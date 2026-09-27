@@ -776,6 +776,43 @@ full run, so the snapshot can never wedge or stale an analysis.
    determine the changed set `ΔF`; the affected closure `ΔF ∪ dependents[ΔF]`
    is re-analysed and the rest served from `Payload#cache`.
 
+### Output order
+
+A run that serves files from the per-file cache MUST list its diagnostics
+in the order a full run of the same tree, with the same options, lists them,
+so warm output is byte-identical to cold
+([#1524](https://github.com/rigortype/rigor/issues/1524)). The options
+matter: a pool backend lists its `.rigor.yml` prepare rows at the head of the
+per-file stream, while a sequential run lists them among the pre-file rows.
+A full run lists its pre-file run-level rows, then the per-file stream —
+each analysed file's rows, one file after another in analysis order (the
+expanded project files, then the template units) — then the post-analysis
+run-level streams. So a narrowed run (a recheck's closure, an empty closure,
+a `--verify-incremental` partition) does not append the served rows to its
+result: `IncrementalSession` hands them to the narrowed run's `Runner`
+(`served_per_file_diagnostics:`), which splices each served file's rows into
+its per-file stream at that file's place in the analysis order, before the
+post-analysis streams are appended. The rows the narrowed run produced keep
+their relative order. A misplaced row never aborts the run
+([ADR-5](../adr/5-robustness-principle.md)).
+
+The cache is keyed by the path a row names, which is where the order can
+still depart from a full run's, in two known cases:
+
+- **A row positioned at another file.** A plugin may report, while analysing
+  one file, a row positioned at a different project file. The cache holds
+  that row under the path it names and lists it at that file's place, where
+  a full run lists it after the rows of the file whose analysis produced it.
+  The cache cannot tell which file produced it either, so a recheck that
+  re-analyses only one of the two files can list the row twice or drop it.
+- **A served path the run no longer lists.** A file deleted between the
+  session's listing and the narrowed run's own expansion has no place in the
+  analysis order; its rows are kept and listed after every other file's.
+
+`--verify-incremental` compares sorted sets and does not check the order;
+`spec/rigor/analysis/incremental_session_spec.rb` does, row for row, against
+a full run.
+
 ### Editor mode (`--tmp-file` / `--instead-of`)
 
 An incremental run may carry an `Analysis::BufferBinding`: one project

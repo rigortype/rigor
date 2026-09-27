@@ -3,6 +3,7 @@
 require "spec_helper"
 require "tmpdir"
 require "rigor/plugin/base"
+require_relative "../../fixtures/template_units/view_demo_plugin"
 
 # ADR-85 WD1 fixture — a synthetic producer-bearing plugin. Its `:probe` producer bumps a class-level
 # scan counter and reads nothing (empty dependency descriptor → always fresh after the first write),
@@ -1885,6 +1886,138 @@ end
         expect(Rigor::Inference::ParameterInferenceCollector).not_to have_received(:collect)
         expect(recheck.affected).to be_empty
         expect(sorted(recheck.diagnostics)).to eq(oracle)
+      end
+    end
+  end
+
+  # Issue #1524 — the merged diagnostics come out in the order a full run of the same tree prints them, not
+  # merely as the same set, so warm output is byte-identical to cold. A full run lists run-level rows before
+  # the per-file stream (`pre-eval.file-not-found`) and after it (`rbs.coverage.synthesized-namespace`), and
+  # the per-file stream in file order. Merging by concatenation put the re-analysed file first and every
+  # reused file after the trailing run-level row. `b.rb` is the edited file, so a reused file sorts on each
+  # side of it; the comparison is of the JSON rows, in order.
+  describe "diagnostic order (#1524)" do
+    after { Rigor::Plugin.unregister!("view-demo") }
+
+    def ordered_fixture(dir, names: %w[a b c], plugins: [])
+      FileUtils.mkdir_p(File.join(dir, "sig"))
+      File.write(File.join(dir, "sig", "widget.rbs"), "class Acme::Widget\n  def size: () -> Integer\nend\n")
+      names.each { |name| write_caller(dir, name) }
+      # No lockfile discovery: this repository's own `Gemfile.lock` would add `rbs.coverage.missing-gem` rows
+      # that depend on the checkout, not on the fixture.
+      Rigor::Configuration.new(
+        "paths" => [dir], "signature_paths" => [File.join(dir, "sig")],
+        "pre_eval" => [File.join(dir, "missing_pre_eval.rb")], "bundler" => { "auto_detect" => false },
+        "plugins" => plugins
+      )
+    end
+
+    def write_caller(dir, name, tail: "")
+      File.write(File.join(dir, "#{name}.rb"), "s = \"hi\"\ns.no_such_method_#{name}\n#{tail}")
+    end
+
+    def full_rows(config, plugin_requirer: nil)
+      runner = Rigor::Analysis::Runner.new(configuration: config, cache_store: nil, plugin_requirer: plugin_requirer)
+      guarded_run(runner).diagnostics.map(&:to_h)
+    end
+
+    def listing(rows)
+      rows.map { |row| [File.basename(row["path"]), row["line"], row["rule"]] }
+    end
+
+    # What "the full run's order" is, pinned so the comparisons below cannot pass on a fixture that lost a
+    # run-level row or a file.
+    let(:full_order) do
+      [[".rigor.yml", 1, "pre-eval.file-not-found"],
+       ["a.rb", 2, "call.undefined-method"], ["b.rb", 2, "call.undefined-method"],
+       ["c.rb", 2, "call.undefined-method"],
+       [".rigor.yml", 1, "rbs.coverage.synthesized-namespace"]]
+    end
+
+    [0, 2].each do |workers|
+      it "lists a recheck after an edit in the full run's order (workers: #{workers})" do
+        skip "fork is unavailable on this platform" if workers.positive? && !Process.respond_to?(:fork)
+        Dir.mktmpdir do |dir|
+          config = ordered_fixture(dir)
+          session = described_class.new(configuration: config, paths: [dir], cache_store: nil, workers: workers)
+          guarded_baseline(session)
+
+          write_caller(dir, "b", tail: "t = 1\n")
+          recheck = guarded_recheck(session)
+          expect(recheck.affected.map { |path| File.basename(path) }).to eq(["b.rb"])
+          expect(recheck.reused.map { |path| File.basename(path) }).to contain_exactly("a.rb", "c.rb")
+
+          full = full_rows(config)
+          expect(listing(full)).to eq(full_order)
+          expect(recheck.diagnostics.map(&:to_h)).to eq(full)
+        end
+      end
+    end
+
+    it "keeps the full run's order on a nothing-changed recheck and on a --verify-incremental partition" do
+      Dir.mktmpdir do |dir|
+        config = ordered_fixture(dir)
+        session = described_class.new(configuration: config, paths: [dir], cache_store: nil)
+        guarded_baseline(session)
+        full = full_rows(config)
+        expect(listing(full)).to eq(full_order)
+
+        recheck = guarded_recheck(session)
+        expect(recheck.affected).to be_empty
+        expect(recheck.diagnostics.map(&:to_h)).to eq(full)
+
+        subset = session.analyzed_files.select { |path| File.basename(path) == "b.rb" }
+        expect(guarded_reanalyze_subset(session, subset).map(&:to_h)).to eq(full)
+      end
+    end
+
+    # A re-analysed file that reports nothing marks no place in the stream, so the reused files on either side
+    # of it are placed by the next re-analysed file that does report: `b.rb` goes quiet, `d.rb` keeps its row.
+    it "places the reused files around a re-analysed file that reports nothing" do
+      Dir.mktmpdir do |dir|
+        config = ordered_fixture(dir, names: %w[a b c d])
+        session = described_class.new(configuration: config, paths: [dir], cache_store: nil)
+        guarded_baseline(session)
+
+        File.write(File.join(dir, "b.rb"), "x = 1\n")
+        write_caller(dir, "d", tail: "t = 1\n")
+        recheck = guarded_recheck(session)
+        expect(recheck.affected.map { |path| File.basename(path) }).to contain_exactly("b.rb", "d.rb")
+        expect(recheck.reused.map { |path| File.basename(path) }).to contain_exactly("a.rb", "c.rb")
+
+        full = full_rows(config)
+        expect(listing(full)).to eq(
+          [[".rigor.yml", 1, "pre-eval.file-not-found"],
+           ["a.rb", 2, "call.undefined-method"], ["c.rb", 2, "call.undefined-method"],
+           ["d.rb", 2, "call.undefined-method"],
+           [".rigor.yml", 1, "rbs.coverage.synthesized-namespace"]]
+        )
+        expect(recheck.diagnostics.map(&:to_h)).to eq(full)
+      end
+    end
+
+    # A template unit is analysed on every run and listed after the project's `.rb` files, so a reused file
+    # that sorts after the edited one still goes before the unit's rows. The unit's path is not one of the
+    # expanded files; only the run's own targets give it a place.
+    it "places the reused files before a template unit's rows" do
+      requirer = ->(_name) { Rigor::Plugin.register(RigorViewDemoPlugin) }
+      Dir.mktmpdir do |dir|
+        config = ordered_fixture(dir, plugins: ["rigor-view-demo"])
+        FileUtils.mkdir_p(File.join(dir, "app", "views", "users"))
+        File.write(File.join(dir, "app", "views", "users", "show.rbx"), "\"x\".upcasee\n")
+        Dir.chdir(dir) do
+          session = described_class.new(configuration: config, paths: [dir], cache_store: nil,
+                                        plugin_requirer: requirer)
+          guarded_baseline(session)
+
+          write_caller(dir, "b", tail: "t = 1\n")
+          recheck = guarded_recheck(session)
+          expect(recheck.reused.map { |path| File.basename(path) }).to contain_exactly("a.rb", "c.rb")
+
+          full = full_rows(config, plugin_requirer: requirer)
+          expect(listing(full)).to eq(full_order[0..-2] + [["show.rbx", 1, "call.undefined-method"], full_order.last])
+          expect(recheck.diagnostics.map(&:to_h)).to eq(full)
+        end
       end
     end
   end

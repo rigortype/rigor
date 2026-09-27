@@ -2,8 +2,10 @@
 
 # The warm-journey harness (`tool/engine_warm_ab.rb`, issue #1507). What it must not get wrong without anyone
 # noticing: the probe edit (a `method` edit that lands outside the class changes a different table, and one that
-# fails to change the file measures a null build), and the warm-equals-cold comparison, which must tell different
-# findings from the same findings in another order. Unit test only; requiring the script runs no engine.
+# fails to change the file measures a null build), and the warm-equals-cold comparison, which must fail the same
+# findings in another order as well as different findings (#1524), and say which. Unit test only; requiring the
+# script runs no engine.
+require "digest"
 require "json"
 require "spec_helper"
 
@@ -87,6 +89,35 @@ RSpec.describe "tool/engine_warm_ab.rb (#1507)" do
     it "disagrees for different diagnostics, including a repeated one" do
       expect(EngineWarmAB.set_digest(output("a", "b"))).not_to eq(EngineWarmAB.set_digest(output("a", "c")))
       expect(EngineWarmAB.set_digest(output("a", "a"))).not_to eq(EngineWarmAB.set_digest(output("a")))
+    end
+  end
+
+  describe "Journey#verify" do
+    # The two digests a timed run carries, for an output listing these rules in this order.
+    def run_result(*rules)
+      out = JSON.generate("success" => false, "diagnostics" => rules.map { |rule| { "rule" => rule } })
+      { "digest" => Digest::SHA256.hexdigest(out), "set_digest" => EngineWarmAB.set_digest(out) }
+    end
+
+    # The journey after comparing `warm` against a cold run that printed `cold`.
+    def verified(warm, cold)
+      journey = EngineWarmAB::Journey.new({ "head" => {} }, {}, "/nonexistent")
+      allow(journey).to receive(:run_check).and_return(cold)
+      journey.send(:verify, "incremental", "leaf", "head", {}, warm)
+      journey
+    end
+
+    it "fails the same diagnostics in another order, and says so (#1524)" do
+      journey = verified(run_result("a", "b"), run_result("b", "a"))
+      expect(journey.failures).to eq(["head incremental leaf: the same diagnostics as a --no-cache run of the " \
+                                      "same tree, in a different order"])
+      expect(journey.notes).to be_empty
+    end
+
+    it "fails different diagnostics, and passes the same output" do
+      expect(verified(run_result("a"), run_result("b")).failures)
+        .to eq(["head incremental leaf: the warm diagnostics differ from a --no-cache run of the same tree"])
+      expect(verified(run_result("a", "b"), run_result("a", "b")).failures).to be_empty
     end
   end
 

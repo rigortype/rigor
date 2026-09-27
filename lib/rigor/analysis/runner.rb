@@ -297,11 +297,15 @@ module Rigor
                      record_dependencies: false, record_self_calls: false, analyze_only: nil,
                      seed_bundles: nil, collect_seed_bundles: false, param_inferred_types: nil,
                      discovery_seed: nil, no_tolerated_effects: false,
-                     restored_run_level_rows: nil)
+                     restored_run_level_rows: nil, served_per_file_diagnostics: nil)
         @configuration = configuration
         # Issues #796 / #794 — the previous full run's run-level rows, supplied only by
         # {IncrementalSession} on a narrowed run; see {PoolCoordinator#replay_restored_run_level_rows}.
         @restored_run_level_rows = restored_run_level_rows
+        # Issue #1524 — `{path => rows}` the {IncrementalSession} serves from its per-file cache for the files a
+        # narrowed run does not analyse, spliced into this run's per-file stream by
+        # {#interleave_served_diagnostics}. Empty on every other run.
+        @served_per_file_diagnostics = served_per_file_diagnostics || {}
         @explain = explain
         @cache_store = enforce_read_only_cache(cache_store, buffer)
         @plugin_requirer = plugin_requirer
@@ -1180,7 +1184,8 @@ module Rigor
       # `#per_file_diagnostics`: the `analyze_files` return, stamped with the same severity profile the run's
       # own stream gets (`SeverityStamp` drops `:off` rows and re-stamps overrides, and the per-file cache never
       # re-stamps), sliced to the rows positioned at the targets. Returns the RAW return for the run's stream,
-      # which is stamped once, at the end of `#run_analysis`.
+      # which is stamped once, at the end of `#run_analysis` — on a narrowed incremental run with the served
+      # files' rows spliced in (#1524), which `#per_file_diagnostics` never carries.
       def analyze_targets(targets, environment:, project_files:)
         raw = template_units.remap(
           @pool_coordinator.analyze_files(targets, environment: environment, project_files: project_files)
@@ -1189,9 +1194,41 @@ module Rigor
         @per_file_diagnostics = @diagnostic_aggregator.apply_severity_profile(raw)
                                                       .select { |diagnostic| analysed.include?(diagnostic.path) }
                                                       .freeze
-        raw
+        interleave_served_diagnostics(raw, analysed, project_files | targets)
       end
       private :analyze_targets
+
+      # Issue #1524 — splices the rows {IncrementalSession} serves from its per-file cache into this narrowed
+      # run's per-file stream, each file's rows where a full run of the same tree lists them. A full run
+      # analyses `order` (the project's files, then any buffer and template-unit targets) one file after
+      # another and a narrowed run a subsequence of it, so a served file's rows go just before the first row
+      # positioned at an analysed file later in `order`, or at the end when there is none. Only such a row
+      # marks a place, so the rows this run produced keep their relative order and a pool backend's
+      # `.rigor.yml` rows stay at the head. Splicing here rather than into the finished result keeps the
+      # run-level streams on either side of the per-file stream, where a full run has them. The served rows
+      # are already severity-resolved and the run's final stamp leaves them unchanged: a resolved severity
+      # resolves to itself, and a row the profile turns `:off` is never cached.
+      def interleave_served_diagnostics(raw, analysed, order)
+        served = @served_per_file_diagnostics
+        return raw if served.empty?
+
+        rank = order.each_with_index.to_h
+        # A served path the expansion no longer lists (a file deleted between the session's listing and this
+        # run) keeps its rows, after every other file's, as the concatenation this replaced did.
+        known, unknown = served.keys.partition { |path| rank.key?(path) }
+        pending = known.sort_by { |path| rank.fetch(path) }
+        merged = []
+        raw.each do |diagnostic|
+          # `order` lists every target, so an analysed path always has a rank; one that did not would only
+          # mark no place, since a misplaced row must never abort the run (ADR-5).
+          position = analysed.include?(diagnostic.path) ? rank.fetch(diagnostic.path, -1) : -1
+          merged.concat(served.fetch(pending.shift)) while pending.any? && rank.fetch(pending.first) < position
+          merged << diagnostic
+        end
+        (pending + unknown).each { |path| merged.concat(served.fetch(path)) }
+        merged
+      end
+      private :interleave_served_diagnostics
 
       # ADR-67 WD6a — the check-walk parameter-inference pre-pass. Populates `@project_param_inferred_types`
       # (read by `project_scope_seed_tables`) with the call-site union of every undeclared parameter, running

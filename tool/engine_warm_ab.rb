@@ -31,9 +31,9 @@
 #
 # Correctness: the first timed run of each scenario is compared with a plain `rigor check --no-cache` of the same
 # tree, which reads and writes neither the result cache nor the incremental snapshot. (`--incremental --no-cache`
-# is not a cold run: it still replays the snapshot, #1525.) Different findings fail the tool; the same findings in
-# another order are a note. Every run passes `--no-baseline`, so a project baseline does not hide findings from the
-# comparison.
+# is not a cold run: it still replays the snapshot, #1525.) Any difference in the output fails the tool, the same
+# findings in another order included (#1524). Every run passes `--no-baseline`, so a project baseline does not hide
+# findings from the comparison.
 #
 # An edit is `method` (an empty method inserted into the file's main declaration: the one named after the file, else
 # the widest multi-line class, else the widest module; see {edited}) or `comment` (a comment line appended). Both
@@ -173,8 +173,8 @@ module EngineWarmAB
     text.split.to_h { |pair| pair.split("=", 2) }.then { |h| { "foreign" => "" }.merge(h.transform_values(&:to_s)) }
   end
 
-  # The output with its diagnostics in a canonical order: what two runs must agree on even where they emit the
-  # same findings in a different order (`--incremental` does, against a full run: #1524).
+  # The output with its diagnostics in a canonical order. Two runs must print the same bytes; when they do not, this
+  # tells a reorder (what `--incremental` printed after an edit until #1524) from different findings.
   def set_digest(json)
     parsed = JSON.parse(json)
     parsed["diagnostics"] = parsed.fetch("diagnostics").sort_by { |d| JSON.generate(d) }
@@ -411,15 +411,18 @@ module EngineWarmAB
       end
     end
 
-    # Against a plain `--no-cache` run, which touches neither the result cache nor the incremental snapshot.
+    # Against a plain `--no-cache` run, which touches neither the result cache nor the incremental snapshot. The
+    # output must be the same bytes; the failure says whether only the order differs (#1524).
     def verify(mode, scenario, name, arm, result)
       cold = run_check(arm, ["--no-cache"])
+      return if result["digest"] == cold["digest"]
+
       label = "#{name} #{mode} #{scenario}"
-      if result["set_digest"] != cold["set_digest"]
-        @failures << "#{label}: the warm diagnostics differ from a --no-cache run of the same tree"
-      elsif result["digest"] != cold["digest"]
-        @notes << "#{label}: the same diagnostics as a --no-cache run of the same tree, in a different order"
-      end
+      @failures << if result["set_digest"] == cold["set_digest"]
+                     "#{label}: the same diagnostics as a --no-cache run of the same tree, in a different order"
+                   else
+                     "#{label}: the warm diagnostics differ from a --no-cache run of the same tree"
+                   end
     end
   end
 

@@ -58,6 +58,21 @@ RSpec.describe Rigor::Configuration::SeverityProfile do
       ).to eq(:off)
     end
 
+    it "matches a family only through a dot-free key, never through another rule's override" do
+      expect(
+        described_class.resolve(
+          rule: "call.undefined-method", authored_severity: :error,
+          profile: :balanced, overrides: { "call.wrong-arity" => :off }
+        )
+      ).to eq(:error)
+      expect(
+        described_class.resolve(
+          rule: "call.undefined-method", authored_severity: :error,
+          profile: :balanced, overrides: { "call.wrong-arity" => :off, "call" => :warning }
+        )
+      ).to eq(:warning)
+    end
+
     it "per-rule override beats family-wildcard override" do
       expect(
         described_class.resolve(

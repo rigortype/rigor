@@ -203,6 +203,18 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
       end
     end
 
+    it "reads a subclass's variants in the collector and in the walk alike" do
+      # A subclass that overrides both variants with the walk's own rules: the path it keys anonymous classes
+      # with and the walk it gets must both follow the override.
+      conforming = Class.new(described_class::SuperclassesCollector) do
+        const_set(:VARIANTS, { factory_block: :unnamed_self, anonymous_class_path: :whole_file }.freeze)
+      end
+      collector = conforming.new
+      walk.run(parse(SuperclassesEquivalenceCases::FORK), [collector],
+               described_class.superclass_walk_root("app/x.rb"))
+      expect(collector.tables.first).to eq("#<Class:app/x.rb:3:2>" => "Parent")
+    end
+
     it "gives each collector its own variant's context at the fork" do
       cvars, (supers, _nestings) =
         shared_tables(parse(SuperclassesEquivalenceCases::FORK), Rigor::Scope.empty, %i[cvars supers])
@@ -257,6 +269,23 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
         expect { described_class.scan_summary_for_paths([path]) }.to raise_error(divergence)
         expect { described_class.discovered_project_index_incremental([path], seed_bundles: {}) }
           .to raise_error(divergence)
+        # The parameter-inference scan's own discovery seed, which empties itself on any other error.
+        seed = Rigor::Inference::ParameterInferenceCollector.new(files: [path], environment: nil)
+        expect { seed.send(:discovery_seed_tables) }.to raise_error(divergence)
+      end
+    end
+
+    it "raises an unknown variant out of the project pre-pass too, rather than emptying the project index" do
+      Dir.mktmpdir("rigor-superclass-prepass-") do |dir|
+        path = File.join(dir, "c.rb")
+        File.write(path, source)
+        misspelt = Class.new(described_class::SuperclassesCollector) do
+          const_set(:VARIANTS, { factory_block: :ordinary }.freeze)
+        end
+        instance = misspelt.new
+        allow(described_class::SuperclassesCollector).to receive(:new).and_return(instance)
+        expect { described_class.discovered_project_index_for_paths([path]) }
+          .to raise_error(Rigor::Inference::DeclarationWalk::UnknownVariant)
       end
     end
 

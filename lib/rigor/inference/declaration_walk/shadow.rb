@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../../analysis/shadow_harness"
+require_relative "errors"
 
 module Rigor
   module Inference
@@ -25,9 +26,9 @@ module Rigor
       # - in a file's own index ({ScopeIndexer.index}), the raise lands in the per-file rescue and reports
       #   as an error diagnostic on the file, carrying the message, the same way a rule-walk divergence does;
       # - in the cross-file project pre-pass (the superclass tables are built there too), the raise aborts
-      #   the run with the message. The pre-pass skips a file it cannot read or parse, and the run-result
-      #   cache path falls back to an uncached run on an error; both let {Divergence} through, because
-      #   skipping would pass the check that failed and drop the file from the project index.
+      #   the run with the message. {Divergence} is a {ContractError}, which the pre-pass loops, the
+      #   run-result cache fallback and the parameter-inference discovery seed all let through (see
+      #   {ContractError}).
       #
       # A run that completes with no such row found no divergence. The rule-walk harness reads the same
       # variable ({Analysis::ShadowHarness}).
@@ -42,7 +43,7 @@ module Rigor
       module Shadow
         ENV_KEY = Analysis::ShadowHarness::ENV_KEY
 
-        class Divergence < StandardError; end
+        class Divergence < ContractError; end
 
         module_function
 

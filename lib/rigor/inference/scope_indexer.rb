@@ -6866,8 +6866,6 @@ module Rigor
           source = File.read(physical)
           root = Prism.parse(source, filepath: path).value
           collect_class_decls(root, [], accumulator)
-        rescue DeclarationWalk::Shadow::Divergence
-          raise # a harness finding is not an unreadable file: skipping it would pass the check it failed
         rescue StandardError
           # Skip files that fail to parse or read; the per-file analyzer surfaces the parse error separately.
           next
@@ -6896,8 +6894,8 @@ module Rigor
           physical = buffer ? buffer.resolve(path) : path
           root = Prism.parse(File.read(physical), filepath: path).value
           accumulate_project_index(acc, path, root)
-        rescue DeclarationWalk::Shadow::Divergence
-          raise # a harness finding is not an unreadable file: skipping it would pass the check it failed
+        rescue DeclarationWalk::ContractError
+          raise # a broken walk contract, not an unreadable file: skipping it would hide the failure
         rescue StandardError
           # Skip files that fail to parse or read; the per-file analyzer surfaces the parse error separately.
           next
@@ -6930,8 +6928,8 @@ module Rigor
           code_fingerprints[path] = code_fingerprint(source, parsed.comments)
           declaration_signatures[path] = declaration_signature(file_index)
           refinements[path] = file_index[:refinements] if file_index[:refinements]
-        rescue DeclarationWalk::Shadow::Divergence
-          raise # a harness finding is not an unreadable file: skipping it would pass the check it failed
+        rescue DeclarationWalk::ContractError
+          raise # a broken walk contract, not an unreadable file: skipping it would hide the failure
         rescue StandardError
           next
         end
@@ -7131,8 +7129,8 @@ module Rigor
           root = Prism.parse(File.read(physical), filepath: path).value
           collect_class_decls(root, [], classes)
           accumulate_project_index(acc, path, root)
-        rescue DeclarationWalk::Shadow::Divergence
-          raise # a harness finding is not an unreadable file: skipping it would pass the check it failed
+        rescue DeclarationWalk::ContractError
+          raise # a broken walk contract, not an unreadable file: skipping it would hide the failure
         rescue StandardError
           # Skip files that fail to parse or read; the per-file analyzer surfaces the parse error separately.
           next
@@ -7202,8 +7200,8 @@ module Rigor
             classes.merge!(file_classes)
             fold_file_index(acc, file_index)
           end
-        rescue DeclarationWalk::Shadow::Divergence
-          raise # a harness finding is not an unreadable file: skipping it would pass the check it failed
+        rescue DeclarationWalk::ContractError
+          raise # a broken walk contract, not an unreadable file: skipping it would hide the failure
         rescue StandardError
           # Skip files that fail to parse / read; the per-file analyzer surfaces the parse error separately.
           next

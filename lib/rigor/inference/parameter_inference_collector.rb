@@ -248,10 +248,11 @@ module Rigor
           tables[field] = table unless table.empty?
         end
         tables
-      rescue StandardError
+      rescue StandardError => e
         # Discovery is best-effort; a malformed corner of the project must not crash the
-        # protection scan. Without discovery the collector simply resolves fewer call sites.
-        {}
+        # protection scan. Without discovery the collector simply resolves fewer call sites. A broken
+        # walk contract is not such a corner, and an empty seed would hide it.
+        e.is_a?(DeclarationWalk::ContractError) ? raise : {}
       end
 
       DISCOVERY_FIELD = {

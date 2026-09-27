@@ -774,6 +774,24 @@ full run, so the snapshot can never wedge or stale an analysis.
    determine the changed set `ΔF`; the affected closure `ΔF ∪ dependents[ΔF]`
    is re-analysed and the rest served from `Payload#cache`.
 
+### Output order
+
+A run that serves files from the per-file cache MUST list its diagnostics
+in the order a full run of the same tree lists them, so warm output is
+byte-identical to cold ([#1524](https://github.com/rigortype/rigor/issues/1524)).
+A full run lists its pre-file run-level rows, then the per-file stream —
+each analysed file's rows, one file after another in analysis order (the
+expanded project files, then the template units) — then the post-analysis
+run-level streams. So a narrowed run (a recheck's closure, an empty closure,
+a `--verify-incremental` partition) does not append the served rows to its
+result: `IncrementalSession` hands them to the narrowed run's `Runner`
+(`served_per_file_diagnostics:`), which splices each served file's rows into
+its per-file stream at that file's place in the analysis order, before the
+post-analysis streams are appended. The rows the narrowed run produced keep
+their relative order. `--verify-incremental` compares sorted sets and does
+not check the order; `spec/rigor/analysis/incremental_session_spec.rb`
+does, row for row, against a full run.
+
 ### Editor mode (`--tmp-file` / `--instead-of`)
 
 An incremental run may carry an `Analysis::BufferBinding`: one project

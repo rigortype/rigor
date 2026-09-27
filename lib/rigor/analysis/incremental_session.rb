@@ -22,10 +22,11 @@ module Rigor
     # only `ΔF ∪ dependents[ΔF]`, and serves every other analyzed file from the cache — the body tier.
     #
     # The invariant the verify harness (and the spec) assert: `#recheck`'s merged diagnostics are
-    # byte-identical (as a sorted set) to a full `--no-cache` re-analysis of the edited tree. This is the
-    # `--verify-incremental` acceptance gate, here without disk persistence or CLI wiring (the cache is
-    # in-process). It models the body tier only: an edit that adds / removes / moves a *file* is outside
-    # the analyzed set it maintains and falls to a fresh {#baseline} (the structural tier is a later slice).
+    # byte-identical to a full `--no-cache` re-analysis of the edited tree, in the same order (#1524; the gate
+    # itself compares sorted sets). This is the `--verify-incremental` acceptance gate, here without disk
+    # persistence or CLI wiring (the cache is in-process). It models the body tier only: an edit that adds /
+    # removes / moves a *file* is outside the analyzed set it maintains and falls to a fresh {#baseline} (the
+    # structural tier is a later slice).
     # The class-length budget is relaxed: this is one cohesive orchestrator of the incremental state
     # (per-file diagnostics cache, the file-level / symbol-level / negative dependency graphs, and the ADR-85
     # seed bundles), clearer read together than split across micro-classes that would all share the same ivars.
@@ -199,15 +200,16 @@ module Rigor
         param_files, param_pairs = param_seed_invalidation(fresh_params)
         affected = affected_closure(changed, added, removed, param_files, param_pairs)
         analyze_set = affected & current
+        reused = (current & previous) - affected.to_a
         # The freshly collected table is handed to the runner so the run seeds from the SAME table the diff
-        # was decided on (and the collector runs once per recheck, not twice).
+        # was decided on (and the collector runs once per recheck, not twice). The reused files' cached rows
+        # go in too, so the runner lists them in the full run's file order (#1524).
         runner = build_runner(analyze_only: analyze_set, record_dependencies: true,
                               param_inferred_types: fresh_params,
-                              restored_run_level_rows: @run_level_rows)
-        fresh = run_runner(runner).diagnostics
+                              restored_run_level_rows: @run_level_rows,
+                              served_per_file_diagnostics: @cache.slice(*reused))
+        merged = run_runner(runner).diagnostics
         @last_runner = runner # ADR-88 WD1 — the post-hoc fact-surface fingerprint reads this prepared registry.
-        reused = (current & previous) - affected.to_a
-        merged = fresh + reused.flat_map { |path| @cache[path] || [] }
         absorb(runner, current, analyze_set, removed)
         @param_table = fresh_params
         Recheck.new(diagnostics: merged, changed: changed.to_set, added: added.to_set,
@@ -441,13 +443,13 @@ module Rigor
       # mutating session state. Returns the merged diagnostics.
       def reanalyze_subset(subset)
         affected = subset.to_set
+        reused = @analyzed - affected.to_a
         # ADR-67 WD6c lift — seed the subset run from the baseline's own table so the verification engine
         # exercises the exact seeds the served cache entries were computed under (and skips a re-collect).
         runner = build_runner(analyze_only: affected, param_inferred_types: @param_table,
-                              restored_run_level_rows: @run_level_rows)
-        fresh = run_runner(runner).diagnostics
-        reused = @analyzed - affected.to_a
-        fresh + reused.flat_map { |path| @cache[path] || [] }
+                              restored_run_level_rows: @run_level_rows,
+                              served_per_file_diagnostics: @cache.slice(*reused))
+        run_runner(runner).diagnostics
       end
 
       # Cross-process incremental run (the `--incremental` flag's engine). With a disk `snapshot` whose

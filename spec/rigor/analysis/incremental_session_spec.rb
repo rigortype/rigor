@@ -1889,6 +1889,84 @@ end
     end
   end
 
+  # Issue #1524 — the merged diagnostics come out in the order a full run of the same tree prints them, not
+  # merely as the same set, so warm output is byte-identical to cold. A full run lists run-level rows before
+  # the per-file stream (`pre-eval.file-not-found`) and after it (`rbs.coverage.synthesized-namespace`), and
+  # the per-file stream in file order. Merging by concatenation put the re-analysed file first and every
+  # reused file after the trailing run-level row. `b.rb` is the edited file, so a reused file sorts on each
+  # side of it; the comparison is of the JSON rows, in order.
+  describe "diagnostic order (#1524)" do
+    def ordered_fixture(dir)
+      FileUtils.mkdir_p(File.join(dir, "sig"))
+      File.write(File.join(dir, "sig", "widget.rbs"), "class Acme::Widget\n  def size: () -> Integer\nend\n")
+      %w[a b c].each { |name| write_caller(dir, name) }
+      # No lockfile discovery: this repository's own `Gemfile.lock` would add `rbs.coverage.missing-gem` rows
+      # that depend on the checkout, not on the fixture.
+      Rigor::Configuration.new(
+        "paths" => [dir], "signature_paths" => [File.join(dir, "sig")],
+        "pre_eval" => [File.join(dir, "missing_pre_eval.rb")], "bundler" => { "auto_detect" => false }
+      )
+    end
+
+    def write_caller(dir, name, tail: "")
+      File.write(File.join(dir, "#{name}.rb"), "s = \"hi\"\ns.no_such_method_#{name}\n#{tail}")
+    end
+
+    def full_rows(config)
+      guarded_run(Rigor::Analysis::Runner.new(configuration: config, cache_store: nil)).diagnostics.map(&:to_h)
+    end
+
+    def listing(rows)
+      rows.map { |row| [File.basename(row["path"]), row["line"], row["rule"]] }
+    end
+
+    # What "the full run's order" is, pinned so the comparisons below cannot pass on a fixture that lost a
+    # run-level row or a file.
+    let(:full_order) do
+      [[".rigor.yml", 1, "pre-eval.file-not-found"],
+       ["a.rb", 2, "call.undefined-method"], ["b.rb", 2, "call.undefined-method"],
+       ["c.rb", 2, "call.undefined-method"],
+       [".rigor.yml", 1, "rbs.coverage.synthesized-namespace"]]
+    end
+
+    [0, 2].each do |workers|
+      it "lists a recheck after an edit in the full run's order (workers: #{workers})" do
+        skip "fork is unavailable on this platform" if workers.positive? && !Process.respond_to?(:fork)
+        Dir.mktmpdir do |dir|
+          config = ordered_fixture(dir)
+          session = described_class.new(configuration: config, paths: [dir], cache_store: nil, workers: workers)
+          guarded_baseline(session)
+
+          write_caller(dir, "b", tail: "t = 1\n")
+          recheck = guarded_recheck(session)
+          expect(recheck.affected.map { |path| File.basename(path) }).to eq(["b.rb"])
+          expect(recheck.reused.map { |path| File.basename(path) }).to contain_exactly("a.rb", "c.rb")
+
+          full = full_rows(config)
+          expect(listing(full)).to eq(full_order)
+          expect(recheck.diagnostics.map(&:to_h)).to eq(full)
+        end
+      end
+    end
+
+    it "keeps the full run's order on a nothing-changed recheck and on a --verify-incremental partition" do
+      Dir.mktmpdir do |dir|
+        config = ordered_fixture(dir)
+        session = described_class.new(configuration: config, paths: [dir], cache_store: nil)
+        guarded_baseline(session)
+        full = full_rows(config)
+        expect(listing(full)).to eq(full_order)
+
+        recheck = guarded_recheck(session)
+        expect(recheck.affected).to be_empty
+        expect(recheck.diagnostics.map(&:to_h)).to eq(full)
+
+        subset = session.analyzed_files.select { |path| File.basename(path) == "b.rb" }
+        expect(guarded_reanalyze_subset(session, subset).map(&:to_h)).to eq(full)
+      end
+    end
+  end
+
   # #788 rounds 5–6 — a narrowed run now builds its environment over the whole project (#793), so every
   # run-level row that is POSITIONED at a project file is regenerated for files the run did not analyse:
   # `effect.annotations-unchecked` at the first annotated file, `source-rbs-annotation-not-honoured` at the

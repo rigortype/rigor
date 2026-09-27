@@ -803,8 +803,7 @@ jobs:
           # an older master would otherwise be charged with every engine
           # change merged since.
           merge_base=$(git merge-base "$BASE_SHA" "$HEAD_SHA")
-          # TEMPORARY (reverted next commit): exercise the measuring path on Linux with a known pair.
-          bundle exec ruby tool/engine_alloc_ab.rb --base 46cd1680c6668a30fde31eb10dd7866d86c56a01 --head a3f9356a46897020d6bf7680358967071188fb91 \
+          bundle exec ruby tool/engine_alloc_ab.rb --base "$merge_base" --head "$HEAD_SHA" \
             --summary "$GITHUB_STEP_SUMMARY"
 
   # ── Fan-in: single required-check target for branch protection ───

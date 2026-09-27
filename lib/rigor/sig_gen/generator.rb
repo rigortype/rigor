@@ -13,6 +13,7 @@ require_relative "../source/literals"
 require_relative "../source/node_children"
 require_relative "../inference/def_return_typer"
 require_relative "../inference/scope_indexer"
+require_relative "../inference/module_function_state"
 require_relative "../inference/rbs_type_translator"
 require_relative "alias_index"
 require_relative "meta_class_shape"
@@ -662,21 +663,12 @@ module Rigor
         walk_defs(namespace_node.body, prefix, false, false, out)
       end
 
+      # The directive's reach is {Inference::ModuleFunctionState.each_sig_gen_statement}.
       def walk_statements(stmts_node, prefix, in_singleton_class, module_function_active, out)
-        stmts_node.body.each do |stmt|
-          if module_function_directive?(stmt)
-            module_function_active = true
-            next
-          end
-          walk_defs(stmt, prefix, in_singleton_class, module_function_active, out)
+        Inference::ModuleFunctionState.each_sig_gen_statement(stmts_node.body,
+                                                              module_function_active) do |stmt, active|
+          walk_defs(stmt, prefix, in_singleton_class, active, out)
         end
-      end
-
-      def module_function_directive?(node)
-        return false unless node.is_a?(Prism::CallNode)
-        return false unless node.name == :module_function && node.receiver.nil?
-
-        (node.arguments&.arguments || []).empty?
       end
 
       def collect_def_node(node, prefix, in_singleton_class, module_function_active, out)
@@ -684,7 +676,9 @@ module Rigor
 
         kind = node.receiver.is_a?(Prism::SelfNode) || in_singleton_class ? :singleton : :instance
         class_name = prefix.join("::")
-        @module_function_methods << [class_name, node.name] if module_function_active && kind == :instance
+        if Inference::ModuleFunctionState.sig_gen_module_function?(module_function_active, kind)
+          @module_function_methods << [class_name, node.name]
+        end
         out << [node, class_name, kind]
       end
 

@@ -145,7 +145,12 @@ module Rigor
       # in place of switching the gate off whenever `rigor-rbs-inline` is configured. A pre-30 bundle
       # carries none, which the session reads as "unknown" and so as moved: sound, but every first edit to
       # each file would re-analyse the whole project, so the gate rejects the blob and the next run is cold.
-      SCHEMA = 30
+      # 31: issue #1574 digests `plugin_fact_digest` and a seed bundle's `source_rbs_digest` with
+      # {ValueDigest} instead of over `Marshal.dump` bytes, so the same value digests alike whether a producer
+      # computed it or its cache entry served it. A pre-31 digest is in the old form and would never match, so
+      # the next run would go cold anyway; the bump makes that a clean miss instead of a "plugin fact surface
+      # changed" note that nothing changed.
+      SCHEMA = 31
 
       # The persisted per-file state.
       # `cache` maps an analyzed file to its diagnostics.

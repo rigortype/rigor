@@ -1,8 +1,10 @@
 # frozen_string_literal: true
 
 require "spec_helper"
+require "tmpdir"
 require "rigor/plugin/base"
 require "rigor/analysis/plugin_fact_fingerprint"
+require "rigor/cache/store"
 
 # ADR-88 WD1 fixtures — synthetic plugins exercising each fact-surface channel. Class-level toggles let a
 # spec vary a producer value / a published fact / a hook value and observe the digest move, without touching
@@ -62,6 +64,35 @@ module Rigor
       # A plugin that declares NO surface AND contributes NO type — inert, never opaque.
       class FpInertPlugin < Base
         manifest(id: "fp-inert", version: "0.1.0")
+      end
+    end
+
+    unless defined?(FpSharedKeyPlugin)
+      # Issue #1574: a producer whose value shares one frozen String between an Array element, a row's field
+      # and a Hash key, as rigor-sidekiq's `worker_index` does. It reads nothing, so once its cache entry is
+      # written every later run is served it.
+      class FpSharedKeyPlugin < Base
+        Row = Data.define(:class_name, :arity)
+
+        manifest(id: "fp-shared-key", version: "0.1.0")
+        producer :index do |_params|
+          names = %w[WelcomeWorker DigestWorker].map { |name| name.dup.freeze }
+          rows = names.map { |name| Row.new(class_name: name, arity: 1) }
+          { names: names, rows: rows, by_name: rows.to_h { |row| [row.class_name, row] } }
+        end
+      end
+
+      # Issue #1574: publishes a fact no digest can see into (a Proc), beside a surface of its own (the hook).
+      class FpUndigestibleFactPlugin < Base
+        manifest(id: "fp-undigestible-fact", version: "0.1.0")
+
+        def prepare(services)
+          services.fact_store.publish(plugin_id: manifest.id, name: :callback, value: -> {})
+        end
+
+        def incremental_state_fingerprint
+          "static"
+        end
       end
     end
   end
@@ -177,6 +208,47 @@ RSpec.describe Rigor::Analysis::PluginFactFingerprint do
       expect(posthoc.opaque_plugin_ids).to eq(probe.opaque_plugin_ids)
     ensure
       Rigor::Plugin::FpProducerPlugin.value = "v1"
+    end
+  end
+
+  # Issue #1574 — the gate. The first `compute` runs the producer and writes its cache entry; the second, over
+  # the same store root, is served that entry. The two values are equal, but the served one no longer shares
+  # the String its Hash keys on, so a digest of `Marshal.dump` bytes differed and every run that switched
+  # between computing and serving a producer threw the snapshot away.
+  describe "a producer value computed on one run and served from the cache on the next" do
+    it "digests alike on both runs" do
+      Dir.mktmpdir do |root|
+        map = { "fp-shared-key" => Rigor::Plugin::FpSharedKeyPlugin }
+        config = config_for("fp-shared-key")
+        computing = Rigor::Cache::Store.new(root: root)
+        computed = described_class.compute(configuration: config, cache_store: computing,
+                                           plugin_requirer: requirer_for(map))
+        Rigor::Plugin.unregister!
+        serving = Rigor::Cache::Store.new(root: root)
+        served = described_class.compute(configuration: config, cache_store: serving,
+                                         plugin_requirer: requirer_for(map))
+
+        producer_id = "plugin.fp-shared-key.index"
+        expect(computing.stats[:by_producer][producer_id]).to include(misses: 1, writes: 1)
+        expect(serving.stats[:by_producer][producer_id]).to include(hits: 1, misses: 0)
+        expect(served.digest).to eq(computed.digest)
+        expect(served.reusable_against?(computed.digest)).to be(true)
+      end
+    end
+  end
+
+  # Issue #1574 — a fact the digest cannot read must not read as "unchanged". Before, one undigestible fact
+  # dropped every plugin's facts from the digest, and a publisher with another surface (here the hook) stayed
+  # reusable while its facts went unseen.
+  describe "a published fact the digest cannot read" do
+    it "makes its publisher opaque, so the snapshot is not reused" do
+      map = {
+        "fp-undigestible-fact" => Rigor::Plugin::FpUndigestibleFactPlugin, "fp-fact" => Rigor::Plugin::FpFactPlugin
+      }
+      result = compute(config_for("fp-undigestible-fact", "fp-fact"), map)
+
+      expect(result.opaque_plugin_ids).to eq(["fp-undigestible-fact"])
+      expect(result.reusable_against?(result.digest)).to be(false)
     end
   end
 

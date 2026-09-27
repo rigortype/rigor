@@ -827,10 +827,13 @@ module Rigor
       # one the user wrote, and it has no grammar for merging two — so rewriting the region could silently
       # replace an author's own `%a{pure}` with a labelled envelope, or strip a directive Rigor does not
       # read at all. Leaving it and saying so is the only move that cannot destroy an authored fact.
+      #
+      # An annotation on one of the member's overloads (`def m: %a{pure} (Integer) -> String`) counts too:
+      # it sits inside the location, and a tighter return keeps it (#1436), so ours would be a second one.
       def splice_annotations(source, member, candidate, state)
         return source if candidate.annotations.empty?
 
-        unless member.annotations.empty?
+        if annotated?(member)
           # Rebuilt so the reported row carries the reason it was actually given. The generator stamped
           # `:emitted` when it decided the annotation; only the writer knows the declaration refused it.
           state.left_unreadable << candidate.with_effect_annotation(candidate.annotations, :left_unreadable)
@@ -842,6 +845,12 @@ module Rigor
         return source unless indent.match?(/\A[ \t]*\z/)
 
         source[0...line_start] + candidate.annotations.map { |line| "#{indent}#{line}\n" }.join + source[line_start..]
+      end
+
+      def annotated?(member)
+        return true unless member.annotations.empty?
+
+        member.respond_to?(:overloads) && member.overloads.any? { |overload| overload.annotations.any? }
       end
     end
   end

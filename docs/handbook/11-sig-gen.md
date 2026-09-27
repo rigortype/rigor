@@ -205,9 +205,10 @@ Two declarations get no proposal:
   overloads into one line would drop them, and giving every
   overload the same return would widen the ones you wrote
   narrower.
-- A name declared through `alias al m`. Its parameters are
-  `m`'s, and the proposal would read as a rewrite of `m`'s
-  line.
+- A name the class itself declares through `alias al m`. Its
+  parameters are `m`'s, and the proposal would read as a
+  rewrite of `m`'s line. An alias only an ancestor declares is
+  overridden like any other ancestor declaration.
 
 An `initialize` your `sig/` already declares is `equivalent`
 too. sig-gen writes a constructor stub only for a class that

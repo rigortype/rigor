@@ -64,8 +64,8 @@ RSpec.describe Rigor::CLI::SigGenCommand do
     File.write(path, body)
   end
 
-  def sig_gen(*argv)
-    write(".rigor.yml", "paths:\n  - lib\nsignature_paths:\n  - sig\n")
+  def sig_gen(*argv, config: "")
+    write(".rigor.yml", "paths:\n  - lib\nsignature_paths:\n  - sig\n#{config}")
     out = StringIO.new
     err = StringIO.new
     status = described_class.new(argv: [*argv, "--config=#{File.join(root, '.rigor.yml')}", "lib/c.rb"],
@@ -158,5 +158,41 @@ RSpec.describe Rigor::CLI::SigGenCommand do
                               out: out, err: StringIO.new)
     expect([status, out.string]).not_to include(a_string_matching(/wrong-arity|error/))
     expect(status).to eq(0)
+  end
+
+  # Round 2 of the review: what `--overwrite` writes over a declaration it keeps whole. The kept `private` and
+  # the overload annotations must come out once and byte-for-byte, and the written file must be a fixed point.
+  it "writes `private` once and keeps each overload annotation's own delimiters, then has nothing left to do" do
+    write("sig/c.rbs", <<~RBS)
+      class C
+        private def pv: (Integer x) -> untyped
+        def a: %a{pure} (Integer x) -> untyped
+        def b: %a[custom: {nested}] (Integer x) -> untyped
+      end
+    RBS
+    write("lib/c.rb", "class C\n  def a(x) = nil\n  def b(x) = nil\n\n  private\n\n  def pv(x) = nil\nend\n")
+
+    expect(sig_gen("--write", "--overwrite", "--include-private").first).to eq(0)
+    expect(sig_file).to eq(<<~RBS)
+      class C
+        private def pv: (Integer x) -> nil
+        def a: %a{pure} (Integer x) -> nil
+        def b: %a[custom: {nested}] (Integer x) -> nil
+      end
+    RBS
+    expect(sig_gen("--write", "--overwrite", "--include-private")[1]).to eq("No changes\n")
+  end
+
+  # An effect annotation is added only to a declaration that carries none (ADR-103 WD9). An annotation on the
+  # overload counts, or the kept `%a{pure}` would get a second one above the line.
+  it "adds no effect annotation above a declaration whose overload is already annotated" do
+    write("sig/c.rbs", "class C\n  def a: %a{pure} (Integer x) -> untyped\nend\n")
+    write("lib/c.rb", "class C\n  def a(x) = x + 1\nend\n")
+
+    status, out, = sig_gen("--write", "--overwrite", config: "effects: {}\n")
+
+    expect(status).to eq(0)
+    expect(sig_file).to eq("class C\n  def a: %a{pure} (Integer x) -> Integer\nend\n")
+    expect(out).to include("sig.effect.left-unreadable")
   end
 end

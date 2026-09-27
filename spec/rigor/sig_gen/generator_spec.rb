@@ -1188,6 +1188,34 @@ RSpec.describe Rigor::SigGen::Generator do
       expect([al.classification, al.rbs, al.declared_rbs]).to eq([Rigor::SigGen::Classification::EQUIVALENT, nil, nil])
     end
 
+    # Declining is for an alias the class itself declares. One only an ancestor declares is an ordinary
+    # ancestor declaration: the subclass's `def` is a new override, rendered from its own shape.
+    it "proposes an override of an alias only an ancestor declares, instance and singleton alike" do
+      rbs = <<~RBS
+        class Base
+          def m: (Integer x) -> untyped
+          def self.sm: (Integer x) -> untyped
+          alias bal m
+          alias self.bsal self.sm
+        end
+        class Sub < Base
+        end
+      RBS
+      ruby = <<~RUBY
+        class Base
+          def m(x) = nil
+          def self.sm(x) = nil
+        end
+        class Sub < Base
+          def bal(x, y = 1) = 1.0
+          def self.bsal(x, y = 1) = 1.0
+        end
+      RUBY
+
+      expect(candidate_for(rbs, ruby, :bal, owner: "Sub").rbs).to eq("def bal: (untyped, ?untyped) -> Float")
+      expect(candidate_for(rbs, ruby, :bsal, owner: "Sub").rbs).to eq("def self.bsal: (untyped, ?untyped) -> Float")
+    end
+
     # One body answers for every overload at once, so the inferred return cannot be assigned to any one of
     # them; the declaration stands, as it does for any narrowing the generator declines.
     it "declines an overloaded declaration rather than collapsing its overloads into one line" do

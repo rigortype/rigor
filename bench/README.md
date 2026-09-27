@@ -66,3 +66,21 @@ charges the work with every engine change merged since.
 ```sh
 nix develop --command bash -c 'bundle exec ruby tool/engine_alloc_ab.rb --base "$(git merge-base origin/master HEAD)" --head WORKTREE'
 ```
+
+## Wall and CPU on CI Linux
+
+Wall and CPU time are noise on a shared development host, so they are measured
+by the manually dispatched "Engine wall A/B" workflow
+(`.github/workflows/engine-wall.yml`, `tool/engine_wall_ab.rb`). It runs two
+engines N times each over one frozen corpus in ABBA order, every run a fresh
+process after a discarded warm-up, and reports each arm's median and range for
+wall, CPU, GC time and, where the runner exposes the counter, user-space
+instructions. A row says the ranges separate only when that is unlikely by
+chance: at most 5% across all the rows together, which takes five runs per
+arm, the default.
+`--yjit on` or `off` takes the wall-clock YJIT deadline out of the comparison,
+and the report warns when the arms ended in different YJIT states.
+
+```sh
+gh workflow run engine-wall.yml -f base=v0.3.9 -f head=master -f corpus=v0.3.9
+```

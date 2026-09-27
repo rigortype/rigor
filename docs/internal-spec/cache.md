@@ -167,7 +167,7 @@ choosing one contribution silently.
 Returns the canonical hex SHA-256 cache key for a producer +
 input + descriptor combination. The key incorporates:
 
-1. `Descriptor::SCHEMA_VERSION` (currently `9` — v2 added the
+1. `Descriptor::SCHEMA_VERSION` (currently `11` — v2 added the
    `dependencies` slot for the ADR-10 per-gem-version cache slice;
    v3 invalidates RBS envs marshalled before `build_env_for` began
    synthesizing missing `signature_paths:` namespaces; v4 added the
@@ -186,8 +186,13 @@ input + descriptor combination. The key incorporates:
    run descriptor's per-signature-root names-mode `GlobEntry` listing rows
    (#979), for
    the same migration reason one slot over — a pre-9 entry carries none and
-   validates fresh across a `.rbs` appearing under `sig/`). Bumping
-   this constant invalidates every cached value.
+   validates fresh across a `.rbs` appearing under `sig/`; v10 invalidates
+   def-index seed bundles written before they carried the `:prepends`
+   table (#1123); v11 invalidates run-result and plugin-producer entries
+   written before a producer served from its own cache replayed its
+   dependency rows into its plugin's `IoBoundary` (#1558) — the same
+   migration reason as v8). Bumping this constant invalidates every
+   cached value.
 2. `producer_id` (a stable string that namespaces the cache
    slice).
 3. `params` (the producer's input hash). Recursively
@@ -1542,12 +1547,19 @@ The served-producer rows (#1558) are the rows the producer's entry
 recorded when it was computed: its own reads, the rows its plugin's
 boundary already held then, and its `watch:` globs, all validated by
 the hit. A replayed `watch:` row equals the one the last table row
-recomputes, and the descriptor's glob `uniq` drops the duplicate. They
-needed no `SCHEMA_VERSION` bump, although an entry written before the
-fix would validate fresh across exactly the edit they exist to catch:
-the engine's identity (the released version, or a checkout's source
-digest) is part of this slot's key and of every producer key, so the
-build carrying the fix misses every such entry once.
+recomputes, and the descriptor's glob `uniq` drops the duplicate.
+`SCHEMA_VERSION` went 10 → 11 with them, for v8's migration reason: an
+entry written before the fix, while a producer hit, lacks the rows and
+would validate fresh across exactly the edit they exist to catch. Two
+cases were covered without the bump. A checkout, `path:` or `github:`
+install carries the engine's source digest in this slot's key and in
+every producer key, so the fixing tree missed its old entries; and a
+release bump changes `PAYLOAD_ABI_VERSION`, which clears the root. The
+case left over was a build installed under `gems/rigortype-<VERSION>`
+with an unchanged `VERSION` (a `gem build` of unreleased `master`):
+`EngineSource` treats that layout as version-pinned and adds no digest
+(#285), so it would have kept serving pre-fix entries. The bump costs
+one cold run where a release would not already have cleared the root.
 
 ## Constant-lookup path under `cache_store`
 

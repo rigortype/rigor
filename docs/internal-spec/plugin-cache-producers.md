@@ -166,10 +166,10 @@ filesystem, and they merge by the boundary's own precedence (see
 duplicated, and none the boundary already holds is weakened. No
 cache key moves, because a boundary descriptor is validation-only
 and the replay does not change what a producer's key is built from.
-An entry written before #1558 lacks the replayed rows; no build
-carrying the fix reads one, because the engine's identity (the
-released version, or the source digest of a checkout) is part of
-every producer key and every run-result key.
+An entry written before #1558 lacks the replayed rows, so
+`Descriptor::SCHEMA_VERSION` went to 11 and every such entry misses
+once (see [`cache.md`](cache.md) § "The run-descriptor row inventory"
+for the one install layout the engine identity alone left exposed).
 
 When `services.cache_store` is `nil` (e.g. CLI `--no-cache`),
 the callable bypasses the cache and runs the producer block
@@ -266,9 +266,32 @@ A producer that consumes another producer of the same plugin
 declares nothing extra. Asked inside its block, or earlier in the
 run, the consumed producer leaves its rows in the boundary whether
 it was computed or served (#1558), so the consumer's entry goes
-stale when the consumed producer's inputs change. A value from
-another plugin, read through `read_fact`, carries no such row: the
-fact's inputs were read through the publishing plugin's boundary.
+stale when the consumed producer's inputs change.
+
+**A producer that reads another plugin's fact MUST key on that fact
+through `descriptor:`.** A fact published into `services.fact_store`
+carries no dependency rows: its inputs were read through the
+publishing plugin's boundary, not the consumer's, so the consumer's
+entry records nothing that moves when they change. A producer whose
+block composes `read_fact(plugin_id: …, name: …)` therefore keeps
+serving the old fact after the publisher's input is edited, in the
+run slot and under `--incremental` alike, until `--no-cache`. Pass a
+`ConfigEntry` whose `value_hash` digests the fact's value in
+`descriptor:`, so a changed fact is a different key and a miss.
+`producer_value` takes no `descriptor:`, so such a consumer calls
+`cache_for` itself:
+
+```ruby
+table = read_fact(plugin_id: "schema-source", name: :schema_table)
+fact_row = Rigor::Cache::Descriptor::ConfigEntry.new(
+  key: "fact:schema-source:schema_table",
+  value_hash: Digest::SHA256.hexdigest(Marshal.dump(table))
+)
+cache_for(:model_index, descriptor: Rigor::Cache::Descriptor.new(configs: [fact_row])).call
+```
+
+No bundled producer reads a fact inside its block; the bundled
+plugins read facts in `#prepare` or per file, outside any producer.
 
 Identity inputs (gem versions, sibling-plugin config, external
 state the boundary can't read) compose into the **key** via the

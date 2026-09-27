@@ -1,1 +1,0 @@
-- **[sig-gen]** A `# sig-gen gap: #NNN` marker now cites an allow-listed issue that tracks the engine gap, and a deliberately hand-written row carries an `# authored:` marker instead. ([#1158](https://github.com/rigortype/rigor/pull/1158))

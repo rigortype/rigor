@@ -1,0 +1,1 @@
+- **[inference]** Class guards (`is_a?`, `kind_of?`, `instance_of?`, `C === @x`, `case @x when C`) now narrow an instance-variable receiver, so `@io.is_a?(StringIO) ? @io.string : nil` on an `IO`-typed `@io` no longer reports `call.undefined-method` ([#1446](https://github.com/rigortype/rigor/issues/1446), [#1499](https://github.com/rigortype/rigor/pull/1499)).

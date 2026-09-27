@@ -210,7 +210,12 @@ module Rigor
         profile_table.fetch(rule, authored_severity)
       end
 
+      # A family name has no `.` in it, so only a dot-free key can match one. `resolve` runs for every
+      # diagnostic in a run's stream, and most configurations carry no such key (usually no overrides at all),
+      # so the split below is skipped for them rather than allocating a name that nothing can match.
       def family_override(rule, overrides)
+        return nil unless overrides.any? { |key, _| !key.to_s.include?(".") }
+
         family = rule.split(".").first
         return nil if family.nil?
 

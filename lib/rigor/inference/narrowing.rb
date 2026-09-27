@@ -1624,13 +1624,17 @@ module Rigor
         # `String`; every other numbered group present in the pattern stays `String | nil` on
         # both edges (a truthy match leaves an optional group nil at runtime), so we do not
         # narrow it on the truthy edge.
+        #
+        # Both edges start from `scope` with the match globals forgotten (#1385): the match rebinds every one of them,
+        # so a `$N` an earlier match narrowed says nothing here. Without that, a `when /(x)/` arm, or the right operand
+        # of `s =~ /(a)(b)(c)/ && t =~ /(x)/`, kept `$2` and `$3` narrowed to `String` where Ruby reads nil.
         def regex_match_predicate_scopes(scope, unconditional)
           string_t = Type::Combinator.nominal_of("String")
           match_data_t = Type::Combinator.nominal_of("MatchData")
           nil_t = Type::Combinator.constant_of(nil)
 
-          truthy = scope
-          falsey = scope
+          truthy = scope.forget_match_globals
+          falsey = truthy
           truthy = truthy.with_global(:$~, match_data_t)
           falsey = falsey.with_global(:$~, nil_t)
           REGEX_MATCH_GLOBALS.each do |name|
@@ -1664,8 +1668,10 @@ module Rigor
         # them to non-nil `String` would be unsound. The walker is intentionally light (char
         # scan, not a regex-AST parse): backslash escapes are skipped; `(?:…)`, lookahead
         # `(?=…)`/`(?!…)`, and lookbehind `(?<=…)`/`(?<!…)` do not capture; named groups
-        # `(?<name>…)` do. Conservatism is one-directional — when in doubt a group is treated
-        # as conditional (dropped from the Set), never the reverse.
+        # `(?<name>…)` / `(?'name'…)` do. Once the pattern has a named group, Ruby numbers only
+        # the named groups and a plain `(…)` does not capture (#1471): `/(?<x>a)(b)/` has one
+        # group, so `$2` is nil. Conservatism is one-directional — when in doubt a group is
+        # treated as conditional (dropped from the Set), never the reverse.
         def unconditional_capture_groups(source)
           # `unconditional` collects every capturing index; a group is later removed (with its
           # whole subtree) when it is optionally quantified, nested under an optional ancestor,
@@ -1675,7 +1681,15 @@ module Rigor
           # mutually exclusive, so its descendant captures may be absent on a successful match;
           # the group itself still participates. Closing a frame rolls its subtree up to the
           # parent so an optional / alternated ancestor disqualifies it.
-          state = { unconditional: Set.new, stack: [[nil, [], false]], group_index: 0 }
+          state = { unconditional: Set.new, stack: [[nil, [], false]], group_index: 0, named: named_groups?(source) }
+          each_structural_char(source) { |pos, chr| scan_group_char(source, pos, chr, state) }
+          # Drain the virtual root: a top-level `|` disqualifies all.
+          finalize_frame(state, state[:stack].pop, optional: false)
+          state[:unconditional]
+        end
+
+        # Yields each position of `source` outside a backslash escape and a character class, with its char.
+        def each_structural_char(source)
           pos = 0
           length = source.length
           while pos < length
@@ -1688,12 +1702,13 @@ module Rigor
               pos = skip_char_class(source, pos) + 1
               next
             end
-            scan_group_char(source, pos, chr, state)
+            yield pos, chr
             pos += 1
           end
-          # Drain the virtual root: a top-level `|` disqualifies all.
-          finalize_frame(state, state[:stack].pop, optional: false)
-          state[:unconditional]
+        end
+
+        def named_groups?(source)
+          each_structural_char(source) { |pos, chr| break true if chr == "(" && named_group?(source, pos) } == true
         end
 
         # Updates the walk `state` at a group-relevant char during
@@ -1703,7 +1718,7 @@ module Rigor
           case chr
           when "("
             idx = nil
-            if capturing_group?(source, pos)
+            if capturing_group?(source, pos, named: state[:named])
               idx = (state[:group_index] += 1)
               state[:unconditional] << idx
             end
@@ -1742,11 +1757,20 @@ module Rigor
           end
         end
 
-        def capturing_group?(source, pos)
-          return true unless source[pos + 1] == "?"
+        # A plain `(…)` captures unless the pattern has a named group (`named:`); of the `(?…)` forms only a named
+        # group does.
+        def capturing_group?(source, pos, named:)
+          return !named unless source[pos + 1] == "?"
 
-          # `(?<name>…)` captures; `(?<=…)`/`(?<!…)` (lookbehind) and
-          # `(?:…)`/`(?=…)`/`(?!…)` do not.
+          named_group?(source, pos)
+        end
+
+        # `(?<name>…)` and `(?'name'…)` are named groups; `(?<=…)`/`(?<!…)` (lookbehind) and
+        # `(?:…)`/`(?=…)`/`(?!…)` are not.
+        def named_group?(source, pos)
+          return false unless source[pos + 1] == "?"
+          return true if source[pos + 2] == "'"
+
           source[pos + 2] == "<" && source[pos + 3] != "=" && source[pos + 3] != "!"
         end
 

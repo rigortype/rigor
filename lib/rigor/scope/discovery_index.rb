@@ -58,6 +58,70 @@ module Rigor
       EMPTY_NAME_SET = Set.new.freeze
       private_constant :EMPTY_NODE_TABLE, :EMPTY_TABLE, :EMPTY_NAME_SET
 
+      # [#1507](https://github.com/rigortype/rigor/issues/1507) — the kind of fact each member holds, which decides
+      # what a reader may conclude from an entry and which gate covers the member. A forthcoming ADR sets the policy
+      # per class. Until then this is the inventory, and `spec/rigor/declaration_facts/member_classes_spec.rb` fails
+      # on a member that is unclassified or classified twice. Each reason describes the table as the code builds it
+      # today.
+      #
+      # - `:set_valued` — names, edges, files or rows whose presence is the fact. A reader asks whether an entry is
+      #   there.
+      # - `:single_valued` — one value per key, where disagreeing contributions must decline rather than pick one.
+      # - `:typed` — the values are types, which already carry uncertainty in the type lattice.
+      # - `:syntactic` — read straight off the parse of one file, which is their reference.
+      # - `:run_state` — the run's own state, not a fact about the program.
+      MEMBER_CLASSES = {
+        set_valued: {
+          discovered_classes: "the class and module names the project declares; the value is the name's singleton",
+          discovered_methods: "which names each class answers, and on which side",
+          discovered_refinements: "the methods a refine block adds, keyed by the refined class",
+          discovered_global_write_census: "the names any file aliases, defines or mixes in at the top level",
+          discovered_includes: "the modules each class includes, prepends among them",
+          discovered_prepends: "the modules each class prepends",
+          discovered_extends: "the modules each singleton mixes in; the module itself for module_function",
+          discovered_class_sources: "the files that declare each class, reopenings included",
+          discovered_def_sources: "the instance methods the project defines, with the first-seen path:line",
+          discovered_singleton_def_sources: "the singleton methods the project defines, with the first-seen path:line",
+          discovered_deferred_ranges: "each file's def and block ranges; def rows add owner and module_function side",
+          constant_sources: "the files that write each constant",
+          constant_writers: "the constant names some write binds, by last segment",
+          constant_shadowers: "the constant names a non-memo write assigns, by last segment",
+          published_constant_names: "the last segments of the constants the project publishes",
+          local_constant_names: "the last segments of the constants the analysed file assigns",
+          published_constant_alias_names: "the file's constants copied straight from a published one",
+          published_constant_ivars: "the ivars each class seeds from a published constant",
+          patched_line_readers: "the gets / readline names the file defines through the define_method family"
+        }.freeze,
+        single_valued: {
+          discovered_def_nodes: "the def node each instance method resolves to",
+          discovered_singleton_def_nodes: "the def node each singleton method resolves to",
+          discovered_method_visibilities: "each method's visibility",
+          discovered_parameter_envelopes: "each method's parameter shape, opaque when contributions disagree",
+          discovered_superclasses: "each class's superclass as written",
+          discovered_header_nestings: "the cref each ancestor name resolves in, an alternatives list when ambiguous",
+          data_member_layouts: "each Data class's member layout",
+          struct_member_layouts: "each Struct class's member layout"
+        }.freeze,
+        typed: {
+          declared_types: "the type each declaration node binds",
+          class_ivars: "the joined type of each ivar's writes, per class",
+          class_cvars: "the joined type of each cvar's writes, per class",
+          program_globals: "the joined type of each global's writes",
+          program_global_seeds: "a declared global's signature type joined with its writes",
+          in_source_constants: "the type each constant's write binds",
+          param_inferred_types: "the union of each parameter's call-site argument types"
+        }.freeze,
+        syntactic: {
+          discovered_def_nestings: "the Module.nesting each def is written in, keyed by node identity",
+          clears_last_status: "whether the analysed file holds a call that may set $? to nil",
+          defines_case_equality: "whether the analysed file holds a define_method naming ===",
+          implicit_self_evidence: "where the analysed file's implicit-self readers sit, built lazily from its tree"
+        }.freeze,
+        run_state: {
+          run_generation: "the identity token of the current run"
+        }.freeze
+      }.freeze
+
       # The third value a `discovered_methods` entry can hold, beside `:instance` and `:singleton`. One name may
       # legitimately be defined on both sides of the same class (`def helper` plus a `class << self` twin), and the
       # table is keyed by name alone — so before this existed the second `def` overwrote the first's kind and

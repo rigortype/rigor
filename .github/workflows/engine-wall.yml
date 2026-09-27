@@ -1,0 +1,100 @@
+name: Engine wall A/B
+
+# The wall half of #1507's measurement decision: allocations are measured locally
+# and on every engine PR (the "Engine allocations" job in ci.yml), wall and CPU
+# here, on CI Linux, off the shared development host. `tool/engine_wall_ab.rb`
+# runs the two engines N times each over one frozen corpus, alternating in ABBA
+# order, every run a fresh process, and writes the per-arm medians and ranges to
+# the job summary plus a JSON artifact of every sample.
+#
+# Dispatch it from the Actions tab or with
+#   gh workflow run engine-wall.yml -f base=v0.3.9 -f head=master -f corpus=v0.3.9
+# The inputs reach the script through env, never interpolated into it.
+
+on:
+  workflow_dispatch:
+    inputs:
+      base:
+        description: "Base engine revision"
+        required: true
+        default: "master"
+      head:
+        description: "Head engine revision"
+        required: true
+        default: "master"
+      corpus:
+        description: "Corpus revision (default: the base)"
+        required: false
+        default: ""
+      target:
+        description: "Path analysed inside the corpus"
+        required: false
+        default: "lib"
+      reps:
+        description: "Runs per engine (ABBA order)"
+        required: false
+        default: "5"
+      yjit:
+        description: "default (the shipped deadline), immediate, or off"
+        type: choice
+        options: [default, immediate, off]
+        default: default
+      perf:
+        description: "Count user-space instructions with perf stat where the runner exposes the counter"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  wall:
+    name: Engine wall A/B
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          submodules: false
+          fetch-depth: 0
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "4.0"
+          bundler-cache: true
+
+      # Best effort: a GitHub-hosted VM may not expose the hardware counter, in
+      # which case the tool says so and reports wall and CPU only.
+      - name: Make perf stat available
+        if: inputs.perf
+        run: |
+          sudo apt-get install -y -qq linux-tools-common linux-tools-generic "linux-tools-$(uname -r)" >/dev/null 2>&1 || true
+          sudo sysctl -w kernel.perf_event_paranoid=1 >/dev/null 2>&1 || true
+          perf stat -x, -e instructions:u true 2>&1 | tail -1 || true
+
+      - name: Compare the engines
+        env:
+          BASE: ${{ inputs.base }}
+          HEAD: ${{ inputs.head }}
+          CORPUS: ${{ inputs.corpus }}
+          TARGET: ${{ inputs.target }}
+          REPS: ${{ inputs.reps }}
+          YJIT: ${{ inputs.yjit }}
+          PERF: ${{ inputs.perf }}
+        run: |
+          resolve() { git rev-parse --verify --quiet "$1^{commit}" || git rev-parse --verify "origin/$1^{commit}"; }
+          args=(--base "$(resolve "$BASE")" --head "$(resolve "$HEAD")" --target "$TARGET" --reps "$REPS" --yjit "$YJIT")
+          if [ -n "$CORPUS" ]; then args+=(--corpus "$(resolve "$CORPUS")"); fi
+          if [ "$PERF" = "true" ]; then args+=(--perf); fi
+          bundle exec ruby tool/engine_wall_ab.rb "${args[@]}" --summary "$GITHUB_STEP_SUMMARY" --json wall-ab.json
+
+      - name: Upload the samples
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: engine-wall-ab-${{ github.run_id }}
+          path: wall-ab.json
+          if-no-files-found: ignore
+          retention-days: 30

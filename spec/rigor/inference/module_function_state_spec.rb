@@ -96,13 +96,61 @@ module ModuleFunctionStateProbes
         def x; end
       end
     RUBY
-    "P13" => <<~RUBY
+    "P13" => <<~RUBY,
       module P13
         module_function
         def x; end
         alias y x
         attr_reader :r
         define_method(:dm) {}
+      end
+    RUBY
+    "P14" => <<~RUBY,
+      module P14
+        def s1; 1; end
+        module_function "s1"
+        def s2; 2; end
+        module_function :"s2"
+      end
+    RUBY
+    "P15" => <<~RUBY,
+      module P15
+        module_function def x; end
+      end
+    RUBY
+    "P16" => <<~RUBY,
+      module P16
+        module_function def self.y; end
+      end
+    RUBY
+    "P17" => <<~RUBY,
+      module P17
+        def a; end
+        module_function(*[:a].each { module_function })
+        def b; end
+      end
+    RUBY
+    "P18" => <<~RUBY,
+      module P18
+        def a; end
+        module_function(:a) { module_function }
+        def b; end
+      end
+    RUBY
+    "P19" => <<~RUBY,
+      module P19
+        END { module_function }
+        def a; end
+      end
+    RUBY
+    "P20" => <<~RUBY
+      module P20
+        Other = Module.new
+        Other.module_eval do
+          module_function
+          def oe; end
+        end
+        def after; end
       end
     RUBY
   }.freeze
@@ -130,8 +178,8 @@ RSpec.describe Rigor::Inference::ModuleFunctionState do
   def singleton_reading(probe)
     statements = Rigor::Inference::ScopeIndexer.statements_of(body_of(probe))
     answer = {}
-    described_class.each_singleton_sibling(statements) do |stmt, module_function_on|
-      if module_function_on == :named
+    described_class.each_singleton_sibling(statements) do |stmt, module_function_on, named_call|
+      if named_call
         described_class.each_singleton_copy(stmt, statements) do |name, def_node|
           answer["copy #{name}"] = label(def_node)
         end
@@ -156,7 +204,7 @@ RSpec.describe Rigor::Inference::ModuleFunctionState do
     answer
   end
 
-  # `"module_function@line" => extends_self?` for every `module_function` call in the body.
+  # `"module_function@line:column" => extends_self?` for every `module_function` call in the body.
   def extends_reading(probe)
     calls = []
     pending = [body_of(probe)]
@@ -165,7 +213,9 @@ RSpec.describe Rigor::Inference::ModuleFunctionState do
       calls << node if node.is_a?(Prism::CallNode) && node.name == :module_function
       pending.concat(node.compact_child_nodes)
     end
-    calls.to_h { |call| ["module_function@#{call.location.start_line}", described_class.extends_self?(call)] }
+    calls.to_h do |call|
+      ["module_function@#{call.location.start_line}:#{call.location.start_column}", described_class.extends_self?(call)]
+    end
   end
 
   # `"name@line" => renders as self?` for each def in the body's statement list.
@@ -205,7 +255,7 @@ RSpec.describe Rigor::Inference::ModuleFunctionState do
     it "P1 (`public`): every reader makes `x` a module function" do
       expect(readings("P1")).to eq(
         singleton: { "x@4" => true }, deferred: { :rows => [], "x@4" => true },
-        extends: { "module_function@2" => true }, sig_gen: { "x@4" => true }
+        extends: { "module_function@2:2" => true }, sig_gen: { "x@4" => true }
       )
       expect(tables("P1")).to eq(
         singleton_def_nodes: { "P1" => { x: "x@4" } }, deferred_ranges: [[:x, 4, :both, "P1"]],
@@ -218,7 +268,7 @@ RSpec.describe Rigor::Inference::ModuleFunctionState do
     it "P2 (`private`): every reader makes `x` a module function" do
       expect(readings("P2")).to eq(
         singleton: { "x@4" => true }, deferred: { :rows => [], "x@4" => true },
-        extends: { "module_function@2" => true }, sig_gen: { "x@4" => true }
+        extends: { "module_function@2:2" => true }, sig_gen: { "x@4" => true }
       )
       expect(tables("P2")).to eq(
         singleton_def_nodes: { "P2" => { x: "x@4" } }, deferred_ranges: [[:x, 4, :both, "P2"]],
@@ -231,7 +281,7 @@ RSpec.describe Rigor::Inference::ModuleFunctionState do
     it "P12 (`protected`): every reader makes `x` a module function" do
       expect(readings("P12")).to eq(
         singleton: { "x@4" => true }, deferred: { :rows => [], "x@4" => true },
-        extends: { "module_function@2" => true }, sig_gen: { "x@4" => true }
+        extends: { "module_function@2:2" => true }, sig_gen: { "x@4" => true }
       )
       expect(tables("P12")).to eq(
         singleton_def_nodes: { "P12" => { x: "x@4" } }, deferred_ranges: [[:x, 4, :both, "P12"]],
@@ -246,7 +296,7 @@ RSpec.describe Rigor::Inference::ModuleFunctionState do
       expect(readings("P10")).to eq(
         singleton: { "a@3" => true, "b@5" => true, "c@7" => true },
         deferred: { :rows => [], "a@3" => true, "b@5" => true, "c@7" => true },
-        extends: { "module_function@2" => true, "module_function@6" => true },
+        extends: { "module_function@2:2" => true, "module_function@6:2" => true },
         sig_gen: { "a@3" => true, "b@5" => true, "c@7" => true }
       )
       expect(tables("P10")).to eq(
@@ -265,7 +315,7 @@ RSpec.describe Rigor::Inference::ModuleFunctionState do
       expect(readings("P9")).to eq(
         singleton: { "a@2" => false, "copy a" => "a@4", "a@4" => false },
         deferred: { :rows => [[:a, 3, :singleton, "P9"]], "a@2" => false, "a@4" => false },
-        extends: { "module_function@3" => false }, sig_gen: { "a@2" => false, "a@4" => false }
+        extends: { "module_function@3:2" => false }, sig_gen: { "a@2" => false, "a@4" => false }
       )
       expect(tables("P9")).to eq(
         singleton_def_nodes: { "P9" => { a: "a@4" } },
@@ -280,7 +330,7 @@ RSpec.describe Rigor::Inference::ModuleFunctionState do
       expect(readings("P6")).to eq(
         singleton: { "copy a" => "a@3", "a@3" => false },
         deferred: { :rows => [[:a, 2, :singleton, "P6"]], "a@3" => false },
-        extends: { "module_function@2" => false }, sig_gen: { "a@3" => false }
+        extends: { "module_function@2:2" => false }, sig_gen: { "a@3" => false }
       )
       expect(tables("P6")).to eq(
         singleton_def_nodes: { "P6" => { a: "a@3" } },
@@ -296,7 +346,7 @@ RSpec.describe Rigor::Inference::ModuleFunctionState do
     it "P3 (`def self.x`)" do
       expect(readings("P3")).to eq(
         singleton: { "x@3" => true }, deferred: { :rows => [], "x@3" => true },
-        extends: { "module_function@2" => true }, sig_gen: { "x@3" => false }
+        extends: { "module_function@2:2" => true }, sig_gen: { "x@3" => false }
       )
       expect(tables("P3")).to eq(
         singleton_def_nodes: { "P3" => { x: "x@3" } }, deferred_ranges: [[:x, 3, :singleton, "P3"]],
@@ -309,7 +359,7 @@ RSpec.describe Rigor::Inference::ModuleFunctionState do
     it "P4 (a `class << self` body between the call and a def)" do
       expect(readings("P4")).to eq(
         singleton: { "z@6" => true }, deferred: { :rows => [], "z@6" => true },
-        extends: { "module_function@2" => true }, sig_gen: { "z@6" => true }
+        extends: { "module_function@2:2" => true }, sig_gen: { "z@6" => true }
       )
       expect(tables("P4")).to eq(
         singleton_def_nodes: { "P4" => { y: "y@4", z: "z@6" } },
@@ -323,7 +373,7 @@ RSpec.describe Rigor::Inference::ModuleFunctionState do
     it "P11 (`def self.k`, then a module function `k`)" do
       expect(readings("P11")).to eq(
         singleton: { "k@2" => false, "k@4" => true }, deferred: { :rows => [], "k@2" => false, "k@4" => true },
-        extends: { "module_function@3" => true }, sig_gen: { "k@2" => false, "k@4" => true }
+        extends: { "module_function@3:2" => true }, sig_gen: { "k@2" => false, "k@4" => true }
       )
       expect(tables("P11")).to eq(
         singleton_def_nodes: { "P11" => { k: "k@4" } },
@@ -337,7 +387,7 @@ RSpec.describe Rigor::Inference::ModuleFunctionState do
     it "P13 (non-def definers after the call)" do
       expect(readings("P13")).to eq(
         singleton: { "x@3" => true }, deferred: { :rows => [], "x@3" => true },
-        extends: { "module_function@2" => true }, sig_gen: { "x@3" => true }
+        extends: { "module_function@2:2" => true }, sig_gen: { "x@3" => true }
       )
       expect(tables("P13")).to eq(
         singleton_def_nodes: { "P13" => { x: "x@3" } }, deferred_ranges: [[:x, 3, :both, "P13"]],
@@ -358,12 +408,115 @@ RSpec.describe Rigor::Inference::ModuleFunctionState do
     end
   end
 
+  describe "argument and block forms" do
+    # Ruby copies both: a String argument names a method as a Symbol does. The singleton reading and the
+    # prescan both resolve it. sig-gen reads only the bare form as a directive, so neither renders as `self?`.
+    it "P14 (String and quoted-Symbol arguments)" do
+      expect(readings("P14")).to eq(
+        singleton: { "s1@2" => false, "copy s1" => "s1@2", "s2@4" => false, "copy s2" => "s2@4" },
+        deferred: { :rows => [[:s1, 3, :singleton, "P14"], [:s2, 5, :singleton, "P14"]], "s1@2" => false,
+                    "s2@4" => false },
+        extends: { "module_function@3:2" => false, "module_function@5:2" => false },
+        sig_gen: { "s1@2" => false, "s2@4" => false }
+      )
+      expect(tables("P14")).to eq(
+        singleton_def_nodes: { "P14" => { s1: "s1@2", s2: "s2@4" } },
+        deferred_ranges: [[:s1, 3, :singleton, "P14"], [:s2, 5, :singleton, "P14"], [:s1, 2, :instance, "P14"],
+                          [:s2, 4, :instance, "P14"]],
+        extends: {}
+      )
+    end
+
+    # Ruby: `x` is a module function. The prescan gives the def a `:both` row, beside the `:instance` row the
+    # range walk records for the same def. The singleton reading resolves no copy for a def argument, so
+    # `P15.x` has no singleton def node.
+    it "P15 (`module_function def x`): a :both row over the def" do
+      expect(readings("P15")).to eq(
+        singleton: {}, deferred: { rows: [[:x, 2, :both, "P15"]] },
+        extends: { "module_function@2:2" => false }, sig_gen: {}
+      )
+      expect(tables("P15")).to eq(
+        singleton_def_nodes: {}, deferred_ranges: [[:x, 2, :both, "P15"], [:x, 2, :instance, "P15"]], extends: {}
+      )
+    end
+
+    # Ruby defines `P16.y`, then raises `NameError`: `module_function :y` finds no instance method `y`. The
+    # prescan's row for a `def self.y` argument is `:singleton`.
+    it "P16 (`module_function def self.y`): a :singleton row over the def" do
+      expect(readings("P16")).to eq(
+        singleton: {}, deferred: { rows: [[:y, 2, :singleton, "P16"]] },
+        extends: { "module_function@2:2" => false }, sig_gen: {}
+      )
+      expect(tables("P16")).to eq(
+        singleton_def_nodes: {}, deferred_ranges: [[:y, 2, :singleton, "P16"], [:y, 2, :singleton, "P16"]],
+        extends: {}
+      )
+    end
+
+    # Ruby: the block runs, so its bare call turns the mode on, and the splat hands `:a` to the outer call;
+    # `a` and `b` are both module functions. Only the prescan looks inside a non-literal argument, where it
+    # finds the bare call that makes `b` `:both`. The extends walk does not enter an ordinary block.
+    it "P17 (a bare call inside a non-literal argument)" do
+      expect(readings("P17")).to eq(
+        singleton: { "a@2" => false, "b@4" => false }, deferred: { :rows => [], "a@2" => false, "b@4" => true },
+        extends: { "module_function@3:2" => false, "module_function@3:31" => true },
+        sig_gen: { "a@2" => false, "b@4" => false }
+      )
+      expect(tables("P17")).to eq(
+        singleton_def_nodes: {}, deferred_ranges: [[:a, 2, :instance, "P17"], [:b, 4, :both, "P17"]], extends: {}
+      )
+    end
+
+    # Ruby never runs a block passed to `module_function`, so `b` stays a public instance method. The prescan
+    # enters the block anyway, as it enters every block, and its bare call makes `b` `:both`: an
+    # over-approximation of a call that never runs.
+    it "P18 (a bare call inside the block of a named call)" do
+      expect(readings("P18")).to eq(
+        singleton: { "a@2" => false, "copy a" => "a@2", "b@4" => false },
+        deferred: { :rows => [[:a, 3, :singleton, "P18"]], "a@2" => false, "b@4" => true },
+        extends: { "module_function@3:2" => false, "module_function@3:24" => true },
+        sig_gen: { "a@2" => false, "b@4" => false }
+      )
+      expect(tables("P18")).to eq(
+        singleton_def_nodes: { "P18" => { a: "a@2" } },
+        deferred_ranges: [[:a, 3, :singleton, "P18"], [:a, 2, :instance, "P18"], [:b, 4, :both, "P18"]],
+        extends: {}
+      )
+    end
+  end
+
+  describe "calls in a body that runs elsewhere" do
+    # Ruby runs an `END` body at exit, after every def, so `a` is an instance method only. The prescan skips
+    # the body; the extends walk does too, although `extends_self?` answers for the call itself.
+    it "P19 (a bare call in an END body)" do
+      expect(readings("P19")).to eq(
+        singleton: { "a@3" => false }, deferred: { :rows => [], "a@3" => false },
+        extends: { "module_function@2:8" => true }, sig_gen: { "a@3" => false }
+      )
+      expect(tables("P19")).to eq(singleton_def_nodes: {}, deferred_ranges: [[:a, 3, :instance, "P19"]], extends: {})
+    end
+
+    # Ruby: the call inside `module_eval` makes `Other.oe` a module function and leaves `P20#after` alone. The
+    # prescan skips an eval block for the enclosing body, and the block gets its own prescan under `Other`.
+    it "P20 (a bare call in a module_eval block)" do
+      expect(readings("P20")).to eq(
+        singleton: { "after@7" => false }, deferred: { :rows => [], "after@7" => false },
+        extends: { "module_function@4:4" => true }, sig_gen: { "after@7" => false }
+      )
+      expect(tables("P20")).to eq(
+        singleton_def_nodes: { "P20::Other" => { oe: "oe@5" } },
+        deferred_ranges: [[:oe, 5, :both, "P20::Other"], [:after, 7, :instance, "P20"]],
+        extends: { "P20::Other" => ["P20::Other"] }
+      )
+    end
+  end
+
   describe "calls Ruby rejects" do
     # Ruby raises `NameError`: a singleton class does not respond to `module_function`. `extends_self?`
     # answers for the call, but the extends walk never records a call inside `class << self`.
     it "P5 (`module_function` inside `class << self`)" do
       expect(readings("P5")).to eq(
-        singleton: {}, deferred: { rows: [] }, extends: { "module_function@3" => true }, sig_gen: {}
+        singleton: {}, deferred: { rows: [] }, extends: { "module_function@3:4" => true }, sig_gen: {}
       )
       expect(tables("P5")).to eq(singleton_def_nodes: {}, deferred_ranges: [], extends: {})
     end
@@ -373,7 +526,7 @@ RSpec.describe Rigor::Inference::ModuleFunctionState do
     it "P7 (`module_function` in a class body)" do
       expect(readings("P7")).to eq(
         singleton: { "q@3" => true }, deferred: { :rows => [], "q@3" => true },
-        extends: { "module_function@2" => true }, sig_gen: { "q@3" => true }
+        extends: { "module_function@2:2" => true }, sig_gen: { "q@3" => true }
       )
       expect(tables("P7")).to eq(
         singleton_def_nodes: { "P7" => { q: "q@3" } }, deferred_ranges: [[:q, 3, :both, "P7"]],

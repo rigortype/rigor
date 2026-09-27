@@ -4886,8 +4886,8 @@ module Rigor
                               defs_singleton: false)
         owner_prefix = def_owner_prefix || qualified_prefix
         statements = statements_of(body)
-        ModuleFunctionState.each_singleton_sibling(statements) do |stmt, module_function_on|
-          if module_function_on == :named
+        ModuleFunctionState.each_singleton_sibling(statements) do |stmt, module_function_on, named_call|
+          if named_call
             # `:unnameable` — the named defs the call copies live on the metaclass,
             # which this table cannot name either.
             record_module_function_names(stmt, owner_prefix, statements, accumulator) unless

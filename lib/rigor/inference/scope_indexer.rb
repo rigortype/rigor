@@ -29,6 +29,7 @@ require_relative "struct_fold_safety"
 require_relative "unknown_store_widening"
 require_relative "declaration_walk/traversal"
 require_relative "scope_indexer/class_cvars_collector"
+require_relative "scope_indexer/superclasses_collector"
 
 module Rigor
   module Inference
@@ -5041,8 +5042,33 @@ module Rigor
       # the enclosing cref — `[]` for the first spelling, `["Admin"]` for the second. A class reopened under two
       # spellings keeps the LAST one walked, matching how `superclasses` itself merges.
       #
+      # ADR-116 WD5 — built by {SuperclassesCollector} on the shared {DeclarationWalk}, following the two
+      # legacy variants it declares; `RIGOR_SHADOW_RULE_WALK` checks both tables against
+      # {#legacy_superclass_tables}.
+      #
       # @return the `[superclasses, header_nestings]` pair
       def build_superclass_tables(root, source_path = nil)
+        collector = SuperclassesCollector.new
+        DeclarationWalk.run(root, [collector], superclass_walk_root(source_path))
+        verified_superclass_tables(root, source_path, collector.tables)
+      end
+
+      # The root context the superclass tables are walked from: the ancestry nesting starts empty and the
+      # anonymous-class key carries the file's path.
+      def superclass_walk_root(source_path, scope: nil)
+        DeclarationWalk::Context.root(scope: scope, nesting: EMPTY_NESTING, source_path: source_path)
+      end
+
+      # `tables` once the shadow harness has compared them with the legacy walker's, when it is on.
+      def verified_superclass_tables(root, source_path, tables)
+        DeclarationWalk::Shadow.verified(:superclass_tables, source_path, tables) do
+          legacy_superclass_tables(root, source_path)
+        end
+      end
+
+      # The walker {SuperclassesCollector} replaced, kept as the shadow harness's oracle until ADR-116 WD5 has
+      # ported every table walker onto {DeclarationWalk}.
+      def legacy_superclass_tables(root, source_path = nil)
         accumulator = { superclasses: {}, header_nestings: {} }
         walk_class_superclasses(root, [], accumulator, source_path)
         [accumulator[:superclasses].freeze, accumulator[:header_nestings].freeze]
@@ -6868,6 +6894,8 @@ module Rigor
           physical = buffer ? buffer.resolve(path) : path
           root = Prism.parse(File.read(physical), filepath: path).value
           accumulate_project_index(acc, path, root)
+        rescue DeclarationWalk::ContractError
+          raise # a broken walk contract, not an unreadable file: skipping it would hide the failure
         rescue StandardError
           # Skip files that fail to parse or read; the per-file analyzer surfaces the parse error separately.
           next
@@ -6900,6 +6928,8 @@ module Rigor
           code_fingerprints[path] = code_fingerprint(source, parsed.comments)
           declaration_signatures[path] = declaration_signature(file_index)
           refinements[path] = file_index[:refinements] if file_index[:refinements]
+        rescue DeclarationWalk::ContractError
+          raise # a broken walk contract, not an unreadable file: skipping it would hide the failure
         rescue StandardError
           next
         end
@@ -7099,6 +7129,8 @@ module Rigor
           root = Prism.parse(File.read(physical), filepath: path).value
           collect_class_decls(root, [], classes)
           accumulate_project_index(acc, path, root)
+        rescue DeclarationWalk::ContractError
+          raise # a broken walk contract, not an unreadable file: skipping it would hide the failure
         rescue StandardError
           # Skip files that fail to parse or read; the per-file analyzer surfaces the parse error separately.
           next
@@ -7168,6 +7200,8 @@ module Rigor
             classes.merge!(file_classes)
             fold_file_index(acc, file_index)
           end
+        rescue DeclarationWalk::ContractError
+          raise # a broken walk contract, not an unreadable file: skipping it would hide the failure
         rescue StandardError
           # Skip files that fail to parse / read; the per-file analyzer surfaces the parse error separately.
           next

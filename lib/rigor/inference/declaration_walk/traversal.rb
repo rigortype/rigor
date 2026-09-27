@@ -4,6 +4,7 @@ require "prism"
 
 require_relative "../../source/node_children"
 require_relative "context"
+require_relative "errors"
 require_relative "shadow"
 
 module Rigor
@@ -35,7 +36,8 @@ module Rigor
     #   unnamed `self`, and an eval-family block (`class_eval`, `module_eval`, `class_exec`, `module_exec`,
     #   `instance_eval`, `instance_exec`) its receiver and arguments under the enclosing context and its body
     #   with `self` rebound to the receiver. Neither walks the block's parameters. Any other call walks its
-    #   children.
+    #   children. A collector following the `:ordinary_call` variant of the `factory_block` rule (below) sees
+    #   a bare factory block walked as any other call instead.
     #
     # Every other node walks its children under the context it was reached with, in `compact_child_nodes`
     # order, so a collector sees its events in the order the legacy walker it replaces accumulated them.
@@ -47,6 +49,14 @@ module Rigor
     # of the same run continue into it. Any other answer descends. The walk dispatches only the events some
     # collector of the run overrides.
     #
+    # ## Variants
+    #
+    # Where the legacy walkers disagree on a context rule, a port keeps its walker's answer by naming a
+    # variant of the rule in its class's `VARIANTS` (ADR-116 WD5; {RULE_VARIANTS} lists them). Collectors on
+    # different variants of a rule still share a run: at a bare factory block the walk goes down once per
+    # variant in use, each collector only in its own. A variant is a legacy answer kept on purpose, and #1521
+    # tracks converging each one.
+    #
     # The rule walk stays separate (ADR-53 rejected folding rule collectors into indexing): this walk only
     # builds discovery tables.
     module DeclarationWalk
@@ -54,9 +64,31 @@ module Rigor
       DESCEND = :descend
       DECLINE = :decline
 
+      # Each context rule a collector may follow a legacy variant of, with its variants. The first is the
+      # walk's own rule, which a collector follows unless its `VARIANTS` names another.
+      #
+      # - `factory_block` — a bare `Class.new { … }` / `Module.new` / `Struct.new` / `Data.define` block.
+      #   `:unnamed_self` walks the factory's receiver and arguments, then the body with an unnamed `self`,
+      #   and skips the block's parameters (`walk_class_cvars`' rule). `:ordinary_call` walks the call's
+      #   children like any call's — receiver, arguments, the block's parameters and body — under the
+      #   enclosing context, so a `self::` header in the body anchors on the enclosing self
+      #   (`walk_class_superclasses`' rule; `class C; Class.new { class self::E < S; end }; end` files
+      #   `C::E`, a class Ruby never creates; #1521 item 8).
+      # - `anonymous_class_path` — the file path an anonymous class's synthetic name carries; answered by
+      #   {Context#anonymous_class_path}, which documents `:whole_file` and `:outside_class_bodies` (#1521
+      #   item 11).
+      RULE_VARIANTS = {
+        factory_block: %i[unnamed_self ordinary_call].freeze,
+        anonymous_class_path: %i[whole_file outside_class_bodies].freeze
+      }.freeze
+
       # The event handlers a collector may override; each answers {DESCEND} until overridden.
       module Collector
         EVENTS = %i[on_declaration on_def on_call on_constant_write].freeze
+
+        # The legacy variants of {RULE_VARIANTS} this collector follows, `rule => variant`. A collector
+        # overrides the constant, documenting each entry where it declares it.
+        VARIANTS = {}.freeze
 
         # A `class` / `module` header. `body` is the context its body is walked under; it exists even when
         # the declaration has no body.
@@ -93,6 +125,24 @@ module Rigor
           EVENTS.reject { |event| klass.instance_method(event).owner.equal?(self) }.freeze
         end
         private_class_method :overridden_events
+
+        # The variant of `rule` `klass` follows: its `VARIANTS` entry, or the walk's own rule.
+        def self.variant_of(klass, rule)
+          klass::VARIANTS.fetch(rule) { RULE_VARIANTS.fetch(rule).first }
+        end
+
+        # Raises {UnknownVariant} unless every `VARIANTS` entry of `klass` names a rule and one of its
+        # variants, so a misspelt variant is a {ContractError} rather than the walk's rule followed silently:
+        # an error row on the file in a file's own index, and an aborted run in the project pre-pass.
+        def self.check_variants!(klass)
+          klass::VARIANTS.each do |rule, variant|
+            next if RULE_VARIANTS.fetch(rule, EMPTY).include?(variant)
+
+            raise UnknownVariant, "#{klass}: no #{rule.inspect} variant #{variant.inspect} (ADR-116 WD5)"
+          end
+        end
+        EMPTY = [].freeze
+        private_constant :EMPTY
       end
 
       NO_COLLECTORS = [].freeze
@@ -102,19 +152,37 @@ module Rigor
 
       # Walks `root` once for every collector, from `context` (a file's top level by default).
       def run(root, collectors, context = Context.root)
-        Traversal.new(collectors).walk(root, collectors, context)
+        Traversal.for(collectors).walk(root, collectors, context)
         collectors
       end
 
       # One run's dispatch: which events any collector overrides, so an event none of them handles costs no
       # call per node.
       class Traversal
+        # The traversal for `collectors`. A single-collector run's depends on the collector's class alone, so
+        # the main Ractor builds it once per class (the #1055 pattern in `FactStore::Target.local`); every
+        # other run builds its own.
+        def self.for(collectors)
+          return new(collectors) unless collectors.size == 1 && Ractor.main?
+
+          @single_runs[collectors.first.class] ||= new(collectors)
+        end
+        @single_runs = {}.compare_by_identity
+
         def initialize(collectors)
-          handled = collectors.map { |collector| Collector.events_of(collector.class) }
-          @declarations = handled.any? { |events| events.include?(:on_declaration) }
-          @defs = handled.any? { |events| events.include?(:on_def) }
-          @calls = handled.any? { |events| events.include?(:on_call) }
-          @constant_writes = handled.any? { |events| events.include?(:on_constant_write) }
+          @declarations = handles?(collectors, :on_declaration)
+          @defs = handles?(collectors, :on_def)
+          @calls = handles?(collectors, :on_call)
+          @constant_writes = handles?(collectors, :on_constant_write)
+          collectors.each { |collector| Collector.check_variants!(collector.class) }
+          @ordinary_factories = collectors.any? { |collector| ordinary_factory?(collector) }
+          @unnamed_factories = !collectors.all? { |collector| ordinary_factory?(collector) }
+          # Only a run that mixes the variants keeps its collectors, which a cached single-collector
+          # traversal must not hold on to.
+          if @ordinary_factories && @unnamed_factories
+            @run = collectors
+            @factory_groups = factory_groups(collectors)
+          end
           @alone = alone_table(collectors)
           freeze
         end
@@ -122,7 +190,17 @@ module Rigor
         def walk(node, collectors, context) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
           return unless node.is_a?(Prism::Node)
 
+          # The arms are disjoint node classes, so their order is only a cost: the commonest kind is tried first.
           case node
+          when Prism::CallNode
+            collectors = descending(collectors) { |c| c.on_call(node, context) } if @calls
+            return if collectors.empty?
+            # Both block arms need a literal block, which most calls lack.
+            return if node.block.is_a?(Prism::BlockNode) &&
+                      (walk_factory_call?(node, collectors, context) || walk_eval_call?(node, collectors, context))
+          when Prism::DefNode
+            collectors = descending(collectors) { |c| c.on_def(node, context) } if @defs
+            return if collectors.empty?
           when Prism::ClassNode, Prism::ModuleNode
             return if walk_declaration?(node, collectors, context)
           when Prism::SingletonClassNode
@@ -131,13 +209,6 @@ module Rigor
                Prism::ConstantOrWriteNode, Prism::ConstantPathOrWriteNode
             collectors = descending(collectors) { |c| c.on_constant_write(node, context) } if @constant_writes
             return if collectors.empty? || walk_meta_new_write?(node, collectors, context)
-          when Prism::DefNode
-            collectors = descending(collectors) { |c| c.on_def(node, context) } if @defs
-            return if collectors.empty?
-          when Prism::CallNode
-            collectors = descending(collectors) { |c| c.on_call(node, context) } if @calls
-            return if collectors.empty? || walk_factory_call?(node, collectors, context) ||
-                      walk_eval_call?(node, collectors, context)
           end
 
           node.rigor_each_child { |child| walk(child, collectors, context) }
@@ -145,11 +216,27 @@ module Rigor
 
         private
 
-        # Each collector alone, for a two-collector run in which one of them declines a node; nil otherwise.
+        def handles?(collectors, event)
+          collectors.any? { |collector| Collector.events_of(collector.class).include?(event) }
+        end
+
+        # The run's collectors split by `factory_block` variant, `[unnamed_self, ordinary_call]`, built once
+        # for a run that mixes them; a subset left by a decline is split on demand.
+        def factory_groups(collectors)
+          ordinary, unnamed = collectors.partition { |collector| ordinary_factory?(collector) }
+          [unnamed.freeze, ordinary.freeze].freeze
+        end
+
+        # Each collector alone, for a pair of collectors in which one declines a node — the whole run, or what
+        # is left of a larger one. nil for a single-collector run, which never needs it.
         def alone_table(collectors)
-          return nil unless collectors.size == 2
+          return nil if collectors.size < 2
 
           collectors.to_h { |collector| [collector, [collector].freeze] }.compare_by_identity
+        end
+
+        def ordinary_factory?(collector)
+          Collector.variant_of(collector.class, :factory_block) == :ordinary_call
         end
 
         # The collectors that let the walk into the node the block asks each of them about. Every collector is
@@ -203,19 +290,41 @@ module Rigor
           return false if enclosing.nil?
 
           enclosing.each { |part| walk(part, collectors, context) }
-          walk(body, collectors, context.rebound(body_self)) if body
+          walk(body, collectors, context.meta_new_body(body_self)) if body
           true
         end
 
+        # The `factory_block` rule, for a call with a literal block. False when every collector here follows
+        # `:ordinary_call`, so the call walks its children like any call. Otherwise the receiver and arguments
+        # are walked once, for every collector, since both variants walk them under the enclosing context;
+        # the variants part only at the block: the `:unnamed_self` collectors walk its body with an unnamed
+        # `self`, the `:ordinary_call` ones the whole block, parameters included, under the enclosing context.
+        # Each collector sees the same events in the same order as in a run of its own.
         def walk_factory_call?(node, collectors, context)
-          block = node.block
-          return false unless block.is_a?(Prism::BlockNode) && ScopeIndexer.meta_new_constant_rvalue?(node)
+          return false unless @unnamed_factories && ScopeIndexer.meta_new_constant_rvalue?(node)
+
+          unnamed = unnamed_factory_group(collectors)
+          return false if unnamed.empty?
 
           walk(node.receiver, collectors, context)
           node.arguments&.arguments&.each { |argument| walk(argument, collectors, context) }
-          body = block.body
-          walk(body, collectors, context.rebound(Context::EMPTY_PREFIX)) if body
+          block = node.block
+          walk(block.body, unnamed, context.factory_body) if block.body
+          walk(block, ordinary_factory_group(collectors), context) if unnamed.size < collectors.size
           true
+        end
+
+        def unnamed_factory_group(collectors)
+          return collectors unless @ordinary_factories
+          return @factory_groups.first if collectors.equal?(@run)
+
+          collectors.reject { |collector| ordinary_factory?(collector) }
+        end
+
+        def ordinary_factory_group(collectors)
+          return @factory_groups.last if collectors.equal?(@run)
+
+          collectors.select { |collector| ordinary_factory?(collector) }
         end
 
         def walk_eval_call?(node, collectors, context)
@@ -223,7 +332,7 @@ module Rigor
           return false if enclosing.nil?
 
           enclosing.each { |part| walk(part, collectors, context) }
-          walk(body, collectors, context.rebound(eval_self)) if body
+          walk(body, collectors, context.eval_body(eval_self)) if body
           true
         end
       end

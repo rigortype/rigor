@@ -62,13 +62,13 @@ module Rigor
       # what a reader may conclude from an entry and which gate covers the member (ADR-119 WD4, proposed). Each
       # reason describes the table as the code builds it today. `spec/rigor/declaration_facts/member_classes_spec.rb`
       # fails on a member that is unclassified or classified twice, and checks each class's shape on an index built
-      # from a fixture project, so a member filed under the wrong class fails too.
+      # from a fixture project; it pins the few misfilings those checks accept.
       #
       # - `:set_valued` — names, edges, files or rows whose presence is the fact. A reader asks whether an entry is
       #   there.
       # - `:single_valued` — one value per key, which readers use; disagreeing contributions fold by a fixed rule.
       # - `:typed` — the values are types, which already carry uncertainty in the type lattice.
-      # - `:syntactic` — read straight off the parse of the analysed file, which is their reference.
+      # - `:syntactic` — read off the parse of the analysed file alone, which is their reference.
       # - `:run_state` — the run's own state, not a fact about the program.
       MEMBER_CLASSES = {
         set_valued: {

@@ -3,14 +3,21 @@
 require "spec_helper"
 
 # #1507 — ADR-119 WD4 (proposed). Every `Scope::DiscoveryIndex` member sits in exactly one of the five classes
-# `DiscoveryIndex::MEMBER_CLASSES` names, and each member's value has its class's shape on an index built from a
-# fixture project (`spec/support/declaration_fact_fixture.rb`, checked by `spec/support/declaration_member_shapes.rb`).
-# A member added to the index fails until someone classifies it, and a member filed under the wrong class fails the
-# shape check.
+# `DiscoveryIndex::MEMBER_CLASSES` names, and each member's value has its class's shape on a fixture project's index
+# (`spec/support/declaration_fact_fixture.rb`, checked by `spec/support/declaration_member_shapes.rb`). A member
+# added to the index fails until someone classifies it.
 #
-# Not built yet: the ADR's `possible_*` / `contested_*` sibling checks, because no member admits `possible` facts; and
-# for the syntactic members, the ADR-53 shadow oracle. A second, independent parse standing in for it is checked
-# instead.
+# What the shape checks catch, measured by refiling every member into every other class: all misfilings but three,
+# which the last example pins. Two of the three are Data and Struct layouts, which are ordered lists of member names
+# (a set's shape) that readers use as one value. The third is `patched_line_readers`, a set of names read off the
+# analysed file. Single-valued is checked against a slot kind recorded per member, so a member filed there without
+# one fails because no kind is recorded, not because of its shape. Syntactic is checked as "the file's parse alone
+# gives the same value": a table that depends on the project differs, because the fixture's second file contributes
+# to every project table.
+#
+# Threat model: the checks catch an accidental misfiling, not a deliberate one. Not built yet: the ADR's `possible_*`
+# / `contested_*` sibling checks, because no member admits `possible` facts, and the ADR-53 shadow oracle for the
+# syntactic members.
 RSpec.describe "Rigor::Scope::DiscoveryIndex::MEMBER_CLASSES" do
   let(:members) { Rigor::Scope::DiscoveryIndex.members }
   let(:classes) { Rigor::Scope::DiscoveryIndex::MEMBER_CLASSES }
@@ -27,10 +34,8 @@ RSpec.describe "Rigor::Scope::DiscoveryIndex::MEMBER_CLASSES" do
     problems
   end
 
-  # `classes` with `member` taken out of its class and filed under `klass`.
   def refiled(classes, member, klass)
-    classes.to_h { |name, entries| [name, entries.except(member)] }
-           .tap { |copy| copy[klass] = copy[klass].merge(member => "refiled") }
+    DeclarationMemberShapes.refiled(classes, member, klass)
   end
 
   it "names exactly the five fact classes" do
@@ -86,24 +91,31 @@ RSpec.describe "Rigor::Scope::DiscoveryIndex::MEMBER_CLASSES" do
       DeclarationMemberShapes.problems(refiled(classes, member, klass), DeclarationFactFixture.built)
     end
 
-    it "fails a single-valued member filed as typed" do
+    it "fails a single-valued member filed as typed, and a typed one filed as set-valued" do
       expect(shape_problems_for(:discovered_def_nodes, :typed))
         .to eq(["discovered_def_nodes (typed): a leaf is not a Rigor::Type"])
-    end
-
-    it "fails a typed member filed as set-valued" do
       expect(shape_problems_for(:class_ivars, :set_valued))
-        .to eq(["class_ivars (set_valued): holds something other than names, rows or flags"])
+        .to eq(["class_ivars (set_valued): holds something other than names, rows or kind flags"])
     end
 
-    it "fails a set-valued member filed as single-valued" do
-      expect(shape_problems_for(:discovered_includes, :single_valued))
-        .to eq(["discovered_includes (single_valued): no slot kind is recorded for it"])
+    it "fails a single-valued site or visibility table filed as set-valued" do
+      expect(shape_problems_for(:discovered_def_sources, :set_valued))
+        .to eq(["discovered_def_sources (set_valued): holds something other than names, rows or kind flags"])
+      expect(shape_problems_for(:discovered_superclasses, :set_valued))
+        .to eq(["discovered_superclasses (set_valued): an entry is a bare value, not a collection"])
     end
 
-    it "fails a member that rides a seed filed as syntactic or run state" do
+    it "fails a project table filed as syntactic, and a table filed as run state" do
+      expect(shape_problems_for(:discovered_class_sources, :syntactic).first)
+        .to start_with("discovered_class_sources (syntactic): the file's parse alone gives {}")
       expect(shape_problems_for(:discovered_def_sources, :run_state))
-        .to eq(["discovered_def_sources (run_state): it is persisted in a seed bundle"])
+        .to eq(["discovered_def_sources (run_state): a table or a fact, not an opaque token"])
+    end
+
+    it "pins the misfilings the checks accept" do
+      expect(DeclarationMemberShapes.accepted_misfilings(classes, DeclarationFactFixture.built))
+        .to eq(data_member_layouts: [:set_valued], struct_member_layouts: [:set_valued],
+               patched_line_readers: [:set_valued])
     end
   end
 end

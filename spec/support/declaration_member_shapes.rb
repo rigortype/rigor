@@ -1,28 +1,39 @@
 # frozen_string_literal: true
 
-# #1507 — the structural check behind each `DiscoveryIndex::MEMBER_CLASSES` class (ADR-119 WD4), applied to the index
-# {DeclarationFactFixture} builds. `problems(classes, fixture)` returns one line per member whose value does not have
-# its class's shape, so a member filed under the wrong class fails, not only a missing one.
+# #1507 — the structural check behind each `DiscoveryIndex::MEMBER_CLASSES` class (ADR-119 WD4), applied to the two
+# indexes {DeclarationFactFixture} builds. `problems(classes, fixture)` returns one line per member whose value does
+# not have its class's shape.
+#
+# - Set-valued: a Hash or Set whose keys are names and whose entries are collections of names, rows or kind flags;
+#   no entry is a bare value, a `path:line` site or a visibility, which only single-valued tables hold.
+#   `discovered_classes` is the exception its reason names: each value is its own name's singleton.
+# - Single-valued: every slot holds the one kind of value the member's entry in {SLOT_KINDS} records, unwrapped.
+# - Typed: every leaf is a `Rigor::Type`, and the values are not merely each key's own singleton.
+# - Syntactic: read off the analysed file alone, so the file's parse without the project seed gives the same value.
+# - Run state: an opaque token the runner's seed supplies, which neither the file's parse alone nor a persisted seed
+#   bundle carries.
+#
+# `implicit_self_evidence` must also never ride a seed: it holds its own file's parse.
 module DeclarationMemberShapes
   SCALARS = [String, Symbol, Integer, NilClass, TrueClass, FalseClass].freeze
   VISIBILITIES = %i[public private protected].freeze
+  SITE = /:\d+\z/
+  TABLES_AND_FACTS = [Hash, Set, Array, TrueClass, FalseClass].freeze
   # The two members the fixture cannot fill, and why.
   UNFILLED = {
-    param_inferred_types: "only `coverage --protection`'s collection pass fills it",
-    run_generation: "`Runner#run_analysis` mints it once per run; the fixture builds the index without a run"
+    param_inferred_types: "only `coverage --protection`'s collection pass fills it"
   }.freeze
 
   module_function
 
   def problems(classes, fixture)
-    discovery, root = fixture.fetch(:discovery)
-    second, second_root = fixture.fetch(:second)
     classes.flat_map do |klass, entries|
       entries.keys.filter_map do |member|
-        value = discovery.public_send(member)
+        value = fixture.fetch(:discovery).first.public_send(member)
         next "#{member}: empty in the fixture" if empty?(value) && !UNFILLED.key?(member)
+        next if UNFILLED.key?(member)
 
-        why = shape_problem(klass, member, value, second.public_send(member), [root, second_root], fixture)
+        why = shape_problem(klass, member, value, fixture)
         "#{member} (#{klass}): #{why}" if why
       end
     end
@@ -32,33 +43,52 @@ module DeclarationMemberShapes
     value.nil? || value == false || (value.respond_to?(:empty?) && value.empty?)
   end
 
-  def shape_problem(klass, member, value, again, roots, fixture)
+  def shape_problem(klass, member, value, fixture)
     case klass
     when :set_valued then set_valued_problem(member, value)
     when :single_valued then single_valued_problem(member, value)
     when :typed then typed_problem(value)
-    when :syntactic then syntactic_problem(member, value, again, roots, fixture)
+    when :syntactic then syntactic_problem(member, value, fixture)
     when :run_state then run_state_problem(member, value, fixture)
     end
   end
 
-  # Names, edges, files or rows: containers of scalars. `discovered_classes` keeps each name's singleton beside it.
   def set_valued_problem(member, value)
     if member == :discovered_classes
-      own_singletons = value.is_a?(Hash) &&
-                       value.all? { |name, type| type.is_a?(Rigor::Type::Singleton) && type.class_name == name }
-      return own_singletons ? nil : "a value is not the singleton of its own name"
+      return own_singletons?(value) ? nil : "a value is not the singleton of its own name"
     end
     return "not a Hash or Set" unless value.is_a?(Hash) || value.is_a?(Set)
+    return "an entry is a bare value, not a collection" if value.is_a?(Hash) && value.values.any? { |v| scalar?(v) }
+    return "a key is not a name" unless names_as_keys?(value)
 
-    "holds something other than names, rows or flags" unless scalar_tree?(value)
+    "holds something other than names, rows or kind flags" unless set_leaves?(value)
   end
 
-  def scalar_tree?(value)
+  def own_singletons?(value)
+    value.is_a?(Hash) &&
+      value.all? { |name, type| type.is_a?(Rigor::Type::Singleton) && type.class_name == name }
+  end
+
+  def scalar?(value)
+    SCALARS.any? { |scalar| value.is_a?(scalar) }
+  end
+
+  # Every Hash key, at any depth, is a String or Symbol name.
+  def names_as_keys?(value)
     case value
-    when Hash then value.all? { |key, entry| scalar_tree?(key) && scalar_tree?(entry) }
-    when Set, Array then value.all? { |entry| scalar_tree?(entry) }
-    else SCALARS.any? { |scalar| value.is_a?(scalar) }
+    when Hash then value.all? { |key, entry| (key.is_a?(String) || key.is_a?(Symbol)) && names_as_keys?(entry) }
+    when Set, Array then value.all? { |entry| names_as_keys?(entry) }
+    else true
+    end
+  end
+
+  def set_leaves?(value)
+    case value
+    when Hash then value.values.all? { |entry| set_leaves?(entry) }
+    when Set, Array then value.all? { |entry| set_leaves?(entry) }
+    when String then !value.match?(SITE)
+    when Symbol then !VISIBILITIES.include?(value)
+    else scalar?(value)
     end
   end
 
@@ -67,8 +97,8 @@ module DeclarationMemberShapes
   SLOT_KINDS = {
     discovered_def_nodes: ->(slot) { slot.is_a?(Prism::DefNode) || slot.is_a?(Rigor::Inference::DefHandle) },
     discovered_singleton_def_nodes: ->(slot) { slot.is_a?(Prism::DefNode) || slot.is_a?(Rigor::Inference::DefHandle) },
-    discovered_def_sources: ->(slot) { slot.is_a?(String) && slot.match?(/:\d+\z/) },
-    discovered_singleton_def_sources: ->(slot) { slot.is_a?(String) && slot.match?(/:\d+\z/) },
+    discovered_def_sources: ->(slot) { slot.is_a?(String) && slot.match?(SITE) },
+    discovered_singleton_def_sources: ->(slot) { slot.is_a?(String) && slot.match?(SITE) },
     discovered_method_visibilities: ->(slot) { VISIBILITIES.include?(slot) },
     discovered_parameter_envelopes: lambda do |slot|
       slot == Rigor::Source::ParameterEnvelope::OPAQUE || (slot.is_a?(Array) && slot.size == 3)
@@ -103,6 +133,7 @@ module DeclarationMemberShapes
 
   def typed_problem(value)
     return "not a Hash" unless value.is_a?(Hash)
+    return "the values are only each name's own singleton" if own_singletons?(value)
 
     "a leaf is not a Rigor::Type" unless typed_tree?(value)
   end
@@ -111,28 +142,39 @@ module DeclarationMemberShapes
     value.is_a?(Hash) ? value.values.all? { |entry| typed_tree?(entry) } : value.class.name.to_s.start_with?("Rigor::Type::")
   end
 
-  # Read off the analysed file alone, so a second, independent parse gives the same answer. The implicit-self
-  # evidence is a lazy object over the parse, so it is compared by kind, and it must never ride a seed: another
-  # file's readers would find their own parse missing from it.
-  def syntactic_problem(member, value, again, roots, fixture)
+  def syntactic_problem(member, value, fixture)
+    file_only, file_root = fixture.fetch(:file_only)
+    alone = file_only.public_send(member)
     case member
     when :discovered_def_nestings
-      "a second parse records different nestings" unless nestings(value, roots.first) == nestings(again, roots.last)
+      root = fixture.fetch(:discovery).last
+      "the file's parse alone gives other nestings" unless nestings(value, root) == nestings(alone, file_root)
     when :implicit_self_evidence
       return "not a LastLine::SelfEvidence" unless value.is_a?(Rigor::Inference::LastLine::SelfEvidence)
+      return "the file's parse alone gives none" unless alone.is_a?(Rigor::Inference::LastLine::SelfEvidence)
 
       "it rides a seed" if in_runner_seed?(member, fixture) || in_bundles?(member, fixture)
     else
-      "a second parse gives #{again.inspect}, not #{value.inspect}" unless value == again
+      "the file's parse alone gives #{brief(alone)}, not #{brief(value)}" unless value == alone
     end
   end
 
+  def brief(value)
+    text = value.inspect
+    text.size > 60 ? "#{text[0, 57]}..." : text
+  end
+
+  # Def nestings keyed by each def's position, so two parses of one file compare.
   def nestings(table, root)
     DeclarationFactSources.each_node(root).grep(Prism::DefNode).to_h { |node| [node.location.start_offset, table[node]] }
   end
 
-  # Run state may ride the in-memory seed of the run it belongs to, never a persisted per-file bundle.
-  def run_state_problem(member, _value, fixture)
+  def run_state_problem(member, value, fixture)
+    return "a table or a fact, not an opaque token" if TABLES_AND_FACTS.any? { |kind| value.is_a?(kind) }
+    return "a type, not an opaque token" if value.class.name.to_s.start_with?("Rigor::Type::")
+    return "the file's parse alone carries it" unless fixture.fetch(:file_only).first.public_send(member).nil?
+    return "the runner's seed does not carry it" unless in_runner_seed?(member, fixture)
+
     "it is persisted in a seed bundle" if in_bundles?(member, fixture)
   end
 
@@ -144,5 +186,25 @@ module DeclarationMemberShapes
   def in_bundles?(member, fixture)
     short = member.to_s.delete_prefix("discovered_").to_sym
     fixture.fetch(:bundles).values.any? { |bundle| bundle.key?(member) || bundle.key?(short) }
+  end
+
+  # `{member => [classes it passes as, other than its own]}` for every member: the misfilings the checks accept.
+  def accepted_misfilings(classes, fixture)
+    classes.each_with_object({}) do |(own, entries), accepted|
+      entries.each_key do |member|
+        next if UNFILLED.key?(member)
+
+        passes = (classes.keys - [own]).select do |other|
+          problems(refiled(classes, member, other), fixture).none? { |line| line.start_with?("#{member} ") }
+        end
+        accepted[member] = passes unless passes.empty?
+      end
+    end
+  end
+
+  # `classes` with `member` taken out of its class and filed under `klass`.
+  def refiled(classes, member, klass)
+    classes.to_h { |name, entries| [name, entries.except(member)] }
+           .tap { |copy| copy[klass] = copy[klass].merge(member => "refiled") }
   end
 end

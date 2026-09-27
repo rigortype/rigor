@@ -4,15 +4,41 @@ require "fileutils"
 require "prism"
 require "tmpdir"
 
-# #1507 — a two-file project that fills almost every `Scope::DiscoveryIndex` member, and the index `rigor check`
-# analyses its main file under: the runner's own project pre-pass and seed (`Runner#ensure_project_discovery`,
-# `#seed_project_scope`, with dependency recording on so the source-attribution tables are seeded), then the file's
-# own `ScopeIndexer.index`. `member_classes_spec.rb` checks each member's shape on it.
+# #1507 — a two-file project that fills almost every `Scope::DiscoveryIndex` member, and two indexes of its main file:
+# the one `rigor check` analyses it under (the runner's own project pre-pass and seed, with dependency recording on
+# so the source-attribution tables are seeded and a run token minted, then the file's own `ScopeIndexer.index`), and
+# the one the file's parse alone gives (`ScopeIndexer.index` over an empty scope). The second file contributes to
+# every project table, so a table that depends on the project differs between the two. `member_classes_spec.rb` checks
+# each member's shape on them.
 module DeclarationFactFixture
   FILES = {
     "lib/app_config.rb" => <<~RUBY,
       module AppConfig
         MODE = :production
+        Size = Data.define(:width, :height)
+        Cell = Struct.new(:value)
+
+        def self.load = new
+      end
+
+      module Numbers
+        refine Integer do
+          def half = self / 2
+        end
+      end
+
+      class Gadget < Base
+        include Greeting
+        prepend Wrap
+        extend Loud
+
+        def self.make = new
+        def use(first, second = 1) = first
+        def to_int = 1
+
+        private
+
+        def hidden = 1
       end
     RUBY
     "lib/widget.rb" => <<~RUBY
@@ -37,8 +63,8 @@ module DeclarationFactFixture
       Point = Data.define(:x, :y)
       Pair = Struct.new(:a, :b)
       LIMIT = 7
-      $counter = 0
-      $stdout = $stderr
+      $counter = AppConfig::MODE
+      $stdout = AppConfig::MODE
 
       class Base
         def base_method(first, second = 1) = first + second
@@ -57,7 +83,7 @@ module DeclarationFactFixture
         end
 
         def self.build = new
-        def self.bump = (@@count = 1)
+        def self.bump = (@@count = AppConfig::MODE)
         def render = "r"
         def to_str = "widget"
 
@@ -93,8 +119,8 @@ module DeclarationFactFixture
     end
   end
 
-  # `{discovery:, root:, seed:, bundles:}`: the main file's index, its parse, the runner's seed tables and the
-  # ADR-85 per-file seed bundles for the project.
+  # `{discovery:, file_only:, seed:, bundles:}`: the main file's index as `rigor check` builds it and as its parse
+  # alone builds it (each `[discovery, root]`), the runner's seed tables, and the ADR-85 per-file seed bundles.
   def build
     with_project do |dir, paths|
       Dir.chdir(dir) do
@@ -103,8 +129,12 @@ module DeclarationFactFixture
           cache_store: nil, collect_stats: false, record_dependencies: true
         )
         runner.send(:ensure_project_discovery, { files: paths })
+        # `Runner#run_analysis` mints the run token the same way before it seeds any file.
+        runner.instance_variable_set(:@run_generation, Object.new.freeze)
         main = File.join(dir, MAIN)
-        { discovery: index(runner, main), second: index(runner, main), seed: runner.send(:project_scope_seed_tables),
+        { discovery: index(runner.send(:seed_project_scope, Rigor::Scope.empty(source_path: main)), main),
+          file_only: index(Rigor::Scope.empty(source_path: main), main),
+          seed: runner.send(:project_scope_seed_tables),
           bundles: Rigor::Inference::ScopeIndexer.discovered_project_index_incremental(paths, seed_bundles: {})
                                                  .fetch(:bundles) }
       end
@@ -116,9 +146,8 @@ module DeclarationFactFixture
     @built ||= build
   end
 
-  # One independent parse and index of `path`: `[discovery, root]`.
-  def index(runner, path)
-    base = runner.send(:seed_project_scope, Rigor::Scope.empty(source_path: path))
+  # One parse and index of `path` under `base`: `[discovery, root]`.
+  def index(base, path)
     root = Prism.parse(File.read(path), filepath: path).value
     [Rigor::Inference::ScopeIndexer.index(root, default_scope: base).default.discovery, root]
   end

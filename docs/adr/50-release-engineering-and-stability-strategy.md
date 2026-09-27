@@ -262,6 +262,19 @@ idiomatic corpus → it is a strengthening, not a new discipline.
   subsets of the established corpora (Mastodon `app/models`, Redmine `app`,
   a GitLab `app/{controllers,services,…}` subset — the trees ADR-44/45/46
   already profile), `--no-cache`, fixed worker count.
+- **Corpus (amended for #1507):** the implemented gate measures Rigor's own
+  `lib` rather than the external corpora above, and since #1507 it reads
+  that `lib` at the **previous release's tag** (`"corpus"` in
+  `bench/baseline.json`, unpacked with `git archive`) with the release
+  candidate's engine. Before, it read the checkout's own `lib`, which grows
+  with every PR (+9.3 %, +1.0 %, +6.3 % and +26.5 % over the four releases
+  through v0.4.0), so no band width could separate corpus growth from
+  engine cost: the v0.4.0 cut read +80.5 % and was accepted as a whole, and
+  the engine's own +19.1 % was separated only afterwards (#1469). On a
+  frozen tree allocations repeat to a few hundred objects, so the band can
+  be a tight budget for the cycle's engine cost and a refresh after each
+  improvement keeps it honest. After tagging, the corpus advances to the
+  new tag and the baseline is recalibrated on it.
 - **Metrics:** wall time, total allocations (`ObjectSpace`), peak RSS, and
   diagnostic count (a *count* change flags an unintended behaviour shift —
   the byte-identical-diagnostics check ADR-44/45/46 already use).
@@ -289,7 +302,9 @@ idiomatic corpus → it is a strengthening, not a new discipline.
   tolerance band. The **initial** band (tunable per above): wall +10 %,
   allocations +5 %, RSS +10 % — wider on wall for runner noise, tighter on
   allocations as the deterministic signal. A *win* past the band prompts a
-  baseline refresh, not a failure.
+  baseline refresh, not a failure. On the frozen corpus (#1507) allocations
+  tightened to +2 %, and a drop past 1 % prompts the refresh;
+  `bench/thresholds.yml` holds the current values and their reasons.
 - Not in the local `make verify` fast path (too slow); a dedicated CI job,
   like `check-incremental` (ADR-46).
 

@@ -383,6 +383,13 @@ commit.
   flake — `gh run rerun --failed` clears it; never recalibrate for wall
   alone.** Diff the OSS-sweep diagnostics for FPs before blessing a higher
   count; fix an FP at its root rather than blessing it in.
+- The perf gate runs the release candidate's engine over the **previous
+  release's tree** (the `corpus` tag in `bench/baseline.json`,
+  [`bench/README.md`](../../../bench/README.md)), not over the growing `lib`,
+  so an allocations failure is the cycle's engine cost with corpus growth
+  already out of it. Attribute it from the cycle's "Engine allocations" PR
+  summaries and put it to the user; do not recalibrate the old corpus to clear
+  it. The corpus advances after tagging ("Advance the perf-gate corpus" below).
 - Perf-measurement comparability: warm numbers are only comparable within one
   process model (an in-process cold-then-warm chain is ~186k allocs cheaper
   than a fresh-process warm — a phantom regression otherwise). Self-check
@@ -434,8 +441,9 @@ release **PR** you open next (it triggers on `pull_request`, not on a
   release-quality signal worth reviewing.
   - A **`wall_s`-only** perf failure is CI wall-time noise — the deterministic
     `allocations` / `peak_rss_kb` bands are the real signal. Clear it with
-    `gh run rerun --failed <run-id>`; recalibrate `bench/baseline.json` only
-    when allocations or RSS actually breach their band, never for wall alone.
+    `gh run rerun --failed <run-id>`; never recalibrate for wall alone. An
+    allocations failure is engine cost on the previous release's tree (see
+    "Perf-gate gotchas").
   - An OSS-sweep diagnostic-count change needs a false-positive diff before it
     is blessed into `data/oss-sweep/*-thresholds.json`.
 
@@ -527,6 +535,28 @@ In the split-publish case, push the `vx.y.z` tag manually after the gem is
 accepted by RubyGems, then run `rake release:github` once the tag is on
 `origin` to create the GitHub Release.
 
+## Advance the perf-gate corpus
+
+Once the tag exists, the perf gate's corpus moves to it, so the next cycle's
+engine cost is measured on this release's tree. Recalibrate from a branch cut
+at the tag, so the baseline measures exactly the released engine:
+
+```sh
+git switch -c bench-corpus-vX.Y.Z vX.Y.Z
+# bench/baseline.json: "corpus": "vX.Y.Z", "calibrated": false
+git commit -am "Advance the perf-gate corpus to vX.Y.Z"
+git push origin HEAD:refs/heads/bench-corpus-vX.Y.Z
+gh workflow run release-gate.yml --ref bench-corpus-vX.Y.Z
+gh run watch <run-id>
+gh run download <run-id> --name bench-baseline-<run-id>
+```
+
+Commit the downloaded `baseline.updated.json` as `bench/baseline.json`, adding
+`calibrated_on` (the run) and a `note` with the move from the previous corpus,
+and land it on `master` through a PR. `calibrated: false` in the first commit
+is what keeps that run from gating the new tree against the old tree's
+numbers.
+
 ## Quick Checklist
 
 - Working tree starts clean or every pending change is understood.
@@ -559,3 +589,5 @@ accepted by RubyGems, then run `rake release:github` once the tag is on
   version to x.y.z` commit intact (rebase / merge, not squash).
 - After publish: the `vx.y.z` tag, the RubyGems push, and the GitHub Release
   all exist; the release branch is deleted.
+- After publish: `bench/baseline.json` names `vx.y.z` as its corpus and is
+  recalibrated on it, from a branch cut at the tag.

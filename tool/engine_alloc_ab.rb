@@ -6,12 +6,12 @@
 #
 # ## Why a frozen corpus
 #
-# The release gate (`tool/bench.rb`, `bench/thresholds.yml`) runs only at a release cut, and measures `rigor check
-# lib` against a committed baseline. `lib` is Rigor's own source and grows with every PR, so the gate's number mixes
-# corpus growth with engine cost: at the v0.4.0 cut it rose 80.5% and the rise was accepted as a whole, and the
-# engine's own share, +19.1% on a frozen corpus, was only separated afterwards (#1469). Here both engines read the
-# corpus at one revision (the base's, by default), so a PR that only grows `lib` measures zero and a PR that makes
-# the engine allocate more shows exactly that, on the PR that does it.
+# `lib` is Rigor's own source and grows with every PR, so a number measured over the current `lib` mixes corpus
+# growth with engine cost: at the v0.4.0 cut the release gate rose 80.5% and the rise was accepted as a whole, and
+# the engine's own share, +19.1% on a frozen corpus, was only separated afterwards (#1469). Here both engines read
+# the corpus at one revision (the base's, by default), so a PR that only grows `lib` measures zero and a PR that makes
+# the engine allocate more shows exactly that, on the PR that does it. The release gate (`tool/bench.rb`) now
+# measures the same way, over the previous release's tree, but only at a cut.
 #
 # ## Method
 #
@@ -59,6 +59,8 @@ require "stringio"
 require "tmpdir"
 require "yaml"
 
+# `tool/bench.rb` (the release gate) requires this file for `materialise`, `run_check`, `diagnostic_count` and
+# `COMPLETED_EXITS`, so the two measure a corpus the same way.
 module EngineAllocAB
   ROOT = File.expand_path("..", __dir__)
   # What each engine directory holds.

@@ -8,9 +8,12 @@ name: Release gate
 # addition away).
 #
 # ADR-50 WD6 hardening status:
-#   perf-bench   — HARD gate: bench/baseline.json is now calibrated
-#                  (Linux CI, run 27444722315). A regression past the
-#                  tolerance band in bench/thresholds.yml fails the job.
+#   perf-bench   — HARD gate: bench/baseline.json is calibrated on Linux
+#                  CI. A regression past the tolerance band in
+#                  bench/thresholds.yml fails the job. It measures this
+#                  checkout's engine over the frozen corpus the baseline
+#                  names (the previous release's tag, #1507), not over
+#                  this checkout's growing `lib`.
 #                  An uncalibrated baseline always passes (future resets /
 #                  first-time forks remain green without extra config).
 #   gem-build    — advisory (continue-on-error); not yet required check.
@@ -40,10 +43,13 @@ jobs:
     name: Perf benchmark
     runs-on: ubuntu-latest
     steps:
+      # Full history, for its tags: tool/bench.rb `git archive`s the corpus
+      # revision bench/baseline.json names, and a shallow clone has none.
       - name: Checkout
         uses: actions/checkout@v7
         with:
           submodules: false
+          fetch-depth: 0
 
       - name: Set up Ruby
         uses: ruby/setup-ruby@v1

@@ -24,11 +24,26 @@ RSpec.describe "tool/engine_warm_ab.rb (#1507)" do
         .to eq("module X\n  class Y\n    def a; end\n    def __rigor_warm_probe_1; end\n  end\nend\n")
     end
 
-    it "falls back to the last module header in a file with no class" do
+    it "puts it in the innermost module of a file with no class, past the namespace wrapper" do
       commands = "module X\n  module Commands\n    define_command(:c) {}\n  end\nend\n"
-      expect(EngineWarmAB.edited(commands, "method", 1)).to include(
-        "    define_command(:c) {}\n    def __rigor_warm_probe_1; end\n  end\nend\n"
+      expect(EngineWarmAB.edited(commands, "method", 1)).to eq(
+        "module X\n  module Commands\n    define_command(:c) {}\n    def __rigor_warm_probe_1; end\n  end\nend\n"
       )
+    end
+
+    it "chooses the main class over a nested one and over a trailing one-line class" do
+      source = "class Account\n  class Field\n    def a; end\n  end\n  def b; end\nend\n" \
+               "class Error < StandardError; end\n"
+      expect(EngineWarmAB.edited(source, "method", 1)).to eq(
+        "class Account\n  class Field\n    def a; end\n  end\n  def b; end\n  def __rigor_warm_probe_1; end\nend\n" \
+        "class Error < StandardError; end\n"
+      )
+    end
+
+    it "ignores a class spelled inside a heredoc" do
+      source = "class A\n  X = <<~RUBY\n    class Fake\n    end\n  RUBY\nend\n"
+      expect(EngineWarmAB.edited(source, "method", 1))
+        .to eq("class A\n  X = <<~RUBY\n    class Fake\n    end\n  RUBY\n  def __rigor_warm_probe_1; end\nend\n")
     end
 
     it "appends a comment line for a bytes-only edit" do
@@ -55,17 +70,21 @@ RSpec.describe "tool/engine_warm_ab.rb (#1507)" do
     end
   end
 
-  describe ".parse_marker and .recheck_size" do
+  describe ".parse_marker" do
     it "reads the child's exit marker, defaulting to no foreign load" do
       expect(EngineWarmAB.parse_marker("engine=0 yjit=1 foreign="))
         .to include("engine" => "0", "yjit" => "1", "foreign" => "")
       expect(EngineWarmAB.parse_marker("")).to include("foreign" => "")
     end
+  end
 
-    it "reads the recheck size from --verify-incremental's verdict" do
-      err = "rigor: --verify-incremental OK — incremental (39/77 files re-analyzed, rest from cache) matches full\n"
-      expect(EngineWarmAB.recheck_size(err)).to eq([39, 77])
-      expect(EngineWarmAB.recheck_size("rigor: --incremental warm")).to be_nil
+  describe ".report" do
+    it "writes a partial A/B report when one engine has no samples for a row" do
+      journey = EngineWarmAB::Journey.new({ "base" => {}, "head" => {} }, {}, "/nonexistent")
+      journey.samples[%w[default null]]["base"] << 0.4
+      options = { project: "p", paths: [], leaf: "l.rb", hub: "h.rb", edit: "method", reps: 5,
+                  base: "b", head: "h" }
+      expect { EngineWarmAB.report(options, %w[base head], journey) }.to output(/default \| null/).to_stdout
     end
   end
 end

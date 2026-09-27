@@ -166,21 +166,20 @@ the default run-result cache and for `--incremental`:
 - **leaf:** a file nothing depends on was edited;
 - **hub:** a file many others depend on was edited.
 
-Every step runs as a fresh process, boot included. Each timed run must be the
-run its row is about, or the tool fails:
-- a default null run must be the engine-free probe hit;
-- an edit run must be a miss;
-- every `--incremental` run must report itself warm.
+Every step runs as a fresh process, boot included (the harness's
+`bundler/setup` adds about 50 ms that a gem-installed user does not pay). Each
+timed run must be the run its row is about, or the tool fails: an edit run must
+load the engine (a miss), and every `--incremental` run must report itself
+warm. The report counts how many default null runs the engine-free probe served.
 
 The first timed run of each scenario is compared with a plain `--no-cache` run
-of the same tree. (`--incremental --no-cache` would replay the snapshot.)
-Different findings fail the tool, and the same findings in another order are a
-note. Each incremental edit is also replayed under `--verify-incremental`,
-which records how many files the recheck re-analysed. That count is what tells
-a hub from a leaf: under rbs-inline comment ingestion, even a comment edit
-widens the closure. With `base` set, two engines alternate in ABBA order on
-separate project copies, and the table gives the same separation verdict as the
-wall A/B.
+of the same tree. (`--incremental --no-cache` still replays the snapshot,
+#1525.) Different findings fail the tool, and the same findings in another
+order are a note. How far an incremental edit spread is not reported yet
+(#1526), so whether a leaf or hub is really one rests on the files chosen:
+Mastodon's defaults re-analyse 1 and 277 files. With `base` set, two engines
+alternate in ABBA order on separate project copies, and the table gives the
+same separation verdict as the wall A/B.
 
 ```sh
 gh workflow run engine-warm.yml -f head=master

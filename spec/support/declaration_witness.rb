@@ -15,8 +15,9 @@ require "rbconfig"
 #
 # - `Module.nesting` at every line the fixture runs, with the `self` of that line, so two statements on one line are
 #   told apart. A `def` is a statement, so its line carries the nesting its body is compiled under, `class << self`
-#   bodies included (a `:class` TracePoint does not report those). Each anonymous entry (`#<Class:C>`) records
-#   whether it owns constants;
+#   bodies included (a `:class` TracePoint does not report those). Each anonymous entry (`#<Class:C>`) records,
+#   after the fixture has loaded, whether it owns constants: its own, and for the innermost entry also its
+#   ancestors' up to `Class` / `Module` / `Object` (an `extend M`'s, a superclass's `class << self`'s);
 # - its own instance methods by visibility, and its own singleton methods plus those its singleton mixins (`extend`)
 #   give it, each with `Method#source_location`;
 # - its ancestors, split into its own instance mixins and its own singleton mixins, and its superclass;
@@ -38,6 +39,10 @@ require "rbconfig"
 # A module under an anonymous one (`#<Class:…>::D`) is left out of the runtime sets, because no constant path reaches
 # it. A runtime method counts only when its `source_location` is in the fixture, so a reopened core class brings only
 # the fixture's own methods.
+#
+# Threat model: the witness checks the fixtures it is given; it finds no bug a fixture does not exercise, and one run
+# witnesses one execution. A constant an anonymous cref gains at run time after load (`const_set` from a method) is
+# not seen.
 module DeclarationWitness
   RELATIONS = %i[
     classes methods visibilities def_nodes singleton_def_nodes superclasses includes extends def_nestings class_cvars
@@ -51,8 +56,15 @@ module DeclarationWitness
 
     path = File.expand_path(ARGV.fetch(0))
     name_of = ->(mod) { mod.name || mod.inspect }
-    entry_of = ->(mod) { [name_of.(mod), mod.name.nil? && !mod.constants(false).empty?] }
     in_fixture = ->(location) { location && File.expand_path(location[0]) == path ? location[1] : nil }
+    # Whether an anonymous cref makes a constant reachable that no named cref of the chain can: its own constants
+    # and, for the innermost cref, its ancestors' up to `Class` / `Module` / `Object`, whose constants the
+    # top-level lookup reaches anyway. Read after the fixture has loaded, so a constant written later in the body
+    # (it is there when the method runs) counts.
+    owns_constants = lambda do |mod, innermost|
+      scope = innermost ? mod.ancestors.take_while { |a| ![Class, Module, Object].include?(a) } : [mod]
+      scope.any? { |owner| !owner.constants(false).empty? }
+    end
 
     nestings = Hash.new { |table, line| table[line] = [] }
     opened = []
@@ -62,9 +74,8 @@ module DeclarationWitness
       if tp.event == :class
         opened << tp.self
       else
-        self_label = tp.self.is_a?(Module) ? name_of.(tp.self) : "(#{tp.self.class})"
-        seen = [self_label, tp.binding.eval("Module.nesting").map(&entry_of)]
-        nestings[tp.lineno] << seen unless nestings[tp.lineno].include?(seen)
+        seen = [tp.self, tp.binding.eval("Module.nesting")]
+        nestings[tp.lineno] << seen unless nestings[tp.lineno].any? { |s, n| s.equal?(tp.self) && n == seen.last }
       end
     end
 
@@ -116,7 +127,15 @@ module DeclarationWitness
       }]
     end
 
-    puts JSON.generate("error" => error, "nestings" => nestings, "modules" => record)
+    # Each line's `[self, Module.nesting]` pairs, as labels: an anonymous entry carries whether it owns constants.
+    labelled = nestings.transform_values do |seen|
+      seen.map do |self_value, chain|
+        self_label = self_value.is_a?(Module) ? name_of.(self_value) : "(#{self_value.class})"
+        [self_label, chain.each_with_index.map { |mod, i| [name_of.(mod), mod.name.nil? && owns_constants.(mod, i.zero?)] }]
+      end
+    end
+
+    puts JSON.generate("error" => error, "nestings" => labelled, "modules" => record)
   RUBY
 
   module_function

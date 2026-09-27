@@ -9,6 +9,9 @@ require "tmpdir"
 # has two examples: a `pending` one asserting agreement, which RSpec fails the moment the bug is fixed, and a pin of
 # today's exact violations, which fails if the fixture starts failing for another reason (a broken fixture raises
 # instead of recording). Both flip together when the bug is fixed.
+#
+# Threat model: the witness finds only the bugs its fixtures exercise, and one run witnesses one execution; a
+# deliberately misleading fixture defeats it. The limits of each relation are in the support file's header.
 RSpec.describe "Declaration-fact witness" do
   def fixture(name)
     File.expand_path("../../integration/fixtures/declaration_witness/#{name}.rb", __dir__)
@@ -128,18 +131,28 @@ RSpec.describe "Declaration-fact witness" do
       )
     end
 
-    it "#1305: resolves a constant a class << self body owns from a class opened below it" do
-      pending "https://github.com/rigortype/rigor/issues/1305 — the recorded nesting drops #<Class:C>, which owns X"
+    # #1305's family: a def whose innermost or enclosing cref is a singleton class that owns constants, directly or
+    # through its ancestors, which no recorded chain of names can reach.
+    {
+      "anonymous_cref_constant" => ["a class opened below class << self", '["E", "C"]', 15],
+      "anonymous_cref_late_constant" => ["the same, with the constant written after the class", '["E", "C"]', 11],
+      "singleton_body_late_constant" => ["a def in class << self, the constant written after it", '["C"]', 10],
+      "singleton_extend_constant" => ["a def in class << self of a class that extends M", '["C"]', 16],
+      "singleton_superclass_constant" => ["a def in class << self, the constant in the superclass's", '["C"]', 16]
+    }.each do |fixture_name, (shape, recorded, line)|
+      it "#1305: resolves constants through the singleton cref — #{shape}" do
+        pending "https://github.com/rigortype/rigor/issues/1305 — the recorded nesting drops #<Class:C>"
 
-      expect(violations("anonymous_cref_constant")).to eq([])
-    end
+        expect(violations(fixture_name)).to eq([])
+      end
 
-    # Flip this when #1305 is fixed for defs nested below a class << self body.
-    it "#1305 today" do
-      expect(violations("anonymous_cref_constant")).to eq(
-        ['def_nestings: Rigor records ["E", "C"] for the def at line 15; Ruby\'s nesting holds #<Class:C>, ' \
-         "which owns constants the recorded chain cannot reach"]
-      )
+      # Flip this when #1305 is fixed.
+      it "#1305 today — #{shape}" do
+        expect(violations(fixture_name)).to eq(
+          ["def_nestings: Rigor records #{recorded} for the def at line #{line}; Ruby's nesting holds #<Class:C>, " \
+           "which owns constants the recorded chain cannot reach"]
+        )
+      end
     end
   end
 

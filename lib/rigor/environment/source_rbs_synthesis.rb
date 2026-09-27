@@ -76,9 +76,13 @@ module Rigor
       # would otherwise read as a moved contribution. A failed synthesis contributes nothing to the loader but
       # is kept as one stable value of its own, so a file flipping between "no annotation" and "broken
       # annotation" still reads as moved. Any shape the contract does not name is digested whole.
+      #
+      # The RBS text itself is digested whole, comments included. RBS reads a `# resolve-type-names: false`
+      # magic comment at the start of a buffer, rbs-inline copies a `.rb` file's first comment line there, and
+      # a string-literal type may span lines that start with `#`, so no line-based stripping is sound (#1549).
       def contribution(output)
         return nil if output.nil? || output == ""
-        return ["rbs", without_comment_lines(output)] if output.is_a?(String)
+        return ["rbs", output] if output.is_a?(String)
         return ["raw", Marshal.dump(output)] unless output.is_a?(Array)
 
         case output[0]
@@ -87,39 +91,6 @@ module Rigor
         else ["raw", Marshal.dump(output)]
         end
       end
-
-      # The RBS text without its full-line comments: the doc comments and file-leading magic comments
-      # rbs-inline copies from the `.rb`, so rewording one in an annotated file does not read as a moved
-      # contribution. Sound for the digest alone. Nothing a per-file cache holds reads an RBS comment or an RBS
-      # position, and the loaded buffer and its environment-cache key keep the full text (ADR-89 Amendment
-      # 2026-09-28). Kept whole when an `%a` annotation spans lines, because a line inside one is annotation
-      # text even when it starts with `#`, and when the text is not valid in its encoding.
-      def without_comment_lines(rbs)
-        return rbs unless rbs.valid_encoding?
-
-        lines = rbs.each_line.to_a
-        return rbs if lines.any? { |line| open_annotation?(line) }
-
-        lines.grep_v(COMMENT_LINE).join
-      end
-
-      # Whether `line` opens an `%a` annotation it does not close. RBS lexes `%a` with each of the pairs in
-      # {ANNOTATION_CLOSERS} up to the first matching closer, with no escape.
-      def open_annotation?(line)
-        offset = 0
-        while (start = line.index(ANNOTATION_OPENER, offset))
-          stop = line.index(ANNOTATION_CLOSERS.fetch(line[start + 2]), start + 3)
-          return true if stop.nil?
-
-          offset = stop + 1
-        end
-        false
-      end
-
-      COMMENT_LINE = /\A\s*#/
-      ANNOTATION_OPENER = /%a[{(\[<|]/
-      ANNOTATION_CLOSERS = { "{" => "}", "(" => ")", "[" => "]", "<" => ">", "|" => "|" }.freeze
-      private_constant :COMMENT_LINE, :ANNOTATION_OPENER, :ANNOTATION_CLOSERS
 
       # One entry per (plugin, source file), all of them live for as long as the file is in the project — a
       # generation count says nothing about staleness here, so this producer declares itself out of
@@ -167,8 +138,7 @@ module Rigor
         nil
       end
 
-      private_class_method :contribution, :without_comment_lines, :open_annotation?, :generation_cap,
-                           :cache_descriptor, :input_digest, :invoke_safely
+      private_class_method :contribution, :generation_cap, :cache_descriptor, :input_digest, :invoke_safely
     end
   end
 end

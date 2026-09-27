@@ -954,21 +954,26 @@ from its comments — every `#:` / `# @rbs` annotation under the auto-wired
   loaded `source_rbs_synthesizer` contributes for the file, `none` when nothing
   is contributed, or `nil` when an output could not be read.
   `Environment::SourceRbsSynthesis.digest` reads the same function and
-  `Cache::Store` entries the loader is fed from. Three things are left out of
-  the digest input, never out of the loaded buffer or its environment-cache
-  key:
-  - WD6 / WD12 notices, which feed only run-level `source-rbs-*` rows. A failed
-    synthesis still counts as one stable value.
-  - The RBS text's full-line comments, which rbs-inline copies from the `.rb`
-    and which no per-file cache reads. The text is kept whole when an `%a`
-    annotation spans lines.
-  - Positions, which the text does not carry.
+  `Cache::Store` entries the loader is fed from. WD6 / WD12 notices are left
+  out of the digest input, never out of the loaded buffer: they feed only
+  run-level `source-rbs-*` rows, and they quote line numbers. A failed synthesis
+  still counts as one stable value. The RBS text is digested whole, comments
+  included. RBS reads a `# resolve-type-names:` magic comment at the start of a
+  buffer, where rbs-inline copies the `.rb` file's first comment line, so a
+  comment line can change the environment. Rewording any comment in an
+  annotated file therefore re-analyses the project until
+  [#1549](https://github.com/rigortype/rigor/issues/1549) lands.
 - `Analysis::SourceRbsGate` stamps the bundles the runner built in a run. A
   reused bundle keeps its digest, which stays exact because reuse requires
-  byte-identical content. A stamp is bound to its bundle's bytes: a reading is
-  kept only when the file's SHA-256, read before and after it, equals the
-  bundle's content digest. Otherwise the file is read again, and the digest is
-  stored as `nil` if it still does not match.
+  byte-identical content. A stamp must describe the synthesized RBS its file's
+  readers were computed under. The reading the closure was decided on is
+  stamped only when the file's SHA-256, read before and after it, equals the
+  bundle's content digest. A file saved after the closure was decided is never
+  re-read. It is stamped `nil`, and its recorded content digest is dropped from
+  `digests`, so the next run detects it as changed. A bundle built without such
+  a reading is stamped from a fresh reading only when every file was just
+  re-analysed, and `nil` otherwise. A `nil` stamp is re-stamped when its file is
+  next read for a closure, or on the next whole-project run.
 - A recheck whose edit moved any synthesized output re-analyses every analysed
   file. The output has moved when a changed file's digest differs from its
   bundle's (or either is unknown), when an added file contributes anything, or
@@ -982,9 +987,9 @@ from its comments — every `#:` / `# @rbs` annotation under the auto-wired
   without `#prepare`, before the recheck runner exists. A project without
   annotations keeps both gates with `rigor-rbs-inline` loaded, and an
   `enabled: false` entry, which the loader skips, contributes no synthesizer.
-- After every `--incremental` run, the gate's set is reconciled with the set of
-  the registry the run's environment was built from, after `#prepare`, compared
-  by plugin id and order. That registry is the one ADR-88's `plugin_fact_digest`
+- After every `--incremental` run, one that read no file included, the gate's
+  set is reconciled with the set of the registry the run's environment was
+  built from, after `#prepare`, compared by plugin id and order. That registry is the one ADR-88's `plugin_fact_digest`
   reads: the runner's on a sequential run, the sequential probe's on a pooled
   one. A mismatch means a synthesizer built in `#prepare`, which the gate could
   not see. The gate then turns untrusted for the session, every bundle's digest

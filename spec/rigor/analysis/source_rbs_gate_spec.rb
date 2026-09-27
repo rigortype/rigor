@@ -33,31 +33,52 @@ RSpec.describe Rigor::Analysis::SourceRbsGate do
   end
 
   describe "#stamp" do
-    it "binds a digest read before a save to nothing, and re-reads it from the bytes the bundle was built from" do
+    it "stamps the closure's reading when the bundle was built from the same bytes" do
       File.write(path, "class A\nend\n")
-      gate.moved?({}, [], [path], []) # the closure decision reads the pre-save bytes
-      before_save = digest_now
-      File.write(path, "class B\nend\n") # saved before the runner's discovery built the bundle
+      gate.moved?({}, [], [path], [])
 
-      stamped = gate.stamp(path => bundle_for_current_bytes)
+      stamped = gate.stamp({ path => bundle_for_current_bytes })
 
-      expect(stamped.fetch(path).fetch(:source_rbs_digest)).to eq(digest_now)
-      expect(digest_now).not_to eq(before_save)
+      expect(stamped.fetch(path)).to include(source_rbs_digest: digest_now)
+      expect(gate.unbound).to be_empty
     end
 
-    it "stores a digest as unknown when the bytes on disk never match the bundle's" do
+    it "stamps unknown, without re-reading, a file saved after the closure was decided" do
+      # The readers' cached answers predate the save, so the post-save digest must not stand for them.
       File.write(path, "class A\nend\n")
+      gate.moved?({}, [], [path], [])
+      File.write(path, "class B\nend\n")
 
-      stamped = gate.stamp(path => { digest: "0" * 64 })
+      stamped = gate.stamp({ path => bundle_for_current_bytes })
 
       expect(stamped.fetch(path)).to include(source_rbs_digest: nil)
+      expect(gate.unbound).to eq(Set[path])
+    end
+
+    it "stamps unknown a bundle this run built without a reading, unless every file was re-analysed" do
+      File.write(path, "class A\nend\n")
+
+      expect(gate.stamp({ path => bundle_for_current_bytes }).fetch(path)).to include(source_rbs_digest: nil)
+      expect(gate.stamp({ path => bundle_for_current_bytes }, whole_project: true).fetch(path))
+        .to include(source_rbs_digest: digest_now)
+    end
+
+    it "re-stamps an unknown digest once a run can vouch for it, and only then" do
+      File.write(path, "class A\nend\n")
+      unknown = bundle_for_current_bytes.merge(source_rbs_digest: nil)
+
+      expect(gate.stamp({ path => unknown }).fetch(path)).to be(unknown)
+      expect(gate.stamp({ path => unknown }, whole_project: true).fetch(path))
+        .to include(source_rbs_digest: digest_now)
+      gate.moved?({ path => unknown }, [path], [], [])
+      expect(gate.stamp({ path => unknown }).fetch(path)).to include(source_rbs_digest: digest_now)
     end
 
     it "keeps the digest a reused bundle already carries" do
       File.write(path, "class A\nend\n")
       reused = bundle_for_current_bytes.merge(source_rbs_digest: "kept")
 
-      expect(gate.stamp(path => reused).fetch(path)).to be(reused)
+      expect(gate.stamp({ path => reused }).fetch(path)).to be(reused)
     end
   end
 
@@ -67,7 +88,7 @@ RSpec.describe Rigor::Analysis::SourceRbsGate do
       gate.moved?({}, [], [path], [])
     end
 
-    let(:stamped) { gate.stamp(path => bundle_for_current_bytes) }
+    let(:stamped) { gate.stamp({ path => bundle_for_current_bytes }) }
 
     it "trusts a run whose prepared registry declares the synthesizers the gate digested with" do
       expect(gate.verify(registry_with("echo"), stamped)).to eq(stamped)
@@ -79,7 +100,7 @@ RSpec.describe Rigor::Analysis::SourceRbsGate do
 
       expect(gate).to be_untrusted
       expect(kept.fetch(path)).to include(source_rbs_digest: nil)
-      expect(gate.stamp(path => bundle_for_current_bytes).fetch(path)).to include(source_rbs_digest: nil)
+      expect(gate.stamp({ path => bundle_for_current_bytes }).fetch(path)).to include(source_rbs_digest: nil)
       expect(gate.moved?(kept, [path], [], [])).to be(true)
     end
 
@@ -90,10 +111,13 @@ RSpec.describe Rigor::Analysis::SourceRbsGate do
     end
   end
 
-  it "has nothing to distrust in a session that never digested a file" do
+  it "verifies a session that has not read a file yet, since a stamp an earlier process wrote is at stake" do
     idle = described_class.new(configuration: configuration, cache_store: nil, plugin_requirer: nil)
+    allow(idle).to receive(:synthesizers).and_return([synthesizer])
 
-    expect(idle.verify(nil, { path => { source_rbs_digest: "x" } })).to eq(path => { source_rbs_digest: "x" })
-    expect(idle).not_to be_untrusted
+    kept = idle.verify(registry_with("echo", "built-in-prepare"), { path => { source_rbs_digest: "x" } })
+
+    expect(idle).to be_untrusted
+    expect(kept.fetch(path)).to include(source_rbs_digest: nil)
   end
 end

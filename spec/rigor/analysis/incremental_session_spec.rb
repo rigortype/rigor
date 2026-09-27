@@ -1723,20 +1723,27 @@ end
       end
     end
 
-    it "keeps the gate when a doc comment in an annotated file is reworded" do
-      # rbs-inline copies the comment block above a member into the RBS it writes, so the rendered text moves
-      # with every reworded doc comment. The digest leaves full-line comments out: no per-file cache reads an
-      # RBS comment or an RBS position, and the annotation itself is not a comment line.
+    it "re-checks the readers when a leading magic comment changes how the synthesized RBS resolves" do
+      # rbs-inline copies the file's first comment line to the top of its RBS, and RBS reads a
+      # `# resolve-type-names:` magic comment there: flipping it turns `Baz` into an unresolvable name. The
+      # synthesized text moves only in a comment line, which is why the digest keeps comments (#1549).
       Dir.mktmpdir do |dir|
-        greeter = write_greeter(dir, "  # Says hi.\n  #: () -> String\n")
+        ns = File.join(dir, "ns.rb")
+        source = lambda do |first|
+          "#{first}\nmodule Foo\n  class Baz\n  end\n\n  " \
+            "class Bar\n    #: () -> Baz\n    def x\n      nil\n    end\n  end\nend\n"
+        end
+        File.write(ns, source.call("# resolve-type-names: true"))
+        File.write(File.join(dir, "caller.rb"),
+                   "class Caller\n  def go\n    Rigor.dump_type(Foo::Bar.new.x)\n  end\nend\n")
         config = inline_config([dir])
         session = inline_session(config, [dir])
-        expect(messages_for(guarded_baseline(session), "caller.rb")).to eq(["dump_type: String"])
+        expect(messages_for(guarded_baseline(session), "caller.rb")).to eq(["dump_type: Foo::Baz"])
 
-        write_greeter(dir, "  # Greets whoever asks.\n  #: () -> String\n")
+        File.write(ns, source.call("# resolve-type-names: false"))
         recheck = guarded_recheck(session)
 
-        expect(recheck.affected).to eq(Set[greeter])
+        expect(recheck.affected).to include(File.join(dir, "caller.rb"))
         expect(sorted(recheck.diagnostics)).to eq(sorted(inline_full_run(config, [dir])))
       end
     end
@@ -1913,6 +1920,100 @@ end
         expect_prepare_built_answer(diagnostics, config, project, "dump_type: Integer")
       ensure
         Rigor::Plugin::PrepareBuiltSynthesizerProbe.building = true
+      end
+    end
+
+    # A long-lived session (the language server's) primes with `run_incremental` and then calls `recheck`
+    # directly, so the check after its priming is the only one it gets. A priming that changed nothing digests
+    # nothing, and must still compare the two synthesizer sets.
+    def primed_session(config, project, snapshot)
+      session = described_class.new(configuration: config, paths: [project], plugin_requirer: prepare_built_requirer)
+      guarded_run_incremental(session, snapshot: snapshot, fingerprint: fingerprint(config, project), persist: false)
+      session
+    end
+
+    def prepare_built_project(dir)
+      project = File.join(dir, "project")
+      FileUtils.mkdir_p(project)
+      write_greeter(project, "  # fake-rbs: def greet: () -> String\n")
+      [project, Rigor::Cache::IncrementalSnapshot.new(root: File.join(dir, "cache")),
+       inline_config([project], entry: "prepare-built-synth")]
+    end
+
+    it "verifies even a priming that changed nothing, so later direct rechecks stay whole-project" do
+      Dir.mktmpdir do |dir|
+        project, snapshot, config = prepare_built_project(dir)
+        prepare_built_run(config, project, snapshot)
+        session = primed_session(config, project, snapshot)
+        write_greeter(project, "  # fake-rbs: def greet: () -> Integer\n")
+        guarded_recheck(session)
+
+        write_greeter(project, "  # fake-rbs: def greet: () -> Float\n")
+        recheck = guarded_recheck(session)
+
+        expect_prepare_built_answer(recheck.diagnostics, config, project, "dump_type: Float")
+      end
+    end
+
+    it "re-analyses the project when a file is added under an untrusted gate" do
+      # Under an untrusted gate the unprepared registry says nothing about what an added file contributes, so
+      # an edit that only adds a file must not take the gated closure either.
+      Dir.mktmpdir do |dir|
+        project, snapshot, config = prepare_built_project(dir)
+        prepare_built_run(config, project, snapshot)
+        session = primed_session(config, project, snapshot)
+        File.write(File.join(project, "extra.rb"),
+                   "class Extra\n  # fake-rbs: def extra: () -> Integer\n  def extra\n    1\n  end\nend\n")
+
+        recheck = guarded_recheck(session)
+
+        expect(recheck.reused).to be_empty
+        expect(sorted(recheck.diagnostics)).to eq(sorted(inline_full_run(config, [project],
+                                                                         requirer: prepare_built_requirer)))
+      end
+    end
+
+    # One `--incremental` process over `snapshot`; the block sees the session before it runs.
+    def rbs_inline_process(config, project, snapshot)
+      session = described_class.new(configuration: config, paths: [project], plugin_requirer: rbs_inline_requirer)
+      yield session if block_given?
+      guarded_run_incremental(session, snapshot: snapshot, fingerprint: fingerprint(config, project))
+    end
+
+    # Saves the block's rewrite of `path` right after `session` decides its closure, keeping the older mtime.
+    def save_after_closure(session, path)
+      allow(session.send(:source_rbs_gate)).to receive(:moved?).and_wrap_original do |original, *args|
+        original.call(*args).tap do
+          before = File.stat(path)
+          File.write(path, yield(File.read(path)))
+          File.utime(before.atime, before.mtime, path)
+        end
+      end
+    end
+
+    it "re-analyses, on the next run, a file saved between the closure decision and the runner's discovery" do
+      # Process B decides its closure on the pre-save bytes, where nothing moved, and its runner then reads the
+      # saved annotation edit. Its readers' cached answers predate that save, so the file must not be stamped
+      # with the post-save digest: process C, with no further edit, would read it as unmoved and serve them.
+      # The save keeps the file's older mtime, as a sync tool or `cp -p` does, so C's stat check cannot see
+      # it either (ADR-87's racy-entry rule re-hashes only a file whose mtime falls inside B's run).
+      Dir.mktmpdir do |dir|
+        project = File.join(dir, "project")
+        FileUtils.mkdir_p(project)
+        snapshot = Rigor::Cache::IncrementalSnapshot.new(root: File.join(dir, "cache"))
+        config = inline_config([project])
+        greeter = write_greeter(project, "  #: () -> String\n")
+        rbs_inline_process(config, project, snapshot)
+        sleep 0.05
+        File.write(greeter, "#{File.read(greeter)}# touch\n")
+        rbs_inline_process(config, project, snapshot) do |session|
+          save_after_closure(session, greeter) { |text| text.sub("#: () -> String", "#: () -> Integer") }
+        end
+
+        diagnostics, = rbs_inline_process(config, project, snapshot)
+
+        expect(messages_for(diagnostics, "caller.rb")).to eq(["dump_type: Integer"])
+        expect(sorted(diagnostics)).to eq(sorted(inline_full_run(config, [project])))
       end
     end
   end

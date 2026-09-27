@@ -197,18 +197,26 @@ had three defects.
    `source-rbs-*` rows, which every run regenerates and the per-file cache never serves, and they quote line
    numbers, so digesting them would turn a line shift in a file carrying a malformed `#:` into a
    whole-project re-analysis. A failed synthesis contributes nothing to the loader but counts as one stable
-   value, so a file that flips between "no annotation" and "broken annotation" still reads as moved.
+   value, so a file that flips between "no annotation" and "broken annotation" still reads as moved. The
+   RBS text itself is digested whole, comments included (decision 6).
 2. `Analysis::SourceRbsGate` writes the digest onto the bundles the runner built this run. A reused bundle
-   keeps its digest, which stays exact because a bundle is reused only for byte-identical content. Each
-   digest is bound to its bundle's bytes: a reading is kept only when the file's SHA-256, taken before and
-   after the reading, equals the content digest the runner built the bundle from. A file saved between the
-   closure decision and the runner's discovery is read again, and stored as unknown if it still does not
-   match.
+   keeps its digest, which stays exact because a bundle is reused only for byte-identical content. A stamp
+   must describe the synthesized RBS the cached answers of the file's readers were computed under, so each
+   digest is bound to its bundle's bytes. The reading the closure was decided on is stamped only when the
+   file's SHA-256, taken before and after it, equals the content digest the runner built the bundle from.
+   A file saved after the closure was decided is not read again: its readers' cached answers predate the
+   save. It is stamped unknown, and its recorded content digest is forgotten, so the next run detects it as
+   changed and re-analyses the project. A bundle the run built without such a reading is stamped from a
+   reading taken after the run only when every file was just re-analysed (a baseline, or a whole-project
+   recheck), and is stamped unknown the same way otherwise. An unknown stamp is re-stamped once a run can
+   vouch for it: when its file is next read for a closure, or the next time every file is re-analysed.
 3. The gate reads the synthesizers from a plugin registry it loads for itself, without `#prepare`, before
    the recheck runner exists. Every loaded synthesizer counts, not one plugin known by name. An
    `enabled: false` entry, which the loader skips, contributes none. A registry without `#prepare` is exact
-   only for a synthesizer the manifest declares before `#prepare` runs, so after every `--incremental` run
-   the session compares, by plugin id and order, the gate's set with the prepared registry's. The prepared
+   only for a synthesizer the manifest declares before `#prepare` runs. So after every `--incremental` run,
+   one that changed nothing and so read no file included, the session compares, by plugin id and order,
+   the gate's set with the prepared registry's. A stamp written by an earlier process is at stake even
+   when this run read nothing, and a long-lived session gets its only check at priming. The prepared
    registry is the one ADR-88 WD1 already reads: the runner's on a sequential run, and the sequential
    probe's on a pooled one. On a mismatch the gate turns untrusted for the session. Every bundle's digest is
    stamped unknown before the snapshot is saved, every later edit re-analyses the whole project, and a
@@ -227,17 +235,14 @@ had three defects.
 6. The digest comes from the output, not from the comment lines. rbs-inline binds an annotation by
    adjacency, so a plain comment or a blank line can bind or unbind one without touching its text. In an
    annotated file upstream emits a skeleton for every `def`, `attr`, constant and mixin, and the plugin
-   rewrites `#:nodoc:`-style directives before parsing. The output's own full-line comments are left out of
-   the digest, though. Upstream copies each member's comment block, and the file's leading magic comments,
-   into the RBS it writes, so otherwise rewording any comment in an annotated file would re-analyse the
-   project. That is sound because no per-file cache reads an RBS comment or an RBS position. An audit found
-   none: every position a check rule embeds is a Prism position, and nothing outside `sig_gen/` and the
-   language server reads a declaration's comment. The run-level `definition-build-failed` rows that
-   replay a `virtual:` buffer position and a hint drawn from its echoed comments are dropped for every file
-   in the closure (`PoolCoordinator#stale_replayed_failure?`), and the edited file always is. Only the
-   digest input is stripped; the loaded buffer and its environment-cache key keep the full text. The text is
-   kept whole when an `%a` annotation spans lines, since a line inside one is annotation text even when it
-   starts with `#`.
+   rewrites `#:nodoc:`-style directives before parsing. The output's comments stay in the digest. Upstream
+   copies each member's comment block, and the `.rb` file's first comment line, into the RBS it writes, and
+   RBS reads a `# resolve-type-names:` magic comment at the start of a buffer. Flipping that one line in a
+   `.rb` file changes how every type name in its RBS resolves. A string-literal type can also span lines
+   that start with `#`. A line-based strip of comments from the digest input was tried in review and
+   reverted for these reasons. A sound comment-insensitive digest is
+   [#1549](https://github.com/rigortype/rigor/issues/1549). Until it lands, rewording any comment in an
+   annotated file re-analyses the project.
 7. `Effects::InlineAnchor` maps an effect envelope's location onto the `.rb` line of its annotation, which
    the RBS text does not carry, so a line shift can move that position without moving the digest. This
    needs no handling. The mapped location reaches only `EffectEnvelopePass` and
@@ -256,12 +261,15 @@ dependents; one run per edit on a shared host, so the walls are indicative):
 
 Every answer from this amendment matched a cold `--no-cache` run. On a project without annotations,
 nothing else changes. In an annotated project, every edit that moves the synthesized RBS re-analyses the
-whole project. Such edits include an annotation edit, and adding, removing or renaming a `def` in an
-annotated file. Rewording a comment does not. Master re-analysed the file's ancestry closure for these
-edits, which can serve a stale answer. A baseline computes one digest per file: a `Cache::Store` hit after
-the environment build, or a second synthesizer run under `--no-cache`, plus two content SHA-256 reads that
-bind each digest to its bundle. A plugin that builds its synthesizer in `#prepare` costs its project a
-whole-project re-analysis on every `--incremental` edit. The language server re-seeds its session from the
+whole project. Such edits include an annotation edit, adding, removing or renaming a `def` in an
+annotated file, and, until [#1549](https://github.com/rigortype/rigor/issues/1549), rewording any comment
+in one. Master re-analysed the file's ancestry closure for these edits, which can serve a stale answer. A
+baseline computes one digest per file: a `Cache::Store` hit after the environment build, or a second
+synthesizer run under `--no-cache`, plus two content SHA-256 reads that bind each digest to its bundle.
+Every `--incremental` run loads the plugin registry once more for the post-run comparison. A plugin that
+builds its synthesizer in `#prepare` costs its project a whole-project re-analysis on every
+`--incremental` edit. After it is fixed, the unknown stamps it left clear one file at a time, as each is
+next edited, or all at once on the next whole-project run. The language server re-seeds its session from the
 on-disk snapshot on every watched-file change, and editor mode never saves. In both, the whole-project
 fallback therefore repeats until a terminal `--incremental` run refreshes the snapshot, as master's
 ancestry closure already did ([#1547](https://github.com/rigortype/rigor/issues/1547)).

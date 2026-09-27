@@ -171,7 +171,7 @@ module Rigor
         @analyzed = runner.analyzed_files - runner.template_unit_paths
         # ADR-85 WD2 — the freshly built bundle set for the next run, each stamped with its file's source-RBS
         # digest (issue #1536).
-        @seed_bundles = source_rbs_gate.stamp(runner.seed_bundles)
+        @seed_bundles = source_rbs_gate.stamp(runner.seed_bundles, whole_project: true)
         absorb_dependency_graph(runner)
         @return_summaries = runner.return_summaries # ADR-89 WD2 — the full-run behavioural surface.
         # ADR-67 WD6c lift — the seed table the runner's own pre-pass computed ({} when the gate is off).
@@ -182,6 +182,7 @@ module Rigor
         @effects_identity = current_effects_identity
         @cache = per_file(runner.per_file_diagnostics)
         @digests = @analyzed.to_h { |path| [path, pack_digest(path)] }
+        forget_unbound_digests
         @run_level_rows = runner.run_level_rows
         diagnostics
       end
@@ -574,6 +575,13 @@ module Rigor
         source_rbs_gate.untrusted? && !result.reused.empty?
       end
 
+      # Issue #1536 — a file the gate could not stamp because it was saved after the closure was decided (its
+      # readers' cached answers predate that save) must read as changed on the next run, where its unknown
+      # stamp sends the edit to the whole project. Recording its post-save content digest would hide it.
+      def forget_unbound_digests
+        source_rbs_gate.unbound.each { |path| @digests.delete(path) }
+      end
+
       # Issue #1536 — decides whether an edit moved synthesized RBS, and stamps each seed bundle's digest. One
       # per session: its untrusted state must outlive every run the session makes.
       def source_rbs_gate
@@ -765,12 +773,14 @@ module Rigor
         # ADR-85 WD2 — the recheck's discovery folded the restored bundles and refreshed them (changed files
         # re-walked, removed files dropped, added files built), so adopt the runner's current set wholesale,
         # stamping the re-walked ones with their source-RBS digest (issue #1536).
-        @seed_bundles = source_rbs_gate.stamp(runner.seed_bundles)
+        whole_project = current.all? { |path| analyze_set.include?(path) }
+        @seed_bundles = source_rbs_gate.stamp(runner.seed_bundles, whole_project: whole_project)
         fresh_by_file = per_file(runner.per_file_diagnostics)
         analyze_set.each do |path|
           @cache[path] = fresh_by_file[path] || []
           @digests[path] = pack_digest(path)
         end
+        forget_unbound_digests
         absorb_dependency_graph(runner)
         # Issues #796 / #794 — the recheck's own snapshots already carry the replayed rows folded together
         # with anything its closure demanded for itself, so this is the same union the next run replays.

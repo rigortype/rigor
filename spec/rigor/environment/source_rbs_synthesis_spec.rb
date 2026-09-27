@@ -54,20 +54,12 @@ RSpec.describe Rigor::Environment::SourceRbsSynthesis do
     expect(digest(synthesizer("a") { [:ok, "", ["nothing bound"]] })).to eq(none)
   end
 
-  it "ignores the full-line comments rbs-inline copies from the source, and nothing else" do
-    rbs = "# frozen_string_literal: true\n# Says hi.\nclass A\n  def x: () -> void\nend\n"
-    commented = digest(synthesizer("a") { rbs })
+  it "digests the RBS text whole, comments included" do
+    # RBS reads a `# resolve-type-names:` magic comment at the start of a buffer, where rbs-inline copies a
+    # `.rb` file's first comment line, so a comment line can change the environment (#1549).
+    resolving = digest(synthesizer("a") { "# resolve-type-names: true\nclass A\nend\n" })
 
-    expect(digest(synthesizer("a") { "# Says hello.\nclass A\n  # A reworded doc.\n  def x: () -> void\nend\n" }))
-      .to eq(commented)
-    expect(digest(synthesizer("a") { "# Says hi.\nclass A\n  def x: () -> bool\nend\n" })).not_to eq(commented)
-  end
-
-  it "keeps every line of a multi-line annotation, even one that starts with `#`" do
-    annotated = ->(tail) { "%a{rigor:v1:effect io\n#{tail}}\nclass A\nend\n" }
-
-    expect(digest(synthesizer("a") { annotated.call("# net") }))
-      .not_to eq(digest(synthesizer("a") { annotated.call("# fs") }))
+    expect(digest(synthesizer("a") { "# resolve-type-names: false\nclass A\nend\n" })).not_to eq(resolving)
   end
 
   it "moves when any one of several synthesizers' output moves" do

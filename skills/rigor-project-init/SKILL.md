@@ -88,7 +88,7 @@ diagnostics.
 | Today's diagnostics | Snapshotted into `.rigor-baseline.yml`; suppressed as long as the count does not grow. | All surfaced; every one is fixed or consciously suppressed. |
 | Hard-to-fix diagnostics | Left in the baseline. The project **trusts its test / spec suite** to cover runtime correctness for those sites — the static `T | nil` reading is worst-case-sound, the suite proves the worst case is not hit. | Fixed, or annotated `# rigor:disable <rule>` with an author-intent reason at the specific line. No blanket suppression. |
 | `severity_profile` | `lenient` (or `balanced` for a small project). | `strict`. |
-| Best for | Mature codebases; incremental adoption; teams that want the regression guard without a big upfront fix. | New / small projects; libraries; teams that want the maximum guarantee and have the budget to reach zero. |
+| Best for | **Every project by default** — mature or brand-new, large or small. | Users fluent in both type theory and RBS who opt in and will resolve Rigor's inference gaps themselves. |
 | New diagnostics later | Surface immediately — anything beyond the baseline envelope is a regression. | Surface immediately — there is no envelope; every diagnostic is live. |
 
 Both modes give the same core guarantee: **a change that introduces
@@ -97,12 +97,29 @@ diagnostics that exist *today*. Acknowledge mode parenthesises them
 behind a baseline and leans on the test suite; strict mode refuses to
 parenthesise anything.
 
-If the project's first `rigor check` reports more than ~100 errors,
-recommend acknowledge mode as the default and let the user override.
-Below that, either mode is reasonable — ask.
+**Recommend acknowledge mode for every project, including new and
+small ones.** A clean start does not make a zero-diagnostic gate
+cheap: Rigor's inference still has gaps, so a strict project meets
+diagnostics on correct code, where the fix is a better `sig/` entry,
+an RBS workaround, or a `# rigor:disable` with a reason rather than a
+code change. Resolving those takes working knowledge of type theory and
+RBS, and without it strict mode pushes the user into rewriting correct
+code for the tool or scattering suppressions. Acknowledge mode costs a
+new project nothing: its baseline starts small or empty, and new
+diagnostics still surface.
 
-Note the ordering: the error count that feeds this recommendation (and
-the `severity_profile` choice in Phase 4) is only *measured* in
+Present strict mode as an opt-in for users who know type theory and
+RBS, want the zero-diagnostic gate, and accept resolving inference
+gaps themselves — never as the recommendation, and never because the
+project is new, small, or a library. If the user picks it, tell them
+that moving to acknowledge mode later means running Phase 7 (generate
+a baseline and wire `baseline:`) and relaxing `severity_profile`.
+
+For a large first run (more than ~100 errors), acknowledge mode also
+suggests `severity_profile: lenient`; see Phase 4.
+
+Note the ordering: the error count that feeds the `severity_profile`
+choice in Phase 4 is only *measured* in
 Phase 6's triage run. Any profile written in Phase 4 is therefore
 **provisional** — Phase 6 revisits it against the measured count (see
 [`references/02-configure.md`](references/02-configure.md)

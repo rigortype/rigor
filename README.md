@@ -91,8 +91,9 @@ It installs Rigor, then runs the bundled **`rigor-project-init`**
 [Agent Skill](https://agentskills.io/): it walks your `Gemfile`,
 proposes plugins matched to your stack (Rails, Sinatra, dry-rb, …),
 lets you pick an adoption mode — **baseline** (acknowledge existing
-diagnostics, work them down incrementally) or **strict**
-(zero-diagnostic gate from day one) — and commits a ready-to-use
+diagnostics, work them down incrementally; the recommended
+default) or **strict** (zero-diagnostic gate from day one, an
+opt-in for users fluent in type theory and RBS) — and commits a ready-to-use
 configuration.
 
 **This works in your language.** The prompt is plain natural

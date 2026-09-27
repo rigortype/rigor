@@ -149,6 +149,11 @@ cannot distinguish "correctly declined" from "never analysed" — both read as s
   call (Prism's parse) to the next interrupt check. During #1507 that made `IO.read` read as ~460 ms and
   `File.realpath` as ~200 ms of a run; timed directly, reading every file took 11 ms and the 922 realpath calls
   22 ms.
+- **Size a lever against the whole run before calling it one.** A phase that gets 30% faster is worth 30%
+  of that phase's share of the run. During #1507 the declaration-walk merge (#1197) cut the table build by
+  26–46% per slice and was prioritised as the wall lever. The four walkers still left were worth about 0.2%
+  of a cold `rigor check lib`, and warm runs never reach them. Put the saving against the command's
+  end-to-end wall, from a profile of the journey the user runs, before ranking it.
 - **Keep the instrument.** A note in `docs/notes/` records the numbers, not the harness that produced
   them — the positive control, the trap-clearing flags, the classifier. Push the instrumented build
   as its own branch and name it in the note's limitations section; a follow-up question against the

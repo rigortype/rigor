@@ -45,6 +45,10 @@ on:
         description: "Timed runs per step (5 for an A/B separation verdict)"
         required: false
         default: "5"
+      profile:
+        description: "Also run each scenario once under vernier and summarise where its time goes"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -76,6 +80,12 @@ jobs:
           git -C /tmp/mastodon sparse-checkout set app lib config
           cp data/oss-sweep/mastodon-rigor.yml /tmp/mastodon/.rigor.yml
 
+      - name: Install vernier outside the bundle
+        if: inputs.profile
+        run: |
+          gem install vernier --no-document --install-dir /tmp/vernier-gems
+          echo "VERNIER_LIB=$(ls -d /tmp/vernier-gems/gems/vernier-*/lib | head -1)" >> "$GITHUB_ENV"
+
       - name: Run the journeys
         env:
           HEAD: ${{ inputs.head }}
@@ -91,6 +101,7 @@ jobs:
                 --leaf "$LEAF" --hub "$HUB" --edit "$EDIT" --modes "$MODES" --reps "$REPS"
                 --head "$(resolve "$HEAD")")
           if [ -n "$BASE" ]; then args+=(--base "$(resolve "$BASE")"); fi
+          if [ -n "$VERNIER_LIB" ]; then args+=(--profile-dir warm-profiles --profile-lib "$VERNIER_LIB"); fi
           bundle exec ruby tool/engine_warm_ab.rb "${args[@]}" \
             --summary "$GITHUB_STEP_SUMMARY" --json warm-journeys.json
 
@@ -99,6 +110,8 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: engine-warm-journeys-${{ github.run_id }}
-          path: warm-journeys.json
+          path: |
+            warm-journeys.json
+            warm-profiles/
           if-no-files-found: ignore
           retention-days: 30

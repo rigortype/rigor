@@ -181,6 +181,10 @@ Mastodon's defaults re-analyse 1 and 277 files. With `base` set, two engines
 alternate in ABBA order on separate project copies, and the table gives the
 same separation verdict as the wall A/B.
 
+With `profile` set, each scenario also runs once, untimed, under vernier, and
+the summary lists where its time goes (the heaviest Rigor frames below the CLI
+entry chain). The full counts are in the artifact.
+
 ```sh
-gh workflow run engine-warm.yml -f head=master
+gh workflow run engine-warm.yml -f head=master -f profile=true
 ```

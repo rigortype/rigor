@@ -117,4 +117,17 @@ RSpec.describe "tool/engine_warm_ab.rb (#1507)" do
       expect { EngineWarmAB.report(options, %w[base head], journey) }.to output(/default \| null/).to_stdout
     end
   end
+
+  describe ".profile_notes" do
+    it "lists the phases below the CLI entry chain as shares of the run" do
+      journey = EngineWarmAB::Journey.new({ "head" => {} }, {}, "/nonexistent")
+      journey.profiles["default/null/head"] = {
+        "total" => 100,
+        "inclusive_rigor" => [["Rigor::CLI.start", 98], ["Rigor::Cache::EngineSource.digest_tree", 47]]
+      }
+      text = EngineWarmAB.profile_notes(journey).join("\n")
+      expect(text).to include("Rigor::Cache::EngineSource.digest_tree 47%")
+      expect(text).not_to include("Rigor::CLI.start")
+    end
+  end
 end

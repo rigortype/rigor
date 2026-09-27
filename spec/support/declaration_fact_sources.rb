@@ -82,11 +82,13 @@ end
 # - (iii) references a constant, in this file or another covered one, whose assignment contains (i), (ii) or (iv);
 # - (iv) names a visibility or mixin keyword as a symbol (`:private`, `:include`, …), except as a Hash key or among
 #   Array/String mutator names (`%i[<< push prepend unshift]` names methods, not the keyword);
-# - (v) in `scope_indexer.rb`, is reachable from `index` or `accumulate_project_index` through same-file calls and
-#   writes into one of its parameters: an indexed assignment or a `<<` / `merge!`-style call into it, or passing it
-#   to a same-file method that does.
+# - (v) in `scope_indexer.rb`, is reachable through same-file calls from one of `DeclarationWriterScan::ROOTS` and
+#   writes into one of its parameters, a `*rest` or `**rest` included: an indexed assignment or a `<<` /
+#   `merge!` / `add?`-style call into it, or passing it (by position, keyword or splat) to a same-file method that
+#   does.
 #
-# A class that includes `DeclarationWalk::Collector` is a producer as a whole, found from the `include` statement.
+# A class that includes `DeclarationWalk::Collector` is a producer as a whole, found from the `include` statement, and
+# so is a class in a covered file whose superclass is one (`class X < SuperclassesCollector`).
 module DeclarationProducerScan
   NODE_CONSTANTS = %w[Prism::ClassNode Prism::ModuleNode Prism::SingletonClassNode].freeze
   NODE_TYPES = %i[class_node module_node singleton_class_node].freeze
@@ -106,8 +108,8 @@ module DeclarationProducerScan
     parsed.each do |path, root|
       skipped = catalogue_symbols(root)
       scan(root, [], nil, tainted, skipped) { |scope, reason| found["#{path}##{scope}"] << reason }
-      collectors(root) { |scope| found["#{path}##{scope}"] << "include DeclarationWalk::Collector" }
     end
+    collectors(parsed) { |path, scope, why| found["#{path}##{scope}"] << why }
     DeclarationWriterScan.rule_v(parsed.fetch(RULE_V_FILE, nil)) do |scope|
       found["#{RULE_V_FILE}##{scope}"] << "writes a table (rule v)"
     end
@@ -235,16 +237,48 @@ module DeclarationProducerScan
     "#{owner.empty? ? '(top level)' : owner}#{singleton ? '.' : '#'}#{name}"
   end
 
-  # Yields the body key of every class that includes `DeclarationWalk::Collector`.
-  def collectors(root)
-    DeclarationFactSources.each_with_owners(root) do |node, owners|
-      next unless node.is_a?(Prism::CallNode) && node.name == :include && node.receiver.nil?
-
-      names = (node.arguments&.arguments || []).filter_map { |arg| DeclarationFactSources.constant_name(arg) }
-      next unless names.any? { |name| collector_name?(name, owners) }
-
-      yield owners.join("::")
+  # Yields `path, body key, reason` for every class that includes `DeclarationWalk::Collector`, then for every class
+  # in a covered file whose superclass names one of those, transitively.
+  def collectors(parsed)
+    found = []
+    subclasses = []
+    parsed.each do |path, root|
+      DeclarationFactSources.each_with_owners(root) do |node, owners|
+        if collector_include?(node, owners)
+          found << [path, owners.join("::"), "include DeclarationWalk::Collector"]
+        elsif node.is_a?(Prism::ClassNode) && (superclass = DeclarationFactSources.constant_name(node.superclass))
+          subclasses << [path, class_key(node, owners), superclass, owners]
+        end
+      end
     end
+    grow_collectors(found, subclasses).each { |entry| yield(*entry) }
+  end
+
+  def grow_collectors(found, subclasses)
+    names = found.to_set { |_, key, _| key }
+    loop do
+      grown = subclasses.reject { |_, key, _, _| names.include?(key) }.select do |_, _, superclass, owners|
+        DeclarationFactSources.candidates(superclass, owners).any? { |candidate| names.include?(candidate) }
+      end
+      return found if grown.empty?
+
+      grown.each do |path, key, superclass, _|
+        names << key
+        found << [path, key, "#{superclass} (a DeclarationWalk::Collector subclass)"]
+      end
+    end
+  end
+
+  def collector_include?(node, owners)
+    return false unless node.is_a?(Prism::CallNode) && node.name == :include && node.receiver.nil?
+
+    names = (node.arguments&.arguments || []).filter_map { |arg| DeclarationFactSources.constant_name(arg) }
+    names.any? { |name| collector_name?(name, owners) }
+  end
+
+  def class_key(node, owners)
+    name = DeclarationFactSources.constant_name(node.constant_path) || "(dynamic)"
+    name.start_with?("::") ? name.delete_prefix("::") : (owners + [name]).join("::")
   end
 
   def collector_name?(name, owners)
@@ -252,12 +286,18 @@ module DeclarationProducerScan
   end
 end
 
-# ADR-119 WD6's rule (v): the methods of `scope_indexer.rb` that are reachable from `index` or
-# `accumulate_project_index` through same-file calls and write into one of their parameters: an indexed assignment
-# or a `<<` / `merge!`-style call into it, or passing it to a same-file method that does.
+# ADR-119 WD6's rule (v): the methods of `scope_indexer.rb` that are reachable from `ROOTS` through same-file calls
+# and write into one of their parameters: an indexed assignment or a `<<` / `merge!`-style call into it, or passing
+# it to a same-file method that does.
 module DeclarationWriterScan
-  WRITE_CALLS = %i[[]= << push unshift concat merge! store add update].freeze
-  ROOTS = %i[index accumulate_project_index].freeze
+  WRITE_CALLS = %i[[]= << push unshift concat merge! store add add? update].freeze
+  # ADR-119's three roots, then the multi-file entry points: their folds (`finalize_project_index`,
+  # `fold_def_tables`, `fold_def_sources`, …) are reachable from no other root.
+  ROOTS = %i[
+    index accumulate_project_index finalize_def_index
+    discovered_classes_for_paths discovered_def_index_for_paths discovered_project_index_for_paths
+    discovered_project_index_incremental
+  ].freeze
 
   module_function
 
@@ -313,7 +353,7 @@ module DeclarationWriterScan
       grown = false
       calls.each do |name, sites|
         sites.each do |site|
-          passed_writes(site, params, writes).each do |param|
+          passed_writes(site, defs.fetch(site.name), params, writes).each do |param|
             next unless params.fetch(name).include?(param) && writes[name].add?(param)
 
             grown = true
@@ -324,11 +364,28 @@ module DeclarationWriterScan
     end
   end
 
+  # Every named parameter, a `*rest` and a `**rest` included.
   def parameter_names(def_node)
     list = def_node.parameters
     return [] unless list
 
-    (list.requireds + list.optionals + list.keywords).filter_map { |param| param.respond_to?(:name) ? param.name : nil }
+    names_of([*list.requireds, *list.optionals, list.rest, *list.posts, *list.keywords, list.keyword_rest])
+  end
+
+  # The parameters positional argument `index` can land in: a leading one, else the `*rest` that absorbs it. A
+  # `*splat` can land in any of them from `index` on.
+  def positional_targets(list, index, splat)
+    return [] unless list
+
+    leading = list.requireds + list.optionals
+    return names_of([*leading.drop(index), list.rest, *list.posts]) if splat
+
+    names_of([index < leading.size ? leading[index] : list.rest])
+  end
+
+  # The names of the named ones among `params`: an anonymous `*`, `**` or `**nil` has none.
+  def names_of(params)
+    params.filter_map { |param| param.respond_to?(:name) ? param.name : nil }
   end
 
   # The parameters `def_node` writes into itself.
@@ -359,20 +416,37 @@ module DeclarationWriterScan
     end
   end
 
-  # The caller's parameters a same-file call hands to a parameter the callee writes.
-  def passed_writes(site, params, writes)
-    callee_params = params.fetch(site.name)
+  # The caller's parameters a same-file call hands to a parameter the callee writes: by position or keyword, into a
+  # `*rest` or `**rest` that absorbs the argument, or as a `*splat` / `**splat`.
+  def passed_writes(site, callee_sites, params, writes)
     callee_writes = writes.fetch(site.name)
     caller_params = params.values.flatten
+    lists = callee_sites.map { |node, _| node.parameters }
     (site.arguments&.arguments || []).each_with_index.flat_map do |arg, index|
-      if arg.is_a?(Prism::KeywordHashNode)
-        arg.elements.grep(Prism::AssocNode).filter_map do |assoc|
-          key = assoc.key.is_a?(Prism::SymbolNode) ? assoc.key.unescaped.to_sym : nil
-          parameter_root(assoc.value, caller_params) if key && callee_writes.include?(key)
-        end
-      else
-        callee_writes.include?(callee_params[index]) ? [parameter_root(arg, caller_params)].compact : []
+      handed(arg, index, lists).filter_map do |value, targets|
+        parameter_root(value, caller_params) if value && targets.any? { |name| callee_writes.include?(name) }
       end
+    end
+  end
+
+  # `[[value, callee parameters it can land in]]` for one argument.
+  def handed(arg, index, lists)
+    if arg.is_a?(Prism::KeywordHashNode)
+      return arg.elements.map { |element| [element.value, keyword_targets(lists, element)] }
+    end
+
+    splat = arg.is_a?(Prism::SplatNode)
+    [[splat ? arg.expression : arg, lists.flat_map { |list| positional_targets(list, index, splat) }]]
+  end
+
+  # The callee parameters a keyword argument can land in: the keyword itself, else the `**rest` that absorbs it. A
+  # `**splat` can land in any of them.
+  def keyword_targets(lists, element)
+    splat = element.is_a?(Prism::AssocSplatNode)
+    key = element.key.unescaped.to_sym if !splat && element.key.is_a?(Prism::SymbolNode)
+    lists.compact.flat_map do |list|
+      keyword = key && list.keywords.find { |param| param.name == key }
+      names_of(keyword ? [keyword] : [*(list.keywords if splat), list.keyword_rest])
     end
   end
 end
@@ -387,10 +461,11 @@ end
 #   argument position of a keyed read (`[]`, `fetch`, `dig`, `key?`, `values_at`, `slice`, …) or write (`[]=`,
 #   `store`), on any receiver. `:methods` and `:classes` are ordinary words, so they count only on a receiver named
 #   like an index (`index`, `def_index`, `seed`, `tables`, `bundle`, `summary`). A Symbol list naming two or more
-#   slots is an alias list and counts as a copy of each.
-# - Whole-index reads and copies are recorded apart: `with(**x)`, `new(**x)`, `to_h` and `deconstruct_keys` on a
-#   discovery index, iterating `DiscoveryIndex.members`, a `send` with a computed name on one, and a
-#   `discovered_`-prefixed interpolated Symbol or String.
+#   slots is an alias list and counts as a copy of each, and so does a slot name assigned to a constant or variable
+#   (`SLOT = :def_nodes`), which stands for the slot wherever it is read.
+# - Whole-index reads and copies are recorded apart: `with(**x)`, `new(**x)`, `new(*x)`, `to_h`, `deconstruct` and
+#   `deconstruct_keys` on a discovery index, iterating `DiscoveryIndex.members`, a `send` with a computed name on
+#   one, and a `discovered_`-prefixed interpolated Symbol or String.
 module DiscoveryReadScan
   # The table owners: the index, its keyed readers, the indexer with its collectors, and the pre-pass that builds it.
   EXCLUDED = %w[
@@ -403,7 +478,7 @@ module DiscoveryReadScan
   WRITE_CALLS = %i[[]= store].freeze
   SEND_CALLS = %i[public_send send __send__].freeze
   AMBIGUOUS_SLOTS = %i[methods classes].freeze
-  WHOLE_INDEX_CALLS = %i[to_h deconstruct_keys dup clone].freeze
+  WHOLE_INDEX_CALLS = %i[to_h deconstruct deconstruct_keys dup clone].freeze
 
   module_function
 
@@ -442,6 +517,8 @@ module DiscoveryReadScan
       case node
       when Prism::CallNode then scan_call(node, table, claimed, &report)
       when Prism::ArrayNode then scan_alias_list(node, table, claimed, &report)
+      when Prism::ConstantWriteNode, Prism::LocalVariableWriteNode, Prism::InstanceVariableWriteNode
+        scan_slot_holder(node, table, &report)
       when Prism::InterpolatedSymbolNode, Prism::InterpolatedStringNode
         report.call(:whole, nil) if computed_member_name?(node)
       when Prism::SymbolNode
@@ -491,6 +568,15 @@ module DiscoveryReadScan
     end
   end
 
+  # A slot name held in a constant or variable (`SLOT = :def_nodes`) stands for the slot wherever it is read.
+  def scan_slot_holder(node, table)
+    return unless node.value.is_a?(Prism::SymbolNode)
+
+    name = node.value.unescaped.to_sym
+    member, full = table[name]
+    yield :copy, member if member && !full && !AMBIGUOUS_SLOTS.include?(name)
+  end
+
   def computed_member_name?(node)
     first = node.parts.first
     first.is_a?(Prism::StringNode) && first.unescaped.start_with?("discovered_")
@@ -510,7 +596,7 @@ module DiscoveryReadScan
 
   def splat_argument?(node)
     (node.arguments&.arguments || []).any? do |arg|
-      arg.is_a?(Prism::AssocSplatNode) ||
+      arg.is_a?(Prism::AssocSplatNode) || arg.is_a?(Prism::SplatNode) ||
         (arg.is_a?(Prism::KeywordHashNode) && arg.elements.any?(Prism::AssocSplatNode))
     end
   end

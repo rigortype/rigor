@@ -15,9 +15,11 @@ require "rbconfig"
 #
 # - `Module.nesting` at every line the fixture runs, with the `self` of that line, so two statements on one line are
 #   told apart. A `def` is a statement, so its line carries the nesting its body is compiled under, `class << self`
-#   bodies included (a `:class` TracePoint does not report those). Each anonymous entry (`#<Class:C>`) records,
-#   after the fixture has loaded, whether it owns constants: its own, and for the innermost entry also its
-#   ancestors' up to `Class` / `Module` / `Object` (an `extend M`'s, a superclass's `class << self`'s);
+#   bodies included (a `:class` TracePoint does not report those). Each anonymous entry (`#<Class:C>`,
+#   `#<Class:C>::D`) records, after the fixture has loaded, the constants it owns that resolve elsewhere once the
+#   anonymous entries are dropped from the chain, Ruby resolving both: its own, private ones included (seen through a
+#   `const_added` hook, since `constants(false)` omits them), and for the innermost entry also its ancestors' up to
+#   `Class` / `Module` / `Object` (an `extend M`'s, a superclass's `class << self`'s);
 # - its own instance methods by visibility, and its own singleton methods plus those its singleton mixins (`extend`)
 #   give it, each with `Method#source_location`;
 # - its ancestors, split into its own instance mixins and its own singleton mixins, and its superclass;
@@ -32,17 +34,21 @@ require "rbconfig"
 # - A single-valued table must agree with Ruby wherever it answers. No entry is a decline, which is always allowed.
 # - Def identity is compared through `source_location` lines.
 # - A typed table must admit the class of the value Ruby holds.
-# - A def nesting must equal Ruby's once anonymous entries are dropped, and an anonymous entry that owns constants
-#   cannot be dropped: a recorded chain without it resolves those constants somewhere else, so Rigor must record
-#   no chain for that def.
+# - A def nesting must equal Ruby's once anonymous entries are dropped, and an anonymous entry cannot be dropped when
+#   the def names bare (`X`, the `X` of `X::Y`) a constant it makes resolve elsewhere: the recorded chain would
+#   resolve it somewhere else, so Rigor must record no chain for that def. The comparison is per constant name, so
+#   an anonymous entry whose constants the def does not name, or the chain without it resolves to the same module
+#   (`include M` beside `extend M`, a lexical `X` in the named class, `extend Forwardable`'s `VERSION`), does not
+#   count, and a #1305 fix need decline only those defs.
 #
 # A module under an anonymous one (`#<Class:…>::D`) is left out of the runtime sets, because no constant path reaches
 # it. A runtime method counts only when its `source_location` is in the fixture, so a reopened core class brings only
 # the fixture's own methods.
 #
 # Threat model: the witness checks the fixtures it is given; it finds no bug a fixture does not exercise, and one run
-# witnesses one execution. A constant an anonymous cref gains at run time after load (`const_set` from a method) is
-# not seen.
+# witnesses one execution. A constant an anonymous cref gains at run time after load (`const_set` from a method), or
+# one a fixture's own `const_added` hides by not calling `super`, is not seen. The nesting relation checks the
+# constants a def names bare, not a `const_get` or a `Module.nesting` call in its body.
 module DeclarationWitness
   RELATIONS = %i[
     classes methods visibilities def_nodes singleton_def_nodes superclasses includes extends def_nestings class_cvars
@@ -57,13 +63,34 @@ module DeclarationWitness
     path = File.expand_path(ARGV.fetch(0))
     name_of = ->(mod) { mod.name || mod.inspect }
     in_fixture = ->(location) { location && File.expand_path(location[0]) == path ? location[1] : nil }
-    # Whether an anonymous cref makes a constant reachable that no named cref of the chain can: its own constants
-    # and, for the innermost cref, its ancestors' up to `Class` / `Module` / `Object`, whose constants the
-    # top-level lookup reaches anyway. Read after the fixture has loaded, so a constant written later in the body
-    # (it is there when the method runs) counts.
-    owns_constants = lambda do |mod, innermost|
-      scope = innermost ? mod.ancestors.take_while { |a| ![Class, Module, Object].include?(a) } : [mod]
-      scope.any? { |owner| !owner.constants(false).empty? }
+    anonymous = ->(mod) { mod.name.nil? || mod.name.include?("#<") }
+
+    # Every constant a module gains while the fixture runs: `constants(false)` leaves out a private one, which a
+    # lexical lookup still finds.
+    added = Hash.new { |table, mod| table[mod] = [] }.compare_by_identity
+    Module.prepend(Module.new do
+      define_method(:const_added) do |name|
+        added[self] << name
+        super(name)
+      end
+    end)
+    owned = ->(mod) { (mod.constants(false) + added.fetch(mod, []).select { |n| mod.const_defined?(n, false) }).uniq }
+    # The module a bare `name` resolves in from `chain`, innermost first: the crefs' own tables, then the innermost
+    # cref's ancestors, then Object's for a module.
+    resolve = lambda do |chain, name|
+      innermost = chain.first || Object
+      scope = chain + innermost.ancestors + (innermost.is_a?(Class) ? [] : Object.ancestors)
+      scope.find { |mod| mod.const_defined?(name, false) }
+    end
+    # The constants that resolve elsewhere once the anonymous crefs are dropped from `chain`, among those the
+    # anonymous cref at `index` owns: its own and, for the innermost cref, its ancestors' up to `Class` / `Module` /
+    # `Object`, whose constants the top-level lookup reaches anyway. Read after the fixture has loaded, so a
+    # constant written later in the body (it is there when the method runs) counts.
+    diverging = lambda do |chain, index|
+      mod = chain[index]
+      scope = index.zero? ? mod.ancestors.take_while { |a| ![Class, Module, Object].include?(a) } : [mod]
+      named = chain.reject(&anonymous)
+      scope.flat_map(&owned).uniq.reject { |name| resolve.(chain, name).equal?(resolve.(named, name)) }.map(&:to_s)
     end
 
     nestings = Hash.new { |table, line| table[line] = [] }
@@ -127,11 +154,12 @@ module DeclarationWitness
       }]
     end
 
-    # Each line's `[self, Module.nesting]` pairs, as labels: an anonymous entry carries whether it owns constants.
+    # Each line's `[self, Module.nesting]` pairs, as labels: each entry carries the constants that, were it dropped,
+    # would resolve elsewhere (none for a named entry).
     labelled = nestings.transform_values do |seen|
       seen.map do |self_value, chain|
         self_label = self_value.is_a?(Module) ? name_of.(self_value) : "(#{self_value.class})"
-        [self_label, chain.each_with_index.map { |mod, i| [name_of.(mod), mod.name.nil? && owns_constants.(mod, i.zero?)] }]
+        [self_label, chain.each_index.map { |i| [name_of.(chain[i]), anonymous.(chain[i]) ? diverging.(chain, i) : []] }]
       end
     end
 
@@ -165,7 +193,13 @@ module DeclarationWitness
     Bundler.with_unbundled_env do
       Open3.popen3(RbConfig.ruby, "-e", RECORDER, path) do |stdin, stdout, stderr, waiter|
         stdin.close
-        readers = [stdout, stderr].map { |io| Thread.new { io.read } }
+        readers = [stdout, stderr].map do |io|
+          Thread.new do
+            io.read
+          rescue IOError # the pipe closes under the read once a child past the limit is killed
+            nil
+          end
+        end
         unless waiter.join(TIME_LIMIT)
           Process.kill(:KILL, waiter.pid)
           raise "witness fixture #{path} ran past #{TIME_LIMIT}s"
@@ -336,15 +370,19 @@ module DeclarationWitness
         actual = ruby_nesting(runtime, def_node)
         next if recorded.nil? || actual.nil?
 
-        nesting_violation(recorded, actual, def_node.location.start_line)
+        nesting_violation(recorded, actual, def_node.location.start_line, constant_reads(def_node))
       end
     end
 
-    def nesting_violation(recorded, actual, line)
-      owners = actual.select { |_, owns_constants| owns_constants }.map(&:first)
-      unless owners.empty?
-        return "def_nestings: Rigor records #{recorded.inspect} for the def at line #{line}; Ruby's nesting holds " \
-               "#{owners.join(', ')}, which owns constants the recorded chain cannot reach"
+    # `actual` is Ruby's chain as `[name, diverging constants]` pairs; `reads` the constants the def names bare.
+    def nesting_violation(recorded, actual, line, reads)
+      lost = actual.filter_map do |name, diverging|
+        read = diverging & reads
+        "#{read.join(', ')} through #{name}" unless read.empty?
+      end
+      unless lost.empty?
+        return "def_nestings: Rigor records #{recorded.inspect} for the def at line #{line}; Ruby resolves " \
+               "#{lost.join('; ')}, which the recorded chain cannot reach"
       end
       names = actual.map(&:first)
       return if recorded == names.select { |name| nameable?(name) }
@@ -377,6 +415,14 @@ module DeclarationWitness
       found << node if node.is_a?(Prism::DefNode)
       node.compact_child_nodes.each { |child| def_nodes(child, found) }
       found
+    end
+
+    # The constants a def names bare, which a lexical lookup through its nesting resolves: `X`, and the `X` of
+    # `X::Y`.
+    def constant_reads(node, found = [])
+      found << node.name.to_s if node.is_a?(Prism::ConstantReadNode)
+      node.compact_child_nodes.each { |child| constant_reads(child, found) }
+      found.uniq
     end
 
     def class_cvars_violations(runtime, tables, _root)

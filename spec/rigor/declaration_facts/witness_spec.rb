@@ -107,13 +107,10 @@ RSpec.describe "Declaration-fact witness" do
       expect(violations("issue_1520")).to eq([])
     end
 
-    # Flip this when #1520 is fixed. The def nesting half is #1305's family, like the anonymous-cref fixture below.
+    # Flip this when #1520 is fixed. The def's recorded nesting ["E", "C"] drops #<Class:C>, but the one constant the
+    # def names, Bar, resolves to the top-level Bar either way, so the nesting is no violation.
     it "#1520 today" do
-      expect(violations("issue_1520")).to eq(
-        ['def_nestings: Rigor records ["E", "C"] for the def at line 20; Ruby\'s nesting holds #<Class:C>, ' \
-         "which owns constants the recorded chain cannot reach",
-         "class_cvars: Rigor types E @@ad as C::D::Bar; Ruby holds a Bar"]
-      )
+      expect(violations("issue_1520")).to eq(["class_cvars: Rigor types E @@ad as C::D::Bar; Ruby holds a Bar"])
     end
 
     it "#1550: copies the def in effect at a named module_function call" do
@@ -131,15 +128,17 @@ RSpec.describe "Declaration-fact witness" do
       )
     end
 
-    # #1305's family: a def whose innermost or enclosing cref is a singleton class that owns constants, directly or
-    # through its ancestors, which no recorded chain of names can reach.
+    # #1305's family: a def whose innermost or enclosing cref is a singleton class through which a constant the def
+    # names resolves, directly or through its ancestors, where no recorded chain of names reaches it.
     {
-      "anonymous_cref_constant" => ["a class opened below class << self", '["E", "C"]', 15],
-      "anonymous_cref_late_constant" => ["the same, with the constant written after the class", '["E", "C"]', 11],
-      "singleton_body_late_constant" => ["a def in class << self, the constant written after it", '["C"]', 10],
-      "singleton_extend_constant" => ["a def in class << self of a class that extends M", '["C"]', 16],
-      "singleton_superclass_constant" => ["a def in class << self, the constant in the superclass's", '["C"]', 16]
-    }.each do |fixture_name, (shape, recorded, line)|
+      "anonymous_cref_constant" => ["a class opened below class << self", '["E", "C"]', 15, "X"],
+      "anonymous_cref_late_constant" => ["the same, with the constant written after the class", '["E", "C"]', 11, "X"],
+      "singleton_body_late_constant" => ["a def in class << self, the constant written after it", '["C"]', 10, "X"],
+      "singleton_private_constant" => ["a def in class << self, the constant private", '["C"]', 13, "X"],
+      "singleton_extend_constant" => ["a def in class << self of a class that extends M", '["C"]', 16, "Y"],
+      "singleton_extend_private_constant" => ["the same, M's constant private", '["C"]', 17, "Y"],
+      "singleton_superclass_constant" => ["a def in class << self, the constant in the superclass's", '["C"]', 16, "Z"]
+    }.each do |fixture_name, (shape, recorded, line, constant)|
       it "#1305: resolves constants through the singleton cref — #{shape}" do
         pending "https://github.com/rigortype/rigor/issues/1305 — the recorded nesting drops #<Class:C>"
 
@@ -149,8 +148,8 @@ RSpec.describe "Declaration-fact witness" do
       # Flip this when #1305 is fixed.
       it "#1305 today — #{shape}" do
         expect(violations(fixture_name)).to eq(
-          ["def_nestings: Rigor records #{recorded} for the def at line #{line}; Ruby's nesting holds #<Class:C>, " \
-           "which owns constants the recorded chain cannot reach"]
+          ["def_nestings: Rigor records #{recorded} for the def at line #{line}; Ruby resolves #{constant} through " \
+           "#<Class:C>, which the recorded chain cannot reach"]
         )
       end
     end
@@ -218,15 +217,36 @@ RSpec.describe "Declaration-fact witness" do
         .to eq(['class_cvars: Rigor types Widget @@label as "renamed"; Ruby holds a Integer'])
     end
 
-    it "reports a nesting Ruby disagrees with, and ignores an anonymous entry that owns no constants" do
-      changed = changed_runtime { |r| r["nestings"]["51"] = [["Outer::Inner", [["Inner", false], ["Outer", false]]]] }
+    it "reports a nesting Ruby disagrees with, and ignores an anonymous entry no constant resolves through" do
+      changed = changed_runtime { |r| r["nestings"]["51"] = [["Outer::Inner", [["Inner", []], ["Outer", []]]]] }
 
-      singleton_body = ["#<Class:Widget>", [["#<Class:Widget>", false], ["Widget", false]]]
+      singleton_body = ["#<Class:Widget>", [["#<Class:Widget>", []], ["Widget", []]]]
 
       expect(runtime.dig("nestings", "35")).to include(singleton_body)
       expect(DeclarationWitness::Relations.def_nestings_violations(changed, *tables))
         .to eq(['def_nestings: Rigor records ["Outer::Inner", "Outer"] for the def at line 51; ' \
                 'Ruby\'s is ["Inner", "Outer"]'])
+    end
+
+    # The anonymous-entry rule compares, per constant the def names, the module Ruby resolves it in with and without
+    # the anonymous entries, so a chain that reaches the same module is no violation.
+    it "counts an anonymous entry only for a named constant the recorded chain resolves elsewhere" do
+      agreeing = {
+        "include M beside extend M" => "module M\n  X = :m\nend\n\nclass C\n  include M\n  extend M\n",
+        "a lexical X in the named class" => "module M\n  X = :m\nend\n\nclass C\n  X = :c\n  extend M\n",
+        "extend Forwardable, VERSION unnamed" => "require \"forwardable\"\n\nclass C\n  extend Forwardable\n"
+      }
+      agreeing.each do |shape, prelude|
+        body = shape.include?("Forwardable") ? ":f" : "X"
+        with_fixture("#{prelude}\n  class << self\n    def foo = #{body}\n  end\nend\n") do |probe|
+          expect(DeclarationWitness.violations(probe, relations: %i[def_nestings])).to eq([]), shape
+        end
+      end
+      with_fixture("#{agreeing.values.last}\n  class << self\n    def foo = VERSION\n  end\nend\n") do |probe|
+        expect(DeclarationWitness.violations(probe, relations: %i[def_nestings]))
+          .to eq(['def_nestings: Rigor records ["C"] for the def at line 7; Ruby resolves VERSION through ' \
+                  "#<Class:C>, which the recorded chain cannot reach"])
+      end
     end
 
     it "tells two statements on one line apart by their self" do

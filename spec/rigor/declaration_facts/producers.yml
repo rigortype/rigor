@@ -177,7 +177,15 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#accumulate_project_index: grandfathered
     Rigor::Inference::ScopeIndexer#add_declared_name: grandfathered
     Rigor::Inference::ScopeIndexer#add_header_nesting: grandfathered
+    Rigor::Inference::ScopeIndexer#alias_renamed_header_nestings: grandfathered
+    Rigor::Inference::ScopeIndexer#append_ancestry_signature: grandfathered
+    Rigor::Inference::ScopeIndexer#append_constant_signature: grandfathered
+    Rigor::Inference::ScopeIndexer#append_declaration_tables: grandfathered
+    Rigor::Inference::ScopeIndexer#append_def_signatures: grandfathered
+    Rigor::Inference::ScopeIndexer#append_envelope_signature: grandfathered
     Rigor::Inference::ScopeIndexer#apply_alias_def_nodes: grandfathered
+    Rigor::Inference::ScopeIndexer#apply_compact_header_renames!: grandfathered
+    Rigor::Inference::ScopeIndexer#apply_dynamic_target_writes: grandfathered
     Rigor::Inference::ScopeIndexer#apply_named_visibility: grandfathered
     Rigor::Inference::ScopeIndexer#apply_visibility_call: grandfathered
     Rigor::Inference::ScopeIndexer#build_discovered_method_visibilities: grandfathered
@@ -219,8 +227,17 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#detect_multi_write_target_writes: grandfathered
     Rigor::Inference::ScopeIndexer#detect_read_before_write: grandfathered
     Rigor::Inference::ScopeIndexer#each_refinement_def: grandfathered
+    Rigor::Inference::ScopeIndexer#finalize_call_surface_tables: grandfathered
+    Rigor::Inference::ScopeIndexer#finalize_def_index: grandfathered
+    Rigor::Inference::ScopeIndexer#finalize_project_index: grandfathered
+    Rigor::Inference::ScopeIndexer#fold_ancestry_tables: grandfathered
+    Rigor::Inference::ScopeIndexer#fold_constant_tables: grandfathered
+    Rigor::Inference::ScopeIndexer#fold_def_sources: grandfathered
+    Rigor::Inference::ScopeIndexer#fold_def_tables: grandfathered
     Rigor::Inference::ScopeIndexer#fold_extends_into_singleton_tables: grandfathered
+    Rigor::Inference::ScopeIndexer#fold_file_index: grandfathered
     Rigor::Inference::ScopeIndexer#fold_file_mixin_tables: grandfathered
+    Rigor::Inference::ScopeIndexer#fold_mixin_lists: grandfathered
     Rigor::Inference::ScopeIndexer#fold_per_file_extends: grandfathered
     Rigor::Inference::ScopeIndexer#fold_refinements: grandfathered
     Rigor::Inference::ScopeIndexer#gather_aliased_mutations: grandfathered
@@ -236,6 +253,7 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#merge_header_nestings: grandfathered
     Rigor::Inference::ScopeIndexer#merge_held_ivar_writes!: grandfathered
     Rigor::Inference::ScopeIndexer#merge_member_layout_tables: grandfathered
+    Rigor::Inference::ScopeIndexer#merge_renamed_header_bucket: grandfathered
     Rigor::Inference::ScopeIndexer#method_definite_assigns: grandfathered
     Rigor::Inference::ScopeIndexer#mixin_call?: grandfathered
     Rigor::Inference::ScopeIndexer#mixin_call_recorded?: grandfathered

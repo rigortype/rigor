@@ -7,17 +7,21 @@ require "yaml"
 # table owners that read the whole table or copy it: `DiscoveryReadScan` (`spec/support/declaration_fact_sources.rb`)
 # parses `lib/` and `plugins/*/lib/` with Prism and counts a member's name wherever it appears as a method or a Symbol,
 # its def-index slot name (`:def_sources`, `:refinements`) as a key in any argument position of a keyed read or write,
-# and, apart from them, the whole-index reads and copies (`with(**x)`, `to_h`, iterating `DiscoveryIndex.members`, a
-# computed `send`, a `discovered_`-prefixed interpolated name). The census is compared with `admission_census.yml`,
-# so a new raw read or copy path fails until it is recorded; the ADR admits a member to `possible` facts only once its
-# entry here is empty. `RIGOR_REGENERATE_GATES=1` rewrites the file.
+# or held in a constant or variable (`SLOT = :def_nodes`), and, apart from them, the whole-index reads and copies
+# (`with(**x)`, `new(*x)`, `to_h`, `deconstruct`, iterating `DiscoveryIndex.members`, a computed `send`, a
+# `discovered_`-prefixed interpolated name). The census is compared with `admission_census.yml`, so a new raw read or
+# copy path fails until it is recorded; the ADR admits a member to `possible` facts only once its entry here is empty.
+# `RIGOR_REGENERATE_GATES=1` rewrites the file.
 #
 # Threat model: the census catches a raw read or copy added in the codebase's normal styles, not a deliberate evasion.
 # It does not see a slot named by a String (`fetch("def_nodes")`) or a computed Symbol not prefixed `discovered_`
-# (`:"#{pre}_#{slot}"`); a discovery index held in a variable not named like one (`d = scope.discovery; d.with(**x)`);
-# `Marshal` round trips; iterating a def-index Hash (`index.each { |slot, table| … }`); or a read through a local
-# holding a table, which counts once, where the local is assigned. `:methods` and `:classes` count only on a receiver
-# named like an index (`index`, `def_index`, `seed`, `tables`, `bundle`, `summary`), because they are ordinary words.
+# (`:"#{pre}_#{slot}"`); a slot Symbol reached some other way than a constant or variable assignment (a Hash value,
+# a default argument); a discovery index held in a variable not named like one (`d = scope.discovery; d.with(**x)`,
+# `d.deconstruct`); `members` on a bare `EMPTY` (only `DiscoveryIndex::EMPTY` counts, since a bare `EMPTY` names
+# the index only inside its own class); `Marshal` round trips; iterating a def-index Hash
+# (`index.each { |slot, table| … }`); or a read through a local holding a table, which counts once, where the local
+# is assigned. `:methods` and `:classes` count only on a receiver named like an index (`index`, `def_index`, `seed`,
+# `tables`, `bundle`, `summary`), because they are ordinary words, and not when held in a constant or variable.
 RSpec.describe "Discovery-table admission census" do
   let(:snapshot) { File.join(__dir__, "admission_census.yml") }
   let(:header) do
@@ -104,10 +108,22 @@ RSpec.describe "Discovery-table admission census" do
 
     it "records whole-index reads and copies apart" do
       [
-        "scope.discovery.with(**seed)", "scope.discovery.to_h",
+        "scope.discovery.with(**seed)", "scope.discovery.to_h", "scope.discovery.deconstruct",
+        "Rigor::Scope::DiscoveryIndex.new(*values)",
         "Rigor::Scope::DiscoveryIndex.members.each { |m| tables[m] = index.public_send(m) }",
         "index.public_send(\"discovered_\#{slot}\")", "key = :\"discovered_\#{slot}\""
       ].each { |source| expect(census_of(source)).to eq("whole" => true), source }
+    end
+
+    it "counts a slot name held in a constant or variable" do
+      source = <<~RUBY
+        SLOT = :def_nodes
+        slot = :refinements
+        WORD = :methods
+      RUBY
+
+      expect(census_of(source))
+        .to eq("discovered_def_nodes" => ["copies"], "discovered_refinements" => ["copies"], "whole" => false)
     end
 
     it "does not count a keyed reader, an ordinary word on another receiver, or a longer name" do

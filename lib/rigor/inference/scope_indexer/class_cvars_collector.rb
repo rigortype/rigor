@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require_relative "../declaration_walk"
+require_relative "../declaration_walk/traversal"
 
 module Rigor
   module Inference

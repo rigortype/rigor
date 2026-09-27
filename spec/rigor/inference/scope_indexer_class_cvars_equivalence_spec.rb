@@ -172,6 +172,8 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
 
     it "keys cvars by the lexical cref, re-anchored only at a header that still names its class" do
       cases = ClassCvarsEquivalenceCases::CASES
+      # `C::C::Pathed` is wrong, pinned because the port reproduces the legacy walker: Ruby opens `C::Pathed`
+      # (the header's `C` is the top-level class). Flip this when #1519 is fixed.
       expect(described(tables(cases["a class << self body, and bare and nameable headers below it"]).last))
         .to eq("C" => { :@@e => "1" }, "Anchored" => { :@@g => "1" }, "C::C::Pathed" => { :@@h => "1" })
       expect(tables(cases["meta-new writes in every spelling, with self:: headers inside"]).last.keys)
@@ -187,7 +189,8 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
     it "types each rvalue under the chain the census scope carries" do
       # The census scope's chain is pushed at every header, the unnameable `class D` below `class <<`
       # included, so `Bar` inside `class ::E` resolves through `C::D` first. The ancestry nesting would not
-      # push `C::D`; the census scope always has, and a move keeps it.
+      # push `C::D`; the census scope always has, and a move keeps it. That answer is wrong: `class D` there
+      # opens `#<Class:C>::D`, and Ruby resolves the top-level `Bar`. Flip this when #1520 is fixed.
       source = <<~RUBY
         class C
           class << self

@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "spec_helper"
+require "open3"
 require "prism"
 require "rigor/inference/declaration_walk"
 
@@ -155,6 +156,8 @@ RSpec.describe Rigor::Inference::DeclarationWalk do
         .to eq(prefix: [], self_owner: nil, singleton_cref: true, nesting: %w[C])
       expect(fields(context_of(source, :def_node, "rooted")))
         .to eq(prefix: %w[E], self_owner: nil, singleton_cref: false, nesting: %w[E C])
+      # Wrong, pinned because the walk reproduces the legacy walkers: Ruby opens `C::F` here (the header's `C`
+      # is the top-level class). Flip this when #1519 is fixed.
       expect(fields(context_of(source, :def_node, "pathed")))
         .to eq(prefix: %w[C C::F], self_owner: nil, singleton_cref: false, nesting: %w[C::C::F C])
     end
@@ -240,28 +243,19 @@ RSpec.describe Rigor::Inference::DeclarationWalk do
   end
 
   describe "the collector protocol" do
-    it "stops descending for a collector that declines, and only for that collector" do
-      source = <<~RUBY
+    let(:source) do
+      <<~RUBY
         class C
           def m
             inside
           end
         end
       RUBY
-      declining = recorder_class.new(decline: [[:def_node, "m"]])
-      plain = recorder_class.new
-      walk(source, [declining, plain])
-      expect(declining.events.map { |e| e[:label] }).to eq(%w[C m])
-      expect(plain.events.map { |e| e[:label] }).to eq(%w[C m inside])
     end
 
-    it "skips a declaration's body when the collector declines the declaration" do
-      found = events("class C\n  def m; end\nend\nhelper\n", decline: [[:declaration, "C"]])
-      expect(found.map { |e| e[:label] }).to eq(%w[C helper])
-    end
-
-    it "dispatches only the events a collector of the run overrides" do
-      defs_only = Class.new do
+    # A collector overriding the one event `event`, recording the name of each node it sees.
+    def only_class(event)
+      Class.new do
         include Rigor::Inference::DeclarationWalk::Collector
 
         attr_reader :seen
@@ -270,17 +264,99 @@ RSpec.describe Rigor::Inference::DeclarationWalk do
           @seen = []
         end
 
-        def on_def(node, _context)
+        define_method(event) do |node, *|
           @seen << node.name
           Rigor::Inference::DeclarationWalk::DESCEND
         end
-      end.new
+      end
+    end
+
+    # Every node the traversal visits, whichever collectors (if any) it still carries there.
+    def walked_nodes(source, collectors)
+      visited = []
+      trace = TracePoint.new(:call) do |tp|
+        next unless tp.method_id == :walk && tp.defined_class == described_class::Traversal
+
+        visited << tp.binding.local_variable_get(:node)
+      end
+      trace.enable { walk(source, collectors) }
+      visited
+    end
+
+    def labels(collector)
+      collector.events.map { |e| e[:label] }
+    end
+
+    it "stops descending for a collector that declines, and only for that collector" do
+      declining = recorder_class.new(decline: [[:def_node, "m"]])
+      plain = recorder_class.new
+      walk(source, [declining, plain])
+      expect(labels(declining)).to eq(%w[C m])
+      expect(labels(plain)).to eq(%w[C m inside])
+    end
+
+    it "keeps the subtree for a collector listed before a decliner, in a pair and in a larger run" do
+      pair = [recorder_class.new, recorder_class.new(decline: [[:def_node, "m"]])]
+      walk(source, pair)
+      expect(pair.map { |collector| labels(collector) }).to eq([%w[C m inside], %w[C m]])
+
+      trio = [recorder_class.new, recorder_class.new(decline: [[:def_node, "m"]]), recorder_class.new]
+      walk(source, trio)
+      expect(trio.map { |collector| labels(collector) }).to eq([%w[C m inside], %w[C m], %w[C m inside]])
+    end
+
+    it "prunes the walk at a node every collector declines" do
+      alone = walked_nodes(source, [recorder_class.new(decline: [[:def_node, "m"]])])
+      both = walked_nodes(source, Array.new(2) { recorder_class.new(decline: [[:def_node, "m"]]) })
+      [alone, both].each do |visited|
+        expect(visited.grep(Prism::DefNode).size).to eq(1)
+        expect(visited.grep(Prism::CallNode)).to be_empty
+      end
+      expect(walked_nodes(source, [recorder_class.new]).grep(Prism::CallNode).size).to eq(1)
+    end
+
+    it "skips a declaration's body when the collector declines the declaration" do
+      found = events("class C\n  def m; end\nend\nhelper\n", decline: [[:declaration, "C"]])
+      expect(found.map { |e| e[:label] }).to eq(%w[C helper])
+    end
+
+    it "dispatches only the events a collector of the run overrides" do
+      defs_only = only_class(:on_def).new
       # A stub would override `on_call` itself, so the dispatch is observed from outside instead.
       default_calls = 0
       trace = TracePoint.new(:call) { |tp| default_calls += 1 if tp.method_id == :on_call }
       trace.enable { walk("class C\n  def m = helper\nend\nhelper\n", [defs_only]) }
       expect(defs_only.seen).to eq(%i[m])
       expect(default_calls).to eq(0)
+    end
+
+    it "dispatches an event to the one collector of a mixed run that overrides it" do
+      defs_only = only_class(:on_def).new
+      calls_only = only_class(:on_call).new
+      walk("class C\n  def m = helper\nend\ntop_level\n", [defs_only, calls_only])
+      expect(defs_only.seen).to eq(%i[m])
+      expect(calls_only.seen).to eq(%i[helper top_level])
+    end
+
+    it "names the events a collector class overrides, inherited overrides included" do
+      collector = Rigor::Inference::ScopeIndexer::ClassCvarsCollector
+      expect(described_class::Collector.events_of(collector)).to eq(%i[on_def])
+      expect(described_class::Collector.events_of(Class.new(collector))).to eq(%i[on_def])
+      expect(described_class::Collector.events_of(only_class(:on_call))).to eq(%i[on_call])
+    end
+
+    it "loads the walk and the rules it applies from its own entry point" do
+      # A fresh process: the suite has loaded every file already, which would hide a missing require.
+      script = <<~RUBY
+        require "rigor/inference/declaration_walk"
+        walk = Rigor::Inference::DeclarationWalk
+        source = "class C\\n  X.class_eval { def m; end }\\n  K = Class.new { def n; end }\\nend\\n"
+        walk.run(Prism.parse(source).value, [Class.new { include walk::Collector }.new])
+        print "walked"
+      RUBY
+      lib = File.expand_path("../../../lib", __dir__)
+      stdout, stderr, status = Open3.capture3(RbConfig.ruby, "-I", lib, "-e", script)
+      expect([status.success?, stdout, stderr]).to eq([true, "walked", ""])
     end
   end
 

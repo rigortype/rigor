@@ -9,9 +9,12 @@ module Rigor
       # derives each child's context from its parent's through the transitions below, so every collector reads
       # the same answer for the same node and none of them recomputes it.
       #
-      # - `prefix` — the lexical cref as qualified-name segments: `["Admin", "User"]` inside `module Admin;
-      #   class User`, and `[]` at the top level and under an unnameable cref (a bare header inside `class <<`
-      #   opens `#<Class:C>::D`, which no name spells).
+      # - `prefix` — the qualified-name segments of the innermost `class` / `module` a name reaches, which is
+      #   what the tables key lexical facts under: `["Admin", "User"]` inside `module Admin; class User`, `[]`
+      #   at the top level. It is not always the cref. Directly inside `class << self` the cref is the
+      #   singleton class, which has no name, and `prefix` stays the enclosing class's while `singleton_cref`
+      #   says so; below a bare header there (`class D` opens `#<Class:C>::D`, which no name spells) it is
+      #   `[]`.
       # - `self_owner` — the rebound `self` a `self::` header, write target or eval receiver anchors on. nil
       #   while `self` is the lexical class; a prefix while a meta-new or eval-family block rebinds it; `[]`
       #   while it names nothing (a `class <<` body, an anonymous factory block, an eval receiver no name
@@ -28,11 +31,14 @@ module Rigor
       #
       # `nesting` and the chain on `scope` are two fields because the walks that threaded them disagree. The
       # scope's chain is pushed at EVERY header, an unnameable one and the lenient render of a `self::` header
-      # included (`class self::D` pushes `Outer::D`); the ancestry chain is not. A move keeps both answers.
+      # included (`class self::D` pushes `Outer::D`); the ancestry chain is not. A move keeps both answers
+      # (ADR-116's variant rule); the scope's is wrong below `class <<` (#1520), and converging the two is
+      # #1521's.
       #
       # The rules themselves stay in {ScopeIndexer} ({ScopeIndexer.decl_body_context},
       # {ScopeIndexer.meta_new_block_split}, {ScopeIndexer.eval_block_split}), where the walkers not yet ported
-      # still call them; this class is the one place a ported collector reaches them from.
+      # still call them; this class is the one place a ported collector reaches them from. That is why the
+      # entry point is `rigor/inference/declaration_walk`, which loads `ScopeIndexer` and, through it, this file.
       class Context
         EMPTY_PREFIX = [].freeze
 

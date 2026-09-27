@@ -27,7 +27,7 @@ require_relative "operand_effects"
 require_relative "statement_evaluator"
 require_relative "struct_fold_safety"
 require_relative "unknown_store_widening"
-require_relative "declaration_walk"
+require_relative "declaration_walk/traversal"
 require_relative "scope_indexer/class_cvars_collector"
 
 module Rigor

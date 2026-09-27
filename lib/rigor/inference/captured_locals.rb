@@ -413,10 +413,16 @@ module Rigor
       NESTED_SCOPE_NODES = Set[Prism::BlockNode, Prism::LambdaNode].freeze
       private_constant :NESTED_SCOPE_NODES
 
+      # The index arm spells {INDEX_STORE_NODES} out rather than splatting it: `when *ARRAY` copies the array
+      # on every evaluation, and this runs once per node of every scanned block body, which cost `rigor check`
+      # about 126K allocations over the v0.3.9 `lib` ([#1502](https://github.com/rigortype/rigor/issues/1502),
+      # the shape `ScopeIndexer::META_CONSTANT_WRITE_NODES` records). Keep the arm and the list in step.
       def mutated_receiver(node)
         case node
         when Prism::CallNode then node.receiver if MutationWidening::SHAPE_MUTATORS.include?(node.name)
-        when *INDEX_STORE_NODES then node.receiver
+        when Prism::IndexOrWriteNode, Prism::IndexAndWriteNode, Prism::IndexOperatorWriteNode,
+             Prism::IndexTargetNode
+          node.receiver
         end
       end
 

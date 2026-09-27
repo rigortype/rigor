@@ -2867,8 +2867,7 @@ module Rigor
       # `ArgumentsNode`, and a `&blk` pass-through is a `BlockArgumentNode`.
       def walk_constant_write_children(node, qualified_prefix, default_scope, accumulator, self_owner,
                                        singleton_cref)
-        rebound = rebound_block_self(node, qualified_prefix, default_scope, nil,
-                                     rebound_self_base(self_owner))
+        rebound = rebound_block_self(node, qualified_prefix, default_scope, nil, self_owner)
         node.rigor_each_child do |child|
           rebinds_self = rebound && child.is_a?(Prism::BlockNode)
           owner = rebinds_self ? rebound : self_owner
@@ -2894,14 +2893,18 @@ module Rigor
       # caller ({#meta_new_block_owner}) ([#710](https://github.com/rigortype/rigor/issues/710)). It is
       # supplied only by the publication census; the typed walk returns at a `ConstantWriteNode` without
       # descending into its rvalue, so no `self::` write inside one reaches that walk at all.
+      #
+      # `self_owner` is the enclosing body's self as the walk carries it, unsplit. Every walk asks this at
+      # every node it visits, and only an eval call reads the self, so the split waits until one does
+      # ([#1502](https://github.com/rigortype/rigor/issues/1502)).
       def rebound_block_self(node, qualified_prefix, default_scope = nil, meta_owner = nil,
-                             self_prefix = nil)
+                             self_owner = nil)
         return nil unless node.is_a?(Prism::CallNode) && node.block.is_a?(Prism::BlockNode)
         return OPAQUE_SELF if OPAQUE_SELF_BLOCK_CALLS.include?(node.name)
         return meta_owner || OPAQUE_SELF if meta_new_constant_rvalue?(node)
         return nil unless RECEIVER_EVAL_CALLS.include?(node.name)
 
-        eval_receiver_self(node.receiver, qualified_prefix, default_scope, self_prefix)
+        eval_receiver_self(node.receiver, qualified_prefix, default_scope, rebound_self_base(self_owner))
       end
 
       # Issue #710 — the qualified name a `Klass = Class.new { … }` gives the block's class, or nil when
@@ -5752,7 +5755,7 @@ module Rigor
         # names, so it declines rather than re-anchoring to the lexical class.
         unnameable_self = singleton_self || (singleton_cref && current_class.nil?)
         rebound = rebound_block_self(node, qualified_prefix, nil, nil,
-                                     rebound_self_base(unnameable_self ? OPAQUE_SELF : current_class))
+                                     unnameable_self ? OPAQUE_SELF : current_class)
         node.rigor_each_child do |child|
           rebinds_self = rebound && child.is_a?(Prism::BlockNode)
           owner =
@@ -7657,8 +7660,7 @@ module Rigor
           tables.write_census.visit(node, top_level: qualified_prefix.empty?)
         end
 
-        rebound = rebound_block_self(node, qualified_prefix, nil, meta_owner,
-                                     rebound_self_base(self_owner))
+        rebound = rebound_block_self(node, qualified_prefix, nil, meta_owner, self_owner)
         # A `ConstantWriteNode`'s only child is its rvalue, so this reaches exactly the call whose block the
         # constant names — and nil everywhere else, leaving every other descent as it was.
         #

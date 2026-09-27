@@ -52,11 +52,12 @@ Released through #1490; the `v0.4.0` milestone is closed. Blockers: #1470, #1479
 
 ## What the next session should do
 
-0. **Performance campaign, #1507 — the maintainer's next priority.** First target: the analysis time
-   v0.4.0 lost (#1469). Read #1507 first; it holds the loop, the levers (#1502–#1504
-   `ready-for-agent`, #1505 `ready-for-human`) and three decisions to ask before building a
-   harness: where to measure (CI Linux or local), ratcheting the perf gate, and ordering against
-   ADR-116 (#1193–#1199).
+0. **Performance campaign, #1507.** Its decisions are recorded there. Reviewed, awaiting the maintainer's
+   merge (an agent merge was denied): #1508 (#1502–#1504), #1509 (two per-file/per-node scans) and #1511
+   (#1505), all green; #1512 (`tool/engine_alloc_ab.rb`, the advisory per-PR allocation job). Together
+   they cut 9.2% of allocations on the frozen v0.3.9 `lib`, so the engine's cost over v0.3.9 falls from +19.1%
+   to +8.2%. The +31% wall is attributed on #1507: feature cost spread thin, with #1197 the lever that scales.
+   Open there: the release-gate corpus, and whether #1197 is next. The CI-Linux wall workflow is not built.
 0. **In flight: #1499 (#1446, ivar class guards).** Round 1 of the adversarial review found one
    severe item (`for @ivar in …` kept the narrowing) plus a moderate (a call on a `bot` receiver was
    a restore point). Both are fixed and pushed as `9b8bc0c86` (rebased onto `3aae74259`; `for $g in`

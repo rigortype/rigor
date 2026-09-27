@@ -5,14 +5,18 @@ Status: measurement record for [#1469](https://github.com/rigortype/rigor/issues
 ([#1502](https://github.com/rigortype/rigor/issues/1502)–[#1505](https://github.com/rigortype/rigor/issues/1505)).
 The harness is on the unmerged branch `allocation-attribution-1469-harness` (`tool/perf1469/`).
 Predecessors: [`20260908-v037-allocation-regression-attribution.md`](20260908-v037-allocation-regression-attribution.md)
-(the same question for v0.3.6..v0.3.7) and #1046 (the first +6.8% of this range, through #1036).
+(the same question for v0.3.6..v0.3.7) and #1046 (the early part of this range, through #1036).
 
 ## The question
 
 At the v0.4.0 cut the release-gate baseline was recalibrated to +80.5% allocations on `lib`. Most
 of that rise is corpus growth, since Rigor's own `lib` grew 26%. Holding the corpus fixed at the
 v0.3.9 tree, the v0.4.0 engine still allocates +19.1% more than the v0.3.9 engine, and #1469 asks
-which merges pay for it. #1046 had already attributed +6.8% of it, through #1036.
+which merges pay for it. #1046 had looked at the early part of the range, but on a different axis:
+it ran each merge over its own growing `lib`, so corpus growth is inside its numbers, and its +6.8%
+is the figure after #1045. On this note's frozen axis the same stretch is +12.0% through #1036
+(`81133b8a`, 26,555,627, with #1035's bug still in) and +2.66% once #1045 lands (`22f5a1a7`,
+24,336,177).
 
 ## Method
 
@@ -24,8 +28,10 @@ which merges pay for it. #1046 had already attributed +6.8% of it, through #1036
   `lib/rigor` reads `data/` and `plugins/` from beside itself, through `ENGINE_ROOT` and the
   `../../../data` paths. Of the 255 first-parent commits in `v0.3.9..v0.4.0`, 183 change `lib/`,
   `plugins/` or `data/`: 182 merges and one direct commit (`c56c2ccf`). All 183 were measured. The
-  other 72 carry the previous arm's engine byte for byte. The bundle is master's; within the range
-  `Gemfile.lock` changes only RuboCop and the version bump.
+  other 72 carry the previous arm's engine byte for byte. The bundle is master's for every arm. Within
+  the range, `Gemfile.lock` moves RuboCop 1.90.0 → 1.91.0 with its dependencies json 2.21.2 → 3.0.2
+  and parallel 2.1.0 → 2.2.0, plus the version bump. Every arm runs on the v0.4.0 set, so no step
+  here includes a gem change.
 - **A fresh process per arm.** The process puts the arm's `lib` first on `$LOAD_PATH`, requires
   `rigor/cli`, and calls `Rigor::CLI.new(["check", "--no-cache", "--no-stats", "--format", "json",
   "lib"]).run` in-process, the same way `tool/bench.rb` does. It reads the
@@ -42,7 +48,9 @@ which merges pay for it. #1046 had already attributed +6.8% of it, through #1036
   makes, and it records the method's call count. The driver's own allocations are subtracted, and its
   totals reproduce the sweep to within 5K objects per arm. Diffing two arms method by method names
   where a step's objects are allocated. It was run on the parent and merge arms of ten of the largest
-  positive steps, and on v0.3.9 and v0.4.0.
+  positive steps, and on v0.3.9 and v0.4.0. The split between an iterator and its caller in this
+  trace depends on YJIT (see Limitations), so the #1166 pair was traced again with
+  `RIGOR_DISABLE_YJIT=1`.
 - **Levers.** Each suspected accidental cost was prototyped in a scratch copy of the v0.4.0 arm and
   measured on its own and then combined, with the `--format json` output compared byte for byte to
   the unpatched arm. Nothing was landed.
@@ -51,8 +59,8 @@ Diagnostics held at 1 on every arm: the corpus's only finding is the `rbs.covera
 info. So no step in this range is explained by a diagnostic change, and the byte-identity check on
 the prototypes is weak (see Limitations). Arms whose engines differ only off the check path land within a few
 dozen objects of each other (`4c48106c`, `79ef2ae2` and `02bc9467` read 28,316,964–28,316,977), which
-bounds the noise floor. Wall was one sample per
-arm, taken while other lanes ran on the host, and is recorded only.
+bounds the noise floor. Re-running the prototype arms reproduced them to within 802 objects.
+Wall was one sample per arm, taken while other lanes ran on the host, and is recorded only.
 
 ## Where the +4.53M went
 
@@ -67,15 +75,15 @@ arm, taken while other lanes ran on the host, and is recorded only.
 The [#1035] / [#1045] pair nets to −253, because #1045 fixed exactly what #1035 added. Without that
 pair, the +4.53M is 18 positive steps of +100K or more (+3.94M), two paybacks (−0.38M), and a long
 tail. Most of the step sizes are one feature doing more inference on purpose, but four of the
-eleven largest carry a cost that the feature does not need.
+eleven largest positive steps carry a cost that the feature does not need.
 
 ### The largest steps, and what the trace says
 
 | merge | PR | Δ | where the objects are (exclusive, traced) | verdict |
 | --- | --- | ---: | --- | --- |
-| `b5af5cf7` | [#1135] Sorbet annotation DSL | +720,553 | `ScopeIndexer.rebound_self_base` is a new method taking 542,519 allocations over 972,530 calls. It splits a String self owner on `::` for every AST node three walks visit, and the result is read only under a `class_eval`-style call with a block. The other ~178K is the deferred-range and def-shadow pre-pass (`record_deferred_def`, `Scope#def_shadows_call?`, `nesting_lexical_prefix`). | **542K accidental** ([#1502]); the rest inherent |
-| `b587a70e` | [#1096] `-> self` keeps receiver type args | +507,162 | Rendering: `DataInstance#describe` +66.6K, `Constant#describe` +60.6K (+60.9K calls), `HashShape#render_entry` +60.2K, `Tuple#describe` +20.2K, `nominal_of` +39.2K, `sort_members` +36.1K, `unique_members` +26.1K. More precise receivers make more and wider unions, and `Combinator.sort_members` orders each one by re-rendering every member's `describe` string. | inherent volume at a **systemic cost** ([#1505]) |
-| `66177b9c` | [#1166] `**h` shapes and `...` at the call site | +402,739 | `ExpressionTyper#call_arg_types` +262K and `Array#each` +193K, less `Array#map` −127K. The `map` became a `flat_map` that wraps each argument's type in a one-element Array, for the sake of `...` alone. | **accidental** ([#1503]) |
+| `b5af5cf7` | [#1135] Sorbet annotation DSL | +720,553 | `ScopeIndexer.rebound_self_base` is a new method taking 542,519 allocations over 972,530 calls. Three walks call it for every AST node they visit, and it splits a String self owner on `::`, but the result is read only under a `class_eval`-style call with a block. A per-caller probe puts 523,300 of the allocations under `walk_mixin_call_children` (143,880 calls; `scope_indexer.rb` ~:5755), 19,222 under the publication census (562,796 calls), and none under `walk_constant_write_children`, whose owner there is never a String. The other ~178K is the deferred-range and def-shadow pre-pass (`record_deferred_def`, `Scope#def_shadows_call?`, `nesting_lexical_prefix`). | **542K accidental** ([#1502]); the rest inherent |
+| `b587a70e` | [#1096] `-> self` keeps receiver type args | +507,162 | Rendering: `DataInstance#describe` +66.6K, `Constant#describe` +60.6K (+60.9K calls), `HashShape#render_entry` +60.2K, `Tuple#describe` +20.2K, `nominal_of` +39.2K, `sort_members` +36.1K, `unique_members` +26.1K. More precise receivers make more and wider unions. `Combinator.sort_members` orders each one by re-rendering every member's `describe` string, which is one path into these methods (not measured separately per step). | inherent volume at a **systemic cost** ([#1505]) |
+| `66177b9c` | [#1166] `**h` shapes and `...` at the call site | +402,739 | With YJIT on, `ExpressionTyper#call_arg_types` +262K and `Array#each` +193K, less `Array#map` −127K. With `RIGOR_DISABLE_YJIT=1`, `call_arg_types` alone is +321,006 on unchanged call counts (292,850 → 293,796), so its allocations per call roughly double; the other ~82K is spread thin. The `map` became a `flat_map` that wraps each argument's type in a one-element Array, for the sake of `...` alone. | **accidental** ([#1503]) |
 | `11455d5c` | [#1103] destructure `Array[T]` block params | +294,385 | `BlockParameterBinder#reset_per_bind_state` +133K, which runs twice per bind, `MultiTargetBinder::Result#apply_to` +132K, and `bind_onto` +97K. The old entry path saves −76K. | **accidental plumbing** ([#1504]) |
 | `54f120d9` | [#1129] composite receiver per projected member | +249,066 | Dispatch volume: `CallContext.build` +58K on +19.4K calls, union algebra ~+40K, `try_composite_receiver` 11.7K over 177K calls. | inherent; the per-dispatch `CallContext` cost is #150 / #820 |
 | `9b54f41e` | [#1441] | −239,994 | payback | |
@@ -111,15 +119,21 @@ Prototype levers on the v0.4.0 engine, frozen v0.3.9 `lib` (28,238,280 unpatched
 
 On the v0.4.0 tree's own `lib`, the corpus the release gate measures, all five together take the
 v0.4.0 engine from 42,940,599 to 39,120,227 (−3.82M, −8.9%). The output is byte-identical on both
-corpora.
+corpora. That base is +0.40% over the 42.77M in #1469, because the two measure different trees. The
+42.77M was a local measurement of the release branch at `665440d8`, the first version-bump commit,
+before #1479 and #1483 landed on it. The committed baseline, 42,721,526, is the Linux release-gate
+run 36278383180 on that same commit. The release head `6503cd49` measured 42,895,332 on Linux
+(release-gate run 36286123530). The arm here, `07f49bdb`, merges that head, and 42,940,599 is
++0.10% over it.
 
 The first four are the accidental share of this range: about −1.45M together, a third of the
 +4.53M. After them, the engine's cost over v0.3.9 on the frozen corpus drops from +19.1% to about
 +13%. That remainder is the inference the v0.4.0 line bought on purpose (narrowing through the
 statement evaluator, per-member dispatch, ancestor and module resolution, destructuring), plus the
 union-ordering cost those features amplify. The fifth lever is a design choice rather than a
-mechanical removal, and it predates the range: `sort_members` costs 4,505,381 allocations inclusive
-at v0.4.0, 16% of the run. It is filed `ready-for-human`. With all five, the frozen-corpus cost over
+mechanical removal, and it predates the range. At v0.4.0, `sort_members` costs 1,419,145
+allocations inclusive, 5.0% of the run, over 163,939 calls and 617,243 members. The prototype
+recovers −1,039,035 of that. It is filed `ready-for-human`. With all five, the frozen-corpus cost over
 v0.3.9 would be +8.6%.
 
 ## Wall
@@ -135,16 +149,36 @@ noise. Deciding a wall question needs alternated repeated samples on a quiet hos
 - **Output equality is weak evidence here.** The frozen corpus and the v0.4.0 `lib` each produce a
   single info diagnostic, so "byte-identical" rules out a crash or a new finding and little else.
   Each filed issue's gate asks for the survey-corpus diff.
-- **The trace attributes to the innermost Ruby frame.** A method that calls a C iterator absorbs
-  its allocations, and a refactor that renames or moves a method shows as a matched ± pair (between
-  v0.3.9 and v0.4.0, `with_local` → `bind_local`, `sub_eval` → `evaluator_at`,
-  `select_candidates` → `select_declared`). Read a step's rows together.
+- **The trace attributes to the innermost Ruby frame, and that frame depends on YJIT.** A method
+  that calls a C iterator absorbs the iterator's allocations. `Array#map` and `Array#each` are
+  implemented in Ruby only when YJIT is enabled (`array.rb`'s `with_jit` block), and Rigor enables
+  YJIT after a 5 s deadline (`CLI#arm_jit_deadline`, `lib/rigor/runtime/jit.rb`). On a loaded host
+  the point where YJIT turns on moves from run to run. When it is on, `Array#map` and `Array#each`
+  appear as their own Ruby frames, and they take allocations that would otherwise be charged to the
+  caller. So an iterator-versus-caller split can differ between the two arms of a step. Only the
+  #1166 pair was re-traced with `RIGOR_DISABLE_YJIT=1`. For the other steps, read an `Array#…` row
+  and its callers' rows together. In the same way, a block passed to a Ruby-level iterator (for
+  example `rigor_each_child`) charges its allocations to the iterator. A refactor that renames or
+  moves a method shows as a matched ± pair. Between v0.3.9 and v0.4.0 there are three:
+  `with_local` → `bind_local`, `sub_eval` → `evaluator_at` and `select_candidates` →
+  `select_declared`. The per-arm totals do not depend on any of this: YJIT on and off agree to
+  within 55 objects on both #1166 arms.
 - **Eight steps of +100K or more were not traced per step** ([#1250], [#1301] and the six listed
-  after the table). Each is +101K to +135K, and all eight together are 0.91M. The sum of the steps equals the total by
-  construction, so nothing in the range is unmeasured, only unexplained at the method level.
-- **The harness** is on `allocation-attribution-1469-harness` under `tool/perf1469/`: the sweep
-  driver, the fresh-process measure script, the TracePoint tracer and its diff, the raw per-arm
-  results, and the five prototype diffs. Its scripts hard-code the scratch paths they ran from.
+  after the table). Each is +101K to +135K, and all eight together are 0.91M. The steps sum to the
+  total by construction, so nothing in the range is unmeasured, only unexplained at the method
+  level.
+- **The inclusive `sort_members` figure was corrected before merge.** The first probe counted its
+  own per-member tally inside the measured window and reported 4,505,381. The tally now runs
+  outside the window, and the figure is 1,419,145.
+- **The harness** is on `allocation-attribution-1469-harness` under `tool/perf1469/`. It holds:
+  - the sweep driver and the fresh-process measure script;
+  - the TracePoint tracer and its diff;
+  - the raw per-arm results, including the v0.3.9 base arm and its load-path proof;
+  - the gzipped per-method traces;
+  - the inclusive-probe output;
+  - the five prototype diffs and their measured result lines.
+
+  Its scripts hard-code the scratch paths they ran from.
 
 ## The full series
 
@@ -154,7 +188,7 @@ previous row. "diags" is the JSON diagnostic count, and wall is a single sample.
 
 | # | merge | PR | allocations | Δ | diags | wall s | title |
 | ---: | --- | --- | ---: | ---: | ---: | ---: | --- |
-| 0 | `5ae05195` (v0.3.9) | | 23,705,247 | | 1 | 14.49 | the base engine |
+| 0 | `d0c370f7` (v0.3.9) | | 23,705,247 | | 1 | 14.49 | the base engine |
 | 1 | `be73e08d` | [#999] | 23,717,840 | +12,593 | 1 | 15.28 | Check arity against a source-defined method's own signature |
 | 2 | `d32ad0d9` | [#1005] | 23,717,964 | +124 | 1 | 16.27 | Distinguish an unresolvable inline type name from a duplicate one |
 | 3 | `e747d0d5` | [#1000] | 23,717,935 | −29 | 1 | 15.72 | Propose the inferred return for a declared-untyped method |

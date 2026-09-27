@@ -991,7 +991,7 @@ RSpec.describe Rigor::SigGen::Generator do
       expect(n_method.classification).to eq(Rigor::SigGen::Classification::EQUIVALENT)
     end
 
-    it "classifies a strict subtype as tighter-return and renders the inferred form" do
+    it "classifies a strict subtype as tighter-return and renders the inferred return on the declared line" do
       write_fixture("sig/box.rbs", "class Box\n  def label: (untyped text) -> Object\nend\n")
       path = write_fixture("lib/box.rb", "class Box\n  def label(text)\n    \"v\#{text}\"\n  end\nend\n")
 
@@ -1000,7 +1000,7 @@ RSpec.describe Rigor::SigGen::Generator do
 
       expect(method.classification).to eq(Rigor::SigGen::Classification::TIGHTER_RETURN)
       expect(method.declared_return_rbs).to eq("Object")
-      expect(method.rbs).to eq("def label: (untyped) -> String")
+      expect(method.rbs).to eq("def label: (untyped text) -> String")
     end
   end
 
@@ -1032,9 +1032,8 @@ RSpec.describe Rigor::SigGen::Generator do
 
       expect(method.classification).to eq(Rigor::SigGen::Classification::TIGHTER_RETURN)
       expect(method.declared_return_rbs).to eq("untyped")
-      # The rendered PARAMETER stays `untyped` regardless of the declared `Float` per ADR-5 clause 2 (see the
-      # class doc comment) — only `--params=observed` widens it. The fix under test is about the RETURN.
-      expect(method.rbs).to eq("def f: (untyped) -> [Float, String]")
+      # The declared `Float num` is kept: a tighter return changes the return and nothing else (#1436).
+      expect(method.rbs).to eq("def f: (Float num) -> [Float, String]")
     end
 
     # The suite pins `Configuration.load`'s `rigor-rbs-inline` auto-wire off (see spec_helper.rb) and this spec
@@ -1094,6 +1093,174 @@ RSpec.describe Rigor::SigGen::Generator do
 
       expect(method.classification).to eq(Rigor::SigGen::Classification::EQUIVALENT)
       expect(method.declared_return_rbs).to eq("Integer")
+    end
+  end
+
+  # Issue #1436. A tighter return changes the return and nothing else. The proposal used to be rendered from
+  # the `def`'s runtime shape like a new method, so `--overwrite` replaced a declared `(Integer x)` with
+  # `(untyped)` and a declared `(?)` with `(*untyped)`. The CLI half — `--print`, `--diff`, JSON, `--check` and
+  # `--write --overwrite` — is `spec/rigor/cli/sig_gen_command_declared_params_spec.rb`.
+  describe "#run proposing a tighter return over a declared parameter list" do
+    def candidate_for(rbs, ruby, method, owner: "C")
+      write_fixture("sig/c.rbs", rbs)
+      path = write_fixture("lib/c.rb", ruby)
+      generator(paths: [path], signature_paths: [File.join(tmpdir, "sig")])
+        .run.find { |c| c.class_name == owner && c.method_name == method }
+    end
+
+    it "keeps every declared parameter kind, the block and the method's type parameters verbatim" do
+      rbs = <<~RBS
+        class C
+          def k: [T] (Integer a, ?String b, *Symbol r, T t, key: Integer, ?opt: String, **untyped) ?{ (Integer) -> void } -> untyped
+        end
+      RBS
+      method = candidate_for(rbs, "class C\n  def k(a, b = '', *r, t, key:, opt: '', **kw, &blk) = nil\nend\n", :k)
+
+      expect(method.classification).to eq(Rigor::SigGen::Classification::TIGHTER_RETURN)
+      expect(method.rbs).to eq(
+        "def k: [T] (Integer a, ?String b, *Symbol r, T t, key: Integer, ?opt: String, **untyped) " \
+        "?{ (Integer) -> void } -> nil"
+      )
+      expect(method.declared_rbs).to eq(
+        "def k: [T] (Integer a, ?String b, *Symbol r, T t, key: Integer, ?opt: String, **untyped) " \
+        "?{ (Integer) -> void } -> untyped"
+      )
+    end
+
+    it "keeps a singleton method's declared parameters" do
+      method = candidate_for("class C\n  def self.s: (String s) -> untyped\nend\n",
+                             "class C\n  def self.s(s) = nil\nend\n", :s)
+
+      expect([method.classification, method.rbs])
+        .to eq([Rigor::SigGen::Classification::TIGHTER_RETURN, "def self.s: (String s) -> nil"])
+    end
+
+    # An ancestor's parameters describe the ancestor's `def`. The subclass's may take other arguments, and the
+    # proposal is a new override on the subclass, so it is rendered from the subclass's own `def` (ADR-14
+    # clause 2) — copying `(Integer x)` here would make `Sub.new.m(1, 2)` a wrong-arity call.
+    it "renders a declaration only an ancestor carries from the subclass's own `def`" do
+      rbs = <<~RBS
+        class Base
+          def m: (Integer x) -> Object
+          def k: (Integer x) -> untyped
+        end
+        class Sub < Base
+        end
+      RBS
+      ruby = <<~RUBY
+        class Base
+          def m(x) = Object.new
+          def k(x) = x
+        end
+        class Sub < Base
+          def m(x, y = 1, *rest, &blk) = 1.0
+          def k(x, flag: false) = 1
+        end
+      RUBY
+      m = candidate_for(rbs, ruby, :m, owner: "Sub")
+      k = candidate_for(rbs, ruby, :k, owner: "Sub")
+
+      expect([m.classification, m.rbs, m.declared_rbs]).to eq(
+        [Rigor::SigGen::Classification::TIGHTER_RETURN,
+         "def m: (untyped, ?untyped, *untyped) ?{ (*untyped) -> untyped } -> Float", nil]
+      )
+      expect(k.rbs).to eq("def k: (untyped, ?flag: untyped) -> 1")
+    end
+
+    it "keeps an overload's own annotation and the declaration's visibility" do
+      rbs = "class C\n  def a: %a{pure} (Integer x) -> untyped\n  private def pv: (Integer x) -> untyped\nend\n"
+      write_fixture("sig/c.rbs", rbs)
+      path = write_fixture("lib/c.rb", "class C\n  def a(x) = nil\n\n  private\n\n  def pv(x) = nil\nend\n")
+      config = Rigor::Configuration.new(
+        Rigor::Configuration::DEFAULTS.merge("paths" => [path], "signature_paths" => [File.join(tmpdir, "sig")])
+      )
+      candidates = described_class.new(configuration: config, paths: [path], include_private: true).run
+
+      expect(candidates.select { |c| c.class_name == "C" }.map(&:rbs))
+        .to eq(["def a: %a{pure} (Integer x) -> nil", "private def pv: (Integer x) -> nil"])
+    end
+
+    # The alias's parameters are the aliased method's, and the proposal would read as a rewrite of `m`'s line.
+    it "declines a name the class's `sig/` declares only through an `alias`" do
+      al = candidate_for("class C\n  def m: (Integer x) -> untyped\n  alias al m\nend\n",
+                         "class C\n  def m(x) = 1.0\n  def al(x) = nil\nend\n", :al)
+
+      expect([al.classification, al.rbs, al.declared_rbs]).to eq([Rigor::SigGen::Classification::EQUIVALENT, nil, nil])
+    end
+
+    # Declining is for an alias the class itself declares. One only an ancestor declares is an ordinary
+    # ancestor declaration: the subclass's `def` is a new override, rendered from its own shape.
+    it "proposes an override of an alias only an ancestor declares, instance and singleton alike" do
+      rbs = <<~RBS
+        class Base
+          def m: (Integer x) -> untyped
+          def self.sm: (Integer x) -> untyped
+          alias bal m
+          alias self.bsal self.sm
+        end
+        class Sub < Base
+        end
+      RBS
+      ruby = <<~RUBY
+        class Base
+          def m(x) = nil
+          def self.sm(x) = nil
+        end
+        class Sub < Base
+          def bal(x, y = 1) = 1.0
+          def self.bsal(x, y = 1) = 1.0
+        end
+      RUBY
+
+      expect(candidate_for(rbs, ruby, :bal, owner: "Sub").rbs).to eq("def bal: (untyped, ?untyped) -> Float")
+      expect(candidate_for(rbs, ruby, :bsal, owner: "Sub").rbs).to eq("def self.bsal: (untyped, ?untyped) -> Float")
+    end
+
+    # One body answers for every overload at once, so the inferred return cannot be assigned to any one of
+    # them; the declaration stands, as it does for any narrowing the generator declines.
+    it "declines an overloaded declaration rather than collapsing its overloads into one line" do
+      rbs = "class C\n  def o: (Integer x) -> untyped\n      | (String x) -> untyped\n  " \
+            "def p: (Integer x) -> Numeric\n      | (Float x) -> Numeric\nend\n"
+      write_fixture("sig/c.rbs", rbs)
+      path = write_fixture("lib/c.rb", "class C\n  def o(x) = nil\n  def p(x) = 1.0\nend\n")
+      candidates = generator(paths: [path], signature_paths: [File.join(tmpdir, "sig")]).run
+
+      expect(candidates.select { |c| %i[o p].include?(c.method_name) }.map { |c| [c.method_name, c.classification] })
+        .to eq([[:o, Rigor::SigGen::Classification::EQUIVALENT], [:p, Rigor::SigGen::Classification::EQUIVALENT]])
+    end
+
+    it "does not list a declared typed `initialize` as a new method" do
+      init = candidate_for("class C\n  def initialize: (Integer a) -> void\nend\n",
+                           "class C\n  def initialize(a)\n    @a = a\n  end\nend\n", :initialize)
+
+      expect([init.classification, init.rbs]).to eq([Rigor::SigGen::Classification::EQUIVALENT, nil])
+    end
+
+    it "does not list a declared untyped `(?)` `initialize` as a new method" do
+      init = candidate_for("class C\n  def initialize: (?) -> void\nend\n",
+                           "class C\n  def initialize(a, b = 1)\n    @a = a\n  end\nend\n", :initialize)
+
+      expect(init.classification).to eq(Rigor::SigGen::Classification::EQUIVALENT)
+    end
+
+    # The one case a declared constructor is still proposed: observations clear an `untyped` it declares,
+    # which `--overwrite` applies (the writer's case 2).
+    it "still proposes a declared `initialize` whose `untyped` an observation tightens" do
+      write_fixture("sig/c.rbs", "class C\n  def initialize: (untyped a) -> void\nend\n")
+      path = write_fixture("lib/c.rb", "class C\n  def initialize(a)\n    @a = a\n  end\nend\n")
+      observations = {
+        ["C", :initialize] => [
+          Rigor::SigGen::ObservedCall.new(positional: [Rigor::Type::Combinator.nominal_of("String")])
+        ]
+      }
+      config = Rigor::Configuration.new(
+        Rigor::Configuration::DEFAULTS.merge("paths" => [path], "signature_paths" => [File.join(tmpdir, "sig")])
+      )
+      init = described_class.new(configuration: config, paths: [path], observations: observations)
+                            .run.find { |c| c.method_name == :initialize }
+
+      expect([init.classification, init.rbs])
+        .to eq([Rigor::SigGen::Classification::NEW_METHOD, "def initialize: (String) -> void"])
     end
   end
 
@@ -1226,15 +1393,16 @@ RSpec.describe Rigor::SigGen::Generator do
       expect(JSON.parse(out.string).fetch("candidates").map { |c| c["method"] }).not_to include("load_factor")
     end
 
-    it "leaves the `initialize` stub alone — sig-gen spells a constructor `-> void` unconditionally" do
+    it "leaves a declared `initialize` alone — sig-gen spells a constructor `-> void` unconditionally" do
       write_fixture("sig/box.rbs", "class Box\n  def initialize: (untyped size) -> void\nend\n")
       path = write_fixture("lib/box.rb", "class Box\n  def initialize(size)\n    @size = size\n  end\nend\n")
 
       gen = generator(paths: [path], signature_paths: [File.join(tmpdir, "sig")])
       init = gen.run.find { |c| c.method_name == :initialize }
 
-      expect(init.classification).to eq(Rigor::SigGen::Classification::NEW_METHOD)
-      expect(init.rbs).to eq("def initialize: (untyped) -> void")
+      # Not a `new-method` since #1436: the class already declares its constructor.
+      expect(init.classification).to eq(Rigor::SigGen::Classification::EQUIVALENT)
+      expect(init.declared_return_rbs).to eq("void")
     end
   end
 

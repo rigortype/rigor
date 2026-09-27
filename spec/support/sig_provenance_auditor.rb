@@ -225,11 +225,12 @@ class SigProvenanceAuditor
       Row.new(declaration: decl, classification: MISSING_SOURCE.fetch(found), detail: detail)
     end
 
-    # `sig-gen` never compares an `initialize` against an existing declaration: it emits a
-    # `(<runtime param shape>) -> void` stub unconditionally, because Ruby's constructor return
-    # value is never meaningful (`Generator#initialize_stub_candidate`). The declared `-> void` is
-    # {RETURN_INTENT} like any other — the constructor is only the case that reaches this arm rather
-    # than the compared one, and everything the author added to it is the parameter list.
+    # `sig-gen` never compares an `initialize`'s return against an existing declaration: it writes a
+    # `(<runtime param shape>) -> void` stub, because Ruby's constructor return value is never
+    # meaningful (`Generator#initialize_stub_candidate`). Since #1436 a constructor the class declares
+    # is `equivalent` carrying `void`, which {#classify_equivalent} reads; the stub still reaches this
+    # arm when observations would tighten the declaration, and the declared `-> void` is
+    # {RETURN_INTENT} here too — everything the author added to it is the parameter list.
     def classify_new_method(decl, candidate)
       return Row.new(declaration: decl, classification: RETURN_INTENT, detail: "void") if decl.return_rbs == "void"
 

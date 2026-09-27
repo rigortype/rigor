@@ -78,6 +78,15 @@ module Rigor
         write_target(target, emittable, source_path: source_path)
       end
 
+      # Whether `proposed` has STRICTLY FEWER bare `untyped` tokens than `existing`. A count, not a slot-by-slot
+      # comparison: it reads as "at least one more position is concrete", and does not prove that no concrete
+      # position became `untyped` elsewhere. Word-boundary matching counts `untyped` only as a type token, not
+      # as a substring inside identifiers. Public because the generator asks the same question before it lists a
+      # declared `initialize` at all (#1436).
+      def self.fewer_untyped?(proposed, existing)
+        proposed.scan(/\buntyped\b/).size < existing.scan(/\buntyped\b/).size
+      end
+
       private
 
       # Shared per-target write path used by both `#write` and `#write_all`. Picks a representative
@@ -710,20 +719,13 @@ module Rigor
         declared_void && !candidate.rbs.to_s.end_with?(" -> void")
       end
 
-      # Compares the existing member's source-side RBS text against the candidate's proposed RBS text. Returns
-      # true when the new spelling has STRICTLY FEWER bare `untyped` tokens than the existing one — i.e. at
-      # least one `untyped` slot becomes a concrete type AND no concrete slot becomes `untyped`. Word-boundary
-      # matching ensures we count `untyped` only as a type token, not as a substring inside identifiers.
+      # Compares the existing member's source-side RBS text against the candidate's proposed RBS text
+      # ({.fewer_untyped?}).
       def tightens_untyped?(candidate, decl, source)
         member = find_method_member(decl, candidate.method_name, candidate.kind)
         return false if member.nil?
 
-        existing_rbs = source[member.location.start_pos...member.location.end_pos]
-        count_untyped(candidate.rbs) < count_untyped(existing_rbs)
-      end
-
-      def count_untyped(rbs)
-        rbs.scan(/\buntyped\b/).size
+        self.class.fewer_untyped?(candidate.rbs, source[member.location.start_pos...member.location.end_pos])
       end
 
       def member_position(decl, candidate)
@@ -825,10 +827,13 @@ module Rigor
       # one the user wrote, and it has no grammar for merging two — so rewriting the region could silently
       # replace an author's own `%a{pure}` with a labelled envelope, or strip a directive Rigor does not
       # read at all. Leaving it and saying so is the only move that cannot destroy an authored fact.
+      #
+      # An annotation on one of the member's overloads (`def m: %a{pure} (Integer) -> String`) counts too:
+      # it sits inside the location, and a tighter return keeps it (#1436), so ours would be a second one.
       def splice_annotations(source, member, candidate, state)
         return source if candidate.annotations.empty?
 
-        unless member.annotations.empty?
+        if annotated?(member)
           # Rebuilt so the reported row carries the reason it was actually given. The generator stamped
           # `:emitted` when it decided the annotation; only the writer knows the declaration refused it.
           state.left_unreadable << candidate.with_effect_annotation(candidate.annotations, :left_unreadable)
@@ -840,6 +845,12 @@ module Rigor
         return source unless indent.match?(/\A[ \t]*\z/)
 
         source[0...line_start] + candidate.annotations.map { |line| "#{indent}#{line}\n" }.join + source[line_start..]
+      end
+
+      def annotated?(member)
+        return true unless member.annotations.empty?
+
+        member.respond_to?(:overloads) && member.overloads.any? { |overload| overload.annotations.any? }
       end
     end
   end

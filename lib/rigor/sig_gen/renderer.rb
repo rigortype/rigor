@@ -111,8 +111,8 @@ module Rigor
         end
       end
 
-      # An inline update replaces a whole `sig/` line, which it carries; every other row knows only the
-      # declared return.
+      # A tighter return or an inline update replaces a whole `sig/` line, which it carries; any other row
+      # knows only the declared return.
       def render_removed_line(candidate)
         if candidate.declared_rbs
           @out.puts("- #{candidate.declared_rbs}")

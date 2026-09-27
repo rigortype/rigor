@@ -36,11 +36,14 @@ module Rigor
       # read set many times over: on Rigor's own `lib`, 71% of the replays into a consumer repeated one
       # already made into it, carrying 65% of the replayed events.
       module ReplayMemory
-        def first_replay?(read_set)
-          replayed = (@replayed ||= {}.compare_by_identity)
-          return false if replayed.key?(read_set)
+        def holds?(read_set)
+          !@held.nil? && @held.key?(read_set)
+        end
 
-          replayed[read_set] = true
+        # Called only once every event of `read_set` is in, so a replay that raises part-way leaves the
+        # target unmarked and the next replay adds the rest.
+        def hold!(read_set)
+          (@held ||= {}.compare_by_identity)[read_set] = true
         end
       end
 
@@ -60,7 +63,7 @@ module Rigor
           # file-granularity by nature (a superclass edge touches the whole class).
           @symbol_sources = Hash.new { |h, k| h[k] = Set.new }
           @ancestry_sources = Set.new
-          @replayed = nil
+          @held = nil
           @suspensions = 0
         end
 
@@ -94,6 +97,11 @@ module Rigor
       # self-read filter is applied at {replay} time, mirroring {read_site}.
       ReadSet = Data.define(:reads, :missing)
 
+      # What every window that saw nothing closes into: most windows {RbsDispatch}'s recording-mode memos
+      # open see nothing, and they need neither a copy of two empty Sets nor a place in a target's
+      # {ReplayMemory}.
+      EMPTY_READ_SET = Ractor.make_shareable(ReadSet.new(reads: Set.new, missing: Set.new))
+
       # Mutable capture accumulator; snapshot into a frozen {ReadSet} when the capture window closes.
       class Capture
         include ReplayMemory
@@ -103,10 +111,12 @@ module Rigor
         def initialize
           @reads = Set.new
           @missing = Set.new
-          @replayed = nil
+          @held = nil
         end
 
         def snapshot
+          return EMPTY_READ_SET if reads.empty? && missing.empty?
+
           ReadSet.new(reads: reads.dup.freeze, missing: missing.dup.freeze)
         end
       end
@@ -177,11 +187,13 @@ module Rigor
       # there skip a pass that could add nothing: on Rigor's own `lib`, two thirds of the first replays into a
       # consumer were of a set captured while that consumer was recording.
       def note_captured(read_set, captures, accumulator, suspensions)
-        captures.last&.first_replay?(read_set)
+        return if read_set.equal?(EMPTY_READ_SET)
+
+        captures.last&.hold!(read_set)
         return unless accumulator && Thread.current[KEY].equal?(accumulator)
         return unless accumulator.suspensions == suspensions
 
-        accumulator.first_replay?(read_set)
+        accumulator.hold!(read_set)
       end
       private_class_method :note_captured
 
@@ -213,13 +225,13 @@ module Rigor
       # capture so an enclosing capture window stays transitive when a memo hit substitutes for a body walk.
       def replay(read_set)
         accumulator = Thread.current[KEY]
-        return if accumulator.nil? || read_set.nil?
+        return if accumulator.nil? || read_set.nil? || read_set.equal?(EMPTY_READ_SET)
 
         captures = Thread.current[CAPTURE_KEY]
         tee_read_set(captures, read_set) if captures && !captures.empty?
         # Each set keeps its own insertion order whichever target is filled first, and a skipped replay is one
         # that could only have re-added what the target already holds.
-        return unless accumulator.first_replay?(read_set)
+        return if accumulator.holds?(read_set)
 
         consumer = accumulator.consumer
         read_set.reads.each do |pair|
@@ -228,15 +240,18 @@ module Rigor
         end
         missing = accumulator.missing
         read_set.missing.each { |entry| missing << entry }
+        accumulator.hold!(read_set)
       end
 
       # {replay}'s share for the open captures. The innermost capture having seen `read_set` already means every
       # open capture holds all of it (see CAPTURE_KEY).
       def tee_read_set(captures, read_set)
-        return unless captures.last.first_replay?(read_set)
+        innermost = captures.last
+        return if innermost.holds?(read_set)
 
         read_set.reads.each { |pair| tee_read(captures, pair) }
         read_set.missing.each { |entry| tee_missing(captures, entry) }
+        innermost.hold!(read_set)
       end
       private_class_method :tee_read_set
 

@@ -400,6 +400,50 @@ RSpec.describe Rigor::Analysis::DependencyRecorder do
       expect(record).to eq(once)
     end
 
+    it "finishes a replay that raised part-way when the same read set is replayed again" do
+      stored = recorder::ReadSet.new(reads: Set[["/app/one.rb", "One#a"], ["/app/two.rb", "Two#b"]].freeze,
+                                     missing: Set.new.freeze)
+      calls = 0
+      %i[accumulate_read tee_read].each do |name|
+        allow(recorder).to receive(name).and_wrap_original do |original, *args|
+          calls += 1
+          raise "interrupted" if calls == 2
+
+          original.call(*args)
+        end
+      end
+      # The window's tee raises on its second pair...
+      window = nil
+      recorder.record_for("/app/consumer.rb") do
+        _, window = recorder.capture do
+          expect { recorder.replay(stored) }.to raise_error("interrupted")
+          recorder.replay(stored)
+        end
+      end
+      # ...and, in a fresh consumer with no window open, the accumulator's pass does.
+      calls = 0
+      record = recorder.record_for("/app/consumer.rb") do
+        expect { recorder.replay(stored) }.to raise_error("interrupted")
+        recorder.replay(stored)
+      end
+
+      expect(window.reads).to eq(stored.reads)
+      expect(record.sources).to contain_exactly("/app/one.rb", "/app/two.rb")
+    end
+
+    it "closes a window that saw nothing into the shared empty read set" do
+      empty = nil
+      withheld = nil
+      recorder.record_for("/app/consumer.rb") do
+        _, empty = recorder.capture { :nothing }
+        _, withheld = recorder.withhold { :nothing }
+      end
+
+      expect(empty).to be(recorder::EMPTY_READ_SET)
+      expect(withheld).to be(recorder::EMPTY_READ_SET)
+      expect(Ractor.shareable?(empty)).to be(true)
+    end
+
     it "replays a window that saw another consumer's reads into the consumer outside it" do
       window = nil
       record = recorder.record_for("/app/outer.rb") do

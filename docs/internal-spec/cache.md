@@ -993,10 +993,12 @@ from its comments — every `#:` / `# @rbs` annotation under the auto-wired
   reads: the runner's on a sequential run, the sequential probe's on a pooled
   one. A mismatch means a synthesizer built in `#prepare`, which the gate could
   not see. The gate then turns untrusted for the session, every bundle's digest
-  is saved as `nil`, and every later edit re-analyses the whole project.
-  `run_incremental` re-analyses the project for a recheck that had left files
-  out, and `run_buffer_recheck` declines. The contract a synthesizer must keep
-  is in [`plugin.md`](plugin.md).
+  is saved as `nil`, and every later edit re-analyses the whole project. For an
+  edit whose recheck had left files out, `run_incremental` re-analyses the
+  project and `run_buffer_recheck` declines. A run that changed nothing stays a
+  null run, since every edit under the untrusted gate already re-analysed the
+  whole project. The contract a synthesizer must keep is in
+  [`plugin.md`](plugin.md).
 
 ### `effect_collections` / `effects_identity` — the effects sidecar ([ADR-103](../adr/103-effect-labels.md) WD13)
 

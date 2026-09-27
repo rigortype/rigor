@@ -2016,6 +2016,99 @@ end
         expect(sorted(diagnostics)).to eq(sorted(inline_full_run(config, [project])))
       end
     end
+
+    # The rbs-inline twin of {#prepare_built_project}: the greeter tree plus a snapshot and a configuration.
+    def rbs_inline_project(dir)
+      project = File.join(dir, "project")
+      FileUtils.mkdir_p(project)
+      write_greeter(project, "  #: () -> String\n")
+      [project, Rigor::Cache::IncrementalSnapshot.new(root: File.join(dir, "cache")), inline_config([project])]
+    end
+
+    def expect_integer_caller(diagnostics, config, project)
+      expect(messages_for(diagnostics, "caller.rb")).to eq(["dump_type: Integer"])
+      expect(sorted(diagnostics)).to eq(sorted(inline_full_run(config, [project])))
+    end
+
+    it "re-analyses, on the next run, an annotated file saved outside the closure while a recheck ran" do
+      # Process B's closure is `other.rb`. greeter.rb, outside it, is saved (keeping its mtime) just after the
+      # closure is decided, so B's runner rebuilds its bundle from bytes no reading vouches for. Only a run that
+      # re-analysed every file may stamp such a bundle from a reading taken afterwards; here greeter.rb's readers
+      # were served from cache, so it is stamped unknown and process C re-detects it.
+      Dir.mktmpdir do |dir|
+        project, snapshot, config = rbs_inline_project(dir)
+        greeter = File.join(project, "greeter.rb")
+        other = File.join(project, "other.rb")
+        File.write(other, "class Other\n  def run\n    1\n  end\nend\n")
+        rbs_inline_process(config, project, snapshot)
+        sleep 0.05
+        File.write(other, "class Other\n  def run\n    2\n  end\nend\n")
+        rbs_inline_process(config, project, snapshot) do |session|
+          save_after_closure(session, greeter) { |text| text.sub("#: () -> String", "#: () -> Integer") }
+        end
+
+        diagnostics, = rbs_inline_process(config, project, snapshot)
+
+        expect_integer_caller(diagnostics, config, project)
+      end
+    end
+
+    it "re-analyses, on the next run, a file saved while a baseline was stamping it" do
+      # The baseline's reading, taken after the run, no longer matches the bytes discovery built the bundle
+      # from; the file's readers were analysed before the save, so it is stamped unknown and its recorded
+      # content digest (taken after the save, with the older mtime kept) is dropped.
+      Dir.mktmpdir do |dir|
+        project, snapshot, config = rbs_inline_project(dir)
+        greeter = File.join(project, "greeter.rb")
+        rbs_inline_process(config, project, snapshot) do |session|
+          allow(session.send(:source_rbs_gate)).to receive(:stamp).and_wrap_original do |original, *args, **kwargs|
+            before = File.stat(greeter)
+            File.write(greeter, File.read(greeter).sub("#: () -> String", "#: () -> Integer"))
+            File.utime(before.atime, before.mtime, greeter)
+            original.call(*args, **kwargs)
+          end
+        end
+
+        diagnostics, = rbs_inline_process(config, project, snapshot)
+
+        expect_integer_caller(diagnostics, config, project)
+      end
+    end
+
+    it "re-stamps unknown digests on the next whole-project run once the gate is trusted again" do
+      # A distrust episode leaves every stamp unknown. Once the synthesizer sets agree again, the next edit
+      # re-analyses every file, which vouches for every stamp; left unknown, each untouched file's first edit
+      # would re-analyse the project once more.
+      Dir.mktmpdir do |dir|
+        project, snapshot, config = prepare_built_project(dir)
+        prepare_built_run(config, project, snapshot)
+        Rigor::Plugin::PrepareBuiltSynthesizerProbe.building = false
+        write_greeter(project, "  # fake-rbs: def greet: () -> Integer\n")
+        prepare_built_run(config, project, snapshot)
+
+        stamps = snapshot.load(fingerprint: fingerprint(config, project)).seed_bundles.values
+                         .map { |bundle| bundle[:source_rbs_digest] }
+        expect(stamps).to all(be_a(String))
+      ensure
+        Rigor::Plugin::PrepareBuiltSynthesizerProbe.building = true
+      end
+    end
+
+    it "keeps a run that changed nothing a null run under an untrusted gate" do
+      # Under an untrusted gate every edit re-analyses the whole project, so the snapshot a later null run
+      # serves is whole; re-analysing it would turn every null run into a baseline.
+      Dir.mktmpdir do |dir|
+        project, snapshot, config = prepare_built_project(dir)
+        prepare_built_run(config, project, snapshot)
+
+        warm = Array.new(2) { prepare_built_run(config, project, snapshot).last }
+
+        stamps = snapshot.load(fingerprint: fingerprint(config, project)).seed_bundles.values
+                         .map { |bundle| bundle[:source_rbs_digest] }
+        expect(stamps).to all(be_nil) # the gate really was untrusted
+        expect(warm).to eq([true, true])
+      end
+    end
   end
 
   # ADR-89 WD1 — the declaration-shape gate. It generalises B1 (comment-only) to BODY edits: a changed file

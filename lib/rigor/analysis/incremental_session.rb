@@ -568,11 +568,13 @@ module Rigor
         @seed_bundles = source_rbs_gate.verify(registry, @seed_bundles)
       end
 
-      # Issue #1536 — a recheck whose closure left some file out may have under-read a synthesizer the gate
-      # could not see. {#run_incremental} re-analyses the project and {#run_buffer_recheck} declines, the way
-      # each treats a moved plugin fact surface.
+      # Issue #1536 — a recheck of an edit whose closure left some file out may have under-read a synthesizer
+      # the gate could not see. {#run_incremental} re-analyses the project and {#run_buffer_recheck} declines,
+      # the way each treats a moved plugin fact surface. A run that changed nothing is exempt: under an
+      # untrusted gate every earlier edit already re-analysed the whole project, so the snapshot it serves is
+      # whole, and a null run stays one.
       def source_rbs_unverified?(result)
-        source_rbs_gate.untrusted? && !result.reused.empty?
+        source_rbs_gate.untrusted? && !result.no_change? && !result.reused.empty?
       end
 
       # Issue #1536 — a file the gate could not stamp because it was saved after the closure was decided (its

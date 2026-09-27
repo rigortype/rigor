@@ -219,9 +219,11 @@ had three defects.
    when this run read nothing, and a long-lived session gets its only check at priming. The prepared
    registry is the one ADR-88 WD1 already reads: the runner's on a sequential run, and the sequential
    probe's on a pooled one. On a mismatch the gate turns untrusted for the session. Every bundle's digest is
-   stamped unknown before the snapshot is saved, every later edit re-analyses the whole project, and a
-   recheck that already left files out re-analyses the project at once (`run_buffer_recheck` declines
-   instead). [`plugin.md`](../internal-spec/plugin.md) states the contract a synthesizer must keep.
+   stamped unknown before the snapshot is saved, and every later edit re-analyses the whole project. The
+   run that found the mismatch, if it was an edit whose recheck left files out, re-analyses the project at
+   once (`run_buffer_recheck` declines instead). A run that changed nothing stays a null run: every edit
+   under the untrusted gate already re-analysed the whole project, so the snapshot it serves is whole.
+   [`plugin.md`](../internal-spec/plugin.md) states the contract a synthesizer must keep.
 4. Before WD1 and WD2 run, the recheck asks whether the edit moved any synthesized output. It has moved
    when a changed file's digest differs from its bundle's or either is unknown, when an added file
    contributes anything, or when a removed file contributed anything. If so, the closure is every analysed
@@ -268,7 +270,7 @@ baseline computes one digest per file: a `Cache::Store` hit after the environmen
 synthesizer run under `--no-cache`, plus two content SHA-256 reads that bind each digest to its bundle.
 Every `--incremental` run loads the plugin registry once more for the post-run comparison. A plugin that
 builds its synthesizer in `#prepare` costs its project a whole-project re-analysis on every
-`--incremental` edit. After it is fixed, the unknown stamps it left clear one file at a time, as each is
+`--incremental` run that changes a file; a run that changes nothing stays a null run. After it is fixed, the unknown stamps it left clear one file at a time, as each is
 next edited, or all at once on the next whole-project run. The language server re-seeds its session from the
 on-disk snapshot on every watched-file change, and editor mode never saves. In both, the whole-project
 fallback therefore repeats until a terminal `--incremental` run refreshes the snapshot, as master's

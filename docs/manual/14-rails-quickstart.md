@@ -159,9 +159,12 @@ Start with acknowledge mode even on a brand-new project. Rigor's
 inference still has gaps, so a zero-diagnostic gate meets
 diagnostics on correct code, and clearing those means fixing
 signatures or RBS rather than your code. Choose strict only if
-you are comfortable doing that yourself. You can tighten later. In `.rigor.dist.yml` (Step 3) the mode maps to a
-`severity_profile:` — acknowledge → `lenient`, strict → `strict`
-(omit the key for the default `balanced`).
+you are comfortable doing that yourself. You can tighten later.
+
+In `.rigor.dist.yml` (Step 3) the mode maps to a
+`severity_profile:`. Acknowledge mode uses the default `balanced`
+(omit the key), or `lenient` when the first `rigor check` reports
+more than ~100 diagnostics; strict mode uses `strict`.
 
 ### Step 3 — Write .rigor.dist.yml
 
@@ -201,7 +204,7 @@ plugins:
   - rigor-rspec
   - rigor-factorybot
 
-severity_profile: lenient   # "strict" for strict mode; omit for "balanced"
+# severity_profile: lenient   # only for >100 initial diagnostics; "strict" for strict mode
 
 # baseline: .rigor-baseline.yml   # uncomment after Step 6 (acknowledge mode only)
 ```

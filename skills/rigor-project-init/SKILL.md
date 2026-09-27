@@ -104,16 +104,21 @@ diagnostics on correct code, where the fix is a better `sig/` entry,
 an RBS workaround, or a `# rigor:disable` with a reason rather than a
 code change. Resolving those takes working knowledge of type theory and
 RBS, and without it strict mode pushes the user into rewriting correct
-code for the tool or scattering suppressions. Acknowledge mode costs a
-new project nothing: its baseline starts small or empty, and new
-diagnostics still surface.
+code for the tool or scattering suppressions. Acknowledge mode keeps
+the same regression guard with an exit: the baseline starts small or
+empty, a new diagnostic still fails the check, and once one is
+confirmed as an inference gap on correct code, `rigor baseline
+regenerate` absorbs it (report it upstream as a false positive)
+instead of forcing a signature fix or a suppression.
 
 Present strict mode as an opt-in for users who know type theory and
 RBS, want the zero-diagnostic gate, and accept resolving inference
 gaps themselves — never as the recommendation, and never because the
 project is new, small, or a library. If the user picks it, tell them
-that moving to acknowledge mode later means running Phase 7 (generate
-a baseline and wire `baseline:`) and relaxing `severity_profile`.
+how to move to acknowledge mode later: optionally relax
+`severity_profile`, re-run triage, then run Phase 7 (generate a
+baseline and wire `baseline:`). The profile change comes first because
+it changes which rules fire.
 
 For a large first run (more than ~100 errors), acknowledge mode also
 suggests `severity_profile: lenient`; see Phase 4.
@@ -133,7 +138,8 @@ the user delegated the onboarding up front — including the adoption
 mode — those points resolve without blocking:
 
 - The **mode** the user pre-declared is settled; record it and skip the
-  Phase 2 presentation.
+  Phase 2 presentation. If the delegation names no mode, choose
+  acknowledge mode and say so in the report — never strict.
 - Low-risk, reversible, in-repo confirmations (`rbs collection
   install`, the `.gitignore` addition) are covered by the delegation —
   act, and note each self-answer in your report.

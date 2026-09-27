@@ -114,8 +114,9 @@ mostly a question of *how much* you want to say:
 
 1. **`severity_profile:`** — the project's overall stance.
    `lenient` for a legacy codebase you are easing Rigor into,
-   `balanced` for everyday work, `strict` for a project with
-   no legacy noise.
+   `balanced` for everyday work, new projects included, and
+   `strict` only if you are ready to resolve inference gaps
+   through signatures and RBS yourself.
 2. **`severity_overrides:`** — one rule (or one family) at a
    different severity from the rest of the profile. The right
    layer when a rule is *useful but not blocking* for you.

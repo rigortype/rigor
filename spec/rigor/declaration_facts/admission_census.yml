@@ -1,0 +1,271 @@
+# Discovery-table admission census (#1507, ADR-119 WD1): per Scope::DiscoveryIndex member, the files outside
+# scope.rb, scope/discovery_index.rb, scope_indexer.rb and runner/project_pre_passes.rb that read the whole
+# table ("reads") or copy it ("copies"), and the files that copy every member at once through a splat or a
+# computed name ("whole_index_copies"). admission_census_spec.rb computes it with Prism and compares it with
+# this file; `RIGOR_REGENERATE_GATES=1` rewrites it.
+
+members:
+  declared_types:
+    reads:
+    - lib/rigor/inference/expression_typer.rb
+    copies:
+    - lib/rigor/inference/pre_eval_constants.rb
+  class_ivars:
+    reads: []
+    copies: []
+  class_cvars:
+    reads: []
+    copies: []
+  program_globals:
+    reads:
+    - lib/rigor/analysis/check_rules/declaration_sourced_guard.rb
+    - lib/rigor/inference/match_rebinding/calls.rb
+    - lib/rigor/inference/statement_evaluator.rb
+    copies: []
+  program_global_seeds:
+    reads:
+    - lib/rigor/analysis/check_rules/declaration_sourced_guard.rb
+    - lib/rigor/inference/statement_evaluator.rb
+    copies: []
+  discovered_classes:
+    reads:
+    - lib/rigor/analysis/check_rules.rb
+    - lib/rigor/analysis/check_rules/shadowed_rescue_collector.rb
+    - lib/rigor/analysis/check_rules/source_arity.rb
+    - lib/rigor/analysis/runner.rb
+    - lib/rigor/analysis/template_units.rb
+    - lib/rigor/inference/last_line/implicit_self.rb
+    - lib/rigor/inference/method_dispatcher/singleton_mixin_dispatch.rb
+    - lib/rigor/inference/narrowing.rb
+    - lib/rigor/inference/pre_eval_constants.rb
+    - lib/rigor/protection/discovery_seed.rb
+    - lib/rigor/reflection.rb
+    - lib/rigor/reflection/constant_ancestors.rb
+    copies:
+    - lib/rigor/analysis/runner.rb
+    - lib/rigor/inference/parameter_inference_collector.rb
+    - lib/rigor/inference/pre_eval_constants.rb
+    - lib/rigor/protection/discovery_seed.rb
+    - lib/rigor/sig_gen/observation_collector.rb
+  in_source_constants:
+    reads:
+    - lib/rigor/inference/last_line/implicit_self.rb
+    - lib/rigor/reflection.rb
+    copies:
+    - lib/rigor/analysis/runner.rb
+    - lib/rigor/inference/expression_typer.rb
+  discovered_methods:
+    reads:
+    - lib/rigor/analysis/runner.rb
+    - lib/rigor/inference/block_call_timing.rb
+    copies:
+    - lib/rigor/analysis/runner.rb
+    - lib/rigor/inference/parameter_inference_collector.rb
+  discovered_def_nodes:
+    reads:
+    - lib/rigor/analysis/incremental_session.rb
+    - lib/rigor/analysis/runner.rb
+    - lib/rigor/inference/block_call_timing.rb
+    - lib/rigor/inference/expression_typer.rb
+    - lib/rigor/inference/parameter_inference_collector.rb
+    - lib/rigor/inference/statement_evaluator.rb
+    - lib/rigor/inference/void_tail_summary.rb
+    copies:
+    - lib/rigor/analysis/runner.rb
+    - lib/rigor/inference/parameter_inference_collector.rb
+  discovered_def_nestings:
+    reads:
+    - lib/rigor/analysis/runner.rb
+    - lib/rigor/inference/expression_typer.rb
+    copies:
+    - lib/rigor/analysis/runner.rb
+  discovered_singleton_def_nodes:
+    reads:
+    - lib/rigor/analysis/incremental_session.rb
+    - lib/rigor/analysis/runner.rb
+    - lib/rigor/inference/block_call_timing.rb
+    - lib/rigor/inference/expression_typer.rb
+    - lib/rigor/inference/method_dispatcher/process_folding.rb
+    - lib/rigor/inference/parameter_inference_collector.rb
+    copies:
+    - lib/rigor/analysis/runner.rb
+    - lib/rigor/inference/parameter_inference_collector.rb
+  discovered_def_sources:
+    reads:
+    - lib/rigor/analysis/incremental_session.rb
+    - lib/rigor/analysis/runner.rb
+    copies:
+    - lib/rigor/analysis/runner.rb
+    - lib/rigor/inference/parameter_inference_collector.rb
+  discovered_singleton_def_sources:
+    reads:
+    - lib/rigor/analysis/incremental_session.rb
+    - lib/rigor/analysis/runner.rb
+    copies:
+    - lib/rigor/analysis/runner.rb
+  discovered_method_visibilities:
+    reads:
+    - lib/rigor/analysis/runner.rb
+    copies:
+    - lib/rigor/analysis/runner.rb
+    - lib/rigor/inference/parameter_inference_collector.rb
+  discovered_parameter_envelopes:
+    reads:
+    - lib/rigor/analysis/check_rules.rb
+    - lib/rigor/analysis/check_rules/source_arity.rb
+    - lib/rigor/analysis/runner.rb
+    copies:
+    - lib/rigor/analysis/runner.rb
+  discovered_superclasses:
+    reads:
+    - lib/rigor/analysis/check_rules.rb
+    - lib/rigor/analysis/check_rules/shadowed_rescue_collector.rb
+    - lib/rigor/analysis/check_rules/source_arity.rb
+    - lib/rigor/analysis/runner.rb
+    - lib/rigor/analysis/worker_session.rb
+    - lib/rigor/inference/last_line/implicit_self.rb
+    - lib/rigor/inference/macro_block_self_type.rb
+    - lib/rigor/inference/method_dispatcher/rbs_dispatch.rb
+    - lib/rigor/reflection/constant_ancestors.rb
+    copies:
+    - lib/rigor/analysis/runner.rb
+    - lib/rigor/inference/parameter_inference_collector.rb
+  discovered_deferred_ranges:
+    reads:
+    - lib/rigor/analysis/runner.rb
+    copies:
+    - lib/rigor/analysis/runner.rb
+    - lib/rigor/inference/parameter_inference_collector.rb
+  discovered_refinements:
+    reads:
+    - lib/rigor/analysis/check_rules.rb
+    - lib/rigor/analysis/runner.rb
+    copies:
+    - lib/rigor/analysis/runner.rb
+  discovered_global_write_census:
+    reads:
+    - lib/rigor/analysis/check_rules.rb
+    - lib/rigor/analysis/runner.rb
+    copies:
+    - lib/rigor/analysis/runner.rb
+  discovered_header_nestings:
+    reads:
+    - lib/rigor/analysis/runner.rb
+    copies:
+    - lib/rigor/analysis/runner.rb
+    - lib/rigor/inference/parameter_inference_collector.rb
+  discovered_includes:
+    reads:
+    - lib/rigor/analysis/runner.rb
+    - lib/rigor/analysis/worker_session.rb
+    - lib/rigor/inference/method_dispatcher/rbs_dispatch.rb
+    - lib/rigor/reflection/constant_ancestors.rb
+    copies:
+    - lib/rigor/analysis/runner.rb
+    - lib/rigor/inference/parameter_inference_collector.rb
+  discovered_prepends:
+    reads:
+    - lib/rigor/analysis/runner.rb
+    copies:
+    - lib/rigor/analysis/runner.rb
+  discovered_extends:
+    reads:
+    - lib/rigor/analysis/check_rules/source_arity.rb
+    - lib/rigor/analysis/runner.rb
+    - lib/rigor/inference/last_line/implicit_self.rb
+    - lib/rigor/inference/macro_block_self_type.rb
+    - lib/rigor/inference/method_dispatcher/rbs_dispatch.rb
+    copies:
+    - lib/rigor/analysis/runner.rb
+  discovered_class_sources:
+    reads:
+    - lib/rigor/analysis/incremental_session.rb
+    - lib/rigor/analysis/runner.rb
+    copies:
+    - lib/rigor/analysis/runner.rb
+    - lib/rigor/inference/parameter_inference_collector.rb
+  constant_sources:
+    reads:
+    - lib/rigor/analysis/runner.rb
+    copies:
+    - lib/rigor/analysis/runner.rb
+  constant_writers:
+    reads: []
+    copies:
+    - lib/rigor/analysis/runner.rb
+  constant_shadowers:
+    reads: []
+    copies:
+    - lib/rigor/analysis/runner.rb
+  published_constant_names:
+    reads:
+    - lib/rigor/analysis/check_rules/published_constant_guard.rb
+    copies:
+    - lib/rigor/analysis/runner.rb
+  local_constant_names:
+    reads: []
+    copies: []
+  published_constant_alias_names:
+    reads: []
+    copies: []
+  published_constant_ivars:
+    reads: []
+    copies: []
+  data_member_layouts:
+    reads:
+    - lib/rigor/analysis/runner.rb
+    - lib/rigor/sig_gen/generator.rb
+    copies:
+    - lib/rigor/analysis/runner.rb
+    - lib/rigor/inference/parameter_inference_collector.rb
+    - lib/rigor/protection/discovery_seed.rb
+  struct_member_layouts:
+    reads:
+    - lib/rigor/analysis/runner.rb
+    - lib/rigor/sig_gen/generator.rb
+    copies:
+    - lib/rigor/analysis/runner.rb
+    - lib/rigor/inference/parameter_inference_collector.rb
+    - lib/rigor/protection/discovery_seed.rb
+  param_inferred_types:
+    reads:
+    - lib/rigor/analysis/incremental_session.rb
+    - lib/rigor/inference/statement_evaluator.rb
+    - lib/rigor/protection/closure_kill_oracle.rb
+    copies:
+    - lib/rigor/analysis/incremental_session.rb
+    - lib/rigor/analysis/runner.rb
+    - lib/rigor/cli/coverage_scan.rb
+    - lib/rigor/inference/parameter_inference_collector.rb
+    - lib/rigor/protection/closure_kill_oracle.rb
+    - lib/rigor/protection/discovery_seed.rb
+  run_generation:
+    reads:
+    - lib/rigor/inference/expression_typer.rb
+    - lib/rigor/inference/void_tail_summary.rb
+    - lib/rigor/reflection/constant_ancestors.rb
+    copies:
+    - lib/rigor/analysis/runner.rb
+  patched_line_readers:
+    reads:
+    - lib/rigor/inference/last_line.rb
+    copies: []
+  clears_last_status:
+    reads:
+    - lib/rigor/inference/last_status.rb
+    copies: []
+  defines_case_equality:
+    reads:
+    - lib/rigor/inference/error_info.rb
+    copies: []
+  implicit_self_evidence:
+    reads:
+    - lib/rigor/inference/last_line/implicit_self.rb
+    copies: []
+whole_index_copies:
+- lib/rigor/analysis/runner.rb
+- lib/rigor/analysis/worker_session.rb
+- lib/rigor/cli/coverage_mutation.rb
+- lib/rigor/cli/coverage_scan.rb
+- lib/rigor/inference/parameter_inference_collector.rb
+- lib/rigor/protection/discovery_seed.rb

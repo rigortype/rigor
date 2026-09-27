@@ -1,0 +1,443 @@
+# Declaration producers (#1507, ADR-119 WD6): every method, or class or module body, under lib/ and
+# plugins/*/lib/ whose code decides what a declaration is. producers_spec.rb computes the set with Prism and
+# compares it with this file. Each file says what it computes; `RIGOR_REGENERATE_GATES=1` rewrites the
+# producer lists and keeps the notes, and a new file's note is left empty for its author to write.
+
+lib/rigor/analysis/check_rules.rb:
+  computes: the visibility of a method and its override, for the def.method-visibility-mismatch and override rules
+  producers:
+  - Rigor::Analysis::CheckRules.visibility_mismatch_diagnostic
+  - Rigor::Analysis::CheckRules.visibility_reduced?
+lib/rigor/analysis/check_rules/ivar_write_collector.rb:
+  computes: the instance-variable writes in each class's instance-method bodies, keyed by qualified name
+  producers:
+  - Rigor::Analysis::CheckRules::IvarWriteCollector
+  - Rigor::Analysis::CheckRules::IvarWriteCollector#gather_writes
+  - Rigor::Analysis::CheckRules::IvarWriteCollector#walk
+lib/rigor/analysis/check_rules/lexical_method_sites.rb:
+  computes: where a using activates refinements and where a singleton def on a local is in scope
+  producers:
+  - Rigor::Analysis::CheckRules::LexicalMethodSites#walk
+lib/rigor/analysis/check_rules/rule_walk.rb:
+  computes: the single AST walk that hosts the check-rule collectors
+  producers:
+  - Rigor::Analysis::CheckRules::RuleWalk
+  - Rigor::Analysis::CheckRules::RuleWalk.detached_ivar_facet?
+  - Rigor::Analysis::CheckRules::RuleWalk.extend_prefix
+lib/rigor/analysis/check_rules/self_closedness_scanner.rb:
+  computes: the qualified names of modules and open classes that call.self-undefined-method skips
+  producers:
+  - Rigor::Analysis::CheckRules::SelfClosednessScanner#walk
+lib/rigor/analysis/check_rules/shadowed_rescue_collector.rb:
+  computes: the qualified owner a flow.shadowed-rescue-clause diagnostic names
+  producers:
+  - Rigor::Analysis::CheckRules::ShadowedRescueCollector#extend_prefix
+lib/rigor/analysis/check_rules/source_arity.rb:
+  computes: whether a source-inferred method is public at a call site
+  producers:
+  - Rigor::Analysis::CheckRules::SourceArity#public_at?
+lib/rigor/analysis/dependency_source_inference/walker.rb:
+  computes: the method catalog of an opt-in gem's source roots, per class and side
+  producers:
+  - Rigor::Analysis::DependencySourceInference::Walker#walk_node
+lib/rigor/analysis/reachability/scan.rb:
+  computes: every constant declaration and reference with the lexical nesting in force there (ADR-102)
+  producers:
+  - Rigor::Analysis::Reachability::Scan::Walker#mixin_names
+  - Rigor::Analysis::Reachability::Scan::Walker#walk
+lib/rigor/effects/definition_context.rb:
+  computes: the side a definition lands on and the self its body runs with, for the effects scan
+  producers:
+  - Rigor::Effects::DefinitionContext#for_child
+  - Rigor::Effects::DefinitionContext.rebinds?
+lib/rigor/effects/definition_lines.rb:
+  computes: the line a method key's def is written at, in the file the key was traced to
+  producers:
+  - Rigor::Effects::DefinitionLines#walk
+lib/rigor/effects/scanner.rb:
+  computes: the effect units a file defines, keyed Class#m or Class.m, and their superclasses
+  producers:
+  - Rigor::Effects::Scanner
+  - Rigor::Effects::Scanner#declaration?
+  - Rigor::Effects::Scanner#record_declaration
+  - Rigor::Effects::Scanner#walk
+  - Rigor::Effects::Scanner#walk_namespace
+lib/rigor/effects/visibility.rb:
+  computes: the visibility region a statement list's bare and argument visibility calls set
+  producers:
+  - Rigor::Effects::Visibility
+  - Rigor::Effects::Visibility#apply_targets
+  - Rigor::Effects::Visibility#region_after
+lib/rigor/environment/missing_gem_constant_index.rb:
+  computes: the top-level constant names an RBS-less gem declares
+  producers:
+  - Rigor::Environment::MissingGemConstantIndex#top_level_root_constants
+lib/rigor/environment/rbs_loader.rb:
+  computes: the visibility of each member an RBS declaration lists
+  producers:
+  - Rigor::Environment::RbsLoader.each_declared_member
+  - Rigor::Environment::RbsLoader.member_visibility
+lib/rigor/inference/builtins/array_catalog.rb:
+  computes: the Array method catalog; names :prepend as the Array or String mutator, not the mixin keyword
+  producers:
+  - Rigor::Inference::Builtins
+lib/rigor/inference/builtins/string_catalog.rb:
+  computes: the String method catalog; names :prepend as the Array or String mutator, not the mixin keyword
+  producers:
+  - Rigor::Inference::Builtins
+lib/rigor/inference/captured_locals.rb:
+  computes: the outer locals a block body can rebind
+  producers:
+  - Rigor::Inference::CapturedLocals#hard_scope_entered?
+lib/rigor/inference/content_join.rb:
+  computes: the Array calls that add content to a receiver; names :prepend as the Array or String mutator, not the mixin keyword
+  producers:
+  - Rigor::Inference::ContentJoin
+  - Rigor::Inference::ContentJoin#array_added_elements
+lib/rigor/inference/declaration_walk/traversal.rb:
+  computes: the shared declaration walk that hands each ScopeIndexer collector its self, cref and nesting
+  producers:
+  - Rigor::Inference::DeclarationWalk::Traversal#walk
+lib/rigor/inference/expression_typer.rb:
+  computes: the type a class or module expression evaluates to, and the barrier around a re-typed callee body
+  producers:
+  - Rigor::Inference::ExpressionTyper
+  - Rigor::Inference::ExpressionTyper#untraced_type_of
+  - Rigor::Inference::ExpressionTyper#yield_reachable?
+lib/rigor/inference/global_write_census.rb:
+  computes: the global write census (aliases, answer-method defines, top-level mixins)
+  producers:
+  - Rigor::Inference::GlobalWriteCensus
+  - Rigor::Inference::GlobalWriteCensus#walk
+  - Rigor::Inference::GlobalWriteCensus::Collector#visit_call
+lib/rigor/inference/guard_rebinding.rb:
+  computes: where a guard's narrowing of a global or constant stops holding
+  producers:
+  - Rigor::Inference::GuardRebinding::ScanScope
+  - Rigor::Inference::GuardRebinding::ScanScope#collect_local_writes
+lib/rigor/inference/jump_targets.rb:
+  computes: the break and next nodes that target a construct
+  producers:
+  - Rigor::Inference::JumpTargets
+  - Rigor::Inference::JumpTargets#boundary?
+lib/rigor/inference/last_line/self_evidence.rb:
+  computes: what a file shows about the self its implicit-self gets and readline readers run with
+  producers:
+  - Rigor::Inference::LastLine::SelfEvidence
+  - Rigor::Inference::LastLine::SelfEvidence::Scan#classify
+  - Rigor::Inference::LastLine::SelfEvidence::Scan#def_context
+  - Rigor::Inference::LastLine::SelfEvidence::Scan#mixin
+  - Rigor::Inference::LastLine::SelfEvidence::Scan#visit
+  - Rigor::Inference::LastLine::SelfEvidence::Scan#visit_declaration
+lib/rigor/inference/match_rebinding.rb:
+  computes: which code may rebind the regex match globals
+  producers:
+  - Rigor::Inference::MatchRebinding
+  - Rigor::Inference::MatchRebinding#broad_may_match?
+  - Rigor::Inference::MatchRebinding#hands_out_slot?
+  - Rigor::Inference::MatchRebinding#makes_closure?
+  - Rigor::Inference::MatchRebinding#operand_may_match?
+  - Rigor::Inference::MatchRebinding#scan
+  - Rigor::Inference::MatchRebinding#value_may_rebind?
+lib/rigor/inference/method_dispatcher/member_shape_projection.rb:
+  computes: whether a Data or Struct member reader is redefined in the class body
+  producers:
+  - Rigor::Inference::MethodDispatcher::MemberShapeProjection#reader_scope_boundary?
+lib/rigor/inference/method_dispatcher/rbs_dispatch.rb:
+  computes: whether an RBS-declared method is private
+  producers:
+  - Rigor::Inference::MethodDispatcher::RbsDispatch.method_private?
+lib/rigor/inference/method_dispatcher/self_substitute.rb:
+  computes: the Array calls that keep a receiver's type arguments; names :prepend as the Array or String mutator, not the mixin keyword
+  producers:
+  - Rigor::Inference::MethodDispatcher::SelfSubstitute
+  - Rigor::Inference::MethodDispatcher::SelfSubstitute#preserves_type_args?
+lib/rigor/inference/module_function_state.rb:
+  computes: what a module_function call does to the defs around it, for each of its four readers
+  producers:
+  - Rigor::Inference::ModuleFunctionState#call?
+  - Rigor::Inference::ModuleFunctionState#prescan_deferred
+lib/rigor/inference/mutation_widening.rb:
+  computes: the Array and Hash mutators that widen a receiver; names :prepend as the Array or String mutator, not the mixin keyword
+  producers:
+  - Rigor::Inference::MutationWidening
+  - Rigor::Inference::MutationWidening#mutation_carrier?
+  - Rigor::Inference::MutationWidening#widen_difference
+  - Rigor::Inference::MutationWidening#widen_for_mutator
+lib/rigor/inference/operand_effects.rb:
+  computes: whether an operand holds a write or a jump the scope after it must see
+  producers:
+  - Rigor::Inference::OperandEffects
+  - Rigor::Inference::OperandEffects#collect_read
+  - Rigor::Inference::OperandEffects#collect_written
+  - Rigor::Inference::OperandEffects#effect?
+lib/rigor/inference/project_patched_scanner.rb:
+  computes: the def and def self methods each class declares in the pre_eval files (ADR-17)
+  producers:
+  - Rigor::Inference::ProjectPatchedScanner#walk_node
+lib/rigor/inference/receiver_blind_block.rb:
+  computes: whether a block can see the hash an in-place transform is rewriting
+  producers:
+  - Rigor::Inference::ReceiverBlindBlock
+  - Rigor::Inference::ReceiverBlindBlock#node_blind?
+lib/rigor/inference/refinement_mutation.rb:
+  computes: the String mutators that keep a refinement's witness; names :prepend as the Array or String mutator, not the mixin keyword
+  producers:
+  - Rigor::Inference::RefinementMutation
+  - Rigor::Inference::RefinementMutation#preserves_witness?
+lib/rigor/inference/scope_indexer.rb:
+  computes: the per-file and project discovery tables (methods, def nodes, visibilities, mixins, constants, ranges)
+  producers:
+  - Rigor::Inference::ScopeIndexer
+  - Rigor::Inference::ScopeIndexer#apply_visibility_call
+  - Rigor::Inference::ScopeIndexer#build_discovered_method_visibilities
+  - Rigor::Inference::ScopeIndexer#collect_class_alias_map
+  - Rigor::Inference::ScopeIndexer#collect_class_body_ivar_writes
+  - Rigor::Inference::ScopeIndexer#collect_class_decls
+  - Rigor::Inference::ScopeIndexer#collect_class_method_defs
+  - Rigor::Inference::ScopeIndexer#collect_declared_class_decl
+  - Rigor::Inference::ScopeIndexer#collect_declared_constant_names
+  - Rigor::Inference::ScopeIndexer#collect_explicit_return_ivars
+  - Rigor::Inference::ScopeIndexer#collect_mixin_names
+  - Rigor::Inference::ScopeIndexer#declared_ancestor_names
+  - Rigor::Inference::ScopeIndexer#detect_read_before_write
+  - Rigor::Inference::ScopeIndexer#each_refinement_def
+  - Rigor::Inference::ScopeIndexer#gather_cvar_writes
+  - Rigor::Inference::ScopeIndexer#gather_global_writes
+  - Rigor::Inference::ScopeIndexer#gather_ivar_writes
+  - Rigor::Inference::ScopeIndexer#mixin_call?
+  - Rigor::Inference::ScopeIndexer#mixin_call_recorded?
+  - Rigor::Inference::ScopeIndexer#mixin_names_for
+  - Rigor::Inference::ScopeIndexer#mixin_tables
+  - Rigor::Inference::ScopeIndexer#record_declaration_ancestry
+  - Rigor::Inference::ScopeIndexer#record_declaration_facts
+  - Rigor::Inference::ScopeIndexer#record_declarations
+  - Rigor::Inference::ScopeIndexer#record_def_body_evidence
+  - Rigor::Inference::ScopeIndexer#record_extend_call
+  - Rigor::Inference::ScopeIndexer#record_mixin_call
+  - Rigor::Inference::ScopeIndexer#record_self_surface_evidence
+  - Rigor::Inference::ScopeIndexer#surface_mixin_call?
+  - Rigor::Inference::ScopeIndexer#walk_class_cvars
+  - Rigor::Inference::ScopeIndexer#walk_class_extends
+  - Rigor::Inference::ScopeIndexer#walk_class_includes
+  - Rigor::Inference::ScopeIndexer#walk_class_ivars
+  - Rigor::Inference::ScopeIndexer#walk_class_superclasses
+  - Rigor::Inference::ScopeIndexer#walk_constant_write_census
+  - Rigor::Inference::ScopeIndexer#walk_constant_writes
+  - Rigor::Inference::ScopeIndexer#walk_data_member_layouts
+  - Rigor::Inference::ScopeIndexer#walk_def_nestings
+  - Rigor::Inference::ScopeIndexer#walk_deferred_lexical_body
+  - Rigor::Inference::ScopeIndexer#walk_deferred_ranges
+  - Rigor::Inference::ScopeIndexer#walk_eval_visibilities
+  - Rigor::Inference::ScopeIndexer#walk_layout_declaration
+  - Rigor::Inference::ScopeIndexer#walk_literal_receiver_mutations
+  - Rigor::Inference::ScopeIndexer#walk_method_visibilities
+  - Rigor::Inference::ScopeIndexer#walk_methods_and_def_nodes
+  - Rigor::Inference::ScopeIndexer#walk_published_constant_ivars
+  - Rigor::Inference::ScopeIndexer#walk_singleton_def_nodes
+  - Rigor::Inference::ScopeIndexer#walk_struct_member_layouts
+  - Rigor::Inference::ScopeIndexer#walk_visibility_singleton_class
+  - Rigor::Inference::ScopeIndexer#write_mixin_targets
+lib/rigor/inference/scope_indexer/class_cvars_collector.rb:
+  computes: the per-class class-variable writes, as a collector on the shared declaration walk
+  producers:
+  - Rigor::Inference::ScopeIndexer::ClassCvarsCollector
+lib/rigor/inference/scope_indexer/def_nestings_collector.rb:
+  computes: the Module.nesting of each def, as a collector on the shared declaration walk
+  producers:
+  - Rigor::Inference::ScopeIndexer::DefNestingsCollector
+lib/rigor/inference/scope_indexer/member_layouts_collector.rb:
+  computes: each Data and Struct class's member layout
+  producers:
+  - Rigor::Inference::ScopeIndexer::MemberLayoutsCollector
+  - Rigor::Inference::ScopeIndexer::MemberLayoutsCollector#on_declaration
+lib/rigor/inference/scope_indexer/superclasses_collector.rb:
+  computes: each class's superclass and header nesting, as a collector on the shared declaration walk
+  producers:
+  - Rigor::Inference::ScopeIndexer::SuperclassesCollector
+lib/rigor/inference/statement_evaluator.rb:
+  computes: the scope a class, module or class << self body is evaluated in
+  producers:
+  - Rigor::Inference::StatementEvaluator
+  - Rigor::Inference::StatementEvaluator#eval_class_body
+  - Rigor::Inference::StatementEvaluator#evaluate
+  - Rigor::Inference::StatementEvaluator#forget_last_line_first?
+  - Rigor::Inference::StatementEvaluator#same_scope_local?
+  - Rigor::Inference::StatementEvaluator#scope_boundary?
+  - Rigor::Inference::StatementEvaluator#thread_operand
+  - Rigor::Inference::StatementEvaluator#walk_primary_frame
+lib/rigor/inference/string_mutation.rb:
+  computes: the String mutators that widen a receiver; names :prepend as the Array or String mutator, not the mixin keyword
+  producers:
+  - Rigor::Inference::StringMutation
+  - Rigor::Inference::StringMutation#may_empty?
+  - Rigor::Inference::StringMutation#widen_constant
+lib/rigor/inference/struct_fold_safety.rb:
+  computes: the Struct locals that are never mutated, aliased or escaped
+  producers:
+  - Rigor::Inference::StructFoldSafety#scope_boundary?
+lib/rigor/inference/synthetic_method_scanner.rb:
+  computes: the synthetic methods plugin heredoc-template DSL calls define on each class (ADR-16)
+  producers:
+  - Rigor::Inference::SyntheticMethodScanner#body_extends?
+  - Rigor::Inference::SyntheticMethodScanner#class_name_from
+  - Rigor::Inference::SyntheticMethodScanner#collect_concern_re_targeted_entries
+  - Rigor::Inference::SyntheticMethodScanner#concern_module_body?
+  - Rigor::Inference::SyntheticMethodScanner#walk_class_bodies
+  - Rigor::Inference::SyntheticMethodScanner#walk_class_decls
+  - Rigor::Inference::SyntheticMethodScanner#walk_classes
+  - Rigor::Inference::SyntheticMethodScanner#walk_module_decls
+lib/rigor/language_server/document_symbol_provider.rb:
+  computes: the editor outline of classes, modules and defs
+  producers:
+  - Rigor::LanguageServer::DocumentSymbolProvider#each_decl
+lib/rigor/language_server/folding_range_provider.rb:
+  computes: the editor's folding ranges
+  producers:
+  - Rigor::LanguageServer::FoldingRangeProvider#walk
+lib/rigor/plugin/node_context.rb:
+  computes: the enclosing class or module a node rule sees (ADR-37)
+  producers:
+  - Rigor::Plugin::NodeContext#enclosing_module
+lib/rigor/sig_gen/generator.rb:
+  computes: the defs, attribute readers and ivar observations sig-gen emits per qualified class
+  producers:
+  - Rigor::SigGen::Generator#collect_init_ivar_obs
+  - Rigor::SigGen::Generator#descend_into_namespace?
+  - Rigor::SigGen::Generator#record_superclass
+  - Rigor::SigGen::Generator#scan_ivar_param_assignments
+  - Rigor::SigGen::Generator#visibility_excludes?
+  - Rigor::SigGen::Generator#walk_attr_calls
+  - Rigor::SigGen::Generator#walk_defs
+lib/rigor/sig_gen/observation_collector.rb:
+  computes: the qualified class of each observed call site's enclosing declaration
+  producers:
+  - Rigor::SigGen::ObservationCollector#walk_class_decls
+plugins/rigor-actioncable/lib/rigor/plugin/actioncable/channel_discoverer.rb:
+  computes: the ActionCable channel classes and their lexical paths
+  producers:
+  - Rigor::Plugin::Actioncable::ChannelDiscoverer#walk_for_channels
+plugins/rigor-actionmailer/lib/rigor/plugin/actionmailer/mailer_discoverer.rb:
+  computes: the mailer classes and the actions their modules contribute
+  producers:
+  - Rigor::Plugin::Actionmailer::MailerDiscoverer#collect_action_defs
+  - Rigor::Plugin::Actionmailer::MailerDiscoverer#collect_includes
+  - Rigor::Plugin::Actionmailer::MailerDiscoverer#collect_module_actions
+  - Rigor::Plugin::Actionmailer::MailerDiscoverer#collect_visibility_and_callbacks
+  - Rigor::Plugin::Actionmailer::MailerDiscoverer#next_visibility
+  - Rigor::Plugin::Actionmailer::MailerDiscoverer#walk_for_mailers
+plugins/rigor-actionpack/lib/rigor/plugin/actionpack/analyzer.rb:
+  computes: the name of the controller enclosing a node
+  producers:
+  - Rigor::Plugin::Actionpack::Analyzer#enclosing_controller_name
+plugins/rigor-actionpack/lib/rigor/plugin/actionpack/controller_discoverer.rb:
+  computes: the controller classes, their parents and their included modules
+  producers:
+  - Rigor::Plugin::Actionpack::ControllerDiscoverer#collect_include_targets
+  - Rigor::Plugin::Actionpack::ControllerDiscoverer#parent_name_for
+  - Rigor::Plugin::Actionpack::ControllerDiscoverer#walk_declarations
+plugins/rigor-actionpack/lib/rigor/plugin/actionpack/controller_scan.rb:
+  computes: each controller class with its namespace
+  producers:
+  - Rigor::Plugin::Actionpack::ControllerScan#each_controller
+plugins/rigor-active-model-serializers/lib/rigor/plugin/active_model_serializers/serializer_discoverer.rb:
+  computes: the serializer classes whose ancestry closes back to a configured root
+  producers:
+  - Rigor::Plugin::ActiveModelSerializers::SerializerDiscoverer
+  - Rigor::Plugin::ActiveModelSerializers::SerializerDiscoverer#collect_from
+  - Rigor::Plugin::ActiveModelSerializers::SerializerDiscoverer#walk
+plugins/rigor-activejob/lib/rigor/plugin/activejob/job_discoverer.rb:
+  computes: the job classes and their lexical paths
+  producers:
+  - Rigor::Plugin::Activejob::JobDiscoverer#walk_for_jobs
+plugins/rigor-activerecord/lib/rigor/plugin/activerecord/model_discoverer.rb:
+  computes: the model classes, their table names and the table-name decorators, including its own module_function reading
+  producers:
+  - Rigor::Plugin::Activerecord::ModelDiscoverer#abstract_class?
+  - Rigor::Plugin::Activerecord::ModelDiscoverer#include_call_targets
+  - Rigor::Plugin::Activerecord::ModelDiscoverer#singleton_class_defines_table_name?
+  - Rigor::Plugin::Activerecord::ModelDiscoverer#table_name_decorators
+  - Rigor::Plugin::Activerecord::ModelDiscoverer#walk_for_classes
+  - Rigor::Plugin::Activerecord::ModelDiscoverer#walk_for_outside_decorators
+plugins/rigor-activestorage/lib/rigor/plugin/activestorage/attachment_discoverer.rb:
+  computes: the attachment declarations of each model class
+  producers:
+  - Rigor::Plugin::Activestorage::AttachmentDiscoverer#walk
+plugins/rigor-dry-schema/lib/rigor/plugin/dry_schema/schema_scanner.rb:
+  computes: the schema definitions under each qualified prefix
+  producers:
+  - Rigor::Plugin::DrySchema::SchemaScanner#collect_schemas
+plugins/rigor-dry-types/lib/rigor/plugin/dry_types/alias_scanner.rb:
+  computes: the alias table of each module that includes Dry.Types()
+  producers:
+  - Rigor::Plugin::DryTypes::AliasScanner#collect_alias_modules
+  - Rigor::Plugin::DryTypes::AliasScanner#include_call_targeting_dry_types?
+plugins/rigor-dry-validation/lib/rigor/plugin/dry_validation/contract_scanner.rb:
+  computes: the contract classes, their params blocks and their rule issues
+  producers:
+  - Rigor::Plugin::DryValidation::ContractScanner#collect_contracts
+  - Rigor::Plugin::DryValidation::ContractScanner#collect_params_blocks
+  - Rigor::Plugin::DryValidation::ContractScanner#walk_for_rule_issues
+plugins/rigor-ffi/lib/rigor/plugin/ffi.rb:
+  computes: the node rule that checks FFI struct classes
+  producers:
+  - Rigor::Plugin::FFI
+plugins/rigor-ffi/lib/rigor/plugin/ffi/analyzer.rb:
+  computes: the ffx diagnostics for one class node
+  producers:
+  - Rigor::Plugin::FFI::Analyzer#ffx_diagnostics_for_class
+plugins/rigor-ffi/lib/rigor/plugin/ffi/discoverer.rb:
+  computes: the FFI catalog (bindings, libraries, structs, typedefs, enums, callbacks) per enclosing module
+  producers:
+  - Rigor::Plugin::FFI::Discoverer#discover
+  - Rigor::Plugin::FFI::Discoverer#handle_call
+  - Rigor::Plugin::FFI::Discoverer#walk_tree
+plugins/rigor-graphql/lib/rigor/plugin/graphql/type_scanner.rb:
+  computes: the GraphQL object, enum, input-object and mutation classes and their field and argument tables
+  producers:
+  - Rigor::Plugin::Graphql::TypeScanner#collect_definitions
+plugins/rigor-hanami/lib/rigor/plugin/hanami.rb:
+  computes: the node rule that checks the Hanami::Action protocol
+  producers:
+  - Rigor::Plugin::Hanami
+plugins/rigor-hanami/lib/rigor/plugin/hanami/action_checker.rb:
+  computes: the defs a class body declares directly
+  producers:
+  - Rigor::Plugin::Hanami::ActionChecker#collect_direct_defs
+plugins/rigor-pundit/lib/rigor/plugin/pundit/policy_discoverer.rb:
+  computes: the policy classes and their lexical paths
+  producers:
+  - Rigor::Plugin::Pundit::PolicyDiscoverer#walk_for_policies
+plugins/rigor-rails-routes/lib/rigor/plugin/rails_routes/grape_api_discoverer.rb:
+  computes: the Grape API classes and their superclasses
+  producers:
+  - Rigor::Plugin::RailsRoutes::GrapeApiDiscoverer#walk
+plugins/rigor-rails-routes/lib/rigor/plugin/rails_routes/helper_discoverer.rb:
+  computes: the _path and _url helper names the helper modules define
+  producers:
+  - Rigor::Plugin::RailsRoutes::HelperDiscoverer::ModuleBodyWalker#visit_program_children
+  - Rigor::Plugin::RailsRoutes::HelperDiscoverer::ModuleBodyWalker#visit_statements
+plugins/rigor-sidekiq/lib/rigor/plugin/sidekiq/worker_discoverer.rb:
+  computes: the Sidekiq worker classes and their lexical paths
+  producers:
+  - Rigor::Plugin::Sidekiq::WorkerDiscoverer#includes_marker_module?
+  - Rigor::Plugin::Sidekiq::WorkerDiscoverer#walk_for_workers
+plugins/rigor-sorbet/lib/rigor/plugin/sorbet.rb:
+  computes: the include and extend chain a sig lookup walks, read off the Sorbet catalog
+  producers:
+  - Rigor::Plugin::Sorbet#chain_lookup
+  - Rigor::Plugin::Sorbet#implicit_self_lookup
+  - Rigor::Plugin::Sorbet#instance_chain_lookup
+  - Rigor::Plugin::Sorbet#lookup_signature
+plugins/rigor-sorbet/lib/rigor/plugin/sorbet/catalog.rb:
+  computes: the mixins the Sorbet catalog records per class
+  producers:
+  - Rigor::Plugin::Sorbet::Catalog#mixins_for
+plugins/rigor-sorbet/lib/rigor/plugin/sorbet/catalog_walker.rb:
+  computes: the Sorbet sig catalog per class and side
+  producers:
+  - Rigor::Plugin::Sorbet::CatalogWalker
+  - Rigor::Plugin::Sorbet::CatalogWalker#mixin_call?
+  - Rigor::Plugin::Sorbet::CatalogWalker#record_mixin_call
+  - Rigor::Plugin::Sorbet::CatalogWalker#visibility_wrapped_def
+  - Rigor::Plugin::Sorbet::CatalogWalker#walk_node

@@ -59,16 +59,16 @@ module Rigor
       private_constant :EMPTY_NODE_TABLE, :EMPTY_TABLE, :EMPTY_NAME_SET
 
       # [#1507](https://github.com/rigortype/rigor/issues/1507) — the kind of fact each member holds, which decides
-      # what a reader may conclude from an entry and which gate covers the member. A forthcoming ADR sets the policy
-      # per class. Until then this is the inventory, and `spec/rigor/declaration_facts/member_classes_spec.rb` fails
-      # on a member that is unclassified or classified twice. Each reason describes the table as the code builds it
-      # today.
+      # what a reader may conclude from an entry and which gate covers the member (ADR-119 WD4, proposed). Each
+      # reason describes the table as the code builds it today. `spec/rigor/declaration_facts/member_classes_spec.rb`
+      # fails on a member that is unclassified or classified twice, and checks each class's shape on an index built
+      # from a fixture project, so a member filed under the wrong class fails too.
       #
       # - `:set_valued` — names, edges, files or rows whose presence is the fact. A reader asks whether an entry is
       #   there.
-      # - `:single_valued` — one value per key, where disagreeing contributions must decline rather than pick one.
+      # - `:single_valued` — one value per key, which readers use; disagreeing contributions fold by a fixed rule.
       # - `:typed` — the values are types, which already carry uncertainty in the type lattice.
-      # - `:syntactic` — read straight off the parse of one file, which is their reference.
+      # - `:syntactic` — read straight off the parse of the analysed file, which is their reference.
       # - `:run_state` — the run's own state, not a fact about the program.
       MEMBER_CLASSES = {
         set_valued: {
@@ -80,8 +80,6 @@ module Rigor
           discovered_prepends: "the modules each class prepends",
           discovered_extends: "the modules each singleton mixes in; the module itself for module_function",
           discovered_class_sources: "the files that declare each class, reopenings included",
-          discovered_def_sources: "the instance methods the project defines, with the first-seen path:line",
-          discovered_singleton_def_sources: "the singleton methods the project defines, with the first-seen path:line",
           discovered_deferred_ranges: "each file's def and block ranges; def rows add owner and module_function side",
           constant_sources: "the files that write each constant",
           constant_writers: "the constant names some write binds, by last segment",
@@ -89,12 +87,13 @@ module Rigor
           published_constant_names: "the last segments of the constants the project publishes",
           local_constant_names: "the last segments of the constants the analysed file assigns",
           published_constant_alias_names: "the file's constants copied straight from a published one",
-          published_constant_ivars: "the ivars each class seeds from a published constant",
-          patched_line_readers: "the gets / readline names the file defines through the define_method family"
+          published_constant_ivars: "the ivars each class seeds from a published constant"
         }.freeze,
         single_valued: {
           discovered_def_nodes: "the def node each instance method resolves to",
           discovered_singleton_def_nodes: "the def node each singleton method resolves to",
+          discovered_def_sources: "the first-seen path:line of each instance method, which readers use",
+          discovered_singleton_def_sources: "the first-seen path:line of each singleton method, which readers use",
           discovered_method_visibilities: "each method's visibility",
           discovered_parameter_envelopes: "each method's parameter shape, opaque when contributions disagree",
           discovered_superclasses: "each class's superclass as written",
@@ -113,9 +112,10 @@ module Rigor
         }.freeze,
         syntactic: {
           discovered_def_nestings: "the Module.nesting each def is written in, keyed by node identity",
+          patched_line_readers: "the gets / readline names the file defines through the define_method family",
           clears_last_status: "whether the analysed file holds a call that may set $? to nil",
           defines_case_equality: "whether the analysed file holds a define_method naming ===",
-          implicit_self_evidence: "where the analysed file's implicit-self readers sit, built lazily from its tree"
+          implicit_self_evidence: "where the file's implicit-self readers sit; built lazily from its tree, never seeded"
         }.freeze,
         run_state: {
           run_generation: "the identity token of the current run"

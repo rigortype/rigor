@@ -343,6 +343,85 @@ RSpec.describe Rigor::Analysis::IncrementalRunSlot do
     end
   end
 
+  # #1536's source-RBS gate decides a recheck's closure; the slot does not lean on it. An analysed file's row
+  # declines for any edit, the gate's verdict aside, so a run under an untrusted gate still writes a slot. What the
+  # slot does depend on is the session's content digests, and a file the gate unbinds has none.
+  describe "under the source-RBS gate" do
+    let(:synthesizer) do
+      lambda do |path|
+        source = File.read(path)
+        members = source.scan(/^\s*# slot-rbs: (.+)$/).flatten
+        class_name = source[/^class (\w+)/, 1]
+        next nil if members.empty? || class_name.nil?
+
+        "class #{class_name}\n#{members.map { |member| "  #{member}\n" }.join}end\n"
+      end
+    end
+
+    # A synthesizer that exists only after `#prepare`, which the gate cannot see and so distrusts.
+    let(:prepare_built_plugin) do
+      built = synthesizer
+      Class.new(Rigor::Plugin::Base) do
+        manifest(id: "slot-prepare-synth", version: "0.1.0")
+
+        define_method(:prepare) do |_services|
+          @prepared_manifest = Rigor::Plugin::Manifest.new(id: "slot-prepare-synth", version: "0.1.0",
+                                                           source_rbs_synthesizer: built)
+        end
+
+        def manifest
+          @prepared_manifest || self.class.manifest
+        end
+      end
+    end
+
+    def synth_config
+      configuration("plugins" => ["rigor-slot-prepare-synth"])
+    end
+
+    def write_greeter(returns)
+      write("lib/greeter.rb",
+            "class Greeter\n  # slot-rbs: def greet: () -> #{returns}\n  def greet\n    x\n  end\nend\n")
+      write("lib/caller.rb", "class Caller\n  def go\n    Rigor.dump_type(Greeter.new.greet)\n  end\nend\n")
+    end
+
+    def dumped(diagnostics)
+      rows(diagnostics).filter_map { |row| row["message"] if row["path"] == "lib/caller.rb" }
+    end
+
+    it "writes a slot under an untrusted gate, declines for a synthesised-RBS edit, and serves the cold answer after" do
+      stub_const("SlotPrepareSynthPlugin", prepare_built_plugin)
+      write_greeter("String")
+      incremental_run(synth_config, plugin: prepare_built_plugin)
+      fingerprint = Rigor::Cache::IncrementalSnapshot.fingerprint(configuration: synth_config, roots: ["lib"])
+      bundles = Rigor::Cache::IncrementalSnapshot.new(root: cache_root).load(fingerprint: fingerprint).seed_bundles
+      expect(bundles.values.map { |bundle| bundle[:source_rbs_digest] }).to all(be_nil) # the gate is untrusted
+      expect(dumped(served(synth_config).result.diagnostics).join).to include("String")
+
+      write_greeter("Integer")
+      expect(served(synth_config)).to be_nil
+      diagnostics, = incremental_run(synth_config, plugin: prepare_built_plugin)
+      expect(rows(diagnostics)).to eq(rows(cold(synth_config, plugin: prepare_built_plugin)))
+      expect(dumped(diagnostics).join).to include("Integer")
+      expect(rows(served(synth_config).result.diagnostics)).to eq(rows(diagnostics))
+    end
+
+    it "writes no slot when the session forgot a file's digest because the file was saved mid-run" do
+      write_project
+      session = Rigor::Analysis::IncrementalSession.new(
+        configuration: configuration, cache_store: Rigor::Cache::Store.new(root: cache_root)
+      )
+      allow(session.send(:source_rbs_gate)).to receive(:unbound).and_return(Set["lib/c.rb"])
+      guarded_run_incremental(
+        session,
+        snapshot: Rigor::Cache::IncrementalSnapshot.new(root: cache_root),
+        fingerprint: Rigor::Cache::IncrementalSnapshot.fingerprint(configuration: configuration, roots: ["lib"])
+      )
+      expect(slot_entries).to be_empty
+      expect(served).to be_nil
+    end
+  end
+
   describe "the chain a recheck carries forward" do
     before do
       write_project

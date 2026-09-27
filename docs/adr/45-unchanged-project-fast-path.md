@@ -327,9 +327,13 @@ read from a thread the plugin started).
 
 **What is neither written nor served.** No slot is written for an editor
 buffer (never persisted), a pool run, effect collection (its `effects:`
-block is outside the key, and its envelope rows are #428's decline), or an
+block is outside the key, and its envelope rows are #428's decline), an
 opaque plugin, whose next full-path run is cold rather than the warm run
-the probe stands in for. The CLI asks the probe only for a plain
+the probe stands in for, or a run after which the session holds no digest
+for some analysed file: #1536's source-RBS gate forgets the digest of a
+file saved after the closure was decided, and no row could then say what
+its readers were computed from. The slot does not depend on that gate's
+closure decision otherwise, so a run under an untrusted gate is written. The CLI asks the probe only for a plain
 `--incremental`: not `--no-cache`, `--verify-incremental`, a worker pool,
 `--coverage`, `--cache-stats`, a `RIGOR_*_TRACE` probe, or `--explain`,
 which the session does not honour yet (#1533) and so writes no slot keyed

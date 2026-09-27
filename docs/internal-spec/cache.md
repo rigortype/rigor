@@ -1224,9 +1224,13 @@ guarantee, is [ADR-45](../adr/45-unchanged-project-fast-path.md) WD2; this is th
   the one it restored; the fast path then stays off until the next full run starts a
   fresh chain. When the path set moved it discards the previous entry after writing its own.
 - **Not written** for an editor buffer, a pool run, a project with effect collection
-  on, a run with an opaque plugin, a project whose plugins claim template globs, or a
-  run in which a boundary row changed during the per-file loop without being credited
-  to a file. **Not served** under `--no-cache`, `--verify-incremental`, `--explain`,
+  on, a run with an opaque plugin, a project whose plugins claim template globs, a run
+  in which a boundary row changed during the per-file loop without being credited to a
+  file, or a run after which the session holds no content digest for some analysed file
+  — the #1536 source-RBS gate forgets the digest of a file saved after the closure was
+  decided (`forget_unbound_digests`), and no row could then say what that file's readers
+  were computed from. A run under an untrusted gate is written: the gate decides the
+  closure, and an analysed file's row declines for any edit whatever it decided. **Not served** under `--no-cache`, `--verify-incremental`, `--explain`,
   a worker pool, `--coverage`, `--cache-stats`, a `RIGOR_*_TRACE` probe, or effect
   collection.
 

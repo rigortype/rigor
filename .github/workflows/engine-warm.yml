@@ -1,0 +1,103 @@
+name: Engine warm journeys
+
+# The warm-cache journeys of #1507 on Mastodon at the pinned tag: how long
+# `rigor check` takes to answer with a warm cache when nothing changed (null),
+# after editing a file nothing depends on (leaf), and after editing one many
+# files depend on (hub), for the default run-result cache and for
+# `--incremental`. `tool/engine_warm_ab.rb` runs every step as a fresh process,
+# checks each warm answer against a `--no-cache` run of the same tree, and with
+# `base` set, alternates two engines in ABBA order on separate project copies.
+#
+# Dispatch it from the Actions tab or with
+#   gh workflow run engine-warm.yml -f head=master
+# The inputs reach the script through env, never interpolated into it.
+
+on:
+  workflow_dispatch:
+    inputs:
+      head:
+        description: "Engine revision to measure"
+        required: true
+        default: "master"
+      base:
+        description: "Second engine for an A/B (empty for a single engine)"
+        required: false
+        default: ""
+      leaf:
+        description: "A file nothing else depends on"
+        required: false
+        default: "app/controllers/about_controller.rb"
+      hub:
+        description: "A file many others depend on"
+        required: false
+        default: "app/models/account.rb"
+      edit:
+        description: "method (a new empty method in the class) or comment (bytes only)"
+        type: choice
+        options: [method, comment]
+        default: method
+      modes:
+        description: "Comma-separated: default, incremental"
+        required: false
+        default: "default,incremental"
+      reps:
+        description: "Timed runs per step"
+        required: false
+        default: "3"
+
+permissions:
+  contents: read
+
+jobs:
+  warm:
+    name: Engine warm journeys
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          submodules: false
+          fetch-depth: 0
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "4.0"
+          bundler-cache: true
+
+      - name: Clone Mastodon (sparse, pinned tag)
+        run: |
+          tag=$(tr -d '[:space:]' < data/oss-sweep/mastodon-sha.txt)
+          echo "MASTODON_TAG=$tag" >> "$GITHUB_ENV"
+          git clone --depth 1 --filter=blob:none --sparse --branch "$tag" \
+            https://github.com/mastodon/mastodon.git /tmp/mastodon
+          git -C /tmp/mastodon sparse-checkout set app lib config
+          cp data/oss-sweep/mastodon-rigor.yml /tmp/mastodon/.rigor.yml
+
+      - name: Run the journeys
+        env:
+          HEAD: ${{ inputs.head }}
+          BASE: ${{ inputs.base }}
+          LEAF: ${{ inputs.leaf }}
+          HUB: ${{ inputs.hub }}
+          EDIT: ${{ inputs.edit }}
+          MODES: ${{ inputs.modes }}
+          REPS: ${{ inputs.reps }}
+        run: |
+          resolve() { git rev-parse --verify --quiet "$1^{commit}" || git rev-parse --verify "origin/$1^{commit}"; }
+          args=(--project /tmp/mastodon --project-label "Mastodon $MASTODON_TAG" --paths "app lib config"
+                --leaf "$LEAF" --hub "$HUB" --edit "$EDIT" --modes "$MODES" --reps "$REPS"
+                --head "$(resolve "$HEAD")")
+          if [ -n "$BASE" ]; then args+=(--base "$(resolve "$BASE")"); fi
+          bundle exec ruby tool/engine_warm_ab.rb "${args[@]}" \
+            --summary "$GITHUB_STEP_SUMMARY" --json warm-journeys.json
+
+      - name: Upload the samples
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: engine-warm-journeys-${{ github.run_id }}
+          path: warm-journeys.json
+          if-no-files-found: ignore
+          retention-days: 30

@@ -154,3 +154,24 @@ and the report warns when the arms ended in different YJIT states.
 ```sh
 gh workflow run engine-wall.yml -f base=v0.3.9 -f head=master -f corpus=v0.3.9
 ```
+
+## Warm journeys on Mastodon
+
+The dispatched "Engine warm journeys" workflow
+(`.github/workflows/engine-warm.yml`, `tool/engine_warm_ab.rb`) measures how
+long `rigor check` answers with a warm cache on Mastodon at the pinned tag, for
+the default run-result cache and for `--incremental`:
+
+- **null:** nothing changed;
+- **leaf:** a file nothing depends on was edited;
+- **hub:** a file many others depend on was edited.
+
+Every step runs as a fresh process, boot included. The first timed run of each
+scenario is compared with a `--no-cache` run of the same tree: different
+findings fail the tool, and the same findings in another order are reported as
+a note. With `base` set, two engines alternate in ABBA order on separate
+project copies, and the table gives the same separation verdict as the wall A/B.
+
+```sh
+gh workflow run engine-warm.yml -f head=master
+```

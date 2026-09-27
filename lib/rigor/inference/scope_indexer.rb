@@ -30,6 +30,8 @@ require_relative "unknown_store_widening"
 require_relative "declaration_walk/traversal"
 require_relative "scope_indexer/class_cvars_collector"
 require_relative "scope_indexer/superclasses_collector"
+require_relative "scope_indexer/def_nestings_collector"
+require_relative "scope_indexer/member_layouts_collector"
 
 module Rigor
   module Inference
@@ -224,9 +226,11 @@ module Rigor
       # file's own contribution (identical, so the join keeps it), and a reopening in a sibling file must still
       # make a disagreeing name opaque here, which "same-file declarations win" would silently undo.
       def merge_project_method_indexes(seeded_scope, default_scope, root, file_def_nodes, file_envelopes)
-        def_nodes, def_nestings = merge_def_node_tables(default_scope, root, file_def_nodes)
+        # ADR-116 WD5 — the superclass, def-nesting and member-layout tables come from ONE shared walk.
+        walked = declaration_walk_tables(root, default_scope.source_path)
+        def_nodes, def_nestings = merge_def_node_tables(default_scope, walked, file_def_nodes)
         singleton_def_nodes = merge_singleton_def_nodes(default_scope, root)
-        superclasses, header_nestings = merge_ancestry_tables(default_scope, root)
+        superclasses, header_nestings = merge_ancestry_tables(default_scope, walked)
         includes, prepends = merge_mixin_tables(default_scope, root)
         # ADR-35 — per-file visibilities merged OVER the cross-file seed (the current file is authoritative for its own
         # classes; sibling-file ancestors are preserved from the project seed).
@@ -235,7 +239,7 @@ module Rigor
         ) { |_class, cross_file, per_file| cross_file.merge(per_file) }
         # ADR-48 — per-file Data + Struct member layouts merged OVER the cross-file seed (same-file declaration is
         # authoritative).
-        data_member_layouts, struct_member_layouts = merge_member_layouts(default_scope, root)
+        data_member_layouts, struct_member_layouts = merge_member_layouts(default_scope, walked)
 
         # #526 — this file's extends folded against the MERGED instance def-nodes (so `extend M` sees a
         # sibling-file M through the cross-file seed). The project-wide fold in {#finalize_def_index}
@@ -318,22 +322,21 @@ module Rigor
       # The as-written superclass table and its issue #682 header-nesting twin, each merged over the cross-file
       # seed. Returned as a pair for the same reason {#merge_def_node_tables} is: both come from ONE walk of the
       # file, so a caller cannot pair a superclass name with a nesting recorded by a different parse.
-      def merge_ancestry_tables(default_scope, root)
-        file_superclasses, file_header_nestings = build_superclass_tables(root, default_scope.source_path)
-        [default_scope.discovered_superclasses.merge(file_superclasses),
+      def merge_ancestry_tables(default_scope, walked)
+        [default_scope.discovered_superclasses.merge(walked.fetch(:superclasses)),
          merge_header_nestings(default_scope.discovery.discovered_header_nestings.dup,
-                               file_header_nestings).freeze]
+                               walked.fetch(:header_nestings)).freeze]
       end
 
       # The instance-side def-node table and its issue #681 nesting twin, each merged over the cross-file seed.
       # Returned as a pair so the two stay written together: a node the merge keeps must be the same object the
       # nesting table keys, and they are only that if both halves take the same file's walk.
-      def merge_def_node_tables(default_scope, root, file_def_nodes)
+      def merge_def_node_tables(default_scope, walked, file_def_nodes)
         def_nodes = default_scope.discovered_def_nodes.merge(
           file_def_nodes
         ) { |_class, cross_file, per_file| cross_file.merge(per_file) }
         [def_nodes,
-         merge_def_nestings(default_scope.discovery.discovered_def_nestings, build_def_nestings(root))]
+         merge_def_nestings(default_scope.discovery.discovered_def_nestings, walked.fetch(:def_nestings))]
       end
 
       # Issue #681 — the per-file nesting table over the cross-file seed. Both are keyed by node identity, so
@@ -378,10 +381,10 @@ module Rigor
       # ADR-48 — the per-file Data + Struct member-layout tables, each merged OVER the cross-file seed so a same-file
       # declaration wins for its own classes. Returned as a pair to keep {#merge_project_method_indexes} under the
       # method-size budget.
-      def merge_member_layouts(default_scope, root)
+      def merge_member_layouts(default_scope, walked)
         [
-          default_scope.data_member_layouts.merge(build_data_member_layouts(root)),
-          default_scope.struct_member_layouts.merge(build_struct_member_layouts(root))
+          default_scope.data_member_layouts.merge(walked.fetch(:data_member_layouts)),
+          default_scope.struct_member_layouts.merge(walked.fetch(:struct_member_layouts))
         ]
       end
 
@@ -4794,12 +4797,27 @@ module Rigor
       # CompactBase` calls it, and the bare `Post` inside `make` names `::Post` — the constant the compact
       # declaration that OWNS the body reaches, not the one the receiver's spelling would suggest.
       #
-      # A separate descent rather than a leaf of the fused methods/def-nodes walk: it needs the CHAIN
-      # threaded, which the fused walk does not carry (a singleton-class body and a `Class.new` block body
-      # both push a qualified prefix while pushing no `Module.nesting` entry), and threading a second value
-      # through that walk and its anonymous-block twin exceeds their parameter budget. It stops at every
-      # `Prism::DefNode`, so a def-dense file pays only the declaration spine.
+      # Not a leaf of the fused methods/def-nodes walk: it needs the CHAIN threaded, which the fused walk does
+      # not carry (a singleton-class body and a `Class.new` block body both push a qualified prefix while
+      # pushing no `Module.nesting` entry). {DefNestingsCollector} declines at every `Prism::DefNode`, so a
+      # def-dense file pays only the declaration spine.
+      #
+      # ADR-116 WD5 — production builds this table in {#declaration_walk_tables}' shared run, and nothing in
+      # `lib` calls this builder. It runs the collector alone and stays for the specs, which compare it with
+      # the shared run; `RIGOR_SHADOW_RULE_WALK` checks it against {#legacy_def_nestings}.
       def build_def_nestings(root)
+        collector = DefNestingsCollector.new
+        DeclarationWalk.run(root, [collector], superclass_walk_root(nil))
+        verified_def_nestings(root, collector.table)
+      end
+
+      def verified_def_nestings(root, table, source_path = nil)
+        DeclarationWalk::Shadow.verified(:def_nestings, source_path, table) { legacy_def_nestings(root) }
+      end
+
+      # The walker {DefNestingsCollector} replaced, kept as the shadow harness's oracle until ADR-116 WD5 has
+      # ported every table walker onto {DeclarationWalk}.
+      def legacy_def_nestings(root)
         accumulator = {}.compare_by_identity
         walk_def_nestings(root, EMPTY_NESTING, accumulator)
         accumulator.freeze
@@ -5044,7 +5062,9 @@ module Rigor
       #
       # ADR-116 WD5 — built by {SuperclassesCollector} on the shared {DeclarationWalk}, following the two
       # legacy variants it declares; `RIGOR_SHADOW_RULE_WALK` checks both tables against
-      # {#legacy_superclass_tables}.
+      # {#legacy_superclass_tables}. Production builds both in {#declaration_walk_tables}' shared run, and
+      # nothing in `lib` calls this builder: it runs the collector alone and stays for the specs, which
+      # compare it with the shared run.
       #
       # @return the `[superclasses, header_nestings]` pair
       def build_superclass_tables(root, source_path = nil)
@@ -5072,6 +5092,23 @@ module Rigor
         accumulator = { superclasses: {}, header_nestings: {} }
         walk_class_superclasses(root, [], accumulator, source_path)
         [accumulator[:superclasses].freeze, accumulator[:header_nestings].freeze]
+      end
+
+      # ADR-116 WD5 — the file's superclass, header-nesting, def-nesting and member-layout tables from ONE
+      # shared {DeclarationWalk}: the file is descended once for all of them, where the legacy walkers
+      # descended it once per table. `RIGOR_SHADOW_RULE_WALK` checks each table against its legacy walker.
+      #
+      # @return `{ superclasses:, header_nestings:, def_nestings:, data_member_layouts:, struct_member_layouts: }`
+      def declaration_walk_tables(root, source_path = nil)
+        superclasses = SuperclassesCollector.new
+        layouts = MemberLayoutsCollector.new
+        def_nestings = DefNestingsCollector.new
+        DeclarationWalk.run(root, [superclasses, layouts, def_nestings], superclass_walk_root(source_path))
+        supers, header_nestings = verified_superclass_tables(root, source_path, superclasses.tables)
+        data, struct = verified_member_layouts(root, layouts.tables, source_path)
+        { superclasses: supers, header_nestings: header_nestings,
+          def_nestings: verified_def_nestings(root, def_nestings.table, source_path),
+          data_member_layouts: data, struct_member_layouts: struct }
       end
 
       # `self_base` names a rebound `self` for `self::`-anchored headers — a meta-new
@@ -5388,7 +5425,31 @@ module Rigor
       # `Data.define` is recorded: `Struct.new` instances are mutable, so member-value folding would be unsound (the
       # Struct follow-up is deferred — see ADR-48 § "Struct follow-up"). Consumed by
       # {Inference::MethodDispatcher::DataFolding} via {Scope#data_member_layout}.
+      #
+      # ADR-116 WD5 — built with its Struct sibling by {MemberLayoutsCollector}. Production builds both in
+      # {#declaration_walk_tables}' shared run, and nothing in `lib` calls this builder: it stays for the specs,
+      # and walks both layout tables to return this one.
       def build_data_member_layouts(root)
+        member_layout_tables(root).first
+      end
+
+      # `[data_member_layouts, struct_member_layouts]` from a {MemberLayoutsCollector} run of its own, checked by
+      # `RIGOR_SHADOW_RULE_WALK` against the two legacy walkers. Spec-only, like the two builders on it.
+      def member_layout_tables(root)
+        collector = MemberLayoutsCollector.new
+        DeclarationWalk.run(root, [collector], superclass_walk_root(nil))
+        verified_member_layouts(root, collector.tables)
+      end
+
+      def verified_member_layouts(root, tables, source_path = nil)
+        DeclarationWalk::Shadow.verified(:member_layouts, source_path, tables) do
+          [legacy_data_member_layouts(root), legacy_struct_member_layouts(root)]
+        end
+      end
+
+      # The walker {MemberLayoutsCollector} replaced for the `Data.define` table, kept as the shadow harness's
+      # oracle until ADR-116 WD5 has ported every table walker onto {DeclarationWalk}.
+      def legacy_data_member_layouts(root)
         accumulator = {}
         walk_data_member_layouts(root, [], accumulator)
         accumulator.freeze
@@ -5491,7 +5552,16 @@ module Rigor
       # table so the existing `Data.define` value-shape contract (a bare `[Symbol]`) is untouched: a Struct entry
       # carries `{ members:, keyword_init: }` because the dispatcher needs the flag to fold the matching `.new` call
       # form (positional vs keyword) without manufacturing a wrong map.
+      #
+      # ADR-116 WD5 — production builds it in {#declaration_walk_tables}' shared run; this builder is spec-only,
+      # like {#build_data_member_layouts}.
       def build_struct_member_layouts(root)
+        member_layout_tables(root).last
+      end
+
+      # The walker {MemberLayoutsCollector} replaced for the `Struct.new` table, kept as the shadow harness's
+      # oracle until ADR-116 WD5 has ported every table walker onto {DeclarationWalk}.
+      def legacy_struct_member_layouts(root)
         accumulator = {}
         walk_struct_member_layouts(root, [], accumulator)
         accumulator.freeze
@@ -7544,21 +7614,22 @@ module Rigor
         fold_parameter_envelopes(acc, file_envelopes)
         fold_refinements(acc, file_refinements)
         # Issue #681 — node-identity keyed, so this is a flat union: no two files can contribute the same key.
-        acc[:def_nestings].merge!(build_def_nestings(root))
+        walked = declaration_walk_tables(root, path)
+        acc[:def_nestings].merge!(walked.fetch(:def_nestings))
         # ADR-46 slice 4 (singleton) — record the singleton-side `"path:line"` sources alongside the nodes,
         # the exact mirror of the instance-side `merge_discovered_defs`, so a class/singleton-method body edit
         # produces a changed `"Class.method"` fingerprint pair (and its call sites a symbol edge) instead of
         # silently degrading to the file's full ancestry closure.
         merge_discovered_defs(acc[:singleton_def_nodes], acc[:singleton_def_sources], path,
                               build_discovered_singleton_def_nodes(root))
-        superclasses, header_nestings = build_superclass_tables(root, path)
+        superclasses = walked.fetch(:superclasses)
         acc[:superclasses].merge!(superclasses)
-        merge_header_nestings(acc[:header_nestings], header_nestings)
+        merge_header_nestings(acc[:header_nestings], walked.fetch(:header_nestings))
         ancestry_keys = fold_file_mixin_tables(acc, root)
         record_file_positions(acc, path, root, superclasses, ancestry_keys, file_def_nodes)
         merge_constant_literal_tables(acc, root, path)
         merge_class_keyed_index_tables(acc, root, file_methods)
-        merge_member_layout_tables(acc, root)
+        merge_member_layout_tables(acc, walked)
       end
 
       # Issue #1123 — this file's three instance- / singleton-side module lists, folded into the
@@ -7590,9 +7661,9 @@ module Rigor
 
       # Folds one file's Data + Struct member-layout tables into the cross-file accumulator (kept out of
       # {#accumulate_project_index} to hold its ABC budget).
-      def merge_member_layout_tables(acc, root)
-        acc[:data_member_layouts].merge!(build_data_member_layouts(root))
-        acc[:struct_member_layouts].merge!(build_struct_member_layouts(root))
+      def merge_member_layout_tables(acc, walked)
+        acc[:data_member_layouts].merge!(walked.fetch(:data_member_layouts))
+        acc[:struct_member_layouts].merge!(walked.fetch(:struct_member_layouts))
       end
 
       # Folds the per-class method-visibility and method-existence tables of one file into the cross-file accumulator

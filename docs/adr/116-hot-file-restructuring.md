@@ -3,9 +3,11 @@
 Status: **Accepted, 2026-09-23; WD5 amended 2026-09-27 (context-rule variants, below).** WD5 is in
 progress. Its first slice (#1517: the discovery-table shadow harness, the context model,
 `class_cvars`) and its second (#1522: the superclass tables, with the first variants) put two tables
-on the walk. This ADR fixes the direction, the three criteria, and the slice order (WD0–WD7). Each
-slice lands as its own PR in the `v0.4.x` milestone, tracked by #1192–#1199 (WD0–WD7). WD0–WD5 and
-WD7 preserve behaviour; WD6 changes it and carries its own corpus diff.
+on the walk. Its third (#1527: the def-nesting and member-layout tables) makes the walk shared: it
+builds five tables in one run per file. This ADR fixes the direction, the three criteria, and the
+slice order (WD0–WD7). Each slice lands as its own PR in the `v0.4.x` milestone, tracked by
+#1192–#1199 (WD0–WD7). WD0–WD5 and WD7 preserve behaviour; WD6 changes it and carries its own corpus
+diff.
 
 Grounding: [`docs/notes/20260923-hot-file-churn-audit.md`](../notes/20260923-hot-file-churn-audit.md)
 (the 60-day churn, growth and co-change measurement, and the mechanisms M1–M6 cited below); its
@@ -188,6 +190,56 @@ never chooses the cut.
         `:whole_file` is the walk's rule; `:outside_class_bodies` drops the path inside class/module,
         meta-new and eval-family bodies but not in `class <<` (#1521 item 11). It needed two context
         fields, `source_path` and a `class_body` latch. No event was added.
+    - *The first shared walk (slice 3, #1527).*
+      - `ScopeIndexer.declaration_walk_tables` runs three collectors in one walk of a file:
+        `SuperclassesCollector`, `DefNestingsCollector` (for `walk_def_nestings`) and
+        `MemberLayoutsCollector` (for `walk_data_member_layouts` and `walk_struct_member_layouts`,
+        which applied the same rules in two walks). It builds five tables: superclasses, header
+        nestings, def nestings, and the `Data` and `Struct` member layouts.
+      - Both production sites read those tables from that walk: the per-file index
+        (`merge_project_method_indexes`) and the project pre-pass (`accumulate_project_index`).
+        Before this slice, each site walked the file four times for them. Nothing in `lib` calls the
+        standalone builders any longer. They stay for the specs, which compare each collector run alone
+        against the shared run. Under `RIGOR_SHADOW_RULE_WALK`, each table is still checked against its
+        legacy walker.
+      - `unrendered_header` is a new traversal rule. It covers a `class` / `module` header that renders
+        no name, which only a parse error produces (`class foo`, or a `module` keyword followed by a
+        `def`). `:children` is the walk's rule, `walk_class_superclasses`': walk every child under the
+        enclosing context. `:skip` walks nothing below the header (the member-layout walkers).
+        `:body_with_lost_nesting` walks only the body, under `Context#lost_header_body`
+        (`walk_def_nestings`). That context makes `self` the class again. It keeps the nesting chain
+        below an unnameable cref and loses it (nil) elsewhere, and only a `self::` header below a
+        rebound `self` grows it again (#1521 item 3). `Context#nesting` answers nil both for a lost
+        chain and for one the caller does not track. The context keeps the two apart: only a lost chain
+        grows again, and an untracked one stays nil everywhere.
+      - `lexical_prefix` is a new value rule, and the traversal consults it. It picks the prefix that
+        meta-new and eval-family splits resolve against, and `Context#lexical_prefix(variant)` answers
+        it. `:prefix` is the walk's rule. `:nesting_head` is `walk_def_nestings`': the innermost
+        nesting entry split into segments. The two differ below a compact header (`["Admin::W"]`
+        against `["Admin", "W"]`) and below an unnameable cref (`[]` against the enclosing entry)
+        (#1521 item 1). When a run mixes the two, the walk splits a rebound body a second time with the
+        head. If the two owners agree, it walks the body once for everyone. If they differ, it walks
+        the body once per owner, and each collector goes down only with its own group.
+      - No event was added. Multi-collector runs now build the collector subsets they need lazily and
+        memoise them per run: a collector alone, the run without one collector, and the run split by
+        variant. Asking the collectors allocates nothing, so a node costs no object where no collector
+        declines, or where one does and its remainder is already memoised. A decline inside a variant
+        fork's group of three or more, or two declines at one node, copies one Array.
+      - *Acceptance.* Every table stays equal, under the strict `Shadow` comparer, to what its legacy
+        walker builds. At landing this held for 67,137 files (this repo, the survey corpora and gitlab)
+        and 12,000 fuzzed programs, and `RIGOR_SHADOW_RULE_WALK` keeps checking it.
+      - The other walkers that `merge_project_method_indexes` and the pre-pass call stay on their
+        legacy walkers for now. Each needs a traversal contract beyond these events, so porting one
+        requires amending this ADR first (the amendment rule above).
+        - `walk_class_includes` (includes and prepends) rebinds the owner at every block through
+          `rebound_block_self`, including `define_method` and non-constant receivers as opaque. It
+          resolves eval receivers as written and walks block parameters.
+        - `walk_class_extends` skips `END { }`. Its `in_singleton` depth flag keeps the owner only
+          for the first `class << self`. It does not walk a block-carrying call outside its own arms
+          at all: receiver, arguments and block are all skipped.
+        - `walk_method_visibilities` and `walk_singleton_def_nodes` thread state from one sibling
+          statement to the next: the default visibility, and the `module_function` toggle. A
+          per-node event cannot carry that state.
 - **WD6 — One block-entry model for `ExpressionTyper` and `StatementEvaluator` (behaviour change;
   #1198).**
   - *Problem.* Block entry-scope construction exists three times: ET ~L3690–3726, SE ~L2984–3061,

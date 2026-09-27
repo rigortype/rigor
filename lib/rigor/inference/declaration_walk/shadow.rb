@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "prism"
+
 require_relative "../../analysis/shadow_harness"
 require_relative "errors"
 
@@ -82,7 +84,7 @@ module Rigor
           container_difference(legacy, walk, at) ||
             key_difference(legacy, walk, at) ||
             legacy.each_key.lazy.filter_map do |key|
-              first_difference(legacy[key], walk[key], "#{at}[#{key.inspect}]")
+              first_difference(legacy[key], walk[key], "#{at}[#{render_key(key)}]")
             end.first
         end
 
@@ -105,16 +107,16 @@ module Rigor
 
         def key_difference(legacy, walk, at)
           missing = legacy.each_key.find { |key| !walk.key?(key) }
-          return "#{location(at)}: key #{missing.inspect} only in legacy" if missing
+          return "#{location(at)}: key #{render_key(missing)} only in legacy" if missing
 
           extra = walk.each_key.find { |key| !legacy.key?(key) }
-          return "#{location(at)}: key #{extra.inspect} only in declaration walk" if extra
+          return "#{location(at)}: key #{render_key(extra)} only in declaration walk" if extra
 
           index = legacy.keys.zip(walk.keys).index { |ours, theirs| !ours.eql?(theirs) }
           return nil if index.nil?
 
-          "#{location(at)}: key order differs at position #{index}: legacy #{legacy.keys[index].inspect}, " \
-            "declaration walk #{walk.keys[index].inspect}"
+          "#{location(at)}: key order differs at position #{index}: legacy #{render_key(legacy.keys[index])}, " \
+            "declaration walk #{render_key(walk.keys[index])}"
         end
 
         def size_difference(legacy, walk, at)
@@ -123,6 +125,16 @@ module Rigor
 
         def location(at)
           at.empty? ? "the table" : at
+        end
+
+        # A key as it inspects, except a Prism node, which keys the identity tables and would inspect as its
+        # whole subtree: that renders as its class, its name where it has one, and where it starts.
+        def render_key(key)
+          return key.inspect unless key.is_a?(Prism::Node)
+
+          name = key.respond_to?(:name) ? " #{key.name}" : ""
+          start = key.location
+          "#<#{key.class.name.delete_prefix('Prism::')}#{name} at #{start.start_line}:#{start.start_column}>"
         end
 
         # A Rigor type renders as it describes itself; anything else as it inspects.

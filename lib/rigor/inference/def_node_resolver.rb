@@ -76,8 +76,9 @@ module Rigor
       #    walk over the analyzer's own parse produced. This holds per NODE and needs nothing about files.
       # 2. AGREEMENT — where both tables answer for the same DEF (through different objects), they answer the
       #    same chain. A bundle is only reused when the file's content SHA-256 matches
-      #    ({Cache::FileDigest.hexdigest}, the digest tier, not the stat one), and `build_def_nestings` is a
-      #    pure function of that file's AST, so identical bytes yield an identical chain.
+      #    ({Cache::FileDigest.hexdigest}, the digest tier, not the stat one), and the def-nesting table
+      #    (`ScopeIndexer.declaration_walk_tables`) is a pure function of that file's AST, so identical bytes
+      #    yield an identical chain.
       #
       # What is NOT true — and was asserted here before it was measured — is that a file takes exactly ONE of
       # the two branches per run. It does so in the cross-file pre-pass only. An UNCHANGED file re-analysed as

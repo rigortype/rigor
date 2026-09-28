@@ -862,7 +862,7 @@ never in. A session that cannot reuse an existing snapshot therefore
 declines rather than running a baseline — nothing it computed could warm
 the next keystroke anyway.
 
-### `Payload` (current `SCHEMA = 23`)
+### `Payload` (current `SCHEMA = 31`)
 
 ```
 Payload :: Data[
@@ -908,7 +908,10 @@ comment on `IncrementalSnapshot::SCHEMA`; `22` added `run_level_rows`
 ([#796](https://github.com/rigortype/rigor/issues/796),
 [#794](https://github.com/rigortype/rigor/issues/794)); `23` gave each seed
 bundle a `parameter_envelopes` table
-([#992](https://github.com/rigortype/rigor/issues/992)); `30` gave each seed
+([#992](https://github.com/rigortype/rigor/issues/992)); `31` changed how
+`plugin_fact_digest` and the `source_rbs_digest` of an unnamed synthesizer
+output digest a value
+([#1574](https://github.com/rigortype/rigor/issues/1574), below); `30` gave each seed
 bundle a `source_rbs_digest`
 ([#1536](https://github.com/rigortype/rigor/issues/1536), below). A blob
 from an older schema mismatches the `SCHEMA` gate and loads as `nil` — a
@@ -932,6 +935,26 @@ digest drops the snapshot (a conservative full re-analysis). A plugin that
 contributes types but exposes none of (a)/(b)/(c) makes the snapshot
 un-reusable and is named — a forcing function to declare its surface rather
 than a silent stale reuse.
+
+Each value is digested with `Cache::ValueDigest`, which MUST be a function of
+the value alone ([#1574](https://github.com/rigortype/rigor/issues/1574)): a
+producer's value is computed on one run and served from its ADR-45 entry on
+the next, the two are equal but share different objects, and a digest that
+read the sharing (as one of `Marshal.dump` bytes did) invalidated the snapshot
+on every switch between them. The digest keeps the distinctions Marshal keeps
+— classes, Hash and Set insertion order, a Hash's default, a non-ASCII
+String's encoding — and ignores identity and frozenness. It reads a Data's or
+Struct's members, an exception's message, backtrace and cause, and every
+object's instance variables through the core classes' own methods, so an
+override cannot hide a field. A value it cannot digest — state outside Ruby, a
+default proc, an anonymous class, or a cycle or anything else nested past 256
+levels — makes the plugin that owns it opaque, and so does a published fact of
+that kind. A few things Marshal keeps are outside the digest by design, so a
+change confined to them does not move the snapshot: instance variables set on a
+String, Array, Hash or Set (which `==` ignores too), modules an object was
+extended with, and the hidden fields a C-implemented class keeps outside
+`instance_variables` other than an exception's message, backtrace and cause
+(`NameError#name` reaches the digest only through the message).
 
 ### `return_summaries` — semantic propagation gates ([ADR-89](../adr/89-semantic-propagation-gates.md))
 

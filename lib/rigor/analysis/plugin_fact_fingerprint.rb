@@ -2,6 +2,7 @@
 
 require "digest"
 require_relative "runner"
+require_relative "../cache/value_digest"
 
 module Rigor
   module Analysis
@@ -98,9 +99,9 @@ module Rigor
       def digest_registry(registry)
         return Result.new(digest: nil, opaque_plugin_ids: [].freeze) if registry.nil? || registry.empty?
 
-        facts_by_plugin = facts_by_plugin(registry.plugins.first&.services&.fact_store)
-        parts = fact_parts(facts_by_plugin)
         opaque = []
+        facts_by_plugin = facts_by_plugin(registry, opaque)
+        parts = fact_parts(facts_by_plugin)
         registry.plugins.each { |plugin| collect_plugin_parts(plugin, facts_by_plugin, parts, opaque) }
         # Sort the parts so the digest is independent of plugin registration / iteration order.
         Result.new(
@@ -129,16 +130,25 @@ module Rigor
 
       # `{ plugin_id => ["name=digest", ...] }` for every ADR-9 published fact (channel a). A plugin that
       # published nothing does not appear.
-      def facts_by_plugin(fact_store)
+      #
+      # A fact the fingerprint cannot digest is an input it cannot see, so its publisher is opaque, whether or
+      # not the publisher contributes a type itself: other plugins read its facts. A fact store that cannot be
+      # read at all makes every plugin opaque. Both force the full run; dropping the facts instead would let a
+      # plugin with another surface reuse a snapshot its facts no longer match.
+      def facts_by_plugin(registry, opaque)
         result = Hash.new { |hash, key| hash[key] = [] }
-        return result if fact_store.nil?
-
-        fact_store.each_fact do |fact|
-          result[fact.plugin_id.to_s] << "#{fact.name}=#{digest_value(fact.value)}"
+        fact_store = registry.plugins.first&.services&.fact_store
+        fact_store&.each_fact do |fact|
+          plugin_id = fact.plugin_id.to_s
+          begin
+            result[plugin_id] << "#{fact.name}=#{digest_value(fact.value)}"
+          rescue StandardError
+            opaque << plugin_id
+          end
         end
         result
       rescue StandardError
-        # An unreadable fact store contributes nothing; opacity for contributing plugins is decided below.
+        registry.plugins.each { |plugin| opaque << safe_id(plugin) }
         Hash.new { |hash, key| hash[key] = [] }
       end
 
@@ -175,12 +185,13 @@ module Rigor
         true
       end
 
-      # A stable content digest of an arbitrary fact / producer value. Producer values are Marshal-clean by
-      # contract (the ADR-45 disk cache serialises them the same way), so this is the same round-trip the cache
-      # already relies on. A Marshal failure raises to the caller, which marks the plugin opaque (never a
-      # silent wrong-value digest).
+      # A digest of a fact / producer / hook value that depends on the value alone (issue #1574). A producer's
+      # value is computed on one run and served from its ADR-45 cache entry on the next; the two are equal but
+      # do not share the same objects, so a digest of their `Marshal.dump` bytes differed and invalidated the
+      # snapshot on every such switch. {Cache::ValueDigest} reads no identity. A value it cannot digest raises
+      # to the caller, which marks the plugin opaque (never a silent wrong-value digest).
       def digest_value(value)
-        Digest::SHA256.hexdigest(Marshal.dump(value))
+        Cache::ValueDigest.hexdigest(value)
       end
 
       def contributes_types?(plugin)

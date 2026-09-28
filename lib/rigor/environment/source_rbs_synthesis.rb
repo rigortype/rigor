@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "digest"
+require_relative "../cache/value_digest"
 
 module Rigor
   class Environment
@@ -75,7 +76,9 @@ module Rigor
       # cache never serves, and they quote line numbers, so a line shift in a file carrying a malformed `#:`
       # would otherwise read as a moved contribution. A failed synthesis contributes nothing to the loader but
       # is kept as one stable value of its own, so a file flipping between "no annotation" and "broken
-      # annotation" still reads as moved. Any shape the contract does not name is digested whole.
+      # annotation" still reads as moved. Any shape the contract does not name is digested whole, by value: the
+      # output is computed on one run and served from its cache entry on the next, and a digest of its
+      # `Marshal.dump` bytes can differ between the two (issue #1574).
       #
       # The RBS text itself is digested whole, comments included. RBS reads a `# resolve-type-names: false`
       # magic comment at the start of a buffer, rbs-inline copies a `.rb` file's first comment line there, and
@@ -83,12 +86,12 @@ module Rigor
       def contribution(output)
         return nil if output.nil? || output == ""
         return ["rbs", output] if output.is_a?(String)
-        return ["raw", Marshal.dump(output)] unless output.is_a?(Array)
+        return ["raw", Cache::ValueDigest.hexdigest(output)] unless output.is_a?(Array)
 
         case output[0]
         when :error then ["error", nil]
         when :ok then contribution(output[1])
-        else ["raw", Marshal.dump(output)]
+        else ["raw", Cache::ValueDigest.hexdigest(output)]
         end
       end
 

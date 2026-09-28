@@ -87,6 +87,45 @@ precision requirement made concrete, and it is why WD2's determinism fix
 (below) is load-bearing: a non-deterministic producer value would false-invalidate on
 every recompute.
 
+**Value, not object graph ([#1574](https://github.com/rigortype/rigor/issues/1574)).**
+The digest first hashed each value's `Marshal.dump` bytes. Those bytes encode
+sharing: an object reached twice is written once and back-referenced. A Marshal
+round trip does not keep that sharing for a frozen String used as a Hash key
+(`Marshal.load` rebuilds it unfrozen, and `Hash#[]=` stores a frozen copy), so a
+producer whose rows' names also key an index Hash digested one way when computed
+and another when its ADR-45 entry served it. Every run that switched between the
+two — the null run after a prime, every edit run, the run after that — discarded
+the snapshot. On Mastodon, whose rigor-sidekiq `worker_index`, rigor-rails-i18n
+`locale_index` and rigor-rails-routes `helper_table` all have that shape, every
+`--incremental` edit was a ~21 s full run instead of a ~2 s recheck.
+
+Each channel's value is now digested by {Cache::ValueDigest}, a type-tagged,
+length-prefixed walk that reads no identity and no frozenness, so the same value
+digests alike however it is built. It keeps what Marshal keeps and a consumer can
+observe: classes (Integer vs Float, String vs Symbol, subclasses, each object's
+class), Hash and Set insertion order (a consumer may iterate a fact in order, and
+the computed and served forms agree on it, so digesting it can only
+over-invalidate), a Hash's default and `compare_by_identity`, and a non-ASCII
+String's encoding. A Data, Struct, Exception or plain object is written as its
+class and the SHA-256 of its content, taken once per object, so a row reached from
+both an index's list and its by-name Hash is walked once. The content is a Data's or
+Struct's members, an exception's message, backtrace and cause (which Marshal keeps
+in hidden instance variables), and the object's instance variables, all read through
+the core classes' own methods so a subclass's `to_h` or `message` cannot hide a
+field. A value the walk cannot see into — state outside Ruby (a Proc, an IO, a
+Mutex: what `Marshal.dump` refuses), a default proc, an anonymous class, a cycle —
+makes its plugin opaque, as a producer whose value would not Marshal already did. A
+published fact of that kind now makes its publisher opaque too; before, it dropped
+every plugin's facts from the digest, which a plugin with another surface survived
+as reusable. Three things Marshal keeps stay outside the digest: instance variables
+set on a String, Array, Hash or Set (`==` ignores them too), modules an object was
+extended with, and the hidden fields a C-implemented class keeps beside what is
+listed above (`NameError#name` reaches the digest only through the message). The
+digest's form changed, so `IncrementalSnapshot::SCHEMA` went 30→31. On Mastodon's
+`locale_index` (1.5M nodes, 3.2 MB of Marshal) the walk costs about what the
+Marshal dump it replaces did: 72 ms against 125 ms under YJIT, 152 ms against 121 ms
+without.
+
 **Post-hoc, not a separate probe.** The fingerprint is read POST-HOC from the
 analysis runner's already-prepared registry
 ({PluginFactFingerprint.from_registry}), not from a second `#prepare` probe. The
@@ -193,6 +232,14 @@ session's own subset run).
 - **Blob digest (cache-entry bytes) as the producer signature** — cheaper (no
   re-Marshal) but the blob carries the input-file descriptor, so it over-invalidates
   on value-preserving edits. Value digest is the correct semantics.
+- **Digesting a Marshal round trip, `Marshal.dump(Marshal.load(Marshal.dump(v)))`**
+  (#1574) — it is stable under a further round trip for the String-key case, but it is
+  still a function of the object graph (sharing between Arrays, Hashes and objects
+  survives a round trip, and Ruby's String interning depends on what the process
+  interned before), and it pays three Marshal passes.
+- **Digesting the value bytes the cache entry stores, on both paths** (#1574) — the
+  computed and served digests would agree, but a recompute that builds an equal value
+  with different sharing would still move it, and a published fact has no entry.
 - **A separate `#prepare` probe as the fingerprint's sole path** — measured ~1.0s on
   gitlab (a second `#prepare` + a second producer validation), ~10% of a recheck.
   Post-hoc from the analysis runner reuses the recheck's prepare (~0.24s). The probe

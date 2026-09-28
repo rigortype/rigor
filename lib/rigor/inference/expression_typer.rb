@@ -2383,8 +2383,7 @@ module Rigor
         key = method_name.to_sym
         return table[key] if table.key?(key)
 
-        table[key] = scope.singleton_def_through_ancestors(class_name, method_name,
-                                                           name_memo: class_graph_buckets[:name])
+        table[key] = scope.singleton_def_through_ancestors(class_name, method_name)
       end
 
       # The project-side singleton-method band: a `Foo.bar` call resolved against a `class << …` / `def self.…`
@@ -2415,13 +2414,12 @@ module Rigor
         nil
       end
 
-      # ADR-24 slice 2 — resolves `method_name` against `class_name`'s own `def`s, then walks the user-class
-      # ancestor chain: included / prepended modules (transitive) and the superclass chain. RBS-known
-      # ancestors are NOT walked here — the `MethodDispatcher` RBS tier runs before
-      # `try_user_method_inference` and already covers them; an ancestor name that resolves to no
-      # project-discovered class/module ends that branch. Cross-file: the chain is followed through
-      # `Scope#discovered_superclasses` / `#discovered_includes` / `#discovered_def_nodes`, which the runner
-      # seeds from the project-wide pre-pass. The walk is breadth-first, cycle-guarded, and node-count-capped.
+      # ADR-24 slice 2 — resolves `method_name` against the project definers on `class_name`'s
+      # {Scope::ResolutionChain}, in Ruby's order: prepended modules, the class, its included modules, then the
+      # superclass's chain likewise. RBS-known ancestors are NOT answered here — the `MethodDispatcher` RBS
+      # tier runs before `try_user_method_inference` and already covers them; they sit on the chain as
+      # external entries this lookup passes over. Cross-file: the chain is built from the tables the runner
+      # seeds from the project-wide pre-pass, cycle-guarded and capped at `Scope::ANCESTOR_WALK_LIMIT`.
 
       CLASS_GRAPH_CACHE_KEY = :__rigor_class_graph_cache__
       private_constant :CLASS_GRAPH_CACHE_KEY
@@ -2464,8 +2462,7 @@ module Rigor
           # is a pure function of the same frozen index — the sibling resolver it walks reads nothing else.
           # `singleton_def` is added lazily by {#singleton_def_through_ancestors}'s caller.
           slot = [discovery,
-                  { name: {}, user_def: {}, self_pure: {}.compare_by_identity,
-                    yields: {}.compare_by_identity }]
+                  { user_def: {}, self_pure: {}.compare_by_identity, yields: {}.compare_by_identity }]
           Thread.current[CLASS_GRAPH_CACHE_KEY] = slot
         end
         slot[1]
@@ -2493,11 +2490,10 @@ module Rigor
       # nothing but the frozen discovery index, and the `.with` guard in
       # {MethodDispatcher::StructMaterialization} needs the SAME answer without threading dispatcher state
       # through the dispatcher (#598 review). What stays here is the caching: the run-scoped
-      # `(class_name, method_name)` memo above, plus the per-edge name bucket handed to the walk so a class
-      # whose many methods are resolved pays each ancestor edge once.
+      # `(class_name, method_name)` memo above. The chain itself is memoised per class by
+      # {Scope::ResolutionChain}, so a class whose many methods are resolved builds it once.
       def compute_user_def_with_owner(class_name, method_name)
-        scope.user_def_through_ancestors(class_name, method_name,
-                                         name_memo: class_graph_buckets[:name])
+        scope.user_def_through_ancestors(class_name, method_name)
       end
 
       # ADR-57 N5 — overridable-method adoption gate. A self-call resolved to a project `def` whose owner has
@@ -2671,34 +2667,14 @@ module Rigor
         index
       end
 
-      # True when `candidate`'s transitive ancestor chain (superclasses + included/prepended modules) reaches
-      # `owner` — i.e. `candidate` is a subclass of an owner class or an includer of an owner module. Reuses
-      # the same BFS resolver the method-resolution ancestor walk uses, so name resolution (lexical nesting,
-      # RBS-known-ancestor pruning) is identical.
-      # Delegates to the shared walk's edge step so this BFS and method resolution resolve ancestor names
-      # identically, sharing the per-edge memo bucket.
-      def enqueue_ancestors(current, queue)
-        scope.enqueue_ancestors(current, queue, class_graph_buckets[:name])
-      end
-
+      # True when `candidate`'s ancestor chain (superclasses + included/prepended modules) reaches `owner` —
+      # i.e. `candidate` is a subclass of an owner class or an includer of an owner module. Asked of the same
+      # {Scope::ResolutionChain} method resolution reads, so name resolution (lexical nesting, RBS-known-ancestor
+      # pruning) is identical; a chain cut at the budget that does not reach `owner` answers false, as the walk
+      # it replaced did. Reachability is the same in both of the chain's worlds.
       def related_to_owner?(candidate, owner)
-        queue = []
-        enqueue_ancestors(candidate, queue)
-        seen = {}
-        visited = 0
-        until queue.empty?
-          current = queue.shift
-          next if current.nil? || seen[current]
-
-          return true if current == owner
-
-          seen[current] = true
-          visited += 1
-          return false if visited > Scope::ANCESTOR_WALK_LIMIT
-
-          enqueue_ancestors(current, queue)
-        end
-        false
+        chain = Scope::ResolutionChain.for(scope, candidate.to_s, :instance, :methods)
+        !chain.search(scope) { |entry| entry.name == owner }.nil?
       end
 
       INFERENCE_GUARD_KEY = :__rigor_user_method_inference_stack__

@@ -114,7 +114,7 @@ RSpec.describe Rigor::Inference::ExternalAncestorResolution do
   end
 
   # No memo here on purpose — see the module's own comment. This pins the property a memo keyed on
-  # fewer tables than the walk reads would break: `Scope#resolve_ancestor_class_name` consults
+  # fewer tables than the walk reads would break: the ancestor chain's name resolution consults
   # `discovered_def_nodes` through `known_user_class?`, so declaring `Set` a project class turns it
   # from an EXTERNAL candidate into a node the walk descends into, and the answer must change. The two
   # scopes below share `discovered_superclasses` by identity, which is what an identity-keyed memo on

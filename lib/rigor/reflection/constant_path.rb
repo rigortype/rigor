@@ -81,7 +81,10 @@ module Rigor
 
       prefix = caller_derived ? enclosing_class_path(scope) : nil
       unless prefix.nil? || prefix.empty?
-        hit = first_namespace_hit(bounded_ancestor_scopes(prefix, scope), head, scope)
+        hit = bounded_agreed_hit(prefix, scope) do |entry|
+          candidate = "#{entry}::#{head}"
+          candidate if namespace_known?(candidate, scope)
+        end
         return hit if hit
       end
 
@@ -106,13 +109,26 @@ module Rigor
       candidate = "#{owner}::#{segment}"
       return candidate if yield(candidate)
 
-      bounded_ancestor_scopes(owner, scope).each do |ancestor|
+      bounded_agreed_hit(owner, scope) do |ancestor|
         inherited = "#{ancestor}::#{segment}"
-        return inherited if yield(inherited)
+        inherited if yield(inherited)
       end
-      nil
     end
     private_class_method :constant_in_namespace
+
+    # {.agreed_ancestor_hit} over the budget-bounded scope lists: the first answer both worlds reach at the
+    # same ancestor, and otherwise the breadth-first order's.
+    def bounded_agreed_hit(class_name, scope, &)
+      scopes, retro_scopes = ancestor_constant_worlds(class_name, scope)
+      owner, hit = first_ancestor_hit(bounded(scopes), &)
+      return hit if retro_scopes.equal?(scopes)
+
+      retro_owner, = first_ancestor_hit(bounded(retro_scopes), &)
+      return hit if owner == retro_owner
+
+      first_ancestor_hit(bounded(master_constant_scopes(class_name, scope)), &)&.last
+    end
+    private_class_method :bounded_agreed_hit
 
     # How many of {.ancestor_constant_scopes}' entries one segment may consult, under
     # `Scope::ANCESTOR_WALK_LIMIT` — the budget `Scope`'s method lookup already spends on this same
@@ -120,14 +136,13 @@ module Rigor
     # itself is the memoised one step 2 builds, so this bounds the per-segment consultation the walk
     # adds and not the graph. Reported through the shared counter, so a truncated walk is visible in a
     # budget trace instead of looking like a plain miss.
-    def bounded_ancestor_scopes(class_name, scope)
-      scopes = ancestor_constant_scopes(class_name, scope)
+    def bounded(scopes)
       return scopes if scopes.size <= Scope::ANCESTOR_WALK_LIMIT
 
       Inference::BudgetTrace.hit(Inference::BudgetTrace::ANCESTOR_WALK_LIMIT)
       scopes.first(Scope::ANCESTOR_WALK_LIMIT)
     end
-    private_class_method :bounded_ancestor_scopes
+    private_class_method :bounded
 
     # Whether `name` can OWN a constant. `class_known?` covers the RBS and registry classes and modules;
     # the project tables cover a namespace the project declares with no RBS for it.

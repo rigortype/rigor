@@ -17,7 +17,25 @@ a method its subclasses implement) is an unaddressed false-positive under the
 current per-class gate. Gate widening to superclass/include chains is deferred
 (it would only enlarge that class). Subclass-aware gating has since shipped
 (`CheckRules#method_defined_on_known_subclass?`); the rule still ships `:off`.
-See slice 4 below.**
+See slice 4 below. Amended 2026-09-28: the resolution order is Ruby's
+linearisation, read from one chain.**
+
+**Amended 2026-09-28**
+([#1567](https://github.com/rigortype/rigor/issues/1567),
+[#1568](https://github.com/rigortype/rigor/issues/1568),
+[#1570](https://github.com/rigortype/rigor/issues/1570),
+[#1571](https://github.com/rigortype/rigor/issues/1571)): "its own
+definitions, then its ancestors" (WD1, Decision step 2) means Ruby's
+linearised ancestor order, and `Scope::ResolutionChain` is the one
+implementation of it. The breadth-first walks slice 2 shipped are
+superseded; every reader that asks "which definer does Ruby call" reads
+the chain, and a spec keeps any other method from walking the ancestry
+tables itself. The rules, the two worlds a skipped `include` leaves
+(where they disagree a reader keeps master's answer, so #1570's shape is
+not yet fixed), and what the tables cannot express are in § "Amendment
+2026-09-28 — Ruby's resolution order, one chain" below. It carries no
+certainty yet: the proposed ADR-119 adds `possible` facts on top of
+this chain.
 
 Records the project's decision to resolve implicit-self method calls
 (a call written with no explicit receiver, inside a method body)
@@ -323,6 +341,13 @@ the full user-class ancestor set — included / prepended modules
 node-count-capped (100). `extend` is NOT tracked: it adds singleton
 methods, out of scope for the instance-side chain.
 
+> **Superseded 2026-09-28.** Breadth-first is not Ruby's order: `class
+> C < Base; include A` with `A` including `M` reached `Base` before `M`
+> (#1567), and the other walks built the same way made the prepended
+> and redundantly included modules answer where Ruby does not call them
+> (#1568, #1570, and the constant ladder's #1571). The walk now reads
+> `Scope::ResolutionChain`; see § "Amendment 2026-09-28".
+
 Scope deviations from the slice sketch:
 
 - **RBS-known ancestors are NOT walked here.** The
@@ -492,6 +517,108 @@ mapped to `:off` in every profile; `severity_overrides:` opts in.
 widening the gate to superclass / include chains (each requires the
 engine to confirm the full ancestor chain resolved — record that
 completeness at the recorder, the same "collect, don't recompute" route).
+
+## Amendment 2026-09-28 — Ruby's resolution order, one chain
+
+**The order.** `Scope::ResolutionChain`
+(`lib/rigor/scope/resolution_chain.rb`, internal: it is not part of the
+`Scope` surface plugins read) replays CRuby's insertion rule
+(`include_modules_at` in `class.c`) over the discovery tables:
+
+- A class's chain is the class, then its superclass's chain.
+- Each `prepend`, in statement order, inserts the module's own chain
+  directly before the class. It skips a module only when the class
+  already prepends it: `class C < B; prepend W` where `B` includes `W`
+  is `[W, C, B, W]`.
+- Each `include`, in statement order (`include M, N` is `include N;
+  include M`), inserts the module's own chain directly after the class.
+  It skips a module already anywhere in the chain, the superclass's
+  modules included (`class C < Base; include M` where `Base` includes
+  `M` is a no-op). A skipped module lying before the superclass moves
+  the insertion point past it, so `include M; include Z` with `Z`
+  including `M` is `[C, Z, M]`.
+- The singleton side is the class object's singleton, its `extend`s and
+  `class << self; include`s inserted by the include rule (each module
+  expanded to its instance chain), then the superclass's singleton
+  chain. A class-method lookup reads the class objects' own tables (the
+  extends fold has copied each extended module's own `def`s there) and
+  the extended modules' entries, so `class C < Base; extend A` with `A`
+  including `M` answers `M#foo` rather than `Base.foo` (#1567's
+  singleton shape).
+
+An ancestor the project does not declare is an external entry at its
+Ruby position. Which as-written names count as project classes stays
+the reader's: `:methods` (`Scope#known_user_class?`) for the method
+walks, `:constants` (also every declared namespace) for the constant
+ladder, and `:arity` (also every `discovered_parameter_envelopes` key,
+with a #986 ambiguous name expanded to both classes) for
+`call.wrong-arity`. The three predicates predate the chain, and a bug
+fix does not unify them.
+
+**Two worlds, and master's answer where they disagree.** The skip rule
+is Ruby's for the order the statements ran; the tables hold only their
+final state. A body reopened after an includer ran (`class Base;
+include M; end` after `class C < Base; include M`) added an edge the
+includer never skipped, and Ruby keeps both copies: `[C, M, Base, M]`.
+So wherever the rule skips, the chain also carries the RETRO world,
+with every skipped insertion made. A reader answers from the chain
+where the two worlds agree on its answer, and otherwise answers what
+the walk it replaced answered (`ResolutionChain::MasterOrder`, the old
+breadth-first, depth-first and level orders over the same tables): the
+tables cannot say which world ran, and a disagreement is no reason to
+answer anything new. No reader has a third outcome; each keeps its
+signature and return type (`node | nil`, pairs, Booleans, lists), and
+only which definer it answers moved. #1570 is exactly such a
+disagreement — Ruby skips the redundant `include` when `Base` was
+defined first, and keeps it when `Base` was reopened later — so its
+readers keep master's answer, and its false positive stays until the
+tables record whether a body was reopened after the include ran. Two
+worlds are not every combination of several skips; a mix could put a
+third definer first. On Mastodon 42 of 4,379 chains carry a second
+world — 21 classes that re-include a module their chain already carries,
+as `ActivityPub::FetchAllRepliesService` re-includes the `JsonLdHelper`
+its superclass includes — and no read over them saw the worlds
+disagree; Rigor's own `lib/` has none.
+
+**The single walker.** Every "which definer" reader reads the chain:
+`Scope#user_def_through_ancestors`, `#singleton_def_through_ancestors`,
+`#discovered_method_through_ancestors?`,
+`#external_ancestor_name_candidates`, the override rules' walk
+(`CheckRules#each_project_ancestor`, behind `nearest_ancestor_visibility`
+and `nearest_ancestor_method_def`), the visibility rule's prepend check,
+`CheckRules::SourceArity`'s levels (its per-level agreement rule and
+every hedge kept), and `Reflection.ancestor_constant_scopes` with the
+constant path walk. `Scope#enqueue_ancestors` stays for the plugin
+surface and no engine reader calls it.
+`spec/rigor/scope/ancestry_walker_detection_spec.rb` fails on any other
+method that reads two ancestry tables, reads one in a loop or a
+recursive method, or calls a same-file reader in a loop; a membership
+test or a table copied whole reads no edge. An allow-list keeps the walks
+that answer a different question, each with its reason: unions and
+universals over every ancestor used only to withhold, and the three
+bridge walks that interleave RBS-declared edges and plugin allow-lists
+the tables lack (the singleton `extend` bridges, already in Ruby's
+singleton order for what they see, and the RBS-complete ancestor bridge
+#1572 reorders). The spec's header lists what the scan cannot see.
+
+**What the tables cannot express.** They do not record how a body
+interleaves `include` and `prepend` statements; the chain processes a
+body's prepends first, which differs from Ruby only when one body both
+includes and prepends a module (`include M; prepend M` is `[M, C, M]` in
+Ruby, `[M, C]` here: the same first definer, one trailing copy less; a
+census of Mastodon, Redmine, GitLab, Rails and Rigor found no such
+body). `class << self; prepend P` is recorded as an `extend`, so `P`
+sits after the singleton rather than before it. A repeated `extend`
+keeps its latest position in the table (#1573). A definer an external
+module supplies ahead of a project one is not answered yet (#1572).
+
+**Dependency edges (ADR-46).** A read records the class edge of every
+project entry ahead of its answer, and of the root whenever the answer
+is not the root heading its own chain — the contract the breadth-first
+walks kept, filed in the same order. A read that falls back to master's
+answer records every class that order lists. One edge set narrows on
+purpose: the override walk starts after the class (#1568), so a class's
+own `def`s no longer record method edges on the modules it prepends.
 
 ## Re-evaluation triggers
 

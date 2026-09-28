@@ -5639,7 +5639,7 @@ module Rigor
       # stored in instance-ancestor SEARCH order: a later `prepend` statement puts its module NEARER than
       # an earlier one (`prepend A; prepend B` searches B before A) while the arguments of ONE
       # `prepend A, B` keep call order — exactly the convention {#record_extend_targets} documents for
-      # `extend`, and the order `Scope#user_def_through_ancestors`'s prepend wedge consumes. Ruby inserts a
+      # `extend`, and the order `Scope::ResolutionChain` reads a body's prepends in. Ruby inserts a
       # prepended module, and its own ancestry, immediately BEFORE the class that prepends it, so these
       # names outrank the class's own `def`s; without the kind recorded separately from {#build_discovered_includes}
       # there was nothing to order on and `prepend` was silently an `include`.
@@ -8544,7 +8544,7 @@ module Rigor
       # definition — the pre-#728 answer for a name no site recorded — so it keeps unioning. A KEYED entry is
       # the cref of the site that wrote that exact name, and the two sides are two different sites, so
       # unioning their chains would hand each site's ancestor the other's namespace: `Wrap::Mixin` sorts
-      # ahead of `::Mixin`, and `Scope#compute_ancestor_class_name` takes the first known class as the sole
+      # ahead of `::Mixin`, and the ancestor-name resolution takes the first known class as the sole
       # resolution, so the top-level site's `include Mixin` silently became the `Wrap` one. That is not just
       # a wrong class, it is a FALSE POSITIVE source — the two modules' same-named methods can differ in
       # arity, and `call.wrong-arity` then fires on a correct program.

@@ -7,8 +7,9 @@
 # lost precision. Ruby inserts a prepended module, and its own ancestry, IMMEDIATELY BEFORE the class that
 # prepends it, so the module's `def` wins and the class's own body is what `super` reaches.
 #
-# The fix is the instance-side ordering in `Scope#user_def_through_ancestors`: a prepend wedge
-# (`Scope#prepends_of`, fed by `ScopeIndexer`'s new prepend table) is searched ahead of the class's own defs.
+# The fix was the instance-side ordering in `Scope#user_def_through_ancestors`: a prepend wedge (fed by
+# `ScopeIndexer`'s new prepend table) searched ahead of the class's own defs; since #1567 it is a position on
+# `Scope::ResolutionChain`, which puts a prepended module ahead of the class at every level.
 # Issue #1173 later gave `include` the same treatment: the include table stores instance-ancestor search
 # order, so `include M1; include M2` answers M2's definition the way CRuby does — the control below now
 # asserts the CORRECT runtime order rather than the pre-#1173 divergence.

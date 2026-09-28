@@ -319,6 +319,11 @@ SIG_PROVENANCE_RESIDUE = {
   # +1 (#1449): the new `DiscoveryIndex#implicit_self_evidence` `Data` member is `synthetic_source`
   # residue, like every member row of that class (#1150). It is declared `untyped` because its value, an
   # `Inference::LastLine::SelfEvidence`, carries no signature.
+  # ±0 (#1567): `user_def_through_ancestors`, `singleton_def_through_ancestors` and
+  # `external_ancestor_name_candidates` no longer walk a queue; each answers through
+  # `Scope::ResolutionChain#search`, whose value is whatever its block returns, which sig-gen does not render.
+  # The three rows move from `declared_divergent` to `unrenderable` and stay residue; the declarations are
+  # unchanged and still true.
   "sig/rigor/scope.rbs" => 113,
   "sig/rigor/sig_gen/skip_reason_catalog.rbs" => 8,
   "sig/rigor/source.rbs" => 4,

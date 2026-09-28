@@ -33,11 +33,19 @@ module Rigor
     #   Regexp's options, and a non-ASCII String's encoding. ASCII-only Strings digest alike in every encoding, as
     #   `==` has it.
     #
-    # What it leaves out: instance variables set on a String, Array, Hash or Set, which `==` ignores too, and
-    # modules or singleton methods an object was given.
+    # What it leaves out, although Marshal keeps it:
     #
-    # A plain object digests as its instance variables, sorted by name. An object that defines `marshal_dump` or
-    # `_dump` digests as what that returns, which is what Marshal keeps of it.
+    # - instance variables set on a String, Array, Hash or Set, which `==` ignores too;
+    # - modules an object was `extend`ed with (Marshal refuses singleton methods, and this does not look);
+    # - the hidden fields a core exception subclass keeps beside its message, backtrace and cause
+    #   (`NameError#name`, `SystemCallError#errno`), which reach the digest only through the message, and the
+    #   hidden fields any other C-implemented class keeps outside `instance_variables`.
+    #
+    # A plain object digests as its instance variables, sorted by name; a Data or Struct as its members and its
+    # instance variables; an Exception as its message, backtrace, cause and instance variables. Each is read
+    # through the core class's own method, so a subclass that overrides `to_h`, `each_pair`, `message` or
+    # `backtrace` cannot hide a field. An object that defines `marshal_dump` or `_dump` digests as what that
+    # returns, which is what Marshal keeps of it.
     #
     # A value that cannot be digested this way raises {Uncanonicalisable}: an object whose state lives outside
     # its instance variables (a Proc, an IO, a Mutex: what `Marshal.dump` refuses), a Hash with a default proc, an
@@ -73,6 +81,13 @@ module Rigor
           @objects = {}.compare_by_identity # object => the SHA-256 of its encoding
           @symbols = {} # Symbol => its encoding
           @plain = {}.compare_by_identity # class => whether Marshal writes its instances as their ivars
+          # The core readers, taken unbound so an override on the value's class cannot change what is read. Held
+          # per walk rather than in constants, which must stay Ractor-shareable (#1064).
+          @data_to_h = Data.instance_method(:to_h)
+          @struct_each_pair = Struct.instance_method(:each_pair)
+          @exception_readers = %i[to_s backtrace cause].map { |name| Exception.instance_method(name) }
+          @instance_variables = Kernel.instance_method(:instance_variables)
+          @instance_variable_get = Kernel.instance_method(:instance_variable_get)
         end
 
         def hexdigest(value)
@@ -183,8 +198,8 @@ module Rigor
         end
 
         # The object's content, walked into a SHA-256 of its own. A `marshal_dump` / `_dump` hook decides what
-        # Marshal keeps of an object, so it decides the digest too; otherwise a Data or Struct is its members and
-        # anything else is its instance variables.
+        # Marshal keeps of an object, so it decides the digest too; otherwise the object is its members (a Data or
+        # Struct) or its message, backtrace and cause (an Exception), then its instance variables.
         def object_digest(value)
           outer_sha = @sha
           outer_out = @out
@@ -217,12 +232,32 @@ module Rigor
 
         def write_members(value)
           case value
-          when Data then write_fields("D", value.to_h)
-          when Struct then write_fields("T", value.each_pair)
+          when Data then write_fields("D", @data_to_h.bind_call(value))
+          when Struct then write_fields("T", struct_members(value))
+          when Exception then write_exception(value)
           else
             assert_plain(value)
-            write_fields("V", value.instance_variables.sort.map { |name| [name, value.instance_variable_get(name)] })
+            @out.append_as_bytes("V")
           end
+          write_fields("@", instance_variables(value))
+        end
+
+        def struct_members(value)
+          members = []
+          @struct_each_pair.bind_call(value) { |name, field| members << [name, field] }
+          members
+        end
+
+        # Marshal keeps an exception's message, backtrace and cause in hidden instance variables, which
+        # `instance_variables` does not list: two exceptions that differ only in their message would otherwise
+        # digest alike. A plugin that records parse errors as exceptions depends on the message moving the digest.
+        def write_exception(value)
+          @out.append_as_bytes("X")
+          @exception_readers.each { |reader| write(reader.bind_call(value)) }
+        end
+
+        def instance_variables(value)
+          @instance_variables.bind_call(value).sort.map { |name| [name, @instance_variable_get.bind_call(value, name)] }
         end
 
         def write_fields(tag, pairs)
@@ -239,6 +274,9 @@ module Rigor
         # depth limit of 1 makes the check cost one object: Marshal decides whether it can write the object
         # before it writes any instance variable, and raises `ArgumentError` on reaching the first one. It is
         # asked once per class, since whether a class keeps state outside Ruby does not vary by instance.
+        #
+        # The `ArgumentError` cannot tell a listed instance variable from a hidden one that a C-implemented class
+        # keeps, so an Exception, whose message and backtrace are hidden, is read explicitly above instead.
         def assert_plain(value)
           klass = value.class
           plain = @plain.fetch(klass) do

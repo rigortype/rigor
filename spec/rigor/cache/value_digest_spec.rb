@@ -28,6 +28,28 @@ module ValueDigestSpecFixtures
     def marshal_dump = @kept
     def marshal_load(kept) = (@kept = kept)
   end
+
+  # Look-alikes that differ from the fixtures above only in their class.
+  OtherRow = Data.define(:class_name, :arity)
+  OtherPair = Struct.new(:left, :right)
+
+  class OtherIndex < Index; end
+
+  # Subclasses of the core values, which Marshal writes with their class.
+  class StringSub < String; end
+  class ArraySub < Array; end
+  class HashSub < Hash; end
+  class SetSub < Set; end
+
+  # A Data and a Struct whose own readers leave a member out.
+  HidingData = Data.define(:shown, :hidden) do
+    def to_h = { shown: shown }
+  end
+  HidingStruct = Struct.new(:shown, :hidden) do
+    def each_pair(&) = { shown: shown }.each_pair(&)
+  end
+
+  class ParseError < StandardError; end
 end
 
 RSpec.describe Rigor::Cache::ValueDigest do
@@ -39,6 +61,18 @@ RSpec.describe Rigor::Cache::ValueDigest do
 
   def round_trip(value)
     Marshal.load(Marshal.dump(value))
+  end
+
+  # An exception raised while handling a ParseError, so its `cause` is that error. Raised from one line, so two
+  # of them differ only in the cause's message.
+  def raised_with_cause(message)
+    raise fixtures::ParseError, message
+  rescue fixtures::ParseError
+    begin
+      raise "outer"
+    rescue RuntimeError => e
+      e
+    end
   end
 
   # The structure the issue measured: one frozen String reached as an Array element, a row field and the key of
@@ -122,6 +156,59 @@ RSpec.describe Rigor::Cache::ValueDigest do
     it "keeps a Hash's insertion order, which Marshal keeps too" do
       expect(digest({ a: 1, b: 2 })).not_to eq(digest({ b: 2, a: 1 }))
       expect(digest(round_trip({ b: 2, a: 1 }))).to eq(digest({ b: 2, a: 1 }))
+    end
+
+    it "names the class of every object, so look-alikes of another class digest apart" do
+      expect(digest(fixtures::Row.new(class_name: "A", arity: 1)))
+        .not_to eq(digest(fixtures::OtherRow.new(class_name: "A", arity: 1)))
+      expect(digest(fixtures::Pair.new(1, 2))).not_to eq(digest(fixtures::OtherPair.new(1, 2)))
+      expect(digest(fixtures::Index.new([]))).not_to eq(digest(fixtures::OtherIndex.new([])))
+    end
+
+    it "tags a subclass of String, Array, Hash and Set, which Marshal keeps" do
+      pairs = [
+        [fixtures::StringSub.new("a"), "a"], [fixtures::ArraySub[1], [1]], [fixtures::HashSub[{ a: 1 }], { a: 1 }],
+        [fixtures::SetSub[1], Set[1]]
+      ]
+
+      pairs.each do |subclassed, plain|
+        expect(digest(subclassed)).not_to eq(digest(plain)), "#{subclassed.class} digested as #{plain.class}"
+        expect(digest(round_trip(subclassed))).to eq(digest(subclassed))
+      end
+    end
+
+    it "keeps a Set's compare_by_identity flag, which Marshal keeps too" do
+      by_identity = Set["a"].compare_by_identity
+
+      expect(digest(by_identity)).not_to eq(digest(Set["a"]))
+      expect(digest(round_trip(by_identity))).to eq(digest(by_identity))
+    end
+
+    it "reads every member of a Data or Struct, past a `to_h` or `each_pair` that leaves one out" do
+      expect(digest(fixtures::HidingData.new(shown: 1, hidden: 1)))
+        .not_to eq(digest(fixtures::HidingData.new(shown: 1, hidden: 2)))
+      expect(digest(fixtures::HidingStruct.new(1, 1))).not_to eq(digest(fixtures::HidingStruct.new(1, 2)))
+    end
+
+    it "includes a Struct's instance variables, which Marshal keeps" do
+      memoised = ->(memo) { fixtures::Pair.new(1, 2).tap { |pair| pair.instance_variable_set(:@memo, memo) } }
+
+      expect(digest(memoised.call(1))).not_to eq(digest(memoised.call(2)))
+      expect(digest(round_trip(memoised.call(1)))).to eq(digest(memoised.call(1)))
+    end
+
+    # Marshal keeps an exception's message, backtrace and cause in hidden instance variables, which
+    # `instance_variables` does not list.
+    it "digests an exception by its class, message, backtrace, cause and instance variables" do
+      traced = ->(line) { RuntimeError.new("a").tap { |error| error.set_backtrace(["parse.rb:#{line}"]) } }
+      tagged = ->(tag) { RuntimeError.new("a").tap { |error| error.instance_variable_set(:@tag, tag) } }
+
+      expect(digest(RuntimeError.new("a"))).not_to eq(digest(RuntimeError.new("b")))
+      expect(digest(RuntimeError.new("a"))).not_to eq(digest(fixtures::ParseError.new("a")))
+      expect(digest(traced.call(1))).not_to eq(digest(traced.call(2)))
+      expect(digest(raised_with_cause("a"))).not_to eq(digest(raised_with_cause("b")))
+      expect(digest(tagged.call(1))).not_to eq(digest(tagged.call(2)))
+      expect(digest(round_trip(raised_with_cause("a")))).to eq(digest(raised_with_cause("a")))
     end
 
     it "digests an object with `marshal_dump` as what that returns, which is what Marshal keeps" do

@@ -106,17 +106,25 @@ observe: classes (Integer vs Float, String vs Symbol, subclasses, each object's
 class), Hash and Set insertion order (a consumer may iterate a fact in order, and
 the computed and served forms agree on it, so digesting it can only
 over-invalidate), a Hash's default and `compare_by_identity`, and a non-ASCII
-String's encoding. A Data, Struct or plain object is written as its class and the
-SHA-256 of its content, taken once per object, so a row reached from both an
-index's list and its by-name Hash is walked once. A value the walk cannot see into
-— state outside Ruby (a Proc, an IO, a Mutex: what `Marshal.dump` refuses), a
-default proc, an anonymous class, a cycle — makes its plugin opaque, as a producer
-whose value would not Marshal already did. A published fact of that kind now makes
-its publisher opaque too; before, it dropped every plugin's facts from the digest,
-which a plugin with another surface survived as reusable. The digest's form changed,
-so `IncrementalSnapshot::SCHEMA` went 30→31. On Mastodon's `locale_index` (1.5M
-nodes, 3.2 MB of Marshal) the walk costs about what the Marshal dump it replaces
-did: 64 ms against 121 ms under YJIT, 131 ms against 96 ms without.
+String's encoding. A Data, Struct, Exception or plain object is written as its
+class and the SHA-256 of its content, taken once per object, so a row reached from
+both an index's list and its by-name Hash is walked once. The content is a Data's or
+Struct's members, an exception's message, backtrace and cause (which Marshal keeps
+in hidden instance variables), and the object's instance variables, all read through
+the core classes' own methods so a subclass's `to_h` or `message` cannot hide a
+field. A value the walk cannot see into — state outside Ruby (a Proc, an IO, a
+Mutex: what `Marshal.dump` refuses), a default proc, an anonymous class, a cycle —
+makes its plugin opaque, as a producer whose value would not Marshal already did. A
+published fact of that kind now makes its publisher opaque too; before, it dropped
+every plugin's facts from the digest, which a plugin with another surface survived
+as reusable. Three things Marshal keeps stay outside the digest: instance variables
+set on a String, Array, Hash or Set (`==` ignores them too), modules an object was
+extended with, and the hidden fields a C-implemented class keeps beside what is
+listed above (`NameError#name` reaches the digest only through the message). The
+digest's form changed, so `IncrementalSnapshot::SCHEMA` went 30→31. On Mastodon's
+`locale_index` (1.5M nodes, 3.2 MB of Marshal) the walk costs about what the
+Marshal dump it replaces did: 72 ms against 125 ms under YJIT, 152 ms against 121 ms
+without.
 
 **Post-hoc, not a separate probe.** The fingerprint is read POST-HOC from the
 analysis runner's already-prepared registry

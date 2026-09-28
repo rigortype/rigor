@@ -1,0 +1,585 @@
+# Declaration producers (#1507, ADR-119 WD6): every method, or class or module body, under lib/ and
+# plugins/*/lib/ whose code decides what a declaration is. producers_spec.rb computes the set with Prism and
+# compares it with this file. Each file says what it computes, and each entry why it computes a declaration
+# context itself instead of going through DeclarationWalk::Context or ModuleFunctionState. `grandfathered`
+# marks the entries present when the tripwire landed; they converge as bugs are filed. A new entry must say
+# why; `RIGOR_REGENERATE_GATES=1` adds new entries as TODO, which the spec fails on.
+
+lib/rigor/analysis/check_rules.rb:
+  computes: the visibility of a method and its override, for the def.method-visibility-mismatch and override rules
+  producers:
+    Rigor::Analysis::CheckRules.visibility_mismatch_diagnostic: grandfathered
+    Rigor::Analysis::CheckRules.visibility_reduced?: grandfathered
+lib/rigor/analysis/check_rules/ivar_write_collector.rb:
+  computes: the instance-variable writes in each class's instance-method bodies, keyed by qualified name
+  producers:
+    Rigor::Analysis::CheckRules::IvarWriteCollector: grandfathered
+    Rigor::Analysis::CheckRules::IvarWriteCollector#gather_writes: grandfathered
+    Rigor::Analysis::CheckRules::IvarWriteCollector#walk: grandfathered
+lib/rigor/analysis/check_rules/lexical_method_sites.rb:
+  computes: where a using activates refinements and where a singleton def on a local is in scope
+  producers:
+    Rigor::Analysis::CheckRules::LexicalMethodSites#walk: grandfathered
+lib/rigor/analysis/check_rules/rule_walk.rb:
+  computes: the single AST walk that hosts the check-rule collectors
+  producers:
+    Rigor::Analysis::CheckRules::RuleWalk: grandfathered
+    Rigor::Analysis::CheckRules::RuleWalk.detached_ivar_facet?: grandfathered
+    Rigor::Analysis::CheckRules::RuleWalk.extend_prefix: grandfathered
+lib/rigor/analysis/check_rules/self_closedness_scanner.rb:
+  computes: the qualified names of modules and open classes that call.self-undefined-method skips
+  producers:
+    Rigor::Analysis::CheckRules::SelfClosednessScanner#walk: grandfathered
+lib/rigor/analysis/check_rules/shadowed_rescue_collector.rb:
+  computes: the qualified owner a flow.shadowed-rescue-clause diagnostic names
+  producers:
+    Rigor::Analysis::CheckRules::ShadowedRescueCollector#extend_prefix: grandfathered
+lib/rigor/analysis/check_rules/source_arity.rb:
+  computes: whether a source-inferred method is public at a call site
+  producers:
+    Rigor::Analysis::CheckRules::SourceArity#public_at?: grandfathered
+lib/rigor/analysis/dependency_source_inference/walker.rb:
+  computes: the method catalog of an opt-in gem's source roots, per class and side
+  producers:
+    Rigor::Analysis::DependencySourceInference::Walker#walk_node: grandfathered
+lib/rigor/analysis/reachability/scan.rb:
+  computes: every constant declaration and reference with the lexical nesting in force there (ADR-102)
+  producers:
+    Rigor::Analysis::Reachability::Scan::Walker#mixin_names: grandfathered
+    Rigor::Analysis::Reachability::Scan::Walker#walk: grandfathered
+lib/rigor/effects/definition_context.rb:
+  computes: the side a definition lands on and the self its body runs with, for the effects scan
+  producers:
+    Rigor::Effects::DefinitionContext#for_child: grandfathered
+    Rigor::Effects::DefinitionContext.rebinds?: grandfathered
+lib/rigor/effects/definition_lines.rb:
+  computes: the line a method key's def is written at, in the file the key was traced to
+  producers:
+    Rigor::Effects::DefinitionLines#walk: grandfathered
+lib/rigor/effects/scanner.rb:
+  computes: the effect units a file defines, keyed Class#m or Class.m, and their superclasses
+  producers:
+    Rigor::Effects::Scanner: grandfathered
+    Rigor::Effects::Scanner#declaration?: grandfathered
+    Rigor::Effects::Scanner#record_declaration: grandfathered
+    Rigor::Effects::Scanner#walk: grandfathered
+    Rigor::Effects::Scanner#walk_namespace: grandfathered
+lib/rigor/effects/visibility.rb:
+  computes: the visibility region a statement list's bare and argument visibility calls set
+  producers:
+    Rigor::Effects::Visibility: grandfathered
+    Rigor::Effects::Visibility#apply_targets: grandfathered
+    Rigor::Effects::Visibility#region_after: grandfathered
+lib/rigor/environment/missing_gem_constant_index.rb:
+  computes: the top-level constant names an RBS-less gem declares
+  producers:
+    Rigor::Environment::MissingGemConstantIndex#top_level_root_constants: grandfathered
+lib/rigor/environment/rbs_loader.rb:
+  computes: the visibility of each member an RBS declaration lists
+  producers:
+    Rigor::Environment::RbsLoader.each_declared_member: grandfathered
+    Rigor::Environment::RbsLoader.member_visibility: grandfathered
+lib/rigor/inference/captured_locals.rb:
+  computes: the outer locals a block body can rebind
+  producers:
+    Rigor::Inference::CapturedLocals#hard_scope_entered?: grandfathered
+lib/rigor/inference/declaration_walk/traversal.rb:
+  computes: the shared declaration walk that hands each ScopeIndexer collector its self, cref and nesting
+  producers:
+    Rigor::Inference::DeclarationWalk::Traversal#walk: grandfathered
+lib/rigor/inference/expression_typer.rb:
+  computes: the type a class or module expression evaluates to, and the barrier around a re-typed callee body
+  producers:
+    Rigor::Inference::ExpressionTyper: grandfathered
+    Rigor::Inference::ExpressionTyper#prefix_statement_jump_free?: grandfathered
+    Rigor::Inference::ExpressionTyper#untraced_type_of: grandfathered
+    Rigor::Inference::ExpressionTyper#yield_reachable?: grandfathered
+lib/rigor/inference/global_write_census.rb:
+  computes: the global write census (aliases, answer-method defines, top-level mixins)
+  producers:
+    Rigor::Inference::GlobalWriteCensus: grandfathered
+    Rigor::Inference::GlobalWriteCensus#walk: grandfathered
+    Rigor::Inference::GlobalWriteCensus::Collector#visit_call: grandfathered
+lib/rigor/inference/guard_rebinding.rb:
+  computes: where a guard's narrowing of a global or constant stops holding
+  producers:
+    Rigor::Inference::GuardRebinding::ScanScope: grandfathered
+    Rigor::Inference::GuardRebinding::ScanScope#collect_local_writes: grandfathered
+lib/rigor/inference/jump_targets.rb:
+  computes: the break and next nodes that target a construct
+  producers:
+    Rigor::Inference::JumpTargets: grandfathered
+    Rigor::Inference::JumpTargets#boundary?: grandfathered
+lib/rigor/inference/last_line.rb:
+  computes: whether a gets / readline reader runs in a frame of its own, for the $_ binding
+  producers:
+    Rigor::Inference::LastLine#scan: grandfathered
+lib/rigor/inference/last_line/self_evidence.rb:
+  computes: what a file shows about the self its implicit-self gets and readline readers run with
+  producers:
+    Rigor::Inference::LastLine::SelfEvidence: grandfathered
+    Rigor::Inference::LastLine::SelfEvidence::Scan#classify: grandfathered
+    Rigor::Inference::LastLine::SelfEvidence::Scan#def_context: grandfathered
+    Rigor::Inference::LastLine::SelfEvidence::Scan#mixin: grandfathered
+    Rigor::Inference::LastLine::SelfEvidence::Scan#visit: grandfathered
+    Rigor::Inference::LastLine::SelfEvidence::Scan#visit_declaration: grandfathered
+lib/rigor/inference/match_rebinding.rb:
+  computes: which code may rebind the regex match globals
+  producers:
+    Rigor::Inference::MatchRebinding: grandfathered
+    Rigor::Inference::MatchRebinding#broad_may_match?: grandfathered
+    Rigor::Inference::MatchRebinding#hands_out_slot?: grandfathered
+    Rigor::Inference::MatchRebinding#makes_closure?: grandfathered
+    Rigor::Inference::MatchRebinding#operand_may_match?: grandfathered
+    Rigor::Inference::MatchRebinding#scan: grandfathered
+    Rigor::Inference::MatchRebinding#value_may_rebind?: grandfathered
+lib/rigor/inference/match_rebinding/frame.rb:
+  computes: the frame a match global binds in, for the regex match globals
+  producers:
+    Rigor::Inference::MatchRebinding::Frame#binds_local?: grandfathered
+lib/rigor/inference/method_dispatcher/member_shape_projection.rb:
+  computes: whether a Data or Struct member reader is redefined in the class body
+  producers:
+    Rigor::Inference::MethodDispatcher::MemberShapeProjection#reader_scope_boundary?: grandfathered
+lib/rigor/inference/method_dispatcher/rbs_dispatch.rb:
+  computes: whether an RBS-declared method is private
+  producers:
+    Rigor::Inference::MethodDispatcher::RbsDispatch.method_private?: grandfathered
+lib/rigor/inference/module_function_state.rb:
+  computes: what a module_function call does to the defs around it, for each of its four readers
+  producers:
+    Rigor::Inference::ModuleFunctionState#call?: grandfathered
+    Rigor::Inference::ModuleFunctionState#prescan_deferred: grandfathered
+lib/rigor/inference/operand_effects.rb:
+  computes: whether an operand holds a write or a jump the scope after it must see
+  producers:
+    Rigor::Inference::OperandEffects: grandfathered
+    Rigor::Inference::OperandEffects#collect_read: grandfathered
+    Rigor::Inference::OperandEffects#collect_written: grandfathered
+    Rigor::Inference::OperandEffects#effect?: grandfathered
+lib/rigor/inference/project_patched_scanner.rb:
+  computes: the def and def self methods each class declares in the pre_eval files (ADR-17)
+  producers:
+    Rigor::Inference::ProjectPatchedScanner#walk_node: grandfathered
+lib/rigor/inference/receiver_blind_block.rb:
+  computes: whether a block can see the hash an in-place transform is rewriting
+  producers:
+    Rigor::Inference::ReceiverBlindBlock: grandfathered
+    Rigor::Inference::ReceiverBlindBlock#node_blind?: grandfathered
+lib/rigor/inference/scope_indexer.rb:
+  computes: the per-file and project discovery tables (methods, def nodes, visibilities, mixins, constants, ranges)
+  producers:
+    Rigor::Inference::ScopeIndexer: grandfathered
+    Rigor::Inference::ScopeIndexer#accumulate_extend_lists: grandfathered
+    Rigor::Inference::ScopeIndexer#accumulate_include_lists: grandfathered
+    Rigor::Inference::ScopeIndexer#accumulate_ivar_type: grandfathered
+    Rigor::Inference::ScopeIndexer#accumulate_prepend_lists: grandfathered
+    Rigor::Inference::ScopeIndexer#accumulate_project_index: grandfathered
+    Rigor::Inference::ScopeIndexer#add_declared_name: grandfathered
+    Rigor::Inference::ScopeIndexer#add_header_nesting: grandfathered
+    Rigor::Inference::ScopeIndexer#alias_renamed_header_nestings: grandfathered
+    Rigor::Inference::ScopeIndexer#append_ancestry_signature: grandfathered
+    Rigor::Inference::ScopeIndexer#append_constant_signature: grandfathered
+    Rigor::Inference::ScopeIndexer#append_declaration_tables: grandfathered
+    Rigor::Inference::ScopeIndexer#append_def_signatures: grandfathered
+    Rigor::Inference::ScopeIndexer#append_envelope_signature: grandfathered
+    Rigor::Inference::ScopeIndexer#apply_alias_def_nodes: grandfathered
+    Rigor::Inference::ScopeIndexer#apply_compact_header_renames!: grandfathered
+    Rigor::Inference::ScopeIndexer#apply_dynamic_target_writes: grandfathered
+    Rigor::Inference::ScopeIndexer#apply_named_visibility: grandfathered
+    Rigor::Inference::ScopeIndexer#apply_visibility_call: grandfathered
+    Rigor::Inference::ScopeIndexer#build_discovered_method_visibilities: grandfathered
+    Rigor::Inference::ScopeIndexer#collect_alias_map_block_call?: grandfathered
+    Rigor::Inference::ScopeIndexer#collect_alias_map_declaration: grandfathered
+    Rigor::Inference::ScopeIndexer#collect_alias_map_meta_new?: grandfathered
+    Rigor::Inference::ScopeIndexer#collect_alias_map_singleton: grandfathered
+    Rigor::Inference::ScopeIndexer#collect_anonymous_meta_defs?: grandfathered
+    Rigor::Inference::ScopeIndexer#collect_block_ivar_writes: grandfathered
+    Rigor::Inference::ScopeIndexer#collect_call_method_defs?: grandfathered
+    Rigor::Inference::ScopeIndexer#collect_class_alias_map: grandfathered
+    Rigor::Inference::ScopeIndexer#collect_class_body_ivar_writes: grandfathered
+    Rigor::Inference::ScopeIndexer#collect_class_decls: grandfathered
+    Rigor::Inference::ScopeIndexer#collect_class_method_defs: grandfathered
+    Rigor::Inference::ScopeIndexer#collect_decl_body?: grandfathered
+    Rigor::Inference::ScopeIndexer#collect_decl_method_defs: grandfathered
+    Rigor::Inference::ScopeIndexer#collect_declared_anonymous_factory?: grandfathered
+    Rigor::Inference::ScopeIndexer#collect_declared_bare_write: grandfathered
+    Rigor::Inference::ScopeIndexer#collect_declared_class_decl: grandfathered
+    Rigor::Inference::ScopeIndexer#collect_declared_constant_names: grandfathered
+    Rigor::Inference::ScopeIndexer#collect_declared_path_write: grandfathered
+    Rigor::Inference::ScopeIndexer#collect_def_cvar_writes: grandfathered
+    Rigor::Inference::ScopeIndexer#collect_def_ivar_writes: grandfathered
+    Rigor::Inference::ScopeIndexer#collect_defined_test_ivars: grandfathered
+    Rigor::Inference::ScopeIndexer#collect_eval_class_decls?: grandfathered
+    Rigor::Inference::ScopeIndexer#collect_eval_method_defs?: grandfathered
+    Rigor::Inference::ScopeIndexer#collect_explicit_return_ivars: grandfathered
+    Rigor::Inference::ScopeIndexer#collect_initializer_block_ivars: grandfathered
+    Rigor::Inference::ScopeIndexer#collect_meta_new_constant_decls?: grandfathered
+    Rigor::Inference::ScopeIndexer#collect_meta_new_method_defs?: grandfathered
+    Rigor::Inference::ScopeIndexer#collect_mixin_names: grandfathered
+    Rigor::Inference::ScopeIndexer#collect_nil_test_ivars: grandfathered
+    Rigor::Inference::ScopeIndexer#collect_read_before_write_evidence: grandfathered
+    Rigor::Inference::ScopeIndexer#collect_rvalue_declared_names: grandfathered
+    Rigor::Inference::ScopeIndexer#collect_singleton_method_defs: grandfathered
+    Rigor::Inference::ScopeIndexer#collect_truthy_test_ivars: grandfathered
+    Rigor::Inference::ScopeIndexer#constant_mutation_candidates: grandfathered
+    Rigor::Inference::ScopeIndexer#declared_ancestor_names: grandfathered
+    Rigor::Inference::ScopeIndexer#detect_multi_write_target_writes: grandfathered
+    Rigor::Inference::ScopeIndexer#detect_read_before_write: grandfathered
+    Rigor::Inference::ScopeIndexer#each_refinement_def: grandfathered
+    Rigor::Inference::ScopeIndexer#finalize_call_surface_tables: grandfathered
+    Rigor::Inference::ScopeIndexer#finalize_def_index: grandfathered
+    Rigor::Inference::ScopeIndexer#finalize_project_index: grandfathered
+    Rigor::Inference::ScopeIndexer#fold_ancestry_tables: grandfathered
+    Rigor::Inference::ScopeIndexer#fold_constant_tables: grandfathered
+    Rigor::Inference::ScopeIndexer#fold_def_sources: grandfathered
+    Rigor::Inference::ScopeIndexer#fold_def_tables: grandfathered
+    Rigor::Inference::ScopeIndexer#fold_extends_into_singleton_tables: grandfathered
+    Rigor::Inference::ScopeIndexer#fold_file_index: grandfathered
+    Rigor::Inference::ScopeIndexer#fold_file_mixin_tables: grandfathered
+    Rigor::Inference::ScopeIndexer#fold_mixin_lists: grandfathered
+    Rigor::Inference::ScopeIndexer#fold_per_file_extends: grandfathered
+    Rigor::Inference::ScopeIndexer#fold_refinements: grandfathered
+    Rigor::Inference::ScopeIndexer#gather_aliased_mutations: grandfathered
+    Rigor::Inference::ScopeIndexer#gather_cvar_writes: grandfathered
+    Rigor::Inference::ScopeIndexer#gather_global_writes: grandfathered
+    Rigor::Inference::ScopeIndexer#gather_ivar_writes: grandfathered
+    Rigor::Inference::ScopeIndexer#ivar_write_targets: grandfathered
+    Rigor::Inference::ScopeIndexer#merge_and_fold_extends: grandfathered
+    Rigor::Inference::ScopeIndexer#merge_class_keyed_index_tables: grandfathered
+    Rigor::Inference::ScopeIndexer#merge_constant_literal_tables: grandfathered
+    Rigor::Inference::ScopeIndexer#merge_discovered_defs: grandfathered
+    Rigor::Inference::ScopeIndexer#merge_header_nesting_bucket: grandfathered
+    Rigor::Inference::ScopeIndexer#merge_header_nestings: grandfathered
+    Rigor::Inference::ScopeIndexer#merge_held_ivar_writes!: grandfathered
+    Rigor::Inference::ScopeIndexer#merge_member_layout_tables: grandfathered
+    Rigor::Inference::ScopeIndexer#merge_renamed_header_bucket: grandfathered
+    Rigor::Inference::ScopeIndexer#method_definite_assigns: grandfathered
+    Rigor::Inference::ScopeIndexer#mixin_call?: grandfathered
+    Rigor::Inference::ScopeIndexer#mixin_call_recorded?: grandfathered
+    Rigor::Inference::ScopeIndexer#mixin_names_for: grandfathered
+    Rigor::Inference::ScopeIndexer#mixin_tables: grandfathered
+    Rigor::Inference::ScopeIndexer#path_mutation_candidates: grandfathered
+    Rigor::Inference::ScopeIndexer#propagate: grandfathered
+    Rigor::Inference::ScopeIndexer#propagate_call: grandfathered
+    Rigor::Inference::ScopeIndexer#propagate_end_body: grandfathered
+    Rigor::Inference::ScopeIndexer#propagate_if_branches: grandfathered
+    Rigor::Inference::ScopeIndexer#propagate_unless_branches: grandfathered
+    Rigor::Inference::ScopeIndexer#record_alias_leaf?: grandfathered
+    Rigor::Inference::ScopeIndexer#record_alias_map_entry: grandfathered
+    Rigor::Inference::ScopeIndexer#record_aliased_ivar_mutations!: grandfathered
+    Rigor::Inference::ScopeIndexer#record_anonymous_body_def_as_toplevel: grandfathered
+    Rigor::Inference::ScopeIndexer#record_anonymous_meta_superclass: grandfathered
+    Rigor::Inference::ScopeIndexer#record_attr_writer_ivars: grandfathered
+    Rigor::Inference::ScopeIndexer#record_class_new_constant_decl: grandfathered
+    Rigor::Inference::ScopeIndexer#record_class_or_module?: grandfathered
+    Rigor::Inference::ScopeIndexer#record_class_sources: grandfathered
+    Rigor::Inference::ScopeIndexer#record_collected_method_def: grandfathered
+    Rigor::Inference::ScopeIndexer#record_compact_header: grandfathered
+    Rigor::Inference::ScopeIndexer#record_compound_ivar_write: grandfathered
+    Rigor::Inference::ScopeIndexer#record_constant_write: grandfathered
+    Rigor::Inference::ScopeIndexer#record_cvar_write: grandfathered
+    Rigor::Inference::ScopeIndexer#record_data_member_layout: grandfathered
+    Rigor::Inference::ScopeIndexer#record_declaration_ancestry: grandfathered
+    Rigor::Inference::ScopeIndexer#record_declaration_facts: grandfathered
+    Rigor::Inference::ScopeIndexer#record_declarations: grandfathered
+    Rigor::Inference::ScopeIndexer#record_def_body_evidence: grandfathered
+    Rigor::Inference::ScopeIndexer#record_def_node: grandfathered
+    Rigor::Inference::ScopeIndexer#record_def_visibility: grandfathered
+    Rigor::Inference::ScopeIndexer#record_deferred_def: grandfathered
+    Rigor::Inference::ScopeIndexer#record_envelope: grandfathered
+    Rigor::Inference::ScopeIndexer#record_eval_declarations?: grandfathered
+    Rigor::Inference::ScopeIndexer#record_extend_call: grandfathered
+    Rigor::Inference::ScopeIndexer#record_extend_targets: grandfathered
+    Rigor::Inference::ScopeIndexer#record_file_positions: grandfathered
+    Rigor::Inference::ScopeIndexer#record_global_write: grandfathered
+    Rigor::Inference::ScopeIndexer#record_ivar_and_write: grandfathered
+    Rigor::Inference::ScopeIndexer#record_ivar_mutator_call: grandfathered
+    Rigor::Inference::ScopeIndexer#record_ivar_operator_write: grandfathered
+    Rigor::Inference::ScopeIndexer#record_ivar_or_write: grandfathered
+    Rigor::Inference::ScopeIndexer#record_ivar_write: grandfathered
+    Rigor::Inference::ScopeIndexer#record_literal_receiver_mutation: grandfathered
+    Rigor::Inference::ScopeIndexer#record_meta_new_constant?: grandfathered
+    Rigor::Inference::ScopeIndexer#record_method_kind: grandfathered
+    Rigor::Inference::ScopeIndexer#record_mixin_call: grandfathered
+    Rigor::Inference::ScopeIndexer#record_mixin_names: grandfathered
+    Rigor::Inference::ScopeIndexer#record_module_function_names: grandfathered
+    Rigor::Inference::ScopeIndexer#record_multi_write_ivars: grandfathered
+    Rigor::Inference::ScopeIndexer#record_published_constant_ivar: grandfathered
+    Rigor::Inference::ScopeIndexer#record_self_surface_evidence: grandfathered
+    Rigor::Inference::ScopeIndexer#record_singleton_def_node: grandfathered
+    Rigor::Inference::ScopeIndexer#record_struct_member_layout: grandfathered
+    Rigor::Inference::ScopeIndexer#seed_operator_only_ivars!: grandfathered
+    Rigor::Inference::ScopeIndexer#surface_mixin_call?: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_anonymous_meta_block: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_class_cvars: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_class_extends: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_class_includes: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_class_ivars: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_class_superclasses: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_conditional_ivar_writes: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_constant_write_census: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_constant_write_children: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_constant_writes: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_cvars_declaration?: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_cvars_eval_call?: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_cvars_meta_call?: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_cvars_meta_new?: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_data_layout_meta_new?: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_data_member_layouts: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_def_nesting_declaration: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_def_nesting_eval?: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_def_nesting_meta_new?: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_def_nestings: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_deferred_body: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_deferred_children: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_deferred_def_leaf: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_deferred_lexical_body: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_deferred_meta_new: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_deferred_ranges: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_deferred_singleton_body: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_eval_block_call: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_eval_extends_call: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_eval_methods_and_defs: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_eval_singleton_defs: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_eval_visibilities: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_extends_block_call: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_extends_declaration: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_extends_meta_new?: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_extends_opaque_block: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_extends_singleton_class: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_includes_declaration?: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_includes_meta_new?: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_ivars_declaration: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_ivars_eval_call?: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_ivars_leaf?: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_ivars_meta_call?: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_ivars_meta_new?: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_layout_declaration: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_literal_mutation_declaration?: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_literal_mutation_eval_call?: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_literal_mutation_meta_call?: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_literal_mutation_meta_new?: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_literal_receiver_mutations: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_method_visibilities: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_methods_and_def_nodes: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_mixin_call_children: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_published_constant_ivars: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_published_ivar_declaration?: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_published_ivar_eval_call?: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_published_ivar_leaf?: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_published_ivar_meta_new?: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_singleton_body: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_singleton_class_includes: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_singleton_class_ivars: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_singleton_class_writes: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_singleton_def_nodes: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_singleton_literal_mutations: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_singleton_meta_new?: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_singleton_published_ivars: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_singleton_superclasses: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_struct_layout_meta_new?: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_struct_member_layouts: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_superclass_declaration?: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_superclass_eval_call?: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_superclass_meta_new?: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_typed_declaration?: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_visibility_singleton_class: grandfathered
+    Rigor::Inference::ScopeIndexer#write_mixin_targets: grandfathered
+lib/rigor/inference/scope_indexer/class_cvars_collector.rb:
+  computes: the per-class class-variable writes, as a collector on the shared declaration walk
+  producers:
+    Rigor::Inference::ScopeIndexer::ClassCvarsCollector: grandfathered
+lib/rigor/inference/scope_indexer/def_nestings_collector.rb:
+  computes: the Module.nesting of each def, as a collector on the shared declaration walk
+  producers:
+    Rigor::Inference::ScopeIndexer::DefNestingsCollector: grandfathered
+lib/rigor/inference/scope_indexer/member_layouts_collector.rb:
+  computes: each Data and Struct class's member layout
+  producers:
+    Rigor::Inference::ScopeIndexer::MemberLayoutsCollector: grandfathered
+    Rigor::Inference::ScopeIndexer::MemberLayoutsCollector#on_declaration: grandfathered
+lib/rigor/inference/scope_indexer/superclasses_collector.rb:
+  computes: each class's superclass and header nesting, as a collector on the shared declaration walk
+  producers:
+    Rigor::Inference::ScopeIndexer::SuperclassesCollector: grandfathered
+lib/rigor/inference/statement_evaluator.rb:
+  computes: the scope a class, module or class << self body is evaluated in
+  producers:
+    Rigor::Inference::StatementEvaluator: grandfathered
+    Rigor::Inference::StatementEvaluator#eval_class_body: grandfathered
+    Rigor::Inference::StatementEvaluator#evaluate: grandfathered
+    Rigor::Inference::StatementEvaluator#forget_last_line_first?: grandfathered
+    Rigor::Inference::StatementEvaluator#same_scope_local?: grandfathered
+    Rigor::Inference::StatementEvaluator#scope_boundary?: grandfathered
+    Rigor::Inference::StatementEvaluator#thread_operand: grandfathered
+    Rigor::Inference::StatementEvaluator#walk_primary_frame: grandfathered
+lib/rigor/inference/struct_fold_safety.rb:
+  computes: the Struct locals that are never mutated, aliased or escaped
+  producers:
+    Rigor::Inference::StructFoldSafety#scope_boundary?: grandfathered
+lib/rigor/inference/synthetic_method_scanner.rb:
+  computes: the synthetic methods plugin heredoc-template DSL calls define on each class (ADR-16)
+  producers:
+    Rigor::Inference::SyntheticMethodScanner#body_extends?: grandfathered
+    Rigor::Inference::SyntheticMethodScanner#class_name_from: grandfathered
+    Rigor::Inference::SyntheticMethodScanner#collect_concern_re_targeted_entries: grandfathered
+    Rigor::Inference::SyntheticMethodScanner#concern_module_body?: grandfathered
+    Rigor::Inference::SyntheticMethodScanner#walk_class_bodies: grandfathered
+    Rigor::Inference::SyntheticMethodScanner#walk_class_decls: grandfathered
+    Rigor::Inference::SyntheticMethodScanner#walk_classes: grandfathered
+    Rigor::Inference::SyntheticMethodScanner#walk_module_decls: grandfathered
+lib/rigor/language_server/document_symbol_provider.rb:
+  computes: the editor outline of classes, modules and defs
+  producers:
+    Rigor::LanguageServer::DocumentSymbolProvider#each_decl: grandfathered
+lib/rigor/language_server/folding_range_provider.rb:
+  computes: the editor's folding ranges
+  producers:
+    Rigor::LanguageServer::FoldingRangeProvider#walk: grandfathered
+lib/rigor/plugin/node_context.rb:
+  computes: the enclosing class or module a node rule sees (ADR-37)
+  producers:
+    Rigor::Plugin::NodeContext#enclosing_module: grandfathered
+lib/rigor/sig_gen/generator.rb:
+  computes: the defs, attribute readers and ivar observations sig-gen emits per qualified class
+  producers:
+    Rigor::SigGen::Generator#collect_init_ivar_obs: grandfathered
+    Rigor::SigGen::Generator#descend_into_namespace?: grandfathered
+    Rigor::SigGen::Generator#record_superclass: grandfathered
+    Rigor::SigGen::Generator#scan_ivar_param_assignments: grandfathered
+    Rigor::SigGen::Generator#visibility_excludes?: grandfathered
+    Rigor::SigGen::Generator#walk_attr_calls: grandfathered
+    Rigor::SigGen::Generator#walk_defs: grandfathered
+lib/rigor/sig_gen/observation_collector.rb:
+  computes: the qualified class of each observed call site's enclosing declaration
+  producers:
+    Rigor::SigGen::ObservationCollector#walk_class_decls: grandfathered
+plugins/rigor-actioncable/lib/rigor/plugin/actioncable/channel_discoverer.rb:
+  computes: the ActionCable channel classes and their lexical paths
+  producers:
+    Rigor::Plugin::Actioncable::ChannelDiscoverer#walk_for_channels: grandfathered
+plugins/rigor-actionmailer/lib/rigor/plugin/actionmailer/mailer_discoverer.rb:
+  computes: the mailer classes and the actions their modules contribute
+  producers:
+    Rigor::Plugin::Actionmailer::MailerDiscoverer#collect_action_defs: grandfathered
+    Rigor::Plugin::Actionmailer::MailerDiscoverer#collect_includes: grandfathered
+    Rigor::Plugin::Actionmailer::MailerDiscoverer#collect_module_actions: grandfathered
+    Rigor::Plugin::Actionmailer::MailerDiscoverer#collect_visibility_and_callbacks: grandfathered
+    Rigor::Plugin::Actionmailer::MailerDiscoverer#next_visibility: grandfathered
+    Rigor::Plugin::Actionmailer::MailerDiscoverer#walk_for_mailers: grandfathered
+plugins/rigor-actionpack/lib/rigor/plugin/actionpack/analyzer.rb:
+  computes: the name of the controller enclosing a node
+  producers:
+    Rigor::Plugin::Actionpack::Analyzer#enclosing_controller_name: grandfathered
+plugins/rigor-actionpack/lib/rigor/plugin/actionpack/controller_discoverer.rb:
+  computes: the controller classes, their parents and their included modules
+  producers:
+    Rigor::Plugin::Actionpack::ControllerDiscoverer#collect_include_targets: grandfathered
+    Rigor::Plugin::Actionpack::ControllerDiscoverer#parent_name_for: grandfathered
+    Rigor::Plugin::Actionpack::ControllerDiscoverer#walk_declarations: grandfathered
+plugins/rigor-actionpack/lib/rigor/plugin/actionpack/controller_scan.rb:
+  computes: each controller class with its namespace
+  producers:
+    Rigor::Plugin::Actionpack::ControllerScan#each_controller: grandfathered
+plugins/rigor-active-model-serializers/lib/rigor/plugin/active_model_serializers/serializer_discoverer.rb:
+  computes: the serializer classes whose ancestry closes back to a configured root
+  producers:
+    Rigor::Plugin::ActiveModelSerializers::SerializerDiscoverer: grandfathered
+    Rigor::Plugin::ActiveModelSerializers::SerializerDiscoverer#collect_from: grandfathered
+    Rigor::Plugin::ActiveModelSerializers::SerializerDiscoverer#walk: grandfathered
+plugins/rigor-activejob/lib/rigor/plugin/activejob/job_discoverer.rb:
+  computes: the job classes and their lexical paths
+  producers:
+    Rigor::Plugin::Activejob::JobDiscoverer#walk_for_jobs: grandfathered
+plugins/rigor-activerecord/lib/rigor/plugin/activerecord/model_discoverer.rb:
+  computes: the model classes, their table names and the table-name decorators, including its own module_function reading
+  producers:
+    Rigor::Plugin::Activerecord::ModelDiscoverer#abstract_class?: grandfathered
+    Rigor::Plugin::Activerecord::ModelDiscoverer#include_call_targets: grandfathered
+    Rigor::Plugin::Activerecord::ModelDiscoverer#singleton_class_defines_table_name?: grandfathered
+    Rigor::Plugin::Activerecord::ModelDiscoverer#table_name_decorators: grandfathered
+    Rigor::Plugin::Activerecord::ModelDiscoverer#walk_for_classes: grandfathered
+    Rigor::Plugin::Activerecord::ModelDiscoverer#walk_for_outside_decorators: grandfathered
+plugins/rigor-activestorage/lib/rigor/plugin/activestorage/attachment_discoverer.rb:
+  computes: the attachment declarations of each model class
+  producers:
+    Rigor::Plugin::Activestorage::AttachmentDiscoverer#walk: grandfathered
+plugins/rigor-dry-schema/lib/rigor/plugin/dry_schema/schema_scanner.rb:
+  computes: the schema definitions under each qualified prefix
+  producers:
+    Rigor::Plugin::DrySchema::SchemaScanner#collect_schemas: grandfathered
+plugins/rigor-dry-types/lib/rigor/plugin/dry_types/alias_scanner.rb:
+  computes: the alias table of each module that includes Dry.Types()
+  producers:
+    Rigor::Plugin::DryTypes::AliasScanner#collect_alias_modules: grandfathered
+    Rigor::Plugin::DryTypes::AliasScanner#include_call_targeting_dry_types?: grandfathered
+plugins/rigor-dry-validation/lib/rigor/plugin/dry_validation/contract_scanner.rb:
+  computes: the contract classes, their params blocks and their rule issues
+  producers:
+    Rigor::Plugin::DryValidation::ContractScanner#collect_contracts: grandfathered
+    Rigor::Plugin::DryValidation::ContractScanner#collect_params_blocks: grandfathered
+    Rigor::Plugin::DryValidation::ContractScanner#walk_for_rule_issues: grandfathered
+plugins/rigor-ffi/lib/rigor/plugin/ffi.rb:
+  computes: the node rule that checks FFI struct classes
+  producers:
+    Rigor::Plugin::FFI: grandfathered
+plugins/rigor-ffi/lib/rigor/plugin/ffi/analyzer.rb:
+  computes: the ffx diagnostics for one class node
+  producers:
+    Rigor::Plugin::FFI::Analyzer#ffx_diagnostics_for_class: grandfathered
+plugins/rigor-ffi/lib/rigor/plugin/ffi/discoverer.rb:
+  computes: the FFI catalog (bindings, libraries, structs, typedefs, enums, callbacks) per enclosing module
+  producers:
+    Rigor::Plugin::FFI::Discoverer#discover: grandfathered
+    Rigor::Plugin::FFI::Discoverer#handle_call: grandfathered
+    Rigor::Plugin::FFI::Discoverer#walk_tree: grandfathered
+plugins/rigor-graphql/lib/rigor/plugin/graphql/type_scanner.rb:
+  computes: the GraphQL object, enum, input-object and mutation classes and their field and argument tables
+  producers:
+    Rigor::Plugin::Graphql::TypeScanner#collect_definitions: grandfathered
+plugins/rigor-hanami/lib/rigor/plugin/hanami.rb:
+  computes: the node rule that checks the Hanami::Action protocol
+  producers:
+    Rigor::Plugin::Hanami: grandfathered
+plugins/rigor-hanami/lib/rigor/plugin/hanami/action_checker.rb:
+  computes: the defs a class body declares directly
+  producers:
+    Rigor::Plugin::Hanami::ActionChecker#collect_direct_defs: grandfathered
+plugins/rigor-pundit/lib/rigor/plugin/pundit/policy_discoverer.rb:
+  computes: the policy classes and their lexical paths
+  producers:
+    Rigor::Plugin::Pundit::PolicyDiscoverer#walk_for_policies: grandfathered
+plugins/rigor-rails-routes/lib/rigor/plugin/rails_routes/grape_api_discoverer.rb:
+  computes: the Grape API classes and their superclasses
+  producers:
+    Rigor::Plugin::RailsRoutes::GrapeApiDiscoverer#walk: grandfathered
+plugins/rigor-rails-routes/lib/rigor/plugin/rails_routes/helper_discoverer.rb:
+  computes: the _path and _url helper names the helper modules define
+  producers:
+    Rigor::Plugin::RailsRoutes::HelperDiscoverer::ModuleBodyWalker#visit_program_children: grandfathered
+    Rigor::Plugin::RailsRoutes::HelperDiscoverer::ModuleBodyWalker#visit_statements: grandfathered
+plugins/rigor-sidekiq/lib/rigor/plugin/sidekiq/worker_discoverer.rb:
+  computes: the Sidekiq worker classes and their lexical paths
+  producers:
+    Rigor::Plugin::Sidekiq::WorkerDiscoverer#includes_marker_module?: grandfathered
+    Rigor::Plugin::Sidekiq::WorkerDiscoverer#walk_for_workers: grandfathered
+plugins/rigor-sorbet/lib/rigor/plugin/sorbet.rb:
+  computes: the include and extend chain a sig lookup walks, read off the Sorbet catalog
+  producers:
+    Rigor::Plugin::Sorbet#chain_lookup: grandfathered
+    Rigor::Plugin::Sorbet#implicit_self_lookup: grandfathered
+    Rigor::Plugin::Sorbet#instance_chain_lookup: grandfathered
+    Rigor::Plugin::Sorbet#lookup_signature: grandfathered
+plugins/rigor-sorbet/lib/rigor/plugin/sorbet/catalog.rb:
+  computes: the mixins the Sorbet catalog records per class
+  producers:
+    Rigor::Plugin::Sorbet::Catalog#mixins_for: grandfathered
+plugins/rigor-sorbet/lib/rigor/plugin/sorbet/catalog_walker.rb:
+  computes: the Sorbet sig catalog per class and side
+  producers:
+    Rigor::Plugin::Sorbet::CatalogWalker: grandfathered
+    Rigor::Plugin::Sorbet::CatalogWalker#mixin_call?: grandfathered
+    Rigor::Plugin::Sorbet::CatalogWalker#record_mixin_call: grandfathered
+    Rigor::Plugin::Sorbet::CatalogWalker#visibility_wrapped_def: grandfathered
+    Rigor::Plugin::Sorbet::CatalogWalker#walk_node: grandfathered

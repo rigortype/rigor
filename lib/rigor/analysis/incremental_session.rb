@@ -705,6 +705,9 @@ module Rigor
       # the run reads anything. nil (no slot this run) for a store no slot is written to, or no fingerprint.
       def start_slot_guard(fingerprint)
         return nil if fingerprint.nil? || @cache_store.nil? || @cache_store.read_only? || !@buffer.nil?
+        # Known before the run: none of these can be written afterwards, so the stamp and the recomputed
+        # fingerprint would be spent for nothing.
+        return nil unless @workers.zero? && !@configuration.effects_enabled?
 
         IncrementalRunSlot::WriteGuard.start(
           configuration: @configuration, roots: @paths || @configuration.paths, cache_root: @cache_store.root,

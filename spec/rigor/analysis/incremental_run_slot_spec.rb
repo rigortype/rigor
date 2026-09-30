@@ -967,7 +967,10 @@ RSpec.describe Rigor::Analysis::IncrementalRunSlot do
     write(".rigor.yml", "paths:\n  - lib\neffects: {}\n")
     config = Rigor::Configuration.load(".rigor.yml")
     expect(config.effects_enabled?).to be(true)
+    allow(Rigor::Analysis::IncrementalRunSlot::WriteGuard).to receive(:start).and_call_original
     incremental_run(config)
+    # No mark is spent on a run whose slot cannot be written.
+    expect(Rigor::Analysis::IncrementalRunSlot::WriteGuard).not_to have_received(:start)
     expect(slot_entries).to be_empty
     expect(served(config)).to be_nil
   end

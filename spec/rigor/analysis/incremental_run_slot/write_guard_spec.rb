@@ -9,7 +9,8 @@ require "rigor/analysis/incremental_run_slot/write_guard"
 # a fine-grained macOS APFS run never meets. The clock is coarsened in the spec, so the examples do not depend on
 # the filesystem the suite runs on.
 RSpec.describe Rigor::Analysis::IncrementalRunSlot::WriteGuard do
-  let(:tick_ns) { 50_000_000 }
+  # Not a divisor of a second: a first stamp on a whole second is declined as a filesystem too coarse to wait out.
+  let(:tick_ns) { 47_000_000 }
   let(:cache_root) { File.join(Dir.pwd, ".rigor", "cache") }
   let(:configuration) do
     Rigor::Configuration.new(Rigor::Configuration::DEFAULTS.merge({ "paths" => ["lib"] }))
@@ -85,5 +86,57 @@ RSpec.describe Rigor::Analysis::IncrementalRunSlot::WriteGuard do
     allow(described_class).to receive(:write_stamp).and_return([1, device])
     expect(start).to be_nil
     expect(described_class).to have_received(:write_stamp).at_least(:twice)
+  end
+
+  it "takes no mark when the first stamp lands on a whole second, a filesystem too coarse to wait out" do
+    device = File.stat(Dir.pwd).dev
+    allow(described_class).to receive(:write_stamp).and_return([3_000_000_000, device])
+    expect(start).to be_nil
+    expect(described_class).to have_received(:write_stamp).once
+  end
+
+  it "takes no mark on native Windows, where a change time is the creation time" do
+    allow(Gem).to receive(:win_platform?).and_return(true)
+    expect(start).to be_nil
+  end
+
+  it "refuses the write once the clock reads earlier than the mark" do
+    guard = start
+    expect(guard.admits?(rows_for("lib/a.rb"))).to be(true)
+
+    allow(described_class).to receive(:write_stamp).and_return([1, File.stat(Dir.pwd).dev])
+    expect(guard.admits?(rows_for("lib/a.rb"))).to be(false)
+  end
+
+  it "refuses the write when the closing stamp cannot be written" do
+    guard = start
+    allow(described_class).to receive(:write_stamp).and_return(nil)
+    expect(guard.admits?(rows_for("lib/a.rb"))).to be(false)
+  end
+
+  # `derived` carries an existence row for every `pre_eval:` entry, and the baseline a content row for the same path
+  # when it is outside the analysed files. The row that comes first must not hide the other.
+  context "with a `pre_eval:` file that is an existence row and a content row" do
+    let(:configuration) do
+      Rigor::Configuration.new(Rigor::Configuration::DEFAULTS.merge({ "paths" => ["lib"],
+                                                                      "pre_eval" => ["support/pre.rb"] }))
+    end
+
+    before { write("support/pre.rb", "PRE = 1\n") }
+
+    def presence_row(path) = Rigor::Cache::Descriptor::FileEntry.present(path: File.expand_path(path))
+
+    def content_row(path)
+      absolute = File.expand_path(path)
+      Rigor::Cache::Descriptor::FileEntry.stat(path: absolute, digest: Rigor::Cache::FileDigest.hexdigest(absolute))
+    end
+
+    it "refuses the write for an edit after the mark, whichever row comes first" do
+      guard = start
+      write("support/pre.rb", "PRE = 2\n")
+      both = Rigor::Cache::Descriptor.new(files: [presence_row("support/pre.rb"), content_row("support/pre.rb")])
+      expect(guard.admits?(Rigor::Cache::Descriptor.new(files: [content_row("support/pre.rb")]))).to be(false)
+      expect(guard.admits?(both)).to be(false)
+    end
   end
 end

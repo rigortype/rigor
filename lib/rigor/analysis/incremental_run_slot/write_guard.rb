@@ -35,8 +35,15 @@ module Rigor
       # and that later change time is the mark. Everything saved before the run started carries a change time no
       # later than the first stamp, hence before the mark; everything saved after the mark carries at least the
       # mark. The wait is bounded ({TICK_WAIT_LIMIT}); a filesystem that does not tick within it takes no mark,
-      # which is the safe answer. The residual risk is a clock that steps backwards (an NTP correction) inside the
-      # run: a save can then carry a change time before the mark and be admitted.
+      # which is the safe answer. A filesystem whose first stamp lands on a whole second (HFS+, FAT, ext3) ticks too
+      # coarsely to wait out and takes no mark at once.
+      #
+      # Where the change time is not the time of the write, the mark says nothing, and the guard takes none or
+      # cannot tell: native Windows, where a change time is the creation time, takes no mark; a network or FUSE
+      # filesystem (NFS with its attribute cache, virtiofs, sshfs) may report a change time from before a save,
+      # which nothing here detects. A clock that steps backwards (an NTP correction) inside the run would date a
+      # save before the mark, so {#admits?} takes one more stamp and refuses when it reads earlier than the mark.
+      # A step undone before the run ends is not seen.
       class WriteGuard
         STAMP_DIR = "incremental"
         private_constant :STAMP_DIR
@@ -58,6 +65,8 @@ module Rigor
         # The mark also records which of the paths an existence row can name are present: the lockfiles, the
         # analysis roots, the `pre_eval:` entries and the signature roots.
         def self.start(configuration:, roots:, cache_root:, fingerprint:)
+          return nil if Gem.win_platform?
+
           started_ns, device = stamp(cache_root)
           return nil if started_ns.nil? || device_of(Dir.pwd) != device
           return nil unless Cache::IncrementalSnapshot.fingerprint(configuration: configuration, roots: roots) ==
@@ -68,16 +77,19 @@ module Rigor
           presence = (lockfiles + named.map { |path| File.expand_path(path.to_s) }).to_h do |path|
             [path, File.exist?(path)]
           end
-          new(started_ns: started_ns, device: device, lockfiles: lockfiles, presence: presence)
+          new(started_ns: started_ns, device: device, lockfiles: lockfiles, presence: presence,
+              stamp_dir: stamp_dir(cache_root))
         end
 
         # The mark: the change time and device of the first stamp whose change time is later than that of a
         # stamp taken before it, on the same device; nil when none is written within {TICK_WAIT_LIMIT}.
         def self.stamp(cache_root)
-          dir = File.join(cache_root.to_s, STAMP_DIR)
+          dir = stamp_dir(cache_root)
           FileUtils.mkdir_p(dir)
           first_ns, device = write_stamp(dir)
-          return nil if first_ns.nil?
+          # A change time on a whole second is a filesystem that ticks by the second: waiting for it would burn the
+          # whole bound. One that ticks finer lands there once in a billion stamps, and declining is safe.
+          return nil if first_ns.nil? || (first_ns % 1_000_000_000).zero?
 
           deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + TICK_WAIT_LIMIT
           loop do
@@ -92,6 +104,11 @@ module Rigor
           nil
         end
         private_class_method :stamp
+
+        def self.stamp_dir(cache_root)
+          File.join(cache_root.to_s, STAMP_DIR)
+        end
+        private_class_method :stamp_dir
 
         # One stamp's change time and device; the file is removed again.
         def self.write_stamp(dir)
@@ -122,7 +139,8 @@ module Rigor
         end
         private_class_method :lockfile_paths
 
-        def initialize(started_ns:, device:, lockfiles:, presence: {})
+        def initialize(started_ns:, device:, lockfiles:, presence: {}, stamp_dir: nil)
+          @stamp_dir = stamp_dir
           @started_ns = started_ns
           @device = device
           @lockfiles = lockfiles
@@ -152,7 +170,7 @@ module Rigor
         # @param rows — a {Cache::Descriptor} of the rows the key does not pin
         # @param pinned — a {Cache::Descriptor} of the rows it does
         def admits?(rows, pinned: Cache::Descriptor.new)
-          @lockfiles.none? { |path| lockfile_changed?(path) } &&
+          !clock_stepped_back? && @lockfiles.none? { |path| lockfile_changed?(path) } &&
             files_unchanged?(rows.files, strict: true) && globs_unchanged?(rows.globs, strict: true) &&
             files_unchanged?(pinned.files, strict: false) && globs_unchanged?(pinned.globs, strict: false)
         rescue StandardError
@@ -161,10 +179,22 @@ module Rigor
 
         private
 
+        # One more stamp: a change time earlier than the mark means the clock stepped back since it was taken, so
+        # a save since then may carry a change time the guard reads as before it. A stamp that cannot be written,
+        # or lands on another device, cannot vouch for the clock either.
+        def clock_stepped_back?
+          return false if @stamp_dir.nil?
+
+          ns, device = self.class.__send__(:write_stamp, @stamp_dir)
+          ns.nil? || device != @device || ns < @started_ns
+        end
+
+        # An existence row and a content row for one path are different questions (the first asks only whether it
+        # is there, the second whether it changed), so the row that comes first must not hide the other.
         def files_unchanged?(entries, strict:)
           seen = Set.new
           entries.none? do |entry|
-            next false unless seen.add?(entry.path)
+            next false unless seen.add?([entry.path, entry.comparator == :exists])
 
             if entry.comparator == :exists
               existence_changed?(entry.path, strict: strict)

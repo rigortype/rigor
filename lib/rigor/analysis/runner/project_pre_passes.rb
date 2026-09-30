@@ -53,11 +53,10 @@ module Rigor
         # consumes them and so never pays the double parse (see {#discover} + `Runner#ensure_project_discovery`).
         # The slot names mirror the discovery half of {Result} exactly.
         Discovery = Data.define(
-          :discovered_classes, :discovered_def_nodes, :discovered_def_nestings,
-          :discovered_singleton_def_nodes, :discovered_def_sources, :discovered_singleton_def_sources,
-          :discovered_superclasses, :discovered_header_nestings, :discovered_includes, :discovered_prepends,
-          :discovered_extends, :unpositioned_mixins, :discovered_class_sources, :constant_values, :constant_sources,
-          :constant_writes,
+          :discovered_classes, :discovered_def_nodes, :discovered_def_nestings, :discovered_singleton_def_nodes,
+          :discovered_def_sources, :discovered_singleton_def_sources, :discovered_superclasses,
+          :discovered_header_nestings, :discovered_includes, :discovered_prepends, :discovered_extends,
+          :unpositioned_mixins, :discovered_class_sources, :constant_values, :constant_sources, :constant_writes,
           :discovered_method_visibilities, :discovered_methods, :discovered_parameter_envelopes, :data_member_layouts,
           :struct_member_layouts, :discovered_deferred_ranges, :discovered_refinements, :discovered_global_write_census
         )
@@ -173,8 +172,7 @@ module Rigor
             discovered_prepends: def_index.fetch(:prepends),
             # Issue #898 — the singleton-side mixin table, kept beside the instance-side one so a class
             # object's `extend`s reach `Narrowing` from a sibling file the way its `include`s already do.
-            discovered_extends: def_index.fetch(:extends),
-            unpositioned_mixins: def_index.fetch(:unpositioned_mixins),
+            discovered_extends: def_index.fetch(:extends), unpositioned_mixins: def_index.fetch(:unpositioned_mixins),
             discovered_class_sources: def_index.fetch(:class_sources),
             # Issue #644 — the cross-file value-constant publication table and its write attribution.
             constant_values: def_index.fetch(:constant_values), constant_sources: def_index.fetch(:constant_sources),

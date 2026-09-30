@@ -234,7 +234,7 @@ module Rigor
         def_nodes, def_nestings = merge_def_node_tables(default_scope, walked, file_def_nodes)
         singleton_def_nodes = merge_singleton_def_nodes(default_scope, root)
         superclasses, header_nestings = merge_ancestry_tables(default_scope, walked)
-        includes, prepends, unpositioned = merge_mixin_tables(default_scope, root)
+        includes, prepends, *unpositioned = merge_mixin_tables(default_scope, root)
         # ADR-35 — per-file visibilities merged OVER the cross-file seed (the current file is authoritative for its own
         # classes; sibling-file ancestors are preserved from the project seed).
         method_visibilities = default_scope.discovered_method_visibilities.merge(
@@ -262,9 +262,8 @@ module Rigor
             discovered_superclasses: superclasses,
             discovered_header_nestings: header_nestings,
             discovered_includes: includes,
-            discovered_prepends: prepends,
-            discovered_extends: extends,
-            unpositioned_mixins: union_mixin_tables(default_scope.discovery.unpositioned_mixins, unpositioned,
+            discovered_prepends: prepends, discovered_extends: extends,
+            unpositioned_mixins: union_mixin_tables(default_scope.discovery.unpositioned_mixins, *unpositioned,
                                                     extend_unpositioned),
             discovered_method_visibilities: method_visibilities,
             discovered_parameter_envelopes: merge_envelope_seed(default_scope, file_envelopes),
@@ -7367,7 +7366,7 @@ module Rigor
       # bundle: the plain-data tables verbatim, the def-node tables re-expressed as `[node_id, name,
       # fingerprint]` triples (the path is the bundle key), the class-source names (path implicit), and the
       # content digest that gates the bundle's reuse.
-      def build_seed_bundle(file_index, file_classes, digest, code_fingerprint)
+      def build_seed_bundle(file_index, file_classes, digest, code_fingerprint) # rubocop:disable Metrics/AbcSize
         {
           digest: digest,
           # B1 — the comment-stripped code fingerprint, so a recheck can prove this file's edit was
@@ -7443,8 +7442,8 @@ module Rigor
           prepends: bundle[:prepends] || {},
           # #526 — pre-extends bundles lack the key; default `{}` keeps the fold total.
           extends: bundle[:extends] || {},
-          # A pre-32 bundle lacks the key; the SCHEMA bump rebuilds it cold, but default so the fold stays total.
-          unpositioned_mixins: bundle[:unpositioned_mixins] || {},
+          # A pre-32 bundle lacks the key; the SCHEMA bump rebuilds it cold, and the fold defaults it anyway.
+          unpositioned_mixins: bundle[:unpositioned_mixins],
           method_visibilities: bundle[:method_visibilities],
           methods: bundle[:methods],
           parameter_envelopes: bundle[:parameter_envelopes] || {},

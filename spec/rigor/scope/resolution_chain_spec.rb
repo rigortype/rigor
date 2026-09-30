@@ -175,6 +175,21 @@ RSpec.describe Rigor::Scope::ResolutionChain do
     expect(chain_of(scope, "Uses").settle(:answer) { raise "an unsettled chain reads no retro world" }).to eq(:master)
   end
 
+  # The singleton side settles a superclass that only `extend`s to master (its extended modules are not on the
+  # chain), and only that: a superclass the project declares for its constants or defs is an ordinary entry.
+  it "counts forks for an extends-only superclass on the singleton side and not for any other" do
+    scope = scope_for(<<~RUBY)
+      module Deep; def foo = 1; end
+      module E; include Deep; end
+      class OnlyExt; extend E; end
+      class WithConst; X = 1; end
+      class A < OnlyExt; end
+      class B < WithConst; extend E; end
+    RUBY
+    expect(chain_of(scope, "A", :singleton).skip_count).to be >= 2
+    expect(chain_of(scope, "B", :singleton).skip_count).to eq(0)
+  end
+
   # `extend self` reaches the module's own instance chain from its singleton chain; that is not a cycle.
   it "puts a module after its own singleton on `extend self`" do
     scope = scope_for(<<~RUBY)

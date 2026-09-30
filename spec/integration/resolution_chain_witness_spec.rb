@@ -812,6 +812,29 @@ RSpec.describe "Scope::ResolutionChain against Ruby's own resolution" do
       end
     end
 
+    # A module that both prepends and includes the same module is recorded as a plain prepend. Ruby's `C`
+    # is `[C, M1, M0, M1, M3]` and reads `X` from `M0`; the chain would read `M3` (`[C, M1, M3, M0]`). A
+    # prepended module that carries ancestors of its own therefore counts two forks and settles to master.
+    it "counts two forks where a prepended module carries ancestors of its own" do
+      source = <<~RUBY
+        module M0; X = :M0; end
+        module M1; end
+        module M3; X = :M3; end
+        module M0; prepend M1; end
+        class C; include M0; end
+        module M0; include M1; end
+        module M1; include M3; end
+      RUBY
+      Dir.mktmpdir("rigor-chain-witness-") do |dir|
+        path = File.join(dir, "fixture.rb")
+        File.write(path, source)
+        expect(ruby_answers(path, { constants: ["C::X"] }).fetch("constants:C::X")).to eq("M0")
+        chain = chain_of(rigor_scope(source), "C", :instance, :constants)
+        expect(chain.skip_count).to be >= 2
+        expect(chain.settle(:answer) { raise "no retro world for two forks" }).to eq(:master)
+      end
+    end
+
     # Flip this when #1573 is fixed: the extends table keeps the LATEST position of a repeated `extend`,
     # while Ruby skips the repeat and keeps the first, so the chain reads `E1` as nearest and Ruby runs `E2`.
     it "reads a repeated extend at its latest position (#1573)" do

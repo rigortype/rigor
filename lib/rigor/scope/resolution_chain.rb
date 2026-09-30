@@ -687,19 +687,13 @@ module Rigor
           end
         end
 
-        def shadowed_sub_chain?(entries, sub, origin, modules)
-          sub.any? do |entry|
-            next false if entry.external? || modules.include?(entry.name)
-
-            found = entries.index(entry)
-            found && found >= origin
-          end
+        def carries_own_ancestors?(sub, modules)
+          sub.any? { |entry| !entry.external? && !modules.include?(entry.name) }
         end
 
         def declared_class?(owner, raw)
           @scope.ancestor_name_candidates(owner, raw).any? do |candidate|
-            @discovery.discovered_extends.key?(candidate) || @discovery.discovered_classes.key?(candidate) ||
-              @discovery.discovered_includes.key?(candidate) || @discovery.discovered_superclasses.key?(candidate)
+            @discovery.discovered_extends.key?(candidate)
           end
         end
 
@@ -715,9 +709,10 @@ module Rigor
             each_mixin_chain(owner, raw, depth) do |sub|
               point = -1
               # Ruby's result depends on whether the prepended module's own includes ran before or after the
-              # prepend, which the tables cannot tell: an entry of its sub-chain (other than the module) that
-              # the class or its superclass already carries is two forks, so the chain settles to master.
-              @frames.last.skips += 2 if !@retro && shadowed_sub_chain?(entries, sub, origin, modules)
+              # prepend, and on whether the class ALSO includes it (`include M; prepend M`, which the tables
+              # record exactly as a plain `prepend M`): a project entry of its sub-chain other than the module
+              # is two forks, so the chain settles to master.
+              @frames.last.skips += 2 if !@retro && carries_own_ancestors?(sub, modules)
               sub.each do |entry|
                 found = entries.index(entry)
                 found = nil if found && found >= origin

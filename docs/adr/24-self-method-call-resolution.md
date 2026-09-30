@@ -580,6 +580,21 @@ every reader, `ResolutionChain#settle`, which answers `:chain` or
   the definer Ruby calls` is that shape: Ruby runs `D#foo`, both worlds
   read `Deep#foo`, and master's order happens to reach `D`.
 
+**Unsettled chains.** A skip count is not the only reason the tables
+cannot vouch for an order. The chain marks a node *unsettled* when
+`DiscoveryIndex#unpositioned_mixins` lists anything on the side being
+linearised (`include` for the instance side, `extend` for the singleton
+side: an edge written in a conditional, a method, a block such as a
+concern's `included do` or a hook, or a mixin call the walk cannot record,
+listed as `"*"`), or when its class is declared in more than one file and
+has two or more edges on that side, whose order across the files is load
+order. The mark propagates through every chain that draws on the node, so
+a concern taints each of its includers, and `settle` answers `:master`
+for an unsettled chain whatever its skip count, without a retro world. A
+master answer keeps recording the chain's classes, so the flagged files
+stay dependencies. A top-level `include` into `Object` is neither
+recorded nor listed, so no order is trusted beyond a project root.
+
 Where the chain does not stand, a reader answers what the walk it
 replaced answered (`ResolutionChain::MasterOrder`, the old breadth-first,
 depth-first and level orders over the same tables). No reader has a third
@@ -633,8 +648,14 @@ includes: `class C2; include A; prepend M; end` with `A` including `M` is
 `[M, C2, A, M]` in Ruby and `[M, C2, A]` in the chain, and `class C3;
 include M; prepend P; end` with `P` including `M` is `[P, M, C3, M]` in
 Ruby and `[P, M, C3]` in the chain, because the include of `M` is a skip
-once the prepends have placed it. The first definer is the same in both,
-and a witness pins each. `class << self; prepend P` is recorded as an
+once the prepends have placed it. The first definer is the same in both
+until a later include propagates into the module (`module M0; prepend M1;
+end`, `class C; include M0; end`, then `module M0; include M1; end` and
+`module M1; include M3; end` gives Ruby `[C, M1, M0, M1, M3]` and the
+chain `[C, M1, M3, M0]`), and the tables record `include M1; prepend M1`
+exactly as a plain `prepend M1`, so a prepended module that carries
+project ancestors of its own counts two forks and settles to master. A
+witness pins each shape. `class << self; prepend P` is recorded as an
 `extend`, so `P` sits after the singleton rather than before it. A repeated `extend`
 keeps its latest position in the table (#1573). A definer an external
 module supplies ahead of a project one is not answered yet (#1572).

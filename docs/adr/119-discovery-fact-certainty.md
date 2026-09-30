@@ -220,7 +220,7 @@ and `docs/internal-spec/inference-engine.md:662`. This ADR relies on the followi
   SI:6216, `:skip`), so `items.each { extend X }`, a block inside a method and a concern's `included
   do extend X end` stay unrecorded and unlisted. What remains after #1593 is MA's rule for an opaque
   eval block (`block_mixes_in?`, SI:5994–6001): a block that holds a mixin call on the class's own
-  `self` must at least list `"*"`.
+  `self` must at least list `"*"` (tracked by #1592).
 - **Marked entries keep exactly master's declines and add none.** The sites in Context (e) are the only
   declines on `ENVELOPE_DYNAMIC_MARK`; #1578 preserved each (`ruby_order_resolution_spec.rb:175–195`).
   Typing through a marked entry is a known remainder, not a rule: on GitLab 1,730 entities carry the

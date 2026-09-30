@@ -1238,7 +1238,13 @@ guarantee, is [ADR-45](../adr/45-unchanged-project-fast-path.md) WD2; this is th
   fresh chain. When the path set moved it discards the previous entry after writing its own.
 - **Write guard.** `IncrementalRunSlot::WriteGuard` takes a mark before the run reads
   anything: the change time and device of a stamp file written under
-  `<cache>/incremental/` (the filesystem's own clock). No mark is taken, and no slot
+  `<cache>/incremental/` (the filesystem's own clock). The mark is taken on a tick
+  boundary: stamps are written until one carries a change time later than the first
+  stamp's, on the same device, and that later change time is the mark. A save before the
+  run then carries at most the first stamp's change time and is admitted, while a save at
+  or after the mark, in the same tick or later, is refused (`>=`). A filesystem that does
+  not tick within the wait bound (`TICK_WAIT_LIMIT`, 50 ms, monotonic clock) takes no mark,
+  so no slot is written. No mark is taken, and no slot
   written, when the stamp is not on the device of the working directory, or when the
   snapshot fingerprint the run was given, recomputed after the stamp, has moved. The slot is
   written only when, at write time, nothing the guard watches moved: every lockfile the
@@ -1251,13 +1257,16 @@ guarantee, is [ADR-45](../adr/45-unchanged-project-fast-path.md) WD2; this is th
   mark recorded (the analysis roots, the `pre_eval:` entries, the signature roots) moved if
   the path's presence differs from the mark's; its directory's change time is not asked,
   so an editor's lock file beside it does not refuse the write, and a path that comes and
-  goes again within the run is not seen. Any other existence row is judged by its own
+  goes again within the run is not seen. A glob row still compares its directory's change
+  time, so a file created and removed in a listed directory (an editor's swap file in
+  `lib/` during a run that overran the mark) refuses the write; that is safe, and known.
+  Any other existence row is judged by its own
   change time, or its nearest existing ancestor's when absent. A path whose change time is
   asked refuses the write when it is on another device, except a `pinned` row's, which is
   passed over. A content row whose file is gone passes; the row is stale already. The `observed` rows and
   the carried `reads` are not asked about: a later save leaves a row taken as it was read
-  stale. The bound is the clock: a filesystem clock stepped backwards during the run can
-  date a save before the mark.
+  stale. The bound is the clock: a filesystem clock stepped backwards during the run (an NTP
+  correction) can date a save before the mark; the tick-boundary rule does not cover it.
 - **Not written** for an editor buffer, a pool run, a project with effect collection
   on, a run with an opaque plugin, a run in which a boundary row changed during the
   per-file loop without being credited to a file, or a run after which the session holds no content digest for some analysed file

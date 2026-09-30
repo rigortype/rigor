@@ -376,7 +376,15 @@ The mark is the change time of a file written for the purpose, so it is
 read off the filesystem's own clock. A change time, unlike a modification
 time, cannot be set back by `cp -p` or `touch -d`, and on the mark's own
 filesystem a coarse tick cannot hide an edit: a change in the mark's tick
-counts as after it. One clock needs one filesystem, so the mark is taken
+counts as after it. That rule alone would refuse a save that landed shortly
+before the run, since a coarse filesystem (ext4, tmpfs) gives it the first
+stamp's own change time. So the mark is taken on a tick boundary: stamps are
+written until one carries a later change time than the first (on the same
+device), and that later change time is the mark. A save before the run
+carries at most the first stamp's change time and is admitted; a save after
+the mark carries at least the mark and is refused. The wait is bounded
+(50 ms), and a filesystem that does not tick within it takes no mark: no slot
+is written, which is always safe. One clock needs one filesystem, so the mark is taken
 only when the store is on the project's. A row on another filesystem is
 decided by what identifies it. The signature files outside the project's
 own signature roots are identified by the key already: the engine's own
@@ -391,7 +399,8 @@ Ruby source, so a contributor's edit to a bundled signature file while a
 run reads is outside the guard when the checkout is on another filesystem
 from the project. What the guard cannot see is its clock stepping
 backwards during a run (an NTP correction, a network filesystem's server),
-which could date a save before the mark.
+which could date a save before the mark; the tick-boundary rule does not
+remove that residual.
 
 **Why the chain holds together.** By induction from the full run that
 started it: that run's descriptor is the plain slot's, and each recheck's

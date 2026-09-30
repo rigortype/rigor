@@ -6016,12 +6016,12 @@ module Rigor
       # freeze time — ahead of every include, where Ruby puts them.
       def write_mixin_targets(accumulator, owner, targets, prepend:)
         bucket = accumulator[owner] ||= {}
-        if prepend
-          (bucket[:prepend] ||= []).unshift(*targets)
-        else
-          list = (bucket[:include] ||= [])
-          list.unshift(*targets.reject { |target| list.include?(target) })
-        end
+        kind, other = prepend ? %i[prepend include] : %i[include prepend]
+        list = (bucket[kind] ||= [])
+        # A target the OTHER kind already carries (`include M; prepend M`) is one body the two tables cannot
+        # represent (Ruby's `[M, C, M]`), so the instance side is named unpositioned.
+        accumulator.taint(owner, :include) if targets.any? { |target| bucket[other]&.include?(target) }
+        list.unshift(*targets.reject { |target| list.include?(target) })
       end
 
       # Whether a mixin call contributes to the tables at all: a receiverless `include` / `prepend` needs an
@@ -6362,7 +6362,8 @@ module Rigor
         end
         return targets if targets.empty?
 
-        (accumulator[current_class] ||= []).unshift(*targets)
+        list = (accumulator[current_class] ||= [])
+        list.unshift(*targets.reject { |target| list.include?(target) })
         accumulator.note(node, current_class, :extend, targets, complete: targets.size == arguments.size)
         targets
       end

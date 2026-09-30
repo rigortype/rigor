@@ -68,7 +68,10 @@ module Rigor
       # v12: the def-index seed bundles gain the `:unpositioned_mixins` table, the mixin edges whose order is
       # not a fact, which an ancestor-order reader declines on. A pre-12 bundle would silently contribute no
       # such edge for an unchanged file, so cached bundles must read as misses once and rebuild carrying it.
-      SCHEMA_VERSION = 12
+      # v13: #1573 / #1587 — the mixin producers keep the FIRST position of a repeated `prepend` or `extend`, and
+      # name a module written to both the include and the prepend table unpositioned. A pre-13 bundle would keep
+      # the later position for an unchanged file, so cached bundles must read as misses once and rebuild.
+      SCHEMA_VERSION = 13
 
       # Per-slot entry value objects. Constructors validate enums / required fields and freeze the resulting
       # struct so no caller can mutate after the entry is in a Descriptor.

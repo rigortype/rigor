@@ -835,9 +835,9 @@ RSpec.describe "Scope::ResolutionChain against Ruby's own resolution" do
       end
     end
 
-    # Flip this when #1573 is fixed: the extends table keeps the LATEST position of a repeated `extend`,
-    # while Ruby skips the repeat and keeps the first, so the chain reads `E1` as nearest and Ruby runs `E2`.
-    it "reads a repeated extend at its latest position (#1573)" do
+    # #1573 and #1587 are fixed at the producers: a repeated `extend` or `prepend` keeps its FIRST position, as
+    # Ruby's skip of a module already in the ancestry does, so the chain and Ruby agree.
+    it "keeps a repeated extend at its first position (#1573)" do
       source = <<~RUBY
         module E1
           def foo = :e1
@@ -858,7 +858,32 @@ RSpec.describe "Scope::ResolutionChain against Ruby's own resolution" do
         File.write(path, source)
         ruby = ruby_answers(path, { methods: ["C.foo"] }).fetch("C.foo")
         expect(ruby.first).to eq(["E2", 6])
-        expect(rigor_agreed_singleton_line(rigor_scope(source), "C", :foo)).to eq(2)
+        expect(rigor_agreed_singleton_line(rigor_scope(source), "C", :foo)).to eq(6)
+      end
+    end
+
+    it "keeps a repeated prepend at its first position (#1587)" do
+      source = <<~RUBY
+        module P
+          def foo = :p
+        end
+
+        module Q
+          def foo = :q
+        end
+
+        class C
+          prepend P
+          prepend Q
+          prepend P
+        end
+      RUBY
+      Dir.mktmpdir("rigor-chain-witness-") do |dir|
+        path = File.join(dir, "fixture.rb")
+        File.write(path, source)
+        ruby = ruby_answers(path, { methods: ["C#foo"] }).fetch("C#foo")
+        expect(ruby.first).to eq(["Q", 6])
+        expect(rigor_instance_definers(rigor_scope(source), "C", :foo).first).to eq(["Q", 6])
       end
     end
   end

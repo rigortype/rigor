@@ -6116,10 +6116,9 @@ module Rigor
                                           in_singleton: in_singleton, singleton_self: singleton_self,
                                           singleton_cref: singleton_cref)
           end
-          if node.block.is_a?(Prism::BlockNode) &&
-             walk_extends_block_call?(node, qualified_prefix, current_class, accumulator,
-                                      in_singleton, singleton_self, singleton_cref)
-            return
+          if node.block.is_a?(Prism::BlockNode) && rebinding_extends_block?(node)
+            return walk_extends_block_call(node, qualified_prefix, current_class, accumulator,
+                                           in_singleton, singleton_self, singleton_cref)
           end
         end
 
@@ -6195,19 +6194,23 @@ module Rigor
       # (only `def` rebinding differs, and defs are not this table's facts) — while a
       # `define_method` body or an unnamed `Class.new { … }`-family block runs on an object
       # nothing names, so its `extend` walks ownerless.
-      def walk_extends_block_call?(node, qualified_prefix, current_class, accumulator,
-                                   in_singleton, singleton_self, singleton_cref)
+      def walk_extends_block_call(node, qualified_prefix, current_class, accumulator,
+                                  in_singleton, singleton_self, singleton_cref)
         if %i[instance_eval instance_exec].include?(node.name)
-          walk_eval_extends_call(node, qualified_prefix, current_class, accumulator,
-                                 in_singleton: in_singleton, singleton_self: singleton_self,
-                                 singleton_cref: singleton_cref)
-          return true
+          return walk_eval_extends_call(node, qualified_prefix, current_class, accumulator,
+                                        in_singleton: in_singleton, singleton_self: singleton_self,
+                                        singleton_cref: singleton_cref)
         end
-        return false unless node.name == :define_method || meta_new_constant_rvalue?(node)
+        return unless node.name == :define_method || meta_new_constant_rvalue?(node)
 
         walk_extends_opaque_block(node, qualified_prefix, current_class, accumulator,
                                   in_singleton, singleton_self, singleton_cref)
-        true
+      end
+
+      # Whether {#walk_extends_block_call} owns this block-carrying call. Any other block (`[1].each { extend M }`,
+      # `included do extend M end`) keeps the enclosing `self`, so the generic descent walks it (#1592).
+      def rebinding_extends_block?(node)
+        INSTANCE_EVAL_CALLS.include?(node.name) || node.name == :define_method || meta_new_constant_rvalue?(node)
       end
 
       # A block whose `self` is an object this walk cannot name — a `define_method` body (its

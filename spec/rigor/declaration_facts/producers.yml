@@ -356,7 +356,7 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#walk_eval_methods_and_defs: grandfathered
     Rigor::Inference::ScopeIndexer#walk_eval_singleton_defs: grandfathered
     Rigor::Inference::ScopeIndexer#walk_eval_visibilities: grandfathered
-    Rigor::Inference::ScopeIndexer#walk_extends_block_call?: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_extends_block_call: grandfathered
     Rigor::Inference::ScopeIndexer#walk_extends_children: the generic child descent of the extend walk, adding a hook's parameters to scope; it derives no declaration context
     Rigor::Inference::ScopeIndexer#walk_extends_children_plain: the generic child descent of the extend walk; the owner and cref arrive from the caller
     Rigor::Inference::ScopeIndexer#walk_extends_declaration: grandfathered

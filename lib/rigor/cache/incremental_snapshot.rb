@@ -156,7 +156,9 @@ module Rigor
       # 33: the mixin producers change what a seed bundle holds (#1587 — the prepend table keeps every statement,
       # and a both-kind module or a repeated `extend` is named unpositioned), so a pre-33 bundle folds as the
       # collapsed, positioned table and a warm run would answer an order a cold run declines.
-      SCHEMA = 33
+      # 34: #1592 — an `extend` or a `class << self` include inside a block the extends walk used to skip is now
+      # recorded and named unpositioned, so a pre-34 bundle folds as if the edge did not exist.
+      SCHEMA = 34
 
       # The persisted per-file state.
       # `cache` maps an analyzed file to its diagnostics.

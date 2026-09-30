@@ -46,6 +46,7 @@ module Rigor
           @direct = nil
           @unpositioned = nil
           @hook_params = nil
+          @body_blocks = nil
         end
 
         # Marks the statements of a body whose own position is a fact — the calls and declarations in them
@@ -59,6 +60,22 @@ module Rigor
 
             (@direct ||= Set.new.compare_by_identity) << statement
           end
+        end
+
+        # Marks the block-carrying calls that are statements of a class or module body, whatever that declaration
+        # sits in: the only blocks whose `self` the extends walk takes to be the body's own (#1592).
+        def body_statements(body)
+          return unless body.is_a?(Prism::StatementsNode)
+
+          body.body.each do |statement|
+            if statement.is_a?(Prism::CallNode) && statement.block
+              (@body_blocks ||= Set.new.compare_by_identity) << statement
+            end
+          end
+        end
+
+        def body_block?(node)
+          !@body_blocks.nil? && @body_blocks.include?(node)
         end
 
         # Runs the block with the parameters of a `self.included(base)`-style hook in scope: a mixin call on

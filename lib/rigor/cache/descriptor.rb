@@ -72,7 +72,9 @@ module Rigor
       # the freeze) and a module written to both the include and the prepend table, or a repeated `extend`, is
       # named unpositioned. A pre-14 bundle would hold the collapsed prepend list and miss the taint for an
       # unchanged file, so cached bundles must read as misses once and rebuild.
-      SCHEMA_VERSION = 14
+      # v15: #1592 — an `extend` (or a `class << self` include) written inside a block the walk used to skip is
+      # now recorded and named unpositioned. A pre-15 bundle would hold neither for an unchanged file.
+      SCHEMA_VERSION = 15
 
       # Per-slot entry value objects. Constructors validate enums / required fields and freeze the resulting
       # struct so no caller can mutate after the entry is in a Descriptor.

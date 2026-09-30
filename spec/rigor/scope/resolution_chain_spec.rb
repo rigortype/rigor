@@ -176,6 +176,20 @@ RSpec.describe Rigor::Scope::ResolutionChain do
     expect(unsettled.settle(scope, :answer) { raise "an unsettled chain reads no retro world" }).to eq(:master)
   end
 
+  # #1592 — a module's own `:extend` listing (a conditional `extend`, a hook that extends the includer) is NOT the
+  # includer's edge, and neither the chain nor master's walk could place a hook edge on the includer anyway, so an
+  # includer's singleton chain stays settled and keeps #1567's Ruby order.
+  it "leaves an includer's singleton chain settled when an included module lists an extend edge" do
+    scope = scope_for(<<~RUBY)
+      module X; end
+      module Plugin; extend X if ENV["A"]; end
+      module Hook; def self.included(base) = base.extend(X); end
+      class K; include Plugin; include Hook; end
+    RUBY
+    expect(chain_of(scope, "K", :singleton)).not_to be_unsettled
+    expect(chain_of(scope, "Plugin", :singleton)).to be_unsettled
+  end
+
   # The singleton side settles a superclass that only `extend`s to master (its extended modules are not on the
   # chain), and only that: a superclass the project declares for its constants or defs is an ordinary entry.
   it "counts forks for an extends-only superclass on the singleton side and not for any other" do

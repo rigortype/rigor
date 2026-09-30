@@ -1265,8 +1265,19 @@ guarantee, is [ADR-45](../adr/45-unchanged-project-fast-path.md) WD2; this is th
   asked refuses the write when it is on another device, except a `pinned` row's, which is
   passed over. A content row whose file is gone passes; the row is stale already. The `observed` rows and
   the carried `reads` are not asked about: a later save leaves a row taken as it was read
-  stale. The bound is the clock: a filesystem clock stepped backwards during the run (an NTP
-  correction) can date a save before the mark; the tick-boundary rule does not cover it.
+  stale. The plugin-read rows (`observed` and `reads`) and every other `:stat` row of the slot
+  are written with their recording instant lowered to the mark (`WriteGuard#mark_racy`), so a
+  file whose mtime is at or after the mark is racy and re-hashed on validation, rather than
+  trusted on an unmoved stat tuple after a same-size save in a coarse tick. Bounds of the mark:
+  - The guard takes one more stamp when it is asked, and refuses when that stamp's change time
+    is earlier than the mark, or the stamp cannot be written or is on another device: a clock
+    stepped backwards during the run (an NTP correction) is seen. A step undone before the run
+    ends is not.
+  - A filesystem whose first stamp lands on a whole second (HFS+, FAT, ext3) ticks too coarsely
+    to wait out, and takes no mark at once.
+  - Native Windows takes no mark: `File::Stat#ctime` is the creation time there.
+  - A network or FUSE filesystem (NFS with its attribute cache, virtiofs, gRPC-FUSE, sshfs) may
+    report a change time from before a save; nothing detects that.
 - **Not written** for an editor buffer, a pool run, a project with effect collection
   on, a run with an opaque plugin, a run in which a boundary row changed during the
   per-file loop without being credited to a file, or a run after which the session holds no content digest for some analysed file

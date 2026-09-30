@@ -177,6 +177,19 @@ module Rigor
           false
         end
 
+        # `descriptor` with every `:stat` row's recording instant no later than the mark. A row recorded as the run
+        # read carries the instant the run began, and validation trusts a stat tuple whose mtime is before it. On a
+        # coarse clock a save that lands after the read, in the tick the file's mtime already has and with the same
+        # size, leaves the tuple unmoved, so it would be trusted. With the instant at the mark, every row whose mtime is
+        # at or after the mark is racy, and validation re-hashes it.
+        def mark_racy(descriptor)
+          Cache::Descriptor.new(
+            files: descriptor.files.map { |entry| entry.with_recording_instant_at_most(@started_ns) },
+            gems: descriptor.gems, plugins: descriptor.plugins, configs: descriptor.configs,
+            dependencies: descriptor.dependencies, globs: descriptor.globs
+          )
+        end
+
         private
 
         # One more stamp: a change time earlier than the mark means the clock stepped back since it was taken, so

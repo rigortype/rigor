@@ -677,11 +677,14 @@ module Rigor
         baseline, pinned, reads = chain
         return unless @slot_guard&.admits?(guarded_rows(analysed, rows.derived, baseline), pinned: pinned)
 
+        # A save the run read after the mark's tick must not hide behind an unmoved stat tuple.
+        reads = reads.transform_values { |descriptor| @slot_guard.mark_racy(descriptor) }
+
         entry = IncrementalRunSlot::Entry.new(
           diagnostics: diagnostics, roots: IncrementalRunSlot.as_written(roots),
           baseline: baseline, pinned: pinned, reads: reads, snapshot: written_identity
         )
-        dependencies = run_slot_dependencies(analysed, rows, [baseline, pinned], reads.values)
+        dependencies = @slot_guard.mark_racy(run_slot_dependencies(analysed, rows, [baseline, pinned], reads.values))
         wrote = IncrementalRunSlot.write(
           store: @cache_store, configuration: @configuration, entry: entry, dependencies: dependencies,
           target: IncrementalRunSlot::Target.new(files: @analyzed, roots: roots)

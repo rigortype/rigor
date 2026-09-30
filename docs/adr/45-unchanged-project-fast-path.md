@@ -399,8 +399,17 @@ Ruby source, so a contributor's edit to a bundled signature file while a
 run reads is outside the guard when the checkout is on another filesystem
 from the project. What the guard cannot see is its clock stepping
 backwards during a run (an NTP correction, a network filesystem's server),
-which could date a save before the mark; the tick-boundary rule does not
-remove that residual.
+which could date a save before the mark. The guard takes one more stamp
+when it is asked and refuses when it reads earlier than the mark (or cannot
+be written, or is on another device), so a step is seen unless it is undone
+before the run ends. Other bounds: a filesystem whose first stamp lands on a
+whole second (HFS+, FAT, ext3) takes no mark at once; native Windows takes no
+mark, since a change time is the creation time there; a network or FUSE
+filesystem (NFS's attribute cache, virtiofs, sshfs) may report a change time
+from before a save, and nothing detects that. The rows recorded as the run
+read carry a recording instant lowered to the mark, so on a coarse clock a
+same-size save after the read is re-hashed instead of trusted on an unmoved
+stat tuple.
 
 **Why the chain holds together.** By induction from the full run that
 started it: that run's descriptor is the plain slot's, and each recheck's

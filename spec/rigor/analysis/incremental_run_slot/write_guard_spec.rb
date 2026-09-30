@@ -139,4 +139,28 @@ RSpec.describe Rigor::Analysis::IncrementalRunSlot::WriteGuard do
       expect(guard.admits?(both)).to be(false)
     end
   end
+
+  # A row recorded as the run read carries the instant the run began. On a coarse clock a same-size save after the
+  # read keeps the stat tuple, so the row must turn racy for every mtime at or after the mark.
+  describe "#mark_racy" do
+    def instant_of(descriptor)
+      descriptor.files.map { |entry| entry.value.split.last.to_i }
+    end
+
+    it "lowers a row's recording instant to the mark, and leaves an earlier one and other rows alone" do
+      guard = start
+      mark = guard.instance_variable_get(:@started_ns)
+      stat = Rigor::Cache::Descriptor::FileEntry.stat(path: File.expand_path("lib/a.rb"), digest: "d" * 64)
+      late = Rigor::Cache::Descriptor::FileEntry.new(
+        path: "/x", comparator: :stat, value: stat.value.split[0..4].push((mark + 1_000).to_s).join(" ")
+      )
+      early = Rigor::Cache::Descriptor::FileEntry.new(
+        path: "/y", comparator: :stat, value: stat.value.split[0..4].push((mark - 1_000).to_s).join(" ")
+      )
+      presence = Rigor::Cache::Descriptor::FileEntry.present(path: "/z")
+      racy = guard.mark_racy(Rigor::Cache::Descriptor.new(files: [late, early, presence]))
+      expect(instant_of(Rigor::Cache::Descriptor.new(files: racy.files.first(2)))).to eq([mark, mark - 1_000])
+      expect(racy.files.last).to eq(presence)
+    end
+  end
 end

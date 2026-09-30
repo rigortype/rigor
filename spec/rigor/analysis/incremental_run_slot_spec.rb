@@ -88,6 +88,23 @@ RSpec.describe Rigor::Analysis::IncrementalRunSlot do
     Dir.glob(File.join(cache_root, described_class::PRODUCER_ID, "**", "*.entry"))
   end
 
+  # A row recorded as the run read carries the run's start as its recording instant; on a coarse clock a same-size
+  # save after the read would keep its stat tuple, so the slot's rows are made racy at the mark.
+  it "writes the slot's rows racy at the write guard's mark" do
+    write_project
+    guards = []
+    allow(Rigor::Analysis::IncrementalRunSlot::WriteGuard).to receive(:start).and_wrap_original do |original, **args|
+      original.call(**args).tap do |guard|
+        allow(guard).to receive(:mark_racy).and_call_original
+        guards << guard
+      end
+    end
+    incremental_run
+    expect(guards.size).to eq(1)
+    expect(guards.first).to have_received(:mark_racy).at_least(:once)
+    expect(slot_entries).not_to be_empty
+  end
+
   it "serves the run's own answer after a cold baseline, and its file count for the banner" do
     write_project
     diagnostics, warm = incremental_run

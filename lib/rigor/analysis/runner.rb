@@ -1554,7 +1554,7 @@ module Rigor
 
         @project_discovery_done = true
         # Issue #684 — the cross-file index spans the PROJECT even when the analysis targets a file list.
-        expansion = @project_discovery_expansion || expansion
+        expansion = @project_discovery_expansion || once_each(expansion)
         if @collect_seed_bundles
           # ADR-85 WD2 — rebuild discovery from the prior run's bundles (re-walking only changed files) and
           # capture the refreshed bundle set for the session to persist.
@@ -1595,9 +1595,9 @@ module Rigor
       # and every file was a discovered-not-analysed dependency of the run's cache entry.
       #
       # The widening decision itself still compares the paths as spelled. `exclude:` patterns match a path as it
-      # is spelled, so the configured absolute `lib` can discover files the argument `lib` excludes (a relative
-      # `lib/gen/**` pattern never matches `/abs/lib/gen/x.rb`), and treating the two as the same root would drop
-      # those files from discovery.
+      # is spelled, so until #1576 is fixed the configured absolute `lib` can discover files the argument `lib`
+      # excludes (a relative `lib/gen/**` pattern never matches `/abs/lib/gen/x.rb`), and treating the two as the
+      # same root would drop those files from discovery.
       def project_discovery_expansion(paths, expansion)
         return nil unless widen_discovery_to_project?(paths)
 
@@ -1605,6 +1605,15 @@ module Rigor
         files = discovery_files(expand_paths(@configuration.paths | paths).fetch(:files), analysed)
         # Overlapping arguments (`lib lib/user.rb`) name an analysed file twice; the widened set names it once.
         files.size > analysed.uniq { |path| File.expand_path(path) }.size ? { files: files, errors: [] } : nil
+      end
+
+      # The expansion with each file once, first spelling kept: overlapping arguments (`lib ./lib`) that do not
+      # widen discovery still name a file twice, and the pre-pass would take every constant in it for one written
+      # twice (#1556). Symlinked aliases (`src -> lib`) are not folded; that needs a realpath and stays out of scope.
+      def once_each(expansion)
+        files = expansion.fetch(:files)
+        unique = files.uniq { |path| File.expand_path(path) }
+        unique.size == files.size ? expansion : expansion.merge(files: unique)
       end
 
       # Each file once, in project order, under the spelling the analysis uses when it is analysed.
@@ -1633,7 +1642,7 @@ module Rigor
 
       private :run_project_pre_passes, :adopt_prebuilt_project_scan, :apply_pre_passes_result,
               :apply_discovery_result, :ensure_project_discovery, :force_eager_discovery?,
-              :project_discovery_expansion, :discovery_files, :widen_discovery_to_project?
+              :project_discovery_expansion, :discovery_files, :once_each, :widen_discovery_to_project?
 
       # Ruby versions probed (ascending) to discover the lowest one this Prism build accepts for
       # `version:`. Prism exposes no version list, so the floor is found empirically — only when a

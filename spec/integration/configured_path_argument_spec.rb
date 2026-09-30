@@ -47,6 +47,9 @@ RSpec.describe "a path argument that names a configured path (#1556)" do
   # `exclude:` matches a path as spelled, and the configured `lib` loads absolute, so a relative pattern excludes
   # `lib/gen` from the argument's expansion and not from the configured one. The run still widens discovery over
   # the configured spelling and finds the method `lib/gen` defines.
+  #
+  # flip this when #1576 is fixed: once a relative `exclude:` pattern applies to the configured absolute paths,
+  # the configured spelling excludes `lib/gen` as well, and this example pins behaviour that no longer exists.
   it "discovers a method defined only in a file the argument's spelling excludes" do
     File.write(".rigor.yml", "paths:\n  - lib\nexclude:\n  - \"lib/gen/**\"\n")
     FileUtils.mkdir_p("lib/gen")
@@ -71,5 +74,21 @@ RSpec.describe "a path argument that names a configured path (#1556)" do
     expect(undefined_rows(%w[lib lib/user.rb])).to eq(["b.rb:3"])
     expect(undefined_rows(%w[lib lib])).to eq(["b.rb:3", "b.rb:3"])
     expect(undefined_rows(%w[./lib lib/user.rb])).to eq(["b.rb:3"])
+  end
+
+  # Overlapping arguments that do not widen discovery still name a file twice; the pre-pass must census it once.
+  # The analysis itself still walks the file twice, as `lib lib` does, so the finding repeats. Files are identified
+  # by expanded path: a symlinked alias (`src -> lib`) is a known limitation and is not folded.
+  it "censuses a file once when two spellings of the same argument name it" do
+    expect(undefined_rows(%w[lib ./lib])).to eq(["b.rb:3", "b.rb:3"])
+  end
+
+  # A discovered file keeps the spelling the analysis uses when it is analysed, so the run-result cache does not
+  # list it a second time as discovered-not-analysed under the configured absolute spelling.
+  it "keeps the analysis's spelling for a file the widened set shares with it" do
+    runner = Rigor::Analysis::Runner.new(configuration: Rigor::Configuration.load(".rigor.yml"), cache_store: nil)
+    absolute = File.expand_path("lib")
+    project = ["#{absolute}/a.rb", "#{absolute}/b.rb", "#{absolute}/a.rb"]
+    expect(runner.send(:discovery_files, project, ["lib/a.rb"])).to eq(["lib/a.rb", "#{absolute}/b.rb"])
   end
 end

@@ -77,17 +77,23 @@ RSpec.describe Rigor::Inference::ScopeIndexer::MixinAccumulator do
     end
   end
 
-  # #1592 — the extends walk dropped every block it did not recognise as a class body, so a singleton-side mixin
-  # written in one was neither recorded nor named. The edge is now recorded (so the readers' own walk sees it)
-  # and named on the owner's `:extend` side (so the resolution chain does not trust its position).
+  # #1592 — the extends walk dropped every block it did not recognise as a class body, so `[1].each { extend M }`
+  # recorded nothing. A block runs on whatever object its call hands it, so only a self-preserving iterator
+  # (`each`, `times`, `map`, `tap`, `then` ...) over a literal Array / Range / Hash / Integer or a constant, written
+  # as a statement of a class or module body, is read as the body's own: the edge is recorded and named on the
+  # owner's `:extend` side. Every other block is skipped, as before.
   context "when a singleton-side mixin is written in a block (#1592)" do
     {
-      "[1].each { extend M }" => "extend in a plain block",
-      "[1].each { class << self; include M; end }" => "class << self; include in a plain block",
-      "[1].each { class << self; prepend M; end }" => "class << self; prepend in a plain block",
-      "helper(-> { extend M })" => "extend in a lambda argument of a block-less call",
-      "helper { [1].each { extend M } }" => "extend in a nested block",
-      "def self.boot = [1].each { extend M }" => "extend in a block inside a method"
+      "[1].each { extend M }" => "extend in an Array each",
+      "(1..3).each { extend M }" => "extend in a Range each",
+      "3.times { extend M }" => "extend in times",
+      "{ a: 1 }.each_pair { extend M }" => "extend in a Hash each_pair",
+      "MODS.each { extend M }" => "extend in a constant's each",
+      "[1].map { extend M }" => "extend in map",
+      "Object.tap { extend M }" => "extend in tap",
+      "[1].each { class << self; include M; end }" => "class << self; include in an iterator",
+      "[1].each { class << self; prepend M; end }" => "class << self; prepend in an iterator",
+      "helper(-> { extend M })" => "extend in a lambda argument of a block-less call"
     }.each do |body, label|
       it "records and names #{label}" do
         source = "class C\n  #{body}\nend\n"
@@ -97,11 +103,38 @@ RSpec.describe Rigor::Inference::ScopeIndexer::MixinAccumulator do
       end
     end
 
+    # The block's `self` is not the class: an instance, the class an `on_load` hook loaded, an `instance_exec`ed
+    # DSL object, a refinement, a hook. Nothing is recorded or listed, exactly the merge-base answer.
+    {
+      "@lock.synchronize { extend M }" => "a call on an instance variable",
+      "def call = @lock.synchronize { extend M }" => "a block inside a method",
+      "ActiveSupport.on_load(:active_record) { extend M }" => "an on_load hook",
+      "helper { extend M }" => "a receiverless call",
+      "included do\n    extend M\n  end" => "a concern's included do",
+      "config.each { extend M }" => "a call on a non-literal receiver",
+      "[1].each_slice(2) { extend M }" => "a method outside the iterator list",
+      "[1].each { [2].each { extend M } }" => "an iterator nested in another block",
+      "[1].each { def z = [2].each { extend M } }" => "an iterator nested in a def"
+    }.each do |body, label|
+      it "skips an extend in #{label}" do
+        source = "class C\n  #{body}\nend\n"
+
+        expect(index_of(source).fetch(:extends)).to eq({}), body
+        expect(unpositioned(source)).to eq({}), body
+      end
+    end
+
+    it "skips an iterator that is not a statement of the body" do
+      source = "class C\n  x = [1].each { extend M }\nend\n"
+
+      expect(index_of(source).fetch(:extends)).to eq({})
+    end
+
     it "leaves the instance side alone" do
       expect(unpositioned("class C\n  include A\n  [1].each { extend M }\nend\n")).to eq("C" => { extend: ["M"] })
     end
 
-    it "taints the extend side of a block extend whose argument cannot be named" do
+    it "taints the extend side of an iterator extend whose argument cannot be named" do
       expect(unpositioned("class C\n  [1].each { |m| extend m }\nend\n")).to eq("C" => wild(:extend))
     end
 
@@ -111,20 +144,13 @@ RSpec.describe Rigor::Inference::ScopeIndexer::MixinAccumulator do
       expect(index_of(source).fetch(:extends)).to eq("C::K" => ["M"])
     end
 
-    it "keeps a receiver on a plain block off the enclosing class" do
+    it "keeps a receiver on an iterator block off the enclosing class" do
       expect(unpositioned("class C\n  [1].each { obj.extend(M) }\nend\n")).to eq({})
     end
 
-    it "taints the extend side of a module with a `class_methods do` block" do
-      source = "module Concern\n  extend ActiveSupport::Concern\n  class_methods do\n    def z = 1\n  end\nend\n"
-
-      expect(unpositioned(source)).to eq("Concern" => wild(:extend))
-    end
-
-    it "records the extend inside a concern's `included do`, on the concern, named unpositioned" do
-      source = "module Concern\n  included do\n    extend M\n  end\nend\n"
-
-      expect(unpositioned(source)).to eq("Concern" => { extend: ["M"] })
+    # Known imprecision: the block never runs, yet the edge is recorded, unpositioned, like `extend M if false`.
+    it "records an iterator over an empty literal, unpositioned" do
+      expect(unpositioned("class C\n  [].each { extend M }\nend\n")).to eq("C" => { extend: ["M"] })
     end
   end
 

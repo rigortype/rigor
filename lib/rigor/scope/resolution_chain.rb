@@ -682,7 +682,6 @@ module Rigor
 
         def compute_singleton(name, depth)
           mark_unsettled(name, :extend, (@discovery.discovered_extends[name] || EMPTY).size)
-          @frames.last.unsettled = true if hook_singleton_edges?(name)
           entries = [project_entry(name, :singleton)]
           super_lin = superclass_lin(name, :singleton, depth)
           entries.concat(super_lin[0])
@@ -699,44 +698,6 @@ module Rigor
         def mark_unsettled(name, kind, edge_count)
           listed = @discovery.unpositioned_mixins[name]&.dig(kind)
           @frames.last.unsettled = true if (listed && !listed.empty?) || (edge_count >= 2 && multi_file?(name))
-        end
-
-        # Whether a module `name` includes (transitively, through its own `include` / `prepend` edges) lists
-        # unpositioned singleton-side edges of its own: an `included do extend X end`, a `class_methods do`
-        # block, a `self.included(base)` hook that extends `base`. Those edges run against the INCLUDER's
-        # singleton when the module is included, so its singleton chain has mixins the tables never file
-        # under it — and it does not draw on the module's own `:extend` side, which is where they are listed.
-        # The superclass's includes are its own singleton chain's business.
-        def hook_singleton_edges?(name)
-          holders = extend_side_holders
-          return false if holders.empty?
-
-          seen = {}
-          pending = [name]
-          until pending.empty?
-            current = pending.pop
-            (@discovery.discovered_includes[current] || EMPTY).each do |raw|
-              resolved = resolve(current, raw)
-              next unless resolved
-
-              Array(resolved).each do |module_name|
-                next if seen[module_name]
-
-                seen[module_name] = true
-                return true if holders.include?(module_name)
-
-                pending << module_name
-              end
-            end
-          end
-          false
-        end
-
-        # The owners that list an unpositioned `:extend` edge, computed once per builder.
-        def extend_side_holders
-          @extend_side_holders ||= @discovery.unpositioned_mixins.filter_map do |owner, sides|
-            owner unless sides[:extend].nil? || sides[:extend].empty?
-          end.to_set
         end
 
         def multi_file?(name)

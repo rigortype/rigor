@@ -539,10 +539,11 @@ RSpec.describe "resolution in Ruby's ancestor order (#1567, #1568, #1570, #1571)
     RUBY
   end
 
-  # #1592 — a singleton-side mixin written in a block, a method or a hook. The extend walk dropped every block it
-  # did not recognise, so `[1].each { extend X }` recorded nothing and the singleton chain stood without `X`. Ruby
-  # prints "X" for each `K.bar` below. The control on the same source (`Kc`, no mixin) must still fire, so a run
-  # that analysed nothing cannot pass by reporting nothing.
+  # #1592 — a singleton-side mixin written in a block. The extend walk dropped every block it did not recognise, so
+  # `[1].each { extend X }` recorded nothing and the singleton chain stood without `X`. Ruby prints "X" for each
+  # `K.bar` below. Only a self-preserving iterator over a literal or a constant, written in a class body, is read
+  # as the body's own; a block on any other object (an instance, an `on_load` hook) is skipped, as it was. The
+  # control on the same source (`Kc`, no mixin) must still fire, so a run that analysed nothing cannot pass.
   describe "a singleton-side mixin inside a block, method or hook (#1592)" do
     let(:prelude) do
       "module X; def bar = \"X\"; end\nclass Base; def self.bar = 1; def self.baz = 1; end\n" \
@@ -550,11 +551,11 @@ RSpec.describe "resolution in Ruby's ancestor order (#1567, #1568, #1570, #1571)
     end
     let(:control) { [[4, "call.undefined-method"]] }
 
-    it "records an `extend` inside a block" do
+    it "records an `extend` inside an iterator" do
       expect(diagnostics_for("#{prelude}class K < Base\n  [1].each { extend X }\nend\nK.bar.upcase\n")).to eq(control)
     end
 
-    it "records a `class << self; include` inside a block" do
+    it "records a `class << self; include` inside an iterator" do
       source = "#{prelude}class K < Base\n  [1].each { class << self; include X; end }\nend\nK.bar.upcase\n"
       expect(diagnostics_for(source)).to eq(control)
     end
@@ -570,10 +571,62 @@ RSpec.describe "resolution in Ruby's ancestor order (#1567, #1568, #1570, #1571)
       expect(diagnostics_for(source)).to eq(control)
     end
 
-    # flip this when #1592 is fixed: Ruby prints "X" for `K.bar`, so the second diagnostic is a false positive.
-    # The includer's singleton chain is now unsettled (the concern lists `X` on its `:extend` side), so the
-    # reader answers master's order, and master's walk does not see the includer's hook-driven edge either.
-    # Modelling `included do` / `class_methods do` belongs to a follow-up ADR.
+    # Ruby: each `label` below is Base's "x" (an `extend` in these blocks reaches the instance, or the class
+    # `on_load` loads, never `Svc` / `Engine`), so `upcase` exists. Recording the edge on the enclosing class typed
+    # each read as Counted's Integer.
+    it "does not record an `extend` in a block that runs on another object" do
+      source = <<~RUBY
+        class Base; def self.label = "x"; end
+        module Counted; def label = 1; end
+        class Svc < Base
+          def call = @lock.synchronize { extend Counted }
+        end
+        class Engine < Base
+          ActiveSupport.on_load(:active_record) { extend Counted }
+        end
+        Svc.label.upcase
+        Engine.label.upcase
+      RUBY
+      expect(diagnostics_for(source)).to eq([])
+    end
+
+    # Known imprecision: `[].each` never runs, so Ruby's `W.label` is "x" and `upcase` exists; the edge is recorded,
+    # unpositioned, as `extend Counted if false` is on master, so the read is typed from Counted's Integer.
+    it "records an `extend` in an iterator over an empty literal, as master does for `if false`" do
+      source = <<~RUBY
+        class Base; def self.label = "x"; end
+        module Counted; def label = 1; end
+        class W < Base; [].each { extend Counted }; end
+        W.label.upcase
+      RUBY
+      guarded = source.sub("[].each { extend Counted }", "extend Counted if false")
+      expect(diagnostics_for(source)).to eq([[4, "call.undefined-method"]])
+      expect(diagnostics_for(guarded)).to include([4, "call.undefined-method"])
+    end
+
+    # #1567 stays: an included module's own conditional `extend`, or a hook that extends its includer, is not the
+    # includer's edge, so the includer's singleton chain must keep Ruby's order (`A`'s `M#foo`, not Base's).
+    {
+      "conditional extend" => "module Plugin; extend Unrelated if RUBY_VERSION > \"3\"; end",
+      "hook extend" => "module Plugin; def self.included(base) = base.extend(Unrelated); end"
+    }.each do |label, plugin|
+      it "keeps Ruby's singleton order for an includer of a module with a #{label}" do
+        source = <<~RUBY
+          module Unrelated; def zzz = 1; end
+          #{plugin}
+          class Base; def self.foo = 1; end
+          module M; def foo = "m"; end
+          module A; include M; end
+          class K < Base; include Plugin; extend A; end
+          K.foo.upcase
+        RUBY
+        expect(diagnostics_for(source)).to eq([])
+      end
+    end
+
+    # flip this when #1592 is fixed: Ruby prints "X" for `K.bar`, so the diagnostic is a false positive. Neither
+    # the chain nor master's walk files a hook-driven edge under the includer; modelling `included do` /
+    # `class_methods do` belongs to a follow-up ADR.
     it "still types a read through a concern's `included do extend X end` from master's order" do
       source = <<~RUBY
         #{prelude}module C

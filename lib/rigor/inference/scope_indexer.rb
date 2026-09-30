@@ -6116,9 +6116,15 @@ module Rigor
                                           in_singleton: in_singleton, singleton_self: singleton_self,
                                           singleton_cref: singleton_cref)
           end
-          if node.block.is_a?(Prism::BlockNode) && rebinding_extends_block?(node)
-            return walk_extends_block_call(node, qualified_prefix, current_class, accumulator,
-                                           in_singleton, singleton_self, singleton_cref)
+          if node.block.is_a?(Prism::BlockNode)
+            if rebinding_extends_block?(node)
+              return walk_extends_block_call(node, qualified_prefix, current_class, accumulator,
+                                             in_singleton, singleton_self, singleton_cref)
+            end
+            # Any other block runs on an object this walk cannot vouch for (`@lock.synchronize { extend M }`
+            # extends the instance, `on_load(:x) { extend M }` the loaded class), so it is skipped as it always
+            # was, unless it is a self-preserving iterator written straight in a class body (#1592).
+            return unless self_preserving_body_block?(node, accumulator)
           end
         end
 
@@ -6184,6 +6190,7 @@ module Rigor
 
         child_cref = unnameable_decl?(node, self_decl, singleton_cref)
         accumulator.direct_body(node.body) if accumulator.direct?(node)
+        accumulator.body_statements(node.body)
         walk_class_extends(node.body, child_cref ? [] : child_prefix,
                            child_cref ? nil : child_prefix.join("::"), accumulator,
                            singleton_cref: child_cref)
@@ -6205,6 +6212,27 @@ module Rigor
 
         walk_extends_opaque_block(node, qualified_prefix, current_class, accumulator,
                                   in_singleton, singleton_self, singleton_cref)
+      end
+
+      SELF_PRESERVING_ITERATORS = %i[each each_with_index each_pair each_key each_value times upto downto step map
+                                     tap then].freeze
+      private_constant :SELF_PRESERVING_ITERATORS
+
+      # A block that keeps the class body's `self`: the call is a statement of the body itself (not nested in a
+      # `def` or another block) and iterates a literal Array / Range / Hash / Integer or a constant with a method
+      # that yields without rebinding. `[].each { extend M }` never runs and is recorded anyway; it is listed
+      # unpositioned, like `extend M if false` (a known imprecision).
+      def self_preserving_body_block?(node, accumulator)
+        return false unless accumulator.body_block?(node) && SELF_PRESERVING_ITERATORS.include?(node.name)
+
+        receiver = node.receiver
+        # `(1..3).each` wraps the literal in parentheses.
+        receiver = receiver.body.body.first if receiver.is_a?(Prism::ParenthesesNode) && receiver.body&.body&.size == 1
+        case receiver
+        when Prism::ArrayNode, Prism::RangeNode, Prism::HashNode, Prism::IntegerNode,
+             Prism::ConstantReadNode, Prism::ConstantPathNode then true
+        else false
+        end
       end
 
       # Whether {#walk_extends_block_call} owns this block-carrying call. Any other block (`[1].each { extend M }`,
@@ -6332,7 +6360,6 @@ module Rigor
         return record_module_function(node, current_class, accumulator, in_singleton) if node.name == :module_function
 
         taint_opaque_eval(node, current_class, accumulator)
-        taint_class_methods_block(node, current_class, accumulator)
 
         kind, _arguments, via_send = mixin_call_view(node)
         return if kind.nil?
@@ -6343,14 +6370,6 @@ module Rigor
         return if !via_send && singleton_mixin_recorded?(node, kind, current_class, accumulator, in_singleton)
 
         effects.each { |owner, side| accumulator.taint(owner, side) }
-      end
-
-      # A concern's `class_methods do … end` block defines the module every includer extends: a singleton-side
-      # edge no `extend` writes, so the module's own `:extend` side is named as having an unknown edge.
-      def taint_class_methods_block(node, current_class, accumulator)
-        return unless current_class && node.name == :class_methods && node.receiver.nil? && node.block
-
-        accumulator.taint(current_class, :extend)
       end
 
       # The bare `module_function` toggle: the module extends itself. A direct statement only.

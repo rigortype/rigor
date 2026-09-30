@@ -6,11 +6,14 @@ require "prism"
 # `plugins/*/lib/` that walks the discovery tables' ancestry edges itself rather than reading
 # `Scope::ResolutionChain`. See the spec's header for the rule and for what the scan cannot see.
 module AncestryWalkerScan
-  # The ancestry readers: `Scope`'s keyed readers and the raw tables behind them (a `DiscoveryIndex` member
-  # or its `Scope` pass-through, which share names).
+  # The ten ancestry readers: `Scope`'s keyed readers and the raw tables behind them (a `DiscoveryIndex` member
+  # or its `Scope` pass-through, which share names), and the two that hand out a class's direct ancestors one
+  # step at a time — `Scope#enqueue_ancestors` and `ResolutionChain.direct_ancestors` — whose loop is a
+  # breadth-first walk over the same edges.
   READERS = %i[
     includes_of prepends_of superclass_of singleton_extends_of
     discovered_includes discovered_prepends discovered_superclasses discovered_extends
+    enqueue_ancestors direct_ancestors
   ].freeze
 
   # A reader whose result only answers membership or emptiness — `discovered_superclasses.key?(name)` asks

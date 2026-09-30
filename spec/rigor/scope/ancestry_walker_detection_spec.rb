@@ -12,9 +12,11 @@ require_relative "../../support/ancestry_walker_scan"
 # The rule. A method under `lib/` or `plugins/*/lib/`, outside the chain builder
 # (`lib/rigor/scope/resolution_chain.rb`), is a WALKER when it
 #
-# - reads two or more of the ancestry readers — `includes_of`, `prepends_of`, `superclass_of`,
-#   `singleton_extends_of`, and the raw tables `discovered_includes`, `discovered_prepends`,
-#   `discovered_superclasses`, `discovered_extends` (a `DiscoveryIndex` member or its `Scope` pass-through);
+# - reads two or more of the ten ancestry readers — `includes_of`, `prepends_of`, `superclass_of`,
+#   `singleton_extends_of`, the raw tables `discovered_includes`, `discovered_prepends`,
+#   `discovered_superclasses`, `discovered_extends` (a `DiscoveryIndex` member or its `Scope` pass-through),
+#   and the two that hand out a class's direct ancestors one step at a time, `Scope#enqueue_ancestors` and
+#   `ResolutionChain.direct_ancestors` (a loop over either is the breadth-first walk the chain replaced);
 # - reads one inside a loop — a block, `while`, `until` or `for` body — directly or through a local it
 #   assigned the table to (`supers = scope.discovered_superclasses` … `supers[current]`);
 # - calls a method of the same file that reads one, inside a loop; or
@@ -153,6 +155,26 @@ RSpec.describe "ancestry walkers outside Scope::ResolutionChain" do
       RUBY
       expect(found.keys).to contain_exactly("lib/x.rb#two", "lib/x.rb#looped", "lib/x.rb#aliased",
                                             "lib/x.rb#driver", "lib/x.rb#recursive")
+    end
+
+    it "flags a loop over the one-step ancestor readers and not a single call" do
+      found = scan_source(<<~RUBY)
+        class X
+          def bfs(scope, queue)
+            queue.each { |current| scope.enqueue_ancestors(current, queue, {}) }
+          end
+          def chain_bfs(scope, names)
+            names.flat_map { |name| Rigor::Scope::ResolutionChain.direct_ancestors(scope, name, true) }
+          end
+          def both(scope, name, queue)
+            scope.enqueue_ancestors(name, queue, {})
+            Rigor::Scope::ResolutionChain.direct_ancestors(scope, name, true)
+          end
+          def once(scope, name, queue) = scope.enqueue_ancestors(name, queue, {})
+          def once_direct(scope, name) = Rigor::Scope::ResolutionChain.direct_ancestors(scope, name, false)
+        end
+      RUBY
+      expect(found.keys).to contain_exactly("lib/x.rb#bfs", "lib/x.rb#chain_bfs", "lib/x.rb#both")
     end
 
     it "does not flag one direct read, a membership read inside a loop, or a table copied whole" do

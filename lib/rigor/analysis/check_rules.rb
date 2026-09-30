@@ -2664,10 +2664,9 @@ module Rigor
         def prepended_definer_visibility(scope, class_name, method_name)
           chain = Scope::ResolutionChain.for(scope, class_name.to_s, :instance, :methods)
           answer = prepend_region_visibility(scope, chain, class_name.to_s, method_name)
-          verdict = chain.settle(answer) do |retro|
+          verdict = chain.settle(scope, answer) do |retro|
             prepend_region_visibility(scope, retro, class_name.to_s, method_name)
           end
-          chain.record(scope) if verdict == :master
           verdict == :chain ? answer : nil
         end
 
@@ -3801,7 +3800,7 @@ module Rigor
         def each_project_ancestor(scope, class_name, &)
           chain = Scope::ResolutionChain.for(scope, class_name.to_s, :instance, :methods)
           answer = overridden_ancestor_answer(scope, chain, class_name.to_s, &)
-          verdict = chain.settle(answer&.first) do |retro|
+          verdict = chain.settle(scope, answer&.first) do |retro|
             overridden_ancestor_answer(scope, retro, class_name.to_s, &)&.first
           end
           return answer if verdict == :chain

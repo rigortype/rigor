@@ -141,7 +141,11 @@ module Rigor
       #
       # #1570 is a one-fork disagreement, so its readers answer master's until ADR-119 gives the arity rule's
       # decision point a way to decline.
-      def settle(answer)
+      def settle(scope, answer)
+        # The verdict depends on EVERY node of the chain (a fork, an unpositioned edge, a second declaring file),
+        # and `:master` changes the answer, so the whole chain's class edges are dependencies whichever way it
+        # goes; `search` files only the entries ahead of an answer.
+        record(scope)
         return :master if @unsettled
 
         case @forks
@@ -182,8 +186,23 @@ module Rigor
         return unless Analysis::DependencyRecorder.active?
 
         ResolutionChain.record_class(scope, @root)
-        (stop || @entries.size).times { |index| ResolutionChain.record_entry(scope, @entries[index], side) }
+        (stop || @entries.size).times do |index|
+          entry = @entries[index]
+          ResolutionChain.record_entry(scope, entry, side)
+          record_appeared(entry, side)
+        end
       end
+
+      # The negative class edge of an entry the whole chain read (a verdict of {#settle}): a NEW file declaring
+      # or reopening the class changes the edges the verdict counted (a second declaring file, another mixin),
+      # and the class edges above name only the files that declare it now. Keyed on the unqualified name, as the
+      # appeared-class widening reads it.
+      def record_appeared(entry, side)
+        return if side && entry.side != side
+
+        Analysis::DependencyRecorder.read_missing(:class, (entry.name || entry.raw).to_s.split("::").last)
+      end
+      private :record_appeared
 
       def record_head(scope, start, side)
         ResolutionChain.record_class(scope, @root) unless start.zero? && @entries.first&.name == @root
@@ -198,7 +217,16 @@ module Rigor
       end
 
       def self.record_entry(scope, entry, side)
-        record_class(scope, entry.name) unless entry.external? || (side && entry.side != side)
+        return if side && entry.side != side
+
+        if entry.external?
+          # An ancestor the project does not treat as a class may still be DECLARED (an empty module in another
+          # file), and a later edit there turns it into a project entry that moves the answer: file the sites
+          # of every name its spelling can denote.
+          entry.candidates.each { |candidate| record_class(scope, candidate) }
+        else
+          record_class(scope, entry.name)
+        end
       end
 
       # The position of `name`'s own entry on this chain's side, or nil. A module can appear twice (a prepend

@@ -88,13 +88,13 @@ RSpec.describe Rigor::Scope::ResolutionChain do
     RUBY
     chain = chain_of(scope, "Own")
     expect(chain.skip_count).to be >= 2
-    expect(chain.settle(:answer) { raise "the retro world must not be read" }).to eq(:master)
+    expect(chain.settle(scope, :answer) { raise "the retro world must not be read" }).to eq(:master)
     expect(chain.instance_variable_get(:@retro)).to be_nil
   end
 
   it "settles a skip-free chain to itself without reading the retro world" do
     scope = scope_for("module M; end\nclass C; include M; end")
-    expect(chain_of(scope, "C").settle(:answer) { raise "no retro world exists" }).to eq(:chain)
+    expect(chain_of(scope, "C").settle(scope, :answer) { raise "no retro world exists" }).to eq(:chain)
   end
 
   it "keeps the retro world and the skip counter off its public surface" do
@@ -136,8 +136,8 @@ RSpec.describe Rigor::Scope::ResolutionChain do
       scope = scope_for(one_skip_source(5))
       chain = chain_of(scope, "C")
       expect(chain.skip_count).to eq(1)
-      expect(chain.settle(:answer) { |retro| retro.entries.count { |entry| entry.name == "S" } }).to eq(:master)
-      expect(chain.settle(:answer) { :answer }).to eq(:chain)
+      expect(chain.settle(scope, :answer) { |retro| retro.entries.count { |entry| entry.name == "S" } }).to eq(:master)
+      expect(chain.settle(scope, :answer) { :answer }).to eq(:chain)
       expect(retro_tables(scope)[:lin_instance_retro]).to include("C")
     end
 
@@ -147,7 +147,7 @@ RSpec.describe Rigor::Scope::ResolutionChain do
       expect(chain.entries.size).to eq(described_class::LIMIT)
       expect(chain.skip_count).to eq(1)
       expect(chain).not_to be_truncated
-      expect(chain.settle(:answer) { raise "an over-budget retro world must not be read" }).to eq(:master)
+      expect(chain.settle(scope, :answer) { raise "an over-budget retro world must not be read" }).to eq(:master)
       expect(retro_tables(scope)[:lin_instance_retro]).not_to include("C")
     end
   end
@@ -172,7 +172,8 @@ RSpec.describe Rigor::Scope::ResolutionChain do
     expect(chain_of(scope, "Guarded", :singleton)).not_to be_unsettled
     expect(chain_of(scope, "Ext", :singleton)).to be_unsettled
     expect(chain_of(scope, "Ext")).not_to be_unsettled
-    expect(chain_of(scope, "Uses").settle(:answer) { raise "an unsettled chain reads no retro world" }).to eq(:master)
+    unsettled = chain_of(scope, "Uses")
+    expect(unsettled.settle(scope, :answer) { raise "an unsettled chain reads no retro world" }).to eq(:master)
   end
 
   # The singleton side settles a superclass that only `extend`s to master (its extended modules are not on the

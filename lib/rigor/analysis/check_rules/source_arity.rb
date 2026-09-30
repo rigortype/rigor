@@ -114,12 +114,11 @@ module Rigor
           envelope = owner_in(chain_levels(chain).first)
           # The retro read answers `false` (no envelope is `false`) unless it agrees with the chain's and neither
           # read was ambiguous (`@ambiguous` only ever turns true, so it covers both).
-          verdict = chain.settle(envelope) do |retro|
+          verdict = chain.settle(@scope, envelope) do |retro|
             owner_in(chain_levels(retro).first) == envelope && !@ambiguous ? envelope : false
           end
           return envelope if verdict == :chain
 
-          chain.record(@scope)
           @levels = []
           @passed = []
           @owner_entries = []
@@ -316,8 +315,7 @@ module Rigor
         def subclass_levels(subclass)
           chain = arity_chain(subclass)
           own = chain_levels(chain).first.first
-          verdict = chain.settle(own) { |retro| chain_levels(retro).first.first }
-          chain.record(@scope) if verdict == :master
+          verdict = chain.settle(@scope, own) { |retro| chain_levels(retro).first.first }
           [verdict == :chain ? own : master_levels(subclass).first.first]
         end
 

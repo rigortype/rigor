@@ -791,9 +791,10 @@ RSpec.describe "Scope::ResolutionChain against Ruby's own resolution" do
         path = File.join(dir, "fixture.rb")
         File.write(path, source)
         expect(ruby_answers(path, { constants: ["D::X"] }).fetch("constants:D::X")).to eq("C")
-        chain = chain_of(rigor_scope(source), "D", :instance, :constants)
+        scope = rigor_scope(source)
+        chain = chain_of(scope, "D", :instance, :constants)
         expect(chain.skip_count).to be >= 1
-        expect(chain.settle(:answer) { raise "no retro world for a prepend fork" }).to eq(:master)
+        expect(chain.settle(scope, :answer) { raise "no retro world for a prepend fork" }).to eq(:master)
         expect(chain.instance_variable_get(:@retro)).to be_nil
       end
     end
@@ -816,9 +817,10 @@ RSpec.describe "Scope::ResolutionChain against Ruby's own resolution" do
         path = File.join(dir, "fixture.rb")
         File.write(path, source)
         expect(ruby_answers(path, { constants: ["C::X"] }).fetch("constants:C::X")).to eq("M0")
-        chain = chain_of(rigor_scope(source), "C", :instance, :constants)
+        scope = rigor_scope(source)
+        chain = chain_of(scope, "C", :instance, :constants)
         expect(chain).to be_unsettled
-        expect(chain.settle(:answer) { raise "an unsettled chain reads no retro world" }).to eq(:master)
+        expect(chain.settle(scope, :answer) { raise "an unsettled chain reads no retro world" }).to eq(:master)
         expect(chain.instance_variable_get(:@retro)).to be_nil
       end
     end
@@ -861,9 +863,10 @@ RSpec.describe "Scope::ResolutionChain against Ruby's own resolution" do
         path = File.join(dir, "fixture.rb")
         File.write(path, source)
         expect(ruby_answers(path, { methods: ["C#foo"] }).fetch("C#foo").first.first).to eq("M")
-        chain = chain_of(rigor_scope(source), "C")
+        scope = rigor_scope(source)
+        chain = chain_of(scope, "C")
         expect(chain.skip_count).to eq(2)
-        expect(chain.settle(:answer) { raise "two forks read no retro world" }).to eq(:master)
+        expect(chain.settle(scope, :answer) { raise "two forks read no retro world" }).to eq(:master)
       end
     end
 

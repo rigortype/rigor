@@ -33,6 +33,7 @@ require_relative "scope_indexer/class_cvars_collector"
 require_relative "scope_indexer/superclasses_collector"
 require_relative "scope_indexer/def_nestings_collector"
 require_relative "scope_indexer/layered_def_nestings"
+require_relative "scope_indexer/mixin_accumulator"
 require_relative "scope_indexer/member_layouts_collector"
 
 module Rigor
@@ -233,7 +234,7 @@ module Rigor
         def_nodes, def_nestings = merge_def_node_tables(default_scope, walked, file_def_nodes)
         singleton_def_nodes = merge_singleton_def_nodes(default_scope, root)
         superclasses, header_nestings = merge_ancestry_tables(default_scope, walked)
-        includes, prepends = merge_mixin_tables(default_scope, root)
+        includes, prepends, unpositioned = merge_mixin_tables(default_scope, root)
         # ADR-35 — per-file visibilities merged OVER the cross-file seed (the current file is authoritative for its own
         # classes; sibling-file ancestors are preserved from the project seed).
         method_visibilities = default_scope.discovered_method_visibilities.merge(
@@ -249,8 +250,8 @@ module Rigor
         #
         # Issue #898 — and the same walk's table is now kept, merged over the cross-file seed the way
         # `includes` is: `Narrowing` asks it what a class object's singleton ancestry holds.
-        extends, methods_table = merge_and_fold_extends(default_scope, root, def_nodes,
-                                                        singleton_def_nodes, seeded_scope)
+        extends, methods_table, extend_unpositioned = merge_and_fold_extends(default_scope, root, def_nodes,
+                                                                             singleton_def_nodes, seeded_scope)
 
         seeded_scope.with_discovery(
           seeded_scope.discovery.with(
@@ -263,6 +264,8 @@ module Rigor
             discovered_includes: includes,
             discovered_prepends: prepends,
             discovered_extends: extends,
+            unpositioned_mixins: union_mixin_tables(default_scope.discovery.unpositioned_mixins, unpositioned,
+                                                    extend_unpositioned),
             discovered_method_visibilities: method_visibilities,
             discovered_parameter_envelopes: merge_envelope_seed(default_scope, file_envelopes),
             data_member_layouts: data_member_layouts,
@@ -293,17 +296,27 @@ module Rigor
           end,
           default_scope.discovered_prepends.merge(file[:prepends]) do |_class, cross_file, per_file|
             (per_file + cross_file).uniq
-          end
+          end,
+          file[:unpositioned]
         ]
+      end
+
+      # The union of `{class => [module names]}` tables — how {Scope::DiscoveryIndex#unpositioned_mixins}
+      # folds: an edge any contribution cannot position stays unpositioned. Returns the first table itself
+      # when the others add nothing, so the common empty case allocates nothing.
+      def union_mixin_tables(first, *others)
+        others.reject(&:empty?).reduce(first) do |out, table|
+          out.merge(table) { |_class, sitting, arriving| (sitting | arriving).freeze }
+        end
       end
 
       # The `extend`-edge half of {#merge_project_method_indexes}: merges this file's `extend`s over the
       # cross-file seed AND folds them against the merged def tables — the #526 fold that turns an
       # extended module's instance defs into singleton-side method entries on the extending class.
       def merge_and_fold_extends(default_scope, root, def_nodes, singleton_def_nodes, seeded_scope)
-        file_extends, extends = merge_extend_tables(default_scope, root)
+        file_extends, extends, unpositioned = merge_extend_tables(default_scope, root)
         methods_table = fold_per_file_extends(file_extends, def_nodes, singleton_def_nodes, seeded_scope)
-        [extends, methods_table]
+        [extends, methods_table, unpositioned]
       end
 
       # Issue #1097 — this file's def / block / lambda ranges merged over the cross-file seed; the
@@ -358,13 +371,14 @@ module Rigor
       # same table merged over the cross-file seed for the scope. Returned as a pair so a caller cannot
       # pair the fold with a table a different parse produced, as {#merge_ancestry_tables} is.
       def merge_extend_tables(default_scope, root)
-        file_extends = build_discovered_extends(root)
+        file = extend_tables(root)
+        file_extends = file.fetch(:extends)
         # The table stores singleton-ancestor search order, so the file under analysis — the
         # later-loading contribution for a reopened class — prepends over the cross-file seed.
         merged = default_scope.discovered_extends.merge(
           file_extends
         ) { |_class, cross_file, per_file| (per_file + cross_file).uniq }
-        [file_extends, merged]
+        [file_extends, merged, file.fetch(:unpositioned)]
       end
 
       # The per-file half of the #526 fold: mutable copies of the merged tables take the extends, and the
@@ -5625,13 +5639,15 @@ module Rigor
 
       # One descent, both instance-side mixin tables: the walk classifies each mixin call it sees, so the
       # two tables cost one walk rather than two. Each value is frozen and de-duplicated per class, as the
-      # single-table builder always did.
+      # single-table builder always did. `:unpositioned` names the recorded edges whose order is not a fact
+      # ({MixinAccumulator}).
       def mixin_tables(root)
-        accumulator = {}
+        accumulator = MixinAccumulator.new
         walk_class_includes(root, [], nil, accumulator)
         {
           includes: freeze_mixin_lists(accumulator, :include),
-          prepends: freeze_mixin_lists(accumulator, :prepend)
+          prepends: freeze_mixin_lists(accumulator, :prepend),
+          unpositioned: accumulator.unpositioned
         }
       end
 
@@ -5708,6 +5724,7 @@ module Rigor
         return true unless node.body
 
         _self_decl, child_prefix, child_cref = ctx
+        accumulator.direct_body(node.body)
         walk_class_includes(node.body, child_cref ? [] : child_prefix,
                             child_cref ? nil : child_prefix.join("::"), accumulator,
                             singleton_cref: child_cref)
@@ -5804,13 +5821,15 @@ module Rigor
       def record_mixin_call(node, qualified_prefix, current_class, accumulator)
         return unless mixin_call_recorded?(node, current_class)
 
-        targets = node.arguments&.arguments&.filter_map { |arg| Source::ConstantPath.qualified_name(arg) }
-        return if targets.nil? || targets.empty?
+        arguments = node.arguments&.arguments || []
+        targets = arguments.filter_map { |arg| Source::ConstantPath.qualified_name(arg) }
+        return if targets.empty?
 
         owner = node.receiver.nil? ? current_class : prepend_call_receiver(node, qualified_prefix)
         return if owner.nil?
 
         write_mixin_targets(accumulator, owner, targets, prepend: node.name == :prepend)
+        accumulator.note(node, owner, targets, complete: targets.size == arguments.size)
       end
 
       # Issue #1123 — one class's contribution to the two tables. A prepended module lands in BOTH: the
@@ -5877,9 +5896,18 @@ module Rigor
       # Issue #915 — plus `class << self; include M; end`, the same singleton ancestor spelled through the
       # singleton-class body. It folds like an `extend` because Ruby makes it one.
       def build_discovered_extends(root)
-        accumulator = {}
+        extend_tables(root).fetch(:extends)
+      end
+
+      # {#build_discovered_extends} and the `extend` edges whose order is not a fact ({MixinAccumulator}), from
+      # one descent.
+      def extend_tables(root)
+        accumulator = MixinAccumulator.new
         walk_class_extends(root, [], nil, accumulator)
-        accumulator.transform_values { |mods| mods.uniq.freeze }.freeze
+        {
+          extends: accumulator.transform_values { |mods| mods.uniq.freeze }.freeze,
+          unpositioned: accumulator.unpositioned
+        }
       end
 
       def walk_class_extends(node, qualified_prefix, current_class, accumulator, in_singleton: false,
@@ -5941,6 +5969,7 @@ module Rigor
         # singleton body, `self` IS the singleton and `class << self` opens the
         # singleton's own singleton (`#<Class:#<Class:C>>`), which nothing names.
         opens_self = node.expression.is_a?(Prism::SelfNode) && !in_singleton
+        accumulator.direct_body(node.body) if opens_self
         walk_class_extends(node.body, qualified_prefix, opens_self ? current_class : nil,
                            accumulator, in_singleton: opens_self,
                                         singleton_self: true, singleton_cref: true)
@@ -5957,6 +5986,7 @@ module Rigor
         return unless child_prefix && node.body
 
         child_cref = unnameable_decl?(node, self_decl, singleton_cref)
+        accumulator.direct_body(node.body)
         walk_class_extends(node.body, child_cref ? [] : child_prefix,
                            child_cref ? nil : child_prefix.join("::"), accumulator,
                            singleton_cref: child_cref)
@@ -6104,7 +6134,10 @@ module Rigor
         case node.name
         when :extend then record_extend_targets(node, current_class, accumulator)
         when :module_function
-          (accumulator[current_class] ||= []) << current_class if ModuleFunctionState.extends_self?(node)
+          return unless ModuleFunctionState.extends_self?(node)
+
+          (accumulator[current_class] ||= []) << current_class
+          accumulator.note(node, current_class, [current_class], complete: true)
         end
       end
 
@@ -6114,11 +6147,15 @@ module Rigor
       # and consumers iterating the list forward read the same order the singleton ancestry searches.
       def record_extend_targets(node, current_class, accumulator)
         targets = []
-        node.arguments&.arguments&.each do |arg|
+        arguments = node.arguments&.arguments || []
+        arguments.each do |arg|
           target = arg.is_a?(Prism::SelfNode) ? current_class : Source::ConstantPath.qualified_name(arg)
           targets << target if target
         end
-        (accumulator[current_class] ||= []).unshift(*targets) unless targets.empty?
+        return if targets.empty?
+
+        (accumulator[current_class] ||= []).unshift(*targets)
+        accumulator.note(node, current_class, targets, complete: targets.size == arguments.size)
       end
 
       # The materialization half of #526: for every `C extends M`, M's INSTANCE defs become C's
@@ -7298,6 +7335,7 @@ module Rigor
         # resolves the class as it did before the ordering fix, which is this table's empty state.
         accumulate_prepend_lists(acc[:prepends], file_index[:prepends] || {})
         accumulate_extend_lists(acc[:extends], file_index[:extends] || {})
+        accumulate_unpositioned(acc[:unpositioned_mixins], file_index[:unpositioned_mixins] || {})
       end
 
       # The `extends` half stores singleton-ancestor search order ({#record_extend_targets}), so a file
@@ -7358,6 +7396,9 @@ module Rigor
           # the bundle stays Marshal-clean and a warm incremental file orders its prepends the way a cold
           # walk of it does.
           prepends: file_index[:prepends],
+          # The mixin edges whose order is not a fact — plain `{class name => Array[String]}` data, so the
+          # bundle stays Marshal-clean and a warm file flags the edges its cold walk flags.
+          unpositioned_mixins: file_index[:unpositioned_mixins],
           method_visibilities: file_index[:method_visibilities],
           methods: file_index[:methods],
           # Issue #992 — plain `{class name => {[kind, name] => [min, max, required_keywords] | :opaque}}`
@@ -7402,6 +7443,8 @@ module Rigor
           prepends: bundle[:prepends] || {},
           # #526 — pre-extends bundles lack the key; default `{}` keeps the fold total.
           extends: bundle[:extends] || {},
+          # A pre-32 bundle lacks the key; the SCHEMA bump rebuilds it cold, but default so the fold stays total.
+          unpositioned_mixins: bundle[:unpositioned_mixins] || {},
           method_visibilities: bundle[:method_visibilities],
           methods: bundle[:methods],
           parameter_envelopes: bundle[:parameter_envelopes] || {},
@@ -7449,7 +7492,8 @@ module Rigor
       def new_def_index_accumulator
         { def_nodes: {}, def_nestings: {}.compare_by_identity,
           singleton_def_nodes: {}, def_sources: {}, singleton_def_sources: {},
-          superclasses: {}, header_nestings: {}, includes: {}, prepends: {}, extends: {}, method_visibilities: {},
+          superclasses: {}, header_nestings: {}, includes: {}, prepends: {}, extends: {}, unpositioned_mixins: {},
+          method_visibilities: {},
           methods: {},
           deferred_ranges: {},
           parameter_envelopes: {}, class_sources: {},
@@ -7479,8 +7523,8 @@ module Rigor
         # for `obj.x` in another.
         acc[:methods] = subtract_def_methods(acc[:methods], acc[:def_nodes])
         finalize_call_surface_tables(acc)
-        %i[def_nodes singleton_def_nodes def_sources singleton_def_sources includes prepends method_visibilities
-           methods parameter_envelopes class_sources constant_sources deferred_ranges].each do |key|
+        %i[def_nodes singleton_def_nodes def_sources singleton_def_sources includes prepends unpositioned_mixins
+           method_visibilities methods parameter_envelopes class_sources constant_sources deferred_ranges].each do |key|
           acc[key].each_value(&:freeze)
         end
         acc.transform_values(&:freeze)
@@ -7551,10 +7595,19 @@ module Rigor
       # {#accumulate_project_index} to hold its ABC budget.
       def fold_file_mixin_tables(acc, root)
         mixin = mixin_tables(root)
+        extend_side = extend_tables(root)
         accumulate_include_lists(acc[:includes], mixin[:includes])
         accumulate_prepend_lists(acc[:prepends], mixin[:prepends])
-        accumulate_extend_lists(acc[:extends], build_discovered_extends(root))
+        accumulate_extend_lists(acc[:extends], extend_side[:extends])
+        accumulate_unpositioned(acc[:unpositioned_mixins], mixin[:unpositioned])
+        accumulate_unpositioned(acc[:unpositioned_mixins], extend_side[:unpositioned])
         mixin[:includes].merge(mixin[:prepends]) { |_cn, included_mods, _prepends| included_mods }
+      end
+
+      # {Scope::DiscoveryIndex#unpositioned_mixins} folds by union, so the fold is order-independent and a
+      # bundle-served file folds exactly as its live walk would.
+      def accumulate_unpositioned(target, additions)
+        additions.each { |cn, mods| target[cn] = target.key?(cn) ? (target[cn] | mods) : mods.dup }
       end
 
       # Issue #644 — folds one file's publication census into the cross-file accumulator, keyed by
@@ -8339,7 +8392,7 @@ module Rigor
       # passes so those see the settled keys.
       def apply_compact_header_renames!(acc, renames)
         %i[def_nodes singleton_def_nodes def_sources singleton_def_sources superclasses
-           includes prepends extends method_visibilities methods class_sources data_member_layouts
+           includes prepends extends unpositioned_mixins method_visibilities methods class_sources data_member_layouts
            struct_member_layouts constant_writes].each do |key|
           acc[key] = rekey_class_table(acc[key], renames)
         end

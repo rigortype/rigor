@@ -262,6 +262,7 @@ module Rigor
         superclasses: :discovered_superclasses,
         header_nestings: :discovered_header_nestings,
         includes: :discovered_includes,
+        unpositioned_mixins: :unpositioned_mixins,
         class_sources: :discovered_class_sources,
         method_visibilities: :discovered_method_visibilities,
         methods: :discovered_methods,

@@ -65,7 +65,10 @@ module Rigor
       # every such key, and a release clears the root through `Store::PAYLOAD_ABI_VERSION`; the bump closes
       # the remaining window, a same-`VERSION` build installed as `gems/rigortype-<VERSION>`, which
       # {EngineSource} treats as version-pinned (#285) and so keys on the version alone.
-      SCHEMA_VERSION = 11
+      # v12: the def-index seed bundles gain the `:unpositioned_mixins` table, the mixin edges whose order is
+      # not a fact, which an ancestor-order reader declines on. A pre-12 bundle would silently contribute no
+      # such edge for an unchanged file, so cached bundles must read as misses once and rebuild carrying it.
+      SCHEMA_VERSION = 12
 
       # Per-slot entry value objects. Constructors validate enums / required fields and freeze the resulting
       # struct so no caller can mutate after the entry is in a Descriptor.

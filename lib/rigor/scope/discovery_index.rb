@@ -34,6 +34,7 @@ module Rigor
       :discovered_includes,
       :discovered_prepends,
       :discovered_extends,
+      :unpositioned_mixins,
       :discovered_class_sources,
       :constant_sources,
       :constant_writers,
@@ -79,6 +80,7 @@ module Rigor
           discovered_includes: "the modules each class includes, prepends among them",
           discovered_prepends: "the modules each class prepends",
           discovered_extends: "the modules each singleton mixes in; the module itself for module_function",
+          unpositioned_mixins: "the mixin edges each class records from a call whose order is not a fact",
           discovered_class_sources: "the files that declare each class, reopenings included",
           discovered_deferred_ranges: "each file's def and block ranges; def rows add owner and module_function side",
           constant_sources: "the files that write each constant",
@@ -274,6 +276,17 @@ module Rigor
         # the table inside the indexer and threw it away; `Narrowing` needs it to survive onto the scope,
         # because `Singleton[C]`'s ancestry is exactly what `extend` writes and nothing else records it.
         discovered_extends: EMPTY_TABLE,
+        # `{qualified class or module name => [module names, as written]}` — the `include` / `prepend` /
+        # `extend` edges of the three tables above whose ORDER is not a fact: one written anywhere but as a
+        # direct statement of the class's own body (or its `class << self` body), the receiver form, and one
+        # sharing an argument list with a name the walk could not record
+        # (`Inference::ScopeIndexer::MixinAccumulator`). An edge written both ways is here. Folded by union.
+        # Read by a reader that depends on the order of a class's ancestors, which declines where it is not
+        # known; the three tables themselves are unchanged.
+        unpositioned_mixins: EMPTY_TABLE,
+        # The files that declare each class, reopenings included. Seeded on every run: the ADR-46 recording
+        # accessors read it for their class edges, and an ancestor-order reader reads whether a class is
+        # declared in more than one file, where the order of its mixins across the files is load order.
         discovered_class_sources: EMPTY_TABLE,
         # Issue #644 — `{qualified constant name => Set[declaring file]}`, the write attribution behind the
         # cross-file value-constant table. Read only by `Scope#record_constant_dependency` during ADR-46

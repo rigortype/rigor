@@ -84,9 +84,8 @@ module Rigor
       # collectors driven over the same tree) that {Analysis::Runner::ProjectPrePasses#discover} uses. Empty
       # tables are dropped so an empty seed stays `{}` and every consumer's "seed nothing" branch keeps working.
       #
-      # `discovered_class_sources` is deliberately NOT carried: the runner itself seeds it only under dependency
-      # recording (it is read by the ancestry accessors solely to record cross-file edges), and Tier 2 never
-      # records.
+      # `discovered_class_sources` is carried as the runner carries it on every run: Tier 2 never records edges,
+      # but an ancestor-order reader asks whether a class is declared in more than one file.
       def discovery_tables(paths)
         seed_tables(Inference::ScopeIndexer.discovered_project_index_for_paths(paths))
       end
@@ -99,7 +98,7 @@ module Rigor
         tables = { discovered_classes: index.fetch(:classes) }
         %i[
           def_nodes def_nestings singleton_def_nodes def_sources singleton_def_sources superclasses includes
-          prepends
+          prepends unpositioned_mixins class_sources
           method_visibilities methods parameter_envelopes data_member_layouts struct_member_layouts
           deferred_ranges refinements global_write_census
         ].each do |slot|
@@ -108,10 +107,13 @@ module Rigor
         tables.reject { |_, table| table.nil? || table.empty? }
       end
 
+      UNPREFIXED_SLOTS = %i[data_member_layouts struct_member_layouts unpositioned_mixins].freeze
+      private_constant :UNPREFIXED_SLOTS
+
       # The def-index slot names match the {Scope::DiscoveryIndex} ones under a `discovered_` prefix, except the
-      # two member-layout tables, which carry the same name on both sides.
+      # two member-layout tables and the unpositioned-mixin table, which carry the same name on both sides.
       def seed_key(slot)
-        slot.to_s.end_with?("member_layouts") ? slot : :"discovered_#{slot}"
+        UNPREFIXED_SLOTS.include?(slot) ? slot : :"discovered_#{slot}"
       end
     end
   end

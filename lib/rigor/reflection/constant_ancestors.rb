@@ -51,7 +51,7 @@ module Rigor
     def agreed_ancestor_hit(class_name, scope, &)
       scopes, chain = ancestor_constant_worlds(class_name, scope)
       owner, hit = first_ancestor_hit(scopes, &)
-      verdict = chain.settle(scope, owner) do |retro|
+      verdict = chain.settle(scope, owner, owner: owner) do |retro|
         first_ancestor_hit(constant_scopes_of(retro, class_name), &)&.first
       end
       return hit if verdict == :chain

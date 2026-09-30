@@ -141,11 +141,11 @@ module Rigor
       #
       # #1570 is a one-fork disagreement, so its readers answer master's until ADR-119 gives the arity rule's
       # decision point a way to decline.
-      def settle(scope, answer)
+      def settle(scope, answer, owner: nil)
         # The verdict depends on EVERY node of the chain (a fork, an unpositioned edge, a second declaring file),
-        # and `:master` changes the answer, so the whole chain's class edges are dependencies whichever way it
-        # goes; `search` files only the entries ahead of an answer.
-        record(scope)
+        # and `:master` changes the answer, so the entries past the answer are dependencies whichever way it
+        # goes; `search` files only the entries ahead of an answer. `owner` names the entry that answered.
+        record_beyond(scope, owner)
         return :master if @unsettled
 
         case @forks
@@ -186,23 +186,33 @@ module Rigor
         return unless Analysis::DependencyRecorder.active?
 
         ResolutionChain.record_class(scope, @root)
-        (stop || @entries.size).times do |index|
-          entry = @entries[index]
-          ResolutionChain.record_entry(scope, entry, side)
-          record_appeared(entry, side)
+        (stop || @entries.size).times { |index| ResolutionChain.record_entry(scope, @entries[index], side) }
+      end
+
+      # What a {#settle} verdict adds to what the search already filed. The search files the root and every entry
+      # AHEAD of the answer; entries strictly after it matter only through the verdict (a fork or an unpositioned
+      # edge there sends the reader to master's answer), so they are filed here, and only where master's answer
+      # could differ from the chain's:
+      #
+      # - the answer is the root's own entry and nothing is prepended (the root heads its chain): master's first
+      #   candidate is the root too, so no verdict can move it and nothing more is filed;
+      # - otherwise every entry after the answer (the whole chain when `owner` names none) files its class edge
+      #   and, for a project entry, the negative class edge on its unqualified name, so a NEW file declaring or
+      #   reopening it re-checks the reader. An external entry files only the sites of the names it can denote.
+      def record_beyond(scope, owner)
+        return unless Analysis::DependencyRecorder.active?
+        return if !owner.nil? && owner == @root && @entries.first&.name == @root
+
+        start = owner.nil? ? nil : @entries.index { |entry| entry.name == owner }
+        ResolutionChain.record_class(scope, @root) if start.nil?
+        @entries.drop(start.nil? ? 0 : start + 1).each do |entry|
+          ResolutionChain.record_entry(scope, entry, nil)
+          next if entry.external?
+
+          Analysis::DependencyRecorder.read_missing(:class, entry.name.to_s.split("::").last)
         end
       end
-
-      # The negative class edge of an entry the whole chain read (a verdict of {#settle}): a NEW file declaring
-      # or reopening the class changes the edges the verdict counted (a second declaring file, another mixin),
-      # and the class edges above name only the files that declare it now. Keyed on the unqualified name, as the
-      # appeared-class widening reads it.
-      def record_appeared(entry, side)
-        return if side && entry.side != side
-
-        Analysis::DependencyRecorder.read_missing(:class, (entry.name || entry.raw).to_s.split("::").last)
-      end
-      private :record_appeared
+      private :record_beyond
 
       def record_head(scope, start, side)
         ResolutionChain.record_class(scope, @root) unless start.zero? && @entries.first&.name == @root

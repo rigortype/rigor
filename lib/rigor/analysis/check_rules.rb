@@ -3800,7 +3800,7 @@ module Rigor
         def each_project_ancestor(scope, class_name, &)
           chain = Scope::ResolutionChain.for(scope, class_name.to_s, :instance, :methods)
           answer = overridden_ancestor_answer(scope, chain, class_name.to_s, &)
-          verdict = chain.settle(scope, answer&.first) do |retro|
+          verdict = chain.settle(scope, answer&.first, owner: answer&.first) do |retro|
             overridden_ancestor_answer(scope, retro, class_name.to_s, &)&.first
           end
           return answer if verdict == :chain

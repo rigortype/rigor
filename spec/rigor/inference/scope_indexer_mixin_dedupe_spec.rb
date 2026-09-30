@@ -20,7 +20,8 @@ RSpec.describe "mixin tables: repeated targets and both-kind targets" do
       module Q; def b = 1; end
       class C; prepend P; prepend Q; prepend P; end
     RUBY
-    expect(scope.discovered_prepends["C"]).to eq(%w[P Q P])
+    expect(scope.discovery.discovered_prepends["C"]).to eq(%w[P Q P])
+    expect(scope.discovered_prepends["C"]).to eq(%w[P Q])
     chain = Rigor::Scope::ResolutionChain.for(scope, "C", :instance, :methods)
     expect(chain.entries.map(&:name)).to eq(%w[Q P C])
     expect(chain.skip_count).to eq(0)

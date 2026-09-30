@@ -67,7 +67,10 @@ module Rigor
     # Issue #1123 — `{qualified class or module name => [module names it `prepend`s, as written]}`, in
     # instance-ancestor search order (nearest prepend first). The one table that tells a `prepend` from an
     # `include`: {ResolutionChain} reads it to put a prepended module ahead of the class.
-    def discovered_prepends = @discovery.discovered_prepends
+    # The plugin-facing view: each class's prepends once, nearest first. The discovery index itself keeps every
+    # statement (a repeated `prepend` is a no-op in Ruby, the first statement winning), and the resolution chain
+    # reads that raw list.
+    def discovered_prepends = @discovery.discovered_prepends.transform_values { |names| names.uniq.freeze }.freeze
     def discovered_extends = @discovery.discovered_extends
     def discovered_class_sources = @discovery.discovered_class_sources
     # Issue #644 — `{qualified constant name => Set[declaring file]}`; seeded only on an ADR-46 recording run.
@@ -1336,7 +1339,8 @@ module Rigor
     def user_def_through_ancestors(class_name, method_name, name_memo: UNUSED_NAME_MEMO) # rubocop:disable Lint/UnusedMethodArgument
       chain = ResolutionChain.for(self, class_name.to_s, :instance, :methods)
       found = first_user_def(chain, method_name)
-      if chain.settle(self, found&.last) { |retro| first_user_def(retro, method_name)&.last } == :master
+      owner = found&.last
+      if chain.settle(self, owner, owner: owner) { |retro| first_user_def(retro, method_name)&.last } == :master
         found = master_user_def(class_name.to_s, method_name)
       end
       return found if found
@@ -1374,7 +1378,8 @@ module Rigor
     def singleton_def_through_ancestors(class_name, method_name, name_memo: UNUSED_NAME_MEMO) # rubocop:disable Lint/UnusedMethodArgument
       chain = ResolutionChain.for(self, class_name.to_s, :singleton, :methods)
       found = first_singleton_def(chain, method_name)
-      if chain.settle(self, found&.last) { |retro| first_singleton_def(retro, method_name)&.last } == :master
+      owner = found&.last
+      if chain.settle(self, owner, owner: owner) { |retro| first_singleton_def(retro, method_name)&.last } == :master
         found = first_singleton_def(chain, method_name, :singleton)
       end
       return found if found

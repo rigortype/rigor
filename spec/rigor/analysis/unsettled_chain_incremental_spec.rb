@@ -66,4 +66,21 @@ RSpec.describe "unsettled chain verdict — incremental" do
     expect(cold).to eq([["b.rb", 1]])
     expect(warm).to eq(cold)
   end
+
+  # The precision half: the entries past an answer file a negative class edge only when they are PROJECT entries
+  # and the answer is not the root's own. A namespaced file that merely shares a last segment with an external
+  # ancestor (`Admin::Comparable`) or with a project module the answer precedes must not re-check the consumer.
+  it "does not re-check a consumer when an unrelated namespaced file reuses an ancestor's last segment" do
+    Dir.mktmpdir do |dir|
+      File.write(File.join(dir, "h.rb"), "module Helpers\n  def foo = 1\nend\n")
+      File.write(File.join(dir, "c.rb"), "class C\n  include Comparable\n  include Helpers\nend\n")
+      File.write(File.join(dir, "b.rb"), "C.new.foo\n")
+      session = session_for(dir)
+      guarded_baseline(session)
+      File.write(File.join(dir, "x.rb"), "module Admin\n  module Comparable\n  end\n\n  module Helpers\n  end\nend\n")
+      recheck = guarded_recheck(session)
+      expect(recheck.affected).to include(File.join(dir, "x.rb"))
+      expect(recheck.affected).not_to include(File.join(dir, "b.rb"))
+    end
+  end
 end

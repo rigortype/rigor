@@ -104,6 +104,54 @@ RSpec.describe Rigor::Scope::ResolutionChain do
     expect(chain).not_to respond_to(:contested?)
   end
 
+  # The retro world repeats every skipped module, so it is built for a chain with exactly ONE skip — two or
+  # more settle to master without it — and abandoned once it holds more than LIMIT project entries.
+  describe "the bound on the retro world" do
+    def retro_tables(scope, flavor = :methods)
+      described_class.send(:flavor_bucket, scope.discovery, flavor).slice(:lin_instance_retro, :lin_singleton_retro)
+    end
+
+    # `Base` carries `S` and a line of `depth` modules; `C`'s own `include S` is the one skip. `C`'s chain holds
+    # `depth + 3` project entries, and its retro world one more (the second `S`).
+    def one_skip_source(depth)
+      modules = (1..depth).map do |index|
+        "module M#{index}; def m = 1; #{"include M#{index + 1}" if index < depth}; end"
+      end
+      "#{modules.join("\n")}\nmodule S; def s = 1; end\nclass Base; include S; include M1; end\n" \
+        "class C < Base; include S; end"
+    end
+
+    it "builds no retro world for a chain with two or more skips" do
+      scope = scope_for(<<~RUBY)
+        module N; def foo = 1; end
+        module Z; include N; end
+        module X; include N; include Z; end
+        class Own; include N; include Z; include X; end
+      RUBY
+      expect(chain_of(scope, "Own").skip_count).to be >= 2
+      expect(retro_tables(scope)).to be_empty
+    end
+
+    it "builds the retro world for a single skip that fits, and settles on what it answers" do
+      scope = scope_for(one_skip_source(5))
+      chain = chain_of(scope, "C")
+      expect(chain.skip_count).to eq(1)
+      expect(chain.settle(:answer) { |retro| retro.entries.count { |entry| entry.name == "S" } }).to eq(:master)
+      expect(chain.settle(:answer) { :answer }).to eq(:chain)
+      expect(retro_tables(scope)[:lin_instance_retro]).to include("C")
+    end
+
+    it "drops a single skip's retro world once it holds more than LIMIT project entries, settling to master" do
+      scope = scope_for(one_skip_source(97))
+      chain = chain_of(scope, "C")
+      expect(chain.entries.size).to eq(described_class::LIMIT)
+      expect(chain.skip_count).to eq(1)
+      expect(chain).not_to be_truncated
+      expect(chain.settle(:answer) { raise "an over-budget retro world must not be read" }).to eq(:master)
+      expect(retro_tables(scope)[:lin_instance_retro]).not_to include("C")
+    end
+  end
+
   # `extend self` reaches the module's own instance chain from its singleton chain; that is not a cycle.
   it "puts a module after its own singleton on `extend self`" do
     scope = scope_for(<<~RUBY)

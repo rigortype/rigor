@@ -104,8 +104,9 @@ module Rigor
       def truncated? = @truncated
 
       # How many insertions the skip rule skipped while this chain was built, counted across every module
-      # sub-chain it drew on (a memoised sub-chain hands its own count up). Each is a place where the final
-      # tables may not be the tables Ruby ran with.
+      # sub-chain it drew on (a memoised sub-chain hands its own count up). Each skipped ENTRY counts, so a
+      # skipped module that carries its own includes counts each of them: an over-count only ever sends a
+      # reader to master's answer. Each is a place where the final tables may not be the tables Ruby ran with.
       attr_reader :skips
       alias skip_count skips
 

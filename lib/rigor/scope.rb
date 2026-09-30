@@ -1337,6 +1337,7 @@ module Rigor
       chain = ResolutionChain.for(self, class_name.to_s, :instance, :methods)
       found = first_user_def(chain, method_name)
       if chain.settle(found&.last) { |retro| first_user_def(retro, method_name)&.last } == :master
+        chain.record(self)
         found = master_user_def(class_name.to_s, method_name)
       end
       return found if found
@@ -1375,6 +1376,7 @@ module Rigor
       chain = ResolutionChain.for(self, class_name.to_s, :singleton, :methods)
       found = first_singleton_def(chain, method_name)
       if chain.settle(found&.last) { |retro| first_singleton_def(retro, method_name)&.last } == :master
+        chain.record(self)
         found = first_singleton_def(chain, method_name, :singleton)
       end
       return found if found

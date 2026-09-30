@@ -199,6 +199,7 @@ members:
   unpositioned_mixins:
     reads:
     - lib/rigor/analysis/runner.rb
+    - lib/rigor/scope/resolution_chain.rb
     copies:
     - lib/rigor/analysis/runner.rb
     - lib/rigor/inference/parameter_inference_collector.rb

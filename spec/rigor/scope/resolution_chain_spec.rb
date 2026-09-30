@@ -152,6 +152,29 @@ RSpec.describe Rigor::Scope::ResolutionChain do
     end
   end
 
+  # A mixin edge whose order is not a fact (`DiscoveryIndex#unpositioned_mixins`) leaves the chain unsettled, for
+  # its own class and for every chain that draws on it, memoised or not; the singleton side reads the extend side.
+  it "marks a chain unsettled through an unpositioned edge on the class or any module it draws on" do
+    scope = scope_for(<<~RUBY)
+      module M; def foo = 1; end
+      module Concern; included do; include M; end; end
+      class Plain; include M; end
+      class Guarded; include M if ENV["X"]; end
+      class Uses; include Concern; end
+      class Sub < Uses; end
+      class Ext; extend M if ENV["X"]; end
+    RUBY
+    expect(chain_of(scope, "Plain")).not_to be_unsettled
+    expect(chain_of(scope, "Guarded")).to be_unsettled
+    expect(chain_of(scope, "Concern")).to be_unsettled
+    expect(chain_of(scope, "Uses")).to be_unsettled
+    expect(chain_of(scope, "Sub")).to be_unsettled
+    expect(chain_of(scope, "Guarded", :singleton)).not_to be_unsettled
+    expect(chain_of(scope, "Ext", :singleton)).to be_unsettled
+    expect(chain_of(scope, "Ext")).not_to be_unsettled
+    expect(chain_of(scope, "Uses").settle(:answer) { raise "an unsettled chain reads no retro world" }).to eq(:master)
+  end
+
   # `extend self` reaches the module's own instance chain from its singleton chain; that is not a cycle.
   it "puts a module after its own singleton on `extend self`" do
     scope = scope_for(<<~RUBY)

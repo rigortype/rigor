@@ -24,6 +24,17 @@ RSpec.describe "resolution in Ruby's ancestor order (#1567, #1568, #1570, #1571)
       .map { |diagnostic| [diagnostic.line, diagnostic.qualified_rule] }
   end
 
+  def diagnostics_for_files(files)
+    FileUtils.mkdir_p("lib")
+    files.each { |name, source| File.write(File.join("lib", name), source) }
+    configuration = Rigor::Configuration.new(
+      Rigor::Configuration::DEFAULTS.merge("paths" => %w[lib], "workers" => 0)
+    )
+    guarded_run(Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil), %w[lib])
+      .diagnostics.reject { |diagnostic| diagnostic.severity == :info }
+      .map { |diagnostic| [File.basename(diagnostic.path), diagnostic.line, diagnostic.qualified_rule] }
+  end
+
   around do |example|
     Dir.mktmpdir("rigor-ruby-order-") { |dir| Dir.chdir(dir) { example.run } }
   end
@@ -354,6 +365,71 @@ RSpec.describe "resolution in Ruby's ancestor order (#1567, #1568, #1570, #1571)
       class Base; include M2; end
       module M0; include M3; end
     RUBY
+  end
+
+  # ADR-119 H1 — an edge whose ORDER the tables cannot vouch for (`DiscoveryIndex#unpositioned_mixins`, or a
+  # class declared in several files with several edges) makes the chain untrustworthy even where nothing was
+  # skipped, so each chain that draws on one settles to master's order. Every example below has no skip, and the
+  # chain alone would answer `M#foo` (a String) where master answers `Base#foo` (an Integer).
+  describe "mixin edges whose order is not a fact settle to master" do
+    let(:prelude) do
+      "module M; def foo = \"m\"; end\nmodule A; include M; end\nclass Base; def foo = 1; end\n"
+    end
+
+    # Ruby, with `RIGOR_X` unset, never runs the include: `C.new.foo` is `Base#foo`, and `upcase` is missing.
+    it "keeps master's answer for a conditional include" do
+      expect(diagnostics_for(<<~RUBY)).to eq([[6, "call.undefined-method"]])
+        #{prelude}class C < Base; include A if ENV["RIGOR_X"]; end
+
+        C.new.foo.upcase
+      RUBY
+    end
+
+    # `setup` is never called: `C.ancestors` is `[C, Base]` in Ruby.
+    it "keeps master's answer for an include inside a method body" do
+      expect(diagnostics_for(<<~RUBY)).to eq([[6, "call.undefined-method"]])
+        #{prelude}class C < Base; def self.setup = include(A); end
+
+        C.new.foo.upcase
+      RUBY
+    end
+
+    # Ruby's own answer is `M#foo` for the next three (their order is real but unknowable to the tables), so
+    # master's `Base#foo` is silent on `even?`; a chain that read them would fire on the String.
+    it "keeps master's answer for a class declared in two files, each with an include" do
+      expect(diagnostics_for_files("a.rb" => <<~RUBY, "b.rb" => "class C; include Z; end\nC.new.foo.even?\n"))
+        #{prelude}module Z; end
+        class C < Base; include A; end
+      RUBY
+        .to eq([])
+    end
+
+    it "keeps master's answer for a class that includes a concern with `included do include A end`" do
+      expect(diagnostics_for(<<~RUBY)).to eq([])
+        #{prelude}module Concern
+          extend ActiveSupport::Concern
+          included do
+            include A
+          end
+        end
+
+        class C < Base; include Concern; end
+
+        C.new.foo.even?
+      RUBY
+    end
+
+    it "keeps master's answer for a class that includes a module whose hook includes another" do
+      expect(diagnostics_for(<<~RUBY)).to eq([])
+        #{prelude}module Hook
+          def self.included(base) = base.include(A)
+        end
+
+        class C < Base; include Hook; include A; end
+
+        C.new.foo.even?
+      RUBY
+    end
   end
 
   # The singleton side resolved a class that only `extend`s as an external entry, so the modules it extends

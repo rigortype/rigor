@@ -2667,6 +2667,7 @@ module Rigor
           verdict = chain.settle(answer) do |retro|
             prepend_region_visibility(scope, retro, class_name.to_s, method_name)
           end
+          chain.record(scope) if verdict == :master
           verdict == :chain ? answer : nil
         end
 

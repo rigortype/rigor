@@ -461,6 +461,11 @@ lib/rigor/plugin/node_context.rb:
   computes: the enclosing class or module a node rule sees (ADR-37)
   producers:
     Rigor::Plugin::NodeContext#enclosing_module: grandfathered
+lib/rigor/scope/resolution_chain.rb:
+  computes: the ancestor order of a project class or module from the mixin tables, and whether that order is a fact
+  producers:
+    Rigor::Scope::ResolutionChain::Builder#compute_instance: a consumer, not a declaration producer; it reads `unpositioned_mixins` on the :include side to mark a chain unsettled, and reads the tables raw by design (ADR-24)
+    Rigor::Scope::ResolutionChain::Builder#compute_singleton: the singleton-side twin, reading the :extend side
 lib/rigor/sig_gen/generator.rb:
   computes: the defs, attribute readers and ivar observations sig-gen emits per qualified class
   producers:

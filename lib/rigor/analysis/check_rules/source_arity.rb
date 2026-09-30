@@ -119,6 +119,7 @@ module Rigor
           end
           return envelope if verdict == :chain
 
+          chain.record(@scope)
           @levels = []
           @passed = []
           @owner_entries = []
@@ -316,6 +317,7 @@ module Rigor
           chain = arity_chain(subclass)
           own = chain_levels(chain).first.first
           verdict = chain.settle(own) { |retro| chain_levels(retro).first.first }
+          chain.record(@scope) if verdict == :master
           [verdict == :chain ? own : master_levels(subclass).first.first]
         end
 

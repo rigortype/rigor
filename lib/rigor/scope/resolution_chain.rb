@@ -90,7 +90,7 @@ module Rigor
 
       # rubocop:disable-next Metrics/ParameterLists
       def initialize(root:, side:, entries:, level_starts:, level_classes:, levels_end:, truncated:, skips: 0,
-                     retro: nil)
+                     unsettled: false, retro: nil)
         @root = root
         @side = side
         @entries = entries
@@ -99,6 +99,7 @@ module Rigor
         @levels_end = levels_end
         @truncated = truncated
         @skips = skips
+        @unsettled = unsettled
         @retro = retro
         freeze
       end
@@ -114,6 +115,10 @@ module Rigor
       attr_reader :skips
       alias skip_count skips
 
+      # True when a class on the chain has mixin edges whose order the tables cannot vouch for
+      # (`DiscoveryIndex#unpositioned_mixins`, or a class declared in several files with several edges).
+      def unsettled? = @unsettled
+
       # The ONE decision every first-definer reader makes: does `answer`, read off this chain, stand, or does
       # the reader answer what the walk this chain replaced answered ({MasterOrder})? Returns `:chain` or
       # `:master`.
@@ -124,6 +129,9 @@ module Rigor
       # is therefore a fork between two worlds — the skip made, or the insertion made anyway — and the tables
       # cannot say which one ran.
       #
+      # - Unsettled (a class on the chain has a mixin edge whose order is not a fact, or is declared in several
+      #   files with several edges): master's answer, whatever the skip count, and the block is not called.
+      #   The order is not a fact even where no insertion was skipped, so no world of the chain is trusted.
       # - No skip: only one world exists, so the chain stands.
       # - One skip: two worlds. The chain stands when the retro world (the skipped insertion made) gives the
       #   same answer, which the block computes from the chain it is handed; where they differ, or the retro
@@ -135,6 +143,8 @@ module Rigor
       # #1570 is a one-skip disagreement, so its readers answer master's until ADR-119 gives the arity rule's
       # decision point a way to decline.
       def settle(answer)
+        return :master if @unsettled
+
         case @skips
         when 0 then :chain
         when 1 then !@retro.nil? && answer == yield(@retro) ? :chain : :master
@@ -488,13 +498,18 @@ module Rigor
       class Builder # rubocop:disable Metrics/ClassLength
         EMPTY = [].freeze
         RETRO_OVER_BUDGET = :rigor_retro_over_budget
-        EMPTY_LIN = [EMPTY, EMPTY, EMPTY, 0].freeze
+        EMPTY_LIN = [EMPTY, EMPTY, EMPTY, 0, false].freeze
         private_constant :EMPTY, :EMPTY_LIN, :RETRO_OVER_BUDGET
 
         # What one node's computation met, handed up to the computation that asked for it: how many skips it
-        # counted (see {ResolutionChain#settle}) and whether it met a cycle or the depth budget (so it is not
-        # memoised).
-        Frame = Struct.new(:skips, :incomplete)
+        # counted (see {ResolutionChain#settle}), whether a node on it has mixin edges whose order is not a
+        # fact (`unsettled`), and whether it met a cycle or the depth budget (so it is not memoised).
+        Frame = Struct.new(:skips, :incomplete, :unsettled) do
+          def absorb(skips, unsettled)
+            self.skips += skips
+            self.unsettled ||= unsettled
+          end
+        end
         private_constant :Frame
 
         def initialize(scope, flavor, bucket, retro: false)
@@ -513,10 +528,10 @@ module Rigor
 
         # The chain for `root`, carrying its retro world when the skip rule skipped anything on the way.
         def chain(root, side)
-          entries, starts, classes, skips = side == :singleton ? singleton_lin(root, 0) : instance_lin(root, 0)
-          retro = build_retro(root, side) if skips == 1 && !@retro
+          entries, starts, classes, skips, unsettled = lin_for(root, side)
+          retro = build_retro(root, side) if skips == 1 && !unsettled && !@retro
           cut_at = cut_position(entries)
-          return whole_chain(root, side, entries, starts, classes, skips, retro) if cut_at.nil?
+          return whole_chain(root, side, entries, starts, classes, [skips, unsettled], retro) if cut_at.nil?
 
           # Keep the prefix for first-definer reads, and only the levels that end inside it.
           complete = starts.count { |start| start < cut_at }
@@ -525,16 +540,18 @@ module Rigor
                               level_starts: starts.first(complete).freeze,
                               level_classes: classes.first(complete).freeze,
                               levels_end: complete.zero? ? 0 : (starts[complete] || cut_at), truncated: true,
-                              skips: skips, retro: retro)
+                              skips: skips, unsettled: unsettled, retro: retro)
         end
 
         private
 
-        def whole_chain(root, side, entries, starts, classes, skips, retro)
+        def whole_chain(root, side, entries, starts, classes, (skips, unsettled), retro)
           ResolutionChain.new(root: root, side: side, entries: entries, level_starts: starts,
                               level_classes: classes, levels_end: entries.size, truncated: @deep, skips: skips,
-                              retro: retro)
+                              unsettled: unsettled, retro: retro)
         end
+
+        def lin_for(root, side) = side == :singleton ? singleton_lin(root, 0) : instance_lin(root, 0)
 
         # The retro world, built only for a chain with exactly one skip (two or more settle to master without
         # it) and abandoned — nil, which settles to master — once it holds more than {LIMIT} project entries.
@@ -575,7 +592,7 @@ module Rigor
           cached = memo[name]
           if cached
             # A memoised chain's skips are the asker's too.
-            @frames.last&.then { |frame| frame.skips += cached[3] }
+            @frames.last&.absorb(cached[3], cached[4])
             return cached
           end
 
@@ -589,13 +606,13 @@ module Rigor
             return EMPTY_LIN
           end
 
-          frame = Frame.new(0, false)
+          frame = Frame.new(0, false, false)
           @frames.push(frame)
           stack.push(name)
           entries, starts, classes = yield
           stack.pop
           @frames.pop
-          lin = [entries, starts, classes, frame.skips].freeze
+          lin = [entries, starts, classes, frame.skips, frame.unsettled].freeze
           memo[name] = lin unless frame.incomplete
           hand_up(frame)
           lin
@@ -605,11 +622,12 @@ module Rigor
           parent = @frames.last
           return if parent.nil?
 
-          parent.skips += frame.skips
+          parent.absorb(frame.skips, frame.unsettled)
           parent.incomplete ||= frame.incomplete
         end
 
         def compute_instance(name, depth)
+          mark_unsettled(name, :include, (@discovery.discovered_includes[name] || EMPTY).size)
           entries = [project_entry(name, :instance)]
           super_lin = superclass_lin(name, :instance, depth)
           entries.concat(super_lin[0])
@@ -621,12 +639,28 @@ module Rigor
         end
 
         def compute_singleton(name, depth)
+          mark_unsettled(name, :extend, (@discovery.discovered_extends[name] || EMPTY).size)
           entries = [project_entry(name, :singleton)]
           super_lin = superclass_lin(name, :singleton, depth)
           entries.concat(super_lin[0])
           extends = @discovery.discovered_extends[name] || EMPTY
           super_start = include_all(entries, name, extends, EMPTY, depth, [0, 1])
           finish(entries, name, super_lin, super_start)
+        end
+
+        # Marks the node being computed unsettled when the order of its mixin edges on `kind` is not a fact
+        # (`DiscoveryIndex#unpositioned_mixins`: an edge written in a conditional, a method, a block or a hook,
+        # or a call the walk cannot record, `"*"`), or when its class is declared in more than one file and
+        # has two or more such edges, whose order across the files is load order. A node's unsettled state
+        # taints every chain that draws on it, so a concern's `included do` edges taint every includer.
+        def mark_unsettled(name, kind, edge_count)
+          listed = @discovery.unpositioned_mixins[name]&.dig(kind)
+          @frames.last.unsettled = true if (listed && !listed.empty?) || (edge_count >= 2 && multi_file?(name))
+        end
+
+        def multi_file?(name)
+          sites = @discovery.discovered_class_sources[name]
+          !sites.nil? && sites.size >= 2
         end
 
         def finish(entries, name, super_lin, super_start)
@@ -649,7 +683,7 @@ module Rigor
             # is external here, so its extended modules vanish from the singleton chain and a skip among them
             # goes uncounted: two forks settle the chain to master.
             @frames.last.skips += 2 if side == :singleton && declared_class?(name, raw)
-            [[external_entry(name, raw, side, true)].freeze, [0].freeze, [nil].freeze, 0].freeze
+            [[external_entry(name, raw, side, true)].freeze, [0].freeze, [nil].freeze, 0, false].freeze
           end
         end
 

@@ -175,6 +175,7 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#accumulate_ivar_type: grandfathered
     Rigor::Inference::ScopeIndexer#accumulate_prepend_lists: grandfathered
     Rigor::Inference::ScopeIndexer#accumulate_project_index: grandfathered
+    Rigor::Inference::ScopeIndexer#accumulate_unpositioned: folds one file's unpositioned mixin edges into the project table by union; it computes no declaration context, only merges a per-file fact
     Rigor::Inference::ScopeIndexer#add_declared_name: grandfathered
     Rigor::Inference::ScopeIndexer#add_header_nesting: grandfathered
     Rigor::Inference::ScopeIndexer#alias_renamed_header_nestings: grandfathered

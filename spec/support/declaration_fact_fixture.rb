@@ -31,6 +31,7 @@ module DeclarationFactFixture
         include Greeting
         prepend Wrap
         extend Loud
+        include Conditional if defined?(Conditional)
 
         def self.make = new
         def use(first, second = 1) = first

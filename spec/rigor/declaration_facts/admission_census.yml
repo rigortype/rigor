@@ -191,6 +191,13 @@ members:
     - lib/rigor/inference/method_dispatcher/rbs_dispatch.rb
     copies:
     - lib/rigor/analysis/runner.rb
+  unpositioned_mixins:
+    reads:
+    - lib/rigor/analysis/runner.rb
+    copies:
+    - lib/rigor/analysis/runner.rb
+    - lib/rigor/inference/parameter_inference_collector.rb
+    - lib/rigor/protection/discovery_seed.rb
   discovered_class_sources:
     reads:
     - lib/rigor/analysis/incremental_session.rb
@@ -198,6 +205,7 @@ members:
     copies:
     - lib/rigor/analysis/runner.rb
     - lib/rigor/inference/parameter_inference_collector.rb
+    - lib/rigor/protection/discovery_seed.rb
   constant_sources:
     reads:
     - lib/rigor/analysis/runner.rb

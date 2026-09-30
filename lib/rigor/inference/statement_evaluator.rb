@@ -5683,6 +5683,12 @@ module Rigor
         case ref
         when Prism::LocalVariableTargetNode
           scope.with_local(ref.name, exception_type)
+        when Prism::InstanceVariableTargetNode
+          # Issue #1446 — `rescue => @io` writes the ivar, which ends a class guard's narrowing of it, and `rescue =>
+          # $out` the global, which ends any guard's narrowing of it.
+          scope.with_ivar(ref.name, exception_type).without_ivar_guard(ref.name)
+        when Prism::GlobalVariableTargetNode
+          scope.with_global(ref.name, exception_type)
         when Prism::IndexTargetNode
           widen_index_target(ref, exception_type, scope, type_scope: scope)
         else

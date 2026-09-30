@@ -4,7 +4,7 @@ include Rigor::Testing
 
 # Issue #1446 — a write to an instance variable ends a class guard's narrowing of it: what the variable reads after a
 # later call that may rebind it is the written type, not a union with the binding the guard narrowed. A plain write, a
-# compound write, a multiple assignment and a `for` index each write it.
+# compound write, a multiple assignment, a `for` index and a `rescue` reference each write it.
 class Poker
   def initialize(holder) = (@holder = holder)
   def poke = @holder.touch
@@ -50,6 +50,17 @@ class Writer
     @io.stat # QUIET-1446
   end
 
+  # `rescue => @io` writes the rescued exception to `@io` (Ruby: NoMethodError, `string` on an ArgumentError).
+  def after_rescue_reference
+    return unless @io.is_a?(StringIO)
+
+    begin
+      Integer("x")
+    rescue ArgumentError => @io
+      @io.string # FIRES-1446 call.undefined-method
+    end
+  end
+
   # A branch joins with the guard's record kept, so a later call that may rebind still restores it to the binding the
   # guard narrowed (the class's seed, which the `||=` above makes nilable).
   def restored_after_join
@@ -75,4 +86,14 @@ def global_for_index
 
   for $out in [STDOUT]; end
   $out.stat # QUIET-1446
+end
+
+def global_rescue_reference
+  return unless $out.is_a?(StringIO)
+
+  begin
+    Integer("x")
+  rescue ArgumentError => $out
+    $out.string # FIRES-1446 call.undefined-method
+  end
 end

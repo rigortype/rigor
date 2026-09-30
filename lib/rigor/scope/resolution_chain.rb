@@ -28,32 +28,38 @@ module Rigor
     #   inserted by the include rule (each module expanded to its instance chain), then the superclass's
     #   singleton chain.
     #
-    # The skip rule is Ruby's for the order the statements RAN in, and the tables hold only their final
-    # state: a body reopened after an includer ran (`class Base; include M; end` after `class C < Base;
-    # include M`) adds an edge the includer never skipped, and Ruby then keeps both copies. So every skip is
-    # counted ({#skips}), and the ONE decision every first-definer reader makes is {#settle}: with no skip the
-    # chain stands; with one skip the chain stands only where the retro world (that insertion made anyway)
-    # gives the same answer; with two or more the chain never stands, because two worlds are not every
-    # assignment of several skips (a mix can put a third definer first). Where it does not stand, a reader
-    # answers what the walk this chain replaced answered ({MasterOrder}): the tables cannot say which world
-    # ran, and a disagreement is no reason to answer anything new. That leaves #1570's redundant `include`
-    # with the answer master gave, since the two worlds disagree there; ADR-119's arity decision point is
-    # where it gets fixed.
+    # The insertion rule is Ruby's for the order the statements RAN in, and the tables hold only their final
+    # state. The chain therefore replays every edge once, eagerly, and counts a FORK wherever Ruby's own order
+    # could have gone another way. The single-route argument (`class.c`): Ruby skips an insertion only when the
+    # module is already present, and that takes a second route to it through the tables. So where the replay
+    # inserts every entry exactly once and no owner on the chain is unsettled (below), Ruby's first-occurrence
+    # ancestor order equals the replay's under every interleaving of the statements. A fork is a place where a
+    # module reached a chain by a second route: an `include` skipped because the chain carries the module, a
+    # prepend skipped or an entry of a prepended module's own chain already carried by the class. The ONE
+    # decision every first-definer reader makes is {#settle}: with no fork the chain stands; with exactly one
+    # include-side fork, at or after the class, on the last entry of the sub-chain being inserted, Ruby has
+    # exactly two worlds (the skip made, or the insertion made — `class Base; include M; end` after `class C <
+    # Base; include M` keeps both copies, `[C, M, Base, M]`), and the chain stands only where that retro world
+    # gives the reader the same answer; with any other fork or two or more the worlds are more than two and
+    # the chain never stands. Where it does not stand, a reader answers what the walk this chain replaced
+    # answered ({MasterOrder}): the tables cannot say which world ran, and a disagreement is no reason to
+    # answer anything new. That leaves #1570's redundant `include` with the answer master gave, since the two
+    # worlds disagree there; ADR-119's arity decision point is where it gets fixed.
     #
     # Two things the tables do not record, so the chain cannot reproduce them:
     #
-    # - The interleaving of a body's `include` and `prepend` statements. Each kind keeps its statement order
-    #   (`discovered_prepends` separates the prepends; the include-only list is `includes_of` minus them), and
-    #   the chain processes a body's prepends before its includes. That is exact whenever the body is written
-    #   that way, and otherwise differs only when one body both includes and prepends the same module:
-    #   `include M; prepend M` is `[M, C, M]` in Ruby and `[M, C]` here. The first definer is the same either
-    #   way; only the trailing duplicate is missing, so a question about what `C`'s own method overrides
-    #   answers "nothing" where Ruby answers `M` — the direction that stays silent. A census of Mastodon,
-    #   Redmine, GitLab, Rails and Rigor's `lib` found no body that includes and prepends the same module.
-    #   The same trailing copy goes missing through a module's own includes: `class C2; include A; prepend M`
-    #   with `A` including `M` is `[M, C2, A, M]` in Ruby and `[M, C2, A]` here, and `class C3; include M;
-    #   prepend P` with `P` including `M` is `[P, M, C3, M]` in Ruby and `[P, M, C3]` here, because the
-    #   include of `M` is a skip once the prepends have placed it. The first definer is the same in both.
+    # - The interleaving of a body's `include` and `prepend` statements, and whether a class both includes and
+    #   prepends one module (`include M; prepend M` is `[M, C, M]` in Ruby; the tables record it as a plain
+    #   `prepend M`). Each kind keeps its statement order and the chain processes a body's prepends before its
+    #   includes. Only the trailing duplicate is ever missing, so a first-occurrence reader is unaffected
+    #   until a later include propagates into the prepended module (`module M0; prepend M1; end`, `class C;
+    #   include M0; end`, then `module M0; include M1; end` and `module M1; include M3; end` is `[C, M1, M0,
+    #   M1, M3]` in Ruby and `[C, M1, M3, M0]` here), which is why an entry of a prepended module's own chain
+    #   that the class already carries is a fork. The same holds through a module's own includes (`class C2;
+    #   include A; prepend M` with `A` including `M` is `[M, C2, A, M]` in Ruby and `[M, C2, A]` here).
+    #   CRuby also propagates a later prepend into the includers of a prepended module and leaves a trailing
+    #   duplicate (`module M0; prepend M3; end; class Base; prepend M0; end; module M0; prepend M4; end` is
+    #   `[M4, M3, M0, M4, Base]`); the first-occurrence order is the chain's, and the duplicate is not modelled.
     # - `class << self; prepend P`, which the extends table records (and the extends fold copies) as an
     #   `extend`: the chain places `P` after the singleton, where Ruby places it before.
     #
@@ -89,7 +95,7 @@ module Rigor
       attr_reader :root, :side, :entries, :level_starts, :level_classes
 
       # rubocop:disable-next Metrics/ParameterLists
-      def initialize(root:, side:, entries:, level_starts:, level_classes:, levels_end:, truncated:, skips: 0,
+      def initialize(root:, side:, entries:, level_starts:, level_classes:, levels_end:, truncated:, forks: 0,
                      unsettled: false, retro: nil)
         @root = root
         @side = side
@@ -98,7 +104,7 @@ module Rigor
         @level_classes = level_classes
         @levels_end = levels_end
         @truncated = truncated
-        @skips = skips
+        @forks = forks
         @unsettled = unsettled
         @retro = retro
         freeze
@@ -108,12 +114,11 @@ module Rigor
       # "no definer" from "a definer past the cut", which is budget uncertainty, not absence.
       def truncated? = @truncated
 
-      # How many insertions the skip rule skipped while this chain was built, counted across every module
-      # sub-chain it drew on (a memoised sub-chain hands its own count up). Each skipped ENTRY counts, so a
-      # skipped module that carries its own includes counts each of them: an over-count only ever sends a
-      # reader to master's answer. Each is a place where the final tables may not be the tables Ruby ran with.
-      attr_reader :skips
-      alias skip_count skips
+      # How many forks the replay met while this chain was built, counted across every module sub-chain it drew
+      # on (a memoised sub-chain hands its own count up): each entry that reached the chain by a second route.
+      # An over-count only ever sends a reader to master's answer.
+      attr_reader :forks
+      alias skip_count forks
 
       # True when a class on the chain has mixin edges whose order the tables cannot vouch for
       # (`DiscoveryIndex#unpositioned_mixins`, or a class declared in several files with several edges).
@@ -123,29 +128,23 @@ module Rigor
       # the reader answer what the walk this chain replaced answered ({MasterOrder})? Returns `:chain` or
       # `:master`.
       #
-      # The skip rule is Ruby's for the order the statements RAN in, and the tables hold only their final
-      # state: a body reopened after an includer ran (`class C < Base; include M; end`, then `class Base;
-      # include M; end`) adds an edge the includer never skipped, and Ruby then keeps both copies. Each skip
-      # is therefore a fork between two worlds — the skip made, or the insertion made anyway — and the tables
-      # cannot say which one ran.
-      #
       # - Unsettled (a class on the chain has a mixin edge whose order is not a fact, or is declared in several
-      #   files with several edges): master's answer, whatever the skip count, and the block is not called.
-      #   The order is not a fact even where no insertion was skipped, so no world of the chain is trusted.
-      # - No skip: only one world exists, so the chain stands.
-      # - One skip: two worlds. The chain stands when the retro world (the skipped insertion made) gives the
-      #   same answer, which the block computes from the chain it is handed; where they differ, or the retro
-      #   world was too large to build, master's answer stands.
-      # - Two or more: the worlds are the assignments of several skips, and two of them are not all of them (a
-      #   mix can put a third definer first), so no answer read off two worlds is trustworthy. Master's answer
-      #   stands, and the block is not called.
+      #   files with several edges): master's answer, whatever the fork count, and the block is not called.
+      # - No fork: every entry was inserted once by a single route, so Ruby's first-occurrence order is the
+      #   chain's under every interleaving, and the chain stands.
+      # - One fork that is an include-side skip at or after the class on the last entry of the sub-chain: two
+      #   worlds (the skip made, the insertion made). The chain stands when the retro world gives the same
+      #   answer, which the block computes from the chain it is handed; where they differ, or the retro world
+      #   was too large to build, master's answer stands.
+      # - Any other fork, or two or more: more than two worlds, so no answer read off two of them is
+      #   trustworthy. Master's answer stands, and the block is not called.
       #
-      # #1570 is a one-skip disagreement, so its readers answer master's until ADR-119 gives the arity rule's
+      # #1570 is a one-fork disagreement, so its readers answer master's until ADR-119 gives the arity rule's
       # decision point a way to decline.
       def settle(answer)
         return :master if @unsettled
 
-        case @skips
+        case @forks
         when 0 then :chain
         when 1 then !@retro.nil? && answer == yield(@retro) ? :chain : :master
         else :master
@@ -498,16 +497,17 @@ module Rigor
       class Builder # rubocop:disable Metrics/ClassLength
         EMPTY = [].freeze
         RETRO_OVER_BUDGET = :rigor_retro_over_budget
-        EMPTY_LIN = [EMPTY, EMPTY, EMPTY, 0, false].freeze
+        EMPTY_LIN = [EMPTY, EMPTY, EMPTY, 0, false, true].freeze
         private_constant :EMPTY, :EMPTY_LIN, :RETRO_OVER_BUDGET
 
-        # What one node's computation met, handed up to the computation that asked for it: how many skips it
+        # What one node's computation met, handed up to the computation that asked for it: how many forks it
         # counted (see {ResolutionChain#settle}), whether a node on it has mixin edges whose order is not a
         # fact (`unsettled`), and whether it met a cycle or the depth budget (so it is not memoised).
-        Frame = Struct.new(:skips, :incomplete, :unsettled) do
-          def absorb(skips, unsettled)
-            self.skips += skips
+        Frame = Struct.new(:forks, :incomplete, :unsettled, :retro_ok) do
+          def absorb(forks, unsettled, retro_ok)
+            self.forks += forks
             self.unsettled ||= unsettled
+            self.retro_ok &&= retro_ok
           end
         end
         private_constant :Frame
@@ -528,10 +528,10 @@ module Rigor
 
         # The chain for `root`, carrying its retro world when the skip rule skipped anything on the way.
         def chain(root, side)
-          entries, starts, classes, skips, unsettled = lin_for(root, side)
-          retro = build_retro(root, side) if skips == 1 && !unsettled && !@retro
+          entries, starts, classes, forks, unsettled, retro_ok = lin_for(root, side)
+          retro = build_retro(root, side) if forks == 1 && retro_ok && !unsettled && !@retro
           cut_at = cut_position(entries)
-          return whole_chain(root, side, entries, starts, classes, [skips, unsettled], retro) if cut_at.nil?
+          return whole_chain(root, side, entries, starts, classes, [forks, unsettled], retro) if cut_at.nil?
 
           # Keep the prefix for first-definer reads, and only the levels that end inside it.
           complete = starts.count { |start| start < cut_at }
@@ -540,14 +540,14 @@ module Rigor
                               level_starts: starts.first(complete).freeze,
                               level_classes: classes.first(complete).freeze,
                               levels_end: complete.zero? ? 0 : (starts[complete] || cut_at), truncated: true,
-                              skips: skips, unsettled: unsettled, retro: retro)
+                              forks: forks, unsettled: unsettled, retro: retro)
         end
 
         private
 
-        def whole_chain(root, side, entries, starts, classes, (skips, unsettled), retro)
+        def whole_chain(root, side, entries, starts, classes, (forks, unsettled), retro)
           ResolutionChain.new(root: root, side: side, entries: entries, level_starts: starts,
-                              level_classes: classes, levels_end: entries.size, truncated: @deep, skips: skips,
+                              level_classes: classes, levels_end: entries.size, truncated: @deep, forks: forks,
                               unsettled: unsettled, retro: retro)
         end
 
@@ -591,8 +591,8 @@ module Rigor
           memo = (@bucket[table] ||= {})
           cached = memo[name]
           if cached
-            # A memoised chain's skips are the asker's too.
-            @frames.last&.absorb(cached[3], cached[4])
+            # A memoised chain's forks are the asker's too.
+            @frames.last&.absorb(cached[3], cached[4], cached[5])
             return cached
           end
 
@@ -606,13 +606,13 @@ module Rigor
             return EMPTY_LIN
           end
 
-          frame = Frame.new(0, false, false)
+          frame = Frame.new(0, false, false, true)
           @frames.push(frame)
           stack.push(name)
           entries, starts, classes = yield
           stack.pop
           @frames.pop
-          lin = [entries, starts, classes, frame.skips, frame.unsettled].freeze
+          lin = [entries, starts, classes, frame.forks, frame.unsettled, frame.retro_ok].freeze
           memo[name] = lin unless frame.incomplete
           hand_up(frame)
           lin
@@ -622,11 +622,12 @@ module Rigor
           parent = @frames.last
           return if parent.nil?
 
-          parent.absorb(frame.skips, frame.unsettled)
+          parent.absorb(frame.forks, frame.unsettled, frame.retro_ok)
           parent.incomplete ||= frame.incomplete
         end
 
         def compute_instance(name, depth)
+          # `discovered_includes` already carries the prepended names, so it counts every instance-side edge once.
           mark_unsettled(name, :include, (@discovery.discovered_includes[name] || EMPTY).size)
           entries = [project_entry(name, :instance)]
           super_lin = superclass_lin(name, :instance, depth)
@@ -680,15 +681,12 @@ module Rigor
             side == :singleton ? singleton_lin(resolved, depth + 1) : instance_lin(resolved, depth + 1)
           else
             # A class the project declares that the `:methods` predicate does not admit (one that only `extend`s)
-            # is external here, so its extended modules vanish from the singleton chain and a skip among them
-            # goes uncounted: two forks settle the chain to master.
-            @frames.last.skips += 2 if side == :singleton && declared_class?(name, raw)
-            [[external_entry(name, raw, side, true)].freeze, [0].freeze, [nil].freeze, 0, false].freeze
+            # is external here, so its extended modules vanish from the singleton chain and a fork among them
+            # goes uncounted. That is a hole in what the chain can see, not an order fork, so it settles to
+            # master with the weight of two.
+            @frames.last.forks += 2 if side == :singleton && declared_class?(name, raw)
+            [[external_entry(name, raw, side, true)].freeze, [0].freeze, [nil].freeze, 0, false, true].freeze
           end
-        end
-
-        def carries_own_ancestors?(sub, modules)
-          sub.any? { |entry| !entry.external? && !modules.include?(entry.name) }
         end
 
         def declared_class?(owner, raw)
@@ -699,8 +697,12 @@ module Rigor
 
         # Inserts every prepend, in statement order (the table stores search order, nearest first), ahead of
         # the class, and returns `[origin, super_start]` — where the class itself now sits and where its
-        # superclass's entries begin. Ruby skips a module already in the prepend region; the retro world
-        # inserts it again.
+        # superclass's entries begin. Ruby skips a module already in the prepend region (a fork: the module is
+        # present through a second route); the retro world inserts it again. A sub-chain entry other than the
+        # prepended module that the class or its superclass already carries is a fork too (the prepended
+        # module's own includes may have run before or after), and the tables record `include M; prepend M`
+        # exactly as a plain `prepend M`. A direct prepend of the module itself is always inserted, in Ruby and
+        # here, so it forks nothing.
         def prepend_all(entries, owner, prepends, depth)
           origin = 0
           super_start = 1
@@ -708,18 +710,13 @@ module Rigor
             modules = Array(resolve(owner, raw))
             each_mixin_chain(owner, raw, depth) do |sub|
               point = -1
-              # Ruby's result depends on whether the prepended module's own includes ran before or after the
-              # prepend, and on whether the class ALSO includes it (`include M; prepend M`, which the tables
-              # record exactly as a plain `prepend M`): a project entry of its sub-chain other than the module
-              # is two forks, so the chain settles to master.
-              @frames.last.skips += 2 if !@retro && carries_own_ancestors?(sub, modules)
               sub.each do |entry|
                 found = entries.index(entry)
-                found = nil if found && found >= origin
-                if found && !@retro
-                  @frames.last.skips += 1
+                if found && found < origin && !@retro
+                  fork_without_retro
                   point = found if found > point
                 else
+                  fork_without_retro if found && !@retro && !modules.include?(entry.name)
                   entries.insert(point + 1, entry)
                   point += 1
                   origin += 1
@@ -734,7 +731,9 @@ module Rigor
 
         # Inserts every name in `mixins` that `skip` does not hold, in statement order, after the class, and
         # returns where the superclass's entries now begin. Ruby skips a module already anywhere in the chain;
-        # the retro world inserts it again.
+        # that is a fork (the module is present through a second route), and the retro world inserts it
+        # again. Exactly one fork, at or after the class, on the last entry of the sub-chain being inserted, is
+        # the one shape whose Ruby worlds are exactly two: the skip made or the insertion made.
         def include_all(entries, owner, mixins, skip, depth, boundary)
           origin, super_start = boundary
           mixins.reverse_each do |raw|
@@ -742,12 +741,11 @@ module Rigor
 
             each_mixin_chain(owner, raw, depth) do |sub|
               point = origin
-              sub.each do |entry|
+              sub.each_with_index do |entry, index|
                 found = @retro ? nil : entries.index(entry)
                 if found
-                  # A module the class's prepended modules already carry is skipped only if they got it before
-                  # this include ran, which the tables cannot tell: two more forks.
-                  @frames.last.skips += found < origin ? 3 : 1
+                  @frames.last.forks += 1
+                  @frames.last.retro_ok = false unless found >= origin && index == sub.size - 1
                   point = found if found > point && found < super_start
                 else
                   entries.insert(point + 1, entry)
@@ -759,6 +757,12 @@ module Rigor
             guard_retro(entries)
           end
           super_start
+        end
+
+        # A fork whose second Ruby world is not "the insertion made anyway": the chain settles to master.
+        def fork_without_retro
+          @frames.last.forks += 1
+          @frames.last.retro_ok = false
         end
 
         # Yields the instance chain of the module `raw` names from `owner` — once per class an ambiguous

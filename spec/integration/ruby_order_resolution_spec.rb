@@ -435,7 +435,8 @@ RSpec.describe "resolution in Ruby's ancestor order (#1567, #1568, #1570, #1571)
   # Round-2 review. `M0` prepends `M1` AND (later) includes it, which the tables record exactly as a plain
   # `prepend M1`; `M1` then includes `M3`. Ruby's `C.ancestors` is `[C, M1, M0, M1, M3]`, so `X` is `M0`'s
   # String. The chain, which cannot see the include, would put `M3` ahead of `M0` and type `X` as an Integer.
-  # A prepended module that carries ancestors of its own settles the chain to master's order.
+  # The indexer names a module written to both the include and the prepend table unpositioned, so the chain
+  # settles to master's order.
   it "does not read a constant through a prepended module's own includes ahead of the includer" do
     expect(diagnostics_for(<<~RUBY)).to eq([])
       module M0; X = "m0"; end

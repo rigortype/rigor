@@ -777,45 +777,32 @@ RSpec.describe "Scope::ResolutionChain against Ruby's own resolution" do
 
     # A prepend's result depends on whether the module included its own modules before or after the prepend
     # ran. `A` included `M` after `D` prepended it, and `M` was already in `C`'s chain, so Ruby reads `D`'s
-    # constant `X` from `C`; the final tables read alone put `M` ahead of `D`. The chain holds two forks, so
+    # constant `X` from `C`; the final tables read alone put `M` ahead of `D`. The prepend of `A` forks, so
     # every reader settles to master's order.
-    it "counts two forks where a prepended module's later include is already in the superclass chain" do
+    it "settles to master where a prepended module's later include is already in the superclass chain" do
       source = <<~RUBY
-        module A
-        end
-
-        module M
-          X = "m"
-        end
-
-        class C
-          include M
-
-          X = 1
-        end
-
-        class D < C
-          prepend A
-        end
-
-        module A
-          include M
-        end
+        module A; end
+        module M; X = "m"; end
+        class C; include M; X = 1; end
+        class D < C; prepend A; end
+        module A; include M; end
       RUBY
       Dir.mktmpdir("rigor-chain-witness-") do |dir|
         path = File.join(dir, "fixture.rb")
         File.write(path, source)
         expect(ruby_answers(path, { constants: ["D::X"] }).fetch("constants:D::X")).to eq("C")
         chain = chain_of(rigor_scope(source), "D", :instance, :constants)
-        expect(chain.skip_count).to be >= 2
-        expect(chain.settle(:answer) { raise "no retro world for two forks" }).to eq(:master)
+        expect(chain.skip_count).to be >= 1
+        expect(chain.settle(:answer) { raise "no retro world for a prepend fork" }).to eq(:master)
+        expect(chain.instance_variable_get(:@retro)).to be_nil
       end
     end
 
     # A module that both prepends and includes the same module is recorded as a plain prepend. Ruby's `C`
-    # is `[C, M1, M0, M1, M3]` and reads `X` from `M0`; the chain would read `M3` (`[C, M1, M3, M0]`). A
-    # prepended module that carries ancestors of its own therefore counts two forks and settles to master.
-    it "counts two forks where a prepended module carries ancestors of its own" do
+    # is `[C, M1, M0, M1, M3]` and reads `X` from `M0`; the chain would read `M3` (`[C, M1, M3, M0]`). The
+    # indexer names the module's instance side unpositioned when one module is written to both tables, so
+    # the chain is unsettled and every reader answers master's.
+    it "settles to master where a module both prepends and includes the same module" do
       source = <<~RUBY
         module M0; X = :M0; end
         module M1; end
@@ -830,8 +817,53 @@ RSpec.describe "Scope::ResolutionChain against Ruby's own resolution" do
         File.write(path, source)
         expect(ruby_answers(path, { constants: ["C::X"] }).fetch("constants:C::X")).to eq("M0")
         chain = chain_of(rigor_scope(source), "C", :instance, :constants)
-        expect(chain.skip_count).to be >= 2
-        expect(chain.settle(:answer) { raise "no retro world for two forks" }).to eq(:master)
+        expect(chain).to be_unsettled
+        expect(chain.settle(:answer) { raise "an unsettled chain reads no retro world" }).to eq(:master)
+        expect(chain.instance_variable_get(:@retro)).to be_nil
+      end
+    end
+
+    # CRuby propagates a later prepend into the includers of a prepended module and leaves a trailing
+    # duplicate: `[M4, M3, M0, M4, Base]`. The first-occurrence order is the chain's; the duplicate is not
+    # modelled, and no reader can tell the difference.
+    it "matches Ruby's first-occurrence order where a later prepend propagates a trailing duplicate" do
+      source = <<~RUBY
+        module M0; def a = 0; end
+        module M3; def b = 3; end
+        module M4; def c = 4; end
+        module M0; prepend M3; end
+        class Base; prepend M0; end
+        module M0; prepend M4; end
+      RUBY
+      Dir.mktmpdir("rigor-chain-witness-") do |dir|
+        path = File.join(dir, "fixture.rb")
+        File.write(path, source)
+        ruby = ruby_answers(path, { ancestors: ["Base.instance"] }).fetch("ancestors:Base.instance").map(&:first)
+        rigor = rigor_ancestors(rigor_scope(source), "Base.instance", %w[M0 M3 M4 Base], :methods, :skip).map(&:first)
+        expect(ruby).to eq(%w[M4 M3 M0 M4 Base])
+        expect(rigor).to eq(%w[M4 M3 M0 Base])
+        expect(ruby.uniq).to eq(rigor)
+      end
+    end
+
+    # A sibling shape with two forks, each an include skipped because `B` already carries the module: the
+    # tables cannot say in which order `A` got `M` and `B` got `Z`, so the chain settles to master's order
+    # (which here reaches `Z`, where this run of Ruby reaches `M`) rather than trust one interleaving.
+    it "settles a chain with two include forks to master" do
+      source = <<~RUBY
+        module M; def foo = :m; end
+        module Z; def foo = :z; end
+        module A; include M; end
+        class B; include Z; include M; end
+        class C < B; include A; include Z; end
+      RUBY
+      Dir.mktmpdir("rigor-chain-witness-") do |dir|
+        path = File.join(dir, "fixture.rb")
+        File.write(path, source)
+        expect(ruby_answers(path, { methods: ["C#foo"] }).fetch("C#foo").first.first).to eq("M")
+        chain = chain_of(rigor_scope(source), "C")
+        expect(chain.skip_count).to eq(2)
+        expect(chain.settle(:answer) { raise "two forks read no retro world" }).to eq(:master)
       end
     end
 

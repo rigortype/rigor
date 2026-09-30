@@ -556,29 +556,45 @@ with a #986 ambiguous name expanded to both classes) for
 `call.wrong-arity`. The three predicates predate the chain, and a bug
 fix does not unify them.
 
-**Counted skips, and master's answer where the chain cannot stand.** The
-skip rule is Ruby's for the order the statements ran; the tables hold
-only their final state. A body reopened after an includer ran (`class
-Base; include M; end` after `class C < Base; include M`) added an edge
-the includer never skipped, and Ruby keeps both copies: `[C, M, Base,
-M]`. Each skipped insertion is therefore a fork between two worlds, and
-the tables cannot say which one ran. The chain counts every skip
-(`ResolutionChain#skip_count`, summed through the module sub-chains it
-draws on, each skipped entry counting once), and one method decides for
-every reader, `ResolutionChain#settle`, which answers `:chain` or
+**Counted forks, and master's answer where the chain cannot stand.** The
+insertion rule is Ruby's for the order the statements ran; the tables
+hold only their final state. The chain replays every edge once,
+eagerly, and counts a *fork* wherever Ruby's own order could have gone
+another way. The argument is single-route (`class.c`): Ruby skips an
+insertion only when the module is already present, and that takes a
+second route to the module through the tables. So where the replay
+inserts every entry exactly once and no owner on the chain is unsettled
+(below), Ruby's first-occurrence ancestor order equals the replay's
+under every interleaving of the statements. A fork is an entry that
+reached the chain by a second route: an `include` skipped because the
+chain already carries the module, a prepend skipped in the prepend
+region, or an entry of a prepended module's own chain that the class or
+its superclass already carries. A direct prepend of the module itself is
+always inserted, in Ruby and in the replay, and forks nothing. The chain
+counts forks (`ResolutionChain#skip_count`, summed through the module
+sub-chains it draws on, each entry counting once), and one method decides
+for every reader, `ResolutionChain#settle`, which answers `:chain` or
 `:master`:
 
-- No skip: the chain stands.
-- One skip: two worlds exist. The chain also builds the retro world,
-  with that insertion made anyway, and stands only where the retro
-  world gives the reader the same answer. The retro world is abandoned
-  once it holds more than 100 project entries, which settles to master.
-- Two or more skips: master's answer, and no retro world is built. A
-  mix of skips made and skips not made can put a third definer first, so
-  two worlds are not every world, and agreement between them proves
-  nothing. The witness fixture `two skips of which neither world reaches
-  the definer Ruby calls` is that shape: Ruby runs `D#foo`, both worlds
-  read `Deep#foo`, and master's order happens to reach `D`.
+- No fork: the chain stands.
+- One fork that is an include-side skip at or after the class, on the last
+  entry of the sub-chain being inserted: Ruby has exactly two worlds, the
+  skip made or the insertion made (`class Base; include M; end` after
+  `class C < Base; include M` keeps both copies, `[C, M, Base, M]`). The
+  chain also builds the retro world, with that insertion made anyway, and
+  stands only where it gives the reader the same answer. The retro world
+  is abandoned once it holds more than 100 project entries, which settles
+  to master.
+- Any other fork, or two or more: master's answer, and no retro world is
+  built. More than two worlds exist, so agreement between two of them
+  proves nothing. The witness fixture `two skips of which neither world
+  reaches the definer Ruby calls` is that shape: Ruby runs `D#foo`, both
+  worlds read `Deep#foo`, and master's order happens to reach `D`.
+
+The singleton-side superclass that only `extend`s is a separate rule of
+the same weight: it resolves as external there, so its extended modules
+are invisible to the chain. That is a hole in what the chain sees, not an
+order fork, and it settles to master.
 
 **Unsettled chains.** A skip count is not the only reason the tables
 cannot vouch for an order. The chain marks a node *unsettled* when
@@ -590,7 +606,7 @@ listed as `"*"`), or when its class is declared in more than one file and
 has two or more edges on that side, whose order across the files is load
 order. The mark propagates through every chain that draws on the node, so
 a concern taints each of its includers, and `settle` answers `:master`
-for an unsettled chain whatever its skip count, without a retro world. A
+for an unsettled chain whatever its fork count, without a retro world. A
 master answer keeps recording the chain's classes, so the flagged files
 stay dependencies. A top-level `include` into `Object` is neither
 recorded nor listed, so no order is trusted beyond a project root.
@@ -647,17 +663,18 @@ body). The same trailing copy goes missing through a module's own
 includes: `class C2; include A; prepend M; end` with `A` including `M` is
 `[M, C2, A, M]` in Ruby and `[M, C2, A]` in the chain, and `class C3;
 include M; prepend P; end` with `P` including `M` is `[P, M, C3, M]` in
-Ruby and `[P, M, C3]` in the chain, because the include of `M` is a skip
-once the prepends have placed it. The first definer is the same in both
-until a later include propagates into the module (`module M0; prepend M1;
-end`, `class C; include M0; end`, then `module M0; include M1; end` and
-`module M1; include M3; end` gives Ruby `[C, M1, M0, M1, M3]` and the
-chain `[C, M1, M3, M0]`), and the tables record `include M1; prepend M1`
-exactly as a plain `prepend M1`, so a prepended module that carries
-project ancestors of its own counts two forks and settles to master. A
-witness pins each shape. `class << self; prepend P` is recorded as an
-`extend`, so `P` sits after the singleton rather than before it. A repeated `extend`
-keeps its latest position in the table (#1573). A definer an external
+Ruby and `[P, M, C3]` in the chain. The first-occurrence order is the
+same in both, and a witness pins each. A module written to both the
+include and the prepend table of one class is a body the tables cannot
+represent (`module M0; prepend M1; end`, `class C; include M0; end`, then
+`module M0; include M1; end` and `module M1; include M3; end` gives Ruby
+`[C, M1, M0, M1, M3]` and the tables `[C, M1, M3, M0]`), so the indexer
+names that class's instance side unpositioned and the chain is unsettled.
+CRuby also leaves a trailing duplicate when a later prepend propagates
+into the includers of a prepended module (`[M4, M3, M0, M4, Base]`); the
+first-occurrence order is the chain's, and the duplicate is not modelled.
+`class << self; prepend P` is recorded as an
+`extend`, so `P` sits after the singleton rather than before it. A definer an external
 module supplies ahead of a project one is not answered yet (#1572).
 
 **Dependency edges (ADR-46).** A read records the class edge of every

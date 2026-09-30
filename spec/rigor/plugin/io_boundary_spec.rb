@@ -396,6 +396,70 @@ RSpec.describe Rigor::Plugin::IoBoundary do
     end
   end
 
+  # ADR-45 WD2 (#1507) — the per-file attribution the `--incremental` run-result slot keeps its plugin reads by.
+  describe ".attributing" do
+    it "hands every row recorded inside the block to the sink, across boundaries, and returns the block's value" do
+      File.write(File.join(tmpdir, "read.txt"), "x")
+      FileUtils.mkdir_p(File.join(tmpdir, "listed"))
+      other = described_class.new(policy: policy, plugin_id: "other")
+      sink = []
+
+      value = described_class.attributing(sink) do
+        boundary.read_file(File.join(tmpdir, "read.txt"))
+        boundary.file?(File.join(tmpdir, "missing.txt"))
+        other.list_directory(File.join(tmpdir, "listed"))
+        :done
+      end
+
+      expect(value).to eq(:done)
+      expect(sink.map { |row| row.is_a?(Rigor::Cache::Descriptor::GlobEntry) ? row.root : row.path })
+        .to eq([File.join(tmpdir, "read.txt"), File.join(tmpdir, "missing.txt"), File.join(tmpdir, "listed")])
+      expect(sink[1]).to be_absent
+    end
+
+    it "records a read outside every block in the boundary alone, and restores the outer sink after a raise" do
+      File.write(File.join(tmpdir, "read.txt"), "x")
+      outer = []
+      described_class.attributing(outer) do
+        expect { described_class.attributing([]) { raise ArgumentError } }.to raise_error(ArgumentError)
+        boundary.read_file(File.join(tmpdir, "read.txt"))
+      end
+      boundary.file?(File.join(tmpdir, "read.txt"))
+
+      expect(outer.size).to eq(1)
+      expect(boundary.cache_descriptor.files.size).to eq(1)
+    end
+
+    # A producer served from its cache hands its rows back through `#replay` (#1558); the file whose analysis asked
+    # for it is credited with every one, the rows a held row wins over included, as a live read would be.
+    it "hands every replayed row to the sink, including one a row the boundary holds wins over" do
+      read = File.join(tmpdir, "read.txt")
+      File.write(read, "x")
+      boundary.read_file(read)
+      held = boundary.cache_descriptor.files.first
+      replayed = Rigor::Cache::Descriptor.new(
+        files: [Rigor::Cache::Descriptor::FileEntry.present(path: read),
+                Rigor::Cache::Descriptor::FileEntry.absent(path: File.join(tmpdir, "gone.txt"))],
+        globs: [Rigor::Cache::Descriptor::GlobEntry.compute(root: tmpdir, pattern: "*.txt", mode: :names)]
+      )
+      sink = []
+
+      described_class.attributing(sink) { boundary.replay(replayed) }
+
+      expect(sink).to eq(replayed.files + replayed.globs)
+      expect(boundary.cache_descriptor.files).to include(held)
+    end
+
+    it "reaches a read made from inside a Fiber, such as an external Enumerator's" do
+      File.write(File.join(tmpdir, "read.txt"), "x")
+      sink = []
+      described_class.attributing(sink) do
+        Enumerator.new { |y| y << boundary.read_file(File.join(tmpdir, "read.txt")) }.next
+      end
+      expect(sink.size).to eq(1)
+    end
+  end
+
   # The real-`Net::HTTP` wrapper the boundary injects-over in every other test (a fake `#get`); exercised here with
   # stubbed transport so the success / non-success / oversize-body branches and their reason codes have a unit safety
   # net without touching the network.

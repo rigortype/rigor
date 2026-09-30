@@ -112,6 +112,21 @@ module Rigor
           new(path: path, comparator: :stat, value: packed)
         end
 
+        # A `:stat` row whose recording instant is no later than `limit_ns`: any file whose recorded mtime is at or
+        # after `limit_ns` is then racy, and validation re-hashes it instead of trusting its stat tuple. Any other
+        # row, and one whose instant is already earlier, is returned as is.
+        def with_recording_instant_at_most(limit_ns)
+          return self unless comparator == :stat
+
+          parts = value.split
+          return self unless parts.size == 6 && Integer(parts[5], 10) > limit_ns
+
+          parts[5] = limit_ns.to_s
+          self.class.new(path: path, comparator: comparator, value: parts.join(" "))
+        rescue ArgumentError
+          self
+        end
+
         # ADR-45 WD1 (#577) — the absence row: fresh while `path` does not exist, stale the moment anything
         # (a file, a directory, a symlink) comes into existence there. {Plugin::IoBoundary#read_file}
         # records one when a read fails because the path is missing, so a value computed on "X is absent"

@@ -193,6 +193,66 @@ RSpec.describe Rigor::CLI::CheckCommand do
     end
   end
 
+  # ADR-45 WD2 (#1507) — a null `--incremental` run served from the session's run-result slot prints exactly what
+  # the full path prints for the same warm run: the banner, the baseline filter, the output format and the exit
+  # code. The full path's answer is taken with the probe stubbed to decline, which leaves the slot in place; the
+  # served answer is asserted to come from no session at all.
+  describe "--incremental served from the run-result slot" do
+    before { require "rigor/analysis/incremental_run_slot" }
+
+    def write_slot_project
+      FileUtils.mkdir_p("lib")
+      File.write(File.join("lib", "a.rb"), "class Widget\n  def price\n    10\n  end\nend\n")
+      File.write(File.join("lib", "b.rb"), "class Shop\n  def total\n    Widget.new.price.upcase\n  end\nend\n")
+      File.write(File.join("lib", "c.rb"), "class Other\n  def go\n    :sym.upcase\n    1.nope\n  end\nend\n")
+    end
+
+    [
+      [], ["--format=json"], ["--format=sarif"], ["--format=github"], ["--fail-on=info"],
+      ["--baseline=baseline.yml"], ["--no-baseline"]
+    ].each do |extra|
+      it "prints what the full path prints#{" (#{extra.join(' ')})" unless extra.empty?}" do
+        write_slot_project
+        argv = ["--no-ci-detect", "--no-stats", "--incremental", *extra, "lib"]
+        if extra.include?("--baseline=baseline.yml")
+          Rigor::CLI.new(["baseline", "generate", "--output=baseline.yml", "lib"], out: StringIO.new,
+                                                                                   err: StringIO.new).run
+          File.write(File.join("lib", "d.rb"), "class Fresh\n  def go\n    2.nope\n  end\nend\n")
+        end
+        run(argv.dup) # the option parser consumes its argv
+
+        allow(Rigor::Analysis::IncrementalRunSlot).to receive(:serve).and_return(nil)
+        full = run(argv.dup)
+        allow(Rigor::Analysis::IncrementalRunSlot).to receive(:serve).and_call_original
+        allow(Rigor::Analysis::IncrementalSession).to receive(:new).and_call_original
+        served = run(argv.dup)
+
+        expect(Rigor::Analysis::IncrementalSession).not_to have_received(:new)
+        expect(served).to eq(full)
+        expect(served[2]).to include("--incremental warm")
+        expect(served[2]).to include("silenced by baseline") if extra.include?("--baseline=baseline.yml")
+      end
+    end
+
+    # `extra` is missing, so both runs analyse the same files; only the first reports the missing root, which
+    # under `--fail-on=warning` is also the difference between exit 1 and exit 0.
+    it "answers `lib` and `lib extra` each from its own slot, in either order" do
+      write_slot_project
+      File.write(File.join("lib", "b.rb"), "class Shop\n  def total\n    Widget.new.price\n  end\nend\n")
+      File.write(File.join("lib", "c.rb"), "class Other\nend\n")
+      argv = ->(*roots) { ["--no-ci-detect", "--no-stats", "--incremental", "--fail-on=warning", *roots] }
+
+      2.times do
+        with_extra = run(argv.call("lib", "extra"))
+        without = run(argv.call("lib"))
+        expect(with_extra[0]).to eq(1)
+        expect(with_extra[1]).to include("extra")
+        expect(without[0]).to eq(0)
+        expect(without[1]).not_to include("extra")
+      end
+    end
+  end
+
   it "allows parameter_inference: on a full (non-incremental) check" do
     File.write(".rigor.yml", "paths:\n  - clean.rb\nparameter_inference: true\n")
     File.write("clean.rb", "x = 1\n")

@@ -21,11 +21,12 @@
 #
 # Every timed run is checked for being the run it is labelled as, from a marker the child process writes at exit
 # (`-r` on RUBYOPT; no engine change):
-#   - a default-mode edit run must load the inference engine (a miss that saw the edit);
+#   - an edit run, in either mode, must load the inference engine (a miss that saw the edit);
 #   - every `--incremental` run must report itself `warm`;
-#   - a default-mode null run is counted as a probe hit when it did not load the engine (ADR-87 WD4). The probe
-#     steps aside for some configurations (worker pools, effects declarations), where the full path still serves
-#     the cache, so a null run that loads the engine is reported rather than failed.
+#   - a null run is counted as a probe hit when it did not load the engine: the default mode's is served from the
+#     plain run-result slot (ADR-87 WD4), `--incremental`'s from the one the incremental session writes (ADR-45
+#     WD2). Both probes step aside for some configurations (worker pools, effects declarations), where the full
+#     path still answers warm, so a null run that loads the engine is reported rather than failed.
 # The same marker proves no Rigor file loaded from this checkout instead of the engine, and records whether YJIT
 # was on.
 #
@@ -368,7 +369,7 @@ module EngineWarmAB
       assert_labelled(mode, scenario, "#{name} (profiled)", result)
       timed_hit = @engine_loaded[[mode, scenario]][name] * 2 < @samples[[mode, scenario]][name].size
       @notes << "#{key}: the profiled run #{result['engine_loaded'] ? 'loaded the engine' : 'was a probe hit'}, unlike " \
-                "most timed runs" if scenario == "null" && mode == "default" && result["engine_loaded"] == timed_hit
+                "most timed runs" if scenario == "null" && result["engine_loaded"] == timed_hit
       timed_yjit = @yjit[[mode, scenario]][name] * 2 > @samples[[mode, scenario]][name].size
       @notes << "#{key}: the profiled run ended with YJIT #{result['yjit'] ? 'on' : 'off'}, unlike most timed runs" if
         result["yjit"] != timed_yjit
@@ -400,15 +401,16 @@ module EngineWarmAB
       result
     end
 
-    # The run must be the hit or miss its row is about; otherwise the row times something else.
+    # The run must be the hit or miss its row is about; otherwise the row times something else. An incremental edit
+    # run served by the ADR-45 WD2 probe would be a stale answer, so it fails here as well as on the verify.
     def assert_labelled(mode, scenario, name, result)
       label = "#{name} #{mode} #{scenario}"
-      if mode == "incremental"
-        @failures << "#{label}: the run reported `--incremental #{result['incremental'].inspect}`, not warm" unless
-          result["incremental"] == "warm"
-      elsif scenario != "null" && !result["engine_loaded"]
-        @failures << "#{label}: the edit run did not load the engine, so the edit was not seen"
+      if mode == "incremental" && result["incremental"] != "warm"
+        @failures << "#{label}: the run reported `--incremental #{result['incremental'].inspect}`, not warm"
       end
+      return if scenario == "null" || result["engine_loaded"]
+
+      @failures << "#{label}: the edit run did not load the engine, so the edit was not seen"
     end
 
     # Against a plain `--no-cache` run, which touches neither the result cache nor the incremental snapshot. The
@@ -533,16 +535,21 @@ module EngineWarmAB
     lines << "" << "</details>"
   end
 
-  # How many default null runs the ADR-87 probe served without the engine.
+  # How many null runs each mode's probe served without the engine: the default mode's from the plain run-result
+  # slot (ADR-87 WD4), `--incremental`'s from the session's (ADR-45 WD2).
   def probe_notes(arm_names, journey)
-    row = %w[default null]
-    return [] unless journey.samples.key?(row)
+    lines = %w[default incremental].filter_map do |mode|
+      row = [mode, "null"]
+      next unless journey.samples.key?(row)
 
-    served = arm_names.map do |name|
-      runs = journey.samples.fetch(row).fetch(name, []).size
-      "#{name} #{runs - journey.engine_loaded[row][name]}/#{runs}"
+      served = arm_names.map do |name|
+        runs = journey.samples.fetch(row).fetch(name, []).size
+        "#{name} #{runs - journey.engine_loaded[row][name]}/#{runs}"
+      end
+      "#{mode.capitalize} null runs served by the engine-free probe (the rest loaded the engine): " \
+        "#{served.join(', ')}"
     end
-    ["", "Default null runs served by the engine-free probe (the rest loaded the engine): #{served.join(', ')}"]
+    lines.empty? ? [] : ["", *lines]
   end
 
   def reps_warning(options, arm_names, journey)

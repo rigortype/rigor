@@ -112,6 +112,34 @@ module Rigor
         hexdigest(path) == digest
       end
 
+      # ADR-45 WD2 (#1507) — `packed` re-packed against `path`'s current stat, for a writer about to record it
+      # again: when the tuple moved (a `touch`, a checkout) or the entry is racy, but the file still hashes to the
+      # recorded digest, the new pack carries the current tuple and this run's recording instant, so the next
+      # validation is one `File::Stat` again rather than a re-hash every time.
+      #
+      # The hash is taken fresh, never from the per-run memo: a memoised digest describes the bytes as they were
+      # when change detection read them, and pairing it with a later stat would vouch for bytes written since. And
+      # the re-pack is kept only when the tuple it packed, taken after the hash, is the one taken before it: a
+      # write landing while the file is hashed moves the change time, and leaves `packed` as it was.
+      #
+      # `packed` comes back unchanged when its tuple still matches and it is not racy, and whenever the bytes no
+      # longer match the digest: a row that must stay stale is never refreshed into a fresh one. nil when `packed`
+      # is not a stat pack. A stat failure (the file is gone) returns `packed` unchanged, which then validates as
+      # stale.
+      def self.refresh_stat(path, packed)
+        parsed = parse_stat(packed)
+        return nil if parsed.nil?
+
+        before = File.stat(path)
+        return packed if !racy?(parsed) && tuple_matches?(before, parsed)
+        return packed unless Digest::SHA256.file(path).hexdigest == parsed[0]
+
+        repacked = pack_stat(path, parsed[0])
+        repacked && tuple_matches?(before, parse_stat(repacked)) ? repacked : packed
+      rescue SystemCallError
+        packed
+      end
+
       # The content-digest field of a packed `:stat` entry ({.pack_stat}); nil when the entry is absent or not
       # well-formed. Exposed for the caller that must compare the recorded digest against bytes it hashes
       # itself rather than against the file on disk — the incremental session's editor-mode freshness check,

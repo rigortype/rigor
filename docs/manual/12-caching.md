@@ -220,9 +220,46 @@ dependents of removed ones.) As with the rest of the cache, a
 missing or corrupt snapshot is simply a full run; it can never
 wedge analysis.
 
+When nothing has changed since the last `--incremental` run, the
+answer comes straight from the cache, without starting the
+analyzer at all. Rigor first checks the inputs that answer was
+computed from — your source files and view templates, your RBS,
+your configuration and the files your plugins read — and runs the
+ordinary incremental re-check the moment any of them differs. On
+a Rails application the size of Mastodon, an unchanged
+`--incremental` run takes about a quarter of a second. An
+unchanged plain `rigor check` skips the analyzer the same way,
+except when a plugin compiles your view templates, as
+rigor-actionpack does.
+
+The shortcut stands aside under `--workers=N` (or
+`parallel.workers:`), `--explain`, `--cache-stats`, `--coverage`,
+an editor buffer, and an `effects:` block, and when the cache
+directory is on a different filesystem from the project; those
+runs re-check as before. It also switches itself off, silently:
+
+- when an input changes that the ordinary re-check does not look
+  at itself: an auto-detected `sig/` directory (one you did not
+  list under `signature_paths:`), a file a narrower
+  `rigor check --incremental DIR` only discovers from the rest of
+  your configured `paths:`, or a `pre_eval:` file outside the
+  analysed paths. The re-check may keep printing the answer from
+  before that change; the shortcut does not repeat it;
+- when an `--incremental` run cannot record its answer safely:
+  after a run with `--workers=N` or `--no-cache` that re-analysed
+  files, when a file or directory changes while a run is reading
+  it, after a CI cache is restored onto a fresh checkout, or when
+  two runs race.
+
+Either way it stays off, and every run is an ordinary re-check,
+until the next full analysis. The ordinary re-check never starts
+one by itself: only a configuration, `Gemfile.lock` or Rigor
+version change does, or `--clear-cache`. So the shortcut can stay
+off indefinitely; run `rigor check --incremental --clear-cache`
+once to turn it back on.
+
 `--incremental` is most useful for fast local re-checks and CI
-on a changed branch. For a one-shot run on an unchanged project,
-the ordinary cache already serves the whole result in one step.
+on a changed branch.
 
 ## Concurrency
 

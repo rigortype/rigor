@@ -121,6 +121,47 @@ RSpec.describe "tool/engine_warm_ab.rb (#1507)" do
     end
   end
 
+  # ADR-45 WD2 (#1507) — an `--incremental` null run may now be served without the engine; an edit run never may.
+  describe "Journey#assert_labelled" do
+    def labelled(mode, scenario, engine_loaded:, incremental: "warm")
+      journey = EngineWarmAB::Journey.new({ "head" => {} }, {}, "/nonexistent")
+      journey.send(:assert_labelled, mode, scenario, "head",
+                   { "engine_loaded" => engine_loaded, "incremental" => mode == "incremental" ? incremental : nil })
+      journey.failures
+    end
+
+    it "allows a null run served by either probe" do
+      expect(labelled("default", "null", engine_loaded: false)).to be_empty
+      expect(labelled("incremental", "null", engine_loaded: false)).to be_empty
+    end
+
+    it "fails an edit run, in either mode, that did not load the engine" do
+      expect(labelled("default", "leaf", engine_loaded: false))
+        .to eq(["head default leaf: the edit run did not load the engine, so the edit was not seen"])
+      expect(labelled("incremental", "hub", engine_loaded: false))
+        .to eq(["head incremental hub: the edit run did not load the engine, so the edit was not seen"])
+      expect(labelled("incremental", "hub", engine_loaded: true)).to be_empty
+    end
+
+    it "fails an incremental run that was not warm" do
+      expect(labelled("incremental", "null", engine_loaded: true, incremental: "cold"))
+        .to eq(["head incremental null: the run reported `--incremental \"cold\"`, not warm"])
+    end
+  end
+
+  describe ".probe_notes" do
+    it "counts each mode's null runs the engine-free probe served" do
+      journey = EngineWarmAB::Journey.new({ "head" => {} }, {}, "/nonexistent")
+      journey.samples[%w[default null]]["head"].push(0.3, 0.3)
+      journey.samples[%w[incremental null]]["head"].push(0.3, 0.3, 1.4)
+      journey.engine_loaded[%w[incremental null]]["head"] += 1
+      expect(EngineWarmAB.probe_notes(["head"], journey)).to eq(
+        ["", "Default null runs served by the engine-free probe (the rest loaded the engine): head 2/2",
+         "Incremental null runs served by the engine-free probe (the rest loaded the engine): head 2/3"]
+      )
+    end
+  end
+
   describe ".within_paths?" do
     it "accepts the spellings a user gives --paths, and rejects a file outside them" do
       expect(EngineWarmAB.within_paths?("/p", "app/a.rb", ["."])).to be(true)

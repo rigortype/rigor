@@ -223,6 +223,300 @@ each driven cold → add → warm through the real Runner against a real
 on-disk Store, plus the nothing-changed control and the remove-after-hit
 inverse.
 
+### WD2 (landed, #1507) — a second writer: the `--incremental` session
+
+The slot above is written by a run that analysed every file. A warm
+`rigor check --incremental` never is one, so [ADR-87](87-null-build-floor.md)
+WD4's engine-free probe declined it, and an unchanged project paid the
+incremental path's whole fixed cost to learn that nothing changed: on CI
+against Mastodon (~1,400 files), 1.43 s for an `--incremental` null run
+against 0.29 s for a default one — 343 ms loading the engine, 273 ms
+reading the snapshot, 123 ms rebuilding its dependents indexes, 160 ms
+building an environment for an empty closure, ~190 ms of discovery and
+digests.
+
+WD2 makes the incremental session a second writer. After every run whose
+snapshot it persists, `IncrementalSession#run_incremental` records the
+run's diagnostics — the list the CLI prints before its baseline filter,
+which #1524 made a full run's list in a full run's order — in a
+record-and-validate slot of its own, and `rigor check --incremental`
+serves a null run from it before loading the engine
+(`Analysis::IncrementalRunSlot`), with the `--incremental warm` banner the
+full path prints for the same run.
+
+**Key.** The one WD4 reconstructs from configuration alone (`RunCacheKey`:
+the library list without `rbs.virtual_rbs`, no `template-units` slot,
+`--explain` false), plus the analysis roots, under its own producer id,
+`analysis.incremental-run-diagnostics`. The roots are not implied by the
+files: `--incremental lib extra` with `extra` missing analyses what
+`--incremental lib` analyses, and only the first reports `extra` missing
+(the plain key has the same gap, #1559). The key holds them normalised to
+absolute paths and sorted (`lib`, `./lib` and `lib/` are one root there),
+so a run that reorders them still finds the previous slot's chain, as the
+snapshot fingerprint, which sorts them too, still restores, and a respelled
+run replaces the slot rather than adding one beside it. The entry keeps them as the run was given them, and is served only to a
+run that names them the same way in the same order: a missing root is
+reported as written (`./extra` is not `extra`), and `--incremental a b`
+lists `a`'s files first where `b a` lists `b`'s. The producer id and the
+roots entry each keep the two slots apart on their own, so neither probe
+can read the other's entry.
+
+Neither slot WD4's key leaves out is needed. A synthesised RBS buffer is a
+function of an analysed file's bytes (a validated row) and of the
+synthesising plugin's identity and configuration (the key's
+`configuration`, lockfile and engine slots). A template unit (#392) is a
+function of its template's bytes and whatever else its transform read, of
+the transform, and of the synthesis version: the template files and one
+listing row per claimed glob are rows, a transform's other reads go
+through its plugin's boundary, and the plugin and the engine are in the
+key. So a project whose plugins claim template globs, as rigor-actionpack
+does on any Rails application, is served; the plain probe misses on it,
+because the plain key carries the compiled units' digest.
+
+**Descriptor.** A narrowed recheck read only its closure; the rest of its
+answer was computed by earlier runs. The rows come from three sources:
+
+1. One `:stat` row per analysed file, packed from the digest the session
+   holds for it — for a file served from cache, the bytes its cached rows
+   were computed from — and re-packed against the current stat when the
+   bytes still match but the tuple moved (a `touch`, a checkout), so a
+   later probe stats rather than re-hashes it. The re-pack hashes the file
+   afresh, never from the per-run memo, whose digest describes the bytes
+   change detection read, and only when the tuple it packs after that hash
+   is the one taken before it. A re-digest after the run would vouch for
+   bytes that changed while the run was reading them.
+2. What every run reads again and re-derives its answer from
+   (`Runner#incremental_slot_rows`), in two kinds. Taken as the run read:
+   every plugin `IoBoundary` row, among them each producer's `watch:`
+   globs, which #1558 replays into the boundary whether the producer
+   computed or was served. Taken when the run ends: the template files and
+   globs (re-analysed every run), and an existence row per analysis root
+   and per `pre_eval:` entry. The plain slot records no existence rows, but
+   the incremental path regenerates its path-error rows every run, so a
+   slot that served one past the edit that retracts it would print what no
+   run of the tree prints. They carry WD1b's bound.
+3. The **chain** the slot's value carries forward. Its baseline part is
+   what a full run records for inputs a recheck does NOT re-derive
+   (`Runner#baseline_dependency_rows`): the signature tree
+   (`RbsDescriptor.file_entries` / `.glob_entries`) and an existence row per
+   signature root, configured or the auto-detected `sig`; the
+   discovered-not-analysed files (#684) and a listing row per discovery
+   root; and the `pre_eval:` files outside the analysed set. Its reads part
+   is the plugin reads credited to each analysed file:
+   `Runner#analyze_file` wraps each file's analysis in
+   `Plugin::IoBoundary.attributing` when it records dependencies. A full run
+   starts a chain; a recheck carries the baseline part unchanged, replaces
+   the reads of every file it re-analysed with this run's, and drops the
+   removed files'.
+
+Carrying the baseline part rather than recomputing it is deliberate. A
+recheck neither rebuilds its environment on an empty closure nor widens
+discovery, the snapshot fingerprint digests only a configured
+`signature_paths:` (#1554), and the session tracks only analysed files
+(#1560), so a change to one of those inputs leaves the full path serving
+rows computed before it. Recomputed, the next slot would vouch for that
+stale answer; carried, the probe declines until the next full run.
+
+Reads are credited to the file whose analysis made them, and only a read
+the boundary records is credited at all. A value a plugin memoised — in an
+ivar, through `producer_value`, or carried across files by the ADR-84
+return memo — reaches later files without a read of their own, so only the
+first file to trigger the read guards it. A producer answered from its
+own record-and-validate entry reads nothing, but since #1558 it replays the
+rows its entry recorded into its boundary, and `IoBoundary#replay` hands
+each of them to the sink as a live read would, the ones a held row wins
+over included. A producer first asked while a file is analysed
+(rigor-actionpack's `:controller_index`, rigor-rails-i18n's
+`:locale_index`) then credits that file with its inputs; without the
+credit, the rows it replays during the per-file loop would make
+`Runner#incremental_slot_rows` decline and no slot would ever be written
+for such a project. On a miss the replayed descriptor is the whole
+boundary's, so the file is credited with more than the producer read,
+which only makes the slot decline sooner.
+
+**Written only for the tree the run read.** Part of the slot is read off
+the tree when the run ENDS: the analysed-file rows (a full run digests its
+files after analysing them), the rows item 2 takes at the end, and a full
+run's baseline rows. A save that lands while the run reads — an editor's, a
+`bundle install`'s, a `mkdir` — would leave those vouching for a tree the
+analysis never saw: a signature file saved after the environment was
+built, a served file replaced with its mtime kept, an analysis root created
+after the run reported it missing. A recheck's carried baseline has the
+same exposure in another form: a recheck with a non-empty closure reads
+the signature tree again, and a save it read that is reverted before the
+run ends leaves every carried row fresh. So the session takes a mark before
+the run reads anything (`IncrementalRunSlot::WriteGuard`) and writes
+nothing unless, at write time, none of those rows, carried or taken, moved
+after it: no file a content row names, no directory a glob row lists, and
+no file a stat-mode glob matches. An existence row asks only whether its
+path is there, so the mark records whether each path such a row can name
+(the analysis roots, the `pre_eval:` entries, the signature roots) is
+present, and the row moved if its path came or went since. Its
+directory's change time is not asked: an editor's lock file created and
+removed beside the path moves it, and a recheck refused for that leaves
+the chain broken until the next full run. A path that comes and goes again
+within the run is the bound. An existence row for a path the mark did not
+record falls back to its own change time, or its nearest existing
+ancestor's. A row taken as a plugin read needs no guard, since a later
+save leaves it stale.
+
+The key needs the same care: it is computed when the run ends, and its
+only file inputs are the lockfiles. So the guard also watches every
+lockfile the key or the snapshot fingerprint may read: one present at the
+mark must still be there with its change time before it, which refuses a
+lockfile rewritten, removed, or rewritten and restored (which a digest
+would not tell apart from the bytes the run began with), and one absent at
+the mark must still be absent. The caller computes the snapshot
+fingerprint before the run starts, and a lockfile or configured signature
+file changed in between would leave the snapshot the run restores keyed by
+one tree while the run reads another, so the mark also recomputes the
+fingerprint and takes no mark when it moved.
+
+The mark is the change time of a file written for the purpose, so it is
+read off the filesystem's own clock. A change time, unlike a modification
+time, cannot be set back by `cp -p` or `touch -d`, and on the mark's own
+filesystem a coarse tick cannot hide an edit: a change in the mark's tick
+counts as after it. That rule alone would refuse a save that landed shortly
+before the run, since a coarse filesystem (ext4, tmpfs) gives it the first
+stamp's own change time. So the mark is taken on a tick boundary: stamps are
+written until one carries a later change time than the first (on the same
+device), and that later change time is the mark. A save before the run
+carries at most the first stamp's change time and is admitted; a save after
+the mark carries at least the mark and is refused. The wait is bounded
+(50 ms), and a filesystem that does not tick within it takes no mark: no slot
+is written, which is always safe. One clock needs one filesystem, so the mark is taken
+only when the store is on the project's. A row on another filesystem is
+decided by what identifies it. The signature files outside the project's
+own signature roots are identified by the key already: the engine's own
+(`data/`, a bundled plugin's `sig/`, a gem overlay) by the engine slot, a
+gem's `sig/` and an `rbs collection` directory by the lockfiles. They live
+wherever the engine and the gems are installed, a container image's layer
+or a Nix store, so on another filesystem the guard passes over them, and on
+the mark's it checks them like any other row
+(`Runner::BaselineRows#pinned`). Every other row on another filesystem
+refuses the write. For a checkout, the engine slot pins only the engine's
+Ruby source, so a contributor's edit to a bundled signature file while a
+run reads is outside the guard when the checkout is on another filesystem
+from the project. What the guard cannot see is its clock stepping
+backwards during a run (an NTP correction, a network filesystem's server),
+which could date a save before the mark. The guard takes one more stamp
+when it is asked and refuses when it reads earlier than the mark (or cannot
+be written, or is on another device), so a step is seen unless it is undone
+before the run ends. Other bounds: a filesystem whose first stamp lands on a
+whole second (HFS+, FAT, ext3) takes no mark at once; native Windows takes no
+mark, since a change time is the creation time there; a network or FUSE
+filesystem (NFS's attribute cache, virtiofs, sshfs) may report a change time
+from before a save, and nothing detects that. The rows recorded as the run
+read carry a recording instant lowered to the mark, so on a coarse clock a
+same-size save after the read is re-hashed instead of trusted on an unmoved
+stat tuple. A plugin-read file saved during a writer run therefore stays racy,
+and is re-hashed on each probe, until its reader is re-analysed and the row
+re-recorded; the cost is bounded by the number of such files and the answer
+stays correct.
+
+**Why the chain holds together.** By induction from the full run that
+started it: that run's descriptor is the plain slot's, and each recheck's
+carries this run's reads for the files it re-analysed and the previous
+slot's for the files it served. That holds only if the previous slot
+describes the snapshot the recheck restored. It does not when the slot is
+missing (evicted, deleted, never written), or when another run rewrote the
+snapshot without writing a slot: a pool run, whose workers' reads never
+reach the process that would record them; `--incremental --no-cache`,
+which has no store; a slot write that failed. So the slot records the
+identity of the snapshot file its run left behind — `(size, mtime_ns,
+ctime_ns, inode)`; a save renames a new file into place — and a recheck
+carries the chain only from a previous slot that exists and names the
+snapshot file it restored. Otherwise it writes nothing, and the fast path
+stays off until the next full run starts a fresh chain: after a pool or
+`--no-cache` edit run, a save the write guard caught, a cache restored
+onto a new checkout (new inodes), a lockfile change the snapshot
+fingerprint does not see (#1532), or two runs racing.
+`Runner#incremental_slot_rows` also declines when a boundary row changed
+during the per-file loop without being credited to a file (a read from a
+thread the plugin started).
+
+"Until the next full run" can mean indefinitely: the full `--incremental`
+path starts one only when its fingerprint moves (the configuration, the
+lockfiles, a configured `signature_paths:`, the engine) or its snapshot is
+gone, and never because the probe stopped serving. The same holds after a
+chained input changed (below). A cheap follow-up would be for the session
+to run a baseline itself when the previous slot's chain no longer
+validates in its baseline part, or when no chain could be carried; it is
+not built here.
+
+**What is neither written nor served.** No slot is written for an editor
+buffer (never persisted), a pool run, effect collection (its `effects:`
+block is outside the key, and its envelope rows are #428's decline), an
+opaque plugin, whose next full-path run is cold rather than the warm run
+the probe stands in for, or a run after which the session holds no digest
+for some analysed file: #1536's source-RBS gate forgets the digest of a
+file saved after the closure was decided, and no row could then say what
+its readers were computed from. The slot does not depend on that gate's
+closure decision otherwise, so a run under an untrusted gate is written. The CLI asks the probe only for a plain
+`--incremental`: not `--no-cache`, `--verify-incremental`, a worker pool,
+`--coverage`, `--cache-stats`, a `RIGOR_*_TRACE` probe, or `--explain`,
+which the session does not honour yet (#1533) and so writes no slot keyed
+by. A hit prints the incremental tail
+(`CheckCommand#write_incremental_result`), not the ordinary check's.
+
+`Runner#run_result_cacheable?` still excludes recording and subset runs,
+for reasons that do not reach this slot: a recording run must analyse to
+record the graph, and a subset run's partial answer would share the full
+run's key. The session writes after recording, the merged and complete
+answer, under its own producer id. A hit neither reads nor writes the
+snapshot: it stands in for a null recheck, which already leaves the
+snapshot as it was (ADR-87 WD3), so the next edit run restores what it
+would have restored.
+
+**What a hit guarantees.** A hit prints exactly what the run that wrote
+the slot printed, and only while every recorded row validates. The rows
+cover every input the full incremental path's own change detection sees —
+the analysed files, the configuration, roots and lockfiles in the key, the
+signature tree, and each plugin read the boundary records, which is where
+the ADR-88 fact surface comes from — so where the full path would notice a
+change and re-analyse, the probe declines first. That rests on ADR-45's own
+premise, that a plugin reads through its `IoBoundary`, and on #1558's
+replay of a producer's rows on a hit; before it, a producer input could
+change with the probe serving the pre-change answer while the full path
+recomputed the producer and rebuilt. WD2 landed after #1558 for that
+reason.
+
+A hit is not guaranteed to equal a cold run. Where the full path misses a
+change, one of two things happens. For an input the chain carries (#1554's
+auto-detected `sig/`, #1560's discovered files, a `pre_eval:` file outside
+the analysed set), the probe declines until the next full run while the
+full path serves its stale answer. For a plugin read credited to another
+file, or reaching a file through a memo (#1553), the probe serves the same
+stale answer the full path serves — parity, no more.
+
+Measured locally on Mastodon (macOS, engines laid out as installed gems
+by `tool/engine_warm_ab.rb`). With the sweep configuration
+(`data/oss-sweep/mastodon-rigor.yml`, 1,404 files, no plugin claiming
+templates), an `--incremental` null run went from 0.94 s to 0.18 s, level
+with the default null run's 0.17 s. With the survey configuration (1,328
+files; rigor-actionpack, which claims `app/views/**/*.erb`, and nine other
+Rails plugins) it went from 2.49 s to 0.28 s, every null run served, where
+a default null run takes 1.1 s because the plain key's `template-units`
+slot keeps WD4's probe from answering. That configuration's edit runs are
+cold on both engines, for #1574. Writing the slot costs 17–20 ms per run
+with the sweep configuration and 48–62 ms with the survey one, where the
+guard takes 11–13 ms and the rest builds and writes a 0.5 MB entry of
+6,348 file rows. CI numbers are for the `engine-warm.yml` dispatch to
+confirm.
+
+Gate: `spec/rigor/analysis/incremental_run_slot_spec.rb` (each input class,
+the roots and their spelling, the carried read, the inputs that decline
+until a full run, the chain breaks, the separation of the two slots, a
+producer's input through a cache hit, a producer first asked from a node
+rule, template units, and the write guard: a save, a root created or
+removed, a nested signature file removed and a configured lockfile
+rewritten while the run reads, and a row on another filesystem), the
+subprocess examples in `spec/rigor/cli/run_cache_probe_spec.rb`
+(no `rigor/inference` on a hit), `spec/rigor/cli/check_command_spec.rb` (the
+same output per format, baseline and `--fail-on`), and
+`tool/engine_warm_ab.rb`, which counts `--incremental` null probe hits and
+fails an edit run that did not load the engine.
+
 ## Consequences
 
 - **Soundness is the whole game.** The naive design under-invalidates on

@@ -2,6 +2,8 @@
 
 require "digest"
 require_relative "incremental"
+require_relative "incremental_run_slot"
+require_relative "incremental_run_slot/write_guard"
 require_relative "plugin_fact_fingerprint"
 require_relative "source_rbs_gate"
 require_relative "../cache/file_digest"
@@ -161,6 +163,7 @@ module Rigor
       # Full baseline analysis with recording. Returns the run's diagnostics; populates the in-process cache
       # + dependency state.
       def baseline
+        @slot_carried_from = nil # ADR-45 WD2 — see {#load_snapshot}
         runner = build_runner(record_dependencies: true)
         diagnostics = run_runner(runner).diagnostics
         @last_runner = runner # ADR-88 WD1 — the post-hoc fact-surface fingerprint reads this prepared registry.
@@ -483,7 +486,7 @@ module Rigor
         # shares one digest memo across change detection and the baseline/absorb re-pack. The inner
         # `Runner#run` nests its own `with_run` for the analysis descriptors; nesting is safe (each restores).
         Cache::FileDigest.with_run(strict: @configuration.cache_validation_strict?) do
-          restored = fingerprint && snapshot.load(fingerprint: fingerprint)
+          restored = load_snapshot(snapshot, fingerprint)
           # ADR-88 WD1 — the plugin fact-surface fingerprint gates snapshot reuse the same way the global
           # fingerprint gates the load: a plugin sig/catalog edit outside `signature_paths:` (a Sorbet `.rbi`)
           # changes the types unchanged call sites resolve, without moving any analyzed file, so the global
@@ -529,7 +532,7 @@ module Rigor
             warm = false
             skip_save = false
           end
-          snapshot.save(fingerprint: fingerprint, payload: to_payload) if persist && fingerprint && !skip_save
+          persist_run(snapshot, fingerprint, diagnostics, skip_save: skip_save) if persist && fingerprint
           [diagnostics, warm]
         end
       end
@@ -610,6 +613,180 @@ module Rigor
         PluginFactFingerprint.prepared_registry(
           configuration: @configuration, cache_store: @cache_store, plugin_requirer: @plugin_requirer
         )
+      end
+
+      # Loads the snapshot, noting (ADR-45 WD2) which write of the file it read: the identity is kept only when
+      # the file was the same before and after the read, since a rewrite in between leaves no telling which one
+      # the payload came from.
+      def load_snapshot(snapshot, fingerprint)
+        @slot_guard = start_slot_guard(fingerprint)
+        before = snapshot_identity(snapshot)
+        restored = fingerprint && snapshot.load(fingerprint: fingerprint)
+        @restored_snapshot_identity = restored && before == snapshot_identity(snapshot) ? before : nil
+        # The path set the previous run-result slot is keyed by, for a recheck to carry its chain from; a
+        # {#baseline} clears it, since a full run starts a chain of its own.
+        @slot_carried_from = restored&.analyzed
+        restored
+      end
+
+      # ADR-87 WD3 — a warm recheck that changed nothing skips the snapshot rewrite: the file it restored is still
+      # the one on disk, which is what the run-result slot records as its snapshot.
+      def persist_run(snapshot, fingerprint, diagnostics, skip_save:)
+        written = if skip_save
+                    @restored_snapshot_identity
+                  elsif snapshot.save(fingerprint: fingerprint, payload: to_payload)
+                    snapshot_identity(snapshot)
+                  end
+        write_run_slot(diagnostics, written_identity: written)
+      end
+
+      # ADR-45 WD2 (#1507) — records this run's answer as the run-result slot a later `rigor check --incremental`
+      # serves without loading the engine ({IncrementalRunSlot}). The slot's dependency descriptor must validate
+      # what the answer was computed from, and after a narrowed recheck most of the answer was computed by earlier
+      # runs, so it is assembled from three sources:
+      #
+      # - the analysed files, at the digest this session holds for each: the bytes its cached or fresh rows were
+      #   computed from, never a re-digest taken after the fact;
+      # - what this run read and re-derives every run ({Runner#incremental_slot_rows}' `observed` and `derived`
+      #   rows);
+      # - the CHAIN: the rows the last full run recorded for inputs a recheck does not re-derive
+      #   ({Runner#baseline_dependency_rows}), and the plugin reads credited to each file's analysis. A full run
+      #   starts a chain; a recheck takes the previous slot's, replaces the reads of every file it re-analysed with
+      #   this run's, and drops the removed files'.
+      #
+      # A recheck writes only when the previous slot exists and was written against the very snapshot file it
+      # restored: otherwise some run in between — a pool run, `--no-cache`, a write that failed — analysed files
+      # without recording their reads, and the chain cannot vouch for them. It then writes nothing, and the next
+      # full run starts a fresh chain. Declining to write is always safe; it only leaves the next null run on the
+      # full path.
+      #
+      # Every row not recorded as a plugin read it must still describe the tree the run read
+      # ({IncrementalRunSlot::WriteGuard}): the analysed files' (whose session digest a full run takes after its
+      # analysis), the `derived` rows, and the chain's baseline, taken now or carried ({#guarded_rows}).
+      #
+      # @param written_identity — the snapshot file as this run leaves it, recorded for the next writer's check.
+      def write_run_slot(diagnostics, written_identity:)
+        return unless run_slot_writable?
+
+        roots = @paths || @configuration.paths
+        rows = @last_runner.incremental_slot_rows(roots: roots)
+        chain = rows && (@slot_carried_from ? carry_chain(rows, roots) : start_chain(rows))
+        analysed = chain && analysed_file_rows
+        return if analysed.nil?
+
+        baseline, pinned, reads = chain
+        return unless @slot_guard&.admits?(guarded_rows(analysed, rows.derived, baseline), pinned: pinned)
+
+        # A save the run read after the mark's tick must not hide behind an unmoved stat tuple.
+        reads = reads.transform_values { |descriptor| @slot_guard.mark_racy(descriptor) }
+
+        entry = IncrementalRunSlot::Entry.new(
+          diagnostics: diagnostics, roots: IncrementalRunSlot.as_written(roots),
+          baseline: baseline, pinned: pinned, reads: reads, snapshot: written_identity
+        )
+        dependencies = @slot_guard.mark_racy(run_slot_dependencies(analysed, rows, [baseline, pinned], reads.values))
+        wrote = IncrementalRunSlot.write(
+          store: @cache_store, configuration: @configuration, entry: entry, dependencies: dependencies,
+          target: IncrementalRunSlot::Target.new(files: @analyzed, roots: roots)
+        )
+        discard_previous_slot(roots) if wrote
+      rescue StandardError
+        nil
+      end
+
+      # The previous slot is keyed by the previous path set; once this run's stands, nothing asks for it again.
+      def discard_previous_slot(roots)
+        return if @slot_carried_from.nil? || @slot_carried_from.sort == @analyzed.sort
+
+        IncrementalRunSlot.discard(
+          store: @cache_store, configuration: @configuration,
+          target: IncrementalRunSlot::Target.new(files: @slot_carried_from, roots: roots)
+        )
+      end
+
+      # ADR-45 WD2 — the mark {IncrementalRunSlot::WriteGuard#admits?} checks the slot's rows against, taken before
+      # the run reads anything. nil (no slot this run) for a store no slot is written to, or no fingerprint.
+      def start_slot_guard(fingerprint)
+        return nil if fingerprint.nil? || @cache_store.nil? || @cache_store.read_only? || !@buffer.nil?
+        # Known before the run: none of these can be written afterwards, so the stamp and the recomputed
+        # fingerprint would be spent for nothing.
+        return nil unless @workers.zero? && !@configuration.effects_enabled?
+
+        IncrementalRunSlot::WriteGuard.start(
+          configuration: @configuration, roots: @paths || @configuration.paths, cache_root: @cache_store.root,
+          fingerprint: fingerprint
+        )
+      end
+
+      # The runs whose answer the slot may hold: a writable store, no editor buffer (whose bytes exist only in
+      # the editor), a sequential run (a pool worker's plugin reads never reach this process), effect collection
+      # off ({IncrementalRunSlot.serve} declines it), and no opaque plugin — the next full-path run would then be
+      # cold, not the warm run the probe stands in for.
+      def run_slot_writable?
+        !@cache_store.nil? && !@cache_store.read_only? && @buffer.nil? && @workers.zero? &&
+          !@configuration.effects_enabled? && @opaque_plugin_ids.empty? && !@last_runner.nil?
+      end
+
+      def start_chain(rows)
+        baseline = @last_runner.baseline_dependency_rows(files: @analyzed)
+        baseline && [baseline.owned, baseline.pinned, rows.by_file.slice(*@analyzed)]
+      end
+
+      def carry_chain(rows, roots)
+        return nil if @restored_snapshot_identity.nil?
+
+        previous = IncrementalRunSlot.previous_entry(
+          store: @cache_store, configuration: @configuration,
+          target: IncrementalRunSlot::Target.new(files: @slot_carried_from, roots: roots)
+        )
+        return nil if previous.nil? || previous.snapshot != @restored_snapshot_identity
+
+        served = previous.reads.except(*@last_runner.analyzed_files)
+        [previous.baseline, previous.pinned, served.merge(rows.by_file).slice(*@analyzed)]
+      end
+
+      # One `:stat` row per analysed file, from the entry this session recorded for it (`#pack_digest`), re-packed
+      # against the file's current stat when the bytes still hash to the recorded digest but the tuple moved (a
+      # `touch`, a checkout): the snapshot keeps the old tuple, and a row carrying it would cost every later probe
+      # a re-hash of the file. nil when any file has no usable entry (it could not be read): no row could say what
+      # its answer was computed from.
+      def analysed_file_rows
+        @analyzed.map do |path|
+          packed = Cache::FileDigest.refresh_stat(path, @digests[path])
+          return nil if packed.nil?
+
+          Cache::Descriptor::FileEntry.new(path: path, comparator: :stat, value: packed)
+        end
+      end
+
+      # @param chained — the chain's baseline descriptors, owned and pinned
+      def run_slot_dependencies(analysed, rows, chained, reads)
+        carried = chained + reads
+        Cache::Descriptor.new(
+          files: analysed + rows.derived.files + rows.observed.files + carried.flat_map(&:files),
+          globs: (rows.derived.globs + rows.observed.globs + carried.flat_map(&:globs)).uniq
+        )
+      end
+
+      # What the write guard asks about besides the pinned baseline: every row the key does not pin that was not
+      # recorded as a plugin read it. A recheck's carried baseline is among them. The run that took it vouched for
+      # the tree it saw, but this run reads those inputs again (a recheck with a non-empty closure rebuilds its
+      # environment from the signature tree), and a save it read that is reverted before the run ends leaves every
+      # carried row fresh while the answer came from the saved bytes.
+      def guarded_rows(analysed, derived, baseline)
+        Cache::Descriptor.new(files: analysed + derived.files + baseline.files, globs: derived.globs + baseline.globs)
+      end
+
+      # The snapshot file's `(size, mtime_ns, ctime_ns, inode)`: which write of it a run restored, or left behind.
+      # A rewrite renames a new file into place, so any write moves it. nil when there is no file to stat.
+      def snapshot_identity(snapshot)
+        path = snapshot.respond_to?(:path) ? snapshot.path : nil
+        return nil if path.nil?
+
+        stat = File.stat(path)
+        [stat.size, Cache::FileDigest.ns_of(stat.mtime), Cache::FileDigest.ns_of(stat.ctime), stat.ino]
+      rescue SystemCallError
+        nil
       end
 
       # Adopt a persisted snapshot's per-file state as this session's baseline (the warm-start path).

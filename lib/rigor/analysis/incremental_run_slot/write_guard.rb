@@ -26,9 +26,26 @@ module Rigor
       # filesystem, so the mark is taken only when the store is on the project's filesystem, and a row the key
       # does not pin refuses the write when it is on any other. Declining to write is always safe; it leaves the
       # next null run on the full path.
+      #
+      # A filesystem's change times tick coarsely (a millisecond or more on ext4 and tmpfs), so a file saved just
+      # before the stamp can carry the stamp's own change time. {#admits?} refuses a change time at or after the
+      # mark, since a save after the stamp in the same tick reads the same; taking the first stamp as the mark
+      # would therefore refuse every save that landed shortly before the run, and no slot would be written. So the
+      # mark is taken on a tick boundary: stamps are written until one carries a later change time than the first,
+      # and that later change time is the mark. Everything saved before the run started carries a change time no
+      # later than the first stamp, hence before the mark; everything saved after the mark carries at least the
+      # mark. The wait is bounded ({TICK_WAIT_LIMIT}); a filesystem that does not tick within it takes no mark,
+      # which is the safe answer. The residual risk is a clock that steps backwards (an NTP correction) inside the
+      # run: a save can then carry a change time before the mark and be admitted.
       class WriteGuard
         STAMP_DIR = "incremental"
         private_constant :STAMP_DIR
+
+        # How long to wait, in seconds, for the filesystem's change time to tick past the first stamp.
+        TICK_WAIT_LIMIT = 0.05
+        # The pause between stamps.
+        TICK_RETRY_DELAY = 0.0005
+        private_constant :TICK_RETRY_DELAY
 
         # Takes the mark, or nil when the slot must not be written: no stamp can be written, it is not on the
         # project's filesystem, or the snapshot fingerprint the run was given no longer describes the tree.
@@ -54,10 +71,30 @@ module Rigor
           new(started_ns: started_ns, device: device, lockfiles: lockfiles, presence: presence)
         end
 
-        # The stamp's change time and device.
+        # The mark: the change time and device of the first stamp whose change time is later than that of a
+        # stamp taken before it, on the same device; nil when none is written within {TICK_WAIT_LIMIT}.
         def self.stamp(cache_root)
           dir = File.join(cache_root.to_s, STAMP_DIR)
           FileUtils.mkdir_p(dir)
+          first_ns, device = write_stamp(dir)
+          return nil if first_ns.nil?
+
+          deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + TICK_WAIT_LIMIT
+          loop do
+            ns, dev = write_stamp(dir)
+            return nil if ns.nil? || dev != device
+            return [ns, device] if ns > first_ns
+            return nil if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
+
+            sleep(TICK_RETRY_DELAY)
+          end
+        rescue SystemCallError, IOError
+          nil
+        end
+        private_class_method :stamp
+
+        # One stamp's change time and device; the file is removed again.
+        def self.write_stamp(dir)
           path = File.join(dir, "run-#{Process.pid}-#{SecureRandom.hex(4)}.stamp")
           File.write(path, "")
           stat = File.stat(path)
@@ -67,7 +104,7 @@ module Rigor
         ensure
           FileUtils.rm_f(path) if path
         end
-        private_class_method :stamp
+        private_class_method :write_stamp
 
         def self.device_of(path)
           File.stat(path).dev

@@ -84,7 +84,9 @@ module Rigor
       # instance methods) or `:singleton` (the class object's singleton). An external entry has no `name`: it
       # keeps the spelling (`raw`) and its candidate names (`candidates`, most qualified first, empty for an
       # ambiguous spelling), and `superclass_edge` says it was reached through a superclass edge.
-      Entry = Data.define(:name, :side, :raw, :candidates, :superclass_edge) do
+      # `last_segment` is the unqualified name a project entry files its negative class edge under, computed once
+      # when the entry is interned.
+      Entry = Data.define(:name, :side, :raw, :candidates, :superclass_edge, :last_segment) do
         def external? = name.nil?
       end
 
@@ -205,11 +207,12 @@ module Rigor
 
         start = owner.nil? ? nil : @entries.index { |entry| entry.name == owner }
         ResolutionChain.record_class(scope, @root) if start.nil?
-        @entries.drop(start.nil? ? 0 : start + 1).each do |entry|
+        index = start.nil? ? 0 : start + 1
+        while index < @entries.size
+          entry = @entries[index]
           ResolutionChain.record_entry(scope, entry, nil)
-          next if entry.external?
-
-          Analysis::DependencyRecorder.read_missing(:class, entry.name.to_s.split("::").last)
+          Analysis::DependencyRecorder.read_missing(:class, entry.last_segment) unless entry.external?
+          index += 1
         end
       end
       private :record_beyond
@@ -820,14 +823,14 @@ module Rigor
 
         def project_entry(name, side)
           by_side = (@bucket[:interned][side] ||= {})
-          by_side[name] ||= Entry.new(name, side, nil, nil, false)
+          by_side[name] ||= Entry.new(name, side, nil, nil, false, name.to_s.split("::").last.freeze)
         end
 
         def external_entry(owner, raw, side, superclass_edge)
           by_edge = ((@bucket[:externals][side] ||= {})[superclass_edge] ||= {})
           by_owner = (by_edge[owner] ||= {})
           by_owner[raw] ||= Entry.new(nil, side, raw, @scope.ancestor_name_candidates(owner, raw).freeze,
-                                      superclass_edge)
+                                      superclass_edge, nil)
         end
       end
       private_constant :Builder

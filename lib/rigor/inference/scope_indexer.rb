@@ -6240,17 +6240,29 @@ module Rigor
       private_constant :ARRAY_ITERATORS, :HASH_ITERATORS
 
       # A block that provably runs at least once with the class body's `self`: the call is a statement of the
-      # body itself (not nested in a `def` or another block) and either `tap` / `then` (they always yield once,
-      # self preserved) or an iterator over a literal that is known non-empty (a non-empty Array or Hash literal,
-      # a positive `Integer#times`, an Integer-literal Range that is not empty, `upto` / `downto` in the right
+      # body itself (not nested in a `def` or another block) and either `tap` / `then` on a literal or `self` (they
+      # always yield once, self preserved) or an iterator over a literal that is known non-empty (a non-empty Array
+      # or Hash literal, a positive `Integer#times`, an Integer-literal Range that is not empty, `upto` / `downto` in the right
       # order). A constant or variable receiver (`Registry.each`, a lazy `map`) may never yield, so it is not one.
       # The walk then records the block's direct statements as positioned: the block runs where it is written, and
       # a repeated `extend` is idempotent (#1592).
       def runs_body_block_once?(node, accumulator)
         return false unless accumulator.body_block?(node)
-        return true if %i[tap then].include?(node.name)
+        return literal_or_self?(node.receiver) if %i[tap then].include?(node.name)
 
         non_empty_literal_iteration?(node.name, node.receiver, node.arguments&.arguments || [])
+      end
+
+      TAP_RECEIVERS = [Prism::IntegerNode, Prism::FloatNode, Prism::StringNode, Prism::SymbolNode, Prism::ArrayNode,
+                       Prism::HashNode, Prism::RangeNode, Prism::NilNode, Prism::TrueNode, Prism::FalseNode,
+                       Prism::SelfNode].freeze
+      private_constant :TAP_RECEIVERS
+
+      # `tap` / `then` yield once only on a receiver whose method nobody overrode: a literal or `self`. A constant
+      # may define its own `tap` (`Registry.tap`), a promise's `then` defers, and a receiverless call may reach a
+      # class-level DSL method, so none of those is read as running.
+      def literal_or_self?(receiver)
+        TAP_RECEIVERS.any? { |kind| receiver.is_a?(kind) }
       end
 
       def non_empty_literal_iteration?(name, receiver, arguments)

@@ -611,13 +611,28 @@ RSpec.describe "resolution in Ruby's ancestor order (#1567, #1568, #1570, #1571)
       expect(diagnostics_for(source)).to eq([])
     end
 
-    # `tap` always yields once with the body's `self`: `Base.tap { extend Counted }` extends T5, so Ruby's
-    # `T5.label` is Counted's 1.
-    it "records an `extend` in `tap` as the class's own" do
+    # `tap` / `then` count only on a literal or `self`. `Registry.tap` is the constant's own (here `nil`, the block
+    # never runs) and a receiverless `tap` may reach a class-level DSL method, so neither records anything; Ruby's
+    # `label` is Base's "x" for both. `Base.tap { extend Counted }` would extend the class in Ruby, a missed case.
+    it "does not record an `extend` in `tap` on a constant or without a receiver" do
       source = <<~RUBY
         class Base; def self.label = "x"; end
         module Counted; def label = 1; end
-        class T5 < Base; Base.tap { extend Counted }; end
+        class Registry; def self.tap = nil; end
+        class U1 < Base; Registry.tap { extend Counted }; end
+        class U2 < Base; def self.tap = nil; tap { extend Counted }; end
+        U1.label.upcase
+        U2.label.upcase
+      RUBY
+      expect(diagnostics_for(source)).to eq([])
+    end
+
+    # `1.then` yields once with the body's `self`, so Ruby's `T5.label` is Counted's 1.
+    it "records an `extend` in `then` on a literal as the class's own" do
+      source = <<~RUBY
+        class Base; def self.label = "x"; end
+        module Counted; def label = 1; end
+        class T5 < Base; 1.then { extend Counted }; end
         T5.label.upcase
       RUBY
       expect(diagnostics_for(source)).to eq([[4, "call.undefined-method"]])

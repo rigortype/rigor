@@ -95,8 +95,9 @@ RSpec.describe Rigor::Inference::ScopeIndexer::MixinAccumulator do
       "3.downto(1) { extend M }" => "extend in an ordered downto",
       "{ a: 1 }.each_pair { extend M }" => "extend in a non-empty Hash each_pair",
       "[1].map { extend M }" => "extend in map",
-      "Object.tap { extend M }" => "extend in tap on a constant",
-      "helper.then { extend M }" => "extend in then on any receiver",
+      "self.tap { extend M }" => "extend in tap on self",
+      "1.then { extend M }" => "extend in then on an Integer literal",
+      "\"s\".tap { extend M }" => "extend in tap on a String literal",
       "[1].each { class << self; include M; end }" => "class << self; include in an iterator",
       "[1].each { class << self; prepend M; end }" => "class << self; prepend in an iterator"
     }.each do |body, label|
@@ -135,6 +136,9 @@ RSpec.describe Rigor::Inference::ScopeIndexer::MixinAccumulator do
       "included do\n    extend M\n  end" => "a concern's included do",
       "config.each { extend M }" => "a call on a non-literal receiver",
       "Registry.each { extend M }" => "a constant receiver, which may never yield",
+      "Registry.tap { extend M }" => "a constant's tap, which the constant may override",
+      "helper.then { extend M }" => "a then on a call, which may defer",
+      "tap { extend M }" => "a receiverless tap, which may reach a class-level DSL method",
       "LAZY.map { extend M }" => "a constant lazy enumerator",
       "[].each { extend M }" => "an empty Array literal",
       "[*list].each { extend M }" => "an Array literal with a splat",

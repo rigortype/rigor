@@ -184,6 +184,7 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#append_declaration_tables: grandfathered
     Rigor::Inference::ScopeIndexer#append_def_signatures: grandfathered
     Rigor::Inference::ScopeIndexer#append_envelope_signature: grandfathered
+    Rigor::Inference::ScopeIndexer#append_mixin_signature: renders the mixin lists and the unpositioned table into the declaration signature; it derives no declaration context
     Rigor::Inference::ScopeIndexer#apply_alias_def_nodes: grandfathered
     Rigor::Inference::ScopeIndexer#apply_compact_header_renames!: grandfathered
     Rigor::Inference::ScopeIndexer#apply_dynamic_target_writes: grandfathered
@@ -245,6 +246,7 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#gather_cvar_writes: grandfathered
     Rigor::Inference::ScopeIndexer#gather_global_writes: grandfathered
     Rigor::Inference::ScopeIndexer#gather_ivar_writes: grandfathered
+    Rigor::Inference::ScopeIndexer#instance_mixin_recorded?: writes one instance-side mixin call into the include/prepend accumulator under the owner the walk passes in; it computes no declaration context
     Rigor::Inference::ScopeIndexer#ivar_write_targets: grandfathered
     Rigor::Inference::ScopeIndexer#merge_and_fold_extends: grandfathered
     Rigor::Inference::ScopeIndexer#merge_class_keyed_index_tables: grandfathered
@@ -258,14 +260,18 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#method_definite_assigns: grandfathered
     Rigor::Inference::ScopeIndexer#mixin_call?: grandfathered
     Rigor::Inference::ScopeIndexer#mixin_call_recorded?: grandfathered
+    Rigor::Inference::ScopeIndexer#mixin_call_view: classifies a call as an include, prepend or extend (or a send of one); it reads the call's own name and arguments, not a declaration context
+    Rigor::Inference::ScopeIndexer#mixin_effects: names which ancestry side of which owner a mixin call reshapes, from the call's receiver and the owner the walk already resolved; it computes no declaration context
     Rigor::Inference::ScopeIndexer#mixin_names_for: grandfathered
     Rigor::Inference::ScopeIndexer#mixin_tables: grandfathered
+    Rigor::Inference::ScopeIndexer#own_mixin_effects: names the ancestry side a receiverless mixin call reshapes on the owner the walk passes in; it computes no declaration context
     Rigor::Inference::ScopeIndexer#path_mutation_candidates: grandfathered
     Rigor::Inference::ScopeIndexer#propagate: grandfathered
     Rigor::Inference::ScopeIndexer#propagate_call: grandfathered
     Rigor::Inference::ScopeIndexer#propagate_end_body: grandfathered
     Rigor::Inference::ScopeIndexer#propagate_if_branches: grandfathered
     Rigor::Inference::ScopeIndexer#propagate_unless_branches: grandfathered
+    Rigor::Inference::ScopeIndexer#receiver_mixin_effects: names the ancestry sides a receiver-form mixin call reshapes; it computes no declaration context
     Rigor::Inference::ScopeIndexer#record_alias_leaf?: grandfathered
     Rigor::Inference::ScopeIndexer#record_alias_map_entry: grandfathered
     Rigor::Inference::ScopeIndexer#record_aliased_ivar_mutations!: grandfathered
@@ -304,6 +310,7 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#record_method_kind: grandfathered
     Rigor::Inference::ScopeIndexer#record_mixin_call: grandfathered
     Rigor::Inference::ScopeIndexer#record_mixin_names: grandfathered
+    Rigor::Inference::ScopeIndexer#record_module_function: writes the bare module_function edge under the owner the walk passes in; it computes no declaration context
     Rigor::Inference::ScopeIndexer#record_module_function_names: grandfathered
     Rigor::Inference::ScopeIndexer#record_multi_write_ivars: grandfathered
     Rigor::Inference::ScopeIndexer#record_published_constant_ivar: grandfathered
@@ -311,6 +318,7 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#record_singleton_def_node: grandfathered
     Rigor::Inference::ScopeIndexer#record_struct_member_layout: grandfathered
     Rigor::Inference::ScopeIndexer#seed_operator_only_ivars!: grandfathered
+    Rigor::Inference::ScopeIndexer#singleton_mixin_recorded?: writes one singleton-side mixin call under the owner the walk passes in; it computes no declaration context
     Rigor::Inference::ScopeIndexer#surface_mixin_call?: grandfathered
     Rigor::Inference::ScopeIndexer#walk_anonymous_meta_block: grandfathered
     Rigor::Inference::ScopeIndexer#walk_class_cvars: grandfathered
@@ -400,6 +408,11 @@ lib/rigor/inference/scope_indexer/member_layouts_collector.rb:
   producers:
     Rigor::Inference::ScopeIndexer::MemberLayoutsCollector: grandfathered
     Rigor::Inference::ScopeIndexer::MemberLayoutsCollector#on_declaration: grandfathered
+lib/rigor/inference/scope_indexer/mixin_accumulator.rb:
+  computes: which mixin edges have no known order (the accumulator the mixin and extend walks fill)
+  producers:
+    Rigor::Inference::ScopeIndexer::MixinAccumulator: holds the walks' per-owner mixin lists and the unpositioned edges; the owner is resolved by the walk that fills it
+    Rigor::Inference::ScopeIndexer::MixinAccumulator#direct_body: marks the statements of a body the caller already judged direct; it resolves no declaration context
 lib/rigor/inference/scope_indexer/superclasses_collector.rb:
   computes: each class's superclass and header nesting, as a collector on the shared declaration walk
   producers:

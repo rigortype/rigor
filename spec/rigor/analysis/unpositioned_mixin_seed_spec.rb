@@ -13,6 +13,8 @@ require "fileutils"
 RSpec.describe "unpositioned mixin edges reach every discovery seed" do
   let(:indexer) { Rigor::Inference::ScopeIndexer }
 
+  let(:expected) { { "Gadget" => { include: ["Greeting"] }, "Helper" => { extend: ["Greeting"] } } }
+
   let(:sources) do
     {
       "lib/direct.rb" => "class Gadget\n  include Greeting\nend\n",
@@ -57,7 +59,7 @@ RSpec.describe "unpositioned mixin edges reach every discovery seed" do
       cold = indexer.discovered_project_index_incremental(paths, seed_bundles: {})
       warm = indexer.discovered_project_index_incremental(paths, seed_bundles: cold.fetch(:bundles))
 
-      expect(unpositioned_of(reference)).to eq("Gadget" => ["Greeting"], "Helper" => ["Greeting"])
+      expect(unpositioned_of(reference)).to eq(expected)
       expect(unpositioned_of(cold)).to eq(unpositioned_of(reference))
       expect(unpositioned_of(warm)).to eq(unpositioned_of(reference))
 
@@ -67,7 +69,7 @@ RSpec.describe "unpositioned mixin edges reach every discovery seed" do
       edited_reference = indexer.discovered_project_index_for_paths(paths)
       edited_warm = indexer.discovered_project_index_incremental(paths, seed_bundles: cold.fetch(:bundles))
 
-      expect(unpositioned_of(edited_reference)).to eq("Helper" => ["Greeting"])
+      expect(unpositioned_of(edited_reference)).to eq("Helper" => { extend: ["Greeting"] })
       expect(unpositioned_of(edited_warm)).to eq(unpositioned_of(edited_reference))
     end
   end
@@ -93,7 +95,7 @@ RSpec.describe "unpositioned mixin edges reach every discovery seed" do
         runner.send(:ensure_project_discovery, { files: paths })
         tables = runner.send(:project_scope_seed_tables)
 
-        expect(tables.fetch(:unpositioned_mixins)).to eq("Gadget" => ["Greeting"], "Helper" => ["Greeting"])
+        expect(tables.fetch(:unpositioned_mixins)).to eq(expected)
         expect(tables.fetch(:discovered_class_sources).fetch("Gadget").size).to eq(2)
         expect(tables).not_to have_key(:constant_sources)
       end
@@ -104,11 +106,11 @@ RSpec.describe "unpositioned mixin edges reach every discovery seed" do
     with_project do |_dir, paths|
       seed = Rigor::Protection::DiscoverySeed.discovery_tables(paths)
       bundles = Rigor::Protection::DiscoverySeed.bundles(paths: paths)
-      expect(seed.fetch(:unpositioned_mixins)).to eq("Gadget" => ["Greeting"], "Helper" => ["Greeting"])
+      expect(seed.fetch(:unpositioned_mixins)).to eq(expected)
       expect(seed.fetch(:discovered_class_sources).fetch("Gadget").size).to eq(2)
       expect(Rigor::Scope.empty.with_discovery(Rigor::Scope.empty.discovery.with(**seed))
                          .discovery.unpositioned_mixins).to eq(seed.fetch(:unpositioned_mixins))
-      expect(mutated_tables(paths, bundles).fetch(:unpositioned_mixins)).to eq("Helper" => ["Greeting"])
+      expect(mutated_tables(paths, bundles).fetch(:unpositioned_mixins)).to eq("Helper" => { extend: ["Greeting"] })
     end
   end
 end

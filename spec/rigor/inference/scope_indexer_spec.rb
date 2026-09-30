@@ -852,7 +852,8 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
       file_index = described_class.discovered_project_index_for_paths([path]).fetch(:def_index)
       parts = []
       described_class.append_ancestry_signature(parts, file_index)
-      expect(parts).to include("i:Foo=ModA,ModB")
+      # Source order, nearest first: the later `include` searches ahead of the earlier one.
+      expect(parts).to include("i:Foo=ModB,ModA")
     end
 
     it "joins a multi-parameter signature with a comma (parameter_signature)" do

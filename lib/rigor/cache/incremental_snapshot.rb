@@ -150,7 +150,10 @@ module Rigor
       # computed it or its cache entry served it. A pre-31 digest is in the old form and would never match, so
       # the next run would go cold anyway; the bump makes that a clean miss instead of a "plugin fact surface
       # changed" note that nothing changed.
-      SCHEMA = 31
+      # 32: each seed bundle gains an `unpositioned_mixins` table — the file's mixin edges whose order is not a
+      # fact (`Scope::DiscoveryIndex#unpositioned_mixins`), which an ancestor-order reader declines on. A pre-32
+      # bundle would fold as "every edge positioned", and a warm run would answer an order a cold run declines.
+      SCHEMA = 32
 
       # The persisted per-file state.
       # `cache` maps an analyzed file to its diagnostics.

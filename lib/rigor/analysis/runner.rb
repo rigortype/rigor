@@ -424,6 +424,7 @@ module Rigor
         @project_discovered_prepends = {}.freeze
         # Issue #898 — the singleton-side twin of the include table (`extend M` / `extend self`).
         @project_discovered_extends = {}.freeze
+        @project_unpositioned_mixins = {}.freeze
         @project_discovered_deferred_ranges = {}.freeze
         # Issue #1120 — `{refined class => {method => [refining modules]}}`, every `refine X do … end` body.
         @project_discovered_refinements = {}.freeze
@@ -1729,6 +1730,7 @@ module Rigor
         @project_discovered_includes = discovery.discovered_includes
         @project_discovered_prepends = discovery.discovered_prepends
         @project_discovered_extends = discovery.discovered_extends
+        @project_unpositioned_mixins = discovery.unpositioned_mixins
       end
 
       # Internal: builds the deferred cross-file discovery tables at most once per run and adopts them.
@@ -2292,12 +2294,14 @@ module Rigor
         tables[:discovered_includes] = @project_discovered_includes unless @project_discovered_includes.empty?
         tables[:discovered_prepends] = @project_discovered_prepends unless @project_discovered_prepends.empty?
         tables[:discovered_extends] = @project_discovered_extends unless @project_discovered_extends.empty?
+        tables[:unpositioned_mixins] = @project_unpositioned_mixins unless @project_unpositioned_mixins.empty?
       end
 
-      # ADR-46 slice 1 / issue #644 — the two SOURCE-ATTRIBUTION tables, read only by the recording accessors
+      # ADR-46 slice 1 / issue #644 — the two SOURCE-ATTRIBUTION tables, read by the recording accessors
       # (`Scope#record_class_dependency` for the class-declaration map, `Scope#record_constant_dependency`
-      # for the constant-write map). A normal run carries neither of the two. Extracted to keep
-      # {#project_scope_seed_tables} under the complexity budget.
+      # for the constant-write map). The class-declaration map rides every run: an ancestor-order reader also
+      # asks whether a class is declared in more than one file. The constant-write map rides only a recording
+      # run. Extracted to keep {#project_scope_seed_tables} under the complexity budget.
       #
       # Issue #617 — the census's binding writes, grouped by last segment, ride every run instead: a constant
       # compound write whose plain read resolves nothing reads its binding off them, a TYPE rather than an edge.
@@ -2307,10 +2311,10 @@ module Rigor
         tables[:constant_writers] = writers unless writers.empty?
         shadowers = constant_shadower_index
         tables[:constant_shadowers] = shadowers unless shadowers.empty?
-        return unless @record_dependencies
-
         tables[:discovered_class_sources] = @project_discovered_class_sources unless
           @project_discovered_class_sources.empty?
+        return unless @record_dependencies
+
         tables[:constant_sources] = @project_constant_sources unless @project_constant_sources.empty?
       end
 

@@ -34,6 +34,7 @@ module Rigor
       :discovered_includes,
       :discovered_prepends,
       :discovered_extends,
+      :unpositioned_mixins,
       :discovered_class_sources,
       :constant_sources,
       :constant_writers,
@@ -79,6 +80,7 @@ module Rigor
           discovered_includes: "the modules each class includes, prepends among them",
           discovered_prepends: "the modules each class prepends",
           discovered_extends: "the modules each singleton mixes in; the module itself for module_function",
+          unpositioned_mixins: "per side, the mixin edges each class records whose order is not a fact, or \"*\"",
           discovered_class_sources: "the files that declare each class, reopenings included",
           discovered_deferred_ranges: "each file's def and block ranges; def rows add owner and module_function side",
           constant_sources: "the files that write each constant",
@@ -274,6 +276,24 @@ module Rigor
         # the table inside the indexer and threw it away; `Narrowing` needs it to survive onto the scope,
         # because `Singleton[C]`'s ancestry is exactly what `extend` writes and nothing else records it.
         discovered_extends: EMPTY_TABLE,
+        # `{qualified class or module name => {include: [names], extend: [names]}}` — the mixin edges of the three
+        # tables above whose ORDER is not a fact, per side (`:include` is the instance side, `include` and
+        # `prepend`; `:extend` the singleton side). An edge is listed when it is written anywhere but as a direct
+        # statement of the class's own body (or its `class << self` body) in a declaration that is itself a
+        # direct statement — inside a `def`, a block, a conditional, or a conditional or deferred declaration —
+        # or in the receiver form, and when it shares an argument list with a name the walk could not record
+        # (`Inference::ScopeIndexer::MixinAccumulator`). A mixin call the walk cannot record at all (`include
+        # helper`, `include(*MODS)`, `send(:include, M)`, `self.include M`, `C.include(M)`,
+        # `singleton_class.include M`, a call on a `self.included(base)`-style hook's parameter, an `*_eval` block on
+        # one or on an opaque receiver whose body mixes a module in) lists the name
+        # `"*"` on the side it reshapes: that side of the owner has no known order. An edge written both ways
+        # is listed. Folded by union. A reader that depends on the order of a class's ancestors MUST decline
+        # when the owner it asks about, or any ancestor it walks through, lists anything on the side it reads;
+        # the three tables themselves are unchanged.
+        unpositioned_mixins: EMPTY_TABLE,
+        # The files that declare each class, reopenings included. Seeded on every run: the ADR-46 recording
+        # accessors read it for their class edges, and an ancestor-order reader reads whether a class is
+        # declared in more than one file, where the order of its mixins across the files is load order.
         discovered_class_sources: EMPTY_TABLE,
         # Issue #644 — `{qualified constant name => Set[declaring file]}`, the write attribution behind the
         # cross-file value-constant table. Read only by `Scope#record_constant_dependency` during ADR-46

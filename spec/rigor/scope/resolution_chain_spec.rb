@@ -176,6 +176,45 @@ RSpec.describe Rigor::Scope::ResolutionChain do
     expect(unsettled.settle(scope, :answer) { raise "an unsettled chain reads no retro world" }).to eq(:master)
   end
 
+  # #1592 — a module's hook-driven singleton edges (`included do extend X end`, `def self.included(base) =
+  # base.extend(X)`) land on the INCLUDER's singleton, which does not draw on the module's own `:extend` side. So
+  # the includer's singleton chain is unsettled when any module in its instance-side include closure lists one, and
+  # its instance chain is not.
+  it "marks a singleton chain unsettled through a hook-driven extend on a module it includes" do
+    scope = scope_for(<<~RUBY)
+      module X; def bar = 1; end
+      module Concern; included do; extend X; end; end
+      module Hook; def self.included(base) = base.extend(X); end
+      module Wrapper; include Concern; end
+      module Plain; end
+      module CM; class_methods do; def z = 1; end; end
+      class ViaCM; include CM; end
+      class ViaConcern; include Concern; end
+      class ViaHook; prepend Hook; end
+      class Deep; include Wrapper; end
+      class Sub < ViaConcern; end
+      class Clean; include Plain; end
+    RUBY
+    %w[ViaConcern ViaHook ViaCM Deep Sub Wrapper].each do |name|
+      expect(chain_of(scope, name, :singleton)).to be_unsettled, name
+    end
+    expect(chain_of(scope, "Clean", :singleton)).not_to be_unsettled
+    expect(chain_of(scope, "Plain", :singleton)).not_to be_unsettled
+    expect(chain_of(scope, "ViaConcern")).not_to be_unsettled
+    expect(chain_of(scope, "Clean")).not_to be_unsettled
+  end
+
+  # The taint follows a class's own include closure: an unrelated class stays settled although a hook module exists.
+  it "leaves an unrelated class's singleton chain settled" do
+    scope = scope_for(<<~RUBY)
+      module X; end
+      module Concern; included do; extend X; end; end
+      class Other; end
+      class User; include Concern; end
+    RUBY
+    expect(chain_of(scope, "Other", :singleton)).not_to be_unsettled
+  end
+
   # The singleton side settles a superclass that only `extend`s to master (its extended modules are not on the
   # chain), and only that: a superclass the project declares for its constants or defs is an ordinary entry.
   it "counts forks for an extends-only superclass on the singleton side and not for any other" do

@@ -322,6 +322,7 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#seed_operator_only_ivars!: grandfathered
     Rigor::Inference::ScopeIndexer#singleton_mixin_recorded?: writes one singleton-side mixin call under the owner the walk passes in; it computes no declaration context
     Rigor::Inference::ScopeIndexer#surface_mixin_call?: grandfathered
+    Rigor::Inference::ScopeIndexer#taint_class_methods_block: a taint, not a declaration; it names a concern's `class_methods do` block as an unknown singleton-side edge on the module's :extend side (`unpositioned_mixins`), and records no def or table entry
     Rigor::Inference::ScopeIndexer#taint_opaque_eval: taints the enclosing owner the walk passes in when an eval block on an opaque receiver mixes a module in; it computes no declaration context
     Rigor::Inference::ScopeIndexer#walk_anonymous_meta_block: grandfathered
     Rigor::Inference::ScopeIndexer#walk_class_cvars: grandfathered
@@ -355,7 +356,7 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#walk_eval_methods_and_defs: grandfathered
     Rigor::Inference::ScopeIndexer#walk_eval_singleton_defs: grandfathered
     Rigor::Inference::ScopeIndexer#walk_eval_visibilities: grandfathered
-    Rigor::Inference::ScopeIndexer#walk_extends_block_call: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_extends_block_call?: grandfathered
     Rigor::Inference::ScopeIndexer#walk_extends_children: the generic child descent of the extend walk, adding a hook's parameters to scope; it derives no declaration context
     Rigor::Inference::ScopeIndexer#walk_extends_children_plain: the generic child descent of the extend walk; the owner and cref arrive from the caller
     Rigor::Inference::ScopeIndexer#walk_extends_declaration: grandfathered
@@ -467,6 +468,7 @@ lib/rigor/scope/resolution_chain.rb:
   producers:
     Rigor::Scope::ResolutionChain::Builder#compute_instance: a consumer, not a declaration producer; it reads `unpositioned_mixins` on the :include side to mark a chain unsettled, and reads the tables raw by design (ADR-24)
     Rigor::Scope::ResolutionChain::Builder#compute_singleton: the singleton-side twin, reading the :extend side
+    Rigor::Scope::ResolutionChain::Builder#extend_side_holders: a consumer, not a declaration producer; it lists the owners whose `unpositioned_mixins` :extend side is non-empty, so `hook_singleton_edges?` can mark an includer's singleton chain unsettled
 lib/rigor/sig_gen/generator.rb:
   computes: the defs, attribute readers and ivar observations sig-gen emits per qualified class
   producers:

@@ -6116,9 +6116,10 @@ module Rigor
                                           in_singleton: in_singleton, singleton_self: singleton_self,
                                           singleton_cref: singleton_cref)
           end
-          if node.block.is_a?(Prism::BlockNode)
-            return walk_extends_block_call(node, qualified_prefix, current_class, accumulator,
-                                           in_singleton, singleton_self, singleton_cref)
+          if node.block.is_a?(Prism::BlockNode) &&
+             walk_extends_block_call?(node, qualified_prefix, current_class, accumulator,
+                                      in_singleton, singleton_self, singleton_cref)
+            return
           end
         end
 
@@ -6194,17 +6195,19 @@ module Rigor
       # (only `def` rebinding differs, and defs are not this table's facts) — while a
       # `define_method` body or an unnamed `Class.new { … }`-family block runs on an object
       # nothing names, so its `extend` walks ownerless.
-      def walk_extends_block_call(node, qualified_prefix, current_class, accumulator,
-                                  in_singleton, singleton_self, singleton_cref)
+      def walk_extends_block_call?(node, qualified_prefix, current_class, accumulator,
+                                   in_singleton, singleton_self, singleton_cref)
         if %i[instance_eval instance_exec].include?(node.name)
-          return walk_eval_extends_call(node, qualified_prefix, current_class, accumulator,
-                                        in_singleton: in_singleton, singleton_self: singleton_self,
-                                        singleton_cref: singleton_cref)
+          walk_eval_extends_call(node, qualified_prefix, current_class, accumulator,
+                                 in_singleton: in_singleton, singleton_self: singleton_self,
+                                 singleton_cref: singleton_cref)
+          return true
         end
-        return unless node.name == :define_method || meta_new_constant_rvalue?(node)
+        return false unless node.name == :define_method || meta_new_constant_rvalue?(node)
 
         walk_extends_opaque_block(node, qualified_prefix, current_class, accumulator,
                                   in_singleton, singleton_self, singleton_cref)
+        true
       end
 
       # A block whose `self` is an object this walk cannot name — a `define_method` body (its
@@ -6326,6 +6329,7 @@ module Rigor
         return record_module_function(node, current_class, accumulator, in_singleton) if node.name == :module_function
 
         taint_opaque_eval(node, current_class, accumulator)
+        taint_class_methods_block(node, current_class, accumulator)
 
         kind, _arguments, via_send = mixin_call_view(node)
         return if kind.nil?
@@ -6336,6 +6340,14 @@ module Rigor
         return if !via_send && singleton_mixin_recorded?(node, kind, current_class, accumulator, in_singleton)
 
         effects.each { |owner, side| accumulator.taint(owner, side) }
+      end
+
+      # A concern's `class_methods do … end` block defines the module every includer extends: a singleton-side
+      # edge no `extend` writes, so the module's own `:extend` side is named as having an unknown edge.
+      def taint_class_methods_block(node, current_class, accumulator)
+        return unless current_class && node.name == :class_methods && node.receiver.nil? && node.block
+
+        accumulator.taint(current_class, :extend)
       end
 
       # The bare `module_function` toggle: the module extends itself. A direct statement only.

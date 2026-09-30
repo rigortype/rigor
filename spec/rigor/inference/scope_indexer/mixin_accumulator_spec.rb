@@ -77,6 +77,57 @@ RSpec.describe Rigor::Inference::ScopeIndexer::MixinAccumulator do
     end
   end
 
+  # #1592 — the extends walk dropped every block it did not recognise as a class body, so a singleton-side mixin
+  # written in one was neither recorded nor named. The edge is now recorded (so the readers' own walk sees it)
+  # and named on the owner's `:extend` side (so the resolution chain does not trust its position).
+  context "when a singleton-side mixin is written in a block (#1592)" do
+    {
+      "[1].each { extend M }" => "extend in a plain block",
+      "[1].each { class << self; include M; end }" => "class << self; include in a plain block",
+      "[1].each { class << self; prepend M; end }" => "class << self; prepend in a plain block",
+      "helper(-> { extend M })" => "extend in a lambda argument of a block-less call",
+      "helper { [1].each { extend M } }" => "extend in a nested block",
+      "def self.boot = [1].each { extend M }" => "extend in a block inside a method"
+    }.each do |body, label|
+      it "records and names #{label}" do
+        source = "class C\n  #{body}\nend\n"
+
+        expect(index_of(source).fetch(:extends)).to eq("C" => ["M"]), body
+        expect(unpositioned(source)).to eq("C" => { extend: ["M"] }), body
+      end
+    end
+
+    it "leaves the instance side alone" do
+      expect(unpositioned("class C\n  include A\n  [1].each { extend M }\nend\n")).to eq("C" => { extend: ["M"] })
+    end
+
+    it "taints the extend side of a block extend whose argument cannot be named" do
+      expect(unpositioned("class C\n  [1].each { |m| extend m }\nend\n")).to eq("C" => wild(:extend))
+    end
+
+    it "keeps a `Class.new` block on its own class, not the enclosing one" do
+      source = "class C\n  K = Class.new { extend M }\n  Struct.new(:a) { extend N }\nend\n"
+
+      expect(index_of(source).fetch(:extends)).to eq("C::K" => ["M"])
+    end
+
+    it "keeps a receiver on a plain block off the enclosing class" do
+      expect(unpositioned("class C\n  [1].each { obj.extend(M) }\nend\n")).to eq({})
+    end
+
+    it "taints the extend side of a module with a `class_methods do` block" do
+      source = "module Concern\n  extend ActiveSupport::Concern\n  class_methods do\n    def z = 1\n  end\nend\n"
+
+      expect(unpositioned(source)).to eq("Concern" => wild(:extend))
+    end
+
+    it "records the extend inside a concern's `included do`, on the concern, named unpositioned" do
+      source = "module Concern\n  included do\n    extend M\n  end\nend\n"
+
+      expect(unpositioned(source)).to eq("Concern" => { extend: ["M"] })
+    end
+  end
+
   context "when a mixin call cannot be recorded" do
     # Every form leaves the direct `include A` recorded, so without the taint the class would read positioned.
     {

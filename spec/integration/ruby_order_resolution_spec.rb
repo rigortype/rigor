@@ -538,4 +538,66 @@ RSpec.describe "resolution in Ruby's ancestor order (#1567, #1568, #1570, #1571)
       D.new.bar.upcase
     RUBY
   end
+
+  # #1592 — a singleton-side mixin written in a block, a method or a hook. The extend walk dropped every block it
+  # did not recognise, so `[1].each { extend X }` recorded nothing and the singleton chain stood without `X`. Ruby
+  # prints "X" for each `K.bar` below. The control on the same source (`Kc`, no mixin) must still fire, so a run
+  # that analysed nothing cannot pass by reporting nothing.
+  describe "a singleton-side mixin inside a block, method or hook (#1592)" do
+    let(:prelude) do
+      "module X; def bar = \"X\"; end\nclass Base; def self.bar = 1; def self.baz = 1; end\n" \
+        "class Kc < Base; end\nKc.baz.upcase\n"
+    end
+    let(:control) { [[4, "call.undefined-method"]] }
+
+    it "records an `extend` inside a block" do
+      expect(diagnostics_for("#{prelude}class K < Base\n  [1].each { extend X }\nend\nK.bar.upcase\n")).to eq(control)
+    end
+
+    it "records a `class << self; include` inside a block" do
+      source = "#{prelude}class K < Base\n  [1].each { class << self; include X; end }\nend\nK.bar.upcase\n"
+      expect(diagnostics_for(source)).to eq(control)
+    end
+
+    it "keeps an `extend` inside a method body" do
+      source = "#{prelude}class K < Base\n  def self.setup = extend(X)\nend\nK.setup\nK.bar.upcase\n"
+      expect(diagnostics_for(source)).to eq(control)
+    end
+
+    it "keeps a `class << self; include` inside a method body" do
+      source = "#{prelude}class K < Base\n  def self.setup; class << self; include X; end; end\nend\n" \
+               "K.setup\nK.bar.upcase\n"
+      expect(diagnostics_for(source)).to eq(control)
+    end
+
+    # flip this when #1592 is fixed: Ruby prints "X" for `K.bar`, so the second diagnostic is a false positive.
+    # The includer's singleton chain is now unsettled (the concern lists `X` on its `:extend` side), so the
+    # reader answers master's order, and master's walk does not see the includer's hook-driven edge either.
+    # Modelling `included do` / `class_methods do` belongs to a follow-up ADR.
+    it "still types a read through a concern's `included do extend X end` from master's order" do
+      source = <<~RUBY
+        #{prelude}module C
+          extend ActiveSupport::Concern
+          included do
+            extend X
+          end
+        end
+        class K < Base; include C; end
+        K.bar.upcase
+      RUBY
+      expect(diagnostics_for(source)).to eq(control + [[12, "call.undefined-method"]])
+    end
+
+    # flip this when #1592 is fixed: Ruby prints "X" for `K.bar`; same shape as the concern above.
+    it "still types a read through a `self.included(base)` hook that extends the includer from master's order" do
+      source = <<~RUBY
+        #{prelude}module H
+          def self.included(base) = base.extend(X)
+        end
+        class K < Base; include H; end
+        K.bar.upcase
+      RUBY
+      expect(diagnostics_for(source)).to eq(control + [[9, "call.undefined-method"]])
+    end
+  end
 end

@@ -1588,11 +1588,33 @@ module Rigor
       # Excluded, each because its expansion is already the one it means: the LSP `prebuilt:` path (which
       # seeds discovery from a snapshot), editor `buffer:` mode, `run_source`'s in-memory single file, and
       # ADR-46's `analyze_only` subset mode (which already passes the full expansion and filters later).
+      #
+      # Issue #1556 — the widened set holds each FILE once. `.rigor.yml`'s `paths:` load as absolute paths and a
+      # path argument usually does not, so `rigor check lib` widened discovery over both spellings of every file:
+      # the pre-pass then saw two writers for every constant a file declares and withheld its publication (#644),
+      # and every file was a discovered-not-analysed dependency of the run's cache entry.
+      #
+      # The widening decision itself still compares the paths as spelled. `exclude:` patterns match a path as it
+      # is spelled, so the configured absolute `lib` can discover files the argument `lib` excludes (a relative
+      # `lib/gen/**` pattern never matches `/abs/lib/gen/x.rb`), and treating the two as the same root would drop
+      # those files from discovery.
       def project_discovery_expansion(paths, expansion)
         return nil unless widen_discovery_to_project?(paths)
 
-        widened = expand_paths(@configuration.paths | paths)
-        widened.fetch(:files).size > expansion.fetch(:files).size ? widened : nil
+        analysed = expansion.fetch(:files)
+        files = discovery_files(expand_paths(@configuration.paths | paths).fetch(:files), analysed)
+        # Overlapping arguments (`lib lib/user.rb`) name an analysed file twice; the widened set names it once.
+        files.size > analysed.uniq { |path| File.expand_path(path) }.size ? { files: files, errors: [] } : nil
+      end
+
+      # Each file once, in project order, under the spelling the analysis uses when it is analysed.
+      def discovery_files(project_files, analysed_files)
+        spelling = analysed_files.to_h { |path| [File.expand_path(path), path] }
+        seen = Set.new
+        project_files.filter_map do |path|
+          absolute = File.expand_path(path)
+          spelling.fetch(absolute, path) if seen.add?(absolute)
+        end
       end
 
       def widen_discovery_to_project?(paths)
@@ -1611,7 +1633,7 @@ module Rigor
 
       private :run_project_pre_passes, :adopt_prebuilt_project_scan, :apply_pre_passes_result,
               :apply_discovery_result, :ensure_project_discovery, :force_eager_discovery?,
-              :project_discovery_expansion, :widen_discovery_to_project?
+              :project_discovery_expansion, :discovery_files, :widen_discovery_to_project?
 
       # Ruby versions probed (ascending) to discover the lowest one this Prism build accepts for
       # `version:`. Prism exposes no version list, so the floor is found empirically — only when a

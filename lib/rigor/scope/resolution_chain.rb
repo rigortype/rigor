@@ -716,7 +716,9 @@ module Rigor
               sub.each do |entry|
                 found = @retro ? nil : entries.index(entry)
                 if found
-                  @frames.last.skips += 1
+                  # A module the class's prepended modules already carry is skipped only if they got it before
+                  # this include ran, which the tables cannot tell: two more forks.
+                  @frames.last.skips += found < origin ? 3 : 1
                   point = found if found > point && found < super_start
                 else
                   entries.insert(point + 1, entry)

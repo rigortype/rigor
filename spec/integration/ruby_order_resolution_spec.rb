@@ -339,6 +339,23 @@ RSpec.describe "resolution in Ruby's ancestor order (#1567, #1568, #1570, #1571)
     RUBY
   end
 
+  # Round-1 review, fuzzer find. `M0` was prepended empty and includes `M3` last; `Base` reached `M3` through
+  # `M2` first, so the prepended `M0` gets no `M3` of its own and `C`'s `X` is `Base`'s. A module the prepend
+  # region carries and a later include skips is order-dependent, which settles the chain to master's order.
+  it "does not read a constant from a module a prepended module got after the class's include reached it" do
+    expect(diagnostics_for(<<~RUBY)).to eq([])
+      module M0; end
+      module M2; end
+      module M3; X = "m3"; end
+      class Base; X = 1; end
+      class C < Base; def bar = X.even?; end
+      module M2; include M3; end
+      class Base; prepend M0; end
+      class Base; include M2; end
+      module M0; include M3; end
+    RUBY
+  end
+
   # The singleton side resolved a class that only `extend`s as an external entry, so the modules it extends
   # vanished from the chain and the skip among them went uncounted.
   it "does not type a singleton method from a module a class that only extends carries" do

@@ -106,8 +106,8 @@ module Rigor
         # propagates it across every derived scope.
         # Issue #722 residue 2 — the project's settled declaration names are the oracle the file's own
         # compact headers are re-anchored against. `discovered_class_sources` would be the more direct
-        # reading, but it is seeded only under `--record-dependencies`; this table is the one every run
-        # carries, and the fold has already applied its own re-anchoring to it.
+        # reading, but it names files rather than settled declarations, and the fold has already applied its
+        # own re-anchoring to this table.
         declared_types, discovered_classes =
           build_declaration_artifacts(root, default_scope.discovered_classes.keys.to_set)
         # Merge the indexer's findings on top of whatever the base scope already carries so callers that seed cross-file

@@ -931,6 +931,37 @@ RSpec.describe Rigor::Analysis::IncrementalRunSlot do
     end
   end
 
+  # `.rigor.yml`'s paths load as absolute paths, and `rigor check --incremental lib` names the same root relatively.
+  # Discovery widened to the configured paths once per file under both spellings (#1556), so the run recorded a
+  # discovered-not-analysed row for every analysed file, and the first edit left the chain stale for good.
+  it "keeps serving after an edit when the path argument names a configured path" do
+    write_project
+    write(".rigor.yml", "paths:\n  - lib\n")
+    config = Rigor::Configuration.load(".rigor.yml")
+    incremental_run(config, paths: %w[lib])
+    expect(served(config, paths: %w[lib])).not_to be_nil
+
+    write("lib/c.rb", "class Other\n  def go\n    2\n  end\nend\n")
+    diagnostics, warm = incremental_run(config, paths: %w[lib])
+    expect(warm).to be(true)
+    expect(rows(served(config, paths: %w[lib]).result.diagnostics)).to eq(rows(diagnostics))
+  end
+
+  # A file list widens discovery to the configured paths, which name the listed file again under its absolute
+  # spelling; the listed file must not become a discovered-not-analysed row of its own.
+  it "keeps serving after an edit to the one file a file-list run analyses" do
+    write_project
+    write(".rigor.yml", "paths:\n  - lib\n")
+    config = Rigor::Configuration.load(".rigor.yml")
+    incremental_run(config, paths: %w[lib/c.rb])
+    expect(served(config, paths: %w[lib/c.rb])).not_to be_nil
+
+    write("lib/c.rb", "class Other\n  def go\n    2\n  end\nend\n")
+    diagnostics, warm = incremental_run(config, paths: %w[lib/c.rb])
+    expect(warm).to be(true)
+    expect(rows(served(config, paths: %w[lib/c.rb]).result.diagnostics)).to eq(rows(diagnostics))
+  end
+
   it "writes no slot with effect collection on, whose configuration the key does not carry" do
     write_project
     write(".rigor.yml", "paths:\n  - lib\neffects: {}\n")

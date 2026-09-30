@@ -101,8 +101,19 @@ The criterion, reusable for any cache that would become a default route:
     unsound (#1553). Narrower responses are later amendments, each with its own proof. For per-file
     reads, that proof needs a plugin-declared contract that the plugin keeps no cross-file memo.
   - **A snapshot written without a complete chain is not reusable**, and the next run is a full
-    baseline. Today the chain is missing under a worker pool, with no recording, and for a read
-    attributed to no file.
+    baseline. Today the chain is missing under a worker pool, with no recording, and when a plugin
+    makes a read that is credited to no file (one from a thread it started).
+  - **WD1 lands together with pool support.** Workers send their credited reads back, as
+    `PoolCoordinator` already does with dependency records, and the main process builds the baseline
+    part, so a pool run records a complete chain. Without this, WD1 would make every explicit
+    `--incremental --workers N` run cold.
+  - A run with an uncredited read records that in the same marker as opacity (WD5).
+  - **The chain moves into the snapshot.** It is carried inside the snapshot rather than from the
+    previous slot. `IncrementalSession#carry_chain`'s snapshot-identity check retires, and so does
+    ADR-45's case of a slot that stays off indefinitely after a pool run, a `--no-cache` run or a
+    cache restore.
+  - Validating the `pinned` rows, the signature files of the gems and the engine, costs stats on
+    every recheck. G3 measures that cost.
   - **Gate:** a spec enumerates the row kinds the carried part emits, taken from the builders
     themselves. Each kind needs an example that primes, edits that input in a new process, and
     asserts the warm answer equals a `--no-cache` run. A new row kind without an example fails the
@@ -118,17 +129,23 @@ The criterion, reusable for any cache that would become a default route:
   would leave those users with no snapshot at all.
 - **WD4 — One tail.** The default miss path, the plain slot hit, the incremental path and the
   incremental slot hit end in one tail. That tail writes the `config_warnings` block, CI-native
-  annotations, the `--baseline-strict` verdict and `--explain` output (#1533), and runs eviction.
-  - A run served from a slot, or a warm recheck, prints no run stats and no trace appendices, as a
-    plain hit already does. Their RBS counts describe an environment such a run never built.
+  annotations, the `--baseline-strict` verdict and `--explain` output (#1533). Eviction runs on the
+  miss paths, the default miss and the full incremental path. A slot hit defers it, as today, so a
+  null run pays for no walk of the store.
+  - Only a run that built the environment prints the run stats block and trace appendices: a
+    default miss or a cold incremental baseline. A run served from a slot, or a warm recheck, prints
+    neither, as a plain hit already does. Their RBS counts describe an environment such a run never
+    built.
   - The `--incremental warm / cold` banner and ADR-88's fact-surface notes print only when
     `--incremental` or `incremental: true` asked for the route. A default run's stderr stays as it
     is today.
   - **Gate:** extend #1552's CLI spec. Every output-affecting flag and format goes through each
     route, and must produce byte-identical stdout, the same exit code, and stderr that is equal once
-    normalised for timings.
-- **WD5 — `incremental: auto | true | false`.** The CLI switch `--[no-]incremental` beats the key.
-  The default becomes `auto` at the flip. `auto` takes the incremental route unless one of the
+    timings and the stats block are normalised away.
+- **WD5 — `incremental: auto | true | false`.** The CLI switch `--[no-]incremental` beats the
+  environment variable `RIGOR_INCREMENTAL` (same values), which beats the key. The variable is a
+  route-only override: the spec helper pins it, as it pins `RIGOR_CI_DETECT`, so specs take the
+  same route everywhere. The default becomes `auto` at the flip. `auto` takes the incremental route unless one of the
   following holds:
   - **The run is excluded from the incremental slot probe** (`incremental_run_hit_eligible?`):
     - an editor buffer;
@@ -137,19 +154,24 @@ The criterion, reusable for any cache that would become a default route:
     - `--coverage`, since a report run gains nothing from it;
     - `--cache-stats` or a `RIGOR_*_TRACE` probe;
     - a worker pool, until workers send their reads back (WD1).
-  - **The run names file or directory arguments** other than the configured `paths:`. A pre-commit
+  - **The run names file or directory arguments** other than the configured `paths:`, compared
+    after normalising both as `IncrementalRunSlot.normalize_roots` does (`./lib` is `lib`). A pre-commit
     hook or an editor's "check this file" would otherwise pay for recording and replace the project
     snapshot with one that nothing reuses. Serving a subset run from the project snapshot is
     deferred until a measurement asks for it.
   - **The environment is CI.** The predicate is `CiDetector`'s provider table with
     `RIGOR_CI_DETECT` ignored, because that switch silences annotations and must not move a job's
-    route. A CI job usually starts cold, and it is where merge decisions are made. On its current
+    route. A generic truthy `CI` counts, so a dev container that sets it takes the full route unless
+    `RIGOR_INCREMENTAL` says otherwise. A CI job usually starts cold, and it is where merge decisions are made. On its current
     route it pays for no recording and changes nothing at the gate of record. A job that persists
     `.rigor/cache` opts in with `incremental: true`.
   - **Effects are enabled** (ADR-103). The session writes no slot then, so null runs would lose
     their engine-free path.
-  - **The previous run found an opaque plugin** (ADR-88, #924). Opacity is known only after
-    `#prepare`, so the session records it in the store, and `auto` reads it on the next run. The
+  - **The previous run found an opaque plugin** (ADR-88, #924), **or a read credited to no file**
+    (WD1). Opacity is known only after `#prepare`, so a marker in the store records it, and `auto`
+    reads it on the next run. The marker is keyed like the fingerprint, by the configuration and
+    the plugins' identity. Every run that prepares plugins rewrites it, the full route included
+    (`PluginFactFingerprint.from_registry`), so a marker cannot outlive the plugin it names. The
     first run pays. An opaque project re-analyses everything on every incremental run, and today
     after a recheck as well, so the full route is strictly cheaper for it.
 - **WD6 — Other readers of the snapshot.** The language server primes from it
@@ -163,9 +185,10 @@ The criterion, reusable for any cache that would become a default route:
     routes and does not block.
   - **G2 (parity):** WD4 has landed, and `--verify-incremental` compares order as well as the set
     (#1542).
-  - **G3 (cost):** on `engine-warm.yml`, with `incremental: true` against `false` set explicitly
-    (the job runs on CI, where `auto` would choose the full route), every journey is no slower on the
-    incremental route. That includes a file-argument run. On `engine-wall.yml`, a cold incremental
+  - **G3 (cost):** on `engine-warm.yml`, every warm journey (null, leaf, hub) is no slower with
+    `incremental: true` than with `false`. Both are set explicitly, because the job runs on CI, where
+    `auto` would take the full route. With `RIGOR_INCREMENTAL=auto` and the CI predicate bypassed, a
+    file-argument run takes the full route and is no slower than today. On `engine-wall.yml`, a cold incremental
     run into an empty cache directory costs at most 10% more than a cold plain run, on Mastodon and
     on Rigor's own `lib`. The comparison uses the lower of five runs and total allocations, since the
     ±7% CI spread (ADR-50) is too wide for one sample. Today's single samples are +27% and +10%
@@ -209,14 +232,17 @@ The criterion, reusable for any cache that would become a default route:
   - Any stale carried row forces a full baseline, so a `sig/` edit costs a cold run until
     per-kind refinements land.
   - The first run of a project with an opaque plugin pays for recording once.
+  - A warm local run no longer prints the run stats block; only runs that built the environment
+    print it.
 - **In the same changes:** `docs/internal-spec/cache.md` § "Two-level gating", the Caching and CLI
   manual pages, and ADR-46's status line.
 
 ## Relationship to other ADRs
 
 - [ADR-45](45-unchanged-project-fast-path.md): WD2's carried chain becomes the snapshot's validity
-  check (WD1), and the snapshot, not the slot, owns it. After the flip, only runs on the full route
-  write the plain slot.
+  check (WD1), and the snapshot, not the slot, owns it. § "Why the chain holds together" is amended:
+  the snapshot-identity check retires. After the flip, only runs on the full route write the plain
+  slot.
 - [ADR-46](46-incremental-dependency-graph.md): WD1–WD3 amend the snapshot's validity check and key.
   The dependency graph is unchanged.
 - [ADR-50](50-release-engineering-and-stability-strategy.md): the preview mechanism (WD8) and the
@@ -226,5 +252,5 @@ The criterion, reusable for any cache that would become a default route:
 - [ADR-88](88-incremental-plugin-fact-soundness.md): the fact digest stays in the key. Opaque
   plugins take the full route (WD5).
 - [ADR-103](103-effect-labels.md): an effects-enabled project takes the full route under `auto`
-  until the session writes a slot with effects on. If `effects-on-by-default` graduates first, G3
-  must be measured again.
+  until the session writes a slot with effects on. If `effects-on-by-default` graduates before that,
+  `auto` takes the full route everywhere, and the flip waits for it.

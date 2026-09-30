@@ -311,12 +311,12 @@ module Rigor
       # `[class_name, …ancestors]`, memoised per class. Cycle-guarded and capped: the tables are *as
       # written*, so a project can spell an ancestry that loops.
       #
-      # Included and prepended modules are walked beside the superclass, nearer first, because that is
-      # Ruby's own lookup order and because a framework's contract is as often a module as a base class:
-      # a Sidekiq worker is `class TriggerWebhookWorker; include Sidekiq::Job`, with no base class at all,
-      # so a superclass-only walk could not match a row about it however the plugin spelled one (#456).
-      # `ExpressionTyper#enqueue_ancestors` already resolves a self-call this way; the two tables
-      # disagreeing about what an ancestor is was the bug.
+      # Included and prepended modules are walked beside the superclass, nearer first, because a framework's
+      # contract is as often a module as a base class: a Sidekiq worker is `class TriggerWebhookWorker;
+      # include Sidekiq::Job`, with no base class at all, so a superclass-only walk could not match a row
+      # about it however the plugin spelled one (#456). Breadth-first is close to Ruby's lookup order but not
+      # it (a module an included module includes comes after the superclass here); `Scope::ResolutionChain`
+      # is the exact order, and this walk over the plugin facts' own copy of the tables does not read it yet.
       def ancestry(class_name)
         @ancestry[class_name] ||= begin
           chain = []

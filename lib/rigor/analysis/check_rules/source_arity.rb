@@ -14,9 +14,10 @@ module Rigor
       # Asked in two stages, because every condition past the first can only WITHHOLD a firing:
       #
       # 1. {#owner_envelope} walks the receiver's superclass chain to the first class whose own body, or one of
-      #    whose project mixins, records the name. Every record at that level must agree — `include` and
-      #    `prepend` share one table, so a mixin's definition may shadow the class's own — and none may be
-      #    opaque. A call that fits this envelope is silent, and nothing below is consulted.
+      #    whose project mixins, records the name. Every record at that level must agree — deliberately wider
+      #    than Ruby's order, so a mixin whose definition may shadow the class's own, or a load-order-dependent
+      #    pair (#986), declines instead of answering — and none may be opaque. A call that fits this envelope
+      #    is silent, and nothing below is consulted.
       # 2. {#authoritative?} runs only for a call that would fire. It declines when a `method_missing` /
       #    `respond_to_missing?` hook or a dynamic-surface mark sits anywhere in the chain; when a mixin the
       #    project does not declare is not a known RBS module that lacks the name; when a `pre_eval:` patch or
@@ -29,12 +30,18 @@ module Rigor
       # arity (the envelope's required-keyword flag declines, as `compute_arity_envelope` declines an RBS
       # function with required keywords); and a `class_eval` whose receiver is not a constant, which the
       # discovery walk cannot name.
-      class SourceArity
+      class SourceArity # rubocop:disable Metrics/ClassLength
         MISSING_HOOKS = %i[method_missing respond_to_missing?].freeze
         private_constant :MISSING_HOOKS
 
         # One class on the walk: its own name, the project modules its mixins resolve to (transitively through
         # their own `include`s), and the candidate-name lists of the mixins that resolve to no project module.
+        #
+        # Issue #1570 — the level is a SEGMENT of the receiver's `Scope::ResolutionChain` (`:arity` flavor): the
+        # class with the modules Ruby inserts around it before the superclass's entries begin. Ruby skips an
+        # `include` of a module the superclass chain already carries, so `class C < Base; include M` where
+        # `Base` includes `M` leaves `M` at `Base`'s level; collecting every module a class's own `include`s
+        # name put it at `C`'s level instead, where its `def` answered a call `Base#foo` receives.
         Level = Data.define(:class_name, :modules, :externals)
         private_constant :Level
 
@@ -95,20 +102,43 @@ module Rigor
 
         private
 
+        # ADR-24 / #1570 — `Scope::ResolutionChain#settle` decides whether the chain's owner stands. Where a
+        # skipped `include` would put a different envelope first, which definition the call reaches depends on
+        # the order the bodies ran, and the walk answers from the levels it read before the chain
+        # (`Scope::ResolutionChain::MasterOrder`). Both worlds' levels are kept for {#authoritative?}.
         def walk_to_owner(class_name)
           @levels = []
           @passed = []
-          walked_whole_chain?(class_name) do |current|
-            level = level_for(current)
+          @master = false
+          chain = arity_chain(class_name)
+          envelope = owner_in(chain_levels(chain).first)
+          # The retro read answers `false` (no envelope is `false`) unless it agrees with the chain's and neither
+          # read was ambiguous (`@ambiguous` only ever turns true, so it covers both).
+          verdict = chain.settle(@scope, envelope) do |retro|
+            owner_in(chain_levels(retro).first) == envelope && !@ambiguous ? envelope : false
+          end
+          return envelope if verdict == :chain
+
+          @levels = []
+          @passed = []
+          @owner_entries = []
+          @ambiguous = false
+          @master = true
+          @envelope = nil
+          owner_in(master_levels(class_name).first)
+        end
+
+        def owner_in(levels)
+          levels.each do |level|
             @levels << level
             found = level_envelopes(level)
             if found.empty?
-              @passed.concat([current] + level.modules)
+              @passed.concat([level.class_name] + level.modules)
               next
             end
 
             envelope = found.first
-            @owner_entries = owner_entries(level)
+            @owner_entries |= owner_entries(level)
             unless found.all?(envelope) && !Source::ParameterEnvelope.opaque?(envelope)
               @ambiguous = true
               return nil
@@ -155,56 +185,36 @@ module Rigor
           @scope.discovered_classes.key?(name) || Rigor::Reflection.rbs_class_known?(name, scope: @scope)
         end
 
-        # False when the walk stopped at the ADR-41 budget rather than at the top of the chain: budget
-        # exhaustion is uncertainty, and every caller reads it as a reason to decline.
-        def walked_whole_chain?(class_name)
-          current = class_name.to_s
-          seen = {}
-          while current && !seen[current]
-            return false if seen.size >= Scope::ANCESTOR_WALK_LIMIT
-
-            seen[current] = true
-            yield current
-            current = resolve(current, @scope.superclass_of(current))
-          end
-          true
+        # Yields each level of `class_name`'s walk — the chain's, or master's where {#walk_to_owner} fell back to
+        # it. False when the walk stopped at the ADR-41 budget rather than ending: budget exhaustion is
+        # uncertainty, and every caller reads it as a reason to decline.
+        def walked_whole_chain?(class_name, &)
+          levels, whole = @master ? master_levels(class_name) : chain_levels(arity_chain(class_name))
+          levels.each(&)
+          whole
         end
 
-        def level_for(class_name)
-          modules = []
-          externals = []
-          collect_mixins(class_name, own_mixins(class_name), modules, externals, {})
-          Level.new(class_name: class_name, modules: modules, externals: externals)
+        # `[levels, whole]` for one world of the chain, up to the first superclass the project does not declare.
+        def chain_levels(chain) = [chain.levels.map { |level| Level.new(*level) }, !chain.truncated?]
+
+        def master_levels(class_name)
+          levels, whole = Scope::ResolutionChain::MasterOrder.arity_levels(@scope, class_name.to_s, side)
+          [levels.map { |level| Level.new(*level) }, whole]
         end
+
+        def side = @kind == :singleton ? :singleton : :instance
 
         # Instance methods reach a receiver through `include` / `prepend`; class methods through `extend`, and
-        # an extended module's own `include`s reach the same singleton.
-        def own_mixins(class_name)
-          @kind == :singleton ? (@scope.discovered_extends[class_name] || []) : @scope.includes_of(class_name)
-        end
-
-        # Issue #986 — a name the compact-header rename collision left ambiguous resolves to no ONE class,
-        # but BOTH classes it names are ancestors at runtime; only their MRO order is unknowable. Taking
-        # both as levels is what keeps this rule alive for the rest of the receiver: a method only one of
-        # them declares still has one envelope and still fires, a method they disagree about lands two on
-        # `#envelope_for`'s join and declines there, and the class's own `def`s, its superclass's and its
-        # unambiguous mixins are untouched. Letting the decline arrive as an unknown EXTERNAL mixin instead
-        # suppressed the rule for every level of the receiver.
-        def collect_mixins(owner, raw_names, modules, externals, seen)
-          raw_names.each do |raw|
-            resolved = resolve(owner, raw)
-            names = resolved ? [resolved] : @scope.ambiguous_ancestor_resolutions(owner, raw)
-            next externals << @scope.ancestor_name_candidates(owner, raw) if names.empty?
-
-            names.each do |name|
-              next if seen[name]
-
-              seen[name] = true
-              modules << name
-              collect_mixins(name, @scope.includes_of(name), modules, externals, seen)
-            end
-          end
-        end
+        # an extended module's own `include`s reach the same singleton — the chain's singleton side.
+        #
+        # Issue #986 — the `:arity` flavor expands a name the compact-header rename collision left ambiguous
+        # to BOTH classes it names: both are ancestors at runtime and only their MRO order is unknowable. Taking
+        # both into the level is what keeps this rule alive for the rest of the receiver: a method only one of
+        # them declares still has one envelope and still fires, a method they disagree about lands two on the
+        # level's join and declines there, and the class's own `def`s, its superclass's and its unambiguous
+        # mixins are untouched. Letting the decline arrive as an unknown EXTERNAL mixin instead suppressed the
+        # rule for every level of the receiver.
+        def arity_chain(class_name) = Scope::ResolutionChain.for(@scope, class_name.to_s, side, :arity)
 
         def resolve(owner, raw)
           return nil if raw.nil?
@@ -273,8 +283,8 @@ module Rigor
         # A hook anywhere in the chain, including above the owner, and on either side: a class that answers
         # names it does not define is a class whose `def`s are not the whole story of what a call reaches.
         def chain_free_of_hooks?(class_name)
-          walked_whole_chain?(class_name) do |current|
-            ([current] + level_for(current).modules).each do |name|
+          walked_whole_chain?(class_name) do |level|
+            ([level.class_name] + level.modules).each do |name|
               envelopes = @scope.parameter_envelopes_of(name)
               return false if dynamic_surface?(name)
               return false if MISSING_HOOKS.any? { |hook| hook_recorded?(envelopes, hook) }
@@ -290,11 +300,23 @@ module Rigor
         # receiver may be any of them, and each one's own definition of the name is what runs for it.
         def subclasses_agree?(class_name, envelope)
           each_subclass(class_name) do |subclass|
-            level = level_for(subclass)
-            return false unless clean_level?(level)
-            return false unless level_envelopes(level).all?(envelope)
+            subclass_levels(subclass).each do |level|
+              # A subclass whose own level the budget cut cannot be read, which is a reason to decline.
+              return false if level.nil?
+              return false unless clean_level?(level)
+              return false unless level_envelopes(level).all?(envelope)
+            end
           end
           true
+        end
+
+        # A subclass's own level (nil where the budget cut it): the chain's where `settle` lets it stand, and
+        # master's where it does not.
+        def subclass_levels(subclass)
+          chain = arity_chain(subclass)
+          own = chain_levels(chain).first.first
+          verdict = chain.settle(@scope, own) { |retro| chain_levels(retro).first.first }
+          [verdict == :chain ? own : master_levels(subclass).first.first]
         end
 
         def each_subclass(class_name)

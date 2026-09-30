@@ -6,7 +6,7 @@ require "spec_helper"
 # (ADR-8) and the three ADR-35 override rules (`def.override-visibility-reduced`,
 # `def.override-return-widened`, `def.override-param-narrowed`), together with the ancestry and
 # RBS-signature helpers they share (`body_last_expression`, `declared_return_union`,
-# `each_project_ancestor`, `ancestor_class_names`, `resolve_override_ancestor_name`, `defined_on?`,
+# `each_project_ancestor` (over `Scope::ResolutionChain`), `defined_on?`,
 # `ancestor_instantiation_type_vars`).
 #
 # Authored from a mutation-recon pass over `check_rules.rb`, which found this the densest surviving
@@ -539,7 +539,7 @@ RSpec.describe "return-type and Liskov override rules", type: :runner do
       end
     end
 
-    describe "ancestor_class_names / resolve_override_ancestor_name" do
+    describe "the override walk's ancestor order and name resolution" do
       it "orders included modules ahead of the superclass" do
         # Both `Mixin` and `Base` define `tag`; the includes are collected first, so the
         # breadth-first walk resolves the module as the parent.

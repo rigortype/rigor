@@ -30,10 +30,11 @@ module Rigor
     #
     # There is deliberately NO memo here. The dispatch consumer this module is being extracted FOR does
     # not exist yet, and a memo keyed on the tables this slice happens to name would be keyed on less
-    # than the walk reads — `Scope#resolve_ancestor_class_name` consults `discovered_def_nodes` and
-    # `discovered_methods` through `known_user_class?`, and `ancestor_name_candidates` reads
-    # `discovered_header_nestings`. The slice that brings the hot path brings the memo, keyed on what
-    # that consumer actually reads.
+    # than the walk reads — the ancestor chain resolves names through `known_user_class?`
+    # (`discovered_def_nodes`, `discovered_methods`) and `ancestor_name_candidates`
+    # (`discovered_header_nestings`). The chain itself is memoised per discovery index
+    # ({Scope::ResolutionChain}); the slice that brings the hot path brings this module's memo, keyed on
+    # what that consumer actually reads.
     module ExternalAncestorResolution
       # The owner a name must PRECEDE for its declaration to win an MRO. See {declared_before_object?}.
       OBJECT_OWNER = "Object"
@@ -67,13 +68,12 @@ module Rigor
       # `include Enumerable` so that slice 2's measurement stays its own, and the narrowing belongs to
       # the CALLER rather than to this module: the implicit-self veto must keep walking both edges,
       # because Ruby reaches an included module's methods too.
-      # rubocop:disable-next Metrics/ParameterLists
-      def resolve(class_name, method_name, kind = :instance, scope:, environment: nil, name_memo: nil,
-                  record_dependencies: true, mixins: true)
+      def resolve(class_name, method_name, kind = :instance, scope:, environment: nil, record_dependencies: true,
+                  mixins: true)
         return nil if class_name.nil? || scope.nil?
         return nil unless kind == :instance
 
-        compute(class_name, method_name, scope, environment, name_memo, record_dependencies, mixins)
+        compute(class_name, method_name, scope, environment, record_dependencies, mixins)
       end
 
       # The RBS method definition for `class_name`, or nil for a class the environment does not know, a
@@ -133,7 +133,7 @@ module Rigor
         []
       end
 
-      def compute(class_name, method_name, scope, environment, name_memo, record_dependencies, mixins)
+      def compute(class_name, method_name, scope, environment, record_dependencies, mixins)
         kind = :instance
         own = method_definition(class_name, method_name, kind, scope: scope, environment: environment)
         if own
@@ -144,7 +144,7 @@ module Rigor
           end
         end
 
-        groups = ancestor_candidate_groups(scope, class_name, name_memo, record_dependencies, mixins)
+        groups = ancestor_candidate_groups(scope, class_name, record_dependencies, mixins)
         farther_ancestors = {}
         groups.each_with_index do |candidates, index|
           answer = first_known_candidate_answer(candidates, method_name, kind, scope, environment)
@@ -244,14 +244,11 @@ module Rigor
       # The walk, with its ADR-46 reads attached or detached. `withhold` returns `[result, read_set]`
       # and the read set is dropped: a caller that suppresses is saying these reads are not a dependency
       # of its answer, not that they should be replayed somewhere else.
-      def ancestor_candidate_groups(scope, class_name, name_memo, record_dependencies, mixins)
-        memo = name_memo || {}
-        if record_dependencies
-          return scope.external_ancestor_name_candidates(class_name, name_memo: memo, mixins: mixins)
-        end
+      def ancestor_candidate_groups(scope, class_name, record_dependencies, mixins)
+        return scope.external_ancestor_name_candidates(class_name, mixins: mixins) if record_dependencies
 
         Analysis::DependencyRecorder.withhold do
-          scope.external_ancestor_name_candidates(class_name, name_memo: memo, mixins: mixins)
+          scope.external_ancestor_name_candidates(class_name, mixins: mixins)
         end.first
       end
       private_class_method :ancestor_candidate_groups

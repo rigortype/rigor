@@ -220,7 +220,7 @@ module Rigor
     def ancestor_constant_type(name, scope, prefix, shadows)
       return nil if prefix.nil? || prefix.empty?
 
-      first_constant_hit(ancestor_constant_scopes(prefix, scope), name, scope, shadows)
+      agreed_ancestor_hit(prefix, scope) { |entry| constant_type_at("#{entry}::#{name}", scope, shadows) }
     end
     private_class_method :ancestor_constant_type
 

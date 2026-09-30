@@ -865,10 +865,10 @@ RSpec.describe Rigor::Scope do
   end
 
   # #723 / #732 — the predicate that filters those candidates, and the reason it is owned HERE. Every
-  # ancestor-name resolver asks it: `compute_ancestor_class_name` for dispatch and the constant ladder,
-  # `ExpressionTyper`'s gem-provenance probe, and the override rules' `resolve_override_ancestor_name`,
-  # which carried a copy of this body reading only the first three tables until #732 replaced it with this
-  # call. Each table admits a class on its OWN, so the fork was observable on exactly one shape.
+  # ancestor-name resolver asks it: `Scope::ResolutionChain`'s `:methods` flavor for dispatch and the override
+  # rules, and `ExpressionTyper`'s gem-provenance probe. The override rules carried a copy of this body reading
+  # only the first three tables until #732 replaced it with this call. Each table admits a class on its OWN, so
+  # the fork was observable on exactly one shape.
   describe "#known_user_class?" do
     def scope_with_discovery(**tables)
       described_class.empty.with_discovery(Rigor::Scope::DiscoveryIndex::EMPTY.with(**tables))

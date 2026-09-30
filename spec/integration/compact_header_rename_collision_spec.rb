@@ -10,7 +10,7 @@
 # reached last: top-then-compact resolved the include to `Wrap::Mixin`, compact-then-top to `::Mixin`.
 #
 # Unioning the two chains only makes that pick deterministic, and a deterministic wrong ancestor is worse
-# than an order-dependent one: `Scope#compute_ancestor_class_name` takes the first known class as the SOLE
+# than an order-dependent one: the ancestor-name resolution takes the first known class as the SOLE
 # resolution, `union_header_nesting` sorts `Wrap::Mixin` ahead of `::Mixin`, and if the two modules declare
 # one method at different arities `call.wrong-arity` then fires on a program Ruby runs happily. Both
 # `include`s run at runtime; which module lands nearer in the MRO is the two files' load order, which this

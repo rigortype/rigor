@@ -61,10 +61,9 @@ module Rigor
       # ADR-87 WD4 — the canonical rule-id table lives in the light `check_rules/rule_ids.rb` (required at the
       # top of this file) so {Analysis::RuleCatalog} can read it without loading the engine.
 
-      # ADR-35 slice 1 — bound for the `def.override-visibility-reduced`
-      # ancestor walk, and the public > protected > private ordering
-      # used to decide whether an override reduces visibility.
-      OVERRIDE_ANCESTOR_WALK_LIMIT = 100
+      # ADR-35 slice 1 — the public > protected > private ordering used to decide whether an override reduces
+      # visibility. The override rules' ancestor walk is bounded by `Scope::ANCESTOR_WALK_LIMIT`, the
+      # resolution chain's.
       VISIBILITY_RANK = { public: 2, protected: 1, private: 0 }.freeze
 
       # Resolves a user-supplied rule token (`undefined-method`,
@@ -2632,6 +2631,9 @@ module Rigor
         #   `Prism::SelfNode` are also skipped — Ruby 2.7+ permits `self.foo` for private methods.
         # - Receiver MUST resolve to a `Type::Nominal` so the rule has a single class identity to query.
         #   Unions / Dynamic / shape carriers are skipped.
+        # - Issue #1568 — a module the class PREPENDS sits ahead of it in Ruby's order, so a definition there
+        #   is what the call reaches; the class's own private `def` answers only when nothing prepended
+        #   defines the name ({#prepended_definer_visibility}).
         def visibility_mismatch_diagnostic(path, call_node, scope_index)
           return nil unless explicit_non_self_receiver?(call_node.receiver)
 
@@ -2648,7 +2650,43 @@ module Rigor
           visibility = scope.discovered_method_visibility(receiver_type.class_name, call_node.name)
           return nil unless visibility == :private
 
+          prepended = prepended_definer_visibility(scope, receiver_type.class_name, call_node.name)
+          return nil unless prepended.nil? || prepended == :private
+
           build_visibility_mismatch_diagnostic(path, call_node, receiver_type)
+        end
+
+        # Issue #1568 — the recorded visibility of the definition a project module prepended to `class_name`
+        # gives `method_name`, or nil when nothing ahead of the class on its `Scope::ResolutionChain` defines it
+        # with a recorded visibility — and then the class's own visibility stands, as it always did. An ancestor
+        # the project does not declare is passed over, as the method lookup passes it. Where the chain's two
+        # worlds disagree, the answer is nil too: the class's own, which is what this rule read before.
+        def prepended_definer_visibility(scope, class_name, method_name)
+          chain = Scope::ResolutionChain.for(scope, class_name.to_s, :instance, :methods)
+          answer = prepend_region_visibility(scope, chain, class_name.to_s, method_name)
+          verdict = chain.settle(scope, answer) do |retro|
+            prepend_region_visibility(scope, retro, class_name.to_s, method_name)
+          end
+          verdict == :chain ? answer : nil
+        end
+
+        # The read depends on the class's own declarations even when it finds an empty region: a file that later
+        # gives the class a `prepend` fills it. The chain search records the entries it passes, but there is none
+        # to pass when the class heads its chain (or is not on it), so the class edge is filed here.
+        def prepend_region_visibility(scope, chain, class_name, method_name)
+          own = chain.index_of(class_name)
+          if own.nil? || own.zero?
+            Scope::ResolutionChain.record_class(scope, class_name) if Analysis::DependencyRecorder.active?
+            return nil
+          end
+
+          definer = chain.search(scope, 0, own) do |entry|
+            next if entry.external?
+
+            entry.name if scope.user_def_for(entry.name, method_name) ||
+                          scope.discovered_method?(entry.name, method_name, :instance)
+          end
+          definer && scope.discovered_method_visibility(definer, method_name)
         end
 
         def explicit_non_self_receiver?(receiver)
@@ -3740,29 +3778,58 @@ module Rigor
           override_rank < parent_rank
         end
 
-        # Breadth-first walk of the project-discovered ancestor chain (included / prepended modules first,
-        # then the superclass — Ruby's MRO ordering), yielding each resolved ancestor class name
-        # nearest-first. Returns the first truthy value the block produces, or nil. Cross-file: the chain
-        # is followed through the scope tables the runner seeds from the project pre-pass (ADR-24 WD1).
-        # Cycle-guarded and node-count-capped. Mirrors `ExpressionTyper#resolve_user_def_through_ancestors`.
-        def each_project_ancestor(scope, class_name)
-          queue = ancestor_class_names(scope, class_name)
-          seen = { class_name.to_s => true }
-          visited = 0
-          until queue.empty?
-            current = queue.shift
-            next if current.nil? || seen[current]
+        # The project ancestors whose definitions `class_name`'s own `def` OVERRIDES: the entries AFTER the
+        # class on its {Scope::ResolutionChain}, nearest first. Returns the first truthy value the block
+        # produces for a project ancestor, or nil. Cross-file: the chain is built from the scope tables the
+        # runner seeds from the project pre-pass (ADR-24 WD1).
+        #
+        # Issue #1568 — the walk this replaced was breadth-first from the class's direct ancestors, and those
+        # include the modules the class PREPENDS. A prepended module sits BEFORE the class in Ruby's order: its
+        # `def` overrides the class's, not the other way round, so `prepend P` with a public `P#foo` and a
+        # private `C#foo` reported `C#foo` as reducing `P#foo`'s visibility. It also reached `Base` before a
+        # module included through an included module (#1567's order).
+        #
+        # ADR-24 / #1570 — `Scope::ResolutionChain#settle` decides whether the chain's answer stands: where a
+        # skipped `include` would put a different ancestor next, which method the class's `def` overrides
+        # depends on the order the bodies ran, and the rules answer from the breadth-first order this walk used
+        # before (`Scope::ResolutionChain::MasterOrder`).
+        #
+        # ADR-46 slice 3 — an ancestor the project does not declare ends the walk's reach into it, and a class
+        # defined LATER under that name would change the answer, so each external entry passed records a
+        # negative class edge keyed on its unqualified name, as the per-name resolver this replaced did.
+        def each_project_ancestor(scope, class_name, &)
+          chain = Scope::ResolutionChain.for(scope, class_name.to_s, :instance, :methods)
+          answer = overridden_ancestor_answer(scope, chain, class_name.to_s, &)
+          verdict = chain.settle(scope, answer&.first, owner: answer&.first) do |retro|
+            overridden_ancestor_answer(scope, retro, class_name.to_s, &)&.first
+          end
+          return answer if verdict == :chain
 
-            seen[current] = true
-            visited += 1
-            return nil if visited > OVERRIDE_ANCESTOR_WALK_LIMIT
+          master_ancestor_answer(scope, chain, class_name.to_s, &)
+        end
 
-            result = yield current
-            return result if result
-
-            ancestor_class_names(scope, current).each { |name| queue.push(name) }
+        def master_ancestor_answer(scope, chain, class_name)
+          chain.record(scope)
+          chain.entries.each { |entry| record_unresolved_ancestor(entry) if entry.external? }
+          Scope::ResolutionChain::MasterOrder.breadth_first(scope, class_name, :methods).each do |name|
+            answer = yield name
+            return answer if answer
           end
           nil
+        end
+
+        def overridden_ancestor_answer(scope, chain, class_name)
+          own = chain.index_of(class_name)
+          return nil if own.nil?
+
+          chain.search(scope, own + 1) do |entry|
+            if entry.external?
+              record_unresolved_ancestor(entry)
+              next
+            end
+
+            yield entry.name
+          end
         end
 
         # `[defining_class, visibility]` for the nearest user-source ancestor that defines an instance
@@ -3778,44 +3845,11 @@ module Rigor
           end
         end
 
-        # Direct ancestors of `class_name` as project-discovered, qualified names: included / prepended
-        # modules first, then the superclass. As-written names are resolved against the nesting the
-        # subclass's declaration header is written in (`Scope#ancestor_name_candidates`, the single owner of
-        # that order); names that resolve to no project class/module (RBS-known / third-party) are dropped.
-        def ancestor_class_names(scope, class_name)
-          names = []
-          scope.includes_of(class_name).each do |raw|
-            resolved = resolve_override_ancestor_name(scope, class_name, raw)
-            names << resolved if resolved
-          end
-          raw_super = scope.superclass_of(class_name)
-          if raw_super
-            resolved_super = resolve_override_ancestor_name(scope, class_name, raw_super)
-            names << resolved_super if resolved_super
-          end
-          names
-        end
-
-        # Issue #732 — the predicate is asked of the SCOPE, not re-implemented here. This rule kept its own
-        # three-table copy until #723 widened the scope's with `discovered_methods` and left this one behind,
-        # so the two disagreed about exactly one shape (a project class with no instance def, no superclass
-        # and no include — `class Base; def self.build = :built; end`) with nothing observing the fork. #682
-        # made `Scope` the single owner of the candidate ORDER; this makes it the single owner of the
-        # predicate that filters those candidates too.
-        def resolve_override_ancestor_name(scope, subclass_qualified, raw_ancestor)
-          resolved = scope.ancestor_name_candidates(subclass_qualified, raw_ancestor)
-                          .find { |candidate| scope.known_user_class?(candidate) }
-          return resolved if resolved
-
-          # ADR-46 slice 3 — the override checker reads the class graph
-          # directly (not through the recorder's `Scope` choke points), and
-          # short-circuits when the ancestor resolves to no project class, so
-          # an incremental re-check has no edge telling it to re-check this
-          # subclass when that ancestor is later defined. Record a negative
-          # class edge (keyed on the unqualified name) so the appeared-class
-          # widening picks it up.
-          DependencyRecorder.read_missing(:class, raw_ancestor.to_s.split("::").last) if DependencyRecorder.active?
-          nil
+        # Issue #732 — which names count as project classes is asked of the SCOPE (the chain's `:methods`
+        # flavor, `Scope#known_user_class?`), not re-implemented here; this records the negative class edge an
+        # external entry leaves, keyed on the unqualified name so the appeared-class widening picks it up.
+        def record_unresolved_ancestor(entry)
+          DependencyRecorder.read_missing(:class, entry.raw.to_s.split("::").last) if DependencyRecorder.active?
         end
 
         def build_override_visibility_diagnostic(path, def_node, parent_class, parent_visibility, override_visibility)

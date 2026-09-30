@@ -63,8 +63,31 @@ RSpec.describe "class-graph memo storage" do
       expect(slot).to be_an(Array)
       expect(slot.size).to eq(2)
       expect(slot[0]).to be_a(Rigor::Scope::DiscoveryIndex)
-      expect(slot[1].keys).to include(:name, :user_def)
+      expect(slot[1].keys).to include(:user_def)
     end
+  end
+
+  # `Scope::ResolutionChain`, which the walks above read since #1567, is memoised under the same bound: one
+  # slot keyed on the index, holding per-flavor buckets of chains. The chains themselves are asserted
+  # non-empty, which is the positive control that the run built them there.
+  it "keeps the resolution-chain memo in one slot keyed on the discovery index" do
+    chain_key = :__rigor_resolution_chain__
+    Thread.current[chain_key] = nil
+    sizes = [2, 6].map do |files|
+      Dir.mktmpdir do |dir|
+        write_project(dir, files)
+        run_check(dir)
+        slot = Thread.current[chain_key]
+        expect(slot).to be_an(Array)
+        expect(slot.size).to eq(2)
+        expect(slot[0]).to be_a(Rigor::Scope::DiscoveryIndex)
+        expect(slot[1].fetch(:methods).fetch(:instance)).not_to be_empty
+        slot.size
+      end
+    end
+    expect(sizes.uniq.size).to eq(1)
+  ensure
+    Thread.current[chain_key] = nil
   end
 
   # The positive control for the example above: a bounded slot that was never CONSULTED would also be a

@@ -3,6 +3,7 @@
 require_relative "type"
 require_relative "environment"
 require_relative "scope/discovery_index"
+require_relative "scope/resolution_chain"
 require_relative "analysis/fact_store"
 require_relative "analysis/dependency_recorder"
 require_relative "inference/expression_typer"
@@ -64,9 +65,12 @@ module Rigor
     def discovered_global_write_census = @discovery.discovered_global_write_census
     def discovered_includes = @discovery.discovered_includes
     # Issue #1123 — `{qualified class or module name => [module names it `prepend`s, as written]}`, in
-    # instance-ancestor search order (nearest prepend first). Feeds {#prepends_of}, the one table that tells
-    # a `prepend` from an `include` at `def`-priority level.
-    def discovered_prepends = @discovery.discovered_prepends
+    # instance-ancestor search order (nearest prepend first). The one table that tells a `prepend` from an
+    # `include`: {ResolutionChain} reads it to put a prepended module ahead of the class.
+    # The plugin-facing view: each class's prepends once, nearest first. The discovery index itself keeps every
+    # statement (a repeated `prepend` is a no-op in Ruby, the first statement winning), and the resolution chain
+    # reads that raw list.
+    def discovered_prepends = @discovery.discovered_prepends.transform_values { |names| names.uniq.freeze }.freeze
     def discovered_extends = @discovery.discovered_extends
     def discovered_class_sources = @discovery.discovered_class_sources
     # Issue #644 — `{qualified constant name => Set[declaring file]}`; seeded only on an ADR-46 recording run.
@@ -1276,32 +1280,6 @@ module Rigor
       @discovery.discovered_includes[class_name.to_s] || []
     end
 
-    # Issue #1123 — the modules `class_name` `prepend`s, in instance-ancestor SEARCH order: the nearest
-    # prepend first, so `prepend A; prepend B` answers `["B", "A"]` and `prepend A, B` keeps `["A", "B"]`
-    # (each Ruby statement's argument list lands as one unit, ahead of the earlier statements'). Read by
-    # {#user_def_through_ancestors}'s prepend wedge — Ruby inserts a prepended module, and its own ancestry,
-    # IMMEDIATELY BEFORE the class that prepends it, so these names are searched ahead of the class's own
-    # `def`s. Empty for a class the project never prepends, which is the behaviour every class had before
-    # `prepend` was ordered at all.
-    #
-    # The same names ALSO appear in {#includes_of} — that table answers "which modules does this class
-    # carry", which is what the arity, visibility, reflection and constant-scope consumers ask, and a
-    # prepended module does contribute instance methods. This table adds the ORDER and the KIND; it never
-    # removes a name from the other one.
-    #
-    # The class dependency is recorded only on a HIT, as {#data_member_layout} does: the wedge asks this
-    # for every class the walk visits, so recording on a miss would give a caller file an ancestry edge on
-    # a class that prepends nothing — an edge where ADR-46 slice 4 keeps method-body reads at
-    # symbol granularity.
-    def prepends_of(class_name)
-      names = @discovery.discovered_prepends[class_name.to_s]
-      return EMPTY_MIXIN_NAMES if names.nil?
-
-      record_class_dependency(class_name) if Analysis::DependencyRecorder.active?
-      names
-    end
-    private :prepends_of
-
     # Issue #898 — the module names `extend`ed onto `class_name`'s SINGLETON, as written, gathered up the
     # as-written superclass chain because a singleton class inherits its superclass's singleton class
     # (`class Base; extend Comparable; end; class Widget < Base; end` leaves `Widget.is_a?(Comparable)`
@@ -1330,224 +1308,145 @@ module Rigor
       names.uniq
     end
 
-    # ADR-24 slice 2 — the user-side ancestor walk: resolves `method_name` against `class_name`'s own `def`s,
-    # then breadth-first through its included / prepended modules (mixins first, as Ruby orders them) and its
-    # superclass chain. Returns `[def_node, owner]`, or `[nil, nil]` when nothing in the project defines it.
-    # RBS-known / third-party ancestors resolve to no discovered class and end that branch.
+    # ADR-24, amended for #1567 / #1568 / #1570 / #1571 — every reader below answers in Ruby's linearised
+    # ancestor order, read from {ResolutionChain} (an internal class: `Scope`'s own surface is the plugin API
+    # `spec/rigor/public_api_drift_spec.rb` pins, and the chain is not part of it). None walks `includes_of` /
+    # `superclass_of` / the extends table itself; `spec/rigor/scope/ancestry_walker_detection_spec.rb` fails on
+    # a method that does. Each keeps its signature and its return type exactly: only WHICH definer it answers
+    # moved. `name_memo:` is still accepted and no longer needed — the chain memoises name resolution itself.
+    UNUSED_NAME_MEMO = {}.freeze
+    private_constant :UNUSED_NAME_MEMO
     #
-    # It lives HERE, not in a consumer, because it reads nothing but this scope's frozen discovery index
-    # (`user_def_for` / `includes_of` / `superclass_of` / the `discovered_*` tables) — the same property that
-    # lets `ExpressionTyper` memoise its results run-wide. Two callers depend on that single answer:
-    # `ExpressionTyper#compute_user_def_with_owner`, which wraps it in the run-scoped memo for the dispatch hot
-    # path, and {Inference::MethodDispatcher::StructMaterialization}, whose `.with` guard must see a `with`
-    # contributed by an included module. They forked once — the guard resolved own-class-only while the
-    # dispatcher walked ancestors — and answered differently about the same receiver expression (#598 review).
+    # Every reader below asks {ResolutionChain#settle} whether its chain answer stands, and where it does not
+    # answers what the walk it replaced answered ({ResolutionChain::MasterOrder}) — the tables cannot say which
+    # world ran, and a disagreement is no reason to answer anything new.
+
+    # ADR-24 slice 2 — the user-side method lookup: the first project `def` of `method_name` along
+    # `class_name`'s instance chain, as `[def_node, owner]`, or `[nil, nil]` when nothing the project declares
+    # defines it. An external ancestor is passed over, as before: a caller asking "does the project define
+    # this" must not read an RBS module's declaration as absence (#1572 is the typing read that will stop
+    # there).
     #
-    # `name_memo` is a CACHE, not semantics: the per-edge as-written-name resolutions, so a caller resolving
-    # many methods against one class pays each ancestor edge once. Omit it and the walk is identical, just
-    # uncached.
+    # It lives HERE, not in a consumer, because it reads nothing but this scope's frozen discovery index — the
+    # property that lets `ExpressionTyper` memoise its results run-wide. `ExpressionTyper#compute_user_def_with_owner`
+    # wraps it in that memo for the dispatch hot path, and {Inference::MethodDispatcher::StructMaterialization}'s
+    # `.with` guard reads the same answer (#598 review).
     #
-    # Issue #1123 — a prepended module is searched through {#prepends_of} AHEAD of the class's own `def`s
-    # ({#prepend_wedge_names}), because Ruby inserts it, and its own ancestry, immediately before the class
-    # that prepends it: `class Base; def speak = "base"; end; Base.prepend(Loud)` answers `Loud#speak`, and
-    # the `super` in that body then reaches `Base#speak`. An included module still
-    # sits AFTER the class in this walk, but — since #1173 — `includes_of` feeds the mixin step in
-    # instance-ancestor search order, so `include A; include B` searches B first the way CRuby does. The
-    # wedge is searched at EVERY node, not just the entry class: a prepend on an ancestor (`class Sub <
-    # Base` where `Base` prepends a module) wins for the subclass too, exactly as Ruby dispatches it.
-    def user_def_through_ancestors(class_name, method_name, name_memo: {})
-      queue = [class_name.to_s]
-      seen = {}
-      visited = 0
-      until queue.empty?
-        current = queue.shift
-        next if current.nil? || seen[current]
-
-        seen[current] = true
-        visited += 1
-        return ancestor_walk_gave_up if visited > ANCESTOR_WALK_LIMIT
-
-        wedge_hit = search_prepend_wedge(current, method_name, name_memo, seen)
-        return wedge_hit if wedge_hit
-
-        found = user_def_for(current, method_name)
-        return [found, current] if found
-
-        enqueue_ancestors(current, queue, name_memo)
+    # #1567 — the walk was breadth-first until the chain replaced it: `class C < Base; include A` with `A`
+    # including `M` answered `Base#foo` where Ruby calls `M#foo`. The prepend wedge #1123 added (a prepended
+    # module searched ahead of the class's own `def`s) and the include search order #1173 fixed are both
+    # positions on the chain now, at every class on it.
+    def user_def_through_ancestors(class_name, method_name, name_memo: UNUSED_NAME_MEMO) # rubocop:disable Lint/UnusedMethodArgument
+      chain = ResolutionChain.for(self, class_name.to_s, :instance, :methods)
+      found = first_user_def(chain, method_name)
+      owner = found&.last
+      if chain.settle(self, owner, owner: owner) { |retro| first_user_def(retro, method_name)&.last } == :master
+        found = master_user_def(class_name.to_s, method_name)
       end
-      [nil, nil]
+      return found if found
+
+      chain.truncated? ? ancestor_walk_gave_up : [nil, nil]
     end
 
-    # Issue #1123 — the `[def_node, owner]` pair a class's prepend wedge answers `method_name` with, or nil
-    # when nothing in the wedge defines it and the walk should ask the class's own `def`s next.
-    #
-    # Every name the wedge takes is marked on `seen`, the SAME set the walk's breadth-first step uses: a
-    # prepended module also sits in `includes_of`, so the mixin step would otherwise re-ask a name the wedge
-    # already answered — and, more importantly, marking it there keeps a `prepend` graph that loops back on
-    # the walk (a prepended module reached again from somewhere else) from being expanded twice.
-    def search_prepend_wedge(class_name, method_name, name_memo, seen)
-      prepend_wedge_names(class_name, name_memo).each do |name|
-        next if seen[name]
+    def first_user_def(chain, method_name)
+      chain.search(self) do |entry|
+        next if entry.external?
 
-        seen[name] = true
-        found = user_def_for(name, method_name)
-        return [found, name] if found
+        node = user_def_for(entry.name, method_name)
+        [node, entry.name] if node
+      end
+    end
+
+    def master_user_def(class_name, method_name)
+      names = ResolutionChain::MasterOrder.definer_sequence(self, class_name)
+      names.each { |name| record_class_dependency(name) } if Analysis::DependencyRecorder.active?
+      names.each do |name|
+        node = user_def_for(name, method_name)
+        return [node, name] if node
       end
       nil
     end
+    private :first_user_def, :master_user_def
 
-    # Issue #1123 — the qualified names the instance MRO searches ahead of `class_name`'s own definitions,
-    # in the order it searches them: for each of `class_name`'s prepends, nearest first, that module's own
-    # prepend wedge, then the module itself, then its includes and superclass.
-    #
-    # A prepended module's own ancestry is part of the wedge because Ruby inserts the whole sub-chain with
-    # it — `module Loud; include Loud::Prefix; end` prepended into `Base` puts `Loud::Prefix` ahead of
-    # `Base`, so the wedge has to reach it. `seen` is shared across one wedge computation and guards a cyclic
-    # `prepend`/`include` graph (and the overlap with `includes_of`, which carries the prepend names too);
-    # the walk's own set is applied by {#search_prepend_wedge}, and each name is expanded at most once.
-    def prepend_wedge_names(class_name, name_memo, seen = {})
-      out = []
-      prepends_of(class_name).each do |raw|
-        resolved = resolve_ancestor_class_name(class_name, raw, name_memo)
-        next if resolved.nil? || seen[resolved]
-
-        seen[resolved] = true
-        out.concat(subchain_names(resolved, name_memo, seen))
+    # Issue #731 — the singleton-side twin of {#user_def_through_ancestors}: the first `def self.` /
+    # `class << self` body of `method_name` along `class_name`'s singleton chain, as `[def_node, owner]`, or
+    # `[nil, nil]` — each class object's own table, then the modules it extends in Ruby's order, then the
+    # superclass's. `ScopeIndexer` folds an extended module's own `def`s into the extender's table, so those
+    # answer at the extender; a module the extended one includes is its own entry (#1567's singleton shape:
+    # `class C < Base; extend A` with `A` including `M` is `M#foo`, not `Base.foo`). Where the chain does
+    # not stand, the answer is the class objects' alone, as the superclass-only walk this replaced gave.
+    def singleton_def_through_ancestors(class_name, method_name, name_memo: UNUSED_NAME_MEMO) # rubocop:disable Lint/UnusedMethodArgument
+      chain = ResolutionChain.for(self, class_name.to_s, :singleton, :methods)
+      found = first_singleton_def(chain, method_name)
+      owner = found&.last
+      if chain.settle(self, owner, owner: owner) { |retro| first_singleton_def(retro, method_name)&.last } == :master
+        found = first_singleton_def(chain, method_name, :singleton)
       end
-      out
+      return found if found
+
+      chain.truncated? ? ancestor_walk_gave_up : [nil, nil]
     end
 
-    # Issue #1123 — appends `node`'s own instance search order to `out`: its prepend wedge, the node
-    # itself, then its includes and superclass, each expanded the same way. Since #1173 the include
-    # half is `includes_of`'s search order — the ORDER inside a prepended module's own include list is
-    # not re-derived here, only read.
-    def subchain_names(node, name_memo, seen)
-      out = prepend_wedge_names(node, name_memo, seen)
-      out << node
-      (includes_of(node) + [superclass_of(node)].compact).each do |raw|
-        resolved = resolve_ancestor_class_name(node, raw, name_memo)
-        next if resolved.nil? || seen[resolved]
+    def first_singleton_def(chain, method_name, side = nil)
+      chain.search(self, side: side) do |entry|
+        next if entry.external?
 
-        seen[resolved] = true
-        out.concat(subchain_names(resolved, name_memo, seen))
+        name = entry.name
+        node = entry.side == :singleton ? singleton_def_for(name, method_name) : user_def_for(name, method_name)
+        [node, entry.name] if node
       end
-      out
     end
-    private :search_prepend_wedge, :prepend_wedge_names, :subchain_names
-
-    # Issue #731 — the singleton-side twin of {#user_def_through_ancestors}: resolves `method_name` against
-    # `class_name`'s own `def self.` / `class << self` bodies, then up the SUPERCLASS chain. Returns
-    # `[def_node, owner]`, or `[nil, nil]`.
-    #
-    # Superclasses only, and that is the whole shape of class-method inheritance in Ruby: a subclass
-    # inherits its parent's class methods, while an `include`d module contributes INSTANCE methods and its
-    # own `def self.x` is not callable on the includer. `extend M` needs no walk either — `ScopeIndexer`
-    # folds an extend into the extender's own singleton entries before the table is frozen — so the one
-    # edge this misses is a module's singleton surface reached through some other route, which nothing
-    # resolves today.
-    def singleton_def_through_ancestors(class_name, method_name, name_memo: {})
-      queue = [class_name.to_s]
-      seen = {}
-      visited = 0
-      until queue.empty?
-        current = queue.shift
-        next if current.nil? || seen[current]
-
-        seen[current] = true
-        visited += 1
-        return ancestor_walk_gave_up if visited > ANCESTOR_WALK_LIMIT
-
-        found = singleton_def_for(current, method_name)
-        return [found, current] if found
-
-        enqueue_ancestors(current, queue, name_memo, mixins: false)
-      end
-      [nil, nil]
-    end
+    private :first_singleton_def
 
     # Issue #633 — the ancestors a project class reaches that the project itself does NOT declare: the
-    # `< StandardError` / `< Array` superclasses and the `include Comparable` mixins the two walks above
-    # deliberately drop, gathered depth-first over the project ancestry (an included module's own
-    # sub-chain precedes the includer's superclass edge) so an inherited edge counts too — and, since
-    # #1173, so the groups arrive in instance-ancestor search order for the caller that adopts the
-    # FIRST answering one.
+    # `< StandardError` / `< Array` superclasses and the `include Comparable` mixins, as the CANDIDATE LIST for
+    # each as-written name ({#ancestor_name_candidates}: the nesting spellings first, the bare name last), in
+    # Ruby's order along the instance chain — the order the caller that adopts the FIRST answering one (#1173)
+    # depends on. Resolving a candidate means asking the RBS environment, which this frozen-index read does
+    # not do; the caller takes the first candidate its own oracle knows. Where the chain does not stand, the
+    # groups are the depth-first ones the walk this replaced emitted.
     #
-    # Each entry is the CANDIDATE LIST for one as-written name ({#ancestor_name_candidates}: the nesting
-    # spellings first, the bare name last), not a resolved class — resolving it means asking the RBS
-    # environment, which this frozen-index walk does not read. The caller takes the first candidate its own
-    # oracle knows and ignores the rest, the same "most-qualified first" order the project-side resolution
-    # uses.
-    # Issue #527 slice 1 — `mixins: false` follows the SUPERCLASS chain only. Ruby reaches an included
-    # module's methods too, so the default answers the whole ancestry; a consumer resolving one KIND of
-    # inheritance edge at a time (the dispatch arm lands `< Hash` before `include Enumerable`) narrows
-    # it, the same way {#singleton_def_through_ancestors} narrows {#enqueue_ancestors}.
-    def external_ancestor_name_candidates(class_name, name_memo: {}, mixins: true)
-      groups = []
-      collect_external_ancestors(class_name.to_s, groups, name_memo, mixins, {}, [0])
+    # Issue #527 slice 1 — `mixins: false` answers the superclass edge only: a consumer resolving one KIND of
+    # inheritance edge at a time (the dispatch arm lands `< Hash` before `include Enumerable`) narrows it, and
+    # records only the superclass chain it read.
+    def external_ancestor_name_candidates(class_name, name_memo: UNUSED_NAME_MEMO, mixins: true) # rubocop:disable Lint/UnusedMethodArgument
+      chain = ResolutionChain.for(self, class_name.to_s, :instance, :methods)
+      groups = external_groups(chain, mixins)
+      if chain.settle(self, groups) { |retro| external_groups(retro, mixins) } == :master
+        groups = ResolutionChain::MasterOrder.external_groups(self, class_name.to_s, mixins)
+      end
+      if Analysis::DependencyRecorder.active?
+        mixins ? chain.record(self) : chain.level_classes.each { |name| record_class_dependency(name) if name }
+      end
+      # Issue #527 — the cut is a budget event, not an answer: consumers read the groups as "the ancestors
+      # this class reaches", so a short list must be visible in `--stats` beside the other walks' exhaustions.
+      Inference::BudgetTrace.hit(Inference::BudgetTrace::ANCESTOR_WALK_LIMIT) if chain.truncated?
       groups
     end
 
-    # One node of {#external_ancestor_name_candidates}: the project-declared ancestors continue the walk,
-    # everything else is reported as a candidate list.
-    #
-    # Issue #1173 — the walk is depth-first pre-order, not breadth-first: a resolved ancestor's own
-    # edges are followed BEFORE the next sibling edge, because Ruby inserts an included module's whole
-    # sub-chain ahead of the includer's superclass (`class C < Hash; include M` where `M` itself
-    # includes `Widen` chains `C → M → Widen → Hash`; BFS would report `Hash` ahead of `Widen`). Each
-    # node's edges still go includes-then-superclass, and `includes_of` is already search order, so the
-    # emitted groups arrive in MRO order — which the #1173 include arm depends on when two ancestors
-    # both declare the name.
-    def collect_external_ancestors(current, groups, name_memo, mixins, seen, visited)
-      return if current.nil? || seen[current]
-
-      seen[current] = true
-      visited[0] += 1
-      if visited[0] > ANCESTOR_WALK_LIMIT
-        # Issue #527 — the give-up is a budget event, not an answer. Consumers read the groups as
-        # "the ancestors this class reaches", so a truncated list must be visible in `--stats`
-        # alongside the other walks' exhaustions rather than silently short. Hit once: every node
-        # visited past the limit returns here too, and only the first should count.
-        Inference::BudgetTrace.hit(Inference::BudgetTrace::ANCESTOR_WALK_LIMIT) if visited[0] == ANCESTOR_WALK_LIMIT + 1
-        return
-      end
-
-      raw_names = mixins ? includes_of(current).dup : []
-      raw_super = superclass_of(current)
-      raw_names << raw_super if raw_super
-      raw_names.each do |raw|
-        resolved = resolve_ancestor_class_name(current, raw, name_memo)
-        if resolved
-          collect_external_ancestors(resolved, groups, name_memo, mixins, seen, visited)
-        else
-          groups << ancestor_name_candidates(current, raw)
-        end
-      end
+    def external_groups(chain, mixins)
+      chain.entries.filter_map { |entry| entry.candidates if entry.external? && (mixins || entry.superclass_edge) }
     end
-    private :collect_external_ancestors
+    private :external_groups
 
-    # The BFS node cap; a hierarchy past it gives up rather than walking unboundedly (ADR-41 WD4).
-    ANCESTOR_WALK_LIMIT = 100
+    # The budget {ResolutionChain::LIMIT} enforces; a hierarchy past it gives up rather than reading an answer
+    # off a cut chain (ADR-41 WD4).
+    ANCESTOR_WALK_LIMIT = ResolutionChain::LIMIT
 
     EMPTY_HEADER_NESTING = [].freeze
     private_constant :EMPTY_HEADER_NESTING
-
-    # The answer for a class that prepends nothing — the common case, so the wedge does not allocate a
-    # fresh empty list per visited node. Shared and frozen, and never handed to a caller that could
-    # mutate it ({#prepends_of} is private to this walk).
-    EMPTY_MIXIN_NAMES = [].freeze
-    private_constant :EMPTY_MIXIN_NAMES
 
     def ancestor_walk_gave_up
       Inference::BudgetTrace.hit(Inference::BudgetTrace::ANCESTOR_WALK_LIMIT)
       [nil, nil]
     end
+    private :ancestor_walk_gave_up
 
-    # Issue #723 — the same ancestor walk as {#user_def_through_ancestors}, asked of the DISCOVERY table
-    # rather than the def-node table: does the project define `method_name` on `class_name` or on any
-    # ancestor the project itself declares? The two tables are not interchangeable —
-    # `discovered_methods` also carries `define_method`, `attr_*` and the whole singleton side, none of
-    # which contributes a `Prism::DefNode` — and the suppression probe shared by the `call.*` check rules
-    # needs the broader one.
+    # Issue #723 — the question {#user_def_through_ancestors} asks, asked of the DISCOVERY table rather than
+    # the def-node table: does the project define `method_name` on `class_name` or on any ancestor the project
+    # itself declares? The two tables are not interchangeable — `discovered_methods` also carries
+    # `define_method`, `attr_*` and the whole singleton side, none of which contributes a `Prism::DefNode` —
+    # and the suppression probe shared by the `call.*` check rules needs the broader one.
     #
     # Why it must walk at all: `Analysis::CheckRules#source_declared_method?` asked `discovered_method?`,
     # which is keyed on the receiver's OWN name, while the typer resolves the same call through this
@@ -1555,72 +1454,47 @@ module Rigor
     # `call.undefined-method` on a method `dump_type` resolved on the same line of the same run — writing
     # MORE RBS made the run worse, the incentive #653 removed for plugin-typed calls.
     #
-    # `kind: :singleton` follows the superclass chain ONLY: a class method is inherited by a subclass, but
-    # an `include`d module contributes instance methods and its own `def self.x` is not callable on the
-    # includer. `extend M` is not lost to that narrowing — `Inference::ScopeIndexer` folds an extend into
-    # the extender's own singleton entries before this table is frozen.
-    def discovered_method_through_ancestors?(class_name, method_name, kind, name_memo: {})
+    # `kind: :singleton` reads the singleton chain: the class objects' own methods (an extended module's are
+    # folded into its extender's) and the instance methods of the modules they extend and those modules'
+    # includes. Existence is a union, so the chain's two worlds, which hold the same modules, agree on it.
+    def discovered_method_through_ancestors?(class_name, method_name, kind, name_memo: UNUSED_NAME_MEMO) # rubocop:disable Lint/UnusedMethodArgument
       return false if class_name.nil?
 
-      queue = [class_name.to_s]
-      seen = {}
-      visited = 0
-      until queue.empty?
-        current = queue.shift
-        next if current.nil? || seen[current]
+      chain = ResolutionChain.for(self, class_name.to_s, kind == :singleton ? :singleton : :instance, :methods)
+      found = chain.search(self) do |entry|
+        next false if entry.external?
 
-        seen[current] = true
-        visited += 1
-        # Budget exhaustion is uncertainty, not absence: answering "not declared" here would hand a
-        # `call.undefined-method` a fired verdict it has no evidence for. Suppress and record the hit.
-        if visited > ANCESTOR_WALK_LIMIT
-          Inference::BudgetTrace.hit(Inference::BudgetTrace::ANCESTOR_WALK_LIMIT)
-          return true
-        end
-
-        return true if discovered_method?(current, method_name, kind)
-
-        enqueue_ancestors(current, queue, name_memo, mixins: kind != :singleton)
+        discovered_method?(entry.name, method_name, entry.side == :singleton ? :singleton : kind_for(kind))
       end
-      false
+      return true if found
+      # Budget exhaustion is uncertainty, not absence: answering "not declared" here would hand a
+      # `call.undefined-method` a fired verdict it has no evidence for. Suppress and record the hit.
+      return false unless chain.truncated?
+
+      Inference::BudgetTrace.hit(Inference::BudgetTrace::ANCESTOR_WALK_LIMIT)
+      true
     end
 
-    # Pushes `current`'s direct ancestors onto the BFS queue: included / prepended modules first (Ruby places
-    # mixins nearer than the superclass), then the superclass. Each as-written name is resolved against the
-    # nesting `current`'s declaration header is written in ({#ancestor_name_candidates}); names that resolve
-    # to no project class/module are dropped. `mixins: false` walks the superclass chain alone, for the
-    # singleton-side question where an `include` contributes nothing.
-    def enqueue_ancestors(current, queue, name_memo, mixins: true)
-      if mixins
-        includes_of(current).each do |raw|
-          resolved = resolve_ancestor_class_name(current, raw, name_memo)
-          queue.push(resolved) if resolved
-        end
-      end
-      raw_super = superclass_of(current)
-      return if raw_super.nil?
+    # A module entry on the singleton chain answers with its INSTANCE methods; on the instance chain, the
+    # caller's kind stands.
+    def kind_for(kind) = kind == :singleton ? :instance : kind
+    private :kind_for
 
-      resolved_super = resolve_ancestor_class_name(current, raw_super, name_memo)
-      queue.push(resolved_super) if resolved_super
+    # Pushes `current`'s direct ancestors onto a breadth-first queue: included / prepended modules first, then
+    # the superclass, each resolved against the nesting `current`'s declaration header is written in; names
+    # that resolve to no project class/module are dropped. `mixins: false` gives the superclass alone. No
+    # reader in the engine walks this way any more (they read {ResolutionChain}); it stays for the plugin
+    # surface, with the ADR-46 class edge the walk it served always filed.
+    def enqueue_ancestors(current, queue, name_memo, mixins: true) # rubocop:disable Lint/UnusedMethodArgument
+      record_class_dependency(current) if Analysis::DependencyRecorder.active?
+      queue.concat(ResolutionChain.direct_ancestors(self, current.to_s, mixins))
     end
-
-    # Resolves an ancestor name AS WRITTEN (`"Base"`, or a qualified `"A::B"`) to a project-discovered class,
-    # following Ruby's `Module.nesting` constant lookup from the subclass's declaration HEADER, innermost
-    # first, then bare. nil when no candidate names a discovered user class.
-    def resolve_ancestor_class_name(subclass_qualified, raw_ancestor, name_memo)
-      by_subclass = (name_memo[subclass_qualified] ||= {})
-      return by_subclass[raw_ancestor] if by_subclass.key?(raw_ancestor)
-
-      by_subclass[raw_ancestor] = compute_ancestor_class_name(subclass_qualified, raw_ancestor)
-    end
-    private :ancestor_walk_gave_up, :resolve_ancestor_class_name
 
     # Issue #682 — the candidate names an ancestor spelled `raw_ancestor` can denote in `subclass_qualified`,
     # in Ruby's lookup order, most-qualified first and the bare name last. The single owner of the question:
-    # three walks resolved a superclass / include name apiece ({#enqueue_ancestors} for method lookup,
-    # `Reflection.resolve_ancestor_name` for the constant ladder's ancestor rung, and
-    # `Analysis::CheckRules`' override-visibility rule), and each derived the order by PEELING the
-    # subclass's qualified name one `::` segment at a time.
+    # three walks resolved a superclass / include name apiece (the method walk, the constant ladder's
+    # ancestor rung, and `Analysis::CheckRules`' override-visibility rule — all three now {ResolutionChain}),
+    # and each derived the order by PEELING the subclass's qualified name one `::` segment at a time.
     #
     # That peel is the NESTED spelling's answer, given to both spellings. Ruby evaluates a superclass
     # expression before entering the body, so the cref that governs it is the one the declaration's HEADER
@@ -1632,9 +1506,9 @@ module Rigor
     # The header nesting is a property of the DECLARATION, not of the reader, so it is read from the
     # discovery table `Inference::ScopeIndexer` records it in rather than from this scope's own
     # `#lexical_nesting`. Answering off the reader's chain would be wrong past the first hop of the ancestor
-    # BFS (the chain describes the reader's class, not the ancestor being resolved) and would silently
-    # corrupt the run-scoped ancestor memos in `Inference::ExpressionTyper#class_graph_buckets` and
-    # `Reflection.ancestor_constant_scopes`, both of which key on the class name alone because this walk is
+    # chain (the chain describes the reader's class, not the ancestor being resolved) and would silently
+    # corrupt the {ResolutionChain} memo and the ones layered on it (`Inference::ExpressionTyper#class_graph_buckets`,
+    # `Reflection.ancestor_constant_scopes`), all of which key on the class name alone because this walk is
     # a pure function of the frozen discovery tables.
     #
     # The peel survives as the FALLBACK, for a class no declaration walk recorded — a scope seeded without
@@ -1741,10 +1615,6 @@ module Rigor
     end
     private :peeled_header_nesting
 
-    def compute_ancestor_class_name(subclass_qualified, raw_ancestor)
-      ancestor_name_candidates(subclass_qualified, raw_ancestor).find { |c| known_user_class?(c) }
-    end
-
     # Issue #723 — `discovered_methods` is in the list because the other three miss a class whose only
     # project-side content is CLASS methods: `class Base; def self.build = :built; end` records no instance
     # def node, no superclass and no include, so the ancestor-name resolver did not recognise `Base` as a
@@ -1759,13 +1629,13 @@ module Rigor
     # narrower predicate (`discovered_classes` alone) would read a project class as having left the project
     # and attribute its root name to a same-named locked gem — a WRONG provenance label, which is the one
     # direction ADR-82 forbids.
-    private :ancestor_walk_gave_up, :compute_ancestor_class_name
 
     # Records, for a resolved cross-class ancestry read, every file that declares `class_name` (its declaration /
-    # reopening / superclass / include sites). The `discovered_class_sources` table it reads is populated only by
-    # the cross-file project pre-pass ({Inference::ScopeIndexer.discovered_def_index_for_paths}) and only when
-    # dependency recording is active. No-op when the class is not a project class (core / stdlib / gem names
-    # never appear in the source map). Gated by the caller on the recorder being active.
+    # reopening / superclass / include sites). The `discovered_class_sources` table it reads is populated by the
+    # cross-file project pre-pass ({Inference::ScopeIndexer.discovered_def_index_for_paths}); a scope built
+    # without one holds none, and the read then files nothing. No-op when the class is not a project class
+    # (core / stdlib / gem names never appear in the source map). Gated by the caller on the recorder being
+    # active.
     def record_class_dependency(class_name)
       sites = @discovery.discovered_class_sources[class_name.to_s]
       return if sites.nil?

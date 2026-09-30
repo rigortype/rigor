@@ -243,6 +243,7 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#fold_mixin_lists: grandfathered
     Rigor::Inference::ScopeIndexer#fold_per_file_extends: grandfathered
     Rigor::Inference::ScopeIndexer#fold_refinements: grandfathered
+    Rigor::Inference::ScopeIndexer#freeze_mixin_lists: it freezes the mixin accumulator's per-class lists into the include and prepend tables; it is the one place the two are projected, and the include projection alone is a set (#1587)
     Rigor::Inference::ScopeIndexer#gather_aliased_mutations: grandfathered
     Rigor::Inference::ScopeIndexer#gather_cvar_writes: grandfathered
     Rigor::Inference::ScopeIndexer#gather_global_writes: grandfathered
@@ -461,6 +462,11 @@ lib/rigor/plugin/node_context.rb:
   computes: the enclosing class or module a node rule sees (ADR-37)
   producers:
     Rigor::Plugin::NodeContext#enclosing_module: grandfathered
+lib/rigor/scope/resolution_chain.rb:
+  computes: the ancestor order of a project class or module from the mixin tables, and whether that order is a fact
+  producers:
+    Rigor::Scope::ResolutionChain::Builder#compute_instance: a consumer, not a declaration producer; it reads `unpositioned_mixins` on the :include side to mark a chain unsettled, and reads the tables raw by design (ADR-24)
+    Rigor::Scope::ResolutionChain::Builder#compute_singleton: the singleton-side twin, reading the :extend side
 lib/rigor/sig_gen/generator.rb:
   computes: the defs, attribute readers and ivar observations sig-gen emits per qualified class
   producers:

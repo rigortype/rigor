@@ -153,7 +153,10 @@ module Rigor
       # 32: each seed bundle gains an `unpositioned_mixins` table — the file's mixin edges whose order is not a
       # fact (`Scope::DiscoveryIndex#unpositioned_mixins`), which an ancestor-order reader declines on. A pre-32
       # bundle would fold as "every edge positioned", and a warm run would answer an order a cold run declines.
-      SCHEMA = 32
+      # 33: the mixin producers change what a seed bundle holds (#1587 — the prepend table keeps every statement,
+      # and a both-kind module or a repeated `extend` is named unpositioned), so a pre-33 bundle folds as the
+      # collapsed, positioned table and a warm run would answer an order a cold run declines.
+      SCHEMA = 33
 
       # The persisted per-file state.
       # `cache` maps an analyzed file to its diagnostics.

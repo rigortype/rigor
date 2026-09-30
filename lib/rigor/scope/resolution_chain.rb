@@ -734,7 +734,9 @@ module Rigor
         def prepend_all(entries, owner, prepends, depth)
           origin = 0
           super_start = 1
-          prepends.reverse_each do |raw|
+          # The table holds every statement, nearest first: a same-owner repeat is a no-op in Ruby (the first
+          # statement wins), so it is dropped here rather than met as a fork.
+          prepends.reverse.uniq.each do |raw|
             modules = Array(resolve(owner, raw))
             each_mixin_chain(owner, raw, depth) do |sub|
               point = -1

@@ -449,6 +449,33 @@ RSpec.describe "resolution in Ruby's ancestor order (#1567, #1568, #1570, #1571)
     RUBY
   end
 
+  # Round-3 review. The prepend table keeps every statement, so the readers that walk it raw answer what they
+  # always did: Ruby skips the repeated `prepend M1`, and `M1` (the first) stays nearest.
+  it "keeps the first of a repeated prepend where the prepended module later includes another" do
+    expect(diagnostics_for(<<~RUBY)).to eq([])
+      module M1; def foo = "m1"; end
+      module M3; def foo = 3; end
+      class D; prepend M1; end
+      module M1; include M3; end
+      class D; prepend M3; end
+      class D; prepend M1; end
+      D.new.foo.upcase
+    RUBY
+  end
+
+  # A repeated `extend` keeps the table position it always had, which the folded singleton tables read; Ruby's
+  # `[K, M2, M4]` runs `M2#foo`, a String, and so does the reader's answer.
+  it "keeps the readers' answer for a repeated extend of a module that later includes another" do
+    expect(diagnostics_for(<<~RUBY)).to eq([])
+      module M4; def foo = 1; end
+      module M2; def foo = "m2"; end
+      class K; extend M2; end
+      module M2; include M4; end
+      class K; extend M4; extend M2; end
+      K.foo.upcase
+    RUBY
+  end
+
   # The singleton side resolved a class that only `extend`s as an external entry, so the modules it extends
   # vanished from the chain and the skip among them went uncounted.
   it "does not type a singleton method from a module a class that only extends carries" do

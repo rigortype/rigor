@@ -870,9 +870,11 @@ RSpec.describe "Scope::ResolutionChain against Ruby's own resolution" do
       end
     end
 
-    # #1573 and #1587 are fixed at the producers: a repeated `extend` or `prepend` keeps its FIRST position, as
-    # Ruby's skip of a module already in the ancestry does, so the chain and Ruby agree.
-    it "keeps a repeated extend at its first position (#1573)" do
+    # #1587 is fixed: the prepend table keeps every statement and the chain keeps the first, as Ruby's skip of a
+    # module already in the prepend region does. #1573 is not: the extend table keeps the later statement's
+    # position, which the folded singleton tables read, so a repeated `extend` names the singleton side
+    # unpositioned and every reader answers what it always did. Flip this when #1573 is fixed: Ruby runs `E2`.
+    it "leaves a repeated extend at the readers' own answer (#1573)" do
       source = <<~RUBY
         module E1
           def foo = :e1
@@ -893,7 +895,9 @@ RSpec.describe "Scope::ResolutionChain against Ruby's own resolution" do
         File.write(path, source)
         ruby = ruby_answers(path, { methods: ["C.foo"] }).fetch("C.foo")
         expect(ruby.first).to eq(["E2", 6])
-        expect(rigor_agreed_singleton_line(rigor_scope(source), "C", :foo)).to eq(6)
+        scope = rigor_scope(source)
+        expect(chain_of(scope, "C", :singleton)).to be_unsettled
+        expect(rigor_agreed_singleton_line(scope, "C", :foo)).to eq(2)
       end
     end
 

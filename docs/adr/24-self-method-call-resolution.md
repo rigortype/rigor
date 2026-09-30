@@ -596,6 +596,17 @@ the same weight: it resolves as external there, so its extended modules
 are invisible to the chain. That is a hole in what the chain sees, not an
 order fork, and it settles to master.
 
+**Repeated mixins.** Ruby skips a repeated `include`, `prepend` or
+`extend` and keeps the first position. The producers keep the first
+position of a repeated `include`. The prepend table keeps every
+statement, nearest first, so the readers that walk it raw answer what
+they always did, and the chain drops a same-owner repeat with the first
+statement winning (#1587). A repeated `extend` keeps the table position
+it always had (the later statement's, which the folded singleton tables
+read), so the class's singleton side is named unpositioned and every
+reader answers what it did before (#1573 stays open until the folded
+tables can carry the first position).
+
 **Unsettled chains.** A skip count is not the only reason the tables
 cannot vouch for an order. The chain marks a node *unsettled* when
 `DiscoveryIndex#unpositioned_mixins` lists anything on the side being

@@ -5673,7 +5673,10 @@ module Rigor
       # already store nearest-first (see {#write_mixin_targets}), so the concat preserves MRO.
       def freeze_mixin_lists(accumulator, kind)
         accumulator.each_with_object({}) do |(class_name, kinds), out|
-          names = mixin_names_for(kinds, kind).uniq.freeze
+          names = mixin_names_for(kinds, kind)
+          # The instance-side projection is a SET in search order; the prepend table keeps every statement.
+          names = names.uniq if kind == :include
+          names = names.freeze
           out[class_name] = names unless names.empty?
         end.freeze
       end
@@ -6021,7 +6024,10 @@ module Rigor
         # A target the OTHER kind already carries (`include M; prepend M`) is one body the two tables cannot
         # represent (Ruby's `[M, C, M]`), so the instance side is named unpositioned.
         accumulator.taint(owner, :include) if targets.any? { |target| bucket[other]&.include?(target) }
-        list.unshift(*targets.reject { |target| list.include?(target) })
+        # A repeated `include` keeps its first position (Ruby skips it). A repeated `prepend` is KEPT: the
+        # prepend table holds every statement, nearest first, so the readers that walk the raw list see what
+        # they always saw, and the resolution chain dedupes per owner, first statement winning.
+        list.unshift(*(prepend ? targets : targets.reject { |target| list.include?(target) }))
       end
 
       # Whether a mixin call contributes to the tables at all: a receiverless `include` / `prepend` needs an
@@ -6363,7 +6369,12 @@ module Rigor
         return targets if targets.empty?
 
         list = (accumulator[current_class] ||= [])
-        list.unshift(*targets.reject { |target| list.include?(target) })
+        # A repeated `extend` keeps the table position it always had (the later statement's: the freeze `uniq`s
+        # the nearest-first list), which is not Ruby's (Ruby skips the repeat and keeps the first, #1573), and
+        # the folded singleton tables read that order. The order is not a fact, so the singleton side is named
+        # unpositioned and the chain settles to the readers' own answer.
+        accumulator.taint(current_class, :extend) if targets.any? { |target| list.include?(target) }
+        list.unshift(*targets)
         accumulator.note(node, current_class, :extend, targets, complete: targets.size == arguments.size)
         targets
       end
@@ -7583,7 +7594,7 @@ module Rigor
       # class. Shared with {#accumulate_extend_lists}' shape deliberately — the two tables answer the
       # `prepend` question on the two sides of the class object, and both fold nearest-first.
       def accumulate_prepend_lists(target, additions)
-        additions.each { |cn, mods| target[cn] = (mods + (target[cn] || [])).uniq }
+        additions.each { |cn, mods| target[cn] = (mods + (target[cn] || [])) }
       end
 
       # ADR-85 WD2 — converts a file's live single-file index + its class table into a Marshal-clean seed

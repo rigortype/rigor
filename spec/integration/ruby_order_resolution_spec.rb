@@ -611,18 +611,21 @@ RSpec.describe "resolution in Ruby's ancestor order (#1567, #1568, #1570, #1571)
       expect(diagnostics_for(source)).to eq([])
     end
 
-    # `tap` / `then` count only on a literal or `self`. `Registry.tap` is the constant's own (here `nil`, the block
-    # never runs) and a receiverless `tap` may reach a class-level DSL method, so neither records anything; Ruby's
-    # `label` is Base's "x" for both. `Base.tap { extend Counted }` would extend the class in Ruby, a missed case.
-    it "does not record an `extend` in `tap` on a constant or without a receiver" do
+    # `tap` / `then` count only on a literal. `Registry.tap` is the constant's own (here `nil`, the block never
+    # runs), and a receiverless or `self.` `tap` may reach the class's own singleton `tap`, so none records
+    # anything; Ruby's `label` is Base's "x" for all three. `Base.tap { extend Counted }` would extend the class in
+    # Ruby, a missed case.
+    it "does not record an `extend` in `tap` on a constant, on self or without a receiver" do
       source = <<~RUBY
         class Base; def self.label = "x"; end
         module Counted; def label = 1; end
         class Registry; def self.tap = nil; end
         class U1 < Base; Registry.tap { extend Counted }; end
         class U2 < Base; def self.tap = nil; tap { extend Counted }; end
+        class U3 < Base; def self.tap = nil; self.tap { extend Counted }; end
         U1.label.upcase
         U2.label.upcase
+        U3.label.upcase
       RUBY
       expect(diagnostics_for(source)).to eq([])
     end

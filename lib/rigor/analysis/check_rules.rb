@@ -2670,9 +2670,15 @@ module Rigor
           verdict == :chain ? answer : nil
         end
 
+        # The read depends on the class's own declarations even when it finds an empty region: a file that later
+        # gives the class a `prepend` fills it. The chain search records the entries it passes, but there is none
+        # to pass when the class heads its chain (or is not on it), so the class edge is filed here.
         def prepend_region_visibility(scope, chain, class_name, method_name)
           own = chain.index_of(class_name)
-          return nil if own.nil? || own.zero?
+          if own.nil? || own.zero?
+            Scope::ResolutionChain.record_class(scope, class_name) if Analysis::DependencyRecorder.active?
+            return nil
+          end
 
           definer = chain.search(scope, 0, own) do |entry|
             next if entry.external?

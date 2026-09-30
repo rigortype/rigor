@@ -1626,10 +1626,11 @@ module Rigor
     # direction ADR-82 forbids.
 
     # Records, for a resolved cross-class ancestry read, every file that declares `class_name` (its declaration /
-    # reopening / superclass / include sites). The `discovered_class_sources` table it reads is populated only by
-    # the cross-file project pre-pass ({Inference::ScopeIndexer.discovered_def_index_for_paths}) and only when
-    # dependency recording is active. No-op when the class is not a project class (core / stdlib / gem names
-    # never appear in the source map). Gated by the caller on the recorder being active.
+    # reopening / superclass / include sites). The `discovered_class_sources` table it reads is populated by the
+    # cross-file project pre-pass ({Inference::ScopeIndexer.discovered_def_index_for_paths}); a scope built
+    # without one holds none, and the read then files nothing. No-op when the class is not a project class
+    # (core / stdlib / gem names never appear in the source map). Gated by the caller on the recorder being
+    # active.
     def record_class_dependency(class_name)
       sites = @discovery.discovered_class_sources[class_name.to_s]
       return if sites.nil?

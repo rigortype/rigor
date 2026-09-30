@@ -128,10 +128,11 @@ RSpec.describe "resolution in Ruby's ancestor order (#1567, #1568, #1570, #1571)
     RUBY
   end
 
-  # Flip this when #1570 is fixed. Ruby skips `C`'s `include M` (`Base` already carries it), so `C.new.foo` is
-  # `Base#foo` and correct; but the tables cannot tell that run from one where `Base` was reopened to include
-  # `M` after `C` did (`[C, M, Base, M]`, `M#foo(x)`), the two worlds disagree, and the rule keeps master's
-  # answer, which checks the call against `M#foo`. Line 20 is the control.
+  # Flip this when ADR-119 PR C fixes #1570 at `SourceArity`'s decision point. Ruby skips `C`'s `include M`
+  # (`Base` already carries it), so `C.new.foo` is `Base#foo` and correct; but the tables cannot tell that run
+  # from one where `Base` was reopened to include `M` after `C` did (`[C, M, Base, M]`, `M#foo(x)`), the two
+  # worlds disagree, and the rule keeps master's answer, which checks the call against `M#foo`. PR C makes
+  # that disagreement answer `Unknown`, so line 19 goes silent. Line 20 is the control.
   it "keeps master's answer for an include of a module the superclass already includes (#1570)" do
     expect(diagnostics_for(<<~RUBY)).to eq([[19, "call.wrong-arity"], [20, "call.wrong-arity"]])
       module M
@@ -201,7 +202,7 @@ RSpec.describe "resolution in Ruby's ancestor order (#1567, #1568, #1570, #1571)
   end
 
   # A body reopened after an includer ran leaves the tables in a state the skip rule reads one way and Ruby
-  # ran the other (`ResolutionChain#retro`). The readers keep master's answer there, so none of these may fire —
+  # ran the other (`ResolutionChain#settle`). The readers keep master's answer there, so none of these may fire —
   # `Base#foo`'s `1` is what the final tables alone would type the call as. Each keeps a control that must.
   it "keeps master's answer where the superclass was reopened to include a module the class already included" do
     expect(diagnostics_for(<<~RUBY)).to eq([[18, "call.undefined-method"]])

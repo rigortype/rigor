@@ -30,10 +30,11 @@ linearised ancestor order, and `Scope::ResolutionChain` is the one
 implementation of it. The breadth-first walks slice 2 shipped are
 superseded; every reader that asks "which definer does Ruby call" reads
 the chain, and a spec keeps any other method from walking the ancestry
-tables itself. The rules, the two worlds a skipped `include` leaves
-(where they disagree a reader keeps master's answer, so #1570's shape is
-not yet fixed), and what the tables cannot express are in § "Amendment
-2026-09-28 — Ruby's resolution order, one chain" below. It carries no
+tables itself. The rules, the counted skips a skipped `include` leaves
+(no skip keeps the chain, one skip keeps it only where a second world
+agrees, two or more take master's answer, so #1570's shape is not fixed
+here but by ADR-119's PR C), and what the tables cannot express are in §
+"Amendment 2026-09-28 — Ruby's resolution order, one chain" below. It carries no
 certainty yet: the proposed ADR-119 adds `possible` facts on top of
 this chain.
 
@@ -555,30 +556,50 @@ with a #986 ambiguous name expanded to both classes) for
 `call.wrong-arity`. The three predicates predate the chain, and a bug
 fix does not unify them.
 
-**Two worlds, and master's answer where they disagree.** The skip rule
-is Ruby's for the order the statements ran; the tables hold only their
-final state. A body reopened after an includer ran (`class Base;
-include M; end` after `class C < Base; include M`) added an edge the
-includer never skipped, and Ruby keeps both copies: `[C, M, Base, M]`.
-So wherever the rule skips, the chain also carries the RETRO world,
-with every skipped insertion made. A reader answers from the chain
-where the two worlds agree on its answer, and otherwise answers what
-the walk it replaced answered (`ResolutionChain::MasterOrder`, the old
-breadth-first, depth-first and level orders over the same tables): the
-tables cannot say which world ran, and a disagreement is no reason to
-answer anything new. No reader has a third outcome; each keeps its
-signature and return type (`node | nil`, pairs, Booleans, lists), and
-only which definer it answers moved. #1570 is exactly such a
-disagreement — Ruby skips the redundant `include` when `Base` was
-defined first, and keeps it when `Base` was reopened later — so its
-readers keep master's answer, and its false positive stays until the
-tables record whether a body was reopened after the include ran. Two
-worlds are not every combination of several skips; a mix could put a
-third definer first. On Mastodon 42 of 4,379 chains carry a second
-world — 21 classes that re-include a module their chain already carries,
-as `ActivityPub::FetchAllRepliesService` re-includes the `JsonLdHelper`
-its superclass includes — and no read over them saw the worlds
-disagree; Rigor's own `lib/` has none.
+**Counted skips, and master's answer where the chain cannot stand.** The
+skip rule is Ruby's for the order the statements ran; the tables hold
+only their final state. A body reopened after an includer ran (`class
+Base; include M; end` after `class C < Base; include M`) added an edge
+the includer never skipped, and Ruby keeps both copies: `[C, M, Base,
+M]`. Each skipped insertion is therefore a fork between two worlds, and
+the tables cannot say which one ran. The chain counts every skip
+(`ResolutionChain#skip_count`, summed through the module sub-chains it
+draws on, each skipped entry counting once), and one method decides for
+every reader, `ResolutionChain#settle`, which answers `:chain` or
+`:master`:
+
+- No skip: the chain stands.
+- One skip: two worlds exist. The chain also builds the retro world,
+  with that insertion made anyway, and stands only where the retro
+  world gives the reader the same answer. The retro world is abandoned
+  once it holds more than 100 project entries, which settles to master.
+- Two or more skips: master's answer, and no retro world is built. A
+  mix of skips made and skips not made can put a third definer first, so
+  two worlds are not every world, and agreement between them proves
+  nothing. The witness fixture `two skips of which neither world reaches
+  the definer Ruby calls` is that shape: Ruby runs `D#foo`, both worlds
+  read `Deep#foo`, and master's order happens to reach `D`.
+
+Where the chain does not stand, a reader answers what the walk it
+replaced answered (`ResolutionChain::MasterOrder`, the old breadth-first,
+depth-first and level orders over the same tables). No reader has a third
+outcome; each keeps its signature and return type (`node | nil`, pairs,
+Booleans, lists), and only which definer it answers moved. The retro
+world and the counter are private to the chain; every reader asks
+`settle`, and `ancestry_walker_detection_spec.rb` fails on a reader that
+reads the retro world itself.
+
+#1570 is exactly a one-skip disagreement, and no reader of this
+amendment fixes it: Ruby skips the redundant `include` when `Base` was
+defined first and keeps it when `Base` was reopened later, so its readers
+keep master's answer. It is fixed by ADR-119's PR C, at the decision
+point of `SourceArity`, where a disagreement between the worlds answers
+`Unknown` and the rule stays silent, with no new data recorded. On
+Mastodon 42 of 4,379 chains carry a second world — 21 classes that
+re-include a module their chain already carries, as
+`ActivityPub::FetchAllRepliesService` re-includes the `JsonLdHelper` its
+superclass includes — and no read over them saw the worlds disagree;
+Rigor's own `lib/` has none.
 
 **The single walker.** Every "which definer" reader reads the chain:
 `Scope#user_def_through_ancestors`, `#singleton_def_through_ancestors`,
@@ -607,8 +628,14 @@ body's prepends first, which differs from Ruby only when one body both
 includes and prepends a module (`include M; prepend M` is `[M, C, M]` in
 Ruby, `[M, C]` here: the same first definer, one trailing copy less; a
 census of Mastodon, Redmine, GitLab, Rails and Rigor found no such
-body). `class << self; prepend P` is recorded as an `extend`, so `P`
-sits after the singleton rather than before it. A repeated `extend`
+body). The same trailing copy goes missing through a module's own
+includes: `class C2; include A; prepend M; end` with `A` including `M` is
+`[M, C2, A, M]` in Ruby and `[M, C2, A]` in the chain, and `class C3;
+include M; prepend P; end` with `P` including `M` is `[P, M, C3, M]` in
+Ruby and `[P, M, C3]` in the chain, because the include of `M` is a skip
+once the prepends have placed it. The first definer is the same in both,
+and a witness pins each. `class << self; prepend P` is recorded as an
+`extend`, so `P` sits after the singleton rather than before it. A repeated `extend`
 keeps its latest position in the table (#1573). A definer an external
 module supplies ahead of a project one is not answered yet (#1572).
 

@@ -50,6 +50,10 @@ module Rigor
     #   way; only the trailing duplicate is missing, so a question about what `C`'s own method overrides
     #   answers "nothing" where Ruby answers `M` — the direction that stays silent. A census of Mastodon,
     #   Redmine, GitLab, Rails and Rigor's `lib` found no body that includes and prepends the same module.
+    #   The same trailing copy goes missing through a module's own includes: `class C2; include A; prepend M`
+    #   with `A` including `M` is `[M, C2, A, M]` in Ruby and `[M, C2, A]` here, and `class C3; include M;
+    #   prepend P` with `P` including `M` is `[P, M, C3, M]` in Ruby and `[P, M, C3]` here, because the
+    #   include of `M` is a skip once the prepends have placed it. The first definer is the same in both.
     # - `class << self; prepend P`, which the extends table records (and the extends fold copies) as an
     #   `extend`: the chain places `P` after the singleton, where Ruby places it before.
     #

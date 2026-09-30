@@ -1369,8 +1369,8 @@ module Rigor
     # `[nil, nil]` — each class object's own table, then the modules it extends in Ruby's order, then the
     # superclass's. `ScopeIndexer` folds an extended module's own `def`s into the extender's table, so those
     # answer at the extender; a module the extended one includes is its own entry (#1567's singleton shape:
-    # `class C < Base; extend A` with `A` including `M` is `M#foo`, not `Base.foo`). Where the two worlds
-    # disagree, the answer is the class objects' alone, as the superclass-only walk this replaced gave.
+    # `class C < Base; extend A` with `A` including `M` is `M#foo`, not `Base.foo`). Where the chain does
+    # not stand, the answer is the class objects' alone, as the superclass-only walk this replaced gave.
     def singleton_def_through_ancestors(class_name, method_name, name_memo: UNUSED_NAME_MEMO) # rubocop:disable Lint/UnusedMethodArgument
       chain = ResolutionChain.for(self, class_name.to_s, :singleton, :methods)
       found = first_singleton_def(chain, method_name)
@@ -1398,8 +1398,8 @@ module Rigor
     # each as-written name ({#ancestor_name_candidates}: the nesting spellings first, the bare name last), in
     # Ruby's order along the instance chain — the order the caller that adopts the FIRST answering one (#1173)
     # depends on. Resolving a candidate means asking the RBS environment, which this frozen-index read does
-    # not do; the caller takes the first candidate its own oracle knows. Where the two worlds list the groups
-    # differently, the list is the depth-first one the walk this replaced emitted.
+    # not do; the caller takes the first candidate its own oracle knows. Where the chain does not stand, the
+    # groups are the depth-first ones the walk this replaced emitted.
     #
     # Issue #527 slice 1 — `mixins: false` answers the superclass edge only: a consumer resolving one KIND of
     # inheritance edge at a time (the dispatch arm lands `< Hash` before `include Enumerable`) narrows it, and

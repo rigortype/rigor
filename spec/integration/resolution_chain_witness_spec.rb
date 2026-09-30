@@ -691,6 +691,60 @@ RSpec.describe "Scope::ResolutionChain against Ruby's own resolution" do
       end
     end
 
+    # The same gap, reached through a module's own includes (`ResolutionChain` header): the trailing copy of a
+    # module the class prepends AND reaches by an include, where the include is on the class or, in the second
+    # shape, the prepend carries the module. The first definer is the same either way.
+    def expect_missing_trailing_copy(source, class_name, ruby_owners, rigor_owners)
+      Dir.mktmpdir("rigor-chain-witness-") do |dir|
+        path = File.join(dir, "fixture.rb")
+        File.write(path, source)
+        ruby = ruby_answers(path, { methods: ["#{class_name}#foo"] }).fetch("#{class_name}#foo")
+        rigor = rigor_instance_definers(rigor_scope(source), class_name, :foo)
+        expect([ruby.map(&:first), rigor.map(&:first)]).to eq([ruby_owners, rigor_owners])
+        expect(rigor.first).to eq(ruby.first)
+      end
+    end
+
+    it "misses the trailing copy of a module the class prepends and an included module includes" do
+      expect_missing_trailing_copy(<<~RUBY, "C2", %w[M C2 M], %w[M C2])
+        module M
+          def foo = [:m, *(defined?(super) ? super : [])]
+        end
+
+        module A
+          include M
+        end
+
+        class C2
+          include A
+          prepend M
+
+          def foo = [:c2, *super]
+        end
+      RUBY
+    end
+
+    it "misses the trailing copy of a module the class includes and a prepended module includes" do
+      expect_missing_trailing_copy(<<~RUBY, "C3", %w[P M C3 M], %w[P M C3])
+        module M
+          def foo = [:m, *(defined?(super) ? super : [])]
+        end
+
+        module P
+          include M
+
+          def foo = [:p, *super]
+        end
+
+        class C3
+          include M
+          prepend P
+
+          def foo = [:c3, *super]
+        end
+      RUBY
+    end
+
     # Flip this when #1573 is fixed: the extends table keeps the LATEST position of a repeated `extend`,
     # while Ruby skips the repeat and keeps the first, so the chain reads `E1` as nearest and Ruby runs `E2`.
     it "reads a repeated extend at its latest position (#1573)" do

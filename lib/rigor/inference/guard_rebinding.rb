@@ -177,7 +177,9 @@ module Rigor
       def implicit_call_may_rebind?(node, scope)
         kind = VARIABLE_OPERATOR_WRITES[node.class]
         return type_method_foreign?(variable_type(kind, node.name, scope), node.binary_operator, scope) if kind
-        return type_method_foreign?(scope.type_of(node.collection), :each, scope) if node.is_a?(Prism::ForNode)
+        if node.is_a?(Prism::ForNode)
+          return type_method_foreign?(ScanScope.dispatch_type(node.collection, scope), :each, scope)
+        end
 
         compound_write_foreign?(node, scope)
       rescue StandardError
@@ -195,7 +197,7 @@ module Rigor
       end
 
       def compound_receiver_type(node, scope)
-        return scope.type_of(node.receiver) if node.receiver
+        return ScanScope.dispatch_type(node.receiver, scope) if node.receiver
 
         scope.self_type || Type::Combinator.nominal_of("Object")
       end
@@ -266,23 +268,12 @@ module Rigor
         return true if BLOCK_OR_CODE_NAMES.include?(call_node.name) &&
                        !(call_node.block.is_a?(Prism::BlockNode) && call_node.arguments.nil?)
 
-        return false if bot_receiver?(call_node, scope)
-
         targets = receiver_targets(call_node, scope)
         return true if targets.nil? || targets.empty?
 
         targets.any? { |class_name, kind| foreign_target?(class_name, call_node.name, kind, scope) }
       rescue StandardError
         true
-      end
-
-      # Issue #1446 — a receiver typed `bot` holds no value the analysis admits: a class guard disjoint from its
-      # `Nominal` (`return unless @io.is_a?(StringIO); @io.rewind`), or code no value reaches. Its method is read as
-      # running nothing, so a call on the guarded receiver does not restore the guard it runs under. Its arguments and
-      # literal block are still read ({.operands_may_rebind?}, {.call_may_rebind?}).
-      def bot_receiver?(call_node, scope)
-        receiver = call_node.receiver
-        !receiver.nil? && !receiver.is_a?(Prism::SelfNode) && scope.type_of(receiver).is_a?(Type::Bot)
       end
 
       # The `[class_name, kind]` pairs the call dispatches on ({ProjectMethodOwnership.targets}); an implicit or
@@ -296,7 +287,7 @@ module Rigor
           return ProjectMethodOwnership.targets(self_type)
         end
 
-        ProjectMethodOwnership.targets(scope.type_of(receiver))
+        ProjectMethodOwnership.targets(ScanScope.dispatch_type(receiver, scope))
       end
 
       def foreign_target?(class_name, method_name, kind, scope)
@@ -332,7 +323,7 @@ module Rigor
         owner = definition.respond_to?(:defined_in) ? definition.defined_in : nil
         owner&.to_s&.delete_prefix("::")
       end
-      private_class_method :scan, :guarded_ivar_write?, :bot_receiver?, :scan_call, :receiver_targets, :foreign_target?,
+      private_class_method :scan, :guarded_ivar_write?, :scan_call, :receiver_targets, :foreign_target?,
                            :universal_delegate_foreign?, :method_owner, :deferred_block_call?,
                            :compound_write_foreign?,
                            :compound_receiver_type, :compound_accessors, :compound_read_type, :variable_type,
@@ -398,7 +389,7 @@ module Rigor
           bindings = names.to_h { |name| [name, Type::Combinator.untyped] }
           requireds = parameters.parameters&.requireds || []
           unless requireds.none?(Prism::RequiredParameterNode)
-            yielded = yielded_types(call_node, scope, requireds.size)
+            yielded = yielded_types(call_node, scope)
             requireds.each_with_index do |parameter, index|
               next unless parameter.is_a?(Prism::RequiredParameterNode)
 
@@ -408,13 +399,10 @@ module Rigor
           bindings.reduce(scope) { |acc, (name, type)| acc.with_local(name, type) }
         end
 
-        # What the method `call_node` calls yields its block, by position, or `[]` when that cannot be read. A `bot`
-        # receiver yields `bot` at each of the `count` positions (#1446): a call on it runs nothing the scan counts
-        # ({GuardRebinding.bot_receiver?}), and neither does one on what it yields.
-        def yielded_types(call_node, scope, count)
-          receiver = call_node.receiver ? scope.type_of(call_node.receiver) : scope.self_type
-          return Array.new(count, receiver) if receiver.is_a?(Type::Bot)
-
+        # What the method `call_node` calls yields its block, by position, or `[]` when that cannot be read. A receiver
+        # a class guard left `bot` yields what the guarded class does ({.dispatch_type}, #1446).
+        def yielded_types(call_node, scope)
+          receiver = call_node.receiver ? dispatch_type(call_node.receiver, scope) : scope.self_type
           arguments = call_node.arguments&.arguments || []
           MethodDispatcher.expected_block_param_types(
             receiver_type: receiver, method_name: call_node.name, environment: scope.environment, scope: scope,
@@ -422,6 +410,23 @@ module Rigor
           )
         rescue StandardError
           []
+        end
+
+        # Issue #1446 — the type a call on the receiver `node` dispatches on: its type in `scope`, or, where a class
+        # guard disjoint from the receiver's binding left it `bot` (`return unless @io.is_a?(StringIO)` on an `IO`),
+        # the classes the guard named ({Narrowing.bot_guard_classes_of}), since the value that passes the guard is one
+        # of them. So `@io.rewind` reads as `StringIO#rewind` and keeps the narrowing, while `@cb.call` past
+        # `@cb.is_a?(Proc)` reads as a call on a code object, and a method a project subclass or reopening defines on
+        # the class still counts. A `bot` no class guard produced stays `bot`, which no target resolves, so a call on
+        # it counts as an unresolved callee.
+        def dispatch_type(node, scope)
+          type = scope.type_of(node)
+          return type unless type.is_a?(Type::Bot)
+
+          classes = Narrowing.bot_guard_classes_of(node, scope)
+          return type if classes.nil?
+
+          Type::Combinator.union(*classes.map { |name| Type::Combinator.nominal_of(name) })
         end
 
         # The names a block's parameter list declares: every kind of parameter, a destructured one's parts included,

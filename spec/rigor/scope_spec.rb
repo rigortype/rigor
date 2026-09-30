@@ -698,7 +698,7 @@ RSpec.describe Rigor::Scope do
           published_constant_sourced
           struct_fold_safe_locals opaque_block_self singleton_class_body
           local_origins ivar_origins optimistic_locals optimistic_ivars repeated_or_writes match_frame
-          constant_narrowings guard_records
+          constant_narrowings guard_records bot_guard_classes
         ],
         receiver: %i[
           discovery source_path lexical_nesting
@@ -749,7 +749,8 @@ RSpec.describe Rigor::Scope do
         repeated_or_writes: { node => true }.compare_by_identity.freeze,
         match_frame: Rigor::Inference::MatchRebinding::Frame.new(node),
         constant_narrowings: { "C" => type }.freeze,
-        guard_records: { %i[global $g] => type, [:constant, "C"] => type, %i[ivar @i] => type }.freeze
+        guard_records: { %i[global $g] => type, [:constant, "C"] => type, %i[ivar @i] => type }.freeze,
+        bot_guard_classes: { %i[ivar @i] => ["Proc"].freeze }.freeze
       )
     end
 
@@ -972,6 +973,33 @@ RSpec.describe Rigor::Scope do
       expect(joined.guard_narrowed_ivar?(:@io)).to be(true)
       expect(joined.forget_guard_narrowings.ivar(:@io)).to eq(io_or_string_io)
       expect(guarded.join(described_class.empty).guard_narrowed?).to be(false)
+    end
+  end
+
+  # Issue #1446 — the classes a class guard named where it left a receiver `bot`, which a call on the receiver
+  # dispatches on. A write or another narrowing of the name drops them, and a join keeps them only both arms hold.
+  describe "bot guard classes" do
+    let(:bot) { Rigor::Type::Combinator.bot }
+    let(:recorded) do
+      described_class.empty.with_local(:x, bot).with_bot_guard_classes(:local, :x, ["Proc"])
+                     .with_ivar(:@cb, bot).with_bot_guard_classes(:ivar, :@cb, ["Proc"])
+                     .with_constant_narrowing("CB", bot, Rigor::Type::Combinator.constant_of(:x))
+                     .with_bot_guard_classes(:constant, "CB", ["Proc"])
+    end
+
+    it "drops an entry when its name is rebound" do
+      expect(recorded.bot_guard_classes_for(:local, :x)).to eq(["Proc"])
+      expect(recorded.with_local(:x, bot).bot_guard_classes_for(:local, :x)).to be_nil
+      expect(recorded.with_ivar(:@cb, bot).bot_guard_classes_for(:ivar, :@cb)).to be_nil
+      expect(recorded.without_constant_narrowings_named("CB").bot_guard_classes_for(:constant, "CB")).to be_nil
+      expect(recorded.with_local(:y, bot).bot_guard_classes_for(:local, :x)).to eq(["Proc"])
+    end
+
+    it "keeps an entry through a join only when both arms hold it, with the classes of either" do
+      other = described_class.empty.with_local(:x, bot).with_bot_guard_classes(:local, :x, ["Method"])
+      expect(recorded.join(other).bot_guard_classes_for(:local, :x)).to eq(%w[Proc Method])
+      expect(recorded.join(other).bot_guard_classes_for(:ivar, :@cb)).to be_nil
+      expect(recorded.join(described_class.empty.with_local(:x, bot)).bot_guard_classes).to be_empty
     end
   end
 end

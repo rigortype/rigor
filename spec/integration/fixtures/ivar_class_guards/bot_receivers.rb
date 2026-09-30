@@ -2,10 +2,11 @@ require "stringio"
 require "rigor/testing"
 include Rigor::Testing
 
-# Issue #1446 — a class guard disjoint from the receiver's `Nominal` reads the receiver as `bot`, and a call on a `bot`
-# receiver runs nothing the rebinding rule counts, nor does a call on what it yields. So calling the guarded object's
-# own methods keeps the narrowing: `@io.rewind; @io.string` stays quiet as `@io.string` does. Ruby 4.0.5 runs each
-# quiet line without error under a `StringIO`. The call's arguments and literal block are still read.
+# Issue #1446 — a class guard disjoint from the receiver's `Nominal` reads the receiver as `bot`, but the value that
+# passes the guard is of the guarded class, and a call on the receiver dispatches on that class. So calling a core
+# method of the guarded `StringIO` keeps the narrowing: `@io.rewind; @io.string` stays quiet as `@io.string` does.
+# Ruby 4.0.5 runs each quiet line without error under a `StringIO`. The call's arguments and literal block are still
+# read, and a call on a guarded `Proc`, or on what a guarded `Array` yields, may run project code.
 class Holder
   def initialize
     @io = STDOUT
@@ -42,6 +43,39 @@ class Holder
     return unless @io.is_a?(StringIO)
 
     @io.write(reset)
+    @io.string # FIRES-1446 call.undefined-method
+  end
+end
+
+# Controls: the guarded class runs project code. `@cb.call` runs whatever the `Proc` holds, and `item.poke` may be
+# `Poker#poke`, which resets the holder's `@io`.
+class Poker
+  def initialize(holder) = (@holder = holder)
+  def poke = @holder.reset
+end
+
+class Dispatcher
+  def initialize
+    @io = STDOUT
+    @cb = :x
+    @items = {}
+  end
+
+  def reset = (@io = STDOUT)
+
+  def reset_by_guarded_proc
+    return unless @io.is_a?(StringIO)
+    return unless @cb.is_a?(Proc)
+
+    @cb.call
+    @io.string # FIRES-1446 call.undefined-method
+  end
+
+  def reset_by_what_a_guarded_array_yields
+    return unless @io.is_a?(StringIO)
+    return unless @items.is_a?(Array)
+
+    @items.each { |item| item.poke }
     @io.string # FIRES-1446 call.undefined-method
   end
 end

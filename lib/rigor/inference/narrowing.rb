@@ -440,6 +440,20 @@ module Rigor
         Source::ConstantPath.rooted?(node) ? "::#{name}" : name
       end
 
+      # Issue #1446 — the classes a class guard narrowed the receiver `node` to where the guard left it `bot`
+      # ({Scope#bot_guard_classes_for}), or nil: a node that is not a local, instance-variable, global or constant
+      # read, or one no such guard narrowed.
+      def bot_guard_classes_of(node, scope)
+        case node
+        when Prism::LocalVariableReadNode then scope.bot_guard_classes_for(:local, node.name)
+        when Prism::InstanceVariableReadNode then scope.bot_guard_classes_for(:ivar, node.name)
+        when Prism::GlobalVariableReadNode then scope.bot_guard_classes_for(:global, node.name)
+        when Prism::ConstantReadNode, Prism::ConstantPathNode
+          key = constant_key(node)
+          key && scope.bot_guard_classes_for(:constant, key)
+        end
+      end
+
       # Public predicate analyser. Returns `[truthy_scope, falsey_scope]`, always; when no
       # narrowing rule matches the predicate node both entries are the receiver scope unchanged.
       def predicate_scopes(node, scope)
@@ -510,7 +524,11 @@ module Rigor
         return [body_scope, scope] if slot.nil?
 
         truthy_type, falsey_type = case_when_types(scope, slot.current, conditions)
-        [narrow_guarded_slot(body_scope, slot, truthy_type), narrow_guarded_slot(scope, slot, falsey_type)]
+        classes = conditions.map do |condition|
+          lexical_class_name(condition, scope) || case_equality_target_class(condition)
+        end
+        body_scope = record_bot_guard(narrow_guarded_slot(body_scope, slot, truthy_type), slot, truthy_type, classes)
+        [body_scope, narrow_guarded_slot(scope, slot, falsey_type)]
       end
 
       CASE_SUBJECT_KINDS = %i[local ivar global constant].freeze
@@ -1039,6 +1057,15 @@ module Rigor
           return scope if type == slot.current
 
           scope.with_guarded_ivar(slot.name, type, slot.current)
+        end
+
+        # Issue #1446 — `scope`, the guard's truthy edge, with `class_names` recorded for `slot` when the guard left
+        # it `bot` ({Scope#with_bot_guard_classes}): the value that passes it is one of those classes. Nothing is
+        # recorded when a condition names no class.
+        def record_bot_guard(scope, slot, type, class_names)
+          return scope unless type.is_a?(Type::Bot) && !class_names.empty? && class_names.none?(&:nil?)
+
+          scope.with_bot_guard_classes(slot.kind, slot.name, class_names)
         end
 
         def narrow_global_slot(scope, slot, type)
@@ -2356,7 +2383,8 @@ module Rigor
           environment = scope.environment
           truthy = narrow_class(slot.current, class_name, exact: exact, environment: environment, scope: scope)
           falsey = narrow_not_class(slot.current, class_name, exact: exact, environment: environment, scope: scope)
-          [narrow_guarded_slot(scope, slot, truthy), narrow_guarded_slot(scope, slot, falsey)]
+          truthy_scope = record_bot_guard(narrow_guarded_slot(scope, slot, truthy), slot, truthy, [class_name])
+          [truthy_scope, narrow_guarded_slot(scope, slot, falsey)]
         end
 
         # The class name a `is_a?` / `kind_of?` / `instance_of?` argument denotes: the top-level

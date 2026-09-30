@@ -37,6 +37,9 @@ module Rigor
     # Issue #1429 — the pre-guard type of each global or constant a guard narrowed.
     # sig-gen gap: #1154 — a reader over an ivar `initialize` assigns from a parameter.
     attr_reader guard_records: Hash[[Symbol, Symbol | String], Type::t]
+    # Issue #1446 — the classes a class guard narrowed a `bot` receiver to.
+    # sig-gen gap: #1154 — a reader over an ivar `initialize` assigns from a parameter.
+    attr_reader bot_guard_classes: Hash[[Symbol, Symbol | String], Array[String]]
 
     # ADR-53 Track A — the seed-time discovery tables live on the
     # DiscoveryIndex; Scope keeps per-table readers as delegates.
@@ -211,6 +214,10 @@ module Rigor
     def without_ivar_guard: (untyped name) -> Scope
     # sig-gen gap: #1154 — the table reader over an ivar `initialize` assigns from a parameter reaches `untyped`.
     def guard_narrowed_ivar?: (untyped name) -> bool
+    # Issue #1446 — `rigor sig-gen` output.
+    def with_bot_guard_classes: (untyped kind, untyped name, untyped class_names) -> Scope
+    # sig-gen gap: #1154 — the table reader over an ivar `initialize` assigns from a parameter reaches `untyped`.
+    def bot_guard_classes_for: (untyped kind, untyped name) -> Array[String]?
     def without_constant_narrowing: (untyped key) -> Scope
     def guard_narrowed?: () -> bool
     def forget_guard_narrowings: () -> Scope

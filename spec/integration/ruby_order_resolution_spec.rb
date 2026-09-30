@@ -250,6 +250,46 @@ RSpec.describe "resolution in Ruby's ancestor order (#1567, #1568, #1570, #1571)
     RUBY
   end
 
+  # Two skips, and neither world a one-skip-at-a-time logic compares reaches Ruby's definer: `C` ran its
+  # includes while `N` was still empty (`[C, D, Base, A, Deep, N, D]`, `D#foo`), and the final tables make both
+  # of them skips, which both worlds turn into `Deep#foo`. A chain with two skips settles to master's order, so
+  # `C.new.foo` is `D#foo`'s string and the correct `.upcase` is silent. The control is the same call on `Base`,
+  # where `Deep#foo`'s `1` is right.
+  it "does not type a two-skip chain from a definer Ruby does not call" do
+    expect(diagnostics_for(<<~RUBY)).to eq([[30, "call.undefined-method"]])
+      module Deep
+        def foo = 1
+      end
+
+      module D
+        def foo = "d"
+      end
+
+      module A
+        include Deep
+      end
+
+      module N; end
+
+      class Base
+        include N
+        include A
+      end
+
+      class C < Base
+        include D
+        include A
+      end
+
+      module N
+        include D
+      end
+
+      C.new.foo.upcase
+      Base.new.foo.upcase
+    RUBY
+  end
+
   it "keeps master's answer where a conditional include in the superclass makes the class's include a skip" do
     expect(diagnostics_for(<<~RUBY)).to eq([[16, "call.undefined-method"]])
       module M

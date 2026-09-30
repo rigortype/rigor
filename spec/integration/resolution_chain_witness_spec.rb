@@ -308,6 +308,45 @@ RESOLUTION_CHAIN_WITNESS_FIXTURES = {
     # include a skip; unset, Ruby runs `[C, M, Base]`. The reader keeps master's answer rather than `Base#foo`.
     methods: ["C#foo"], world: :retro, master: ["C#foo"], super: false
   },
+  "two skips of which neither world reaches the definer Ruby calls" => {
+    source: <<~RUBY,
+      module Deep
+        def foo = 1
+      end
+
+      module D
+        def foo = "d"
+      end
+
+      module A
+        include Deep
+      end
+
+      module N
+      end
+
+      class Base
+        include N
+        include A
+      end
+
+      class C < Base
+        include D
+        include A
+      end
+
+      module N
+        include D
+      end
+    RUBY
+    # `C` ran its includes while `N` was still empty, so `D` was new to it and `A` a skip: Ruby's ancestors are
+    # `[C, D, Base, A, Deep, N, D]` and `D#foo` runs. The final tables make BOTH of `C`'s includes skips, and
+    # the two worlds a one-skip-at-a-time logic would compare — every skip made, or none — both put `Deep`
+    # first (`[C, Base, A, Deep, N, D]` and `[C, A, Deep, D, Base, ...]`). Agreement of two worlds proves
+    # nothing once a chain holds two skips, so `settle` hands the decision to master's order, which reaches
+    # `D` first here.
+    methods: ["C#foo"], master: ["C#foo"], third: ["C#foo"], super: false
+  },
   "extend self puts the module's own instance chain after its singleton" => {
     source: <<~RUBY,
       module N
@@ -496,8 +535,7 @@ RSpec.describe "Scope::ResolutionChain against Ruby's own resolution" do
   end
 
   def rigor_instance_definers(scope, class_name, method_name, world = :skip)
-    chain = chain_of(scope, class_name)
-    chain = chain.retro if world == :retro
+    chain = world == :retro ? ResolutionChainRetro.build(scope, class_name) : chain_of(scope, class_name)
     chain.entries.filter_map do |entry|
       found = !entry.external? && scope.user_def_for(entry.name, method_name)
       [entry.name, found.location.start_line] if found
@@ -528,8 +566,12 @@ RSpec.describe "Scope::ResolutionChain against Ruby's own resolution" do
 
   def rigor_ancestors(scope, query, declared, flavor, world)
     class_name, side = query.split(".")
-    chain = chain_of(scope, class_name, side == "singleton" ? :singleton : :instance, flavor)
-    chain = chain.retro if world == :retro
+    side = side == "singleton" ? :singleton : :instance
+    chain = if world == :retro
+              ResolutionChainRetro.build(scope, class_name, side, flavor)
+            else
+              chain_of(scope, class_name, side, flavor)
+            end
     chain.entries.reject(&:external?).map { |entry| [entry.name, entry.side.to_s] }
          .select { |pair| declared.include?(pair.first) }
   end
@@ -587,6 +629,13 @@ RSpec.describe "Scope::ResolutionChain against Ruby's own resolution" do
             candidates = %i[skip retro].map do |each_world|
               rigor_instance_definers(scope, class_name, method_name.to_sym, each_world).first
             end
+            if fixture.fetch(:third, []).include?(query)
+              # Neither world holds Ruby's definer; only the ≥2-skips rule to master's order reaches it.
+              expect(candidates).not_to include(answers.fetch(query).first)
+              expect(actual).to eq(answers.fetch(query).first)
+              next
+            end
+
             expect_agreed(actual, answers.fetch(query).first, candidates,
                           master_definer(scope, class_name, method_name.to_sym))
           end

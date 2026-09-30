@@ -41,6 +41,7 @@ members:
     - lib/rigor/protection/discovery_seed.rb
     - lib/rigor/reflection.rb
     - lib/rigor/reflection/constant_ancestors.rb
+    - lib/rigor/scope/resolution_chain.rb
     copies:
     - lib/rigor/analysis/runner.rb
     - lib/rigor/inference/parameter_inference_collector.rb
@@ -120,6 +121,7 @@ members:
     - lib/rigor/analysis/check_rules.rb
     - lib/rigor/analysis/check_rules/source_arity.rb
     - lib/rigor/analysis/runner.rb
+    - lib/rigor/scope/resolution_chain.rb
     copies:
     - lib/rigor/analysis/runner.rb
     - lib/rigor/protection/discovery_seed.rb
@@ -134,6 +136,7 @@ members:
     - lib/rigor/inference/macro_block_self_type.rb
     - lib/rigor/inference/method_dispatcher/rbs_dispatch.rb
     - lib/rigor/reflection/constant_ancestors.rb
+    - lib/rigor/scope/resolution_chain.rb
     copies:
     - lib/rigor/analysis/runner.rb
     - lib/rigor/inference/parameter_inference_collector.rb
@@ -172,6 +175,7 @@ members:
     - lib/rigor/analysis/worker_session.rb
     - lib/rigor/inference/method_dispatcher/rbs_dispatch.rb
     - lib/rigor/reflection/constant_ancestors.rb
+    - lib/rigor/scope/resolution_chain.rb
     copies:
     - lib/rigor/analysis/runner.rb
     - lib/rigor/inference/parameter_inference_collector.rb
@@ -179,16 +183,17 @@ members:
   discovered_prepends:
     reads:
     - lib/rigor/analysis/runner.rb
+    - lib/rigor/scope/resolution_chain.rb
     copies:
     - lib/rigor/analysis/runner.rb
     - lib/rigor/protection/discovery_seed.rb
   discovered_extends:
     reads:
-    - lib/rigor/analysis/check_rules/source_arity.rb
     - lib/rigor/analysis/runner.rb
     - lib/rigor/inference/last_line/implicit_self.rb
     - lib/rigor/inference/macro_block_self_type.rb
     - lib/rigor/inference/method_dispatcher/rbs_dispatch.rb
+    - lib/rigor/scope/resolution_chain.rb
     copies:
     - lib/rigor/analysis/runner.rb
   unpositioned_mixins:
@@ -202,6 +207,7 @@ members:
     reads:
     - lib/rigor/analysis/incremental_session.rb
     - lib/rigor/analysis/runner.rb
+    - lib/rigor/scope/resolution_chain.rb
     copies:
     - lib/rigor/analysis/runner.rb
     - lib/rigor/inference/parameter_inference_collector.rb

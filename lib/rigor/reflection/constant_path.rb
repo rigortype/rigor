@@ -116,15 +116,15 @@ module Rigor
     end
     private_class_method :constant_in_namespace
 
-    # {.agreed_ancestor_hit} over the budget-bounded scope lists: the first answer both worlds reach at the
-    # same ancestor, and otherwise the breadth-first order's.
+    # {.agreed_ancestor_hit} over the budget-bounded scope lists: the first answer where
+    # `Scope::ResolutionChain#settle` lets the chain stand, and otherwise the breadth-first order's.
     def bounded_agreed_hit(class_name, scope, &)
-      scopes, retro_scopes = ancestor_constant_worlds(class_name, scope)
+      scopes, chain = ancestor_constant_worlds(class_name, scope)
       owner, hit = first_ancestor_hit(bounded(scopes), &)
-      return hit if retro_scopes.equal?(scopes)
-
-      retro_owner, = first_ancestor_hit(bounded(retro_scopes), &)
-      return hit if owner == retro_owner
+      verdict = chain.settle(owner) do |retro|
+        first_ancestor_hit(bounded(constant_scopes_of(retro, class_name)), &)&.first
+      end
+      return hit if verdict == :chain
 
       first_ancestor_hit(bounded(master_constant_scopes(class_name, scope)), &)&.last
     end

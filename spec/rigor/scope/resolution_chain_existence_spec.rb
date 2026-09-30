@@ -53,10 +53,10 @@ RSpec.describe "existence probes over a contested resolution chain" do
   # The fixture must really be contested — and a class without the redundant include must not be — or every
   # example below would pass without exercising a disagreement.
   it "contests C's chain, where the two worlds put different definers of foo first, and not Plain's" do
-    expect(chain_of("C")).to be_contested
-    expect(chain_of("Plain")).not_to be_contested
+    expect(chain_of("C").skip_count).to eq(1)
+    expect(chain_of("Plain").skip_count).to eq(0)
     skip_world = chain_of("C").entries.map(&:name)
-    retro_world = chain_of("C").retro.entries.map(&:name)
+    retro_world = ResolutionChainRetro.build(scope, "C").entries.map(&:name)
     expect([skip_world, retro_world]).to eq([%w[C Base M], %w[C M Base M]])
   end
 

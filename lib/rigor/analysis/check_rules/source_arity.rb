@@ -30,7 +30,7 @@ module Rigor
       # arity (the envelope's required-keyword flag declines, as `compute_arity_envelope` declines an RBS
       # function with required keywords); and a `class_eval` whose receiver is not a constant, which the
       # discovery walk cannot name.
-      class SourceArity
+      class SourceArity # rubocop:disable Metrics/ClassLength
         MISSING_HOOKS = %i[method_missing respond_to_missing?].freeze
         private_constant :MISSING_HOOKS
 
@@ -102,8 +102,8 @@ module Rigor
 
         private
 
-        # ADR-24 / #1570 — the owner is read in both worlds of the chain (`Scope::ResolutionChain#retro`). Where
-        # a skipped `include` would put a different envelope first, which definition the call reaches depends on
+        # ADR-24 / #1570 — `Scope::ResolutionChain#settle` decides whether the chain's owner stands. Where a
+        # skipped `include` would put a different envelope first, which definition the call reaches depends on
         # the order the bodies ran, and the walk answers from the levels it read before the chain
         # (`Scope::ResolutionChain::MasterOrder`). Both worlds' levels are kept for {#authoritative?}.
         def walk_to_owner(class_name)
@@ -112,10 +112,12 @@ module Rigor
           @master = false
           chain = arity_chain(class_name)
           envelope = owner_in(chain_levels(chain).first)
-          return envelope unless chain.contested?
-
-          settled = @ambiguous
-          return envelope if owner_in(chain_levels(chain.retro).first) == envelope && !settled && !@ambiguous
+          # The retro read answers `false` (no envelope is `false`) unless it agrees with the chain's and neither
+          # read was ambiguous (`@ambiguous` only ever turns true, so it covers both).
+          verdict = chain.settle(envelope) do |retro|
+            owner_in(chain_levels(retro).first) == envelope && !@ambiguous ? envelope : false
+          end
+          return envelope if verdict == :chain
 
           @levels = []
           @passed = []
@@ -308,11 +310,13 @@ module Rigor
           true
         end
 
-        # A subclass's own level in every world the owner may have been read in (nil where the budget cut it).
+        # A subclass's own level (nil where the budget cut it): the chain's where `settle` lets it stand, and
+        # master's where it does not.
         def subclass_levels(subclass)
           chain = arity_chain(subclass)
-          levels = [chain, chain.retro].uniq.map { |world| chain_levels(world).first.first }
-          chain.contested? ? levels << master_levels(subclass).first.first : levels
+          own = chain_levels(chain).first.first
+          verdict = chain.settle(own) { |retro| chain_levels(retro).first.first }
+          [verdict == :chain ? own : master_levels(subclass).first.first]
         end
 
         def each_subclass(class_name)

@@ -44,17 +44,15 @@ module Rigor
     private_class_method :ancestor_constant_scopes
 
     # ADR-24 / #1570 — the first ancestor that owns a constant, asked as {.ancestor_constant_scopes} orders
-    # them and again in the chain's retro world (`Scope::ResolutionChain#retro`): the block's first truthy
-    # answer when both worlds reach it at the same ancestor, and otherwise the answer of the breadth-first
-    # order this rung used before the chain (`Scope::ResolutionChain::MasterOrder`) — where a skipped `include`
-    # would put a different owner first, which constant Ruby reads depends on the order the bodies ran.
+    # them and settled by `Scope::ResolutionChain#settle`: the block's first truthy answer where the chain
+    # stands, and otherwise the answer of the breadth-first order this rung used before the chain
+    # (`Scope::ResolutionChain::MasterOrder`) — where a skipped `include` would put a different owner first,
+    # which constant Ruby reads depends on the order the bodies ran.
     def agreed_ancestor_hit(class_name, scope, &)
-      scopes, retro_scopes = ancestor_constant_worlds(class_name, scope)
+      scopes, chain = ancestor_constant_worlds(class_name, scope)
       owner, hit = first_ancestor_hit(scopes, &)
-      return hit if retro_scopes.equal?(scopes)
-
-      retro_owner, = first_ancestor_hit(retro_scopes, &)
-      return hit if owner == retro_owner
+      verdict = chain.settle(owner) { |retro| first_ancestor_hit(constant_scopes_of(retro, class_name), &)&.first }
+      return hit if verdict == :chain
 
       first_ancestor_hit(master_constant_scopes(class_name, scope), &)&.last
     end
@@ -74,8 +72,8 @@ module Rigor
     end
     private_class_method :first_ancestor_hit
 
-    # `[scopes, retro_scopes]` — {.ancestor_constant_scopes} and its retro-world twin, which is the same
-    # object when the chain skipped nothing.
+    # `[scopes, chain]` — {.ancestor_constant_scopes} and the chain they were read from, which settles the
+    # answer.
     def ancestor_constant_worlds(class_name, scope)
       # ADR-46: the answer depends on every class on the chain, and the memo is run-scoped rather than
       # file-scoped — a hit would skip the recording and under-record the edge for every later file. A
@@ -119,7 +117,7 @@ module Rigor
       chain = Scope::ResolutionChain.for(scope, class_name.to_s, :instance, :constants)
       chain.record(scope)
       scopes = constant_scopes_of(chain, class_name)
-      [scopes, chain.contested? ? constant_scopes_of(chain.retro, class_name) : scopes].freeze
+      [scopes, chain].freeze
     end
     private_class_method :compute_ancestor_constant_scopes
 

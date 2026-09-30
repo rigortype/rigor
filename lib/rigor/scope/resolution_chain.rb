@@ -30,14 +30,15 @@ module Rigor
     #
     # The skip rule is Ruby's for the order the statements RAN in, and the tables hold only their final
     # state: a body reopened after an includer ran (`class Base; include M; end` after `class C < Base;
-    # include M`) adds an edge the includer never skipped, and Ruby then keeps both copies. So wherever the
-    # rule skips an insertion the chain also carries the RETRO world ({#retro}), with every skipped insertion
-    # made. A first-definer read answers from the chain where the two worlds agree on the definer, and
-    # otherwise answers what the walk this chain replaced answered ({MasterOrder}): the tables cannot say which
-    # world ran, and a disagreement is no reason to answer anything new. That leaves #1570's redundant
-    # `include` with the answer master gave, since the two worlds disagree there. Two worlds are not every
-    # assignment of several skips; a mix can put a third definer first, which the witness fixtures do not
-    # reach.
+    # include M`) adds an edge the includer never skipped, and Ruby then keeps both copies. So every skip is
+    # counted ({#skips}), and the ONE decision every first-definer reader makes is {#settle}: with no skip the
+    # chain stands; with one skip the chain stands only where the retro world (that insertion made anyway)
+    # gives the same answer; with two or more the chain never stands, because two worlds are not every
+    # assignment of several skips (a mix can put a third definer first). Where it does not stand, a reader
+    # answers what the walk this chain replaced answered ({MasterOrder}): the tables cannot say which world
+    # ran, and a disagreement is no reason to answer anything new. That leaves #1570's redundant `include`
+    # with the answer master gave, since the two worlds disagree there; ADR-119's arity decision point is
+    # where it gets fixed.
     #
     # Two things the tables do not record, so the chain cannot reproduce them:
     #
@@ -84,7 +85,8 @@ module Rigor
       attr_reader :root, :side, :entries, :level_starts, :level_classes
 
       # rubocop:disable-next Metrics/ParameterLists
-      def initialize(root:, side:, entries:, level_starts:, level_classes:, levels_end:, truncated:, retro: nil)
+      def initialize(root:, side:, entries:, level_starts:, level_classes:, levels_end:, truncated:, skips: 0,
+                     retro: nil)
         @root = root
         @side = side
         @entries = entries
@@ -92,6 +94,7 @@ module Rigor
         @level_classes = level_classes
         @levels_end = levels_end
         @truncated = truncated
+        @skips = skips
         @retro = retro
         freeze
       end
@@ -100,16 +103,39 @@ module Rigor
       # "no definer" from "a definer past the cut", which is budget uncertainty, not absence.
       def truncated? = @truncated
 
-      # The RETRO world: the same class with every insertion the skip rule skipped made anyway — what Ruby
-      # builds when the edge that made the module present was added by a body reopened AFTER the include ran
-      # (`class C < Base; include M; end` and then `class Base; include M; end` gives `[C, M, Base, M]`, where
-      # the final tables alone give `[C, Base, M]`). The chain itself when nothing was skipped.
-      def retro = @retro || self
+      # How many insertions the skip rule skipped while this chain was built, counted across every module
+      # sub-chain it drew on (a memoised sub-chain hands its own count up). Each is a place where the final
+      # tables may not be the tables Ruby ran with.
+      attr_reader :skips
+      alias skip_count skips
 
-      # True when the skip rule skipped an insertion, so the retro world differs from this one. A first-definer
-      # read answers from this chain where both worlds agree on the definer and otherwise answers what the walk
-      # this chain replaced answered ({MasterOrder}).
-      def contested? = !@retro.nil?
+      # The ONE decision every first-definer reader makes: does `answer`, read off this chain, stand, or does
+      # the reader answer what the walk this chain replaced answered ({MasterOrder})? Returns `:chain` or
+      # `:master`.
+      #
+      # The skip rule is Ruby's for the order the statements RAN in, and the tables hold only their final
+      # state: a body reopened after an includer ran (`class C < Base; include M; end`, then `class Base;
+      # include M; end`) adds an edge the includer never skipped, and Ruby then keeps both copies. Each skip
+      # is therefore a fork between two worlds — the skip made, or the insertion made anyway — and the tables
+      # cannot say which one ran.
+      #
+      # - No skip: only one world exists, so the chain stands.
+      # - One skip: two worlds. The chain stands when the retro world (the skipped insertion made) gives the
+      #   same answer, which the block computes from the chain it is handed; where they differ, or the retro
+      #   world was too large to build, master's answer stands.
+      # - Two or more: the worlds are the assignments of several skips, and two of them are not all of them (a
+      #   mix can put a third definer first), so no answer read off two worlds is trustworthy. Master's answer
+      #   stands, and the block is not called.
+      #
+      # #1570 is a one-skip disagreement, so its readers answer master's until ADR-119 gives the arity rule's
+      # decision point a way to decline.
+      def settle(answer)
+        case @skips
+        when 0 then :chain
+        when 1 then !@retro.nil? && answer == yield(@retro) ? :chain : :master
+        else :master
+        end
+      end
 
       # Walks the entries in Ruby's order from `start` up to (not including) `stop`, and returns the first
       # truthy value the block gives for an entry, or nil. `side:` yields only the entries on that side.
@@ -456,12 +482,14 @@ module Rigor
       # on where the cycle was entered.
       class Builder
         EMPTY = [].freeze
-        EMPTY_LIN = [EMPTY, EMPTY, EMPTY, false].freeze
-        private_constant :EMPTY, :EMPTY_LIN
+        RETRO_OVER_BUDGET = :rigor_retro_over_budget
+        EMPTY_LIN = [EMPTY, EMPTY, EMPTY, 0].freeze
+        private_constant :EMPTY, :EMPTY_LIN, :RETRO_OVER_BUDGET
 
-        # What one node's computation met, handed up to the computation that asked for it: a skip (so the
-        # chain has a retro world) and a cycle or the depth budget (so it is not memoised).
-        Frame = Struct.new(:skipped, :incomplete)
+        # What one node's computation met, handed up to the computation that asked for it: how many skips it
+        # counted (see {ResolutionChain#settle}) and whether it met a cycle or the depth budget (so it is not
+        # memoised).
+        Frame = Struct.new(:skips, :incomplete)
         private_constant :Frame
 
         def initialize(scope, flavor, bucket, retro: false)
@@ -480,10 +508,10 @@ module Rigor
 
         # The chain for `root`, carrying its retro world when the skip rule skipped anything on the way.
         def chain(root, side)
-          entries, starts, classes, skipped = side == :singleton ? singleton_lin(root, 0) : instance_lin(root, 0)
-          retro = Builder.new(@scope, @flavor, @bucket, retro: true).chain(root, side) if skipped && !@retro
+          entries, starts, classes, skips = side == :singleton ? singleton_lin(root, 0) : instance_lin(root, 0)
+          retro = build_retro(root, side) if skips == 1 && !@retro
           cut_at = cut_position(entries)
-          return whole_chain(root, side, entries, starts, classes, retro) if cut_at.nil?
+          return whole_chain(root, side, entries, starts, classes, skips, retro) if cut_at.nil?
 
           # Keep the prefix for first-definer reads, and only the levels that end inside it.
           complete = starts.count { |start| start < cut_at }
@@ -492,14 +520,29 @@ module Rigor
                               level_starts: starts.first(complete).freeze,
                               level_classes: classes.first(complete).freeze,
                               levels_end: complete.zero? ? 0 : (starts[complete] || cut_at), truncated: true,
-                              retro: retro)
+                              skips: skips, retro: retro)
         end
 
         private
 
-        def whole_chain(root, side, entries, starts, classes, retro)
+        def whole_chain(root, side, entries, starts, classes, skips, retro)
           ResolutionChain.new(root: root, side: side, entries: entries, level_starts: starts,
-                              level_classes: classes, levels_end: entries.size, truncated: @deep, retro: retro)
+                              level_classes: classes, levels_end: entries.size, truncated: @deep, skips: skips,
+                              retro: retro)
+        end
+
+        # The retro world, built only for a chain with exactly one skip (two or more settle to master without
+        # it) and abandoned — nil, which settles to master — once it holds more than {LIMIT} project entries.
+        # A retro world repeats every skipped module, so a deep diamond grows it geometrically where the
+        # chain itself stays small.
+        def build_retro(root, side)
+          catch(RETRO_OVER_BUDGET) { Builder.new(@scope, @flavor, @bucket, retro: true).chain(root, side) }
+        end
+
+        def guard_retro(entries)
+          return unless @retro && entries.size > LIMIT
+
+          throw RETRO_OVER_BUDGET if entries.count { |entry| !entry.external? } > LIMIT
         end
 
         # The index of the first project entry past {LIMIT}, or nil when the chain fits.
@@ -526,8 +569,8 @@ module Rigor
           memo = (@bucket[table] ||= {})
           cached = memo[name]
           if cached
-            # A memoised chain's skips are the asker's too: its retro world differs wherever this one's does.
-            @frames.last&.skipped ||= cached[3]
+            # A memoised chain's skips are the asker's too.
+            @frames.last&.then { |frame| frame.skips += cached[3] }
             return cached
           end
 
@@ -541,13 +584,13 @@ module Rigor
             return EMPTY_LIN
           end
 
-          frame = Frame.new(false, false)
+          frame = Frame.new(0, false)
           @frames.push(frame)
           stack.push(name)
           entries, starts, classes = yield
           stack.pop
           @frames.pop
-          lin = [entries, starts, classes, frame.skipped].freeze
+          lin = [entries, starts, classes, frame.skips].freeze
           memo[name] = lin unless frame.incomplete
           hand_up(frame)
           lin
@@ -557,7 +600,7 @@ module Rigor
           parent = @frames.last
           return if parent.nil?
 
-          parent.skipped ||= frame.skipped
+          parent.skips += frame.skips
           parent.incomplete ||= frame.incomplete
         end
 
@@ -597,7 +640,7 @@ module Rigor
           if resolved.is_a?(String)
             side == :singleton ? singleton_lin(resolved, depth + 1) : instance_lin(resolved, depth + 1)
           else
-            [[external_entry(name, raw, side, true)].freeze, [0].freeze, [nil].freeze, false].freeze
+            [[external_entry(name, raw, side, true)].freeze, [0].freeze, [nil].freeze, 0].freeze
           end
         end
 
@@ -615,7 +658,7 @@ module Rigor
                 found = entries.index(entry)
                 found = nil if found && found >= origin
                 if found && !@retro
-                  @frames.last.skipped = true
+                  @frames.last.skips += 1
                   point = found if found > point
                 else
                   entries.insert(point + 1, entry)
@@ -625,6 +668,7 @@ module Rigor
                 end
               end
             end
+            guard_retro(entries)
           end
           [origin, super_start]
         end
@@ -642,7 +686,7 @@ module Rigor
               sub.each do |entry|
                 found = @retro ? nil : entries.index(entry)
                 if found
-                  @frames.last.skipped = true
+                  @frames.last.skips += 1
                   point = found if found > point && found < super_start
                 else
                   entries.insert(point + 1, entry)
@@ -651,6 +695,7 @@ module Rigor
                 end
               end
             end
+            guard_retro(entries)
           end
           super_start
         end

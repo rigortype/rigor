@@ -1314,9 +1314,9 @@ module Rigor
     UNUSED_NAME_MEMO = {}.freeze
     private_constant :UNUSED_NAME_MEMO
     #
-    # Where the chain's two worlds put different definers first (see {ResolutionChain#retro}), a reader answers
-    # what the walk it replaced answered ({ResolutionChain::MasterOrder}) — the tables cannot say which world
-    # ran, and a disagreement is no reason to answer anything new.
+    # Every reader below asks {ResolutionChain#settle} whether its chain answer stands, and where it does not
+    # answers what the walk it replaced answered ({ResolutionChain::MasterOrder}) — the tables cannot say which
+    # world ran, and a disagreement is no reason to answer anything new.
 
     # ADR-24 slice 2 — the user-side method lookup: the first project `def` of `method_name` along
     # `class_name`'s instance chain, as `[def_node, owner]`, or `[nil, nil]` when nothing the project declares
@@ -1336,7 +1336,7 @@ module Rigor
     def user_def_through_ancestors(class_name, method_name, name_memo: UNUSED_NAME_MEMO) # rubocop:disable Lint/UnusedMethodArgument
       chain = ResolutionChain.for(self, class_name.to_s, :instance, :methods)
       found = first_user_def(chain, method_name)
-      if chain.contested? && found&.last != first_user_def(chain.retro, method_name)&.last
+      if chain.settle(found&.last) { |retro| first_user_def(retro, method_name)&.last } == :master
         found = master_user_def(class_name.to_s, method_name)
       end
       return found if found
@@ -1374,7 +1374,7 @@ module Rigor
     def singleton_def_through_ancestors(class_name, method_name, name_memo: UNUSED_NAME_MEMO) # rubocop:disable Lint/UnusedMethodArgument
       chain = ResolutionChain.for(self, class_name.to_s, :singleton, :methods)
       found = first_singleton_def(chain, method_name)
-      if chain.contested? && found&.last != first_singleton_def(chain.retro, method_name)&.last
+      if chain.settle(found&.last) { |retro| first_singleton_def(retro, method_name)&.last } == :master
         found = first_singleton_def(chain, method_name, :singleton)
       end
       return found if found
@@ -1407,7 +1407,7 @@ module Rigor
     def external_ancestor_name_candidates(class_name, name_memo: UNUSED_NAME_MEMO, mixins: true) # rubocop:disable Lint/UnusedMethodArgument
       chain = ResolutionChain.for(self, class_name.to_s, :instance, :methods)
       groups = external_groups(chain, mixins)
-      if chain.contested? && groups != external_groups(chain.retro, mixins)
+      if chain.settle(groups) { |retro| external_groups(retro, mixins) } == :master
         groups = ResolutionChain::MasterOrder.external_groups(self, class_name.to_s, mixins)
       end
       if Analysis::DependencyRecorder.active?

@@ -39,10 +39,69 @@ RSpec.describe Rigor::Scope::ResolutionChain do
         include M
       end
     RUBY
-    expect(chain_of(scope, "M")).to be_contested
-    expect(chain_of(scope, "A")).to be_contested
-    expect(chain_of(scope, "B")).to be_contested
-    expect(names(chain_of(scope, "B").retro)).to include(["N", :instance])
+    expect(chain_of(scope, "M").skip_count).to eq(1)
+    expect(chain_of(scope, "A").skip_count).to eq(1)
+    expect(chain_of(scope, "B").skip_count).to eq(1)
+    expect(names(ResolutionChainRetro.build(scope, "B"))).to include(["N", :instance])
+  end
+
+  # Every skip counts, wherever it happened: a class that draws on two modules each holding one skip has two,
+  # whether the modules' chains were built first (and memoised) or as part of the class's own. A reader that
+  # settles on "was anything skipped" would read one world where the tables permit several.
+  it "sums skips across memoised module sub-chains" do
+    source = <<~RUBY
+      module N; def foo = 1; end
+      module Z; include N; end
+      module X; include N; include Z; end
+      module Y; include N; include Z; end
+      class Own; include X; include Y; end
+      class Cold; include X; include Y; end
+    RUBY
+    scope = scope_for(source)
+    expect(chain_of(scope, "X").skip_count).to eq(1)
+    expect(chain_of(scope, "Y").skip_count).to eq(1)
+    # X and Y are memoised now; `Y` also finds `N` and `Z` already there, which is a third skip of its own.
+    expect(chain_of(scope, "Own").skip_count).to be >= 2
+    cold = scope_for(source)
+    expect(chain_of(cold, "Cold").skip_count).to eq(chain_of(scope, "Own").skip_count)
+  end
+
+  it "settles a chain with two or more skips to master without building a retro world" do
+    scope = scope_for(<<~RUBY)
+      module N
+      end
+
+      module Z
+        include N
+      end
+
+      module X
+        include N
+        include Z
+      end
+
+      class Own
+        include N
+        include Z
+        include X
+      end
+    RUBY
+    chain = chain_of(scope, "Own")
+    expect(chain.skip_count).to be >= 2
+    expect(chain.settle(:answer) { raise "the retro world must not be read" }).to eq(:master)
+    expect(chain.instance_variable_get(:@retro)).to be_nil
+  end
+
+  it "settles a skip-free chain to itself without reading the retro world" do
+    scope = scope_for("module M; end\nclass C; include M; end")
+    expect(chain_of(scope, "C").settle(:answer) { raise "no retro world exists" }).to eq(:chain)
+  end
+
+  it "keeps the retro world and the skip counter off its public surface" do
+    scope = scope_for("module M; end\nclass C; include M; end")
+    chain = chain_of(scope, "C")
+    expect(chain).not_to respond_to(:retro)
+    expect(chain).not_to respond_to(:contested?)
   end
 
   # `extend self` reaches the module's own instance chain from its singleton chain; that is not a cycle.

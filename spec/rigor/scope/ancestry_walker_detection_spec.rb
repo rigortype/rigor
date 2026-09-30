@@ -108,6 +108,23 @@ RSpec.describe "ancestry walkers outside Scope::ResolutionChain" do
     expect(ALLOWED_ANCESTRY_WALKERS.values).to all(match(/\S{3,}/))
   end
 
+  # `ResolutionChain#settle` is the ONE place that decides whether a chain's answer stands or master's does
+  # (ADR-24 § "Amendment 2026-09-28"): the retro world is private to it, and no reader compares two worlds, or
+  # asks whether the chain was "contested", itself. Before it, eight readers each owned the rule, and each
+  # could get the count of skips wrong.
+  it "keeps the retro world and the skip decision inside the chain builder" do
+    hits = Dir[File.join(root, "{lib,plugins}/**/*.rb")].flat_map do |path|
+      relative = path.delete_prefix("#{root}/")
+      next [] if relative == AncestryWalkerScan::CHAIN_BUILDER
+
+      File.readlines(path).each_with_index.filter_map do |line, index|
+        "#{relative}:#{index + 1}: #{line.strip}" if line.match?(/\.retro\b|\bchain\.contested\?/)
+      end
+    end
+    expect(hits).to be_empty,
+                    "these read the chain's retro world themselves; ask `settle` instead:\n  #{hits.join("\n  ")}"
+  end
+
   # The scan's positive control: each rule fires on a method written to trip it, so a scan that silently
   # stopped matching cannot pass the two examples above by finding nothing.
   describe "the scan itself" do

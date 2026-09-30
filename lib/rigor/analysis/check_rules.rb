@@ -2664,9 +2664,10 @@ module Rigor
         def prepended_definer_visibility(scope, class_name, method_name)
           chain = Scope::ResolutionChain.for(scope, class_name.to_s, :instance, :methods)
           answer = prepend_region_visibility(scope, chain, class_name.to_s, method_name)
-          return answer unless chain.contested?
-
-          answer == prepend_region_visibility(scope, chain.retro, class_name.to_s, method_name) ? answer : nil
+          verdict = chain.settle(answer) do |retro|
+            prepend_region_visibility(scope, retro, class_name.to_s, method_name)
+          end
+          verdict == :chain ? answer : nil
         end
 
         def prepend_region_visibility(scope, chain, class_name, method_name)
@@ -3782,10 +3783,10 @@ module Rigor
         # private `C#foo` reported `C#foo` as reducing `P#foo`'s visibility. It also reached `Base` before a
         # module included through an included module (#1567's order).
         #
-        # ADR-24 / #1570 — both worlds of the chain are asked (`Scope::ResolutionChain#retro`): where a skipped
-        # `include` would put a different ancestor next, which method the class's `def` overrides depends on the
-        # order the bodies ran, and the rules answer from the breadth-first order this walk used before
-        # (`Scope::ResolutionChain::MasterOrder`).
+        # ADR-24 / #1570 — `Scope::ResolutionChain#settle` decides whether the chain's answer stands: where a
+        # skipped `include` would put a different ancestor next, which method the class's `def` overrides
+        # depends on the order the bodies ran, and the rules answer from the breadth-first order this walk used
+        # before (`Scope::ResolutionChain::MasterOrder`).
         #
         # ADR-46 slice 3 — an ancestor the project does not declare ends the walk's reach into it, and a class
         # defined LATER under that name would change the answer, so each external entry passed records a
@@ -3793,8 +3794,10 @@ module Rigor
         def each_project_ancestor(scope, class_name, &)
           chain = Scope::ResolutionChain.for(scope, class_name.to_s, :instance, :methods)
           answer = overridden_ancestor_answer(scope, chain, class_name.to_s, &)
-          return answer unless chain.contested?
-          return answer if answer&.first == overridden_ancestor_answer(scope, chain.retro, class_name.to_s, &)&.first
+          verdict = chain.settle(answer&.first) do |retro|
+            overridden_ancestor_answer(scope, retro, class_name.to_s, &)&.first
+          end
+          return answer if verdict == :chain
 
           master_ancestor_answer(scope, chain, class_name.to_s, &)
         end

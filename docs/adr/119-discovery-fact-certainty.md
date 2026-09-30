@@ -6,19 +6,21 @@ ahead of it, each on its own merits: #1551 (the layered def-nesting lookup) and 
 byte-identical; the gates of WD4–WD6 (#1566, `spec/rigor/declaration_facts/`); the
 `unpositioned_mixins` member (#1584, data only, nothing read it); and the resolution chain
 (#1578, `lib/rigor/scope/resolution_chain.rb`), an ADR-24 amendment that fixes #1567, #1568, #1571 and
-#1587 and is the first behaviour change in this line. In review, ahead of acceptance: #1593, for the
-block shapes of #1592 (§ The chain). WD1–WD3, the decisions this ADR itself makes, are open: no
-`possible` fact exists, no read answers *unknown*, and the storage siblings, the candidate-set reads and
-the first lane-2 PR on them (PR C) wait on acceptance. **Citation baseline:** `file:line` cites are at
-`origin/master` `a841adac4`; SI is `lib/rigor/inference/scope_indexer.rb`, RC is
-`lib/rigor/scope/resolution_chain.rb`, MA is `lib/rigor/inference/scope_indexer/mixin_accumulator.rb`.
+#1587 and is the first behaviour change in this line; and #1593 (2026-10-01), which records the
+provably-run block shapes of #1592 (§ The chain). WD1–WD3, the decisions this ADR itself makes, are
+open: no `possible` fact exists, no read answers *unknown*, and the storage siblings, the candidate-set
+reads and the first lane-2 PR on them (PR C) wait on acceptance. **Citation baseline:** `file:line`
+cites are at `origin/master` `5ff738a70` (#1593 merged); SI is `lib/rigor/inference/scope_indexer.rb`,
+RC is `lib/rigor/scope/resolution_chain.rb`, MA is
+`lib/rigor/inference/scope_indexer/mixin_accumulator.rb`.
 
 Grounding: the design-review rounds on #1531 and #1507, the fourteen drafts of this ADR reviewed
 adversarially on #1562, #1578's measurements (a Ruby witness suite, an 8,000-program fuzz, a mixin
 census over five corpora, an instrumented run over Rigor's `lib/` and Mastodon v4.5.10), #1584's
 allocation sweep, #1593's review, and the probes named in Context and WD2, each run under `rigor check
---no-cache` (workers 0) and Ruby 4.0.5 against `a841adac4`'s engine with Ruby's own answer beside it.
-ADR-49 archetype: deliberative; stakes: high (the false-positive envelope of every ancestry read).
+--no-cache` (workers 0) and Ruby 4.0.5 against `a841adac4`'s engine (master before #1593) with Ruby's
+own answer beside it. ADR-49 archetype: deliberative; stakes: high (the false-positive envelope of
+every ancestry read).
 
 **Scope.** Three decisions, three documents, each the smallest that holds. The **resolution chain** is
 ADR-24's (§ "Amendment 2026-09-28", landed): Ruby's linearisation, when it stands, and its dependency
@@ -56,9 +58,9 @@ reviews attribute that to five failure modes, each of which the Decision address
    two are fixed by the chain; #1570 is not (§ The chain).
 4. **Byte-identity was demanded against walkers that are wrong or deliberately over-approximate.** The
    extends walker over-approximates on purpose, in the ADR-5-safe direction (SI:6063–6069), and
-   under-approximates in the unsafe one: a singleton-side mixin inside a block — including a block
-   inside a method — is dropped, while one written directly in a method body is recorded and listed
-   (#1592, finding (d)). #1518–#1520 are rules wrong in several walkers at once; #1550 is a false
+   under-approximated in the unsafe one until #1593: a singleton-side mixin inside a block — including
+   a block inside a method — was dropped, while one written directly in a method body was recorded and
+   listed (#1592, finding (d)). #1518–#1520 are rules wrong in several walkers at once; #1550 is a false
    positive on correct Ruby (the named form resolves the *later* `def`, SI:4975–4979).
 5. **The justification shifted** from speed to C2 without a criterion for landing a port; the speed case
    was measured and found absent (`docs/adr/116-hot-file-restructuring.md:175` still calls the merge
@@ -76,16 +78,18 @@ but Ruby applies it to the includer, and a `prepend` there lands ahead of the in
 reopening one class order their includes by load order; and an include the chain skips as already
 present becomes positioned by a later reopening (Ruby `[C, M, Base, M]` against one linearisation).
 Since #1584 and #1578 the first three are *unsettled* chains and the fourth is a counted *fork*. On the
-singleton side the extend walk descends into no block it does not recognise (SI:6119–6121,
-6197–6208): a block's `extend X` or `class << self; include X; end` — in a class body, inside a
-method, or in a concern's `included do` — is neither recorded nor listed, and a hook's `base.extend(X)`
-lists `"*"` on the hook module only, which no includer's singleton chain draws on; in each shape
-`K.bar.upcase` fires `call.undefined-method` on master through `Base.bar` while Ruby runs `X#bar`
-(#1592, pre-existing), whereas the direct-body `extend X if ENV["E"]` and a method body's `extend X`
-are listed, unsettled and silent. **(e) Some edges are not recorded, only marked**: `send(:include,
+singleton side, before #1593, the extend walk descended into no block it did not recognise: a block's
+`extend X` or `class << self; include X; end` — in a class body, inside a method, or in a concern's
+`included do` — was neither recorded nor listed, and a hook's `base.extend(X)` lists `"*"` on the hook
+module only, which no includer's singleton chain draws on; in each shape `K.bar.upcase` fired
+`call.undefined-method` through `Base.bar` while Ruby runs `X#bar` (#1592, pre-existing), whereas the
+direct-body `extend X if ENV["E"]` and a method body's `extend X` were listed, unsettled and silent.
+#1593 walks a block that provably runs once with the body's `self` (`extends_block_plan`, SI:6216;
+`runs_body_block_once?`, SI:6249) and still skips the rest.
+**(e) Some edges are not recorded, only marked**: `send(:include,
 M)`, the receiver form `C.include(M)` and helpers such as `prepend_mod_with` add nothing to the mixin
-tables (`MIXIN_CALL_NAMES`, SI:5624; `SURFACE_MIXIN_HELPER`, SI:6697); each stamps
-`ENVELOPE_DYNAMIC_MARK` on the class (SI:6720, 6730) and, since #1584, lists `"*"` on the owner's side
+tables (`MIXIN_CALL_NAMES`, SI:5624; `SURFACE_MIXIN_HELPER`, SI:6803); each stamps
+`ENVELOPE_DYNAMIC_MARK` on the class (SI:6826, 6836) and, since #1584, lists `"*"` on the owner's side
 in `unpositioned_mixins`. Three readers decline on the mark (`source_arity.rb:244`;
 `rbs_dispatch.rb:621, 656, 739–748`; `check_rules.rb:2506, 2522`); every other read types through it.
 **(f) The chain sees only project classes**, so "absent means `NoMethodError`" is false:
@@ -108,7 +112,8 @@ unsettled and 1.0 % of 135,225 reads answer from master's order; on Mastodon 1,2
 are unsettled, 49 carry one retro-eligible fork, none carries another kind, and **21.3 % of 145,182
 reads answer from master's order, every one on an unsettled chain** (carried forward as #1591).
 `unpositioned_mixins` (#1584) is the data those verdicts read; it cost +0.03 % allocations and bumped
-the seed-bundle and snapshot schemas (`descriptor.rb:75`; `incremental_snapshot.rb:159`; #1593 again).
+the seed-bundle and snapshot schemas (`descriptor.rb:77`; `incremental_snapshot.rb:161`; bumped again
+by #1593).
 
 ## Decision
 
@@ -199,22 +204,23 @@ and `docs/internal-spec/inference-engine.md:662`. This ADR relies on the followi
   `{owner => {include: [names], extend: [names]}}`, `:include` the instance side and `:extend` the
   singleton side. `ScopeIndexer::MixinAccumulator` lists an edge written anywhere but as a direct
   statement of the class's own body or its `class << self` body, in a declaration that is itself a
-  direct statement (`direct_body`, MA:54–62; `note`, MA:84–89), and lists the sentinel `"*"` for a call
-  the walk cannot record (`WILDCARD`, MA:35; `taint`, MA:92–94; a hook parameter's call through
-  `with_hook_params`, MA:66–72); the rule and the consumer obligations are in `inference-engine.md:67`.
+  direct statement (`direct_body`, MA:55–63; `note`, MA:101–106), and lists the sentinel `"*"` for a
+  call the walk cannot record (`WILDCARD`, MA:35; `taint`, MA:109–111; a hook parameter's call through
+  `with_hook_params`, MA:83–89); the rule and the consumer obligations are in `inference-engine.md:67`.
   **The list is only as complete as the walk that feeds it**: the instance walk descends into every
-  child, so an `include` inside `[1].each { }` is recorded and listed, while the extend walk returns
-  from a block it does not recognise without walking it (SI:6119–6121, 6197–6208), so on master the
-  singleton side lists a direct-body statement's conditional edge, a method body's `extend`, and a
-  hook's `"*"`, and nothing written in a block (#1592). **#1593 (in review, narrowed three times)** records
-  a block's `extend` or `class << self` mixin as a *positioned* edge only where the block provably runs
-  at least once with `self` preserved, as a direct class-body statement — `tap` / `then` on a
-  literal receiver, a non-empty literal Array or Hash under `each` / `map` and kin, a positive Integer
-  literal's `times`, a non-empty integer-literal Range — and records and lists nothing for every other
-  block, so `items.each { extend X }`, a block inside a method and a concern's `included do extend X
-  end` stay unrecorded and unlisted after it. What remains for #1593 or its follow-up is MA's rule for
-  an opaque eval block (`block_mixes_in?`, SI:5994–6001): a block that holds a mixin call on the
-  class's own `self` must at least list `"*"`.
+  child, so an `include` inside `[1].each { }` is recorded and listed, while the extend walk, until
+  #1593, returned from a block it did not recognise without walking it, so the singleton side listed a
+  direct-body statement's conditional edge, a method body's `extend`, and a hook's `"*"`, and nothing
+  written in a block (#1592). **#1593 (landed 2026-10-01, narrowed three times in review)** records a
+  block's `extend` or `class << self` mixin as a *positioned* edge only where the block provably runs
+  at least once with `self` preserved, as a direct class-body statement (`runs_body_block_once?`,
+  SI:6249; `literal_or_self?`, SI:6263) — `tap` / `then` on a literal receiver, a non-empty literal
+  Array or Hash under `each` / `map` and kin, a positive Integer literal's `times`, a non-empty
+  integer-literal Range — and records and lists nothing for every other block (`extends_block_plan`,
+  SI:6216, `:skip`), so `items.each { extend X }`, a block inside a method and a concern's `included
+  do extend X end` stay unrecorded and unlisted. What remains after #1593 is MA's rule for an opaque
+  eval block (`block_mixes_in?`, SI:5994–6001): a block that holds a mixin call on the class's own
+  `self` must at least list `"*"`.
 - **Marked entries keep exactly master's declines and add none.** The sites in Context (e) are the only
   declines on `ENVELOPE_DYNAMIC_MARK`; #1578 preserved each (`ruby_order_resolution_spec.rb:175–195`).
   Typing through a marked entry is a known remainder, not a rule: on GitLab 1,730 entities carry the
@@ -233,7 +239,7 @@ and `docs/internal-spec/inference-engine.md:662`. This ADR relies on the followi
 - **What it leaves open, and this ADR does not reopen:** #1570 (a one-fork disagreement whose readers
   keep master's answer; `ruby_order_resolution_spec.rb:142–147` pins it with a "flip this when ADR-119
   PR C" comment), #1572 (an external definer ahead of a project one), #1573 (a repeated `extend`'s
-  position), #1588 (`combine_rekeyed_entries`, SI:8630, merges a re-keyed class's includes in the wrong
+  position), #1588 (`combine_rekeyed_entries`, SI:8736, merges a re-keyed class's includes in the wrong
   order), #1589 (CRuby's trailing duplicate from prepend propagation), #1590, #1591 (the 21.3 %),
   #1592's unprovable-block and hook shapes, #1594 (WD3 states what a migrated read does meanwhile), and
   the two table gaps ADR-24 § "What the tables cannot express" records.
@@ -254,7 +260,7 @@ from data already there: which *names* an unpositioned edge's closure defines (W
   `Base.prepend(M)`) is only read more conservatively. The claim is about recorded edges: a
   singleton-side edge inside a block is in neither the member nor the list (#1592) — a fabricated
   *absence*, the ADR-5-unsafe direction, since the chain then stands without the module — and #1593
-  closes it for provably-run blocks only (§ The chain); a hook's singleton-side edge is never recorded
+  closed it for provably-run blocks only (§ The chain); a hook's singleton-side edge is never recorded
   on the includer. WD3's obligation covers both at a migrated site; nothing covers them in an existing
   reader. v12's `position_unknown_*` triple is withdrawn for this member.
 - **The definer members get siblings.** A set-valued member that admits `possible` facts has a
@@ -361,7 +367,7 @@ is defined over the chain, and asks `settle`:
   read is `Unknown`. Otherwise the external definer is a candidate with its RBS signature as its answer
   (`Object#to_s` disagrees with `M#to_s(fmt)`: `Unknown`; `Enumerable#to_a` is the first definer,
   #1572). For the two override lints, *absent* always counts.
-- **The `SourceArity` differential.** `SourceArity` as it stands at `a841adac4` — its level rule and its
+- **The `SourceArity` differential.** `SourceArity` as it stands at `5ff738a70` — its level rule and its
   eight hedges: `load_order_dependent?` (`source_arity.rb:168`), `object_extension_may_shadow?`
   (`:178`), and under `clean_level?` (`:239–242`) `dynamic_surface?` (`:244`), `project_patched?`
   (`:248`) and `external_mixin_lacks_method?` (`:269`), then `public_at?` (`:278`),
@@ -375,7 +381,7 @@ is defined over the chain, and asks `settle`:
 - **Conditional definers.** A `def` inside control flow, a method body, or a block **other than the
   immediately-evaluated meta-new blocks Rigor already treats as class bodies** — the constant-write
   forms `K = Class.new`/`Module.new`/`Struct.new`/`Data.define do … end` (`meta_new_block_split`,
-  SI:3788; `meta_new_constant_rvalue?`, SI:8692) and the bare-factory blocks the walk recognises
+  SI:3788; `meta_new_constant_rvalue?`, SI:8798) and the bare-factory blocks the walk recognises
   (`AnonymousMetaClass.block_form_receiver`, `lib/rigor/inference/anonymous_meta_class.rb:42`), whose
   certainty is that of the enclosing statement — is a `possible` definer: its slot in the def-node
   tables, its visibility and its parameter envelope (`Scope#parameter_envelopes_of`, `scope.rb:1680`)
@@ -409,8 +415,8 @@ bodies. Everything else is `possible`. A reopening whose `class` keyword sits in
 its statements `possible` however many other definitions exist. An unconditional `include` in a `class
 << self` body is a `certain` singleton-side edge. Certainty and position are two questions:
 `unpositioned_mixins` answers the second for edges, WD3 the first for definers, and the mixin edges need
-only the second (WD1). **The extends fold stays in this ADR**: both sites (SI:401, 7752) copy with `||=`
-(SI:6398); a copy through a `possible` extend edge — `extend X if …`, `class << self; include X if …`,
+only the second (WD1). **The extends fold stays in this ADR**: both sites (SI:401, 7858) copy with `||=`
+(SI:6503); a copy through a `possible` extend edge — `extend X if …`, `class << self; include X if …`,
 `def self.setup; extend X; end` — marks the key contested. **Deferred to a follow-up ADR**: hook facts
 instantiated per includer (PHPStan's trait model, <https://phpstan.org/blog/how-phpstan-analyses-traits>).
 Today every walker treats `included do` and `class_methods do` as ordinary calls under the concern's
@@ -434,7 +440,9 @@ every model) lists anything on its own `:extend` side (a hook's `"*"`), records 
 hook's mixin call already lists, and harmless), or extends `ActiveSupport::Concern` — the concern
 shape's only signal, a framework name the follow-up ADR moves behind the plugin API.
 Existing readers keep master's singleton answer, and #1592's hook shapes stay a false positive there
-until the follow-up ADR. A singleton-side migration in PR C waits for #1593.
+until the follow-up ADR. With #1593 landed, a singleton-side migration in PR C may proceed; a block
+the walk still cannot vouch for stays unrecorded and unlisted, which no read-side signal detects (§ The
+chain's remaining obligation).
 
 ### WD4 — Classification of every `DiscoveryIndex` member, with structural checks (landed)
 
@@ -466,8 +474,9 @@ a sibling exists iff its member admits `possible`.
   it answers. Since no `possible_*` table exists yet, every entry reads as `certain` except the
   self-extend edge Ruby does not show. `issue_1518`, `issue_1519`, `issue_1520` and `issue_1550` are
   `pending` beside a pin of today's exact violations (`witness_spec.rb:74–113`). #1592's block shapes
-  are the relation's `runtime ⊄ certain ∪ possible` case that no fixture held; #1593 adds its block
-  shapes at the read level and pins the hook shapes at their false positive.
+  are the relation's `runtime ⊄ certain ∪ possible` case that no fixture held; #1593 added its block
+  shapes at the read level (`ruby_order_resolution_spec.rb:548`) and pinned the hook shapes at their
+  false positive (`:678–695`).
 - **Read level** (landed, #1578: `spec/integration/resolution_chain_witness_spec.rb`, 21 fixtures, and
   `spec/integration/ruby_order_resolution_spec.rb`). Each fixture runs under the Flake Ruby in a
   subprocess and reports `Method#owner`, `source_location` and `Module#ancestors`; the chain's project
@@ -490,10 +499,10 @@ a sibling exists iff its member admits `possible`.
 declaration node class or its `Prism::Visitor` hook, (ii) names a node-type symbol, (iii) names a
 visibility or mixin keyword as a symbol, or (iv) reads a constant built from one (`CLASS_BODY_NODES`,
 SI:4106); or (v) is reachable, through same-file calls, from `ScopeIndexer.index` (SI:103),
-`.accumulate_project_index` (SI:7797), `.finalize_def_index` (SI:7743), a multi-file entry point or any
+`.accumulate_project_index` (SI:7903), `.finalize_def_index` (SI:7849), a multi-file entry point or any
 method another covered file calls as `ScopeIndexer.x`, and writes into a table parameter; or (vi)
 includes `DeclarationWalk::Collector`. Rule (v) is what marks the bug sites rules i–iv miss
-(SI:4975, 4963, 6387, 6792). `producers.yml`
+(SI:4975, 4963, 6493, 6898). `producers.yml`
 holds 391 entries in 71 files: 371 `grandfathered`, a closed list pinned by count and digest, and 20
 justified since. A new producer must be recorded with a reason; `RIGOR_REGENERATE_GATES=1` adds it as
 `TODO`, which the spec rejects until it is justified. What the scan cannot see is in the spec's header
@@ -529,7 +538,7 @@ applies to every PR, and no listed gate may be skipped or replaced by a claim.
   (`coverage_command.rb:38–39`) as a secondary figure; (g) **from this ADR on**, a change that adds an
   unsettled mark or a taint shows on a fixture that master's answer is right where the mark sends the
   reader — #1584's concern mark had no such gate and fails it at #1594's shape, and #1593's first
-  draft failed it at #1567's (§ The chain). #1578 landed under this lane with (a)–(f); #1593 lands
+  draft failed it at #1567's (§ The chain). #1578 landed under this lane with (a)–(f); #1593 landed
   under it, (g) included.
 
 ### What each part removes, and what remains
@@ -547,8 +556,8 @@ applies to every PR, and no listed gate may be skipped or replaced by a claim.
 **Landed before acceptance.** #1551 (lane 1); #1563 (lane 1); #1566 (lane 1; the four gates); #1584
 (lane 1; `unpositioned_mixins`, `discovered_class_sources` on every run, the signature carrying mixin
 order); #1578 (lane 2; the chain, `settle`, `MasterOrder`, the walker allow-list, the read-level
-witness). **Still to land before acceptance:** #1593 (lane 2, in review; § The chain), on which any
-singleton-side migration in PR C depends; #1548 (key the seeded deferred-ranges reuse, SI:336, on
+witness); #1593 (lane 2; the provably-run block shapes, § The chain). **Still to land before
+acceptance:** #1548 (key the seeded deferred-ranges reuse, SI:336, on
 content digest plus parse version, or drop it); WD1's `with` pairing and round-trip specs (lane 1);
 the `SourceArity` oracle flag (lane 1); pending witness fixtures for #1570, #1572, #1573 and #1594.
 #1531 closes as superseded by this ADR.
@@ -558,7 +567,7 @@ the `SourceArity` oracle flag (lane 1); pending witness fixtures for #1570, #157
 | PR | Change | Expected corpus diff | Expected sig-gen diff | False-positive check |
 | --- | --- | --- | --- | --- |
 | A — #1550 | The named form snapshots the last receiverless `def` before the call (SI:4975) | Zero (rare) | The singleton keeps the earlier body's type | Fixture asserts `Fmt.label == "one"` |
-| B — reset, receiverless-only, privatisation | A bare visibility call ends the toggle; `def self.x` gets no instance copy; `attr_reader` private, no singleton copy; `define_method` both; a `certain` module function's instance copy recorded private (SI:6441–6448); sig-gen bypasses `visibility_excludes?` for module functions | Zero on existence; `Helpers#fmt` stops firing | Module functions after a reset stop rendering as singletons; omitted ones appear | Probes P1–P13, `vis.rb` |
+| B — reset, receiverless-only, privatisation | A bare visibility call ends the toggle; `def self.x` gets no instance copy; `attr_reader` private, no singleton copy; `define_method` both; a `certain` module function's instance copy recorded private (SI:6547–6554); sig-gen bypasses `visibility_excludes?` for module functions | Zero on existence; `Helpers#fmt` stops firing | Module functions after a reset stop rendering as singletons; omitted ones appear | Probes P1–P13, `vis.rb` |
 | C1 — firing sites | `DefinerResolution` over the chain; `settle`'s option with the `:unknown` verdict and per-name relevance over the marks the chain memo now carries; `possible` definers and the mixin members' unpositioned reading; the `case/in` spec. Migrates **the `:arity` question at `SourceArity`'s decision point** (`walk_to_owner`, `source_arity.rb:109–129`: a `:master` verdict answers no envelope, and the walk's reads are recorded as read since another file's edit can lift it — #1570 and the conditional-include arity shape stop firing here on the boolean alone, with no new discovery data), the override super-method lint (`each_project_ancestor`, `check_rules.rb:3800`, and `override_visibility_diagnostic`, `:3736`), the visibility mismatch (`:2664`) and `singleton_context_def?` (`:3671`, with WD3's singleton-side decline). Admits `possible` facts into `discovered_methods`, the def-node tables, `discovered_method_visibilities`, `discovered_parameter_envelopes` and `discovered_deferred_ranges` once WD1's precondition holds for each | Silences #1570, the conditional-include and conditional-def arity shapes and the `Helpers2#fmt2` override; may silence firings that resolved through a `possible`-only definer; **every removed `call.wrong-arity` adjudicated** | A notice on `possible` module functions; `possible` definers render nothing new (RBS has no conditional form) | Every fixture at both witness levels; the differential; the one-fork witness and its guard stay `Unknown`; the five non-discharge shapes stay `Unknown`; the #1591 breakdown reported; WD7(d) on the memo |
 | C2 — typing sites | Return inference through `resolve_user_def_through_ancestors` (`expression_typer.rb:2471, 2496`, where `Unknown` types `Dynamic`) and the singleton memo (`:2386`, with WD3's singleton-side decline); the absent rule with its RBS census | Silences the conditional-definer and conditional-include `call.undefined-method` shapes, #1594 at this site, and the #1592 hook shapes at the migrated singleton site (`Unknown`, not a fix); `gemmod3` waits for #1572 | None expected | WD7(f) census before and after, adjudicated: GitLab's core models type `Dynamic` at these sites until PR D, and the PR states the count |
 | D — hook facts per includer | Deferred to the follow-up ADR | — | — | — |
@@ -587,12 +596,12 @@ lowers it by an amount PR C measures.
   `unpositioned_mixins`).** Bundles carry the new member as plain data (the schema bumps of #1584 and
   #1593); the WD1 siblings take the next bump, and `docs/internal-spec/cache.md` documents them.
 - **[ADR-89](89-semantic-propagation-gates.md)** — the declaration signature carries the mixin lists in source order and the
-  unpositioned table (SI:7250, landed by #1584), so an edit that only reorders or guards an include
+  unpositioned table (SI:7356, landed by #1584), so an edit that only reorders or guards an include
   moves it; ADR-89 WD1 is otherwise unchanged.
 - **[ADR-46](46-incremental-dependency-graph.md)** — preserved by the chain's dependency contract and
   WD2's recording through `Scope` readers, plus the negative class edge relevance files for a tested
   external; #1590 is a cost lever, not a contract change.
-- **[ADR-17](17-monkey-patch-pre-evaluation.md)** — the fold's subtraction (SI:7754) is a consumer
+- **[ADR-17](17-monkey-patch-pre-evaluation.md)** — the fold's subtraction (SI:7860) is a consumer
   policy the WD5 relation is stated around.
 - **[ADR-15](15-ractor-concurrency.md)** — plain frozen data; the chain memo is per index (RC:285–299).
   **[ADR-5](5-robustness-principle.md)** — unknown-is-silence at every migrated read.

@@ -50,8 +50,6 @@ These items were not re-verified this session beyond the states of the PRs.
 - **#1499** (#1446, ivar class guards, Draft `9b8bc0c86`): round-1 fixes are pushed. Next is a
   round-2 delta review, then a merge on green CI. #1500 (a disjoint guard reads the guarded class
   for ivar, global or constant receivers, and `bot` for locals) builds on it.
-- **Awaiting a user yes:** a one-line ruby/rbs PR adding `alias to_str to_s` to
-  `stdlib/uri/0/generic.rbs`. It is an outward publication.
 - **ADR-117 order:** #1426, then #1427, then #1366's stream part. #1484 must land before that
   stream part. #1366 stays `ready-for-human`.
 - **#1454:** phase 3, the handbook chapter, waits for #1366, #1426 and #1427. Keep

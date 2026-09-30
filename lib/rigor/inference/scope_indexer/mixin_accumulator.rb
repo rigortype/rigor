@@ -19,8 +19,9 @@ module Rigor
       # both ways is unpositioned: one guessed copy is enough to move the answer.
       #
       # A mixin call the walks CANNOT record (`include helper`, `include(*MODS)`, `send(:include, M)`,
-      # `self.include M`, `C.include(M)`, `singleton_class.include M`, `base.extend M`, a name in an argument
-      # list beside one the walk cannot name) still reshapes the ancestry of the class it belongs to, and
+      # `self.include M`, `C.include(M)`, `singleton_class.include M`, `base.extend M` or
+      # `base.class_eval { include M }` in a `self.included(base)` hook, a name in an argument list beside one
+      # the walk cannot name) still reshapes the ancestry of the class it belongs to, and
       # leaves the edges the tables did record looking positioned. So it taints the whole owner side with the
       # {WILDCARD} name instead: an owner side that lists {WILDCARD} has no known order at all.
       #
@@ -44,6 +45,7 @@ module Rigor
           super
           @direct = nil
           @unpositioned = nil
+          @hook_params = nil
         end
 
         # Marks the statements of a body whose own position is a fact — the calls and declarations in them
@@ -57,6 +59,20 @@ module Rigor
 
             (@direct ||= Set.new.compare_by_identity) << statement
           end
+        end
+
+        # Runs the block with the parameters of a `self.included(base)`-style hook in scope: a mixin call on
+        # one of them reshapes the class that reached the hook, which this walk cannot name.
+        def with_hook_params(names)
+          saved = @hook_params
+          @hook_params = saved ? saved + names : names
+          yield
+        ensure
+          @hook_params = saved
+        end
+
+        def hook_local?(name)
+          !@hook_params.nil? && @hook_params.include?(name)
         end
 
         def direct?(node)

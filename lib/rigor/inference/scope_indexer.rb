@@ -5724,6 +5724,25 @@ module Rigor
                                           singleton_self, singleton_cref)
         end
 
+        walk_includes_children(node, qualified_prefix, current_class, accumulator, singleton_self, singleton_cref)
+      end
+
+      # The generic descent of {#walk_class_includes}; a `self.included(base)`-style hook's body walks with
+      # its parameters in scope ({MixinAccumulator#with_hook_params}).
+      def walk_includes_children(node, qualified_prefix, current_class, accumulator, singleton_self, singleton_cref)
+        hook_params = hook_def_params(node)
+        if hook_params
+          return accumulator.with_hook_params(hook_params) do
+            walk_includes_children_plain(node, qualified_prefix, current_class, accumulator, singleton_self,
+                                         singleton_cref)
+          end
+        end
+
+        walk_includes_children_plain(node, qualified_prefix, current_class, accumulator, singleton_self, singleton_cref)
+      end
+
+      def walk_includes_children_plain(node, qualified_prefix, current_class, accumulator, singleton_self,
+                                       singleton_cref)
         node.rigor_each_child do |child|
           walk_class_includes(child, qualified_prefix, current_class, accumulator,
                               singleton_self: singleton_self, singleton_cref: singleton_cref)
@@ -5836,10 +5855,11 @@ module Rigor
       # it or the set-shaped consumers (arity, visibility, undefined-method suppression) would answer
       # differently for the two spellings of one edge.
       def record_mixin_call(node, qualified_prefix, current_class, accumulator)
-        kind, arguments, via_send = mixin_call_view(node)
+        taint_opaque_eval(node, current_class, accumulator)
+        kind, _arguments, via_send = mixin_call_view(node)
         return if kind.nil?
 
-        effects = mixin_effects(node, kind, arguments, qualified_prefix, current_class, in_singleton: false)
+        effects = mixin_effects(node, kind, qualified_prefix, current_class, accumulator, in_singleton: false)
                   .select { |_owner, side| side == :include }
         return if effects.empty?
         return if !via_send && instance_mixin_recorded?(node, qualified_prefix, current_class, accumulator)
@@ -5867,13 +5887,7 @@ module Rigor
 
       MIXIN_KINDS = %i[include prepend extend].freeze
       SEND_CALL_NAMES = %i[send public_send __send__].freeze
-      # A literal is never a module: `str.prepend("x")` is `String#prepend`, not a mixin.
-      NON_MODULE_LITERALS = [
-        Prism::StringNode, Prism::InterpolatedStringNode, Prism::SymbolNode, Prism::IntegerNode, Prism::FloatNode,
-        Prism::ArrayNode, Prism::HashNode, Prism::NilNode, Prism::TrueNode, Prism::FalseNode,
-        Prism::RegularExpressionNode, Prism::XStringNode
-      ].freeze
-      private_constant :MIXIN_KINDS, :SEND_CALL_NAMES, :NON_MODULE_LITERALS
+      private_constant :MIXIN_KINDS, :SEND_CALL_NAMES
 
       # `[kind, arguments, via_send]` for a call that mixes modules in — `include` / `prepend` / `extend`, or
       # `send(:include, M)` and its `public_send` / `__send__` twins with a literal first argument — else nil.
@@ -5896,14 +5910,14 @@ module Rigor
       # flip to `:extend` inside `class << self`); `singleton_class` is the singleton side; a constant is
       # that class; any other receiver is unknown, so it may be the class that includes this one from a
       # hook (`base.include M`) and taints both sides of the enclosing class.
-      def mixin_effects(node, kind, arguments, qualified_prefix, current_class, in_singleton:)
+      def mixin_effects(node, kind, qualified_prefix, current_class, accumulator, in_singleton:)
         receiver = node.receiver
         side = kind == :extend ? :extend : :include
         pairs =
           if receiver.nil? || receiver.is_a?(Prism::SelfNode)
             own_mixin_effects(kind, side, current_class, in_singleton)
           else
-            receiver_mixin_effects(node, side, arguments, qualified_prefix, current_class)
+            receiver_mixin_effects(node, side, qualified_prefix, current_class, accumulator)
           end
         pairs.reject { |owner, _side| owner.nil? }
       end
@@ -5916,15 +5930,70 @@ module Rigor
         [[current_class, in_singleton ? :extend : side]]
       end
 
-      def receiver_mixin_effects(node, side, arguments, qualified_prefix, current_class)
+      # A receiver that is not `self` reshapes the class it names, or the singleton of `singleton_class`. Any
+      # other receiver is an object of its own (`ids.prepend(1)`, `obj.extend(Decorator)`) and reshapes none of
+      # the enclosing class's ancestry — except in a `self.included(base)`-style hook, where `base` IS the
+      # class that includes the enclosing module and a call on it taints both sides of the enclosing class.
+      def receiver_mixin_effects(node, side, qualified_prefix, current_class, accumulator)
         receiver = node.receiver
         return [[current_class, :extend]] if singleton_class_receiver?(receiver)
 
         owner = prepend_call_receiver(node, qualified_prefix)
         return [[owner, side]] if owner
-        return [] if NON_MODULE_LITERALS.any? { |lit| receiver.is_a?(lit) || arguments.any?(lit) }
+        return [] unless hook_receiver?(receiver, accumulator)
 
         [[current_class, :include], [current_class, :extend]]
+      end
+
+      HOOK_DEFS = %i[included extended prepended inherited].freeze
+      MIXIN_EVAL_CALLS = %i[class_eval module_eval class_exec module_exec instance_eval instance_exec].freeze
+      private_constant :HOOK_DEFS, :MIXIN_EVAL_CALLS
+
+      # The parameter names of a `def included(base)`-style hook (a hook is written `def self.included`, or
+      # `def included` inside `class << self`), else nil.
+      def hook_def_params(node)
+        return nil unless node.is_a?(Prism::DefNode) && HOOK_DEFS.include?(node.name)
+
+        parameters = node.parameters
+        return [] unless parameters
+
+        (parameters.requireds + parameters.optionals).filter_map do |parameter|
+          parameter.name if parameter.respond_to?(:name)
+        end
+      end
+
+      # Whether `receiver` is a hook parameter, or `singleton_class` / a no-argument call chain off one.
+      def hook_receiver?(receiver, accumulator)
+        case receiver
+        when Prism::LocalVariableReadNode then accumulator.hook_local?(receiver.name)
+        when Prism::CallNode
+          receiver.arguments.nil? && receiver.receiver && hook_receiver?(receiver.receiver, accumulator)
+        else false
+        end
+      end
+
+      # `base.class_eval { include X }` in a hook, and `opaque.module_eval { include B }` anywhere: the block
+      # opens a class this walk cannot name, so its mixin calls record nowhere, yet the enclosing class's
+      # ancestry is what the reader was asked about. Taint both sides of the enclosing class. Outside a hook
+      # the block is scanned for a mixin call first, so an ordinary `obj.instance_eval { … }` DSL taints nothing.
+      def taint_opaque_eval(node, current_class, accumulator)
+        return unless current_class && node.block.is_a?(Prism::BlockNode) && MIXIN_EVAL_CALLS.include?(node.name)
+
+        receiver = node.receiver
+        return if receiver.nil? || receiver.is_a?(Prism::SelfNode)
+        return if Source::ConstantPath.qualified_name_or_nil(receiver)
+        return unless hook_receiver?(receiver, accumulator) || block_mixes_in?(node.block)
+
+        accumulator.taint(current_class, :include)
+        accumulator.taint(current_class, :extend)
+      end
+
+      def block_mixes_in?(node)
+        return true if node.is_a?(Prism::CallNode) && (MIXIN_KINDS.include?(node.name) || mixin_call_view(node))
+
+        found = false
+        node.rigor_each_child { |child| found ||= block_mixes_in?(child) }
+        found
       end
 
       def singleton_class_receiver?(receiver)
@@ -6047,6 +6116,27 @@ module Rigor
           end
         end
 
+        walk_extends_children(node, qualified_prefix, current_class, accumulator, in_singleton, singleton_self,
+                              singleton_cref)
+      end
+
+      # The generic descent of {#walk_class_extends}; a hook's body walks with its parameters in scope.
+      def walk_extends_children(node, qualified_prefix, current_class, accumulator, in_singleton, singleton_self,
+                                singleton_cref)
+        hook_params = hook_def_params(node)
+        if hook_params
+          return accumulator.with_hook_params(hook_params) do
+            walk_extends_children_plain(node, qualified_prefix, current_class, accumulator, in_singleton,
+                                        singleton_self, singleton_cref)
+          end
+        end
+
+        walk_extends_children_plain(node, qualified_prefix, current_class, accumulator, in_singleton, singleton_self,
+                                    singleton_cref)
+      end
+
+      def walk_extends_children_plain(node, qualified_prefix, current_class, accumulator, in_singleton,
+                                      singleton_self, singleton_cref)
         node.rigor_each_child do |child|
           walk_class_extends(child, qualified_prefix, current_class, accumulator,
                              in_singleton: in_singleton, singleton_self: singleton_self,
@@ -6224,14 +6314,18 @@ module Rigor
       # `class << self; extend M; end` puts M on the singleton's OWN singleton, one level further out than
       # anything this table describes, and `module_function` in a singleton body is not the scope toggle
       # {#build_discovered_extends} over-approximates. So the two arms are disjoint rather than additive.
+      # Inside `class << self` the instance walk is ownerless, so this walk also keeps the instance-side taints
+      # (`base.include X` in a hook written there).
       def record_extend_call(node, qualified_prefix, current_class, accumulator, in_singleton: false)
         return record_module_function(node, current_class, accumulator, in_singleton) if node.name == :module_function
 
-        kind, arguments, via_send = mixin_call_view(node)
+        taint_opaque_eval(node, current_class, accumulator)
+
+        kind, _arguments, via_send = mixin_call_view(node)
         return if kind.nil?
 
-        effects = mixin_effects(node, kind, arguments, qualified_prefix, current_class, in_singleton: in_singleton)
-                  .select { |_owner, side| side == :extend }
+        effects = mixin_effects(node, kind, qualified_prefix, current_class, accumulator, in_singleton: in_singleton)
+                  .select { |_owner, side| side == :extend || in_singleton }
         return if effects.empty?
         return if !via_send && singleton_mixin_recorded?(node, kind, current_class, accumulator, in_singleton)
 

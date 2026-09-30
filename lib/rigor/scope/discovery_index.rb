@@ -284,7 +284,8 @@ module Rigor
         # or in the receiver form, and when it shares an argument list with a name the walk could not record
         # (`Inference::ScopeIndexer::MixinAccumulator`). A mixin call the walk cannot record at all (`include
         # helper`, `include(*MODS)`, `send(:include, M)`, `self.include M`, `C.include(M)`,
-        # `singleton_class.include M`, a call on an unknown receiver such as `base.extend M`) lists the name
+        # `singleton_class.include M`, a call on a `self.included(base)`-style hook's parameter, an `*_eval` block on
+        # one or on an opaque receiver whose body mixes a module in) lists the name
         # `"*"` on the side it reshapes: that side of the owner has no known order. An edge written both ways
         # is listed. Folded by union. A reader that depends on the order of a class's ancestors MUST decline
         # when the owner it asks about, or any ancestor it walks through, lists anything on the side it reads;

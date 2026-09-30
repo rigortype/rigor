@@ -107,17 +107,59 @@ RSpec.describe Rigor::Inference::ScopeIndexer::MixinAccumulator do
       end
     end
 
-    it "taints the enclosing class for a call on an unknown receiver in a hook", :aggregate_failures do
-      hook = "module Concern\n  def self.included(base)\n    base.%s X\n  end\nend\n"
-
-      expect(unpositioned(format(hook, "include"))).to eq("Concern" => { include: ["*"], extend: ["*"] })
-      expect(unpositioned(format(hook, "extend"))).to eq("Concern" => { include: ["*"], extend: ["*"] })
+    it "taints the enclosing class for a call on a hook parameter", :aggregate_failures do
+      both = { "Concern" => { include: ["*"], extend: ["*"] } }
+      [
+        "def self.included(base)\n    base.include X\n  end",
+        "def self.included(base)\n    base.extend X\n  end",
+        "def self.included(base)\n    base.prepend X\n  end",
+        "def self.included(base)\n    base.singleton_class.include X\n  end",
+        "def self.extended(base)\n    base.send(:include, X)\n  end",
+        "def self.prepended(base)\n    base.include X\n  end",
+        "def self.inherited(sub)\n    sub.include X\n  end",
+        "def self.included(base = nil)\n    base.include X\n  end",
+        "class << self\n    def included(base)\n      base.include X\n    end\n  end"
+      ].each do |hook|
+        expect(unpositioned("module Concern\n  #{hook}\nend\n")).to eq(both), hook
+      end
     end
 
-    it "does not taint for String#prepend and similar literal calls", :aggregate_failures do
-      expect(unpositioned("class C\n  def m(buf) = buf.prepend(\"x\")\nend\n")).to eq({})
-      expect(unpositioned("class C\n  def m = \"a\".prepend(other)\nend\n")).to eq({})
-      expect(unpositioned("class C\n  def m(list) = list.include?(1)\nend\n")).to eq({})
+    it "taints the enclosing class for an eval-family block on a hook parameter", :aggregate_failures do
+      %w[class_eval module_eval class_exec module_exec instance_eval].each do |verb|
+        source = "module Concern\n  def self.included(base)\n    base.#{verb} { include X }\n  end\nend\n"
+
+        expect(unpositioned(source)).to eq("Concern" => { include: ["*"], extend: ["*"] }), verb
+      end
+    end
+
+    it "taints the enclosing class for an opaque eval block that mixes a module in, outside a hook" do
+      source = "class C\n  include A\n  def m(mod)\n    mod.module_eval { include B }\n  end\nend\n"
+
+      expect(unpositioned(source)).to eq("C" => { include: ["*"], extend: ["*"] })
+    end
+
+    it "does not taint for an opaque eval block that mixes nothing in", :aggregate_failures do
+      expect(unpositioned("class C\n  def m(o)\n    o.instance_eval { helper }\n  end\nend\n")).to eq({})
+      expect(unpositioned("class C\n  def m(o)\n    o.class_eval { def x = 1 }\n  end\nend\n")).to eq({})
+    end
+
+    it "leaves an ordinary object receiver alone: Array#prepend, String#prepend and obj.extend", :aggregate_failures do
+      [
+        "def m(content) = content.prepend(other)",
+        "def m(ids) = ids.prepend(*more)",
+        "def m(path)\n    path.prepend(\"x\")\n  end",
+        "def m(obj) = obj.extend(Decorator)",
+        "def m(obj) = obj.singleton_class.include(Helper)",
+        "def m(base) = base.include(X)"
+      ].each do |body|
+        expect(unpositioned("class C\n  include A\n  #{body}\nend\n")).to eq({}), body
+      end
+    end
+
+    it "does not carry a hook's parameter names out of the hook" do
+      source = "module M\n  def self.included(base) = nil\n  def other(base)\n    base.include X\n  end\nend\n"
+
+      expect(unpositioned(source)).to eq({})
     end
 
     it "taints the receiver's class for a named-class call form anywhere" do

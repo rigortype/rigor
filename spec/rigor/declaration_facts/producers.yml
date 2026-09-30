@@ -190,6 +190,7 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#apply_dynamic_target_writes: grandfathered
     Rigor::Inference::ScopeIndexer#apply_named_visibility: grandfathered
     Rigor::Inference::ScopeIndexer#apply_visibility_call: grandfathered
+    Rigor::Inference::ScopeIndexer#block_mixes_in?: scans an eval block for a mixin call; it answers a question and derives no declaration context
     Rigor::Inference::ScopeIndexer#build_discovered_method_visibilities: grandfathered
     Rigor::Inference::ScopeIndexer#collect_alias_map_block_call?: grandfathered
     Rigor::Inference::ScopeIndexer#collect_alias_map_declaration: grandfathered
@@ -320,6 +321,7 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#seed_operator_only_ivars!: grandfathered
     Rigor::Inference::ScopeIndexer#singleton_mixin_recorded?: writes one singleton-side mixin call under the owner the walk passes in; it computes no declaration context
     Rigor::Inference::ScopeIndexer#surface_mixin_call?: grandfathered
+    Rigor::Inference::ScopeIndexer#taint_opaque_eval: taints the enclosing owner the walk passes in when an eval block on an opaque receiver mixes a module in; it computes no declaration context
     Rigor::Inference::ScopeIndexer#walk_anonymous_meta_block: grandfathered
     Rigor::Inference::ScopeIndexer#walk_class_cvars: grandfathered
     Rigor::Inference::ScopeIndexer#walk_class_extends: grandfathered
@@ -353,10 +355,14 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#walk_eval_singleton_defs: grandfathered
     Rigor::Inference::ScopeIndexer#walk_eval_visibilities: grandfathered
     Rigor::Inference::ScopeIndexer#walk_extends_block_call: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_extends_children: the generic child descent of the extend walk, adding a hook's parameters to scope; it derives no declaration context
+    Rigor::Inference::ScopeIndexer#walk_extends_children_plain: the generic child descent of the extend walk; the owner and cref arrive from the caller
     Rigor::Inference::ScopeIndexer#walk_extends_declaration: grandfathered
     Rigor::Inference::ScopeIndexer#walk_extends_meta_new?: grandfathered
     Rigor::Inference::ScopeIndexer#walk_extends_opaque_block: grandfathered
     Rigor::Inference::ScopeIndexer#walk_extends_singleton_class: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_includes_children: the generic child descent of the include walk, adding a hook's parameters to scope; it derives no declaration context
+    Rigor::Inference::ScopeIndexer#walk_includes_children_plain: the generic child descent of the include walk; the owner and cref arrive from the caller
     Rigor::Inference::ScopeIndexer#walk_includes_declaration?: grandfathered
     Rigor::Inference::ScopeIndexer#walk_includes_meta_new?: grandfathered
     Rigor::Inference::ScopeIndexer#walk_ivars_declaration: grandfathered

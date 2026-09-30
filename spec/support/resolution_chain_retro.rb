@@ -11,6 +11,6 @@ module ResolutionChainRetro
     chain_class = Rigor::Scope::ResolutionChain
     bucket = chain_class.send(:flavor_bucket, scope.discovery, flavor)
     builder = chain_class.const_get(:Builder, false).new(scope, flavor, bucket, retro: true)
-    builder.chain(class_name, side)
+    catch(:rigor_retro_over_budget) { builder.chain(class_name, side) }
   end
 end

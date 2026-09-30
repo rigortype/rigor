@@ -485,7 +485,7 @@ module Rigor
       # made anyway (`retro: true`). Each node's chain is memoised in the flavor's bucket per world (a module's
       # chain is the same whichever class includes it) unless its computation met a cycle, whose answer depends
       # on where the cycle was entered.
-      class Builder
+      class Builder # rubocop:disable Metrics/ClassLength
         EMPTY = [].freeze
         RETRO_OVER_BUDGET = :rigor_retro_over_budget
         EMPTY_LIN = [EMPTY, EMPTY, EMPTY, 0].freeze
@@ -645,7 +645,27 @@ module Rigor
           if resolved.is_a?(String)
             side == :singleton ? singleton_lin(resolved, depth + 1) : instance_lin(resolved, depth + 1)
           else
+            # A class the project declares that the `:methods` predicate does not admit (one that only `extend`s)
+            # is external here, so its extended modules vanish from the singleton chain and a skip among them
+            # goes uncounted: two forks settle the chain to master.
+            @frames.last.skips += 2 if side == :singleton && declared_class?(name, raw)
             [[external_entry(name, raw, side, true)].freeze, [0].freeze, [nil].freeze, 0].freeze
+          end
+        end
+
+        def shadowed_sub_chain?(entries, sub, origin, modules)
+          sub.any? do |entry|
+            next false if entry.external? || modules.include?(entry.name)
+
+            found = entries.index(entry)
+            found && found >= origin
+          end
+        end
+
+        def declared_class?(owner, raw)
+          @scope.ancestor_name_candidates(owner, raw).any? do |candidate|
+            @discovery.discovered_extends.key?(candidate) || @discovery.discovered_classes.key?(candidate) ||
+              @discovery.discovered_includes.key?(candidate) || @discovery.discovered_superclasses.key?(candidate)
           end
         end
 
@@ -657,8 +677,13 @@ module Rigor
           origin = 0
           super_start = 1
           prepends.reverse_each do |raw|
+            modules = Array(resolve(owner, raw))
             each_mixin_chain(owner, raw, depth) do |sub|
               point = -1
+              # Ruby's result depends on whether the prepended module's own includes ran before or after the
+              # prepend, which the tables cannot tell: an entry of its sub-chain (other than the module) that
+              # the class or its superclass already carries is two forks, so the chain settles to master.
+              @frames.last.skips += 2 if !@retro && shadowed_sub_chain?(entries, sub, origin, modules)
               sub.each do |entry|
                 found = entries.index(entry)
                 found = nil if found && found >= origin

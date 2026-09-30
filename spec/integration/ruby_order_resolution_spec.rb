@@ -291,6 +291,68 @@ RSpec.describe "resolution in Ruby's ancestor order (#1567, #1568, #1570, #1571)
     RUBY
   end
 
+  # Round-1 review. Ruby's result for `prepend A` depends on whether `A` included `M` before or after the
+  # prepend ran, which the tables cannot tell; `A` includes `M` LAST here, so the prepend saw an empty `A`
+  # and Ruby reads `C`'s own `X`. A chain that puts `M` first would type `X` as `M::X` and fire on correct code.
+  it "does not read a constant through a module the prepend saw before it included what the superclass carries" do
+    expect(diagnostics_for(<<~RUBY)).to eq([])
+      module A; end
+      module M; X = "m"; end
+      class C; include M; X = 1; end
+      class D < C; prepend A; def bar = X.even?; end
+      module A; include M; end
+    RUBY
+  end
+
+  # `D#foo` reduces `M#foo` (line 17, master says so too); `E#foo` overrides the private `D#foo`, so the chain
+  # that put `M` ahead of `D` reported a second reduction on `E#foo` that Ruby's `[E, A, D, C, M]` does not have.
+  it "does not report a reduced override through the same prepend shape" do
+    expect(diagnostics_for(<<~RUBY)).to eq([[17, "def.override-visibility-reduced"]])
+      module A
+      end
+
+      module M
+        def foo = 2
+      end
+
+      class C
+        include M
+      end
+
+      class D < C
+        prepend A
+
+        private
+
+        def foo = 1
+      end
+
+      module A
+        include M
+      end
+
+      class E < D
+        private
+
+        def foo = 3
+      end
+    RUBY
+  end
+
+  # The singleton side resolved a class that only `extend`s as an external entry, so the modules it extends
+  # vanished from the chain and the skip among them went uncounted.
+  it "does not type a singleton method from a module a class that only extends carries" do
+    expect(diagnostics_for(<<~RUBY)).to eq([])
+      module Deep; def foo = "deep"; end
+      module E0; include Deep; end
+      module E1; include Deep; end
+      class Base; extend E0; end
+      class C < Base; def self.foo = 1; end
+      class D < C; extend E1; end
+      D.foo.even?
+    RUBY
+  end
+
   it "keeps master's answer where a conditional include in the superclass makes the class's include a skip" do
     expect(diagnostics_for(<<~RUBY)).to eq([[16, "call.undefined-method"]])
       module M

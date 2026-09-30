@@ -347,6 +347,36 @@ RESOLUTION_CHAIN_WITNESS_FIXTURES = {
     # `D` first here.
     methods: ["C#foo"], master: ["C#foo"], third: ["C#foo"], super: false
   },
+  "a class that only extends, as the superclass of a singleton chain with a skip" => {
+    source: <<~RUBY,
+      module Deep
+        def foo = "deep"
+      end
+
+      module E0
+        include Deep
+      end
+
+      module E1
+        include Deep
+      end
+
+      class Base
+        extend E0
+      end
+
+      class C < Base
+        def self.foo = 1
+      end
+
+      class D < C
+        extend E1
+      end
+    RUBY
+    # `Base` only `extend`s, which the `:methods` predicate does not admit as a class, so its singleton chain
+    # was cut short and `E1`'s skip of `Deep` went uncounted. Ruby runs `C.foo`.
+    methods: ["D.foo"]
+  },
   "extend self puts the module's own instance chain after its singleton" => {
     source: <<~RUBY,
       module N
@@ -743,6 +773,43 @@ RSpec.describe "Scope::ResolutionChain against Ruby's own resolution" do
           def foo = [:c3, *super]
         end
       RUBY
+    end
+
+    # A prepend's result depends on whether the module included its own modules before or after the prepend
+    # ran. `A` included `M` after `D` prepended it, and `M` was already in `C`'s chain, so Ruby reads `D`'s
+    # constant `X` from `C`; the final tables read alone put `M` ahead of `D`. The chain holds two forks, so
+    # every reader settles to master's order.
+    it "counts two forks where a prepended module's later include is already in the superclass chain" do
+      source = <<~RUBY
+        module A
+        end
+
+        module M
+          X = "m"
+        end
+
+        class C
+          include M
+
+          X = 1
+        end
+
+        class D < C
+          prepend A
+        end
+
+        module A
+          include M
+        end
+      RUBY
+      Dir.mktmpdir("rigor-chain-witness-") do |dir|
+        path = File.join(dir, "fixture.rb")
+        File.write(path, source)
+        expect(ruby_answers(path, { constants: ["D::X"] }).fetch("constants:D::X")).to eq("C")
+        chain = chain_of(rigor_scope(source), "D", :instance, :constants)
+        expect(chain.skip_count).to be >= 2
+        expect(chain.settle(:answer) { raise "no retro world for two forks" }).to eq(:master)
+      end
     end
 
     # Flip this when #1573 is fixed: the extends table keeps the LATEST position of a repeated `extend`,

@@ -89,20 +89,53 @@ RSpec.describe Rigor::Analysis::IncrementalRunSlot do
   end
 
   # A row recorded as the run read carries the run's start as its recording instant; on a coarse clock a same-size
-  # save after the read would keep its stat tuple, so the slot's rows are made racy at the mark.
-  it "writes the slot's rows racy at the write guard's mark" do
-    write_project
-    guards = []
-    allow(Rigor::Analysis::IncrementalRunSlot::WriteGuard).to receive(:start).and_wrap_original do |original, **args|
-      original.call(**args).tap do |guard|
-        allow(guard).to receive(:mark_racy).and_call_original
-        guards << guard
+  # save after the read would keep its stat tuple, so the slot's rows are made racy at the mark. The plugin-read
+  # rows (`policy.txt`) are in the entry's `reads`, the rest in the dependencies.
+  describe "the rows' recording instants" do
+    let(:reader) do
+      Class.new(Rigor::Plugin::Base) do
+        manifest(id: "mark-reader", version: "0.1.0")
+
+        def diagnostics_for_file(path:, scope:, root:) # rubocop:disable Lint/UnusedMethodArgument
+          io_boundary.read_file("policy.txt") if File.basename(path) == "c.rb"
+          []
+        end
       end
     end
-    incremental_run
-    expect(guards.size).to eq(1)
-    expect(guards.first).to have_received(:mark_racy).at_least(:once)
-    expect(slot_entries).not_to be_empty
+    let(:guards) { [] }
+    let(:written) { [] }
+
+    def stat_instants(descriptor)
+      descriptor.files.select { |entry| entry.comparator == :stat }.map { |entry| entry.value.split.last.to_i }
+    end
+
+    before do
+      write_project
+      write("policy.txt", "allow\n")
+      stub_const("MarkReaderPlugin", reader)
+      allow(Rigor::Analysis::IncrementalRunSlot::WriteGuard).to receive(:start).and_wrap_original do |original, **args|
+        original.call(**args).tap { |guard| guards << guard }
+      end
+      allow(described_class).to receive(:write).and_wrap_original do |original, **args|
+        written << args
+        original.call(**args)
+      end
+      incremental_run(configuration("plugins" => ["rigor-mark-reader"]), plugin: reader)
+    end
+
+    it "lowers the plugin reads' to the mark" do
+      reads = written.fetch(0).fetch(:entry).reads.values.flat_map { |descriptor| stat_instants(descriptor) }
+      expect(reads).not_to be_empty
+      expect(reads.max).to be <= guards.fetch(0).instance_variable_get(:@started_ns)
+    end
+
+    # The run's start is after the mark, so a row is lowered, not merely already early.
+    it "lowers every dependency row's to the mark" do
+      instants = stat_instants(written.fetch(0).fetch(:dependencies))
+      mark = guards.fetch(0).instance_variable_get(:@started_ns)
+      expect(instants.max).to be <= mark
+      expect(instants).to include(mark)
+    end
   end
 
   it "serves the run's own answer after a cold baseline, and its file count for the banner" do

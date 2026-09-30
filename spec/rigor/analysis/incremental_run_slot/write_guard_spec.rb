@@ -9,8 +9,9 @@ require "rigor/analysis/incremental_run_slot/write_guard"
 # a fine-grained macOS APFS run never meets. The clock is coarsened in the spec, so the examples do not depend on
 # the filesystem the suite runs on.
 RSpec.describe Rigor::Analysis::IncrementalRunSlot::WriteGuard do
-  # Not a divisor of a second: a first stamp on a whole second is declined as a filesystem too coarse to wait out.
-  let(:tick_ns) { 47_000_000 }
+  # Coprime to a second: a first stamp on a whole second is declined as a filesystem too coarse to wait out, and
+  # a tick that divides a second would reach one every so often.
+  let(:tick_ns) { 49_999_999 }
   let(:cache_root) { File.join(Dir.pwd, ".rigor", "cache") }
   let(:configuration) do
     Rigor::Configuration.new(Rigor::Configuration::DEFAULTS.merge({ "paths" => ["lib"] }))

@@ -409,7 +409,10 @@ filesystem (NFS's attribute cache, virtiofs, sshfs) may report a change time
 from before a save, and nothing detects that. The rows recorded as the run
 read carry a recording instant lowered to the mark, so on a coarse clock a
 same-size save after the read is re-hashed instead of trusted on an unmoved
-stat tuple.
+stat tuple. A plugin-read file saved during a writer run therefore stays racy,
+and is re-hashed on each probe, until its reader is re-analysed and the row
+re-recorded; the cost is bounded by the number of such files and the answer
+stays correct.
 
 **Why the chain holds together.** By induction from the full run that
 started it: that run's descriptor is the plain slot's, and each recheck's

@@ -272,7 +272,8 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
     # rest of this fixture's expectations are untouched.
     #
     # Issue #1123 — the `prepend` is what keeps the `prepends` table non-empty, for the same reason: an
-    # empty table on both sides of the comparison would let stripping it pass vacuously.
+    # empty table on both sides of the comparison would let stripping it pass vacuously. The guarded `include`
+    # does the same for `unpositioned_mixins`.
     def discrimination_fixture_source
       <<~RUBY
         class Parent
@@ -280,6 +281,7 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
         end
         class Child < Parent
           include Enumerable
+          include Kernel if defined?(Kernel)
           prepend Comparable
           extend Comparable
           CONST = 42

@@ -6116,15 +6116,10 @@ module Rigor
                                           in_singleton: in_singleton, singleton_self: singleton_self,
                                           singleton_cref: singleton_cref)
           end
-          if node.block.is_a?(Prism::BlockNode)
-            if rebinding_extends_block?(node)
-              return walk_extends_block_call(node, qualified_prefix, current_class, accumulator,
-                                             in_singleton, singleton_self, singleton_cref)
-            end
-            # Any other block runs on an object this walk cannot vouch for (`@lock.synchronize { extend M }`
-            # extends the instance, `on_load(:x) { extend M }` the loaded class), so it is skipped as it always
-            # was, unless it is a self-preserving iterator written straight in a class body (#1592).
-            return unless self_preserving_body_block?(node, accumulator)
+          if node.block.is_a?(Prism::BlockNode) &&
+             extends_block_handled?(node, qualified_prefix, current_class, accumulator,
+                                    in_singleton, singleton_self, singleton_cref)
+            return
           end
         end
 
@@ -6214,23 +6209,89 @@ module Rigor
                                   in_singleton, singleton_self, singleton_cref)
       end
 
-      SELF_PRESERVING_ITERATORS = %i[each each_with_index each_pair each_key each_value times upto downto step map
-                                     tap then].freeze
-      private_constant :SELF_PRESERVING_ITERATORS
+      # What the extends walk does with a block-carrying call: `:rebound` (its own eval / `define_method` / meta-new
+      # handling), `:skip` (the block runs on an object this walk cannot vouch for, as an instance's `synchronize`
+      # or an `on_load` hook, or may never run: `Registry.each { … }`), or `:descend` (it provably runs once with the
+      # body's `self`, #1592, and its direct statements are positioned when the call itself is).
+      def extends_block_plan(node, accumulator)
+        return :rebound if rebinding_extends_block?(node)
+        return :skip unless runs_body_block_once?(node, accumulator)
 
-      # A block that keeps the class body's `self`: the call is a statement of the body itself (not nested in a
-      # `def` or another block) and iterates a literal Array / Range / Hash / Integer or a constant with a method
-      # that yields without rebinding. `[].each { extend M }` never runs and is recorded anyway; it is listed
-      # unpositioned, like `extend M if false` (a known imprecision).
-      def self_preserving_body_block?(node, accumulator)
-        return false unless accumulator.body_block?(node) && SELF_PRESERVING_ITERATORS.include?(node.name)
+        accumulator.direct_body(node.block.body) if accumulator.direct?(node)
+        :descend
+      end
 
-        receiver = node.receiver
-        # `(1..3).each` wraps the literal in parentheses.
-        receiver = receiver.body.body.first if receiver.is_a?(Prism::ParenthesesNode) && receiver.body&.body&.size == 1
+      # True when {#extends_block_plan} settled the block (walked as rebound, or skipped); false leaves it to the
+      # generic descent.
+      def extends_block_handled?(node, qualified_prefix, current_class, accumulator, in_singleton, singleton_self,
+                                 singleton_cref)
+        case extends_block_plan(node, accumulator)
+        when :skip then true
+        when :rebound
+          walk_extends_block_call(node, qualified_prefix, current_class, accumulator,
+                                  in_singleton, singleton_self, singleton_cref)
+          true
+        else false
+        end
+      end
+
+      ARRAY_ITERATORS = %i[each each_with_index map].freeze
+      HASH_ITERATORS = %i[each each_pair each_key each_value map].freeze
+      private_constant :ARRAY_ITERATORS, :HASH_ITERATORS
+
+      # A block that provably runs at least once with the class body's `self`: the call is a statement of the
+      # body itself (not nested in a `def` or another block) and either `tap` / `then` (they always yield once,
+      # self preserved) or an iterator over a literal that is known non-empty (a non-empty Array or Hash literal,
+      # a positive `Integer#times`, an Integer-literal Range that is not empty, `upto` / `downto` in the right
+      # order). A constant or variable receiver (`Registry.each`, a lazy `map`) may never yield, so it is not one.
+      # The walk then records the block's direct statements as positioned: the block runs where it is written, and
+      # a repeated `extend` is idempotent (#1592).
+      def runs_body_block_once?(node, accumulator)
+        return false unless accumulator.body_block?(node)
+        return true if %i[tap then].include?(node.name)
+
+        non_empty_literal_iteration?(node.name, node.receiver, node.arguments&.arguments || [])
+      end
+
+      def non_empty_literal_iteration?(name, receiver, arguments)
         case receiver
-        when Prism::ArrayNode, Prism::RangeNode, Prism::HashNode, Prism::IntegerNode,
-             Prism::ConstantReadNode, Prism::ConstantPathNode then true
+        when Prism::ArrayNode
+          ARRAY_ITERATORS.include?(name) && !receiver.elements.empty? &&
+            receiver.elements.none?(Prism::SplatNode)
+        when Prism::HashNode
+          HASH_ITERATORS.include?(name) && !receiver.elements.empty? &&
+            receiver.elements.all?(Prism::AssocNode)
+        when Prism::IntegerNode then integer_iteration_runs?(name, receiver.value, arguments)
+        when Prism::ParenthesesNode then non_empty_range_iteration?(name, receiver, arguments)
+        else false
+        end
+      end
+
+      def integer_iteration_runs?(name, value, arguments)
+        limit = arguments.first
+        case name
+        when :times then arguments.empty? && value.positive?
+        when :upto then arguments.size == 1 && limit.is_a?(Prism::IntegerNode) && value <= limit.value
+        when :downto then arguments.size == 1 && limit.is_a?(Prism::IntegerNode) && value >= limit.value
+        else false
+        end
+      end
+
+      def positive_integer_literal?(node) = node.is_a?(Prism::IntegerNode) && node.value.positive?
+
+      # `(1..3).each` and `(1..3).map`, and `(1..3).step(2)` with a positive literal step.
+      def non_empty_range_iteration?(name, parens, arguments)
+        range = parens.body.is_a?(Prism::StatementsNode) && parens.body.body.size == 1 ? parens.body.body.first : nil
+        return false unless range.is_a?(Prism::RangeNode)
+        return false unless range.left.is_a?(Prism::IntegerNode) && range.right.is_a?(Prism::IntegerNode)
+
+        low = range.left.value
+        high = range.right.value
+        return false unless range.exclude_end? ? low < high : low <= high
+
+        case name
+        when :each, :map then arguments.empty?
+        when :step then positive_integer_literal?(arguments.first) && arguments.size == 1
         else false
         end
       end

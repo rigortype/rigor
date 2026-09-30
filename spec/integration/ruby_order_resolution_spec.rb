@@ -541,8 +541,9 @@ RSpec.describe "resolution in Ruby's ancestor order (#1567, #1568, #1570, #1571)
 
   # #1592 — a singleton-side mixin written in a block. The extend walk dropped every block it did not recognise, so
   # `[1].each { extend X }` recorded nothing and the singleton chain stood without `X`. Ruby prints "X" for each
-  # `K.bar` below. Only a self-preserving iterator over a literal or a constant, written in a class body, is read
-  # as the body's own; a block on any other object (an instance, an `on_load` hook) is skipped, as it was. The
+  # `K.bar` below. Only a block that provably runs at least once with the body's `self` (`tap` / `then`, an iterator
+  # over a non-empty literal), written in a class body, is read as the body's own;
+  # a block on any other object (an instance, an `on_load` hook) is skipped, as it was. The
   # control on the same source (`Kc`, no mixin) must still fire, so a run that analysed nothing cannot pass.
   describe "a singleton-side mixin inside a block, method or hook (#1592)" do
     let(:prelude) do
@@ -590,18 +591,50 @@ RSpec.describe "resolution in Ruby's ancestor order (#1567, #1568, #1570, #1571)
       expect(diagnostics_for(source)).to eq([])
     end
 
-    # Known imprecision: `[].each` never runs, so Ruby's `W.label` is "x" and `upcase` exists; the edge is recorded,
-    # unpositioned, as `extend Counted if false` is on master, so the read is typed from Counted's Integer.
-    it "records an `extend` in an iterator over an empty literal, as master does for `if false`" do
+    # A block that may never yield records nothing: `Registry.each` here never calls its block, a lazy `map` never
+    # forces it, `[].each` and `0.times` never run it. Ruby's `label` is Base's "x" for each, so `upcase` exists.
+    it "does not record an `extend` in a block that may never run" do
       source = <<~RUBY
         class Base; def self.label = "x"; end
         module Counted; def label = 1; end
-        class W < Base; [].each { extend Counted }; end
-        W.label.upcase
+        class Registry; def self.each; end; end
+        LAZY = (1..Float::INFINITY).lazy
+        class T1 < Base; Registry.each { extend Counted }; end
+        class T2 < Base; LAZY.map { extend Counted }; end
+        class T3 < Base; [].each { extend Counted }; end
+        class T4 < Base; 0.times { extend Counted }; end
+        T1.label.upcase
+        T2.label.upcase
+        T3.label.upcase
+        T4.label.upcase
       RUBY
-      guarded = source.sub("[].each { extend Counted }", "extend Counted if false")
+      expect(diagnostics_for(source)).to eq([])
+    end
+
+    # `tap` always yields once with the body's `self`: `Base.tap { extend Counted }` extends T5, so Ruby's
+    # `T5.label` is Counted's 1.
+    it "records an `extend` in `tap` as the class's own" do
+      source = <<~RUBY
+        class Base; def self.label = "x"; end
+        module Counted; def label = 1; end
+        class T5 < Base; Base.tap { extend Counted }; end
+        T5.label.upcase
+      RUBY
       expect(diagnostics_for(source)).to eq([[4, "call.undefined-method"]])
-      expect(diagnostics_for(guarded)).to include([4, "call.undefined-method"])
+    end
+
+    # #1567 with a block extend: the class's own singleton chain stays settled, because the block extend is
+    # positioned. Ruby: `K.foo` is A's M#foo "m" (Unrelated has no `foo`), so `upcase` exists.
+    it "keeps Ruby's singleton order for a class with a positioned block extend" do
+      source = <<~RUBY
+        module Unrelated; def zzz = 1; end
+        class Base; def self.foo = 1; end
+        module M; def foo = "m"; end
+        module A; include M; end
+        class K < Base; extend A; [1].each { extend Unrelated }; end
+        K.foo.upcase
+      RUBY
+      expect(diagnostics_for(source)).to eq([])
     end
 
     # #1567 stays: an included module's own conditional `extend`, or a hook that extends its includer, is not the

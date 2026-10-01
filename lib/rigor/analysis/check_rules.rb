@@ -2633,7 +2633,7 @@ module Rigor
         #   Unions / Dynamic / shape carriers are skipped.
         # - Issue #1568 — a module the class PREPENDS sits ahead of it in Ruby's order, so a definition there
         #   is what the call reaches; the class's own private `def` answers only when nothing prepended
-        #   defines the name ({#own_private_definer_stands?}).
+        #   defines the name ({#reached_definer_visibility}).
         def visibility_mismatch_diagnostic(path, call_node, scope_index)
           return nil unless explicit_non_self_receiver?(call_node.receiver)
 
@@ -2650,31 +2650,30 @@ module Rigor
           visibility = scope.discovered_method_visibility(receiver_type.class_name, call_node.name)
           return nil unless visibility == :private
 
-          return nil unless own_private_definer_stands?(scope, receiver_type.class_name, call_node.name)
+          reached = reached_definer_visibility(scope, receiver_type.class_name, call_node.name)
+          return nil if reached == :undecided
+          return nil unless reached.nil? || reached == :private
 
           build_visibility_mismatch_diagnostic(path, call_node, receiver_type)
         end
 
-        # Issue #1568, ADR-119 C1c — whether the class's own private `def` is the definition the call reaches: the
+        # Issue #1568, ADR-119 C1c — the recorded visibility of the definition a call on `class_name` reaches: the
         # first project entry on the class's {Scope::ResolutionChain} from its head that records the name, so a
-        # module the class PREPENDS answers ahead of the class. `Inference::DefinerResolution` reads it with
-        # the `:visibility` question's default answer, and the call declines (`false`) wherever the chain does
-        # not settle the order (an unpositioned or forked mixin, a conditional include) or an ancestor ahead of
-        # the definer may define the name (one RBS does not know), and where ADR-119's contested visibility
-        # slot says the recorded visibility may not be the one that runs. Nothing recording it at all leaves
-        # the class's own standing. An ancestor the project does not declare is passed over, as the method
-        # lookup passes it.
-        def own_private_definer_stands?(scope, class_name, method_name)
-          return false if scope.discovery.contested?(:discovered_method_visibilities,
-                                                     [class_name.to_s, method_name.to_sym])
-
+        # module the class PREPENDS answers ahead of the class. `Inference::DefinerResolution` reads it with the
+        # `:visibility` question's default answer. It is `:undecided` wherever the chain does not settle the order
+        # (an unpositioned or forked mixin, a conditional include) or an ancestor ahead of the definer may define
+        # the name (one RBS does not know), and the caller declines; a definer whose visibility slot ADR-119's
+        # producers contest is not alone (`DefinerResolution` asks the next candidate too), so it is `:undecided`
+        # there without a read of the table here. nil is nothing recording the name at all, and the class's own
+        # visibility stands. An ancestor the project does not declare is passed over, as the method lookup passes it.
+        def reached_definer_visibility(scope, class_name, method_name)
           case Inference::DefinerResolution.resolve(scope, class_name, method_name, :instance, question: :visibility)
           in Inference::DefinerResolution::Known(answer:)
-            answer == :private
+            answer
           in Inference::DefinerResolution::UNKNOWN
-            false
+            :undecided
           in Inference::DefinerResolution::ABSENT
-            true
+            nil
           end
         end
 

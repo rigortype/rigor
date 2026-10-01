@@ -128,6 +128,20 @@ RSpec.describe "Declaration-fact witness" do
       )
     end
 
+    it "#1573: keeps a repeated extend at its first position" do
+      pending "https://github.com/rigortype/rigor/issues/1573 — fixed by the lane-2 record_extend_targets producer " \
+              "change (ADR-119 WD7); today C.foo resolves to E1's def (line 8); fixed, E2's (line 12)"
+
+      expect(violations("issue_1573")).to eq([])
+    end
+
+    # Flip this when #1573 is fixed: the extend table keeps E2 before E1, and the pending example above passes.
+    it "#1573 today" do
+      expect(violations("issue_1573")).to eq(
+        ["singleton_def_nodes: Rigor resolves C.foo to the def at line 8; Ruby's is the def at line 12"]
+      )
+    end
+
     # #1305's family: a def whose innermost or enclosing cref is a singleton class, and a constant the def names
     # resolves elsewhere once the recorded chain of names drops it: through the singleton class or its ancestors, or
     # through the ancestors of the class that becomes innermost without it.

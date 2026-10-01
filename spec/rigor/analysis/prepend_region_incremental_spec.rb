@@ -4,7 +4,7 @@ require "spec_helper"
 require "tmpdir"
 
 # Issue #1568 — `def.method-visibility-mismatch` reads the region a class's prepended modules occupy ahead of it
-# (`CheckRules#prepend_region_visibility`). A class that prepends nothing has an EMPTY region, and that read
+# (`CheckRules#reached_definer_visibility`). A class that prepends nothing has an EMPTY region, and that read
 # still depends on the class's declarations: a file that later gives it a `prepend` puts a definition ahead
 # of the class's own private `def`, which is what a call reaches and what makes the diagnostic wrong.
 #
@@ -81,7 +81,7 @@ RSpec.describe "prepend-region visibility read — incremental" do
     )
     scope = Rigor::Scope.empty.with_discovery(index)
     record = Rigor::Analysis::DependencyRecorder.record_for("app/reader.rb") do
-      expect(Rigor::Analysis::CheckRules.send(:prepended_definer_visibility, scope, "C", :foo)).to be_nil
+      expect(Rigor::Analysis::CheckRules.send(:reached_definer_visibility, scope, "C", :foo)).to be_nil
     end
     expect(record.sources.to_a + record.ancestry_sources.to_a).to include("app/c.rb")
   end

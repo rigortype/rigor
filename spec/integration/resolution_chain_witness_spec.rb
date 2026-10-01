@@ -901,6 +901,30 @@ RSpec.describe "Scope::ResolutionChain against Ruby's own resolution" do
       end
     end
 
+    # Flip this when #1573 is fixed (the lane-2 producer change, ADR-119 WD7): the extend table keeps the first
+    # position, the singleton chain settles, and the read answers the def Ruby runs (`E2`, line 6).
+    it "reads a repeated extend at Ruby's first position (#1573)" do
+      pending "https://github.com/rigortype/rigor/issues/1573 — fixed by the lane-2 record_extend_targets change; " \
+              "the read answers E1's def (line 2)"
+
+      source = <<~RUBY
+        module E1
+          def foo = :e1
+        end
+
+        module E2
+          def foo = :e2
+        end
+
+        class C
+          extend E1
+          extend E2
+          extend E1
+        end
+      RUBY
+      expect(rigor_agreed_singleton_line(rigor_scope(source), "C", :foo)).to eq(6)
+    end
+
     it "keeps a repeated prepend at its first position (#1587)" do
       source = <<~RUBY
         module P

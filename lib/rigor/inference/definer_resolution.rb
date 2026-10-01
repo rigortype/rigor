@@ -184,14 +184,16 @@ module Rigor
         end
       end
 
-      # The first project entry that records the name (a discovered method, or an instance `def` the def table
-      # holds), with its visibility (`:public` where none was stated).
+      # The first project entry that records the name (a discovered method, an instance `def` the def table
+      # holds, or a visibility change such as `private :foo` recorded for it), with its visibility (`:public` where
+      # none was stated).
       def visibility_answer(scope, method_name)
         lambda do |chain, from|
           first_hit(chain, scope, from) do |entry|
             kind = entry.side == :singleton ? :singleton : :instance
             next unless scope.discovered_method?(entry.name, method_name, kind) ||
-                        (kind == :instance && scope.user_def_for(entry.name, method_name))
+                        (kind == :instance && (scope.user_def_for(entry.name, method_name) ||
+                                               scope.discovered_method_visibility(entry.name, method_name)))
 
             scope.discovered_method_visibility(entry.name, method_name) || :public
           end

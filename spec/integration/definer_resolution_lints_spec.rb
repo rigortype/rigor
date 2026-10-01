@@ -196,4 +196,61 @@ RSpec.describe "relationship lints over DefinerResolution (ADR-119 C1c)", type: 
       expect(rules(format(load_source, body: "2"), sig: load_sig)).to eq([[5, "def.return-type-mismatch"]])
     end
   end
+
+  # A receiver-eval block defines on another object than the class body's `self`, so the side a receiverless `def`
+  # answers for is the indexer's record of that node, not the scope's `class << self` mark.
+  describe "a receiverless def in a receiver-eval block" do
+    def eval_sig(singleton_return)
+      { "d.rbs" => <<~RBS }
+        class D
+          def load: () -> String
+          def self.load: () -> #{singleton_return}
+        end
+      RBS
+    end
+
+    {
+      "instance_eval in the class body defines D.load" =>
+        ["Integer", "class D\n  instance_eval do\n    def load = 1\n  end\nend\n"],
+      "E.instance_eval inside class << self defines E.load" =>
+        ["String",
+         "class E; end\nclass D\n  class << self\n    E.instance_eval do\n      def load = 1\n    end\n  end\nend\n"],
+      "E.class_eval inside class << self defines E#load" =>
+        ["String",
+         "class E; end\nclass D\n  class << self\n    E.class_eval do\n      def load = 1\n    end\n  end\nend\n"]
+    }.each do |name, (singleton_return, source)|
+      it "does not compare the body with D's signatures: #{name}" do
+        expect(rules(source, sig: eval_sig(singleton_return))).to eq([])
+      end
+    end
+
+    it "runs those defs on the other receiver under Ruby" do
+      printed = RubyRun.stdout(
+        "class E; end\nclass D; end\nD.instance_eval { def load = 1 }\nE.class_eval { def load = 2 }\n" \
+        "p D.load, E.new.load, D.instance_methods(false)\n"
+      )
+      expect(printed).to eq("1\n2\n[]\n")
+    end
+  end
+
+  # `private :foo` in a subclass records a visibility for an inherited method; the class heads the chain with no
+  # `def` of its own, and the call still reaches a private method.
+  describe "a visibility change without a def" do
+    let(:source) do
+      <<~RUBY
+        class B; def foo = 1; end
+        class C < B; private :foo; end
+        C.new.foo
+      RUBY
+    end
+
+    it "raises NoMethodError under Ruby" do
+      program = "#{source.lines[0..1].join}begin; C.new.foo; rescue NoMethodError => e; puts e.class; end\n"
+      expect(RubyRun.stdout(program)).to eq("NoMethodError\n")
+    end
+
+    it "still reports the private call" do
+      expect(rules(source)).to eq([[3, "def.method-visibility-mismatch"]])
+    end
+  end
 end

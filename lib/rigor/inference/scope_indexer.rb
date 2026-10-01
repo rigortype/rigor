@@ -7663,10 +7663,12 @@ module Rigor
 
       def freeze_siblings(siblings)
         siblings.each_value { |table| freeze_sibling_table(table) }
+        siblings.freeze
       end
 
       def freeze_sibling_table(table)
         table.each_value { |entry| freeze_sibling_table(entry) } if table.is_a?(Hash)
+        table.each { |entry| entry.freeze if entry.is_a?(Array) } if table.is_a?(Set)
         table.freeze
       end
 

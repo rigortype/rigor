@@ -127,7 +127,8 @@ module Rigor
       # No candidate is declared by the project or known to RBS.
       def external_unknown?(scope, candidates)
         candidates.none? do |candidate|
-          scope.discovered_class_sources.key?(candidate) || Rigor::Reflection.rbs_class_known?(candidate, scope: scope)
+          Scope::ResolutionChain.declared?(scope,
+                                           candidate) || Rigor::Reflection.rbs_class_known?(candidate, scope: scope)
         end
       end
 

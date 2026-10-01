@@ -77,7 +77,7 @@ module Rigor
         # `name` (`SourceArity#external_mixin_lacks_method?`). An unknown one, or one that has it, may answer.
         # `edges` collects the recording edges {project_lacks?} reads; without it they are filed directly.
         def external_lacks?(scope, candidates, name, edges = nil)
-          declared = candidates.find { |candidate| scope.discovered_class_sources.key?(candidate) }
+          declared = candidates.find { |candidate| ResolutionChain.declared?(scope, candidate) }
           return project_lacks_recorded?(scope, declared, name, edges) if declared
 
           known = candidates.find { |candidate| Rigor::Reflection.rbs_class_known?(candidate, scope: scope) }

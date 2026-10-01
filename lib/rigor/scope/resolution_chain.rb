@@ -267,6 +267,11 @@ module Rigor
         sites&.each { |site| Analysis::DependencyRecorder.read_site(site) }
       end
 
+      # Whether the project declares the module or class `name` (a `module Empty; end` with no def included).
+      def self.declared?(scope, name)
+        scope.discovery.discovered_class_sources.key?(name.to_s)
+      end
+
       def self.record_entry(scope, entry, side)
         return if side && entry.side != side
 

@@ -54,6 +54,13 @@ RSpec.describe "tool/engine_diag_diff.rb" do
     end
   end
 
+  describe ".parse_floor" do
+    it "splits PATH:N at the last colon" do
+      expect(EngineDiagDiff.parse_floor("spec/survivors/:5")).to eq(["spec/survivors/", 5])
+      expect { EngineDiagDiff.parse_floor("spec/survivors") }.to raise_error(ArgumentError, /PATH:N/)
+    end
+  end
+
   describe ".report" do
     let(:entry) do
       { "path" => "a.rb", "line" => 1, "column" => 1, "message" => "m", "verdict" => "fp-silenced", "reason" => "r" }
@@ -77,15 +84,39 @@ RSpec.describe "tool/engine_diag_diff.rb" do
       expect(passing[:text]).to include("1 fp-silenced, 0 tp-lost")
     end
 
-    it "prints an added row without failing" do
-      result = report([row(1)], [row(1), row(2)])
-      expect(result[:ok]).to be(true)
-      expect(result[:text]).to include("Added", "a.rb:2:1")
+    it "fails an added row nobody named, and passes it once a named-mechanism entry lists it" do
+      failing = report([row(1)], [row(1), row(2)])
+      expect(failing[:ok]).to be(false)
+      expect(failing[:text]).to include("Added, NOT adjudicated", "a.rb:2:1")
+
+      named = entry.merge("line" => 2, "verdict" => "named-mechanism")
+      passing = report([row(1)], [row(1), row(2)], entries: [named])
+      expect(passing[:ok]).to be(true)
+      expect(passing[:text]).to include("Added, adjudicated", "1 named-mechanism")
+    end
+
+    it "does not take a removal verdict for an added row, nor the reverse" do
+      expect(report([row(1)], [row(1), row(2)], entries: [entry.merge("line" => 2)])[:ok]).to be(false)
+      expect(report([row(1)], [], entries: [entry.merge("verdict" => "named-mechanism")])[:ok]).to be(false)
+    end
+
+    it "fails an adjudication entry that matches no removed or added row" do
+      stale = report([row(1)], [row(1)], entries: [entry])
+      expect(stale[:ok]).to be(false)
+      expect(stale[:text]).to include("Stale adjudication entries", "match no removed or added row")
     end
 
     it "ignores rows of other rules" do
       other = row(1, rule: "call.undefined-method")
       expect(report([other], [])).to include(ok: true)
+    end
+
+    it "counts a per-path floor over only the rows under that path" do
+      rows = [row(1, path: "fx/survivors/a.rb"), row(2, path: "fx/silenced.rb"), row(3, path: "fx/silenced.rb")]
+      expect(report(rows, rows, floors: [["fx/survivors/", 1]])[:ok]).to be(true)
+      failing = report(rows, rows, floors: [["fx/survivors/", 2]])
+      expect(failing[:ok]).to be(false)
+      expect(failing[:text]).to include("1 call.wrong-arity row(s) under fx/survivors/")
     end
 
     it "fails when the base has fewer rows than required, so an empty corpus cannot pass" do

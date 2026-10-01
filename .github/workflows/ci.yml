@@ -50,7 +50,6 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       code: ${{ steps.detect.outputs.code }}
-      arity: ${{ steps.arity.outputs.arity }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -83,29 +82,6 @@ jobs:
           else
             echo "Markdown-only PR — skipping the code suite."
             echo "code=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      # The `arity-differential` job's own path filter: the files that decide a `call.wrong-arity` firing, and the
-      # job's own tool, corpus and workflow. A failed diff fails safe to running it.
-      - name: Detect arity-differential paths
-        id: arity
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          if [ "${{ github.event_name }}" != "pull_request" ]; then
-            echo "arity=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          if ! changed=$(git diff --name-only "$BASE_SHA...$HEAD_SHA"); then
-            echo "arity=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          paths='^(lib/rigor/analysis/check_rules/source_arity\.rb|lib/rigor/scope/resolution_chain\.rb|lib/rigor/inference/scope_indexer\.rb|lib/rigor/inference/definer_resolution\.rb|tool/engine_diag_diff\.rb|spec/integration/fixtures/arity_differential/|\.github/workflows/ci\.yml$)'
-          if printf '%s\n' "$changed" | grep -qE "$paths"; then
-            echo "arity=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "arity=false" >> "$GITHUB_OUTPUT"
           fi
 
   # ── 0a. The timing file every shard partitions ──────────────────
@@ -833,12 +809,16 @@ jobs:
   # The merge base's engine and the PR's each analyse the arity fixtures;
   # a firing the PR removes must be adjudicated in
   # `spec/integration/fixtures/arity_differential/arity_adjudication.yml`
-  # (`tool/engine_diag_diff.rb` says how). Path-gated by the `changes`
-  # job's `arity` output; a skipped run is acceptable to `required`.
+  # (`tool/engine_diag_diff.rb` says how), as must a firing it adds. Gated
+  # by the `changes` job's `code` output, like the other engine jobs: what
+  # decides a firing is spread over the scope, the discovery tables, the
+  # reflection layer and the RBS data, so a narrower filter would miss
+  # some of it, and the job costs about ten seconds past the setup. A
+  # skipped run is acceptable to `required`.
   arity-differential:
     name: Arity differential
     needs: changes
-    if: github.event_name == 'pull_request' && needs.changes.outputs.arity == 'true'
+    if: github.event_name == 'pull_request' && needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -861,9 +841,11 @@ jobs:
         run: |
           merge_base=$(git merge-base "$BASE_SHA" "$HEAD_SHA")
           fixtures=spec/integration/fixtures/arity_differential
+          # The floor counts only the survivors, the firings a change must keep.
           bundle exec ruby tool/engine_diag_diff.rb --base "$merge_base" --head "$HEAD_SHA" --corpus "$HEAD_SHA" \
-            --target "$fixtures" --rule call.wrong-arity --adjudication "$fixtures/arity_adjudication.yml" \
-            --require-base-rows 3 --summary "$GITHUB_STEP_SUMMARY"
+            --target "$fixtures" --target spec/integration/fixtures/declaration_witness \
+            --rule call.wrong-arity --adjudication "$fixtures/arity_adjudication.yml" \
+            --require-rows-in "$fixtures/survivors/:5" --summary "$GITHUB_STEP_SUMMARY"
 
   # ── Fan-in: single required-check target for branch protection ───
   # Configure branch protection to require only "CI required" rather

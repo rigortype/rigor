@@ -54,16 +54,20 @@ evidence rather than faking discrimination with a fixture that cannot fail.
 ## Diagnostic differential across commits
 
 `tool/engine_diag_diff.rb --base REV --head REV [--corpus REV | --corpus-dir DIR] [--target PATH] [--rule RULE]
-[--adjudication FILE]` archives each engine whole (`lib data plugins`), runs each in a fresh process over one corpus,
+[--require-rows-in PATH:N] [--adjudication FILE]` (`--target` repeats) archives each engine whole (`lib data plugins`), runs each in a fresh process over one corpus,
 and prints the diagnostic rows the head removed and added, keyed by path, line, column, rule and message. It exits
-non-zero when a removed row of `--rule` is not in the adjudication file (a YAML list of `{path, line, column,
-message, verdict: fp-silenced | tp-lost, reason}`), so each removed firing is classed as a false positive silenced
-or a true positive lost. Use it, rather than a flag or an in-tree copy of the old rule, for any "no new firings,
+non-zero when a removed or added row of `--rule` is not in the adjudication file (a YAML list of `{path, line,
+column, message, verdict, reason}`: `fp-silenced` or `tp-lost` for a removed row, `named-mechanism` for an added one,
+as ADR-119 WD2 allows a new firing only for a mechanism the change names), when an entry matches no row, or when a
+floor (`--require-base-rows N`, `--require-rows-in PATH:N`) is not met. Both engines run under this checkout's
+`Gemfile.lock` and the corpus's configuration, so a dependency or configuration change in the head can make the base
+run fail loudly rather than compare. Use it, rather than a flag or an in-tree copy of the old rule, for any "no new firings,
 every removal adjudicated" claim: a frozen copy still reads the live scope and tables a change moves, and would
 agree with the change by construction. Pass the merge base as `--base`; a survey checkout goes in as `--corpus-dir`.
-CI's `Arity differential` job runs it over `spec/integration/fixtures/arity_differential/` for the `call.wrong-arity`
-rule (ADR-119 WD2, `SourceArity`'s decision point) on a PR touching the files that decide a firing, and the lane-2
-corpus run is the same command with the survey checkouts.
+CI's `Arity differential` job runs it over `spec/integration/fixtures/arity_differential/` and
+`spec/integration/fixtures/declaration_witness/` for the `call.wrong-arity` rule (ADR-119 WD2, `SourceArity`'s
+decision point) on every PR that changes code, with the floor held by the `survivors/` shapes; the lane-2 corpus run
+is the same command with the survey checkouts.
 
 ## Probes that lie
 

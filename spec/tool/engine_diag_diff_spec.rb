@@ -47,10 +47,12 @@ RSpec.describe "tool/engine_diag_diff.rb" do
     end
 
     it "rejects an unknown verdict, a missing reason and a missing key" do
-      good = { "path" => "a.rb", "line" => 1, "column" => 1, "message" => "m", "verdict" => "tp-lost", "reason" => "r" }
+      good = { "base" => "abc1234", "path" => "a.rb", "line" => 1, "column" => 1, "message" => "m", "verdict" => "tp-lost",
+               "reason" => "r" }
       expect { adjudication(good.merge("verdict" => "fine")) }.to raise_error(ArgumentError, /verdict/)
       expect { adjudication(good.merge("reason" => " ")) }.to raise_error(ArgumentError, /reason/)
       expect { adjudication(good.except("line")) }.to raise_error(ArgumentError, /missing line/)
+      expect { adjudication(good.except("base")) }.to raise_error(ArgumentError, /missing base/)
     end
   end
 
@@ -63,11 +65,12 @@ RSpec.describe "tool/engine_diag_diff.rb" do
 
   describe ".report" do
     let(:entry) do
-      { "path" => "a.rb", "line" => 1, "column" => 1, "message" => "m", "verdict" => "fp-silenced", "reason" => "r" }
+      { "base" => "abc1234def", "path" => "a.rb", "line" => 1, "column" => 1, "message" => "m",
+        "verdict" => "fp-silenced", "reason" => "r" }
     end
 
     def report(base, head, entries: [], **)
-      EngineDiagDiff.report(base_rows: base, head_rows: head, rule: "call.wrong-arity", entries: entries, **)
+      EngineDiagDiff.report(base_rows: base, head_rows: head, rule: "call.wrong-arity", entries: entries, base_sha: "abc1234def5678", **)
     end
 
     it "passes an unchanged corpus" do
@@ -117,6 +120,43 @@ RSpec.describe "tool/engine_diag_diff.rb" do
       failing = report(rows, rows, floors: [["fx/survivors/", 2]])
       expect(failing[:ok]).to be(false)
       expect(failing[:text]).to include("1 call.wrong-arity row(s) under fx/survivors/")
+    end
+
+    it "holds a per-path floor in the head too, so a survivor cannot be silenced" do
+      rows = [row(1, path: "fx/survivors/a.rb"), row(2, path: "fx/survivors/b.rb")]
+      failing = report(rows, [rows.first], floors: [["fx/survivors/", 2]])
+      expect(failing[:ok]).to be(false)
+      expect(failing[:text]).to include("the head has 1 call.wrong-arity row(s) under fx/survivors/")
+    end
+
+    it "fails an adjudication entry under a floored path, whatever its verdict or base" do
+      rows = [row(1, path: "fx/survivors/a.rb")]
+      lost = entry.merge("path" => "fx/survivors/a.rb", "verdict" => "tp-lost")
+      result = report(rows, [], entries: [lost], floors: [["fx/survivors/", 1]])
+      expect(result[:ok]).to be(false)
+      expect(result[:text]).to include("under a floored path")
+      other_base = lost.merge("base" => "9999999")
+      expect(report(rows, rows, entries: [other_base], floors: [["fx/survivors/", 1]])[:ok]).to be(false)
+    end
+
+    it "ignores, without failing, an entry written against another base" do
+      other = entry.merge("base" => "9999999")
+      result = report([row(1)], [row(1)], entries: [other])
+      expect(result[:ok]).to be(true)
+      expect(result[:text]).to include("Adjudication entries ignored (other base)")
+    end
+
+    it "does not let an entry for another base adjudicate a difference" do
+      expect(report([row(1)], [], entries: [entry.merge("base" => "9999999")])[:ok]).to be(false)
+    end
+
+    it "takes an abbreviated base only from seven characters" do
+      expect(report([row(1)], [], entries: [entry.merge("base" => "abc1234")])[:ok]).to be(true)
+      expect(report([row(1)], [], entries: [entry.merge("base" => "abc12")])[:ok]).to be(false)
+    end
+
+    it "prints the merge base to use" do
+      expect(report([row(1)], [row(1)])[:text]).to include("`abc1234def5678`")
     end
 
     it "fails when the base has fewer rows than required, so an empty corpus cannot pass" do

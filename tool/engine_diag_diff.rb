@@ -24,14 +24,17 @@
 # ## Verdict
 #
 # Prints the rows only the base has (removed) and only the head has (added). Every difference of the filtered rule
-# must be adjudicated in the `--adjudication` file, a YAML list of {path, line, column, message, verdict, reason}
-# (no file means an empty list): a removed row as `fp-silenced` or `tp-lost`, an added row as `named-mechanism`
+# must be adjudicated in the `--adjudication` file, a YAML list of {base, path, line, column, message, verdict,
+# reason} (no file means an empty list), where `base` is the merge-base sha the entry was written against (the run
+# prints it); an entry for another base is reported as ignored and neither adjudicates nor fails, so a landed
+# change's entries go dormant for every later PR and any later PR may empty the file: a removed row as `fp-silenced` or `tp-lost`, an added row as `named-mechanism`
 # (ADR-119 WD2 allows a head firing outside the base's only for a mechanism the change names and a fixture
 # witnesses; the reason names it). The run exits non-zero for an unadjudicated difference, for an entry that matches
-# no difference (a stale one: the file lists only the current change's, and the next change empties it), for an
-# engine failure, and for a floor not met: `--require-base-rows N` counts all filtered base rows and each
-# `--require-rows-in PATH:N` those under PATH, so a corpus that stopped firing cannot pass by reporting nothing and
-# a floor can be held by the shapes a change must NOT silence.
+# no difference (a stale one, among the entries for the current base), for an engine failure, and for a floor not
+# met: `--require-base-rows N` counts all filtered base rows and each `--require-rows-in PATH:N` those under PATH,
+# in the base AND the head, so a corpus that stopped firing cannot pass by reporting nothing and a floor can be held
+# by the shapes a change must NOT silence. An adjudication entry under a floored PATH is itself a failure: what a
+# floor protects cannot be adjudicated away.
 #
 # Both engines run under THIS checkout's bundle (the head's `Gemfile.lock`) and in the corpus's configuration, so a
 # dependency or configuration change in the head can make the base engine fail loudly; the run then fails rather
@@ -133,11 +136,17 @@ module EngineDiagDiff
     entries.each_with_index.map { |entry, index| validate_entry(entry, index, path) }
   end
 
+  # Whether an entry was written against `base_sha`: equal, or a prefix of at least seven characters.
+  def current_base?(entry, base_sha)
+    written = entry["base"].to_s
+    written.length >= 7 && base_sha.to_s.start_with?(written)
+  end
+
   def validate_entry(entry, index, path)
     label = "#{path}[#{index}]"
     raise ArgumentError, "#{label}: expected a mapping" unless entry.is_a?(Hash)
 
-    missing = ADJUDICATION_KEY.reject { |key| entry.key?(key) }
+    missing = (ADJUDICATION_KEY + %w[base]).reject { |key| entry.key?(key) }
     raise ArgumentError, "#{label}: missing #{missing.join(', ')}" unless missing.empty?
     raise ArgumentError, "#{label}: verdict must be one of #{VERDICTS.join(' | ')}" unless VERDICTS.include?(entry["verdict"])
     raise ArgumentError, "#{label}: a reason is required" if entry["reason"].to_s.strip.empty?
@@ -181,22 +190,27 @@ module EngineDiagDiff
   end
 
   # The report and the exit status. Pure: takes both engines' rows.
-  def report(base_rows:, head_rows:, rule:, entries:, require_base_rows: 0, floors: [])
+  def report(base_rows:, head_rows:, rule:, entries:, base_sha:, require_base_rows: 0, floors: [])
     base = filter(base_rows, rule)
     head = filter(head_rows, rule)
     changes = diff(base, head)
-    verdicts = adjudicate(changes[:removed], changes[:added], entries)
-    problems = problems_for(base, verdicts, rule, require_base_rows, floors)
-    { text: render(base, head, changes, verdicts, rule, problems), ok: problems.empty? }
+    current, ignored = entries.partition { |entry| current_base?(entry, base_sha) }
+    verdicts = adjudicate(changes[:removed], changes[:added], current)
+    problems = problems_for(base, head, verdicts, rule, require_base_rows, floors)
+    floored = entries.select { |entry| floors.any? { |path, _| entry["path"].to_s.start_with?(path) } }
+    problems << "#{floored.size} adjudication entr(ies) under a floored path, which cannot be adjudicated away" unless floored.empty?
+    { text: render(base, head, changes, verdicts, rule, problems, base_sha: base_sha, ignored: ignored), ok: problems.empty? }
   end
 
-  def problems_for(base, verdicts, rule, require_base_rows, floors)
+  def problems_for(base, head, verdicts, rule, require_base_rows, floors)
     name = rule || "diagnostic"
     problems = []
     problems << "the base has #{base.size} #{name} row(s), fewer than the required #{require_base_rows}" if base.size < require_base_rows
     floors.each do |path, count|
-      held = base.count { |row| row[0].to_s.start_with?(path) }
-      problems << "the base has #{held} #{name} row(s) under #{path}, fewer than the required #{count}" if held < count
+      { "base" => base, "head" => head }.each do |side, rows|
+        held = rows.count { |row| row[0].to_s.start_with?(path) }
+        problems << "the #{side} has #{held} #{name} row(s) under #{path}, fewer than the required #{count}" if held < count
+      end
     end
     unless verdicts[:unadjudicated_removed].empty?
       problems << "#{verdicts[:unadjudicated_removed].size} removed row(s) without an fp-silenced or tp-lost adjudication"
@@ -208,16 +222,17 @@ module EngineDiagDiff
     problems
   end
 
-  def render(base, head, changes, verdicts, rule, problems)
+  def render(base, head, changes, verdicts, rule, problems, base_sha:, ignored:)
     lines = ["### Diagnostic differential#{" (`#{rule}`)" if rule}", "",
              "Base #{base.size} row(s), head #{head.size}: #{changes[:removed].size} removed, " \
-             "#{changes[:added].size} added.", ""]
+             "#{changes[:added].size} added.", "Merge base (the `base:` of an adjudication entry): `#{base_sha}`.", ""]
     adjudicated = lambda { |pairs| pairs.map { |row, e| "#{format_row(row)} — #{e['verdict']}: #{e['reason']}" } }
     section(lines, "Removed, adjudicated", adjudicated.call(verdicts[:removed]))
     section(lines, "Removed, NOT adjudicated", verdicts[:unadjudicated_removed].map { |row| format_row(row) })
     section(lines, "Added, adjudicated", adjudicated.call(verdicts[:added]))
     section(lines, "Added, NOT adjudicated (a head firing outside the base's needs a named mechanism)",
             verdicts[:unadjudicated_added].map { |row| format_row(row) })
+    section(lines, "Adjudication entries ignored (other base)", ignored.map { |entry| entry.slice("base", *ADJUDICATION_KEY).to_s })
     section(lines, "Stale adjudication entries", verdicts[:stale].map { |entry| entry.slice(*ADJUDICATION_KEY).to_s })
     counts = verdicts[:removed].map { |_, entry| entry["verdict"] }.tally
     lines << "Adjudicated: #{REMOVED_VERDICTS.map { |verdict| "#{counts.fetch(verdict, 0)} #{verdict}" }.join(', ')}, " \
@@ -252,7 +267,8 @@ module EngineDiagDiff
       EngineAllocAB.materialise(options.fetch(:base), base_dir, EngineAllocAB::ENGINE_PATHS)
       EngineAllocAB.materialise(options.fetch(:head), head_dir, EngineAllocAB::ENGINE_PATHS)
       targets = options.fetch(:targets)
-      result = report(base_rows: run_child(base_dir, corpus, targets), head_rows: run_child(head_dir, corpus, targets),
+      base_sha = EngineAllocAB.git("rev-parse", options.fetch(:base)).strip
+      result = report(base_sha: base_sha, base_rows: run_child(base_dir, corpus, targets), head_rows: run_child(head_dir, corpus, targets),
                       rule: options[:rule], entries: entries, require_base_rows: options.fetch(:require_base_rows),
                       floors: options.fetch(:floors))
       puts result[:text]

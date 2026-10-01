@@ -222,7 +222,7 @@ and `docs/internal-spec/inference-engine.md:670`. This ADR relies on the followi
   written in a block (#1592). **#1593 (landed 2026-10-01, narrowed three times in review)** records a
   block's `extend` or `class << self` mixin as a *positioned* edge only where the block provably runs
   at least once with `self` preserved, as a direct class-body statement (`runs_body_block_once?`,
-  SI:6249; `literal_or_self?`, SI:6272) — `tap` / `then` on a literal receiver, a non-empty literal
+  SI:6258; `literal_or_self?`, SI:6272) — `tap` / `then` on a literal receiver, a non-empty literal
   Array or Hash under `each` / `map` and kin, a positive Integer literal's `times`, a non-empty
   integer-literal Range — and records and lists nothing for every other block (`extends_block_plan`,
   SI:6216, `:skip`), so `items.each { extend X }`, a block inside a method and a concern's `included
@@ -406,13 +406,15 @@ is defined over the chain, and asks `settle`:
   sha it was written against (`base:`), so only the entries for the current merge base adjudicate or
   count as stale (an entry matching no row fails the run), entries for another base are listed as
   ignored and go dormant once their PR merges, and a rebase updates `base` — with the count of each
-  verdict in the PR. The fixture directory holds the shapes C1 is meant to silence (#1570, a
-  conditional `def`, a conditional `include`, a literal surface) and `survivors/`, five plain firings
+  verdict in the PR. The fixture directory holds the shapes C1 is meant to silence (#1570's line 19, a
+  conditional `def`, a conditional `include`), two controls it must keep (#1570's line 20 and the
+  literal surface, which the survivors' floor does not cover), and `survivors/`, five plain firings
   that are real arity errors under Ruby: the floor (`--require-rows-in survivors/:5`) counts them in
   the base **and** the head, and an adjudication entry under a floored path fails whatever its verdict,
   so what the floor protects cannot be adjudicated away. CI's `arity-differential` job
   (`.github/workflows/ci.yml:818–848`) runs it on every PR that changes code, over that directory and
-  `declaration_witness/` (10 base rows: the five survivors and five shapes C1 may silence); the lane-2
+  `declaration_witness/` (10 base rows: the five survivors, three shapes C1 may silence and two
+  controls it must keep); the lane-2
   corpus run is the same command with the survey checkouts (`docs/agents/measurement.md:54`). Declining
   on an unsettled
   chain removes coverage on a fifth of a Rails app's reads (#1591), and the ADR accepts that only against

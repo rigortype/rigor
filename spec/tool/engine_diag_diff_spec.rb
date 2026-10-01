@@ -47,8 +47,8 @@ RSpec.describe "tool/engine_diag_diff.rb" do
     end
 
     it "rejects an unknown verdict, a missing reason and a missing key" do
-      good = { "base" => "abc1234", "path" => "a.rb", "line" => 1, "column" => 1, "message" => "m", "verdict" => "tp-lost",
-               "reason" => "r" }
+      good = { "base" => "abc1234", "path" => "a.rb", "line" => 1, "column" => 1, "message" => "m",
+               "verdict" => "tp-lost", "reason" => "r" }
       expect { adjudication(good.merge("verdict" => "fine")) }.to raise_error(ArgumentError, /verdict/)
       expect { adjudication(good.merge("reason" => " ")) }.to raise_error(ArgumentError, /reason/)
       expect { adjudication(good.except("line")) }.to raise_error(ArgumentError, /missing line/)
@@ -70,7 +70,8 @@ RSpec.describe "tool/engine_diag_diff.rb" do
     end
 
     def report(base, head, entries: [], **)
-      EngineDiagDiff.report(base_rows: base, head_rows: head, rule: "call.wrong-arity", entries: entries, base_sha: "abc1234def5678", **)
+      EngineDiagDiff.report(base_rows: base, head_rows: head, rule: "call.wrong-arity", entries: entries,
+                            base_sha: "abc1234def5678", **)
     end
 
     it "passes an unchanged corpus" do

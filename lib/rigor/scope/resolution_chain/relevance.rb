@@ -71,15 +71,53 @@ module Rigor
           end
         end
 
-        # True only for an ancestor the project does not declare that RBS knows and whose declaration lacks `name`
-        # (`SourceArity#external_mixin_lacks_method?`); an unknown one, or one that has it, may answer.
-        def external_lacks?(scope, candidates, name)
+        # True only for an ancestor that cannot define `name`: a module the project declares but that has no
+        # `def` (a concern holding only `included do` blocks sits here, not as a project entry) when
+        # {project_lacks?} holds, or one the project does not declare that RBS knows and whose declaration lacks
+        # `name` (`SourceArity#external_mixin_lacks_method?`). An unknown one, or one that has it, may answer.
+        # `edges` collects the recording edges {project_lacks?} reads; without it they are filed directly.
+        def external_lacks?(scope, candidates, name, edges = nil)
+          declared = candidates.find { |candidate| scope.discovered_class_sources.key?(candidate) }
+          return project_lacks_recorded?(scope, declared, name, edges) if declared
+
           known = candidates.find { |candidate| Rigor::Reflection.rbs_class_known?(candidate, scope: scope) }
           return false if known.nil?
 
           Rigor::Reflection.instance_method_definition(known, name, scope: scope).nil?
         rescue StandardError
           false
+        end
+
+        def project_lacks_recorded?(scope, owner, name, edges)
+          local = edges || []
+          verdict = project_lacks?(scope, owner, name, local)
+          replay(scope, local) if edges.nil? && Analysis::DependencyRecorder.active?
+          verdict
+        end
+
+        # Whether the project module `owner` cannot answer `name`: no rewritten surface, no `"*"` mixin (on the
+        # include side and on `kind`, or on either side without a `kind`), no `method_missing`, no singleton hook,
+        # and no record of the name. Files `[:class, owner]` and the negative `[:method, "Owner#name"]` on `edges`.
+        def project_lacks?(scope, owner, name, edges, kind = nil)
+          edges << [:class, owner] << [:method, "#{owner}##{name}"]
+          return false if Scope::DiscoveryIndex.rewritten_surface?(scope.parameter_envelopes_of(owner))
+          return false if wildcard_listed?(scope, owner, kind)
+          return false if scope.discovered_method?(owner, :method_missing, :instance)
+          return false if HOOKS.any? { |hook| scope.discovered_method?(owner, hook, :singleton) }
+
+          !records_name?(scope, owner, name)
+        end
+
+        def wildcard_listed?(scope, owner, kind)
+          sides = scope.discovery.unpositioned_mixins[owner]
+          return false if sides.nil?
+
+          (kind ? [:include, kind].uniq : %i[include extend]).any? { |side| sides[side]&.include?(WILDCARD) }
+        end
+
+        def records_name?(scope, owner, name)
+          scope.discovered_method?(owner, name, :instance) || scope.discovered_method?(owner, name, :singleton) ||
+            !scope.discovered_method_visibility(owner, name).nil?
         end
 
         # One verdict's working state: the scope, the resolver, and the edges the tests read.
@@ -124,33 +162,14 @@ module Rigor
           end
 
           def project_clean?(entry)
-            owner = entry.name
-            @edges << [:class, owner] << [:method, "#{owner}##{@name}"]
-            return false if Scope::DiscoveryIndex.rewritten_surface?(@scope.parameter_envelopes_of(owner))
-            return false if wildcard_listed?(owner)
-            return false if @scope.discovered_method?(owner, :method_missing, :instance)
-            return false if HOOKS.any? { |hook| @scope.discovered_method?(owner, hook, :singleton) }
-
-            !records_name?(owner)
-          end
-
-          def wildcard_listed?(owner)
-            sides = @scope.discovery.unpositioned_mixins[owner]
-            return false if sides.nil?
-
-            [:include, @mark.kind].uniq.any? { |side| sides[side]&.include?(WILDCARD) }
-          end
-
-          def records_name?(owner)
-            @scope.discovered_method?(owner, @name, :instance) || @scope.discovered_method?(owner, @name, :singleton) ||
-              !@scope.discovered_method_visibility(owner, @name).nil?
+            Relevance.project_lacks?(@scope, entry.name, @name, @edges, @mark.kind)
           end
 
           # An ancestor the project does not declare: only a module RBS knows, whose declaration lacks the name,
           # is evidence it does not define it (`SourceArity#external_mixin_lacks_method?`).
           def external_clean?(candidates, raw)
             @edges << [:external, raw.to_s.split("::").last]
-            Relevance.external_lacks?(@scope, candidates, @name)
+            Relevance.external_lacks?(@scope, candidates, @name, @edges)
           end
         end
         private_constant :Context

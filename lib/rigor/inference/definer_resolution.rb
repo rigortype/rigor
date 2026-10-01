@@ -51,12 +51,12 @@ module Rigor
         flavor = question == :arity ? :arity : :methods
         chain = Scope::ResolutionChain.for(scope, class_name.to_s, :instance, flavor)
 
-        hits = candidates(scope, chain, method_name, from, answer_in)
+        hits = candidates(scope, chain, method_name, from, answer_in, question)
         return UNKNOWN if hits.nil?
 
         verdict = chain.settle(scope, outcomes(hits), owner: hits.first&.owner, unknown_for: method_name) do |retro|
           retro_from = retro_position(chain, retro, from)
-          outcomes(retro_from && candidates(scope, retro, method_name, retro_from, answer_in))
+          outcomes(retro_from && candidates(scope, retro, method_name, retro_from, answer_in, question))
         end
         return UNKNOWN unless verdict == :chain
 
@@ -79,7 +79,7 @@ module Rigor
       # follows (the absent candidate). A cut chain, and a chain on which an external ancestor ahead of the
       # candidate (or, with no candidate, the implicit `Object`) may define the name, is a decline, answered by
       # nil instead of a set.
-      def candidates(scope, chain, method_name, from, answer_in)
+      def candidates(scope, chain, method_name, from, answer_in, question)
         hits = []
         position = from
         loop do
@@ -88,20 +88,29 @@ module Rigor
           return nil if hit.nil? && chain.truncated?
 
           hits << hit
-          return decided(scope, chain, method_name, from, hits) if hit.nil? || !possible?(scope, hit, method_name)
+          settled = hit.nil? || !possible?(scope, hit, method_name)
+          return decided(scope, chain, method_name, from, hits, question) if settled
 
           position = hit.index + 1
         end
       end
 
-      def decided(scope, chain, method_name, from, hits)
-        external_may_answer?(scope, chain, method_name, from, hits.last) ? nil : hits
+      def decided(scope, chain, method_name, from, hits, question)
+        external_may_answer?(scope, chain, method_name, from, hits.last, question) ? nil : hits
       end
 
       # An external entry ahead of the last candidate that RBS does not know, or knows and declares the name in,
       # may be the definer Ruby calls; with no candidate, so may the implicit `Object` (`Kernel`, for the object
       # that every class is). Both decline. Each tested external files the negative class edge on its spelling.
-      def external_may_answer?(scope, chain, method_name, from, last)
+      #
+      # `question: :override` alone passes over an external RBS does not know at all (a gem module: the edge
+      # above re-checks it once a later RBS or project declaration appears). The override lints read the chain
+      # for what a name reduces or widens to, and a gem definer between the class and the project parent changes
+      # which owner is attributed, not that reduction, unless it declares the same name, which RBS knowing it
+      # shows; master carried the same exposure (externals skipped) with no false positive on Mastodon. An
+      # RBS-known external that declares the name still declines. `:visibility` (a prepended external is
+      # genuinely unsafe), `:definer` and `:arity` keep declining on an RBS-unknown external.
+      def external_may_answer?(scope, chain, method_name, from, last, question)
         stop = last.nil? ? chain.entries.size : last.index
         recording = Analysis::DependencyRecorder.active?
         (from...stop).any? do |index|
@@ -109,8 +118,17 @@ module Rigor
           next false unless entry.external?
 
           Analysis::DependencyRecorder.read_missing(:class, entry.raw.to_s.split("::").last) if recording
+          next false if question == :override && external_unknown?(scope, entry.candidates)
+
           !Scope::ResolutionChain::Relevance.external_lacks?(scope, entry.candidates, method_name)
         end || (last.nil? && implicit_object_answers?(scope, chain, method_name))
+      end
+
+      # No candidate is declared by the project or known to RBS.
+      def external_unknown?(scope, candidates)
+        candidates.none? do |candidate|
+          scope.discovered_class_sources.key?(candidate) || Rigor::Reflection.rbs_class_known?(candidate, scope: scope)
+        end
       end
 
       def implicit_object_answers?(scope, _chain, method_name)
@@ -196,8 +214,8 @@ module Rigor
         found
       end
 
-      private_class_method :retro_position, :candidates, :decided, :external_may_answer?, :implicit_object_answers?,
-                           :outcomes, :collapse, :possible?,
+      private_class_method :retro_position, :candidates, :decided, :external_may_answer?, :external_unknown?,
+                           :implicit_object_answers?, :outcomes, :collapse, :possible?,
                            :default_answer, :definer_answer, :visibility_answer, :first_hit
     end
   end

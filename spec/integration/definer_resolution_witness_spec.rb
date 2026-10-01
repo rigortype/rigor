@@ -18,6 +18,17 @@ RSpec.describe Rigor::Inference::DefinerResolution do # rubocop:disable RSpec/Sp
     Rigor::Inference::ScopeIndexer.index(root, default_scope: Rigor::Scope.empty)[root]
   end
 
+  def project_scope(files)
+    Dir.mktmpdir("rigor-definer-resolution-") do |dir|
+      paths = files.map do |name, source|
+        File.join(dir, name).tap { |path| File.write(path, source) }
+      end
+      tables = Rigor::Protection::DiscoverySeed.discovery_tables(paths)
+      base = Rigor::Scope.empty
+      return base.with_discovery(base.discovery.with(**tables))
+    end
+  end
+
   # `expression`'s printed value in the world where `ENV["Q"]` is unset (`false`) or set (`true`).
   def ruby_says(source, expression, world, prelude: nil)
     program = "#{'ENV["Q"] = "1"' if world}\n#{source}\nputs(#{expression})\n"
@@ -61,17 +72,6 @@ RSpec.describe Rigor::Inference::DefinerResolution do # rubocop:disable RSpec/Sp
   end
 
   describe "a multi-file mark" do
-    def project_scope(files)
-      Dir.mktmpdir("rigor-definer-resolution-") do |dir|
-        paths = files.map do |name, source|
-          File.join(dir, name).tap { |path| File.write(path, source) }
-        end
-        tables = Rigor::Protection::DiscoverySeed.discovery_tables(paths)
-        base = Rigor::Scope.empty
-        return base.with_discovery(base.discovery.with(**tables))
-      end
-    end
-
     let(:base) { "class Base; def foo = 1; end\nmodule Q; def bar = 1; end\nmodule R; def baz = 1; end\n" }
 
     it "is Known when at most one of the node's edges' closures records the name" do
@@ -320,6 +320,58 @@ RSpec.describe Rigor::Inference::DefinerResolution do # rubocop:disable RSpec/Sp
     it "skips an external RBS knows and whose declaration lacks the name" do
       source = "class Base; def foo = 1; end\nclass C < Base; include Comparable; end\n"
       expect(owner_of(resolve(scope_for(source), :foo))).to eq("Base")
+    end
+  end
+
+  # The external-entry precision follow-up (#1562): a declared project module with no `def`, and an RBS-unknown
+  # gem module for `:override`.
+  describe "external ancestors the project declares or RBS does not know" do
+    def override_resolve(scope, name)
+      answer = lambda do |chain, from|
+        chain.entries.each_with_index do |entry, index|
+          next if index < from || entry.external?
+
+          node = scope.user_def_for(entry.name, name)
+          return described_class::Hit.new(node, entry.name, index, entry.side) if node
+        end
+        nil
+      end
+      resolution.resolve(scope, "C", name, :instance, question: :override, &answer)
+    end
+
+    it "skips a declared module with no def, so the project definer answers" do
+      source = "class B; def foo = 1; end\nmodule Empty; end\nclass C < B; include Empty; end\n"
+      expect(RubyRun.stdout("#{source}p C.instance_method(:foo).owner\n").chomp).to eq("B")
+      expect(owner_of(resolve(project_scope("a.rb" => source), :foo))).to eq("B")
+    end
+
+    # A module with a `def` is a project entry, so this chain never asks `external_lacks?` about it; the verdict
+    # is the one a closure test reaches for the same module (`Empty` holds no def, `Hooked` a singleton hook).
+    it "does not say a declared module whose included hook can define the name lacks it" do
+      source = <<~RUBY
+        class B; def foo = 1; end
+        module Empty; end
+        module Hooked; def self.included(b) = b.define_method(:foo) { 3 }; end
+        class C < B; include Hooked; end
+      RUBY
+      expect(RubyRun.stdout("#{source}p C.new.foo\n").chomp).to eq("3")
+      scope = project_scope("a.rb" => source)
+      relevance = Rigor::Scope::ResolutionChain::Relevance
+      expect(relevance.external_lacks?(scope, ["Empty"], :foo)).to be(true)
+      expect(relevance.external_lacks?(scope, ["Hooked"], :foo)).to be(false)
+    end
+
+    it "passes over a module neither declared nor in RBS for :override, and declines for :visibility" do
+      source = "class B; def foo = 1; end\nclass C < B; include Gem::Authorization; end\n"
+      scope = project_scope("a.rb" => source)
+      expect(owner_of(override_resolve(scope, :foo))).to eq("B")
+      expect(owner_of(resolve(scope, :foo, question: :visibility))).to eq(:unknown)
+      expect(owner_of(resolve(scope, :foo))).to eq(:unknown)
+    end
+
+    it "still declines for :override on an RBS-known external that declares the name" do
+      source = "class Base; def between?(a, b) = false; end\nclass C < Base; include Comparable; end\n"
+      expect(owner_of(override_resolve(project_scope("a.rb" => source), :between?))).to eq(:unknown)
     end
   end
 

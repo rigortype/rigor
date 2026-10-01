@@ -169,6 +169,44 @@ RSpec.describe "resolution in Ruby's ancestor order (#1567, #1568, #1570, #1571)
     RUBY
   end
 
+  # The #1570 shape as a program Ruby can run: the same text with a `p` where the diagnostic source calls.
+  def issue_1570_source(tail)
+    <<~RUBY
+      module M
+        def foo(x) = "m\#{x}"
+      end
+
+      class Base
+        include M
+
+        def foo = 1
+      end
+
+      class C < Base
+        include M
+      end
+
+      class E
+        def foo = 1
+      end
+
+      #{tail}
+    RUBY
+  end
+
+  # Ruby's answer for #1570: `C.ancestors` is `[C, Base, M, ...]`, so `C.new.foo` is `Base#foo` and returns 1.
+  it "runs #1570's include of a module the superclass already includes as Base#foo under Ruby" do
+    expect(RubyRun.stdout(issue_1570_source("p C.ancestors.first(3)\np C.new.foo"))).to eq("[C, Base, M]\n1\n")
+  end
+
+  # Flip this when ADR-119 PR C1 fixes #1570 at `SourceArity`'s decision point: line 19 (`C.new.foo`) is correct
+  # under Ruby's run and goes silent; line 20 is the control and stays.
+  it "reports no arity error for an include of a module the superclass already includes (#1570)" do
+    pending "https://github.com/rigortype/rigor/issues/1570 — fixed by ADR-119 PR C1; line 19 is a false positive"
+
+    expect(diagnostics_for(issue_1570_source("C.new.foo\nE.new.foo(1)"))).to eq([[20, "call.wrong-arity"]])
+  end
+
   # The arity rule's hedges survive the move of its levels onto the chain: a module whose method table the
   # project rewrites dynamically (`ENVELOPE_DYNAMIC_MARK`) still declines every level it sits in, in either
   # world, and the same shape without the mark still fires.
@@ -702,6 +740,111 @@ RSpec.describe "resolution in Ruby's ancestor order (#1567, #1568, #1570, #1571)
         K.bar.upcase
       RUBY
       expect(diagnostics_for(source)).to eq(control + [[9, "call.undefined-method"]])
+    end
+  end
+
+  # #1572 — an RBS-known module included after a project module that defines the same name. Ruby prints "a":
+  # `C.ancestors` is `[C, Enumerable, M, ...]`, so `to_a` is `Enumerable#to_a`. The user-method tier reads the
+  # project definers only and skips `Enumerable`, so it types the call from `M#to_a` (1). Line 16 is the control.
+  describe "an RBS-known module included after a project module (#1572)" do
+    let(:source) do
+      <<~RUBY
+        module M
+          def to_a = 1
+        end
+
+        class C
+          include M
+          include Enumerable
+
+          def each
+            yield "a"
+          end
+        end
+
+        K = Struct.new(:x)
+        C.new.to_a.first
+        K.new(1).x.upcase
+      RUBY
+    end
+
+    it "runs Enumerable#to_a under Ruby" do
+      expect(RubyRun.stdout("#{source.lines[0..12].join}\np C.new.to_a.first\np C.ancestors.first(3)\n"))
+        .to eq("\"a\"\n[C, Enumerable, M]\n")
+    end
+
+    # Flip this when #1572 is fixed: the read stops at `Enumerable` and answers from its RBS declaration.
+    it "pending: types the call from the nearer external module" do
+      pending "https://github.com/rigortype/rigor/issues/1572 — fixed by the #1572 typing-only read"
+
+      expect(diagnostics_for(source)).to eq([[16, "call.undefined-method"]])
+    end
+
+    # Flip this when #1572 is fixed: today the call types as `M#to_a`'s Integer and `first` is undefined.
+    it "today: reports `first` as undefined for the Integer from M#to_a" do
+      expect(diagnostics_for(source)).to eq([[15, "call.undefined-method"], [16, "call.undefined-method"]])
+    end
+  end
+
+  # #1594 — a concern whose `included do` block includes a module makes every includer's chain unsettled, so the
+  # read answers from master's order, which misses `A`'s `M#foo` and types `C.new.foo` as `Base#foo` (1). Ruby
+  # prints "M" (ancestors `[C, A, M, Concern, Base]`; the chain lists `Concern` first, the same answer). The
+  # `.even?` example above hides it. The Ruby run loads a minimal `ActiveSupport::Concern` (`included do`
+  # semantics) that `rigor check` never sees: the analysed file has no activesupport in scope.
+  describe "a concern's `included do include A end` (#1594)" do
+    let(:concern_shim) do
+      <<~RUBY
+        module ActiveSupport
+          module Concern
+            def self.extended(base) = base.instance_variable_set(:@_included_block, nil)
+
+            def included(base = nil, &block)
+              if base.nil?
+                @_included_block = block
+              else
+                super
+                base.class_eval(&@_included_block) if @_included_block
+              end
+            end
+          end
+        end
+      RUBY
+    end
+    let(:source) do
+      <<~RUBY
+        module M; def foo = "M"; end
+        module A; include M; end
+        module Concern
+          extend ActiveSupport::Concern
+          included do
+            include A
+          end
+        end
+        class Base; def foo = 1; end
+        class C < Base; include Concern; end
+        class Kc < Base; end
+        Kc.new.foo.upcase
+        C.new.foo.upcase
+      RUBY
+    end
+
+    it "runs M#foo under Ruby" do
+      program = "#{source.lines[0..10].join}p C.new.foo\np C.ancestors.first(5)\n"
+      printed = RubyRun.stdout(program, prelude: concern_shim)
+
+      expect(printed).to eq("\"M\"\n[C, A, M, Concern, Base]\n")
+    end
+
+    # Flip this when ADR-119 PR C2 migrates the instance-side read: the unsettled chain answers `Unknown`, so the
+    # `upcase` on line 13 goes silent; line 12 is the control (Base#foo is an Integer).
+    it "pending: reports only the control" do
+      pending "https://github.com/rigortype/rigor/issues/1594 — fixed by ADR-119 PR C2; line 13 is a false positive"
+
+      expect(diagnostics_for(source)).to eq([[12, "call.undefined-method"]])
+    end
+
+    it "today: also reports `upcase` on the Integer master's order answers for C" do
+      expect(diagnostics_for(source)).to eq([[12, "call.undefined-method"], [13, "call.undefined-method"]])
     end
   end
 end

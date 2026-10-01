@@ -17,9 +17,9 @@ RSpec.describe "DefinerResolution call sites" do
   let(:root) { File.expand_path("../../..", __dir__) }
 
   it "has no call site outside the exhaustive case/in shape" do
-    hits = Dir[File.join(root, "{lib,plugins/*/lib}/**/*.rb")].flat_map do |path|
-      violations_in(File.read(path), path.delete_prefix("#{root}/"))
-    end
+    paths = Dir[File.join(root, "{lib,plugins/*/lib}/**/*.rb")]
+    expect(paths.map { |path| path.delete_prefix("#{root}/") }).to include("lib/rigor/inference/definer_resolution.rb")
+    hits = paths.flat_map { |path| violations_in(File.read(path), path.delete_prefix("#{root}/")) }
     expect(hits).to be_empty, "DefinerResolution.resolve call sites that break the contract:\n  #{hits.join("\n  ")}"
   end
 
@@ -52,6 +52,18 @@ RSpec.describe "DefinerResolution call sites" do
 
     it "flags a missing arm" do
       expect(violations_in(without_last_arm(good, ""))).not_to be_empty
+    end
+
+    it "accepts the module's own declaration" do
+      expect(violations_in("module Rigor\n  module Inference\n    module DefinerResolution\n    end\n  end\nend\n"))
+        .to be_empty
+    end
+
+    it "flags a reference that is not a resolve call or a pattern" do
+      sources = ["include DefinerResolution\n", "extend Rigor::Inference::DefinerResolution\n",
+                 "m = DefinerResolution.method(:resolve)\n", "x = DefinerResolution::UNKNOWN\n",
+                 "DefinerResolution.public_send(:resolve, 1)\n", "helper.public_send(:resolve, 1)\n"]
+      expect(sources.map { |source| violations_in(source).empty? }).to all(be(false))
     end
 
     it "flags a result assigned to a local, stored in an instance variable, truth-tested or returned" do

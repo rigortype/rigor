@@ -247,4 +247,127 @@ RSpec.describe Rigor::Inference::DefinerResolution do # rubocop:disable RSpec/Sp
       expect(owner_of(resolve(scope, :foo, klass: "Kc"))).to eq("Base")
     end
   end
+
+  # A hook defines the name on the includer with nothing the tables record on the module, so a closure holding
+  # one cannot be said not to answer it.
+  describe "a module whose hook adds the name to its includer" do
+    def hooked(module_body, tail = 'include Q if ENV["Q"]')
+      <<~RUBY
+        #{module_body}
+        class Base; def foo = 1; end
+        class C < Base; #{tail}; end
+      RUBY
+    end
+
+    {
+      "included with attr_reader" => "module Q; def bar = 1; def self.included(b) = b.attr_reader(:foo); end",
+      "included in `class << self`" =>
+        "module Q; def bar = 1; class << self; def included(b) = b.send(:define_method, :foo) { 2 }; end; end",
+      "append_features" =>
+        "module Q; def bar = 1; def self.append_features(b) = (super; b.send(:define_method, :foo) { 2 }); end"
+    }.each do |label, body|
+      it "declines #{label}" do
+        source = hooked(body)
+        expect(both_worlds(source, "C.instance_method(:foo).owner")).to eq(%w[Base C])
+        expect(owner_of(resolve(scope_for(source), :foo))).to eq(:unknown)
+      end
+    end
+
+    it "declines a hook reached through the closure" do
+      source = hooked(<<~RUBY)
+        module X; def self.included(b) = b.send(:define_method, :foo) { 2 }; end
+        module Q; def bar = 1; include X; end
+      RUBY
+      expect(both_worlds(source, "C.instance_method(:foo).owner")).to eq(%w[Base Q])
+      expect(owner_of(resolve(scope_for(source), :foo))).to eq(:unknown)
+    end
+
+    it "declines an extended hook on the singleton side" do
+      source = <<~RUBY
+        module Q; def bar = 1; def self.extended(b) = b.singleton_class.send(:define_method, :foo) { 2 }; end
+        class Base; def self.foo = 1; end
+        class C < Base; extend Q if ENV["Q"]; end
+      RUBY
+      expect(both_worlds(source, "C.method(:foo).owner.inspect")).to eq(["#<Class:Base>", "#<Class:C>"])
+      scope = scope_for(source)
+      expect(owner_of(resolve(scope, :foo, side: :singleton))).to eq(:unknown)
+      # The singleton read also declines on the WD3 closure rule, so the relevance rule is asked directly.
+      chain = Rigor::Scope::ResolutionChain.for(scope, "C", :singleton, :methods)
+      mark = chain.instance_variable_get(:@marks).first
+      expect(Rigor::Scope::ResolutionChain::Relevance.discharged?(scope, chain, mark, :foo)).to be(false)
+    end
+  end
+
+  # `from:` is a position on the chain; the retro world must be read from the same entry.
+  describe "from: on a chain with a retro world" do
+    it "reads M after Base on both worlds" do
+      source = <<~RUBY
+        module M; def foo = :m; end
+        module X; def foo = :x; end
+        class Base; include M; def foo = :base; end
+        class C < Base; include X; include M; end
+      RUBY
+      expect(RubyRun.stdout("#{source}p C.ancestors.first(4)\n").chomp).to eq("[C, X, Base, M]")
+      scope = scope_for(source)
+      chain = Rigor::Scope::ResolutionChain.for(scope, "C", :instance, :methods)
+      after_base = chain.entries.index { |entry| entry.name == "Base" } + 1
+      result = resolution.resolve(scope, "C", :foo, :instance, question: :definer, from: after_base)
+      expect(owner_of(result)).to eq("M")
+    end
+  end
+
+  # An external ancestor ahead of the candidate, or the implicit Object, may answer first.
+  describe "external ancestors" do
+    it "is Unknown where the implicit Object (Kernel) answers, Absent for a name nothing defines" do
+      source = "class C; end\n"
+      expect(RubyRun.stdout("#{source}p C.instance_method(:to_s).owner\n").chomp).to eq("Kernel")
+      scope = scope_for(source)
+      expect(owner_of(resolve(scope, :to_s))).to eq(:unknown)
+      expect(owner_of(resolve(scope, :no_such_method_anywhere))).to eq(:absent)
+    end
+
+    it "is Unknown where an included external module answers ahead of the project definer" do
+      source = "class Base; def between?(a, b) = false; end\nclass C < Base; include Comparable; end\n"
+      expect(RubyRun.stdout("#{source}p C.instance_method(:between?).owner\n").chomp).to eq("Comparable")
+      expect(owner_of(resolve(scope_for(source), :between?))).to eq(:unknown)
+    end
+
+    it "skips an external RBS knows and whose declaration lacks the name" do
+      source = "class Base; def foo = 1; end\nclass C < Base; include Comparable; end\n"
+      expect(owner_of(resolve(scope_for(source), :foo))).to eq("Base")
+    end
+  end
+
+  # WD3 — a hook's singleton edge is recorded on no includer, so the singleton side declines by the closure.
+  describe "the singleton side through an included hook module" do
+    it "is Unknown where `included` extends the includer" do
+      source = <<~RUBY
+        module CM; def foo = :cm; end
+        module Q; def bar = 1; def self.included(b) = b.extend(CM); end
+        class Base; def self.foo = :base; end
+        class C < Base; include Q if ENV["Q"]; end
+      RUBY
+      expect(both_worlds(source, "C.method(:foo).owner.inspect")).to eq(["#<Class:Base>", "CM"])
+      expect(owner_of(resolve(scope_for(source), :foo, side: :singleton))).to eq(:unknown)
+    end
+
+    it "answers Known on a hook-free instance chain" do
+      source = "class Base; def self.foo = :base; end\nclass C < Base; end\n"
+      expect(owner_of(resolve(scope_for(source), :foo, side: :singleton))).to eq("Base")
+    end
+  end
+
+  describe "the answer function's contract" do
+    it "raises for a hit that is behind the position it was asked from" do
+      scope = scope_for("class Base; def foo = 1; end\nclass C < Base; end\n")
+      backwards = proc { |_chain, _position| described_class::Hit.new(1, "C", 0, :instance) }
+      expect { resolution.resolve(scope, "C", :foo, :instance, question: :arity, from: 1, &backwards) }
+        .to raise_error(ArgumentError, /backwards/)
+    end
+
+    it "keeps its helpers private" do
+      reachable = %i[collapse candidates possible? outcomes].map { |name| described_class.respond_to?(name) }
+      expect(reachable).to all(be(false))
+    end
+  end
 end

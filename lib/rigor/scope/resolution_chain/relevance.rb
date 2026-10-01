@@ -26,6 +26,12 @@ module Rigor
       module Relevance
         WILDCARD = "*"
 
+        # The singleton hooks Ruby calls while a module enters (or is asked to enter) another's ancestry. A module
+        # that defines one can add methods to the includer, extender or prepender with nothing the tables record
+        # on the module (`def self.included(base) = base.attr_reader(:foo)`), so no closure holding one can be
+        # said not to answer a name.
+        HOOKS = %i[included extended prepended inherited append_features extend_object prepend_features].freeze
+
         module_function
 
         def discharged?(scope, chain, mark, name)
@@ -63,6 +69,17 @@ module Rigor
             when :external then Analysis::DependencyRecorder.read_missing(:class, value)
             end
           end
+        end
+
+        # True only for an ancestor the project does not declare that RBS knows and whose declaration lacks `name`
+        # (`SourceArity#external_mixin_lacks_method?`); an unknown one, or one that has it, may answer.
+        def external_lacks?(scope, candidates, name)
+          known = candidates.find { |candidate| Rigor::Reflection.rbs_class_known?(candidate, scope: scope) }
+          return false if known.nil?
+
+          Rigor::Reflection.instance_method_definition(known, name, scope: scope).nil?
+        rescue StandardError
+          false
         end
 
         # One verdict's working state: the scope, the resolver, and the edges the tests read.
@@ -112,6 +129,7 @@ module Rigor
             return false if Scope::DiscoveryIndex.rewritten_surface?(@scope.parameter_envelopes_of(owner))
             return false if wildcard_listed?(owner)
             return false if @scope.discovered_method?(owner, :method_missing, :instance)
+            return false if HOOKS.any? { |hook| @scope.discovered_method?(owner, hook, :singleton) }
 
             !records_name?(owner)
           end
@@ -132,12 +150,7 @@ module Rigor
           # is evidence it does not define it (`SourceArity#external_mixin_lacks_method?`).
           def external_clean?(candidates, raw)
             @edges << [:external, raw.to_s.split("::").last]
-            known = candidates.find { |candidate| Rigor::Reflection.rbs_class_known?(candidate, scope: @scope) }
-            return false if known.nil?
-
-            Rigor::Reflection.instance_method_definition(known, @name, scope: @scope).nil?
-          rescue StandardError
-            false
+            Relevance.external_lacks?(@scope, candidates, @name)
           end
         end
         private_constant :Context

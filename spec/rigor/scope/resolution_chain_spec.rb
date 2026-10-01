@@ -273,6 +273,7 @@ RSpec.describe Rigor::Scope::ResolutionChain do
         class Forked; include M; end
         class Marked < Clean; include Q if ENV["Q"]; end
         class Both < Forked; include N; include Q if ENV["Q"]; end
+        class Sub < Marked; end
       RUBY
     end
 
@@ -296,11 +297,12 @@ RSpec.describe Rigor::Scope::ResolutionChain do
       expect(chain.settle(scope, :answer, unknown_for: :foo) { :answer }).to eq(:unknown)
     end
 
-    it "interns one Mark per node and side, and carries marks as a frozen array" do
-      mark = chain_of(scope, "Marked").instance_variable_get(:@marks).first
-      expect(mark).to be_a(described_class::Mark)
-      expect(mark.node).to eq("Marked")
-      expect(mark.listed).to eq(["Q"])
+    it "interns one Mark per node and side across chains, and carries marks as a frozen array" do
+      own = chain_of(scope, "Marked").instance_variable_get(:@marks)
+      drawn = chain_of(scope, "Sub").instance_variable_get(:@marks)
+      expect(own.first).to be_a(described_class::Mark)
+      expect([own.first.node, own.first.listed]).to eq(["Marked", ["Q"]])
+      expect(drawn.first).to equal(own.first)
       expect(chain_of(scope, "Both").instance_variable_get(:@marks)).to be_frozen
     end
   end

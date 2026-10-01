@@ -45,6 +45,9 @@ require_relative "../../support/ancestry_walker_scan"
 #   position.
 # The allow-list: `file#method` => the reason it may keep walking.
 ALLOWED_ANCESTRY_WALKERS = {
+  "lib/rigor/inference/definer_resolution.rb#singleton_hooks?" =>
+    "reads each module of the receiver's instance chain once for a hook, `:extend` listing or `Concern` extend " \
+    "(ADR-119 WD3's singleton-side decline); a union over the chain's own entries, order-independent",
   "lib/rigor/analysis/check_rules.rb#method_defined_on_known_subclass?" =>
     "descendant walk over the inverted superclass table: any subclass defining the name withholds " \
     "`call.self-undefined-method`; order-independent",

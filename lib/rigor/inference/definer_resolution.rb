@@ -8,8 +8,12 @@ module Rigor
     #
     # - {Known} — every candidate gives the same answer to the question asked;
     # - {UNKNOWN} — the chain does not stand for this name (a mark not discharged, a fork, a retro world that
-    #   answers otherwise), a candidate disagrees, or the walk was cut by the budget;
-    # - {ABSENT} — nothing on the chain answers, and nothing could.
+    #   answers otherwise), a candidate disagrees, the walk was cut by the budget, an external ancestor ahead of
+    #   the candidate may answer first (one RBS does not know, or knows and declares the name in; one it knows
+    #   and whose declaration lacks the name is skipped), or, on the singleton side, a module on the receiver's
+    #   instance chain can add singleton methods through a hook (WD3);
+    # - {ABSENT} — no project entry, no external entry and not the implicit `Object` (`Class` on the singleton
+    #   side) can answer.
     #
     # THE CALL SITE IS A CONTRACT. A result is consumed only by an exhaustive `case/in` that is the call's own
     # direct predicate, with one arm per answer and no `else` or `in _`, and is never stored, returned or
@@ -35,43 +39,107 @@ module Rigor
       module_function
 
       # `answer_in` is the question's per-chain answer function: called with a chain and a position, it returns
-      # the {Hit} of the first entry at or after the position that defines `method_name`, or nil. `:definer` and
-      # `:visibility` have a default; every other question supplies its own. It is called once per candidate on
-      # the chain, and again on the retro world when the chain has one fork.
+      # the {Hit} of the first project entry at or after the position that defines `method_name`, or nil. `:definer`
+      # and `:visibility` have a default; every other question supplies its own. It is called once per candidate
+      # on the chain, and again on the retro world when the chain has one fork, where `from` is mapped to the
+      # entry it followed.
       def resolve(scope, class_name, method_name, side, question:, from: 0, &answer_in)
         raise ArgumentError, "unknown question #{question.inspect}" unless QUESTIONS.include?(question)
 
         answer_in ||= default_answer(scope, method_name, question)
         flavor = question == :arity ? :arity : :methods
         chain = Scope::ResolutionChain.for(scope, class_name.to_s, side == :singleton ? :singleton : :instance, flavor)
+        return UNKNOWN if side == :singleton && singleton_hooks?(scope, class_name)
+
         hits = candidates(scope, chain, method_name, from, answer_in)
         return UNKNOWN if hits.nil?
 
         verdict = chain.settle(scope, outcomes(hits), owner: hits.first&.owner, unknown_for: method_name) do |retro|
-          outcomes(candidates(scope, retro, method_name, from, answer_in))
+          retro_from = retro_position(chain, retro, from)
+          outcomes(retro_from && candidates(scope, retro, method_name, retro_from, answer_in))
         end
         return UNKNOWN unless verdict == :chain
 
         collapse(hits)
       end
 
+      # `from` is a position on `chain`; the same position on the retro world is just after the entry it followed.
+      # An entry the chain carries twice cannot be matched, which declines.
+      def retro_position(chain, retro, from)
+        return 0 if from.zero?
+
+        entry = chain.entries[from - 1]
+        return nil if entry.nil? || chain.entries.count(entry) > 1
+
+        found = retro.entries.index(entry)
+        found && (found + 1)
+      end
+
       # The first definer and, while that definer is `possible`, the next; a nil joins the set when nothing
-      # follows (the absent candidate). A cut chain is a decline, answered by nil instead of a set.
+      # follows (the absent candidate). A cut chain, and a chain on which an external ancestor ahead of the
+      # candidate (or, with no candidate, the implicit `Object`) may define the name, is a decline, answered by
+      # nil instead of a set.
       def candidates(scope, chain, method_name, from, answer_in)
         hits = []
         position = from
         loop do
           hit = answer_in.call(chain, position)
-          if hit.nil?
-            return nil if chain.truncated?
+          raise ArgumentError, "answer function went backwards" if hit && hit.index < position
+          return nil if hit.nil? && chain.truncated?
 
-            return hits << nil
-          end
           hits << hit
-          return hits unless possible?(scope, hit, method_name)
+          return decided(scope, chain, method_name, from, hits) if hit.nil? || !possible?(scope, hit, method_name)
 
           position = hit.index + 1
         end
+      end
+
+      def decided(scope, chain, method_name, from, hits)
+        external_may_answer?(scope, chain, method_name, from, hits.last) ? nil : hits
+      end
+
+      # An external entry ahead of the last candidate that RBS does not know, or knows and declares the name in,
+      # may be the definer Ruby calls; with no candidate, so may the implicit `Object` (`Kernel`, for the object
+      # that every class is). Both decline. Each tested external files the negative class edge on its spelling.
+      def external_may_answer?(scope, chain, method_name, from, last)
+        stop = last.nil? ? chain.entries.size : last.index
+        recording = Analysis::DependencyRecorder.active?
+        (from...stop).any? do |index|
+          entry = chain.entries[index]
+          next false unless entry.external?
+
+          Analysis::DependencyRecorder.read_missing(:class, entry.raw.to_s.split("::").last) if recording
+          !Scope::ResolutionChain::Relevance.external_lacks?(scope, entry.candidates, method_name)
+        end || (last.nil? && implicit_object_answers?(scope, chain, method_name))
+      end
+
+      def implicit_object_answers?(scope, chain, method_name)
+        owner = chain.side == :singleton ? "Class" : "Object"
+        !Scope::ResolutionChain::Relevance.external_lacks?(scope, [owner], method_name)
+      end
+
+      # WD3 — the singleton side declines when a module on the receiver's INSTANCE chain can add singleton
+      # methods through a hook: it lists anything on its `:extend` side, records a singleton hook, or extends
+      # `ActiveSupport::Concern`. A hook's singleton edge is recorded on no includer, so no chain state carries it.
+      def singleton_hooks?(scope, class_name)
+        instance = Scope::ResolutionChain.for(scope, class_name.to_s, :instance, :methods)
+        instance.record(scope)
+        return true if instance.truncated?
+
+        instance.entries.any? { |entry| !entry.external? && hooked?(scope, entry.name) }
+      end
+
+      def hooked?(scope, owner)
+        discovery = scope.discovery
+        extended = discovery.unpositioned_mixins[owner]&.dig(:extend)
+        return true if extended && !extended.empty?
+        return true if singleton_hook?(scope, owner)
+
+        (discovery.discovered_extends[owner] || []).any? { |raw| raw.to_s.delete_prefix("::") == "ActiveSupport::Concern" }
+      end
+
+      def singleton_hook?(scope, owner)
+        Scope::ResolutionChain::Relevance::HOOKS.any? { |hook| scope.discovered_method?(owner, hook, :singleton) }
       end
 
       # What a candidate set says, for {Scope::ResolutionChain#settle} to compare across worlds.
@@ -152,6 +220,10 @@ module Rigor
         end
         found
       end
+
+      private_class_method :retro_position, :candidates, :decided, :external_may_answer?, :implicit_object_answers?,
+                           :singleton_hooks?, :hooked?, :singleton_hook?, :outcomes, :collapse, :possible?,
+                           :default_answer, :definer_answer, :visibility_answer, :first_hit
     end
   end
 end

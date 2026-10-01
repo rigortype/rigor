@@ -383,8 +383,8 @@ RSpec.describe Rigor::Inference::DefinerResolution do # rubocop:disable RSpec/Sp
       scope = project_scope(
         "a.rb" => "class Outer; end\nclass Base; end\nmodule Mixin; def plain = 1; end\n" \
                   "module Solo; def from_solo = 1; end\nclass Outer::Leaf < Base; include Mixin; include Solo; end\n",
-        "b.rb" => "module Wrap\n  module Mixin\n    def wrapped = 1\n#{wrapped_extra}  end\n" \
-                  "  class Outer::Leaf; include Mixin; end\nend\n"
+        "b.rb" => "module Wrap\n  module Mixin\n    def wrapped = 1\n#{wrapped_extra}  end\n  " \
+                  "class Outer::Leaf; include Mixin; end\nend\n"
       )
       nestings = { "Outer::Leaf" => { "Mixin" => [[], ["Wrap"]] } }
       scope.with_discovery(scope.discovery.with(discovered_header_nestings: nestings))

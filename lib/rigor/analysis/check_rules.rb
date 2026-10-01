@@ -3636,12 +3636,11 @@ module Rigor
           self_type = scope.self_type
           return nil unless self_type.respond_to?(:class_name)
 
-          # A receiverless `def` inside `class << self` is a singleton def. The def node alone cannot say so, but its
-          # scope does: `Scope#singleton_class_body?` answers the lexical question with no table to consult and no
-          # world that varies it. (Two discovered-method tables stood in for it, and took a name defined on both
-          # facets for an instance def.)
+          side = def_node.receiver.nil? ? receiverless_def_side(scope, self_type.class_name, def_node) : :singleton
+          return nil if side.nil?
+
           method_def =
-            if def_node.receiver.nil? && !scope.singleton_class_body?
+            if side == :instance
               Reflection.instance_method_definition(self_type.class_name, def_node.name, scope: scope)
             else
               Reflection.singleton_method_definition(self_type.class_name, def_node.name, scope: scope)
@@ -3653,6 +3652,28 @@ module Rigor
           return override if override
 
           declared_return_union(method_def, scope.environment)
+        end
+
+        # Which side a receiverless `def` defines, from the indexer's own record of THAT node: the instance table
+        # holding it makes it an instance def, the singleton table (`class << self` bodies, and a `def` under
+        # `Const.instance_eval` that the indexer attributes to the singleton) a singleton def. A node neither table
+        # holds (a `def` in a block whose `self` the engine does not model, such as `E.class_eval do` inside
+        # `class << self`, a redefinition a later `def` replaced) or both do is `nil`, and the caller declines: no
+        # world is consulted, but the record cannot say which signature the body answers to.
+        def receiverless_def_side(scope, class_name, def_node)
+          instance = same_def_node?(scope.user_def_for(class_name, def_node.name), def_node)
+          singleton = same_def_node?(scope.singleton_def_for(class_name, def_node.name), def_node)
+          return :instance if instance && !singleton
+          return :singleton if singleton && !instance
+
+          nil
+        end
+
+        # The tables hold the live node or one re-resolved from a `DefHandle`, so identity is the name and span.
+        def same_def_node?(recorded, def_node)
+          recorded.is_a?(Prism::DefNode) && recorded.name == def_node.name &&
+            recorded.location.start_offset == def_node.location.start_offset &&
+            recorded.location.end_offset == def_node.location.end_offset
         end
 
         # `type_vars:` — ADR-35 WD9 tier 1. When the caller supplies a generic-instantiation

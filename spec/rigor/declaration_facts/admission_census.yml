@@ -60,7 +60,6 @@ members:
     - lib/rigor/analysis/runner.rb
     - lib/rigor/inference/block_call_timing.rb
     copies:
-    - lib/rigor/analysis/runner.rb
     - lib/rigor/inference/parameter_inference_collector.rb
   discovered_def_nodes:
     reads:
@@ -72,7 +71,6 @@ members:
     - lib/rigor/inference/statement_evaluator.rb
     - lib/rigor/inference/void_tail_summary.rb
     copies:
-    - lib/rigor/analysis/runner.rb
     - lib/rigor/inference/parameter_inference_collector.rb
     - lib/rigor/protection/discovery_seed.rb
   discovered_def_nestings:
@@ -91,7 +89,6 @@ members:
     - lib/rigor/inference/method_dispatcher/process_folding.rb
     - lib/rigor/inference/parameter_inference_collector.rb
     copies:
-    - lib/rigor/analysis/runner.rb
     - lib/rigor/inference/parameter_inference_collector.rb
     - lib/rigor/protection/discovery_seed.rb
   discovered_def_sources:
@@ -113,7 +110,6 @@ members:
     reads:
     - lib/rigor/analysis/runner.rb
     copies:
-    - lib/rigor/analysis/runner.rb
     - lib/rigor/inference/parameter_inference_collector.rb
     - lib/rigor/protection/discovery_seed.rb
   discovered_parameter_envelopes:
@@ -123,7 +119,6 @@ members:
     - lib/rigor/analysis/runner.rb
     - lib/rigor/scope/resolution_chain.rb
     copies:
-    - lib/rigor/analysis/runner.rb
     - lib/rigor/protection/discovery_seed.rb
   discovered_superclasses:
     reads:
@@ -145,7 +140,6 @@ members:
     reads:
     - lib/rigor/analysis/runner.rb
     copies:
-    - lib/rigor/analysis/runner.rb
     - lib/rigor/inference/parameter_inference_collector.rb
     - lib/rigor/protection/discovery_seed.rb
   discovered_refinements:
@@ -290,6 +284,24 @@ members:
   implicit_self_evidence:
     reads:
     - lib/rigor/inference/last_line/implicit_self.rb
+    copies: []
+  possible_discovered_methods:
+    reads: []
+    copies: []
+  possible_discovered_deferred_ranges:
+    reads: []
+    copies: []
+  contested_discovered_def_nodes:
+    reads: []
+    copies: []
+  contested_discovered_singleton_def_nodes:
+    reads: []
+    copies: []
+  contested_discovered_method_visibilities:
+    reads: []
+    copies: []
+  contested_discovered_parameter_envelopes:
+    reads: []
     copies: []
 whole_index:
 - lib/rigor/analysis/runner.rb

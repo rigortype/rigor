@@ -199,7 +199,11 @@ module Rigor
         file_methods, file_def_nodes, file_envelopes, file_refinements =
           build_methods_and_def_nodes(root, default_scope.source_path)
         discovered_methods = deep_merge_class_methods(default_scope.discovered_methods, file_methods)
-        discovery = seeded_scope.discovery.with(discovered_methods: discovered_methods)
+        # ADR-119 WD1 — the file records no possible fact, so the seed's sibling is carried over with its member.
+        discovery = seeded_scope.discovery.with(
+          discovered_methods: discovered_methods,
+          possible_discovered_methods: seeded_scope.discovery.possible_discovered_methods
+        )
         # Issue #1120 — only a file that refines something pays the overlay; the cross-file seed already carries
         # every other file's refinements.
         unless file_refinements.empty?
@@ -269,7 +273,10 @@ module Rigor
             discovered_parameter_envelopes: merge_envelope_seed(default_scope, file_envelopes),
             data_member_layouts: data_member_layouts,
             struct_member_layouts: struct_member_layouts,
-            discovered_deferred_ranges: merge_deferred_ranges_seed(default_scope, root)
+            discovered_deferred_ranges: merge_deferred_ranges_seed(default_scope, root),
+            # ADR-119 WD1 — the file records no possible or contested fact, so each paired member's sibling is
+            # carried over from the seed unchanged.
+            **seeded_scope.discovery.sibling_tables
           )
         )
       end
@@ -7602,6 +7609,66 @@ module Rigor
         acc[:global_write_census].merge(file_index[:global_write_census] || GlobalWriteCensus::EMPTY)
         fold_ancestry_tables(acc, file_index)
         fold_constant_tables(acc, file_index)
+        fold_siblings(acc, file_index)
+      end
+
+      # ADR-119 WD1 — the `possible_*` / `contested_*` siblings of {Scope::DiscoveryIndex::SIBLINGS}, carried as ONE
+      # `{sibling name => table}` Hash (`acc[:siblings]`) through the accumulator, the fold, the compact-header
+      # rename, the finalize and the seed bundle, so no copy path names a sibling and none can drop one. Folded by
+      # union, so the fold is order-independent and a bundle-served file folds as its live walk would; a pre-35
+      # bundle carries none, and the SCHEMA bump makes such a blob a cold rebuild. No producer fills a sibling yet.
+      def fold_siblings(acc, file_index)
+        (file_index[:siblings] || {}).each do |name, table|
+          acc[:siblings][name] = union_sibling_value(acc[:siblings].fetch(name), table)
+        end
+      end
+
+      # The union of two sibling tables or entries. A Hash merges per key and a Set or Array unions; two scalars
+      # that disagree are a `discovered_methods`-style kind and combine to `:both`, as {#merge_method_kinds} does.
+      def union_sibling_value(sitting, arriving)
+        return arriving if sitting.nil? || sitting.empty?
+        return sitting if arriving.nil? || arriving.empty?
+
+        case sitting
+        when Hash then sitting.merge(arriving) { |_key, left, right| union_sibling_value(left, right) }
+        when Set, Array then sitting | arriving
+        else sitting == arriving ? sitting : Scope::DiscoveryIndex::METHOD_KIND_BOTH
+        end
+      end
+
+      # The sibling tables keyed by file path rather than by class name, which a compact-header rename leaves alone
+      # exactly as it leaves the `deferred_ranges` member alone.
+      SIBLINGS_KEYED_BY_PATH = %i[possible_discovered_deferred_ranges].freeze
+      private_constant :SIBLINGS_KEYED_BY_PATH
+
+      # {#apply_compact_header_renames!} for the siblings: a class-keyed Hash re-keys (colliding keys union), and a
+      # Set of key paths renames each path's first element, the class.
+      def rename_siblings(siblings, renames)
+        siblings.to_h do |name, table|
+          next [name, table] if SIBLINGS_KEYED_BY_PATH.include?(name) || table.empty?
+
+          renamed = case table
+                    when Set then table.to_set { |path| [rename_compact_name(renames, path.first), *path.drop(1)] }
+                    else rename_sibling_hash(table, renames)
+                    end
+          [name, renamed]
+        end
+      end
+
+      def rename_sibling_hash(table, renames)
+        table.each_with_object({}) do |(class_name, entry), out|
+          renamed = rename_compact_name(renames, class_name)
+          out[renamed] = out.key?(renamed) ? union_sibling_value(out[renamed], entry) : entry
+        end
+      end
+
+      def freeze_siblings(siblings)
+        siblings.each_value { |table| freeze_sibling_table(table) }
+      end
+
+      def freeze_sibling_table(table)
+        table.each_value { |entry| freeze_sibling_table(entry) } if table.is_a?(Hash)
+        table.freeze
       end
 
       # Issue #1120 — a union, so the fold is order-independent and a bundle-served file folds exactly as its live
@@ -7763,7 +7830,9 @@ module Rigor
           # nothing), so the bundle stays Marshal-clean.
           refinements: file_index[:refinements],
           # Issue #1367 — the file's {GlobalWriteCensus}, a Set of frozen Arrays, which Marshal round-trips.
-          global_write_census: file_index[:global_write_census]
+          global_write_census: file_index[:global_write_census],
+          # ADR-119 WD1 — `{sibling name => table}`, plain Hashes, Sets and rows, so the bundle stays Marshal-clean.
+          siblings: file_index[:siblings]
         }
       end
 
@@ -7804,7 +7873,9 @@ module Rigor
           # Issue #1120 — absent from a pre-28 bundle, which the SCHEMA bump rebuilds cold.
           refinements: bundle[:refinements],
           # Issue #1367 — absent from a pre-29 bundle, which the SCHEMA bump rebuilds cold.
-          global_write_census: bundle[:global_write_census] || GlobalWriteCensus::EMPTY
+          global_write_census: bundle[:global_write_census] || GlobalWriteCensus::EMPTY,
+          # ADR-119 WD1 — absent from a pre-35 bundle, which the SCHEMA bump rebuilds cold.
+          siblings: bundle[:siblings] || Scope::DiscoveryIndex.empty_siblings
         }
       end
 
@@ -7845,7 +7916,9 @@ module Rigor
           constant_writes: {},
           data_member_layouts: {}, struct_member_layouts: {},
           # Issue #1367 — the project's {GlobalWriteCensus}.
-          global_write_census: Set.new }
+          global_write_census: Set.new,
+          # ADR-119 WD1 — the pair siblings, `{sibling name => table}` (see {#fold_siblings}).
+          siblings: Scope::DiscoveryIndex.empty_siblings.dup }
       end
 
       # Post-processes and freezes a fully-folded def-index accumulator.
@@ -7858,6 +7931,11 @@ module Rigor
         # Issue #644 — resolve the cross-file constant-reassignment rule here, where the whole project's
         # write census is known, and turn the surviving literals into their published `Type::Constant`.
         acc[:constant_values], acc[:constant_sources] = finalize_constant_writes(acc[:constant_writes])
+        # ADR-119 WD1 — the two passes below rewrite `def_nodes`, `singleton_def_nodes` and `methods` and leave the
+        # siblings alone: the extends fold copies an extended module's instance defs onto the extender's singleton
+        # (a copied def is certain or possible as its source was), and `subtract_def_methods` drops `def`-declared
+        # names from `methods`. Whether a sibling follows each rewrite is PR C1's decision, with the first producer
+        # of a `possible` fact; until then every sibling is empty and there is nothing to follow.
         fold_extends_into_singleton_tables(acc[:extends], acc[:def_nodes], acc[:singleton_def_nodes], acc[:methods])
         # Cross-file method suppression is for the project's OWN accessors (attr_* / define_method / alias) — NOT for
         # plain `def`s. A cross-file `def` on a class is exactly the ADR-17 monkey-patch case the undefined-method rule
@@ -7880,6 +7958,7 @@ module Rigor
         acc[:refinements] = freeze_refinements(acc[:refinements])
         acc[:global_write_census] = acc[:global_write_census].freeze
         acc[:unpositioned_mixins].each_value { |sides| sides.each_value(&:freeze).freeze }
+        freeze_siblings(acc[:siblings])
       end
 
       # Removes, per class, the method names that have a project `def` node, leaving only
@@ -8754,6 +8833,7 @@ module Rigor
           acc[key] = rekey_class_table(acc[key], renames)
         end
         acc[:unpositioned_mixins] = rekey_unpositioned(acc[:unpositioned_mixins], renames)
+        acc[:siblings] = rename_siblings(acc[:siblings], renames)
         # Issue #992 — the envelope table cannot take {#combine_rekeyed_entries}' later-wins Hash merge: two
         # bodies of one class landing on the same key are exactly the reopening whose disagreement must
         # make a name opaque.

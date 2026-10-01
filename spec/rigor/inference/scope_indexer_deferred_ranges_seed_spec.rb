@@ -32,7 +32,8 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
 
   def indexed_ranges(source, path, seed)
     base = Rigor::Scope.empty(source_path: path)
-    scope = base.with_discovery(base.discovery.with(discovered_deferred_ranges: seed))
+    scope = base.with_discovery(base.discovery.with(discovered_deferred_ranges: seed,
+                                                       possible_discovered_deferred_ranges: {}))
     root = Prism.parse(source, filepath: path).value
     described_class.index(root, default_scope: scope).fetch(root).discovered_deferred_ranges
   end

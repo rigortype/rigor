@@ -141,7 +141,8 @@ RSpec.describe "class-graph memo storage" do
       expect(typer.send(:class_graph_buckets)).to be(bucket)
 
       # Same three walked tables, a different index object.
-      shifted = scope.with_discovery(index.with(discovered_methods: index.discovered_methods.dup))
+      shifted = scope.with_discovery(index.with(discovered_methods: index.discovered_methods.dup,
+                                                   possible_discovered_methods: index.possible_discovered_methods))
       shifted_bucket = Rigor::Inference::ExpressionTyper.new(scope: shifted).send(:class_graph_buckets)
       expect(shifted_bucket).not_to be(bucket)
       expect(Thread.current[slot_key][0]).to be(shifted.discovery)

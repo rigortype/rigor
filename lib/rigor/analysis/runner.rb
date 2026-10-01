@@ -444,6 +444,9 @@ module Rigor
         @constant_shadower_index = nil
         @project_discovered_method_visibilities = {}.freeze
         @project_discovered_methods = {}.freeze
+        # ADR-119 WD1 — the `possible_*` / `contested_*` siblings of the paired members, ONE Hash keyed by sibling
+        # name so no adoption or seed path names a sibling and none can drop one.
+        @project_discovery_siblings = Scope::DiscoveryIndex.empty_siblings
         # Issue #992 — the cross-file parameter-envelope table `call.wrong-arity` reads for an undeclared `def`.
         @project_discovered_parameter_envelopes = {}.freeze
         @project_data_member_layouts = {}.freeze
@@ -1714,6 +1717,7 @@ module Rigor
         @project_discovered_parameter_envelopes = discovery.discovered_parameter_envelopes
         @project_data_member_layouts = discovery.data_member_layouts
         @project_struct_member_layouts = discovery.struct_member_layouts
+        @project_discovery_siblings = discovery.siblings
       end
 
       # The tables only check rules read beyond dispatch — the issue #1120 refinements and the issue #1367
@@ -2243,12 +2247,8 @@ module Rigor
         # bucket identically to the sequential path.
         tables[:run_generation] = @run_generation if @run_generation
         tables[:discovered_classes] = @project_discovered_classes unless @project_discovered_classes.empty?
-        tables[:discovered_def_nodes] = @project_discovered_def_nodes unless @project_discovered_def_nodes.empty?
         unless @project_discovered_def_nestings.empty?
           tables[:discovered_def_nestings] = @project_discovered_def_nestings
-        end
-        unless @project_discovered_singleton_def_nodes.empty?
-          tables[:discovered_singleton_def_nodes] = @project_discovered_singleton_def_nodes
         end
         seed_def_source_tables(tables)
         unless @project_discovered_superclasses.empty?
@@ -2258,27 +2258,38 @@ module Rigor
           tables[:discovered_header_nestings] = @project_discovered_header_nestings
         end
         seed_mixin_tables(tables)
-        unless @project_discovered_method_visibilities.empty?
-          tables[:discovered_method_visibilities] = @project_discovered_method_visibilities
-        end
-        tables[:discovered_methods] = @project_discovered_methods unless @project_discovered_methods.empty?
-        unless @project_discovered_deferred_ranges.empty?
-          tables[:discovered_deferred_ranges] = @project_discovered_deferred_ranges
-        end
+        seed_paired_tables(tables)
         seed_call_surface_tables(tables)
         seed_opt_in_pre_pass_tables(tables)
         seed_member_layout_tables(tables)
         seed_dependency_attribution_tables(tables)
-        tables
+        # Only a base seed can bring in half a pair (`seed_paired_tables` writes both halves), so a run without
+        # one skips the copy this costs per file.
+        @discovery_seed ? Scope::DiscoveryIndex.compact_pairs(tables) : tables
       end
 
-      # The tables only check rules read: the issue #992 parameter envelopes (`call.wrong-arity`), the issue #1120
-      # refinements (`call.undefined-method`), and the issue #1367 global-write census (the `global.*` write
-      # rules). Split out of {#project_scope_seed_tables} to keep it under the complexity budget.
-      def seed_call_surface_tables(tables)
-        unless @project_discovered_parameter_envelopes.empty?
-          tables[:discovered_parameter_envelopes] = @project_discovered_parameter_envelopes
+      # ADR-119 WD1 — the members `Scope::DiscoveryIndex::SIBLINGS` pairs, each with its sibling. A pair rides the
+      # seed when either half is non-empty and is left out when both are, which keeps an `discovery_seed:` base's
+      # table for a pair this run computed nothing for. {Scope::DiscoveryIndex#with} takes the two together, and
+      # `compact_pairs` completes a half pair a base seed brought in.
+      PAIRED_MEMBER_IVARS = Scope::DiscoveryIndex::SIBLINGS.keys.to_h { |member| [member, :"@project_#{member}"] }.freeze
+      private_constant :PAIRED_MEMBER_IVARS
+
+      def seed_paired_tables(tables)
+        PAIRED_MEMBER_IVARS.each do |member, ivar|
+          sibling = Scope::DiscoveryIndex::SIBLINGS.fetch(member)
+          table = instance_variable_get(ivar)
+          own = @project_discovery_siblings.fetch(sibling)
+          next if table.empty? && own.empty?
+
+          tables[member] = table
+          tables[sibling] = own
         end
+      end
+
+      # The tables only check rules read: the issue #1120 refinements (`call.undefined-method`) and the issue #1367
+      # global-write census (the `global.*` write rules). The issue #992 parameter envelopes ride {#seed_paired_tables}. Split out of {#project_scope_seed_tables} to keep it under the complexity budget.
+      def seed_call_surface_tables(tables)
         tables[:discovered_refinements] = @project_discovered_refinements unless @project_discovered_refinements.empty?
         # Issue #1367 — read by the `global.*` write rules.
         return if @project_discovered_global_write_census.empty?

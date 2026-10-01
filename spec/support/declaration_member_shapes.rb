@@ -13,6 +13,11 @@
 # - Run state: an opaque token the runner's seed supplies, which neither the file's parse alone nor a persisted seed
 #   bundle carries.
 #
+# - Sibling (ADR-119 WD1): the `possible_*` / `contested_*` half of a `DiscoveryIndex::SIBLINGS` pair. `possible_*` has
+#   its member's shape and every entry is in the member; `contested_*` is a Set of key paths that resolve in the
+#   member. No producer fills one yet, so on the fixture the check is vacuous and {sibling_problem} is exercised
+#   directly with injected values.
+#
 # `implicit_self_evidence` must also never ride a seed: it holds its own file's parse.
 module DeclarationMemberShapes
   SCALARS = [String, Symbol, Integer, NilClass, TrueClass, FalseClass].freeze
@@ -30,12 +35,60 @@ module DeclarationMemberShapes
     classes.flat_map do |klass, entries|
       entries.keys.filter_map do |member|
         value = fixture.fetch(:discovery).first.public_send(member)
+        next sibling_line(member, value, fixture) if klass == :sibling
         next "#{member}: empty in the fixture" if empty?(value) && !UNFILLED.key?(member)
         next if UNFILLED.key?(member)
 
         why = shape_problem(klass, member, value, fixture)
         "#{member} (#{klass}): #{why}" if why
       end
+    end
+  end
+
+  def sibling_line(member, value, fixture)
+    why = sibling_problem(member, value, fixture.fetch(:discovery).first)
+    "#{member} (sibling): #{why}" if why
+  end
+
+  # The shape problem of a sibling's `value` against its member's value in `index`, or nil.
+  def sibling_problem(sibling, value, index)
+    member = Rigor::Scope::DiscoveryIndex::SIBLINGS.key(sibling)
+    return "not a sibling of any member" if member.nil?
+
+    member_value = index.public_send(member)
+    return contested_problem(value, member_value) if sibling.start_with?("contested_")
+
+    possible_problem(value, member_value)
+  end
+
+  def contested_problem(value, member_value)
+    return "not a Set" unless value.is_a?(Set)
+    return "a key path is not an Array" unless value.all?(Array)
+
+    "a key path does not resolve in the member" unless value.all? { |path| resolves?(member_value, path) }
+  end
+
+  def resolves?(table, path)
+    path.all? do |key|
+      next false unless table.is_a?(Hash) && table.key?(key)
+
+      table = table.fetch(key)
+      true
+    end
+  end
+
+  def possible_problem(value, member_value)
+    return "not the member's kind of table" unless value.is_a?(member_value.class.ancestors.find { |k| [Hash, Set].include?(k) })
+
+    "an entry is not in the member" unless subset?(value, member_value)
+  end
+
+  # Every key of `value`, at any depth, is in `whole`; a leaf must be the same or a part of it (`:both`).
+  def subset?(value, whole)
+    case value
+    when Hash then whole.is_a?(Hash) && value.all? { |key, entry| whole.key?(key) && subset?(entry, whole.fetch(key)) }
+    when Set, Array then value.all? { |entry| whole.include?(entry) }
+    else value == whole || whole == Rigor::Scope::DiscoveryIndex::METHOD_KIND_BOTH
     end
   end
 
@@ -192,7 +245,7 @@ module DeclarationMemberShapes
   def accepted_misfilings(classes, fixture)
     classes.each_with_object({}) do |(own, entries), accepted|
       entries.each_key do |member|
-        next if UNFILLED.key?(member)
+        next if UNFILLED.key?(member) || own == :sibling
 
         passes = (classes.keys - [own]).select do |other|
           problems(refiled(classes, member, other), fixture).none? { |line| line.start_with?("#{member} ") }

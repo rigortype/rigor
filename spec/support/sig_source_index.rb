@@ -153,6 +153,8 @@ class SigSourceIndex
         discovered_methods: existence_table,
         discovered_def_nodes: def_index.fetch(:def_nodes),
         discovered_singleton_def_nodes: def_index.fetch(:singleton_def_nodes),
+        **def_index.fetch(:siblings).slice(:possible_discovered_methods, :contested_discovered_def_nodes,
+                                           :contested_discovered_singleton_def_nodes),
         discovered_superclasses: def_index.fetch(:superclasses),
         discovered_header_nestings: def_index.fetch(:header_nestings),
         discovered_includes: def_index.fetch(:includes),

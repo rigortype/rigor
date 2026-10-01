@@ -15,9 +15,9 @@ require "spec_helper"
 # gives the same value": a table that depends on the project differs, because the fixture's second file contributes
 # to every project table.
 #
-# Threat model: the checks catch an accidental misfiling, not a deliberate one. Not built yet: the ADR's `possible_*`
-# / `contested_*` sibling checks, because no member admits `possible` facts, and the ADR-53 shadow oracle for the
-# syntactic members.
+# Threat model: the checks catch an accidental misfiling, not a deliberate one. The `possible_*` / `contested_*`
+# sibling class is checked against injected values, since no producer fills one yet. Not built yet: the ADR-53 shadow
+# oracle for the syntactic members.
 RSpec.describe "Rigor::Scope::DiscoveryIndex::MEMBER_CLASSES" do
   let(:members) { Rigor::Scope::DiscoveryIndex.members }
   let(:classes) { Rigor::Scope::DiscoveryIndex::MEMBER_CLASSES }
@@ -38,8 +38,8 @@ RSpec.describe "Rigor::Scope::DiscoveryIndex::MEMBER_CLASSES" do
     DeclarationMemberShapes.refiled(classes, member, klass)
   end
 
-  it "names exactly the five fact classes" do
-    expect(classes.keys).to eq(%i[set_valued single_valued typed syntactic run_state])
+  it "names exactly the five fact classes and the sibling class" do
+    expect(classes.keys).to eq(%i[set_valued single_valued typed syntactic run_state sibling])
   end
 
   it "puts every member in exactly one class, and names no other" do
@@ -59,9 +59,47 @@ RSpec.describe "Rigor::Scope::DiscoveryIndex::MEMBER_CLASSES" do
 
   it "leaves unfilled only the members another command or a whole run fills" do
     discovery, = DeclarationFactFixture.built.fetch(:discovery)
-    unfilled = members.select { |member| DeclarationMemberShapes.empty?(discovery.public_send(member)) }
+    unfilled = members.select do |member|
+      DeclarationMemberShapes.empty?(discovery.public_send(member)) && !classes.fetch(:sibling).key?(member)
+    end
 
     expect(unfilled).to eq(DeclarationMemberShapes::UNFILLED.keys)
+  end
+
+  # ADR-119 WD1. No producer fills a sibling yet, so the fixture check above is vacuous for them: these examples
+  # inject values against the real member tables.
+  describe "the sibling class" do
+    let(:index) { DeclarationFactFixture.built.fetch(:discovery).first }
+    let(:siblings) { Rigor::Scope::DiscoveryIndex::SIBLINGS }
+
+    def problem(sibling, value)
+      DeclarationMemberShapes.sibling_problem(sibling, value, index)
+    end
+
+    it "names exactly the sibling of each paired member, and each member is in its own class" do
+      expect(classes.fetch(:sibling).keys).to eq(siblings.values)
+      expect(siblings.keys.flat_map { |member| classes.except(:sibling).select { |_, e| e.key?(member) }.keys })
+        .to all(satisfy { |klass| %i[set_valued single_valued].include?(klass) })
+    end
+
+    it "is empty on an index no producer has filled" do
+      expect(siblings.values.map { |sibling| index.public_send(sibling) }).to all(be_empty)
+    end
+
+    it "accepts a possible sibling that is a part of its member, and a contested one whose paths resolve" do
+      klass, methods = index.discovered_methods.first
+      def_class, defs = index.discovered_def_nodes.first
+
+      expect(problem(:possible_discovered_methods, { klass => methods.slice(*methods.keys.first(1)) })).to be_nil
+      expect(problem(:contested_discovered_def_nodes, Set[[def_class, defs.keys.first]])).to be_nil
+    end
+
+    it "rejects a possible entry the member lacks, and a contested path that does not resolve" do
+      expect(problem(:possible_discovered_methods, { "Nowhere" => { x: :instance } })).to eq("an entry is not in the member")
+      expect(problem(:contested_discovered_def_nodes, Set[["Nowhere", :x]]))
+        .to eq("a key path does not resolve in the member")
+      expect(problem(:contested_discovered_def_nodes, [])).to eq("not a Set")
+    end
   end
 
   describe "the partition check itself" do

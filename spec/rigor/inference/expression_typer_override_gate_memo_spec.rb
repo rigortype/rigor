@@ -29,6 +29,7 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
     base = Rigor::Scope.empty
     base.with_discovery(
       base.discovery.with(discovered_def_nodes: defs, discovered_singleton_def_nodes: no_singletons,
+                          contested_discovered_def_nodes: Set.new, contested_discovered_singleton_def_nodes: Set.new,
                           discovered_superclasses: supers, discovered_includes: no_includes)
     )
   end

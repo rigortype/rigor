@@ -151,7 +151,8 @@ module Rigor
 
         # The chain's nearest level's envelope. `Known#answer` is that envelope, but {#authoritative?} and
         # {#settle_by_definitions} also read the levels, passed names and owner entries this walk fills, so the
-        # answer is not used on its own. Run only once the candidate-set read has answered, so the chain stands for the name.
+        # answer is not used on its own. Run only once the candidate-set read has answered, so the chain stands
+        # for the name.
         def nearest_envelope(class_name) = owner_in(chain_levels(arity_chain(class_name)).first)
 
         def decline

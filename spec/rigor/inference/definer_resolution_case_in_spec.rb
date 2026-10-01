@@ -43,11 +43,11 @@ RSpec.describe "DefinerResolution call sites" do
     end
 
     it "flags an else arm" do
-      expect(violations_in(without_last_arm(good, "else nil"))).not_to be_empty
+      expect(violations_in(good.sub(/^end$/, "else nil\nend"))).not_to be_empty
     end
 
     it "flags a catch-all `in _` arm" do
-      expect(violations_in(without_last_arm(good, "in _ then nil"))).not_to be_empty
+      expect(violations_in(good.sub(/^end$/, "in _ then nil\nend"))).not_to be_empty
     end
 
     it "flags a missing arm" do

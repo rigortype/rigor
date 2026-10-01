@@ -176,9 +176,7 @@ module Rigor
       # otherwise are all `:unknown`. The retro world is the one built when the chain had exactly one fork and
       # no mark; a chain with a fork is never narrowed, so none is built on demand.
       def settle_unknown(scope, answer, name)
-        if !@marks.empty? && !(@forks.zero? && @marks.all? { |mark| Relevance.discharged?(scope, self, mark, name) })
-          return :unknown
-        end
+        return settle_marked(scope, name) unless @marks.empty?
 
         case @forks
         when 0 then :chain
@@ -186,6 +184,15 @@ module Rigor
         else :unknown
         end
       end
+
+      # A marked chain stands only with no fork and every mark discharged for the name.
+      def settle_marked(scope, name)
+        fork_free = @forks.zero?
+        return :unknown unless fork_free && @marks.all? { |mark| Relevance.discharged?(scope, self, mark, name) }
+
+        :chain
+      end
+      private :settle_marked
       private :settle_unknown
 
       # Walks the entries in Ruby's order from `start` up to (not including) `stop`, and returns the first

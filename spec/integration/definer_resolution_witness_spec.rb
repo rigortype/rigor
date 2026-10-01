@@ -87,9 +87,9 @@ RSpec.describe Rigor::Inference::DefinerResolution do # rubocop:disable RSpec/Sp
     end
   end
 
-  # WD2's five non-discharge shapes: each is a mark whose named entry could answer the name, so the read stays
+  # WD2's non-discharge shapes (the `"*"` one twice, on the mark and inside Q's closure): each is a mark whose named entry could answer the name, so the read stays
   # Unknown. Ruby's answer is shown beside each, in both worlds.
-  describe "the five non-discharge shapes" do
+  describe "the non-discharge shapes" do
     it "declines when Q includes a module the project does not declare" do
       source = <<~RUBY
         module Q; include Ext; end
@@ -103,7 +103,7 @@ RSpec.describe Rigor::Inference::DefinerResolution do # rubocop:disable RSpec/Sp
 
     it "declines when Q's methods come from a define_method loop" do
       source = <<~RUBY
-        module Q; [:foo].each { |name| define_method(name) { 2 } }; end
+        module Q; def bar = 1; [:foo].each { |name| define_method(name) { 2 } }; end
         class Base; def foo = 1; end
         class C < Base; include Q if ENV["Q"]; end
       RUBY
@@ -111,9 +111,31 @@ RSpec.describe Rigor::Inference::DefinerResolution do # rubocop:disable RSpec/Sp
       expect(owner_of(resolve(scope_for(source), :foo))).to eq(:unknown)
     end
 
+    it "declines when Q records the name only through a literal define_method" do
+      source = <<~RUBY
+        module Q; def bar = 1; define_method(:foo) { 2 }; end
+        class Base; def foo = 1; end
+        class C < Base; include Q if ENV["Q"]; end
+      RUBY
+      expect(both_worlds(source, "C.instance_method(:foo).owner")).to eq(%w[Base Q])
+      expect(owner_of(resolve(scope_for(source), :foo))).to eq(:unknown)
+    end
+
+    it "declines when Q includes a module RBS knows whose declaration has the name, and discharges one whose does not" do
+      source = <<~RUBY
+        module Q; def bar = 1; include Comparable; end
+        class Base; def foo = 1; def between?(low, high) = false; end
+        class C < Base; include Q if ENV["Q"]; end
+      RUBY
+      expect(both_worlds(source, "C.instance_method(:between?).owner")).to eq(%w[Base Comparable])
+      expect(owner_of(resolve(scope_for(source), :between?))).to eq(:unknown)
+      expect(both_worlds(source, "C.instance_method(:foo).owner")).to eq(%w[Base Base])
+      expect(owner_of(resolve(scope_for(source), :foo))).to eq("Base")
+    end
+
     it "declines a visibility-only statement on the name asked" do
       source = <<~RUBY
-        module Q; private :to_s; end
+        module Q; def bar = 1; private :to_s; end
         class Base; def to_s = "base"; end
         class C < Base; include Q if ENV["Q"]; end
       RUBY
@@ -128,6 +150,17 @@ RSpec.describe Rigor::Inference::DefinerResolution do # rubocop:disable RSpec/Sp
         class C < Base; include Q if ENV["Q"]; end
       RUBY
       expect(both_worlds(source, "C.instance_method(:foo).owner")).to eq(%w[Base Base])
+      expect(owner_of(resolve(scope_for(source), :foo))).to eq(:unknown)
+    end
+
+    it "declines when a module in Q's closure lists a mixin call the walk cannot record (`\"*\"`)" do
+      source = <<~RUBY
+        module X; def foo = 2; end
+        module Q; def bar = 1; send(:include, X); end
+        class Base; def foo = 1; end
+        class C < Base; include Q if ENV["Q"]; end
+      RUBY
+      expect(both_worlds(source, "C.instance_method(:foo).owner")).to eq(%w[Base X])
       expect(owner_of(resolve(scope_for(source), :foo))).to eq(:unknown)
     end
 

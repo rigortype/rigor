@@ -1458,6 +1458,38 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  # Issue #1446 — the class guards narrow an instance variable as they narrow a local, and a guard's narrowing of one
+  # is restored where code may run that rebinds it. Each entry runs as `rigor check` runs a project.
+  describe "fixtures/ivar_class_guards/ — class guards on instance-variable receivers (#1446)", type: :runner do
+    # The number of `# QUIET-1446` lines each entry carries.
+    quiet_counts = { "guards.rb" => 7, "invalidation.rb" => 0, "bot_receivers.rb" => 5, "writes.rb" => 2 }.freeze
+
+    def fixture_source(name) = File.read(File.join(__dir__, "fixtures/ivar_class_guards", name))
+
+    # Every 1-indexed line of `source` whose comment carries `# FIRES-1446 <rule>`, with that rule.
+    def fired_lines(source)
+      source.lines.each_with_index.filter_map do |line, i|
+        rule = line[/# FIRES-1446 (\S+)/, 1]
+        [i + 1, rule] if rule
+      end
+    end
+
+    def reported(result)
+      result.diagnostics.reject { |d| d.severity == :info || d.rule.to_s == "call.unresolved-toplevel" }
+    end
+
+    # The exact `[line, rule]` set holds both halves: a quiet line that reported, or a control that went quiet, fails.
+    quiet_counts.each do |entry, quiet|
+      it "reports exactly the marked controls in #{entry}, and marks #{quiet} quiet lines" do
+        source = fixture_source(entry)
+        result = analyze(files: { "code.rb" => source })
+        expect(reported(result).map { |d| [d.line, d.rule.to_s] }.sort).to eq(fired_lines(source))
+        expect(result.diagnostics.map(&:rule).map(&:to_s)).not_to include("flow.unreachable-clause")
+        expect(source.lines.count { |line| line.include?("# QUIET-1446") }).to eq(quiet)
+      end
+    end
+  end
+
   describe "fixtures/special_global_writes/ — a write the special's setter rejects (#1367)", type: :runner do
     # The number of `# QUIET-1367` lines each entry carries.
     quiet_counts = {

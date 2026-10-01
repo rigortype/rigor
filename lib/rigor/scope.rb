@@ -30,7 +30,7 @@ module Rigor
                 :void_origins, :plugin_typed_calls,
                 :optimistic_origins, :optimistic_locals, :optimistic_ivars,
                 :repeated_or_writes, :match_frame,
-                :constant_narrowings, :guard_records
+                :constant_narrowings, :guard_records, :bot_guard_classes
 
     # ADR-53 Track A — the seed-time discovery tables live on the {DiscoveryIndex} the scope carries by a single
     # reference; the per-table readers stay on Scope so engine call sites and plugins are unaffected by the
@@ -249,12 +249,21 @@ module Rigor
     # analysis cannot see runs, so a call or block that may run project or unresolved code restores each recorded
     # binding to the union of this pre-guard type and its narrowed one ({#forget_guard_narrowings}). A write drops
     # the record ({#with_global}), and a name the frame-local special-variable machinery owns is never recorded.
+    # Issue #1446 — a class guard's narrowing of an instance variable is recorded too, keyed `[:ivar, :@name]`
+    # ({#with_guarded_ivar}), since that code may reach `self` and rebind it; a write drops it ({#without_ivar_guard}).
     EMPTY_GUARD_RECORDS = {}.freeze
+    # Issue #1446 — the classes a class guard narrowed a receiver to where the narrowing left it `bot`, keyed like
+    # {EMPTY_GUARD_RECORDS} with `[:local, :name]` too: `return unless @cb.is_a?(Proc)` binds `@cb` to `bot` when the
+    # guard is disjoint from its binding, but the value that passes it is a `Proc` (or a subclass of one), and a call
+    # on it dispatches on that class. `Inference::GuardRebinding` reads the class a `bot` receiver runs its methods
+    # on from here ({#bot_guard_classes_for}); a `bot` no class guard produced has no entry. A write or another
+    # narrowing of the name drops its entry, and a join keeps one only both arms hold.
+    EMPTY_BOT_GUARD_CLASSES = {}.freeze
     private_constant :EMPTY_VAR_BINDINGS, :EMPTY_INDEXED_NARROWINGS,
                      :EMPTY_CHAIN_NARROWINGS, :EMPTY_DECLARATION_SOURCED,
                      :EMPTY_FOLD_SAFE, :EMPTY_ORIGINS, :EMPTY_PUBLISHED_CONSTANT_SOURCED,
                      :EMPTY_PUBLISHED_CONSTANT_IVARS, :EMPTY_REPEATED_OR_WRITES,
-                     :EMPTY_CONSTANT_NARROWINGS, :EMPTY_GUARD_RECORDS
+                     :EMPTY_CONSTANT_NARROWINGS, :EMPTY_GUARD_RECORDS, :EMPTY_BOT_GUARD_CLASSES
 
     class << self
       def empty(environment: Environment.default, source_path: nil)
@@ -295,7 +304,7 @@ module Rigor
       @plugin_typed_calls.key?(node)
     end
 
-    def initialize(
+    def initialize( # rubocop:disable Metrics/AbcSize, Metrics/MethodLength -- one keyword and assignment per field
       environment:, locals:,
       fact_store: Analysis::FactStore.empty,
       self_type: nil,
@@ -323,7 +332,8 @@ module Rigor
       repeated_or_writes: EMPTY_REPEATED_OR_WRITES,
       match_frame: nil,
       constant_narrowings: EMPTY_CONSTANT_NARROWINGS,
-      guard_records: EMPTY_GUARD_RECORDS
+      guard_records: EMPTY_GUARD_RECORDS,
+      bot_guard_classes: EMPTY_BOT_GUARD_CLASSES
     )
       @environment = environment
       @locals = locals
@@ -354,6 +364,7 @@ module Rigor
       @match_frame = match_frame
       @constant_narrowings = constant_narrowings
       @guard_records = guard_records
+      @bot_guard_classes = bot_guard_classes
       freeze
     end
 
@@ -448,7 +459,8 @@ module Rigor
               # rvalue is one.
               published_constant_sourced: drop_published_constant_sourced_for(:local, name),
               local_origins: drop_origin(@local_origins, name),
-              optimistic_locals: keep_marks ? @optimistic_locals : drop_origin(@optimistic_locals, name))
+              optimistic_locals: keep_marks ? @optimistic_locals : drop_origin(@optimistic_locals, name),
+              bot_guard_classes: drop_bot_guard_class(:local, name))
     end
     private :bind_local
 
@@ -565,6 +577,11 @@ module Rigor
     end
 
     def with_ivar(name, type)
+      bind_ivar(name, type, @guard_records)
+    end
+
+    # The one body behind {#with_ivar} and {#with_guarded_ivar}, which differ only in the guard records they leave.
+    def bind_ivar(name, type, guard_records)
       new_indexed_narrowings = drop_indexed_narrowings_for(:ivar, name)
       new_chain_narrowings = drop_chain_narrowings_for(:ivar, name)
       # ADR-58 WD1 — a method-local ivar write or narrowing is flow-live: drop any declaration-sourced mark so
@@ -576,8 +593,11 @@ module Rigor
               declaration_sourced: drop_declaration_sourced_for(:ivar, name),
               published_constant_sourced: drop_published_constant_sourced_for(:ivar, name),
               ivar_origins: drop_origin(@ivar_origins, name),
-              optimistic_ivars: drop_origin(@optimistic_ivars, name))
+              optimistic_ivars: drop_origin(@optimistic_ivars, name),
+              guard_records: guard_records,
+              bot_guard_classes: drop_bot_guard_class(:ivar, name))
     end
+    private :bind_ivar
 
     # ADR-58 WD1 — used by the method-entry seed to mark an ivar whose only provenance is the class-ivar index.
     # Unlike `with_ivar` this binds the type AND records the declaration-sourced mark in one transition.
@@ -688,7 +708,8 @@ module Rigor
       name = name.to_sym
       written = rebuild(globals: @globals.merge(name => type).freeze,
                         declaration_sourced: drop_declaration_sourced_for(:global, name),
-                        guard_records: drop_guard_record(:global, name))
+                        guard_records: drop_guard_record(:global, name),
+                        bot_guard_classes: drop_bot_guard_class(:global, name))
       alias_name = STDOUT_ALIASES[name]
       alias_name ? written.forget_guard_narrowing_of(:global, alias_name) : written
     end
@@ -725,7 +746,28 @@ module Rigor
       records = record ? add_guard_record([:global, name].freeze, pre_guard) : drop_guard_record(:global, name)
       rebuild(globals: @globals.merge(name => type).freeze,
               declaration_sourced: drop_declaration_sourced_for(:global, name),
-              guard_records: records)
+              guard_records: records,
+              bot_guard_classes: drop_bot_guard_class(:global, name))
+    end
+
+    # Issue #1446 — binds the instance variable `name` to `type` on a class guard's edge, recording `pre_guard` as
+    # {#with_guarded_global} does. The truthiness, `nil?`, `&.` and `respond_to?` guards narrow an instance variable
+    # through {#with_ivar} and record nothing.
+    def with_guarded_ivar(name, type, pre_guard)
+      name = name.to_sym
+      bind_ivar(name, type, add_guard_record([:ivar, name].freeze, pre_guard))
+    end
+
+    # Issue #1446 — this scope with no guard record for the instance variable `name`: what a write to it leaves.
+    # {#with_ivar} keeps the record, since a narrowing binds through it too.
+    def without_ivar_guard(name)
+      records = drop_guard_record(:ivar, name.to_sym)
+      records.equal?(@guard_records) ? self : rebuild(guard_records: records)
+    end
+
+    # Issue #1446 — true when a class guard's narrowing of the instance variable `name` is live.
+    def guard_narrowed_ivar?(name)
+      !@guard_records.empty? && @guard_records.key?([:ivar, name.to_sym])
     end
 
     # Issue #1429 — the type a guard narrowed the constant reference `key` to, or nil.
@@ -739,7 +781,23 @@ module Rigor
     # {#with_guarded_global} does.
     def with_constant_narrowing(key, type, pre_guard)
       rebuild(constant_narrowings: @constant_narrowings.merge(key => type).freeze,
-              guard_records: add_guard_record([:constant, key].freeze, pre_guard))
+              guard_records: add_guard_record([:constant, key].freeze, pre_guard),
+              bot_guard_classes: drop_bot_guard_class(:constant, key))
+    end
+
+    # Issue #1446 — this scope with `class_names` recorded as the classes a class guard narrowed the receiver `[kind,
+    # name]` to, where the guard left it `bot` ({EMPTY_BOT_GUARD_CLASSES}). Call it after the narrowing, which drops
+    # any earlier entry.
+    def with_bot_guard_classes(kind, name, class_names)
+      key = [kind, kind == :constant ? name : name.to_sym].freeze
+      rebuild(bot_guard_classes: @bot_guard_classes.merge(key => class_names.dup.freeze).freeze)
+    end
+
+    # Issue #1446 — the classes a class guard narrowed the `bot` receiver `[kind, name]` to, or nil.
+    def bot_guard_classes_for(kind, name)
+      return nil if @bot_guard_classes.empty?
+
+      @bot_guard_classes[[kind, name]]
     end
 
     # Issue #1429 — every constant reference whose last segment is `name` with no narrowing: what a write to a constant
@@ -749,7 +807,9 @@ module Rigor
       return self if keys.empty?
 
       records = @guard_records.reject { |(kind, key), _| kind == :constant && keys.include?(key) }
-      rebuild(constant_narrowings: @constant_narrowings.except(*keys).freeze, guard_records: records.freeze)
+      classes = @bot_guard_classes.except(*keys.map { |key| [:constant, key] }).freeze
+      rebuild(constant_narrowings: @constant_narrowings.except(*keys).freeze, guard_records: records.freeze,
+              bot_guard_classes: classes)
     end
 
     # Issue #1429 — the constant reference `key` with no narrowing.
@@ -757,11 +817,12 @@ module Rigor
       return self unless @constant_narrowings.key?(key)
 
       rebuild(constant_narrowings: @constant_narrowings.except(key).freeze,
-              guard_records: @guard_records.except([:constant, key]).freeze)
+              guard_records: @guard_records.except([:constant, key]).freeze,
+              bot_guard_classes: drop_bot_guard_class(:constant, key))
     end
 
-    # True when a guard's narrowing of a global or constant is live, the state {#forget_guard_narrowings} drops and
-    # so the gate on every scan that decides whether to.
+    # True when a guard's narrowing of a global, constant or instance variable is live, the state
+    # {#forget_guard_narrowings} drops and so the gate on every scan that decides whether to.
     def guard_narrowed?
       !@guard_records.empty?
     end
@@ -770,23 +831,19 @@ module Rigor
     # the union of its narrowed type and the binding the guard narrowed, and no record is left. The union, not the
     # pre-guard binding alone, because the code may leave the value as it was: `$stdout.is_a?(StringIO)`, then a
     # helper, reads `IO | StringIO`, which keeps `$stdout.string` quiet as the guard intended.
+    #
+    # Issue #1446 — an instance variable a class guard narrowed is restored the same way.
     def forget_guard_narrowings
       return self if @guard_records.empty?
 
-      globals = @globals
-      constants = @constant_narrowings
+      tables = { global: @globals, constant: @constant_narrowings, ivar: @ivars }
       @guard_records.each do |(kind, name), pre_guard|
-        if kind == :global
-          current = globals[name]
-          globals = globals.merge(name => Type::Combinator.union(pre_guard, current)) if current
-        else
-          current = constants[name]
-          constants = constants.merge(name => Type::Combinator.union(pre_guard, current)) if current
-        end
+        table = tables.fetch(kind)
+        current = table[name]
+        tables[kind] = table.merge(name => Type::Combinator.union(pre_guard, current)) if current
       end
-      rebuild(globals: globals.frozen? ? globals : globals.freeze,
-              constant_narrowings: constants.frozen? ? constants : constants.freeze,
-              guard_records: EMPTY_GUARD_RECORDS)
+      globals, constants, ivars = tables.values_at(:global, :constant, :ivar).map { |t| t.frozen? ? t : t.freeze }
+      rebuild(globals: globals, constant_narrowings: constants, ivars: ivars, guard_records: EMPTY_GUARD_RECORDS)
     end
 
     # Issue #1362 (ADR-58 parity, ADR-117 Decision point 2) — used by the method-entry and top-level seeds to bind a
@@ -1811,17 +1868,17 @@ module Rigor
 
     # Issue #1429 — a join keeps a guard record while the joined scope still narrows its name: a global both arms
     # bind, a constant both arms narrow (one an arm does not narrow reads its resolved type after the join, so its
-    # narrowing is gone). An arm without a record contributes nothing to the restore target, whose union with the
-    # joined binding {#forget_guard_narrowings} takes, so it still covers that arm's binding.
-    def join_guard_records(other, joined_globals, joined_constants)
+    # narrowing is gone), and an instance variable both arms bind (#1446). An arm without a record contributes nothing
+    # to the restore target, whose union with the joined binding {#forget_guard_narrowings} takes, so it still covers
+    # that arm's binding.
+    # `joined` maps each record kind to the joined scope's table of that kind.
+    def join_guard_records(other, joined)
       mine = @guard_records
       theirs = other.guard_records
       return EMPTY_GUARD_RECORDS if mine.empty? && theirs.empty?
 
       merged = mine.merge(theirs) { |_key, left, right| Type::Combinator.union(left, right) }
-      kept = merged.select do |(kind, name), _|
-        kind == :global ? joined_globals.key?(name) : joined_constants.key?(name)
-      end
+      kept = merged.select { |(kind, name), _| joined.fetch(kind).key?(name) }
       kept.empty? ? EMPTY_GUARD_RECORDS : kept.freeze
     end
     private :join_guard_records
@@ -1866,7 +1923,8 @@ module Rigor
     end
 
     def same_guard_state?(other)
-      @constant_narrowings == other.constant_narrowings && @guard_records == other.guard_records
+      @constant_narrowings == other.constant_narrowings && @guard_records == other.guard_records &&
+        @bot_guard_classes == other.bot_guard_classes
     end
 
     def rebuild(
@@ -1893,7 +1951,8 @@ module Rigor
       repeated_or_writes: @repeated_or_writes,
       match_frame: @match_frame,
       constant_narrowings: @constant_narrowings,
-      guard_records: @guard_records
+      guard_records: @guard_records,
+      bot_guard_classes: @bot_guard_classes
     )
       self.class.new(
         environment: environment, locals: locals,
@@ -1920,7 +1979,8 @@ module Rigor
         repeated_or_writes: repeated_or_writes,
         match_frame: match_frame,
         constant_narrowings: constant_narrowings,
-        guard_records: guard_records
+        guard_records: guard_records,
+        bot_guard_classes: bot_guard_classes
       )
     end
 
@@ -2010,15 +2070,32 @@ module Rigor
         # of a merge inside one body carry the same one; `||` keeps it should either arm lack it, since dropping
         # it only loses the frame's resets.
         match_frame: @match_frame || other.match_frame,
-        # Issue #1429 — the guard narrowings of globals and constants and their pre-guard records.
-        **join_guard_narrowings(other, joined_globals)
+        # Issue #1429 — the guard narrowings of globals and constants and their pre-guard records, and of instance
+        # variables (#1446).
+        **join_guard_narrowings(other, joined_globals, joined_ivars)
       )
     end
 
-    def join_guard_narrowings(other, joined_globals)
+    def join_guard_narrowings(other, joined_globals, joined_ivars)
       joined_constants = join_constant_narrowings(other)
-      { constant_narrowings: joined_constants,
-        guard_records: join_guard_records(other, joined_globals, joined_constants) }
+      joined = { global: joined_globals, ivar: joined_ivars, constant: joined_constants }
+      { constant_narrowings: joined_constants, guard_records: join_guard_records(other, joined),
+        bot_guard_classes: join_bot_guard_classes(other) }
+    end
+
+    # Issue #1446 — an entry both arms hold, with the classes of either: the joined receiver reads `bot` only where
+    # both arms do. One only an arm holds is dropped, so a call on the joined `bot` reads as on an unknown one.
+    def join_bot_guard_classes(other)
+      mine = @bot_guard_classes
+      theirs = other.bot_guard_classes
+      return mine if mine.equal?(theirs)
+      return EMPTY_BOT_GUARD_CLASSES if mine.empty? || theirs.empty?
+
+      joined = mine.each_with_object({}) do |(key, names), acc|
+        other_names = theirs[key]
+        acc[key] = (names | other_names).freeze if other_names
+      end
+      joined.empty? ? EMPTY_BOT_GUARD_CLASSES : joined.freeze
     end
 
     # Issue #1429 — a constant reference both arms narrow reads the union; one only an arm narrows reads its resolved
@@ -2230,6 +2307,13 @@ module Rigor
       return @guard_records if @guard_records.key?(key)
 
       @guard_records.merge(key => pre_guard).freeze
+    end
+
+    def drop_bot_guard_class(kind, name)
+      return @bot_guard_classes if @bot_guard_classes.empty?
+
+      key = [kind, kind == :constant ? name : name.to_sym]
+      @bot_guard_classes.key?(key) ? @bot_guard_classes.except(key).freeze : @bot_guard_classes
     end
 
     def drop_guard_record(kind, name)

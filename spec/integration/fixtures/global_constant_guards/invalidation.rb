@@ -126,3 +126,28 @@ def alias_write
   $> = STDOUT
   assert_type("File | IO", $stdout)
 end
+
+# Issue #1446 — a class guard disjoint from a receiver's binding leaves the receiver `bot`, but a value that passes the
+# guard at run time is of the guarded class, and a call on it dispatches there: `Proc#call` runs code the method does
+# not show, and so may a call on what `Array#each` yields.
+CB = :x
+
+def dropped_by_call_on_guarded_proc
+  return unless $sep
+  return unless CB.is_a?(Proc)
+
+  CB.call
+  copy = $sep
+  copy.length # FIRES-1429 call.possible-nil-receiver
+end
+
+def dropped_by_call_on_what_a_guarded_array_yields
+  return unless $sep
+
+  list = {}
+  return unless list.is_a?(Array)
+
+  list.each { |item| item.run }
+  copy = $sep
+  copy.length # FIRES-1429 call.possible-nil-receiver
+end

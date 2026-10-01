@@ -625,7 +625,8 @@ module Rigor
       # lands.
       def eval_ivar_write(node)
         rhs_type, post_rhs = sub_eval(node.value, scope)
-        bound = post_rhs.with_ivar(node.name, rhs_type)
+        # Issue #1446 — a write ends a class guard's narrowing of the variable, as it does a global's.
+        bound = post_rhs.with_ivar(node.name, rhs_type).without_ivar_guard(node.name)
         bound = bound.with_ivar_origin(node.name, rhs_origin(node.value, post_rhs, rhs_type))
         cause = optimistic_rhs_origin(node.value, post_rhs)
         bound = bound.with_optimistic_ivar(node.name, cause, miss: optimistic_rhs_miss(node.value, post_rhs)) if cause
@@ -806,7 +807,8 @@ module Rigor
       end
 
       def rebind_variable(target_scope, kind, name, type)
-        target_scope.public_send(VAR_KIND_BUILDERS.fetch(kind), name, type)
+        bound = target_scope.public_send(VAR_KIND_BUILDERS.fetch(kind), name, type)
+        kind == :ivar ? bound.without_ivar_guard(name) : bound
       end
 
       def compound_result_type(current, rhs, operator)
@@ -2431,6 +2433,12 @@ module Rigor
         case index_node
         when Prism::LocalVariableTargetNode
           scope.with_local(index_node.name, element_type)
+        when Prism::InstanceVariableTargetNode
+          # Issue #1446 — `for @io in xs` writes the ivar each iteration, which ends a class guard's narrowing of it,
+          # and `for $out in xs` the global, which ends any guard's narrowing of it.
+          scope.with_ivar(index_node.name, element_type).without_ivar_guard(index_node.name)
+        when Prism::GlobalVariableTargetNode
+          scope.with_global(index_node.name, element_type)
         when Prism::IndexTargetNode
           widen_index_target(index_node, element_type, scope, type_scope: scope)
         when Prism::MultiTargetNode
@@ -5675,6 +5683,12 @@ module Rigor
         case ref
         when Prism::LocalVariableTargetNode
           scope.with_local(ref.name, exception_type)
+        when Prism::InstanceVariableTargetNode
+          # Issue #1446 — `rescue => @io` writes the ivar, which ends a class guard's narrowing of it, and `rescue =>
+          # $out` the global, which ends any guard's narrowing of it.
+          scope.with_ivar(ref.name, exception_type).without_ivar_guard(ref.name)
+        when Prism::GlobalVariableTargetNode
+          scope.with_global(ref.name, exception_type)
         when Prism::IndexTargetNode
           widen_index_target(ref, exception_type, scope, type_scope: scope)
         else

@@ -69,6 +69,48 @@ RSpec.describe Rigor::Inference::GuardRebinding do
       expect(described_class.may_rebind?(call("unknown.val += 1"), scope)).to be(true)
       expect(described_class.may_rebind?(call("Object.const_set(:A, 1)"), scope)).to be(true)
     end
+
+    # Issue #1446 — a write to an instance variable counts only when a class guard narrowed that variable, and
+    # `instance_variable_set` / `remove_instance_variable` count on any receiver, which may be `self`.
+    it "counts a write to an instance variable a class guard narrowed, and the reflective ivar writers" do
+      guarded = scope.with_guarded_ivar(:@io, string_t, Rigor::Type::Combinator.union(string_t, nil_t))
+      expect(described_class.may_rebind?(call("list.each { @io = nil }"), guarded)).to be(true)
+      expect(described_class.may_rebind?(call("@io ||= s"), guarded)).to be(true)
+      expect(described_class.may_rebind?(call("@other = nil"), guarded)).to be(false)
+      expect(described_class.may_rebind?(call("list.each { @io = nil }"), scope)).to be(false)
+      ["s.instance_variable_set(:@io, nil)", "s.remove_instance_variable(:@io)"].each do |source|
+        expect(described_class.call_may_rebind?(call(source), scope)).to be(true), source
+      end
+    end
+
+    # Issue #1446 — a call on a receiver a disjoint class guard left `bot` dispatches on the class the guard named: the
+    # value that passes the guard is one of them. Its arguments and literal block still count.
+    context "with a receiver a class guard left bot" do
+      let(:bot) { Rigor::Type::Combinator.bot }
+
+      def guarded_as(class_name)
+        scope.with_guarded_ivar(:@io, bot, string_t).with_bot_guard_classes(:ivar, :@io, [class_name])
+      end
+
+      it "reads a core method of the guarded class as running no foreign code, but still reads its operands" do
+        guarded = guarded_as("StringIO")
+        ["@io.rewind", "@io.each_line { |l| l.chomp }"].each do |source|
+          expect(described_class.call_may_rebind?(call(source), guarded)).to be(false), source
+        end
+        expect(described_class.operands_may_rebind?(call("@io.write(helper)"), guarded)).to be(true)
+        expect(described_class.call_may_rebind?(call("@io.each_line { helper }"), guarded)).to be(true)
+      end
+
+      it "counts a call on a guarded code object, and a call on what the guarded class yields" do
+        expect(described_class.call_may_rebind?(call("@io.call"), guarded_as("Proc"))).to be(true)
+        expect(described_class.call_may_rebind?(call("@io.each { |x| x.run }"), guarded_as("Array"))).to be(true)
+      end
+
+      it "reads a bot no class guard produced as an unresolved receiver" do
+        unrecorded = scope.with_guarded_ivar(:@io, bot, string_t)
+        expect(described_class.call_may_rebind?(call("@io.rewind"), unrecorded)).to be(true)
+      end
+    end
   end
 
   describe "ScanScope.block_parameter_scope" do

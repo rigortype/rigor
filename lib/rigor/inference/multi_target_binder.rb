@@ -131,7 +131,7 @@ module Rigor
       # ([#1504](https://github.com/rigortype/rigor/issues/1504)).
       def apply_bindings(bound, types, optimistic, ivars: NO_BINDINGS, optimistic_ivars: NO_NAMES, miss: nil)
         types.each { |name, type| bound = bound.with_local(name, type) }
-        ivars.each { |name, type| bound = bound.with_ivar(name, type) }
+        ivars.each { |name, type| bound = bound.with_ivar(name, type).without_ivar_guard(name) }
         origin = OptimisticOrigin::IMPLICITLY_RETURNS_NIL
         optimistic.each { |name| bound = bound.with_optimistic_local(name, origin, miss: miss) }
         optimistic_ivars.each { |name| bound = bound.with_optimistic_ivar(name, origin, miss: miss) }

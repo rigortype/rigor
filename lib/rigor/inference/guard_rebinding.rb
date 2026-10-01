@@ -33,12 +33,19 @@ module Rigor
     # The accepted gap is implicit conversion: a core method that calls back into a project method the program
     # does not spell (`puts obj` runs `obj.to_s`, `hash[obj]` runs `obj.hash`, `a.sort` runs `<=>`) is read as the
     # core method alone.
+    #
+    # Issue #1446 — a class guard's narrowing of an instance variable is restored at the same code, since code that
+    # may rebind a global may reach `self` and rebind the variable too, and at two more: `instance_variable_set` and
+    # `remove_instance_variable` on any receiver, and a write to the narrowed variable in code the scan reads (a
+    # block that may run again, a loop's next pass).
     module GuardRebinding
       # Calls that run code chosen by name or by a String.
       CODE_RUNNING_NAMES = Set[
         :send, :__send__, :public_send, :eval, :require, :require_relative, :load,
         # These rebind a constant on any receiver (`Object.const_set(:SEP, nil)`).
-        :const_set, :remove_const
+        :const_set, :remove_const,
+        # These rebind an instance variable of a receiver that may be `self` (#1446).
+        :instance_variable_set, :remove_instance_variable
       ].freeze
       # These run their literal block, which the scan reads as any block, or a String of code, which it cannot read.
       BLOCK_OR_CODE_NAMES = Set[
@@ -109,10 +116,11 @@ module Rigor
           (call_node.block.is_a?(Prism::BlockArgumentNode) && may_rebind?(call_node.block, scope))
       end
 
-      # True when running `node` may rebind one: it writes a global or constant, yields, calls `super`, or holds a
-      # call, spelled or implicit ({.implicit_call_may_rebind?}), whose method may run foreign code. A `def` and a
-      # lambda literal run nothing where they are written. Each node is visited once: a call's literal block is
-      # reached as one of its children, so a nested block chain costs its size, not its depth's power.
+      # True when running `node` may rebind one: it writes a global, a constant or an instance variable a class guard
+      # narrowed, yields, calls `super`, or holds a call, spelled or implicit ({.implicit_call_may_rebind?}), whose
+      # method may run foreign code. A `def` and a lambda literal run nothing where they are written. Each node is
+      # visited once: a call's literal block is reached as one of its children, so a nested block chain costs its
+      # size, not its depth's power.
       #
       # A local the scanned code writes has no binding in `scope` yet, so the scan reads it as the code writes it
       # ({ScanScope.with_scanned_locals}): `copy = $sep; copy.length` is a `String` call. A literal block's parameters
@@ -126,6 +134,7 @@ module Rigor
       def scan(node, scope)
         return false unless node.is_a?(Prism::Node)
         return true if REBINDING_NODES.include?(node.class)
+        return true if guarded_ivar_write?(node, scope)
         return false if node.is_a?(Prism::DefNode) || node.is_a?(Prism::LambdaNode)
         return scan_call(node, scope) if node.is_a?(Prism::CallNode)
         return true if IMPLICIT_CALL_NODES.include?(node.class) && implicit_call_may_rebind?(node, scope)
@@ -133,6 +142,18 @@ module Rigor
         found = false
         node.rigor_each_child { |child| found ||= scan(child, scope) }
         found
+      end
+
+      # Issue #1446 — true when `node` writes an instance variable a class guard narrowed
+      # ({Scope#guard_narrowed_ivar?}). A write to any other instance variable rebinds nothing a guard recorded.
+      def guarded_ivar_write?(node, scope)
+        case node
+        when Prism::InstanceVariableWriteNode, Prism::InstanceVariableOrWriteNode, Prism::InstanceVariableAndWriteNode,
+             Prism::InstanceVariableOperatorWriteNode, Prism::InstanceVariableTargetNode
+          scope.guard_narrowed_ivar?(node.name)
+        else
+          false
+        end
       end
 
       def scan_call(node, scope)
@@ -156,7 +177,9 @@ module Rigor
       def implicit_call_may_rebind?(node, scope)
         kind = VARIABLE_OPERATOR_WRITES[node.class]
         return type_method_foreign?(variable_type(kind, node.name, scope), node.binary_operator, scope) if kind
-        return type_method_foreign?(scope.type_of(node.collection), :each, scope) if node.is_a?(Prism::ForNode)
+        if node.is_a?(Prism::ForNode)
+          return type_method_foreign?(ScanScope.dispatch_type(node.collection, scope), :each, scope)
+        end
 
         compound_write_foreign?(node, scope)
       rescue StandardError
@@ -174,7 +197,7 @@ module Rigor
       end
 
       def compound_receiver_type(node, scope)
-        return scope.type_of(node.receiver) if node.receiver
+        return ScanScope.dispatch_type(node.receiver, scope) if node.receiver
 
         scope.self_type || Type::Combinator.nominal_of("Object")
       end
@@ -264,7 +287,7 @@ module Rigor
           return ProjectMethodOwnership.targets(self_type)
         end
 
-        ProjectMethodOwnership.targets(scope.type_of(receiver))
+        ProjectMethodOwnership.targets(ScanScope.dispatch_type(receiver, scope))
       end
 
       def foreign_target?(class_name, method_name, kind, scope)
@@ -300,8 +323,8 @@ module Rigor
         owner = definition.respond_to?(:defined_in) ? definition.defined_in : nil
         owner&.to_s&.delete_prefix("::")
       end
-      private_class_method :scan, :scan_call, :receiver_targets, :foreign_target?, :universal_delegate_foreign?,
-                           :method_owner, :deferred_block_call?,
+      private_class_method :scan, :guarded_ivar_write?, :scan_call, :receiver_targets, :foreign_target?,
+                           :universal_delegate_foreign?, :method_owner, :deferred_block_call?,
                            :compound_write_foreign?,
                            :compound_receiver_type, :compound_accessors, :compound_read_type, :variable_type,
                            :type_method_foreign?
@@ -376,9 +399,10 @@ module Rigor
           bindings.reduce(scope) { |acc, (name, type)| acc.with_local(name, type) }
         end
 
-        # What the method `call_node` calls yields its block, by position, or `[]` when that cannot be read.
+        # What the method `call_node` calls yields its block, by position, or `[]` when that cannot be read. A receiver
+        # a class guard left `bot` yields what the guarded class does ({.dispatch_type}, #1446).
         def yielded_types(call_node, scope)
-          receiver = call_node.receiver ? scope.type_of(call_node.receiver) : scope.self_type
+          receiver = call_node.receiver ? dispatch_type(call_node.receiver, scope) : scope.self_type
           arguments = call_node.arguments&.arguments || []
           MethodDispatcher.expected_block_param_types(
             receiver_type: receiver, method_name: call_node.name, environment: scope.environment, scope: scope,
@@ -386,6 +410,23 @@ module Rigor
           )
         rescue StandardError
           []
+        end
+
+        # Issue #1446 — the type a call on the receiver `node` dispatches on: its type in `scope`, or, where a class
+        # guard disjoint from the receiver's binding left it `bot` (`return unless @io.is_a?(StringIO)` on an `IO`),
+        # the classes the guard named ({Narrowing.bot_guard_classes_of}), since the value that passes the guard is one
+        # of them. So `@io.rewind` reads as `StringIO#rewind` and keeps the narrowing, while `@cb.call` past
+        # `@cb.is_a?(Proc)` reads as a call on a code object, and a method a project subclass or reopening defines on
+        # the class still counts. A `bot` no class guard produced stays `bot`, which no target resolves, so a call on
+        # it counts as an unresolved callee.
+        def dispatch_type(node, scope)
+          type = scope.type_of(node)
+          return type unless type.is_a?(Type::Bot)
+
+          classes = Narrowing.bot_guard_classes_of(node, scope)
+          return type if classes.nil?
+
+          Type::Combinator.union(*classes.map { |name| Type::Combinator.nominal_of(name) })
         end
 
         # The names a block's parameter list declares: every kind of parameter, a destructured one's parts included,

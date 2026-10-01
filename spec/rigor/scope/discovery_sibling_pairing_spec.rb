@@ -180,6 +180,17 @@ RSpec.describe "DiscoveryIndex sibling pairing (ADR-119 WD1)" do
       expect(warm.fetch(:bundles).fetch(first).fetch(:siblings)).to eq(injected)
     end
 
+    it "builds a bundle from a live file index that holds non-empty siblings, and reads it back" do
+      path = write_project(project).first
+      file_index = indexer.build_file_index(path, Prism.parse(File.read(path), filepath: path).value)
+                          .merge(siblings: injected)
+
+      bundle = indexer.build_seed_bundle(file_index, {}, "digest", "fingerprint")
+
+      expect(bundle.fetch(:siblings)).to eq(injected)
+      expect(indexer.bundle_to_file_index(crossed(bundle), path).fetch(:siblings)).to eq(injected)
+    end
+
     it "carries empty siblings as empty" do
       cold = cold_index(project)
       warm = indexer.discovered_project_index_incremental(project.keys, seed_bundles: crossed(cold.fetch(:bundles)))

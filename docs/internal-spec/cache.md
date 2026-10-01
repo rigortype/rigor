@@ -931,8 +931,11 @@ bundle a `parameter_envelopes` table
 output digest a value
 ([#1574](https://github.com/rigortype/rigor/issues/1574), below); `30` gave each seed
 bundle a `source_rbs_digest`
-([#1536](https://github.com/rigortype/rigor/issues/1536), below). A blob
-from an older schema mismatches the `SCHEMA` gate and loads as `nil` — a
+([#1536](https://github.com/rigortype/rigor/issues/1536), below); `35` gave each
+seed bundle a `siblings` Hash, the `possible_*` / `contested_*` halves of the
+discovery-index pairs (ADR-119 WD1, [`inference-engine.md`](inference-engine.md)
+§ "Discovery Index"), every one empty until a producer admits a possible fact.
+A blob from an older schema mismatches the `SCHEMA` gate and loads as `nil` — a
 clean cold rebuild, never a migration.
 
 ### `plugin_fact_digest` — plugin-fact soundness ([ADR-88](../adr/88-incremental-plugin-fact-soundness.md))

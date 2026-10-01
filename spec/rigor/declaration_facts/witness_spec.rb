@@ -130,7 +130,7 @@ RSpec.describe "Declaration-fact witness" do
 
     it "#1573: keeps a repeated extend at its first position" do
       pending "https://github.com/rigortype/rigor/issues/1573 — fixed by the lane-2 record_extend_targets producer " \
-              "change (ADR-119 WD7); C.foo resolves to E1's def"
+              "change (ADR-119 WD7); today C.foo resolves to E1's def (line 8); fixed, E2's (line 12)"
 
       expect(violations("issue_1573")).to eq([])
     end

@@ -545,9 +545,7 @@ RUBY
 RSpec.describe "Scope::ResolutionChain against Ruby's own resolution" do
   def ruby_answers(path, fixture)
     queries = fixture.slice(:methods, :ancestors, :constants).transform_keys(&:to_s)
-    stdout, stderr, status = Bundler.with_unbundled_env do
-      Open3.capture3(RbConfig.ruby, "-e", RESOLUTION_CHAIN_WITNESS_PROBE, path, JSON.generate(queries))
-    end
+    stdout, stderr, status = RubyRun.capture("-e", RESOLUTION_CHAIN_WITNESS_PROBE, path, JSON.generate(queries))
     raise "fixture probe failed: #{stderr}" unless status.success?
 
     JSON.parse(stdout)
@@ -903,9 +901,29 @@ RSpec.describe "Scope::ResolutionChain against Ruby's own resolution" do
 
     # Flip this when #1573 is fixed (the lane-2 producer change, ADR-119 WD7): the extend table keeps the first
     # position, the singleton chain settles, and the read answers the def Ruby runs (`E2`, line 6).
+    # Flip this when #1573 is fixed, together with the pending example below.
+    it "today: reads a repeated extend at E1's def (#1573)" do
+      source = <<~RUBY
+        module E1
+          def foo = :e1
+        end
+
+        module E2
+          def foo = :e2
+        end
+
+        class C
+          extend E1
+          extend E2
+          extend E1
+        end
+      RUBY
+      expect(rigor_agreed_singleton_line(rigor_scope(source), "C", :foo)).to eq(2)
+    end
+
     it "reads a repeated extend at Ruby's first position (#1573)" do
       pending "https://github.com/rigortype/rigor/issues/1573 — fixed by the lane-2 record_extend_targets change; " \
-              "the read answers E1's def (line 2)"
+              "today the read answers E1's def (line 2); fixed, E2's (line 6)"
 
       source = <<~RUBY
         module E1

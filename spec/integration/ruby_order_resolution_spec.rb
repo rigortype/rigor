@@ -199,6 +199,8 @@ RSpec.describe "resolution in Ruby's ancestor order (#1567, #1568, #1570, #1571)
     expect(RubyRun.stdout(issue_1570_source("p C.ancestors.first(3)\np C.new.foo"))).to eq("[C, Base, M]\n1\n")
   end
 
+  # The pin of today's answer for this same program (the `tail` below is the text of `keeps master's answer ...
+  # (#1570)` above) is that example; flip both together.
   # Flip this when ADR-119 PR C1 fixes #1570 at `SourceArity`'s decision point: line 19 (`C.new.foo`) is correct
   # under Ruby's run and goes silent; line 20 is the control and stays.
   it "reports no arity error for an include of a module the superclass already includes (#1570)" do

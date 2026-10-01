@@ -28,10 +28,12 @@ single-route fork rule, `unsettled`, and `settle` as the one decision owner; fix
 
 Next:
 
-1. **#1562, ADR-119 (Proposed, v15).** It records the landed chain and puts per-name relevance and
-   `Unknown` answers into PR C (C1 firing sites, fixing #1570; C2 typing sites). The v14 review's
-   findings are resolved in v15; make sure the text records #1593 as landed, then present it to the
-   maintainer for acceptance. Once accepted, close #1531 as superseded.
+1. **#1562, ADR-119 (Proposed, v16.1).** Every prerequisite its Migration listed has landed: #1597
+   (pending witnesses for #1570/#1572/#1573/#1594), #1598 (fixes #1548), #1599 (a cross-commit
+   `call.wrong-arity` differential, `tool/engine_diag_diff.rb` and the `arity-differential` CI job,
+   which replaced the in-tree oracle) and #1600 (WD1's always-empty siblings). It awaits the
+   maintainer's acceptance; once accepted, set Status to Accepted, merge, and close #1531 as
+   superseded. PR C (C1 firing sites, C2 typing sites) follows under WD7 lane 2.
 2. **Open false positives the chain cannot fix by falling back to master's order** (unsettled means
    master's order, not a decline): #1592's hook shapes and #1594 (a concern's `included do`). Both
    need PR C's `Unknown` or the concern/hook model of a follow-up ADR.

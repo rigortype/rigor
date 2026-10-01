@@ -28,10 +28,15 @@ single-route fork rule, `unsettled`, and `settle` as the one decision owner; fix
 
 Next:
 
-1. **ADR-119, accepted 2026-10-01 (#1562 merged; #1531 closed as superseded).** Next is PR C under
-   WD7 lane 2: C1 (firing sites — `SourceArity`'s decision point, fixing #1570, the override and
-   visibility lints) then C2 (typing sites). A planning pass is splitting C1; every removed or added
-   `call.wrong-arity` goes through `tool/engine_diag_diff.rb` and `arity_adjudication.yml`.
+1. **ADR-119, accepted 2026-10-01; PR C in progress.** Landed: #1601 (errata: the C1a–C1e split, Q12),
+   #1602 (C1a: `DefinerResolution`, marks, relevance; instance side only), #1610 (ambiguous spellings
+   discharge), #1605 (C1b: `SourceArity`, fixes #1570). Waiting on the maintainer:
+   - **#1606 (C1c, Draft, CI green, reviewed):** override and visibility lints. It loses real
+     diagnostics (Mastodon 10, GitLab controllers 61, all `tp-lost`; 0 corpus FPs silenced). Merge or
+     hold is the maintainer's call (ADR Q3); the recoveries are #1608, #1609, #1611, #1612.
+   - **Q12** (the admission census reading of WD1(ii)) gates C1d0; C1d follows it.
+   - The singleton side is designed (a positional decline) for C2, after #1603; #1607 tracks
+     singleton #1570. Fold the C1 planning's WD3/C1c-row errata into the ADR when C1c lands.
 2. **Open false positives the chain cannot fix by falling back to master's order** (unsettled means
    master's order, not a decline): #1592's hook shapes and #1594 (a concern's `included do`). Both
    need PR C's `Unknown` or the concern/hook model of a follow-up ADR.

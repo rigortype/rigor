@@ -73,116 +73,15 @@ module Rigor
           end
         end
 
-        # True only for an ancestor that cannot define `name`: a module the project declares but that has no
-        # `def` (a concern holding only `included do` blocks sits here, not as a project entry) when
-        # {project_lacks?} holds, or one the project does not declare that RBS knows and whose declaration lacks
-        # `name` (`SourceArity#external_mixin_lacks_method?`). An unknown one, or one that has it, may answer.
-        # `edges` collects the recording edges {project_lacks?} reads; without it they are filed directly.
-        def external_lacks?(scope, candidates, name, edges = nil)
-          declared = candidates.find { |candidate| ResolutionChain.declared?(scope, candidate) }
-          return bare_module_lacks?(scope, declared, name, edges) if declared
-
+        # True only for an ancestor the project does not declare that RBS knows and whose declaration lacks `name`
+        # (`SourceArity#external_mixin_lacks_method?`); an unknown one, or one that has it, may answer.
+        def external_lacks?(scope, candidates, name)
           known = candidates.find { |candidate| Rigor::Reflection.rbs_class_known?(candidate, scope: scope) }
           return false if known.nil?
 
           Rigor::Reflection.instance_method_definition(known, name, scope: scope).nil?
         rescue StandardError
           false
-        end
-
-        # A declared module with no `def` is judged only when its body can hold no macro: one that extends,
-        # includes, prepends or lists a mixin may run `included do my_macro :foo end` (or a helper's hook) that
-        # defines on the includer with nothing the tables record, so it is never said to lack the name.
-        def bare_module_lacks?(scope, owner, name, edges)
-          local = edges || []
-          verdict = if bare_module?(scope, owner)
-                      project_lacks?(scope, owner, name, local)
-                    else
-                      local << [:class, owner]
-                      false
-                    end
-          replay(scope, local) if edges.nil? && Analysis::DependencyRecorder.active?
-          verdict
-        end
-
-        # No mixin table lists the module, and every file declaring it gives it a body of nested constant,
-        # module and class definitions and literals only. A call in the body (`extend ActiveSupport::Concern`,
-        # `included do my_macro :foo end`, `include`, `private`) is recorded in no table and may define the name
-        # on the includer, so it ends the judgement; so does a file that cannot be read or does not show the module.
-        def bare_module?(scope, owner)
-          return false if [scope.discovered_extends, scope.discovered_includes,
-                           scope.discovery.unpositioned_mixins].any? { |table| table.key?(owner) }
-
-          memo = ResolutionChain.relevance_memo(scope, :methods)
-          memo.fetch([:bare, owner]) do
-            sites = ResolutionChain.declaring_files(scope, owner)
-            memo[[:bare, owner]] = !sites.nil? && !sites.empty? && sites.all? { |site| bare_in_file?(site, owner) }
-          end
-        end
-
-        def bare_in_file?(path, owner)
-          found = false
-          bare = true
-          each_module_body(Prism.parse_file(path).value.statements, nil) do |name, body|
-            next unless name == owner
-
-            found = true
-            bare &&= body.nil? || body.body.all? { |node| bare_statement?(node) }
-          end
-          found && bare
-        rescue StandardError
-          false
-        end
-
-        def each_module_body(statements, prefix, &)
-          statements.body.each do |node|
-            case node
-            when Prism::ModuleNode, Prism::ClassNode
-              name = [prefix, node.constant_path.full_name.delete_prefix("::")].compact.join("::")
-              yield name, node.body
-              each_module_body(node.body, name, &) if node.body.is_a?(Prism::StatementsNode)
-            when Prism::StatementsNode then each_module_body(node, prefix, &)
-            end
-          end
-        rescue Prism::ConstantPathNode::DynamicPartsInConstantPathError
-          nil
-        end
-
-        LITERALS = [Prism::IntegerNode, Prism::FloatNode, Prism::StringNode, Prism::SymbolNode, Prism::NilNode,
-                    Prism::TrueNode, Prism::FalseNode].freeze
-        private_constant :LITERALS
-
-        def bare_statement?(node)
-          case node
-          when Prism::ModuleNode, Prism::ClassNode then true
-          when Prism::ConstantWriteNode, Prism::ConstantPathWriteNode then LITERALS.any? { |klass| node.value.is_a?(klass) }
-          else LITERALS.any? { |klass| node.is_a?(klass) }
-          end
-        end
-
-        # Whether the project module `owner` cannot answer `name`: no rewritten surface, no `"*"` mixin (on the
-        # include side and on `kind`, or on either side without a `kind`), no `method_missing`, no singleton hook,
-        # and no record of the name. Files `[:class, owner]` and the negative `[:method, "Owner#name"]` on `edges`.
-        def project_lacks?(scope, owner, name, edges, kind = nil)
-          edges << [:class, owner] << [:method, "#{owner}##{name}"]
-          return false if Scope::DiscoveryIndex.rewritten_surface?(scope.parameter_envelopes_of(owner))
-          return false if wildcard_listed?(scope, owner, kind)
-          return false if scope.discovered_method?(owner, :method_missing, :instance)
-          return false if HOOKS.any? { |hook| scope.discovered_method?(owner, hook, :singleton) }
-
-          !records_name?(scope, owner, name)
-        end
-
-        def wildcard_listed?(scope, owner, kind)
-          sides = scope.discovery.unpositioned_mixins[owner]
-          return false if sides.nil?
-
-          (kind ? [:include, kind].uniq : %i[include extend]).any? { |side| sides[side]&.include?(WILDCARD) }
-        end
-
-        def records_name?(scope, owner, name)
-          scope.discovered_method?(owner, name, :instance) || scope.discovered_method?(owner, name, :singleton) ||
-            !scope.discovered_method_visibility(owner, name).nil?
         end
 
         # One verdict's working state: the scope, the resolver, and the edges the tests read.
@@ -227,14 +126,33 @@ module Rigor
           end
 
           def project_clean?(entry)
-            Relevance.project_lacks?(@scope, entry.name, @name, @edges, @mark.kind)
+            owner = entry.name
+            @edges << [:class, owner] << [:method, "#{owner}##{@name}"]
+            return false if Scope::DiscoveryIndex.rewritten_surface?(@scope.parameter_envelopes_of(owner))
+            return false if wildcard_listed?(owner)
+            return false if @scope.discovered_method?(owner, :method_missing, :instance)
+            return false if HOOKS.any? { |hook| @scope.discovered_method?(owner, hook, :singleton) }
+
+            !records_name?(owner)
+          end
+
+          def wildcard_listed?(owner)
+            sides = @scope.discovery.unpositioned_mixins[owner]
+            return false if sides.nil?
+
+            [:include, @mark.kind].uniq.any? { |side| sides[side]&.include?(WILDCARD) }
+          end
+
+          def records_name?(owner)
+            @scope.discovered_method?(owner, @name, :instance) || @scope.discovered_method?(owner, @name, :singleton) ||
+              !@scope.discovered_method_visibility(owner, @name).nil?
           end
 
           # An ancestor the project does not declare: only a module RBS knows, whose declaration lacks the name,
           # is evidence it does not define it (`SourceArity#external_mixin_lacks_method?`).
           def external_clean?(candidates, raw)
             @edges << [:external, raw.to_s.split("::").last]
-            Relevance.external_lacks?(@scope, candidates, @name, @edges)
+            Relevance.external_lacks?(@scope, candidates, @name)
           end
         end
         private_constant :Context

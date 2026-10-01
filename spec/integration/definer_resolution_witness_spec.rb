@@ -362,14 +362,16 @@ RSpec.describe Rigor::Inference::DefinerResolution do # rubocop:disable RSpec/Sp
       RUBY
     end
 
-    it "skips a bare declared module (plain_empty), so the project definer answers" do
+    # A module the project declares without a `def` is an external entry no table can vouch for: a macro in
+    # `included do`, or a hook defined outside the body (`def Q.included(b) = ...`), defines on the includer with
+    # nothing recorded. It declines, as does a gem module declared nowhere and absent from RBS (a future gem-source
+    # approach, `dependencies.source_inference`, could read it).
+    it "declines on a declared def-less module whose body holds nothing" do
       source = "class B; def foo = 1; end\nmodule Empty; end\nclass C < B; include Empty; end\n"
       expect(RubyRun.stdout("#{source}p C.instance_method(:foo).owner\n").chomp).to eq("B")
-      expect(owner_of(resolve(project_scope("a.rb" => source), :foo))).to eq("B")
+      expect(owner_of(resolve(project_scope("a.rb" => source), :foo))).to eq(:unknown)
     end
 
-    # Any macro in `included do` defines on the includer and is recorded nowhere, so a def-less module that
-    # extends anything, mixes anything in, or lists a mixin is never said to lack the name.
     it "declines on a concern whose included block calls a macro (custom_macro)" do
       source = <<~RUBY
         class Base; def self.my_macro(n) = define_method(n) { :m }; def foo = 1; end
@@ -382,30 +384,20 @@ RSpec.describe Rigor::Inference::DefinerResolution do # rubocop:disable RSpec/Sp
         class C < Base; include Q; end
       RUBY
       expect(RubyRun.stdout("#{source}p C.instance_method(:foo).owner\n", prelude: concern_shim).chomp).to eq("C")
-      scope = project_scope("a.rb" => source)
-      expect(owner_of(resolve(scope, :foo))).to eq(:unknown)
-      expect(Rigor::Scope::ResolutionChain::Relevance.external_lacks?(scope, ["Q"], :foo)).to be(false)
+      expect(owner_of(resolve(project_scope("a.rb" => source), :foo))).to eq(:unknown)
     end
 
-    # A module with a `def` is a project entry, so this chain never asks `external_lacks?` about it; the verdict
-    # is the one a closure test reaches for the same module (`Empty` holds no def, `Hooked` a singleton hook).
-    it "does not say a declared module whose included hook can define the name lacks it" do
+    it "declines on a hook defined outside the module body" do
       source = <<~RUBY
-        class B; def foo = 1; end
-        module Empty; end
-        module Hooked; def self.included(b) = b.define_method(:foo) { 3 }; end
-        class C < B; include Hooked; end
+        class Base; def foo = 1; end
+        module Q; end
+        def Q.included(b) = b.attr_reader(:foo)
+        class C < Base; include Q; end
       RUBY
-      expect(RubyRun.stdout("#{source}p C.new.foo\n").chomp).to eq("3")
-      scope = project_scope("a.rb" => source)
-      relevance = Rigor::Scope::ResolutionChain::Relevance
-      expect(relevance.external_lacks?(scope, ["Empty"], :foo)).to be(true)
-      expect(relevance.external_lacks?(scope, ["Hooked"], :foo)).to be(false)
+      expect(RubyRun.stdout("#{source}p C.instance_method(:foo).owner\n").chomp).to eq("C")
+      expect(owner_of(resolve(project_scope("a.rb" => source), :foo))).to eq(:unknown)
     end
 
-    # A gem module is judged by no source here, so every question declines, as on master (a gem definer may
-    # reduce visibility or narrow a signature). A future gem-source approach (`dependencies.source_inference`)
-    # could read it; `:override` must not skip it before then.
     it "declines on a module neither declared nor in RBS, for every question" do
       source = "class B; def foo = 1; end\nclass C < B; include Gem::Authorization; end\n"
       scope = project_scope("a.rb" => source)
@@ -414,7 +406,7 @@ RSpec.describe Rigor::Inference::DefinerResolution do # rubocop:disable RSpec/Sp
       expect(owner_of(resolve(scope, :foo))).to eq(:unknown)
     end
 
-    it "still declines for :override on an RBS-known external that declares the name" do
+    it "declines for :override on an RBS-known external that declares the name" do
       source = "class Base; def between?(a, b) = false; end\nclass C < Base; include Comparable; end\n"
       expect(owner_of(override_resolve(project_scope("a.rb" => source), :between?))).to eq(:unknown)
     end

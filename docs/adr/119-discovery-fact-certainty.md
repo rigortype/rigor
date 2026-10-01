@@ -299,6 +299,13 @@ from data already there: which *names* an unpositioned edge's closure defines (W
   `spec/rigor/declaration_facts/admission_census_spec.rb` (#1566, `admission_census.yml`): per member,
   the files outside the owners that read or copy the whole table, and the files that read or copy
   every member at once — the slot-reader migration list, distinct from the chain's walker allow-list.
+  Errata (2026-10-01): the census spec's header (`admission_census_spec.rb:14`) says a member admits
+  `possible` facts "only once its entry here is empty", which contradicts (ii) — a whole-table read
+  that only tests existence or identity, or keys a cache, is one WD2 allows, and #1600's paired copies
+  are reads the census must keep listing — and the census has no field to record that a read consults
+  `contested_*`. C1d0 adds a per-file `justified:` classification (an existence, identity or cache-key
+  read WD2 allows; a paired copy of #1600's), moves value reads behind `Scope` readers, and rewords the
+  header to (ii); Q12 asks the maintainer to confirm.
 - **C1's storage obligations**, recorded here and not acceptance blockers: `discovered_def_sources` and
   `discovered_singleton_def_sources` (single-valued, first-wins) have no sibling — C1 adds one or states
   that they are read only beside `discovered_def_nodes`; whether an envelope table's project-wide key and
@@ -313,10 +320,17 @@ A read that answers a question about a member — definer, visibility, arity, ty
 is defined over the chain, and asks `settle`:
 
 - **The internal API.** `Rigor::Inference::DefinerResolution.resolve(scope, class_name, method_name,
-  side, question:)` is the candidate-set read. It is not a `Scope` method, so the pinned public surface
-  is unchanged. It returns `Known(answer)` — keyed by the question: a `[node, owner]` pair for
-  `:definer`, a visibility for `:visibility`, an envelope for `:arity`, so candidates that agree on the
-  answer but differ in node are still `Known` —, `Unknown`, or `Absent`. A result is consumed only by
+  side, question:, from: 0, &answer_in)` is the candidate-set read (errata 2026-10-01: `from:` and the
+  block were under-specified). `from:` is the chain index the read starts at — `0` for a definer read,
+  the position after the class for the override rules' walk (`each_project_ancestor`), a level's start
+  for `SourceArity` — and `answer_in` is the per-chain answer function: given a chain and a start, it
+  computes the question's answer over that world (a level's agreed envelope, a visibility, the nearest
+  definer), so `settle`'s block applies the same function to the retro world and the override rules
+  can place an RBS-declared parent in it. It is not a `Scope` method, so the pinned public surface is
+  unchanged. It returns `Known(answer, owner)` — `answer` keyed by the question: a `[node, owner]`
+  pair for `:definer`, a visibility for `:visibility`, an envelope for `:arity`, so candidates that
+  agree on the answer but differ in node are still `Known`; `owner` the entry that answered, for the
+  diagnostic's text —, `Unknown`, or `Absent`. A result is consumed only by
   an exhaustive `case/in` in the same method, with an arm for each of the three and **no `else` or `in
   _` arm** that could fold `Unknown` into a firing arm; it is never stored, returned or truth-tested
   (`Absent` and `Unknown` are both truthy). PR C adds the spec that enforces this syntactically at
@@ -340,9 +354,11 @@ is defined over the chain, and asks `settle`:
   `Frame` and the memo tuple (RC:656) carry the **marks** — per marking node: the side, each named
   entry listed for it (`"*"` included), and whether the multi-file rule fired — and keeps `unsettled?`
   as the boolean the existing readers see (RC:127). A chain narrows for a name only when **every** mark
-  on it, its own node's and every drawn-on node's, is discharged for that name; the retro world an
-  unsettled chain never built (RC:573) is then built on demand under the same budget (RC:601–609).
-  This changes no discovery table; it grows the chain memo, and WD7(d) names its cost.
+  on it, its own node's and every drawn-on node's, is discharged for that name. Errata (2026-10-01):
+  a mark is discharged only on a fork-free chain (below), so a discharged chain has no retro world to
+  build; the on-demand `build_retro` (RC:573, 601–609) this bullet named is unreachable under the rule
+  as decided and belongs only to a Q10 relaxation. This changes no discovery table; it grows the chain
+  memo, and WD7(d) names its cost.
 - **Per-name relevance (the narrowing of `unsettled`, #1591).** A mark is discharged for the queried
   name only on a chain with **no fork**. Two kinds of mark, two rules:
   - **A named entry** `Q` listed on node `N`'s side (`Q ≠ "*"`) is discharged for name `n` when `Q`'s
@@ -376,8 +392,10 @@ is defined over the chain, and asks `settle`:
     irrelevant mark, chain `[C, Q, X, Base, M]` unsettled, and Ruby answers `X#foo` in all four worlds
     (both load orders, `Q` present or absent) — the read stays `Unknown`, pinned as this clause's
     deliberate decline with a "flip this if relevance is extended to one-fork chains" comment. Its
-    sibling without `X` (Ruby `Base#foo` or `M#foo` by load order, in both `Q`-worlds) is a guard that
-    a discharged mark still runs the retro comparison: `Unknown` by the fork rule, not by this clause.
+    sibling without `X` (Ruby `Base#foo` or `M#foo` by load order, in both `Q`-worlds) stays
+    `Unknown` by this clause too — a forked chain is never narrowed, so no retro comparison runs — and
+    is kept as the guard of a future Q10 relaxation, under which the fork rule must still answer
+    `Unknown` there (errata 2026-10-01: today it does not distinguish the two rules).
     GitLab's Project, Group and User carry forks from hook-duplicated includes (inferred from v12's
     skip counts), so they stay `Unknown` at migrated sites until the follow-up ADR.
 - **Marked entries.** A chain entry carrying the dynamic mark keeps exactly master's declines (§ The
@@ -406,17 +424,20 @@ is defined over the chain, and asks `settle`:
   sha it was written against (`base:`), so only the entries for the current merge base adjudicate or
   count as stale (an entry matching no row fails the run), entries for another base are listed as
   ignored and go dormant once their PR merges, and a rebase updates `base` — with the count of each
-  verdict in the PR. The fixture directory holds the shapes C1 is meant to silence (#1570's line 19, a
-  conditional `def`, a conditional `include`), two controls it must keep (#1570's line 20 and the
-  literal surface, which the survivors' floor does not cover), and `survivors/`, five plain firings
-  that are real arity errors under Ruby: the floor (`--require-rows-in survivors/:5`) counts them in
-  the base **and** the head, and an adjudication entry under a floored path fails whatever its verdict,
-  so what the floor protects cannot be adjudicated away. CI's `arity-differential` job
-  (`.github/workflows/ci.yml:818–848`) runs it on every PR that changes code, over that directory and
-  `declaration_witness/` (10 base rows: the five survivors, three shapes C1 may silence and two
-  controls it must keep); the lane-2
-  corpus run is the same command with the survey checkouts (`docs/agents/measurement.md:54`). Declining
-  on an unsettled
+  verdict in the PR. The fixture directory holds the shapes C1 is meant to silence (#1570's `C.new.foo`
+  call, a conditional `def`, a conditional `include`), two controls it must keep (#1570's `E.new.foo(1)`
+  and the literal surface, which the survivors' floor does not cover), and `survivors/`, five plain
+  firings that are real arity errors under Ruby: the floor (`--require-rows-in survivors/:5`) counts
+  them in the base **and** the head, and an adjudication entry under a floored path fails whatever its
+  verdict, so what the floor protects cannot be adjudicated away. Errata (2026-10-01): the conditional
+  `def` and `include` fixtures guard on `RUBY_VERSION > "3"`, which is true under the suite's Ruby 4.0,
+  so both calls raise `ArgumentError` there and C1's silencing of them is adjudicated `tp-lost` by
+  design — the price of a `possible` definer, not a false positive fixed; and all 10 base rows come from
+  `arity_differential/` (verified with master's engine: the five survivors, the three shapes and the two
+  controls), `declaration_witness/` contributing no `call.wrong-arity` row. CI's `arity-differential`
+  job (`.github/workflows/ci.yml:818–848`) runs it on every PR that changes code, over both directories;
+  the lane-2 corpus run is the same command with the survey checkouts (`docs/agents/measurement.md:54`).
+  Declining on an unsettled
   chain removes coverage on a fifth of a Rails app's reads (#1591), and the ADR accepts that only against
   the adjudicated count.
 - **Conditional definers.** A `def` inside control flow, a method body, or a block **other than the
@@ -528,7 +549,7 @@ A sibling exists **iff its member is declared in `DiscoveryIndex::SIBLINGS`** �
   the fixture names. This is the only witness for the chain, the fork rule and the unsettled rule, whose
   tables are correct while the reads are wrong. Since #1597 the open issues are pinned here too, each
   `pending` on its fix, with Ruby's answer from a `RubyRun` subprocess under a timeout
-  (`spec/support/ruby_run.rb`): #1570 as a diagnostic that flips with C1
+  (`spec/support/ruby_run.rb`): #1570 as a diagnostic that flips with C1b
   (`ruby_order_resolution_spec.rb:198–209`), #1572 as a diagnostic with its own fix (`:751–790`), #1573
   at the table (above) and the read (`resolution_chain_witness_spec.rb:875–925`), the lane-2 producer
   fix, and #1594 as a diagnostic under an `ActiveSupport::Concern` shim that flips with C2
@@ -537,7 +558,7 @@ A sibling exists **iff its member is declared in `DiscoveryIndex::SIBLINGS`** �
   closure entry RBS does not know, a dynamic-surfaced closure entry, a visibility-only statement, a
   `method_missing`, and a `"*"`), the one-fork witness and its guard, #1594 at a migrated instance-side
   site, WD3's three singleton-side signals, a conditional definer, the absent rule, and the flips of
-  #1597's #1570 and #1594 pins.
+  #1597's pins: #1570's in C1b, #1594's in C2 (errata 2026-10-01; each pin names its sub-PR).
 - A fixture must fail on `master` before its fix. **Limit:** one run witnesses one execution; "every
   world" is approximated by fixture variants that take each branch, and a fabricated `certain` fact is
   caught only where a variant's run lacks it. The fuzzer stays local until its load rate on the
@@ -577,9 +598,13 @@ applies to every PR, and no listed gate may be skipped or replaced by a claim.
   after; (b) the corpus diagnostics diff **and** the corpus sig-gen diff, every changed line adjudicated
   under the false-positive rule (`visibility_excludes?` hides visibility changes from diagnostics,
   `generator.rb:732, 907`); (c) neither byte-identity to a predecessor nor a variant is claimed; (d) the
-  per-merge allocation sweep runs and its answer is in the PR, on a plain **and** a recording run, and
-  a change to the chain memo's tuple (WD2's marks, the on-demand retro world) reports the memo's growth
-  separately from the recording edges; (e) for any change that can add or remove a `call.wrong-arity`
+  per-merge allocation sweep runs and its answer is in the PR, on a plain **and** a recording run —
+  errata (2026-10-01): `tool/engine_alloc_ab.rb` measures a plain `rigor check --no-cache` only (its
+  options are `--base`, `--head`, `--corpus`, `--target`, `--thresholds`, `--summary`), so until it
+  gains a mode the recording run is measured by its method by hand: each engine archived whole, a cold
+  `rigor check --incremental` over the same frozen corpus in a fresh process, counting
+  `GC.stat(:total_allocated_objects)`, as #1578 reported it — and a change to the chain memo's tuple
+  (WD2's marks) reports the memo's growth separately from the recording edges; (e) for any change that can add or remove a `call.wrong-arity`
   firing, the cross-commit differential (WD2): CI's `arity-differential` job green, every removed row
   adjudicated `fp-silenced` or `tp-lost` and every added row `named-mechanism` under the PR's merge
   base, the survivors' floor held in base and head, and the lane-2 corpus run's adjudication in the PR;
@@ -616,13 +641,19 @@ seeded file's deferred ranges, SI:344–350); #1600 (lane 1; WD1's sibling pairs
 #1599 (the cross-commit arity differential, its fixtures and its CI job). **Still to land before
 acceptance:** nothing remains. #1531 closes as superseded by this ADR.
 
-**After acceptance — under WD7 lane 2.**
+**After acceptance — under WD7's lanes (each row names its lane). The C1 split below was adopted at C1
+planning (errata 2026-10-01); C1a lands relevance so it is live at the first firing site, as Q3 decided.**
 
 | PR | Change | Expected corpus diff | Expected sig-gen diff | False-positive check |
 | --- | --- | --- | --- | --- |
 | A — #1550 | The named form snapshots the last receiverless `def` before the call (SI:4975) | Zero (rare) | The singleton keeps the earlier body's type | Fixture asserts `Fmt.label == "one"` |
 | B — reset, receiverless-only, privatisation | A bare visibility call ends the toggle; `def self.x` gets no instance copy; `attr_reader` private, no singleton copy; `define_method` both; a `certain` module function's instance copy recorded private (SI:6556–6563); sig-gen bypasses `visibility_excludes?` for module functions | Zero on existence; `Helpers#fmt` stops firing | Module functions after a reset stop rendering as singletons; omitted ones appear | Probes P1–P13, `vis.rb` |
-| C1 — firing sites | `DefinerResolution` over the chain; `settle`'s option with the `:unknown` verdict and per-name relevance over the marks the chain memo now carries; `possible` definers and the mixin members' unpositioned reading; the `case/in` spec. Migrates **the `:arity` question at `SourceArity`'s decision point** (`walk_to_owner`, `source_arity.rb:109–129`: a `:master` verdict answers no envelope, and the walk's reads are recorded as read since another file's edit can lift it — #1570 and the conditional-include arity shape stop firing here on the boolean alone, with no new discovery data), the override super-method lint (`each_project_ancestor`, `check_rules.rb:3800`, and `override_visibility_diagnostic`, `:3736`), the visibility mismatch (`:2664`) and `singleton_context_def?` (`:3671`, with WD3's singleton-side decline). Admits `possible` facts into `discovered_methods`, the def-node tables, `discovered_method_visibilities`, `discovered_parameter_envelopes` and `discovered_deferred_ranges` once WD1's precondition holds for each and its C1 storage obligations are discharged | Silences #1570, the conditional-include and conditional-def arity shapes and the `Helpers2#fmt2` override; may silence firings that resolved through a `possible`-only definer; **every removed `call.wrong-arity` adjudicated** | A notice on `possible` module functions; `possible` definers render nothing new (RBS has no conditional form) | Every fixture at both witness levels; the cross-commit differential; the one-fork witness and its guard stay `Unknown`; the five non-discharge shapes stay `Unknown`; the #1591 breakdown reported; WD7(d) on the memo |
+| C1a — the read and relevance (lane 1) | `DefinerResolution.resolve(…, from:, &answer_in)` with `Known(answer, owner)`; `settle`'s option (the `:unknown` verdict, per-name relevance over the marks the chain memo now carries); the `case/in` spec. No site consults it yet, so no diagnostic moves; relevance is live from the first firing site (Q3) | None | None | WD5's relevance fixtures; WD7(d) on the memo |
+| C1b — `SourceArity` (lane 2) | Both settles at the arity rule's decision points: `walk_to_owner` (`source_arity.rb:109–129`) **and** `subclass_levels` (`:315–320`, the per-subclass level `subclasses_agree?` reads), each answering no envelope on `:unknown`, the walk's reads recorded as read since another file's edit can lift it; `MasterOrder.arity_levels` (RC:422) is then dead and removed; the #1570 pin flips; the `issue_1570_skipped_include.rb` header comment is corrected to its firing lines (22 and 23) | Silences #1570 and the conditional-`def` and conditional-`include` shapes, the latter two adjudicated `tp-lost` by design (WD2); may silence firings that resolved through a `possible`-only definer; **every removed `call.wrong-arity` adjudicated** | None | The cross-commit differential with the survivors' floor; the one-fork witness and its guard stay `Unknown` |
+| C1c — relationship lints (lane 2) | The override super-method lint (`each_project_ancestor`, `check_rules.rb:3800`, and `override_visibility_diagnostic`, `:3736`), the visibility mismatch (`:2664`) and `singleton_context_def?` (`:3671`, with WD3's singleton-side decline), each through `resolve` with `from:` past the class and an `answer_in` that places an RBS-declared parent | Silences the lints where some world has no super method | None | The five non-discharge shapes stay `Unknown`; WD5's lint fixtures |
+| C1d0 — storage (lane 1) | WD1's C1 obligations: a sibling, or a read-only-beside-`discovered_def_nodes` statement, for the two def-source tables; the envelope key and class marks; the extends fold and `subtract_def_methods` follow-through; the census's `justified:` classification and header (Q12) | None | None | The pairing spec extended; the census spec |
+| C1d — `possible` facts (lane 2) | WD3's producers fill the siblings: a conditional `def`'s slot, visibility and envelope contested, a conditional `discovered_methods` entry `possible`; constructs the `Helpers2#fmt2` fixture (no such file is in the tree; its silencing needs the contested visibility, which interacts with PR B) | May silence firings that resolved through a `possible`-only definer; the `Helpers2#fmt2` override | `possible` definers render nothing new (RBS has no conditional form) | Both witness levels; the differential |
+| C1e — sig-gen notice (optional) | A notice on `possible` module functions | None | The notice | The sig-gen diff |
 | C2 — typing sites | Return inference through `resolve_user_def_through_ancestors` (`expression_typer.rb:2471, 2496`, where `Unknown` types `Dynamic`) and the singleton memo (`:2386`, with WD3's singleton-side decline); the absent rule with its RBS census | Silences the conditional-definer and conditional-include `call.undefined-method` shapes, #1594 at this site, and the #1592 hook shapes at the migrated singleton site (`Unknown`, not a fix); `gemmod3` waits for #1572 | None expected | WD7(f) census before and after, adjudicated: GitLab's core models type `Dynamic` at these sites until PR D, and the PR states the count |
 | D — hook facts per includer | Deferred to the follow-up ADR | — | — | — |
 
@@ -637,7 +668,7 @@ lowers it by an amount PR C measures.
 - **[ADR-24](24-self-method-call-resolution.md) — amended (landed).** Its § "Amendment 2026-09-28" is
   the binding text for the chain, `settle`, forks, unsettled chains, the single walker and the
   dependency edges; slice 2's breadth-first walk carries the superseded note (`:345–350`). Its #1570
-  paragraph (`:634–644`) says what this ADR says: fixed by PR C at `SourceArity`'s decision point, with
+  paragraph (`:634–644`) says what this ADR says: fixed by PR C (C1b) at `SourceArity`'s two decision points, with
   no new discovery data (the chain-memo change is relevance's, WD2, not #1570's). This ADR's reads are
   defined over that chain and add certainty on top.
 - **[ADR-116](116-hot-file-restructuring.md) WD5 — partially superseded.** Byte-identity and the variant
@@ -701,7 +732,7 @@ Positive:
   context computers is a fixture with a Ruby witness or nothing.
 - One chain is the reference for resolution inside every engine reader, landed: #1567 on both sides,
   #1568 and #1571 are fixed at every call site and for every plugin, with no firing added on any corpus;
-  #1570 is fixed where C1 migrates the arity site. No consumer walks ancestry on its own except the 14
+  #1570 is fixed where C1b migrates both arity decision points. No consumer walks ancestry on its own except the 14
   allow-listed union and bridge walks, and a spec keeps it so.
 - No read carries a direction label; a migrated site answers or is silent by one rule, floored by the
   cross-commit arity differential; every other site and every plugin reads the corrected order through the
@@ -760,3 +791,8 @@ Resolved at acceptance (2026-10-01): every default below is adopted.
     decline. *Default: deferred until PR C's #1591 breakdown shows the share it would recover.*
 11. **WD3's singleton-side decline signals.** The `ActiveSupport::Concern` name test is a framework
     name in the engine. *Default: accept until the follow-up ADR, with the plugin API as its home.*
+12. **The census's `justified:` classification (C1d0; raised after acceptance, errata 2026-10-01).**
+    WD1(ii) lets a whole-table read stay where it only tests existence or identity or keys a cache, or
+    is one of #1600's paired copies, and otherwise moves it behind a `Scope` reader; the census spec's
+    header still says "only once its entry here is empty". *Default: adopt the classification and
+    reword the header; needs the maintainer's confirmation.*

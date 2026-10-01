@@ -17,7 +17,9 @@ module Rigor
       #   entry records `n` in `discovered_methods` (either kind) or in `discovered_method_visibilities`.
       # - A multi-file mark names no entry: it is discharged when at most one of the node's edges' closures is
       #   not clean. A mark that is both listed and multi-file must pass both rules.
-      # - `"*"`, an ambiguous spelling and a truncated closure are never discharged.
+      # - An ambiguous spelling (`:arity` only: several project modules a compact-header collision left as the
+      #   spelling's meaning, #986) is discharged when every one of them is clean; any candidate that fails fails it.
+      # - `"*"` and a truncated closure are never discharged.
       #
       # The verdict and the edges it read are memoised per `[mark, name]` in the flavor's bucket and the edges are
       # replayed on every call while a dependency recording is active (ADR-46): per tested project entry its class
@@ -107,7 +109,7 @@ module Rigor
             resolved = @resolver.resolve(@mark.node, raw)
             case resolved
             when String then project_closure_clean?(resolved)
-            when Array then false
+            when Array then resolved.all? { |name| project_closure_clean?(name) }
             else external_clean?(@resolver.candidates(@mark.node, raw), raw)
             end
           end

@@ -12,11 +12,26 @@ require_relative "../support/ruby_run"
 # sound read may say, and the read answers `Known` only where both worlds agree on it.
 RSpec.describe Rigor::Inference::DefinerResolution do # rubocop:disable RSpec/SpecFilePathFormat
   let(:resolution) { described_class }
+  let(:project_dirs) { [] }
 
   def scope_for(source)
     root = Prism.parse(source).value
     Rigor::Inference::ScopeIndexer.index(root, default_scope: Rigor::Scope.empty)[root]
   end
+
+  # The files stay on disk until the example ends: a declared module's body is read from them.
+  def project_scope(files)
+    dir = Dir.mktmpdir("rigor-definer-resolution-")
+    project_dirs << dir
+    paths = files.map do |name, source|
+      File.join(dir, name).tap { |path| File.write(path, source) }
+    end
+    tables = Rigor::Protection::DiscoverySeed.discovery_tables(paths)
+    base = Rigor::Scope.empty
+    base.with_discovery(base.discovery.with(**tables))
+  end
+
+  after { project_dirs.each { |dir| FileUtils.rm_rf(dir) } }
 
   # `expression`'s printed value in the world where `ENV["Q"]` is unset (`false`) or set (`true`).
   def ruby_says(source, expression, world, prelude: nil)
@@ -61,17 +76,6 @@ RSpec.describe Rigor::Inference::DefinerResolution do # rubocop:disable RSpec/Sp
   end
 
   describe "a multi-file mark" do
-    def project_scope(files)
-      Dir.mktmpdir("rigor-definer-resolution-") do |dir|
-        paths = files.map do |name, source|
-          File.join(dir, name).tap { |path| File.write(path, source) }
-        end
-        tables = Rigor::Protection::DiscoverySeed.discovery_tables(paths)
-        base = Rigor::Scope.empty
-        return base.with_discovery(base.discovery.with(**tables))
-      end
-    end
-
     let(:base) { "class Base; def foo = 1; end\nmodule Q; def bar = 1; end\nmodule R; def baz = 1; end\n" }
 
     it "is Known when at most one of the node's edges' closures records the name" do
@@ -320,6 +324,131 @@ RSpec.describe Rigor::Inference::DefinerResolution do # rubocop:disable RSpec/Sp
     it "skips an external RBS knows and whose declaration lacks the name" do
       source = "class Base; def foo = 1; end\nclass C < Base; include Comparable; end\n"
       expect(owner_of(resolve(scope_for(source), :foo))).to eq("Base")
+    end
+  end
+
+  # The external-entry precision follow-up (#1562): a declared project module with no `def`, and an RBS-unknown
+  # gem module for `:override`.
+  describe "external ancestors the project declares or RBS does not know" do
+    def override_resolve(scope, name)
+      answer = lambda do |chain, from|
+        chain.entries.each_with_index do |entry, index|
+          next if index < from || entry.external?
+
+          node = scope.user_def_for(entry.name, name)
+          return described_class::Hit.new(node, entry.name, index, entry.side) if node
+        end
+        nil
+      end
+      resolution.resolve(scope, "C", name, :instance, question: :override, &answer)
+    end
+
+    let(:concern_shim) do
+      <<~RUBY
+        module ActiveSupport
+          module Concern
+            def self.extended(base) = base.instance_variable_set(:@_included_block, nil)
+
+            def included(base = nil, &block)
+              if base.nil?
+                @_included_block = block
+              else
+                super
+                base.class_eval(&@_included_block) if @_included_block
+              end
+            end
+          end
+        end
+      RUBY
+    end
+
+    # A module the project declares without a `def` is an external entry no table can vouch for: a macro in
+    # `included do`, or a hook defined outside the body (`def Q.included(b) = ...`), defines on the includer with
+    # nothing recorded. It declines, as does a gem module declared nowhere and absent from RBS (a future gem-source
+    # approach, `dependencies.source_inference`, could read it).
+    it "declines on a declared def-less module whose body holds nothing" do
+      source = "class B; def foo = 1; end\nmodule Empty; end\nclass C < B; include Empty; end\n"
+      expect(RubyRun.stdout("#{source}p C.instance_method(:foo).owner\n").chomp).to eq("B")
+      expect(owner_of(resolve(project_scope("a.rb" => source), :foo))).to eq(:unknown)
+    end
+
+    it "declines on a concern whose included block calls a macro (custom_macro)" do
+      source = <<~RUBY
+        class Base; def self.my_macro(n) = define_method(n) { :m }; def foo = 1; end
+        module Q
+          extend ActiveSupport::Concern
+          included do
+            my_macro :foo
+          end
+        end
+        class C < Base; include Q; end
+      RUBY
+      expect(RubyRun.stdout("#{source}p C.instance_method(:foo).owner\n", prelude: concern_shim).chomp).to eq("C")
+      expect(owner_of(resolve(project_scope("a.rb" => source), :foo))).to eq(:unknown)
+    end
+
+    it "declines on a hook defined outside the module body" do
+      source = <<~RUBY
+        class Base; def foo = 1; end
+        module Q; end
+        def Q.included(b) = b.attr_reader(:foo)
+        class C < Base; include Q; end
+      RUBY
+      expect(RubyRun.stdout("#{source}p C.instance_method(:foo).owner\n").chomp).to eq("C")
+      expect(owner_of(resolve(project_scope("a.rb" => source), :foo))).to eq(:unknown)
+    end
+
+    it "declines on a module neither declared nor in RBS, for every question" do
+      source = "class B; def foo = 1; end\nclass C < B; include Gem::Authorization; end\n"
+      scope = project_scope("a.rb" => source)
+      expect(owner_of(override_resolve(scope, :foo))).to eq(:unknown)
+      expect(owner_of(resolve(scope, :foo, question: :visibility))).to eq(:unknown)
+      expect(owner_of(resolve(scope, :foo))).to eq(:unknown)
+    end
+
+    it "declines for :override on an RBS-known external that declares the name" do
+      source = "class Base; def between?(a, b) = false; end\nclass C < Base; include Comparable; end\n"
+      expect(owner_of(override_resolve(project_scope("a.rb" => source), :between?))).to eq(:unknown)
+    end
+  end
+
+  # #986: a compact-header rename collision leaves `Mixin` naming two project modules. Both `include`s run, so a
+  # multi-file mark is discharged for a name when none of the candidates answers it.
+  describe "an ambiguous mixin spelling" do
+    # The collision's header nestings are what the runner's rename pass leaves; the seed alone does not build them.
+    def ambiguous_scope(wrapped_extra)
+      scope = project_scope(
+        "a.rb" => "class Outer; end\nclass Base; end\nmodule Mixin; def plain = 1; end\n" \
+                  "module Solo; def from_solo = 1; end\nclass Outer::Leaf < Base; include Mixin; include Solo; end\n",
+        "b.rb" => "module Wrap\n  module Mixin\n    def wrapped = 1\n#{wrapped_extra}  end\n  " \
+                  "class Outer::Leaf; include Mixin; end\nend\n"
+      )
+      nestings = { "Outer::Leaf" => { "Mixin" => [[], ["Wrap"]] } }
+      scope.with_discovery(scope.discovery.with(discovered_header_nestings: nestings))
+    end
+
+    def arity_resolve(scope, name)
+      answer = lambda do |chain, from|
+        chain.entries.each_with_index do |entry, index|
+          next if index < from || entry.external?
+
+          node = scope.user_def_for(entry.name, name)
+          return described_class::Hit.new(node, entry.name, index, entry.side) if node
+        end
+        nil
+      end
+      resolution.resolve(scope, "Outer::Leaf", name, :instance, question: :arity, &answer)
+    end
+
+    it "discharges the mark when no candidate answers the name" do
+      scope = ambiguous_scope("")
+      expect(Rigor::Scope::ResolutionChain.for(scope, "Outer::Leaf", :instance, :arity).entries.map(&:name))
+        .to include("Mixin", "Wrap::Mixin")
+      expect(owner_of(arity_resolve(scope, :from_solo))).to eq("Solo")
+    end
+
+    it "declines when one candidate defines the name" do
+      expect(owner_of(arity_resolve(ambiguous_scope("    def from_solo = 2\n"), :from_solo))).to eq(:unknown)
     end
   end
 

@@ -375,6 +375,46 @@ RSpec.describe Rigor::Inference::DefinerResolution do # rubocop:disable RSpec/Sp
     end
   end
 
+  # #986: a compact-header rename collision leaves `Mixin` naming two project modules. Both `include`s run, so a
+  # multi-file mark is discharged for a name when none of the candidates answers it.
+  describe "an ambiguous mixin spelling" do
+    # The collision's header nestings are what the runner's rename pass leaves; the seed alone does not build them.
+    def ambiguous_scope(wrapped_extra)
+      scope = project_scope(
+        "a.rb" => "class Outer; end\nclass Base; end\nmodule Mixin; def plain = 1; end\n" \
+                  "module Solo; def from_solo = 1; end\nclass Outer::Leaf < Base; include Mixin; include Solo; end\n",
+        "b.rb" => "module Wrap\n  module Mixin\n    def wrapped = 1\n#{wrapped_extra}  end\n" \
+                  "  class Outer::Leaf; include Mixin; end\nend\n"
+      )
+      nestings = { "Outer::Leaf" => { "Mixin" => [[], ["Wrap"]] } }
+      scope.with_discovery(scope.discovery.with(discovered_header_nestings: nestings))
+    end
+
+    def arity_resolve(scope, name)
+      answer = lambda do |chain, from|
+        chain.entries.each_with_index do |entry, index|
+          next if index < from || entry.external?
+
+          node = scope.user_def_for(entry.name, name)
+          return described_class::Hit.new(node, entry.name, index, entry.side) if node
+        end
+        nil
+      end
+      resolution.resolve(scope, "Outer::Leaf", name, :instance, question: :arity, &answer)
+    end
+
+    it "discharges the mark when no candidate answers the name" do
+      scope = ambiguous_scope("")
+      expect(Rigor::Scope::ResolutionChain.for(scope, "Outer::Leaf", :instance, :arity).entries.map(&:name))
+        .to include("Mixin", "Wrap::Mixin")
+      expect(owner_of(arity_resolve(scope, :from_solo))).to eq("Solo")
+    end
+
+    it "declines when one candidate defines the name" do
+      expect(owner_of(arity_resolve(ambiguous_scope("    def from_solo = 2\n"), :from_solo))).to eq(:unknown)
+    end
+  end
+
   describe "the singleton side" do
     it "is not resolved until ADR-119 C1c" do
       scope = scope_for("class Base; def self.foo = 1; end\nclass C < Base; end\n")

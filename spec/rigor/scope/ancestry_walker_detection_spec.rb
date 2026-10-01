@@ -117,7 +117,7 @@ RSpec.describe "ancestry walkers outside Scope::ResolutionChain" do
   it "keeps the retro world and the skip decision inside the chain builder" do
     hits = Dir[File.join(root, "{lib,plugins}/**/*.rb")].flat_map do |path|
       relative = path.delete_prefix("#{root}/")
-      next [] if relative == AncestryWalkerScan::CHAIN_BUILDER
+      next [] if AncestryWalkerScan::CHAIN_BUILDERS.include?(relative)
 
       File.readlines(path).each_with_index.filter_map do |line, index|
         "#{relative}:#{index + 1}: #{line.strip}" if line.match?(/\.retro\b|\bchain\.contested\?/)
@@ -125,6 +125,30 @@ RSpec.describe "ancestry walkers outside Scope::ResolutionChain" do
     end
     expect(hits).to be_empty,
                     "these read the chain's retro world themselves; ask `settle` instead:\n  #{hits.join("\n  ")}"
+  end
+
+  # ADR-119 WD2 — `settle`'s `unknown_for:` option is the one new decision, and its inputs (the fork count, the
+  # marks, the unpositioned table) stay where it is made: no reader reads them, or passes the option, except the
+  # chain's own files and `Inference::DefinerResolution`. `unsettled?` stays the boolean existing readers see.
+  it "keeps the fork count, the marks and the unknown option inside the chain and the candidate-set read" do
+    hits = Dir[File.join(root, "{lib,plugins}/**/*.rb")].flat_map do |path|
+      relative = path.delete_prefix("#{root}/")
+      next [] if AncestryWalkerScan::DECISION_READERS.include?(relative)
+
+      File.readlines(path).each_with_index.filter_map do |line, index|
+        "#{relative}:#{index + 1}: #{line.strip}" if line.match?(AncestryWalkerScan::DECISION_INPUTS)
+      end
+    end
+    expect(hits).to be_empty,
+                    "these read `settle`'s decision inputs themselves; ask `DefinerResolution`:\n  #{hits.join("\n  ")}"
+  end
+
+  it "matches the decision inputs it guards, and not `unsettled?`" do
+    pattern = AncestryWalkerScan::DECISION_INPUTS
+    guarded = [".forks", "chain.skip_count", "chain.marks.all?", "scope.discovery.unpositioned_mixins[name]",
+               "chain.settle(scope, a, unknown_for: n)"]
+    expect(guarded.map { |line| pattern.match?(line) }).to all(be(true))
+    expect(pattern.match?("chain.unsettled?")).to be(false)
   end
 
   # The scan's positive control: each rule fires on a method written to trip it, so a scan that silently

@@ -71,6 +71,7 @@ members:
     - lib/rigor/inference/statement_evaluator.rb
     - lib/rigor/inference/void_tail_summary.rb
     copies:
+    - lib/rigor/inference/definer_resolution.rb
     - lib/rigor/inference/parameter_inference_collector.rb
     - lib/rigor/protection/discovery_seed.rb
   discovered_def_nestings:
@@ -89,6 +90,7 @@ members:
     - lib/rigor/inference/method_dispatcher/process_folding.rb
     - lib/rigor/inference/parameter_inference_collector.rb
     copies:
+    - lib/rigor/inference/definer_resolution.rb
     - lib/rigor/inference/parameter_inference_collector.rb
     - lib/rigor/protection/discovery_seed.rb
   discovered_def_sources:
@@ -109,6 +111,7 @@ members:
   discovered_method_visibilities:
     reads:
     - lib/rigor/analysis/runner.rb
+    - lib/rigor/inference/definer_resolution.rb
     copies:
     - lib/rigor/inference/parameter_inference_collector.rb
     - lib/rigor/protection/discovery_seed.rb
@@ -117,6 +120,7 @@ members:
     - lib/rigor/analysis/check_rules.rb
     - lib/rigor/analysis/check_rules/source_arity.rb
     - lib/rigor/analysis/runner.rb
+    - lib/rigor/inference/definer_resolution.rb
     - lib/rigor/scope/resolution_chain.rb
     copies:
     - lib/rigor/protection/discovery_seed.rb
@@ -170,6 +174,7 @@ members:
     - lib/rigor/inference/method_dispatcher/rbs_dispatch.rb
     - lib/rigor/reflection/constant_ancestors.rb
     - lib/rigor/scope/resolution_chain.rb
+    - lib/rigor/scope/resolution_chain/relevance.rb
     copies:
     - lib/rigor/analysis/runner.rb
     - lib/rigor/inference/parameter_inference_collector.rb
@@ -188,12 +193,14 @@ members:
     - lib/rigor/inference/macro_block_self_type.rb
     - lib/rigor/inference/method_dispatcher/rbs_dispatch.rb
     - lib/rigor/scope/resolution_chain.rb
+    - lib/rigor/scope/resolution_chain/relevance.rb
     copies:
     - lib/rigor/analysis/runner.rb
   unpositioned_mixins:
     reads:
     - lib/rigor/analysis/runner.rb
     - lib/rigor/scope/resolution_chain.rb
+    - lib/rigor/scope/resolution_chain/relevance.rb
     copies:
     - lib/rigor/analysis/runner.rb
     - lib/rigor/inference/parameter_inference_collector.rb

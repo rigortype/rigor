@@ -87,6 +87,10 @@ lib/rigor/inference/declaration_walk/traversal.rb:
   computes: the shared declaration walk that hands each ScopeIndexer collector its self, cref and nesting
   producers:
     Rigor::Inference::DeclarationWalk::Traversal#walk: grandfathered
+lib/rigor/inference/definer_resolution.rb:
+  computes: the candidate-set read of a method name over a resolution chain, Known, Unknown or Absent (ADR-119 WD2)
+  producers:
+    Rigor::Inference::DefinerResolution#visibility_answer: a consumer, not a declaration producer; `:public` is the visibility it answers for a definer with none recorded, and it writes no table
 lib/rigor/inference/expression_typer.rb:
   computes: the type a class or module expression evaluates to, and the barrier around a re-typed callee body
   producers:
@@ -469,6 +473,11 @@ lib/rigor/scope/resolution_chain.rb:
   producers:
     Rigor::Scope::ResolutionChain::Builder#compute_instance: a consumer, not a declaration producer; it reads `unpositioned_mixins` on the :include side to mark a chain unsettled, and reads the tables raw by design (ADR-24)
     Rigor::Scope::ResolutionChain::Builder#compute_singleton: the singleton-side twin, reading the :extend side
+lib/rigor/scope/resolution_chain/relevance.rb:
+  computes: whether a mark on a chain is discharged for one method name, from the closure of the module it names (ADR-119 WD2)
+  producers:
+    Rigor::Scope::ResolutionChain::Relevance::Context#edge_names: a consumer, not a declaration producer; it reads the marked node's own edges on the side the mark covers and writes no table
+    Rigor::Scope::ResolutionChain::Relevance::Context#wildcard_listed?: a consumer, not a declaration producer; it reads whether a closure entry lists `"*"` on the instance side or the mark's, and writes no table
 lib/rigor/sig_gen/generator.rb:
   computes: the defs, attribute readers and ivar observations sig-gen emits per qualified class
   producers:

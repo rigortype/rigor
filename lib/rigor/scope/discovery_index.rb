@@ -463,6 +463,19 @@ module Rigor
         SIBLINGS.each_value.to_h { |sibling| [sibling, public_send(sibling)] }
       end
 
+      # ADR-119 WD1/WD2 — whether `class_name` answers `method_name` on `kind` only through a `possible` fact
+      # (`possible_discovered_methods`, empty until a producer admits one). Internal to the candidate-set read.
+      def possible_method?(class_name, method_name, kind)
+        recorded = possible_discovered_methods[class_name.to_s]&.[](method_name.to_sym)
+        recorded == kind || (!recorded.nil? && recorded == METHOD_KIND_BOTH)
+      end
+
+      # ADR-119 WD1 — whether `path` (`[class, name]`, or `[class, [kind, name]]` for an envelope) is a contested
+      # entry of `member`, one of the single-valued members {SIBLINGS} pairs. Internal to the candidate-set read.
+      def contested?(member, path)
+        public_send(SIBLINGS.fetch(member)).include?(path)
+      end
+
       # Data's `with`, except that a paired member and its sibling are accepted only TOGETHER (ADR-119 WD1): a
       # caller that rebuilt one without the other would leave the sibling describing the old table, so it
       # raises instead. A call with no change returns the receiver.

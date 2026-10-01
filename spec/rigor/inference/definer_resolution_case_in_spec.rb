@@ -1,0 +1,62 @@
+# frozen_string_literal: true
+
+require "spec_helper"
+require "prism"
+require_relative "../../support/definer_resolution_case_in"
+
+# ADR-119 WD2 — the call-site contract of `Inference::DefinerResolution.resolve`: its result is consumed only by
+# an exhaustive `case/in` that is the call's own direct predicate, with exactly one arm for each of `Known(...)`,
+# `UNKNOWN` and `ABSENT`, no `else` and no `in _`. `UNKNOWN` and `ABSENT` are both truthy, so a result that is
+# assigned, returned, truth-tested or matched with a catch-all can fold a decline into a firing arm.
+#
+# The scan reads every file under `lib/` and `plugins/*/lib/` with Prism. It cannot see a call made through
+# `send`, an alias or a variable holding the module. Its positive controls below show each rule firing.
+RSpec.describe "DefinerResolution call sites" do
+  def violations_in(*) = DefinerResolutionCaseIn.violations_in(*)
+
+  let(:root) { File.expand_path("../../..", __dir__) }
+
+  it "has no call site outside the exhaustive case/in shape" do
+    hits = Dir[File.join(root, "{lib,plugins/*/lib}/**/*.rb")].flat_map do |path|
+      violations_in(File.read(path), path.delete_prefix("#{root}/"))
+    end
+    expect(hits).to be_empty, "DefinerResolution.resolve call sites that break the contract:\n  #{hits.join("\n  ")}"
+  end
+
+  describe "the scan itself" do
+    let(:call) { "DefinerResolution.resolve(scope, 'C', :foo, :instance, question: :definer)" }
+    let(:namespace) { "Rigor::Inference::DefinerResolution" }
+    let(:good) do
+      <<~RUBY
+        case #{call}
+        in #{namespace}::Known(answer:, owner:) then fire(answer, owner)
+        in #{namespace}::UNKNOWN then nil
+        in #{namespace}::ABSENT then nil
+        end
+      RUBY
+    end
+
+    def without_last_arm(source, replacement) = source.sub(/^in \S+::ABSENT then nil$/, replacement)
+
+    it "accepts the three-arm case/in" do
+      expect(violations_in(good)).to be_empty
+    end
+
+    it "flags an else arm" do
+      expect(violations_in(without_last_arm(good, "else nil"))).not_to be_empty
+    end
+
+    it "flags a catch-all `in _` arm" do
+      expect(violations_in(without_last_arm(good, "in _ then nil"))).not_to be_empty
+    end
+
+    it "flags a missing arm" do
+      expect(violations_in(without_last_arm(good, ""))).not_to be_empty
+    end
+
+    it "flags a result assigned to a local, stored in an instance variable, truth-tested or returned" do
+      sources = ["found = #{call}\n", "@found = #{call}\n", "puts 1 if #{call}\n", "def f = #{call}\n"]
+      expect(sources.map { |source| violations_in(source).empty? }).to all(be(false))
+    end
+  end
+end

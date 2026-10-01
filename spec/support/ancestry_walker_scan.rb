@@ -26,8 +26,18 @@ module AncestryWalkerScan
   # ancestor's edge is read, so it does not count either.
   WHOLE = %i[merge merge! dup clone].freeze
 
-  # The one file allowed to walk them: the chain builder.
-  CHAIN_BUILDER = "lib/rigor/scope/resolution_chain.rb"
+  # The files allowed to walk them: the chain builder, and the per-name relevance rule that reads the closure of
+  # a mark's named entry (ADR-119 WD2), which is part of the chain's own decision.
+  CHAIN_BUILDERS = %w[lib/rigor/scope/resolution_chain.rb lib/rigor/scope/resolution_chain/relevance.rb].freeze
+  CHAIN_BUILDER = CHAIN_BUILDERS.first
+
+  # The files that may read what `settle`'s `unknown_for:` decision is made of — fork counts, marks, the
+  # unpositioned table — or pass the option: the chain's files, and the candidate-set read that is its one caller.
+  DECISION_INPUTS = /
+    \.forks\b | \.skip_count\b | \.marks\b | \.unpositioned_mixins(?:\[|\.(?:dig|fetch|key\?)) | \bunknown_for:
+  /x
+
+  DECISION_READERS = (CHAIN_BUILDERS + %w[lib/rigor/inference/definer_resolution.rb]).freeze
 
   Finding = Data.define(:key, :reasons)
 
@@ -129,7 +139,7 @@ module AncestryWalkerScan
   module_function
 
   def files(root)
-    Dir.glob(%w[lib/**/*.rb plugins/*/lib/**/*.rb], base: root).sort - [CHAIN_BUILDER]
+    Dir.glob(%w[lib/**/*.rb plugins/*/lib/**/*.rb], base: root).sort - CHAIN_BUILDERS
   end
 
   # `{ "path#method" => [reason, …] }` for every walker in `files`.

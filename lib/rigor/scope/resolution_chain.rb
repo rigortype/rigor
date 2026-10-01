@@ -94,11 +94,20 @@ module Rigor
       # counted visited project nodes against the same number.
       LIMIT = 100
 
-      attr_reader :root, :side, :entries, :level_starts, :level_classes
+      # ADR-119 WD2 — what marked a chain unsettled, one per marking node and side: `node` is the class or
+      # module whose mixin edges' order is not a fact, `kind` the side read (`:include` or `:extend`), `listed`
+      # the entries `DiscoveryIndex#unpositioned_mixins` lists for it (`"*"` included), and `multi_file` whether
+      # the multi-file rule fired (two or more files declare it and it has two or more edges on that side).
+      # Interned per `[node, kind]` in the flavor's bucket, so equal marks are one object.
+      Mark = Data.define(:node, :kind, :listed, :multi_file)
+
+      NO_MARKS = [].freeze
+
+      attr_reader :root, :side, :entries, :level_starts, :level_classes, :flavor
 
       # rubocop:disable-next Metrics/ParameterLists
       def initialize(root:, side:, entries:, level_starts:, level_classes:, levels_end:, truncated:, forks: 0,
-                     unsettled: false, retro: nil)
+                     marks: NO_MARKS, flavor: :methods, retro: nil)
         @root = root
         @side = side
         @entries = entries
@@ -107,7 +116,8 @@ module Rigor
         @levels_end = levels_end
         @truncated = truncated
         @forks = forks
-        @unsettled = unsettled
+        @marks = marks
+        @flavor = flavor
         @retro = retro
         freeze
       end
@@ -124,7 +134,7 @@ module Rigor
 
       # True when a class on the chain has mixin edges whose order the tables cannot vouch for
       # (`DiscoveryIndex#unpositioned_mixins`, or a class declared in several files with several edges).
-      def unsettled? = @unsettled
+      def unsettled? = !@marks.empty?
 
       # The ONE decision every first-definer reader makes: does `answer`, read off this chain, stand, or does
       # the reader answer what the walk this chain replaced answered ({MasterOrder})? Returns `:chain` or
@@ -141,14 +151,18 @@ module Rigor
       # - Any other fork, or two or more: more than two worlds, so no answer read off two of them is
       #   trustworthy. Master's answer stands, and the block is not called.
       #
-      # #1570 is a one-fork disagreement, so its readers answer master's until ADR-119 gives the arity rule's
-      # decision point a way to decline.
-      def settle(scope, answer, owner: nil)
+      # ADR-119 WD2 — `unknown_for: name` is the candidate-set read's option (only {Inference::DefinerResolution}
+      # passes it): a `:master` verdict becomes `:unknown`, since a reader that can decline has no use for the
+      # replaced walk's answer, and a chain whose every mark is discharged for `name` (see {Relevance}) and that
+      # has no fork is read as settled. Without the option the verdict is never `:unknown`: the readers that
+      # compare it with `:master` would read a leaked `:unknown` as `:chain`.
+      def settle(scope, answer, owner: nil, unknown_for: nil, &)
         # The verdict depends on EVERY node of the chain (a fork, an unpositioned edge, a second declaring file),
         # and `:master` changes the answer, so the entries past the answer are dependencies whichever way it
         # goes; `search` files only the entries ahead of an answer. `owner` names the entry that answered.
         record_beyond(scope, owner)
-        return :master if @unsettled
+        return settle_unknown(scope, answer, unknown_for, &) unless unknown_for.nil?
+        return :master unless @marks.empty?
 
         case @forks
         when 0 then :chain
@@ -156,6 +170,23 @@ module Rigor
         else :master
         end
       end
+
+      # {#settle} under `unknown_for:`: a mark that is not discharged for the name, a fork the marks overlap
+      # (relevance is argued for the fork-free case only), a second fork or a retro world that answers
+      # otherwise are all `:unknown`. The retro world is the one built when the chain had exactly one fork and
+      # no mark; a chain with a fork is never narrowed, so none is built on demand.
+      def settle_unknown(scope, answer, name)
+        if !@marks.empty? && !(@forks.zero? && @marks.all? { |mark| Relevance.discharged?(scope, self, mark, name) })
+          return :unknown
+        end
+
+        case @forks
+        when 0 then :chain
+        when 1 then !@retro.nil? && answer == yield(@retro) ? :chain : :unknown
+        else :unknown
+        end
+      end
+      private :settle_unknown
 
       # Walks the entries in Ruby's order from `start` up to (not including) `stop`, and returns the first
       # truthy value the block gives for an entry, or nil. `side:` yields only the entries on that side.
@@ -296,7 +327,8 @@ module Rigor
           slot = [discovery, {}]
           Thread.current[MEMO_KEY] = slot
         end
-        slot[1][flavor] ||= { instance: {}, singleton: {}, names: {}, interned: {}, externals: {}, master: {} }
+        slot[1][flavor] ||= { instance: {}, singleton: {}, names: {}, interned: {}, externals: {}, master: {},
+                              marks: {} }
       end
 
       # Which project class an as-written ancestor name denotes, under one flavor — shared by the chain and
@@ -351,6 +383,17 @@ module Rigor
       private_constant :Resolver
 
       private_class_method :flavor_bucket
+
+      # {Relevance}'s verdict memo, one table per flavor bucket.
+      def self.relevance_memo(scope, flavor)
+        flavor_bucket(scope.discovery, flavor)[:relevance] ||= {}
+      end
+
+      # The name resolver of `flavor`, over the same memo the chain builder shares: {Relevance} resolves a
+      # mark's listed entry from the node that listed it, exactly as the chain did.
+      def self.resolver_for(scope, flavor)
+        Resolver.new(scope, flavor, flavor_bucket(scope.discovery, flavor))
+      end
 
       # The orders the walks this chain replaced searched in, kept for the one case the chain cannot settle
       # alone: where its two worlds put different definers first, a reader answers what master answered
@@ -538,17 +581,25 @@ module Rigor
       class Builder # rubocop:disable Metrics/ClassLength
         EMPTY = [].freeze
         RETRO_OVER_BUDGET = :rigor_retro_over_budget
-        EMPTY_LIN = [EMPTY, EMPTY, EMPTY, 0, false, true].freeze
+        EMPTY_LIN = [EMPTY, EMPTY, EMPTY, 0, NO_MARKS, true].freeze
         private_constant :EMPTY, :EMPTY_LIN, :RETRO_OVER_BUDGET
 
         # What one node's computation met, handed up to the computation that asked for it: how many forks it
-        # counted (see {ResolutionChain#settle}), whether a node on it has mixin edges whose order is not a
-        # fact (`unsettled`), and whether it met a cycle or the depth budget (so it is not memoised).
-        Frame = Struct.new(:forks, :incomplete, :unsettled, :retro_ok) do
-          def absorb(forks, unsettled, retro_ok)
+        # counted (see {ResolutionChain#settle}), the {Mark}s of the nodes on it whose mixin edges' order is not a
+        # fact, and whether it met a cycle or the depth budget (so it is not memoised).
+        Frame = Struct.new(:forks, :incomplete, :marks, :retro_ok) do
+          # ADR-119 WD2 — mark arrays are frozen and shared: the receiver keeps its array when the other is
+          # empty, adopts the other's when it is empty itself, and allocates a union only when both hold marks.
+          def absorb(forks, other, retro_ok)
             self.forks += forks
-            self.unsettled ||= unsettled
+            add_marks(other)
             self.retro_ok &&= retro_ok
+          end
+
+          def add_marks(other)
+            return if other.empty? || marks.equal?(other)
+
+            self.marks = marks.empty? ? other : (marks | other).freeze
           end
         end
         private_constant :Frame
@@ -569,10 +620,10 @@ module Rigor
 
         # The chain for `root`, carrying its retro world when the skip rule skipped anything on the way.
         def chain(root, side)
-          entries, starts, classes, forks, unsettled, retro_ok = lin_for(root, side)
-          retro = build_retro(root, side) if forks == 1 && retro_ok && !unsettled && !@retro
+          entries, starts, classes, forks, marks, retro_ok = lin_for(root, side)
+          retro = build_retro(root, side) if forks == 1 && retro_ok && marks.empty? && !@retro
           cut_at = cut_position(entries)
-          return whole_chain(root, side, entries, starts, classes, [forks, unsettled], retro) if cut_at.nil?
+          return whole_chain(root, side, entries, starts, classes, [forks, marks], retro) if cut_at.nil?
 
           # Keep the prefix for first-definer reads, and only the levels that end inside it.
           complete = starts.count { |start| start < cut_at }
@@ -581,15 +632,15 @@ module Rigor
                               level_starts: starts.first(complete).freeze,
                               level_classes: classes.first(complete).freeze,
                               levels_end: complete.zero? ? 0 : (starts[complete] || cut_at), truncated: true,
-                              forks: forks, unsettled: unsettled, retro: retro)
+                              forks: forks, marks: marks, flavor: @flavor, retro: retro)
         end
 
         private
 
-        def whole_chain(root, side, entries, starts, classes, (forks, unsettled), retro)
+        def whole_chain(root, side, entries, starts, classes, (forks, marks), retro)
           ResolutionChain.new(root: root, side: side, entries: entries, level_starts: starts,
                               level_classes: classes, levels_end: entries.size, truncated: @deep, forks: forks,
-                              unsettled: unsettled, retro: retro)
+                              marks: marks, flavor: @flavor, retro: retro)
         end
 
         def lin_for(root, side) = side == :singleton ? singleton_lin(root, 0) : instance_lin(root, 0)
@@ -647,13 +698,13 @@ module Rigor
             return EMPTY_LIN
           end
 
-          frame = Frame.new(0, false, false, true)
+          frame = Frame.new(0, false, NO_MARKS, true)
           @frames.push(frame)
           stack.push(name)
           entries, starts, classes = yield
           stack.pop
           @frames.pop
-          lin = [entries, starts, classes, frame.forks, frame.unsettled, frame.retro_ok].freeze
+          lin = [entries, starts, classes, frame.forks, frame.marks, frame.retro_ok].freeze
           memo[name] = lin unless frame.incomplete
           hand_up(frame)
           lin
@@ -663,7 +714,7 @@ module Rigor
           parent = @frames.last
           return if parent.nil?
 
-          parent.absorb(frame.forks, frame.unsettled, frame.retro_ok)
+          parent.absorb(frame.forks, frame.marks, frame.retro_ok)
           parent.incomplete ||= frame.incomplete
         end
 
@@ -693,11 +744,23 @@ module Rigor
         # Marks the node being computed unsettled when the order of its mixin edges on `kind` is not a fact
         # (`DiscoveryIndex#unpositioned_mixins`: an edge written in a conditional, a method, a block or a hook,
         # or a call the walk cannot record, `"*"`), or when its class is declared in more than one file and
-        # has two or more such edges, whose order across the files is load order. A node's unsettled state
-        # taints every chain that draws on it, so a concern's `included do` edges taint every includer.
+        # has two or more such edges, whose order across the files is load order. A node's mark taints every
+        # chain that draws on it, so a concern's `included do` edges taint every includer. The {Mark} says why,
+        # which is what per-name relevance reads.
         def mark_unsettled(name, kind, edge_count)
           listed = @discovery.unpositioned_mixins[name]&.dig(kind)
-          @frames.last.unsettled = true if (listed && !listed.empty?) || (edge_count >= 2 && multi_file?(name))
+          listed = nil if listed && listed.empty?
+          multi = edge_count >= 2 && multi_file?(name)
+          return if listed.nil? && !multi
+
+          @frames.last.add_marks(mark_for(name, kind, listed, multi))
+        end
+
+        # The one-element frozen array carrying the {Mark} of `[name, kind]`, interned in the bucket.
+        def mark_for(name, kind, listed, multi)
+          by_node = (@bucket[:marks][kind] ||= {})
+          by_node[name] ||= [ResolutionChain::Mark.new(name, kind, listed.nil? ? EMPTY : listed.to_a.freeze,
+                                                       multi)].freeze
         end
 
         def multi_file?(name)
@@ -726,7 +789,7 @@ module Rigor
             # goes uncounted. That is a hole in what the chain can see, not an order fork, so it settles to
             # master with the weight of two.
             @frames.last.forks += 2 if side == :singleton && declared_class?(name, raw)
-            [[external_entry(name, raw, side, true)].freeze, [0].freeze, [nil].freeze, 0, false, true].freeze
+            [[external_entry(name, raw, side, true)].freeze, [0].freeze, [nil].freeze, 0, NO_MARKS, true].freeze
           end
         end
 
@@ -837,3 +900,5 @@ module Rigor
     end
   end
 end
+
+require_relative "resolution_chain/relevance"

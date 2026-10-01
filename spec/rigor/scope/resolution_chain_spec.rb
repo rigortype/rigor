@@ -259,4 +259,49 @@ RSpec.describe Rigor::Scope::ResolutionChain do
   it "rejects an unknown flavor" do
     expect { chain_of(scope_for("class C; end"), "C", :instance, :typo) }.to raise_error(ArgumentError)
   end
+
+  # ADR-119 WD2 — `settle` answers `:unknown` only to a caller that passes `unknown_for:`. The readers that test
+  # `== :master` would read a leaked `:unknown` as `:chain`, which is unsafe, so no shape may leak it.
+  describe "#settle's verdict" do
+    let(:scope) do
+      scope_for(<<~RUBY)
+        module N; def foo = 1; end
+        module Z; include N; end
+        module M; include N; include Z; end
+        module Q; def bar = 1; end
+        class Clean; include N; end
+        class Forked; include M; end
+        class Marked < Clean; include Q if ENV["Q"]; end
+        class Both < Forked; include N; include Q if ENV["Q"]; end
+      RUBY
+    end
+
+    it "never answers :unknown without the option, whatever the chain" do
+      %w[Clean Forked Marked Both N M].each do |name|
+        chain = chain_of(scope, name)
+        verdict = chain.settle(scope, :answer) { :answer }
+        expect(%i[chain master]).to include(verdict), "#{name} leaked #{verdict.inspect}"
+      end
+    end
+
+    it "answers :unknown for a mark the name does not discharge, :chain for one it does" do
+      chain = chain_of(scope, "Marked")
+      expect(chain).to be_unsettled
+      expect(chain.settle(scope, :answer, unknown_for: :bar) { :answer }).to eq(:unknown)
+      expect(chain.settle(scope, :answer, unknown_for: :foo) { :answer }).to eq(:chain)
+    end
+
+    it "answers :unknown, never :master, on a forked chain under the option" do
+      chain = chain_of(scope, "Both")
+      expect(chain.settle(scope, :answer, unknown_for: :foo) { :answer }).to eq(:unknown)
+    end
+
+    it "interns one Mark per node and side, and carries marks as a frozen array" do
+      mark = chain_of(scope, "Marked").instance_variable_get(:@marks).first
+      expect(mark).to be_a(described_class::Mark)
+      expect(mark.node).to eq("Marked")
+      expect(mark.listed).to eq(["Q"])
+      expect(chain_of(scope, "Both").instance_variable_get(:@marks)).to be_frozen
+    end
+  end
 end

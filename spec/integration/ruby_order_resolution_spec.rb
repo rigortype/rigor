@@ -371,10 +371,12 @@ RSpec.describe "resolution in Ruby's ancestor order (#1567, #1568, #1570, #1571)
     RUBY
   end
 
-  # `D#foo` reduces `M#foo` (line 17, master says so too); `E#foo` overrides the private `D#foo`, so the chain
-  # that put `M` ahead of `D` reported a second reduction on `E#foo` that Ruby's `[E, A, D, C, M]` does not have.
+  # `E#foo` overrides the private `D#foo`, so the chain that put `M` ahead of `D` reported a second reduction on
+  # `E#foo` that Ruby's `[E, A, D, C, M]` does not have. `D#foo` reducing `M#foo` (line 17) was reported through
+  # master's order while `A` includes `M` after `D` prepended it; since ADR-119 C1c the override lint reads
+  # `DefinerResolution` and declines on that unsettled chain (an `Unknown`), so neither line fires.
   it "does not report a reduced override through the same prepend shape" do
-    expect(diagnostics_for(<<~RUBY)).to eq([[17, "def.override-visibility-reduced"]])
+    expect(diagnostics_for(<<~RUBY)).to eq([])
       module A
       end
 

@@ -87,7 +87,8 @@ RSpec.describe Rigor::Inference::DefinerResolution do # rubocop:disable RSpec/Sp
     end
   end
 
-  # WD2's non-discharge shapes (the `"*"` one twice, on the mark and inside Q's closure): each is a mark whose named entry could answer the name, so the read stays
+  # WD2's non-discharge shapes (the `"*"` one twice, on the mark and inside Q's closure): each is a mark whose
+  # named entry could answer the name, so the read stays
   # Unknown. Ruby's answer is shown beside each, in both worlds.
   describe "the non-discharge shapes" do
     it "declines when Q includes a module the project does not declare" do
@@ -121,7 +122,7 @@ RSpec.describe Rigor::Inference::DefinerResolution do # rubocop:disable RSpec/Sp
       expect(owner_of(resolve(scope_for(source), :foo))).to eq(:unknown)
     end
 
-    it "declines when Q includes a module RBS knows whose declaration has the name, and discharges one whose does not" do
+    it "declines when an RBS-known module in Q has the name, and discharges one whose declaration lacks it" do
       source = <<~RUBY
         module Q; def bar = 1; include Comparable; end
         class Base; def foo = 1; def between?(low, high) = false; end

@@ -34,6 +34,16 @@ RSpec.describe "call.wrong-arity through the candidate-set read (ADR-119 C1b)" d
     end
   end
 
+  def arity_diagnostics_files(files)
+    FileUtils.mkdir_p("lib")
+    files.each { |name, source| File.write(File.join("lib", name), source) }
+    configuration = Rigor::Configuration.new(
+      Rigor::Configuration::DEFAULTS.merge("paths" => %w[lib], "workers" => 0)
+    )
+    guarded_run(Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil), %w[lib])
+      .diagnostics.select { |diagnostic| diagnostic.qualified_rule == "call.wrong-arity" }.map(&:line)
+  end
+
   def line_of_call(declarations) = declarations.lines.size + 1
 
   around do |example|
@@ -164,5 +174,18 @@ RSpec.describe "call.wrong-arity through the candidate-set read (ADR-119 C1b)" d
     RUBY
     expect(ruby_outcomes(declarations, "C.new.foo")).to eq(%i[arity arity])
     expect(arity_diagnostics("#{declarations}C.new.foo\n")).to eq([line_of_call(declarations)])
+  end
+
+  # A multi-file mark with two defining closures (ADR-119 Q4): two files each reopen `User` and include a module
+  # defining `greet(x)`. Ruby raises whichever file loads first, and master fired; the read declines, because the
+  # order the two includes ran in is not a fact the tables hold (tp-lost by design).
+  it "declines a class reopened in two files whose two includes both define the name" do
+    first = "module A; def greet(x) = x; end\nclass User; include A; end\n"
+    second = "module B; def greet(x) = x; end\nclass User; include B; end\n"
+    call = "User.new.greet"
+    [[first, second], [second, first]].each do |order|
+      expect(ruby_outcomes(order.join, call)).to eq(%i[arity arity])
+    end
+    expect(arity_diagnostics_files("a.rb" => first, "b.rb" => second, "c.rb" => "#{call}\n")).to eq([])
   end
 end

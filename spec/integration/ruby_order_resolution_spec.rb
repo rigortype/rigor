@@ -204,6 +204,27 @@ RSpec.describe "resolution in Ruby's ancestor order (#1567, #1568, #1570, #1571)
     expect(diagnostics_for(issue_1570_source("C.new.foo\nE.new.foo(1)"))).to eq([[20, "call.wrong-arity"]])
   end
 
+  # #1607 — the singleton-side form of #1570. `extend M` on `C` is skipped because `Base`'s singleton already
+  # carries `M`, so `C.foo` is `Base.foo` and prints 1; the singleton side of `SourceArity` still settles to master's
+  # order, which reads `M#foo(x)`. Flip when ADR-119 C2 designs the singleton side of the candidate-set read.
+  it "runs the singleton-side #1570 as Base.foo under Ruby" do
+    expect(RubyRun.stdout("#{singleton_1570_source}p C.foo\n")).to eq("1\n")
+  end
+
+  def singleton_1570_source
+    <<~RUBY
+      module M; def foo(x) = "m\#{x}"; end
+      class Base; extend M; def self.foo = 1; end
+      class C < Base; extend M; end
+    RUBY
+  end
+
+  it "reports no arity error for an extend of a module the superclass already extends (#1607)" do
+    pending "https://github.com/rigortype/rigor/issues/1607 — singleton side, ADR-119 C2; the line is a false positive"
+
+    expect(diagnostics_for("#{singleton_1570_source}C.foo\n")).to eq([])
+  end
+
   # The arity rule's hedges survive the move of its levels onto the chain: a module whose method table the
   # project rewrites dynamically (`ENVELOPE_DYNAMIC_MARK`) still declines every level it sits in, in either
   # world, and the same shape without the mark still fires.

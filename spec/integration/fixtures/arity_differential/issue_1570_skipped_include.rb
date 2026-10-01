@@ -1,23 +1,24 @@
-# #1570: Ruby skips `C`'s `include M` (`Base` already carries it), so `C.new.foo` is `Base#foo` and correct; the
-# tables cannot tell that from a reopened `Base`, where `M#foo(x)` answers. Master fired on line 22 (the false
-# positive); since ADR-119 C1b the rule declines there. Line 23 is the control and keeps firing.
-module M
+# #1570: Ruby skips `C1570`'s `include M1570` (`Base1570` already carries it), so `C1570.new.foo` is `Base1570#foo`
+# and correct; the tables cannot tell that from a reopened `Base1570`, where `M1570#foo(x)` answers. Master fired on
+# line 22 (the false positive); since ADR-119 C1b the rule declines there. Line 23 is the control and keeps firing.
+# The names are this file's own: the differential analyses every fixture together.
+module M1570
   def foo(x) = "m#{x}"
 end
 
-class Base
-  include M
+class Base1570
+  include M1570
 
   def foo = 1
 end
 
-class C < Base
-  include M
+class C1570 < Base1570
+  include M1570
 end
 
-class E
+class E1570
   def foo = 1
 end
 
-C.new.foo
-E.new.foo(1)
+C1570.new.foo
+E1570.new.foo(1)

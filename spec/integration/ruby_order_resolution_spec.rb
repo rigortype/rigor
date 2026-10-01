@@ -3,7 +3,7 @@
 # The `rigor check` reproductions of the false positives the breadth-first ancestor walks produced, each beside
 # a control on the same file that must still fire — so a run that analysed nothing cannot pass by reporting
 # nothing. `spec/integration/resolution_chain_witness_spec.rb` compares the same shapes with Ruby. #1570's
-# shape is pinned where the chain's two worlds leave it: at master's answer.
+# shape is pinned where the chain's two worlds leave it: the arity rule declines (ADR-119 C1b).
 
 require "spec_helper"
 require "fileutils"
@@ -139,13 +139,12 @@ RSpec.describe "resolution in Ruby's ancestor order (#1567, #1568, #1570, #1571)
     RUBY
   end
 
-  # Flip this when ADR-119 PR C fixes #1570 at `SourceArity`'s decision point. Ruby skips `C`'s `include M`
-  # (`Base` already carries it), so `C.new.foo` is `Base#foo` and correct; but the tables cannot tell that run
-  # from one where `Base` was reopened to include `M` after `C` did (`[C, M, Base, M]`, `M#foo(x)`), the two
-  # worlds disagree, and the rule keeps master's answer, which checks the call against `M#foo`. PR C makes
-  # that disagreement answer `Unknown`, so line 19 goes silent. Line 20 is the control.
-  it "keeps master's answer for an include of a module the superclass already includes (#1570)" do
-    expect(diagnostics_for(<<~RUBY)).to eq([[19, "call.wrong-arity"], [20, "call.wrong-arity"]])
+  # Ruby skips `C`'s `include M` (`Base` already carries it), so `C.new.foo` is `Base#foo` and correct; but the
+  # tables cannot tell that run from one where `Base` was reopened to include `M` after `C` did (`[C, M, Base, M]`,
+  # `M#foo(x)`). The two worlds disagree, the candidate-set read answers `UNKNOWN` (ADR-119 C1b), and line 19 is
+  # silent. Line 20 is the control.
+  it "declines the arity check for an include of a module the superclass already includes (#1570)" do
+    expect(diagnostics_for(<<~RUBY)).to eq([[20, "call.wrong-arity"]])
       module M
         def foo(x) = "m\#{x}"
       end
@@ -199,13 +198,9 @@ RSpec.describe "resolution in Ruby's ancestor order (#1567, #1568, #1570, #1571)
     expect(RubyRun.stdout(issue_1570_source("p C.ancestors.first(3)\np C.new.foo"))).to eq("[C, Base, M]\n1\n")
   end
 
-  # The pin of today's answer for this same program (the `tail` below is the text of `keeps master's answer ...
-  # (#1570)` above) is that example; flip both together.
-  # Flip this when ADR-119 PR C1 fixes #1570 at `SourceArity`'s decision point: line 19 (`C.new.foo`) is correct
-  # under Ruby's run and goes silent; line 20 is the control and stays.
+  # The same program as the pin above, from the shared source: line 19 (`C.new.foo`) is correct under Ruby's run
+  # and silent; line 20 is the control and stays.
   it "reports no arity error for an include of a module the superclass already includes (#1570)" do
-    pending "https://github.com/rigortype/rigor/issues/1570 — fixed by ADR-119 PR C1; line 19 is a false positive"
-
     expect(diagnostics_for(issue_1570_source("C.new.foo\nE.new.foo(1)"))).to eq([[20, "call.wrong-arity"]])
   end
 

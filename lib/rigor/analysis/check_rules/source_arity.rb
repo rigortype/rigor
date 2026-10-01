@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../../reflection"
+require_relative "../../inference/definer_resolution"
 require_relative "../../source/parameter_envelope"
 
 module Rigor
@@ -25,6 +26,10 @@ module Rigor
       #    project subclass of the receiver — whose instances the receiver's type admits — records a different
       #    or opaque envelope for it.
       #
+      # ADR-119 C1b — on the instance side stage 1 and the subclass check ask `Inference::DefinerResolution`, and a
+      # chain it declines (`UNKNOWN`) answers no envelope: where Ruby's order depends on a fact the tables cannot
+      # prove, the rule is silent instead of checking the call against master's order (#1570).
+      #
       # Deliberately NOT in scope: a constructor reached through `Class#new` (nothing records `initialize` as
       # `[:singleton, :new]`, so `.new` finds no owner unless the class writes `def self.new` itself); keyword
       # arity (the envelope's required-keyword flag declines, as `compute_arity_envelope` declines an RBS
@@ -45,6 +50,21 @@ module Rigor
         Level = Data.define(:class_name, :modules, :externals)
         private_constant :Level
 
+        # ADR-119 C1b — the answer of a level whose records are not one non-opaque envelope. It equals itself in
+        # every world, so two worlds that both reach such a level agree, and no envelope equals it.
+        AMBIGUOUS = Object.new.freeze
+        private_constant :AMBIGUOUS
+
+        # What `Inference::DefinerResolution` reads off a candidate: the answer, the entry that gave it, its
+        # position on the chain and its side. The same four readers as `DefinerResolution::Hit`, which a call site
+        # may not name (the case/in contract spec allows no other reference to the module).
+        ArityHit = Data.define(:answer, :owner, :index, :side)
+        private_constant :ArityHit
+
+        # A subclass level the walk cannot read: `subclasses_agree?` reads the nil as a decline.
+        NO_LEVELS = [nil].freeze
+        private_constant :NO_LEVELS
+
         def initialize(scope, method_name, kind)
           @scope = scope
           @method_name = method_name.to_sym
@@ -60,6 +80,7 @@ module Rigor
         def owner_envelope(class_name)
           @owner_entries = []
           @ambiguous = false
+          @unknown = false
           envelope, @withheld = Analysis::DependencyRecorder.withhold { walk_to_owner(class_name) }
           envelope
         end
@@ -74,6 +95,9 @@ module Rigor
         # withhold, so none of these needs the file-level class edge the bucket reads would otherwise record.
         def settle_by_definitions
           return if @withheld.nil?
+          # ADR-119 C1b — a declined chain (`@unknown`) is silent only until another file's edit lifts the
+          # decline, so its verdict depends on everything the walk read, as an opaque level's does.
+          return settle_by_walk if @unknown
 
           @owner_entries.each do |name, kind|
             if kind == :singleton
@@ -102,14 +126,68 @@ module Rigor
 
         private
 
-        # ADR-24 / #1570 — `Scope::ResolutionChain#settle` decides whether the chain's owner stands. Where a
-        # skipped `include` would put a different envelope first, which definition the call reaches depends on
-        # the order the bodies ran, and the walk answers from the levels it read before the chain
-        # (`Scope::ResolutionChain::MasterOrder`). Both worlds' levels are kept for {#authoritative?}.
+        # ADR-119 C1b / #1570 — on the instance side the nearest level is asked of
+        # {Inference::DefinerResolution}: the chain stands only where every candidate level gives one envelope
+        # in every world Ruby may have run (a fork, an unproven mixin order, a `possible`-only definer). Where it
+        # does not, the answer is NO envelope and `@unknown` — the rule stays silent — instead of master's
+        # answer, which is what #1570 fired on. The levels the walk keeps for {#authoritative?} are the chain's.
+        #
+        # The SINGLETON side is untouched on purpose: the candidate-set read has no singleton side until
+        # ADR-119 C1c designs it, so it keeps `Scope::ResolutionChain#settle` and the level walk the chain
+        # replaced (`Scope::ResolutionChain::MasterOrder`) where the chain does not stand.
         def walk_to_owner(class_name)
           @levels = []
           @passed = []
           @master = false
+          return walk_singleton_to_owner(class_name) if @kind == :singleton
+
+          case Inference::DefinerResolution.resolve(@scope, class_name, @method_name, :instance,
+                                                    question: :arity) { |chain, from| arity_hit(chain, from) }
+          in Inference::DefinerResolution::Known(answer: _answer, owner: _owner) then nearest_envelope(class_name)
+          in Inference::DefinerResolution::ABSENT then nearest_envelope(class_name) # rubocop:disable Lint/DuplicateBranch
+          in Inference::DefinerResolution::UNKNOWN then decline
+          end
+        end
+
+        # The chain's nearest level's envelope, filling the levels {#authoritative?} and {#settle_by_definitions}
+        # read. Run only once the candidate-set read has answered, so the chain stands for the name.
+        def nearest_envelope(class_name) = owner_in(chain_levels(arity_chain(class_name)).first)
+
+        def decline
+          @levels = []
+          @passed = []
+          @owner_entries = []
+          @envelope = nil
+          @unknown = true
+          nil
+        end
+
+        # The first level at or after entry position `from` whose records name the method: its envelope (or
+        # {AMBIGUOUS}), the entry that recorded it and that entry's position on the chain.
+        def arity_hit(chain, from)
+          start = 0
+          chain.levels.each_with_index do |raw, index|
+            level = Level.new(*raw)
+            entries = chain.level_entries(index)
+            first = start
+            start += entries.size
+            next if first < from
+
+            found = level_envelopes(level)
+            next if found.empty?
+
+            envelope = found.first
+            answer = found.all?(envelope) && !Source::ParameterEnvelope.opaque?(envelope) ? envelope : AMBIGUOUS
+            owner = owner_entries(level).first.first
+            position = first + (entries.index { |entry| entry.name == owner } || 0)
+            return ArityHit.new(answer, owner, position, :instance)
+          end
+          nil
+        end
+
+        # The singleton side's walk, as it was before C1b: the chain's owner where `settle` lets it stand, and
+        # master's where it does not. Both worlds' levels are kept for {#authoritative?}.
+        def walk_singleton_to_owner(class_name)
           chain = arity_chain(class_name)
           envelope = owner_in(chain_levels(chain).first)
           # The retro read answers `false` (no envelope is `false`) unless it agrees with the chain's and neither
@@ -310,9 +388,36 @@ module Rigor
           true
         end
 
-        # A subclass's own level (nil where the budget cut it): the chain's where `settle` lets it stand, and
-        # master's where it does not.
+        # A subclass's own level (nil where the budget cut it or the chain does not stand for the name). The
+        # instance side asks {Inference::DefinerResolution} (ADR-119 C1b): the subclass's own level answers, and a
+        # fork, an unproven mixin order or a `possible`-only definer there is `UNKNOWN`, which
+        # `subclasses_agree?` reads as a reason to decline. The singleton side keeps `settle` and master's walk,
+        # as {#walk_singleton_to_owner} does.
         def subclass_levels(subclass)
+          return singleton_subclass_levels(subclass) if @kind == :singleton
+
+          case Inference::DefinerResolution.resolve(@scope, subclass, @method_name, :instance, question: :arity,
+                                                    &own_level_answer(subclass))
+          in Inference::DefinerResolution::Known(answer: _answer, owner: _owner) then [first_level(subclass)]
+          in Inference::DefinerResolution::ABSENT then [nil]
+          in Inference::DefinerResolution::UNKNOWN then NO_LEVELS
+          end
+        end
+
+        # The subclass's own level, always a candidate (an empty answer where it records nothing), so that the
+        # read asks whether the chain stands for the subclass and never whether an ancestor defines the name.
+        def own_level_answer(subclass)
+          lambda do |chain, from|
+            next nil unless from.zero? && !chain.levels.empty?
+
+            level = Level.new(*chain.levels.first)
+            ArityHit.new(level_envelopes(level).uniq, subclass, 0, :instance)
+          end
+        end
+
+        def first_level(class_name) = chain_levels(arity_chain(class_name)).first.first
+
+        def singleton_subclass_levels(subclass)
           chain = arity_chain(subclass)
           own = chain_levels(chain).first.first
           verdict = chain.settle(@scope, own) { |retro| chain_levels(retro).first.first }

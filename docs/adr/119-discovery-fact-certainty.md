@@ -1,6 +1,7 @@
 # ADR-119 — Certainty on discovery facts, candidate-set reads over the resolution chain
 
-Status: **Proposed, 2026-09-28; revised 2026-10-01.** Awaiting the maintainer's acceptance. Landed
+Status: **Accepted, 2026-10-01** (proposed 2026-09-28, revised to v16 on 2026-10-01), with every default in
+§ Open questions. Landed
 ahead of it, each on its own merits: #1551 (the layered def-nesting lookup) and #1563 (the
 `module_function` readings behind one helper, `lib/rigor/inference/module_function_state.rb`), both
 byte-identical; the gates of WD4–WD6 (#1566, `spec/rigor/declaration_facts/`); the
@@ -12,8 +13,7 @@ provably-run block shapes of #1592 (§ The chain); #1597 (witness fixtures for #
 and compared); #1600, which carries WD1's sibling pairs beside their members on every copy path, so
 WD1 is implemented with every sibling empty; and #1599, the cross-commit `call.wrong-arity`
 differential with its fixtures and CI job. WD2 and WD3, the reads this ADR decides, are open: no
-`possible` fact exists, no read answers *unknown*, and the first lane-2 PR on them (PR C) waits on
-acceptance. **Citation baseline:** `file:line` cites are at `origin/master` `fd10d71a7` (#1599
+`possible` fact exists, no read answers *unknown*, and the first lane-2 PR on them (PR C) is next. **Citation baseline:** `file:line` cites are at `origin/master` `fd10d71a7` (#1599
 merged); SI is
 `lib/rigor/inference/scope_indexer.rb`, RC is `lib/rigor/scope/resolution_chain.rb`, MA is
 `lib/rigor/inference/scope_indexer/mixin_accumulator.rb`.
@@ -738,6 +738,8 @@ Negative:
 - No speed is claimed.
 
 ## Open questions for the maintainer
+
+Resolved at acceptance (2026-10-01): every default below is adopted.
 
 1. **Scope of `possible`.** As stated, or restrict to direct-body control flow? *Default: as stated.*
 2. **Typing through a possible-only definer** answers `Dynamic`. *Default: accept.*

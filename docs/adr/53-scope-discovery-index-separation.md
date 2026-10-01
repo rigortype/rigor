@@ -230,7 +230,7 @@ fold in IvarWrite/DeadAssignment, then the main `NodeWalker.each` pass, then
 | Discovery tables on `Environment` | Rejected | Wrong lifetime (run-global vs per-file-seed); see WD1. |
 | Folding the rule collectors into `ScopeIndexer`'s walk (one walk total) | Rejected | Collectors read the *completed* `scope_index`; collecting during indexing couples diagnostics to indexing order and widens the blast radius for no additional walk saved beyond Track B's end state. |
 | Renaming `Analysis::FactStore` → `Inference::` (the namespace twist the re-review noted) | Deferred | Cosmetic; no behavioural or boundary payoff. Revisit only if a v1.0 namespace audit forces it. |
-| Full generic-visitor rewrite of `scope_indexer.rb` (Theme B) | Deferred | Unchanged from the structural-repetition audit: highest-risk traversal surface. Track B's harness is its enabling asset; the rewrite itself stays demand-gated. |
+| Full generic-visitor rewrite of `scope_indexer.rb` (Theme B) | Superseded by [ADR-119](119-discovery-fact-certainty.md) | Unchanged from the structural-repetition audit: highest-risk traversal surface. Track B's harness is its enabling asset; the rewrite itself stays demand-gated. |
 | Asserting discovery-index identity in `Scope#==` | Rejected | Behaviour change with FP-adjacent reach (scope-equality short-circuits); see WD3. |
 
 > **Partially superseded by [ADR-116 (WD5)](116-hot-file-restructuring.md#working-decisions--the-slices-in-order).**

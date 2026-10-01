@@ -281,21 +281,6 @@ RSpec.describe Rigor::Inference::DefinerResolution do # rubocop:disable RSpec/Sp
       expect(both_worlds(source, "C.instance_method(:foo).owner")).to eq(%w[Base Q])
       expect(owner_of(resolve(scope_for(source), :foo))).to eq(:unknown)
     end
-
-    it "declines an extended hook on the singleton side" do
-      source = <<~RUBY
-        module Q; def bar = 1; def self.extended(b) = b.singleton_class.send(:define_method, :foo) { 2 }; end
-        class Base; def self.foo = 1; end
-        class C < Base; extend Q if ENV["Q"]; end
-      RUBY
-      expect(both_worlds(source, "C.method(:foo).owner.inspect")).to eq(["#<Class:Base>", "#<Class:C>"])
-      scope = scope_for(source)
-      expect(owner_of(resolve(scope, :foo, side: :singleton))).to eq(:unknown)
-      # The singleton read also declines on the WD3 closure rule, so the relevance rule is asked directly.
-      chain = Rigor::Scope::ResolutionChain.for(scope, "C", :singleton, :methods)
-      mark = chain.instance_variable_get(:@marks).first
-      expect(Rigor::Scope::ResolutionChain::Relevance.discharged?(scope, chain, mark, :foo)).to be(false)
-    end
   end
 
   # `from:` is a position on the chain; the retro world must be read from the same entry.
@@ -338,22 +323,10 @@ RSpec.describe Rigor::Inference::DefinerResolution do # rubocop:disable RSpec/Sp
     end
   end
 
-  # WD3 — a hook's singleton edge is recorded on no includer, so the singleton side declines by the closure.
-  describe "the singleton side through an included hook module" do
-    it "is Unknown where `included` extends the includer" do
-      source = <<~RUBY
-        module CM; def foo = :cm; end
-        module Q; def bar = 1; def self.included(b) = b.extend(CM); end
-        class Base; def self.foo = :base; end
-        class C < Base; include Q if ENV["Q"]; end
-      RUBY
-      expect(both_worlds(source, "C.method(:foo).owner.inspect")).to eq(["#<Class:Base>", "CM"])
-      expect(owner_of(resolve(scope_for(source), :foo, side: :singleton))).to eq(:unknown)
-    end
-
-    it "answers Known on a hook-free instance chain" do
-      source = "class Base; def self.foo = :base; end\nclass C < Base; end\n"
-      expect(owner_of(resolve(scope_for(source), :foo, side: :singleton))).to eq("Base")
+  describe "the singleton side" do
+    it "is not resolved until ADR-119 C1c" do
+      scope = scope_for("class Base; def self.foo = 1; end\nclass C < Base; end\n")
+      expect { resolve(scope, :foo, side: :singleton) }.to raise_error(ArgumentError, /C1c/)
     end
   end
 

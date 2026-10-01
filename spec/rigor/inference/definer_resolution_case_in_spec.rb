@@ -54,9 +54,10 @@ RSpec.describe "DefinerResolution call sites" do
       expect(violations_in(without_last_arm(good, ""))).not_to be_empty
     end
 
-    it "accepts the module's own declaration" do
-      expect(violations_in("module Rigor\n  module Inference\n    module DefinerResolution\n    end\n  end\nend\n"))
-        .to be_empty
+    it "accepts the module's declaration in its home file and flags a reopening elsewhere" do
+      source = "module Rigor\n  module Inference\n    module DefinerResolution\n    end\n  end\nend\n"
+      expect(violations_in(source, "lib/rigor/inference/definer_resolution.rb")).to be_empty
+      expect(violations_in(source, "lib/rigor/other.rb")).not_to be_empty
     end
 
     it "flags a reference that is not a resolve call or a pattern" do

@@ -11,6 +11,7 @@ module DefinerResolutionCaseIn
   ARMS = %i[Known UNKNOWN ABSENT].freeze
   REACHING_CALLS = %i[send public_send __send__ method instance_method].freeze
   CONSTANT = :DefinerResolution
+  HOME = "lib/rigor/inference/definer_resolution.rb"
 
   # Marks every constant node of a pattern as an approved reference.
   class PatternConstants < Prism::Visitor
@@ -45,6 +46,9 @@ module DefinerResolutionCaseIn
     end
 
     def visit_module_node(node)
+      if node.constant_path.slice.split("::").last == CONSTANT.to_s && @path != HOME
+        @violations << "#{@path}:#{node.location.start_line}: reopens DefinerResolution outside #{HOME}"
+      end
       node.constant_path.accept(PatternConstants.new(@allowed))
       super
     end

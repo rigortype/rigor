@@ -10,10 +10,10 @@ module Rigor
     # - {UNKNOWN} — the chain does not stand for this name (a mark not discharged, a fork, a retro world that
     #   answers otherwise), a candidate disagrees, the walk was cut by the budget, an external ancestor ahead of
     #   the candidate may answer first (one RBS does not know, or knows and declares the name in; one it knows
-    #   and whose declaration lacks the name is skipped), or, on the singleton side, a module on the receiver's
-    #   instance chain can add singleton methods through a hook (WD3);
-    # - {ABSENT} — no project entry, no external entry and not the implicit `Object` (`Class` on the singleton
-    #   side) can answer.
+    #   and whose declaration lacks the name is skipped);
+    # - {ABSENT} — no project entry, no external entry and not the implicit `Object` can answer.
+    #
+    # Instance side only: `side: :singleton` raises until ADR-119 C1c designs the singleton side.
     #
     # THE CALL SITE IS A CONTRACT. A result is consumed only by an exhaustive `case/in` that is the call's own
     # direct predicate, with one arm per answer and no `else` or `in _`, and is never stored, returned or
@@ -44,12 +44,12 @@ module Rigor
       # on the chain, and again on the retro world when the chain has one fork, where `from` is mapped to the
       # entry it followed.
       def resolve(scope, class_name, method_name, side, question:, from: 0, &answer_in)
+        raise ArgumentError, "singleton-side resolution lands with ADR-119 C1c" if side == :singleton
         raise ArgumentError, "unknown question #{question.inspect}" unless QUESTIONS.include?(question)
 
         answer_in ||= default_answer(scope, method_name, question)
         flavor = question == :arity ? :arity : :methods
-        chain = Scope::ResolutionChain.for(scope, class_name.to_s, side == :singleton ? :singleton : :instance, flavor)
-        return UNKNOWN if side == :singleton && singleton_hooks?(scope, class_name)
+        chain = Scope::ResolutionChain.for(scope, class_name.to_s, :instance, flavor)
 
         hits = candidates(scope, chain, method_name, from, answer_in)
         return UNKNOWN if hits.nil?
@@ -113,33 +113,8 @@ module Rigor
         end || (last.nil? && implicit_object_answers?(scope, chain, method_name))
       end
 
-      def implicit_object_answers?(scope, chain, method_name)
-        owner = chain.side == :singleton ? "Class" : "Object"
-        !Scope::ResolutionChain::Relevance.external_lacks?(scope, [owner], method_name)
-      end
-
-      # WD3 — the singleton side declines when a module on the receiver's INSTANCE chain can add singleton
-      # methods through a hook: it lists anything on its `:extend` side, records a singleton hook, or extends
-      # `ActiveSupport::Concern`. A hook's singleton edge is recorded on no includer, so no chain state carries it.
-      def singleton_hooks?(scope, class_name)
-        instance = Scope::ResolutionChain.for(scope, class_name.to_s, :instance, :methods)
-        instance.record(scope)
-        return true if instance.truncated?
-
-        instance.entries.any? { |entry| !entry.external? && hooked?(scope, entry.name) }
-      end
-
-      def hooked?(scope, owner)
-        discovery = scope.discovery
-        extended = discovery.unpositioned_mixins[owner]&.dig(:extend)
-        return true if extended && !extended.empty?
-        return true if singleton_hook?(scope, owner)
-
-        (discovery.discovered_extends[owner] || []).any? { |raw| raw.to_s.delete_prefix("::") == "ActiveSupport::Concern" }
-      end
-
-      def singleton_hook?(scope, owner)
-        Scope::ResolutionChain::Relevance::HOOKS.any? { |hook| scope.discovered_method?(owner, hook, :singleton) }
+      def implicit_object_answers?(scope, _chain, method_name)
+        !Scope::ResolutionChain::Relevance.external_lacks?(scope, ["Object"], method_name)
       end
 
       # What a candidate set says, for {Scope::ResolutionChain#settle} to compare across worlds.
@@ -222,7 +197,7 @@ module Rigor
       end
 
       private_class_method :retro_position, :candidates, :decided, :external_may_answer?, :implicit_object_answers?,
-                           :singleton_hooks?, :hooked?, :singleton_hook?, :outcomes, :collapse, :possible?,
+                           :outcomes, :collapse, :possible?,
                            :default_answer, :definer_answer, :visibility_answer, :first_hit
     end
   end

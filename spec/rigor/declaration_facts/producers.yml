@@ -90,7 +90,6 @@ lib/rigor/inference/declaration_walk/traversal.rb:
 lib/rigor/inference/definer_resolution.rb:
   computes: the candidate-set read of a method name over a resolution chain, Known, Unknown or Absent (ADR-119 WD2)
   producers:
-    Rigor::Inference::DefinerResolution#hooked?: a consumer, not a declaration producer; it reads whether a module lists anything on its `:extend` side or extends `ActiveSupport::Concern` (WD3's singleton-side decline) and writes no table
     Rigor::Inference::DefinerResolution#visibility_answer: a consumer, not a declaration producer; `:public` is the visibility it answers for a definer with none recorded, and it writes no table
 lib/rigor/inference/expression_typer.rb:
   computes: the type a class or module expression evaluates to, and the barrier around a re-typed callee body

@@ -6,12 +6,16 @@ ahead of it, each on its own merits: #1551 (the layered def-nesting lookup) and 
 byte-identical; the gates of WD4–WD6 (#1566, `spec/rigor/declaration_facts/`); the
 `unpositioned_mixins` member (#1584, data only, nothing read it); and the resolution chain
 (#1578, `lib/rigor/scope/resolution_chain.rb`), an ADR-24 amendment that fixes #1567, #1568, #1571 and
-#1587 and is the first behaviour change in this line; and #1593 (2026-10-01), which records the
-provably-run block shapes of #1592 (§ The chain). WD1–WD3, the decisions this ADR itself makes, are
-open: no `possible` fact exists, no read answers *unknown*, and the storage siblings, the candidate-set
-reads and the first lane-2 PR on them (PR C) wait on acceptance. **Citation baseline:** `file:line`
-cites are at `origin/master` `5ff738a70` (#1593 merged); SI is `lib/rigor/inference/scope_indexer.rb`,
-RC is `lib/rigor/scope/resolution_chain.rb`, MA is
+#1587 and is the first behaviour change in this line; #1593 (2026-10-01), which records the
+provably-run block shapes of #1592 (§ The chain); #1597 (witness fixtures for #1570, #1572, #1573 and
+#1594 that flip with their fixes); #1598 (#1548 closed: a seeded file's deferred ranges are re-walked
+and compared); #1600, which carries WD1's sibling pairs beside their members on every copy path, so
+WD1 is implemented with every sibling empty; and #1599, the cross-commit `call.wrong-arity`
+differential with its fixtures and CI job. WD2 and WD3, the reads this ADR decides, are open: no
+`possible` fact exists, no read answers *unknown*, and the first lane-2 PR on them (PR C) waits on
+acceptance. **Citation baseline:** `file:line` cites are at `origin/master` `fd10d71a7` (#1599
+merged); SI is
+`lib/rigor/inference/scope_indexer.rb`, RC is `lib/rigor/scope/resolution_chain.rb`, MA is
 `lib/rigor/inference/scope_indexer/mixin_accumulator.rb`.
 
 Grounding: the design-review rounds on #1531 and #1507, the fourteen drafts of this ADR reviewed
@@ -42,8 +46,8 @@ reviews attribute that to five failure modes, each of which the Decision address
    `Effects::DefinitionContext` (`lib/rigor/effects/definition_context.rb:58`),
    `SyntheticMethodScanner#build_hierarchy` (`lib/rigor/inference/synthetic_method_scanner.rb:369`), the
    ActiveRecord `ModelDiscoverer`'s `included do` descent (`model_discoverer.rb:471, 518`). WD6's
-   tripwire now lists 391 such producers in 71 files (`spec/rigor/declaration_facts/producers.yml`).
-   On the read side, `Scope` exposes every table raw (`lib/rigor/scope.rb:41–52`), and before #1578
+   tripwire now lists 393 such producers in 71 files (`spec/rigor/declaration_facts/producers.yml`).
+   On the read side, `Scope` exposes every table raw (`lib/rigor/scope.rb:42–60`), and before #1578
    six consumers walked ancestry on their own while four more loop over the raw tables on purpose.
 2. **Variants were found by reading code**, so they grew as O(walkers × categories)
    (`lib/rigor/inference/declaration_walk/traversal.rb:89`), protect behaviour no corpus exercises
@@ -51,23 +55,23 @@ reviews attribute that to five failure modes, each of which the Decision address
    construct passes without checking anything.
 3. **One semantic question had several implementations and no reference.** `module_function`'s definee
    was computed four ways until #1563 put the readings behind one helper, byte-identical, so the four
-   semantics still stand (SI:4224, 4605, 4913, 4979; `generator.rb:667`), and Ruby's answer is
+   semantics still stand (SI:4233, 4614, 4922, 4988; `generator.rb:667`), and Ruby's answer is
    run-dependent. **Method resolution order had the same problem**: two breadth-first walks,
    `SourceArity`'s level walk with its own agreement rule and eight hedges, none Ruby's order — three
    false positives on correct programs (#1567 on both sides, #1568 at error level, #1570). The first
    two are fixed by the chain; #1570 is not (§ The chain).
 4. **Byte-identity was demanded against walkers that are wrong or deliberately over-approximate.** The
-   extends walker over-approximates on purpose, in the ADR-5-safe direction (SI:6063–6069), and
+   extends walker over-approximates on purpose, in the ADR-5-safe direction (SI:6072–6078), and
    under-approximated in the unsafe one until #1593: a singleton-side mixin inside a block — including
    a block inside a method — was dropped, while one written directly in a method body was recorded and
    listed (#1592, finding (d)). #1518–#1520 are rules wrong in several walkers at once; #1550 is a false
-   positive on correct Ruby (the named form resolves the *later* `def`, SI:4975–4979).
+   positive on correct Ruby (the named form resolves the *later* `def`, SI:4984–4988).
 5. **The justification shifted** from speed to C2 without a criterion for landing a port; the speed case
    was measured and found absent (`docs/adr/116-hot-file-restructuring.md:175` still calls the merge
    "the wall lever").
 
 Seven findings bound the design. **(a)** The typed pre-passes call `scope.type_of` under the project
-seed and the plugin registry (nine sites, SI:1738–3020), so they are not pure per file. **(b)** A
+seed and the plugin registry (nine sites, SI:1747–3029), so they are not pure per file. **(b)** A
 direction per table or per read is ill-posed: visibility is read to fire and silenced by `nil`,
 constants are read both ways (`scope.rb:140`), and on an ancestor walk keeping a `possible` edge
 shadows a further ancestor while dropping it exposes one. **(c)** A candidate set over a breadth-first
@@ -84,12 +88,12 @@ singleton side, before #1593, the extend walk descended into no block it did not
 module only, which no includer's singleton chain draws on; in each shape `K.bar.upcase` fired
 `call.undefined-method` through `Base.bar` while Ruby runs `X#bar` (#1592, pre-existing), whereas the
 direct-body `extend X if ENV["E"]` and a method body's `extend X` were listed, unsettled and silent.
-#1593 walks a block that provably runs once with the body's `self` (`extends_block_plan`, SI:6216;
-`runs_body_block_once?`, SI:6249) and still skips the rest.
+#1593 walks a block that provably runs once with the body's `self` (`extends_block_plan`, SI:6225;
+`runs_body_block_once?`, SI:6258) and still skips the rest.
 **(e) Some edges are not recorded, only marked**: `send(:include,
 M)`, the receiver form `C.include(M)` and helpers such as `prepend_mod_with` add nothing to the mixin
-tables (`MIXIN_CALL_NAMES`, SI:5624; `SURFACE_MIXIN_HELPER`, SI:6803); each stamps
-`ENVELOPE_DYNAMIC_MARK` on the class (SI:6826, 6836) and, since #1584, lists `"*"` on the owner's side
+tables (`MIXIN_CALL_NAMES`, SI:5633; `SURFACE_MIXIN_HELPER`, SI:6812); each stamps
+`ENVELOPE_DYNAMIC_MARK` on the class (SI:6835, 6845) and, since #1584, lists `"*"` on the owner's side
 in `unpositioned_mixins`. Three readers decline on the mark (`source_arity.rb:244`;
 `rbs_dispatch.rb:621, 656, 739–748`; `check_rules.rb:2506, 2522`); every other read types through it.
 **(f) The chain sees only project classes**, so "absent means `NoMethodError`" is false:
@@ -97,9 +101,9 @@ with `include M if X` and `M#to_s(fmt)`, `Object#to_s` answers when `X` is unset
 `call.wrong-arity` fires; `include M; include Enumerable` fires an error-level `undefined method
 'first' for 1` although `Enumerable#to_a` answers (#1572). A project module is a project entry only
 under the reader's flavour (RC:339–349): a module whose every method is a `define_method` in a loop
-has no `discovered_methods` row, fails `known_user_class?` (`scope.rb:1623–1626`) and enters an
+has no `discovered_methods` row, fails `known_user_class?` (`scope.rb:1680–1683`) and enters an
 includer's `:methods` chain as an **external** entry carrying the dynamic mark. **(g)** A single-valued
-table has no union (last-write-wins, SI:4963) and scalar consumers deref the value (`runner.rb:598–607`).
+table has no union (last-write-wins, SI:4972) and scalar consumers deref the value (`runner.rb:605–609`).
 
 **What landed between the first draft and this one.** The chain (#1578, 2026-09-30) replaced every
 "which definer" walk inside the engine's readers with one Ruby-order implementation and one decision
@@ -112,8 +116,12 @@ unsettled and 1.0 % of 135,225 reads answer from master's order; on Mastodon 1,2
 are unsettled, 49 carry one retro-eligible fork, none carries another kind, and **21.3 % of 145,182
 reads answer from master's order, every one on an unsettled chain** (carried forward as #1591).
 `unpositioned_mixins` (#1584) is the data those verdicts read; it cost +0.03 % allocations and bumped
-the seed-bundle and snapshot schemas (`descriptor.rb:77`; `incremental_snapshot.rb:161`; bumped again
-by #1593).
+the seed-bundle and snapshot schemas (`descriptor.rb:80`; `incremental_snapshot.rb:165`; bumped again
+by #1593 and #1600). Since then: #1598 closed #1548 (`merge_deferred_ranges_seed`, SI:344–350,
+re-walks a seeded file's ranges and keeps the seed only when the rows are equal, so no digest or
+parse-version member was needed); #1600 landed WD1's sibling pairs, all empty; #1597 landed the witness
+fixtures for #1570, #1572, #1573 and #1594, each `pending` on its fix (WD5); #1599 landed the cross-commit
+arity differential and its CI job (WD2).
 
 ## Decision
 
@@ -133,17 +141,17 @@ decline** (§ The chain, "The lesson of #1593 and #1594").
 ### The chain this ADR builds on (ADR-24 amendment, landed by #1578)
 
 Binding text: ADR-24 § "Amendment 2026-09-28" (`docs/adr/24-self-method-call-resolution.md:522–697`)
-and `docs/internal-spec/inference-engine.md:662`. This ADR relies on the following and states no more.
+and `docs/internal-spec/inference-engine.md:670`. This ADR relies on the following and states no more.
 
 - **One walker, one decision.** `Scope::ResolutionChain` (RC:82) replays CRuby's `include_modules_at`
   over the tables — prepends before the class, includes after it in statement order, a module already
   anywhere in the chain skipped, a skipped module before the superclass moving the insertion point, the
   singleton side through the recorded `extend` and `class << self; include` edges under the include
-  rule — and is internal: nothing joins the `Scope` surface `spec/rigor/public_api_drift_spec.rb:9–14`
+  rule — and is internal: nothing joins the `Scope` surface `spec/rigor/public_api_drift_spec.rb`
   pins, and `sig/rigor/scope.rbs` is unchanged. Every "which definer" reader of the engine reads it,
-  keeping its signature and return type: `user_def_through_ancestors` (`scope.rb:1339`),
-  `singleton_def_through_ancestors` (`:1378`; #1567's singleton shape),
-  `external_ancestor_name_candidates` (`:1412`), `discovered_method_through_ancestors?` (`:1460`), the
+  keeping its signature and return type: `user_def_through_ancestors` (`scope.rb:1396`),
+  `singleton_def_through_ancestors` (`:1435`; #1567's singleton shape),
+  `external_ancestor_name_candidates` (`:1469`), `discovered_method_through_ancestors?` (`:1517`), the
   override rules' `each_project_ancestor` (`check_rules.rb:3800`) behind `nearest_ancestor_visibility`
   (`:3837`) and `nearest_ancestor_method_def` (`:3931`), the visibility rule's prepend-region check
   (`:2664`, #1568), `SourceArity`'s levels (`source_arity.rb:109–129`, every hedge kept),
@@ -181,7 +189,7 @@ and `docs/internal-spec/inference-engine.md:662`. This ADR relies on the followi
   transitively, and `settle` answers `:master` for an unsettled chain whatever its fork count (RC:151).
   What propagates is a boolean: `Frame` hands up `unsettled` beside the fork count (RC:547–552), the
   memo tuple stores it (RC:656), and an unsettled chain never builds its retro world (RC:573). The
-  pinned shapes are `spec/integration/ruby_order_resolution_spec.rb:374–438`. On the singleton side the
+  pinned shapes are `spec/integration/ruby_order_resolution_spec.rb:414–478`. On the singleton side the
   mark does not cross an include edge: an included module's `:extend`-side entries (a hook's `"*"`)
   are read only when that module's own singleton chain is built (RC:683–684), which no includer's
   singleton chain does, so `K`'s singleton chain in Context (d) stands with no fork and no mark while
@@ -200,7 +208,7 @@ and `docs/internal-spec/inference-engine.md:662`. This ADR relies on the followi
   draws: **a mark is added only where master's order is shown right for the shape (WD7(g)); where it
   is wrong, the only sound tool is a migrated read's `Unknown` (WD2, WD3), and the existing readers
   keep master's false positive until the follow-up ADR models hooks per includer.**
-- **`unpositioned_mixins`** (#1584; `discovery_index.rb:37`, classified `:set_valued` at `:83`) is
+- **`unpositioned_mixins`** (#1584; `discovery_index.rb:37`, classified `:set_valued` at `:116`) is
   `{owner => {include: [names], extend: [names]}}`, `:include` the instance side and `:extend` the
   singleton side. `ScopeIndexer::MixinAccumulator` lists an edge written anywhere but as a direct
   statement of the class's own body or its `class << self` body, in a declaration that is itself a
@@ -214,15 +222,15 @@ and `docs/internal-spec/inference-engine.md:662`. This ADR relies on the followi
   written in a block (#1592). **#1593 (landed 2026-10-01, narrowed three times in review)** records a
   block's `extend` or `class << self` mixin as a *positioned* edge only where the block provably runs
   at least once with `self` preserved, as a direct class-body statement (`runs_body_block_once?`,
-  SI:6249; `literal_or_self?`, SI:6263) — `tap` / `then` on a literal receiver, a non-empty literal
+  SI:6249; `literal_or_self?`, SI:6272) — `tap` / `then` on a literal receiver, a non-empty literal
   Array or Hash under `each` / `map` and kin, a positive Integer literal's `times`, a non-empty
   integer-literal Range — and records and lists nothing for every other block (`extends_block_plan`,
   SI:6216, `:skip`), so `items.each { extend X }`, a block inside a method and a concern's `included
   do extend X end` stay unrecorded and unlisted. What remains after #1593 is MA's rule for an opaque
-  eval block (`block_mixes_in?`, SI:5994–6001): a block that holds a mixin call on the class's own
+  eval block (`block_mixes_in?`, SI:6003–6010): a block that holds a mixin call on the class's own
   `self` must at least list `"*"` (tracked by #1592).
 - **Marked entries keep exactly master's declines and add none.** The sites in Context (e) are the only
-  declines on `ENVELOPE_DYNAMIC_MARK`; #1578 preserved each (`ruby_order_resolution_spec.rb:175–195`).
+  declines on `ENVELOPE_DYNAMIC_MARK`; #1578 preserved each (`ruby_order_resolution_spec.rb:215–235`).
   Typing through a marked entry is a known remainder, not a rule: on GitLab 1,730 entities carry the
   mark (Project, Group, User, Issue, MergeRequest among them), so 41–51 % of (class, name) pairs
   resolve at or beyond one; on Mastodon 4.7–7.6 %. Declining there would turn that share `Dynamic`.
@@ -239,7 +247,7 @@ and `docs/internal-spec/inference-engine.md:662`. This ADR relies on the followi
 - **What it leaves open, and this ADR does not reopen:** #1570 (a one-fork disagreement whose readers
   keep master's answer; `ruby_order_resolution_spec.rb:142–147` pins it with a "flip this when ADR-119
   PR C" comment), #1572 (an external definer ahead of a project one), #1573 (a repeated `extend`'s
-  position), #1588 (`combine_rekeyed_entries`, SI:8736, merges a re-keyed class's includes in the wrong
+  position), #1588 (`combine_rekeyed_entries`, SI:8819, merges a re-keyed class's includes in the wrong
   order), #1589 (CRuby's trailing duplicate from prepend propagation), #1590, #1591 (the 21.3 %),
   #1592's unprovable-block and hook shapes, #1594 (WD3 states what a migrated read does meanwhile), and
   the two table gaps ADR-24 § "What the tables cannot express" records.
@@ -263,26 +271,41 @@ from data already there: which *names* an unpositioned edge's closure defines (W
   closed it for provably-run blocks only (§ The chain); a hook's singleton-side edge is never recorded
   on the includer. WD3's obligation covers both at a migrated site; nothing covers them in an existing
   reader. v12's `position_unknown_*` triple is withdrawn for this member.
-- **The definer members get siblings.** A set-valued member that admits `possible` facts has a
-  `possible_*` sibling of the same shape (`discovered_methods`: `name → kind` maps with `:both`,
-  `discovery_index.rb:134`, the relation per pair; `discovered_deferred_ranges`: rows). A single-valued
-  member that admits them keeps its slot and today's fold and has a `contested_*` sibling — the keys
-  whose value depends on a `possible` fact, including keys whose only definer is `possible`
-  (`discovered_def_nodes`, `discovered_singleton_def_nodes`, `discovered_method_visibilities`,
-  `discovered_parameter_envelopes`). Slots never hold a new wrapper.
-- Siblings **always exist** for admitting members. `DiscoveryIndex#with` (Data's, reopened at
-  `discovery_index.rb:55`) is overridden to accept a member and its sibling only **together**; passing
-  one without the other raises. The copy paths iterate one declaration of pairs (ADR-116 C1) and drop a
-  pair only when **both** are empty — today's `reject { … empty? }` at `discovery_seed.rb:107` drops
-  members one at a time and would strand a non-empty sibling. Each copy path has a round-trip spec on a
-  fixture whose siblings are non-empty *and* one whose siblings are empty. Marshal-clean, plain frozen
-  data; the ADR-85 bundles carry the pair and the next `SCHEMA` bump covers it.
-- **Admission precondition.** A member may admit `possible` facts only once (i) every copy path passes
-  its round-trip specs and (ii), for a single-valued member, every read the census records for it
+- **The definer members get siblings (landed, #1600).** `DiscoveryIndex::SIBLINGS`
+  (`discovery_index.rb:81–88`) pairs each member designated to admit `possible` facts with its sibling:
+  `discovered_methods` and `discovered_deferred_ranges` (set-valued) with `possible_discovered_methods`
+  and `possible_discovered_deferred_ranges`, of the member's shape and `⊆ member` (a `discovered_methods`
+  pair is `{class => {name => kind}}` with `:both`, `METHOD_KIND_BOTH`, `:178`); `discovered_def_nodes`,
+  `discovered_singleton_def_nodes`, `discovered_method_visibilities` and
+  `discovered_parameter_envelopes` (single-valued; the slot keeps today's fold) with a `contested_*`
+  sibling, a Set of **key paths** into the member — `[class, name]`, and `[class, [kind, name]]` for an
+  envelope — one per entry whose value depends on a `possible` fact, including an entry whose only
+  definer is `possible`. Every sibling is empty until a producer admits a fact (C1), so every member
+  keeps its meaning. Slots never hold a new wrapper.
+- **Siblings always travel with their members (landed, #1600).** `DiscoveryIndex#with` (`:469–479`)
+  raises on a member or sibling that arrives without its partner; `DiscoveryIndex.compact_pairs`
+  (`:436–448`) drops a pair only when **both** halves are empty and **completes a half pair** with the
+  empty value, so a non-empty sibling is never stranded by an empty member (the per-table `reject {
+  empty? }` the seed had, `discovery_seed.rb:108–111`). The siblings ride as one `siblings:` sub-hash
+  through the accumulator, the fold (`fold_siblings`, SI:7619), the compact-header rename
+  (`rename_siblings`, SI:7645, which re-keys a class-keyed sibling with its member and leaves the
+  path-keyed `possible_discovered_deferred_ranges` alone), `finalize_def_index` (SI:7926) and the ADR-85
+  bundle (SI:7836, 7879). `spec/rigor/scope/discovery_sibling_pairing_spec.rb` round-trips all seven copy
+  paths with non-empty siblings *and* with empty ones; the seed-bundle and snapshot schemas were bumped
+  (`descriptor.rb:80`, `incremental_snapshot.rb:165`).
+- **Admission precondition.** A member may admit `possible` facts only once (i) its pair round-trips
+  (landed for all six) and (ii), for a single-valued member, every read the census records for it
   outside the table owners consults `contested_*` or goes through a `Scope` reader. The census is
   `spec/rigor/declaration_facts/admission_census_spec.rb` (#1566, `admission_census.yml`): per member,
   the files outside the owners that read or copy the whole table, and the files that read or copy
   every member at once — the slot-reader migration list, distinct from the chain's walker allow-list.
+- **C1's storage obligations**, recorded here and not acceptance blockers: `discovered_def_sources` and
+  `discovered_singleton_def_sources` (single-valued, first-wins) have no sibling — C1 adds one or states
+  that they are read only beside `discovered_def_nodes`; whether an envelope table's project-wide key and
+  its class marks (`ENVELOPE_MODULE_MARK`, `ENVELOPE_DYNAMIC_MARK`, `discovery_index.rb:213–214`) can be
+  contested; the extends fold (`fold_extends_into_singleton_tables`, SI:6502) and `subtract_def_methods`
+  (SI:7971) follow-through for a `possible` copy; and `possible_discovered_deferred_ranges`' path keys
+  under the compact-header rename, which today leaves them alone.
 
 ### WD2 — Candidate-set reads over the chain
 
@@ -367,24 +390,40 @@ is defined over the chain, and asks `settle`:
   read is `Unknown`. Otherwise the external definer is a candidate with its RBS signature as its answer
   (`Object#to_s` disagrees with `M#to_s(fmt)`: `Unknown`; `Enumerable#to_a` is the first definer,
   #1572). For the two override lints, *absent* always counts.
-- **The `SourceArity` differential.** `SourceArity` as it stands at `5ff738a70` — its level rule and its
-  eight hedges: `load_order_dependent?` (`source_arity.rb:168`), `object_extension_may_shadow?`
+- **The `SourceArity` differential (cross-commit; landed, #1599).** `SourceArity` — its level rule
+  and its eight hedges: `load_order_dependent?` (`source_arity.rb:168`), `object_extension_may_shadow?`
   (`:178`), and under `clean_level?` (`:239–242`) `dynamic_surface?` (`:244`), `project_patched?`
   (`:248`) and `external_mixin_lacks_method?` (`:269`), then `public_at?` (`:278`),
-  `chain_free_of_hooks?` (`:285`) and `subclasses_agree?` (`:301`) — is kept as an oracle behind a
-  flag. Over the WD5 fixtures and the lane-2 corpus (`docs/agents/measurement.md`'s survey checkouts,
-  `check --no-cache` before and after), the set of `call.wrong-arity` firings after a change must be a
-  subset of the oracle's; a firing outside that set is allowed only for a mechanism the PR names and
-  the fixture witnesses. **Each firing the change removes is adjudicated** as a false positive silenced
-  or a true positive lost, with the count of each in the PR; declining on an unsettled chain removes
-  coverage on a fifth of a Rails app's reads (#1591), and the ADR accepts that only against that count.
+  `chain_free_of_hooks?` (`:285`) and `subclasses_agree?` (`:301`) — is compared across **two
+  commits**, not against an in-tree oracle flag: a frozen copy of the rule would still read the live
+  scope, chain and tables the change moves and agree with it by construction. `tool/engine_diag_diff.rb`
+  archives the merge-base engine and the head engine whole, runs each in a fresh process over the same
+  corpus, and prints the `call.wrong-arity` rows the head removed and added. The firings after a change
+  must be a subset of the base's; a firing outside that set is allowed only for a mechanism the PR names
+  and a fixture witnesses. **Each difference is adjudicated** in
+  `spec/integration/fixtures/arity_differential/arity_adjudication.yml` — a removed row as
+  `fp-silenced` or `tp-lost`, an added row only as `named-mechanism`; each entry carries the merge-base
+  sha it was written against (`base:`), so only the entries for the current merge base adjudicate or
+  count as stale (an entry matching no row fails the run), entries for another base are listed as
+  ignored and go dormant once their PR merges, and a rebase updates `base` — with the count of each
+  verdict in the PR. The fixture directory holds the shapes C1 is meant to silence (#1570, a
+  conditional `def`, a conditional `include`, a literal surface) and `survivors/`, five plain firings
+  that are real arity errors under Ruby: the floor (`--require-rows-in survivors/:5`) counts them in
+  the base **and** the head, and an adjudication entry under a floored path fails whatever its verdict,
+  so what the floor protects cannot be adjudicated away. CI's `arity-differential` job
+  (`.github/workflows/ci.yml:818–848`) runs it on every PR that changes code, over that directory and
+  `declaration_witness/` (10 base rows: the five survivors and five shapes C1 may silence); the lane-2
+  corpus run is the same command with the survey checkouts (`docs/agents/measurement.md:54`). Declining
+  on an unsettled
+  chain removes coverage on a fifth of a Rails app's reads (#1591), and the ADR accepts that only against
+  the adjudicated count.
 - **Conditional definers.** A `def` inside control flow, a method body, or a block **other than the
   immediately-evaluated meta-new blocks Rigor already treats as class bodies** — the constant-write
   forms `K = Class.new`/`Module.new`/`Struct.new`/`Data.define do … end` (`meta_new_block_split`,
-  SI:3788; `meta_new_constant_rvalue?`, SI:8798) and the bare-factory blocks the walk recognises
+  SI:3797; `meta_new_constant_rvalue?`, SI:8882) and the bare-factory blocks the walk recognises
   (`AnonymousMetaClass.block_form_receiver`, `lib/rigor/inference/anonymous_meta_class.rb:42`), whose
   certainty is that of the enclosing statement — is a `possible` definer: its slot in the def-node
-  tables, its visibility and its parameter envelope (`Scope#parameter_envelopes_of`, `scope.rb:1680`)
+  tables, its visibility and its parameter envelope (`Scope#parameter_envelopes_of`, `scope.rb:1737`)
   are contested. `class_methods`, `included`, `prepended`, `helpers` and `class_eval` blocks stay
   `possible` until the follow-up ADR positions them.
 - **Existence reads.** A boolean read used positively (`discovered_method?` at `check_rules.rb:951`,
@@ -396,7 +435,7 @@ is defined over the chain, and asks `settle`:
   of every entry on the chain, the closures relevance tests included — and relevance adds, for each
   closure entry it tests, the negative method edge on `Owner#name` (`DependencyRecorder.read_missing(:method,
   …)`, as `SourceArity#settle_by_definitions` files it, `source_arity.rb:86`), because
-  `Scope#discovered_method?` (`scope.rb:991–997`) records nothing itself, **and, for each external
+  `Scope#discovered_method?` (`scope.rb:1048–1054`) records nothing itself, **and, for each external
   closure entry it tests, the negative class edge on the unqualified name of its spelling**
   (`read_missing(:class, …)`, which `record_beyond` files for a project entry and by design not for an
   external one, RC:214), so a new file declaring `module Ext` re-checks the consumer; the over-trigger
@@ -415,8 +454,8 @@ bodies. Everything else is `possible`. A reopening whose `class` keyword sits in
 its statements `possible` however many other definitions exist. An unconditional `include` in a `class
 << self` body is a `certain` singleton-side edge. Certainty and position are two questions:
 `unpositioned_mixins` answers the second for edges, WD3 the first for definers, and the mixin edges need
-only the second (WD1). **The extends fold stays in this ADR**: both sites (SI:401, 7858) copy with `||=`
-(SI:6503); a copy through a `possible` extend edge — `extend X if …`, `class << self; include X if …`,
+only the second (WD1). **The extends fold stays in this ADR**: both sites (SI:410, 7940) copy with `||=`
+(SI:6512); a copy through a `possible` extend edge — `extend X if …`, `class << self; include X if …`,
 `def self.setup; extend X; end` — marks the key contested. **Deferred to a follow-up ADR**: hook facts
 instantiated per includer (PHPStan's trait model, <https://phpstan.org/blog/how-phpstan-analyses-traits>).
 Today every walker treats `included do` and `class_methods do` as ordinary calls under the concern's
@@ -446,9 +485,10 @@ chain's remaining obligation).
 
 ### WD4 — Classification of every `DiscoveryIndex` member, with structural checks (landed)
 
-`DiscoveryIndex::MEMBER_CLASSES` (`discovery_index.rb:73–125`, #1566) puts each `Data.define` member
-(`:13–54`; 40 today, `unpositioned_mixins` among them since #1584) in exactly one of five classes with
-a one-line reason, and `spec/rigor/declaration_facts/member_classes_spec.rb` fails on a member that is
+`DiscoveryIndex::MEMBER_CLASSES` (`discovery_index.rb:107–170`, #1566) puts each `Data.define` member
+(`:13–59`; 46 today: `unpositioned_mixins` since #1584, the six siblings since #1600) in exactly one
+of six classes with a one-line reason, and `spec/rigor/declaration_facts/member_classes_spec.rb` fails
+on a member that is
 unclassified or classified twice and checks each class's shape on a two-file fixture project. A table
 added to the index must be classified in the same change.
 
@@ -459,10 +499,11 @@ added to the index must be classified in the same change.
 | `:typed` | `declared_types`, `class_ivars`, `class_cvars`, `program_globals`, `program_global_seeds`, `in_source_constants`, `param_inferred_types` | every leaf is a `Rigor::Type` value | The type lattice |
 | `:syntactic` | `discovered_def_nestings`, `patched_line_readers`, `clears_last_status`, `defines_case_equality`, `implicit_self_evidence` | the same value from the file's parse alone (the ADR-53 shadow harness stays for these) | The parse |
 | `:run_state` | `run_generation` | an opaque token only the runner's seed supplies | None |
+| `:sibling` (landed, #1600) | `possible_discovered_methods`, `possible_discovered_deferred_ranges`, `contested_discovered_def_nodes`, `contested_discovered_singleton_def_nodes`, `contested_discovered_method_visibilities`, `contested_discovered_parameter_envelopes` | `possible_*` has its member's shape and every entry is in the member; `contested_*` is a Set of key paths that resolve in the member (`spec/support/declaration_member_shapes.rb:48–80`), checked against injected values while no producer fills one | Its member's |
 
-The siblings WD1 adds join `MEMBER_CLASSES` as a sixth class when the first one lands: a `possible_*`
-sibling has its member's shape and is `⊆ member`; a `contested_*` sibling is a Set of the member's keys;
-a sibling exists iff its member admits `possible`.
+A sibling exists **iff its member is declared in `DiscoveryIndex::SIBLINGS`** — designated to admit
+`possible` facts, whether or not a producer fills it yet — and the shape check gates the key-path form:
+`[class, name]`, and `[class, [kind, name]]` for an envelope, each resolving in the member.
 
 ### WD5 — The witness, at two levels
 
@@ -473,20 +514,28 @@ a sibling exists iff its member admits `possible`.
   table must satisfy `certain ⊆ runtime ⊆ certain ∪ possible`, a single-valued one must agree wherever
   it answers. Since no `possible_*` table exists yet, every entry reads as `certain` except the
   self-extend edge Ruby does not show. `issue_1518`, `issue_1519`, `issue_1520` and `issue_1550` are
-  `pending` beside a pin of today's exact violations (`witness_spec.rb:74–113`). #1592's block shapes
-  are the relation's `runtime ⊄ certain ∪ possible` case that no fixture held; #1593 added its block
-  shapes at the read level (`ruby_order_resolution_spec.rb:548`) and pinned the hook shapes at their
-  false positive (`:678–695`).
+  `pending` beside a pin of today's exact violations (`witness_spec.rb:75–119`), and so is
+  `issue_1573` since #1597 (`:131–140`). #1592's block shapes are the relation's `runtime ⊄ certain ∪
+  possible` case that no fixture held; #1593 added its block shapes at the read level
+  (`ruby_order_resolution_spec.rb:588`) and pinned the hook shapes at their false positive
+  (`:718–735`).
 - **Read level** (landed, #1578: `spec/integration/resolution_chain_witness_spec.rb`, 21 fixtures, and
   `spec/integration/ruby_order_resolution_spec.rb`). Each fixture runs under the Flake Ruby in a
   subprocess and reports `Method#owner`, `source_location` and `Module#ancestors`; the chain's project
   entries, its first definer and its `super` chain are compared, in the skip world or the retro world
   the fixture names. This is the only witness for the chain, the fork rule and the unsettled rule, whose
-  tables are correct while the reads are wrong. **PR C adds** fixtures for every candidate-set rule: the
+  tables are correct while the reads are wrong. Since #1597 the open issues are pinned here too, each
+  `pending` on its fix, with Ruby's answer from a `RubyRun` subprocess under a timeout
+  (`spec/support/ruby_run.rb`): #1570 as a diagnostic that flips with C1
+  (`ruby_order_resolution_spec.rb:198–209`), #1572 as a diagnostic with its own fix (`:751–790`), #1573
+  at the table (above) and the read (`resolution_chain_witness_spec.rb:875–925`), the lane-2 producer
+  fix, and #1594 as a diagnostic under an `ActiveSupport::Concern` shim that flips with C2
+  (`:796–843`). **PR C adds** fixtures for every candidate-set rule: the
   relevance rule's positive shapes for both kinds of mark, its five non-discharge shapes (an external
   closure entry RBS does not know, a dynamic-surfaced closure entry, a visibility-only statement, a
   `method_missing`, and a `"*"`), the one-fork witness and its guard, #1594 at a migrated instance-side
-  site, WD3's three singleton-side signals, a conditional definer, the absent rule, and #1570.
+  site, WD3's three singleton-side signals, a conditional definer, the absent rule, and the flips of
+  #1597's #1570 and #1594 pins.
 - A fixture must fail on `master` before its fix. **Limit:** one run witnesses one execution; "every
   world" is approximated by fixture variants that take each branch, and a fabricated `certain` fact is
   caught only where a variant's run lacks it. The fuzzer stays local until its load rate on the
@@ -498,12 +547,12 @@ a sibling exists iff its member admits `possible`.
 `plugins/*/lib/` with Prism and lists each method, or class or module body, that (i) references a
 declaration node class or its `Prism::Visitor` hook, (ii) names a node-type symbol, (iii) names a
 visibility or mixin keyword as a symbol, or (iv) reads a constant built from one (`CLASS_BODY_NODES`,
-SI:4106); or (v) is reachable, through same-file calls, from `ScopeIndexer.index` (SI:103),
-`.accumulate_project_index` (SI:7903), `.finalize_def_index` (SI:7849), a multi-file entry point or any
+SI:4115); or (v) is reachable, through same-file calls, from `ScopeIndexer.index` (SI:103),
+`.accumulate_project_index` (SI:7986), `.finalize_def_index` (SI:7926), a multi-file entry point or any
 method another covered file calls as `ScopeIndexer.x`, and writes into a table parameter; or (vi)
 includes `DeclarationWalk::Collector`. Rule (v) is what marks the bug sites rules i–iv miss
-(SI:4975, 4963, 6493, 6898). `producers.yml`
-holds 391 entries in 71 files: 371 `grandfathered`, a closed list pinned by count and digest, and 20
+(SI:4984, 4972, 6502, 6907). `producers.yml`
+holds 393 entries in 71 files: 371 `grandfathered`, a closed list pinned by count and digest, and 22
 justified since. A new producer must be recorded with a reason; `RIGOR_REGENERATE_GATES=1` adds it as
 `TODO`, which the spec rejects until it is justified. What the scan cannot see is in the spec's header
 (`producers_spec.rb:20–22`); nor does it see a producer that returns from a node without walking it
@@ -518,7 +567,7 @@ applies to every PR, and no listed gate may be skipped or replaced by a claim.
   reads, performance and allocation work, deleting a `RULE_VARIANTS` entry the walk's rule reproduces):
   byte-identical corpus diagnostics, byte-identical corpus `rigor sig-gen` output, the shadow harness
   wherever a table is rebuilt, the per-merge allocation sweep. A port may not change a fact. #1584
-  landed under this lane (+0.03 % allocations).
+  (+0.03 % allocations), #1598 and #1600 landed under this lane.
 - **Lane 2 — behaviour changes** to declaration facts or to how a read answers, in a `ScopeIndexer`
   walker, a `DeclarationWalk` collector, `ModuleFunctionState`, the fold, `ResolutionChain`, sig-gen,
   Effects, a plugin discoverer or a `Scope` reader, and deleting a `RULE_VARIANTS` entry whose variant
@@ -529,7 +578,10 @@ applies to every PR, and no listed gate may be skipped or replaced by a claim.
   per-merge allocation sweep runs and its answer is in the PR, on a plain **and** a recording run, and
   a change to the chain memo's tuple (WD2's marks, the on-demand retro world) reports the memo's growth
   separately from the recording edges; (e) for any change that can add or remove a `call.wrong-arity`
-  firing, the `SourceArity` differential with its adjudicated removals; (f) a change that can widen a
+  firing, the cross-commit differential (WD2): CI's `arity-differential` job green, every removed row
+  adjudicated `fp-silenced` or `tp-lost` and every added row `named-mechanism` under the PR's merge
+  base, the survivors' floor held in base and head, and the lane-2 corpus run's adjudication in the PR;
+  (f) a change that can widen a
   read to `Dynamic` reports, over the lane-2 corpus, the change in the (class, name) census of reads
   answering `Dynamic` taken from `rigor check --no-cache`'s own scopes (an instrumented run, since
   `rigor coverage` seeds from `DiscoverySeed.discovery_tables`, `lib/rigor/cli/coverage_scan.rb:60`,
@@ -556,19 +608,19 @@ applies to every PR, and no listed gate may be skipped or replaced by a claim.
 **Landed before acceptance.** #1551 (lane 1); #1563 (lane 1); #1566 (lane 1; the four gates); #1584
 (lane 1; `unpositioned_mixins`, `discovered_class_sources` on every run, the signature carrying mixin
 order); #1578 (lane 2; the chain, `settle`, `MasterOrder`, the walker allow-list, the read-level
-witness); #1593 (lane 2; the provably-run block shapes, § The chain). **Still to land before
-acceptance:** #1548 (key the seeded deferred-ranges reuse, SI:336, on
-content digest plus parse version, or drop it); WD1's `with` pairing and round-trip specs (lane 1);
-the `SourceArity` oracle flag (lane 1); pending witness fixtures for #1570, #1572, #1573 and #1594.
-#1531 closes as superseded by this ADR.
+witness); #1593 (lane 2; the provably-run block shapes, § The chain); #1597 (the witness fixtures for
+#1570, #1572, #1573 and #1594, `pending` on their fixes); #1598 (lane 1; #1548 closed by re-walking a
+seeded file's deferred ranges, SI:344–350); #1600 (lane 1; WD1's sibling pairs, every sibling empty);
+#1599 (the cross-commit arity differential, its fixtures and its CI job). **Still to land before
+acceptance:** nothing remains. #1531 closes as superseded by this ADR.
 
 **After acceptance — under WD7 lane 2.**
 
 | PR | Change | Expected corpus diff | Expected sig-gen diff | False-positive check |
 | --- | --- | --- | --- | --- |
 | A — #1550 | The named form snapshots the last receiverless `def` before the call (SI:4975) | Zero (rare) | The singleton keeps the earlier body's type | Fixture asserts `Fmt.label == "one"` |
-| B — reset, receiverless-only, privatisation | A bare visibility call ends the toggle; `def self.x` gets no instance copy; `attr_reader` private, no singleton copy; `define_method` both; a `certain` module function's instance copy recorded private (SI:6547–6554); sig-gen bypasses `visibility_excludes?` for module functions | Zero on existence; `Helpers#fmt` stops firing | Module functions after a reset stop rendering as singletons; omitted ones appear | Probes P1–P13, `vis.rb` |
-| C1 — firing sites | `DefinerResolution` over the chain; `settle`'s option with the `:unknown` verdict and per-name relevance over the marks the chain memo now carries; `possible` definers and the mixin members' unpositioned reading; the `case/in` spec. Migrates **the `:arity` question at `SourceArity`'s decision point** (`walk_to_owner`, `source_arity.rb:109–129`: a `:master` verdict answers no envelope, and the walk's reads are recorded as read since another file's edit can lift it — #1570 and the conditional-include arity shape stop firing here on the boolean alone, with no new discovery data), the override super-method lint (`each_project_ancestor`, `check_rules.rb:3800`, and `override_visibility_diagnostic`, `:3736`), the visibility mismatch (`:2664`) and `singleton_context_def?` (`:3671`, with WD3's singleton-side decline). Admits `possible` facts into `discovered_methods`, the def-node tables, `discovered_method_visibilities`, `discovered_parameter_envelopes` and `discovered_deferred_ranges` once WD1's precondition holds for each | Silences #1570, the conditional-include and conditional-def arity shapes and the `Helpers2#fmt2` override; may silence firings that resolved through a `possible`-only definer; **every removed `call.wrong-arity` adjudicated** | A notice on `possible` module functions; `possible` definers render nothing new (RBS has no conditional form) | Every fixture at both witness levels; the differential; the one-fork witness and its guard stay `Unknown`; the five non-discharge shapes stay `Unknown`; the #1591 breakdown reported; WD7(d) on the memo |
+| B — reset, receiverless-only, privatisation | A bare visibility call ends the toggle; `def self.x` gets no instance copy; `attr_reader` private, no singleton copy; `define_method` both; a `certain` module function's instance copy recorded private (SI:6556–6563); sig-gen bypasses `visibility_excludes?` for module functions | Zero on existence; `Helpers#fmt` stops firing | Module functions after a reset stop rendering as singletons; omitted ones appear | Probes P1–P13, `vis.rb` |
+| C1 — firing sites | `DefinerResolution` over the chain; `settle`'s option with the `:unknown` verdict and per-name relevance over the marks the chain memo now carries; `possible` definers and the mixin members' unpositioned reading; the `case/in` spec. Migrates **the `:arity` question at `SourceArity`'s decision point** (`walk_to_owner`, `source_arity.rb:109–129`: a `:master` verdict answers no envelope, and the walk's reads are recorded as read since another file's edit can lift it — #1570 and the conditional-include arity shape stop firing here on the boolean alone, with no new discovery data), the override super-method lint (`each_project_ancestor`, `check_rules.rb:3800`, and `override_visibility_diagnostic`, `:3736`), the visibility mismatch (`:2664`) and `singleton_context_def?` (`:3671`, with WD3's singleton-side decline). Admits `possible` facts into `discovered_methods`, the def-node tables, `discovered_method_visibilities`, `discovered_parameter_envelopes` and `discovered_deferred_ranges` once WD1's precondition holds for each and its C1 storage obligations are discharged | Silences #1570, the conditional-include and conditional-def arity shapes and the `Helpers2#fmt2` override; may silence firings that resolved through a `possible`-only definer; **every removed `call.wrong-arity` adjudicated** | A notice on `possible` module functions; `possible` definers render nothing new (RBS has no conditional form) | Every fixture at both witness levels; the cross-commit differential; the one-fork witness and its guard stay `Unknown`; the five non-discharge shapes stay `Unknown`; the #1591 breakdown reported; WD7(d) on the memo |
 | C2 — typing sites | Return inference through `resolve_user_def_through_ancestors` (`expression_typer.rb:2471, 2496`, where `Unknown` types `Dynamic`) and the singleton memo (`:2386`, with WD3's singleton-side decline); the absent rule with its RBS census | Silences the conditional-definer and conditional-include `call.undefined-method` shapes, #1594 at this site, and the #1592 hook shapes at the migrated singleton site (`Unknown`, not a fix); `gemmod3` waits for #1572 | None expected | WD7(f) census before and after, adjudicated: GitLab's core models type `Dynamic` at these sites until PR D, and the PR states the count |
 | D — hook facts per includer | Deferred to the follow-up ADR | — | — | — |
 
@@ -592,16 +644,16 @@ lowers it by an amount PR C measures.
   closes as superseded; the README row drops "WD5 in progress" at acceptance.
 - **[ADR-53](53-scope-discovery-index-separation.md)** — the shadow harness narrows to WD4's syntactic
   members and lane 1; the "generic-visitor rewrite: Deferred" row (`:233`) is marked superseded.
-- **[ADR-85](85-seed-bundles-and-lazy-def-node-handles.md) WD2 — amended (landed for
-  `unpositioned_mixins`).** Bundles carry the new member as plain data (the schema bumps of #1584 and
-  #1593); the WD1 siblings take the next bump, and `docs/internal-spec/cache.md` documents them.
+- **[ADR-85](85-seed-bundles-and-lazy-def-node-handles.md) WD2 — amended (landed).** Bundles carry
+  `unpositioned_mixins` and the six WD1 siblings as plain data (the schema bumps of #1584, #1593 and
+  #1600); `docs/internal-spec/inference-engine.md:75` documents the siblings.
 - **[ADR-89](89-semantic-propagation-gates.md)** — the declaration signature carries the mixin lists in source order and the
-  unpositioned table (SI:7356, landed by #1584), so an edit that only reorders or guards an include
+  unpositioned table (SI:7365, landed by #1584), so an edit that only reorders or guards an include
   moves it; ADR-89 WD1 is otherwise unchanged.
 - **[ADR-46](46-incremental-dependency-graph.md)** — preserved by the chain's dependency contract and
   WD2's recording through `Scope` readers, plus the negative class edge relevance files for a tested
   external; #1590 is a cost lever, not a contract change.
-- **[ADR-17](17-monkey-patch-pre-evaluation.md)** — the fold's subtraction (SI:7860) is a consumer
+- **[ADR-17](17-monkey-patch-pre-evaluation.md)** — the fold's subtraction (SI:7941) is a consumer
   policy the WD5 relation is stated around.
 - **[ADR-15](15-ractor-concurrency.md)** — plain frozen data; the chain memo is per index (RC:285–299).
   **[ADR-5](5-robustness-principle.md)** — unknown-is-silence at every migrated read.
@@ -630,6 +682,7 @@ lowers it by an amount PR C measures.
 | A hook's `:extend` mark propagated to includers' singleton chains, and a block `extend` recorded under the lexical class whatever the block (#1593's first drafts) | Withdrawn | § The chain, "The lesson of #1593 and #1594": a mark sends the reader to master's order, and the lexical class is wrong once `self` is rebound or the block may not run. |
 | Per-name relevance on a chain with one retro-eligible fork (draft 13 rejected it on the two-fork shape) | Deferred | The two-fork shape decides nothing (`:master` before any mark is read); on a one-fork chain the fork rule compares the worlds itself, and whether an irrelevant mark may be discharged there is not argued here. The witnessed cost is WD2's discriminating shape, `Unknown` though Ruby answers `X#foo` in all four worlds. |
 | Discharging a mark on a closure with no project definer of the name (draft 13) | Rejected | Vacuous on an external entry and on a dynamically defined module, blind to `private :to_s` and `method_missing` (WD2). The rule now requires a closure that provably cannot answer the name. |
+| An in-tree `SourceArity` oracle behind a flag (drafts 4–15) | Replaced by #1599 | A frozen copy of the rule still reads the live scope, chain and tables the change moves, so it agrees with the change by construction; the differential compares two archived engines (WD2). |
 | A cap of four relevant edges and skips, with world enumeration (drafts 4–12) | Retired | The read no longer enumerates worlds of edges: a relevant unpositioned edge is `Unknown` and `possible` definers form a linear candidate list. Nothing is left to cap. |
 | Leaving the existing readers on the breadth-first walk and migrating call sites one by one (draft 9) | Rejected | #1567's singleton side and #1571 fired through readers no migration list named; changing the walk inside every reader fixed all call sites at once and kept every shape (#1578). |
 | A truthy unknown sentinel returned in the node position by the existing readers (draft 8) | Rejected | Nine wrappers return a reader's result under other names and dereference far from it, often under `rescue StandardError`; a dereference detector cannot be complete, and the sentinel would cross the plugin API (`plugin/base.rb:178`; `inference-engine.md:655, 663`). |
@@ -649,7 +702,7 @@ Positive:
   #1570 is fixed where C1 migrates the arity site. No consumer walks ancestry on its own except the 14
   allow-listed union and bridge walks, and a spec keeps it so.
 - No read carries a direction label; a migrated site answers or is silent by one rule, floored by the
-  `SourceArity` differential; every other site and every plugin reads the corrected order through the
+  cross-commit arity differential; every other site and every plugin reads the corrected order through the
   same readers; a member holds `possible` facts only once its copy paths are paired and its slot reads
   migrated. `module_function` has one implementation; #1550, both `vis.rb` false positives and the
   ancestry probes are fixed under a stated relation.
@@ -678,7 +731,8 @@ Negative:
 - **User-visible sig-gen changes** (PR B), each with a changelog entry.
 - **Grandfathered sets**: 371 producer entries, the chain's 14 allow-listed walkers and the slot readers
   the census reports converge only as bugs are filed.
-- One small sibling per admitting definer member, a `with` that raises on a half pair, a `SCHEMA` bump.
+- Six always-empty siblings beside their members, a `with` that raises on a half pair and two schema
+  bumps (landed, #1600), carried on every copy path until C1 fills them.
 - No speed is claimed.
 
 ## Open questions for the maintainer

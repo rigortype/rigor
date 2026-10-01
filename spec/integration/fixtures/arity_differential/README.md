@@ -27,3 +27,13 @@ job also requires them in the head.
 
 Both engines run under the head's `Gemfile.lock` and the corpus's configuration, so a dependency or configuration
 change in a PR can make the base engine fail loudly; the job then fails rather than compare.
+
+## Why a removed row is silent (the mechanisms)
+
+`SourceArity` answers through `DefinerResolution`, which declines (`UNKNOWN`) for three mechanisms, and an
+adjudication reason names the one that applies: a **fork** (an `include` Ruby may have skipped, so two worlds, as in
+#1570); a **fork plus a mark** (a conditional `include` of a module whose closure defines the name); and a
+**multi-file mark with two defining closures** (ADR-119 Q4: two files each reopen `class User` and include `A` / `B`
+both defining `greet(x)`, so `User.new.greet` fired on master and is silent now though Ruby raises in every order,
+`tp-lost` by design). Give a fixture its own class names: the corpus is analysed as one program, and a name another
+fixture also declares makes a multi-file class that declines for the second reason.

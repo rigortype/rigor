@@ -83,4 +83,54 @@ RSpec.describe "unsettled chain verdict — incremental" do
       expect(recheck.affected).not_to include(File.join(dir, "b.rb"))
     end
   end
+
+  # ADR-119 C1b — `SourceArity` declines (`UNKNOWN`) where a mark is not discharged for the name, and the decline is
+  # a verdict another file's edit can lift or impose, so a declined walk records everything it read. The oracle is a
+  # full `--no-cache` run of the same tree.
+  describe "SourceArity's declined chain (ADR-119 C1b)" do
+    def arity(list)
+      list.select { |d| d.rule == "call.wrong-arity" }.map { |d| [File.basename(d.path), d.line] }.sort
+    end
+
+    def full_arity_run(dir)
+      runner = Rigor::Analysis::Runner.new(configuration: configuration(dir), cache_store: nil,
+                                           environment: shared_environment)
+      arity(guarded_run(runner).diagnostics)
+    end
+
+    # `C` answers `foo(x)` itself, so the receiver's typing files no edge past the root; the arity read still
+    # declines while a conditional mixin `Q` could answer it, and what lets it stand is read only there.
+    let(:tree) do
+      {
+        "c.rb" => "class C\n  def foo(x) = x\n  include Q if ENV[\"X\"]\nend\n",
+        "b.rb" => "C.new.foo\n"
+      }
+    end
+
+    def warm_and_cold(files, edits, baseline:)
+      Dir.mktmpdir do |dir|
+        files.each { |name, source| File.write(File.join(dir, name), source) }
+        session = session_for(dir)
+        expect(arity(guarded_baseline(session))).to eq(baseline)
+        edits.each { |name, source| File.write(File.join(dir, name), source) }
+        [arity(guarded_recheck(session).diagnostics), full_arity_run(dir)]
+      end
+    end
+
+    it "re-checks a declined consumer when an edit lifts a `method_missing` hook out of the mark's closure" do
+      files = tree.merge("q.rb" => "module Q\n  include R\nend\n",
+                         "r.rb" => "module R\n  def method_missing(*) = 2\nend\n")
+      warm, cold = warm_and_cold(files, { "r.rb" => "module R\n  def bar = 2\nend\n" }, baseline: [])
+      expect(cold).to eq([["b.rb", 1]])
+      expect(warm).to eq(cold)
+    end
+
+    it "re-checks a firing consumer when a second file puts a hook into the mark's closure" do
+      files = tree.merge("q.rb" => "module Q\n  include R\nend\n", "r.rb" => "module R\n  def bar = 2\nend\n")
+      warm, cold = warm_and_cold(files, { "r.rb" => "module R\n  def method_missing(*) = 2\nend\n" },
+                                 baseline: [["b.rb", 1]])
+      expect(cold).to eq([])
+      expect(warm).to eq(cold)
+    end
+  end
 end

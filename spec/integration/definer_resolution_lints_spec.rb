@@ -157,4 +157,43 @@ RSpec.describe "relationship lints over DefinerResolution (ADR-119 C1c)", type: 
       expect(rules(format(body, prepend: "prepend P"))).to eq([])
     end
   end
+
+  # A receiverless `def` inside `class << self` is a singleton def, whatever the instance side holds: the return-type
+  # lint reads `Scope#singleton_class_body?`, not the two discovered-method tables, which took a name defined on both
+  # facets for the instance def and compared `K.load`'s body against `K#load`'s signature.
+  describe "a `class << self` def beside an instance def of the same name" do
+    let(:load_sig) do
+      { "k.rbs" => <<~RBS }
+        class K
+          def load: () -> Integer
+          def self.load: () -> String
+        end
+      RBS
+    end
+    let(:load_source) do
+      <<~RUBY
+        class K
+          def load = 1 if ENV["X"]
+
+          class << self
+            def load = %<body>s
+          end
+        end
+      RUBY
+    end
+
+    it "runs the singleton load over the instance load under Ruby" do
+      printed = RubyRun.stdout("ENV['X'] = '1'\n#{format(load_source,
+                                                         body: '"s"')}p K.load\np K.instance_methods(false)\n")
+      expect(printed).to eq("\"s\"\n[:load]\n")
+    end
+
+    it "compares the body with the singleton signature" do
+      expect(rules(format(load_source, body: '"s"'), sig: load_sig)).to eq([])
+    end
+
+    it "still reports a body that disagrees with the singleton signature (control)" do
+      expect(rules(format(load_source, body: "2"), sig: load_sig)).to eq([[5, "def.return-type-mismatch"]])
+    end
+  end
 end

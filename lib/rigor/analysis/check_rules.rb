@@ -3637,8 +3637,12 @@ module Rigor
           self_type = scope.self_type
           return nil unless self_type.respond_to?(:class_name)
 
+          # A receiverless `def` inside `class << self` is a singleton def. The def node alone cannot say so, but its
+          # scope does: `Scope#singleton_class_body?` answers the lexical question with no table to consult and no
+          # world that varies it. (Two discovered-method tables stood in for it, and took a name defined on both
+          # facets for an instance def.)
           method_def =
-            if def_node.receiver.nil? && !singleton_context_def?(scope, self_type.class_name, def_node.name)
+            if def_node.receiver.nil? && !scope.singleton_class_body?
               Reflection.instance_method_definition(self_type.class_name, def_node.name, scope: scope)
             else
               Reflection.singleton_method_definition(self_type.class_name, def_node.name, scope: scope)
@@ -3650,16 +3654,6 @@ module Rigor
           return override if override
 
           declared_return_union(method_def, scope.environment)
-        end
-
-        # A receiverless `def` inside `class << self` is a singleton def; the def NODE alone cannot say
-        # so, but the discovery walk recorded it under the singleton kind (and not the instance kind).
-        # Without this, `class << self; def load` compared its body against `Kernel#load: -> bool` — the
-        # inherited INSTANCE method — instead of its own `def self.load` signature. A name defined on
-        # both facets stays on the instance lookup (the pre-existing conservative reading).
-        def singleton_context_def?(scope, class_name, method_name)
-          scope.discovered_method?(class_name, method_name, :singleton) &&
-            !scope.discovered_method?(class_name, method_name, :instance)
         end
 
         # `type_vars:` — ADR-35 WD9 tier 1. When the caller supplies a generic-instantiation

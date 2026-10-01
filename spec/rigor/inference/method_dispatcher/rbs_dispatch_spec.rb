@@ -434,7 +434,7 @@ RSpec.describe Rigor::Inference::MethodDispatcher::RbsDispatch do
         it "declines when the scope discovered a method of the same name on the resolved class" do
           shadowed = permitting_scope.with_discovery(
             Rigor::Scope::DiscoveryIndex::EMPTY.with(discovered_methods: { "RigorSpecBox" => { wrap: :singleton } },
-                                                         possible_discovered_methods: {})
+                                                     possible_discovered_methods: {})
           )
           type = bind(box, :wrap, [Rigor::Type::Combinator.constant_of("x")], scope: shadowed)
           expect(type).to equal(Rigor::Type::Combinator.untyped)
@@ -652,7 +652,7 @@ RSpec.describe Rigor::Inference::MethodDispatcher::RbsDispatch do
       it "leaves the variable untyped when the scope discovered a method shadowing the resolved one" do
         shadowed = permitting_scope.with_discovery(
           Rigor::Scope::DiscoveryIndex::EMPTY.with(discovered_methods: { "RigorSpecFold" => { seeded: :singleton } },
-                                                         possible_discovered_methods: {})
+                                                   possible_discovered_methods: {})
         )
         expect(fold_call(:seeded, [seed], scope: shadowed)).to equal(untyped)
       end

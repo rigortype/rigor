@@ -124,7 +124,7 @@ RSpec.describe Rigor::Inference::ExternalAncestorResolution do
     expect(described_class.resolve("Sub", :add, :instance, scope: plain)&.last).to eq("Set")
 
     shadowed = plain.with_discovery(plain.discovery.with(discovered_def_nodes: { "Set" => {} },
-                                                                        contested_discovered_def_nodes: Set.new))
+                                                         contested_discovered_def_nodes: Set.new))
     expect(shadowed.discovered_superclasses).to equal(plain.discovered_superclasses)
     expect(described_class.resolve("Sub", :add, :instance, scope: shadowed)).to be_nil
   end

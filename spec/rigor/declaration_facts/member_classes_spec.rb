@@ -95,7 +95,8 @@ RSpec.describe "Rigor::Scope::DiscoveryIndex::MEMBER_CLASSES" do
     end
 
     it "rejects a possible entry the member lacks, and a contested path that does not resolve" do
-      expect(problem(:possible_discovered_methods, { "Nowhere" => { x: :instance } })).to eq("an entry is not in the member")
+      expect(problem(:possible_discovered_methods,
+                     { "Nowhere" => { x: :instance } })).to eq("an entry is not in the member")
       expect(problem(:contested_discovered_def_nodes, Set[["Nowhere", :x]]))
         .to eq("a key path does not resolve in the member")
       expect(problem(:contested_discovered_def_nodes, [])).to eq("not a Set")

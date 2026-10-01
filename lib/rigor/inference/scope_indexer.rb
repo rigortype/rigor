@@ -271,8 +271,7 @@ module Rigor
                                                     extend_unpositioned),
             discovered_method_visibilities: method_visibilities,
             discovered_parameter_envelopes: merge_envelope_seed(default_scope, file_envelopes),
-            data_member_layouts: data_member_layouts,
-            struct_member_layouts: struct_member_layouts,
+            data_member_layouts: data_member_layouts, struct_member_layouts: struct_member_layouts,
             discovered_deferred_ranges: merge_deferred_ranges_seed(default_scope, root),
             # ADR-119 WD1 — the file records no possible or contested fact, so each paired member's sibling is
             # carried over from the seed unchanged.
@@ -7839,7 +7838,7 @@ module Rigor
       # ADR-85 WD2 — reconstitutes a cached bundle into a single-file index {#fold_file_index} folds: the
       # def-node triples become {DefHandle}s bound to this file's `path`, and the class-source names become a
       # `{name => Set[path]}` table (the shape `accumulate_project_index` produces).
-      def bundle_to_file_index(bundle, path)
+      def bundle_to_file_index(bundle, path) # rubocop:disable Metrics/CyclomaticComplexity,Metrics/PerceivedComplexity -- one read per bundle slot
         {
           def_nodes: bundle_defs_to_handles(bundle[:def_nodes], path),
           singleton_def_nodes: bundle_defs_to_handles(bundle[:singleton_def_nodes], path),
@@ -7875,7 +7874,7 @@ module Rigor
           # Issue #1367 — absent from a pre-29 bundle, which the SCHEMA bump rebuilds cold.
           global_write_census: bundle[:global_write_census] || GlobalWriteCensus::EMPTY,
           # ADR-119 WD1 — absent from a pre-35 bundle, which the SCHEMA bump rebuilds cold.
-          siblings: bundle[:siblings] || Scope::DiscoveryIndex.empty_siblings
+          siblings: bundle[:siblings] || Scope::DiscoveryIndex::EMPTY_SIBLINGS
         }
       end
 
@@ -7918,7 +7917,7 @@ module Rigor
           # Issue #1367 — the project's {GlobalWriteCensus}.
           global_write_census: Set.new,
           # ADR-119 WD1 — the pair siblings, `{sibling name => table}` (see {#fold_siblings}).
-          siblings: Scope::DiscoveryIndex.empty_siblings.dup }
+          siblings: Scope::DiscoveryIndex::EMPTY_SIBLINGS.dup }
       end
 
       # Post-processes and freezes a fully-folded def-index accumulator.

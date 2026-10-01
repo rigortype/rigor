@@ -247,9 +247,9 @@ module Rigor
           table = def_index.fetch(index_key)
           tables[field] = table unless table.empty? && !Scope::DiscoveryIndex.paired?(field)
         end
-        # ADR-119 WD1 — the pairs travel together: a pair is dropped only when both halves are empty. Only the
-        # siblings of a member this collector seeds ride along.
-        Scope::DiscoveryIndex.compact_pairs(tables.merge(def_index.fetch(:siblings).slice(*SEEDED_SIBLINGS)))
+        # ADR-119 WD1 — the pairs travel together: a pair is dropped only when both halves are empty. A sibling whose
+        # member this collector does not seed completes to that member's empty value, which the base scope holds.
+        Scope::DiscoveryIndex.compact_pairs(tables.merge(def_index.fetch(:siblings)))
       rescue StandardError => e
         # Discovery is best-effort; a malformed corner of the project must not crash the
         # protection scan. Without discovery the collector simply resolves fewer call sites. A broken
@@ -271,9 +271,6 @@ module Rigor
         struct_member_layouts: :struct_member_layouts, deferred_ranges: :discovered_deferred_ranges
       }.freeze
       private_constant :DISCOVERY_FIELD
-
-      SEEDED_SIBLINGS = Scope::DiscoveryIndex::SIBLINGS.values_at(*(DISCOVERY_FIELD.values & Scope::DiscoveryIndex::SIBLINGS.keys)).freeze
-      private_constant :SEEDED_SIBLINGS
 
       # Built once over the whole project and inherited by the fork workers via copy-on-write; a frozen Set
       # for O(1) membership in the {#record_call} hot loop.

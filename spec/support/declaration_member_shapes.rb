@@ -78,7 +78,9 @@ module DeclarationMemberShapes
   end
 
   def possible_problem(value, member_value)
-    return "not the member's kind of table" unless value.is_a?(member_value.class.ancestors.find { |k| [Hash, Set].include?(k) })
+    return "not the member's kind of table" unless value.is_a?(member_value.class.ancestors.find do |k|
+      [Hash, Set].include?(k)
+    end)
 
     "an entry is not in the member" unless subset?(value, member_value)
   end

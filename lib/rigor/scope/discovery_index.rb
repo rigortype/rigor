@@ -418,16 +418,16 @@ module Rigor
         contested_discovered_parameter_envelopes: EMPTY_NAME_SET
       )
 
+      # The siblings of an all-empty index, `{sibling name => empty value}`, frozen: what a def-index with no
+      # possible fact carries, and a Runner's initial state. Copy it (`dup`) before mutating.
+      EMPTY_SIBLINGS = SIBLINGS.each_value.to_h { |sibling| [sibling, EMPTY.public_send(sibling)] }.freeze
+
       # The all-empty value of a paired member or sibling.
       def self.empty_value(name)
         EMPTY.public_send(name)
       end
 
-      # The siblings of an all-empty index, `{sibling name => empty value}`, frozen: what a def-index with no
-      # possible fact carries, and a Runner's initial state.
-      def self.empty_siblings
-        SIBLINGS.each_value.to_h { |sibling| [sibling, empty_value(sibling)] }.freeze
-      end
+      def self.empty_siblings = EMPTY_SIBLINGS
 
       # ADR-119 WD1 — `tables` (a `with(**)` argument Hash) with every pair either complete or absent: a pair whose
       # halves are both missing, nil or empty is dropped, any other pair carries BOTH halves (the half that was

@@ -446,7 +446,7 @@ module Rigor
         @project_discovered_methods = {}.freeze
         # ADR-119 WD1 — the `possible_*` / `contested_*` siblings of the paired members, ONE Hash keyed by sibling
         # name so no adoption or seed path names a sibling and none can drop one.
-        @project_discovery_siblings = Scope::DiscoveryIndex.empty_siblings
+        @project_discovery_siblings = Scope::DiscoveryIndex::EMPTY_SIBLINGS
         # Issue #992 — the cross-file parameter-envelope table `call.wrong-arity` reads for an undeclared `def`.
         @project_discovered_parameter_envelopes = {}.freeze
         @project_data_member_layouts = {}.freeze
@@ -1717,12 +1717,13 @@ module Rigor
         @project_discovered_parameter_envelopes = discovery.discovered_parameter_envelopes
         @project_data_member_layouts = discovery.data_member_layouts
         @project_struct_member_layouts = discovery.struct_member_layouts
-        @project_discovery_siblings = discovery.siblings
       end
 
       # The tables only check rules read beyond dispatch — the issue #1120 refinements and the issue #1367
-      # global-write census. Extracted to keep {#apply_discovery_result} under its ABC budget.
+      # global-write census — and the ADR-119 WD1 siblings of the paired members. Extracted to keep
+      # {#apply_discovery_result} under its ABC budget.
       def apply_discovery_call_surface_tables(discovery)
+        @project_discovery_siblings = discovery.siblings
         @project_discovered_refinements = discovery.discovered_refinements
         @project_discovered_global_write_census = discovery.discovered_global_write_census
       end
@@ -2272,7 +2273,9 @@ module Rigor
       # seed when either half is non-empty and is left out when both are, which keeps an `discovery_seed:` base's
       # table for a pair this run computed nothing for. {Scope::DiscoveryIndex#with} takes the two together, and
       # `compact_pairs` completes a half pair a base seed brought in.
-      PAIRED_MEMBER_IVARS = Scope::DiscoveryIndex::SIBLINGS.keys.to_h { |member| [member, :"@project_#{member}"] }.freeze
+      PAIRED_MEMBER_IVARS = Scope::DiscoveryIndex::SIBLINGS.keys.to_h do |member|
+        [member, :"@project_#{member}"]
+      end.freeze
       private_constant :PAIRED_MEMBER_IVARS
 
       def seed_paired_tables(tables)
@@ -2288,7 +2291,8 @@ module Rigor
       end
 
       # The tables only check rules read: the issue #1120 refinements (`call.undefined-method`) and the issue #1367
-      # global-write census (the `global.*` write rules). The issue #992 parameter envelopes ride {#seed_paired_tables}. Split out of {#project_scope_seed_tables} to keep it under the complexity budget.
+      # global-write census (the `global.*` write rules); the issue #992 envelopes ride {#seed_paired_tables}. Split
+      # out of {#project_scope_seed_tables} to keep it under the complexity budget.
       def seed_call_surface_tables(tables)
         tables[:discovered_refinements] = @project_discovered_refinements unless @project_discovered_refinements.empty?
         # Issue #1367 — read by the `global.*` write rules.

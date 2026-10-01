@@ -612,7 +612,7 @@ RSpec.describe Rigor::Analysis::WorkerSession do
 
   describe "#seed_project_scope / with_discovery (private)" do
     it "threads the project_scope_seed discovery tables into a fresh scope" do
-      seed = { discovered_methods: { "Foo" => { baz: :instance } } }
+      seed = { discovered_methods: { "Foo" => { baz: :instance } }, possible_discovered_methods: {} }
       session = described_class.new(
         configuration: Rigor::Configuration.new("paths" => []),
         cache_store: nil, project_scope_seed: seed

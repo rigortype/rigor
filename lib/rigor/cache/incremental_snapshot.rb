@@ -158,7 +158,11 @@ module Rigor
       # collapsed, positioned table and a warm run would answer an order a cold run declines.
       # 34: #1592 — an `extend` or a `class << self` include inside a block the extends walk used to skip is now
       # recorded and named unpositioned, so a pre-34 bundle folds as if the edge did not exist.
-      SCHEMA = 34
+      # 35: ADR-119 WD1 — each seed bundle gains a `siblings` Hash, the `possible_*` / `contested_*` siblings of the
+      # `Scope::DiscoveryIndex` members that may admit a possible fact. Every sibling is empty until a producer
+      # fills one, so a pre-35 bundle folds as "no possible fact", which is what it would hold today; the bump keeps
+      # that true once one does.
+      SCHEMA = 35
 
       # The persisted per-file state.
       # `cache` maps an analyzed file to its diagnostics.

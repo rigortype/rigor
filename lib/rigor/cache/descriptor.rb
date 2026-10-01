@@ -74,7 +74,10 @@ module Rigor
       # unchanged file, so cached bundles must read as misses once and rebuild.
       # v15: #1592 — an `extend` (or a `class << self` include) written inside a block the walk used to skip is
       # now recorded and named unpositioned. A pre-15 bundle would hold neither for an unchanged file.
-      SCHEMA_VERSION = 15
+      # v16: ADR-119 WD1 — the def-index seed bundles gain the `:siblings` Hash (the `possible_*` / `contested_*`
+      # halves of the discovery pairs). A pre-16 bundle would contribute no sibling for an unchanged file, so cached
+      # bundles must read as misses once and rebuild carrying it.
+      SCHEMA_VERSION = 16
 
       # Per-slot entry value objects. Constructors validate enums / required fields and freeze the resulting
       # struct so no caller can mutate after the entry is in a Descriptor.

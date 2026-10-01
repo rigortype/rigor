@@ -23,7 +23,7 @@ module Rigor
       # ivar surface, preserving the exact assignment order and timing the inline body had. The `pool_mode`
       # predicate is injected (it keys on `@workers` / `@buffer`, owned by the Runner) so this collaborator
       # never calls back into it.
-      class ProjectPrePasses
+      class ProjectPrePasses # rubocop:disable Metrics/ClassLength -- the Discovery slots are one declaration per table
         # Frozen bundle of the EAGER (env-input) project-wide state the pre-passes produce — the slots whose
         # products feed the RBS environment build. Mirrors the env-input ivars `apply_pre_passes_result`
         # sets on the {Runner}. The cross-file discovery tables live in the separate {Discovery} bundle
@@ -58,7 +58,8 @@ module Rigor
           :discovered_header_nestings, :discovered_includes, :discovered_prepends, :discovered_extends,
           :unpositioned_mixins, :discovered_class_sources, :constant_values, :constant_sources, :constant_writes,
           :discovered_method_visibilities, :discovered_methods, :discovered_parameter_envelopes, :data_member_layouts,
-          :struct_member_layouts, :discovered_deferred_ranges, :discovered_refinements, :discovered_global_write_census
+          :struct_member_layouts, :discovered_deferred_ranges, :discovered_refinements, :siblings,
+          :discovered_global_write_census
         )
 
         # Internal: drives every EAGER project-wide pre-pass — the ones whose products feed the RBS
@@ -186,7 +187,8 @@ module Rigor
             # `*_def_shadows_call?` predicates order `sig`-shadowing defs against.
             discovered_deferred_ranges: def_index.fetch(:deferred_ranges),
             discovered_refinements: def_index.fetch(:refinements), # Issue #1120
-            discovered_global_write_census: def_index.fetch(:global_write_census) # Issue #1367
+            # Issue #1367 — the census; ADR-119 WD1 — `{sibling name => table}` for `DiscoveryIndex::SIBLINGS`.
+            discovered_global_write_census: def_index.fetch(:global_write_census), siblings: def_index.fetch(:siblings)
           )
         end
 

@@ -50,7 +50,13 @@ module Rigor
       :patched_line_readers,
       :clears_last_status,
       :defines_case_equality,
-      :implicit_self_evidence
+      :implicit_self_evidence,
+      :possible_discovered_methods,
+      :possible_discovered_deferred_ranges,
+      :contested_discovered_def_nodes,
+      :contested_discovered_singleton_def_nodes,
+      :contested_discovered_method_visibilities,
+      :contested_discovered_parameter_envelopes
     )
 
     class DiscoveryIndex
@@ -58,6 +64,32 @@ module Rigor
       EMPTY_TABLE = {}.freeze
       EMPTY_NAME_SET = Set.new.freeze
       private_constant :EMPTY_NODE_TABLE, :EMPTY_TABLE, :EMPTY_NAME_SET
+
+      # ADR-119 WD1 — each member that may one day admit `possible` or `contested` facts, and the sibling that
+      # holds them. Every copy path reads this one declaration, so a member never travels without its sibling:
+      # {#with} raises on a half pair and {.compact_pairs} drops a pair only when BOTH halves are empty. No
+      # producer fills a sibling yet (the lane-1 carriage), so every sibling is empty and each member keeps its
+      # meaning, the union of its certain and possible facts.
+      #
+      # - `possible_*` has its member's shape and is a subset of it (a `discovered_methods` pair is a
+      #   `{class => {name => kind}}` table).
+      # - `contested_*` is a Set of key paths into its member, one per entry whose value depends on a possible
+      #   fact: `[class, method]`, or `[class, [kind, method]]` for an envelope.
+      #
+      # The members without a sibling here (`discovered_def_sources`, `discovered_singleton_def_sources`) are
+      # ADR-119 WD4's other single-valued tables; see the ADR for whether they need one.
+      SIBLINGS = {
+        discovered_methods: :possible_discovered_methods,
+        discovered_deferred_ranges: :possible_discovered_deferred_ranges,
+        discovered_def_nodes: :contested_discovered_def_nodes,
+        discovered_singleton_def_nodes: :contested_discovered_singleton_def_nodes,
+        discovered_method_visibilities: :contested_discovered_method_visibilities,
+        discovered_parameter_envelopes: :contested_discovered_parameter_envelopes
+      }.freeze
+
+      # Either half of a pair to the other.
+      PARTNERS = SIBLINGS.flat_map { |member, sibling| [[member, sibling], [sibling, member]] }.to_h.freeze
+      private_constant :PARTNERS
 
       # [#1507](https://github.com/rigortype/rigor/issues/1507) — the kind of fact each member holds, which decides
       # what a reader may conclude from an entry and which gate covers the member (ADR-119 WD4, proposed). Each
@@ -71,6 +103,7 @@ module Rigor
       # - `:typed` — the values are types, which already carry uncertainty in the type lattice.
       # - `:syntactic` — read off the parse of the analysed file alone, which is their reference.
       # - `:run_state` — the run's own state, not a fact about the program.
+      # - `:sibling` — the `possible_*` / `contested_*` half of a pair in {SIBLINGS}, which travels with its member.
       MEMBER_CLASSES = {
         set_valued: {
           discovered_classes: "the class and module names the project declares; the value is the name's singleton",
@@ -121,6 +154,17 @@ module Rigor
         }.freeze,
         run_state: {
           run_generation: "the identity token of the current run"
+        }.freeze,
+        sibling: {
+          possible_discovered_methods: "the names and sides of discovered_methods that only a possible definer gives",
+          possible_discovered_deferred_ranges: "the rows of discovered_deferred_ranges that only a possible fact gives",
+          contested_discovered_def_nodes: "the key paths of discovered_def_nodes that a possible definer may change",
+          contested_discovered_singleton_def_nodes:
+            "the key paths of discovered_singleton_def_nodes that a possible definer may change",
+          contested_discovered_method_visibilities:
+            "the key paths of discovered_method_visibilities that a possible fact may change",
+          contested_discovered_parameter_envelopes:
+            "the key paths of discovered_parameter_envelopes that a possible fact may change"
         }.freeze
       }.freeze
 
@@ -364,8 +408,75 @@ module Rigor
         # (`Inference::LastLine::SelfEvidence`, read on the first ask), which `Inference::LastLine.reads_line?` reads
         # them by. Filled by `Inference::ScopeIndexer.index` from the file's own tree only; nil, where no file was
         # indexed, declines every such reader.
-        implicit_self_evidence: nil
+        implicit_self_evidence: nil,
+        # ADR-119 WD1 — the siblings of the members {SIBLINGS} pairs, empty until a producer admits a possible fact.
+        possible_discovered_methods: EMPTY_TABLE,
+        possible_discovered_deferred_ranges: EMPTY_TABLE,
+        contested_discovered_def_nodes: EMPTY_NAME_SET,
+        contested_discovered_singleton_def_nodes: EMPTY_NAME_SET,
+        contested_discovered_method_visibilities: EMPTY_NAME_SET,
+        contested_discovered_parameter_envelopes: EMPTY_NAME_SET
       )
+
+      # The siblings of an all-empty index, `{sibling name => empty value}`, frozen: what a def-index with no
+      # possible fact carries, and a Runner's initial state. Copy it (`dup`) before mutating.
+      EMPTY_SIBLINGS = SIBLINGS.each_value.to_h { |sibling| [sibling, EMPTY.public_send(sibling)] }.freeze
+
+      # The all-empty value of a paired member or sibling.
+      def self.empty_value(name)
+        EMPTY.public_send(name)
+      end
+
+      def self.empty_siblings = EMPTY_SIBLINGS
+
+      # ADR-119 WD1 — `tables` (a `with(**)` argument Hash) with every pair either complete or absent: a pair whose
+      # halves are both missing, nil or empty is dropped, any other pair carries BOTH halves (the half that was
+      # absent or nil becomes its empty value). Dropping members one at a time would strand a non-empty sibling,
+      # and passing a half would make {#with} raise. Entries outside {SIBLINGS} pass through untouched.
+      def self.compact_pairs(tables)
+        tables.each_with_object({}) do |(name, table), out|
+          partner = PARTNERS[name]
+          next out[name] = table if partner.nil?
+          next if out.key?(name)
+
+          other = tables[partner]
+          next if blank_table?(table) && blank_table?(other)
+
+          out[name] = table.nil? ? empty_value(name) : table
+          out[partner] = other.nil? ? empty_value(partner) : other
+        end
+      end
+
+      # Whether `name` is a member or sibling of {SIBLINGS}.
+      def self.paired?(name)
+        PARTNERS.key?(name)
+      end
+
+      def self.blank_table?(table)
+        table.nil? || table.empty?
+      end
+      private_class_method :blank_table?
+
+      # The six siblings as `{sibling name => table}`, for a caller that rebuilds the paired members and carries
+      # their siblings over unchanged.
+      def sibling_tables
+        SIBLINGS.each_value.to_h { |sibling| [sibling, public_send(sibling)] }
+      end
+
+      # Data's `with`, except that a paired member and its sibling are accepted only TOGETHER (ADR-119 WD1): a
+      # caller that rebuilt one without the other would leave the sibling describing the old table, so it
+      # raises instead. A call with no change returns the receiver.
+      def with(**changes)
+        return self if changes.empty?
+
+        changes.each_key do |name|
+          partner = PARTNERS[name]
+          next if partner.nil? || changes.key?(partner)
+
+          raise ArgumentError, "DiscoveryIndex#with: #{name} and #{partner} change together; #{partner} is missing"
+        end
+        super
+      end
     end
   end
 end

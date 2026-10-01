@@ -245,9 +245,11 @@ module Rigor
         tables[:discovered_classes] = classes unless classes.empty?
         DISCOVERY_FIELD.each do |index_key, field|
           table = def_index.fetch(index_key)
-          tables[field] = table unless table.empty?
+          tables[field] = table unless table.empty? && !Scope::DiscoveryIndex.paired?(field)
         end
-        tables
+        # ADR-119 WD1 — the pairs travel together: a pair is dropped only when both halves are empty. A sibling whose
+        # member this collector does not seed completes to that member's empty value, which the base scope holds.
+        Scope::DiscoveryIndex.compact_pairs(tables.merge(def_index.fetch(:siblings)))
       rescue StandardError => e
         # Discovery is best-effort; a malformed corner of the project must not crash the
         # protection scan. Without discovery the collector simply resolves fewer call sites. A broken

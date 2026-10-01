@@ -104,7 +104,12 @@ module Rigor
         ].each do |slot|
           tables[seed_key(slot)] = def_index.fetch(slot)
         end
-        tables.reject { |_, table| table.nil? || table.empty? }
+        # ADR-119 WD1 — the pairs travel as one: an unpaired empty table is dropped here, a pair only when both
+        # halves are empty (`compact_pairs`), so a non-empty sibling is never stranded by an empty member.
+        tables.merge!(def_index.fetch(:siblings))
+        Scope::DiscoveryIndex.compact_pairs(
+          tables.reject { |name, table| !Scope::DiscoveryIndex.paired?(name) && (table.nil? || table.empty?) }
+        )
       end
 
       UNPREFIXED_SLOTS = %i[data_member_layouts struct_member_layouts unpositioned_mixins].freeze

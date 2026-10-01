@@ -872,7 +872,8 @@ RSpec.describe Rigor::Scope do
   # the fork was observable on exactly one shape.
   describe "#known_user_class?" do
     def scope_with_discovery(**tables)
-      described_class.empty.with_discovery(Rigor::Scope::DiscoveryIndex::EMPTY.with(**tables))
+      index_class = Rigor::Scope::DiscoveryIndex
+      described_class.empty.with_discovery(index_class::EMPTY.with(**index_class.compact_pairs(tables)))
     end
 
     it "admits a class the project declares a superclass for" do

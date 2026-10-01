@@ -500,7 +500,8 @@ RSpec.describe Rigor::Reflection do
     let(:scope) do
       index = Rigor::Scope::DiscoveryIndex::EMPTY.with(
         discovered_classes: { "MyClass" => :class },
-        discovered_methods: { "MyClass" => { do_thing: :instance } }
+        discovered_methods: { "MyClass" => { do_thing: :instance } },
+        possible_discovered_methods: {}
       )
       Rigor::Scope.empty.with_discovery(index)
     end
@@ -519,7 +520,8 @@ RSpec.describe Rigor::Reflection do
       # One name may be defined on both sides of a class, and the table holds one value per name — so the writers
       # record METHOD_KIND_BOTH instead of letting the second definition erase the first's kind.
       index = Rigor::Scope::DiscoveryIndex::EMPTY.with(
-        discovered_methods: { "MyClass" => { helper: Rigor::Scope::DiscoveryIndex::METHOD_KIND_BOTH } }
+        discovered_methods: { "MyClass" => { helper: Rigor::Scope::DiscoveryIndex::METHOD_KIND_BOTH } },
+        possible_discovered_methods: {}
       )
       both = Rigor::Scope.empty.with_discovery(index)
 

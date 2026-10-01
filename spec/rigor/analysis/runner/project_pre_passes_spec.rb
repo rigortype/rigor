@@ -162,7 +162,8 @@ RSpec.describe Rigor::Analysis::Runner::ProjectPrePasses do
           struct_member_layouts: :struct_member_layouts_marker,
           deferred_ranges: :deferred_ranges_marker,
           refinements: :refinements_marker,
-          global_write_census: :global_write_census_marker
+          global_write_census: :global_write_census_marker,
+          siblings: :siblings_marker
         }
       }
       pre_passes = build_pre_passes
@@ -188,6 +189,7 @@ RSpec.describe Rigor::Analysis::Runner::ProjectPrePasses do
       expect(discovery.discovered_method_visibilities).to eq(:method_visibilities_marker)
       expect(discovery.discovered_methods).to eq(:methods_marker)
       expect(discovery.discovered_parameter_envelopes).to eq(:parameter_envelopes_marker)
+      expect(discovery.siblings).to eq(:siblings_marker)
       expect(discovery.data_member_layouts).to eq(:data_member_layouts_marker)
       expect(discovery.struct_member_layouts).to eq(:struct_member_layouts_marker)
       expect(discovery.discovered_deferred_ranges).to eq(:deferred_ranges_marker)

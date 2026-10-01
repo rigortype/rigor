@@ -167,7 +167,8 @@ RSpec.describe "override-gate memo storage" do
       expect(Rigor::Inference::ExpressionTyper.new(scope: scope).send(:override_gate_buckets)).to be(bucket)
 
       # Same three walked tables, a different index object.
-      shifted = scope.with_discovery(index.with(discovered_methods: index.discovered_methods.dup))
+      shifted = scope.with_discovery(index.with(discovered_methods: index.discovered_methods.dup,
+                                                possible_discovered_methods: index.possible_discovered_methods))
       shifted_bucket = Rigor::Inference::ExpressionTyper.new(scope: shifted).send(:override_gate_buckets)
       expect(shifted_bucket).not_to be(bucket)
       expect(Thread.current[gate_key][0]).to be(shifted.discovery)
@@ -192,7 +193,8 @@ RSpec.describe "override-gate memo storage" do
       first = typer.send(:method_definers_index, :instance)
 
       # A different `DiscoveryIndex` carrying the SAME def tables must not rebuild the index.
-      shifted = scope.with_discovery(discovery.with(discovered_methods: discovery.discovered_methods.dup))
+      shifted = scope.with_discovery(discovery.with(discovered_methods: discovery.discovered_methods.dup,
+                                                    possible_discovered_methods: discovery.possible_discovered_methods))
       second = Rigor::Inference::ExpressionTyper.new(scope: shifted).send(:method_definers_index, :instance)
       expect(second).to be(first)
       expect(Thread.current[index_key][0]).to be(def_nodes)

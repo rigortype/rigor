@@ -282,11 +282,15 @@ RSpec.describe "a compact-header rename colliding with a top-level declaration (
     # carrying a mixin it cannot see into, so the class's own `def`, its superclass's and its unambiguous
     # second mixin's all went quiet too. Both ambiguous classes are taken as levels instead, so only a
     # method they actually disagree about is unanswerable.
+    #
+    # ADR-119 C1b: `from_solo` no longer fires. `Leaf` is declared in two files with two or more edges, a multi-file
+    # mark, and the candidate-set read discharges it only where at most one edge's closure could answer the name:
+    # the ambiguous `Mixin` spelling never discharges, and `Solo` records `from_solo`, so two do (tp-lost by design,
+    # ADR-119 WD2; Ruby raises for the call in every order). `own` and `from_base` are not in `Solo`'s closure.
     [[surrounded_top_level_site, compact_site], [compact_site, surrounded_top_level_site]].each do |first, second|
       result = answers(first, second, surrounded_probe)
       expect(result[:other]).to contain_exactly(
-        /wrong number of arguments to `own'/, /wrong number of arguments to `from_base'/,
-        /wrong number of arguments to `from_solo'/
+        /wrong number of arguments to `own'/, /wrong number of arguments to `from_base'/
       )
     end
   end

@@ -331,13 +331,16 @@ module Rigor
 
       # Issue #1097 — this file's def / block / lambda ranges merged over the cross-file seed; the
       # ordering predicates key the table by `source_path`, so the entry must exist even on a run
-      # that never built the project pre-pass. When the pre-pass DID run the entry is already the
-      # identical walk product — keep it instead of re-walking the AST.
+      # that never built the project pre-pass. A seeded entry is only the identical walk product when
+      # the pre-pass read the same bytes (a mutant analysed under a seed of the unmutated files does
+      # not), so the file is always re-walked and the seed is kept only when the rows are equal — which
+      # spares the project-wide Hash copy per file. Issue #1548.
       def merge_deferred_ranges_seed(default_scope, root)
         seeded = default_scope.discovered_deferred_ranges
-        return seeded if seeded.key?(default_scope.source_path)
+        fresh = build_deferred_ranges(root)
+        return seeded if seeded[default_scope.source_path] == fresh
 
-        seeded.merge(default_scope.source_path => build_deferred_ranges(root))
+        seeded.merge(default_scope.source_path => fresh)
       end
 
       def merge_envelope_seed(default_scope, file_envelopes)

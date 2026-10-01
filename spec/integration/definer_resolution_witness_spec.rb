@@ -12,22 +12,26 @@ require_relative "../support/ruby_run"
 # sound read may say, and the read answers `Known` only where both worlds agree on it.
 RSpec.describe Rigor::Inference::DefinerResolution do # rubocop:disable RSpec/SpecFilePathFormat
   let(:resolution) { described_class }
+  let(:project_dirs) { [] }
 
   def scope_for(source)
     root = Prism.parse(source).value
     Rigor::Inference::ScopeIndexer.index(root, default_scope: Rigor::Scope.empty)[root]
   end
 
+  # The files stay on disk until the example ends: a declared module's body is read from them.
   def project_scope(files)
-    Dir.mktmpdir("rigor-definer-resolution-") do |dir|
-      paths = files.map do |name, source|
-        File.join(dir, name).tap { |path| File.write(path, source) }
-      end
-      tables = Rigor::Protection::DiscoverySeed.discovery_tables(paths)
-      base = Rigor::Scope.empty
-      return base.with_discovery(base.discovery.with(**tables))
+    dir = Dir.mktmpdir("rigor-definer-resolution-")
+    project_dirs << dir
+    paths = files.map do |name, source|
+      File.join(dir, name).tap { |path| File.write(path, source) }
     end
+    tables = Rigor::Protection::DiscoverySeed.discovery_tables(paths)
+    base = Rigor::Scope.empty
+    base.with_discovery(base.discovery.with(**tables))
   end
+
+  after { project_dirs.each { |dir| FileUtils.rm_rf(dir) } }
 
   # `expression`'s printed value in the world where `ENV["Q"]` is unset (`false`) or set (`true`).
   def ruby_says(source, expression, world, prelude: nil)
@@ -339,10 +343,48 @@ RSpec.describe Rigor::Inference::DefinerResolution do # rubocop:disable RSpec/Sp
       resolution.resolve(scope, "C", name, :instance, question: :override, &answer)
     end
 
-    it "skips a declared module with no def, so the project definer answers" do
+    let(:concern_shim) do
+      <<~RUBY
+        module ActiveSupport
+          module Concern
+            def self.extended(base) = base.instance_variable_set(:@_included_block, nil)
+
+            def included(base = nil, &block)
+              if base.nil?
+                @_included_block = block
+              else
+                super
+                base.class_eval(&@_included_block) if @_included_block
+              end
+            end
+          end
+        end
+      RUBY
+    end
+
+    it "skips a bare declared module (plain_empty), so the project definer answers" do
       source = "class B; def foo = 1; end\nmodule Empty; end\nclass C < B; include Empty; end\n"
       expect(RubyRun.stdout("#{source}p C.instance_method(:foo).owner\n").chomp).to eq("B")
       expect(owner_of(resolve(project_scope("a.rb" => source), :foo))).to eq("B")
+    end
+
+    # Any macro in `included do` defines on the includer and is recorded nowhere, so a def-less module that
+    # extends anything, mixes anything in, or lists a mixin is never said to lack the name.
+    it "declines on a concern whose included block calls a macro (custom_macro)" do
+      source = <<~RUBY
+        class Base; def self.my_macro(n) = define_method(n) { :m }; def foo = 1; end
+        module Q
+          extend ActiveSupport::Concern
+          included do
+            my_macro :foo
+          end
+        end
+        class C < Base; include Q; end
+      RUBY
+      expect(RubyRun.stdout("#{source}p C.instance_method(:foo).owner\n", prelude: concern_shim).chomp).to eq("C")
+      scope = project_scope("a.rb" => source)
+      expect(owner_of(resolve(scope, :foo))).to eq(:unknown)
+      expect(Rigor::Scope::ResolutionChain::Relevance.external_lacks?(scope, ["Q"], :foo)).to be(false)
     end
 
     # A module with a `def` is a project entry, so this chain never asks `external_lacks?` about it; the verdict
@@ -361,10 +403,13 @@ RSpec.describe Rigor::Inference::DefinerResolution do # rubocop:disable RSpec/Sp
       expect(relevance.external_lacks?(scope, ["Hooked"], :foo)).to be(false)
     end
 
-    it "passes over a module neither declared nor in RBS for :override, and declines for :visibility" do
+    # A gem module is judged by no source here, so every question declines, as on master (a gem definer may
+    # reduce visibility or narrow a signature). A future gem-source approach (`dependencies.source_inference`)
+    # could read it; `:override` must not skip it before then.
+    it "declines on a module neither declared nor in RBS, for every question" do
       source = "class B; def foo = 1; end\nclass C < B; include Gem::Authorization; end\n"
       scope = project_scope("a.rb" => source)
-      expect(owner_of(override_resolve(scope, :foo))).to eq("B")
+      expect(owner_of(override_resolve(scope, :foo))).to eq(:unknown)
       expect(owner_of(resolve(scope, :foo, question: :visibility))).to eq(:unknown)
       expect(owner_of(resolve(scope, :foo))).to eq(:unknown)
     end

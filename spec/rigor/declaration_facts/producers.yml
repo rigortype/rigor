@@ -477,6 +477,8 @@ lib/rigor/scope/resolution_chain/relevance.rb:
   computes: whether a mark on a chain is discharged for one method name, from the closure of the module it names (ADR-119 WD2)
   producers:
     Rigor::Scope::ResolutionChain::Relevance::Context#edge_names: a consumer, not a declaration producer; it reads the marked node's own edges on the side the mark covers and writes no table
+    Rigor::Scope::ResolutionChain::Relevance#bare_statement?: a consumer, not a declaration producer; it reads one statement of a declared module's body and says whether it is a nested definition or a literal, and writes no table
+    Rigor::Scope::ResolutionChain::Relevance#each_module_body: a consumer, not a declaration producer; it walks a declaring file for the bodies of the modules and classes it opens, and writes no table
     Rigor::Scope::ResolutionChain::Relevance#wildcard_listed?: a consumer, not a declaration producer; it reads whether a module lists `"*"` on the include side and the mark's, or on either side with no mark, and writes no table
 lib/rigor/sig_gen/generator.rb:
   computes: the defs, attribute readers and ivar observations sig-gen emits per qualified class

@@ -13,8 +13,6 @@ Status: **research note, no design commitments.**
   情報処理学会論文誌: プログラミング Vol.49 No.SIG 3 (PRO 36),
   pp.39–54 (Mar. 2008)
 - 出典 URL: <https://ipsj.ixsq.nii.ac.jp/records/16465>
-- ローカル写し: [IPSJ-TPRO4903005.md](../../IPSJ-TPRO4903005.md) /
-  [IPSJ-TPRO4903005.pdf](../../IPSJ-TPRO4903005.pdf)
 
 ## 1. 論文要旨（一段落）
 

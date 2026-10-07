@@ -11,9 +11,7 @@ Status: **research note, no design commitments.**
 - 松本 宗太郎, 南出 靖彦
   「Rubyプログラムの制御フロー解析とその健全性の証明」
   情報処理学会論文誌 プログラミング Vol.3 No.2, pp.9–25 (Mar. 2010)
-- 出典 URL: <https://ipsj.ixsq.nii.ac.jp/records/37907>
-- ローカル写し: [IPSJ-TPRO0302003.md](../../IPSJ-TPRO0302003.md) /
-  [IPSJ-TPRO0302003.pdf](../../IPSJ-TPRO0302003.pdf)
+- 出典 URL: <https://ipsj.ixsq.nii.ac.jp/records/68444>
 
 ## 1. 論文要旨（一段落）
 

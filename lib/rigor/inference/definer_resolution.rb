@@ -47,6 +47,7 @@ module Rigor
         raise ArgumentError, "singleton-side resolution lands with ADR-119 C1c" if side == :singleton
         raise ArgumentError, "unknown question #{question.inspect}" unless QUESTIONS.include?(question)
 
+        answer_in = override_answer(scope, &answer_in) if question == :override
         answer_in ||= default_answer(scope, method_name, question)
         flavor = question == :arity ? :arity : :methods
         chain = Scope::ResolutionChain.for(scope, class_name.to_s, :instance, flavor)
@@ -61,6 +62,20 @@ module Rigor
         return UNKNOWN unless verdict == :chain
 
         collapse(hits)
+      end
+
+      # The `:override` question's answer function, built from the caller's block: that block is NOT a per-chain
+      # function but `|owner_name| value`, called on each project entry in order, and its first non-nil `value` is
+      # the entry's answer, as `[owner_name, value]` (the owner is part of the answer so that two worlds naming
+      # different parents disagree). It is the override lints' parent read: the nearest project ancestor after the
+      # class whose block answers.
+      def override_answer(scope)
+        lambda do |chain, from|
+          first_hit(chain, scope, from) do |entry|
+            value = yield(entry.name)
+            [entry.name, value] unless value.nil?
+          end
+        end
       end
 
       # `from` is a position on `chain`; the same position on the retro world is just after the entry it followed.
@@ -169,12 +184,16 @@ module Rigor
         end
       end
 
-      # The first project entry that records the name, with its visibility (`:public` where none was stated).
+      # The first project entry that records the name (a discovered method, an instance `def` the def table
+      # holds, or a visibility change such as `private :foo` recorded for it), with its visibility (`:public` where
+      # none was stated).
       def visibility_answer(scope, method_name)
         lambda do |chain, from|
           first_hit(chain, scope, from) do |entry|
             kind = entry.side == :singleton ? :singleton : :instance
-            next unless scope.discovered_method?(entry.name, method_name, kind)
+            next unless scope.discovered_method?(entry.name, method_name, kind) ||
+                        (kind == :instance && (scope.user_def_for(entry.name, method_name) ||
+                                               scope.discovered_method_visibility(entry.name, method_name)))
 
             scope.discovered_method_visibility(entry.name, method_name) || :public
           end
@@ -196,7 +215,8 @@ module Rigor
         found
       end
 
-      private_class_method :retro_position, :candidates, :decided, :external_may_answer?, :implicit_object_answers?,
+      private_class_method :override_answer, :retro_position, :candidates, :decided, :external_may_answer?,
+                           :implicit_object_answers?,
                            :outcomes, :collapse, :possible?,
                            :default_answer, :definer_answer, :visibility_answer, :first_hit
     end

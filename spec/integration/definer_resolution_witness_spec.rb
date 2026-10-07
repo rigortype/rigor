@@ -331,16 +331,7 @@ RSpec.describe Rigor::Inference::DefinerResolution do # rubocop:disable RSpec/Sp
   # gem module for `:override`.
   describe "external ancestors the project declares or RBS does not know" do
     def override_resolve(scope, name)
-      answer = lambda do |chain, from|
-        chain.entries.each_with_index do |entry, index|
-          next if index < from || entry.external?
-
-          node = scope.user_def_for(entry.name, name)
-          return described_class::Hit.new(node, entry.name, index, entry.side) if node
-        end
-        nil
-      end
-      resolution.resolve(scope, "C", name, :instance, question: :override, &answer)
+      resolution.resolve(scope, "C", name, :instance, question: :override) { |owner| scope.user_def_for(owner, name) }
     end
 
     let(:concern_shim) do

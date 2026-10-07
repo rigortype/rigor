@@ -15,6 +15,22 @@ The session handoff (ADR-98). It answers ONE question: what should the next sess
 Transient; replaced wholesale. Backlog lives in GitHub Issues, release planning in Milestones.
 If this file disagrees with an ADR, the CHANGELOG, or an issue, this file is the one that is wrong.
 
+## Next session: scope `v0.4.1` (2026-10-08)
+
+The maintainer wants the next session to decide what `v0.4.1` contains, in-flight work included.
+Scoping is not release prep: a release starts only with `/rigor-release-prep`.
+
+- Shipped since `v0.4.0` (`lib/rigor/version.rb`): 21 pending fragments in `changelog.d/` (8
+  `changed`, 13 `fixed`). Among them are #1552 (an engine-free unchanged `--incremental` run),
+  #1578/#1605/#1606 (Ruby-order resolution; #1570 fixed; override and visibility lints decline on
+  unsettled or forked chains) and #1593.
+- Milestones: there is no `v0.4.1` milestone yet. `v0.4.x` holds 196 open issues, so scoping means
+  picking from it; `v0.5.0` and `v1.0.0` hold 2 each.
+- In flight: ADR-119 C1d0 waits on the maintainer's Q12; C1d, C1e and C2 follow (C2 after #1603).
+  Draft #1397 belongs to a sibling session.
+- Weigh before cutting: C1c's `tp-lost` cost (#1609: 61 GitLab controller diagnostics), and the
+  severe open bugs #1585 (stale `--incremental` after a `pre_eval:` edit) and #1594.
+
 ## Performance campaign, #1507, and the resolution chain (2026-10-01)
 
 The goal is the warm journeys on a Mastodon-sized Rails app (null build, leaf edit, hub edit), for

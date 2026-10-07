@@ -30,10 +30,10 @@ Next:
 
 1. **ADR-119, accepted 2026-10-01; PR C in progress.** Landed: #1601 (errata: the C1a–C1e split, Q12),
    #1602 (C1a: `DefinerResolution`, marks, relevance; instance side only), #1610 (ambiguous spellings
-   discharge), #1605 (C1b: `SourceArity`, fixes #1570). Waiting on the maintainer:
-   - **#1606 (C1c, Draft, CI green, reviewed):** override and visibility lints. It loses real
-     diagnostics (Mastodon 10, GitLab controllers 61, all `tp-lost`; 0 corpus FPs silenced). Merge or
-     hold is the maintainer's call (ADR Q3); the recoveries are #1608, #1609, #1611, #1612.
+   discharge), #1605 (C1b: `SourceArity`, fixes #1570), #1606 (C1c). Still open:
+   - **#1606 (C1c) merged 2026-10-08:** override and visibility lints. It trades real diagnostics
+     (Mastodon 10, GitLab controllers 61, all `tp-lost`) for the fixture FPs; the recoveries are
+     #1608, #1609, #1611, #1612.
    - **Q12** (the admission census reading of WD1(ii)) gates C1d0; C1d follows it.
    - The singleton side is designed (a positional decline) for C2, after #1603; #1607 tracks
      singleton #1570. Fold the C1 planning's WD3/C1c-row errata into the ADR when C1c lands.

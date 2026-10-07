@@ -27,7 +27,7 @@ the whole floor.
 ## Why "target GEM_PATH awareness" is the wrong fix
 
 `BundleSigDiscovery.auto_detect` already states the boundary, and it is deliberate
-([ADR-27](27-tool-distribution-model.md) — Rigor reads the project as *data*, never runs its
+([ADR-27](../adr/27-tool-distribution-model.md) — Rigor reads the project as *data*, never runs its
 toolchain):
 
 > The pure-default install location — gems in the active Ruby's GEM_HOME with no `path` configured —

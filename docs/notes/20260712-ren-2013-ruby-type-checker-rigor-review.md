@@ -108,7 +108,7 @@ rtc は「実行時・注釈をルートとする検査・pay-for-what-you-use�
    eval・reflective method invocation・`method_missing` を伴う動的機能の存在下でも容易に動く」と明言する。
    これはまさに Rigor が静的に苦闘してきた領域そのもの — `pre_eval`（[ADR-17](../adr/17-monkey-patch-pre-evaluation.md)）、
    マクロ展開基盤（[ADR-16](../adr/16-macro-expansion.md)）、implicit-self 呼び出し解決（[ADR-24](../adr/24-self-method-call-resolution.md)/[ADR-57](../adr/57-self-call-return-adoption.md)）、
-   そして `Dynamic[T]` provenance の全アーク（[ADR-75](../adr/75-dynamic-provenance.md)/[ADR-82](../adr/82-dynamic-origin-algebra.md)）。
+   そして `Dynamic[T]` provenance の全アーク（[ADR-75](../adr/75-dynamic-provenance.md)/[ADR-82](../adr/82-dynamic-provenance-wiring.md)）。
    rtc はこれらを「実行時に払う」ことで**構造的に消している**。Rigor は「静的近似＋プラグイン脱出口」で払う。
    **これは根本トレードで追従不可 — 記録のみ。** ただし裏を返せば、rtc が守れない
    「走らなかったパス／未起動のメタプロメソッド」こそ Rigor が静的に守れる領域であり、優位も対称に存在する。
@@ -164,7 +164,7 @@ rtc は「実行時・注釈をルートとする検査・pay-for-what-you-use�
 
 3. **`%any`=Dynamic の位置づけと provenance。**
    rtc の `%any` は「ブロックが何を返してもよい」を表す明示的 untyped で、非厳格モードや native 境界で頻出する。
-   Rigor の `Dynamic[T]` と役割は同じだが、Rigor は provenance（[ADR-75](../adr/75-dynamic-provenance.md)/[ADR-82](../adr/82-dynamic-origin-algebra.md)）で
+   Rigor の `Dynamic[T]` と役割は同じだが、Rigor は provenance（[ADR-75](../adr/75-dynamic-provenance.md)/[ADR-82](../adr/82-dynamic-provenance-wiring.md)）で
    「なぜ Dynamic か」を追う。rtc は追わない（実行時なので不要）。逆に言えば **Rigor の provenance アークは
    「静的だからこそ必要になったメタデータ」** であり、rtc との対比はその存在理由を鮮明にする
    — 実行時チェッカは Dynamic の由来を知る必要がない（値が来た時点で実物を見る）。

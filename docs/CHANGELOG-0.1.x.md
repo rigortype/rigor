@@ -1149,7 +1149,7 @@ A seventh worked plugin example also lands in this cycle: **`rigor-activerecord`
 
 ##### Slice 8 — plugin spec helper module extracted
 
-- **New `Rigor::IntegrationSupport::PluginHelpers` module** at [`spec/integration/examples/support/plugin_helpers.rb`](spec/integration/examples/support/plugin_helpers.rb), auto-included for every `*_plugin_spec.rb` file under `spec/integration/examples/`. Replaces per-spec boilerplate (`requirer` lambda, hand-rolled `run_plugin`, hand-rolled `plugin_diagnostics` filter) with five helpers. All seven example plugin specs migrated; spec total dropped ~15%. `spec/spec_helper.rb` now also loads `spec/integration/**/support/**/*.rb`. SKILL Phase 6 updated with the slimmed boilerplate.
+- **New `Rigor::IntegrationSupport::PluginHelpers` module** at [`spec/integration/examples/support/plugin_helpers.rb`](spec/integration/support/plugin_helpers.rb), auto-included for every `*_plugin_spec.rb` file under `spec/integration/examples/`. Replaces per-spec boilerplate (`requirer` lambda, hand-rolled `run_plugin`, hand-rolled `plugin_diagnostics` filter) with five helpers. All seven example plugin specs migrated; spec total dropped ~15%. `spec/spec_helper.rb` now also loads `spec/integration/**/support/**/*.rb`. SKILL Phase 6 updated with the slimmed boilerplate.
 
 ##### Slice 9 — strict per-demo cache isolation under `tmp/`
 

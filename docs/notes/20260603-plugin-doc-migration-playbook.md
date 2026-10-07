@@ -125,7 +125,7 @@ Structure:
 6. **Plugin internals** — a pointer: "…are in the
    [plugin's README](../../../plugins/rigor-<id>/README.md). To
    write a plugin, see [`examples/`](../../../examples/README.md)
-   and the [`rigor-plugin-author`](../08-skills.md) skill."
+   and the [`rigor-plugin-author`](../manual/08-skills.md) skill."
 
 **Handbook-pointer case:** when a handbook chapter already covers
 the plugin deeply (Sorbet = handbook ch. 10), keep the manual page

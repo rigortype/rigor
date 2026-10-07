@@ -29,7 +29,7 @@ of which cost something to learn:
   the reps could not separate them and the delta is a number with no finding behind it. Hiding that
   behind a median is how a noisy measurement becomes a confident wrong answer.
 - **`--no-cache`, cache directory removed between runs.** A warm slot serves an unanalysed result in
-  milliseconds ([ADR-45](../adr/45-run-result-cache.md)), which reads as a spectacular improvement.
+  milliseconds ([ADR-45](../adr/45-unchanged-project-fast-path.md)), which reads as a spectacular improvement.
 - **A zero-file guard.** Both arms must analyse a positive and *identical* file count or the script
   aborts. The first version of the script wrote its variant configs to a tmpdir; a config's relative
   `paths:` resolve against the config file's own directory, so it analysed nothing, finished in 0.18 s

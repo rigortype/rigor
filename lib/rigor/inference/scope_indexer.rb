@@ -4213,10 +4213,10 @@ module Rigor
         end
 
         def contested_paths
-          return Scope::DiscoveryIndex::EMPTY_SIBLINGS[:contested_discovered_singleton_def_nodes] if
-            @contested.nil? || @contested.empty?
+          contested = @contested
+          return contested.each(&:freeze).freeze if contested && !contested.empty?
 
-          @contested.each(&:freeze).freeze
+          Scope::DiscoveryIndex::EMPTY_SIBLINGS[:contested_discovered_singleton_def_nodes]
         end
       end
 

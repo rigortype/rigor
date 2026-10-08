@@ -16,6 +16,10 @@ require "rigor/protection/discovery_seed"
 # fold of a warm run must agree, as must the per-file index of the file that writes last.
 RSpec.describe "Discovery certainty (ADR-119 WD3)" do
   let(:indexer) { Rigor::Inference::ScopeIndexer }
+  let(:certain_file) { "class C\n  attr_reader :x\n  def m(a) = a\nend\n" }
+  let(:possible_file) do
+    "class C\n  if ENV[\"X\"]\n    attr_reader :x\n    attr_reader :y\n    def m(a, b) = a\n  end\nend\n"
+  end
 
   around do |example|
     Dir.mktmpdir("rigor-discovery-certainty-") { |dir| Dir.chdir(dir) { example.run } }
@@ -50,18 +54,12 @@ RSpec.describe "Discovery certainty (ADR-119 WD3)" do
   # The per-file index of `path` over the project seed of `files`.
   def per_file_discovery(files, path)
     paths = write_project(files)
-    tables = Rigor::Protection::DiscoverySeed.seed_tables(indexer.discovered_project_index_incremental(
-      paths, seed_bundles: {}
-    ))
+    index = indexer.discovered_project_index_incremental(paths, seed_bundles: {})
+    tables = Rigor::Protection::DiscoverySeed.seed_tables(index)
     base = Rigor::Scope.empty
     scope = base.with_discovery(base.discovery.with(**tables)).with_source_path(path)
     root = Prism.parse(File.read(path), filepath: path).value
     indexer.index(root, default_scope: scope).fetch(root).discovery
-  end
-
-  let(:certain_file) { "class C\n  attr_reader :x\n  def m(a) = a\nend\n" }
-  let(:possible_file) do
-    "class C\n  if ENV[\"X\"]\n    attr_reader :x\n    attr_reader :y\n    def m(a, b) = a\n  end\nend\n"
   end
 
   describe "possible_discovered_methods across files" do
@@ -82,7 +80,8 @@ RSpec.describe "Discovery certainty (ADR-119 WD3)" do
     it "folds per side: a certain singleton half leaves the instance half possible" do
       siblings = agreed_siblings(
         "a.rb" => "class C\n  class << self\n    attr_reader :z\n  end\nend\n",
-        "b.rb" => "class C\n  if ENV[\"X\"]\n    attr_reader :z\n    class << self\n      attr_reader :z\n    end\n  end\nend\n"
+        "b.rb" => "class C\n  if ENV[\"X\"]\n    attr_reader :z\n    class << self\n      attr_reader :z\n    " \
+                  "end\n  end\nend\n"
       )
 
       expect(siblings.fetch(:possible_discovered_methods)).to eq("C" => { z: :instance })

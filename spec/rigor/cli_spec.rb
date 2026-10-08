@@ -1958,12 +1958,16 @@ RSpec.describe Rigor::CLI do
     end
 
     it "returns 0 when stdin closes cleanly with no LSP messages" do
-      # `rigor lsp` blocks reading LSP frames from $stdin via the gem's Io::Reader. Under RSpec stdin is non-TTY and
-      # hits EOF immediately, so the loop exits with exit_code=0 (no shutdown → server.exit_code stays nil → CLI returns
-      # 0).
+      # `rigor lsp` blocks reading LSP frames from $stdin via the gem's Io::Reader. An empty stdin hits EOF at once, so
+      # the loop exits with exit_code=0 (no shutdown → server.exit_code stays nil → CLI returns 0). The process's own
+      # stdin is not used: under an agent harness or an editor it stays open, and the read never returns.
+      original_stdin = $stdin
+      $stdin = StringIO.new
       status, _out, _err = run_cli("lsp")
 
       expect(status).to eq(0)
+    ensure
+      $stdin = original_stdin
     end
 
     it "returns EXIT_USAGE for an unsupported transport" do

@@ -73,12 +73,12 @@ module Rigor
         chain.entries.any? { |entry| context.own_hit_capable?(entry) }
       end
 
-      # Whether the project holds a hook `def` whose owner the tables may have wrong: one written at the top level
-      # (`def Base.inherited(sub)`, recorded with no owner), a second singleton `def` of one hook name for one owner
-      # (`class << X; def Base.inherited` beside `X`'s own), or an instance `def` of a hook name in a module that
-      # neither is extended anywhere nor extends `ActiveSupport::Concern` — `def Base.inherited` written in
-      # `module X` is recorded as `X`'s instance `def`, while a module's own instance hook acts only once it is
-      # extended. Read from `discovered_deferred_ranges`' def rows and memoised per discovery index.
+      # Whether the project holds a hook `def` that defines on a class or module other than the one the tables file it
+      # under: one written at the top level (`def Base.inherited(sub)`, recorded with no owner), one whose node has a
+      # receiver other than `self` (`def Base.inherited` written in `module X` is filed as `X`'s instance `def`, and in
+      # `class << X` as `X`'s singleton one), or a second `def` of one hook name for one owner and side, of which the
+      # tables keep one node. Read from `discovered_deferred_ranges`' def rows and the def-node tables, and memoised
+      # per discovery index.
       def foreign_hook_def?(scope)
         memo = Scope::ResolutionChain.hook_memo(scope, :methods)
         memo.fetch(:foreign_hook_def) { memo[:foreign_hook_def] = foreign_hook_row?(scope) }
@@ -86,29 +86,27 @@ module Rigor
 
       def foreign_hook_row?(scope)
         seen = {}
-        hook_modules = hook_modules(scope)
         scope.discovered_deferred_ranges.each_value do |rows|
           rows.each do |(_start, _finish, name, kind, owner)|
             next unless Scope::ResolutionChain::Relevance::HOOKS.include?(name)
             return true if owner.nil? || seen[[owner, name, kind]]
 
             seen[[owner, name, kind]] = true
-            next if kind == :singleton && scope.discovered_method?(owner, name, :singleton)
-            return true unless kind == :instance && hook_modules.key?(owner)
+            return true if foreign_receiver?(scope, owner, name, kind)
           end
         end
         false
       end
 
-      # The project modules whose instance hook `def`s act as hooks: every module some class or module's singleton
-      # extends, as the chain resolves the name, and every module that extends `ActiveSupport::Concern` (its
-      # `class_methods do` defs are recorded as its instance `def`s).
-      def hook_modules(scope)
-        resolver = Scope::ResolutionChain.resolver_for(scope, :methods)
-        scope.discovery.discovered_extends.each_with_object({}) do |(owner, raws), out|
-          out[owner] = true if raws.include?(CONCERN)
-          raws.each { |raw| Array(resolver.resolve(owner, raw)).each { |name| out[name] = true } }
-        end
+      # Whether the `def` the tables hold for `owner`'s hook `name` on `kind`'s side names a receiver other than
+      # `self`, or is missing.
+      def foreign_receiver?(scope, owner, name, kind)
+        return false if kind == :both
+
+        node = kind == :singleton ? scope.singleton_def_for(owner, name) : scope.user_def_for(owner, name)
+        return true if node.nil?
+
+        !node.receiver.nil? && !node.receiver.is_a?(Prism::SelfNode)
       end
 
       def bound_of(scope, chain, method_name, hit)

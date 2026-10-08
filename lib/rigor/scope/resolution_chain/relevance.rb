@@ -89,7 +89,7 @@ module Rigor
 
         # ADR-119 WD2's declared-module category (#1612): a module the project declares that the chain holds as
         # external, because nothing makes it a project entry (`Scope#known_user_class?`: no method, `def` or
-        # mixin row on either side), defines no name, so it lacks every name — when nothing the tables cannot
+        # mixin row on either side, which an external entry has by construction), defines no name, so it lacks every name — when nothing the tables cannot
         # see can define one on it or on its includer. Every candidate of the spelling the project declares must
         # be such a module, and at least one must be declared (an undeclared spelling is assumed absent, as the
         # chain's own name resolution assumes). A declared candidate passes when, from the tables alone:
@@ -101,12 +101,12 @@ module Rigor
         #   blocks run on the includer, and no module whose instance `included` becomes its hook), no
         #   unpositioned mixin (no `"*"`), and no visibility row;
         # - the project has no {.foreign_hook?}: a hook written outside its owner's body
-        #   (`def Q.included(base) = base.attr_reader(:foo)`) is recorded against no module, so any one disables
-        #   the category for every module.
+        #   (`def Q.included(base) = base.attr_reader(:foo)`) is recorded against no module, so any hook `def`
+        #   that may be one disables the category for every module.
         #
-        # Accepted remainder: a hook `def` nested in a method or block body is recorded by no table, and a
-        # receiverless macro call naming nothing (`acts_as_x`) records nothing, as it records nothing on a
-        # project entry either.
+        # Accepted remainders: a hook `def` nested in a method or block body is recorded by no table; `class << X;
+        # def Q.included` is recorded as `X`'s own singleton hook; and a receiverless macro call naming nothing
+        # (`acts_as_x`) records nothing, as it records nothing on a project entry either.
         def bare_declared_module?(scope, candidates)
           discovery = scope.discovery
           declared = candidates.select do |candidate|
@@ -115,7 +115,9 @@ module Rigor
           return false if declared.empty? || foreign_hook?(scope)
 
           memo = ResolutionChain.relevance_memo(scope, :methods)
-          declared.all? { |candidate| memo.fetch([:bare, candidate]) { memo[[:bare, candidate]] = bare?(scope, candidate) } }
+          declared.all? do |candidate|
+            memo.fetch([:bare, candidate]) { memo[[:bare, candidate]] = bare?(scope, candidate) }
+          end
         end
 
         # The ADR-46 edges a {.bare_declared_module?} verdict read, where a candidate is declared: every declaring
@@ -136,8 +138,6 @@ module Rigor
 
         def bare?(scope, name)
           discovery = scope.discovery
-          return false if scope.known_user_class?(name)
-
           envelopes = scope.parameter_envelopes_of(name)
           return false unless envelopes.size == 1 && envelopes.key?(DiscoveryIndex::ENVELOPE_MODULE_MARK)
 
@@ -145,11 +145,12 @@ module Rigor
             !scope.discovered_method_visibilities.key?(name)
         end
 
-        # Whether some hook `def` in the project is not its owner's own: a top-level one (`def Q.included` at the
-        # top level), one its owner records on no matching side (`def Q.included` written in `module X` is the
-        # walk's `X#included` def node and no `X` method), or one written twice for the same owner and side, so
-        # one of the two may be another module's. Read from `discovered_deferred_ranges`, whose def rows name
-        # every `def` outside a method or block body, and memoised per discovery index.
+        # Whether some hook `def` in the project may be another module's: one that is not a singleton `def` its
+        # owner records (`def Q.included` at the top level has no owner; written in `module X` it is the walk's
+        # instance `X#included` def node, indistinguishable from `X`'s own instance `def included`, a hook once `X`
+        # is extended), or a second singleton `def` of the name for one owner (`class << X; def Q.included` beside
+        # `X`'s own `def self.included`). Read from `discovered_deferred_ranges`, whose def rows name every `def`
+        # outside a method or block body, and memoised per discovery index.
         def foreign_hook?(scope)
           memo = ResolutionChain.relevance_memo(scope, :methods)
           memo.fetch(:foreign_hook) { memo[:foreign_hook] = scan_foreign_hooks(scope) }
@@ -160,10 +161,10 @@ module Rigor
           scope.discovered_deferred_ranges.each_value do |rows|
             rows.each do |(_start, _finish, name, kind, owner)|
               next unless HOOKS.include?(name)
-              return true if owner.nil? || seen[[owner, name, kind]]
+              return true unless kind == :singleton && !owner.nil? && scope.discovered_method?(owner, name, kind)
+              return true if seen[[owner, name]]
 
-              seen[[owner, name, kind]] = true
-              return true unless scope.discovered_method?(owner, name, kind)
+              seen[[owner, name]] = true
             end
           end
           false

@@ -1039,6 +1039,35 @@ RSpec.describe Rigor::Inference::DefinerResolution do # rubocop:disable RSpec/Sp
       expect(owner_of(resolve(scope_for(source), :foo))).to eq("C")
     end
 
+    # A prepended module heads the chain, and its own conditional include lands between it and the class.
+    it "stays Unknown where the root does not head its chain" do
+      source = "module X; def foo = :x; end\nmodule P; include X if ENV[\"Q\"]; end\n" \
+               "class C; prepend P; def foo = :c; end\n"
+      expect(both_worlds(source, "C.instance_method(:foo).owner")).to eq(%w[C X])
+      expect(owner_of(resolve(scope_for(source), :foo))).to eq(:unknown)
+    end
+
+    # A possible own definer hands the read to the next candidate, whose position a hook's include can move: Ruby
+    # answers `A`'s private `foo` where the `def` did not run. Both candidates on the chain are public.
+    it "stays Unknown where the own definer is possible and the next candidate sits behind a hook" do
+      source = "module M; def foo = :m; end\nmodule A; private def foo = :a; end\n" \
+               "module Concern; def self.included(base) = base.include(A); end\n" \
+               "class C; include M; include Concern; if ENV[\"Q\"]; def foo = :c; end; end\n"
+      expect(both_worlds(source, "C.private_method_defined?(:foo)")).to eq(%w[true false])
+      expect(owner_of(resolve(scope_for(source), :foo, question: :visibility))).to eq(:unknown)
+    end
+
+    # The chain has one fork (`M` reaches `C` through `Base` too) and a mark (`Q`'s included-block prepend), so
+    # relevance, argued for fork-free chains only, does not read it; the own-hit rule does, because `P`, wherever it
+    # lands, cannot answer the name.
+    it "is Known C on a forked chain whose prepend-listing mark cannot answer the name" do
+      source = "module M; def baz = :m; end\nclass Base; include M; end\nmodule P; def bar = :p; end\n" \
+               "module Q; extend ActiveSupport::Concern; included do; prepend P; end; end\n" \
+               "class C < Base; include M; def foo = :c; include Q; end\n"
+      expect(owner_says(source, prelude: concern_shim)).to eq("C")
+      expect(owner_of(resolve(scope_for(source), :foo))).to eq("C")
+    end
+
     # `SourceArity`'s own-level answer names the class at index 0 whether or not it records the name; the rule
     # reads only a root that does.
     it "does not read an answer that names the root without its recording the name" do
@@ -1070,16 +1099,29 @@ RSpec.describe Rigor::Inference::DefinerResolution do # rubocop:disable RSpec/Sp
       expect(owner_of(resolve(project_scope("a.rb" => source), :foo))).to eq(:unknown)
     end
 
-    # The walk records `def Q.included` written in `module X` as `X#included`; with `X`'s own `def included` beside
-    # it, `X` records the name, and only the second row for the same owner and side shows a foreign hook.
-    it "declines on a foreign hook written beside its owner's own def of the same name" do
+    # `class << X; def Q.included` is recorded as `X`'s own singleton hook; beside `X`'s own `def self.included`, the
+    # second singleton row for one owner is what shows that one of them may be another module's.
+    it "declines on a foreign hook written beside its owner's own singleton def of the same name" do
       source = <<~RUBY
         class Base; def foo = 1; end
         module Q; end
-        module X; def included(base) = nil; def Q.included(b) = b.attr_reader(:foo); end
+        module X; def self.included(base) = nil; class << self; def Q.included(b) = b.attr_reader(:foo); end; end
         class C < Base; include Q; end
       RUBY
       expect(RubyRun.stdout("#{source}p C.instance_method(:foo).owner\n").chomp).to eq("C")
+      expect(owner_of(resolve(project_scope("a.rb" => source), :foo))).to eq(:unknown)
+    end
+
+    # A visibility statement names a method its module must have, so a row with no method row behind it is a
+    # method the tables did not see.
+    it "declines on a module whose visibility row names a method no table records" do
+      source = <<~RUBY
+        class Module; def my_macro = define_method(:foo) { :q }; end
+        class Base; def foo = 1; end
+        module Q; my_macro; public :foo; end
+        class C < Base; include Q; end
+      RUBY
+      expect(RubyRun.stdout("#{source}p C.instance_method(:foo).owner\n").chomp).to eq("Q")
       expect(owner_of(resolve(project_scope("a.rb" => source), :foo))).to eq(:unknown)
     end
 

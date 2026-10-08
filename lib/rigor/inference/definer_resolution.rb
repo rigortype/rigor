@@ -74,13 +74,14 @@ module Rigor
       end
 
       # ADR-119 WD2 (#1622) — whether the candidate set is one certain definer that is the root's own instance
-      # entry at the chain's head and records the name itself: what `settle`'s `own_hit:` says. The record test
-      # matters where an answer function names the root without its recording the name (`SourceArity`'s
-      # own-level answer is always a candidate, an empty one where the class records nothing).
+      # entry and records the name itself: what `settle`'s `own_hit:` says (`settle` checks that the root heads
+      # its chain). One certain candidate, because a `possible` own definer hands the read to the next one, whose
+      # position a mark may move. The record test matters where an answer function names the root without its
+      # recording the name (`SourceArity`'s own-level answer is always a candidate, an empty one where the class
+      # records nothing).
       def own_hit?(scope, chain, method_name, hits)
         hit = hits.first
-        return false unless hits.size == 1 && !hit.nil? && hit.index.zero? && hit.side == :instance
-        return false unless hit.owner == chain.root
+        return false unless hits.size == 1 && !hit.nil? && hit.side == :instance && hit.owner == chain.root
 
         scope.discovered_method?(hit.owner, method_name, :instance) || !scope.user_def_for(hit.owner, method_name).nil?
       end

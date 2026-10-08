@@ -182,8 +182,8 @@ module Rigor
         def relative_path(path)
           return nil if path.nil?
 
-          expanded = File.expand_path(path.to_s)
-          root = "#{File.expand_path(Dir.pwd)}#{File::SEPARATOR}"
+          expanded = File.absolute_path(path.to_s)
+          root = "#{File.absolute_path(Dir.pwd)}#{File::SEPARATOR}"
           expanded.start_with?(root) ? expanded.delete_prefix(root) : nil
         end
 

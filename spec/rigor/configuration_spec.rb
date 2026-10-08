@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "fileutils"
 require "tmpdir"
 
 RSpec.describe Rigor::Configuration do
@@ -109,6 +110,43 @@ RSpec.describe Rigor::Configuration do
         configuration = described_class.load(path)
 
         expect(configuration.signature_paths).to eq([])
+      end
+    end
+
+    # A directory whose name starts with `~` is an ordinary name. `File.expand_path` read `~drafts` as the home of
+    # a user called `drafts` and raised `ArgumentError: user drafts doesn't exist`, so `rigor check` stopped on
+    # the first `paths:` entry it could not place.
+    describe "a path-valued key whose first segment starts with ~" do
+      it "resolves ~name as a literal directory under the config file's directory" do
+        Dir.mktmpdir do |dir|
+          path = File.join(dir, ".rigor.yml")
+          File.write(path, "paths:\n  - ~drafts\n  - lib\n")
+
+          expect(described_class.load(path).paths).to eq([File.join(File.expand_path(dir), "~drafts"),
+                                                          File.join(File.expand_path(dir), "lib")])
+        end
+      end
+
+      it "keeps ~/ literal too, so home expansion is the shell's job and not the config loader's" do
+        Dir.mktmpdir do |dir|
+          path = File.join(dir, ".rigor.yml")
+          File.write(path, "signature_paths:\n  - ~/sig\ntest_paths:\n  - ~spec\n")
+
+          configuration = described_class.load(path)
+
+          expect(configuration.signature_paths).to eq([File.join(File.expand_path(dir), "~", "sig")])
+          expect(configuration.test_paths).to eq([File.join(File.expand_path(dir), "~spec")])
+        end
+      end
+
+      it "still resolves . and .. against the config file's directory" do
+        Dir.mktmpdir do |dir|
+          path = File.join(dir, "config", ".rigor.yml")
+          FileUtils.mkdir_p(File.dirname(path))
+          File.write(path, "paths:\n  - ../~drafts/./lib\n")
+
+          expect(described_class.load(path).paths).to eq([File.join(File.expand_path(dir), "~drafts", "lib")])
+        end
       end
     end
 

@@ -36,7 +36,7 @@ module Rigor
 
         @trusted_gems = trusted_gems.map { |g| g.to_s.dup.freeze }.uniq.sort.freeze
         @allowed_read_roots = allowed_read_roots
-                              .map { |path| File.expand_path(path).freeze }
+                              .map { |path| File.absolute_path(path).freeze }
                               .uniq
                               .sort
                               .freeze
@@ -49,7 +49,7 @@ module Rigor
       #   resolved through `File.expand_path` only (no `realpath`); plugins with adversarial intent are out of
       #   scope per ADR-2.
       def allow_read?(path)
-        absolute = File.expand_path(path.to_s)
+        absolute = File.absolute_path(path.to_s)
         @allowed_read_roots.any? { |root| inside?(absolute, root) }
       end
 

@@ -21,6 +21,8 @@ discovery entirely.
 
 All relative paths in a config file resolve against that
 file's own directory.
+A leading `~` is a literal directory name here, not a home directory: write an absolute path to
+reach your home directory from `paths:`.
 
 ## Editor validation
 

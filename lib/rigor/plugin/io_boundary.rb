@@ -125,7 +125,7 @@ module Rigor
       # outcome is recorded: a path that exists but cannot be read (`EISDIR`, `EACCES`) is a failure the
       # plugin reports, not a probe of absence, and records nothing — as before.
       def read_file(path)
-        absolute = File.expand_path(path.to_s)
+        absolute = File.absolute_path(path.to_s)
         unless @policy.allow_read?(absolute)
           record_refusal(absolute)
           raise AccessDeniedError.new(
@@ -188,7 +188,7 @@ module Rigor
       # @param path — project directory; relative paths expand against the working directory
       # @return the absolute paths directly under `path` in `Dir.glob` order; empty when not a directory
       def list_directory(path)
-        absolute = File.expand_path(path.to_s)
+        absolute = File.absolute_path(path.to_s)
         entries = Dir.glob(File.join(absolute, "*"))
         unless @policy.allow_read?(absolute)
           record_refusal(absolute)
@@ -296,7 +296,7 @@ module Rigor
       #   reverse) → NOTHING, the same bound `#read_file` pins for `EISDIR`: the probe observed neither a
       #   usable file nor an absence, and either row would misdescribe what the plugin saw.
       def probe(path)
-        absolute = File.expand_path(path.to_s)
+        absolute = File.absolute_path(path.to_s)
         answer = yield(absolute)
         unless @policy.allow_read?(absolute)
           record_refusal(absolute)

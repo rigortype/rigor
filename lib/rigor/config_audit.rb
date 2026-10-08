@@ -199,14 +199,14 @@ module Rigor
     end
 
     def self.add_missing_dir(warnings, path, project_root, kind, key)
-      return if path.nil? || File.directory?(File.expand_path(path, project_root))
+      return if path.nil? || File.directory?(File.absolute_path(path, project_root))
 
       warnings << Warning.new(kind: kind, message: "#{key}: #{path.inspect} is not a directory",
                               fields: { "path" => path })
     end
 
     def self.add_missing_file(warnings, path, project_root, kind, key)
-      return if path.nil? || File.file?(File.expand_path(path, project_root))
+      return if path.nil? || File.file?(File.absolute_path(path, project_root))
 
       warnings << Warning.new(kind: kind, message: "#{key}: #{path.inspect} does not exist", fields: { "path" => path })
     end

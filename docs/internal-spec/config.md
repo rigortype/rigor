@@ -102,6 +102,25 @@ real, documented, and schema-declared — a `DEFAULTS`-keyed nested check would 
 `severity_overrides:` is an open map of rule ids besides. Nested unknown keys are tier 1's job: every
 nested object in the schema is `additionalProperties: false`, and the gate below keeps it complete.
 
+## Path-valued keys
+
+A path-valued key (`paths:`, `signature_paths:`, `test_paths:`, `pre_eval:`, and the nested
+`plugins_io.allowed_paths:`) is resolved by `Configuration.resolve_paths_in` at load time. Each entry is
+joined to the directory of the file that names it and normalised with `File.absolute_path` semantics: `.`
+and `..` are resolved against that directory, and nothing else is.
+
+A leading `~` is a literal character, not a home directory. `~/x` resolves to `<config dir>/~/x`, and
+`~drafts/x` to `<config dir>/~drafts/x`. The loader does not use `File.expand_path` for these entries,
+because `expand_path` reads `~name` as the home of a user named `name` and raises `ArgumentError` when
+that user does not exist, which crashed `rigor check` on a project directory named `~drafts`. Home
+expansion of a path is the shell's job: a path reaching Rigor from the command line has already been
+expanded by the time Rigor sees it.
+
+No tracked `.rigor.yml`, example, or spec relies on `~/` expansion inside `paths:`, so the decision does
+not remove a working spelling from the project's own configurations. A `paths:` entry written as
+`~/projects/app` before this decision resolves differently afterwards and must be written as an absolute
+path. The template-unit path arithmetic (`Analysis::TemplateUnitPaths.relative`) follows the same rule.
+
 ## Reserved namespaces
 
 A **reserved namespace** is a top-level key this implementation declares in the schema and never

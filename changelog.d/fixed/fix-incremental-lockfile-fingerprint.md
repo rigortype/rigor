@@ -1,1 +1,0 @@
-- **[cli]** `rigor check --incremental` now notices a change to a lockfile configured with `bundler.lockfile:` or `rbs_collection.lockfile:` at a non-default path, instead of reusing a snapshot built against the old gem set. ([#1532](https://github.com/rigortype/rigor/issues/1532), [#1644](https://github.com/rigortype/rigor/pull/1644))

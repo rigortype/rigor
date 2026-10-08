@@ -1,1 +1,0 @@
-- **[cli]** `rigor check --incremental --no-cache` is now a cold full analysis that neither reads nor writes the incremental snapshot, instead of replaying the previous run's diagnostics. ([#1525](https://github.com/rigortype/rigor/issues/1525), [#1643](https://github.com/rigortype/rigor/pull/1643))

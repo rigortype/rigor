@@ -1,1 +1,0 @@
-- **[incremental]** `rigor check --incremental` re-checks after an edit to a `pre_eval:` file outside the analysed paths or to an auto-detected `sig/*.rbs`, instead of serving the answer computed before the edit. ([#1554](https://github.com/rigortype/rigor/issues/1554), [#1585](https://github.com/rigortype/rigor/issues/1585), [#1618](https://github.com/rigortype/rigor/pull/1618))

@@ -950,39 +950,84 @@ RSpec.describe "resolution in Ruby's ancestor order (#1567, #1568, #1570, #1571)
     RUBY
   end
 
-  # A KNOWN COST of the migration (ADR-119 C2-b1, found on Mastodon's `lib/mastodon/cli/media.rb`): an RBS-unknown
-  # module included ahead of the definer (`include ActionView::Helpers::NumberHelper` before `Base`) may answer
-  # first, so the read declines, `fail_with` types `Dynamic`, and the `unless count` guard no longer narrows `count`
-  # (a call typed `bot` narrows; a `Dynamic` one does not). Ruby: `fail_with` raises, `count` is an Integer, so the
-  # `possible-nil-receiver` is a false positive that master did not report. The control without the include still
-  # types the call and stays silent. Narrowing past an UNKNOWN call that raises is a follow-up, not C2-b1.
-  describe "an RBS-unknown module ahead of the definer loses the raising call's narrowing (C2-b1 known cost)" do
-    let(:source) do
+  # ADR-119 C2-b1's `bot` exception (errata 2026-10-08), the shape of Mastodon's `lib/mastodon/cli/media.rb`: an
+  # RBS-unknown module included ahead of the definer (`include ActionView::Helpers::NumberHelper` before `Base`) may
+  # answer first, so the typing read is UNKNOWN. Where every project definer of the name on the chain types `bot`,
+  # the call types `bot` anyway, and the `unless count` guard narrows `count` as master's did. Line 15 is the
+  # control that the file was analysed.
+  describe "the bot exception: every project definer of an UNKNOWN call raises (C2-b1)" do
+    def media_source(includes: "", extra: "")
       <<~RUBY
         class Base
           def fail_with(message)
             raise ArgumentError, message
           end
         end
-
+        #{extra}
         class Media < Base
-          %<include>s
+          #{includes}
           def lookup(list)
             count = [7, 10].find { |n| n <= list.length }
             fail_with 'no' unless count
             list[-count..]
           end
         end
+        1.upcase
       RUBY
     end
 
-    it "keeps the narrowing without the unknown include" do
-      expect(diagnostics_for(format(source, include: ""))).to eq([])
+    def ruby_lookup(source, prelude)
+      RubyRun.stdout("#{source.sub("1.upcase\n", "")}begin\n  p Media.new.lookup([])\nrescue StandardError => e\n  p e.class\nend\n",
+                     prelude: prelude)
     end
 
-    it "reports the possible nil receiver with the unknown include (false positive, pinned as a known cost)" do
-      expect(diagnostics_for(format(source, include: "include ActionView::Helpers::NumberHelper")))
-        .to eq([[12, "call.possible-nil-receiver"]])
+    let(:unknown_include) { "include ActionView::Helpers::NumberHelper" }
+    let(:empty_helper) { "module ActionView; module Helpers; module NumberHelper; end; end; end\n" }
+
+    it "keeps the narrowing without the unknown include" do
+      expect(diagnostics_for(media_source)).to eq([[15, "call.undefined-method"]])
     end
+
+    # Ruby, with the gem's module not defining `fail_with`: `Base#fail_with` raises, so `count` is an Integer past
+    # the guard and line 12 cannot see nil. C2-b1 without the exception reported it (a false positive).
+    it "narrows past the raising call with the unknown include ahead of the definer" do
+      expect(ruby_lookup(media_source(includes: unknown_include), empty_helper)).to eq("ArgumentError\n")
+      expect(diagnostics_for(media_source(includes: unknown_include))).to eq([[15, "call.undefined-method"]])
+    end
+
+    # The unsound world the exception accepts, pinned as a DELIBERATE false negative: the RBS-unknown module really
+    # defines `fail_with` and returns, so Ruby reaches line 12 with `count` nil and raises NoMethodError, while the
+    # analysis (which cannot see the gem's body) still narrows. `bot` states nothing about a value, so the
+    # exposure is the narrowing master already did here, never a new report.
+    it "misses the nil receiver where the unknown module's own fail_with returns (deliberate false negative)" do
+      returning_helper = "module ActionView; module Helpers; module NumberHelper\n  def fail_with(_) = nil\n" \
+                         "end; end; end\n"
+      expect(ruby_lookup(media_source(includes: unknown_include), returning_helper)).to eq("NoMethodError\n")
+      expect(diagnostics_for(media_source(includes: unknown_include))).to eq([[15, "call.undefined-method"]])
+    end
+
+    # A mixed chain stays Dynamic: `M#fail_with` (after the unknown module, ahead of `Base`) returns, so the call is
+    # not `bot` and the guard does not narrow. Ruby: `M#fail_with` is the definer, `count` is nil on line 12, so
+    # the report is a true positive.
+    it "keeps a call Dynamic where one definer raises and another returns" do
+      source = media_source(includes: "include M; #{unknown_include}", extra: "module M; def fail_with(_) = nil; end")
+      expect(ruby_lookup(source, empty_helper)).to eq("NoMethodError\n")
+      expect(diagnostics_for(source)).to eq([[12, "call.possible-nil-receiver"], [15, "call.undefined-method"]])
+    end
+  end
+
+  # ABSENT stays Dynamic: nothing on the chain defines `fail_with`, so no definer can make it `bot` and the guard
+  # does not narrow; line 5 is reported. (Ruby raises NoMethodError at the call on line 4 whenever `count` is nil,
+  # so line 5 cannot see nil either: the report is master's, and ABSENT is no place to start guessing `bot`.)
+  it "keeps an ABSENT call Dynamic (C2-b1 bot exception)" do
+    expect(diagnostics_for(<<~RUBY)).to eq([[5, "call.possible-nil-receiver"]])
+      class Media
+        def lookup(list)
+          count = [7, 10].find { |n| n <= list.length }
+          fail_with 'no' unless count
+          list[-count..]
+        end
+      end
+    RUBY
   end
 end

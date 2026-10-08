@@ -68,6 +68,7 @@ module TypingCensus
   def measure(engine_dir, corpus_dir, targets)
     $LOAD_PATH.unshift(File.join(engine_dir, "lib"))
     require "rigor/cli"
+    require "rigor/inference/expression_typer"
     Rigor::Inference::ExpressionTyper.prepend(Instrument)
 
     out = StringIO.new
@@ -93,15 +94,15 @@ module TypingCensus
   def compare(base, head)
     b = index(base)
     h = index(head)
-    lost = b.select do |key, (typed, _)|
-      typed.positive? && h.fetch(key, [0, 0])[0].zero?
-    end.map { |key, v| row(key, v, h[key]) }
-    gained = h.select do |key, (typed, _)|
-      typed.positive? && b.fetch(key, [0, 0])[0].zero?
-    end.map { |key, v| row(key, b[key], v) }
-    { lost: lost.sort_by { |r| r[:pair] }, gained: gained.sort_by do |r|
-      r[:pair]
-    end, totals: { base: totals(b), head: totals(h) } }
+    lost = typed_only_in(b, h).map { |key, v| row(key, v, h[key]) }
+    gained = typed_only_in(h, b).map { |key, v| row(key, b[key], v) }
+    { lost: lost.sort_by { |r| r[:pair] }, gained: gained.sort_by { |r| r[:pair] },
+      totals: { base: totals(b), head: totals(h) } }
+  end
+
+  # The pairs `side` types at least once that `other` never types.
+  def typed_only_in(side, other)
+    side.select { |key, (typed, _)| typed.positive? && other.fetch(key, [0, 0])[0].zero? }
   end
 
   def index(rows) = rows.to_h { |klass, name, typed, untyped| [[klass, name], [typed, untyped]] }
@@ -115,6 +116,7 @@ module TypingCensus
       untyped_only_pairs: index.count { |_, v| v[0].zero? } }
   end
 
+  # rubocop:disable-next-line Metrics/AbcSize -- one report, one straight run of lines
   def render(result, classes)
     lines = ["### Typing census (`try_user_method_inference`)", ""]
     result[:totals].each do |side, t|
@@ -137,8 +139,8 @@ module TypingCensus
   end
 
   def run_child(engine_dir, corpus_dir, targets)
-    raw, status = Open3.capture2(RbConfig.ruby, File.expand_path(__FILE__), "--measure", engine_dir, corpus_dir, *targets,
-                                 chdir: ROOT)
+    command = [RbConfig.ruby, File.expand_path(__FILE__), "--measure", engine_dir, corpus_dir, *targets]
+    raw, status = Open3.capture2(*command, chdir: ROOT)
     abort("engine run for #{engine_dir} failed (#{status.inspect})") unless status.success?
     JSON.parse(raw.lines.last)
   end

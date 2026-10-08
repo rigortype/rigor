@@ -242,7 +242,8 @@ module Rigor
       # file list — so a snapshot is keyed to an invocation's roots but adding / removing a file under them is
       # handled incrementally by the session, not a full rebuild), the resolved gem set (the lockfiles
       # {Analysis::RunCacheKey.resolved_lockfile_paths} resolves — `bundler.lockfile:` / `rbs_collection.lockfile:`,
-      # else `./Gemfile.lock` / `./rbs_collection.lock.yaml` — the same files the run-result key digests), the project's own RBS (the `sig/` roots the environment actually loads: the explicit
+      # else `./Gemfile.lock` / `./rbs_collection.lock.yaml` — the same files the run-result key digests), the
+      # project's own RBS (the `sig/` roots the environment actually loads: the explicit
       # `signature_paths`, or the auto-detected `<root>/sig` when `signature_paths` is nil), and the contents of
       # every `pre_eval:` file (its PATH is in the configuration, but an edit to a file outside the analysed
       # paths changes no analysed file, so it needs its own part). Built WITHOUT

@@ -247,8 +247,10 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#fold_file_mixin_tables: grandfathered
     Rigor::Inference::ScopeIndexer#fold_mixin_lists: grandfathered
     Rigor::Inference::ScopeIndexer#fold_per_file_extends: grandfathered
+    Rigor::Inference::ScopeIndexer#fold_project_extends: runs fold_extends_into_singleton_tables, the grandfathered producer, over the finalize accumulator's tables and siblings; it passes them on and decides nothing itself
     Rigor::Inference::ScopeIndexer#fold_refinements: grandfathered
     Rigor::Inference::ScopeIndexer#fold_siblings: ADR-119 WD1 carriage, it unions the sibling tables of a file's index into the accumulator and records no declaration; every sibling is empty until PR C1's first possible producer, which gets its own entry
+    Rigor::Inference::ScopeIndexer#follow_extend_siblings: ADR-119 WD1, the sibling half of one name the extends fold copies onto a singleton; it marks the slot contested and the name possible when the extend edge is unpositioned or the source is, and writes only the singleton side
     Rigor::Inference::ScopeIndexer#freeze_mixin_lists: it freezes the mixin accumulator's per-class lists into the include and prepend tables; it is the one place the two are projected, and the include projection alone is a set (#1587)
     Rigor::Inference::ScopeIndexer#gather_aliased_mutations: grandfathered
     Rigor::Inference::ScopeIndexer#gather_cvar_writes: grandfathered
@@ -273,6 +275,7 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#mixin_names_for: grandfathered
     Rigor::Inference::ScopeIndexer#mixin_tables: grandfathered
     Rigor::Inference::ScopeIndexer#own_mixin_effects: names the ancestry side a receiverless mixin call reshapes on the owner the walk passes in; it computes no declaration context
+    Rigor::Inference::ScopeIndexer#own_sibling_table: copy on write for one sibling table of the extends fold; it adds no entry, it only makes the table the fold writes into private to that fold
     Rigor::Inference::ScopeIndexer#path_mutation_candidates: grandfathered
     Rigor::Inference::ScopeIndexer#propagate: grandfathered
     Rigor::Inference::ScopeIndexer#propagate_call: grandfathered
@@ -327,6 +330,8 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#record_struct_member_layout: grandfathered
     Rigor::Inference::ScopeIndexer#seed_operator_only_ivars!: grandfathered
     Rigor::Inference::ScopeIndexer#singleton_mixin_recorded?: writes one singleton-side mixin call under the owner the walk passes in; it computes no declaration context
+    Rigor::Inference::ScopeIndexer#strip_possible_singleton: ADR-119 WD1, a certain extend copy makes the singleton name certain, so this removes the singleton half of the name's possible kind; it adds no fact
+    Rigor::Inference::ScopeIndexer#subtract_sibling_methods!: rewrites only the possible_discovered_methods sibling in the finalize pass, dropping the names a def declares; it derives no declaration context
     Rigor::Inference::ScopeIndexer#surface_mixin_call?: grandfathered
     Rigor::Inference::ScopeIndexer#taint_opaque_eval: taints the enclosing owner the walk passes in when an eval block on an opaque receiver mixes a module in; it computes no declaration context
     Rigor::Inference::ScopeIndexer#walk_anonymous_meta_block: grandfathered

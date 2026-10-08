@@ -335,8 +335,7 @@ RSpec.describe "DiscoveryIndex sibling pairing (ADR-119 WD1)" do
   end
 
   describe "the per-file ScopeIndexer.index over a seeded default scope (path 6)" do
-    def indexed_discovery(tables)
-      source = "class Gadget\n  def run(arg) = arg\nend\n"
+    def indexed_discovery(tables, source = "class Gadget\n  def run(arg) = arg\nend\n")
       root = Prism.parse(source, filepath: "lib/gadget.rb").value
       default = scope_for(tables).with_source_path("lib/gadget.rb")
       indexer.index(root, default_scope: default).fetch(root).discovery
@@ -348,6 +347,30 @@ RSpec.describe "DiscoveryIndex sibling pairing (ADR-119 WD1)" do
       discovery = indexed_discovery(tables)
 
       expect(siblings.values.to_h { |sibling| [sibling, discovery.public_send(sibling)] }).to eq(injected)
+    end
+
+    it "adds the siblings of a conditional extend to the seeded ones, which both survive" do
+      tables = Rigor::Protection::DiscoverySeed.seed_tables(with_siblings(cold_index(project), injected))
+      source = "module Fmt\n  def fmt = 1\nend\nclass Gadget\n  extend Fmt if ENV[\"X\"]\nend\n"
+
+      discovery = indexed_discovery(tables, source)
+
+      expect(discovery.possible_discovered_methods).to eq("Gadget" => { ghost: :instance, fmt: :singleton })
+      expect(discovery.contested_discovered_singleton_def_nodes).to eq(Set[["Gadget", :build], ["Gadget", :fmt]])
+      expect(discovery.unpositioned_mixins.dig("Gadget", :extend)).to eq(["Fmt"])
+      expect(sibling_readers(Rigor::Scope.empty.with_discovery(discovery)).except(
+               :possible_discovered_methods, :contested_discovered_singleton_def_nodes
+             )).to eq(injected.except(:possible_discovered_methods, :contested_discovered_singleton_def_nodes))
+    end
+
+    it "does not write the seeded siblings the file's extend follows" do
+      seeded = injected.fetch(:possible_discovered_methods)
+      tables = Rigor::Protection::DiscoverySeed.seed_tables(with_siblings(cold_index(project), injected))
+      source = "module Fmt\n  def fmt = 1\nend\nclass Gadget\n  extend Fmt if ENV[\"X\"]\nend\n"
+
+      indexed_discovery(tables, source)
+
+      expect(tables.fetch(:possible_discovered_methods)).to eq(seeded)
     end
 
     it "indexes a file over an unseeded scope with empty siblings" do
@@ -388,6 +411,20 @@ RSpec.describe "DiscoveryIndex sibling pairing (ADR-119 WD1)" do
         contested_discovered_parameter_envelopes: Set[["Outer::Leaf", %i[instance added]]],
         possible_discovered_deferred_ranges: recorded.fetch(:possible_discovered_deferred_ranges)
       )
+      # `possible_discovered_deferred_ranges` is keyed by path. A path is never a compact class name, so
+      # `rename_siblings` leaves the key alone whether SIBLINGS_KEYED_BY_PATH skips the table or the Hash arm
+      # re-keys it, and neither arm rewrites a row's class name (its 5th field): emptying the constant leaves this
+      # example green. The skip is behaviourally indistinguishable today, and the constant documents the intent
+      # until a path-keyed sibling can hold a key the rename would change. What this pins is that the sibling's
+      # rows keep the class name the member's rows keep.
+      member_owners = def_index.fetch(:deferred_ranges).fetch(leaf).map { |row| row[4] }
+      sibling_owners = def_index.fetch(:siblings).fetch(:possible_discovered_deferred_ranges).fetch(leaf).map do |row|
+        row[4]
+      end
+      expect(member_owners).not_to be_empty
+      expect(member_owners).to all(eq("Wrap::Outer::Leaf"))
+      expect(sibling_owners).not_to be_empty
+      expect(sibling_owners).to all(eq("Wrap::Outer::Leaf"))
     end
 
     it "folds two recorded keys that rename to one into the union" do

@@ -1,8 +1,11 @@
 # Discovery-table admission census (#1507, ADR-119 WD1): per Scope::DiscoveryIndex member, the files outside
 # the table owners (scope.rb, scope/discovery_index.rb, scope_indexer.rb with its collectors under
 # scope_indexer/, and runner/project_pre_passes.rb) that read the whole table ("reads") or copy it ("copies"),
-# and the files that read or copy every member at once ("whole_index"). admission_census_spec.rb computes it
-# with Prism and compares it with this file; `RIGOR_REGENERATE_GATES=1` rewrites it.
+# and the files that read or copy every member at once ("whole_index"). A member with a `contested_*` sibling
+# also carries "justified": per recorded file, why that read or copy may stay once the member admits possible
+# facts (WD1(ii)) -- existence, identity, cache_key, same_slot, paired_copy or consults_contested.
+# admission_census_spec.rb computes the rest with Prism and compares it with this file; `RIGOR_REGENERATE_GATES=1` rewrites it and keeps
+# the "justified" entries of files still recorded.
 
 members:
   declared_types:
@@ -68,12 +71,34 @@ members:
     - lib/rigor/inference/block_call_timing.rb
     - lib/rigor/inference/expression_typer.rb
     - lib/rigor/inference/parameter_inference_collector.rb
-    - lib/rigor/inference/statement_evaluator.rb
     - lib/rigor/inference/void_tail_summary.rb
     copies:
     - lib/rigor/inference/definer_resolution.rb
     - lib/rigor/inference/parameter_inference_collector.rb
     - lib/rigor/protection/discovery_seed.rb
+    justified:
+      lib/rigor/analysis/incremental_session.rb:
+      - cache_key
+      - same_slot
+      lib/rigor/analysis/runner.rb:
+      - cache_key
+      - identity
+      - same_slot
+      - paired_copy
+      lib/rigor/inference/block_call_timing.rb:
+      - existence
+      lib/rigor/inference/expression_typer.rb:
+      - identity
+      - existence
+      lib/rigor/inference/parameter_inference_collector.rb:
+      - existence
+      - paired_copy
+      lib/rigor/inference/void_tail_summary.rb:
+      - identity
+      lib/rigor/inference/definer_resolution.rb:
+      - consults_contested
+      lib/rigor/protection/discovery_seed.rb:
+      - paired_copy
   discovered_def_nestings:
     reads:
     - lib/rigor/analysis/runner.rb
@@ -93,6 +118,29 @@ members:
     - lib/rigor/inference/definer_resolution.rb
     - lib/rigor/inference/parameter_inference_collector.rb
     - lib/rigor/protection/discovery_seed.rb
+    justified:
+      lib/rigor/analysis/incremental_session.rb:
+      - cache_key
+      - same_slot
+      lib/rigor/analysis/runner.rb:
+      - cache_key
+      - identity
+      - same_slot
+      - paired_copy
+      lib/rigor/inference/block_call_timing.rb:
+      - existence
+      lib/rigor/inference/expression_typer.rb:
+      - identity
+      - existence
+      lib/rigor/inference/method_dispatcher/process_folding.rb:
+      - existence
+      lib/rigor/inference/parameter_inference_collector.rb:
+      - existence
+      - paired_copy
+      lib/rigor/inference/definer_resolution.rb:
+      - consults_contested
+      lib/rigor/protection/discovery_seed.rb:
+      - paired_copy
   discovered_def_sources:
     reads:
     - lib/rigor/analysis/incremental_session.rb
@@ -115,6 +163,15 @@ members:
     copies:
     - lib/rigor/inference/parameter_inference_collector.rb
     - lib/rigor/protection/discovery_seed.rb
+    justified:
+      lib/rigor/analysis/runner.rb:
+      - paired_copy
+      lib/rigor/inference/definer_resolution.rb:
+      - consults_contested
+      lib/rigor/inference/parameter_inference_collector.rb:
+      - paired_copy
+      lib/rigor/protection/discovery_seed.rb:
+      - paired_copy
   discovered_parameter_envelopes:
     reads:
     - lib/rigor/analysis/check_rules.rb
@@ -124,6 +181,19 @@ members:
     - lib/rigor/scope/resolution_chain.rb
     copies:
     - lib/rigor/protection/discovery_seed.rb
+    justified:
+      lib/rigor/analysis/check_rules.rb:
+      - existence
+      lib/rigor/analysis/check_rules/source_arity.rb:
+      - existence
+      lib/rigor/analysis/runner.rb:
+      - paired_copy
+      lib/rigor/inference/definer_resolution.rb:
+      - consults_contested
+      lib/rigor/scope/resolution_chain.rb:
+      - existence
+      lib/rigor/protection/discovery_seed.rb:
+      - paired_copy
   discovered_superclasses:
     reads:
     - lib/rigor/analysis/check_rules.rb

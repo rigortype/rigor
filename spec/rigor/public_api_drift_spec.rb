@@ -48,6 +48,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     declaration_sourced?(req:kind,req:name)
     declaration_sourced_global_copies(req:name)
     declared_types()
+    def_node_slot(req:class_name,req:method_name,opt:kind)
     discovered_class_sources()
     discovered_classes()
     discovered_def_nodes()

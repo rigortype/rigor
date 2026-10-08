@@ -238,12 +238,10 @@ module Rigor
         def_nodes, def_nestings = merge_def_node_tables(default_scope, walked, file_def_nodes)
         singleton_def_nodes = merge_singleton_def_nodes(default_scope, root)
         superclasses, header_nestings = merge_ancestry_tables(default_scope, walked)
-        includes, prepends, *unpositioned = merge_mixin_tables(default_scope, root)
+        includes, prepends, *mixin_unpositioned = merge_mixin_tables(default_scope, root)
         # ADR-35 — per-file visibilities merged OVER the cross-file seed (the current file is authoritative for its own
         # classes; sibling-file ancestors are preserved from the project seed).
-        method_visibilities = default_scope.discovered_method_visibilities.merge(
-          build_discovered_method_visibilities(root)
-        ) { |_class, cross_file, per_file| cross_file.merge(per_file) }
+        method_visibilities = merge_method_visibilities(default_scope, root)
         # ADR-48 — per-file Data + Struct member layouts merged OVER the cross-file seed (same-file declaration is
         # authoritative).
         data_member_layouts, struct_member_layouts = merge_member_layouts(default_scope, walked)
@@ -254,8 +252,10 @@ module Rigor
         #
         # Issue #898 — and the same walk's table is now kept, merged over the cross-file seed the way
         # `includes` is: `Narrowing` asks it what a class object's singleton ancestry holds.
-        extends, methods_table, extend_unpositioned = merge_and_fold_extends(default_scope, root, def_nodes,
-                                                                             singleton_def_nodes, seeded_scope)
+        siblings = seeded_scope.discovery.sibling_tables
+        extends, methods_table, unpositioned =
+          merge_and_fold_extends(default_scope, root, def_nodes, singleton_def_nodes, seeded_scope, siblings,
+                                 mixin_unpositioned)
 
         seeded_scope.with_discovery(
           seeded_scope.discovery.with(
@@ -267,17 +267,25 @@ module Rigor
             discovered_header_nestings: header_nestings,
             discovered_includes: includes,
             discovered_prepends: prepends, discovered_extends: extends,
-            unpositioned_mixins: union_unpositioned(default_scope.discovery.unpositioned_mixins, *unpositioned,
-                                                    extend_unpositioned),
+            unpositioned_mixins: unpositioned,
             discovered_method_visibilities: method_visibilities,
             discovered_parameter_envelopes: merge_envelope_seed(default_scope, file_envelopes),
             data_member_layouts: data_member_layouts, struct_member_layouts: struct_member_layouts,
             discovered_deferred_ranges: merge_deferred_ranges_seed(default_scope, root),
-            # ADR-119 WD1 — the file records no possible or contested fact, so each paired member's sibling is
-            # carried over from the seed unchanged.
-            **seeded_scope.discovery.sibling_tables
+            # ADR-119 WD1 — the seed's siblings, which the extends fold above followed (copy on write, so the seed's
+            # tables are never written): a fact the seed holds stays, a copy this file's fold made is added, and a
+            # name this file's certain `extend` supplies is no longer possible. The file's own `def`s are not yet a
+            # producer, so a seed slot this file's def replaces keeps its contested mark, which over-contests and
+            # is safe. Letting the file win there is a C1d refinement, with the producers that fill the siblings.
+            **siblings
           )
         )
+      end
+
+      def merge_method_visibilities(default_scope, root)
+        default_scope.discovered_method_visibilities.merge(
+          build_discovered_method_visibilities(root)
+        ) { |_class, cross_file, per_file| cross_file.merge(per_file) }
       end
 
       # Per-file singleton def nodes merged OVER the cross-file seed (same-file declaration is
@@ -329,9 +337,17 @@ module Rigor
       # The `extend`-edge half of {#merge_project_method_indexes}: merges this file's `extend`s over the
       # cross-file seed AND folds them against the merged def tables — the #526 fold that turns an
       # extended module's instance defs into singleton-side method entries on the extending class.
-      def merge_and_fold_extends(default_scope, root, def_nodes, singleton_def_nodes, seeded_scope)
-        file_extends, extends, unpositioned = merge_extend_tables(default_scope, root)
-        methods_table = fold_per_file_extends(file_extends, def_nodes, singleton_def_nodes, seeded_scope)
+      #
+      # ADR-119 WD1 — the unpositioned union (the seed's, the mixin walks' and this file's extend side) is settled
+      # first, because the fold reads it to tell a certain extend edge from a listed one. `siblings` is written by
+      # the fold.
+      def merge_and_fold_extends(default_scope, root, def_nodes, singleton_def_nodes, seeded_scope, siblings,
+                                 mixin_unpositioned)
+        file_extends, extends, extend_unpositioned = merge_extend_tables(default_scope, root)
+        unpositioned = union_unpositioned(default_scope.discovery.unpositioned_mixins, *mixin_unpositioned,
+                                          extend_unpositioned)
+        methods_table = fold_per_file_extends(file_extends, def_nodes, singleton_def_nodes, seeded_scope, siblings,
+                                              unpositioned)
         [extends, methods_table, unpositioned]
       end
 
@@ -402,12 +418,13 @@ module Rigor
 
       # The per-file half of the #526 fold: mutable copies of the merged tables take the extends, and the
       # existence table (already seeded onto the scope) is rebuilt only when the fold touched it.
-      def fold_per_file_extends(extends, def_nodes, singleton_def_nodes, seeded_scope)
+      def fold_per_file_extends(extends, def_nodes, singleton_def_nodes, seeded_scope, siblings, unpositioned)
         methods_table = seeded_scope.discovered_methods
         return methods_table if extends.empty?
 
         mutable_methods = methods_table.transform_values(&:dup)
-        fold_extends_into_singleton_tables(extends, def_nodes, singleton_def_nodes, mutable_methods)
+        fold_extends_into_singleton_tables(extends, def_nodes, singleton_def_nodes, mutable_methods,
+                                           siblings: siblings, unpositioned: unpositioned)
         mutable_methods
       end
 
@@ -6499,36 +6516,133 @@ module Rigor
       # call-site return inference runs with `self = Singleton[C]`, which is what Ruby binds). A name C
       # already defines on its own singleton wins (`||=`); an extend target with no discovered defs
       # contributes nothing (RBS-module extends stay on the dispatch tiers).
-      def fold_extends_into_singleton_tables(extends, def_nodes, singleton_def_nodes, methods)
+      #
+      # ADR-119 WD1 — the copy follows its siblings, which this writes (copy on write; a table the caller passed
+      # is never mutated). `unpositioned` is the project's `unpositioned_mixins`; an edge it lists, or taints
+      # with "*", is not a fact, so what it copies is `possible`:
+      #
+      # - a slot the copy WROTE is contested when the edge is listed or the source slot is contested (a slot some
+      #   other copy wrote was decided by that copy, which the `||=` lets win);
+      # - the singleton name is `possible` when the edge is listed or the source name is possible on the instance
+      #   side, unless C's singleton already answers it certainly (never `:both` from here: the instance side is
+      #   not touched);
+      # - a certain copy makes the singleton name certain, so `:singleton` leaves the name's possible kind.
+      #
+      # A contested source with a certain edge contests the slot and leaves the name certain: a value-only
+      # contest does not make the name possible.
+      def fold_extends_into_singleton_tables(extends, def_nodes, singleton_def_nodes, methods, siblings:,
+                                             unpositioned:)
+        owned = {}.compare_by_identity
         extends.each do |class_name, mods|
+          listed_mods = unpositioned.dig(class_name, :extend)
           mods.each do |mod_name|
-            source_defs = extend_source_defs(def_nodes, class_name, mod_name)
+            resolved, source_defs = extend_source_defs(def_nodes, class_name, mod_name)
             next if source_defs.nil?
 
             # An inner table inherited unchanged from a frozen seed must be thawed before the fold writes.
             target = singleton_def_nodes[class_name]
             target = singleton_def_nodes[class_name] = (target ? target.dup : {}) if target.nil? || target.frozen?
+            listed = extend_edge_listed?(listed_mods, mod_name)
             source_defs.each do |method_name, def_node|
+              wrote = target[method_name].nil?
               target[method_name] ||= def_node
+              certain_before = singleton_name_certain?(methods, siblings, class_name, method_name)
               record_method_kind(methods, class_name, method_name, :singleton)
+              follow_extend_siblings(siblings, owned, [class_name, resolved, method_name],
+                                     wrote: wrote, listed: listed, certain_before: certain_before)
             end
           end
         end
       end
 
+      # Whether `unpositioned_mixins` lists the extend edge to `mod_name` (or taints the whole side).
+      def extend_edge_listed?(listed_mods, mod_name)
+        !listed_mods.nil? && (listed_mods.include?(mod_name) || listed_mods.include?(MixinAccumulator::WILDCARD))
+      end
+
+      # Whether `class_name`'s singleton already answers `method_name` through a certain fact: the existence table
+      # covers the singleton side and the `possible` copy does not.
+      def singleton_name_certain?(methods, siblings, class_name, method_name)
+        return false unless covers_singleton?(methods.dig(class_name, method_name))
+
+        !covers_singleton?(siblings[:possible_discovered_methods].dig(class_name, method_name))
+      end
+
+      SINGLETON_KINDS = [:singleton, Scope::DiscoveryIndex::METHOD_KIND_BOTH].freeze
+      INSTANCE_KINDS = [:instance, Scope::DiscoveryIndex::METHOD_KIND_BOTH].freeze
+      private_constant :SINGLETON_KINDS, :INSTANCE_KINDS
+
+      def covers_singleton?(kind)
+        SINGLETON_KINDS.include?(kind)
+      end
+
+      # The sibling half of one copied name; see {#fold_extends_into_singleton_tables}. `names` is
+      # `[extender, resolved source module, method name]`.
+      def follow_extend_siblings(siblings, owned, names, wrote:, listed:, certain_before:)
+        class_name, resolved, method_name = names
+        contested_source = !siblings[:contested_discovered_def_nodes].empty? &&
+                           siblings[:contested_discovered_def_nodes].include?([resolved, method_name])
+        if wrote && (listed || contested_source)
+          own_sibling_table(siblings, owned, :contested_discovered_singleton_def_nodes) << [class_name, method_name]
+        end
+        if listed || source_name_possible?(siblings, resolved, method_name)
+          return if certain_before
+
+          row = (own_sibling_table(siblings, owned, :possible_discovered_methods)[class_name] ||= {})
+          row[method_name] = merge_sibling_kind(row[method_name], :singleton)
+        else
+          strip_possible_singleton(siblings, owned, class_name, method_name)
+        end
+      end
+
+      def source_name_possible?(siblings, resolved, method_name)
+        INSTANCE_KINDS.include?(siblings[:possible_discovered_methods].dig(resolved, method_name))
+      end
+
+      def merge_sibling_kind(sitting, arriving)
+        sitting.nil? || sitting == arriving ? arriving : Scope::DiscoveryIndex::METHOD_KIND_BOTH
+      end
+
+      # A certain copy: `:singleton` leaves the `possible` kind (`:both` becomes `:instance`), and an emptied row goes.
+      def strip_possible_singleton(siblings, owned, class_name, method_name)
+        return unless covers_singleton?(siblings[:possible_discovered_methods].dig(class_name, method_name))
+
+        possible = own_sibling_table(siblings, owned, :possible_discovered_methods)
+        row = possible[class_name]
+        if row[method_name] == :singleton
+          row.delete(method_name)
+          possible.delete(class_name) if row.empty?
+        else
+          row[method_name] = :instance
+        end
+      end
+
+      # The sibling `key` as a table this fold owns: the first write copies it (a Set, or a Hash of Hashes) and
+      # keeps the copy in `siblings`, so a table shared with a seed, a bundle or an empty constant is never written.
+      def own_sibling_table(siblings, owned, key)
+        table = siblings.fetch(key)
+        return table if owned.key?(table)
+
+        copy = table.is_a?(Set) ? table.dup : table.transform_values(&:dup)
+        owned[copy] = true
+        siblings[key] = copy
+      end
+
       # `extend CustomSig` inside `module Outer; class F` stores the as-written name, while
       # `def_nodes` keys the module's defs as `Outer::CustomSig`. Walk the enclosing namespaces
-      # innermost-first so the fold finds the same module Ruby constant-lookup would.
+      # innermost-first so the fold finds the same module Ruby constant-lookup would. Returns
+      # `[the key the defs were found under, the defs]`, or nil.
       def extend_source_defs(def_nodes, class_name, mod_name)
         found = def_nodes[mod_name]
-        return found if found
+        return [mod_name, found] if found
         return nil if mod_name.nil? || mod_name.start_with?("::")
 
         parts = class_name.to_s.split("::")
         while parts.size > 1
           parts.pop
-          found = def_nodes["#{parts.join('::')}::#{mod_name}"]
-          return found if found
+          key = "#{parts.join('::')}::#{mod_name}"
+          found = def_nodes[key]
+          return [key, found] if found
         end
         nil
       end
@@ -7932,24 +8046,32 @@ module Rigor
         # Issue #644 — resolve the cross-file constant-reassignment rule here, where the whole project's
         # write census is known, and turn the surviving literals into their published `Type::Constant`.
         acc[:constant_values], acc[:constant_sources] = finalize_constant_writes(acc[:constant_writes])
-        # ADR-119 WD1 — the two passes below rewrite `def_nodes`, `singleton_def_nodes` and `methods` and leave the
-        # siblings alone: the extends fold copies an extended module's instance defs onto the extender's singleton
-        # (a copied def is certain or possible as its source was), and `subtract_def_methods` drops `def`-declared
-        # names from `methods`. Whether a sibling follows each rewrite is PR C1's decision, with the first producer
-        # of a `possible` fact; until then every sibling is empty and there is nothing to follow.
-        fold_extends_into_singleton_tables(acc[:extends], acc[:def_nodes], acc[:singleton_def_nodes], acc[:methods])
+        # ADR-119 WD1 — the two passes below rewrite `def_nodes`, `singleton_def_nodes` and `methods`, and each carries
+        # its sibling along. `subtract_def_methods` drops `def`-declared names from `methods`, and
+        # {#subtract_sibling_methods!} applies the same drop to `possible_discovered_methods`. The extends fold copies
+        # an extended module's instance defs onto the extender's singleton, and follows the siblings the same way (a
+        # copy is possible or contested when its edge is listed in `unpositioned_mixins` or its source was).
+        # Until a producer fills a sibling and an edge is listed, there is nothing for either pass to follow.
+        fold_project_extends(acc)
         # Cross-file method suppression is for the project's OWN accessors (attr_* / define_method / alias) — NOT for
         # plain `def`s. A cross-file `def` on a class is exactly the ADR-17 monkey-patch case the undefined-method rule
         # deliberately surfaces (fire + def-site annotation, nudging `pre_eval:`), so dropping the `def`-declared names
         # keeps that contract intact while still letting `attr_reader :x` in one file suppress a false undefined-method
         # for `obj.x` in another.
         acc[:methods] = subtract_def_methods(acc[:methods], acc[:def_nodes])
+        subtract_sibling_methods!(acc)
         finalize_call_surface_tables(acc)
         %i[def_nodes singleton_def_nodes def_sources singleton_def_sources includes prepends
            method_visibilities methods parameter_envelopes class_sources constant_sources deferred_ranges].each do |key|
           acc[key].each_value(&:freeze)
         end
         acc.transform_values(&:freeze)
+      end
+
+      # The project-wide extends fold over the accumulator's tables and siblings.
+      def fold_project_extends(acc)
+        fold_extends_into_singleton_tables(acc[:extends], acc[:def_nodes], acc[:singleton_def_nodes], acc[:methods],
+                                           siblings: acc[:siblings], unpositioned: acc[:unpositioned_mixins])
       end
 
       # The two whole-project tables only call rules read: the issue #992 envelope table gains its project-wide
@@ -7975,6 +8097,30 @@ module Rigor
             next acc[method_name] = kind unless defs.key?(method_name)
 
             acc[method_name] = :singleton if kind == Scope::DiscoveryIndex::METHOD_KIND_BOTH
+          end
+          out[class_name] = kept unless kept.empty?
+        end
+      end
+
+      # ADR-119 WD1 — the `possible` copy of `methods` loses the INSTANCE half of a name that has a project `def`
+      # (`:instance` goes, `:both` becomes `:singleton`), so `possible_discovered_methods` stays a subset of its
+      # member after the rule above. A `:singleton` entry stays: the `def` is the instance side, and the member
+      # keeps the name's singleton half. Only that sibling is rewritten.
+      def subtract_sibling_methods!(acc)
+        possible = acc[:siblings][:possible_discovered_methods]
+        return if possible.nil?
+
+        acc[:siblings] =
+          acc[:siblings].merge(possible_discovered_methods: subtract_sibling_instance_defs(possible, acc[:def_nodes]))
+      end
+
+      def subtract_sibling_instance_defs(possible, def_nodes)
+        possible.each_with_object({}) do |(class_name, table), out|
+          defs = def_nodes[class_name] || {}
+          kept = table.each_with_object({}) do |(method_name, kind), acc|
+            next acc[method_name] = kind unless defs.key?(method_name)
+
+            acc[method_name] = :singleton unless kind == :instance
           end
           out[class_name] = kept unless kept.empty?
         end

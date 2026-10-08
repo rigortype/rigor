@@ -5832,7 +5832,7 @@ module Rigor
       def source_decomposition_projection(subject_type, method_name, arg_types, scope)
         return nil unless subject_type.is_a?(Type::Nominal)
 
-        def_node = scope.discovered_def_nodes[subject_type.class_name]&.[](method_name)
+        def_node = scope.def_node_slot(subject_type.class_name, method_name)
         return nil if def_node.nil?
 
         result = scope.user_method_return(def_node, subject_type, arg_types)

@@ -125,6 +125,35 @@ RSpec.describe "unsettled chain verdict — incremental" do
       expect(warm).to eq(cold)
     end
 
+    # ADR-119 A1 (#1622): `C` answers itself at its chain's head, so no mark or fork elsewhere declines the read,
+    # except one that may prepend onto `C`. A superclass's `inherited` hook that prepends lists `"*"` on `Base`, and
+    # the read declines; `settle` files `Base` although the answer is the root's own.
+    it "re-checks an own-definer consumer when its superclass gains a hook that may prepend onto it" do
+      files = { "base.rb" => "class Base
+end
+", "c.rb" => "class C < Base
+  def foo(x) = x
+end
+",
+                "b.rb" => "C.new.foo
+" }
+      hooked = "module P
+  def foo(*) = 1
+end
+
+class Base
+  def self.inherited(sub)
+    super
+    " \
+               "sub.prepend(P)
+  end
+end
+"
+      warm, cold = warm_and_cold(files, { "base.rb" => hooked }, baseline: [["b.rb", 1]])
+      expect(cold).to eq([])
+      expect(warm).to eq(cold)
+    end
+
     it "re-checks a firing consumer when a second file puts a hook into the mark's closure" do
       files = tree.merge("q.rb" => "module Q\n  include R\nend\n", "r.rb" => "module R\n  def bar = 2\nend\n")
       warm, cold = warm_and_cold(files, { "r.rb" => "module R\n  def method_missing(*) = 2\nend\n" },

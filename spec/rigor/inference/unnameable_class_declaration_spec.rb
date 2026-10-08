@@ -166,6 +166,24 @@ RSpec.describe "unnameable class declarations" do
 
       expect(analyze(source).diagnostics.map(&:rule)).to include("call.wrong-arity")
     end
+
+    it "still reports a real top-level call after the declined body" do
+      source = <<~RUBY
+        class Foo
+          class << self
+            class self::Bar
+              def x = helper_call
+            end
+          end
+        end
+        typo_toplevel_one
+        def top_after = typo_in_top_def
+      RUBY
+
+      lines = analyze(source).diagnostics.select { |d| d.rule == "call.unresolved-toplevel" }.map(&:line)
+
+      expect(lines).to contain_exactly(8, 9)
+    end
   end
 
   context "when the header is a parse-error recovery with no constant" do

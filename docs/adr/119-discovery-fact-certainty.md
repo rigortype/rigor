@@ -554,7 +554,7 @@ beside Ruby's `singleton_class.ancestors` and `Method#owner`. Ruby's `C.singleto
 an external superclass contributing its whole tail. A hook reaches `K`'s singleton chain in two ways
 only: (U1) `K.extend(X)`, `class_methods do`, a concern's `ClassMethods` insert `X` after `#<Class:K>`
 and before `#<Class:K.superclass>`; (U2) `included do def self.x end`, `define_singleton_method` and
-`class_attribute` writers define on `#<Class:K>` itself. So a hook of level `i` cannot move a definer at
+`singleton_class.class_eval` define on `#<Class:K>` itself. So a hook of level `i` cannot move a definer at
 or before the level's head, and a definer found at `#<Class:K_j>`, written in `K_j`'s own body, is immune
 to every hook of levels `j` and deeper.
 
@@ -564,15 +564,23 @@ to every hook of levels `j` and deeper.
   The levels tested are those that start before the bound and do not end before `from`. The read is
   `Unknown` when a tested level's own instance level (`K_i`, its prepends and includes with their
   closures: the first level of `K_i`'s instance chain) or its singleton segment (`#<Class:K_i>` and its
-  extends' closures) holds a *hook-capable* entry, or when a class deeper than the shallowest tested
-  level records a singleton `inherited` (its own or a folded copy), lists `"*"` on `:extend`, or is a
-  hook-capable external superclass (an external's `inherited` is as unseen as a declared one's).
+  extends' closures) holds a *hook-capable* entry, or when a level deeper than the shallowest tested
+  level is hook-capable by the same test, since its `inherited` defines on every subclass's singleton
+  and need not be its class's own `def` (a concern's `class_methods do def inherited`, a hook extending
+  the class with a module that defines it, `define_singleton_method(:inherited)`). An external
+  superclass deeper than that is hook-capable unless RBS knows it: its `inherited` is unknown by
+  construction. (The first draft argued this from `class_attribute`; ActiveSupport 8.1's writer
+  redefines `__class_attr_<name>`, not the public name, so that argument does not hold. A
+  plugin-declared exemption for a framework superclass whose `inherited` defines nothing public is the
+  future narrowing.)
 - **Hook-capable.** A project entry, or a declared module the chain holds as external (a candidate of
   its spelling is a `discovered_class_sources`, `discovered_classes`, `discovered_includes` or
   `discovered_extends` key; an ambiguous spelling tests every declared candidate, any capable one
-  declining), that lists `"*"` on either side, records a singleton `included`, `extended`, `prepended`,
-  `inherited`, `append_features`, `extend_object` or `prepend_features` def, or extends
-  `ActiveSupport::Concern`; and an undeclared external RBS does not know. An RBS-known external is
+  declining), that lists `"*"` on either side, records `included`, `extended`, `prepended`, `inherited`,
+  `append_features`, `extend_object` or `prepend_features` on either side or as an envelope key (a
+  module's instance `def inherited` is a hook once extended; `singleton_class.define_method(:inherited)`
+  is recorded as an instance method and `define_singleton_method(:inherited)` only as an opaque
+  envelope), or extends `ActiveSupport::Concern`; and an undeclared external RBS does not know. An RBS-known external is
   clean (WD2(i)'s limit); the dynamic mark is not a hook signal.
 - **Externals by side.** An external superclass entry stands for its whole tail and is tested with
   `Reflection.singleton_method_definition` (which reaches `Class`, `Module` and `Kernel`); an extended
@@ -583,15 +591,22 @@ to every hook of levels `j` and deeper.
   finds the method: an entry between the class and the module (an RBS-known external that declares the
   name, a nearer module's include) answers first, and on #1607's fork the copy agrees across both
   worlds while Ruby's do not. A class entry whose `def`'s nesting head names a module of the same
-  level's singleton segment is therefore asked past, and the module answers at its own entry.
+  level's singleton segment is therefore asked past, and the module answers at its own entry. One whose
+  nesting head names a module that level does not hold declines: the fold and the chain resolved the
+  `extend`'s name differently (`extend X` inside `module A` with both `X` and `A::X` declared, where the
+  fold copies the top-level `X`; and `extend ::X`, which the extends table records as `X` and the chain
+  resolves to `A::X` — a chain mis-resolution of its own).
 - **ADR-46.** Per tested project entry, its class edge and the negative class edge on its unqualified
   name; per tested external, its candidates' class edges and the negative class edge on its spelling's
   last segment. The verdicts do not depend on the name asked and are memoised per entry in the chain's
   flavor bucket with their edges, replayed while a recording is active.
 - **Known remainders** (pinned, not fixed): `class << self; prepend P` is recorded as an `extend`, so
   `P` is invisible ahead of an own `def self.x` (§ The chain); a concern is capable for every name; an
-  own `def self.x` is trusted against its own level's U2 hooks (an `included do def self.x end` run
-  after it wins in Ruby); a superclass that only `extend`s adds two forks, so every read on its
+  own `def self.x` is trusted against its own level's U2 hooks and same-class redefinitions — an
+  `included do def self.x end` or a plain `def self.included(b) = b.define_singleton_method(:x)` run
+  after it, a later `define_singleton_method(:x)`, `singleton_class.class_eval { def x }`,
+  `instance_eval { def x }`, a singleton `alias_method` or `class << self; attr_accessor :x` (the owner
+  is right, the body is shadowed); a `class Class; def inherited` monkeypatch is unseen; a superclass that only `extend`s adds two forks, so every read on its
   subclasses is `Unknown`, own `def self.x` included. A `def` in `class << self` records the nesting
   `["C"]` (#1305); if #1305 records `#<Class:C>`, such a def reads as not own, which declines more.
 - **Consequences.** Measured on Mastodon `af3596316` (`app`, `lib` and `config`, tables from
@@ -599,18 +614,19 @@ to every hook of levels `j` and deeper.
   whose nesting head is the class), 1 is `Unknown` (`UserSettings::DSL.included`, whose own `"*"` mark
   `settle` never discharges) where the closure rule declined 112; of 437 inherited reads (a name a
   project superclass's own body defines, read on a subclass that does not), 366 are `Unknown` against
-  346 under the closure rule. The external-superclass clause accounts for 119 of them (247 without it),
-  on subclasses of `ActiveModel::Serializer`, `ActiveRecord::Base` and `Thor`, none of which RBS knows
-  there: the price of reading an unseen `inherited` as able to define on every subclass.
+  346 under the closure rule. Testing deeper levels as tested levels accounts for 105 of them (247 when
+  only a deeper class's own `inherited` counted), and the external-superclass clause for 14 more (352
+  without it), on subclasses of superclasses RBS does not know there (`ActiveModel::Serializer`,
+  `ActiveRecord::Base`, `Thor`).
 - **The C1c row** (§ Migration): `singleton_context_def?` was retired for `Scope#singleton_class_body?`
   (a lexical fact no world varies), not migrated through `resolve`; C1c has no singleton-side read.
 - **The C2 rows, from C2 planning:** (E1) C2 migrates only the typing call at `expression_typer.rb:2283`
   (`try_user_method_inference`), through a new memo; the existence reads (`:1638`, `:2127`) and the
   self-purity scan (`:3660`) stay on the union. (E2) The absent rule's RBS census is moot at the typing
-  sites. (E5) The conditional-include pins are `tp-lost`
-  by design, as WD2 adjudicated them for C1b. (E6) #1572's pending pin will pass at C2-b1, where the read
-  is `Unknown`, which fixes nothing; Q5 and the C2 row are read that way. (E7) The conditional-definer shape moves
-  only once C1d-a fills the siblings.
+  sites. (E5) The conditional-include pins are `tp-lost` by design, as WD2 adjudicated them for C1b.
+  (E6) #1572's pending pin will pass at C2-b1, where the read is `Unknown`, which fixes nothing; Q5 and
+  the C2 row are read that way. (E7) The conditional-definer shape moves only once C1d-a fills the
+  siblings.
 
 ### WD4 — Classification of every `DiscoveryIndex` member, with structural checks (landed)
 

@@ -18,25 +18,27 @@ module Rigor
     # (the `def`'s recorded nesting does not start with `K_j`), and every entry when nothing answers. The levels
     # tested are those that start before the bound and do not end before `from`. The read declines when a tested
     # level's own instance level (the class, its prepends and includes with their closures) or its singleton
-    # segment (the class's singleton and its extends' closures) holds a HOOK-CAPABLE entry, or when a class
-    # deeper than the shallowest tested level records a singleton `inherited` (its own or a folded copy) or
-    # lists `"*"` on its `:extend` side, or is an external superclass that is hook-capable.
+    # segment (the class's singleton and its extends' closures) holds a HOOK-CAPABLE entry, or when a level
+    # deeper than the shallowest tested level is hook-capable by the same test: its `inherited` defines on
+    # every subclass's singleton, and it need not be the class's own `def`. A deeper external superclass RBS
+    # does not know counts, its `inherited` being unknown by construction.
     #
     # Hook-capable, for a project entry or a declared module the chain holds as external (a candidate of its
     # spelling is a `discovered_class_sources`, `discovered_classes`, `discovered_includes` or
     # `discovered_extends` key; an ambiguous spelling tests every declared candidate and any capable one
-    # declines): lists `"*"` on either side, records a singleton {Scope::ResolutionChain::Relevance::HOOKS} def,
-    # or extends `ActiveSupport::Concern`. An undeclared external is capable unless RBS knows it (WD2(i)'s
-    # limit: an RBS-known external is clean). The dynamic mark is not a hook signal. The verdict does not depend
-    # on the name asked, so it is memoised per entry in the chain's flavor bucket with the ADR-46 edges it read
-    # (a class edge and the negative class edge on the unqualified name per tested project entry, the negative
-    # class edge on the spelling's last segment and the candidates' class edges per tested external), replayed on
-    # every call while a recording is active.
+    # declines): lists `"*"` on either side, records a {Scope::ResolutionChain::Relevance::HOOKS} name on
+    # either side or as an envelope key, or extends `ActiveSupport::Concern`. An undeclared external is capable
+    # unless RBS knows it (WD2(i)'s limit: an RBS-known external is clean). The dynamic mark is not a hook signal.
+    # The verdict does not depend on the name asked, so it is memoised per entry in the chain's flavor bucket
+    # with the ADR-46 edges it read (a class edge and the negative class edge on the unqualified name per tested
+    # project entry, the negative class edge on the spelling's last segment and the candidates' class edges per
+    # tested external), replayed on every call while a recording is active.
     #
     # Known remainders, pinned in `spec/integration/definer_resolution_witness_spec.rb`: `class << self; prepend
     # P` is recorded as an `extend` (the chain places `P` after the singleton, so an own `def self.x` is trusted
     # against it); a concern is capable for every name; an own `def self.x` is trusted against its own level's
-    # U2 hooks; and a superclass that only `extend`s adds two forks, so every read on its subclasses declines.
+    # U2 hooks and same-class redefinitions; a `class Class; def inherited` monkeypatch is unseen; and a
+    # superclass that only `extend`s adds two forks, so every read on its subclasses declines.
     module SingletonHookDecline
       WILDCARD = "*"
       CONCERN = "ActiveSupport::Concern"

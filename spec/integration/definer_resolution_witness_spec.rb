@@ -614,11 +614,14 @@ RSpec.describe Rigor::Inference::DefinerResolution do # rubocop:disable RSpec/Sp
           "def self.included(b) = b.extend(CM)\nend\nclass Base; include H; end",
         "a concern's `included do def self.inherited`" =>
           "module H\n  extend ActiveSupport::Concern\n  included do\n    " \
-          "def self.inherited(s) = (super; s.define_singleton_method(:x) { :hook })\n  end\nend\nclass Base; include H; end",
+          "def self.inherited(s) = (super; s.define_singleton_method(:x) { :hook })\n  end\nend\n" \
+          "class Base; include H; end",
         "`singleton_class.define_method(:inherited)`" =>
-          "class Base\n  singleton_class.define_method(:inherited) { |s| super(s); s.define_singleton_method(:x) { :hook } }\nend",
+          "class Base\n  singleton_class.define_method(:inherited) { |s|\n    " \
+          "super(s); s.define_singleton_method(:x) { :hook }\n  }\nend",
         "`define_singleton_method(:inherited)`" =>
-          "class Base\n  define_singleton_method(:inherited) { |s| super(s); s.define_singleton_method(:x) { :hook } }\nend"
+          "class Base\n  define_singleton_method(:inherited) { |s|\n    " \
+          "super(s); s.define_singleton_method(:x) { :hook }\n  }\nend"
       }.each do |label, base|
         it "declines through #{label}" do
           source = "module X; def x = :x; end\n#{base}\nclass C < Base; extend X; end\n"
@@ -821,11 +824,13 @@ RSpec.describe Rigor::Inference::DefinerResolution do # rubocop:disable RSpec/Sp
       # A same-class redefinition after an own `def self.x`, or a plain hook defining on the includer: Ruby's owner
       # is `#<Class:C>` as the read says, but the body Ruby runs is not the `def` the read answers.
       {
-        "`define_singleton_method` after it" => "class C; def self.x = :own; define_singleton_method(:x) { :late }; end",
+        "`define_singleton_method` after it" =>
+          "class C; def self.x = :own; define_singleton_method(:x) { :late }; end",
         "a plain `self.included` hook defining on the includer" =>
           "module H; def h = 1; def self.included(b) = b.define_singleton_method(:x) { :late }; end\n" \
           "class C; def self.x = :own; include H; end",
-        "`singleton_class.class_eval { def x }`" => "class C; def self.x = :own; singleton_class.class_eval { def x = :late }; end",
+        "`singleton_class.class_eval { def x }`" =>
+          "class C; def self.x = :own; singleton_class.class_eval { def x = :late }; end",
         "`instance_eval { def x }`" => "class C; def self.x = :own; instance_eval { def x = :late }; end",
         "a singleton `alias_method`" =>
           "class C; def self.late = :late; def self.x = :own; singleton_class.alias_method :x, :late; end",

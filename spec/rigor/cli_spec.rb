@@ -313,6 +313,31 @@ RSpec.describe Rigor::CLI do
         expect(out2).to eq(out1)
       end
     end
+
+    it "--no-cache analyses every file and leaves the snapshot untouched, so a later plain run still reuses it" do
+      Dir.mktmpdir do |dir|
+        cache = File.join(dir, ".cache")
+        File.write(File.join(dir, ".rigor.yml"), "severity_profile: balanced\ncache:\n  path: #{cache}\n")
+        File.write(File.join(dir, "a.rb"), "class A\n  def x = 1\nend\n")
+        base = ["check", "--incremental", "--no-stats", "--config", File.join(dir, ".rigor.yml"), dir]
+
+        run_cli(*base)
+        snapshot_files = Dir.glob(File.join(cache, "**", "*")).select { |f| File.file?(f) && f.include?("incremental") }
+        expect(snapshot_files).not_to be_empty
+        before = snapshot_files.to_h { |f| [f, [File.binread(f), File.mtime(f)]] }
+        all_before = Dir.glob(File.join(cache, "**", "*")).sort
+        sleep 0.05
+
+        _status, _out, err = run_cli(*base, "--no-cache")
+        expect(err).to include("--incremental cold")
+        expect(err).not_to include("--incremental warm")
+        expect(snapshot_files.to_h { |f| [f, [File.binread(f), File.mtime(f)]] }).to eq(before)
+        expect(Dir.glob(File.join(cache, "**", "*")).sort).to eq(all_before)
+
+        _status, _out, err = run_cli(*base)
+        expect(err).to include("--incremental warm")
+      end
+    end
   end
 
   describe "type-of" do

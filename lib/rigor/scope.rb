@@ -1068,6 +1068,8 @@ module Rigor
     # the singleton side for `kind: :singleton`. The slot is a live `Prism::DefNode` or a {Inference::DefHandle}
     # (ADR-85 WD3), returned as stored: no dependency recording and no handle resolution. ADR-119 C1d/C2 decide how
     # a contested slot answers here. Callers that need a node go through {#user_def_for} or {#singleton_def_for}.
+    # The `same_slot` census reads of this slot stay justified: certainty reaches them through the declaration
+    # signature the producer fingerprints (C1d-a), not through this accessor.
     def def_node_slot(class_name, method_name, kind = :instance)
       table = kind == :singleton ? discovered_singleton_def_nodes : discovered_def_nodes
       per_class = table[class_name]
@@ -1161,6 +1163,9 @@ module Rigor
       same_file_top_level_def?(method_name) ? node : nil
     end
 
+    # ADR-119 WD1 errata, deliberately unchanged: this compares the recorded site's FILE with the call's file, and
+    # which file a def sits in does not depend on whether it executes. The `<toplevel>` slots are contested
+    # truthfully (ADR-119 C1d-a) but unread until C2 makes the top-level reader decline on them.
     def same_file_top_level_def?(method_name)
       key = Inference::ScopeIndexer::TOP_LEVEL_DEF_KEY
       site = discovered_def_sources.dig(key, method_name.to_sym)
@@ -1216,6 +1221,17 @@ module Rigor
       site = table && table[method_name.to_sym]
       record_cross_file_method(class_name, method_name, site, singleton: true) if Analysis::DependencyRecorder.active?
       site
+    end
+
+    # ADR-119 WD1 errata — whether the definer of `method_name` on `class_name`'s `kind` side (`:instance` or
+    # `:singleton`) rests on a fact the walk could not prove executes: a `possible` method, or a contested def-node
+    # slot. The site-dependent reads below say a def EXISTS and ran before the call; this says whether that def is
+    # certain. A read where "shadows" narrows an answer must decline on it; a read where "shadows" withholds one
+    # may keep it, since a possible def still withholds.
+    def possible_definer?(class_name, method_name, kind)
+      nodes = kind == :singleton ? :discovered_singleton_def_nodes : :discovered_def_nodes
+      @discovery.possible_method?(class_name, method_name, kind) ||
+        @discovery.contested?(nodes, [class_name.to_s, method_name.to_sym])
     end
 
     # Issue #1097 — whether `class_name`'s own singleton `def method_name` has RUN by the time `call_node`

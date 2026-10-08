@@ -237,7 +237,7 @@ RSpec.describe Rigor::Inference::MacroBlockSelfType do
       # an extend edge binds the first existing candidate — and `defines:` the instance methods each
       # module actually declares, which is what decides the call's owner.
       def sorbet_scope(env, supers:, extends:, known: %w[T::Sig],
-                       defines: { "T::Sig" => [:sig] }, singleton_defines: {})
+                       defines: { "T::Sig" => [:sig] }, singleton_defines: {}, possible: {})
         scope = instance_double(
           Rigor::Scope,
           environment: env,
@@ -253,6 +253,9 @@ RSpec.describe Rigor::Inference::MacroBlockSelfType do
         end
         allow(scope).to receive(:instance_def_shadows_call?) do |klass, meth, _node|
           (defines[klass] || []).include?(meth)
+        end
+        allow(scope).to receive(:possible_definer?) do |klass, meth, _kind|
+          (possible[klass] || []).include?(meth)
         end
         scope
       end
@@ -326,6 +329,31 @@ RSpec.describe Rigor::Inference::MacroBlockSelfType do
           receiver_type: Rigor::Type::Singleton.new("Fetcher")
         )
         expect(result).to eq(Rigor::Type::Nominal.new("T::Private::Methods::DeclBuilder"))
+      end
+
+      it "does not match when the extended module's decisive `sig` def is only possible (ADR-119)" do
+        env = sorbet_env
+        scope = sorbet_scope(
+          env, supers: {}, extends: { "Fetcher" => ["T::Sig"] }, possible: { "T::Sig" => [:sig] }
+        )
+        result = described_class.narrow_self_type_for(
+          scope: scope, call_node: sig_call,
+          receiver_type: Rigor::Type::Singleton.new("Fetcher")
+        )
+        expect(result).to be_nil
+      end
+
+      it "still withholds when the class's own singleton `sig` def is possible (shadowing already withholds)" do
+        env = sorbet_env
+        scope = sorbet_scope(
+          env, supers: {}, extends: { "Fetcher" => ["T::Sig"] },
+               singleton_defines: { "Fetcher" => [:sig] }, possible: { "Fetcher" => [:sig] }
+        )
+        result = described_class.narrow_self_type_for(
+          scope: scope, call_node: sig_call,
+          receiver_type: Rigor::Type::Singleton.new("Fetcher")
+        )
+        expect(result).to be_nil
       end
 
       it "does not match when the class defines its own singleton method" do

@@ -597,6 +597,84 @@ RSpec.describe "plugins/rigor-sorbet" do
       )
     end
 
+    # ADR-119 C1d-c. A project `T::Sig` whose `sig` is defined unconditionally owns the call, so the block's self
+    # narrows to DeclBuilder; once the def sits under `if X`, the module may not answer at runtime (Ruby raises
+    # NoMethodError in the world where X is false), so the narrowing is declined.
+    it "binds DeclBuilder through a project T::Sig whose `sig` def is certain" do
+      source = <<~RUBY
+        module T
+          module Sig
+            def sig(*, &blk) = nil
+          end
+        end
+        class F < T::ImmutableStruct
+          sig { params(x: Integer).bogus_terminus }
+          def m(x); end
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).to include(a_string_matching(/bogus_terminus.*DeclBuilder/))
+    end
+
+    it "does not bind DeclBuilder through a project T::Sig whose `sig` def is conditional" do
+      source = <<~RUBY
+        module T
+          module Sig
+            if ENV["RIGOR_FIXTURE_SIG"]
+              def sig(*, &blk) = nil
+            end
+          end
+        end
+        class F < T::ImmutableStruct
+          sig { params(x: Integer).bogus_terminus }
+          def m(x); end
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).not_to include(a_string_matching(/DeclBuilder/))
+    end
+
+    # A possible `def self.sig` still shadows: shadowing withholds the narrowing, so the answer is unchanged.
+    it "does not bind DeclBuilder when `def self.sig` is conditional" do
+      source = <<~RUBY
+        class F
+          extend T::Sig
+          if ENV["RIGOR_FIXTURE_SIG"]
+            def self.sig(&blk)
+              class_exec(&blk)
+            end
+          end
+          sig { params(x: Integer).bogus_terminus }
+          def m(x); end
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).not_to include(a_string_matching(/DeclBuilder/))
+    end
+
+    it "does not bridge `sig` to T::Sig when `def self.sig` is conditional" do
+      source = <<~RUBY
+        class F
+          extend T::Sig
+          if ENV["RIGOR_FIXTURE_SIG"]
+            def self.sig(&blk) = 1
+          end
+          result = sig { returns(Integer) }
+          result.upcase
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).not_to include(a_string_matching(/upcase.*for nil/))
+    end
+
     it "still binds DeclBuilder for a sig call deferred inside a method body when T::Sig owns it" do
       source = <<~RUBY
         class F

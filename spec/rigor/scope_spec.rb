@@ -1042,4 +1042,39 @@ RSpec.describe Rigor::Scope do
       expect(indexed.def_node_slot("C", :missing)).to be_nil
     end
   end
+
+  # ADR-119 C1d-c — `possible_definer?` answers whether a definer rests on a fact the walk could not prove executes.
+  describe "#possible_definer?" do
+    let(:node) { Prism.parse("def sig = 1\n").value.statements.body.first }
+    let(:indexed) do
+      index = Rigor::Scope::DiscoveryIndex::EMPTY.with(
+        discovered_methods: { "M" => { sig: :instance, gated: :instance }, "K" => { build: :singleton } }.freeze,
+        possible_discovered_methods: { "M" => { gated: :instance } }.freeze,
+        discovered_def_nodes: { "M" => { sig: node, gated: node } }.freeze,
+        contested_discovered_def_nodes: Set[["M", :sig]].freeze,
+        discovered_singleton_def_nodes: { "K" => { build: node } }.freeze,
+        contested_discovered_singleton_def_nodes: Set[["K", :build]].freeze
+      )
+      described_class.empty.with_discovery(index)
+    end
+
+    it "is true for a possible-only method and for a contested def-node slot" do
+      expect(indexed.possible_definer?("M", :gated, :instance)).to be(true)
+      expect(indexed.possible_definer?("M", "sig", :instance)).to be(true)
+    end
+
+    it "reads the singleton side only for kind :singleton" do
+      expect(indexed.possible_definer?("K", :build, :singleton)).to be(true)
+      expect(indexed.possible_definer?("K", :build, :instance)).to be(false)
+    end
+
+    it "is false for a certain definer and for an unknown one" do
+      plain = described_class.empty.with_discovery(
+        Rigor::Scope::DiscoveryIndex::EMPTY.with(discovered_methods: { "M" => { sig: :instance } }.freeze,
+                                                 possible_discovered_methods: {}.freeze)
+      )
+      expect(plain.possible_definer?("M", :sig, :instance)).to be(false)
+      expect(plain.possible_definer?("Nope", :sig, :instance)).to be(false)
+    end
+  end
 end

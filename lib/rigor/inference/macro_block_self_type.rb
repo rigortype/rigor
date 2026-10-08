@@ -168,11 +168,13 @@ module Rigor
           seen[current] = true
           # The class's own singleton defs sit ahead of EVERY `extend` in its singleton ancestry —
           # `class F; extend T::Sig; def self.sig(&b); end; end` calls F's method, not T::Sig's —
-          # once the def has executed; a `def` written after this call has not run yet.
+          # once the def has executed; a `def` written after this call has not run yet. Shadowing here
+          # WITHHOLDS the narrowing for every class but the constraint itself, so a possible def
+          # (ADR-119) keeps the same answer and needs no certainty check.
           return current == constraint if scope.singleton_def_shadows_call?(current, method_name, call_node)
 
           owner = extended_module_call_owner(current, extends, method_name, call_node, scope, environment)
-          return owner == constraint || rbs_inherits?(owner, constraint, environment) if owner
+          return extended_owner_reaches?(owner, constraint, method_name, call_node, scope, environment) if owner
 
           raw = supers[current]
           scope.ancestor_name_candidates(current, raw).each { |c| queue << c } if raw
@@ -215,6 +217,16 @@ module Rigor
 
         !Rigor::Reflection.instance_method_definition(mod_name, method_name,
                                                       environment: environment).nil?
+      end
+
+      # Whether the module that answers the call is `constraint`. ADR-119 WD1 errata: here "shadows" NARROWS the
+      # block's self to the owner, so an owner whose decisive source def is only possible (`if X; def sig ...; end`)
+      # answers false — the module may not answer at runtime.
+      def extended_owner_reaches?(owner, constraint, method_name, call_node, scope, environment)
+        return false if scope.instance_def_shadows_call?(owner, method_name, call_node) &&
+                        scope.possible_definer?(owner, method_name, :instance)
+
+        owner == constraint || rbs_inherits?(owner, constraint, environment)
       end
 
       def rbs_inherits?(class_name, constraint, environment)

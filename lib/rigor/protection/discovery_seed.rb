@@ -17,8 +17,8 @@ module Rigor
     #
     # The answer (issue #260's recorded decision) is one table set, built once, threaded to both sides: the
     # {Mutator} base scope and {DiagnosticOracle}'s runner seam. This module builds that table set — the FULL
-    # discovery bundle (`discovered_def_nodes`, `discovered_methods`, superclasses, includes, …), not just the
-    # class-identity slice site selection needed, because resolving `find` on `singleton(Account)` is what makes
+    # discovery bundle (`discovered_def_nodes`, `discovered_methods`, superclasses, includes, extends, …), not just
+    # the class-identity slice site selection needed, because resolving `find` on `singleton(Account)` is what makes
     # the site killable.
     #
     # The shape is a plain Hash of {Scope::DiscoveryIndex} slot names, which is exactly what both consumers take:
@@ -85,7 +85,9 @@ module Rigor
       # tables are dropped so an empty seed stays `{}` and every consumer's "seed nothing" branch keeps working.
       #
       # `discovered_class_sources` is carried as the runner carries it on every run: Tier 2 never records edges,
-      # but an ancestor-order reader asks whether a class is declared in more than one file.
+      # but an ancestor-order reader asks whether a class is declared in more than one file. The mixin tables
+      # (`discovered_includes`, `discovered_prepends`, `discovered_extends`) ride the same fold, so a singleton
+      # `extend` reads the same from a per-file scope under coverage and protection as it does under `check`.
       def discovery_tables(paths)
         seed_tables(Inference::ScopeIndexer.discovered_project_index_for_paths(paths))
       end
@@ -98,7 +100,7 @@ module Rigor
         tables = { discovered_classes: index.fetch(:classes) }
         %i[
           def_nodes def_nestings singleton_def_nodes def_sources singleton_def_sources superclasses includes
-          prepends unpositioned_mixins class_sources
+          extends prepends unpositioned_mixins class_sources
           method_visibilities methods parameter_envelopes data_member_layouts struct_member_layouts
           deferred_ranges refinements global_write_census
         ].each do |slot|

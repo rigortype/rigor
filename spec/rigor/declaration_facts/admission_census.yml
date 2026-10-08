@@ -266,6 +266,7 @@ members:
     - lib/rigor/scope/resolution_chain/relevance.rb
     copies:
     - lib/rigor/analysis/runner.rb
+    - lib/rigor/protection/discovery_seed.rb
   unpositioned_mixins:
     reads:
     - lib/rigor/analysis/runner.rb

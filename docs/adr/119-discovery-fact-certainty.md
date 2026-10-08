@@ -241,9 +241,10 @@ and `docs/internal-spec/inference-engine.md:670`. This ADR relies on the followi
   answer (RC:169–183); `settle` files every entry after the answer through `record_beyond`, with the
   negative class edge on a project entry's unqualified name and, for an external entry, only the sites
   of the names it can denote and **no negative edge** (RC:204–217, the `unless entry.external?` at
-  RC:214); nothing more is filed when the root heads its own chain and answers itself (RC:206). A
-  master answer records every class that order lists; `spec/rigor/analysis/unsettled_chain_incremental_spec.rb`
-  pins warm equals cold. A per-consumer de-duplication of those edges is #1590.
+  RC:214); nothing more is filed when the root heads its own chain and answers itself on a master-only
+  read (no `unknown_for:`, RC:206); under `unknown_for:` the entries after it are filed as for any
+  other answer (#1637). A master answer records every class that order lists;
+  `spec/rigor/analysis/unsettled_chain_incremental_spec.rb` pins warm equals cold. A per-consumer de-duplication of those edges is #1590.
 - **What it leaves open, and this ADR does not reopen:** #1570 (a one-fork disagreement whose readers
   keep master's answer; `ruby_order_resolution_spec.rb:142–147` pins it with a "flip this when ADR-119
   PR C" comment), #1572 (an external definer ahead of a project one), #1573 (a repeated `extend`'s

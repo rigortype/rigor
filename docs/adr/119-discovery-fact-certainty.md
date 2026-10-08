@@ -810,7 +810,7 @@ producers: `possible_discovered_methods`, the def-node, singleton def-node and e
   imprecision rather than fixed in C1d-a.
 - *The C1d row's `Helpers2#fmt2`.* Its override silencing needs only C1d-b's contested visibility; PR B is needed only
   for the fabricated singleton copy.
-- *C1d-b's visibility contest (2026-10-08).* Beyond a conditional `def`'s slot, a visibility slot is contested when a
+- *C1d-b's visibility contest (2026-10-08, #1631).* Beyond a conditional `def`'s slot, a visibility slot is contested when a
   possible named target (`private :x if …`) wrote it, or when its `def` follows an uncertain bare toggle: `private`,
   `protected`, `public` or `module_function` with no argument that is possible, or that sits under a child of the body
   other than its statement list (`begin private end`, `(private)`, a block), which Ruby applies to the later `def`s

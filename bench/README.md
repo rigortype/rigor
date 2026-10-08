@@ -173,8 +173,9 @@ load the engine (a miss), and every `--incremental` run must report itself
 warm. The report counts how many default null runs the engine-free probe served.
 
 The first timed run of each scenario is compared with a plain `--no-cache` run
-of the same tree. (`--incremental --no-cache` still replays the snapshot,
-#1525.) Different findings fail the tool, and the same findings in another
+of the same tree. (`--incremental --no-cache` is a cold full analysis that
+reads and writes neither the snapshot nor the run-result slot, #1525.)
+Different findings fail the tool, and the same findings in another
 order are a note. How far an incremental edit spread is not reported yet
 (#1526), so whether a leaf or hub is really one rests on the files chosen:
 Mastodon's defaults re-analyse 1 and 277 files. With `base` set, two engines

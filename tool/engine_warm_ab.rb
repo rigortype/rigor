@@ -32,7 +32,7 @@
 #
 # Correctness: the first timed run of each scenario is compared with a plain `rigor check --no-cache` of the same
 # tree, which reads and writes neither the result cache nor the incremental snapshot. (`--incremental --no-cache`
-# is not a cold run: it still replays the snapshot, #1525.) Any difference in the output fails the tool, the same
+# is also a cold full analysis that touches neither, since #1525; it is not a warm run.) Any difference in the output fails the tool, the same
 # findings in another order included (#1524). Every run passes `--no-baseline`, so a project baseline does not hide
 # findings from the comparison.
 #
@@ -363,13 +363,17 @@ module EngineWarmAB
       out = File.join(dir, "#{key.tr('/', '-')}.json")
       FileUtils.rm_f(out)
       result = EngineWarmAB.check(arm[:engine], arm[:project], mode_args(mode), paths, scratch: @scratch,
-                                  env_extra: { "RIGOR_WARM_PROFILE" => out,
-                                               "RIGOR_WARM_VERNIER_LIB" => @options.fetch(:profile_lib),
-                                               "RIGOR_WARM_DESCENT" => File.join(__dir__, "warm_profile_descent.rb") })
+                                                                                       env_extra: { "RIGOR_WARM_PROFILE" => out,
+                                                                                                    "RIGOR_WARM_VERNIER_LIB" => @options.fetch(:profile_lib),
+                                                                                                    "RIGOR_WARM_DESCENT" => File.join(
+                                                                                                      __dir__, "warm_profile_descent.rb"
+                                                                                                    ) })
       assert_labelled(mode, scenario, "#{name} (profiled)", result)
       timed_hit = @engine_loaded[[mode, scenario]][name] * 2 < @samples[[mode, scenario]][name].size
-      @notes << "#{key}: the profiled run #{result['engine_loaded'] ? 'loaded the engine' : 'was a probe hit'}, unlike " \
-                "most timed runs" if scenario == "null" && result["engine_loaded"] == timed_hit
+      if scenario == "null" && result["engine_loaded"] == timed_hit
+        @notes << "#{key}: the profiled run #{result['engine_loaded'] ? 'loaded the engine' : 'was a probe hit'}, unlike " \
+                  "most timed runs"
+      end
       timed_yjit = @yjit[[mode, scenario]][name] * 2 > @samples[[mode, scenario]][name].size
       @notes << "#{key}: the profiled run ended with YJIT #{result['yjit'] ? 'on' : 'off'}, unlike most timed runs" if
         result["yjit"] != timed_yjit
@@ -501,7 +505,7 @@ module EngineWarmAB
              "`rigor check` on `#{options[:project_label] || options[:project]}` (paths: " \
              "#{options[:paths].empty? ? 'from the config' : options[:paths].join(' ')}), #{revs}; leaf " \
              "`#{options[:leaf]}`, hub `#{options[:hub]}`, `#{options[:edit]}` edits, #{options[:reps]} runs per step" \
-             "#{arm_names.size == 2 ? ' in ABBA order' : ''}. Wall seconds per fresh-process run, boot included.", ""]
+             "#{' in ABBA order' if arm_names.size == 2}. Wall seconds per fresh-process run, boot included.", ""]
     lines.concat(reps_warning(options, arm_names, journey))
     lines.concat(table(arm_names, journey, stats))
     lines << "" << "Cold priming runs: #{journey.cold.map { |key, s| "#{key} #{s}s" }.join(', ')}"
@@ -526,10 +530,16 @@ module EngineWarmAB
       labels = profile.fetch("chain").map(&:first).reject { |label| label.start_with?("<") }
       chain = labels.last(3)
       prefix = (labels.size > chain.size ? "… › " : "") + chain.map { |label| "#{label} › " }.join
-      phases = profile.fetch("phases").first(8).map { |label, ms| "#{label} #{share.(ms)}" }
+      phases = profile.fetch("phases").first(8).map { |label, ms| "#{label} #{share.call(ms)}" }
       heaviest, inner = profile.fetch("inner", [nil, []])
-      inside = inner.empty? ? "" : " (inside #{heaviest}: #{inner.first(5).map { |l, ms| "#{l} #{share.(ms)}" }.join('; ')})"
-      lines << "- **#{key}** (#{wall} ms; sampled #{share.(profile.fetch('sampled_ms'))}, GC #{profile.fetch('gc_ms')} ms): " \
+      inside = if inner.empty?
+                 ""
+               else
+                 " (inside #{heaviest}: #{inner.first(5).map do |l, ms|
+                   "#{l} #{share.call(ms)}"
+                 end.join('; ')})"
+               end
+      lines << "- **#{key}** (#{wall} ms; sampled #{share.call(profile.fetch('sampled_ms'))}, GC #{profile.fetch('gc_ms')} ms): " \
                "#{prefix}#{phases.join('; ')}#{inside}"
     end
     lines << "" << "</details>"
@@ -567,7 +577,7 @@ module EngineWarmAB
     if arm_names.size == 1
       rows = ["| mode | scenario | median (min–max) | YJIT on |", "| --- | --- | ---: | ---: |"]
       journey.samples.each_key do |row|
-        rows << "| #{row.join(' | ')} | #{cell(journey.samples[row]['head'])} | #{yjit.(row, 'head')} |"
+        rows << "| #{row.join(' | ')} | #{cell(journey.samples[row]['head'])} | #{yjit.call(row, 'head')} |"
       end
       return rows
     end
@@ -618,7 +628,8 @@ if $PROGRAM_NAME == __FILE__
   abort("--reps must be at least 1") if options[:reps] < 1
   abort("unknown mode in --modes") unless !options[:modes].empty? && (options[:modes] - EngineWarmAB::MODES).empty?
   %i[leaf hub].each do |key|
-    abort("#{key} #{options[key]} is not a file in the project") unless File.file?(File.join(options[:project], options[key]))
+    abort("#{key} #{options[key]} is not a file in the project") unless File.file?(File.join(options[:project],
+                                                                                             options[key]))
   end
   EngineWarmAB.assert_default_cache(options[:project])
   %i[leaf hub].each do |key|

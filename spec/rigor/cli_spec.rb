@@ -313,6 +313,25 @@ RSpec.describe Rigor::CLI do
         expect(out2).to eq(out1)
       end
     end
+
+    it "does not reuse the snapshot when only a bundler.lockfile: at a non-default path changes" do
+      Dir.mktmpdir do |dir|
+        Dir.chdir(dir) do
+          File.write(".rigor.yml",
+                     "severity_profile: balanced\ncache:\n  path: .cache\nbundler:\n  lockfile: deps/my.lock\n")
+          FileUtils.mkdir_p("deps")
+          File.write("deps/my.lock", "GEM\n  specs:\n")
+          File.write("a.rb", "class A\n  def x = 1\nend\n")
+          args = ["check", "--incremental", "--no-stats", "--config", ".rigor.yml", "."]
+
+          expect(run_cli(*args)[2]).to include("--incremental cold")
+          expect(run_cli(*args)[2]).to include("--incremental warm")
+
+          File.write("deps/my.lock", "GEM\n  remote: https://rubygems.org/\n  specs:\n")
+          expect(run_cli(*args)[2]).to include("--incremental cold")
+        end
+      end
+    end
   end
 
   describe "type-of" do

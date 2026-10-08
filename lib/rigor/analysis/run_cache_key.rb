@@ -147,14 +147,23 @@ module Rigor
       # Content-only — the resolved PATH is deliberately not in the payload, so a checkout that moves (a CI
       # runner's workspace, a renamed directory) still hits with an identical lockfile.
       def lockfile_entries(configuration)
-        bundler = Environment::LockfileResolver.resolve_lockfile_path(
-          lockfile_path: configuration.bundler_lockfile, auto_detect: configuration.bundler_auto_detect
-        )
-        collection = Environment::RbsCollectionDiscovery.resolve_lockfile_path(
-          lockfile_path: configuration.rbs_collection_lockfile,
-          auto_detect: configuration.rbs_collection_auto_detect
-        )
+        bundler, collection = resolved_lockfile_paths(configuration)
         [lockfile_entry("bundler.lockfile", bundler), lockfile_entry("rbs_collection.lockfile", collection)]
+      end
+
+      # The one resolution of the two dependency lockfiles — `[bundler, rbs_collection]`, each a Pathname or nil
+      # — shared by this key and by {Cache::IncrementalSnapshot.fingerprint} so the two caches identify the gem
+      # set by the same files (issue #1532): `bundler.lockfile:` / `rbs_collection.lockfile:` and auto-detection.
+      def resolved_lockfile_paths(configuration)
+        [
+          Environment::LockfileResolver.resolve_lockfile_path(
+            lockfile_path: configuration.bundler_lockfile, auto_detect: configuration.bundler_auto_detect
+          ),
+          Environment::RbsCollectionDiscovery.resolve_lockfile_path(
+            lockfile_path: configuration.rbs_collection_lockfile,
+            auto_detect: configuration.rbs_collection_auto_detect
+          )
+        ]
       end
 
       # `nil` — no lockfile resolves — is itself part of the identity, so it carries its own sentinel rather

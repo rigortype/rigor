@@ -1,1 +1,0 @@
-- **[rigor check]** An `--incremental` run records the dependencies of a class-hierarchy read once per file instead of at every read, so recording on Rigor's own `lib` allocates about 2% fewer objects; the recorded dependencies and every diagnostic are unchanged. ([#1590](https://github.com/rigortype/rigor/issues/1590), [#1640](https://github.com/rigortype/rigor/pull/1640))

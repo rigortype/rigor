@@ -126,9 +126,9 @@ each `includes:` entry, `bundler.bundle_path:`, `bundler.lockfile:`, and `rbs_co
 Bundler itself expands `~user/` in `BUNDLE_PATH`; Rigor keeps `~name` literal, so `BUNDLE_PATH: "~deploy/gems"` is
 not followed.
 
-The lockfile settings are expanded in one place per resolver (`LockfileResolver.configured_lockfile_path`,
-`RbsCollectionDiscovery.configured_lockfile_path`), which both the run and the incremental write guard call, so
-the guard watches the lockfile the run reads.
+The run and the incremental write guard expand the lockfile settings through the same helper per resolver
+(`LockfileResolver.configured_lockfile_path`, `RbsCollectionDiscovery.configured_lockfile_path`), so the guard
+watches the lockfile the run reads. `ConfigAudit` calls `ConfigPath.absolute` directly, with the same result.
 
 It does not cover a path Rigor is asked to *analyse* at run time: a CLI path argument, a template-unit path, or
 the runner's file sets. The shell has already expanded a `~` in an argument by the time Rigor sees it, so a `~`

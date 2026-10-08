@@ -138,11 +138,11 @@ module Rigor
           discovery = scope.discovery
           return false if scope.known_user_class?(name)
 
-          envelopes = discovery.discovered_parameter_envelopes[name]
-          return false unless envelopes&.size == 1 && envelopes.key?(DiscoveryIndex::ENVELOPE_MODULE_MARK)
+          envelopes = scope.parameter_envelopes_of(name)
+          return false unless envelopes.size == 1 && envelopes.key?(DiscoveryIndex::ENVELOPE_MODULE_MARK)
 
           !discovery.discovered_extends.key?(name) && !discovery.unpositioned_mixins.key?(name) &&
-            !discovery.discovered_method_visibilities.key?(name)
+            !scope.discovered_method_visibilities.key?(name)
         end
 
         # Whether some hook `def` in the project is not its owner's own: a top-level one (`def Q.included` at the
@@ -152,19 +152,18 @@ module Rigor
         # every `def` outside a method or block body, and memoised per discovery index.
         def foreign_hook?(scope)
           memo = ResolutionChain.relevance_memo(scope, :methods)
-          memo.fetch(:foreign_hook) { memo[:foreign_hook] = scan_foreign_hooks(scope.discovery) }
+          memo.fetch(:foreign_hook) { memo[:foreign_hook] = scan_foreign_hooks(scope) }
         end
 
-        def scan_foreign_hooks(discovery)
+        def scan_foreign_hooks(scope)
           seen = {}
-          discovery.discovered_deferred_ranges.each_value do |rows|
+          scope.discovered_deferred_ranges.each_value do |rows|
             rows.each do |(_start, _finish, name, kind, owner)|
               next unless HOOKS.include?(name)
               return true if owner.nil? || seen[[owner, name, kind]]
 
               seen[[owner, name, kind]] = true
-              recorded = discovery.discovered_methods[owner]&.[](name)
-              return true unless recorded == kind || recorded == DiscoveryIndex::METHOD_KIND_BOTH
+              return true unless scope.discovered_method?(owner, name, kind)
             end
           end
           false

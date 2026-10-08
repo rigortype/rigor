@@ -40,7 +40,8 @@ module Rigor
 
       QUESTIONS = %i[definer visibility arity override own_side].freeze
       NONE = :rigor_definer_resolution_none
-      private_constant :NONE
+      STRAY = :rigor_definer_resolution_stray
+      private_constant :NONE, :STRAY
 
       module_function
 
@@ -106,6 +107,8 @@ module Rigor
         loop do
           hit = answer_in.call(chain, position)
           hit = past_fold_copies(scope, chain, method_name, hit, answer_in) if chain.side == :singleton
+          return nil if hit.equal?(STRAY)
+
           raise ArgumentError, "answer function went backwards" if hit && hit.index < position
           return nil if hit.nil? && chain.truncated?
 
@@ -117,10 +120,15 @@ module Rigor
       end
 
       # A class entry answering through a copy the extends fold made is asked past
-      # (`SingletonHookDecline.fold_copy?`), so the module that wrote the `def` answers at its own position.
+      # (`SingletonHookDecline.copy_kind`), so the module that wrote the `def` answers at its own position; a copy
+      # from a module the chain does not hold on that level is {STRAY}, a decline.
       def past_fold_copies(scope, chain, method_name, hit, answer_in)
-        while hit && SingletonHookDecline.fold_copy?(scope, chain, method_name, hit)
-          hit = answer_in.call(chain, hit.index + 1)
+        while hit
+          case SingletonHookDecline.copy_kind(scope, chain, method_name, hit)
+          when :copy then hit = answer_in.call(chain, hit.index + 1)
+          when :stray then return STRAY
+          else return hit
+          end
         end
         hit
       end

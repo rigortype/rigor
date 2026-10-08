@@ -8,7 +8,7 @@ module Rigor
     #
     # - (U1) `K.extend(X)`, `class_methods do`, a concern's `ClassMethods`: Ruby inserts `X` after `#<Class:K>`
     #   and before `#<Class:K.superclass>`, inside `K`'s own level;
-    # - (U2) `included do def self.x end`, `define_singleton_method`, a `class_attribute` writer: a definition ON
+    # - (U2) `included do def self.x end`, `define_singleton_method`, `singleton_class.class_eval`: a definition ON
     #   `#<Class:K>`, at the level's head.
     #
     # So a hook at level `i` cannot move a definer at an index at or before the level's head, and a definer found
@@ -66,21 +66,24 @@ module Rigor
         own ? index : index + 1
       end
 
-      # Whether `hit` is a class entry answering through a copy the extends fold put on the class's singleton
-      # tables: its `def` was written in a module of the same level's singleton segment. The copy is not where
+      # What a class entry's answer is when its `def` was written in another module's body: `:copy` when that
+      # module is on the same level's singleton segment (the extends fold copied it there; the copy is not where
       # Ruby finds the method — the module's own entry is, and an entry between them may answer first — so the
-      # read skips it and asks again past it.
-      def fold_copy?(scope, chain, method_name, hit)
+      # read asks again past it), `:stray` when it is not (the fold and the chain resolved the `extend`'s name to
+      # different modules, `extend X` inside `module A` with both `X` and `A::X` declared: the read declines), and
+      # nil otherwise (the class's own `def`, no `def`, or one with no recorded nesting).
+      def copy_kind(scope, chain, method_name, hit)
         entry = chain.entries[hit.index]
-        return false if entry.external? || entry.side != :singleton
+        return nil if entry.external? || entry.side != :singleton
 
         head = def_head(scope, entry.name, method_name)
-        return false if head.nil? || head == entry.name
+        return nil if head.nil? || head == entry.name
 
         level = chain.level_starts.rindex { |start| start <= hit.index }
-        return false if level.nil? || level >= chain.level_count
+        return :stray if level.nil? || level >= chain.level_count
 
-        chain.level_entries(level).any? { |candidate| candidate.side == :instance && candidate.name == head }
+        found = chain.level_entries(level).any? { |candidate| candidate.side == :instance && candidate.name == head }
+        found ? :copy : :stray
       end
 
       # The innermost `Module.nesting` entry `owner`'s singleton `def` of the name was written in, or nil.
@@ -115,15 +118,13 @@ module Rigor
           !class_name.nil? && instance_level_capable?(class_name)
         end
 
-        # A class deeper than `level` whose `inherited` (or a `"*"` an `inherited` hook lists on `:extend`) can
-        # define on every subclass's singleton, or an external superclass that is hook-capable.
+        # A level deeper than `level` whose `inherited` can define on every subclass's singleton: one that is
+        # hook-capable as a tested level is. Its class records `inherited` (own, folded, or a literal
+        # `define_method`), or an entry of its own instance level or singleton segment can define it unseen (a
+        # concern's `class_methods do def inherited`, a hook that extends the class with a module defining it),
+        # or it is an external superclass that is hook-capable.
         def deeper_hook?(chain, level)
-          ((level + 1)...chain.level_count).any? do |deeper|
-            class_name = chain.level_classes[deeper]
-            next capable?(chain.entries[chain.level_starts[deeper]]) if class_name.nil?
-
-            verdict(:inherited, class_name) { inherited_hook?(class_name) }
-          end
+          ((level + 1)...chain.level_count).any? { |deeper| level_capable?(chain, deeper) }
         end
 
         def capable?(entry)
@@ -184,17 +185,21 @@ module Rigor
           sides = @scope.discovery.unpositioned_mixins[name]
           return true if sides && SIDES.any? { |side| sides[side]&.include?(WILDCARD) }
 
-          hooks = Scope::ResolutionChain::Relevance::HOOKS
-          return true if hooks.any? { |hook| @scope.discovered_method?(name, hook, :singleton) }
+          return true if records_hook?(name)
 
           extends_concern?(name)
         end
 
-        def inherited_hook?(name)
-          return true if @scope.discovered_method?(name, :inherited, :singleton)
-
-          listed = @scope.discovery.unpositioned_mixins[name]&.dig(:extend)
-          !listed.nil? && listed.include?(WILDCARD)
+        # Whether `name` records a hook name on either side, or in its envelope table: a `def self.inherited`, a
+        # module's instance `def inherited` (a hook once extended), `singleton_class.define_method(:inherited)`
+        # (recorded as an instance method) and `define_singleton_method(:inherited)` (recorded only as an opaque
+        # envelope, the name-literal evidence `ScopeIndexer#record_surface_evidence` files).
+        def records_hook?(name)
+          envelopes = @scope.parameter_envelopes_of(name)
+          Scope::ResolutionChain::Relevance::HOOKS.any? do |hook|
+            @scope.discovered_method?(name, hook, :singleton) || @scope.discovered_method?(name, hook, :instance) ||
+              envelopes.key?([:singleton, hook]) || envelopes.key?([:instance, hook])
+          end
         end
 
         # Whether `name`'s own singleton segment (its `extend`s, as the chain places them) holds

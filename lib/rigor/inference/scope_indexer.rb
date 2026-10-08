@@ -6928,9 +6928,11 @@ module Rigor
         end
 
         def contested_paths
-          return @contested.freeze unless @contested.nil? || @contested.empty?
+          contested = @contested
+          return Scope::DiscoveryIndex::EMPTY_SIBLINGS[:contested_discovered_method_visibilities] if contested.nil?
+          return Scope::DiscoveryIndex::EMPTY_SIBLINGS[:contested_discovered_method_visibilities] if contested.empty?
 
-          Scope::DiscoveryIndex::EMPTY_SIBLINGS[:contested_discovered_method_visibilities]
+          contested.freeze
         end
       end
 

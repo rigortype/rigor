@@ -37,6 +37,8 @@ require "rbconfig"
 # - A single-valued table must agree with Ruby wherever it answers. No entry is a decline, which is always allowed.
 #   A contested slot (`contested_discovered_def_nodes` and its singleton twin) rests on a possible def, so it
 #   agrees when Ruby has no such def or when Ruby's def is another def of that owner and name in the fixture.
+#   A contested visibility slot (`contested_discovered_method_visibilities`) is skipped: it rests on a possible
+#   write or an uncertain bare toggle, and the walk records the same value whichever world runs.
 # - Def identity is compared through `source_location` lines.
 # - A typed table must admit the class of the value Ruby holds.
 # - A def nesting must equal Ruby's once anonymous entries are dropped, and an anonymous entry cannot be dropped when
@@ -316,12 +318,17 @@ module DeclarationWitness
       end
     end
 
+    # A contested visibility slot (ADR-119 WD3) rests on a possible write or an uncertain toggle, and its value is
+    # the walk's in either world, so it is skipped as a decline is.
     def visibilities_violations(runtime, tables, _root)
+      contested = tables.contested_discovered_method_visibilities
       tables.discovered_method_visibilities.flat_map do |owner, table|
         record = runtime.dig("modules", owner)
         next [] unless record
 
         table.filter_map do |name, visibility|
+          next if contested.include?([owner, name])
+
           actual = %w[public private protected].find { |v| record[v].include?(name.to_s) }
           next unless actual && actual != visibility.to_s
 

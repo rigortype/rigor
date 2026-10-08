@@ -254,7 +254,7 @@ module Rigor
         includes, prepends, *mixin_unpositioned = merge_mixin_tables(default_scope, root)
         # ADR-35 — per-file visibilities merged OVER the cross-file seed (the current file is authoritative for its own
         # classes; sibling-file ancestors are preserved from the project seed).
-        method_visibilities = merge_method_visibilities(default_scope, root)
+        method_visibilities, file_visibilities = merge_method_visibilities(default_scope, root, certainty)
         # ADR-48 — per-file Data + Struct member layouts merged OVER the cross-file seed (same-file declaration is
         # authoritative).
         data_member_layouts, struct_member_layouts = merge_member_layouts(default_scope, walked)
@@ -266,7 +266,7 @@ module Rigor
         # Issue #898 — and the same walk's table is now kept, merged over the cross-file seed the way
         # `includes` is: `Narrowing` asks it what a class object's singleton ancestry holds.
         siblings = per_file_siblings(seeded_scope.discovery.sibling_tables, file_tables[0], file_tables[2],
-                                     file_singleton)
+                                     file_singleton, file_visibilities)
         extends, methods_table, unpositioned =
           merge_and_fold_extends(default_scope, root, def_nodes, singleton_def_nodes, seeded_scope, siblings,
                                  mixin_unpositioned)
@@ -294,10 +294,13 @@ module Rigor
         )
       end
 
-      def merge_method_visibilities(default_scope, root)
-        default_scope.discovered_method_visibilities.merge(
-          build_discovered_method_visibilities(root)
+      # Returns `[merged table, [file table, file contested slots]]` ({#build_method_visibility_tables}).
+      def merge_method_visibilities(default_scope, root, certainty)
+        file_visibilities = build_method_visibility_tables(root, certainty: certainty)
+        merged = default_scope.discovered_method_visibilities.merge(
+          file_visibilities.first
         ) { |_class, cross_file, per_file| cross_file.merge(per_file) }
+        [merged, file_visibilities]
       end
 
       # Per-file singleton def nodes merged OVER the cross-file seed (same-file declaration is
@@ -313,11 +316,14 @@ module Rigor
       end
 
       # ADR-119 WD3 — the per-file merge of the slot siblings, under the members' own merges: this file's
-      # `def_nodes` and singleton defs win every slot they write, so the seed's contest on those keys is replaced by
-      # the file's ({#fold_slot_contests}); the envelopes are joined, so their contests union. The possible methods
-      # were folded already ({#seed_discovered_methods}).
-      def per_file_siblings(siblings, file_def_nodes, file_siblings, file_singleton)
+      # `def_nodes`, singleton defs and visibilities win every slot they write, so the seed's contest on those keys
+      # is replaced by the file's ({#fold_slot_contests}); the envelopes are joined, so their contests union. The
+      # possible methods were folded already ({#seed_discovered_methods}).
+      def per_file_siblings(siblings, file_def_nodes, file_siblings, file_singleton, file_visibilities)
         file_singleton_def_nodes, file_singleton_contested = file_singleton
+        siblings[:contested_discovered_method_visibilities] = fold_slot_contests(
+          siblings[:contested_discovered_method_visibilities], *file_visibilities
+        )
         siblings[:contested_discovered_def_nodes] = fold_slot_contests(
           siblings[:contested_discovered_def_nodes], file_def_nodes, file_siblings[:contested_discovered_def_nodes]
         )
@@ -6857,9 +6863,81 @@ module Rigor
       # Top-level (no surrounding class) defs do not contribute — Ruby's top-level visibility nuances (private at
       # top-level marks the method on `Object`) are out of scope for v0.1.2.
       def build_discovered_method_visibilities(root)
-        accumulator = {}
+        build_method_visibility_tables(root).first
+      end
+
+      # ADR-119 WD3 — the visibility table and its `contested_discovered_method_visibilities` sibling, from ONE walk
+      # over the file's {Certainty} classification `certainty`: `[table, contested key paths]`. The recorded values
+      # are {#build_discovered_method_visibilities}'s; a slot is contested when its last writer is ({VisibilityTable}).
+      def build_method_visibility_tables(root, certainty: Certainty.possible_nodes(root))
+        accumulator = VisibilityTable.new.track(certainty)
         walk_method_visibilities(root, [], false, :public, accumulator)
-        accumulator.transform_values(&:freeze).freeze
+        [accumulator.transform_values(&:freeze).freeze, accumulator.contested_paths]
+      end
+
+      # The bare calls that set the running default visibility of the body they run in: the modifiers and
+      # `module_function`, which {#walk_method_visibilities} does not track as a value (#1569) but which moves the
+      # default all the same.
+      VISIBILITY_TOGGLES = (VISIBILITY_MODIFIERS + %i[module_function]).freeze
+
+      # The `{class => {name => visibility}}` accumulator of {#walk_method_visibilities}, which also carries the
+      # ADR-119 WD3 state of the slots it writes. A slot is contested when the write that holds it is possible: a
+      # `def` or a named target (`private :x`) the {Certainty} classification reads as possible, or a `def` written
+      # after an UNCERTAIN bare toggle of its body. A toggle is uncertain when it is possible itself or when the walk
+      # does not carry it into the body's running default: one under any child of the body that is not its
+      # statement list (`if c then private end`, `begin private end`, a block, `(private)`), since Ruby applies a
+      # bare toggle there to the body's later `def`s while the walk keeps the default it had. A certain toggle
+      # written directly in the body settles the default again. A named target does not read the running default,
+      # so a toggle does not contest it. A certain write clears the slot's contest.
+      class VisibilityTable < Hash
+        # The bare toggles the walk has met so far; a body's statement loop compares it around each child.
+        attr_accessor :toggles
+        # Whether the running default of the body being walked rests on an uncertain toggle.
+        attr_accessor :uncertain
+        # The file's {Certainty} answer.
+        attr_reader :certainty
+
+        def track(certainty)
+          @certainty = certainty
+          @contested = nil
+          @toggles = 0
+          @uncertain = false
+          self
+        end
+
+        # Records that `node` wrote the `[class_name, name]` slot; `toggled` when the write reads the running
+        # default (a `def`).
+        def wrote(class_name, name, node, toggled:)
+          if Certainty.possible?(@certainty, node) || (toggled && @uncertain)
+            (@contested ||= Set.new) << [class_name, name].freeze
+          else
+            @contested&.delete([class_name, name])
+          end
+        end
+
+        # Runs the block as a fresh body (a class or module, `class << self`, a meta-new or eval block), whose
+        # default starts certain and whose toggles do not reach the enclosing body.
+        def body
+          saved_toggles = @toggles
+          saved_uncertain = @uncertain
+          @uncertain = false
+          yield
+        ensure
+          @toggles = saved_toggles
+          @uncertain = saved_uncertain
+        end
+
+        def contested_paths
+          return @contested.freeze unless @contested.nil? || @contested.empty?
+
+          Scope::DiscoveryIndex::EMPTY_SIBLINGS[:contested_discovered_method_visibilities]
+        end
+      end
+
+      # A bare toggle ({VISIBILITY_TOGGLES}): receiverless, with no arguments.
+      def bare_visibility_toggle?(node)
+        node.is_a?(Prism::CallNode) && node.receiver.nil? && VISIBILITY_TOGGLES.include?(node.name) &&
+          (node.arguments.nil? || node.arguments.arguments.empty?) && node.block.nil?
       end
 
       # rubocop:disable-next Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity, Metrics/AbcSize
@@ -6881,8 +6959,10 @@ module Rigor
             child_cref = unnameable_decl?(node, self_decl, singleton_cref)
             body_prefix = child_cref ? [] : child_prefix
             if node.body
-              walk_method_visibilities(node.body, body_prefix, false, :public,
-                                       accumulator, nil, singleton_cref: child_cref)
+              accumulator.body do
+                walk_method_visibilities(node.body, body_prefix, false, :public,
+                                         accumulator, nil, singleton_cref: child_cref)
+              end
             end
             return current_visibility
           end
@@ -6902,9 +6982,11 @@ module Rigor
                                        defs_singleton: defs_singleton)
             end
             if body
-              walk_method_visibilities(body, qualified_prefix, false, :public,
-                                       accumulator, body_self,
-                                       singleton_cref: singleton_cref)
+              accumulator.body do
+                walk_method_visibilities(body, qualified_prefix, false, :public,
+                                         accumulator, body_self,
+                                         singleton_cref: singleton_cref)
+              end
             end
             return current_visibility
           end
@@ -6919,6 +7001,7 @@ module Rigor
                                                                   defs_singleton: defs_singleton)
             return current_visibility
           end
+          accumulator.toggles += 1 if bare_visibility_toggle?(node)
           # The visibility table is instance-side only — `private :x` inside `class <<`
           # (or a receiver-eval body that re-evaluates a singleton self) marks the
           # SINGLETON method, which this table cannot express.
@@ -6932,13 +7015,23 @@ module Rigor
 
         # Statement-position StatementsNode preserves left-to-right visibility flow; everything else recurses with the
         # entry visibility unchanged.
+        #
+        # ADR-119 WD3 — the statement loop also settles whether the running default is uncertain
+        # ({VisibilityTable}): a bare toggle written here sets it from its own certainty, and any other statement
+        # under which the walk met a toggle makes it uncertain.
         if node.is_a?(Prism::StatementsNode)
           local_visibility = current_visibility
           node.rigor_each_child do |child|
+            toggles = accumulator.toggles
             local_visibility = walk_method_visibilities(child, qualified_prefix, in_singleton_class,
                                                         local_visibility, accumulator, def_owner_prefix,
                                                         singleton_cref: singleton_cref,
                                                         defs_singleton: defs_singleton)
+            if bare_visibility_toggle?(child)
+              accumulator.uncertain = Certainty.possible?(accumulator.certainty, child)
+            elsif accumulator.toggles != toggles
+              accumulator.uncertain = true
+            end
           end
         else
           node.rigor_each_child do |child|
@@ -6965,8 +7058,10 @@ module Rigor
                                  defs_singleton: defs_singleton)
         return unless node.body
 
-        walk_method_visibilities(node.body, qualified_prefix, true, :public, accumulator,
-                                 singleton_prefix, singleton_cref: true)
+        accumulator.body do
+          walk_method_visibilities(node.body, qualified_prefix, true, :public, accumulator,
+                                   singleton_prefix, singleton_cref: true)
+        end
       end
 
       # The eval-block arm of {#walk_method_visibilities}: the block is a fresh class body under
@@ -6997,10 +7092,12 @@ module Rigor
         # receiver-as-module and stay instance-side (`in_singleton_class` off) for a class
         # receiver.
         call_singleton, defs_flag = eval_body_def_context(node, in_singleton_class)
-        node.block.rigor_each_child do |child|
-          walk_method_visibilities(child, qualified_prefix, call_singleton, :public, accumulator,
-                                   eval_prefix, singleton_cref: singleton_cref,
-                                                defs_singleton: defs_flag)
+        accumulator.body do
+          node.block.rigor_each_child do |child|
+            walk_method_visibilities(child, qualified_prefix, call_singleton, :public, accumulator,
+                                     eval_prefix, singleton_cref: singleton_cref,
+                                                  defs_singleton: defs_flag)
+          end
         end
       end
 
@@ -7011,6 +7108,7 @@ module Rigor
         class_name = qualified_prefix.join("::")
         accumulator[class_name] ||= {}
         accumulator[class_name][def_node.name] = current_visibility
+        accumulator.wrote(class_name, def_node.name, def_node, toggled: true)
       end
 
       # Recognises modifier calls on the implicit-self receiver inside a class body. Returns the (possibly updated)
@@ -7031,19 +7129,20 @@ module Rigor
         if args.empty?
           call_node.name
         else
-          apply_named_visibility(args, qualified_prefix, call_node.name, accumulator)
+          apply_named_visibility(args, qualified_prefix, call_node, accumulator)
           current_visibility
         end
       end
 
-      def apply_named_visibility(args, qualified_prefix, visibility, accumulator)
+      def apply_named_visibility(args, qualified_prefix, call_node, accumulator)
         class_name = qualified_prefix.join("::")
         args.each do |arg|
           name = visibility_target_name(arg)
           next if name.nil?
 
           accumulator[class_name] ||= {}
-          accumulator[class_name][name] = visibility
+          accumulator[class_name][name] = call_node.name
+          accumulator.wrote(class_name, name, call_node, toggled: false)
         end
       end
 
@@ -7983,7 +8082,8 @@ module Rigor
       def fold_siblings(acc, file_index)
         fold_file_siblings(acc, file_index[:siblings] || {},
                            methods: file_index[:methods], def_nodes: file_index[:def_nodes],
-                           singleton_def_nodes: file_index[:singleton_def_nodes])
+                           singleton_def_nodes: file_index[:singleton_def_nodes],
+                           method_visibilities: file_index[:method_visibilities])
       end
 
       # ADR-119 WD3 — folds one file's siblings into the accumulator under each member's own fold, so the result is
@@ -7991,10 +8091,10 @@ module Rigor
       #
       # - `possible_discovered_methods` by {#fold_possible_methods} against `acc[:methods]` before this file's
       #   `methods` join it;
-      # - the def-node slots follow their writer, as the members fold later-wins: the file's contests replace the
-      #   accumulator's on every key the file writes ({#fold_slot_contests});
+      # - the def-node and visibility slots follow their writer, as the members fold later-wins: the file's contests
+      #   replace the accumulator's on every key the file writes ({#fold_slot_contests});
       # - every other sibling (the joined envelopes' contests among them) by union.
-      def fold_file_siblings(acc, siblings, methods:, def_nodes:, singleton_def_nodes:)
+      def fold_file_siblings(acc, siblings, methods:, def_nodes:, singleton_def_nodes:, method_visibilities: {})
         target = acc[:siblings]
         siblings.each do |name, table|
           target[name] =
@@ -8004,6 +8104,8 @@ module Rigor
             when :contested_discovered_def_nodes then fold_slot_contests(target.fetch(name), def_nodes, table)
             when :contested_discovered_singleton_def_nodes
               fold_slot_contests(target.fetch(name), singleton_def_nodes, table)
+            when :contested_discovered_method_visibilities
+              fold_slot_contests(target.fetch(name), method_visibilities, table)
             else union_sibling_value(target.fetch(name), table)
             end
         end
@@ -8480,7 +8582,7 @@ module Rigor
         # One combined descent yields both the methods existence table and the def-node table; the latter is also
         # consumed by `record_class_sources`, so a def-dense file is walked once here instead of three times (methods +
         # def-nodes ×2). See {#build_methods_and_def_nodes}.
-        file_methods, file_def_nodes, file_envelopes, file_refinements, file_singleton_def_nodes =
+        file_methods, file_def_nodes, file_envelopes, file_refinements, file_singleton_def_nodes, certainty =
           walk_def_contributions(acc, path, root)
         merge_discovered_defs(acc[:def_nodes], acc[:def_sources], path, file_def_nodes)
         fold_parameter_envelopes(acc, file_envelopes)
@@ -8500,14 +8602,14 @@ module Rigor
         ancestry_keys = fold_file_mixin_tables(acc, root)
         record_file_positions(acc, path, root, superclasses, ancestry_keys, file_def_nodes)
         merge_constant_literal_tables(acc, root, path)
-        merge_class_keyed_index_tables(acc, root, file_methods)
+        merge_class_keyed_index_tables(acc, root, file_methods, certainty)
         merge_member_layout_tables(acc, walked)
       end
 
       # The two def-contribution walks of {#accumulate_project_index}, over ONE {Certainty} classification, with the
       # file's siblings folded into the accumulator BEFORE its members join it (ADR-119 WD3: the `possible` rule
       # reads the accumulator's member as it stood). Returns `[methods, def_nodes, envelopes, refinements,
-      # singleton_def_nodes]`.
+      # singleton_def_nodes, certainty]`, the classification passed on for the visibility walk.
       def walk_def_contributions(acc, path, root)
         certainty = Certainty.possible_nodes(root)
         file_methods, file_def_nodes, file_envelopes, file_refinements, file_siblings =
@@ -8516,7 +8618,7 @@ module Rigor
         fold_file_siblings(acc, file_siblings.merge(contested_discovered_singleton_def_nodes: file_singleton_contested),
                            methods: file_methods, def_nodes: file_def_nodes,
                            singleton_def_nodes: file_singleton_def_nodes)
-        [file_methods, file_def_nodes, file_envelopes, file_refinements, file_singleton_def_nodes]
+        [file_methods, file_def_nodes, file_envelopes, file_refinements, file_singleton_def_nodes, certainty]
       end
 
       # Issue #1123 — this file's three instance- / singleton-side module lists, folded into the
@@ -8568,8 +8670,16 @@ module Rigor
       # Folds the per-class method-visibility and method-existence tables of one file into the cross-file accumulator
       # (kept out of {#accumulate_project_index} to hold its ABC budget). `file_methods` is the existence table from the
       # combined methods/def-nodes descent.
-      def merge_class_keyed_index_tables(acc, root, file_methods)
-        build_discovered_method_visibilities(root).each do |class_name, table|
+      #
+      # ADR-119 WD3 — the visibility slots fold later-wins, so their contests follow the file that wrote them
+      # ({#fold_slot_contests}), as the def-node slots' do.
+      def merge_class_keyed_index_tables(acc, root, file_methods, certainty)
+        file_visibilities, file_contested = build_method_visibility_tables(root, certainty: certainty)
+        siblings = acc[:siblings]
+        siblings[:contested_discovered_method_visibilities] = fold_slot_contests(
+          siblings[:contested_discovered_method_visibilities], file_visibilities, file_contested
+        )
+        file_visibilities.each do |class_name, table|
           (acc[:method_visibilities][class_name] ||= {}).merge!(table)
         end
         file_methods.each do |class_name, table|

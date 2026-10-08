@@ -17,8 +17,10 @@ RSpec.describe "possible definer — incremental" do
                                             environment: shared_environment)
   end
 
+  def rules = %w[call.wrong-arity def.override-visibility-reduced]
+
   def diagnostics(list)
-    list.select { |d| d.rule == "call.wrong-arity" }.map { |d| [File.basename(d.path), d.line] }.sort
+    list.select { |d| rules.include?(d.rule) }.map { |d| [File.basename(d.path), d.line] }.sort
   end
 
   def full_run(dir)
@@ -54,5 +56,31 @@ RSpec.describe "possible definer — incremental" do
     expect(baseline).to eq([])
     expect(cold).to eq([["b.rb", 1]])
     expect(warm).to eq(cold)
+  end
+
+  # ADR-119 C1d-b — the same for a visibility slot: `(private)` is a bare toggle the walk does not carry into the
+  # body's default, so `H#fmt2` keeps its recorded `:public` and its line, and only its contest moves.
+  describe "a contested visibility" do
+    let(:certain) do
+      { "h.rb" => "module H\n  nil\n  def fmt2(v) = v\nend\n",
+        "f.rb" => "class F\n  include H\n\n  private\n\n  def fmt2(v) = v\nend\n" }
+    end
+    let(:contested) { "module H\n  (private)\n  def fmt2(v) = v\nend\n" }
+
+    it "re-checks the includer when an uncertain toggle contests the parent's visibility" do
+      baseline, warm, cold = warm_and_cold(certain, "h.rb" => contested)
+
+      expect(baseline).to eq([["f.rb", 6]])
+      expect(cold).to eq([])
+      expect(warm).to eq(cold)
+    end
+
+    it "re-checks the includer when the toggle goes and the visibility is certain again" do
+      baseline, warm, cold = warm_and_cold(certain.merge("h.rb" => contested), certain)
+
+      expect(baseline).to eq([])
+      expect(cold).to eq([["f.rb", 6]])
+      expect(warm).to eq(cold)
+    end
   end
 end

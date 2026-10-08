@@ -253,4 +253,56 @@ RSpec.describe "relationship lints over DefinerResolution (ADR-119 C1c)", type: 
       expect(rules(source)).to eq([[3, "def.method-visibility-mismatch"]])
     end
   end
+
+  # ADR-119 C1d-b — a bare `module_function` under a condition still applies to the body's later `def`s (`if` opens
+  # no scope), so `Helpers2#fmt2` is a module function and its instance copy is private: the includer's private
+  # `fmt2` reduces nothing. The visibility walk does not carry a toggle out of the `if` and records `fmt2` public;
+  # that slot is contested, so `DefinerResolution` asks past it and the lint declines.
+  describe "a def after a conditional bare `module_function` (Helpers2#fmt2)" do
+    let(:helpers) do
+      <<~RUBY
+        module Helpers2
+          if true
+            module_function
+          end
+
+          def fmt2(value) = value
+        end
+      RUBY
+    end
+
+    let(:includer) do
+      <<~RUBY
+        class Formatter2
+          include Helpers2
+
+          def call = fmt2(1)
+
+          private
+
+          def fmt2(value) = value.to_s
+        end
+      RUBY
+    end
+
+    it "makes Helpers2#fmt2 a module function under Ruby" do
+      program = "#{helpers}#{includer}p Helpers2.private_instance_methods(false), Helpers2.singleton_methods\n"
+      expect(RubyRun.stdout(program)).to eq("[:fmt2]\n[:fmt2]\n")
+    end
+
+    it "does not report the includer's private fmt2 as a reduction, in one file" do
+      expect(rules("#{helpers}\n#{includer}")).to eq([])
+    end
+
+    it "does not report it across files either" do
+      diagnostics = analyze(files: { "lib/helpers2.rb" => helpers, "lib/formatter2.rb" => includer })
+                    .diagnostics.reject { |d| d.severity == :info }
+      expect(diagnostics.map(&:rule)).to eq([])
+    end
+
+    it "still reports the reduction once a certain `public` settles the default again (control)" do
+      source = helpers.sub("  def fmt2", "  public\n\n  def fmt2")
+      expect(rules("#{source}\n#{includer}")).to eq([[18, "def.override-visibility-reduced"]])
+    end
+  end
 end

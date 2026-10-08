@@ -80,7 +80,9 @@ module Rigor
       # v17: ADR-119 WD3 — the def-contribution producers fill the siblings (a conditional `def`'s name possible, its
       # def-node slot and envelope contested). A pre-17 bundle carries the empty siblings of the walk before them, so
       # an unchanged file would fold as "no possible fact" where a cold walk records one.
-      SCHEMA_VERSION = 17
+      # v18: ADR-119 WD3 — the visibility walk fills `contested_discovered_method_visibilities`; a pre-18 bundle
+      # carries it empty, so an unchanged file's conditional visibility would fold as certain.
+      SCHEMA_VERSION = 18
 
       # Per-slot entry value objects. Constructors validate enums / required fields and freeze the resulting
       # struct so no caller can mutate after the entry is in a Descriptor.

@@ -66,8 +66,8 @@ RSpec.describe "Rigor::Scope::DiscoveryIndex::MEMBER_CLASSES" do
     expect(unfilled).to eq(DeclarationMemberShapes::UNFILLED.keys)
   end
 
-  # ADR-119 WD1. No producer fills a sibling yet, so the fixture check above is vacuous for them: these examples
-  # inject values against the real member tables.
+  # ADR-119 WD1. The fixture fills one sibling only, so the fixture check above is close to vacuous for them: these
+  # examples inject values against the real member tables.
   describe "the sibling class" do
     let(:index) { DeclarationFactFixture.built.fetch(:discovery).first }
     let(:siblings) { Rigor::Scope::DiscoveryIndex::SIBLINGS }
@@ -82,8 +82,13 @@ RSpec.describe "Rigor::Scope::DiscoveryIndex::MEMBER_CLASSES" do
         .to all(satisfy { |klass| %i[set_valued single_valued].include?(klass) })
     end
 
-    it "is empty on an index no producer has filled" do
-      expect(siblings.values.map { |sibling| index.public_send(sibling) }).to all(be_empty)
+    # The fixture's only possible contributions are the `def`s inside its two `refine` blocks, which the visibility
+    # walk records on the refining module (ADR-119 C1d-b contests them, since a block's `def` is possible).
+    it "fills on the fixture only the contested visibilities of the refine blocks' defs" do
+      filled = siblings.values.reject { |sibling| index.public_send(sibling).empty? }
+
+      expect(filled).to eq(%i[contested_discovered_method_visibilities])
+      expect(index.contested_discovered_method_visibilities).to eq(Set[["Numbers", :half], ["Strings", :whisper]])
     end
 
     it "accepts a possible sibling that is a part of its member, and a contested one whose paths resolve" do

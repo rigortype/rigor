@@ -165,7 +165,9 @@ module Rigor
       # that true once one does.
       # 36: ADR-119 WD3 — the def-contribution producers fill those siblings, so a pre-36 bundle folds an unchanged
       # file's conditional `def` as certain and a warm run would answer a definer a cold run declines.
-      SCHEMA = 36
+      # 37: ADR-119 WD3 — the visibility walk fills `contested_discovered_method_visibilities`, which a pre-37 bundle
+      # carries empty.
+      SCHEMA = 37
 
       # The persisted per-file state.
       # `cache` maps an analyzed file to its diagnostics.

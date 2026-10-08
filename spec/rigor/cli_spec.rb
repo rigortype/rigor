@@ -325,14 +325,14 @@ RSpec.describe Rigor::CLI do
         snapshot_files = Dir.glob(File.join(cache, "**", "*")).select { |f| File.file?(f) && f.include?("incremental") }
         expect(snapshot_files).not_to be_empty
         before = snapshot_files.to_h { |f| [f, [File.binread(f), File.mtime(f)]] }
-        all_before = Dir.glob(File.join(cache, "**", "*")).sort
+        all_before = Dir.glob(File.join(cache, "**", "*"))
         sleep 0.05
 
         _status, _out, err = run_cli(*base, "--no-cache")
         expect(err).to include("--incremental cold")
         expect(err).not_to include("--incremental warm")
         expect(snapshot_files.to_h { |f| [f, [File.binread(f), File.mtime(f)]] }).to eq(before)
-        expect(Dir.glob(File.join(cache, "**", "*")).sort).to eq(all_before)
+        expect(Dir.glob(File.join(cache, "**", "*"))).to eq(all_before)
 
         _status, _out, err = run_cli(*base)
         expect(err).to include("--incremental warm")

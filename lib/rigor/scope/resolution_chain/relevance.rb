@@ -33,7 +33,7 @@ module Rigor
         # on the module (`def self.included(base) = base.attr_reader(:foo)`), so no closure holding one can be
         # said not to answer a name.
         HOOKS = %i[included extended prepended inherited append_features extend_object prepend_features].freeze
-        TOPLEVEL_HOOK_EDGES = HOOKS.map { |hook| [:toplevel, hook.to_s].freeze }.freeze
+        TOPLEVEL_HOOK_EDGES = HOOKS.map { |hook| [:toplevel, hook.name].freeze }.freeze
 
         module_function
 

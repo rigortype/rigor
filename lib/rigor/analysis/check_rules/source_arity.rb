@@ -140,8 +140,18 @@ module Rigor
                                                     question: :arity) { |chain, from| arity_hit(chain, from) }
           in Inference::DefinerResolution::Known(answer: _answer, owner: _owner) then nearest_envelope(class_name)
           in Inference::DefinerResolution::ABSENT then nearest_envelope(class_name) # rubocop:disable Lint/DuplicateBranch
-          in Inference::DefinerResolution::UNKNOWN then decline
+          in Inference::DefinerResolution::UNKNOWN then decline_unless_recorded_nowhere(class_name)
           end
+        end
+
+        # A declined read of a name no project level records answers no envelope whether or not it stands, so
+        # the walk's reads are not the verdict's dependency: only a `def` appearing can change it, which
+        # {#settle_by_definitions} files, as for an `ABSENT` read. Without this, every `Widget.new` (the implicit
+        # `Class` tail may answer it) would replay the whole walk as a file-level class edge.
+        def decline_unless_recorded_nowhere(class_name)
+          chain = arity_chain(class_name)
+          nowhere = !chain.truncated? && chain.levels.all? { |raw| level_envelopes(Level.new(*raw)).empty? }
+          nowhere ? nearest_envelope(class_name) : decline
         end
 
         # The chain's nearest level's envelope. `Known#answer` is that envelope, but {#authoritative?} and

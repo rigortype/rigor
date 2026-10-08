@@ -721,6 +721,26 @@ producers: `possible_discovered_methods`, the def-node, singleton def-node and e
 - *The C1d row's `Helpers2#fmt2`.* Its override silencing needs only C1d-b's contested visibility; PR B is needed only
   for the fabricated singleton copy.
 
+Errata (2026-10-08), C2 splits and C2-b1 lands (the instance typing site; lane 2, PR #1629):
+
+- *C2-b1 migrates only `try_user_method_inference`'s definer read.* A new memo, `resolve_typing_def_with_owner`,
+  answers through `DefinerResolution` (`question: :definer`); `UNKNOWN` and `ABSENT` both answer `[nil, nil]` there
+  (the absent rule is moot at a typing site: no definer and an unsettled chain both fall through to `Dynamic`). The
+  existence reads (`instance_self_answers?`, `self_call_method_known?`, the self-purity scan) stay on the union memo,
+  because an existence read turning false adds `call.self-undefined-method` records; the recorder spec pins it.
+- *Pins.* #1594's pending example passes and is now a positive example; #1572's reads `UNKNOWN` at C2-b1 (`Dynamic`,
+  not yet typed from `Enumerable`); the conditional-include shapes are `[]`, tp-lost by design (Ruby with the
+  condition unset raises, the other world's String is `M#foo`'s).
+- *Known cost.* An RBS-unknown module included ahead of the definer (`include ActionView::Helpers::NumberHelper`
+  before `Base`) declines the read, so a raising helper such as Mastodon's `fail_with_message` types `Dynamic` and the
+  `fail_with_message ... unless x` guard no longer narrows `x`: one new false positive on Mastodon
+  (`lib/mastodon/cli/media.rb:281`), pinned in `ruby_order_resolution_spec.rb`. Narrowing past an unsettled call that
+  raises is a follow-up.
+- *WD7(f) census* (`tool/typing_census.rb`, `try_user_method_inference`, `--workers 0`): Rigor `lib` 54,605 typed calls
+  to 54,453 (24 pairs lost); Mastodon `app lib config` 44,389 to 30,034 (1,814 pairs lost); GitLab `app/models` and
+  `app/controllers` 78,014 to 18,556 (7,830 pairs lost, 832 of them on ten core models: Project 188, MergeRequest 157,
+  User 124, Ci::Build 101, Ci::Pipeline 59, Group 55, Note 49, Namespace 41, Member 36, Issue 22).
+
 Precision estimate, unchanged from v12 and not re-measured (the landed PRs changed no producer that
 moves it): about 13 of 940 mixin calls in Mastodon's `app`, 6 of 85 in `app/lib`, sit outside
 unconditional bodies; Redmine has 17 `send(:include)` and 6 mixin calls inside methods. What C1 and C2

@@ -443,10 +443,315 @@ RSpec.describe Rigor::Inference::DefinerResolution do # rubocop:disable RSpec/Sp
     end
   end
 
+  # ADR-119 WD3 (errata 2026-10-08, PR C2-a) — the singleton side: a hook's edge is recorded on no includer, so
+  # the read declines where one could have landed ahead of its last candidate (`SingletonHookDecline`). Each fixture
+  # shows Ruby's `singleton_class.ancestors` (up to `#<Class:Object>`) and the owner of the method read beside the read.
   describe "the singleton side" do
-    it "is not resolved until ADR-119 C1c" do
-      scope = scope_for("class Base; def self.foo = 1; end\nclass C < Base; end\n")
-      expect { resolve(scope, :foo, side: :singleton) }.to raise_error(ArgumentError, /C1c/)
+    let(:concern_shim) do
+      <<~RUBY
+        module ActiveSupport
+          module Concern
+            def self.extended(base) = base.instance_variable_set(:@_included_block, nil)
+
+            def class_methods(&block)
+              mod = const_defined?(:ClassMethods, false) ? const_get(:ClassMethods) : const_set(:ClassMethods, Module.new)
+              mod.module_eval(&block)
+            end
+
+            def included(base = nil, &block)
+              if base.nil?
+                @_included_block = block
+              else
+                super
+                base.extend(const_get(:ClassMethods)) if const_defined?(:ClassMethods, false)
+                base.class_eval(&@_included_block) if @_included_block
+              end
+            end
+          end
+        end
+      RUBY
+    end
+
+    # `[ancestors, owner, value]` of `receiver.name` under Ruby, the ancestors cut before `#<Class:Object>`.
+    def ruby_singleton(source, receiver, name, prelude: nil)
+      program = <<~RUBY
+        #{source}
+        ancestors = #{receiver}.singleton_class.ancestors.take_while { |mod| mod != Object.singleton_class }
+        found = #{receiver}.respond_to?(:#{name}) ? #{receiver}.method(:#{name}) : nil
+        value = found && found.arity.zero? ? found.call : nil
+        puts [ancestors.map(&:to_s), found&.owner.to_s, value.inspect].inspect
+      RUBY
+      eval(RubyRun.stdout(program, prelude: prelude)) # rubocop:disable Security/Eval
+    end
+
+    def singleton(scope, klass, name) = owner_of(resolve(scope, name, side: :singleton, klass: klass))
+
+    it "is Known for an own `def self.x` though a concern is included (a)" do
+      source = <<~RUBY
+        module X; def x = :hook; end
+        module Concern
+          extend ActiveSupport::Concern
+          included do
+            extend X
+          end
+        end
+        class C; include Concern; def self.x = :own; end
+      RUBY
+      expect(ruby_singleton(source, "C", :x, prelude: concern_shim)).to eq([%w[#<Class:C> X], "#<Class:C>", ":own"])
+      expect(singleton(scope_for(source), "C", :x)).to eq("C")
+    end
+
+    # #1592's hook shapes: the hook's `extend` is recorded on no includer, so the chain alone answers Absent.
+    describe "a hook that extends its includer (#1592)" do
+      {
+        "a concern's `included do extend X end`" =>
+          ["module Q\n  extend ActiveSupport::Concern\n  included do\n    extend X\n  end\nend", "X"],
+        "a concern's `class_methods do`" =>
+          ["module Q\n  extend ActiveSupport::Concern\n  class_methods do\n    def bar = :x\n  end\nend", "Q::ClassMethods"],
+        "`self.included(base) = base.extend(X)`" =>
+          ["module Q; def q = 1; def self.included(base) = base.extend(X); end", "X"],
+        "a hook the walk cannot see, reached through `send(:extend, Hooks)` (only its `\"*\"`)" =>
+          ["module Hooks; def included(base) = base.extend(X); end\n" \
+           "module Q; def q = 1; send(:extend, Hooks); end", "X"]
+      }.each do |label, (hook, owner)|
+        it "declines #{label}" do
+          source = "module X; def bar = :x; end\n#{hook}\nclass K; include Q; end\n"
+          ancestors, ruby_owner, = ruby_singleton(source, "K", :bar, prelude: concern_shim)
+          expect([ancestors.first(2), ruby_owner]).to eq([["#<Class:K>", owner], owner])
+          expect(singleton(scope_for(source), "K", :bar)).to eq(:unknown)
+        end
+      end
+    end
+
+    # #1567's singleton shape: an extended module's own includes come after it, and an RBS-known module in the
+    # class's own instance level that lacks the name is clean.
+    it "is Known M#foo through an extended module's include (c)" do
+      source = <<~RUBY
+        module M; def foo = :m; end
+        module A; include M; end
+        class Base; def self.foo = :base; end
+        class C < Base; include Comparable; extend A; end
+      RUBY
+      expect(ruby_singleton(source, "C", :foo)).to eq([%w[#<Class:C> A M #<Class:Base>], "M", ":m"])
+      expect(singleton(scope_for(source), "C", :foo)).to eq("M")
+    end
+
+    # #1607: `C`'s `extend M` is skipped in Ruby (M is already reached through Base's singleton), so Base's own
+    # `def self.foo` answers; had Base's `extend M` run after C's, M would. A fork, Unknown.
+    it "is Unknown on #1607's fork (d)" do
+      source = <<~RUBY
+        module M; def foo(x) = x; end
+        class Base; extend M; def self.foo = 1; end
+        class C < Base; extend M; end
+      RUBY
+      expect(ruby_singleton(source, "C", :foo)).to eq([%w[#<Class:C> #<Class:Base> M], "#<Class:Base>", "1"])
+      expect(singleton(scope_for(source), "C", :foo)).to eq(:unknown)
+    end
+
+    # A superclass's `inherited` defines on every subclass's singleton before the subclass's body runs, so it beats
+    # the subclass's extends but not its own `def self.x`.
+    describe "a superclass's inherited hook (e)" do
+      let(:source) do
+        <<~RUBY
+          module X; def x = :x; end
+          class Base
+            def self.inherited(sub)
+              super
+              sub.define_singleton_method(:x) { :hook }
+            end
+          end
+          class C < Base; extend X; end
+          class D < Base; extend X; def self.x = :own; end
+          class E < Base; end
+        RUBY
+      end
+
+      it "declines a read the hook can reach" do
+        expect(ruby_singleton(source, "C", :x)).to eq([%w[#<Class:C> X #<Class:Base>], "#<Class:C>", ":hook"])
+        expect(ruby_singleton(source, "E", :x)).to eq([%w[#<Class:E> #<Class:Base>], "#<Class:E>", ":hook"])
+        scope = scope_for(source)
+        expect([singleton(scope, "C", :x), singleton(scope, "E", :x)]).to eq(%i[unknown unknown])
+      end
+
+      it "is Known for the subclass's own override" do
+        expect(ruby_singleton(source, "D", :x)).to eq([%w[#<Class:D> X #<Class:Base>], "#<Class:D>", ":own"])
+        expect(singleton(scope_for(source), "D", :x)).to eq("D")
+      end
+    end
+
+    # The extends fold copies X#x onto C's singleton tables, so the read finds it at C's own entry. The copy is not
+    # where Ruby finds it: the read asks past it, X answers at its own entry, and a hook in the same level can still
+    # insert ahead of X.
+    describe "a fold copy beside a hook-capable entry (f)" do
+      let(:source) do
+        <<~RUBY
+          module X; def x = :x; end
+          module Y; def x = :y; end
+          module Concern
+            extend ActiveSupport::Concern
+            included do
+              extend Y
+            end
+          end
+          class C; extend X; include Concern; end
+          class D; extend X; include Concern; def self.x = :own; end
+        RUBY
+      end
+
+      it "declines the copy" do
+        expect(ruby_singleton(source, "C", :x, prelude: concern_shim)).to eq([%w[#<Class:C> Y X], "Y", ":y"])
+        expect(singleton(scope_for(source), "C", :x)).to eq(:unknown)
+      end
+
+      it "is Known for an own def" do
+        expect(ruby_singleton(source, "D", :x, prelude: concern_shim)).to eq([%w[#<Class:D> Y X], "#<Class:D>", ":own"])
+        expect(singleton(scope_for(source), "D", :x)).to eq("D")
+      end
+    end
+
+    # A singleton `def` the class's own body did not write (`C.class_eval do def self.x end`, written before the
+    # hook ran) is read one past the class entry, so its own level's hooks are tested.
+    it "declines a def written outside the class body beside a hook-capable entry (f)" do
+      source = <<~RUBY
+        module Concern; def c = 1; def self.included(base) = base.define_singleton_method(:x) { :hook }; end
+        class C; end
+        C.class_eval do
+          def self.x = :early
+        end
+        class C; include Concern; end
+      RUBY
+      expect(ruby_singleton(source, "C", :x)).to eq([%w[#<Class:C>], "#<Class:C>", ":hook"])
+      expect(singleton(scope_for(source), "C", :x)).to eq(:unknown)
+    end
+
+    # An external superclass entry stands for its whole singleton tail and is asked for a singleton method.
+    describe "an external superclass (g)" do
+      it "declines a name the superclass's singleton declares" do
+        source = "class K < Exception; end\n"
+        expect(ruby_singleton(source, "K", :exception)[1]).to eq("#<Class:Exception>")
+        expect(singleton(scope_for(source), "K", :exception)).to eq(:unknown)
+      end
+
+      it "is not Absent for a singleton-only name (`File.exist?`)" do
+        source = "class C < File; end\n"
+        expect(ruby_singleton(source, "C", :exist?)[1]).to eq("#<Class:File>")
+        expect(singleton(scope_for(source), "C", :exist?)).to eq(:unknown)
+      end
+
+      it "is Absent for a name nothing defines" do
+        source = "class C < File; end\n"
+        expect(ruby_singleton(source, "C", :no_such_method_anywhere)[1]).to eq("")
+        expect(singleton(scope_for(source), "C", :no_such_method_anywhere)).to eq(:absent)
+      end
+    end
+
+    describe "an extended RBS-known module (h)" do
+      let(:source) do
+        <<~RUBY
+          module X; def foo = :x; def between?(a, b) = :x; end
+          class C; extend X; extend Comparable; end
+        RUBY
+      end
+
+      it "is passed where its declaration lacks the name" do
+        expect(ruby_singleton(source, "C", :foo)).to eq([%w[#<Class:C> Comparable X], "X", ":x"])
+        expect(singleton(scope_for(source), "C", :foo)).to eq("X")
+      end
+
+      # The fold copied X#between? onto C, which would read ahead of Comparable: the copy is asked past.
+      it "declines where its declaration has the name" do
+        expect(ruby_singleton(source, "C", :between?)[1]).to eq("Comparable")
+        expect(singleton(scope_for(source), "C", :between?)).to eq(:unknown)
+      end
+    end
+
+    # A module whose methods come from a `define_method` loop holds no recorded method, so the chain carries it as an
+    # external entry; it is declared, so its hook test is the project one, and its own answer is unknown.
+    describe "an extended declared module whose methods come from a define_method loop (i)" do
+      let(:source) do
+        <<~RUBY
+          module U; [:foo].each { |name| define_method(name) { :u } }; end
+          module X; def bar = :x; end
+          class C; extend U; end
+          class D; extend U; extend X; end
+        RUBY
+      end
+
+      it "declines the name it may define" do
+        expect(ruby_singleton(source, "C", :foo)).to eq([%w[#<Class:C> U], "U", ":u"])
+        expect(singleton(scope_for(source), "C", :foo)).to eq(:unknown)
+      end
+
+      it "is no hook signal for a definer ahead of it" do
+        expect(ruby_singleton(source, "D", :bar)).to eq([%w[#<Class:D> X U], "X", ":x"])
+        expect(singleton(scope_for(source), "D", :bar)).to eq("X")
+      end
+    end
+
+    # `include Hk` written in `Outer::C` names `Outer::Hk` or `::Hk` by load order; neither declares a method, so the
+    # chain holds the spelling as external. Every declared candidate is tested and the concern among them declines.
+    it "declines when any declared candidate of an ambiguous spelling is hook-capable (j)" do
+      hooks = <<~RUBY
+        module Y; def bar = :y; end
+        module Hk
+          extend ActiveSupport::Concern
+          included do
+            extend Y
+          end
+        end
+      RUBY
+      host = "module X; def bar = :x; end\nmodule Outer\n  class C; extend X; include Hk; end\nend\n"
+      quiet = "module Outer; module Hk; NAME = 1; end; end\n"
+      expect(ruby_singleton("#{hooks}#{quiet}#{host}", "Outer::C", :bar, prelude: concern_shim)[1]).to eq("X")
+      expect(ruby_singleton("#{hooks}#{host}#{quiet}", "Outer::C", :bar, prelude: concern_shim)[1]).to eq("Y")
+      expect(singleton(scope_for("#{hooks}#{quiet}#{host}"), "Outer::C", :bar)).to eq(:unknown)
+    end
+
+    # The rule's known remainders, pinned at today's answer: FLIP each when its fix lands.
+    describe "remainders" do
+      # The extends table records `class << self; prepend P` as an `extend`, so the chain places P after the
+      # singleton and trusts C's own def; Ruby calls P#foo.
+      it "pins `class << self; prepend P` read past an own def (wrong: Ruby calls P)" do
+        source = "module P; def foo = :p; end\nclass C; class << self; prepend P; end; def self.foo = :own; end\n"
+        expect(ruby_singleton(source, "C", :foo)).to eq([%w[P #<Class:C>], "P", ":p"])
+        expect(singleton(scope_for(source), "C", :foo)).to eq("C")
+      end
+
+      it "pins a concern as capable for every name (Unknown where Ruby calls X)" do
+        source = <<~RUBY
+          module X; def bar = :x; end
+          module Concern
+            extend ActiveSupport::Concern
+            included do
+              attr_reader :unrelated
+            end
+          end
+          class C; include Concern; extend X; end
+        RUBY
+        expect(ruby_singleton(source, "C", :bar, prelude: concern_shim)).to eq([%w[#<Class:C> X], "X", ":x"])
+        expect(singleton(scope_for(source), "C", :bar)).to eq(:unknown)
+      end
+
+      it "pins an own def trusted against its own level's U2 hook (wrong: Ruby calls the hook's)" do
+        source = <<~RUBY
+          module Concern
+            extend ActiveSupport::Concern
+            included do
+              def self.x = :hook
+            end
+          end
+          class C; def self.x = :own; include Concern; end
+        RUBY
+        expect(ruby_singleton(source, "C", :x, prelude: concern_shim)).to eq([%w[#<Class:C>], "#<Class:C>", ":hook"])
+        expect(singleton(scope_for(source), "C", :x)).to eq("C")
+      end
+
+      it "pins a superclass that only extends: two forks, so even an own def declines" do
+        source = "module Z; def z = 1; end\nmodule Y; include Z; end\nclass Base; extend Y; end\n" \
+                 "class C < Base; def self.own = :own; end\n"
+        expect(ruby_singleton(source, "C", :own)).to eq([%w[#<Class:C> #<Class:Base> Y Z], "#<Class:C>", ":own"])
+        expect(singleton(scope_for(source), "C", :own)).to eq(:unknown)
+      end
     end
   end
 

@@ -445,6 +445,12 @@ lib/rigor/inference/scope_indexer/superclasses_collector.rb:
   computes: each class's superclass and header nesting, as a collector on the shared declaration walk
   producers:
     Rigor::Inference::ScopeIndexer::SuperclassesCollector: grandfathered
+lib/rigor/inference/singleton_hook_decline.rb:
+  computes: the singleton-side candidate-set read's positional hook decline (ADR-119 WD3, errata 2026-10-08)
+  producers:
+    Rigor::Inference::SingletonHookDecline: a consumer, not a declaration producer; `SIDES` names the two sides of `unpositioned_mixins` it reads for a `"*"`, and it writes no table
+    Rigor::Inference::SingletonHookDecline::Context#inherited_hook?: a consumer, not a declaration producer; it reads the `:extend` side of `unpositioned_mixins` and `:inherited` in `discovered_methods`, and writes no table
+    Rigor::Inference::SingletonHookDecline::Context#project_capable?: a consumer, not a declaration producer; it reads `unpositioned_mixins` through `SIDES` and writes no table
 lib/rigor/inference/statement_evaluator.rb:
   computes: the scope a class, module or class << self body is evaluated in
   producers:

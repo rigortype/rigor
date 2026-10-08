@@ -13,14 +13,20 @@ module Rigor
     #   and whose declaration lacks the name is skipped);
     # - {ABSENT} — no project entry, no external entry and not the implicit `Object` can answer.
     #
-    # Instance side only: `side: :singleton` raises until ADR-119 C1c designs the singleton side.
+    # On the singleton side (ADR-119 WD3, errata 2026-10-08) the chain is `K`'s singleton, its extends' instance
+    # chains, then the superclass's singleton chain; an external superclass entry stands for its whole tail and is
+    # tested against RBS's singleton side, an extended external module against its instance side, the implicit tail
+    # after a project superclass against `Object`'s singleton side. A standing chain is then read past
+    # {SingletonHookDecline}' positional decline: a hook's singleton-side edge is recorded on no includer, so the read
+    # declines where one could have landed ahead of its last candidate.
     #
     # THE CALL SITE IS A CONTRACT. A result is consumed only by an exhaustive `case/in` that is the call's own
     # direct predicate, with one arm per answer and no `else` or `in _`, and is never stored, returned or
     # truth-tested: {UNKNOWN} and {ABSENT} are both truthy, so any other use folds a decline into a firing arm.
     # `spec/rigor/inference/definer_resolution_case_in_spec.rb` fails on a call site of any other shape.
     #
-    # No production reader calls it yet (ADR-119 PR C1a); it migrates one question at a time.
+    # It migrates one question at a time: `SourceArity` (C1b) and the relationship lints (C1c) read the instance
+    # side; no production reader reads the singleton side yet (C2-a landed it for C2's typing sites).
     module DefinerResolution
       Known = Data.define(:answer, :owner)
       UnknownResult = Data.define
@@ -44,13 +50,12 @@ module Rigor
       # on the chain, and again on the retro world when the chain has one fork, where `from` is mapped to the
       # entry it followed.
       def resolve(scope, class_name, method_name, side, question:, from: 0, &answer_in)
-        raise ArgumentError, "singleton-side resolution lands with ADR-119 C1c" if side == :singleton
         raise ArgumentError, "unknown question #{question.inspect}" unless QUESTIONS.include?(question)
 
         answer_in = override_answer(scope, &answer_in) if question == :override
         answer_in ||= default_answer(scope, method_name, question)
         flavor = question == :arity ? :arity : :methods
-        chain = Scope::ResolutionChain.for(scope, class_name.to_s, :instance, flavor)
+        chain = Scope::ResolutionChain.for(scope, class_name.to_s, side, flavor)
 
         hits = candidates(scope, chain, method_name, from, answer_in)
         return UNKNOWN if hits.nil?
@@ -60,6 +65,7 @@ module Rigor
           outcomes(retro_from && candidates(scope, retro, method_name, retro_from, answer_in))
         end
         return UNKNOWN unless verdict == :chain
+        return UNKNOWN if side == :singleton && SingletonHookDecline.decline?(scope, chain, method_name, from, hits)
 
         collapse(hits)
       end
@@ -99,6 +105,7 @@ module Rigor
         position = from
         loop do
           hit = answer_in.call(chain, position)
+          hit = past_fold_copies(scope, chain, method_name, hit, answer_in) if chain.side == :singleton
           raise ArgumentError, "answer function went backwards" if hit && hit.index < position
           return nil if hit.nil? && chain.truncated?
 
@@ -107,6 +114,15 @@ module Rigor
 
           position = hit.index + 1
         end
+      end
+
+      # A class entry answering through a copy the extends fold made is asked past
+      # (`SingletonHookDecline.fold_copy?`), so the module that wrote the `def` answers at its own position.
+      def past_fold_copies(scope, chain, method_name, hit, answer_in)
+        while hit && SingletonHookDecline.fold_copy?(scope, chain, method_name, hit)
+          hit = answer_in.call(chain, hit.index + 1)
+        end
+        hit
       end
 
       def decided(scope, chain, method_name, from, hits)
@@ -124,12 +140,28 @@ module Rigor
           next false unless entry.external?
 
           Analysis::DependencyRecorder.read_missing(:class, entry.raw.to_s.split("::").last) if recording
-          !Scope::ResolutionChain::Relevance.external_lacks?(scope, entry.candidates, method_name)
+          !external_lacks?(scope, entry.candidates, entry.side, method_name)
         end || (last.nil? && implicit_object_answers?(scope, chain, method_name))
       end
 
-      def implicit_object_answers?(scope, _chain, method_name)
-        !Scope::ResolutionChain::Relevance.external_lacks?(scope, ["Object"], method_name)
+      # The implicit tail after a chain's last project superclass: `Object` (with `Kernel` and `BasicObject`) on the
+      # instance side, `#<Class:Object>` through `Class`, `Module` and `Kernel` on the singleton side.
+      def implicit_object_answers?(scope, chain, method_name)
+        !external_lacks?(scope, ["Object"], chain.side, method_name)
+      end
+
+      # True only for an ancestor RBS knows whose declaration lacks the name, on the side the entry stands for: an
+      # external superclass on a singleton chain (`:singleton`, its whole tail) is asked for a singleton method, an
+      # extended module (`:instance`) and every instance-side entry for an instance method.
+      def external_lacks?(scope, candidates, side, method_name)
+        return Scope::ResolutionChain::Relevance.external_lacks?(scope, candidates, method_name) if side == :instance
+
+        known = candidates.find { |candidate| Rigor::Reflection.rbs_class_known?(candidate, scope: scope) }
+        return false if known.nil?
+
+        Rigor::Reflection.singleton_method_definition(known, method_name, scope: scope).nil?
+      rescue StandardError
+        false
       end
 
       # What a candidate set says, for {Scope::ResolutionChain#settle} to compare across worlds.
@@ -215,10 +247,12 @@ module Rigor
         found
       end
 
-      private_class_method :override_answer, :retro_position, :candidates, :decided, :external_may_answer?,
-                           :implicit_object_answers?,
+      private_class_method :override_answer, :retro_position, :candidates, :past_fold_copies, :decided,
+                           :external_may_answer?, :implicit_object_answers?, :external_lacks?,
                            :outcomes, :collapse, :possible?,
                            :default_answer, :definer_answer, :visibility_answer, :first_hit
     end
   end
 end
+
+require_relative "singleton_hook_decline"

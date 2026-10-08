@@ -396,6 +396,12 @@ module Rigor
         flavor_bucket(scope.discovery, flavor)[:relevance] ||= {}
       end
 
+      # The singleton-side hook verdicts' memo (`Inference::DefinerResolution`'s positional decline, ADR-119 WD3),
+      # one table per flavor bucket.
+      def self.hook_memo(scope, flavor)
+        flavor_bucket(scope.discovery, flavor)[:hooks] ||= {}
+      end
+
       # The name resolver of `flavor`, over the same memo the chain builder shares: {Relevance} resolves a
       # mark's listed entry from the node that listed it, exactly as the chain did.
       def self.resolver_for(scope, flavor)

@@ -844,7 +844,6 @@ RSpec.describe Rigor::Inference::DefinerResolution do # rubocop:disable RSpec/Sp
           "class C; def self.x = :own; include H; end",
         "`singleton_class.class_eval { def x }`" =>
           "class C; def self.x = :own; singleton_class.class_eval { def x = :late }; end",
-        "`instance_eval { def x }`" => "class C; def self.x = :own; instance_eval { def x = :late }; end",
         "a singleton `alias_method`" =>
           "class C; def self.late = :late; def self.x = :own; singleton_class.alias_method :x, :late; end",
         "`class << self; attr_accessor :x`" =>
@@ -854,6 +853,14 @@ RSpec.describe Rigor::Inference::DefinerResolution do # rubocop:disable RSpec/Sp
           expect(ruby_singleton("#{source}\n", "C", :x)).to eq([%w[#<Class:C>], "#<Class:C>", ":late"])
           expect(singleton(scope_for("#{source}\n"), "C", :x)).to eq("C")
         end
+      end
+
+      # Closed by C1d-a's certainty classifier: a `def` inside a non-meta block is POSSIBLE, which contests the
+      # singleton slot, so the read declines instead of answering the wrong body.
+      it "declines an own def read past `instance_eval { def x }` (wrong body: Ruby runs the later definition)" do
+        source = "class C; def self.x = :own; instance_eval { def x = :late }; end\n"
+        expect(ruby_singleton("#{source}\n", "C", :x)).to eq([%w[#<Class:C>], "#<Class:C>", ":late"])
+        expect(singleton(scope_for("#{source}\n"), "C", :x)).to eq(:unknown)
       end
 
       it "pins a `Class#inherited` monkeypatch as unseen (wrong: Ruby calls the hook's)" do

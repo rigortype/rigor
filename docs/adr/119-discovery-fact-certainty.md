@@ -610,10 +610,12 @@ to every hook of levels `j` and deeper.
   own `def self.x` is trusted against its own level's U2 hooks and same-class redefinitions — an
   `included do def self.x end` or a plain `def self.included(b) = b.define_singleton_method(:x)` run
   after it, a later `define_singleton_method(:x)`, `singleton_class.class_eval { def x }`,
-  `instance_eval { def x }`, a singleton `alias_method` or `class << self; attr_accessor :x` (the owner
-  is right, the body is shadowed); a `class Class; def inherited` monkeypatch is unseen; a superclass that only `extend`s adds two forks, so every read on its
+  a singleton `alias_method` or `class << self; attr_accessor :x` (the owner is right, the body is
+  shadowed); a `class Class; def inherited` monkeypatch is unseen; a superclass that only `extend`s adds two forks, so every read on its
   subclasses is `Unknown`, own `def self.x` included. A `def` in `class << self` records the nesting
   `["C"]` (#1305); if #1305 records `#<Class:C>`, such a def reads as not own, which declines more.
+  `instance_eval { def x }` is not a remainder any more: C1d-a's certainty classifier records a `def` in a
+  non-meta block as POSSIBLE, which contests the singleton slot, so the read declines.
 - **Consequences.** Measured on Mastodon `af3596316` (`app`, `lib` and `config`, tables from
   `DiscoverySeed`, `:definer` reads): of 272 own `def self.x` reads (a project class's singleton `def`
   whose nesting head is the class), 1 is `Unknown` (`UserSettings::DSL.included`, whose own `"*"` mark

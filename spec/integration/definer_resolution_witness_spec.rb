@@ -1111,6 +1111,25 @@ RSpec.describe Rigor::Inference::DefinerResolution do # rubocop:disable RSpec/Sp
         expect(hooked(base + hook + klass)).to eq(["P", :unknown])
       end
 
+      it "declines under a superclass's inherited hook written inside another module's body (f)" do
+        hook = "module X; def Base.inherited(s); super; s.prepend(P); end; end\n"
+        expect(hooked(base + hook + klass)).to eq(["P", :unknown])
+      end
+
+      it "declines under a superclass's inherited hook written in another class's singleton body (g)" do
+        hook = "module X; def self.inherited(s) = super; class << self; def Base.inherited(s); super; " \
+               "s.prepend(P); end; end; end\n"
+        expect(hooked(base + hook + klass)).to eq(["P", :unknown])
+      end
+
+      it "declines under an included module RBS does not know, whose hooks are unseen" do
+        prelude = "module GP; def foo(*) = :gp; end\n" \
+                  "module GemHook; def self.included(b); super; b.prepend(GP); end; end\n"
+        source = "#{head}#{base}class C < Base; include FM; include FN; include GemHook; def foo(a) = a; end\n"
+        expect(owner_says(source, prelude: prelude)).to eq("GP")
+        expect(owner_of(resolve(scope_for(source), :foo))).to eq(:unknown)
+      end
+
       it "declines under an included module's hook that defines the superclass's inherited (e2)" do
         hook = "module M; def self.included(b) = b.define_singleton_method(:inherited) { |s| s.prepend(P) }; end\n"
         expect(hooked("#{hook}class Base; include FM; include FN; include M; end\n#{klass}")).to eq(["P", :unknown])

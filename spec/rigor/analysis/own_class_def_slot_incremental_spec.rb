@@ -71,4 +71,39 @@ RSpec.describe "a pattern's source `deconstruct` read — incremental (#1615)" d
       expect(sites(recheck.diagnostics)).to eq(full_run(dir))
     end
   end
+
+  # The owner-is-not-the-class arm of `own_definer_node`: a prepended module's `deconstruct` is the one Ruby
+  # dispatches to, so the own class's `deconstruct` must not be read as the pattern's decomposition. Ruby 4.0.5:
+  #
+  #   module P; def deconstruct = ["s", "t"]; end; class Point; prepend P; def deconstruct = [1, 2]; end
+  #   case Point.new; in [a, _] then puts a.class, a; end   # => String, s   (so `a.upcase` is defined)
+  #
+  # Master read the own class's `[1, 2]` and fired `undefined method 'upcase' for 1`; the arm declines instead, so
+  # the run reports nothing. The second example swaps the bodies: Ruby dispatches to P's `[1, 2]` and `a.upcase`
+  # does raise, but the arm still declines (a conservative silence, not a truth claim). Only that example fails
+  # when the owner check is removed, because the first one reads P's correct `["s", "t"]` by accident.
+  describe "a prepended definer (ADR-119 C2-e)" do
+    def prepended_tree(dir, module_returns:, class_returns:)
+      File.write(File.join(dir, "z_point.rb"),
+                 "module P\n  def deconstruct = #{module_returns}\nend\n" \
+                 "class Point\n  prepend P\n  def deconstruct = #{class_returns}\nend\n")
+      File.write(File.join(dir, reader), reader_source)
+    end
+
+    it "does not read the own class's deconstruct when a prepended module defines it" do
+      Dir.mktmpdir do |dir|
+        prepended_tree(dir, module_returns: '["s", "t"]', class_returns: "[1, 2]")
+
+        expect(full_run(dir)).to eq([])
+      end
+    end
+
+    it "declines to read the prepended module's deconstruct rather than the own class's" do
+      Dir.mktmpdir do |dir|
+        prepended_tree(dir, module_returns: "[1, 2]", class_returns: '["s", "t"]')
+
+        expect(full_run(dir)).to eq([])
+      end
+    end
+  end
 end

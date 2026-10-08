@@ -5843,8 +5843,10 @@ module Rigor
       end
 
       # The `def` node the receiver's OWN class defines `method_name` with, or nil. ADR-119 C2-e (#1615): asked of
-      # `DefinerResolution`, so a slot rebuilt from an ADR-85 seed bundle is resolved to a node, the read files its
-      # ADR-46 edge, and a contested slot answers nil. A definer further up the chain is not the own class's.
+      # `DefinerResolution`, so a slot rebuilt from an ADR-85 seed bundle is resolved to a node and the read files
+      # its ADR-46 edge. UNKNOWN answers nil: an unsettled or forked chain, or a contested slot once ADR-119 C1d
+      # fills the siblings. Conditional or reopened defs are not contested until C1d. A definer further up the
+      # chain (a prepended or included module, a superclass) is not the own class's, so the owner check declines it.
       def own_definer_node(scope, class_name, method_name)
         case DefinerResolution.resolve(scope, class_name, method_name, :instance, question: :definer)
         in DefinerResolution::Known(answer: [node, owner])

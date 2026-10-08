@@ -834,11 +834,19 @@ Errata (2026-10-08), C2 splits and C2-b1 lands (the instance typing site; lane 2
 - *Pins.* #1594's pending example passes and is now a positive example; #1572's reads `UNKNOWN` at C2-b1 (`Dynamic`,
   not yet typed from `Enumerable`); the conditional-include shapes are `[]`, tp-lost by design (Ruby with the
   condition unset raises, the other world's String is `M#foo`'s).
-- *Known cost.* An RBS-unknown module included ahead of the definer (`include ActionView::Helpers::NumberHelper`
-  before `Base`) declines the read, so a raising helper such as Mastodon's `fail_with_message` types `Dynamic` and the
-  `fail_with_message ... unless x` guard no longer narrows `x`: one new false positive on Mastodon
-  (`lib/mastodon/cli/media.rb:281`), pinned in `ruby_order_resolution_spec.rb`. Narrowing past an unsettled call that
-  raises is a follow-up.
+- *The `bot` exception (adopted by the maintainer, 2026-10-08).* `Unknown` types `Dynamic`, except that where every
+  project definer the chain holds types `bot`, the call types `bot`: `bot` reports nothing about a value, and the
+  exposure is master's. Precisely: on `UNKNOWN`, a chain not cut by the budget, at least one project entry with a
+  `def` of the name (at any position, since order is what is unknown), each inferred with the call's receiver and
+  arguments to `bot`, no project entry recording the name without a body or through a `possible` or contested
+  fact, and no RBS-known external declaring the name; `ABSENT` stays `Dynamic`. It restores the narrowing behind
+  `fail_with_message ... unless x` on Mastodon's `lib/mastodon/cli/media.rb:281`, which an RBS-unknown module
+  included ahead of the definer (`include ActionView::Helpers::NumberHelper` before `Base`) had turned into a false
+  positive. The accepted failure: the RBS-unknown module really defines the name and returns, so the guard
+  narrows wrongly and the statements after it are read as unreachable, a false negative pinned as deliberate in
+  `ruby_order_resolution_spec.rb`. The read files the class edges of every entry, the negative class edge of
+  each, and per project entry the method edge (`read_missing(:method, "Owner#name")` where it lacks the `def`),
+  since `candidates` returning nil skips `settle` and `DefinerResolution` files nothing past the external.
 - *WD7(f) census* (`tool/typing_census.rb`, `try_user_method_inference`, `--workers 0`): Rigor `lib` 54,605 typed calls
   to 54,453 (24 pairs lost); Mastodon `app lib config` 44,389 to 30,034 (1,814 pairs lost); GitLab `app/models` and
   `app/controllers` 78,014 to 18,556 (7,830 pairs lost, 832 of them on ten core models: Project 188, MergeRequest 157,
@@ -974,7 +982,10 @@ Resolved at acceptance (2026-10-01): every default below is adopted.
 7. **Sig-gen changes in the changelog.** *Default: yes, one entry for PR B.*
 8. **Pace for the grandfathered sets.** *Default: by filed bug; the gates prevent growth.*
 9. **The follow-up ADR's timing.** *Default: after C1 lands; before C2 if the WD7(f) census on GitLab
-   is not acceptable, or if #1592's or #1594's shapes are reported from a corpus.*
+   is not acceptable, or if #1592's or #1594's shapes are reported from a corpus.* **Adopted (maintainer,
+   2026-10-08).** C2-b1's typing loss (WD7(f), C2-b1 errata) is accepted on master ahead of the follow-up ADR;
+   [#1651](https://github.com/rigortype/rigor/issues/1651) gates v0.5.0: the loss is recovered, or explicitly
+   accepted, before that cut.
 10. **Relevance on a one-fork chain.** Deferred here; the agreeing-worlds witness is pinned as a
     decline. *Default: deferred until PR C's #1591 breakdown shows the share it would recover.*
 11. **WD3's singleton-side decline signals.** The `ActiveSupport::Concern` name test is a framework

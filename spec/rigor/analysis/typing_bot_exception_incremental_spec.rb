@@ -51,11 +51,13 @@ RSpec.describe "typing read's bot exception — incremental" do
 
   # `Root#fail_with` sits past `Base#fail_with`, the first candidate, so the decline (the RBS-unknown module ahead
   # of `Base`) filed nothing for it; the exception counts every definer on the chain whatever its position, so the
-  # new returning `def` turns the call `Dynamic` and the guard stops narrowing. Warm must say what cold says.
+  # new returning `def` turns the call `Dynamic` and the guard stops narrowing. Warm must say what cold says. (The
+  # self call's existence read files `Root`'s class edges too, so this pins the outcome, not which reader filed it.)
   it "re-checks the caller when a new file adds a returning definer past the first candidate" do
     Dir.mktmpdir do |dir|
       File.write(File.join(dir, "base.rb"), <<~RUBY)
         class Root
+          def other = 1
         end
 
         class Base < Root

@@ -9,6 +9,7 @@ require_relative "../source/node_walker"
 require_relative "../source/node_children"
 require_relative "../source/constant_path"
 require_relative "anonymous_meta_class"
+require_relative "definer_resolution"
 require_relative "block_repetition"
 require_relative "block_parameter_binder"
 require_relative "body_fixpoint"
@@ -5832,13 +5833,27 @@ module Rigor
       def source_decomposition_projection(subject_type, method_name, arg_types, scope)
         return nil unless subject_type.is_a?(Type::Nominal)
 
-        def_node = scope.def_node_slot(subject_type.class_name, method_name)
+        def_node = own_definer_node(scope, subject_type.class_name, method_name)
         return nil if def_node.nil?
 
         result = scope.user_method_return(def_node, subject_type, arg_types)
         return nil if result.nil? || result.is_a?(Type::Dynamic) || result.is_a?(Type::Top)
 
         result
+      end
+
+      # The `def` node the receiver's OWN class defines `method_name` with, or nil. ADR-119 C2-e (#1615): asked of
+      # `DefinerResolution`, so a slot rebuilt from an ADR-85 seed bundle is resolved to a node, the read files its
+      # ADR-46 edge, and a contested slot answers nil. A definer further up the chain is not the own class's.
+      def own_definer_node(scope, class_name, method_name)
+        case DefinerResolution.resolve(scope, class_name, method_name, :instance, question: :definer)
+        in DefinerResolution::Known(answer: [node, owner])
+          owner == class_name ? node : nil
+        in DefinerResolution::UNKNOWN # the case/in contract needs one arm per answer
+          nil
+        in DefinerResolution::ABSENT # rubocop:disable Lint/DuplicateBranch -- see above
+          nil
+        end
       end
 
       # A `StructInstance`'s own projection — `Tuple` of its member values for `deconstruct`, `HashShape` of

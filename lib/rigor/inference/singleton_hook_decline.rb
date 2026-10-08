@@ -72,7 +72,8 @@ module Rigor
       # module is on the same level's singleton segment (the extends fold copied it there; the copy is not where
       # Ruby finds the method — the module's own entry is, and an entry between them may answer first — so the
       # read asks again past it), `:stray` when it is not (the fold and the chain resolved the `extend`'s name to
-      # different modules, `extend X` inside `module A` with both `X` and `A::X` declared: the read declines), and
+      # different modules, `extend X` inside `module A` with both `X` and `A::X` declared; or the `def` is not the
+      # node that module's instance table holds, a `def C.x` written in its body: the read declines), and
       # nil otherwise (the class's own `def`, no `def`, or one with no recorded nesting).
       def copy_kind(scope, chain, method_name, hit)
         entry = chain.entries[hit.index]
@@ -85,7 +86,18 @@ module Rigor
         return :stray if level.nil? || level >= chain.level_count
 
         found = chain.level_entries(level).any? { |candidate| candidate.side == :instance && candidate.name == head }
-        found ? :copy : :stray
+        found && copied_from?(scope, head, method_name, entry.name) ? :copy : :stray
+      end
+
+      # Whether the class's singleton `def` is the very node `head`'s instance table holds, the one the fold
+      # copied: a receiverless `def`. A `def C.x` or `class << C; def x; end` written inside `head`'s body has the
+      # same nesting head and is the class's own, not a copy. (The walk records a `def C.x` written in `module X`
+      # as `X#x` too, so identity alone does not tell it from a copy; its receiver does.)
+      def copied_from?(scope, head, method_name, owner)
+        node = scope.singleton_def_for(owner, method_name)
+        return false if node.nil? || !node.receiver.nil?
+
+        scope.user_def_for(head, method_name).equal?(node)
       end
 
       # The innermost `Module.nesting` entry `owner`'s singleton `def` of the name was written in, or nil.

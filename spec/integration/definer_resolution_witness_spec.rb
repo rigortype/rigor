@@ -661,6 +661,19 @@ RSpec.describe Rigor::Inference::DefinerResolution do # rubocop:disable RSpec/Sp
         expect(singleton(scope_for(source), "A::C", :x)).to eq(:unknown)
       end
 
+      # The class's own singleton `def` written inside the extended module's body shares the module's nesting head,
+      # but it is not the node the fold copied: it is not asked past (round-2 review).
+      {
+        "`def C.x`" => "def C.x = :own",
+        "`class << C; def x`" => "class << C; def x = :own; end"
+      }.each do |label, own|
+        it "does not ask past the class's own #{label} written in the extended module" do
+          source = "class C; end\nmodule X\n  def x = :x\n  #{own}\nend\nclass C; extend X; end\n"
+          expect(ruby_singleton(source, "C", :x)).to eq([%w[#<Class:C> X], "#<Class:C>", ":own"])
+          expect(singleton(scope_for(source), "C", :x)).to eq(:unknown)
+        end
+      end
+
       it "declines `extend ::X`" do
         source = "#{modules}  class C\n    extend ::X\n  end\nend\n"
         expect(ruby_singleton(source, "A::C", :x)).to eq([%w[#<Class:A::C> X], "X", ":top"])

@@ -246,7 +246,7 @@ module Rigor
       def real_or_expanded(path)
         File.realpath(path)
       rescue StandardError
-        File.expand_path(path)
+        File.absolute_path(path)
       end
 
       # ADR-25 carry-over — the plain `bundle install` layout. {Environment::BundleSigDiscovery} detects a

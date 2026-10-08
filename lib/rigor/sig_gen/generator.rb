@@ -465,7 +465,7 @@ module Rigor
         @class_superclasses = {}
         @meta_layouts = collect_meta_layouts(scope_index)
         register_meta_classes
-        defs = collect_method_definitions(parse_result.value)
+        defs = collect_method_definitions(parse_result.value, scope_index)
         # Candidate construction freezes the per-file maps above (see {#build_candidate}), so every registration
         # pass has to be finished before the first `build_candidate` call. Meta members lead the RETURNED order —
         # a value class's members and constructors read first, ahead of the methods its block body defines.
@@ -498,7 +498,8 @@ module Rigor
       # - `@module_function_methods` records `(class_name, method_name)` pairs where a `module_function` (no
       #   args) call preceded the `def` inside a module body. The renderer emits `def self?.name` for these, the
       #   RBS spelling that matches the dual instance + singleton dispatch the runtime produces.
-      def collect_method_definitions(root)
+      def collect_method_definitions(root, scope_index)
+        @declared_types = scope_index[root].declared_types
         out = []
         walk_defs(root, [], false, false, out)
         out
@@ -543,6 +544,11 @@ module Rigor
       # `prefix` stays the nesting the header is WRITTEN in for {#record_superclass}: `::` re-anchors the
       # declaration, not the superclass expression beside it, which Ruby still evaluates in the enclosing cref.
       def descend_into_namespace?(node, prefix, out)
+        # Issue #1518 — a `class self::X` / `module self::X` the indexer declined (`self` is opaque, as under
+        # `REGISTRY.first.class_eval`) names no class, so its body must not be written out under the lexical
+        # `X`. The indexer's identity table is the single source of that decision.
+        return true if declined_self_header?(node)
+
         child_prefix = Source::ConstantPath.declaration_prefix(prefix, node.constant_path)
         return false unless child_prefix
 
@@ -551,6 +557,12 @@ module Rigor
         record_superclass(node, full, prefix)
         walk_namespace_body(node, child_prefix, out)
         true
+      end
+
+      def declined_self_header?(node)
+        path = node.constant_path
+        path.is_a?(Prism::ConstantPathNode) && path.parent.is_a?(Prism::SelfNode) &&
+          !@declared_types.key?(path)
       end
 
       # ADR-14: a generated subclass declaration MUST carry its superclass, or the sidecar `sig/` misrepresents

@@ -9633,10 +9633,11 @@ module Rigor
                        Source::ConstantPath.declaration_prefix(qualified_prefix, node.constant_path)
         return false unless child_prefix
 
-        if singleton_cref && !decl_nameable_under_cref?(node) && !self_decl&.any?
+        if self_decl&.empty? || (singleton_cref && !decl_nameable_under_cref?(node) && !self_decl&.any?)
           # `class D` below `class <<` opens `#<singleton>::D` — a real class nothing can
           # name — so nothing is registered; the body still walks so nameable headers
-          # below it re-anchor at a real cref.
+          # below it re-anchor at a real cref. The same holds for `class self::D` where
+          # `self` is opaque (`REGISTRY.first.class_eval { … }`): `self_decl` is `[]`.
           if node.body
             record_declarations(node.body, [], identity_table, discovered, renames,
                                 nil, singleton_cref: true)

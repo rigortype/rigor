@@ -91,7 +91,7 @@ module Rigor
       # run that reorders its roots still finds the previous slot's chain (the snapshot fingerprint sorts them
       # too), and one that respells them replaces the slot rather than adding one beside it.
       def normalize_roots(roots)
-        Array(roots).map { |root| File.expand_path(root.to_s) }
+        Array(roots).map { |root| File.absolute_path(root.to_s) }
       end
 
       # The roots as the run was given them, which {Entry#roots} holds and {.serve} compares. A missing root is

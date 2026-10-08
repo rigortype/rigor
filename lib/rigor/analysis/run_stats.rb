@@ -95,12 +95,12 @@ module Rigor
       # with any of the signature path prefixes (after expansion to absolute paths); `bundled` is the
       # remainder.
       def self.partition_classes(class_decl_paths:, signature_paths:)
-        prefixes = Array(signature_paths).map { |p| File.expand_path(p.to_s) }
+        prefixes = Array(signature_paths).map { |p| File.absolute_path(p.to_s) }
         return [0, class_decl_paths.size] if prefixes.empty?
 
         project = 0
         class_decl_paths.each_value do |path|
-          expanded = File.expand_path(path)
+          expanded = File.absolute_path(path)
           project += 1 if prefixes.any? { |prefix| expanded.start_with?("#{prefix}/") || expanded == prefix }
         end
         [project, class_decl_paths.size - project]

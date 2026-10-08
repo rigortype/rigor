@@ -140,7 +140,7 @@ module Rigor
         end
 
         def snapshot_root_candidates(roots, configured)
-          [roots, Array(roots).map { |path| File.expand_path(path) },
+          [roots, Array(roots).map { |path| File.absolute_path(path) },
            configured, Array(configured).map { |path| relative_to_pwd(path) }]
             .compact.reject(&:empty?).uniq
         end
@@ -148,8 +148,8 @@ module Rigor
         # `path` rendered relative to the working directory when it lies underneath it; unchanged otherwise.
         # Shared by the root-candidate list and the per-file snapshot lookup, which face the same skew.
         def relative_to_pwd(path)
-          absolute = File.expand_path(path)
-          prefix = "#{File.expand_path(Dir.pwd)}#{File::SEPARATOR}"
+          absolute = File.absolute_path(path)
+          prefix = "#{File.absolute_path(Dir.pwd)}#{File::SEPARATOR}"
           absolute.start_with?(prefix) ? absolute.delete_prefix(prefix) : path.to_s
         end
 

@@ -402,6 +402,53 @@ RSpec.describe "template units (#392)" do
     end
   end
 
+  # A directory literally named `~drafts` is an ordinary path to the analysis. `File.expand_path` read the leading
+  # `~` as a user's home and raised `ArgumentError: user drafts doesn't exist` the moment a template unit made the
+  # path arithmetic run — with units present, and not otherwise, which is why the first project to hit it had them.
+  describe "a path whose first segment starts with ~" do
+    def analyse_with_tilde_directory(template:)
+      Dir.mktmpdir("rigor-392-tilde-") do |dir|
+        build_project(dir, template: template)
+        FileUtils.mkdir_p(File.join(dir, "~drafts"))
+        File.write(File.join(dir, "~drafts", "draft.rb"), "x = \"abc\"\nx.missing_from_tilde\n")
+        config = configuration(effects: true, workers: 0, plugins: true)
+        Dir.chdir(dir) do
+          runner = Rigor::Analysis::Runner.new(
+            configuration: config, cache_store: nil,
+            plugin_requirer: ->(_name) { Rigor::Plugin.register(RigorViewDemoPlugin) }
+          )
+          result = guarded_run(runner, ["lib", "~drafts"])
+          yield runner, result
+        end
+      end
+    ensure
+      Rigor::Plugin.unregister!("view-demo")
+    end
+
+    it "resolves ~-prefixed relative and absolute spellings without expanding the ~" do
+      root = File.absolute_path("/project/root")
+
+      expect(Rigor::Analysis::TemplateUnitPaths.relative("~drafts/a.rb", root)).to eq("~drafts/a.rb")
+      expect(Rigor::Analysis::TemplateUnitPaths.relative("./~drafts/a.rb", root)).to eq("~drafts/a.rb")
+      expect(Rigor::Analysis::TemplateUnitPaths.relative("#{root}/~drafts/a.rb", root)).to eq("~drafts/a.rb")
+    end
+
+    it "analyses the ~-named directory when no template unit is produced" do
+      analyse_with_tilde_directory(template: false) do |_runner, result|
+        expect(result.diagnostics.map { |d| [File.basename(File.dirname(d.path)), d.rule] })
+          .to include(["~drafts", "call.undefined-method"])
+      end
+    end
+
+    it "analyses the ~-named directory alongside a template unit, and still finds the unit" do
+      analyse_with_tilde_directory(template: true) do |runner, result|
+        expect(result.diagnostics.map { |d| [File.basename(File.dirname(d.path)), d.rule] })
+          .to include(["~drafts", "call.undefined-method"])
+        expect(runner.template_unit_paths).to include("app/views/users/show.rbx")
+      end
+    end
+  end
+
   # #392 review round 4 — the path spellings a shell, an editor and a symlinked checkout produce are not
   # the spelling `Dir.glob` returns, and every one of them used to miss the unit and fall through to
   # parsing the template as plain Ruby.

@@ -121,7 +121,7 @@ module Rigor
       # syntax: this is the argument a shell just tab-completed, and `rigor effects app/models` meaning
       # "that directory" is the only reading a reader would guess.
       def self.normalize_scope(scope)
-        Array(scope).map { |path| File.expand_path(path.to_s.chomp("/")) }.freeze
+        Array(scope).map { |path| File.absolute_path(path.to_s.chomp("/")) }.freeze
       end
       private_class_method :normalize_scope
 
@@ -130,7 +130,7 @@ module Rigor
         return false if paths.nil? || paths.empty?
 
         paths.any? do |path|
-          absolute = File.expand_path(path)
+          absolute = File.absolute_path(path)
           roots.any? { |root| absolute == root || absolute.start_with?("#{root}/") }
         end
       end

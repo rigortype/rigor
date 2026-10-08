@@ -292,7 +292,7 @@ module Rigor
       test_paths = Configuration.new.resolved_test_paths
       return Configuration::DEFAULTS if test_paths.empty?
 
-      config_dir = Pathname(File.expand_path(File.dirname(path)))
+      config_dir = Pathname(File.absolute_path(File.dirname(path)))
       relative = test_paths.map { |root| Pathname(root).relative_path_from(config_dir).to_s }
       Configuration::DEFAULTS.merge("test_paths" => relative)
     end

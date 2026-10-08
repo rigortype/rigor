@@ -134,16 +134,14 @@ RSpec.describe "Declaration-fact witness" do
 
   describe "filed bugs" do
     it "#1518: declines a class self::X opened on a receiver no constant names" do
-      pending "https://github.com/rigortype/rigor/issues/1518 — the index build raises 'anonymous class has no name'"
-
-      expect(violations("issue_1518", relations: %i[classes])).to eq([])
+      expect(violations("issue_1518")).to eq([])
     end
 
-    # Flip this when #1518 is fixed: the tables build, and the pending example above passes.
-    it "#1518 today: Ruby loads the fixture and Rigor's index build raises" do
-      expect(DeclarationWitness.record(fixture("issue_1518"))["modules"].keys).to include("Registry", "Foo::Bar")
-      expect { DeclarationWitness.rigor_tables(fixture("issue_1518")) }
-        .to raise_error(ArgumentError, "anonymous class has no name")
+    it "#1518: still opens Foo::Bar for a constant receiver" do
+      tables, = DeclarationWitness.rigor_tables(fixture("issue_1518"))
+
+      expect(tables.discovered_classes.keys).to include("Foo::Bar")
+      expect(tables.discovered_classes.keys).not_to include("")
     end
 
     it "#1519: keys a compact header whose leading segment names the enclosing class once" do

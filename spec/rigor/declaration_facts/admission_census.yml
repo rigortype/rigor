@@ -11,6 +11,8 @@ members:
   declared_types:
     reads:
     - lib/rigor/inference/expression_typer.rb
+    - lib/rigor/inference/statement_evaluator.rb
+    - lib/rigor/sig_gen/generator.rb
     copies:
     - lib/rigor/inference/pre_eval_constants.rb
   class_ivars:

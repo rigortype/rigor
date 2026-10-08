@@ -252,7 +252,7 @@ RSpec.describe "resolution in Ruby's ancestor order (#1567, #1568, #1570, #1571)
       class HookBase
         def self.inherited(subclass)
           super
-          subclass.define_singleton_method(:build) { |left, right| [left, right] }
+          subclass.singleton_class.send(:define_method, :build) { |left, right| [left, right] }
         end
 
         def self.build(kind) = kind

@@ -58,7 +58,8 @@ module Rigor
         # project's filesystem, or the snapshot fingerprint the run was given no longer describes the tree.
         #
         # The fingerprint is recomputed AFTER the stamp: the caller computed it earlier, and a lockfile or a
-        # configured signature file changed in between would leave the snapshot the run restores keyed by one tree
+        # signature file under the configured or auto-detected `sig/` roots, or a `pre_eval:` file, changed in
+        # between would leave the snapshot the run restores keyed by one tree
         # and the run reading another. From the stamp on, the lockfiles are the guard's to watch ({#admits?}), which
         # is also what lets the slot's key, whose only file inputs they are, be computed when the run ends.
         #

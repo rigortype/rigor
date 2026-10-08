@@ -281,6 +281,7 @@ RSpec.describe Rigor::Analysis::IncrementalRunSlot do
     # editing one is a snapshot miss: the run is a full one, not a recheck, and the slot it writes answers the
     # changed tree. Nothing is left for a recheck to decline on these two inputs.
     def expect_full_run_after_fingerprint_change(config = configuration, paths: nil, closure: false)
+      expect(served(config, paths: paths)).to be_nil
       write("lib/c.rb", "class Other\n  def go\n    3\n  end\nend\n") if closure
       _, warm = incremental_run(config, paths: paths)
       expect(warm).to be(false)

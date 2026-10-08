@@ -257,7 +257,7 @@ SIG_PROVENANCE_RESIDUE = {
   # the bundle tables — not parameters — so they pin unmarked beside `trivial?` (unrenderable).
   "sig/rigor/effects/summary.rbs" => 3,
   "sig/rigor/effects/taint_cause.rbs" => 0,
-  "sig/rigor/environment.rbs" => 40,
+  "sig/rigor/environment.rbs" => 39,
   # -1 (#1429): a value-position `case` now types each arm under the subject's `when` narrowing, so
   # `ExpressionTyper#type_of_virtual`'s `when AST::TypeNode then node.type` arm reads `node` as the node class
   # and its return renders.

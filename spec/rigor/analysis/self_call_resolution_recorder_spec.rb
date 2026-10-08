@@ -45,6 +45,29 @@ RSpec.describe Rigor::Analysis::SelfCallResolutionRecorder do
     expect(calls).not_to include(["Widget", :compute_total])
   end
 
+  # ADR-119 C2-b1 — the typing read answers `UNKNOWN` (so the call types `Dynamic`) for a conditional include, but
+  # EXISTENCE is a different question: the method exists in the world where the include runs, and an existence read
+  # that turned false would record a miss that was not one. `self_call_method_known?` stays on the union memo.
+  it "does not record a call to a method a conditionally included module defines" do
+    calls = recorded_calls(
+      "widget.rb" => <<~RUBY
+        module Pricing
+          def compute_total = 100
+        end
+
+        class Widget
+          include Pricing if ENV["PRICING"]
+
+          def price
+            compute_total
+          end
+        end
+      RUBY
+    )
+
+    expect(calls).not_to include(["Widget", :compute_total])
+  end
+
   it "does not record a `module_function` sibling call (attempt-1 FP class #1)" do
     calls = recorded_calls(
       "helper.rb" => <<~RUBY

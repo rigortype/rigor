@@ -2280,7 +2280,7 @@ module Rigor
       def try_user_method_inference(receiver, call_node, arg_types, method_name: call_node.name, block_type: nil)
         return nil unless user_inference_receiver?(receiver)
 
-        def_node, owner = resolve_user_def_with_owner(receiver.class_name, method_name)
+        def_node, owner = resolve_typing_def_with_owner(receiver.class_name, method_name)
         return nil if def_node.nil?
 
         result = infer_user_method_return(def_node, receiver, arg_types,
@@ -2462,10 +2462,34 @@ module Rigor
           # is a pure function of the same frozen index — the sibling resolver it walks reads nothing else.
           # `singleton_def` is added lazily by {#singleton_def_through_ancestors}'s caller.
           slot = [discovery,
-                  { user_def: {}, self_pure: {}.compare_by_identity, yields: {}.compare_by_identity }]
+                  { user_def: {}, typing_def: {}, self_pure: {}.compare_by_identity, yields: {}.compare_by_identity }]
           Thread.current[CLASS_GRAPH_CACHE_KEY] = slot
         end
         slot[1]
+      end
+
+      # ADR-119 C2-b1 — the TYPING read of {#resolve_user_def_with_owner}: the same `[def_node, owner]` pair, but
+      # answered through {DefinerResolution} so a chain that does not stand for the name (a conditional definer,
+      # a conditional include, a fork, an external ancestor that may answer first) is `[nil, nil]` and the call
+      # types `Dynamic` instead of from a definer Ruby may not reach. ABSENT is the same `[nil, nil]`: at a typing
+      # site "no definer" and "cannot say" both fall through to `dispatch_miss_result`. Existence reads
+      # ({#resolve_user_def_through_ancestors}, the self-purity scan) stay on the union memo above: an existence
+      # read turning false there could ADD a `call.undefined-method` firing.
+      def resolve_typing_def_with_owner(class_name, method_name)
+        cache = class_graph_buckets[:typing_def]
+        table = (cache[class_name.to_s] ||= {})
+        key = method_name.to_sym
+        return table[key] if table.key?(key)
+
+        table[key] =
+          case DefinerResolution.resolve(scope, class_name, method_name, :instance, question: :definer)
+          in DefinerResolution::Known(answer: [node, owner])
+            [node, owner]
+          in DefinerResolution::UNKNOWN # the case/in contract needs one arm per answer
+            [nil, nil]
+          in DefinerResolution::ABSENT # rubocop:disable Lint/DuplicateBranch -- see above
+            [nil, nil]
+          end
       end
 
       def resolve_user_def_through_ancestors(class_name, method_name)

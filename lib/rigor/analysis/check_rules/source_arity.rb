@@ -241,8 +241,8 @@ module Rigor
           @scope.discovered_classes.key?(name) || Rigor::Reflection.rbs_class_known?(name, scope: @scope)
         end
 
-        # Yields each level of `class_name`'s chain. False when the walk stopped at the ADR-41 budget rather than ending: budget exhaustion is
-        # uncertainty, and every caller reads it as a reason to decline.
+        # Yields each level of `class_name`'s chain. False when the walk stopped at the ADR-41 budget rather than
+        # ending: budget exhaustion is uncertainty, and every caller reads it as a reason to decline.
         def walked_whole_chain?(class_name, &)
           levels, whole = chain_levels(arity_chain(class_name))
           levels.each(&)

@@ -1,14 +1,7 @@
-- base: 2bafdf509182d837272955a1661ec1cbf0c0a3a3
-  path: spec/integration/fixtures/arity_differential/issue_1570_skipped_include.rb
-  line: 22
-  column: 11
-  message: "wrong number of arguments to `foo' on C1570 (given 0, expected 1)"
-  verdict: fp-silenced
-  reason: "#1570. Ruby skips C1570's include M1570 (Base1570 already carries it), so C1570.new.foo is Base1570#foo() and correct; master checked it against M1570#foo(x). The mechanism is a fork: the chain's two worlds disagree, the candidate-set read answers UNKNOWN, and the rule is silent. Line 23, the control, still fires."
-- base: 2bafdf509182d837272955a1661ec1cbf0c0a3a3
-  path: spec/integration/fixtures/arity_differential/conditional_include.rb
-  line: 10
+- base: 366bb1518b4f1e619c936b89f2838ccec139fc5a
+  path: spec/integration/fixtures/arity_differential/conditional_def.rb
+  line: 8
   column: 13
-  message: "wrong number of arguments to `go' on CondInc (given 2, expected 1)"
+  message: "wrong number of arguments to `only' on CondDef (given 2, expected 1)"
   verdict: tp-lost
-  reason: "The include runs under Ruby 4.0 (RUBY_VERSION > \"3\"), so go(1, 2) raises ArgumentError: a real error. The mechanism is a fork plus a mark: a conditional include is a mark whose closure defines the name, so the candidate-set read declines (ADR-119 WD2, lost by design: Ruby's order depends on a fact the tables cannot prove)."
+  reason: "The def runs under Ruby 4.0 (RUBY_VERSION > \"3\"), so only(1, 2) raises ArgumentError: a real error. The mechanism is a possible definer (ADR-119 WD3, C1d-a): the def sits in an if branch, so its def-node slot is contested, the candidate-set read takes the next candidate (absent) as well, the two disagree and the read answers UNKNOWN. Lost by design: whether CondDef#only exists depends on a fact the tables cannot prove."

@@ -75,7 +75,7 @@ module Rigor
 
           lockfiles = lockfile_paths(configuration)
           named = Array(roots) + configuration.pre_eval + (configuration.signature_paths || ["sig"])
-          presence = (lockfiles + named.map { |path| File.expand_path(path.to_s) }).to_h do |path|
+          presence = (lockfiles + named.map { |path| File.absolute_path(path.to_s) }).to_h do |path|
             [path, File.exist?(path)]
           end
           new(started_ns: started_ns, device: device, lockfiles: lockfiles, presence: presence,
@@ -135,8 +135,11 @@ module Rigor
         # while the run reads moves the key as surely as one rewritten, and one rewritten and restored digests as it
         # did while the run may have read the other bytes.
         def self.lockfile_paths(configuration)
-          [configuration.bundler_lockfile, configuration.rbs_collection_lockfile, "Gemfile.lock",
-           "rbs_collection.lock.yaml"].compact.map { |path| File.expand_path(path.to_s) }.uniq
+          configured = [
+            [configuration.bundler_lockfile, Environment::LockfileResolver],
+            [configuration.rbs_collection_lockfile, Environment::RbsCollectionDiscovery]
+          ].filter_map { |path, resolver| resolver.configured_lockfile_path(path) if path }
+          (configured + %w[Gemfile.lock rbs_collection.lock.yaml].map { |path| File.absolute_path(path) }).uniq
         end
         private_class_method :lockfile_paths
 
@@ -235,7 +238,7 @@ module Rigor
         end
 
         def existence_changed?(path, strict:)
-          absolute = File.expand_path(path)
+          absolute = File.absolute_path(path)
           return File.exist?(absolute) != @presence[absolute] if @presence.key?(absolute)
 
           nearest = absolute

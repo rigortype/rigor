@@ -241,9 +241,10 @@ and `docs/internal-spec/inference-engine.md:670`. This ADR relies on the followi
   answer (RC:169–183); `settle` files every entry after the answer through `record_beyond`, with the
   negative class edge on a project entry's unqualified name and, for an external entry, only the sites
   of the names it can denote and **no negative edge** (RC:204–217, the `unless entry.external?` at
-  RC:214); nothing more is filed when the root heads its own chain and answers itself (RC:206). A
-  master answer records every class that order lists; `spec/rigor/analysis/unsettled_chain_incremental_spec.rb`
-  pins warm equals cold. A per-consumer de-duplication of those edges is #1590.
+  RC:214); nothing more is filed when the root heads its own chain and answers itself on a master-only
+  read (no `unknown_for:`, RC:206); under `unknown_for:` the entries after it are filed as for any
+  other answer (#1637). A master answer records every class that order lists;
+  `spec/rigor/analysis/unsettled_chain_incremental_spec.rb` pins warm equals cold. A per-consumer de-duplication of those edges is #1590.
 - **What it leaves open, and this ADR does not reopen:** #1570 (a one-fork disagreement whose readers
   keep master's answer; `ruby_order_resolution_spec.rb:142–147` pins it with a "flip this when ADR-119
   PR C" comment), #1572 (an external definer ahead of a project one), #1573 (a repeated `extend`'s
@@ -668,9 +669,9 @@ A sibling exists **iff its member is declared in `DiscoveryIndex::SIBLINGS`** �
   and class-variable classes, compared with the index `ScopeIndexer.index` (SI:103) builds. A set-valued
   table must satisfy `certain ⊆ runtime ⊆ certain ∪ possible`, a single-valued one must agree wherever
   it answers. Since no `possible_*` table exists yet, every entry reads as `certain` except the
-  self-extend edge Ruby does not show. `issue_1518`, `issue_1519`, `issue_1520` and `issue_1550` are
-  `pending` beside a pin of today's exact violations (`witness_spec.rb:75–119`), and so is
-  `issue_1573` since #1597 (`:131–140`). #1592's block shapes are the relation's `runtime ⊄ certain ∪
+  self-extend edge Ruby does not show. `issue_1519`, `issue_1520` and `issue_1550` are
+  `pending` beside a pin of today's exact violations (`witness_spec.rb:147–189`); `issue_1518` passes
+  since #1642 (the declaration is declined, `:136–145`). `issue_1573` is pinned too, since #1597 (`:191–203`). #1592's block shapes are the relation's `runtime ⊄ certain ∪
   possible` case that no fixture held; #1593 added its block shapes at the read level
   (`ruby_order_resolution_spec.rb:588`) and pinned the hook shapes at their false positive
   (`:718–735`).

@@ -282,9 +282,15 @@ module Rigor
       def run_incremental_check(configuration, options, cache_root, buffer = nil)
         require_relative "check_runner_factory"
         paths = @argv.empty? ? nil : @argv
-        fingerprint = Cache::IncrementalSnapshot.fingerprint(
-          configuration: configuration, roots: paths || configuration.paths
-        )
+        # `--no-cache` is a cold run that touches no persistent state: a nil fingerprint is the session's "uncomputable
+        # inputs" signal, so it neither loads the snapshot, nor saves it, nor writes the run-result slot.
+        fingerprint = if options.fetch(:no_cache)
+                        nil
+                      else
+                        Cache::IncrementalSnapshot.fingerprint(
+                          configuration: configuration, roots: paths || configuration.paths
+                        )
+                      end
         snapshot = Cache::IncrementalSnapshot.new(root: cache_root)
         store = incremental_cache_store(configuration, options, cache_root)
         session = Analysis::IncrementalSession.new(
@@ -338,8 +344,13 @@ module Rigor
       def run_editor_mode_option_b(session, snapshot, fingerprint, configuration, options)
         result = session.run_buffer_recheck(snapshot: snapshot, fingerprint: fingerprint)
         if result.nil?
-          @err.puts("rigor: --incremental has no reusable snapshot for this project; analysing the buffer " \
-                    "alone (run `rigor check --incremental` once to enable whole-project editor mode).")
+          if options.fetch(:no_cache)
+            @err.puts("rigor: --no-cache skips the incremental snapshot, so the buffer is analysed on its own " \
+                      "(no whole-project editor mode).")
+          else
+            @err.puts("rigor: --incremental has no reusable snapshot for this project; analysing the buffer " \
+                      "alone (run `rigor check --incremental` once to enable whole-project editor mode).")
+          end
           return nil
         end
 
@@ -579,7 +590,10 @@ module Rigor
             options[:coverage] = true
           end
           opts.on("--clear-cache", "Remove the .rigor/cache directory before running") { options[:clear_cache] = true }
-          opts.on("--no-cache", "Disable the persistent cache for this run") { options[:no_cache] = true }
+          opts.on("--no-cache",
+                  "Disable the persistent cache for this run (with --incremental: no snapshot is read or written)") do
+            options[:no_cache] = true
+          end
           opts.on("--[no-]stats",
                   "Print run summary (files, classes, memory, wall time) to stderr (default: on)") do |value|
             options[:stats] = value

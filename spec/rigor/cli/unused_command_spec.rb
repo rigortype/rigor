@@ -33,6 +33,22 @@ RSpec.describe Rigor::CLI::UnusedCommand do
     Dir.glob(File.join(dir, "**/*")).each { |f| File.utime(aged, aged, f) if File.file?(f) }
   end
 
+  # A path argument is taken as written (#1510): `~drafts` is a directory called `~drafts`, so reading it as a user's
+  # home must not raise `ArgumentError: user drafts doesn't exist`.
+  it "scans a ~name directory argument without raising" do
+    Dir.mktmpdir do |dir|
+      write_project(dir)
+      FileUtils.mkdir_p(File.join(dir, "~drafts"))
+      File.write(File.join(dir, "~drafts", "draft.rb"), "class Drafty\nend\n")
+      backdate(dir)
+
+      status, report, = run_in(dir, "~drafts")
+
+      expect(status).to eq(0)
+      expect(report).to be_a(Hash)
+    end
+  end
+
   describe "template mentions (ADR-102 WD4)" do
     it "demotes a declaration named inside a longer identifier — substring, not token, semantics" do
       Dir.mktmpdir do |dir|

@@ -1171,7 +1171,7 @@ module Rigor
       site = discovered_def_sources.dig(key, method_name.to_sym)
       return true if site.nil? || @source_path.nil?
 
-      File.expand_path(site.sub(/:\d+\z/, "")) == File.expand_path(@source_path)
+      File.absolute_path(site.sub(/:\d+\z/, "")) == File.absolute_path(@source_path)
     end
     private :same_file_top_level_def?
 

@@ -142,7 +142,7 @@ module Rigor
         buffer_name = decl.location&.buffer&.name
         return nil if buffer_name.nil?
 
-        File.expand_path(buffer_name.to_s)
+        File.absolute_path(buffer_name.to_s)
       rescue StandardError
         nil
       end

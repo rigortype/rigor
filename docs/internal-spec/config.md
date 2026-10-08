@@ -102,6 +102,39 @@ real, documented, and schema-declared — a `DEFAULTS`-keyed nested check would 
 `severity_overrides:` is an open map of rule ids besides. Nested unknown keys are tier 1's job: every
 nested object in the schema is `additionalProperties: false`, and the gate below keeps it complete.
 
+## Path-valued keys
+
+A path-valued setting names a file or directory in `.rigor.yml` (or, for `BUNDLE_PATH`, in Bundler's own
+config). It is resolved by `Rigor::ConfigPath.absolute`, which anchors a relative value at the directory of the
+file that names it (the project root for the keys resolved after load) and normalises with `File.absolute_path`
+semantics: `.` and `..` are resolved, and nothing else is.
+
+Home-directory spelling follows `File.expand_path` for exactly two forms:
+
+- `~/x` expands to `<home>/x`, and a bare `~` to `<home>`, where `<home>` is `Dir.home`. This is what Bundler does
+  with `BUNDLE_PATH: "~/gems"`, and what a `.rigor.yml` author writing `~/projects/app` means.
+- `~name` is a literal directory name. `~name/x` resolves to `<config dir>/~name/x`. The loader does not use
+  `File.expand_path` here, because it reads `~name` as the home of a user called `name` and raises `ArgumentError`
+  when that user does not exist, which crashed `rigor check` on a project directory named `~drafts` (#1510).
+  Resolution never raises on a `~`.
+
+The rule covers `paths:`, `signature_paths:`, `test_paths:`, `pre_eval:`, the nested `plugins_io.allowed_paths:`,
+each `includes:` entry, `bundler.bundle_path:`, `bundler.lockfile:`, and `rbs_collection.lockfile:`, plus the
+`BUNDLE_PATH` value read from `.bundle/config` (project or user-global). It does not cover `cache.path:`,
+`baseline:`, or `effects.snapshot.path:`, which stay literal and relative to the working directory.
+
+Bundler itself expands `~user/` in `BUNDLE_PATH`; Rigor keeps `~name` literal, so `BUNDLE_PATH: "~deploy/gems"` is
+not followed.
+
+The run and the incremental write guard expand the lockfile settings through the same helper per resolver
+(`LockfileResolver.configured_lockfile_path`, `RbsCollectionDiscovery.configured_lockfile_path`), so the guard
+watches the lockfile the run reads. `ConfigAudit` calls `ConfigPath.absolute` directly, with the same result.
+
+It does not cover a path Rigor is asked to *analyse* at run time: a CLI path argument, a template-unit path, or
+the runner's file sets. The shell has already expanded a `~` in an argument by the time Rigor sees it, so a `~`
+that survives is a directory name, and those sites use `File.absolute_path` directly. The template-unit path
+arithmetic (`Analysis::TemplateUnitPaths.relative`) follows that rule.
+
 ## Reserved namespaces
 
 A **reserved namespace** is a top-level key this implementation declares in the schema and never

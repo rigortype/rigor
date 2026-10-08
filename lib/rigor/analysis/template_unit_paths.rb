@@ -21,13 +21,15 @@ module Rigor
       # how an LSP publish for an open `.rbx` reported `call.unresolved-toplevel` for every helper while the
       # unit sat in the index under its relative name). A path outside the root is left alone.
       def relative(path, root)
-        # `expand_path` against the root first, so `./app/views/x.rbx`, `app/views/x.rbx` and
+        # `absolute_path` against the root first, so `./app/views/x.rbx`, `app/views/x.rbx` and
         # `$ROOT/lib/../app/views/x.rbx` all reduce to the one absolute spelling before anything is
         # compared. Without it an `--instead-of=./app/views/x.rbx` matched no unit and was parsed as plain
         # Ruby — the spellings a shell and an editor produce are not the spelling `Dir.glob` returns.
-        root_dir = File.expand_path(root.to_s)
-        text = File.expand_path(path.to_s, root_dir)
-        # BOTH spellings of the root. `expand_path` does not resolve symlinks, and the root is not always
+        # `absolute_path`, not `expand_path`: a leading `~` is a directory name here (`~drafts/a.rb`), and
+        # `expand_path` reads it as a user's home and raises `ArgumentError` for a user that does not exist.
+        root_dir = File.absolute_path(root.to_s)
+        text = File.absolute_path(path.to_s, root_dir)
+        # BOTH spellings of the root. `absolute_path` does not resolve symlinks, and the root is not always
         # already resolved: `Dir.pwd` is (which is why this was latent), but a caller may pass any path.
         prefixes(root_dir).each do |prefix|
           return text.delete_prefix(prefix) if text.start_with?(prefix)

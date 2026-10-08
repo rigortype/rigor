@@ -47,9 +47,25 @@ module Rigor
         end
       end
 
+      # #1590 — the resolution-chain filings ({file_chain_once}) an {Accumulator} or {Capture} already holds in
+      # full: per chain (by identity; the table holds the chain, so its identity cannot be reused while the target
+      # lives), the starts filed from it and the discovery index each was filed against. A filing is a pure
+      # function of those three, so filing it again into the same target adds nothing.
+      module ChainMemory
+        def chain_filed?(chain, start, discovery)
+          table = @chains&.[](chain)
+          !table.nil? && table.key?(start) && table[start].equal?(discovery)
+        end
+
+        def chain_filed!(chain, start, discovery)
+          ((@chains ||= {}.compare_by_identity)[chain] ||= {})[start] = discovery
+        end
+      end
+
       # Mutable per-consumer accumulator. Frozen into a {Record} snapshot when `record_for` returns.
       class Accumulator
         include ReplayMemory
+        include ChainMemory
 
         attr_reader :consumer, :sources, :missing, :symbol_sources, :ancestry_sources, :suspensions
 
@@ -64,6 +80,7 @@ module Rigor
           @symbol_sources = Hash.new { |h, k| h[k] = Set.new }
           @ancestry_sources = Set.new
           @held = nil
+          @chains = nil
           @suspensions = 0
         end
 
@@ -105,6 +122,7 @@ module Rigor
       # Mutable capture accumulator; snapshot into a frozen {ReadSet} when the capture window closes.
       class Capture
         include ReplayMemory
+        include ChainMemory
 
         attr_reader :reads, :missing
 
@@ -112,6 +130,7 @@ module Rigor
           @reads = Set.new
           @missing = Set.new
           @held = nil
+          @chains = nil
         end
 
         def snapshot
@@ -241,6 +260,29 @@ module Rigor
         missing = accumulator.missing
         read_set.missing.each { |entry| missing << entry }
         accumulator.hold!(read_set)
+      end
+
+      # #1590 — runs the block, which files a resolution chain's edges from entry `start` (nil: the root and the
+      # whole chain) against `discovery`, unless the current consumer's accumulator AND the innermost open capture
+      # already hold that filing; the block files the same edges every time, so skipping it there changes nothing.
+      # Every event reaches every capture open at the time (see CAPTURE_KEY), so the innermost capture holding the
+      # filing means every open capture does. A filing the accumulator holds but a capture opened since does not is
+      # filed again, so that capture's read set, replayed elsewhere, still carries it; and {withhold} starts a fresh
+      # accumulator and capture, which hold nothing. The marks are made only once the block has run, as {hold!}'s are.
+      def file_chain_once(chain, start, discovery)
+        accumulator = Thread.current[KEY]
+        return if accumulator.nil?
+
+        captures = Thread.current[CAPTURE_KEY]
+        open = captures && !captures.empty?
+        if accumulator.chain_filed?(chain, start, discovery) &&
+           (!open || captures.last.chain_filed?(chain, start, discovery))
+          return
+        end
+
+        yield
+        accumulator.chain_filed!(chain, start, discovery)
+        captures.each { |capture| capture.chain_filed!(chain, start, discovery) } if open
       end
 
       # {replay}'s share for the open captures. The innermost capture having seen `read_set` already means every

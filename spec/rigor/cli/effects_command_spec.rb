@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "fileutils"
 require "json"
 require "stringio"
 require "tmpdir"
@@ -28,6 +29,17 @@ RSpec.describe Rigor::CLI::EffectsCommand do
   # on rather than any project setting.
   around do |example|
     Dir.mktmpdir { |dir| Dir.chdir(dir) { example.run } }
+  end
+
+  it "reports on a ~name directory argument without raising (#1510)" do
+    FileUtils.mkdir_p("~drafts")
+    File.write("~drafts/a.rb", "class Drafty\n  def go\n    puts 1\n  end\nend\n")
+
+    status, out, err = run(["~drafts"])
+
+    expect(err).not_to include("doesn't exist")
+    expect(status).to eq(0)
+    expect(out).to include("Drafty#go")
   end
 
   it "prints one line per method, sorted by key, with the proven labels" do

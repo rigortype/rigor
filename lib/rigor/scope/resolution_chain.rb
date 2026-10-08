@@ -161,7 +161,7 @@ module Rigor
         # The verdict depends on EVERY node of the chain (a fork, an unpositioned edge, a second declaring file),
         # and `:master` changes the answer, so the entries past the answer are dependencies whichever way it
         # goes; `search` files only the entries ahead of an answer. `owner` names the entry that answered.
-        record_beyond(scope, owner)
+        record_beyond(scope, owner, unknown_for.nil?)
         return settle_unknown(scope, answer, unknown_for, &) unless unknown_for.nil?
         return :master unless @marks.empty?
 
@@ -235,16 +235,28 @@ module Rigor
       # edge there sends the reader to master's answer), so they are filed here, and only where master's answer
       # could differ from the chain's:
       #
-      # - the answer is the root's own entry and nothing is prepended (the root heads its chain): master's first
-      #   candidate is the root too, so no verdict can move it and nothing more is filed;
+      # - the answer is the root's own entry and nothing is prepended (the root heads its chain), and the verdict
+      #   is `:chain` or `:master` (`master_only`): master's first candidate is the root too, so no verdict can
+      #   move it and nothing more is filed. Under `unknown_for:` a mark or a `"*"` elsewhere on the chain turns
+      #   it `:unknown`, so the rest of the chain is filed as for any other answer;
       # - otherwise every entry after the answer (the whole chain when `owner` names none) files its class edge
       #   and, for a project entry, the negative class edge on its unqualified name, so a NEW file declaring or
       #   reopening it re-checks the reader. An external entry files only the sites of the names it can denote.
-      def record_beyond(scope, owner)
+      #
+      # What is filed is a function of this chain, the entry the filing starts from and the discovery index the
+      # sites are read from, so a consumer that settles the same chain from the same entry again (the common case:
+      # one hierarchy read at every call site of a file) files it once ({Analysis::DependencyRecorder.file_chain_once},
+      # #1590). The recorded edges are the same; only the repeated filing is gone.
+      def record_beyond(scope, owner, master_only)
         return unless Analysis::DependencyRecorder.active?
-        return if !owner.nil? && owner == @root && @entries.first&.name == @root
+        return if master_only && !owner.nil? && owner == @root && @entries.first&.name == @root
 
         start = owner.nil? ? nil : @entries.index { |entry| entry.name == owner }
+        Analysis::DependencyRecorder.file_chain_once(self, start, scope.discovery) { file_beyond(scope, start) }
+      end
+      private :record_beyond
+
+      def file_beyond(scope, start)
         ResolutionChain.record_class(scope, @root) if start.nil?
         index = start.nil? ? 0 : start + 1
         while index < @entries.size
@@ -254,7 +266,7 @@ module Rigor
           index += 1
         end
       end
-      private :record_beyond
+      private :file_beyond
 
       def record_head(scope, start, side)
         ResolutionChain.record_class(scope, @root) unless start.zero? && @entries.first&.name == @root

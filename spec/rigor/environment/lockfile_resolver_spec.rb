@@ -250,4 +250,20 @@ RSpec.describe Rigor::Environment::LockfileResolver do
       expect(resolved).to be_nil
     end
   end
+
+  describe ".resolve_lockfile_path with a `~/` lockfile" do
+    before { allow(Dir).to receive(:home).and_return(tmpdir) }
+
+    def resolve
+      described_class.resolve_lockfile_path(lockfile_path: "~/x.lock", project_root: tmpdir, auto_detect: false)
+    end
+
+    it "resolves under the home directory, and not at all while the file is absent" do
+      expect(described_class.configured_lockfile_path("~/x.lock")).to eq(File.join(tmpdir, "x.lock"))
+      expect(resolve).to be_nil
+
+      File.write(File.join(tmpdir, "x.lock"), "x")
+      expect(resolve.to_s).to eq(File.join(tmpdir, "x.lock"))
+    end
+  end
 end

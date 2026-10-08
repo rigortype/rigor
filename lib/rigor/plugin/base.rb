@@ -882,7 +882,7 @@ module Rigor
 
         before, separator, = file.rpartition("/lib/")
         root = separator.empty? ? File.dirname(file) : before
-        relative.map { |rel| File.expand_path(rel, root) }
+        relative.map { |rel| File.absolute_path(rel, root) }
       end
 
       # ADR-28 — the path-scoped method-protocol contracts this plugin contributes. Defaults to the
@@ -1160,7 +1160,7 @@ module Rigor
 
       def collect_glob_files(roots, patterns)
         matched = roots.flat_map do |root|
-          absolute = File.expand_path(root.to_s)
+          absolute = File.absolute_path(root.to_s)
           next [] unless File.directory?(absolute)
 
           patterns.flat_map { |pattern| Dir.glob(File.join(absolute, pattern.to_s)) }
@@ -1244,7 +1244,7 @@ module Rigor
         Array(tuples).flat_map do |tuple|
           roots, *patterns = Array(tuple)
           Array(roots).flat_map do |root|
-            absolute = File.expand_path(root.to_s)
+            absolute = File.absolute_path(root.to_s)
             patterns.map { |pattern| Cache::Descriptor::GlobEntry.compute(root: absolute, pattern: pattern.to_s) }
           end
         end.uniq

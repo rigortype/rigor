@@ -1510,7 +1510,7 @@ module Rigor
       # The signature tree's rows, the project's own and the rest.
       def signature_rows
         roots = SignatureRoots.new(@snapshots.signature_paths)
-        own = signature_root_candidates.map { |root| File.join(File.expand_path(root.to_s), "") }
+        own = signature_root_candidates.map { |root| File.join(File.absolute_path(root.to_s), "") }
         own_files, other_files = Cache::RbsDescriptor.file_entries(roots, comparator: :stat)
                                                      .partition { |row| within?(row.path, own) }
         own_globs, other_globs = Cache::RbsDescriptor.glob_entries(roots).partition { |row| within?(row.root, own) }
@@ -1519,7 +1519,7 @@ module Rigor
       end
 
       def within?(path, roots)
-        directory = File.join(File.expand_path(path.to_s), "")
+        directory = File.join(File.absolute_path(path.to_s), "")
         roots.any? { |root| directory.start_with?(root) }
       end
 
@@ -1542,8 +1542,8 @@ module Rigor
       end
 
       def unanalysed_pre_eval_entries(files)
-        analysed = files.to_set { |path| File.expand_path(path) }
-        outside = @configuration.pre_eval.reject { |path| analysed.include?(File.expand_path(path)) }
+        analysed = files.to_set { |path| File.absolute_path(path) }
+        outside = @configuration.pre_eval.reject { |path| analysed.include?(File.absolute_path(path)) }
         outside.map do |path|
           if File.file?(path)
             Cache::Descriptor::FileEntry.stat(path: path, digest: Cache::FileDigest.hexdigest(path))
@@ -1803,7 +1803,7 @@ module Rigor
         analysed = expansion.fetch(:files)
         files = discovery_files(expand_paths(@configuration.paths | paths).fetch(:files), analysed)
         # Overlapping arguments (`lib lib/user.rb`) name an analysed file twice; the widened set names it once.
-        files.size > analysed.uniq { |path| File.expand_path(path) }.size ? { files: files, errors: [] } : nil
+        files.size > analysed.uniq { |path| File.absolute_path(path) }.size ? { files: files, errors: [] } : nil
       end
 
       # The expansion with each file once, first spelling kept: overlapping arguments (`lib ./lib`) that do not
@@ -1811,16 +1811,16 @@ module Rigor
       # twice (#1556). Symlinked aliases (`src -> lib`) are not folded; that needs a realpath and stays out of scope.
       def once_each(expansion)
         files = expansion.fetch(:files)
-        unique = files.uniq { |path| File.expand_path(path) }
+        unique = files.uniq { |path| File.absolute_path(path) }
         unique.size == files.size ? expansion : expansion.merge(files: unique)
       end
 
       # Each file once, in project order, under the spelling the analysis uses when it is analysed.
       def discovery_files(project_files, analysed_files)
-        spelling = analysed_files.to_h { |path| [File.expand_path(path), path] }
+        spelling = analysed_files.to_h { |path| [File.absolute_path(path), path] }
         seen = Set.new
         project_files.filter_map do |path|
-          absolute = File.expand_path(path)
+          absolute = File.absolute_path(path)
           spelling.fetch(absolute, path) if seen.add?(absolute)
         end
       end
@@ -2392,7 +2392,7 @@ module Rigor
       def memo_files_by_segment
         @project_constant_writes.each_with_object({}) do |(name, by_path), files|
           set = (files[name.split("::").last] ||= Set.new)
-          by_path.each { |path, descriptor| set << File.expand_path(path) if memo_descriptor?(descriptor) }
+          by_path.each { |path, descriptor| set << File.absolute_path(path) if memo_descriptor?(descriptor) }
         end
       end
 
@@ -2450,14 +2450,14 @@ module Rigor
         writers = @project_constant_sources[name]
         wildcard = @project_constant_sources["#{Inference::ScopeIndexer::DYNAMIC_TARGET_PREFIX}#{segment}"]
         [writers, wildcard].any? do |paths|
-          paths&.any? { |path| !listed.include?(File.expand_path(path)) }
+          paths&.any? { |path| !listed.include?(File.absolute_path(path)) }
         end
       end
 
       # The listed `pre_eval:` files, expanded so a census path and a configured one compare as the same
       # file whichever spelling each arrived in.
       def pre_eval_path_set
-        @pre_eval_path_set ||= @configuration.pre_eval.to_set { |path| File.expand_path(path) }
+        @pre_eval_path_set ||= @configuration.pre_eval.to_set { |path| File.absolute_path(path) }
       end
 
       # ADR-46 — seed the instance + singleton `"path:line"` def-source tables (each only when non-empty).

@@ -33,6 +33,34 @@ RSpec.describe Rigor::SigGen::Generator do
     { "gem" => "rigor-rbs-inline", "id" => "rbs-inline", "config" => { "require_magic_comment" => false } }
   end
 
+  describe "#run on a `class self::X` the indexer declined (#1518)" do
+    it "emits nothing for the body, neither as a new class nor onto the real lexical class" do
+      path = write_fixture("lib/registry.rb", <<~RUBY)
+        module Registry
+          class Opaque
+            def self.real(a) = a
+          end
+          REGISTRY = [Class.new].freeze
+
+          REGISTRY.first.class_eval do
+            class self::Opaque
+              def self.other = "s"
+              def helper = :sym
+            end
+            module self::Mod
+              def helper = :sym
+            end
+          end
+        end
+      RUBY
+
+      candidates = generator(paths: [path]).run
+
+      expect(candidates.map { |c| [c.class_name, c.method_name] }).to eq([["Registry::Opaque", :real]])
+      expect(candidates.map(&:class_name)).not_to include("Registry::Mod")
+    end
+  end
+
   describe "#run on a fresh class without RBS" do
     it "classifies a literal-returning def as new-method with the inferred return" do
       path = write_fixture("lib/widget.rb", "class Widget\n  def n\n    42\n  end\nend\n")

@@ -157,11 +157,17 @@ module Rigor
       # replaced walk's answer, and a chain whose every mark is discharged for `name` (see {Relevance}) and that
       # has no fork is read as settled. Without the option the verdict is never `:unknown`: the readers that
       # compare it with `:master` would read a leaked `:unknown` as `:chain`.
-      def settle(scope, answer, owner: nil, unknown_for: nil, &)
+      #
+      # `own_hit: true` (with `unknown_for:` only) says the read's candidate set is one certain definer, the
+      # root's own instance entry at index 0. Where the root heads its chain (nothing is prepended to it), the
+      # chain stands for that answer whatever its fork count and whichever marks it carries, except a mark
+      # that may put an entry AHEAD of the root ({#own_entry_stands?}, #1622).
+      def settle(scope, answer, owner: nil, unknown_for: nil, own_hit: false, &)
         # The verdict depends on EVERY node of the chain (a fork, an unpositioned edge, a second declaring file),
         # and `:master` changes the answer, so the entries past the answer are dependencies whichever way it
         # goes; `search` files only the entries ahead of an answer. `owner` names the entry that answered.
-        record_beyond(scope, owner)
+        record_beyond(scope, owner, unknown_for.nil?)
+        return :chain if !unknown_for.nil? && own_hit && own_entry_stands?(scope, unknown_for)
         return settle_unknown(scope, answer, unknown_for, &) unless unknown_for.nil?
         return :master unless @marks.empty?
 
@@ -195,6 +201,41 @@ module Rigor
       end
       private :settle_marked
       private :settle_unknown
+
+      # ADR-119 WD2 (#1622) — whether the root's own entry, heading its instance chain, is the first definer
+      # Ruby calls under every world the marks and forks leave open. Ruby inserts an `include`, conditional,
+      # hook-driven or skipped, after the class it targets, never ahead of it; only a prepend lands ahead. With
+      # nothing prepended to the root, an entry can reach the root's head only through a mark whose edges may
+      # prepend ONTO THE ROOT, so a fork (an include-side skip, a module reached twice) never moves the answer,
+      # and a mark blocks only when it may prepend there:
+      #
+      # - `"*"`, on any node, blocks: an opaque mixin call (`send(:prepend, …)`), a hook's `base.prepend`, or a
+      #   superclass's `inherited` hook prepending onto the subclass;
+      # - a named entry listed on a superclass (a class node other than the root) does not: its prepends land at
+      #   that superclass's level, behind the root;
+      # - a named entry listed on the root or a module node blocks when the node prepends it (a concern's
+      #   `included do prepend P end` runs on the includer, the root among them), and not otherwise;
+      # - a mark {Relevance} discharges for the name does not block: its closure cannot answer the name wherever
+      #   it lands.
+      #
+      # A multi-file mark is not itself a block: a reopening that prepends unconditionally puts the module in
+      # the root's prepend region, and the root no longer heads its chain.
+      def own_entry_stands?(scope, name)
+        head = @entries.first
+        return false unless @side == :instance && !head.nil? && head.name == @root && head.side == :instance
+
+        @marks.all? { |mark| cannot_precede_root?(scope, mark) || Relevance.discharged?(scope, self, mark, name) }
+      end
+
+      def cannot_precede_root?(scope, mark)
+        listed = mark.listed
+        return false if listed.include?(Relevance::WILDCARD)
+        return true if mark.node != @root && @level_classes.include?(mark.node)
+
+        prepends = scope.discovery.discovered_prepends[mark.node]
+        prepends.nil? || listed.none? { |raw| prepends.include?(raw) }
+      end
+      private :own_entry_stands?, :cannot_precede_root?
 
       # Walks the entries in Ruby's order from `start` up to (not including) `stop`, and returns the first
       # truthy value the block gives for an entry, or nil. `side:` yields only the entries on that side.
@@ -235,14 +276,16 @@ module Rigor
       # edge there sends the reader to master's answer), so they are filed here, and only where master's answer
       # could differ from the chain's:
       #
-      # - the answer is the root's own entry and nothing is prepended (the root heads its chain): master's first
-      #   candidate is the root too, so no verdict can move it and nothing more is filed;
+      # - the answer is the root's own entry and nothing is prepended (the root heads its chain), and the verdict
+      #   is `:chain` or `:master` (`master_only`): master's first candidate is the root too, so no verdict can
+      #   move it and nothing more is filed. Under `unknown_for:` a mark or a `"*"` elsewhere on the chain turns
+      #   it `:unknown`, so the rest of the chain is filed as for any other answer;
       # - otherwise every entry after the answer (the whole chain when `owner` names none) files its class edge
       #   and, for a project entry, the negative class edge on its unqualified name, so a NEW file declaring or
       #   reopening it re-checks the reader. An external entry files only the sites of the names it can denote.
-      def record_beyond(scope, owner)
+      def record_beyond(scope, owner, master_only)
         return unless Analysis::DependencyRecorder.active?
-        return if !owner.nil? && owner == @root && @entries.first&.name == @root
+        return if master_only && !owner.nil? && owner == @root && @entries.first&.name == @root
 
         start = owner.nil? ? nil : @entries.index { |entry| entry.name == owner }
         ResolutionChain.record_class(scope, @root) if start.nil?

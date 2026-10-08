@@ -61,7 +61,9 @@ module Rigor
         hits = candidates(scope, chain, method_name, from, answer_in)
         return UNKNOWN if hits.nil?
 
-        verdict = chain.settle(scope, outcomes(hits), owner: hits.first&.owner, unknown_for: method_name) do |retro|
+        own = own_hit?(scope, chain, method_name, hits)
+        verdict = chain.settle(scope, outcomes(hits), owner: hits.first&.owner, unknown_for: method_name,
+                                                      own_hit: own) do |retro|
           retro_from = retro_position(chain, retro, from)
           outcomes(retro_from && candidates(scope, retro, method_name, retro_from, answer_in))
         end
@@ -69,6 +71,18 @@ module Rigor
         return UNKNOWN if side == :singleton && SingletonHookDecline.decline?(scope, chain, method_name, from, hits)
 
         collapse(hits)
+      end
+
+      # ADR-119 WD2 (#1622) — whether the candidate set is one certain definer that is the root's own instance
+      # entry at the chain's head and records the name itself: what `settle`'s `own_hit:` says. The record test
+      # matters where an answer function names the root without its recording the name (`SourceArity`'s
+      # own-level answer is always a candidate, an empty one where the class records nothing).
+      def own_hit?(scope, chain, method_name, hits)
+        hit = hits.first
+        return false unless hits.size == 1 && !hit.nil? && hit.index.zero? && hit.side == :instance
+        return false unless hit.owner == chain.root
+
+        scope.discovered_method?(hit.owner, method_name, :instance) || !scope.user_def_for(hit.owner, method_name).nil?
       end
 
       # The `:override` question's answer function, built from the caller's block: that block is NOT a per-chain
@@ -147,7 +161,10 @@ module Rigor
           entry = chain.entries[index]
           next false unless entry.external?
 
-          Analysis::DependencyRecorder.read_missing(:class, entry.raw.to_s.split("::").last) if recording
+          if recording
+            Analysis::DependencyRecorder.read_missing(:class, entry.raw.to_s.split("::").last)
+            Scope::ResolutionChain::Relevance.record_declared_module(scope, entry.candidates)
+          end
           !external_lacks?(scope, entry.candidates, entry.side, method_name)
         end || (last.nil? && implicit_object_answers?(scope, chain, method_name))
       end
@@ -255,7 +272,7 @@ module Rigor
         found
       end
 
-      private_class_method :override_answer, :retro_position, :candidates, :past_fold_copies, :decided,
+      private_class_method :own_hit?, :override_answer, :retro_position, :candidates, :past_fold_copies, :decided,
                            :external_may_answer?, :implicit_object_answers?, :external_lacks?,
                            :outcomes, :collapse, :possible?,
                            :default_answer, :definer_answer, :visibility_answer, :first_hit

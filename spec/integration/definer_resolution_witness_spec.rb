@@ -353,14 +353,15 @@ RSpec.describe Rigor::Inference::DefinerResolution do # rubocop:disable RSpec/Sp
       RUBY
     end
 
-    # A module the project declares without a `def` is an external entry no table can vouch for: a macro in
-    # `included do`, or a hook defined outside the body (`def Q.included(b) = ...`), defines on the includer with
-    # nothing recorded. It declines, as does a gem module declared nowhere and absent from RBS (a future gem-source
-    # approach, `dependencies.source_inference`, could read it).
-    it "declines on a declared def-less module whose body holds nothing" do
+    # A module the project declares without a `def` is an external entry. ADR-119's declared-module category
+    # (#1612) reads one that records nothing at all, extends nothing and lists nothing as lacking every name; a
+    # macro in `included do`, or a hook defined outside the body (`def Q.included(b) = ...`), defines on the
+    # includer with nothing recorded on the module, so both still decline, as does a gem module declared nowhere
+    # and absent from RBS (a future gem-source approach, `dependencies.source_inference`, could read it).
+    it "reads a declared def-less module whose body holds nothing as lacking the name" do
       source = "class B; def foo = 1; end\nmodule Empty; end\nclass C < B; include Empty; end\n"
       expect(RubyRun.stdout("#{source}p C.instance_method(:foo).owner\n").chomp).to eq("B")
-      expect(owner_of(resolve(project_scope("a.rb" => source), :foo))).to eq(:unknown)
+      expect(owner_of(resolve(project_scope("a.rb" => source), :foo))).to eq("B")
     end
 
     it "declines on a concern whose included block calls a macro (custom_macro)" do
@@ -890,6 +891,198 @@ RSpec.describe Rigor::Inference::DefinerResolution do # rubocop:disable RSpec/Sp
         expect(ruby_singleton(source, "C", :own)).to eq([%w[#<Class:C> #<Class:Base> Y Z], "#<Class:C>", ":own"])
         expect(singleton(scope_for(source), "C", :own)).to eq(:unknown)
       end
+    end
+  end
+
+  # ADR-119 WD2's own-hit rule (#1622): Ruby inserts an `include` after the class it targets, never ahead of it, so
+  # a mark or a fork cannot move a definer that is the root's own entry heading its chain; only an edge that may
+  # PREPEND onto the root can. Each fixture is run under Ruby, in both `ENV["Q"]` worlds where it is conditional
+  # and in both load orders where two files declare the class.
+  describe "the root's own definer (#1622)" do
+    let(:concern_shim) do
+      <<~RUBY
+        module ActiveSupport
+          module Concern
+            def self.extended(base) = base.instance_variable_set(:@_included_block, nil)
+
+            def included(base = nil, &block)
+              if base.nil?
+                @_included_block = block
+              else
+                super
+                base.class_eval(&@_included_block) if @_included_block
+              end
+            end
+          end
+        end
+      RUBY
+    end
+
+    def owner_says(source, prelude: nil)
+      RubyRun.stdout("#{source}p C.instance_method(:foo).owner\n", prelude: prelude).chomp
+    end
+
+    it "is Known C under a conditional include of a module defining the name (W1)" do
+      source = "module M; def foo = :m; end\nclass C; include M if ENV[\"Q\"]; def foo = :c; end\n"
+      expect(both_worlds(source, "C.instance_method(:foo).owner")).to eq(%w[C C])
+      expect(owner_of(resolve(scope_for(source), :foo))).to eq("C")
+    end
+
+    it "is Known C with the conditional include written after the def (W1b)" do
+      source = "module M; def foo = :m; end\nclass C; def foo = :c; include M if ENV[\"Q\"]; end\n"
+      expect(both_worlds(source, "C.instance_method(:foo).owner")).to eq(%w[C C])
+      expect(owner_of(resolve(scope_for(source), :foo))).to eq("C")
+    end
+
+    it "stays Unknown under a conditional prepend, which Ruby puts ahead of the class (W2)" do
+      source = "module P; def foo = :p; end\nclass C; prepend P if ENV[\"Q\"]; def foo = :c; end\n"
+      expect(both_worlds(source, "C.instance_method(:foo).owner")).to eq(%w[C P])
+      expect(owner_of(resolve(scope_for(source), :foo))).to eq(:unknown)
+    end
+
+    it "stays Unknown under a hook's base.prepend, a \"*\" on the hook module (W3)" do
+      source = "module P; def foo = :p; end\nmodule H; def self.included(base) = base.prepend(P); end\n" \
+               "class C; def foo = :c; include H; end\n"
+      expect(owner_says(source)).to eq("P")
+      expect(owner_of(resolve(scope_for(source), :foo))).to eq(:unknown)
+    end
+
+    # Ruby answers C here, but the hook's edge is the same `"*"` a `base.prepend` leaves: which kind of mixin it
+    # was is unknown until #1608 splits the sentinel. Flip this when it does.
+    it "stays Unknown under a hook's base.include, whose \"*\" may be a prepend (W3b)" do
+      source = "module A; def foo = :a; end\nmodule H; def self.included(base) = base.include(A); end\n" \
+               "class C; def foo = :c; include H; end\n"
+      expect(owner_says(source)).to eq("C")
+      expect(owner_of(resolve(scope_for(source), :foo))).to eq(:unknown)
+    end
+
+    it "stays Unknown for a definer that is not the root's own, where a hook's include lands ahead of it (W4)" do
+      source = "module M; def foo = :m; end\nmodule A; def foo = :a; end\n" \
+               "module Concern; def self.included(base) = base.include(A); end\n" \
+               "class C; include M; include Concern; end\n"
+      expect(owner_says(source)).to eq("A")
+      expect(owner_of(resolve(scope_for(source), :foo))).to eq(:unknown)
+    end
+
+    describe "a root two files declare (W5)" do
+      let(:modules) { "module X; def foo = :x; end\nmodule Y; def foo = :y; end\n" }
+      let(:first) { "class C; include X; def foo = :c; end\n" }
+
+      it "is Known C in either load order" do
+        second = "class C; include Y; end\n"
+        expect([owner_says(modules + first + second), owner_says(modules + second + first)]).to eq(%w[C C])
+        scope = project_scope("a.rb" => modules + first, "b.rb" => second)
+        expect(owner_of(resolve(scope, :foo))).to eq("C")
+      end
+
+      it "stays Unknown when the reopening prepends" do
+        second = "class C; prepend Y; end\n"
+        expect([owner_says(modules + first + second), owner_says(modules + second + first)]).to eq(%w[Y Y])
+        scope = project_scope("a.rb" => modules + first, "b.rb" => second)
+        expect(owner_of(resolve(scope, :foo))).to eq(:unknown)
+      end
+    end
+
+    # Two include-side skips (M and N each reach C through Base too) are more than two worlds, so no other read
+    # stands on this chain; the root's own entry is ahead of every one of them in each.
+    it "is Known C on a chain with two forks, in either load order of the superclass's includes" do
+      head = "module M; def foo = :m; end\nmodule N; def foo = :n; end\n"
+      base = "class Base; include M; include N; end\n"
+      klass = "class C < Base; include M; include N; def foo = :c; end\n"
+      expect([owner_says(head + base + klass), owner_says("#{head}class Base; end\n#{klass}#{base}")])
+        .to eq(%w[C C])
+      expect(owner_of(resolve(scope_for(head + base + klass), :foo))).to eq("C")
+    end
+
+    it "is Known C on a forked chain that also carries an undischarged mark" do
+      source = "module M; def foo = :m; end\nmodule Q; def foo = :q; end\nclass Base; include M; end\n" \
+               "class C < Base; include M; include Q if ENV[\"Q\"]; def foo = :c; end\n"
+      expect(both_worlds(source, "C.instance_method(:foo).owner")).to eq(%w[C C])
+      expect(owner_of(resolve(scope_for(source), :foo))).to eq("C")
+    end
+
+    it "is Known C under a superclass's conditional prepend, which lands at the superclass's level" do
+      source = "module P; def foo = :p; end\nclass Base; prepend P if ENV[\"Q\"]; end\n" \
+               "class C < Base; def foo = :c; end\n"
+      expect(both_worlds(source, "C.instance_method(:foo).owner")).to eq(%w[C C])
+      expect(owner_of(resolve(scope_for(source), :foo))).to eq("C")
+    end
+
+    it "stays Unknown under a superclass's inherited hook that prepends onto the subclass" do
+      source = "module P; def foo = :p; end\nclass Base; def self.inherited(sub); super; sub.prepend(P); end; end\n" \
+               "class C < Base; def foo = :c; end\n"
+      expect(owner_says(source)).to eq("P")
+      expect(owner_of(resolve(scope_for(source), :foo))).to eq(:unknown)
+    end
+
+    it "stays Unknown under a concern whose included block prepends onto the includer" do
+      source = "module P; def foo = :p; end\n" \
+               "module Q; extend ActiveSupport::Concern; included do; prepend P; end; end\n" \
+               "class C; def foo = :c; include Q; end\n"
+      expect(owner_says(source, prelude: concern_shim)).to eq("P")
+      expect(owner_of(resolve(scope_for(source), :foo))).to eq(:unknown)
+    end
+
+    it "is Known C under a concern whose included block includes into the includer" do
+      source = "module P; def foo = :p; end\n" \
+               "module Q; extend ActiveSupport::Concern; included do; include P; end; end\n" \
+               "class C; def foo = :c; include Q; end\n"
+      expect(owner_says(source, prelude: concern_shim)).to eq("C")
+      expect(owner_of(resolve(scope_for(source), :foo))).to eq("C")
+    end
+
+    # `SourceArity`'s own-level answer names the class at index 0 whether or not it records the name; the rule
+    # reads only a root that does.
+    it "does not read an answer that names the root without its recording the name" do
+      source = "module M; def foo = :m; end\nclass C; include M if ENV[\"Q\"]; end\n"
+      expect(both_worlds(source, "(C.instance_method(:foo).owner rescue :none)")).to eq(%w[none M])
+      names_root = proc { |_chain, from| described_class::Hit.new(:none, "C", 0, :instance) if from.zero? }
+      result = resolution.resolve(scope_for(source), "C", :foo, :instance, question: :arity, &names_root)
+      expect(owner_of(result)).to eq(:unknown)
+    end
+  end
+
+  # ADR-119 WD2's declared-module category (#1612): the shapes beside the three in "external ancestors the project
+  # declares or RBS does not know".
+  describe "a declared module the chain holds as external (#1612)" do
+    it "discharges a conditional include of a bare declared module" do
+      source = "class Base; def foo = 1; end\nmodule Empty; end\nclass C < Base; include Empty if ENV[\"Q\"]; end\n"
+      expect(both_worlds(source, "C.instance_method(:foo).owner")).to eq(%w[Base Base])
+      expect(owner_of(resolve(project_scope("a.rb" => source), :foo))).to eq("Base")
+    end
+
+    it "declines on a hook defined for the module inside another module's body" do
+      source = <<~RUBY
+        class Base; def foo = 1; end
+        module Q; end
+        module X; def Q.included(b) = b.attr_reader(:foo); end
+        class C < Base; include Q; end
+      RUBY
+      expect(RubyRun.stdout("#{source}p C.instance_method(:foo).owner\n").chomp).to eq("C")
+      expect(owner_of(resolve(project_scope("a.rb" => source), :foo))).to eq(:unknown)
+    end
+
+    it "declines on a module whose body calls a macro naming the method" do
+      source = <<~RUBY
+        class Module; def my_macro(name) = define_method(name) { :q }; end
+        class Base; def foo = 1; end
+        module Q; my_macro :foo; end
+        class C < Base; include Q; end
+      RUBY
+      expect(RubyRun.stdout("#{source}p C.instance_method(:foo).owner\n").chomp).to eq("Q")
+      expect(owner_of(resolve(project_scope("a.rb" => source), :foo))).to eq(:unknown)
+    end
+
+    # Any `extend` disqualifies: an extended module's instance `included` is the module's hook, and a concern's
+    # `included do` and `class_methods do` blocks run on the includer.
+    it "declines on a module that extends another" do
+      source = <<~RUBY
+        class Base; def foo = 1; end
+        module Q; extend Comparable; end
+        class C < Base; include Q; end
+      RUBY
+      expect(RubyRun.stdout("#{source}p C.instance_method(:foo).owner\n").chomp).to eq("Base")
+      expect(owner_of(resolve(project_scope("a.rb" => source), :foo))).to eq(:unknown)
     end
   end
 

@@ -70,6 +70,39 @@ RSpec.describe "Declaration-fact witness" do
     end
   end
 
+  # ADR-119 WD3 — the possible definers, witnessed in the world where each runs and in the one where none does. Each
+  # world alone would let a wrong classification through (a possible def read as certain agrees with the first, a
+  # certain one read as possible with the second), so both must agree.
+  #
+  # The visibilities relation is left out: the table does not record `private def hidden`'s wrap-around form (a
+  # gap of the visibility walk, `build_discovered_method_visibilities`), whose certainty is ADR-119 C1d-b's.
+  describe "possible definers" do
+    let(:relations) { DeclarationWitness::RELATIONS - %i[visibilities] }
+
+    it "agrees with Ruby in the world where every possible definer runs" do
+      expect(violations("possible_defs_taken", relations: relations)).to eq([])
+    end
+
+    it "agrees with Ruby in the world where no possible definer runs" do
+      expect(violations("possible_defs_skipped", relations: relations)).to eq([])
+    end
+
+    it "reads the conditional definers as possible and the meta-new block and private def as certain" do
+      tables, = DeclarationWitness.rigor_tables(fixture("possible_defs_skipped"))
+
+      expect(tables.possible_discovered_methods).to eq(
+        "Probe" => { gated: :instance, gated_reader: :instance, gated_alias: :instance, in_block: :instance,
+                     rescued_main: :instance, gated_singleton: :singleton },
+        "Reopened" => { reopened: :instance }
+      )
+      expect(tables.contested_discovered_def_nodes)
+        .to include(["Probe", :both], ["Probe", :gated], ["Probe", :in_block])
+      expect(tables.contested_discovered_singleton_def_nodes).to eq(Set[["Probe", :gated_singleton]])
+      expect(tables.discovered_methods.fetch("Probe::Made")).to eq(made: :instance)
+      expect(tables.discovered_methods.fetch("Probe")).to include(hidden: :instance)
+    end
+  end
+
   describe "filed bugs" do
     it "#1518: declines a class self::X opened on a receiver no constant names" do
       pending "https://github.com/rigortype/rigor/issues/1518 — the index build raises 'anonymous class has no name'"

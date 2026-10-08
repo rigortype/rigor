@@ -344,9 +344,20 @@ RSpec.describe "DiscoveryIndex sibling pairing (ADR-119 WD1)" do
     it "carries every seeded sibling through the file's own member rebuilds" do
       tables = Rigor::Protection::DiscoverySeed.seed_tables(with_siblings(cold_index(project), injected))
 
-      discovery = indexed_discovery(tables)
+      discovery = indexed_discovery(tables, "class Gadget\n  def other(arg) = arg\nend\n")
 
       expect(siblings.values.to_h { |sibling| [sibling, discovery.public_send(sibling)] }).to eq(injected)
+    end
+
+    # ADR-119 WD3 — the file wins the slots it writes: its certain `def run` replaces the seed's contested one.
+    it "lets the file's certain def clear the seeded contest on the slot it writes" do
+      tables = Rigor::Protection::DiscoverySeed.seed_tables(with_siblings(cold_index(project), injected))
+
+      discovery = indexed_discovery(tables)
+
+      expect(discovery.contested_discovered_def_nodes).to be_empty
+      expect(discovery.contested_discovered_parameter_envelopes)
+        .to eq(injected.fetch(:contested_discovered_parameter_envelopes))
     end
 
     it "adds the siblings of a conditional extend to the seeded ones, which both survive" do

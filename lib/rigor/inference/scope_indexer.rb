@@ -34,6 +34,7 @@ require_relative "scope_indexer/superclasses_collector"
 require_relative "scope_indexer/def_nestings_collector"
 require_relative "scope_indexer/layered_def_nestings"
 require_relative "scope_indexer/mixin_accumulator"
+require_relative "scope_indexer/certainty"
 require_relative "scope_indexer/member_layouts_collector"
 
 module Rigor
@@ -160,7 +161,9 @@ module Rigor
         # discovered-methods existence table and the instance def-node table — see {#build_methods_and_def_nodes}.
         # `seed_discovered_methods` seeds the former onto the scope and returns the def-node table for
         # `merge_project_method_indexes` below.
-        seeded_scope, file_def_nodes, file_envelopes = seed_discovered_methods(seeded_scope, default_scope, root)
+        # ADR-119 WD3 — the file's possible contributions, classified once for both def-contribution walks.
+        certainty = Certainty.possible_nodes(root)
+        seeded_scope, file_tables = seed_discovered_methods(seeded_scope, default_scope, root, certainty)
 
         # v0.0.2 #5 + ADR-24 slice 2 — record per-instance-method def nodes, the class -> superclass map, and the
         # class/module -> included-modules map, each merged under the cross-file pre-pass seed (see below). v0.1.2 —
@@ -168,7 +171,7 @@ module Rigor
         # `def.method-visibility-mismatch` and ADR-35 `def.override-visibility-reduced` CheckRules consult the table.
         # Seeded inside `merge_project_method_indexes` so the per-file visibilities merge OVER the cross-file project
         # seed rather than overwriting it.
-        seeded_scope = merge_project_method_indexes(seeded_scope, default_scope, root, file_def_nodes, file_envelopes)
+        seeded_scope = merge_project_method_indexes(seeded_scope, default_scope, root, file_tables, certainty)
 
         table = {}.compare_by_identity
         table.default = seeded_scope
@@ -195,14 +198,21 @@ module Rigor
       # onto `seeded_scope` (merged UNDER the cross-file pre-pass seed `default_scope` carries), and returns `[scope,
       # file_def_nodes, file_envelopes]` so the caller can thread the def-node and issue #992 envelope tables into
       # {#merge_project_method_indexes} without walking the file a second time.
-      def seed_discovered_methods(seeded_scope, default_scope, root)
-        file_methods, file_def_nodes, file_envelopes, file_refinements =
-          build_methods_and_def_nodes(root, default_scope.source_path)
-        discovered_methods = deep_merge_class_methods(default_scope.discovered_methods, file_methods)
-        # ADR-119 WD1 — the file records no possible fact, so the seed's sibling is carried over with its member.
+      #
+      # ADR-119 WD3 — the file's `possible_discovered_methods` folds over the seed's by {#fold_possible_methods}, so a
+      # name the file defines certainly is no longer possible and a name only the file's possible contribution
+      # supplies becomes possible. The file's other siblings are returned for {#merge_project_method_indexes}.
+      def seed_discovered_methods(seeded_scope, default_scope, root, certainty = Certainty.possible_nodes(root))
+        file_methods, file_def_nodes, file_envelopes, file_refinements, file_siblings =
+          build_methods_and_def_nodes(root, default_scope.source_path, certainty: certainty)
+        seed_methods = default_scope.discovered_methods
+        discovered_methods = deep_merge_class_methods(seed_methods, file_methods)
         discovery = seeded_scope.discovery.with(
           discovered_methods: discovered_methods,
-          possible_discovered_methods: seeded_scope.discovery.possible_discovered_methods
+          possible_discovered_methods: fold_possible_methods(
+            seeded_scope.discovery.possible_discovered_methods, seed_methods,
+            file_siblings[:possible_discovered_methods], file_methods
+          )
         )
         # Issue #1120 — only a file that refines something pays the overlay; the cross-file seed already carries
         # every other file's refinements.
@@ -211,7 +221,7 @@ module Rigor
             discovered_refinements: merge_refinement_tables(default_scope.discovered_refinements, file_refinements)
           )
         end
-        [seeded_scope.with_discovery(discovery), file_def_nodes, file_envelopes]
+        [seeded_scope.with_discovery(discovery), [file_def_nodes, file_envelopes, file_siblings]]
       end
 
       # ADR-48 Struct slice 3 — installs the top-level fold-safe-local set ({Inference::StructFoldSafety}). Struct
@@ -232,11 +242,14 @@ module Rigor
       # Issue #992 — the envelope table is JOINED with the seed rather than overlaid: the seed already carries this
       # file's own contribution (identical, so the join keeps it), and a reopening in a sibling file must still
       # make a disagreeing name opaque here, which "same-file declarations win" would silently undo.
-      def merge_project_method_indexes(seeded_scope, default_scope, root, file_def_nodes, file_envelopes)
+      #
+      # `file_tables` is `[file_def_nodes, file_envelopes, file_siblings]` from {#seed_discovered_methods}.
+      def merge_project_method_indexes(seeded_scope, default_scope, root, file_tables,
+                                       certainty = Certainty.possible_nodes(root))
         # ADR-116 WD5 — the superclass, def-nesting and member-layout tables come from ONE shared walk.
         walked = declaration_walk_tables(root, default_scope.source_path)
-        def_nodes, def_nestings = merge_def_node_tables(default_scope, walked, file_def_nodes)
-        singleton_def_nodes = merge_singleton_def_nodes(default_scope, root)
+        def_nodes, def_nestings = merge_def_node_tables(default_scope, walked, file_tables[0])
+        singleton_def_nodes, file_singleton = merge_singleton_def_nodes(default_scope, root, certainty)
         superclasses, header_nestings = merge_ancestry_tables(default_scope, walked)
         includes, prepends, *mixin_unpositioned = merge_mixin_tables(default_scope, root)
         # ADR-35 — per-file visibilities merged OVER the cross-file seed (the current file is authoritative for its own
@@ -252,7 +265,8 @@ module Rigor
         #
         # Issue #898 — and the same walk's table is now kept, merged over the cross-file seed the way
         # `includes` is: `Narrowing` asks it what a class object's singleton ancestry holds.
-        siblings = seeded_scope.discovery.sibling_tables
+        siblings = per_file_siblings(seeded_scope.discovery.sibling_tables, file_tables[0], file_tables[2],
+                                     file_singleton)
         extends, methods_table, unpositioned =
           merge_and_fold_extends(default_scope, root, def_nodes, singleton_def_nodes, seeded_scope, siblings,
                                  mixin_unpositioned)
@@ -269,14 +283,12 @@ module Rigor
             discovered_prepends: prepends, discovered_extends: extends,
             unpositioned_mixins: unpositioned,
             discovered_method_visibilities: method_visibilities,
-            discovered_parameter_envelopes: merge_envelope_seed(default_scope, file_envelopes),
+            discovered_parameter_envelopes: merge_envelope_seed(default_scope, file_tables[1]),
             data_member_layouts: data_member_layouts, struct_member_layouts: struct_member_layouts,
             discovered_deferred_ranges: merge_deferred_ranges_seed(default_scope, root),
-            # ADR-119 WD1 — the seed's siblings, which the extends fold above followed (copy on write, so the seed's
-            # tables are never written): a fact the seed holds stays, a copy this file's fold made is added, and a
-            # name this file's certain `extend` supplies is no longer possible. The file's own `def`s are not yet a
-            # producer, so a seed slot this file's def replaces keeps its contested mark, which over-contests and
-            # is safe. Letting the file win there is a C1d refinement, with the producers that fill the siblings.
+            # ADR-119 WD1/WD3 — the seed's siblings with this file's folded in ({#per_file_siblings}: the file wins
+            # every slot it writes), which the extends fold above then followed (copy on write, so the seed's
+            # tables are never written).
             **siblings
           )
         )
@@ -290,10 +302,32 @@ module Rigor
 
       # Per-file singleton def nodes merged OVER the cross-file seed (same-file declaration is
       # authoritative for its own classes, sibling-file defs are preserved).
-      def merge_singleton_def_nodes(default_scope, root)
-        default_scope.discovered_singleton_def_nodes.merge(
-          build_discovered_singleton_def_nodes(root)
+      #
+      # Returns `[merged table, [file table, file contested slots]]` ({#build_singleton_def_tables}).
+      def merge_singleton_def_nodes(default_scope, root, certainty)
+        file_singleton = build_singleton_def_tables(root, certainty: certainty)
+        merged = default_scope.discovered_singleton_def_nodes.merge(
+          file_singleton.first
         ) { |_class, cross_file, per_file| cross_file.merge(per_file) }
+        [merged, file_singleton]
+      end
+
+      # ADR-119 WD3 — the per-file merge of the slot siblings, under the members' own merges: this file's
+      # `def_nodes` and singleton defs win every slot they write, so the seed's contest on those keys is replaced by
+      # the file's ({#fold_slot_contests}); the envelopes are joined, so their contests union. The possible methods
+      # were folded already ({#seed_discovered_methods}).
+      def per_file_siblings(siblings, file_def_nodes, file_siblings, file_singleton)
+        file_singleton_def_nodes, file_singleton_contested = file_singleton
+        siblings[:contested_discovered_def_nodes] = fold_slot_contests(
+          siblings[:contested_discovered_def_nodes], file_def_nodes, file_siblings[:contested_discovered_def_nodes]
+        )
+        siblings[:contested_discovered_singleton_def_nodes] = fold_slot_contests(
+          siblings[:contested_discovered_singleton_def_nodes], file_singleton_def_nodes, file_singleton_contested
+        )
+        siblings[:contested_discovered_parameter_envelopes] = union_paths(
+          siblings[:contested_discovered_parameter_envelopes], file_siblings[:contested_discovered_parameter_envelopes]
+        )
+        siblings
       end
 
       # Issue #1123 — the two instance-side mixin tables, from ONE descent of this file. Each merges over
@@ -3200,20 +3234,59 @@ module Rigor
       # Issue #1120 — and a fourth, `refinements`: `{refined class => {method => [refining modules]}}`, the
       # `def`s of every `refine X do … end` body ({#record_refinement_defs}). Those are kept OUT of the first
       # three tables, which answer everywhere: a refined method exists only where a `using` is in effect.
-      def build_methods_and_def_nodes(root, source_path = nil)
-        tables = MethodTables.new({}, {})
+      #
+      # ADR-119 WD3 — and a fifth, the file's def-contribution siblings ({MethodTables#siblings}):
+      # `possible_discovered_methods`, `contested_discovered_def_nodes` and
+      # `contested_discovered_parameter_envelopes`, from the {Certainty} classification `certainty` (computed here
+      # when the caller has none).
+      def build_methods_and_def_nodes(root, source_path = nil, certainty: Certainty.possible_nodes(root))
+        tables = MethodTables.new({}, {}, nil, certainty, true)
         def_nodes = {}
         walk_methods_and_def_nodes(root, [], false, tables, def_nodes, source_path)
-        apply_alias_def_nodes(root, def_nodes)
+        apply_alias_def_nodes(root, def_nodes, tables)
         [tables.existence.transform_values(&:freeze).freeze, def_nodes.transform_values(&:freeze).freeze,
-         tables.envelopes.transform_values(&:freeze).freeze, freeze_refinements(tables.refinements)]
+         tables.envelopes.transform_values(&:freeze).freeze, freeze_refinements(tables.refinements),
+         tables.siblings]
       end
 
       # The accumulator {#walk_methods_and_def_nodes} threads: the existence table and its issue #992
       # envelope twin, which only {#record_method} and {#record_surface_mark} write, and the issue #1120
       # refinement table, which only {#record_refinement_defs} writes. That last one stays nil until a
       # `refine` block is seen, so a file without one allocates nothing for it.
-      MethodTables = Struct.new(:existence, :envelopes, :refinements)
+      #
+      # ADR-119 WD3 — `certainty` is the file's {Certainty} answer and `certain` whether the contribution being
+      # recorded is certain ({#at} sets it before each recorder). `possible`, `contested_envelopes` and
+      # `contested_def_nodes` are the siblings the recorders fill, each nil until a possible contribution writes it.
+      MethodTables = Struct.new(:existence, :envelopes, :refinements, :certainty, :certain, :possible,
+                                :contested_envelopes, :contested_def_nodes) do
+        # Sets {#certain} for the contribution `node` and returns the tables.
+        def at(node)
+          self.certain = !Certainty.possible?(certainty, node)
+          self
+        end
+
+        # The `{sibling name => table}` part this walk fills, frozen, with the shared empty value for each
+        # sibling nothing wrote.
+        def siblings
+          empty = Scope::DiscoveryIndex::EMPTY_SIBLINGS
+          {
+            possible_discovered_methods:
+              possible ? possible.transform_values(&:freeze).freeze : empty[:possible_discovered_methods],
+            contested_discovered_def_nodes:
+              frozen_paths(contested_def_nodes) || empty[:contested_discovered_def_nodes],
+            contested_discovered_parameter_envelopes:
+              frozen_paths(contested_envelopes) || empty[:contested_discovered_parameter_envelopes]
+          }.freeze
+        end
+
+        private
+
+        def frozen_paths(set)
+          return nil if set.nil? || set.empty?
+
+          set.each(&:freeze).freeze
+        end
+      end
 
       EMPTY_REFINEMENTS = {}.freeze
       private_constant :EMPTY_REFINEMENTS
@@ -3287,9 +3360,58 @@ module Rigor
 
       # The walk's single existence writer. Everything except a `def` passes no envelope and so records
       # {Source::ParameterEnvelope::OPAQUE}.
+      #
+      # ADR-119 WD3 — the existence table's `possible` sibling follows the contribution's certainty
+      # ({MethodTables#certain}): a certain contribution removes its kind from the name's possible kind, and a
+      # possible one adds its kind unless the table already answered that kind certainly. A possible contribution
+      # also contests the envelope entry it joins (envelopes are joined, so one possible joiner is enough).
       def record_method(tables, class_name, method_name, kind, envelope = Source::ParameterEnvelope::OPAQUE)
+        follow_method_certainty(tables, class_name, method_name, kind) unless tables.certain && tables.possible.nil?
         record_method_kind(tables.existence, class_name, method_name, kind)
         record_envelope(tables.envelopes, class_name, [kind, method_name], envelope)
+        contest_envelope(tables, class_name, [kind, method_name]) unless tables.certain
+      end
+
+      # The `possible_discovered_methods` half of {#record_method}, read BEFORE the existence table is written.
+      def follow_method_certainty(tables, class_name, method_name, kind)
+        if tables.certain
+          settle_possible_kind(tables.possible, class_name, method_name, kind)
+        else
+          sitting = tables.possible&.dig(class_name, method_name)
+          return if kind_covers?(tables.existence[class_name]&.[](method_name), kind) && !kind_covers?(sitting, kind)
+
+          row = ((tables.possible ||= {})[class_name] ||= {})
+          row[method_name] = merge_sibling_kind(sitting, kind)
+        end
+      end
+
+      # A certain contribution: `kind` leaves the name's possible kind, and an emptied row goes.
+      def settle_possible_kind(possible, class_name, method_name, kind)
+        row = possible[class_name]
+        return if row.nil?
+
+        remaining = without_kind(row[method_name], kind)
+        return if remaining == row[method_name]
+
+        remaining.nil? ? row.delete(method_name) : (row[method_name] = remaining)
+        possible.delete(class_name) if row.empty?
+      end
+
+      # Whether a recorded kind (`:instance`, `:singleton`, `:both`, or nil) answers `kind`.
+      def kind_covers?(recorded, kind)
+        !recorded.nil? && (recorded == kind || recorded == Scope::DiscoveryIndex::METHOD_KIND_BOTH)
+      end
+
+      # `recorded` less `kind`: nil when nothing remains.
+      def without_kind(recorded, kind)
+        return nil if recorded.nil? || recorded == kind
+        return recorded unless recorded == Scope::DiscoveryIndex::METHOD_KIND_BOTH
+
+        kind == :instance ? :singleton : :instance
+      end
+
+      def contest_envelope(tables, class_name, key)
+        (tables.contested_envelopes ||= Set.new) << [class_name, key]
       end
 
       def record_envelope(envelopes, class_name, key, envelope)
@@ -3375,7 +3497,7 @@ module Rigor
             # `self::` header under a REBOUND self (eval/meta-new body) names
             # `owner::Name` instead.
             child_cref = unnameable_decl?(node, self_decl, singleton_cref)
-            record_declaration_facts(node, child_prefix, methods_acc) unless child_cref
+            record_declaration_facts(node, child_prefix, methods_acc.at(node)) unless child_cref
             body_prefix = child_cref ? [] : child_prefix
             if node.body
               walk_methods_and_def_nodes(node.body, body_prefix, false, methods_acc, def_nodes_acc,
@@ -3418,7 +3540,9 @@ module Rigor
             child_prefix = meta_new_child_prefix(node, qualified_prefix, def_owner_prefix)
             meta_ownerless = singleton_cref &&
                              !meta_new_path_target_nameable?(node, def_owner_prefix)
-            record_meta_new_facts(meta_new_rvalue(node), child_prefix, methods_acc) if child_prefix && !meta_ownerless
+            if child_prefix && !meta_ownerless
+              record_meta_new_facts(meta_new_rvalue(node), child_prefix, methods_acc.at(node))
+            end
             enclosing.each do |part|
               walk_methods_and_def_nodes(part, qualified_prefix, in_singleton_class, methods_acc,
                                          def_nodes_acc, source_path, def_owner_prefix,
@@ -3445,16 +3569,16 @@ module Rigor
           unless def_owner_prefix&.empty? || defs_singleton == :unnameable ||
                  (singleton_cref && owner_prefix.empty?)
             singleton_def = in_singleton_class || defs_singleton
-            record_def_method(node, owner_prefix, singleton_def, methods_acc)
+            record_def_method(node, owner_prefix, singleton_def, methods_acc.at(node))
             record_def_body_evidence(node, owner_prefix, methods_acc)
-            record_def_node(node, owner_prefix, singleton_def, def_nodes_acc)
+            record_def_node(node, owner_prefix, singleton_def, def_nodes_acc, methods_acc)
           end
           return
         when Prism::AliasMethodNode, Prism::UndefNode
           unless def_owner_prefix&.empty? || defs_singleton == :unnameable ||
                  (singleton_cref && owner_prefix.empty?)
             record_alias_or_undef(node, owner_prefix, in_singleton_class || defs_singleton,
-                                  methods_acc)
+                                  methods_acc.at(node))
           end
           return
         when Prism::CallNode
@@ -3464,7 +3588,8 @@ module Rigor
                                               singleton_cref: singleton_cref,
                                               defs_singleton: defs_singleton)
           end
-          anonymous = record_call_node_methods(node, owner_prefix, in_singleton_class, methods_acc, source_path)
+          anonymous = record_call_node_methods(node, owner_prefix, in_singleton_class, methods_acc.at(node),
+                                               source_path)
           # Issue #1120 — a refine body's defs go to the refinement table and nowhere else.
           if (target = refine_target(node))
             return record_refinement_defs(node, target, qualified_prefix, owner_prefix, methods_acc)
@@ -3586,7 +3711,7 @@ module Rigor
       def walk_anonymous_meta_block(call_node, name, qualified_prefix, in_singleton_class, methods_acc, # rubocop:disable Metrics/ParameterLists
                                     def_nodes_acc, source_path, def_owner_prefix = nil,
                                     singleton_cref: false, defs_singleton: false)
-        record_meta_members(call_node, [name], methods_acc)
+        record_meta_members(call_node, [name], methods_acc.at(call_node))
         call_node.rigor_each_child do |child|
           if child.equal?(call_node.block)
             body = call_node.block.body
@@ -4000,13 +4125,30 @@ module Rigor
       # same-named local method.
       TOP_LEVEL_DEF_KEY = "<toplevel>"
 
-      def record_def_node(def_node, qualified_prefix, in_singleton_class, accumulator)
+      #
+      # ADR-119 WD3 — the slot follows its writer (later-wins): a certain write clears the key from
+      # `contested_discovered_def_nodes` and a possible one adds it ({MethodTables#certain}, set for `def_node`).
+      def record_def_node(def_node, qualified_prefix, in_singleton_class, accumulator, tables = nil)
         return if def_singleton?(def_node, qualified_prefix, in_singleton_class)
 
         class_name = qualified_prefix.empty? ? TOP_LEVEL_DEF_KEY : qualified_prefix.join("::")
         accumulator[class_name] ||= {}
         accumulator[class_name][def_node.name] = def_node
-        record_anonymous_body_def_as_toplevel(def_node, qualified_prefix, accumulator)
+        follow_slot_writer(tables, :contested_def_nodes, [class_name, def_node.name], tables.nil? || tables.certain)
+        record_anonymous_body_def_as_toplevel(def_node, qualified_prefix, accumulator, tables)
+      end
+
+      # ADR-119 WD3 — a single-valued slot's contest follows the write that holds it: `certain` clears `key` from
+      # the `slot` Set of `tables`, a possible write adds it. Nil `tables` (a caller with no certainty) is a no-op.
+      def follow_slot_writer(tables, slot, key, certain)
+        return if tables.nil?
+
+        if certain
+          set = tables[slot]
+          set&.delete(key)
+        else
+          (tables[slot] ||= Set.new) << key
+        end
       end
 
       # #319 — a `def` inside an anonymous `Class.new` / `Module.new` body ALSO stays in the `<toplevel>` table.
@@ -4018,12 +4160,16 @@ module Rigor
       # `spawn(...) { start }` block. Giving the body a class of its own must not silently retract it: the call
       # resolves at runtime, and `call.unresolved-toplevel` firing on it would be a new false positive traded
       # for the ones this change retires. Never clobbers a real top-level `def` of the same name.
-      def record_anonymous_body_def_as_toplevel(def_node, qualified_prefix, accumulator)
+      def record_anonymous_body_def_as_toplevel(def_node, qualified_prefix, accumulator, tables = nil)
         return unless qualified_prefix.length == 1
         return unless Type::AnonymousClassName.match?(qualified_prefix.first)
 
         table = (accumulator[TOP_LEVEL_DEF_KEY] ||= {})
-        table[def_node.name] ||= def_node
+        return if table.key?(def_node.name)
+
+        table[def_node.name] = def_node
+        follow_slot_writer(tables, :contested_def_nodes, [TOP_LEVEL_DEF_KEY, def_node.name],
+                           tables.nil? || tables.certain)
       end
 
       # Module-singleton call resolution (ADR-57 follow-up) — the SINGLETON-side mirror of `build_discovered_def_nodes`.
@@ -4035,9 +4181,43 @@ module Rigor
       # singleton defs (`def self.x` outside any class — `self` is `main`) are not recorded; they have no constant
       # receiver to dispatch through.
       def build_discovered_singleton_def_nodes(root)
-        accumulator = {}
+        build_singleton_def_tables(root).first
+      end
+
+      # ADR-119 WD3 — {#build_discovered_singleton_def_nodes} with its sibling: `[table,
+      # contested_discovered_singleton_def_nodes]`, the second a frozen Set of `[class, name]` keys whose slot a
+      # possible `def self.x`, `class << self` def or `module_function` copy wrote last ({Certainty} `certainty`).
+      def build_singleton_def_tables(root, certainty: Certainty.possible_nodes(root))
+        accumulator = SingletonDefTable.new.track(certainty)
         walk_singleton_def_nodes(root, [], false, accumulator)
-        accumulator.transform_values(&:freeze).freeze
+        [accumulator.transform_values(&:freeze).freeze, accumulator.contested_paths]
+      end
+
+      # The singleton walk's accumulator: the `{class => {name => DefNode}}` table, plus the contested slots, which
+      # follow each slot's writer ({#follow_slot_writer}'s rule).
+      class SingletonDefTable < Hash
+        def track(certainty)
+          @certainty = certainty
+          @contested = nil
+          self
+        end
+
+        # Writes the slot; `node` and `other` are the contributions the write rests on, possible when either is.
+        def write(class_name, name, def_node, node, other = nil)
+          (self[class_name] ||= {})[name] = def_node
+          if Certainty.possible?(@certainty, node) || (other && Certainty.possible?(@certainty, other))
+            (@contested ||= Set.new) << [class_name, name]
+          else
+            @contested&.delete([class_name, name])
+          end
+        end
+
+        def contested_paths
+          return Scope::DiscoveryIndex::EMPTY_SIBLINGS[:contested_discovered_singleton_def_nodes] if
+            @contested.nil? || @contested.empty?
+
+          @contested.each(&:freeze).freeze
+        end
       end
 
       # Issue #1097 — `[[start_offset, end_offset, name, kind, owner], ...]` for every `def` / block /
@@ -4992,7 +5172,16 @@ module Rigor
         return if qualified_prefix.empty?
 
         class_name = qualified_prefix.join("::")
-        (accumulator[class_name] ||= {})[def_node.name] = def_node
+        write_singleton_slot(accumulator, class_name, def_node.name, def_node, def_node)
+      end
+
+      # One singleton slot write, through {SingletonDefTable#write} when the walk tracks certainty.
+      def write_singleton_slot(accumulator, class_name, name, def_node, node, other = nil)
+        if accumulator.is_a?(SingletonDefTable)
+          accumulator.write(class_name, name, def_node, node, other)
+        else
+          (accumulator[class_name] ||= {})[name] = def_node
+        end
       end
 
       # `module_function :a, :b` retro-marks named siblings as module-functions: registers on the module's singleton
@@ -5003,7 +5192,7 @@ module Rigor
 
         class_name = qualified_prefix.join("::")
         ModuleFunctionState.each_singleton_copy(node, statements) do |name, def_node|
-          (accumulator[class_name] ||= {})[name] = def_node
+          write_singleton_slot(accumulator, class_name, name, def_node, node, def_node)
         end
       end
 
@@ -6898,6 +7087,7 @@ module Rigor
       def record_method_envelope_opaque(tables, class_name, method_name)
         %i[instance singleton].each do |kind|
           record_envelope(tables.envelopes, class_name, [kind, method_name], Source::ParameterEnvelope::OPAQUE)
+          contest_envelope(tables, class_name, [kind, method_name]) unless tables.certain
         end
       end
 
@@ -7018,8 +7208,11 @@ module Rigor
       # Post-pass over the `def_nodes` accumulator: for every `alias` declaration inside a class body, if the original
       # method name maps to a `Prism::DefNode`, register the new name pointing to the same node so inter-procedural
       # return-type inference works for the aliased name.
-      def apply_alias_def_nodes(root, accumulator)
-        alias_map = collect_class_alias_map(root, [], {})
+      #
+      # ADR-119 WD3 — the alias is the slot's writer: the new name's slot is contested when the alias is possible
+      # or the slot it copies is contested, and cleared otherwise.
+      def apply_alias_def_nodes(root, accumulator, tables = nil)
+        alias_map = collect_class_alias_map(root, [], AliasMap.new.track(tables&.certainty))
         alias_map.each do |class_name, aliases|
           class_defs = accumulator[class_name]
           next unless class_defs
@@ -7029,7 +7222,37 @@ module Rigor
             next unless def_node.is_a?(Prism::DefNode)
 
             (accumulator[class_name] ||= {})[new_name] = def_node
+            next if tables.nil?
+
+            certain = !alias_map.possible?(class_name, new_name) &&
+                      !tables.contested_def_nodes&.include?([class_name, old_name])
+            follow_slot_writer(tables, :contested_def_nodes, [class_name, new_name], certain)
           end
+        end
+      end
+
+      # The `{class => {new name => old name}}` map {#collect_class_alias_map} fills, which also remembers, per
+      # entry, whether the alias that wrote it last is possible ({Certainty}).
+      class AliasMap < Hash
+        def track(certainty)
+          @certainty = certainty || Certainty::EMPTY
+          @possible = nil
+          self
+        end
+
+        # Records that `node` wrote the `[class_name, new_name]` entry.
+        def wrote(class_name, new_name, node)
+          return if @certainty.nil?
+
+          if Certainty.possible?(@certainty, node)
+            (@possible ||= Set.new) << [class_name, new_name]
+          else
+            @possible&.delete([class_name, new_name])
+          end
+        end
+
+        def possible?(class_name, new_name)
+          !@possible.nil? && @possible.include?([class_name, new_name])
         end
       end
 
@@ -7092,7 +7315,7 @@ module Rigor
         # class bodies (`Class.new do … end`), so the walk continues below it either way.
         names = alias_method_call_names(node)
         if names && !rec_prefix.empty? && !(singleton_cref && leaf_owner.nil?)
-          (accumulator[rec_prefix.join("::")] ||= {})[names.first] = names.last
+          record_alias_call_entry(accumulator, rec_prefix.join("::"), names, node)
         end
         false
       end
@@ -7201,6 +7424,11 @@ module Rigor
         accumulator
       end
 
+      def record_alias_call_entry(accumulator, class_name, names, node)
+        (accumulator[class_name] ||= {})[names.first] = names.last
+        accumulator.wrote(class_name, names.first, node) if accumulator.is_a?(AliasMap)
+      end
+
       def record_alias_map_entry(alias_node, qualified_prefix, accumulator)
         return if qualified_prefix.empty?
         return unless alias_node.new_name.is_a?(Prism::SymbolNode) && alias_node.old_name.is_a?(Prism::SymbolNode)
@@ -7209,6 +7437,7 @@ module Rigor
         new_name = alias_node.new_name.unescaped.to_sym
         old_name = alias_node.old_name.unescaped.to_sym
         (accumulator[class_name] ||= {})[new_name] = old_name
+        accumulator.wrote(class_name, new_name, alias_node) if accumulator.is_a?(AliasMap)
       end
 
       def record_define_method(call_node, qualified_prefix, in_singleton_class, accumulator)
@@ -7427,7 +7656,27 @@ module Rigor
         append_def_signatures(parts, file_index[:def_nodes], "#")
         append_def_signatures(parts, file_index[:singleton_def_nodes], ".")
         append_envelope_signature(parts, file_index[:parameter_envelopes] || {})
+        append_certainty_signature(parts, file_index[:siblings] || {})
         Digest::SHA256.hexdigest(parts.join("\x00"))
+      end
+
+      # ADR-119 WD3 — which of the file's contributions are possible is a declaration surface too: a `… end if X`
+      # modifier, or moving a `def` into a block, keeps every def line and envelope and moves only this, while a
+      # dependent's candidate-set read now declines where it answered.
+      def append_certainty_signature(parts, siblings)
+        certainty = []
+        siblings.each do |name, table|
+          next if table.empty?
+
+          if name == :possible_discovered_methods
+            table.each do |class_name, row|
+              row.each { |method_name, kind| certainty << "P:#{class_name}##{method_name}=#{kind}" }
+            end
+          else
+            table.each { |path| certainty << "C:#{name}:#{path.inspect}" }
+          end
+        end
+        parts.concat(certainty.sort)
       end
 
       # Issue #992 — the joined envelope table is a declaration surface the per-def signatures above cannot
@@ -7704,6 +7953,7 @@ module Rigor
       # Polymorphic over the def-node value: a re-walked file's `file_index` carries live nodes; a cached
       # bundle's carries {DefHandle}s. The merges never deref the value, so both fold identically.
       def fold_file_index(acc, file_index)
+        fold_siblings(acc, file_index)
         fold_def_tables(acc, file_index)
         # Issue #992 — a pre-23 seed bundle carries no envelopes; the SCHEMA bump makes such a blob a cold
         # rebuild, and an absent table only ever withholds a check.
@@ -7722,18 +7972,115 @@ module Rigor
         acc[:global_write_census].merge(file_index[:global_write_census] || GlobalWriteCensus::EMPTY)
         fold_ancestry_tables(acc, file_index)
         fold_constant_tables(acc, file_index)
-        fold_siblings(acc, file_index)
       end
 
       # ADR-119 WD1 — the `possible_*` / `contested_*` siblings of {Scope::DiscoveryIndex::SIBLINGS}, carried as ONE
       # `{sibling name => table}` Hash (`acc[:siblings]`) through the accumulator, the fold, the compact-header
-      # rename, the finalize and the seed bundle, so no copy path names a sibling and none can drop one. Folded by
-      # union, so the fold is order-independent and a bundle-served file folds as its live walk would; a pre-35
-      # bundle carries none, and the SCHEMA bump makes such a blob a cold rebuild. No producer fills a sibling yet.
+      # rename, the finalize and the seed bundle, so no copy path names a sibling and none can drop one. A pre-36
+      # bundle carries the empty siblings of the walk before WD3's producers, and the SCHEMA bump makes such a blob
+      # a cold rebuild. Called BEFORE the file's members fold, because the `possible` rule reads the accumulator's
+      # member as it stood ({#fold_file_siblings}).
       def fold_siblings(acc, file_index)
-        (file_index[:siblings] || {}).each do |name, table|
-          acc[:siblings][name] = union_sibling_value(acc[:siblings].fetch(name), table)
+        fold_file_siblings(acc, file_index[:siblings] || {},
+                           methods: file_index[:methods], def_nodes: file_index[:def_nodes],
+                           singleton_def_nodes: file_index[:singleton_def_nodes])
+      end
+
+      # ADR-119 WD3 — folds one file's siblings into the accumulator under each member's own fold, so the result is
+      # the same in any file order and a bundle-served file folds as its live walk would:
+      #
+      # - `possible_discovered_methods` by {#fold_possible_methods} against `acc[:methods]` before this file's
+      #   `methods` join it;
+      # - the def-node slots follow their writer, as the members fold later-wins: the file's contests replace the
+      #   accumulator's on every key the file writes ({#fold_slot_contests});
+      # - every other sibling (the joined envelopes' contests among them) by union.
+      def fold_file_siblings(acc, siblings, methods:, def_nodes:, singleton_def_nodes:)
+        target = acc[:siblings]
+        siblings.each do |name, table|
+          target[name] =
+            case name
+            when :possible_discovered_methods
+              fold_possible_methods(target.fetch(name), acc[:methods], table, methods)
+            when :contested_discovered_def_nodes then fold_slot_contests(target.fetch(name), def_nodes, table)
+            when :contested_discovered_singleton_def_nodes
+              fold_slot_contests(target.fetch(name), singleton_def_nodes, table)
+            else union_sibling_value(target.fetch(name), table)
+            end
         end
+      end
+
+      # ADR-119 WD3 — the `possible_discovered_methods` fold, per name and side: `P' = (P − C_f) ∪ (P_f − C)`,
+      # where `C = member − P` is what the accumulator (or seed) answers certainly and `C_f = member_f − P_f` what
+      # the file does. A side some contribution supplies certainly is never possible, whatever the order the files
+      # fold in. Returns `possible` itself when nothing changes; otherwise a copy (the rows are copied once).
+      def fold_possible_methods(possible, members, file_possible, file_members)
+        result = strip_file_certain(possible, file_possible, file_members)
+        add_file_possible(result, possible, members, file_possible)
+      end
+
+      # `P − C_f`: `possible` less the sides the file answers certainly; `possible` itself when nothing goes.
+      def strip_file_certain(possible, file_possible, file_members)
+        result = possible
+        possible.each do |class_name, row|
+          file_row = file_members[class_name]
+          next if file_row.nil?
+
+          row.each do |method_name, kind|
+            certain = kind_minus(file_row[method_name], file_possible.dig(class_name, method_name))
+            remaining = kind_minus(kind, certain)
+            next if remaining == kind
+
+            result = possible.transform_values(&:dup) if result.equal?(possible)
+            remaining.nil? ? result[class_name].delete(method_name) : (result[class_name][method_name] = remaining)
+          end
+          result.delete(class_name) if result[class_name].empty?
+        end
+        result
+      end
+
+      # `∪ (P_f − C)`: the file's possible sides the accumulator (`members` less `possible`) does not answer
+      # certainly. Copies `result` first when it is still `possible`.
+      def add_file_possible(result, possible, members, file_possible)
+        file_possible.each do |class_name, row|
+          row.each do |method_name, kind|
+            added = kind_minus(kind, kind_minus(members.dig(class_name, method_name),
+                                                possible.dig(class_name, method_name)))
+            next if added.nil?
+
+            merged = merge_sibling_kind(result.dig(class_name, method_name), added)
+            next if merged == result.dig(class_name, method_name)
+
+            result = possible.transform_values(&:dup) if result.equal?(possible)
+            (result[class_name] ||= {})[method_name] = merged
+          end
+        end
+        result
+      end
+
+      # The sides of `kind` that `removed` does not cover (nil when none); either may be nil.
+      def kind_minus(kind, removed)
+        return kind if removed.nil? || kind.nil?
+        return nil if removed == Scope::DiscoveryIndex::METHOD_KIND_BOTH || removed == kind
+
+        kind == Scope::DiscoveryIndex::METHOD_KIND_BOTH ? without_kind(kind, removed) : kind
+      end
+
+      # ADR-119 WD3 — a single-valued slot's contests after a later-wins fold: the slots the file writes take the
+      # file's contests (`file_contested`), every other key keeps the accumulator's (`sitting`). `file_slots` is the
+      # file's `{class => {name => value}}` table. Returns `sitting` itself when nothing changes.
+      def fold_slot_contests(sitting, file_slots, file_contested)
+        stale = sitting.empty? ? nil : sitting.select { |class_name, name| file_slots[class_name]&.key?(name) }
+        return sitting if (stale.nil? || stale.empty?) && file_contested.empty?
+
+        result = stale.nil? || stale.empty? ? sitting.dup : sitting - stale
+        result.merge(file_contested)
+      end
+
+      def union_paths(sitting, arriving)
+        return sitting if arriving.empty?
+        return arriving if sitting.empty?
+
+        sitting | arriving
       end
 
       # The union of two sibling tables or entries. A Hash merges per key and a Set or Array unions; two scalars
@@ -8133,7 +8480,8 @@ module Rigor
         # One combined descent yields both the methods existence table and the def-node table; the latter is also
         # consumed by `record_class_sources`, so a def-dense file is walked once here instead of three times (methods +
         # def-nodes ×2). See {#build_methods_and_def_nodes}.
-        file_methods, file_def_nodes, file_envelopes, file_refinements = build_methods_and_def_nodes(root, path)
+        file_methods, file_def_nodes, file_envelopes, file_refinements, file_singleton_def_nodes =
+          walk_def_contributions(acc, path, root)
         merge_discovered_defs(acc[:def_nodes], acc[:def_sources], path, file_def_nodes)
         fold_parameter_envelopes(acc, file_envelopes)
         fold_refinements(acc, file_refinements)
@@ -8145,7 +8493,7 @@ module Rigor
         # produces a changed `"Class.method"` fingerprint pair (and its call sites a symbol edge) instead of
         # silently degrading to the file's full ancestry closure.
         merge_discovered_defs(acc[:singleton_def_nodes], acc[:singleton_def_sources], path,
-                              build_discovered_singleton_def_nodes(root))
+                              file_singleton_def_nodes)
         superclasses = walked.fetch(:superclasses)
         acc[:superclasses].merge!(superclasses)
         merge_header_nestings(acc[:header_nestings], walked.fetch(:header_nestings))
@@ -8154,6 +8502,21 @@ module Rigor
         merge_constant_literal_tables(acc, root, path)
         merge_class_keyed_index_tables(acc, root, file_methods)
         merge_member_layout_tables(acc, walked)
+      end
+
+      # The two def-contribution walks of {#accumulate_project_index}, over ONE {Certainty} classification, with the
+      # file's siblings folded into the accumulator BEFORE its members join it (ADR-119 WD3: the `possible` rule
+      # reads the accumulator's member as it stood). Returns `[methods, def_nodes, envelopes, refinements,
+      # singleton_def_nodes]`.
+      def walk_def_contributions(acc, path, root)
+        certainty = Certainty.possible_nodes(root)
+        file_methods, file_def_nodes, file_envelopes, file_refinements, file_siblings =
+          build_methods_and_def_nodes(root, path, certainty: certainty)
+        file_singleton_def_nodes, file_singleton_contested = build_singleton_def_tables(root, certainty: certainty)
+        fold_file_siblings(acc, file_siblings.merge(contested_discovered_singleton_def_nodes: file_singleton_contested),
+                           methods: file_methods, def_nodes: file_def_nodes,
+                           singleton_def_nodes: file_singleton_def_nodes)
+        [file_methods, file_def_nodes, file_envelopes, file_refinements, file_singleton_def_nodes]
       end
 
       # Issue #1123 — this file's three instance- / singleton-side module lists, folded into the

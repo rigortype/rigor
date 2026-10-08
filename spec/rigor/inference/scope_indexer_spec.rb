@@ -924,7 +924,7 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
     end
 
     it "shares one frozen empty table for a file that refines nothing" do
-      refinements = described_class.build_methods_and_def_nodes(parse("class A\n  def f = 1\nend\n")).last
+      refinements = described_class.build_methods_and_def_nodes(parse("class A\n  def f = 1\nend\n")).fetch(3)
 
       expect(refinements).to be_empty
       expect(refinements).to be_frozen

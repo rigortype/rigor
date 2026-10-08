@@ -29,11 +29,14 @@ require "rbconfig"
 #
 # The relations:
 #
-# - A set-valued table must satisfy `certain ⊆ runtime ⊆ certain ∪ possible`. Rigor keeps no `possible` table yet, so
-#   every entry reads as `certain` and the relation is equality, with one exception. A self-extend edge that Ruby
-#   does not show, which is how the tables model a bare `module_function` (#526's deliberate over-approximation),
-#   reads as `possible`, and so do the singleton names and def nodes the extends fold derives from it.
+# - A set-valued table must satisfy `certain ⊆ runtime ⊆ certain ∪ possible`. For `discovered_methods` the possible
+#   part is its sibling `possible_discovered_methods` (ADR-119 WD3) and `certain` is the member less it. A
+#   self-extend edge that Ruby does not show, which is how the tables model a bare `module_function` (#526's
+#   deliberate over-approximation), reads as `possible` too, and so do the singleton names and def nodes the
+#   extends fold derives from it.
 # - A single-valued table must agree with Ruby wherever it answers. No entry is a decline, which is always allowed.
+#   A contested slot (`contested_discovered_def_nodes` and its singleton twin) rests on a possible def, so it
+#   agrees when Ruby has no such def or when Ruby's def is another def of that owner and name in the fixture.
 # - Def identity is compared through `source_location` lines.
 # - A typed table must admit the class of the value Ruby holds.
 # - A def nesting must equal Ruby's once anonymous entries are dropped, and an anonymous entry cannot be dropped when
@@ -257,7 +260,7 @@ module DeclarationWitness
 
     def methods_violations(runtime, tables, _root)
       facts = method_facts(tables)
-      possible = self_extend_possible(runtime, tables, facts)
+      possible = self_extend_possible(runtime, tables, facts) + possible_method_facts(tables)
       certain = facts - possible
       observed = runtime_method_facts(runtime)
       unrecorded = observed - certain - possible
@@ -267,12 +270,21 @@ module DeclarationWitness
 
     # `[owner, side, name]` for every entry of `discovered_methods`, a `:both` entry counting on each side.
     def method_facts(tables)
-      tables.discovered_methods.flat_map do |owner, kinds|
+      method_facts_of(tables.discovered_methods)
+    end
+
+    def method_facts_of(table)
+      table.flat_map do |owner, kinds|
         kinds.flat_map do |name, kind|
           sides = kind == Rigor::Scope::DiscoveryIndex::METHOD_KIND_BOTH ? %w[instance singleton] : [kind.to_s]
           sides.map { |side| [owner, side, name.to_s] }
         end
       end
+    end
+
+    # `[owner, side, name]` for every entry of `possible_discovered_methods`, a `:both` entry counting on each side.
+    def possible_method_facts(tables)
+      method_facts_of(tables.possible_discovered_methods)
     end
 
     # The owners whose self-extend edge Ruby does not show.
@@ -311,18 +323,29 @@ module DeclarationWitness
       end
     end
 
-    def def_nodes_violations(runtime, tables, _root)
-      def_identity(runtime, tables.discovered_def_nodes, "instance", "#")
+    def def_nodes_violations(runtime, tables, root)
+      def_identity(runtime, tables.discovered_def_nodes, "instance", "#",
+                   contested: contested_lines(tables.contested_discovered_def_nodes, root, "instance"))
+    end
+
+    # `{[owner, name] => lines}` for each contested slot: the start lines of every def of that name the fixture
+    # writes on that owner's side, any of which Ruby may answer with once the possible def did not run.
+    def contested_lines(contested, root, side)
+      return {} if contested.empty?
+
+      lines = LexicalDefs.lines(root)
+      contested.to_h { |owner, name| [[owner, name], lines.fetch([owner, side, name], [])] }
     end
 
     # A singleton def the extends fold copied along an unconfirmed self-extend edge is `possible`: missing from Ruby
     # is allowed, a different def is not.
-    def singleton_def_nodes_violations(runtime, tables, _root)
+    def singleton_def_nodes_violations(runtime, tables, root)
       def_identity(runtime, tables.discovered_singleton_def_nodes, "singleton", ".",
-                   unconfirmed_self_extends(runtime, tables))
+                   unconfirmed_self_extends(runtime, tables),
+                   contested: contested_lines(tables.contested_discovered_singleton_def_nodes, root, "singleton"))
     end
 
-    def def_identity(runtime, table, side, separator, possible_owners = [])
+    def def_identity(runtime, table, side, separator, possible_owners = [], contested: {})
       table.flat_map do |owner, defs|
         next [] if owner == Rigor::Inference::ScopeIndexer::TOP_LEVEL_DEF_KEY
 
@@ -330,6 +353,7 @@ module DeclarationWitness
           line = def_node.location.start_line
           actual = runtime.dig("modules", owner, "#{side}_locations", name.to_s)
           next if actual == line || (actual.nil? && possible_owners.include?(owner))
+          next if (lines = contested[[owner, name]]) && (actual.nil? || lines.include?(actual))
 
           where = actual ? "Ruby's is the def at line #{actual}" : "Ruby has no such def in the fixture"
           "#{side}_def_nodes: Rigor resolves #{owner}#{separator}#{name} to the def at line #{line}; #{where}"
@@ -459,6 +483,34 @@ module DeclarationWitness
       when Rigor::Type::Constant then ancestors.include?(type.value.class.name)
       else true
       end
+    end
+  end
+end
+
+module DeclarationWitness
+  # `{[owner, side, name] => [lines]}` for the defs a class, module or `class << self` body writes directly or under
+  # control flow, the owner read from the lexical declarations (enough for the witness fixtures).
+  module LexicalDefs
+    module_function
+
+    def lines(root)
+      found = Hash.new { |table, key| table[key] = [] }
+      walk(root, nil, found, singleton: false)
+      found
+    end
+
+    def walk(node, owner, found, singleton:)
+      case node
+      when Prism::ClassNode, Prism::ModuleNode
+        name = [owner, node.constant_path.slice].compact.join("::")
+        return walk(node.body, name, found, singleton: false)
+      when Prism::SingletonClassNode then return walk(node.body, owner, found, singleton: true)
+      when Prism::DefNode
+        side = singleton || node.receiver.is_a?(Prism::SelfNode) ? "singleton" : "instance"
+        found[[owner, side, node.name]] << node.location.start_line if owner
+        return
+      end
+      node&.compact_child_nodes&.each { |child| walk(child, owner, found, singleton: singleton) }
     end
   end
 end

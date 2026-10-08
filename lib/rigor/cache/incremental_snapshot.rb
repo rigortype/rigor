@@ -163,7 +163,9 @@ module Rigor
       # `Scope::DiscoveryIndex` members that may admit a possible fact. Every sibling is empty until a producer
       # fills one, so a pre-35 bundle folds as "no possible fact", which is what it would hold today; the bump keeps
       # that true once one does.
-      SCHEMA = 35
+      # 36: ADR-119 WD3 — the def-contribution producers fill those siblings, so a pre-36 bundle folds an unchanged
+      # file's conditional `def` as certain and a warm run would answer a definer a cold run declines.
+      SCHEMA = 36
 
       # The persisted per-file state.
       # `cache` maps an analyzed file to its diagnostics.

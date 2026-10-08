@@ -324,7 +324,7 @@ SIG_PROVENANCE_RESIDUE = {
   # `Scope::ResolutionChain#search`, whose value is whatever its block returns, which sig-gen does not render.
   # The three rows move from `declared_divergent` to `unrenderable` and stay residue; the declarations are
   # unchanged and still true.
-  "sig/rigor/scope.rbs" => 113,
+  "sig/rigor/scope.rbs" => 114,
   "sig/rigor/sig_gen/skip_reason_catalog.rbs" => 8,
   "sig/rigor/source.rbs" => 4,
   "sig/rigor/testing.rbs" => 4,

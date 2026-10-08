@@ -44,15 +44,18 @@ single-route fork rule, `unsettled`, and `settle` as the one decision owner; fix
 
 Next:
 
-1. **ADR-119, accepted 2026-10-01; PR C in progress.** Landed: #1601 (errata: the C1a–C1e split, Q12),
-   #1602 (C1a: `DefinerResolution`, marks, relevance; instance side only), #1610 (ambiguous spellings
-   discharge), #1605 (C1b: `SourceArity`, fixes #1570), #1606 (C1c). Still open:
-   - **#1606 (C1c) merged 2026-10-08:** override and visibility lints. It trades real diagnostics
-     (Mastodon 10, GitLab controllers 61, all `tp-lost`) for the fixture FPs; the recoveries are
-     #1608, #1609, #1611, #1612.
-   - **Q12** (the admission census reading of WD1(ii)) gates C1d0; C1d follows it.
-   - The singleton side is designed (a positional decline) for C2, after #1603; #1607 tracks
-     singleton #1570. Fold the C1 planning's WD3/C1c-row errata into the ADR when C1c lands.
+1. **ADR-119, accepted 2026-10-01; PR C nearly done.** Landed: C1a #1602, #1610, C1b #1605, C1c #1606,
+   C1d0 #1617 (Q12 adopted), C1d-a #1623, C1d-b #1631, C1d-c #1630, C2-a #1621 (singleton side,
+   positional hook decline), C2-c #1632 (SourceArity singleton; fixes #1607), C2-e #1620 (fixes #1615);
+   also #1616 (fixes #1603) and #1618 (fixes #1585, #1554). Open:
+   - **C2-b1 (#1629, Draft, held):** the instance typing site. As is it adds a false positive
+     (`media.rb:281`: an RBS-less gem module ahead turns a raising helper's `bot` into `Dynamic`) and
+     cuts typed calls (Mastodon -32%, GitLab -76%). A Fable diagnosis: 47-69% are own-class hits
+     declined by marks (#1622), Mastodon's bulk is `RoutingHelper`'s `"*"` (#1608).
+   - **A1 (in progress):** own-hit rule plus a declared-module rule, read-side only. **A2** next:
+     #1608's include-kind sentinel. Then rebase C2-b1, re-run its typing census, fix the raising-helper
+     FP (plugin RBS for ActionView/Pundit, or widen on an undecided `bot` branch).
+   - C2-b2 (the singleton typing memo) and C2-d (#1604, optional) follow C2-b1.
 2. **Open false positives the chain cannot fix by falling back to master's order** (unsettled means
    master's order, not a decline): #1592's hook shapes and #1594 (a concern's `included do`). Both
    need PR C's `Unknown` or the concern/hook model of a follow-up ADR.

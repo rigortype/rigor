@@ -99,7 +99,9 @@ RSpec.describe "class-graph memo storage" do
       run_check(dir)
 
       bucket = Thread.current[slot_key][1]
-      expect(bucket[:user_def]).not_to be_empty
+      # ADR-119 C2-b1: the instance typing site reads its definer through `typing_def`; the existence reads keep
+      # `user_def`, which this fixture does not reach. The typing bucket filled proves the slot served the run.
+      expect(bucket[:typing_def]).not_to be_empty
     end
   end
 

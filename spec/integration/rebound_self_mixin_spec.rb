@@ -7,7 +7,8 @@
 # `class Outer` registered `Taggable` on `Outer`. `Outer.new.tag` then typed `:tagged` where MRI raises
 # `NoMethodError` — a wrong answer, not a wider one.
 #
-# Every expectation here was checked against MRI on the same source:
+# Every expectation here was checked against MRI on the same source (a `Dynamic[top]` beside a walk answer is
+# ADR-119 C2-b1's decline on an unpositioned include; the walk's answer is MRI's):
 #
 #   Outer.new.tag  -> NoMethodError      Evaled.new.tag -> :tagged
 #   Legit.new.tag  -> :tagged            Singly.new.tag -> NoMethodError  (Singly.tag -> :tagged)
@@ -32,12 +33,20 @@ RSpec.describe "a mixin call in a self-rebinding block (#728)" do
     result.diagnostics.select { |d| d.qualified_rule == "dump.type" }.map(&:message)
   end
 
+  # The definer the ancestor walk answers (the union read the existence checks use), from one file's tables: the
+  # attribution observable where the typing read declines.
+  def walk_owner(source, class_name, method_name)
+    root = Prism.parse(source).value
+    scope = Rigor::Inference::ScopeIndexer.index(root, default_scope: Rigor::Scope.empty)[root]
+    scope.user_def_through_ancestors(class_name, method_name)&.last
+  end
+
   around do |example|
     Dir.mktmpdir("rigor-rebound-mixin-") { |dir| Dir.chdir(dir) { example.run } }
   end
 
   it "does not give a Class.new block's include to the enclosing class" do
-    expect(dumps_for(<<~RUBY)).to eq(["dump_type: Dynamic[top]"])
+    source = <<~RUBY
       module Taggable
         def tag = :tagged
       end
@@ -54,12 +63,17 @@ RSpec.describe "a mixin call in a self-rebinding block (#728)" do
         end
       end
     RUBY
+    expect(walk_owner(source, "Outer", :tag)).to be_nil
+    expect(dumps_for(source)).to eq(["dump_type: Dynamic[top]"])
   end
 
   it "gives a class_eval block's include to the receiver" do
     # The precision half of the same classification: the block's owner used to be the lexical enclosure, so
-    # at the top level this include was dropped entirely and `tag` read `Dynamic[top]`. MRI resolves it.
-    expect(dumps_for(<<~RUBY)).to eq(["dump_type: :tagged"])
+    # at the top level this include was dropped entirely and `tag` read `Dynamic[top]`. MRI resolves it. The
+    # include is attributed to `Evaled` (the walk answers `Taggable`), but as a receiver-form mixin it is an
+    # unpositioned edge, so since ADR-119 C2-b1 the instance typing read declines and the call types
+    # `Dynamic[top]` instead of `:tagged`.
+    source = <<~RUBY
       module Taggable
         def tag = :tagged
       end
@@ -77,12 +91,14 @@ RSpec.describe "a mixin call in a self-rebinding block (#728)" do
         end
       end
     RUBY
+    expect(walk_owner(source, "Evaled", :tag)).to eq("Taggable")
+    expect(dumps_for(source)).to eq(["dump_type: Dynamic[top]"])
   end
 
   it "does not give a class << self include to the instance surface" do
     # `class << self; include M; end` mixes M into the singleton: `Singly.tag` works, `Singly.new.tag`
     # raises. The instance-side table must not carry it.
-    expect(dumps_for(<<~RUBY)).to eq(["dump_type: Dynamic[top]"])
+    source = <<~RUBY
       module Taggable
         def tag = :tagged
       end
@@ -99,6 +115,8 @@ RSpec.describe "a mixin call in a self-rebinding block (#728)" do
         end
       end
     RUBY
+    expect(walk_owner(source, "Singly", :tag)).to be_nil
+    expect(dumps_for(source)).to eq(["dump_type: Dynamic[top]"])
   end
 
   it "still records an ordinary include written in the class body" do
@@ -124,8 +142,10 @@ RSpec.describe "a mixin call in a self-rebinding block (#728)" do
   it "still records an include written in an ordinary block" do
     # An ordinary block does NOT rebind `self`, so an include inside one belongs to the enclosing class
     # exactly as before. This is the boundary the classification draws, and the arm that fails if the walk
-    # starts dropping owners wholesale.
-    expect(dumps_for(<<~RUBY)).to eq(["dump_type: :tagged"])
+    # starts dropping owners wholesale. An include in a block is unpositioned (the block may run any number of
+    # times, or never), so since ADR-119 C2-b1 the typing read declines and the call types `Dynamic[top]`; the
+    # walk still answers `Taggable`, which is the attribution this example pins.
+    source = <<~RUBY
       module Taggable
         def tag = :tagged
       end
@@ -142,5 +162,7 @@ RSpec.describe "a mixin call in a self-rebinding block (#728)" do
         end
       end
     RUBY
+    expect(walk_owner(source, "Conditional", :tag)).to eq("Taggable")
+    expect(dumps_for(source)).to eq(["dump_type: Dynamic[top]"])
   end
 end

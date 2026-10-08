@@ -3,8 +3,8 @@
 # scope_indexer/, and runner/project_pre_passes.rb) that read the whole table ("reads") or copy it ("copies"),
 # and the files that read or copy every member at once ("whole_index"). A member with a `contested_*` sibling
 # also carries "justified": per recorded file, why that read or copy may stay once the member admits possible
-# facts (WD1(ii)) -- existence, identity, cache_key, paired_copy or consults_contested. admission_census_spec.rb
-# computes the rest with Prism and compares it with this file; `RIGOR_REGENERATE_GATES=1` rewrites it and keeps
+# facts (WD1(ii)) -- existence, identity, cache_key, same_slot, paired_copy or consults_contested.
+# admission_census_spec.rb computes the rest with Prism and compares it with this file; `RIGOR_REGENERATE_GATES=1` rewrites it and keeps
 # the "justified" entries of files still recorded.
 
 members:
@@ -79,10 +79,11 @@ members:
     justified:
       lib/rigor/analysis/incremental_session.rb:
       - cache_key
-      - identity
+      - same_slot
       lib/rigor/analysis/runner.rb:
       - cache_key
       - identity
+      - same_slot
       - paired_copy
       lib/rigor/inference/block_call_timing.rb:
       - existence
@@ -120,10 +121,11 @@ members:
     justified:
       lib/rigor/analysis/incremental_session.rb:
       - cache_key
-      - identity
+      - same_slot
       lib/rigor/analysis/runner.rb:
       - cache_key
       - identity
+      - same_slot
       - paired_copy
       lib/rigor/inference/block_call_timing.rb:
       - existence

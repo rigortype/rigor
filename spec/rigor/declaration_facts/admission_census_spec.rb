@@ -14,9 +14,9 @@ require "yaml"
 # it is recorded. The ADR admits a single-valued member to `possible` facts only once every read recorded for it
 # consults its `contested_*` sibling, goes through a `Scope` reader, or is justified (WD1(ii)): a member with a
 # `contested_*` sibling carries, per recorded file, a `justified:` classification (`existence`, `identity`,
-# `cache_key`, `paired_copy` or `consults_contested`, the reads WD2 allows beside #1600's paired copies), which
-# this spec checks is complete and names no unrecorded file. `RIGOR_REGENERATE_GATES=1` rewrites the file and
-# keeps the `justified:` entries of files still recorded.
+# `cache_key`, `same_slot`, `paired_copy` or `consults_contested`, the reads WD2 allows beside #1600's paired
+# copies), which this spec checks is complete and names no unrecorded file. `RIGOR_REGENERATE_GATES=1` rewrites the
+# file and keeps the `justified:` entries of files still recorded.
 #
 # Threat model: the census catches a raw read or copy added in the codebase's normal styles, not a deliberate evasion.
 # It does not see a slot named by a String (`fetch("def_nodes")`) or a computed Symbol not prefixed `discovered_`
@@ -37,14 +37,17 @@ RSpec.describe "Discovery-table admission census" do
       # scope_indexer/, and runner/project_pre_passes.rb) that read the whole table ("reads") or copy it ("copies"),
       # and the files that read or copy every member at once ("whole_index"). A member with a `contested_*` sibling
       # also carries "justified": per recorded file, why that read or copy may stay once the member admits possible
-      # facts (WD1(ii)) -- existence, identity, cache_key, paired_copy or consults_contested. admission_census_spec.rb
-      # computes the rest with Prism and compares it with this file; `RIGOR_REGENERATE_GATES=1` rewrites it and keeps
+      # facts (WD1(ii)) -- existence, identity, cache_key, same_slot, paired_copy or consults_contested.
+      # admission_census_spec.rb computes the rest with Prism and compares it with this file; `RIGOR_REGENERATE_GATES=1` rewrites it and keeps
       # the "justified" entries of files still recorded.
 
     YAML
   end
   let(:members) { Rigor::Scope::DiscoveryIndex.members }
-  let(:kinds_allowed) { %w[existence identity cache_key paired_copy consults_contested] }
+  # `same_slot` is a value read that compares the slot with itself across runs (`IncrementalSession#scan_def_node`,
+  # `Runner#evaluate_spec_returns`), so it answers from nothing a contested slot could change. ADR-119 C1d must
+  # revisit each once `user_def_for` / `singleton_def_for` decline on contested slots.
+  let(:kinds_allowed) { %w[existence identity cache_key same_slot paired_copy consults_contested] }
   let(:contested_members) do
     Rigor::Scope::DiscoveryIndex::SIBLINGS.filter_map do |member, sibling|
       member.to_s if sibling.start_with?("contested_")

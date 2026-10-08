@@ -906,6 +906,7 @@ module Rigor
               # The class's own `def self.x` sits ahead of every `extend` — once it has run.
               # `singleton_def_shadows_call?` orders the def against the call site, so a `def self.sig`
               # written AFTER this `sig {}` does not suppress the bridge.
+              # ADR-119: shadowing already withholds the bridge, so a possible def withholds too.
               return nil if scope.singleton_def_shadows_call?(current, method_name, call_node)
 
               resolved = rbs_complete_extended_module_for(current, extends, environment, scope,
@@ -944,6 +945,8 @@ module Rigor
             nil
           end
 
+          # ADR-119: "defines" here stops the allow-list walk (a withholding answer), so a possible def stays
+          # a definer — treating it as absent would let a later extend bridge a call the def may own.
           def extend_owner_defines?(owner, method_name, call_node, scope, environment)
             return true if scope.instance_def_shadows_call?(owner, method_name, call_node)
 

@@ -7944,7 +7944,7 @@ module Rigor
         # keeps that contract intact while still letting `attr_reader :x` in one file suppress a false undefined-method
         # for `obj.x` in another.
         acc[:methods] = subtract_def_methods(acc[:methods], acc[:def_nodes])
-        acc[:siblings] = subtract_sibling_methods(acc[:siblings], acc[:def_nodes])
+        subtract_sibling_methods!(acc)
         finalize_call_surface_tables(acc)
         %i[def_nodes singleton_def_nodes def_sources singleton_def_sources includes prepends
            method_visibilities methods parameter_envelopes class_sources constant_sources deferred_ranges].each do |key|
@@ -7981,13 +7981,14 @@ module Rigor
         end
       end
 
-      # ADR-119 WD1 — the same subtraction for the `possible` copy of `methods`, so `possible_discovered_methods` stays a
-      # subset of its member after the rule above. Only that sibling is rewritten; the rest of `siblings` passes through.
-      def subtract_sibling_methods(siblings, def_nodes)
-        possible = siblings[:possible_discovered_methods]
-        return siblings if possible.nil?
+      # ADR-119 WD1 — the same subtraction for the `possible` copy of `methods`, so `possible_discovered_methods`
+      # stays a subset of its member after the rule above. Only that sibling is rewritten.
+      def subtract_sibling_methods!(acc)
+        possible = acc[:siblings][:possible_discovered_methods]
+        return if possible.nil?
 
-        siblings.merge(possible_discovered_methods: subtract_def_methods(possible, def_nodes))
+        acc[:siblings] =
+          acc[:siblings].merge(possible_discovered_methods: subtract_def_methods(possible, acc[:def_nodes]))
       end
 
       # Folds one file's class-keyed indexes into the cross-file accumulator. `method_visibilities` (ADR-35) is

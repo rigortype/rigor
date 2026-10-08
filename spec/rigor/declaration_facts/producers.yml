@@ -327,6 +327,7 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#record_struct_member_layout: grandfathered
     Rigor::Inference::ScopeIndexer#seed_operator_only_ivars!: grandfathered
     Rigor::Inference::ScopeIndexer#singleton_mixin_recorded?: writes one singleton-side mixin call under the owner the walk passes in; it computes no declaration context
+    Rigor::Inference::ScopeIndexer#subtract_sibling_methods!: rewrites only the possible_discovered_methods sibling in the finalize pass, dropping the names a def declares; it derives no declaration context
     Rigor::Inference::ScopeIndexer#surface_mixin_call?: grandfathered
     Rigor::Inference::ScopeIndexer#taint_opaque_eval: taints the enclosing owner the walk passes in when an eval block on an opaque receiver mixes a module in; it computes no declaration context
     Rigor::Inference::ScopeIndexer#walk_anonymous_meta_block: grandfathered

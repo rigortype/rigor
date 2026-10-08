@@ -276,7 +276,7 @@ module Rigor
                       rbs_collection_lockfile: nil, rbs_collection_auto_detect: false,
                       synthetic_method_index: nil, project_patched_methods: nil,
                       source_files: [], locked_gems: nil)
-        resolved_paths = signature_paths || default_signature_paths(root)
+        resolved_paths = project_signature_roots(signature_paths, root: root)
         # O4 MVP — append per-gem `sig/` directories discovered under the target project's bundler install
         # root. Empty array when neither an explicit path nor auto-detection finds a bundle. Order: user
         # `signature_paths:` win first (semantic precedence inside `RbsLoader.build_env_for`); gem-shipped
@@ -389,6 +389,13 @@ module Rigor
           missing_rbs_gems: missing_gems,
           missing_rbs_bundle_path: bundle_root
         )
+      end
+
+      # The project-owned `sig/` roots a run reads: the explicit `signature_paths:` when given, else the
+      # auto-detected `<root>/sig` (or none). Public so {Cache::IncrementalSnapshot} digests exactly the
+      # directories the environment loads, including the auto-detected one a `nil` `signature_paths:` hides.
+      def project_signature_roots(signature_paths, root: Dir.pwd)
+        signature_paths || default_signature_paths(root)
       end
 
       private

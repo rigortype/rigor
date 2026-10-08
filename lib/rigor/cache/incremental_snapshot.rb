@@ -7,6 +7,7 @@ require "zlib"
 require_relative "engine_source"
 require_relative "store"
 require_relative "../analysis/shadow_harness"
+require_relative "../environment"
 
 module Rigor
   module Cache
@@ -235,7 +236,10 @@ module Rigor
       # resolved configuration, the analysis **roots** (the path arguments, e.g. `["lib"]`, NOT the expanded
       # file list — so a snapshot is keyed to an invocation's roots but adding / removing a file under them is
       # handled incrementally by the session, not a full rebuild), the resolved gem set (`Gemfile.lock` /
-      # `rbs_collection`), and the project's own RBS (`signature_paths` file contents). Built WITHOUT
+      # `rbs_collection`), the project's own RBS (the `sig/` roots the environment actually loads: the explicit
+      # `signature_paths`, or the auto-detected `<root>/sig` when `signature_paths` is nil), and the contents of
+      # every `pre_eval:` file (its PATH is in the configuration, but an edit to a file outside the analysed
+      # paths changes no analysed file, so it needs its own part). Built WITHOUT
       # constructing the RBS environment so the warm path can gate the load cheaply, before the costly env
       # build. The `--verify-incremental` gate is the safety net for any under-capture (it would surface as an
       # incremental-vs-full mismatch). Returns nil on any error → the caller falls back to a non-persisted run.
@@ -255,7 +259,8 @@ module Rigor
           "roots:#{Array(roots).map(&:to_s).sort.join("\n")}",
           "gems:#{digest_file_if_present('Gemfile.lock')}",
           "rbs_collection:#{digest_file_if_present('rbs_collection.lock.yaml')}",
-          "sig:#{digest_signature_paths(configuration.signature_paths)}"
+          "sig:#{digest_signature_paths(project_sig_roots(configuration))}",
+          "pre_eval:#{digest_pre_eval(configuration.pre_eval)}"
         ]
         identity = EngineSource.process_identity
         parts << "engine-source:#{identity}" if identity
@@ -277,6 +282,24 @@ module Rigor
         File.file?(path) ? Digest::SHA256.file(path).hexdigest : "absent"
       end
       private_class_method :digest_file_if_present
+
+      # Content-digest every `pre_eval:` file in configuration order, so an edit to one invalidates the snapshot
+      # even when it lies outside the analysed paths. A missing file digests as "absent", so creating it counts too.
+      def self.digest_pre_eval(paths)
+        digest = Digest::SHA256.new
+        Array(paths).each do |path|
+          digest << path.to_s << "\0" << digest_file_if_present(path.to_s) << "\0"
+        end
+        digest.hexdigest
+      end
+      private_class_method :digest_pre_eval
+
+      # The `sig/` roots the environment loads for this configuration: the configured `signature_paths`, or the
+      # auto-detected `<root>/sig` when those are nil ({Environment.project_signature_roots}).
+      def self.project_sig_roots(configuration)
+        Environment.project_signature_roots(configuration.signature_paths).map(&:to_s)
+      end
+      private_class_method :project_sig_roots
 
       # Content-digest every `.rbs` under the configured signature paths (sorted for determinism) so a project
       # RBS edit invalidates the snapshot. Sig trees are small; content (not mtime) keeps it stable across

@@ -2711,12 +2711,20 @@ module Rigor
         # A header Prism recovered without a constant (`class foo`, a parse error) names no class: its body
         # runs under an untyped `self` and no class frame, so nothing is filed under an empty name.
         return eval_unnameable_class_body(node) if name.nil?
+        # `class self::X` the indexer declined (opaque `self`, e.g. `REGISTRY.first.class_eval`) is not the
+        # lexical `X` that `qualified_name` renders; a nameable `self::` header is in the identity table.
+        return eval_unnameable_class_body(node) if declined_self_header?(path)
 
         frame = ClassFrame.new(name: name, singleton: false)
         new_context = Source::ConstantPath.rooted?(path) ? [frame] : @class_context + [frame]
         body_type, _body_scope = eval_class_body(node, new_context,
                                                  Source::ConstantPath.pushed_nesting(@lexical_nesting, path))
         [body_type, scope]
+      end
+
+      def declined_self_header?(path)
+        path.is_a?(Prism::ConstantPathNode) && path.parent.is_a?(Prism::SelfNode) &&
+          !scope.declared_types.key?(path)
       end
 
       def eval_unnameable_class_body(node)

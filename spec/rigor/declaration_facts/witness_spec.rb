@@ -134,7 +134,7 @@ RSpec.describe "Declaration-fact witness" do
 
   describe "filed bugs" do
     it "#1518: declines a class self::X opened on a receiver no constant names" do
-      expect(violations("issue_1518", relations: %i[classes])).to eq([])
+      expect(violations("issue_1518")).to eq([])
     end
 
     it "#1518: still opens Foo::Bar for a constant receiver" do

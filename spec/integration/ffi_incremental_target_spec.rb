@@ -64,6 +64,21 @@ RSpec.describe "rigor check --incremental over rigor-ffi target detection" do
     expect(rules(out)).to eq(rules(check("--no-cache").first))
   end
 
+  it "goes cold when an ext/**/extconf.rb gains FFX.create_makefile although the lockfile is unchanged" do
+    write_project
+    expect(check("--incremental")[1]).to include("--incremental cold")
+    expect(check("--incremental")[1]).to include("--incremental warm")
+
+    FileUtils.mkdir_p("ext/x")
+    File.write("ext/x/extconf.rb", "require \"mkmf\"\nFFX.create_makefile(\"x\")\n")
+    File.write("b.rb", "class B\n  def x = 2\nend\n")
+    out, err = check("--incremental")
+
+    expect(err).to include("--incremental cold")
+    expect(rules(out)).to include("ffx.unsupported-callback")
+    expect(rules(out)).to eq(rules(check("--no-cache").first))
+  end
+
   it "stays warm across an edit that does not change the detected target" do
     write_project
     check("--incremental")

@@ -822,10 +822,14 @@ full run, so the snapshot can never wedge or stale an analysis.
    different fingerprint once (a safe cold run): one whose `bundler.lockfile:`
    names another file, one with `auto_detect: false` and an existing
    `./Gemfile.lock` (now unread, so the part is `absent`), and one whose
-   `bundler.lockfile:` names a missing file (no fallback to auto-detection).
+   `bundler.lockfile:` names a missing file (no fallback to auto-detection) —
+   the last only when a `./Gemfile.lock` also exists. With neither file, master
+   and now both digest the part as `absent`, so the fingerprint does not move.
    A plugin that reads a dependency file on its own, such as `rigor-ffi` reading
    `./Gemfile.lock` for its `:ffx` / `:ffi` target, covers it through the
-   `incremental_state_fingerprint` hook instead.
+   `incremental_state_fingerprint` hook instead. That covers the snapshot gate
+   only: a change to such an input with no source edit is still served from the
+   run-result slot ([#1652](https://github.com/rigortype/rigor/issues/1652)).
 2. **Per-file digests (drive the decision).** When the fingerprint matches,
    the `Payload` is loaded unconditionally and its per-file content digests
    determine the changed set `ΔF`; the affected closure `ΔF ∪ dependents[ΔF]`

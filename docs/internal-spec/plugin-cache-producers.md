@@ -330,7 +330,10 @@ Contract:
   surface. It should still define the hook returning a **stable sentinel
   string** (e.g. `"per-file-lets"`) — this positively declares "no cross-file
   fact surface", keeping the plugin incremental-capable. Bundled `rigor-rspec`,
-  `rigor-minitest`, and `rigor-mangrove` do exactly this.
+  `rigor-minitest`, `rigor-mangrove`, `rigor-railties`, and
+  `rigor-activesupport-core-ext` do exactly this. `rigor-ffi` returns its
+  detected `:ffx` / `:ffi` target instead, because that target is read from
+  `./Gemfile.lock` and `ext/**/extconf.rb`, which no analysed file's content covers.
 - A plugin that registers `dynamic_return` / `narrowing_facts` contributions
   and provides **none** of the three channels makes the snapshot un-reusable
   for the run and is named in the run output — incremental degrades to a full

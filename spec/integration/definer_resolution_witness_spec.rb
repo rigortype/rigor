@@ -1117,8 +1117,8 @@ RSpec.describe Rigor::Inference::DefinerResolution do # rubocop:disable RSpec/Sp
       end
 
       it "declines under a superclass's inherited hook written in another class's singleton body (g)" do
-        hook = "module X; def self.inherited(s) = super; class << self; def Base.inherited(s); super; " \
-               "s.prepend(P); end; end; end\n"
+        hook = "module X; class << self; def Base.inherited(s); super; s.prepend(P); end; end; " \
+               "def self.inherited(s) = super; end\n"
         expect(hooked(base + hook + klass)).to eq(["P", :unknown])
       end
 

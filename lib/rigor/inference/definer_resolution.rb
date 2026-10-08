@@ -74,16 +74,21 @@ module Rigor
       end
 
       # ADR-119 WD2 (#1622) — whether the candidate set is one certain definer that is the root's own instance
-      # entry and records the name itself: what `settle`'s `own_hit:` says (`settle` checks that the root heads
-      # its chain). One certain candidate, because a `possible` own definer hands the read to the next one, whose
-      # position a mark may move. The record test matters where an answer function names the root without its
-      # recording the name (`SourceArity`'s own-level answer is always a candidate, an empty one where the class
-      # records nothing).
+      # entry and records the name itself, on a chain no hook can prepend onto unseen
+      # ({SingletonHookDecline.own_hit_exposed?}): what `settle`'s `own_hit:` says (`settle` checks that the root
+      # heads its chain and reads the marks). One certain candidate, because a `possible` own definer hands the
+      # read to the next one, whose position a mark may move. The record test matters where an answer function
+      # names the root without its recording the name (`SourceArity`'s own-level answer is always a candidate, an
+      # empty one where the class records nothing).
       def own_hit?(scope, chain, method_name, hits)
         hit = hits.first
         return false unless hits.size == 1 && !hit.nil? && hit.side == :instance && hit.owner == chain.root
+        return false unless scope.discovered_method?(hit.owner, method_name, :instance) ||
+                            !scope.user_def_for(hit.owner, method_name).nil?
+        # A standing chain needs no exception, so the hook test runs only where one could change the verdict.
+        return false unless chain.unsettled? || chain.forks.positive?
 
-        scope.discovered_method?(hit.owner, method_name, :instance) || !scope.user_def_for(hit.owner, method_name).nil?
+        !SingletonHookDecline.own_hit_exposed?(scope, chain)
       end
 
       # The `:override` question's answer function, built from the caller's block: that block is NOT a per-chain
@@ -162,10 +167,7 @@ module Rigor
           entry = chain.entries[index]
           next false unless entry.external?
 
-          if recording
-            Analysis::DependencyRecorder.read_missing(:class, entry.raw.to_s.split("::").last)
-            Scope::ResolutionChain::Relevance.record_declared_module(scope, entry.candidates)
-          end
+          Analysis::DependencyRecorder.read_missing(:class, entry.raw.to_s.split("::").last) if recording
           !external_lacks?(scope, entry.candidates, entry.side, method_name)
         end || (last.nil? && implicit_object_answers?(scope, chain, method_name))
       end

@@ -507,10 +507,9 @@ is defined over the chain, and asks `settle`:
   named entry and, per closure entry, three table probes, the dynamic-mark test and, for an external,
   one RBS lookup. The constant tables admit no `possible` facts in this ADR.
 
-**Errata (2026-10-08), PR A1 (#1635): the root's own definer, and declared modules.** Two read-side rules,
-no data change, both inside `settle` and `Relevance`, witnessed in `spec/integration/definer_resolution_witness_spec.rb`
-§ "the root's own definer (#1622)" and § "a declared module the chain holds as external (#1612)" beside Ruby's own
-answer:
+**Errata (2026-10-08), PR A1 (#1635): the root's own definer.** A read-side rule, no data change, decided in
+`settle`, witnessed in `spec/integration/definer_resolution_witness_spec.rb` § "the root's own definer (#1622)"
+beside Ruby's own answer:
 
 - *An exception to "a chain with a fork is never narrowed" (#1622).* Ruby inserts every `include` — conditional,
   hook-driven, skipped or repeated by a fork — after the class it targets, never ahead of it; only a prepend lands
@@ -525,17 +524,19 @@ answer:
 - *`"*"` is still never discharged, by this rule either.* A hook's `base.include` cannot shadow the root, but its
   `"*"` is the one a `base.prepend` leaves, and so is a superclass's `inherited` hook that prepends onto the
   subclass (`"*"` on the superclass, witnessed): the own-hit rule reads an include-kind `"*"` only once #1608
-  splits the sentinel.
-- *A declared-module category in the absent rule (#1612).* An external entry RBS knows none of whose candidates,
-  where at least one candidate is a declared module and every declared candidate is bare — its envelope bucket holds
-  only the module mark (no name a body call mentions, no dynamic, refinement or object-extension mark), and it has no
-  `extend`, no unpositioned mixin and no visibility row — lacks every name, in `DefinerResolution`'s external and
-  absent checks and in relevance's closure test alike. A concern, or any module with an `included do` or
-  `class_methods do` block, extends `ActiveSupport::Concern` and is never bare. A hook written outside its module's
-  body is recorded against no module (`def Q.included` at the top level, or in `module X` as `X#included`), so the
-  category is off for the whole project while any hook `def` row is not a singleton `def` its owner records, or is a
-  second one for that owner. A hook `def` nested in a method or block body, and `class << X; def Q.included` alone,
-  are recorded by no table and remain unseen.
+  splits the sentinel. That a hook leaves a `"*"` holds only for the literal forms the walk lists, `def
+  self.inherited` or `class << self; def inherited` and the other names `ScopeIndexer::HOOK_DEFS` holds.
+- *A hook that leaves no `"*"` on any chain node declines the rule (#1635 review).* A superclass's `inherited` from a
+  module it extends, an `append_features` or `prepend_features` hook (`HOOK_DEFS` lists neither, so no `"*"`), a
+  module whose extended module's `included` prepends, a top-level `def Base.inherited`, and a
+  `define_singleton_method(:inherited)` written from outside all prepend onto the root unseen (witnessed). The rule
+  therefore applies only where no project entry on the chain lists `"*"`, records a hook name, carries the dynamic
+  mark or extends a module that may hold a hook, no external entry is one RBS does not know, and the project holds
+  no hook `def` the tables may attribute to the wrong owner (`Inference::SingletonHookDecline.own_hit_exposed?`).
+  Adding the two hooks to `HOOK_DEFS` changes discovery data and is left to a follow-up.
+- *The declared-module category (#1612) is not part of A1.* A module the project only reopens (with a constant, say)
+  may be a gem's, whose methods no table records, and no table tells such a reopening from the module's only
+  declaration; #1612 keeps it.
 - *The attribution in "Why the rule stops at a fork" is corrected.* GitLab's Project, Group and User do carry forks
   (7–11 each, C2-b1's census), but forks no longer decide their own definers: the `"*"` that
   `Project.prepend_mod_with('Project')` at a model file's foot lists on the root (Project, User; Group through

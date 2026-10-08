@@ -353,15 +353,14 @@ RSpec.describe Rigor::Inference::DefinerResolution do # rubocop:disable RSpec/Sp
       RUBY
     end
 
-    # A module the project declares without a `def` is an external entry. ADR-119's declared-module category
-    # (#1612) reads one that records nothing at all, extends nothing and lists nothing as lacking every name; a
-    # macro in `included do`, or a hook defined outside the body (`def Q.included(b) = ...`), defines on the
-    # includer with nothing recorded on the module, so both still decline, as does a gem module declared nowhere
-    # and absent from RBS (a future gem-source approach, `dependencies.source_inference`, could read it).
-    it "reads a declared def-less module whose body holds nothing as lacking the name" do
+    # A module the project declares without a `def` is an external entry no table can vouch for: a macro in
+    # `included do`, or a hook defined outside the body (`def Q.included(b) = ...`), defines on the includer with
+    # nothing recorded. It declines, as does a gem module declared nowhere and absent from RBS (a future gem-source
+    # approach, `dependencies.source_inference`, could read it).
+    it "declines on a declared def-less module whose body holds nothing" do
       source = "class B; def foo = 1; end\nmodule Empty; end\nclass C < B; include Empty; end\n"
       expect(RubyRun.stdout("#{source}p C.instance_method(:foo).owner\n").chomp).to eq("B")
-      expect(owner_of(resolve(project_scope("a.rb" => source), :foo))).to eq("B")
+      expect(owner_of(resolve(project_scope("a.rb" => source), :foo))).to eq(:unknown)
     end
 
     it "declines on a concern whose included block calls a macro (custom_macro)" do
@@ -1071,6 +1070,53 @@ RSpec.describe Rigor::Inference::DefinerResolution do # rubocop:disable RSpec/Sp
       expect(owner_of(resolve(scope_for(source), :foo))).to eq("C")
     end
 
+    # #1635 round-1 review: a hook that may prepend onto the root without leaving a `"*"` on any chain node. Each
+    # chain is forked (`FM` reaches `C` through `Base` too), where the merge base declines, so a wrong Known here
+    # would fire. The rule declines wherever a chain node is hook-capable, or some hook `def` belongs to no owner.
+    describe "a hook that prepends onto the root with no \"*\" on the chain" do
+      let(:head) { "module P; def foo(*) = :p; end\nmodule FM; def x = 1; end\nmodule FN; def y = 1; end\n" }
+      let(:base) { "class Base; include FM; include FN; end\n" }
+      let(:klass) { "class C < Base; include FM; include FN; def foo(a) = a; end\n" }
+      let(:includes_h) { "class C < Base; include FM; include FN; include H; def foo(a) = a; end\n" }
+
+      # Ruby's owner of `C#foo`, and the read's answer.
+      def hooked(source)
+        [owner_says(head + source), owner_of(resolve(scope_for(head + source), :foo))]
+      end
+
+      it "declines under a superclass's extended module whose inherited prepends (a)" do
+        hooky = "module Hooky; def inherited(sub); super; sub.prepend(P); end; end\n"
+        expect(hooked("#{hooky}class Base; extend Hooky; include FM; include FN; end\n#{klass}")).to eq(["P", :unknown])
+      end
+
+      it "declines under an append_features hook, which lists no \"*\" (b)" do
+        hook = "module H; def self.append_features(b); super; b.prepend(P); end; end\n"
+        expect(hooked(hook + base + includes_h)).to eq(["P", :unknown])
+      end
+
+      it "declines under a module whose extended module's included prepends (c)" do
+        hook = "module Hooky; def included(b); super; b.prepend(P); end; end\nmodule H; extend Hooky; end\n"
+        expect(hooked(hook + base + includes_h)).to eq(["P", :unknown])
+      end
+
+      it "declines under a superclass's inherited hook defined at the top level in another file (d)" do
+        hook = "def Base.inherited(s); super; s.prepend(P); end\n"
+        expect(owner_says(head + base + hook + klass)).to eq("P")
+        scope = project_scope("a.rb" => head + base + klass, "b.rb" => hook)
+        expect(owner_of(resolve(scope, :foo))).to eq(:unknown)
+      end
+
+      it "declines under a superclass's define_singleton_method(:inherited) (e)" do
+        hook = "Base.define_singleton_method(:inherited) { |s| s.prepend(P) }\n"
+        expect(hooked(base + hook + klass)).to eq(["P", :unknown])
+      end
+
+      it "declines under an included module's hook that defines the superclass's inherited (e2)" do
+        hook = "module M; def self.included(b) = b.define_singleton_method(:inherited) { |s| s.prepend(P) }; end\n"
+        expect(hooked("#{hook}class Base; include FM; include FN; include M; end\n#{klass}")).to eq(["P", :unknown])
+      end
+    end
+
     # `SourceArity`'s own-level answer names the class at index 0 whether or not it records the name; the rule
     # reads only a root that does.
     it "does not read an answer that names the root without its recording the name" do
@@ -1079,76 +1125,6 @@ RSpec.describe Rigor::Inference::DefinerResolution do # rubocop:disable RSpec/Sp
       names_root = proc { |_chain, from| described_class::Hit.new(:none, "C", 0, :instance) if from.zero? }
       result = resolution.resolve(scope_for(source), "C", :foo, :instance, question: :arity, &names_root)
       expect(owner_of(result)).to eq(:unknown)
-    end
-  end
-
-  # ADR-119 WD2's declared-module category (#1612): the shapes beside the three in "external ancestors the project
-  # declares or RBS does not know".
-  describe "a declared module the chain holds as external (#1612)" do
-    it "discharges a conditional include of a bare declared module" do
-      source = "class Base; def foo = 1; end\nmodule Empty; end\nclass C < Base; include Empty if ENV[\"Q\"]; end\n"
-      expect(both_worlds(source, "C.instance_method(:foo).owner")).to eq(%w[Base Base])
-      expect(owner_of(resolve(project_scope("a.rb" => source), :foo))).to eq("Base")
-    end
-
-    it "declines on a hook defined for the module inside another module's body" do
-      source = <<~RUBY
-        class Base; def foo = 1; end
-        module Q; end
-        module X; def Q.included(b) = b.attr_reader(:foo); end
-        class C < Base; include Q; end
-      RUBY
-      expect(RubyRun.stdout("#{source}p C.instance_method(:foo).owner\n").chomp).to eq("C")
-      expect(owner_of(resolve(project_scope("a.rb" => source), :foo))).to eq(:unknown)
-    end
-
-    # `class << X; def Q.included` is recorded as `X`'s own singleton hook; beside `X`'s own `def self.included`, the
-    # second singleton row for one owner is what shows that one of them may be another module's.
-    it "declines on a foreign hook written beside its owner's own singleton def of the same name" do
-      source = <<~RUBY
-        class Base; def foo = 1; end
-        module Q; end
-        module X; def self.included(base) = nil; class << self; def Q.included(b) = b.attr_reader(:foo); end; end
-        class C < Base; include Q; end
-      RUBY
-      expect(RubyRun.stdout("#{source}p C.instance_method(:foo).owner\n").chomp).to eq("C")
-      expect(owner_of(resolve(project_scope("a.rb" => source), :foo))).to eq(:unknown)
-    end
-
-    # A visibility statement names a method its module must have, so a row with no method row behind it is a
-    # method the tables did not see.
-    it "declines on a module whose visibility row names a method no table records" do
-      source = <<~RUBY
-        class Module; def my_macro = define_method(:foo) { :q }; end
-        class Base; def foo = 1; end
-        module Q; my_macro; public :foo; end
-        class C < Base; include Q; end
-      RUBY
-      expect(RubyRun.stdout("#{source}p C.instance_method(:foo).owner\n").chomp).to eq("Q")
-      expect(owner_of(resolve(project_scope("a.rb" => source), :foo))).to eq(:unknown)
-    end
-
-    it "declines on a module whose body calls a macro naming the method" do
-      source = <<~RUBY
-        class Module; def my_macro(name) = define_method(name) { :q }; end
-        class Base; def foo = 1; end
-        module Q; my_macro :foo; end
-        class C < Base; include Q; end
-      RUBY
-      expect(RubyRun.stdout("#{source}p C.instance_method(:foo).owner\n").chomp).to eq("Q")
-      expect(owner_of(resolve(project_scope("a.rb" => source), :foo))).to eq(:unknown)
-    end
-
-    # Any `extend` disqualifies: an extended module's instance `included` is the module's hook, and a concern's
-    # `included do` and `class_methods do` blocks run on the includer.
-    it "declines on a module that extends another" do
-      source = <<~RUBY
-        class Base; def foo = 1; end
-        module Q; extend Comparable; end
-        class C < Base; include Q; end
-      RUBY
-      expect(RubyRun.stdout("#{source}p C.instance_method(:foo).owner\n").chomp).to eq("Base")
-      expect(owner_of(resolve(project_scope("a.rb" => source), :foo))).to eq(:unknown)
     end
   end
 

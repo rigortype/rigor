@@ -58,6 +58,59 @@ module Rigor
         tested.any? { |level| context.level_capable?(chain, level) } || context.deeper_hook?(chain, tested.first)
       end
 
+      # ADR-119 A1 (#1635 review) — whether a hook may prepend onto `chain`'s root without leaving a `"*"` on a
+      # chain node, which the own-hit rule (`ResolutionChain#settle`'s `own_hit:`) cannot see: a superclass's
+      # `inherited` from a module it extends, an `append_features` hook, a module whose extended module's
+      # `included` prepends, a `define_singleton_method(:inherited)` written from outside. True when the chain is
+      # cut, when some project entry on it is hook-capable for the own hit ({Context#own_hit_capable?}), when an
+      # external entry RBS does not know is on it (its hooks are unknown), or when the project holds a hook `def`
+      # that may be another class's ({.foreign_hook_def?}). Instance chains only; memoised like {.decline?}'s
+      # verdicts.
+      def own_hit_exposed?(scope, chain)
+        return true if chain.truncated? || foreign_hook_def?(scope)
+
+        context = Context.new(scope, chain.flavor)
+        chain.entries.any? { |entry| context.own_hit_capable?(entry) }
+      end
+
+      # Whether the project holds a hook `def` whose owner the tables may have wrong: one written at the top level
+      # (`def Base.inherited(sub)`, recorded with no owner), a second singleton `def` of one hook name for one owner
+      # (`class << X; def Base.inherited` beside `X`'s own), or an instance `def` of a hook name in a module that
+      # neither is extended anywhere nor extends `ActiveSupport::Concern` — `def Base.inherited` written in
+      # `module X` is recorded as `X`'s instance `def`, while a module's own instance hook acts only once it is
+      # extended. Read from `discovered_deferred_ranges`' def rows and memoised per discovery index.
+      def foreign_hook_def?(scope)
+        memo = Scope::ResolutionChain.hook_memo(scope, :methods)
+        memo.fetch(:foreign_hook_def) { memo[:foreign_hook_def] = foreign_hook_row?(scope) }
+      end
+
+      def foreign_hook_row?(scope)
+        seen = {}
+        hook_modules = hook_modules(scope)
+        scope.discovered_deferred_ranges.each_value do |rows|
+          rows.each do |(_start, _finish, name, kind, owner)|
+            next unless Scope::ResolutionChain::Relevance::HOOKS.include?(name)
+            return true if owner.nil? || seen[[owner, name, kind]]
+
+            seen[[owner, name, kind]] = true
+            next if kind == :singleton && scope.discovered_method?(owner, name, :singleton)
+            return true unless kind == :instance && hook_modules.key?(owner)
+          end
+        end
+        false
+      end
+
+      # The project modules whose instance hook `def`s act as hooks: every module some class or module's singleton
+      # extends, as the chain resolves the name, and every module that extends `ActiveSupport::Concern` (its
+      # `class_methods do` defs are recorded as its instance `def`s).
+      def hook_modules(scope)
+        resolver = Scope::ResolutionChain.resolver_for(scope, :methods)
+        scope.discovery.discovered_extends.each_with_object({}) do |(owner, raws), out|
+          out[owner] = true if raws.include?(CONCERN)
+          raws.each { |raw| Array(resolver.resolve(owner, raw)).each { |name| out[name] = true } }
+        end
+      end
+
       def bound_of(scope, chain, method_name, hit)
         return chain.entries.size if hit.nil?
 
@@ -122,6 +175,7 @@ module Rigor
           @flavor = flavor
           @memo = Scope::ResolutionChain.hook_memo(scope, flavor)
           @recording = Analysis::DependencyRecorder.active?
+          @visiting = {}
         end
 
         # A tested level: its singleton segment, and its class's own instance level.
@@ -139,6 +193,25 @@ module Rigor
         # or it is an external superclass that is hook-capable.
         def deeper_hook?(chain, level)
           ((level + 1)...chain.level_count).any? { |deeper| level_capable?(chain, deeper) }
+        end
+
+        # The own-hit test of one chain entry: a project entry that lists `"*"`, records a hook name or carries the
+        # dynamic mark (`Base.define_singleton_method(:inherited)` written outside leaves only that), or whose
+        # singleton side extends a module that may hold a hook; an external entry RBS does not know. A concern is
+        # not capable for the own hit: its `included do` edges are listed on it, which `settle` reads.
+        def own_hit_capable?(entry)
+          return verdict(:own_hit_external, entry) { !rbs_known?(entry.candidates) } if entry.external?
+
+          name = entry.name
+          return false if @visiting[name]
+
+          verdict(:own_hit, name) do
+            @visiting[name] = true
+            hooked?(name) || Scope::DiscoveryIndex.rewritten_surface?(@scope.parameter_envelopes_of(name)) ||
+              extends_hook_capable?(name)
+          ensure
+            @visiting.delete(name)
+          end
         end
 
         def capable?(entry)
@@ -174,7 +247,7 @@ module Rigor
         end
 
         def own_edges(kind, key)
-          return entry_edges(key) if kind == :external
+          return entry_edges(key) if %i[external own_hit_external].include?(kind)
           return EMPTY_EDGES if kind == :instance_level
 
           [[:class, key], [:missing, key.to_s.split("::").last]]
@@ -195,13 +268,14 @@ module Rigor
           end
         end
 
-        def project_capable?(name)
+        def project_capable?(name) = hooked?(name) || extends_concern?(name)
+
+        # Whether `name` lists `"*"` on either side or records a hook name.
+        def hooked?(name)
           sides = @scope.discovery.unpositioned_mixins[name]
           return true if sides && SIDES.any? { |side| sides[side]&.include?(WILDCARD) }
 
-          return true if records_hook?(name)
-
-          extends_concern?(name)
+          records_hook?(name)
         end
 
         # Whether `name` records a hook name on either side, or in its envelope table: a `def self.inherited`, a
@@ -225,6 +299,29 @@ module Rigor
           entries.any? do |entry|
             entry.external? ? entry.candidates.include?(CONCERN) : entry.name == CONCERN
           end
+        end
+
+        # Whether `name`'s own singleton segment holds a module whose hook could act on an includer or subclass:
+        # a project module that is hook-capable for the own hit, or an external RBS does not know other than
+        # `ActiveSupport::Concern`.
+        def extends_hook_capable?(name)
+          chain = Scope::ResolutionChain.for(@scope, name, :singleton, @flavor)
+          entries = chain.level_count.zero? ? chain.entries : chain.level_entries(0)
+          entries.any? do |entry|
+            next false if entry.side == :singleton
+
+            if entry.external?
+              !entry.candidates.include?(CONCERN) && !rbs_known?(entry.candidates)
+            else
+              entry.name != name && own_hit_capable?(entry)
+            end
+          end
+        end
+
+        def rbs_known?(candidates)
+          candidates.any? { |candidate| Rigor::Reflection.rbs_class_known?(candidate, scope: @scope) }
+        rescue StandardError
+          false
         end
 
         # A declared module the chain holds as external is tested as that module; an undeclared one is capable

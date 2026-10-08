@@ -242,11 +242,21 @@ module Rigor
       # - otherwise every entry after the answer (the whole chain when `owner` names none) files its class edge
       #   and, for a project entry, the negative class edge on its unqualified name, so a NEW file declaring or
       #   reopening it re-checks the reader. An external entry files only the sites of the names it can denote.
+      #
+      # What is filed is a function of this chain, the entry the filing starts from and the discovery index the
+      # sites are read from, so a consumer that settles the same chain from the same entry again (the common case:
+      # one hierarchy read at every call site of a file) files it once ({Analysis::DependencyRecorder.file_chain_once},
+      # #1590). The recorded edges are the same; only the repeated filing is gone.
       def record_beyond(scope, owner, master_only)
         return unless Analysis::DependencyRecorder.active?
         return if master_only && !owner.nil? && owner == @root && @entries.first&.name == @root
 
         start = owner.nil? ? nil : @entries.index { |entry| entry.name == owner }
+        Analysis::DependencyRecorder.file_chain_once(self, start, scope.discovery) { file_beyond(scope, start) }
+      end
+      private :record_beyond
+
+      def file_beyond(scope, start)
         ResolutionChain.record_class(scope, @root) if start.nil?
         index = start.nil? ? 0 : start + 1
         while index < @entries.size
@@ -256,7 +266,7 @@ module Rigor
           index += 1
         end
       end
-      private :record_beyond
+      private :file_beyond
 
       def record_head(scope, start, side)
         ResolutionChain.record_class(scope, @root) unless start.zero? && @entries.first&.name == @root

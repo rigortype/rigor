@@ -473,6 +473,76 @@ RSpec.describe Rigor::Analysis::DependencyRecorder do
     end
   end
 
+  # #1590 — a resolution chain's filing is skipped only where every target the filing would reach already holds it.
+  describe ".file_chain_once" do
+    let(:recorder) { described_class }
+    let(:chain) { Object.new }
+    let(:discovery) { Object.new }
+
+    def filing(chain, start, discovery, calls)
+      recorder.file_chain_once(chain, start, discovery) do
+        calls << start
+        recorder.read_site("/app/chain.rb:1")
+      end
+    end
+
+    it "files a chain from one start once per consumer, and again from another start, chain or index" do
+      calls = []
+      record = recorder.record_for("/app/consumer.rb") do
+        2.times { filing(chain, 2, discovery, calls) }
+        filing(chain, nil, discovery, calls)
+        filing(chain, nil, discovery, calls)
+        filing(Object.new, 2, discovery, calls)
+        filing(chain, 2, Object.new, calls)
+      end
+
+      expect(calls).to eq([2, nil, 2, 2])
+      expect(record.sources).to eq(Set["/app/chain.rb"])
+    end
+
+    it "files it again for the next consumer" do
+      calls = []
+      2.times { recorder.record_for("/app/consumer.rb") { filing(chain, 0, discovery, calls) } }
+
+      expect(calls).to eq([0, 0])
+    end
+
+    it "files it again into a capture opened after the consumer filed it, so the read set carries it" do
+      calls = []
+      read_set = nil
+      recorder.record_for("/app/consumer.rb") do
+        filing(chain, 0, discovery, calls)
+        _, read_set = recorder.capture do
+          filing(chain, 0, discovery, calls)
+          recorder.capture { filing(chain, 0, discovery, calls) }
+        end
+        filing(chain, 0, discovery, calls)
+      end
+
+      expect(calls).to eq([0, 0, 0])
+      expect(read_set.reads).to eq(Set[["/app/chain.rb", nil]])
+    end
+
+    it "files it again under withhold, whose read set the caller may replay or drop" do
+      calls = []
+      withheld = nil
+      recorder.record_for("/app/consumer.rb") do
+        filing(chain, 0, discovery, calls)
+        _, withheld = recorder.withhold { filing(chain, 0, discovery, calls) }
+      end
+
+      expect(calls).to eq([0, 0])
+      expect(withheld.reads).to eq(Set[["/app/chain.rb", nil]])
+    end
+
+    it "does not run the filing when nothing on this thread is recording" do
+      calls = []
+      recorder.file_chain_once(chain, 0, discovery) { calls << 0 }
+
+      expect(calls).to be_empty
+    end
+  end
+
   describe ".read_site" do
     it "reads the path up to the site's first colon" do
       record = described_class.record_for("/app/consumer.rb") do

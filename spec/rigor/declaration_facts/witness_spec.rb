@@ -77,8 +77,9 @@ RSpec.describe "Declaration-fact witness" do
   # Every relation is checked on both fixtures. The taken world holds the def-node relations strict (the contested
   # slot must name the def Ruby answers with), the skipped world relaxes a contested slot to any def of that name
   # the fixture writes, since the possible def did not run. One row is filtered from the visibilities relation:
-  # the table does not record `private def hidden`'s wrap-around form as private (a gap of the visibility walk,
-  # `build_discovered_method_visibilities`), whose certainty is ADR-119 C1d-b's.
+  # the table does not record `private def hidden`'s wrap-around form as private. That is a gap in the value the
+  # visibility walk records (`build_discovered_method_visibilities`), not in its certainty: `hidden` is a certain
+  # def, and ADR-119 C1d-b contests slots without changing a recorded value.
   describe "possible definers" do
     def without_hidden(violations)
       violations.reject { |line| line.include?("Probe#hidden") }
@@ -92,7 +93,7 @@ RSpec.describe "Declaration-fact witness" do
       expect(without_hidden(violations("possible_defs_skipped"))).to eq([])
     end
 
-    it "records the wrap-around `private def hidden` as public today (C1d-b's gap)" do
+    it "records the wrap-around `private def hidden` as public today (a value gap C1d-b leaves)" do
       expect(violations("possible_defs_skipped", relations: %i[visibilities]))
         .to contain_exactly(a_string_including("Probe#hidden"))
     end
@@ -110,6 +111,24 @@ RSpec.describe "Declaration-fact witness" do
       expect(tables.contested_discovered_singleton_def_nodes).to eq(Set[["Probe", :gated_singleton]])
       expect(tables.discovered_methods.fetch("Probe::Made")).to eq(made: :instance)
       expect(tables.discovered_methods.fetch("Probe")).to include(hidden: :instance)
+    end
+  end
+
+  # ADR-119 C1d-b — the visibility relation skips a contested slot. A bare `module_function` under a condition
+  # applies to `fmt2` in Ruby (an instance copy made private) while the walk records it public; the slot rests on
+  # an uncertain toggle, so it is contested and the relation does not compare it. The singleton copy is recorded
+  # `possible` through the module's self-extend edge, which the methods relation accepts.
+  describe "a conditional bare module_function" do
+    it "agrees with Ruby across every relation, the contested visibility skipped" do
+      expect(violations("conditional_module_function")).to eq([])
+    end
+
+    it "contests the visibility the walk records public where Ruby makes it private" do
+      tables, = DeclarationWitness.rigor_tables(fixture("conditional_module_function"))
+
+      expect(tables.discovered_method_visibilities).to eq("Helpers2" => { fmt2: :public })
+      expect(tables.contested_discovered_method_visibilities).to eq(Set[["Helpers2", :fmt2]])
+      expect(tables.possible_discovered_methods).to eq("Helpers2" => { fmt2: :singleton })
     end
   end
 

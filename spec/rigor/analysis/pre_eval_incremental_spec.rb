@@ -25,9 +25,9 @@ RSpec.describe "pre_eval and auto-detected sig — incremental fingerprint" do
   end
 
   # One `rigor check --incremental` process: a brand-new session reading the snapshot under `fp`.
-  def process_run(config, roots, snapshot:, fp:)
+  def process_run(config, roots, snapshot:, fingerprint:)
     session = Rigor::Analysis::IncrementalSession.new(configuration: config, paths: roots)
-    diagnostics, warm = guarded_run_incremental(session, snapshot: snapshot, fingerprint: fp)
+    diagnostics, warm = guarded_run_incremental(session, snapshot: snapshot, fingerprint: fingerprint)
     [undefined_method(diagnostics), warm]
   end
 
@@ -47,12 +47,12 @@ RSpec.describe "pre_eval and auto-detected sig — incremental fingerprint" do
         fp = fingerprint(config, [lib])
 
         # Process 1 — cold. `shout` is defined by the pre_eval file, so nothing is undefined.
-        diags1, warm1 = process_run(config, [lib], snapshot: snapshot, fp: fp)
+        diags1, warm1 = process_run(config, [lib], snapshot: snapshot, fingerprint: fp)
         expect(warm1).to be(false)
         expect(diags1).to eq([])
 
         # Process 2 — nothing changed: the fingerprint is stable and the snapshot is reused.
-        diags2, warm2 = process_run(config, [lib], snapshot: snapshot, fp: fingerprint(config, [lib]))
+        diags2, warm2 = process_run(config, [lib], snapshot: snapshot, fingerprint: fingerprint(config, [lib]))
         expect(warm2).to be(true)
         expect(diags2).to eq([])
 
@@ -62,7 +62,7 @@ RSpec.describe "pre_eval and auto-detected sig — incremental fingerprint" do
         expect(fp_after).not_to eq(fp)
 
         # Process 3 — the edited pre_eval file must invalidate the snapshot: the warm result equals a cold run.
-        diags3, _warm3 = process_run(config, [lib], snapshot: snapshot, fp: fp_after)
+        diags3, _warm3 = process_run(config, [lib], snapshot: snapshot, fingerprint: fp_after)
         expect(diags3).to eq(cold_run(config))
         expect(diags3).to eq([["a.rb", 1]])
       end
@@ -85,7 +85,7 @@ RSpec.describe "pre_eval and auto-detected sig — incremental fingerprint" do
           fp = fingerprint(config, ["lib"])
 
           # Process 1 — cold. `Integer#upcase` does not exist, so the sig's return type is reported.
-          diags1, warm1 = process_run(config, ["lib"], snapshot: snapshot, fp: fp)
+          diags1, warm1 = process_run(config, ["lib"], snapshot: snapshot, fingerprint: fp)
           expect(warm1).to be(false)
           expect(diags1).to eq([["a.rb", 5]])
 
@@ -95,7 +95,7 @@ RSpec.describe "pre_eval and auto-detected sig — incremental fingerprint" do
           expect(fp_after).not_to eq(fp)
 
           # Process 2 — the warm result must equal a cold run (the diagnostic goes away).
-          diags2, _warm2 = process_run(config, ["lib"], snapshot: snapshot, fp: fp_after)
+          diags2, _warm2 = process_run(config, ["lib"], snapshot: snapshot, fingerprint: fp_after)
           expect(diags2).to eq(cold_run(config))
           expect(diags2).to eq([])
         end

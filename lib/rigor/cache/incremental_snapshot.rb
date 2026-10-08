@@ -259,7 +259,7 @@ module Rigor
           "roots:#{Array(roots).map(&:to_s).sort.join("\n")}",
           "gems:#{digest_file_if_present('Gemfile.lock')}",
           "rbs_collection:#{digest_file_if_present('rbs_collection.lock.yaml')}",
-          "sig:#{digest_signature_paths(Environment.project_signature_roots(configuration.signature_paths).map(&:to_s))}",
+          "sig:#{digest_signature_paths(project_sig_roots(configuration))}",
           "pre_eval:#{digest_pre_eval(configuration.pre_eval)}"
         ]
         identity = EngineSource.process_identity
@@ -293,6 +293,13 @@ module Rigor
         digest.hexdigest
       end
       private_class_method :digest_pre_eval
+
+      # The `sig/` roots the environment loads for this configuration: the configured `signature_paths`, or the
+      # auto-detected `<root>/sig` when those are nil ({Environment.project_signature_roots}).
+      def self.project_sig_roots(configuration)
+        Environment.project_signature_roots(configuration.signature_paths).map(&:to_s)
+      end
+      private_class_method :project_sig_roots
 
       # Content-digest every `.rbs` under the configured signature paths (sorted for determinism) so a project
       # RBS edit invalidates the snapshot. Sig trees are small; content (not mtime) keeps it stable across

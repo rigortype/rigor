@@ -590,8 +590,13 @@ to every hook of levels `j` and deeper.
   `def` onto the class's singleton tables, so the class entry answers for it. That is not where Ruby
   finds the method: an entry between the class and the module (an RBS-known external that declares the
   name, a nearer module's include) answers first, and on #1607's fork the copy agrees across both
-  worlds while Ruby's do not. A class entry whose `def`'s nesting head names a module of the same
-  level's singleton segment is therefore asked past, and the module answers at its own entry. One whose
+  worlds while Ruby's do not. A class entry whose `def` is the receiverless node the fold copied — its
+  nesting head names a module of the same level's singleton segment and that module's instance table
+  holds the same node — is therefore asked past, and the module answers at its own entry. A `def C.x`
+  or `class << C; def x; end` written inside the module's body shares the nesting head but is the
+  class's own; it is not a copy and declines with the next case. (The walk records such a `def C.x` as
+  the module's instance method too, so the node identity alone does not tell it apart; its receiver
+  does.) One whose
   nesting head names a module that level does not hold declines: the fold and the chain resolved the
   `extend`'s name differently (`extend X` inside `module A` with both `X` and `A::X` declared, where the
   fold copies the top-level `X`; and `extend ::X`, which the extends table records as `X` and the chain

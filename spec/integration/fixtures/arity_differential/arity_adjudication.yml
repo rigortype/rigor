@@ -1,7 +1,7 @@
-- base: 004440da5de45b498723b0c2cd123aefa75f3059
-  path: spec/integration/fixtures/arity_differential/conditional_def.rb
-  line: 8
-  column: 13
-  message: "wrong number of arguments to `only' on CondDef (given 2, expected 1)"
-  verdict: tp-lost
-  reason: "The def runs under Ruby 4.0 (RUBY_VERSION > \"3\"), so only(1, 2) raises ArgumentError: a real error. The mechanism is a possible definer (ADR-119 WD3, C1d-a): the def sits in an if branch, so its def-node slot is contested, the candidate-set read takes the next candidate (absent) as well, the two disagree and the read answers UNKNOWN. Lost by design: whether CondDef#only exists depends on a fact the tables cannot prove."
+- base: 28df4441751638281156c295a5cf71cd740b9827
+  path: spec/integration/fixtures/arity_differential/issue_1607_skipped_extend.rb
+  line: 23
+  column: 7
+  message: "wrong number of arguments to `foo' on C1607 (given 0, expected 1)"
+  verdict: fp-silenced
+  reason: "Ruby skips C1607's extend M1607 because Base1607's singleton already carries it, so C1607.foo is Base1607.foo and prints 1 (Ruby-verified). The mechanism is a fork (ADR-119 C2-c, #1607): the singleton chain skipped an extend, the retro world puts M1607#foo(x) first, the two disagree and the read answers UNKNOWN."

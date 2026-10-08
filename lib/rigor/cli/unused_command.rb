@@ -131,7 +131,7 @@ module Rigor
       # ADR-102 WD2), which is exactly why the two corpora are separated rather than both widened.
       def reference_files(_paths, configuration)
         relative = Analysis::Reachability::ProjectFiles.own(Dir.glob(REFERENCE_GLOB, base: Dir.pwd), Dir.pwd)
-        absolute = relative.map { |rel| File.expand_path(rel) }
+        absolute = relative.map { |rel| File.absolute_path(rel) }
         Analysis::PathExpansion.reject_excluded(absolute, configuration.exclude_patterns).to_set
       end
 
@@ -177,7 +177,7 @@ module Rigor
         return [] if names.empty?
 
         Analysis::Reachability::ProjectFiles.own(Dir.glob(TEMPLATE_GLOB, base: Dir.pwd), Dir.pwd).flat_map do |rel|
-          absolute = File.expand_path(rel)
+          absolute = File.absolute_path(rel)
           haystack = cache.serve(:runs, absolute) { constant_bearing_text(File.read(absolute).scrub) }
           names.filter_map do |fqn|
             next unless haystack.include?(fqn)
@@ -208,7 +208,7 @@ module Rigor
         return [] if globs.empty?
 
         matcher = Analysis::Reachability::ProjectFiles.method(:entry_point_match?)
-        cwd = "#{File.expand_path(Dir.pwd)}/"
+        cwd = "#{File.absolute_path(Dir.pwd)}/"
         declarations.filter_map do |d|
           relative = d.path.delete_prefix(cwd)
           d.fqn if globs.any? { |g| matcher.call(g, d.path) || matcher.call(g, relative) }

@@ -296,12 +296,12 @@ module Rigor
         def build_trust_policy
           trusted_gems = @configuration.plugins.map { |entry| trusted_gem_name(entry) }.uniq
           roots = [Dir.pwd]
-          Array(@configuration.signature_paths).each { |sp| roots << File.expand_path(sp) }
+          Array(@configuration.signature_paths).each { |sp| roots << File.absolute_path(sp) }
           trusted_gems.each do |gem_name|
             path = trusted_gem_root(gem_name)
             roots << path if path
           end
-          @configuration.plugins_io_allowed_paths.each { |p| roots << File.expand_path(p) }
+          @configuration.plugins_io_allowed_paths.each { |p| roots << File.absolute_path(p) }
 
           Plugin::TrustPolicy.new(
             trusted_gems: trusted_gems,

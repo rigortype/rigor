@@ -2,6 +2,7 @@
 
 require "did_you_mean"
 
+require_relative "config_path"
 require_relative "signature_path_audit"
 # ADR-87 WD4 — only the pure rule-id table (`ALL_RULES` / `RULE_FAMILIES`) is needed, so require the light
 # `rule_ids.rb` rather than the engine-pulling `check_rules.rb`; keeps `config_audit` (loaded by every check)
@@ -199,14 +200,14 @@ module Rigor
     end
 
     def self.add_missing_dir(warnings, path, project_root, kind, key)
-      return if path.nil? || File.directory?(File.expand_path(path, project_root))
+      return if path.nil? || File.directory?(ConfigPath.absolute(path, project_root))
 
       warnings << Warning.new(kind: kind, message: "#{key}: #{path.inspect} is not a directory",
                               fields: { "path" => path })
     end
 
     def self.add_missing_file(warnings, path, project_root, kind, key)
-      return if path.nil? || File.file?(File.expand_path(path, project_root))
+      return if path.nil? || File.file?(ConfigPath.absolute(path, project_root))
 
       warnings << Warning.new(kind: kind, message: "#{key}: #{path.inspect} does not exist", fields: { "path" => path })
     end

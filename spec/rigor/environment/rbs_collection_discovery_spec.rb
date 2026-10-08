@@ -304,4 +304,20 @@ RSpec.describe Rigor::Environment::RbsCollectionDiscovery do
       expect(resolved).to be_nil
     end
   end
+
+  describe ".resolve_lockfile_path with a `~/` lockfile" do
+    before { allow(Dir).to receive(:home).and_return(tmpdir) }
+
+    def resolve
+      described_class.resolve_lockfile_path(lockfile_path: "~/c.lock.yaml", project_root: tmpdir, auto_detect: false)
+    end
+
+    it "resolves under the home directory, and not at all while the file is absent" do
+      expect(described_class.configured_lockfile_path("~/c.lock.yaml")).to eq(File.join(tmpdir, "c.lock.yaml"))
+      expect(resolve).to be_nil
+
+      File.write(File.join(tmpdir, "c.lock.yaml"), "x")
+      expect(resolve.to_s).to eq(File.join(tmpdir, "c.lock.yaml"))
+    end
+  end
 end

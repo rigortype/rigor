@@ -287,10 +287,10 @@ module Rigor
           buffers = failure.is_a?(Array) ? failure[3] : nil
           return false if buffers.nil?
 
-          closure_paths = closure.to_set { |path| File.expand_path(path.to_s) }
+          closure_paths = closure.to_set { |path| File.absolute_path(path.to_s) }
           Array(buffers).any? do |name|
             path = virtual_buffer_path(name)
-            !path.nil? && closure_paths.include?(File.expand_path(path))
+            !path.nil? && closure_paths.include?(File.absolute_path(path))
           end
         end
 

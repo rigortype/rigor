@@ -812,7 +812,7 @@ module Rigor
           buffer_name = location&.buffer&.name
           return false unless buffer_name
 
-          project_files.include?(File.expand_path(buffer_name.to_s))
+          project_files.include?(File.absolute_path(buffer_name.to_s))
         end
 
         # Adds empty stub declarations for the missing referenced types (and any enclosing namespace they

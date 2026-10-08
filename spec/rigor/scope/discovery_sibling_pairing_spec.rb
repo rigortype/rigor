@@ -411,16 +411,19 @@ RSpec.describe "DiscoveryIndex sibling pairing (ADR-119 WD1)" do
         contested_discovered_parameter_envelopes: Set[["Outer::Leaf", %i[instance added]]],
         possible_discovered_deferred_ranges: recorded.fetch(:possible_discovered_deferred_ranges)
       )
-      # `possible_discovered_deferred_ranges` is keyed by path, and SIBLINGS_KEYED_BY_PATH cannot be told apart from the
-      # Hash arm of `rename_siblings` for path keys: a path is never a compact class name, so both arms leave the key
-      # alone. The row's class name (its 5th field) is what separates "skipped" from "renamed", so pin it on the member
-      # row and on the sibling row. Both must still name the inner class.
+      # `possible_discovered_deferred_ranges` is keyed by path. A path is never a compact class name, so
+      # `rename_siblings` leaves the key alone whether SIBLINGS_KEYED_BY_PATH skips the table or the Hash arm
+      # re-keys it, and neither arm rewrites a row's class name (its 5th field): emptying the constant leaves this
+      # example green. The skip is behaviourally indistinguishable today, and the constant documents the intent
+      # until a path-keyed sibling can hold a key the rename would change. What this pins is that the sibling's
+      # rows keep the class name the member's rows keep.
       member_owners = def_index.fetch(:deferred_ranges).fetch(leaf).map { |row| row[4] }
       sibling_owners = def_index.fetch(:siblings).fetch(:possible_discovered_deferred_ranges).fetch(leaf).map do |row|
         row[4]
       end
       expect(member_owners).not_to be_empty
       expect(member_owners).to all(eq("Wrap::Outer::Leaf"))
+      expect(sibling_owners).not_to be_empty
       expect(sibling_owners).to all(eq("Wrap::Outer::Leaf"))
     end
 

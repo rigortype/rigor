@@ -977,7 +977,8 @@ RSpec.describe "resolution in Ruby's ancestor order (#1567, #1568, #1570, #1571)
     end
 
     def ruby_lookup(source, prelude)
-      RubyRun.stdout("#{source.sub("1.upcase\n", "")}begin\n  p Media.new.lookup([])\nrescue StandardError => e\n  p e.class\nend\n",
+      program = source.sub("1.upcase\n", "")
+      RubyRun.stdout("#{program}begin\n  p Media.new.lookup([])\nrescue StandardError => e\n  p e.class\nend\n",
                      prelude: prelude)
     end
 

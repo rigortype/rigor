@@ -24,7 +24,8 @@ file's own directory.
 A leading `~/` (or a bare `~`) in a path setting expands to your home directory; `~name` is an ordinary
 directory called `~name`, not another user's home. This covers `paths:`, `signature_paths:`, `test_paths:`,
 `pre_eval:`, `plugins_io.allowed_paths:`, `includes:`, `bundler.bundle_path:`, `bundler.lockfile:` and
-`rbs_collection.lockfile:`.
+`rbs_collection.lockfile:`. It does not apply to `cache.path:`, `baseline:` or `effects.snapshot.path:`, which stay
+literal and relative to the working directory.
 
 ## Editor validation
 

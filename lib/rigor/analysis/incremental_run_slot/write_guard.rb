@@ -135,8 +135,11 @@ module Rigor
         # while the run reads moves the key as surely as one rewritten, and one rewritten and restored digests as it
         # did while the run may have read the other bytes.
         def self.lockfile_paths(configuration)
-          [configuration.bundler_lockfile, configuration.rbs_collection_lockfile, "Gemfile.lock",
-           "rbs_collection.lock.yaml"].compact.map { |path| File.absolute_path(path.to_s) }.uniq
+          configured = [
+            [configuration.bundler_lockfile, Environment::LockfileResolver],
+            [configuration.rbs_collection_lockfile, Environment::RbsCollectionDiscovery]
+          ].filter_map { |path, resolver| resolver.configured_lockfile_path(path) if path }
+          (configured + %w[Gemfile.lock rbs_collection.lock.yaml].map { |path| File.absolute_path(path) }).uniq
         end
         private_class_method :lockfile_paths
 

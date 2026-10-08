@@ -118,9 +118,17 @@ Home-directory spelling follows `File.expand_path` for exactly two forms:
   when that user does not exist, which crashed `rigor check` on a project directory named `~drafts` (#1510).
   Resolution never raises on a `~`.
 
-The rule covers every path-valued setting: `paths:`, `signature_paths:`, `test_paths:`, `pre_eval:`, the nested
-`plugins_io.allowed_paths:`, each `includes:` entry, `bundler.bundle_path:`, `bundler.lockfile:`, and
-`rbs_collection.lockfile:`, plus the `BUNDLE_PATH` value read from `.bundle/config` (project or user-global).
+The rule covers `paths:`, `signature_paths:`, `test_paths:`, `pre_eval:`, the nested `plugins_io.allowed_paths:`,
+each `includes:` entry, `bundler.bundle_path:`, `bundler.lockfile:`, and `rbs_collection.lockfile:`, plus the
+`BUNDLE_PATH` value read from `.bundle/config` (project or user-global). It does not cover `cache.path:`,
+`baseline:`, or `effects.snapshot.path:`, which stay literal and relative to the working directory.
+
+Bundler itself expands `~user/` in `BUNDLE_PATH`; Rigor keeps `~name` literal, so `BUNDLE_PATH: "~deploy/gems"` is
+not followed.
+
+The lockfile settings are expanded in one place per resolver (`LockfileResolver.configured_lockfile_path`,
+`RbsCollectionDiscovery.configured_lockfile_path`), which both the run and the incremental write guard call, so
+the guard watches the lockfile the run reads.
 
 It does not cover a path Rigor is asked to *analyse* at run time: a CLI path argument, a template-unit path, or
 the runner's file sets. The shell has already expanded a `~` in an argument by the time Rigor sees it, so a `~`

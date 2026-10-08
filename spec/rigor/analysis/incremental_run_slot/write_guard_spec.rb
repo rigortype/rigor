@@ -81,6 +81,45 @@ RSpec.describe Rigor::Analysis::IncrementalRunSlot::WriteGuard do
     expect(guard.admits?(rows_for("lib/a.rb"))).to be(false)
   end
 
+  # The guard must watch the lockfile the run reads. A `~/` lockfile setting is the home directory's, not a
+  # directory called `~` under the working directory.
+  context "with `~/` lockfile settings" do
+    let(:home) { File.join(Dir.pwd, "home") }
+    let(:configuration) do
+      Rigor::Configuration.new(
+        Rigor::Configuration::DEFAULTS.merge(
+          { "paths" => ["lib"], "bundler" => { "lockfile" => "~/x.lock" },
+            "rbs_collection" => { "lockfile" => "~/c.lock.yaml" } }
+        )
+      )
+    end
+
+    before do
+      FileUtils.mkdir_p(home)
+      allow(Dir).to receive(:home).and_return(home)
+    end
+
+    it "watches the same lockfile paths the resolvers read" do
+      watched = described_class.send(:lockfile_paths, configuration)
+      expect(watched).to include(
+        Rigor::Environment::LockfileResolver.configured_lockfile_path(configuration.bundler_lockfile),
+        Rigor::Environment::RbsCollectionDiscovery.configured_lockfile_path(configuration.rbs_collection_lockfile)
+      )
+      expect(watched).to include(File.join(home, "x.lock"), File.join(home, "c.lock.yaml"))
+      expect(watched.grep(%r{/~/})).to be_empty
+    end
+
+    it "refuses the write when the home lockfile is rewritten after the mark" do
+      at_tick_start
+      write(File.join(home, "x.lock"), "GEM\n  specs:\n")
+      guard = start
+      expect(guard.admits?(rows_for("lib/a.rb"))).to be(true)
+
+      write(File.join(home, "x.lock"), "GEM\n  specs:\n\n")
+      expect(guard.admits?(rows_for("lib/a.rb"))).to be(false)
+    end
+  end
+
   # An analysed path is taken as written: the shell has expanded any `~` before it arrives, so `~drafts/b.rb` is a
   # directory called `~drafts`, not the home of a user that does not exist (#1510).
   it "starts on a root whose first segment is ~name without raising" do

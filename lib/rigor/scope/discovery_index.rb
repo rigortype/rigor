@@ -76,8 +76,10 @@ module Rigor
       # - `contested_*` is a Set of key paths into its member, one per entry whose value depends on a possible
       #   fact: `[class, method]`, or `[class, [kind, method]]` for an envelope.
       #
-      # The members without a sibling here (`discovered_def_sources`, `discovered_singleton_def_sources`) are
-      # ADR-119 WD4's other single-valued tables; see the ADR for whether they need one.
+      # The members without a sibling here (`discovered_def_sources`, `discovered_singleton_def_sources`) are site
+      # tables (dependency edges, positions, fingerprints): no read takes a definer, visibility, arity or type from
+      # them, and certainty does not move a site. The one read whose answer depends on the site is
+      # `Scope#same_file_top_level_def?`, left to ADR-119 C1d.
       SIBLINGS = {
         discovered_methods: :possible_discovered_methods,
         discovered_deferred_ranges: :possible_discovered_deferred_ranges,
@@ -198,6 +200,9 @@ module Rigor
       # `[kind, method_name]` entries. Their PRESENCE is the fact; the value is always
       # `Source::ParameterEnvelope::OPAQUE`, so a bucket folds under the one join every other entry does.
       # Symbols, because every per-method key is an Array and neither can collide with the other.
+      #
+      # The class marks below and {ENVELOPE_PROJECT_WIDE} are presence facts read only to decline a read; they are
+      # never a contested path. Contested envelope paths are always `[class, [kind, name]]`.
       #
       # - {ENVELOPE_MODULE_MARK}: the name is declared with `module` (or `Const = Module.new do … end`) somewhere
       #   in the project. An instance of it is an instance of an unknown includer.

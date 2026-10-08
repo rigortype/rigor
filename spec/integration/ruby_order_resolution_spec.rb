@@ -921,4 +921,40 @@ RSpec.describe "resolution in Ruby's ancestor order (#1567, #1568, #1570, #1571)
       C.new.foo.upcase
     RUBY
   end
+
+  # A KNOWN COST of the migration (ADR-119 C2-b1, found on Mastodon's `lib/mastodon/cli/media.rb`): an RBS-unknown
+  # module included ahead of the definer (`include ActionView::Helpers::NumberHelper` before `Base`) may answer
+  # first, so the read declines, `fail_with` types `Dynamic`, and the `unless count` guard no longer narrows `count`
+  # (a call typed `bot` narrows; a `Dynamic` one does not). Ruby: `fail_with` raises, `count` is an Integer, so the
+  # `possible-nil-receiver` is a false positive that master did not report. The control without the include still
+  # types the call and stays silent. Narrowing past an UNKNOWN call that raises is a follow-up, not C2-b1.
+  describe "an RBS-unknown module ahead of the definer loses the raising call's narrowing (C2-b1 known cost)" do
+    let(:source) do
+      <<~RUBY
+        class Base
+          def fail_with(message)
+            raise ArgumentError, message
+          end
+        end
+
+        class Media < Base
+          %<include>s
+          def lookup(list)
+            count = [7, 10].find { |n| n <= list.length }
+            fail_with 'no' unless count
+            list[-count..]
+          end
+        end
+      RUBY
+    end
+
+    it "keeps the narrowing without the unknown include" do
+      expect(diagnostics_for(format(source, include: ""))).to eq([])
+    end
+
+    it "reports the possible nil receiver with the unknown include (false positive, pinned as a known cost)" do
+      expect(diagnostics_for(format(source, include: "include ActionView::Helpers::NumberHelper")))
+        .to eq([[12, "call.possible-nil-receiver"]])
+    end
+  end
 end

@@ -1,7 +1,7 @@
 {
   "calibrated": true,
-  "calibrated_at": "2026-09-27T01:38:00Z",
+  "calibrated_at": "2026-10-08T09:51:07Z",
   "max_diagnostics": 21,
-  "min_precision_ratio": 0.523,
-  "note": "Set by hand from release-gate run 36286123530 (release/0.4.0 @ 6503cd49a, the v0.4.0 release head): 21 diagnostics, including one info-level rbs.coverage.missing-gem row, and a precise ratio of 77,768 / 148,431 = 0.5239. The previous 468 / 0.4284 was calibrated on 2026-06-16 from a 445-row run; the scheduled sweep has reported between 21 and 29 rows since late June, so the old ceiling would have let a regression of several hundred rows through. max_diagnostics is exact: a rise means diffing the new rows for false positives before re-blessing, never raising the number blindly. min_precision_ratio keeps a band of about 130 precise expressions below the measured 0.5239, because an exact floor would fail on legitimate precision trade-offs (master moved by -14 precise expressions between 2026-09-21 and v0.4.0)."
+  "min_precision_ratio": 0.52,
+  "note": "Set by hand from release-gate run 37759384453 (release/0.4.1 @ 06eea7a63, the v0.4.1 release head): 21 diagnostics, unchanged from v0.4.0, and a precise ratio of 77,336 / 148,431 = 0.5210. The floor moves from 0.523 to 0.520 because ADR-119 C2-b1 (#1629) types calls through an ancestry the file cannot order as Dynamic: -432 precise expressions against v0.4.0, a typing loss the maintainer accepted on 2026-10-08 (ADR-119 Q9) and that #1651 tracks recovering before v0.5.0. max_diagnostics is exact: a rise means diffing the new rows for false positives before re-blessing, never raising the number blindly. min_precision_ratio keeps the same band of about 130 precise expressions below the measured ratio, because an exact floor would fail on legitimate precision trade-offs. Previous calibration: 2026-09-27 from run 36286123530 (v0.4.0 head), 77,768 / 148,431 = 0.5239, floor 0.523."
 }

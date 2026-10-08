@@ -1471,7 +1471,8 @@ module Rigor
       # - the signature tree the plain slot records (`RbsDescriptor.file_entries` / `.glob_entries` over the loader
       #   roots this run's analysis resolved), and an existence row per signature root, configured or the
       #   auto-detected `sig` — a recheck rebuilds no environment unless its closure is non-empty, and the snapshot
-      #   fingerprint digests only a configured `signature_paths:`;
+      #   fingerprint digests the same roots (configured, or the auto-detected `sig`), so a change to one drops the
+      #   snapshot and forces a full run rather than reaching a recheck;
       # - the discovered-not-analysed files (#684) and a listing row per discovery root — a narrowed recheck does
       #   not widen discovery at all;
       # - every `pre_eval:` file outside `files` (a stat row, or an absence row) — the session tracks only analysed

@@ -26,9 +26,9 @@ module Rigor
       #    project subclass of the receiver — whose instances the receiver's type admits — records a different
       #    or opaque envelope for it.
       #
-      # ADR-119 C1b — on the instance side stage 1 and the subclass check ask `Inference::DefinerResolution`, and a
+      # ADR-119 C1b / C2-c — on both sides stage 1 and the subclass check ask `Inference::DefinerResolution`, and a
       # chain it declines (`UNKNOWN`) answers no envelope: where Ruby's order depends on a fact the tables cannot
-      # prove, the rule is silent instead of checking the call against master's order (#1570).
+      # prove, the rule is silent instead of checking the call against master's order (#1570, #1607).
       #
       # Deliberately NOT in scope: a constructor reached through `Class#new` (nothing records `initialize` as
       # `[:singleton, :new]`, so `.new` finds no owner unless the class writes `def self.new` itself); keyword
@@ -95,8 +95,10 @@ module Rigor
         # withhold, so none of these needs the file-level class edge the bucket reads would otherwise record.
         def settle_by_definitions
           return if @withheld.nil?
-          # ADR-119 C1b — a declined chain (`@unknown`) is silent only until another file's edit lifts the
-          # decline, so its verdict depends on everything the walk read, as an opaque level's does.
+          # ADR-119 C1b — a declined chain (`@unknown`) that some level records the name on is silent only until
+          # another file's edit lifts the decline, so its verdict depends on everything the walk read, as an opaque
+          # level's does. A decline over a name no project level records is not `@unknown` (see
+          # {#decline_unless_recorded_nowhere}): it settles by definitions, as an `ABSENT` read does.
           return settle_by_walk if @unknown
 
           @owner_entries.each do |name, kind|
@@ -126,27 +128,34 @@ module Rigor
 
         private
 
-        # ADR-119 C1b / #1570 — on the instance side the nearest level is asked of
-        # {Inference::DefinerResolution}: the chain stands only where every candidate level gives one envelope
-        # in every world Ruby may have run (a fork, an unproven mixin order, a `possible`-only definer). Where it
-        # does not, the answer is NO envelope and `@unknown` — the rule stays silent — instead of master's
-        # answer, which is what #1570 fired on. The levels the walk keeps for {#authoritative?} are the chain's.
-        #
-        # The SINGLETON side is untouched on purpose: the candidate-set read has no singleton side until
-        # ADR-119 C1c designs it, so it keeps `Scope::ResolutionChain#settle` and the level walk the chain
-        # replaced (`Scope::ResolutionChain::MasterOrder`) where the chain does not stand.
+        # ADR-119 C1b / C2-c, #1570 / #1607 — the nearest level is asked of {Inference::DefinerResolution}, on the
+        # receiver's own side: the chain stands only where every candidate level gives one envelope in every
+        # world Ruby may have run (a fork, an unproven mixin order, a `possible`-only definer, and on the
+        # singleton side a hook that could have put a definer ahead). Where it does not, the answer is NO
+        # envelope and `@unknown` — the rule stays silent — instead of master's order, which is what #1570 and
+        # #1607 fired on. The levels the walk keeps for {#authoritative?} are the chain's.
         def walk_to_owner(class_name)
           @levels = []
           @passed = []
-          @master = false
-          return walk_singleton_to_owner(class_name) if @kind == :singleton
+          @recorded = false
 
-          case Inference::DefinerResolution.resolve(@scope, class_name, @method_name, :instance,
+          case Inference::DefinerResolution.resolve(@scope, class_name, @method_name, side,
                                                     question: :arity) { |chain, from| arity_hit(chain, from) }
           in Inference::DefinerResolution::Known(answer: _answer, owner: _owner) then nearest_envelope(class_name)
           in Inference::DefinerResolution::ABSENT then nearest_envelope(class_name) # rubocop:disable Lint/DuplicateBranch
-          in Inference::DefinerResolution::UNKNOWN then decline
+          in Inference::DefinerResolution::UNKNOWN then decline_unless_recorded_nowhere(class_name)
           end
+        end
+
+        # A declined read of a name no project level records (`arity_hit` found no level that does, in any world it
+        # was asked) answers no envelope whether or not it stands, so the walk's reads are not the verdict's
+        # dependency: only a `def` appearing can change it, which {#settle_by_definitions} files, as for an
+        # `ABSENT` read. It can leave a stale false negative in a warm run, never a firing. Without this, every
+        # `Widget.new` (the implicit `Class` tail may answer it) would replay the whole walk as a file-level
+        # class edge.
+        def decline_unless_recorded_nowhere(class_name)
+          nowhere = !@recorded && !arity_chain(class_name).truncated?
+          nowhere ? nearest_envelope(class_name) : decline
         end
 
         # The chain's nearest level's envelope. `Known#answer` is that envelope, but {#authoritative?} and
@@ -165,7 +174,9 @@ module Rigor
         end
 
         # The first level at or after entry position `from` whose records name the method: its envelope (or
-        # {AMBIGUOUS}), the entry that recorded it and that entry's position on the chain.
+        # {AMBIGUOUS}), the entry that recorded it and that entry's position and side on the chain. On the
+        # singleton side the class's own record is a `:singleton` entry and an extended module's an `:instance`
+        # one (`owner_entries` names the kind of each).
         def arity_hit(chain, from)
           start = 0
           chain.levels.each_with_index do |raw, index|
@@ -180,32 +191,12 @@ module Rigor
 
             envelope = found.first
             answer = found.all?(envelope) && !Source::ParameterEnvelope.opaque?(envelope) ? envelope : AMBIGUOUS
-            owner = owner_entries(level).first.first
-            position = first + (entries.index { |entry| entry.name == owner } || 0)
-            return ArityHit.new(answer, owner, position, :instance)
+            owner, owner_kind = owner_entries(level).first
+            position = first + (entries.index { |entry| entry.name == owner && entry.side == owner_kind } || 0)
+            @recorded = true
+            return ArityHit.new(answer, owner, position, owner_kind)
           end
           nil
-        end
-
-        # The singleton side's walk, as it was before C1b: the chain's owner where `settle` lets it stand, and
-        # master's where it does not. Both worlds' levels are kept for {#authoritative?}.
-        def walk_singleton_to_owner(class_name)
-          chain = arity_chain(class_name)
-          envelope = owner_in(chain_levels(chain).first)
-          # The retro read answers `false` (no envelope is `false`) unless it agrees with the chain's and neither
-          # read was ambiguous (`@ambiguous` only ever turns true, so it covers both).
-          verdict = chain.settle(@scope, envelope) do |retro|
-            owner_in(chain_levels(retro).first) == envelope && !@ambiguous ? envelope : false
-          end
-          return envelope if verdict == :chain
-
-          @levels = []
-          @passed = []
-          @owner_entries = []
-          @ambiguous = false
-          @master = true
-          @envelope = nil
-          owner_in(master_levels(class_name).first)
         end
 
         def owner_in(levels)
@@ -265,22 +256,16 @@ module Rigor
           @scope.discovered_classes.key?(name) || Rigor::Reflection.rbs_class_known?(name, scope: @scope)
         end
 
-        # Yields each level of `class_name`'s walk — the chain's, or master's where {#walk_to_owner} fell back to
-        # it. False when the walk stopped at the ADR-41 budget rather than ending: budget exhaustion is
-        # uncertainty, and every caller reads it as a reason to decline.
+        # Yields each level of `class_name`'s chain. False when the walk stopped at the ADR-41 budget rather than
+        # ending: budget exhaustion is uncertainty, and every caller reads it as a reason to decline.
         def walked_whole_chain?(class_name, &)
-          levels, whole = @master ? master_levels(class_name) : chain_levels(arity_chain(class_name))
+          levels, whole = chain_levels(arity_chain(class_name))
           levels.each(&)
           whole
         end
 
         # `[levels, whole]` for one world of the chain, up to the first superclass the project does not declare.
         def chain_levels(chain) = [chain.levels.map { |level| Level.new(*level) }, !chain.truncated?]
-
-        def master_levels(class_name)
-          levels, whole = Scope::ResolutionChain::MasterOrder.arity_levels(@scope, class_name.to_s, side)
-          [levels.map { |level| Level.new(*level) }, whole]
-        end
 
         def side = @kind == :singleton ? :singleton : :instance
 
@@ -390,15 +375,12 @@ module Rigor
           true
         end
 
-        # A subclass's own level (nil where the budget cut it or the chain does not stand for the name). The
-        # instance side asks {Inference::DefinerResolution} (ADR-119 C1b): the subclass's own level answers, and a
-        # fork, an unproven mixin order or a `possible`-only definer there is `UNKNOWN`, which
-        # `subclasses_agree?` reads as a reason to decline. The singleton side keeps `settle` and master's walk,
-        # as {#walk_singleton_to_owner} does.
+        # A subclass's own level (nil where the budget cut it or the chain does not stand for the name). It asks
+        # {Inference::DefinerResolution} on the receiver's side (ADR-119 C1b, C2-c): the subclass's own level
+        # answers, and a fork, an unproven mixin order, a `possible`-only definer or a hook there is `UNKNOWN`,
+        # which `subclasses_agree?` reads as a reason to decline.
         def subclass_levels(subclass)
-          return singleton_subclass_levels(subclass) if @kind == :singleton
-
-          case Inference::DefinerResolution.resolve(@scope, subclass, @method_name, :instance, question: :arity,
+          case Inference::DefinerResolution.resolve(@scope, subclass, @method_name, side, question: :arity,
                                                     &own_level_answer(subclass))
           in Inference::DefinerResolution::Known(answer: _answer, owner: _owner) then [first_level(subclass)]
           in Inference::DefinerResolution::ABSENT then [nil]
@@ -413,18 +395,11 @@ module Rigor
             next nil unless from.zero? && !chain.levels.empty?
 
             level = Level.new(*chain.levels.first)
-            ArityHit.new(level_envelopes(level).uniq, subclass, 0, :instance)
+            ArityHit.new(level_envelopes(level).uniq, subclass, 0, side)
           end
         end
 
         def first_level(class_name) = chain_levels(arity_chain(class_name)).first.first
-
-        def singleton_subclass_levels(subclass)
-          chain = arity_chain(subclass)
-          own = chain_levels(chain).first.first
-          verdict = chain.settle(@scope, own) { |retro| chain_levels(retro).first.first }
-          [verdict == :chain ? own : master_levels(subclass).first.first]
-        end
 
         def each_subclass(class_name)
           children = children_by_parent

@@ -119,6 +119,7 @@ module Rigor
         @marks = marks
         @flavor = flavor
         @retro = retro
+        @memo = {} # the chain is frozen; this table is not, and holds {#levels}
         freeze
       end
 
@@ -299,7 +300,9 @@ module Rigor
       # Each complete level up to the first superclass the project does not declare, as `[class_name,
       # modules, externals]`: the level's class, the project modules around it (each once), and the candidate
       # lists of the ancestors in it the project does not declare — the shape `call.wrong-arity` reads.
-      def levels
+      def levels = (@memo[:levels] ||= compute_levels)
+
+      def compute_levels
         out = []
         level_count.times do |index|
           class_name = @level_classes[index]
@@ -307,10 +310,11 @@ module Rigor
 
           externals, entries = level_entries(index).partition(&:external?)
           modules = entries.filter_map { |entry| entry.name unless entry.name == class_name && entry.side == @side }
-          out << [class_name, modules.uniq, externals.map(&:candidates)]
+          out << [class_name, modules.uniq.freeze, externals.map(&:candidates).freeze].freeze
         end
-        out
+        out.freeze
       end
+      private :compute_levels
 
       MEMO_KEY = :__rigor_resolution_chain__
       private_constant :MEMO_KEY
@@ -471,28 +475,6 @@ module Rigor
           end
         end
 
-        # `call.wrong-arity`'s level walk: each class up the superclass chain with every module its own
-        # mixins (`extend`s on the singleton side) reach, transitively, and the mixins that resolve to none.
-        # Returns `[levels, whole]`, a level being `[class_name, modules, externals]`.
-        def arity_levels(scope, root, side)
-          ResolutionChain.master_memo(scope, :arity, [:levels, root, side]) do |resolver|
-            levels = []
-            current = root
-            seen = {}
-            whole = true
-            while current && !seen[current]
-              if seen.size >= LIMIT
-                whole = false
-                break
-              end
-              seen[current] = true
-              levels << arity_level(scope, resolver, current, side)
-              current = resolver.resolve_one(current, scope.discovery.discovered_superclasses[current])
-            end
-            [levels.freeze, whole].freeze
-          end
-        end
-
         def direct_edges(scope, resolver, name)
           discovery = scope.discovery
           raws = (discovery.discovered_includes[name] || EMPTY_NAMES) + [discovery.discovered_superclasses[name]]
@@ -533,33 +515,6 @@ module Rigor
             next groups << resolver.candidates(current, raw) if resolved.nil?
 
             collect_externals(scope, resolver, resolved, mixins, groups, seen)
-          end
-        end
-
-        def arity_level(scope, resolver, class_name, side)
-          discovery = scope.discovery
-          table = side == :singleton ? discovery.discovered_extends : discovery.discovered_includes
-          own = table[class_name]
-          modules = []
-          externals = []
-          collect_mixins(scope, resolver, class_name, own || EMPTY_NAMES, [modules, externals], {})
-          [class_name, modules.freeze, externals.freeze].freeze
-        end
-
-        def collect_mixins(scope, resolver, owner, raws, found, seen)
-          raws.each do |raw|
-            resolved = resolver.resolve(owner, raw)
-            names = resolved.is_a?(String) ? [resolved] : Array(resolved)
-            next found[1] << resolver.candidates(owner, raw) if names.empty?
-
-            names.each do |name|
-              next if seen[name]
-
-              seen[name] = true
-              found[0] << name
-              collect_mixins(scope, resolver, name, scope.discovery.discovered_includes[name] || EMPTY_NAMES,
-                             found, seen)
-            end
           end
         end
       end

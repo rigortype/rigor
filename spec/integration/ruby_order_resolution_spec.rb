@@ -216,8 +216,8 @@ RSpec.describe "resolution in Ruby's ancestor order (#1567, #1568, #1570, #1571)
   end
 
   # #1607 — the singleton-side form of #1570. `extend M` on `C` is skipped because `Base`'s singleton already
-  # carries `M`, so `C.foo` is `Base.foo` and prints 1; the singleton side of `SourceArity` still settles to master's
-  # order, which reads `M#foo(x)`. Flip when ADR-119 C2 designs the singleton side of the candidate-set read.
+  # carries `M`, so `C.foo` is `Base.foo` and prints 1; `SourceArity`'s singleton side asks the candidate-set read
+  # (ADR-119 C2-c), which declines the fork instead of settling to master's order, which read `M#foo(x)`.
   it "runs the singleton-side #1570 as Base.foo under Ruby" do
     expect(RubyRun.stdout("#{singleton_1570_source}p C.foo\n")).to eq("1\n")
   end
@@ -231,9 +231,37 @@ RSpec.describe "resolution in Ruby's ancestor order (#1567, #1568, #1570, #1571)
   end
 
   it "reports no arity error for an extend of a module the superclass already extends (#1607)" do
-    pending "https://github.com/rigortype/rigor/issues/1607 — singleton side, ADR-119 C2; the line is a false positive"
-
     expect(diagnostics_for("#{singleton_1570_source}C.foo\n")).to eq([])
+  end
+
+  # C2-c: the same extend with no fork stays a firing (the control), and an `inherited` hook that defines the name on
+  # the subclass's singleton ahead of the superclass's `def` makes the read decline.
+  it "still reports an arity error for a module the superclass extends, read through a subclass" do
+    expect(diagnostics_for(<<~RUBY)).to eq([[5, "call.wrong-arity"]])
+      module Greeter; def greet(name) = name; end
+      class Host; extend Greeter; end
+      class Guest < Host; end
+
+      Guest.greet
+      Guest.greet(1)
+    RUBY
+  end
+
+  it "reports no arity error where an inherited hook may define the singleton method ahead of the superclass's" do
+    expect(diagnostics_for(<<~RUBY)).to eq([])
+      class HookBase
+        def self.inherited(subclass)
+          super
+          subclass.singleton_class.send(:define_method, :build) { |left, right| [left, right] }
+        end
+
+        def self.build(kind) = kind
+      end
+
+      class HookSub < HookBase; end
+
+      HookSub.build(1, 2)
+    RUBY
   end
 
   # The arity rule's hedges survive the move of its levels onto the chain: a module whose method table the

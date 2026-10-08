@@ -12,3 +12,6 @@ relevance silences it and the differential reports an unadjudicated removal.
 `meta_new_block_def.rb` is the certain control of ADR-119 WD3's classifier: a `def` in a `K = Class.new do … end`
 block runs whenever the write does, so the definer is certain. A classifier that read every block as possible would
 silence it.
+
+`singleton_extend.rb` is the singleton side's control (ADR-119 C2-c): a module the superclass `extend`s, inherited by a
+subclass, with no fork and no hook, so `resolve(…, :singleton)` stands and the firing stays.

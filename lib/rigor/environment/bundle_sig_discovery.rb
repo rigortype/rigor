@@ -2,6 +2,8 @@
 
 require "yaml"
 
+require_relative "../config_path"
+
 module Rigor
   class Environment
     # Target-project Bundler awareness (O4, implemented).
@@ -167,7 +169,7 @@ module Rigor
       # for the stats banner so end users can see what rigor picked up.
       def self.resolve_bundle_path(bundle_path:, project_root: Dir.pwd, auto_detect: true, home: nil)
         if bundle_path
-          path = Pathname.new(File.absolute_path(bundle_path.to_s, project_root))
+          path = Pathname.new(Rigor::ConfigPath.absolute(bundle_path.to_s, project_root))
           return path if path.directory?
 
           return nil
@@ -203,7 +205,7 @@ module Rigor
       # read of the real `~/.bundle/config`).
       def self.auto_detect(project_root:, home: nil)
         from_config = read_bundle_config_path(File.join(project_root, ".bundle", "config"))
-        return File.absolute_path(from_config, project_root) if from_config
+        return Rigor::ConfigPath.absolute(from_config, project_root) if from_config
 
         vendor = File.join(project_root, "vendor", "bundle")
         return vendor if File.directory?(vendor)
@@ -221,7 +223,7 @@ module Rigor
         configured = read_bundle_config_path(File.join(home, ".bundle", "config"))
         return nil unless configured
 
-        resolved = File.absolute_path(configured, project_root)
+        resolved = Rigor::ConfigPath.absolute(configured, project_root)
         File.directory?(resolved) ? resolved : nil
       end
       private_class_method :global_bundle_path

@@ -6,6 +6,7 @@ require_relative "bleeding_edge"
 require_relative "ci_detector"
 require_relative "configuration/dependencies"
 require_relative "configuration/severity_profile"
+require_relative "config_path"
 require_relative "configuration_error"
 require_relative "effects/entry_points"
 require_relative "effects/label"
@@ -433,7 +434,7 @@ module Rigor
 
       accumulated = {}
       includes.each do |inc|
-        inc_path = File.absolute_path(inc.to_s, base_dir)
+        inc_path = ConfigPath.absolute(inc.to_s, base_dir)
         unless File.exist?(inc_path)
           raise ConfigurationError, "include not found: #{inc.inspect} (referenced from #{base_dir})"
         end
@@ -459,7 +460,7 @@ module Rigor
     def self.resolve_path_key!(out, key, base_dir)
       return unless out.key?(key) && !out[key].nil?
 
-      out[key] = Array(out[key]).map { |p| File.absolute_path(p.to_s, base_dir) }
+      out[key] = Array(out[key]).map { |p| ConfigPath.absolute(p.to_s, base_dir) }
     end
 
     def self.resolve_plugins_io_paths!(out, base_dir)
@@ -467,7 +468,7 @@ module Rigor
       return unless plugins_io.is_a?(Hash) && plugins_io["allowed_paths"]
 
       duped = plugins_io.dup
-      duped["allowed_paths"] = Array(plugins_io["allowed_paths"]).map { |p| File.absolute_path(p.to_s, base_dir) }
+      duped["allowed_paths"] = Array(plugins_io["allowed_paths"]).map { |p| ConfigPath.absolute(p.to_s, base_dir) }
       out["plugins_io"] = duped
     end
 

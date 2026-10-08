@@ -2,6 +2,8 @@
 
 require "yaml"
 
+require_relative "../config_path"
+
 module Rigor
   class Environment
     # `rbs collection install` awareness (O4 Layer 3 slice 2, implemented).
@@ -72,7 +74,7 @@ module Rigor
       # produces one. Public so the stats banner can surface what rigor found.
       def self.resolve_lockfile_path(lockfile_path:, project_root: Dir.pwd, auto_detect: true)
         if lockfile_path
-          path = Pathname.new(File.absolute_path(lockfile_path.to_s, project_root))
+          path = Pathname.new(Rigor::ConfigPath.absolute(lockfile_path.to_s, project_root))
           return path if path.file?
 
           return nil

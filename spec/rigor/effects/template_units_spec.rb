@@ -402,9 +402,6 @@ RSpec.describe "template units (#392)" do
     end
   end
 
-  # #392 review round 4 — the path spellings a shell, an editor and a symlinked checkout produce are not
-  # the spelling `Dir.glob` returns, and every one of them used to miss the unit and fall through to
-  # parsing the template as plain Ruby.
   # A directory literally named `~drafts` is an ordinary path to the analysis. `File.expand_path` read the leading
   # `~` as a user's home and raised `ArgumentError: user drafts doesn't exist` the moment a template unit made the
   # path arithmetic run — with units present, and not otherwise, which is why the first project to hit it had them.
@@ -452,6 +449,9 @@ RSpec.describe "template units (#392)" do
     end
   end
 
+  # #392 review round 4 — the path spellings a shell, an editor and a symlinked checkout produce are not
+  # the spelling `Dir.glob` returns, and every one of them used to miss the unit and fall through to
+  # parsing the template as plain Ruby.
   describe "the spellings an analysed path arrives in" do
     def buffer_run(dir, logical, bytes, root: dir)
       buffer_path = File.join(dir, "buffer.rbx")

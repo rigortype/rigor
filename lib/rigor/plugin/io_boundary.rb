@@ -90,7 +90,7 @@ module Rigor
         @first_refused_path = nil
       end
 
-      # Issue #959 — `TrustPolicy#allow_read?` refuses a path purely by `File.expand_path` comparison
+      # Issue #959 — `TrustPolicy#allow_read?` refuses a path purely by `File.absolute_path` comparison
       # (ADR-2's documented bound; no `File.realpath`), so a project rooted under a symlink (macOS'
       # `/tmp` → `/private/tmp` alias is the common case) can have every plugin read refused with no
       # visible cause: the boundary answered "not readable" and the plugin swallowed or surfaced only its

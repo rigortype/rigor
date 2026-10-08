@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "../config_path"
+
 module Rigor
   class Environment
     # Gemfile.lock parser for target-project bundler awareness (O4 Layer 3, implemented).
@@ -113,7 +115,7 @@ module Rigor
       # produces one. Public so the stats banner can show what rigor picked up.
       def self.resolve_lockfile_path(lockfile_path:, project_root: Dir.pwd, auto_detect: true)
         if lockfile_path
-          path = Pathname.new(File.absolute_path(lockfile_path.to_s, project_root))
+          path = Pathname.new(Rigor::ConfigPath.absolute(lockfile_path.to_s, project_root))
           return path if path.file?
 
           return nil

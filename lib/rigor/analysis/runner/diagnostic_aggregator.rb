@@ -965,7 +965,7 @@ module Rigor
 
         # Issue #959 — surfaces the {Plugin::IoBoundary} refusal history each loaded plugin accumulated over
         # the whole run (prepare AND every per-file call: `#io_boundary` is memoised per plugin instance, so
-        # one boundary sees both). `TrustPolicy#allow_read?` stays `File.expand_path`-only per ADR-2 — a
+        # one boundary sees both). `TrustPolicy#allow_read?` stays `File.absolute_path`-only per ADR-2 — a
         # project rooted under a symlink (macOS' `/tmp` → `/private/tmp` is the common case) can have every
         # plugin read fall outside its own read roots with nothing said about it. One `:info` row per plugin
         # that hit this, never one per path, naming the count and the first path so the row stays legible on

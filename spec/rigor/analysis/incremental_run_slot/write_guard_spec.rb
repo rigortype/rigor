@@ -81,6 +81,20 @@ RSpec.describe Rigor::Analysis::IncrementalRunSlot::WriteGuard do
     expect(guard.admits?(rows_for("lib/a.rb"))).to be(false)
   end
 
+  # An analysed path is taken as written: the shell has expanded any `~` before it arrives, so `~drafts/b.rb` is a
+  # directory called `~drafts`, not the home of a user that does not exist (#1510).
+  it "starts on a root whose first segment is ~name without raising" do
+    write("~drafts/b.rb", "class Draft\nend\n")
+    expect do
+      described_class.start(
+        configuration: configuration, roots: ["~drafts/b.rb"], cache_root: cache_root,
+        fingerprint: Rigor::Cache::IncrementalSnapshot.fingerprint(
+          configuration: configuration, roots: ["~drafts/b.rb"]
+        )
+      )
+    end.not_to raise_error
+  end
+
   it "takes no mark when the change time never ticks within the wait" do
     stub_const("#{described_class}::TICK_WAIT_LIMIT", 0.02)
     device = File.stat(Dir.pwd).dev

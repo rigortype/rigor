@@ -91,6 +91,49 @@ RSpec.describe Rigor::Environment::BundleSigDiscovery do
       expect(result.first.to_s).to start_with(bundle)
     end
 
+    it "expands a BUNDLE_PATH written as ~/dir to the home directory, as Bundler does" do
+      saved = Dir.home
+      home = File.join(tmpdir, "home")
+      ENV["HOME"] = home
+      make_bundle_layout(File.join(home, "gems"), ["tilde_gem", "1.0", "4.0.0"])
+      FileUtils.mkdir_p(File.join(tmpdir, ".bundle"))
+      File.write(File.join(tmpdir, ".bundle", "config"), "---\nBUNDLE_PATH: \"~/gems\"\n")
+      result = described_class.discover(bundle_path: nil, project_root: tmpdir, auto_detect: true)
+      expect(result.map { |p| p.parent.basename.to_s }).to eq(["tilde_gem-1.0"])
+    ensure
+      ENV["HOME"] = saved
+    end
+
+    it "expands a user-global BUNDLE_PATH written as ~/dir to the home directory" do
+      saved = Dir.home
+      home = File.join(tmpdir, "home")
+      ENV["HOME"] = home
+      make_bundle_layout(File.join(home, "gems"), ["global_tilde", "1.0", "4.0.0"])
+      FileUtils.mkdir_p(File.join(home, ".bundle"))
+      File.write(File.join(home, ".bundle", "config"), "---\nBUNDLE_PATH: \"~/gems\"\n")
+      result = described_class.discover(bundle_path: nil, project_root: tmpdir, auto_detect: true, home: home)
+      expect(result.map { |p| p.parent.basename.to_s }).to eq(["global_tilde-1.0"])
+    ensure
+      ENV["HOME"] = saved
+    end
+
+    it "reads a BUNDLE_PATH written as ~name as a literal directory and does not raise" do
+      FileUtils.mkdir_p(File.join(tmpdir, ".bundle"))
+      File.write(File.join(tmpdir, ".bundle", "config"), "---\nBUNDLE_PATH: \"~nobody/gems\"\n")
+      expect(described_class.discover(bundle_path: nil, project_root: tmpdir, auto_detect: true, home: tmpdir))
+        .to eq([])
+    end
+
+    it "expands bundle_path: ~/dir to the home directory" do
+      saved = Dir.home
+      ENV["HOME"] = File.join(tmpdir, "home")
+      make_bundle_layout(File.join(tmpdir, "home", "gems"), ["cfg_gem", "1.0", "4.0.0"])
+      result = described_class.discover(bundle_path: "~/gems", project_root: tmpdir, auto_detect: false)
+      expect(result.map { |p| p.parent.basename.to_s }).to eq(["cfg_gem-1.0"])
+    ensure
+      ENV["HOME"] = saved
+    end
+
     it "falls back to vendor/bundle when .bundle/config is absent" do
       bundle = File.join(tmpdir, "vendor", "bundle")
       make_bundle_layout(bundle, ["fallback_gem", "0.1", "4.0.0"])

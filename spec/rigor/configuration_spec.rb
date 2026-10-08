@@ -113,10 +113,20 @@ RSpec.describe Rigor::Configuration do
       end
     end
 
-    # A directory whose name starts with `~` is an ordinary name. `File.expand_path` read `~drafts` as the home of
-    # a user called `drafts` and raised `ArgumentError: user drafts doesn't exist`, so `rigor check` stopped on
-    # the first `paths:` entry it could not place.
+    # A `.rigor.yml` path value follows `File.expand_path` for `~/` and a bare `~` (the invoking user's home) and
+    # reads `~name` as a directory called `~name`: `File.expand_path` would have raised `ArgumentError: user drafts
+    # doesn't exist` and stopped `rigor check` on the first `paths:` entry it could not place (#1510).
     describe "a path-valued key whose first segment starts with ~" do
+      around do |example|
+        saved = Dir.home
+        Dir.mktmpdir do |home|
+          ENV["HOME"] = home
+          example.run
+        ensure
+          ENV["HOME"] = saved
+        end
+      end
+
       it "resolves ~name as a literal directory under the config file's directory" do
         Dir.mktmpdir do |dir|
           path = File.join(dir, ".rigor.yml")
@@ -127,15 +137,38 @@ RSpec.describe Rigor::Configuration do
         end
       end
 
-      it "keeps ~/ literal too, so home expansion is the shell's job and not the config loader's" do
+      it "expands ~/ and a bare ~ to the home directory, as File.expand_path does" do
         Dir.mktmpdir do |dir|
           path = File.join(dir, ".rigor.yml")
-          File.write(path, "signature_paths:\n  - ~/sig\ntest_paths:\n  - ~spec\n")
+          File.write(path, "signature_paths:\n  - ~/sig\ntest_paths:\n  - ~spec\npre_eval:\n  - \"~\"\n" \
+                           "plugins_io:\n  allowed_paths:\n    - ~/shared\n")
 
           configuration = described_class.load(path)
 
-          expect(configuration.signature_paths).to eq([File.join(File.expand_path(dir), "~", "sig")])
+          expect(configuration.signature_paths).to eq([File.join(Dir.home, "sig")])
           expect(configuration.test_paths).to eq([File.join(File.expand_path(dir), "~spec")])
+          expect(configuration.pre_eval).to eq([Dir.home])
+          expect(configuration.plugins_io_allowed_paths).to eq([File.join(Dir.home, "shared")])
+        end
+      end
+
+      it "loads an includes: entry written as ~/file from the home directory" do
+        Dir.mktmpdir do |dir|
+          File.write(File.join(Dir.home, "shared.yml"), "paths:\n  - from_shared\n")
+          path = File.join(dir, ".rigor.yml")
+          File.write(path, "includes:\n  - ~/shared.yml\n")
+
+          expect(described_class.load(path).paths).to eq([File.join(Dir.home, "from_shared")])
+        end
+      end
+
+      it "keeps an includes: entry written as ~name literal and reports it as not found, not ArgumentError" do
+        Dir.mktmpdir do |dir|
+          path = File.join(dir, ".rigor.yml")
+          File.write(path, "includes:\n  - ~nobody/shared.yml\n")
+
+          expect { described_class.load(path) }
+            .to raise_error(Rigor::ConfigurationError, %r{include not found: "~nobody/shared.yml"})
         end
       end
 

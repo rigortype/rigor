@@ -21,8 +21,10 @@ discovery entirely.
 
 All relative paths in a config file resolve against that
 file's own directory.
-A leading `~` is a literal directory name here, not a home directory: write an absolute path to
-reach your home directory from `paths:`.
+A leading `~/` (or a bare `~`) in a path setting expands to your home directory; `~name` is an ordinary
+directory called `~name`, not another user's home. This covers `paths:`, `signature_paths:`, `test_paths:`,
+`pre_eval:`, `plugins_io.allowed_paths:`, `includes:`, `bundler.bundle_path:`, `bundler.lockfile:` and
+`rbs_collection.lockfile:`.
 
 ## Editor validation
 

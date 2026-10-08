@@ -696,6 +696,26 @@ planning (errata 2026-10-01); C1a lands relevance so it is live at the first fir
 | C2 — typing sites | Return inference through `resolve_user_def_through_ancestors` (`expression_typer.rb:2471, 2496`, where `Unknown` types `Dynamic`) and the singleton memo (`:2386`, with WD3's singleton-side decline); the absent rule with its RBS census | Silences the conditional-definer and conditional-include `call.undefined-method` shapes, #1594 at this site, and the #1592 hook shapes at the migrated singleton site (`Unknown`, not a fix); `gemmod3` waits for #1572 | None expected | WD7(f) census before and after, adjudicated: GitLab's core models type `Dynamic` at these sites until PR D, and the PR states the count |
 | D — hook facts per includer | Deferred to the follow-up ADR | — | — | — |
 
+Errata (2026-10-08), from C1d planning; C1d splits into C1d-a (WD3's classifier and the def-contribution
+producers: `possible_discovered_methods`, the def-node, singleton def-node and envelope contests; #1623) and C1d-b
+(the contested visibilities):
+
+- *The C1c row's `singleton_context_def?` is stale.* C1c read a receiverless def's singleton context from the scope
+  (`Scope#singleton_class_body?`) and the indexer's record of the node, not through a candidate-set read, and
+  `DefinerResolution.resolve` still raises on `side: :singleton`. So the singleton-side contests C1d-a produces
+  (`contested_discovered_singleton_def_nodes`) have no migrated reader yet; `DefinerResolution#possible?` is the only
+  sibling reader, on the instance side.
+- *WD3's `rescue` wording.* A `begin` WITHOUT a `rescue` clause keeps its main statements and its `ensure` clause
+  certain (either they run or the raise leaves the file's top level); a `begin` WITH one is possible throughout,
+  main statements included, because a rescued raise skips every statement after the raising one
+  (`lib/rigor/inference/scope_indexer/certainty.rb`).
+- *The Consequences counts of defs in blocks are v12's, not today's.* Under C1d-a's classifier, counting every
+  `def` node in the tree, Rigor's `lib` has 8 possible defs of 8,634 (at #1623's head), the survey's Mastodon
+  checkout (`af3596316`, `app lib config`) 78 of 7,208, almost all in `class_methods` and `included` blocks, and
+  GitLab's `app/controllers` 3 of 4,345.
+- *The C1d row's `Helpers2#fmt2`.* Its override silencing needs only C1d-b's contested visibility; PR B is needed only
+  for the fabricated singleton copy.
+
 Precision estimate, unchanged from v12 and not re-measured (the landed PRs changed no producer that
 moves it): about 13 of 940 mixin calls in Mastodon's `app`, 6 of 85 in `app/lib`, sit outside
 unconditional bodies; Redmine has 17 `send(:include)` and 6 mixin calls inside methods. What C1 and C2

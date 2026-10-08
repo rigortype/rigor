@@ -15,21 +15,21 @@ The session handoff (ADR-98). It answers ONE question: what should the next sess
 Transient; replaced wholesale. Backlog lives in GitHub Issues, release planning in Milestones.
 If this file disagrees with an ADR, the CHANGELOG, or an issue, this file is the one that is wrong.
 
-## Next session: scope `v0.4.1` (2026-10-08)
+## Next session: land the `v0.4.1` milestone (scoped 2026-10-08)
 
-The maintainer wants the next session to decide what `v0.4.1` contains, in-flight work included.
-Scoping is not release prep: a release starts only with `/rigor-release-prep`.
+The maintainer scoped `v0.4.1` as a patch: master since `v0.4.0` (21 `changelog.d/` fragments) plus
+the 7 issues on the [`v0.4.1` milestone](https://github.com/rigortype/rigor/milestone/10), each
+`ready-for-agent` with an agent brief. Scoping is not release prep: only `/rigor-release-prep` cuts.
 
-- Shipped since `v0.4.0` (`lib/rigor/version.rb`): 21 pending fragments in `changelog.d/` (8
-  `changed`, 13 `fixed`). Among them are #1552 (an engine-free unchanged `--incremental` run),
-  #1578/#1605/#1606 (Ruby-order resolution; #1570 fixed; override and visibility lints decline on
-  unsettled or forked chains) and #1593.
-- Milestones: there is no `v0.4.1` milestone yet. `v0.4.x` holds 196 open issues, so scoping means
-  picking from it; `v0.5.0` and `v1.0.0` hold 2 each.
-- In flight: ADR-119 C1d0 waits on the maintainer's Q12; C1d, C1e and C2 follow (C2 after #1603).
-  Draft #1397 belongs to a sibling session.
-- Weigh before cutting: C1c's `tp-lost` cost (#1609: 61 GitLab controller diagnostics), and the
-  severe open bugs #1585 (stale `--incremental` after a `pre_eval:` edit) and #1594.
+- **Crashes:** #1518 (both shapes, the second is in its comment) and #1510.
+- **Stale `--incremental` answers, one lane:** #1585 and #1554 (both reproduced at `5625e7a14`),
+  #1532 and #1525. Each is an input the snapshot fingerprint misses.
+- **Unreleased regression:** #1590 (#1578's +5% on recording runs).
+- **Deliberately out:** ADR-119 C1d0 onward, so Q12 does not gate this release; the C2-dependent false
+  positives #1594, #1607, #1592 and #1572 (reproduced, and present before `v0.4.0`); C1c's `tp-lost`
+  recoveries #1608, #1609, #1611 and #1612, a cost accepted for this release; the remaining
+  incremental gaps. #1569 and #1550 (`module_function` false positives) and #1533 were offered and
+  declined; they are the first candidates if the milestone grows.
 
 ## Performance campaign, #1507, and the resolution chain (2026-10-01)
 
@@ -68,9 +68,9 @@ cache format or native code.
 
 These items were not re-verified this session beyond the states of the PRs.
 
-- **#1499** (#1446, ivar class guards, Draft `9b8bc0c86`): round-1 fixes are pushed. Next is a
-  round-2 delta review, then a merge on green CI. #1500 (a disjoint guard reads the guarded class
-  for ivar, global or constant receivers, and `bot` for locals) builds on it.
+- **#1499** (#1446, ivar class guards) merged 2026-10-01. #1500 (a disjoint guard reads the guarded
+  class for ivar, global or constant receivers, and `bot` for locals) builds on it; #1596 is the
+  most common report left on that shape.
 - **ADR-117 order:** #1426, then #1427, then #1366's stream part. #1484 must land before that
   stream part. #1366 stays `ready-for-human`.
 - **#1454:** phase 3, the handbook chapter, waits for #1366, #1426 and #1427. Keep

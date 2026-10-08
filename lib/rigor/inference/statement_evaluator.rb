@@ -2707,10 +2707,20 @@ module Rigor
       # that half rather than this one deriving it from the frames.
       def eval_class_or_module(node)
         path = node.constant_path
-        frame = ClassFrame.new(name: Source::ConstantPath.qualified_name(path), singleton: false)
+        name = Source::ConstantPath.qualified_name(path)
+        # A header Prism recovered without a constant (`class foo`, a parse error) names no class: its body
+        # runs under an untyped `self` and no class frame, so nothing is filed under an empty name.
+        return eval_unnameable_class_body(node) if name.nil?
+
+        frame = ClassFrame.new(name: name, singleton: false)
         new_context = Source::ConstantPath.rooted?(path) ? [frame] : @class_context + [frame]
         body_type, _body_scope = eval_class_body(node, new_context,
                                                  Source::ConstantPath.pushed_nesting(@lexical_nesting, path))
+        [body_type, scope]
+      end
+
+      def eval_unnameable_class_body(node)
+        body_type, _body_scope = eval_class_body(node, [], @lexical_nesting, opaque_self: true)
         [body_type, scope]
       end
 
@@ -5184,7 +5194,7 @@ module Rigor
 
       # ----- def/class helpers -----
 
-      def eval_class_body(node, new_context, new_nesting = @lexical_nesting)
+      def eval_class_body(node, new_context, new_nesting = @lexical_nesting, opaque_self: false)
         return [Type::Combinator.constant_of(nil), scope] if node.body.nil?
 
         # Class/module bodies run in a fresh scope: the outer scope's locals are NOT visible inside `class Foo; ...
@@ -5192,7 +5202,7 @@ module Rigor
         # A-engine: `self` inside a class body is the class object itself, so we set `self_type` to
         # `Singleton[<qualified>]`.
         fresh = build_fresh_body_scope
-        body_self = self_type_for_class_body(new_context)
+        body_self = opaque_self ? Type::Combinator.untyped : self_type_for_class_body(new_context)
         fresh = fresh.with_self_type(body_self) if body_self
         # Issue #963 — `self` in a `class << ...` body is the SINGLETON class, which shares the `Singleton[X]`
         # carrier a `class X` body gets. The mark is the only thing that tells the two apart downstream, and a

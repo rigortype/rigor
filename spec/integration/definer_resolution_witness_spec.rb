@@ -1047,14 +1047,17 @@ RSpec.describe Rigor::Inference::DefinerResolution do # rubocop:disable RSpec/Sp
       expect(owner_of(resolve(scope_for(source), :foo))).to eq(:unknown)
     end
 
-    # A possible own definer hands the read to the next candidate, whose position a hook's include can move: Ruby
-    # answers `A`'s private `foo` where the `def` did not run. Both candidates on the chain are public.
-    it "stays Unknown where the own definer is possible and the next candidate sits behind a hook" do
-      source = "module M; def foo = :m; end\nmodule A; private def foo = :a; end\n" \
-               "module Concern; def self.included(base) = base.include(A); end\n" \
-               "class C; include M; include Concern; if ENV[\"Q\"]; def foo = :c; end; end\n"
-      expect(both_worlds(source, "C.private_method_defined?(:foo)")).to eq(%w[true false])
-      expect(owner_of(resolve(scope_for(source), :foo, question: :visibility))).to eq(:unknown)
+    # A possible own definer hands the read to the next candidate, whose position a fork can move: where the `def`
+    # did not run, Ruby answers `Base`'s public `foo` when `Base` includes `M` first and `M`'s private one when it
+    # includes it after `C` did (#1570's two worlds). Both candidates on the chain, `C` and `Base`, are public.
+    it "stays Unknown where the own definer is possible and a fork moves the next candidate" do
+      head = "module M; def foo = :m; private :foo; end\n"
+      klass = "class C < Base; include M; if ENV[\"Q\"]; def foo = :c; end; end\n"
+      first = "#{head}class Base; include M; def foo = :b; end\n#{klass}"
+      later = "#{head}class Base; def foo = :b; end\n#{klass}class Base; include M; end\n"
+      expect([first, later].map { |source| ruby_says(source, "C.private_method_defined?(:foo)", false) })
+        .to eq(%w[false true])
+      expect(owner_of(resolve(scope_for(first), :foo, question: :visibility))).to eq(:unknown)
     end
 
     # The chain has one fork (`M` reaches `C` through `Base` too) and a mark (`Q`'s included-block prepend), so

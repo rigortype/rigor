@@ -1023,6 +1023,14 @@ RSpec.describe Rigor::Inference::DefinerResolution do # rubocop:disable RSpec/Sp
       expect(owner_of(resolve(scope_for(source), :foo))).to eq(:unknown)
     end
 
+    it "is Known C under a concern's included-block prepend of a module that cannot answer the name" do
+      source = "module P; def bar = :p; end\n" \
+               "module Q; extend ActiveSupport::Concern; included do; prepend P; end; end\n" \
+               "class C; def foo = :c; include Q; end\n"
+      expect(owner_says(source, prelude: concern_shim)).to eq("C")
+      expect(owner_of(resolve(scope_for(source), :foo))).to eq("C")
+    end
+
     it "is Known C under a concern whose included block includes into the includer" do
       source = "module P; def foo = :p; end\n" \
                "module Q; extend ActiveSupport::Concern; included do; include P; end; end\n" \
@@ -1056,6 +1064,19 @@ RSpec.describe Rigor::Inference::DefinerResolution do # rubocop:disable RSpec/Sp
         class Base; def foo = 1; end
         module Q; end
         module X; def Q.included(b) = b.attr_reader(:foo); end
+        class C < Base; include Q; end
+      RUBY
+      expect(RubyRun.stdout("#{source}p C.instance_method(:foo).owner\n").chomp).to eq("C")
+      expect(owner_of(resolve(project_scope("a.rb" => source), :foo))).to eq(:unknown)
+    end
+
+    # The walk records `def Q.included` written in `module X` as `X#included`; with `X`'s own `def included` beside
+    # it, `X` records the name, and only the second row for the same owner and side shows a foreign hook.
+    it "declines on a foreign hook written beside its owner's own def of the same name" do
+      source = <<~RUBY
+        class Base; def foo = 1; end
+        module Q; end
+        module X; def included(base) = nil; def Q.included(b) = b.attr_reader(:foo); end
         class C < Base; include Q; end
       RUBY
       expect(RubyRun.stdout("#{source}p C.instance_method(:foo).owner\n").chomp).to eq("C")

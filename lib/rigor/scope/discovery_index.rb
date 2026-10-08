@@ -78,8 +78,9 @@ module Rigor
       #
       # The members without a sibling here (`discovered_def_sources`, `discovered_singleton_def_sources`) are site
       # tables (dependency edges, positions, fingerprints): no read takes a definer, visibility, arity or type from
-      # them, and certainty does not move a site. The one read whose answer depends on the site is
-      # `Scope#same_file_top_level_def?`, left to ADR-119 C1d.
+      # them, and certainty does not move a site. The reads whose answer depends on the site are
+      # `Scope#same_file_top_level_def?`, `#singleton_def_shadows_call?` and `#instance_def_shadows_call?`, left to
+      # ADR-119 C1d: a conditional def's site would answer "shadows".
       SIBLINGS = {
         discovered_methods: :possible_discovered_methods,
         discovered_deferred_ranges: :possible_discovered_deferred_ranges,

@@ -316,8 +316,11 @@ from data already there: which *names* an unpositioned edge's closure defines (W
   Errata (2026-10-08), C1d0 resolves each (PR #1617, lane 1, behaviour byte-identical):
   - *The two def-source tables carry no sibling.* They are site tables — dependency edges, positions and
     fingerprints — and no read takes a definer, visibility, arity or type from them; certainty does not move a
-    site. The one site-dependent read is `Scope#same_file_top_level_def?` (`scope.rb:1153–1157`), left to
-    C1d. This corrects the draft's "read only beside `discovered_def_nodes`", which no census entry supports.
+    site. Three reads decide from a site and are left to C1d, which must handle each: `Scope#same_file_top_level_def?`
+    (`scope.rb:1164–1168`) and the #1097 pair `#singleton_def_shadows_call?` and `#instance_def_shadows_call?`
+    (`scope.rb:1229–1260`, over `user_singleton_def_site_for` and `user_def_site_for`), where a conditional def's
+    site would answer "shadows" for a definer decision. This corrects the draft's "read only beside
+    `discovered_def_nodes`", which no census entry supports.
   - *Envelope marks are never contested.* `ENVELOPE_PROJECT_WIDE`, `ENVELOPE_MODULE_MARK` and
     `ENVELOPE_DYNAMIC_MARK` are presence facts that only decline a read; a contested envelope path is always
     `[class, [kind, name]]`.
@@ -335,12 +338,20 @@ from data already there: which *names* an unpositioned edge's closure defines (W
     additions less the names a certain copy settles; a seed slot the file's own `def` replaces keeps its
     contested mark, which over-contests and is safe, and letting the file win is C1d's refinement.
   - *`subtract_def_methods` follows its sibling.* The same drop applies to `possible_discovered_methods`
-    (`subtract_sibling_methods!`), keeping the sibling a subset of its member.
+    (`subtract_sibling_methods!`) for the instance half only: `:instance` is removed, `:both` becomes
+    `:singleton` and `:singleton` stays, because a def is the instance side and the member keeps the name's
+    singleton half. That keeps the sibling a subset of its member, and a conditional singleton extend over a
+    class that defines the name keeps it possible. It is not `subtract_def_methods`'s rule, which drops a
+    singleton-only member entry too.
   - *The deferred-ranges sibling is not admitted until C2.* `possible_discovered_deferred_ranges` is keyed by
     path, so the compact-header rename leaves it alone as it leaves the member alone, and no producer fills
     it before C2's typing sites need it.
-  - *The rename pin was vacuous.* A path key cannot tell "skipped" from "renamed", so the pairing spec's
-    compact-header example now pins the row's class name (its fifth field), which only a skipped rename keeps.
+  - *The rename skip is behaviourally indistinguishable today.* A path key is never a compact class name, so
+    `rename_siblings` leaves `possible_discovered_deferred_ranges` alone whether `SIBLINGS_KEYED_BY_PATH` skips
+    it or the Hash arm re-keys it, and neither arm rewrites a row's class name. The earlier compact-header
+    example pinned nothing about the skip; it now pins that the sibling's rows keep the class name the member's
+    rows keep, and the constant documents intent until a path-keyed sibling can hold a key the rename would
+    change.
 
 ### WD2 — Candidate-set reads over the chain
 

@@ -119,6 +119,7 @@ module Rigor
         @marks = marks
         @flavor = flavor
         @retro = retro
+        @memo = {} # the chain is frozen; this table is not, and holds {#levels}
         freeze
       end
 
@@ -299,7 +300,9 @@ module Rigor
       # Each complete level up to the first superclass the project does not declare, as `[class_name,
       # modules, externals]`: the level's class, the project modules around it (each once), and the candidate
       # lists of the ancestors in it the project does not declare — the shape `call.wrong-arity` reads.
-      def levels
+      def levels = (@memo[:levels] ||= compute_levels)
+
+      def compute_levels
         out = []
         level_count.times do |index|
           class_name = @level_classes[index]
@@ -307,10 +310,11 @@ module Rigor
 
           externals, entries = level_entries(index).partition(&:external?)
           modules = entries.filter_map { |entry| entry.name unless entry.name == class_name && entry.side == @side }
-          out << [class_name, modules.uniq, externals.map(&:candidates)]
+          out << [class_name, modules.uniq.freeze, externals.map(&:candidates).freeze].freeze
         end
-        out
+        out.freeze
       end
+      private :compute_levels
 
       MEMO_KEY = :__rigor_resolution_chain__
       private_constant :MEMO_KEY

@@ -95,8 +95,10 @@ module Rigor
         # withhold, so none of these needs the file-level class edge the bucket reads would otherwise record.
         def settle_by_definitions
           return if @withheld.nil?
-          # ADR-119 C1b — a declined chain (`@unknown`) is silent only until another file's edit lifts the
-          # decline, so its verdict depends on everything the walk read, as an opaque level's does.
+          # ADR-119 C1b — a declined chain (`@unknown`) that some level records the name on is silent only until
+          # another file's edit lifts the decline, so its verdict depends on everything the walk read, as an opaque
+          # level's does. A decline over a name no project level records is not `@unknown` (see
+          # {#decline_unless_recorded_nowhere}): it settles by definitions, as an `ABSENT` read does.
           return settle_by_walk if @unknown
 
           @owner_entries.each do |name, kind|
@@ -135,6 +137,7 @@ module Rigor
         def walk_to_owner(class_name)
           @levels = []
           @passed = []
+          @recorded = false
 
           case Inference::DefinerResolution.resolve(@scope, class_name, @method_name, side,
                                                     question: :arity) { |chain, from| arity_hit(chain, from) }
@@ -144,13 +147,14 @@ module Rigor
           end
         end
 
-        # A declined read of a name no project level records answers no envelope whether or not it stands, so
-        # the walk's reads are not the verdict's dependency: only a `def` appearing can change it, which
-        # {#settle_by_definitions} files, as for an `ABSENT` read. Without this, every `Widget.new` (the implicit
-        # `Class` tail may answer it) would replay the whole walk as a file-level class edge.
+        # A declined read of a name no project level records (`arity_hit` found no level that does, in any world it
+        # was asked) answers no envelope whether or not it stands, so the walk's reads are not the verdict's
+        # dependency: only a `def` appearing can change it, which {#settle_by_definitions} files, as for an
+        # `ABSENT` read. It can leave a stale false negative in a warm run, never a firing. Without this, every
+        # `Widget.new` (the implicit `Class` tail may answer it) would replay the whole walk as a file-level
+        # class edge.
         def decline_unless_recorded_nowhere(class_name)
-          chain = arity_chain(class_name)
-          nowhere = !chain.truncated? && chain.levels.all? { |raw| level_envelopes(Level.new(*raw)).empty? }
+          nowhere = !@recorded && !arity_chain(class_name).truncated?
           nowhere ? nearest_envelope(class_name) : decline
         end
 
@@ -189,6 +193,7 @@ module Rigor
             answer = found.all?(envelope) && !Source::ParameterEnvelope.opaque?(envelope) ? envelope : AMBIGUOUS
             owner, owner_kind = owner_entries(level).first
             position = first + (entries.index { |entry| entry.name == owner && entry.side == owner_kind } || 0)
+            @recorded = true
             return ArityHit.new(answer, owner, position, owner_kind)
           end
           nil

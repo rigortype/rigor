@@ -1,1 +1,0 @@
-- **[incremental]** A warm `rigor check --incremental` run now re-checks a call whose answer comes from a class's own method when an edit in its superclass adds a hook or mark that could change that answer, instead of keeping the stale result. ([#1637](https://github.com/rigortype/rigor/issues/1637), [#1638](https://github.com/rigortype/rigor/pull/1638))

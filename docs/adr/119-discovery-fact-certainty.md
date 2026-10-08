@@ -838,8 +838,13 @@ Errata (2026-10-08), C2 splits and C2-b1 lands (the instance typing site; lane 2
   project definer the chain holds types `bot`, the call types `bot`: `bot` reports nothing about a value, and the
   exposure is master's. Precisely: on `UNKNOWN`, a chain not cut by the budget, at least one project entry with a
   `def` of the name (at any position, since order is what is unknown), each inferred with the call's receiver and
-  arguments to `bot`, no project entry recording the name without a body or through a `possible` or contested
-  fact, and no RBS-known external declaring the name; `ABSENT` stays `Dynamic`. It restores the narrowing behind
+  arguments to `bot`, no project entry whose only record of the name has no body (an `attr_*` or `define_method`
+  with no `def` of it), no definer resting on a `possible` or contested fact, and no RBS-known external declaring
+  the name; `ABSENT` stays `Dynamic`. "The chain" is what the tables hold: a receiver-form `X.include(M)` written
+  outside `X`'s body is not on it (the chain lists `"*"` for it), and an entry's `define_method` or `attr_reader`
+  beside its own `def` of the name is not seen (the `def` holds the table's slot), both as on the `Known` path and
+  on master; the second is pinned as a deliberate false negative. A chain cut by the budget declines, a pinned
+  false positive where the raising definer sits ahead of the cut. It restores the narrowing behind
   `fail_with_message ... unless x` on Mastodon's `lib/mastodon/cli/media.rb:281`, which an RBS-unknown module
   included ahead of the definer (`include ActionView::Helpers::NumberHelper` before `Base`) had turned into a false
   positive. The accepted failure: the RBS-unknown module really defines the name and returns, so the guard

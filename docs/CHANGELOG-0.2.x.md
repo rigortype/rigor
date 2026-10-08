@@ -13,8 +13,8 @@ after the `0.2.x` → `0.3.x` bump), the entire previous-minor range moves
 into a `docs/CHANGELOG-<old-prefix>.md` archive file.**
 
 The current cycle's release notes live in [`CHANGELOG.md`](../CHANGELOG.md).
-When the next minor bump's first patch lands (`0.4.1`), the `0.3.x` block
-will move into `docs/CHANGELOG-0.3.x.md` following the same rule.
+The `0.3.x` block moved into [`docs/CHANGELOG-0.3.x.md`](CHANGELOG-0.3.x.md)
+at `0.4.1`, following the same rule.
 
 ## [0.2.9] - 2026-07-11
 

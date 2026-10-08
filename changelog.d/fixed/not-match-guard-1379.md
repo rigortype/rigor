@@ -1,1 +1,0 @@
-- **[engine]** A `!~` guard now narrows the regex match globals on its edges as the negation of `=~`, so `return if line !~ /\A(\w+)=/` followed by a method call on a copy of `$1` no longer reports a false `call.possible-nil-receiver`. ([#1379](https://github.com/rigortype/rigor/issues/1379), [#1496](https://github.com/rigortype/rigor/pull/1496))

@@ -1,4 +1,4 @@
-- base: 366bb1518b4f1e619c936b89f2838ccec139fc5a
+- base: 004440da5de45b498723b0c2cd123aefa75f3059
   path: spec/integration/fixtures/arity_differential/conditional_def.rb
   line: 8
   column: 13

@@ -713,6 +713,11 @@ producers: `possible_discovered_methods`, the def-node, singleton def-node and e
   `def` node in the tree, Rigor's `lib` has 8 possible defs of 8,634 (at #1623's head), the survey's Mastodon
   checkout (`af3596316`, `app lib config`) 78 of 7,208, almost all in `class_methods` and `included` blocks, and
   GitLab's `app/controllers` 3 of 4,345.
+- *Two accepted limits of the classifier (#1626).* A top-level `return if …` guard, and a `||=` meta-new constant
+  write (`K ||= Class.new do … end`), are classified certain though Ruby can skip what follows the guard or the
+  write; and a possible `alias` over-contests its source name, so a certain `def` of the source reads contested too.
+  Each errs toward `Unknown` or toward a contested slot, never toward a firing, and each is accepted as
+  imprecision rather than fixed in C1d-a.
 - *The C1d row's `Helpers2#fmt2`.* Its override silencing needs only C1d-b's contested visibility; PR B is needed only
   for the fabricated singleton copy.
 

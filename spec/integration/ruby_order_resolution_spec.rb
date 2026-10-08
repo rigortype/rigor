@@ -168,6 +168,17 @@ RSpec.describe "resolution in Ruby's ancestor order (#1567, #1568, #1570, #1571)
     RUBY
   end
 
+  # #1625, a known tp-lost by design (ADR-119 C1d-a): the second `def run` sits in an `if`, so its def-node slot is
+  # contested and the candidate-set read takes the earlier `run(a)` as well; the two worlds disagree on the arity
+  # and the read answers `UNKNOWN`. Ruby raises ArgumentError in both worlds (`run(a)` and `run(a) = p(a)` both take
+  # one argument), so the silence is a lost true positive. Flip this when #1625 is fixed: the expectation becomes
+  # `[[1, "call.wrong-arity"]]`.
+  it "stays silent on a wrong-arity call to a def a conditional redefinition shadows (#1625, tp-lost today)" do
+    expect(diagnostics_for(<<~RUBY)).to eq([])
+      class Svc; def run(a) = a; if ENV["DEBUG"]; def run(a) = p(a); end; end; Svc.new.run(1, 2)
+    RUBY
+  end
+
   # The #1570 shape as a program Ruby can run: the same text with a `p` where the diagnostic source calls.
   def issue_1570_source(tail)
     <<~RUBY

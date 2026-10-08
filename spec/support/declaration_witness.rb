@@ -64,6 +64,8 @@ module DeclarationWitness
   RELATIONS = %i[
     classes methods visibilities def_nodes singleton_def_nodes superclasses includes extends def_nestings class_cvars
   ].freeze
+  # The relations that read a contested slot (ADR-119 WD3) and so take `relax_contested:`.
+  CONTESTED_RELATIONS = %i[def_nodes singleton_def_nodes].freeze
   # Seconds a fixture may run before the child is killed.
   TIME_LIMIT = 20
 
@@ -182,10 +184,15 @@ module DeclarationWitness
   module_function
 
   # Every disagreement between Ruby and Rigor's tables for the fixture at `path`, restricted to `relations`.
-  def violations(path, relations: RELATIONS)
+  # `relax_contested: false` holds the def-node relations strict: a contested slot (ADR-119 WD3) must then name the
+  # def Ruby answers with, which is right only in a world where the possible def ran.
+  def violations(path, relations: RELATIONS, relax_contested: true)
     runtime = record(path)
     tables, root = rigor_tables(path)
-    relations.flat_map { |relation| Relations.public_send(:"#{relation}_violations", runtime, tables, root) }
+    relations.flat_map do |relation|
+      extra = CONTESTED_RELATIONS.include?(relation) ? { relax_contested: relax_contested } : {}
+      Relations.public_send(:"#{relation}_violations", runtime, tables, root, **extra)
+    end
   end
 
   # What Ruby says about the fixture. A fixture that raises, exits early or runs past {TIME_LIMIT} is a broken
@@ -323,9 +330,10 @@ module DeclarationWitness
       end
     end
 
-    def def_nodes_violations(runtime, tables, root)
+    def def_nodes_violations(runtime, tables, root, relax_contested: true)
+      contested = tables.contested_discovered_def_nodes
       def_identity(runtime, tables.discovered_def_nodes, "instance", "#",
-                   contested: contested_lines(tables.contested_discovered_def_nodes, root, "instance"))
+                   contested: relax_contested ? contested_lines(contested, root, "instance") : {})
     end
 
     # `{[owner, name] => lines}` for each contested slot: the start lines of every def of that name the fixture
@@ -339,10 +347,11 @@ module DeclarationWitness
 
     # A singleton def the extends fold copied along an unconfirmed self-extend edge is `possible`: missing from Ruby
     # is allowed, a different def is not.
-    def singleton_def_nodes_violations(runtime, tables, root)
+    def singleton_def_nodes_violations(runtime, tables, root, relax_contested: true)
+      contested = tables.contested_discovered_singleton_def_nodes
       def_identity(runtime, tables.discovered_singleton_def_nodes, "singleton", ".",
                    unconfirmed_self_extends(runtime, tables),
-                   contested: contested_lines(tables.contested_discovered_singleton_def_nodes, root, "singleton"))
+                   contested: relax_contested ? contested_lines(contested, root, "singleton") : {})
     end
 
     def def_identity(runtime, table, side, separator, possible_owners = [], contested: {})

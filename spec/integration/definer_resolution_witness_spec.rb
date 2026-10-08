@@ -1130,6 +1130,14 @@ RSpec.describe Rigor::Inference::DefinerResolution do # rubocop:disable RSpec/Sp
         expect(owner_of(resolve(scope_for(source), :foo))).to eq(:unknown)
       end
 
+      it "declines under a superclass that extends a module RBS does not know, whose inherited is unseen" do
+        prelude = "module GP; def foo(*) = :gp; end\n" \
+                  "module GemHooky; def inherited(sub); super; sub.prepend(GP); end; end\n"
+        source = "#{head}class Base; extend GemHooky; include FM; include FN; end\n#{klass}"
+        expect(owner_says(source, prelude: prelude)).to eq("GP")
+        expect(owner_of(resolve(scope_for(source), :foo))).to eq(:unknown)
+      end
+
       it "declines under an included module's hook that defines the superclass's inherited (e2)" do
         hook = "module M; def self.included(b) = b.define_singleton_method(:inherited) { |s| s.prepend(P) }; end\n"
         expect(hooked("#{hook}class Base; include FM; include FN; include M; end\n#{klass}")).to eq(["P", :unknown])

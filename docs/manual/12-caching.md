@@ -144,6 +144,8 @@ There is no config key to disable caching permanently — the
 flags are per-run toggles. To run without a persistent cache
 habitually, point `cache.path` at a disposable directory.
 
+With `--incremental --no-cache` and an editor buffer (`--tmp-file` with `--instead-of`), the buffer is analysed on its own, as it is when no snapshot exists, and the note says that `--no-cache` skipped the snapshot rather than suggesting `rigor check --incremental`.
+
 ## Size and eviction
 
 A project's active cache set is a few megabytes (about 10 MB
@@ -246,8 +248,7 @@ runs re-check as before. It also switches itself off, silently:
   analysed paths. The re-check may keep printing the answer from
   before that change; the shortcut does not repeat it;
 - when an `--incremental` run cannot record its answer safely:
-  after a run with `--workers=N` or `--no-cache` that re-analysed
-  files, when a file or directory changes while a run is reading
+  after a run with `--workers=N` that re-analysed files, when a file or directory changes while a run is reading
   it, after a CI cache is restored onto a fresh checkout, or when
   two runs race.
 

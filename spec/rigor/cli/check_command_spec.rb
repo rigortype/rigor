@@ -182,6 +182,18 @@ RSpec.describe Rigor::CLI::CheckCommand do
       expect(status).to eq(0)
     end
 
+    it "says --no-cache skipped the snapshot, not that no snapshot exists, when a primed snapshot is ignored" do
+      write_editor_project
+      run(["--no-ci-detect", "--no-stats", "--incremental", "lib"]) # a snapshot exists on disk
+
+      status, _out, err = run(editor_argv + ["--no-cache"])
+
+      expect(err).to include("--no-cache skips the incremental snapshot")
+      expect(err).not_to include("no reusable snapshot")
+      expect(err).not_to include("rigor check --incremental")
+      expect(status).to eq(0)
+    end
+
     it "refuses --verify-incremental against a buffer instead of comparing against the wrong oracle" do
       write_editor_project
 

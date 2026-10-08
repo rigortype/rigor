@@ -344,8 +344,13 @@ module Rigor
       def run_editor_mode_option_b(session, snapshot, fingerprint, configuration, options)
         result = session.run_buffer_recheck(snapshot: snapshot, fingerprint: fingerprint)
         if result.nil?
-          @err.puts("rigor: --incremental has no reusable snapshot for this project; analysing the buffer " \
-                    "alone (run `rigor check --incremental` once to enable whole-project editor mode).")
+          if options.fetch(:no_cache)
+            @err.puts("rigor: --no-cache skips the incremental snapshot, so the buffer is analysed on its own " \
+                      "(no whole-project editor mode).")
+          else
+            @err.puts("rigor: --incremental has no reusable snapshot for this project; analysing the buffer " \
+                      "alone (run `rigor check --incremental` once to enable whole-project editor mode).")
+          end
           return nil
         end
 

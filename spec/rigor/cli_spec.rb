@@ -324,14 +324,16 @@ RSpec.describe Rigor::CLI do
         run_cli(*base)
         snapshot_files = Dir.glob(File.join(cache, "**", "*")).select { |f| File.file?(f) && f.include?("incremental") }
         expect(snapshot_files).not_to be_empty
-        before = snapshot_files.to_h { |f| [f, [File.binread(f), File.mtime(f)]] }
+        # Bytes, mtime and inode: a rewrite that keeps the content (or an atomic replace) must still show up.
+        state = ->(files) { files.to_h { |f| [f, [File.binread(f), File.mtime(f), File.stat(f).ino]] } }
+        before = state.call(snapshot_files)
         all_before = Dir.glob(File.join(cache, "**", "*"))
         sleep 0.05
 
         _status, _out, err = run_cli(*base, "--no-cache")
         expect(err).to include("--incremental cold")
         expect(err).not_to include("--incremental warm")
-        expect(snapshot_files.to_h { |f| [f, [File.binread(f), File.mtime(f)]] }).to eq(before)
+        expect(state.call(snapshot_files)).to eq(before)
         expect(Dir.glob(File.join(cache, "**", "*"))).to eq(all_before)
 
         _status, _out, err = run_cli(*base)

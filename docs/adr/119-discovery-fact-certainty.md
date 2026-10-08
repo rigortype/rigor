@@ -507,6 +507,41 @@ is defined over the chain, and asks `settle`:
   named entry and, per closure entry, three table probes, the dynamic-mark test and, for an external,
   one RBS lookup. The constant tables admit no `possible` facts in this ADR.
 
+**Errata (2026-10-08), PR A1 (#1635): the root's own definer, and declared modules.** Two read-side rules,
+no data change, both inside `settle` and `Relevance`, witnessed in `spec/integration/definer_resolution_witness_spec.rb`
+§ "the root's own definer (#1622)" and § "a declared module the chain holds as external (#1612)" beside Ruby's own
+answer:
+
+- *An exception to "a chain with a fork is never narrowed" (#1622).* Ruby inserts every `include` — conditional,
+  hook-driven, skipped or repeated by a fork — after the class it targets, never ahead of it; only a prepend lands
+  ahead. So where the candidate set is exactly one certain definer, the root's own instance entry, which records the
+  name itself, and the root heads its chain (nothing prepended to it), the chain stands for that answer whatever its
+  fork count, unless a mark may prepend onto the root: a mark listing `"*"` on any node; a named listing on the root
+  or on a module that the node prepends (a concern's `included do prepend P end` is listed on the concern and runs
+  on the includer); a mark `Relevance` discharges for the name never blocks. A named listing on a superclass does not
+  block: its prepends land at the superclass's level, behind the root. The rule is only for the root's own entry: a
+  hook's `base.include` lands ahead of an earlier `include`, so a mark's position decides nothing for any other
+  definer (`class C; include M; include Concern` with `Concern`'s hook including `A` is `[C, A, Concern, M]`).
+- *`"*"` is still never discharged, by this rule either.* A hook's `base.include` cannot shadow the root, but its
+  `"*"` is the one a `base.prepend` leaves, and so is a superclass's `inherited` hook that prepends onto the
+  subclass (`"*"` on the superclass, witnessed): the own-hit rule reads an include-kind `"*"` only once #1608
+  splits the sentinel.
+- *A declared-module category in the absent rule (#1612).* An external entry RBS knows none of whose candidates,
+  where at least one candidate is a declared module and every declared candidate is bare — its envelope bucket holds
+  only the module mark (no name a body call mentions, no dynamic, refinement or object-extension mark), and it has no
+  `extend`, no unpositioned mixin and no visibility row — lacks every name, in `DefinerResolution`'s external and
+  absent checks and in relevance's closure test alike. A concern, or any module with an `included do` or
+  `class_methods do` block, extends `ActiveSupport::Concern` and is never bare. A hook written outside its module's
+  body is recorded against no module (`def Q.included` at the top level, or in `module X` as `X#included`), so the
+  category is off for the whole project while any hook `def` row is not a singleton `def` its owner records, or is a
+  second one for that owner. A hook `def` nested in a method or block body, and `class << X; def Q.included` alone,
+  are recorded by no table and remain unseen.
+- *The attribution in "Why the rule stops at a fork" is corrected.* GitLab's Project, Group and User do carry forks
+  (7–11 each, C2-b1's census), but forks no longer decide their own definers: the `"*"` that
+  `Project.prepend_mod_with('Project')` at a model file's foot lists on the root (Project, User; Group through
+  `Namespace`), and concerns whose `included do` prepends onto the includer (`Avatarable`'s `prepend
+  ShadowMethods`), block them, and they stay `Unknown` at migrated sites until #1608 and the follow-up ADR.
+
 ### WD3 — What is certain
 
 A fact is `certain` when its statement executes whenever the file's top level executes: reachable

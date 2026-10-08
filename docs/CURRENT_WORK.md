@@ -52,9 +52,17 @@ Next:
      (`media.rb:281`: an RBS-less gem module ahead turns a raising helper's `bot` into `Dynamic`) and
      cuts typed calls (Mastodon -32%, GitLab -76%). A Fable diagnosis: 47-69% are own-class hits
      declined by marks (#1622), Mastodon's bulk is `RoutingHelper`'s `"*"` (#1608).
-   - **A1 (in progress):** own-hit rule plus a declared-module rule, read-side only. **A2** next:
-     #1608's include-kind sentinel. Then rebase C2-b1, re-run its typing census, fix the raising-helper
-     FP (plugin RBS for ActionView/Pundit, or widen on an undecided `bot` branch).
+   - **A1 (#1635, Draft, held):** sound for cold runs after round 2 (rule 2, the declared-module
+     rule, was removed — tracked in #1612), but warm `--incremental` goes stale: `own_hit_exposed?`
+     files no edges for the foreign-hook scan or receiver-form singleton facts (see the PR comment).
+     With the strict hook test the typing gain is 0, so decide whether a positional refinement (only
+     the root's direct mixins' `included` and superclasses' `inherited` can prepend onto the root)
+     makes it worth finishing. Extract its independent `record_beyond` fix first (#1637).
+   - **Next for C2-b1:** A2 = #1608's include-kind sentinel (the Mastodon lever); the raising-helper
+     FP needs plugin RBS for ActionView/Pundit (#1611) or a widen-on-undecided-`bot` join. Then rebase
+     #1629 and re-run its typing census.
+   - Other open findings from this round: #1625, #1626, #1627, #1628, #1633, #1634 (stale, multi-file
+     reopen), #1636 (hook prepends with no mark), #1624, #1622.
    - C2-b2 (the singleton typing memo) and C2-d (#1604, optional) follow C2-b1.
 2. **Open false positives the chain cannot fix by falling back to master's order** (unsettled means
    master's order, not a decline): #1592's hook shapes and #1594 (a concern's `included do`). Both

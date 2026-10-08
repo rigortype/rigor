@@ -80,8 +80,9 @@ module Rigor
       # tables (dependency edges, positions, fingerprints): no read takes a definer, visibility, arity or type from
       # them, and certainty does not move a site. The reads whose answer depends on the site are
       # `Scope#same_file_top_level_def?` (file identity, independent of certainty), `#singleton_def_shadows_call?`
-      # and `#instance_def_shadows_call?` (a conditional def's site answers "shadows"). The shadows reads pair with
-      # `Scope#possible_definer?` where "shadows" narrows an answer (ADR-119 C1d-c).
+      # and `#instance_def_shadows_call?` (a conditional def's site answers "shadows"). Where "shadows" narrows an
+      # answer, the caller pairs it with {#possible_method?}: existence is the method table, certainty is the possible
+      # table alone (ADR-119 C1d-c).
       SIBLINGS = {
         discovered_methods: :possible_discovered_methods,
         discovered_deferred_ranges: :possible_discovered_deferred_ranges,

@@ -1223,17 +1223,6 @@ module Rigor
       site
     end
 
-    # ADR-119 WD1 errata — whether the definer of `method_name` on `class_name`'s `kind` side (`:instance` or
-    # `:singleton`) rests on a fact the walk could not prove executes: a `possible` method, or a contested def-node
-    # slot. The site-dependent reads below say a def EXISTS and ran before the call; this says whether that def is
-    # certain. A read where "shadows" narrows an answer must decline on it; a read where "shadows" withholds one
-    # may keep it, since a possible def still withholds.
-    def possible_definer?(class_name, method_name, kind)
-      nodes = kind == :singleton ? :discovered_singleton_def_nodes : :discovered_def_nodes
-      @discovery.possible_method?(class_name, method_name, kind) ||
-        @discovery.contested?(nodes, [class_name.to_s, method_name.to_sym])
-    end
-
     # Issue #1097 — whether `class_name`'s own singleton `def method_name` has RUN by the time `call_node`
     # executes. Such a def precedes every `extend` in the singleton ancestry, so once it exists it owns the
     # call — but `sig { ... }` written BEFORE `def self.sig` in the same body still resolves through the

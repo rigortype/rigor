@@ -254,10 +254,17 @@ RSpec.describe Rigor::Inference::MacroBlockSelfType do
         allow(scope).to receive(:instance_def_shadows_call?) do |klass, meth, _node|
           (defines[klass] || []).include?(meth)
         end
-        allow(scope).to receive(:possible_definer?) do |klass, meth, _kind|
+        allow(scope).to receive(:discovery).and_return(sorbet_discovery(possible))
+        scope
+      end
+
+      # The possible-only side of DiscoveryIndex that the `extend` owner check reads (ADR-119 C1d-c).
+      def sorbet_discovery(possible)
+        discovery = instance_double(Rigor::Scope::DiscoveryIndex)
+        allow(discovery).to receive(:possible_method?) do |klass, meth, _kind|
           (possible[klass] || []).include?(meth)
         end
-        scope
+        discovery
       end
 
       def sorbet_env(rbs_extends: {})

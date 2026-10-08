@@ -618,6 +618,50 @@ RSpec.describe "plugins/rigor-sorbet" do
       expect(offenders.map(&:message)).to include(a_string_matching(/bogus_terminus.*DeclBuilder/))
     end
 
+    # Existence, not the last write, decides: a def that is certain anywhere in the module keeps the narrowing,
+    # whichever order the certain and the conditional def appear in.
+    it "keeps the DeclBuilder narrowing when a certain `sig` def precedes a conditional one" do
+      source = <<~RUBY
+        module T
+          module Sig
+            def sig(*, &blk) = nil
+            if ENV["RIGOR_FIXTURE_SIG"]
+              def sig(*, &blk) = nil
+            end
+          end
+        end
+        class F < T::ImmutableStruct
+          sig { params(x: Integer).bogus_terminus }
+          def m(x); end
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).to include(a_string_matching(/bogus_terminus.*DeclBuilder/))
+    end
+
+    it "keeps the DeclBuilder narrowing when a conditional `sig` def precedes a certain one" do
+      source = <<~RUBY
+        module T
+          module Sig
+            if ENV["RIGOR_FIXTURE_SIG"]
+              def sig(*, &blk) = nil
+            end
+            def sig(*, &blk) = nil
+          end
+        end
+        class F < T::ImmutableStruct
+          sig { params(x: Integer).bogus_terminus }
+          def m(x); end
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).to include(a_string_matching(/bogus_terminus.*DeclBuilder/))
+    end
+
     it "does not bind DeclBuilder through a project T::Sig whose `sig` def is conditional" do
       source = <<~RUBY
         module T

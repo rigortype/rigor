@@ -224,7 +224,7 @@ module Rigor
       # answers false — the module may not answer at runtime.
       def extended_owner_reaches?(owner, constraint, method_name, call_node, scope, environment)
         return false if scope.instance_def_shadows_call?(owner, method_name, call_node) &&
-                        scope.possible_definer?(owner, method_name, :instance)
+                        scope.discovery.possible_method?(owner, method_name, :instance)
 
         owner == constraint || rbs_inherits?(owner, constraint, environment)
       end

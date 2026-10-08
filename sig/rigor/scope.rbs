@@ -324,8 +324,6 @@ module Rigor
     def singleton_def_shadows_call?: (String | Symbol class_name, String | Symbol method_name, untyped call_node) -> bool
     # sig-gen gap: #1167 — the instance-side twin: the same untyped `call_node`, the same untyped-return skip.
     def instance_def_shadows_call?: (String | Symbol class_name, String | Symbol method_name, untyped call_node) -> bool
-    # authored: sig-gen skips it (sig.skipped.untyped-return) — the answer is an `||` over the untyped DiscoveryIndex reads.
-    def possible_definer?: (String | Symbol class_name, String | Symbol method_name, Symbol kind) -> bool
     def top_level_def_for: (String | Symbol method_name) -> ::Prism::DefNode?
     def bindable_top_level_def_for: (String | Symbol method_name) -> ::Prism::DefNode?
     def toplevel?: () -> bool

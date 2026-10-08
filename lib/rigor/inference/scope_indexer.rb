@@ -7934,8 +7934,8 @@ module Rigor
         acc[:constant_values], acc[:constant_sources] = finalize_constant_writes(acc[:constant_writes])
         # ADR-119 WD1 — the two passes below rewrite `def_nodes`, `singleton_def_nodes` and `methods`, and each carries
         # its sibling along. `subtract_def_methods` drops `def`-declared names from `methods`, and
-        # {#subtract_sibling_methods!} applies the same drop to `possible_discovered_methods`. The extends fold copies an
-        # extended module's instance defs onto the extender's singleton (a copied def is certain or possible as its
+        # {#subtract_sibling_methods!} applies the same drop to `possible_discovered_methods`. The extends fold copies
+        # an extended module's instance defs onto the extender's singleton (a copied def is certain or possible as its
         # source was); it does not yet follow its siblings, which lands in a later commit on the ADR-119 C1d0 branch.
         # Until a producer fills a sibling, every sibling is empty and there is nothing for either pass to follow.
         fold_extends_into_singleton_tables(acc[:extends], acc[:def_nodes], acc[:singleton_def_nodes], acc[:methods])

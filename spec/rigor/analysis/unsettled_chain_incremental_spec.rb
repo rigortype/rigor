@@ -38,17 +38,21 @@ RSpec.describe "unsettled chain verdict — incremental" do
       "m.rb" => "module M\n  def foo = \"m\"\nend\n\nmodule A\n  include M\nend\n",
       "c.rb" => "class C < Base\n  include A\nend\n",
       "f.rb" => "module Factory\n  def self.build = C.new\nend\n",
-      "b.rb" => "Factory.build.foo.upcase\n"
+      "b.rb" => "Factory.build.foo.even?\n"
     }
   end
 
-  # Runs the baseline, applies the edits, and returns `[warm, cold]` after the recheck. The baseline is silent
-  # (`C#foo` is `M#foo`, a String), so a cold run that fires afterwards proves the edit moved the answer.
+  # Runs the baseline, applies the edits, and returns `[warm, cold]` after the recheck. The baseline types `C#foo` as
+  # `M#foo`'s String, so `even?` fires; a cold run that is silent afterwards proves the edit moved the answer.
+  # (Before ADR-119 C2-b1 the edit sent the instance typing read to master's order, `Base#foo`'s Integer, and the
+  # consumer was `upcase`, silent before and firing after; since C2-b1 the unsettled chain types `Dynamic`, so the
+  # flip is observed the other way round. What the gate pins is unchanged: an edit to a module past the answer
+  # flips the verdict, and the warm run must re-check the consumer.)
   def warm_and_cold(files, edits)
     Dir.mktmpdir do |dir|
       files.each { |name, source| File.write(File.join(dir, name), source) }
       session = session_for(dir)
-      expect(diagnostics(guarded_baseline(session))).to eq([])
+      expect(diagnostics(guarded_baseline(session))).to eq([["b.rb", 1]])
       edits.each { |name, source| File.write(File.join(dir, name), source) }
       [diagnostics(guarded_recheck(session).diagnostics), full_run(dir)]
     end
@@ -56,14 +60,14 @@ RSpec.describe "unsettled chain verdict — incremental" do
 
   it "re-checks the consumer when a module past the answer gains an unpositioned edge" do
     warm, cold = warm_and_cold(tree, "q.rb" => "module R\nend\n\nmodule Q\n  include R if ENV[\"X\"]\nend\n")
-    expect(cold).to eq([["b.rb", 1]])
+    expect(cold).to eq([])
     expect(warm).to eq(cold)
   end
 
   it "re-checks the consumer when a new file reopens a module past the answer with a second edge" do
     files = tree.merge("q.rb" => "module R\nend\n\nmodule S\nend\n\nmodule Q\n  include R\nend\n")
     warm, cold = warm_and_cold(files, "q2.rb" => "module Q\n  include S\nend\n")
-    expect(cold).to eq([["b.rb", 1]])
+    expect(cold).to eq([])
     expect(warm).to eq(cold)
   end
 

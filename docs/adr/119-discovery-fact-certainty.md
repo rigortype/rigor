@@ -824,6 +824,49 @@ producers: `possible_discovered_methods`, the def-node, singleton def-node and e
   declares its private `fmt2` under a bare `private`, the form master records. The singleton copy is `possible`
   through the module's self-extend edge, so the witness needs no pin for it.
 
+Errata (2026-10-08), C2 splits and C2-b1 lands (the instance typing site; lane 2, PR #1629):
+
+- *C2-b1 migrates only `try_user_method_inference`'s definer read.* A new memo, `resolve_typing_def_with_owner`,
+  answers through `DefinerResolution` (`question: :definer`); `UNKNOWN` and `ABSENT` both answer `[nil, nil]` there
+  (the absent rule is moot at a typing site: no definer and an unsettled chain both fall through to `Dynamic`). The
+  existence reads (`instance_self_answers?`, `self_call_method_known?`, the self-purity scan) stay on the union memo,
+  because an existence read turning false adds `call.self-undefined-method` records; the recorder spec pins it.
+- *Pins.* #1594's pending example passes and is now a positive example; #1572's reads `UNKNOWN` at C2-b1 (`Dynamic`,
+  not yet typed from `Enumerable`); the conditional-include shapes are `[]`, tp-lost by design (Ruby with the
+  condition unset raises, the other world's String is `M#foo`'s).
+- *The `bot` exception (adopted by the maintainer, 2026-10-08).* `Unknown` types `Dynamic`, except that where every
+  project definer the chain holds types `bot`, the call types `bot`: `bot` reports nothing about a value, and the
+  exposure is master's. Precisely: on `UNKNOWN`, a chain not cut by the budget, at least one project entry with a
+  `def` of the name (at any position, since order is what is unknown), each inferred with the call's receiver and
+  arguments to `bot`, no project entry whose only record of the name has no body (an `attr_*` or `define_method`
+  with no `def` of it), no definer resting on a `possible` or contested fact, and no RBS-known external declaring
+  the name; `ABSENT` stays `Dynamic`. "The chain" is what the tables hold: a receiver-form `X.include(M)` written
+  outside `X`'s body is not on it (the chain lists `"*"` for it), and an entry's `define_method` or `attr_reader`
+  beside its own `def` of the name is not seen (the `def` holds the table's slot), both as on the `Known` path and
+  on master; the second is pinned as a deliberate false negative. A chain cut by the budget declines, a pinned
+  false positive where the raising definer sits ahead of the cut. It restores the narrowing behind
+  `fail_with_message ... unless x` on Mastodon's `lib/mastodon/cli/media.rb:281`, which an RBS-unknown module
+  included ahead of the definer (`include ActionView::Helpers::NumberHelper` before `Base`) had turned into a false
+  positive. The accepted failure: the RBS-unknown module really defines the name and returns, so the guard
+  narrows wrongly and the statements after it are read as unreachable, a false negative pinned as deliberate in
+  `ruby_order_resolution_spec.rb`. The read files the class edges of every entry, the negative class edge of
+  each, and per project entry the method edge (`read_missing(:method, "Owner#name")` where it lacks the `def`),
+  since `candidates` returning nil skips `settle` and `DefinerResolution` files nothing past the external.
+- *WD7(f) census* (`tool/typing_census.rb`, `try_user_method_inference`, `--workers 0`, base master `f65193940`, with
+  the `bot` exception): Rigor `lib` 55,174 typed calls to 55,022 (24 pairs lost); Mastodon `af3596316` `app lib
+  config` under `data/oss-sweep/mastodon-rigor.yml` 44,398 to 30,841 (1,710 pairs lost), under its plugin-enabled
+  `.rigor.dist.yml` 92,128 to 73,103 (1,712); GitLab `289f6e1c` `app/models` and `app/controllers` without plugins
+  78,018 to 18,765 (7,814 pairs lost, 831 on ten core models: Project, MergeRequest, User, Ci::Build, Ci::Pipeline,
+  Group, Note, Namespace, Member, Issue), with its plugins 92,316 to 23,667 (7,789, 840 on those models). No pair
+  is gained. Before the exception the same Mastodon run lost 1,814 pairs. The loss is accepted on master (Q9).
+- *Corpus differentials* (`tool/engine_diag_diff.rb`, all rules, same base): Rigor `lib` 1 to 1; Mastodon under
+  the sweep config 19 to 19 and under its plugins 2,611 to 2,602 (9 removed, 0 added); GitLab without plugins 57 to
+  53 and with them 2,631 to 2,625 (4 and 6 removed, 0 added). Every removed row is `fp-silenced` except Mastodon's
+  `quote_request.rb:28:26`, `tp-lost` (a `FetchRemoteStatusService#call` that returns nil). `rigor sig-gen --print`
+  is byte-identical on Rigor `lib`; Mastodon drops `RoutingHelper#frontend_asset_url`'s `-> String`, GitLab 15
+  signatures of concern modules (13 dropped, 2 widened), among them master's unsound `FastDestroyAll#fast_destroy_all:
+  () -> bot` (its callee is an abstract stub each includer overrides). No signature is added or narrowed.
+
 Precision estimate, unchanged from v12 and not re-measured (the landed PRs changed no producer that
 moves it): about 13 of 940 mixin calls in Mastodon's `app`, 6 of 85 in `app/lib`, sit outside
 unconditional bodies; Redmine has 17 `send(:include)` and 6 mixin calls inside methods. What C1 and C2
@@ -954,7 +997,10 @@ Resolved at acceptance (2026-10-01): every default below is adopted.
 7. **Sig-gen changes in the changelog.** *Default: yes, one entry for PR B.*
 8. **Pace for the grandfathered sets.** *Default: by filed bug; the gates prevent growth.*
 9. **The follow-up ADR's timing.** *Default: after C1 lands; before C2 if the WD7(f) census on GitLab
-   is not acceptable, or if #1592's or #1594's shapes are reported from a corpus.*
+   is not acceptable, or if #1592's or #1594's shapes are reported from a corpus.* **Adopted (maintainer,
+   2026-10-08).** C2-b1's typing loss (WD7(f), C2-b1 errata) is accepted on master ahead of the follow-up ADR;
+   [#1651](https://github.com/rigortype/rigor/issues/1651) gates v0.5.0: the loss is recovered, or explicitly
+   accepted, before that cut.
 10. **Relevance on a one-fork chain.** Deferred here; the agreeing-worlds witness is pinned as a
     decline. *Default: deferred until PR C's #1591 breakdown shows the share it would recover.*
 11. **WD3's singleton-side decline signals.** The `ActiveSupport::Concern` name test is a framework

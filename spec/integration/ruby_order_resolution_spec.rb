@@ -473,18 +473,28 @@ RSpec.describe "resolution in Ruby's ancestor order (#1567, #1568, #1570, #1571)
       "module M; def foo = \"m\"; end\nmodule A; include M; end\nclass Base; def foo = 1; end\n"
     end
 
-    # Ruby, with `RIGOR_X` unset, never runs the include: `C.new.foo` is `Base#foo`, and `upcase` is missing.
-    it "keeps master's answer for a conditional include" do
-      expect(diagnostics_for(<<~RUBY)).to eq([[6, "call.undefined-method"]])
+    # The chain alone answers `M#foo`, master's order answers `Base#foo`: the chain stands for neither, so the typing
+    # read answers `UNKNOWN` (C2-b1) and `C.new.foo` is `Dynamic`. Ruby with `RIGOR_X` unset never runs the include:
+    # `C.new.foo` is `Base#foo` and `upcase` IS missing, a true positive this silences by design (tp-lost, ADR-119
+    # E5): the file alone cannot say which world runs, and the other world's `C.new.foo` is `M#foo`'s String.
+    it "types a conditional include's call as Dynamic" do
+      expect(diagnostics_for(<<~RUBY)).to eq([])
         #{prelude}class C < Base; include A if ENV["RIGOR_X"]; end
 
         C.new.foo.upcase
       RUBY
     end
 
-    # `setup` is never called: `C.ancestors` is `[C, Base]` in Ruby.
-    it "keeps master's answer for an include inside a method body" do
-      expect(diagnostics_for(<<~RUBY)).to eq([[6, "call.undefined-method"]])
+    it "runs both worlds of the conditional include under Ruby" do
+      source = "#{prelude}class C < Base; include A if ENV[\"RIGOR_X\"]; end\n"
+      expect(RubyRun.stdout("#{source}p C.new.foo\n")).to eq("1\n")
+      expect(RubyRun.stdout("ENV[\"RIGOR_X\"] = \"1\"\n#{source}p C.new.foo\n")).to eq("\"m\"\n")
+    end
+
+    # `setup` is never called: `C.ancestors` is `[C, Base]` in Ruby and `upcase` IS missing (tp-lost by design, as
+    # above: a method body's include runs whenever the method is called, which the tables cannot know).
+    it "types an include inside a method body as Dynamic" do
+      expect(diagnostics_for(<<~RUBY)).to eq([])
         #{prelude}class C < Base; def self.setup = include(A); end
 
         C.new.foo.upcase
@@ -587,8 +597,13 @@ RSpec.describe "resolution in Ruby's ancestor order (#1567, #1568, #1570, #1571)
     RUBY
   end
 
-  it "keeps master's answer where a conditional include in the superclass makes the class's include a skip" do
-    expect(diagnostics_for(<<~RUBY)).to eq([[16, "call.undefined-method"]])
+  # `C.new.foo` is `Base#foo` (1) when `X` is set (`Base` already includes `M`, so `C`'s include is a skip) and `M#foo`
+  # (a String) when it is not, so line 15 is world-dependent and typed `Dynamic` (C2-b1). `Base.new.foo` is `Base#foo`
+  # in both worlds (its own `def` precedes the include), so line 16 is a true positive the typing read also loses:
+  # the conditional include is relevant to `foo` (`M` defines it), so the read declines although `Base`'s own
+  # `def` comes first (tp-lost by design, ADR-119 E5).
+  it "types the class's call as Dynamic where a conditional include in the superclass makes its include a skip" do
+    expect(diagnostics_for(<<~RUBY)).to eq([])
       module M
         def foo = "m"
       end
@@ -832,16 +847,11 @@ RSpec.describe "resolution in Ruby's ancestor order (#1567, #1568, #1570, #1571)
         .to eq("\"a\"\n[C, Enumerable, M]\n")
     end
 
-    # Flip this when #1572 is fixed: the read stops at `Enumerable` and answers from its RBS declaration.
-    it "pending: types the call from the nearer external module" do
-      pending "https://github.com/rigortype/rigor/issues/1572 — fixed by the #1572 typing-only read"
-
+    # UNKNOWN at C2-b1, so `C.new.to_a` types `Dynamic` and line 15 is silent (Ruby: `"a"`, a String, so `first` exists;
+    # master's `M#to_a` Integer made it a false positive). #1572 later types it from `Enumerable` (an Array of String
+    # elements) instead of `Dynamic`; line 16 is the control that this source still analyses.
+    it "UNKNOWN at C2-b1; #1572 later types it from Enumerable" do
       expect(diagnostics_for(source)).to eq([[16, "call.undefined-method"]])
-    end
-
-    # Flip this when #1572 is fixed: today the call types as `M#to_a`'s Integer and `first` is undefined.
-    it "today: reports `first` as undefined for the Integer from M#to_a" do
-      expect(diagnostics_for(source)).to eq([[15, "call.undefined-method"], [16, "call.undefined-method"]])
     end
   end
 
@@ -894,16 +904,209 @@ RSpec.describe "resolution in Ruby's ancestor order (#1567, #1568, #1570, #1571)
       expect(printed).to eq("\"M\"\n[C, A, M, Concern, Base]\n")
     end
 
-    # Flip this when ADR-119 PR C2 migrates the instance-side read: the unsettled chain answers `Unknown`, so the
-    # `upcase` on line 13 goes silent; line 12 is the control (Base#foo is an Integer).
-    it "pending: reports only the control" do
-      pending "https://github.com/rigortype/rigor/issues/1594 — fixed by ADR-119 PR C2; line 13 is a false positive"
-
+    # C2-b1 migrated the instance typing read: the unsettled chain answers `UNKNOWN`, `C.new.foo` types `Dynamic` and
+    # the `upcase` on line 13 is silent (it was a false positive: Ruby's `C.new.foo` is "M"); line 12 is the control
+    # (`Kc` has no concern, `Base#foo` is an Integer).
+    it "reports only the control" do
       expect(diagnostics_for(source)).to eq([[12, "call.undefined-method"]])
     end
+  end
 
-    it "today: also reports `upcase` on the Integer master's order answers for C" do
-      expect(diagnostics_for(source)).to eq([[12, "call.undefined-method"], [13, "call.undefined-method"]])
+  # ADR-119 C2-b1 — the instance typing read answers from a definer only where the chain stands for the name. A
+  # conditional `def` contests the slot (C1d-a's siblings), so the call types `Dynamic`; Ruby's answer depends on a
+  # world the file cannot name, and the String of the unconditional `def` is right in only one of them.
+  describe "the typing read declines on a conditional definer (C2-b1)" do
+    let(:source) do
+      <<~RUBY
+        class C
+          def foo = "a"
+          def foo = 1 if ENV["RIGOR_X"]
+        end
+        C.new.foo.upcase
+        Plain = Struct.new(:x)
+        Plain.new(1).x.upcase
+      RUBY
     end
+
+    it "runs both worlds under Ruby" do
+      body = source.lines[0..3].join
+      expect(RubyRun.stdout("#{body}p C.new.foo\n")).to eq("\"a\"\n")
+      expect(RubyRun.stdout("ENV[\"RIGOR_X\"] = \"1\"\n#{body}p C.new.foo\n")).to eq("1\n")
+    end
+
+    it "types the call Dynamic, with the unrelated control still firing" do
+      expect(diagnostics_for(source)).to eq([[7, "call.undefined-method"]])
+    end
+  end
+
+  # The same shape with an unconditional `def` still types: the migration silences only what the chain cannot
+  # stand for.
+  it "still types a call through an unconditional definer (C2-b1)" do
+    expect(diagnostics_for(<<~RUBY)).to eq([[4, "call.undefined-method"]])
+      class C
+        def foo = 1
+      end
+      C.new.foo.upcase
+    RUBY
+  end
+
+  # ADR-119 C2-b1's `bot` exception (errata 2026-10-08), the shape of Mastodon's `lib/mastodon/cli/media.rb`: an
+  # RBS-unknown module included ahead of the definer (`include ActionView::Helpers::NumberHelper` before `Base`) may
+  # answer first, so the typing read is UNKNOWN. Where every project definer of the name on the chain types `bot`,
+  # the call types `bot` anyway, and the `unless count` guard narrows `count` as master's did. Line 15 is the
+  # control that the file was analysed.
+  describe "the bot exception: every project definer of an UNKNOWN call raises (C2-b1)" do
+    def media_source(includes: "", extra: "")
+      <<~RUBY
+        class Base
+          def fail_with(message)
+            raise ArgumentError, message
+          end
+        end
+        #{extra}
+        class Media < Base
+          #{includes}
+          def lookup(list)
+            count = [7, 10].find { |n| n <= list.length }
+            fail_with 'no' unless count
+            list[-count..]
+          end
+        end
+        1.upcase
+      RUBY
+    end
+
+    def ruby_lookup(source, prelude)
+      program = source.sub("1.upcase\n", "")
+      RubyRun.stdout("#{program}begin\n  p Media.new.lookup([])\nrescue StandardError => e\n  p e.class\nend\n",
+                     prelude: prelude)
+    end
+
+    let(:unknown_include) { "include ActionView::Helpers::NumberHelper" }
+    let(:empty_helper) { "module ActionView; module Helpers; module NumberHelper; end; end; end\n" }
+
+    it "keeps the narrowing without the unknown include" do
+      expect(diagnostics_for(media_source)).to eq([[15, "call.undefined-method"]])
+    end
+
+    # Ruby, with the gem's module not defining `fail_with`: `Base#fail_with` raises, so `count` is an Integer past
+    # the guard and line 12 cannot see nil. C2-b1 without the exception reported it (a false positive).
+    it "narrows past the raising call with the unknown include ahead of the definer" do
+      expect(ruby_lookup(media_source(includes: unknown_include), empty_helper)).to eq("ArgumentError\n")
+      expect(diagnostics_for(media_source(includes: unknown_include))).to eq([[15, "call.undefined-method"]])
+    end
+
+    # The unsound world the exception accepts, pinned as a DELIBERATE false negative: the RBS-unknown module really
+    # defines `fail_with` and returns, so Ruby reaches line 12 with `count` nil and raises NoMethodError, while the
+    # analysis (which cannot see the gem's body) still narrows. `bot` states nothing about a value, so the
+    # exposure is the narrowing master already did here, never a new report.
+    it "misses the nil receiver where the unknown module's own fail_with returns (deliberate false negative)" do
+      returning_helper = "module ActionView; module Helpers; module NumberHelper\n  def fail_with(_) = nil\n" \
+                         "end; end; end\n"
+      expect(ruby_lookup(media_source(includes: unknown_include), returning_helper)).to eq("NoMethodError\n")
+      expect(diagnostics_for(media_source(includes: unknown_include))).to eq([[15, "call.undefined-method"]])
+    end
+
+    # A mixed chain stays Dynamic: `M#fail_with` (after the unknown module, ahead of `Base`) returns, so the call is
+    # not `bot` and the guard does not narrow. Ruby: `M#fail_with` is the definer, `count` is nil on line 12, so
+    # the report is a true positive.
+    it "keeps a call Dynamic where one definer raises and another returns" do
+      source = media_source(includes: "include M; #{unknown_include}", extra: "module M; def fail_with(_) = nil; end")
+      expect(ruby_lookup(source, empty_helper)).to eq("NoMethodError\n")
+      expect(diagnostics_for(source)).to eq([[12, "call.possible-nil-receiver"], [15, "call.undefined-method"]])
+    end
+
+    # A definer the tables hold no body for declines the exception: `Soft` (after the unknown module, ahead of
+    # `Base`) defines `fail_with` through `define_method`, which returns. Ruby: `Soft#fail_with` is the definer and
+    # returns nil, so line 12 raises NoMethodError and the report is a true positive.
+    it "keeps a call Dynamic where a project definer has no body (define_method)" do
+      source = media_source(includes: "include Soft; #{unknown_include}",
+                            extra: "module Soft; define_method(:fail_with) { |_| nil }; end")
+      expect(ruby_lookup(source, empty_helper)).to eq("NoMethodError\n")
+      expect(diagnostics_for(source)).to eq([[12, "call.possible-nil-receiver"], [15, "call.undefined-method"]])
+    end
+
+    # A definer resting on a `possible` fact declines the exception: `Base` is reopened with an unconditional `def`
+    # that returns and then a conditional one that raises, so the def table's slot holds the raising body and is
+    # contested. Ruby: with `RIGOR_X` unset the returning `def` stands and line 12 raises NoMethodError; with it set
+    # the call raises ArgumentError. The file cannot name the world, so the call stays `Dynamic` and the report
+    # stands (a true positive in the first world).
+    it "keeps a call Dynamic where the raising definer is conditional" do
+      extra = "class Base; def fail_with(_) = nil; end; " \
+              "class Base; def fail_with(m) = raise(ArgumentError, m) if ENV[\"RIGOR_X\"]; end"
+      source = media_source(includes: unknown_include, extra: extra)
+      expect(ruby_lookup(source, empty_helper)).to eq("NoMethodError\n")
+      expect(ruby_lookup("ENV[\"RIGOR_X\"] = \"1\"\n#{source}", empty_helper)).to eq("ArgumentError\n")
+      expect(diagnostics_for(source)).to eq([[12, "call.possible-nil-receiver"], [15, "call.undefined-method"]])
+    end
+
+    # A known gap, pinned as a deliberate false negative: an entry that holds a `def` of the name AND a later
+    # `define_method` (or `attr_reader`) of it keeps the `def` in the table, so the exception reads only the
+    # raising body. Ruby runs the later definition, which returns, and line 12 raises NoMethodError. The Known path
+    # reads the same slot, so without the unknown include master and C2-b1 miss it too (the second expectation).
+    # Flip this when #1657 is fixed.
+    it "misses a later define_method beside a raising def on the same entry (deliberate false negative)" do
+      extra = "class Base; define_method(:fail_with) { |_m| nil }; end"
+      source = media_source(includes: unknown_include, extra: extra)
+      expect(ruby_lookup(source, empty_helper)).to eq("NoMethodError\n")
+      expect(diagnostics_for(source)).to eq([[15, "call.undefined-method"]])
+      expect(diagnostics_for(media_source(extra: extra))).to eq([[15, "call.undefined-method"]])
+    end
+
+    # An external RBS knows and that declares the name declines the exception: `Enumerable#to_a` sits ahead of
+    # `Base#to_a` (which raises) and returns an Array. Ruby: `Enumerable#to_a` runs, `count` is nil on line 12 and
+    # it raises NoMethodError, so the report is a true positive.
+    it "keeps a call Dynamic where an RBS-known external declares the name" do
+      source = <<~RUBY
+        class Base
+          def to_a
+            raise ArgumentError, "no"
+          end
+        end
+        class Media < Base
+          include Enumerable
+          def each; end
+          def lookup(list)
+            count = [7, 10].find { |n| n <= list.length }
+            to_a unless count
+            list[-count..]
+          end
+        end
+        1.upcase
+      RUBY
+      expect(ruby_lookup(source, nil)).to eq("NoMethodError\n")
+      expect(diagnostics_for(source)).to eq([[12, "call.possible-nil-receiver"], [15, "call.undefined-method"]])
+    end
+
+    # A chain cut by the budget (`ResolutionChain::LIMIT` project entries) declines the exception: a definer past
+    # the cut cannot be read. Here the raising `Raiser` sits ahead of the cut and ahead of `Base`, so Ruby raises
+    # (ArgumentError) and line 12 cannot see nil: the report is a FALSE POSITIVE, the budget's conservative cost
+    # (ADR-41 WD4), pinned so that relaxing the cut is a decision rather than an accident. Flip this when #1656 is
+    # fixed.
+    it "keeps a call Dynamic on a chain cut by the budget (a pinned false positive)" do
+      # Each filler defines a method of its own: a module that records none is not a project entry on a `:methods`
+      # chain, and would not count toward the cut.
+      fillers = (0..104).map { |i| "module F#{i}; def f#{i} = 1; end" }.join("; ")
+      includes = (0..104).map { |i| "include F#{i}" }.join("; ")
+      source = media_source(includes: "#{includes}; include Raiser; #{unknown_include}",
+                            extra: "#{fillers}; module Raiser; def fail_with(m) = raise(ArgumentError, m); end")
+      expect(ruby_lookup(source, empty_helper)).to eq("ArgumentError\n")
+      expect(diagnostics_for(source)).to eq([[12, "call.possible-nil-receiver"], [15, "call.undefined-method"]])
+    end
+  end
+
+  # ABSENT stays Dynamic: nothing on the chain defines `fail_with`, so no definer can make it `bot` and the guard
+  # does not narrow; line 5 is reported. (Ruby raises NoMethodError at the call on line 4 whenever `count` is nil,
+  # so line 5 cannot see nil either: the report is master's, and ABSENT is no place to start guessing `bot`.)
+  it "keeps an ABSENT call Dynamic (C2-b1 bot exception)" do
+    expect(diagnostics_for(<<~RUBY)).to eq([[5, "call.possible-nil-receiver"]])
+      class Media
+        def lookup(list)
+          count = [7, 10].find { |n| n <= list.length }
+          fail_with 'no' unless count
+          list[-count..]
+        end
+      end
+    RUBY
   end
 end

@@ -14,7 +14,8 @@
 # order, so `include M1; include M2` answers M2's definition the way CRuby does — the control below now
 # asserts the CORRECT runtime order rather than the pre-#1173 divergence.
 #
-# Every expectation below is the answer CRuby gives for the same source.
+# Every expectation below is the answer CRuby gives for the same source, or (the receiver-form call examples since
+# ADR-119 C2-b1) `Dynamic[top]` beside the walk's answer, which is CRuby's.
 
 require "spec_helper"
 require "fileutils"
@@ -35,9 +36,22 @@ RSpec.describe "Module#prepend ancestor order (#1123)" do
     ).diagnostics.select { |d| d.qualified_rule == "dump.type" }.map(&:message)
   end
 
+  # The definer the ancestor walk answers (the union read the existence checks use), from one file's tables.
+  def walk_owner(source, class_name, method_name)
+    root = Prism.parse(source).value
+    scope = Rigor::Inference::ScopeIndexer.index(root, default_scope: Rigor::Scope.empty)[root]
+    scope.user_def_through_ancestors(class_name, method_name)&.last
+  end
+
   around do |example|
     Dir.mktmpdir("rigor-prepend-") { |dir| Dir.chdir(dir) { example.run } }
   end
+
+  # ADR-119 C2-b1 — a receiver-form `Recv.prepend(Mod)` written outside the class body is an unpositioned edge:
+  # the tables cannot place it against the class's other mixin statements, so the chain is marked and the instance
+  # typing read answers `UNKNOWN` (the mark is not discharged, since `Mod` defines the name). The three call-form
+  # examples below therefore type `Dynamic[top]`, never the class's own (overridden) answer, and pin the order the
+  # walk resolves (`walk_owner`), which is what #1123 fixed. The in-body forms keep their precise types.
 
   # NOTE: the module bodies below return DISTINCT module constants rather than literals. A value-pinned
   # (literal) return is widened to `Dynamic[top]` by ADR-57 N5's overridable-method gate whenever a related
@@ -46,7 +60,7 @@ RSpec.describe "Module#prepend ancestor order (#1123)" do
   # examples below state the observable the gate leaves: a non-pinned return, or the class's own literal
   # where no prepend is in play.
   it "puts a prepended module ahead of the class for the `Base.prepend(Mod)` call form" do
-    expect(dumps_for(<<~RUBY)).to eq(["dump_type: singleton(Comparable)"])
+    source = <<~RUBY
       module Mod
         def speak = Comparable
       end
@@ -56,6 +70,8 @@ RSpec.describe "Module#prepend ancestor order (#1123)" do
       Base.prepend(Mod)
       Rigor.dump_type(Base.new.speak)
     RUBY
+    expect(walk_owner(source, "Base", :speak)).to eq("Mod")
+    expect(dumps_for(source)).to eq(["dump_type: Dynamic[top]"])
   end
 
   it "puts an in-body `prepend Mod` ahead of the class too" do
@@ -75,7 +91,7 @@ RSpec.describe "Module#prepend ancestor order (#1123)" do
     # `super` is a Dynamic source (`ExpressionTyper` types `Prism::SuperNode` as `dynamic_top`), so the
     # observable is the interpolated `String` — the module's body ran — plus the absence of the `bot` the
     # engine's recursion net answers a self-call with (`def speak = speak` types `bot`).
-    expect(dumps_for(<<~RUBY)).to eq(["dump_type: String"])
+    source = <<~RUBY
       module Loud
         def speak = "LOUD \#{super}"
       end
@@ -85,6 +101,9 @@ RSpec.describe "Module#prepend ancestor order (#1123)" do
       Base.prepend(Loud)
       Rigor.dump_type(Base.new.speak)
     RUBY
+    expect(walk_owner(source, "Base", :speak)).to eq("Loud")
+    # Since C2-b1 the call form types `Dynamic[top]` (see above); it is never the recursion net's `bot`.
+    expect(dumps_for(source)).to eq(["dump_type: Dynamic[top]"])
   end
 
   it "searches a prepend on an ancestor for the subclass too" do
@@ -175,7 +194,7 @@ RSpec.describe "Module#prepend ancestor order (#1123)" do
   end
 
   it "resolves the receiver of a `Recv.prepend(Mod)` written inside a namespace" do
-    expect(dumps_for(<<~RUBY)).to eq(["dump_type: singleton(Comparable)"])
+    source = <<~RUBY
       module Api
         module Loud
           def speak = Comparable
@@ -187,6 +206,8 @@ RSpec.describe "Module#prepend ancestor order (#1123)" do
       end
       Rigor.dump_type(Api::Widget.new.speak)
     RUBY
+    expect(walk_owner(source, "Api::Widget", :speak)).to eq("Api::Loud")
+    expect(dumps_for(source)).to eq(["dump_type: Dynamic[top]"])
   end
 
   it "leaves a class's own def winning over an included module (include control)" do

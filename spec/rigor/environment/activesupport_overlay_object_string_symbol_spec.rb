@@ -99,7 +99,10 @@ RSpec.describe "ADR-72 ActiveSupport overlay — the Object, Kernel, String and 
   end
 
   # `Kernel#class_eval` is `singleton_class.class_eval`; a `Module` receiver keeps core `Module#class_eval`,
-  # whose block defines methods on the receiver itself.
+  # whose block defines methods on the receiver itself. That block's `def` is a `possible` definer (ADR-119 C1d-a:
+  # a `def` in a block other than a meta-new one), so since C2-b1 the instance typing read declines on it and
+  # `Post.new.title` types `Dynamic[top]` (ADR-119 open question 2), where it was `"t"`; no rule fires on it
+  # either way. The overlay rows this example is for are the two `Kernel#class_eval` dumps.
   it "types class_eval on any object, and leaves Module#class_eval to core" do
     result = run_source(<<~RUBY)
       class Post; end
@@ -111,7 +114,7 @@ RSpec.describe "ADR-72 ActiveSupport overlay — the Object, Kernel, String and 
     RUBY
 
     expect(call_rules(result)).to be_empty
-    expect(dumps(result)).to eq(['"t"', "1", ":sym"])
+    expect(dumps(result)).to eq(["Dynamic[top]", "1", ":sym"])
   end
 
   it "types the String rows" do

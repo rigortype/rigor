@@ -634,6 +634,9 @@ to every hook of levels `j` and deeper.
   (E6) #1572's pending pin will pass at C2-b1, where the read is `Unknown`, which fixes nothing; Q5 and
   the C2 row are read that way. (E7) The conditional-definer shape moves only once C1d-a fills the
   siblings.
+  (E8) PR C2-c moves `SourceArity`'s singleton side onto `resolve(…, :singleton, question: :arity)`, which
+  fixes #1607 (the `extend` Ruby skips) and silences a call a hook may have redefined; the singleton-side
+  `MasterOrder` fallback and its `arity_levels` order are deleted.
 
 ### WD4 — Classification of every `DiscoveryIndex` member, with structural checks (landed)
 

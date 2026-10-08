@@ -313,6 +313,34 @@ from data already there: which *names* an unpositioned edge's closure defines (W
   contested; the extends fold (`fold_extends_into_singleton_tables`, SI:6502) and `subtract_def_methods`
   (SI:7971) follow-through for a `possible` copy; and `possible_discovered_deferred_ranges`' path keys
   under the compact-header rename, which today leaves them alone.
+  Errata (2026-10-08), C1d0 resolves each (PR #1617, lane 1, behaviour byte-identical):
+  - *The two def-source tables carry no sibling.* They are site tables — dependency edges, positions and
+    fingerprints — and no read takes a definer, visibility, arity or type from them; certainty does not move a
+    site. The one site-dependent read is `Scope#same_file_top_level_def?` (`scope.rb:1153–1157`), left to
+    C1d. This corrects the draft's "read only beside `discovered_def_nodes`", which no census entry supports.
+  - *Envelope marks are never contested.* `ENVELOPE_PROJECT_WIDE`, `ENVELOPE_MODULE_MARK` and
+    `ENVELOPE_DYNAMIC_MARK` are presence facts that only decline a read; a contested envelope path is always
+    `[class, [kind, name]]`.
+  - *The extends fold follows its siblings* (`fold_extends_into_singleton_tables`, both sites: the per-file
+    fold after the unpositioned union is settled, and `finalize_def_index`). A copy is *listed* when
+    `unpositioned_mixins[class][:extend]` names the module as written or holds `"*"`. A slot the copy wrote
+    (it was `nil`) is contested when the edge is listed or the source slot is contested; a slot another copy
+    wrote stays that copy's. The singleton name is `possible` when the edge is listed or the source name is
+    possible on the instance side, unless the singleton already answered it certainly, and the fold writes
+    `:singleton` only, never `:both`, because the instance side is not touched. A certain copy removes
+    `:singleton` from the name's possible kind (`:both` becomes `:instance`). So a value-only contest has a
+    certain name (a contested source reached through a certain edge contests the slot and leaves the name
+    certain), and a certain module after a possible one leaves the slot contested and the name certain. The
+    per-file path copies the seed's tables on write, so what carries is the seed's siblings plus this file's
+    additions less the names a certain copy settles; a seed slot the file's own `def` replaces keeps its
+    contested mark, which over-contests and is safe, and letting the file win is C1d's refinement.
+  - *`subtract_def_methods` follows its sibling.* The same drop applies to `possible_discovered_methods`
+    (`subtract_sibling_methods!`), keeping the sibling a subset of its member.
+  - *The deferred-ranges sibling is not admitted until C2.* `possible_discovered_deferred_ranges` is keyed by
+    path, so the compact-header rename leaves it alone as it leaves the member alone, and no producer fills
+    it before C2's typing sites need it.
+  - *The rename pin was vacuous.* A path key cannot tell "skipped" from "renamed", so the pairing spec's
+    compact-header example now pins the row's class name (its fifth field), which only a skipped rename keeps.
 
 ### WD2 — Candidate-set reads over the chain
 
@@ -651,7 +679,7 @@ planning (errata 2026-10-01); C1a lands relevance so it is live at the first fir
 | C1a — the read and relevance (lane 1) | `DefinerResolution.resolve(…, from:, &answer_in)` with `Known(answer, owner)`; `settle`'s option (the `:unknown` verdict, per-name relevance over the marks the chain memo now carries); the `case/in` spec. No site consults it yet, so no diagnostic moves; relevance is live from the first firing site (Q3) | None | None | WD5's relevance fixtures; WD7(d) on the memo |
 | C1b — `SourceArity` (lane 2) | Both settles at the arity rule's decision points: `walk_to_owner` (`source_arity.rb:109–129`) **and** `subclass_levels` (`:315–320`, the per-subclass level `subclasses_agree?` reads), each answering no envelope on `:unknown`, the walk's reads recorded as read since another file's edit can lift it; `MasterOrder.arity_levels` (RC:421) is then dead and removed; the #1570 pin flips; the `issue_1570_skipped_include.rb` header comment is corrected to its firing lines (22 and 23) and the #1570 pin's text to C1b | Silences #1570 and the conditional-`def` and conditional-`include` shapes, the latter two adjudicated `tp-lost` by design (WD2); may silence firings that resolved through a `possible`-only definer; **every removed `call.wrong-arity` adjudicated** | None | The cross-commit differential with the survivors' floor; the one-fork witness and its guard stay `Unknown` |
 | C1c — relationship lints (lane 2) | The override super-method lint (`each_project_ancestor`, `check_rules.rb:3800`, and `override_visibility_diagnostic`, `:3736`), the visibility mismatch (`:2664`) and `singleton_context_def?` (`:3671`, with WD3's singleton-side decline), each through `resolve` with `from:` past the class and an `answer_in` that places an RBS-declared parent | Silences the lints where some world has no super method | None | The five non-discharge shapes stay `Unknown`; WD5's lint fixtures |
-| C1d0 — storage (lane 1) | WD1's C1 obligations: a sibling, or a read-only-beside-`discovered_def_nodes` statement, for the two def-source tables; the envelope key and class marks; the extends fold and `subtract_def_methods` follow-through; the census's `justified:` classification and header (Q12) | None | None | The pairing spec extended; the census spec |
+| C1d0 — storage (lane 1) | WD1's C1 obligations: a sibling, or a read-only-beside-`discovered_def_nodes` statement, for the two def-source tables; the envelope key and class marks; the extends fold and `subtract_def_methods` follow-through; the census's `justified:` classification and header (Q12) | None | None | The pairing spec extended; the census spec, whose `justified:` check fails on a read or copy of a contested-sibling member without an entry, on an entry naming an unrecorded file, and on a kind outside `existence`, `identity`, `cache_key`, `paired_copy` and `consults_contested` |
 | C1d — `possible` facts (lane 2) | WD3's producers fill the siblings: a conditional `def`'s slot, visibility and envelope contested, a conditional `discovered_methods` entry `possible`; constructs the `Helpers2#fmt2` fixture (no such file is in the tree; its silencing needs the contested visibility, which interacts with PR B) | May silence firings that resolved through a `possible`-only definer; the `Helpers2#fmt2` override | `possible` definers render nothing new (RBS has no conditional form) | Both witness levels; the differential |
 | C1e — sig-gen notice (optional) | A notice on `possible` module functions | None | The notice | The sig-gen diff |
 | C2 — typing sites | Return inference through `resolve_user_def_through_ancestors` (`expression_typer.rb:2471, 2496`, where `Unknown` types `Dynamic`) and the singleton memo (`:2386`, with WD3's singleton-side decline); the absent rule with its RBS census | Silences the conditional-definer and conditional-include `call.undefined-method` shapes, #1594 at this site, and the #1592 hook shapes at the migrated singleton site (`Unknown`, not a fix); `gemmod3` waits for #1572 | None expected | WD7(f) census before and after, adjudicated: GitLab's core models type `Dynamic` at these sites until PR D, and the PR states the count |
@@ -795,4 +823,4 @@ Resolved at acceptance (2026-10-01): every default below is adopted.
     WD1(ii) lets a whole-table read stay where it only tests existence or identity or keys a cache, or
     is one of #1600's paired copies, and otherwise moves it behind a `Scope` reader; the census spec's
     header still says "only once its entry here is empty". *Default: adopt the classification and
-    reword the header; needs the maintainer's confirmation.*
+    reword the header; needs the maintainer's confirmation.* **Adopted (maintainer, 2026-10-08).**

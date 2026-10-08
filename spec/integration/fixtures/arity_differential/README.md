@@ -30,8 +30,10 @@ change in a PR can make the base engine fail loudly; the job then fails rather t
 
 ## Why a removed row is silent (the mechanisms)
 
-`SourceArity` answers through `DefinerResolution`, which declines (`UNKNOWN`) for three mechanisms, and an
-adjudication reason names the one that applies: a **fork** (an `include` Ruby may have skipped, so two worlds, as in
+`SourceArity` answers through `DefinerResolution`, which declines (`UNKNOWN`) for four mechanisms, and an
+adjudication reason names the one that applies: a **possible definer** (ADR-119 WD3: a `def` under control flow or in
+a block other than a meta-new class body, so its slot is contested and the next candidate, often *absent*, disagrees,
+as in `conditional_def.rb`, `tp-lost` by design under the suite's Ruby); a **fork** (an `include` Ruby may have skipped, so two worlds, as in
 #1570); a **fork plus a mark** (a conditional `include` of a module whose closure defines the name); and a
 **multi-file mark with two defining closures** (ADR-119 Q4: two files each reopen `class User` and include `A` / `B`
 both defining `greet(x)`, so `User.new.greet` fired on master and is silent now though Ruby raises in every order,

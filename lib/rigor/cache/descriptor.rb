@@ -77,7 +77,10 @@ module Rigor
       # v16: ADR-119 WD1 — the def-index seed bundles gain the `:siblings` Hash (the `possible_*` / `contested_*`
       # halves of the discovery pairs). A pre-16 bundle would contribute no sibling for an unchanged file, so cached
       # bundles must read as misses once and rebuild carrying it.
-      SCHEMA_VERSION = 16
+      # v17: ADR-119 WD3 — the def-contribution producers fill the siblings (a conditional `def`'s name possible, its
+      # def-node slot and envelope contested). A pre-17 bundle carries the empty siblings of the walk before them, so
+      # an unchanged file would fold as "no possible fact" where a cold walk records one.
+      SCHEMA_VERSION = 17
 
       # Per-slot entry value objects. Constructors validate enums / required fields and freeze the resulting
       # struct so no caller can mutate after the entry is in a Descriptor.

@@ -70,6 +70,49 @@ RSpec.describe "Declaration-fact witness" do
     end
   end
 
+  # ADR-119 WD3 — the possible definers, witnessed in the world where each runs and in the one where none does. Each
+  # world alone would let a wrong classification through (a possible def read as certain agrees with the first, a
+  # certain one read as possible with the second), so both must agree.
+  #
+  # Every relation is checked on both fixtures. The taken world holds the def-node relations strict (the contested
+  # slot must name the def Ruby answers with), the skipped world relaxes a contested slot to any def of that name
+  # the fixture writes, since the possible def did not run. One row is filtered from the visibilities relation:
+  # the table does not record `private def hidden`'s wrap-around form as private (a gap of the visibility walk,
+  # `build_discovered_method_visibilities`), whose certainty is ADR-119 C1d-b's.
+  describe "possible definers" do
+    def without_hidden(violations)
+      violations.reject { |line| line.include?("Probe#hidden") }
+    end
+
+    it "agrees with Ruby in the world where every possible definer runs" do
+      expect(without_hidden(violations("possible_defs_taken", relax_contested: false))).to eq([])
+    end
+
+    it "agrees with Ruby in the world where no possible definer runs" do
+      expect(without_hidden(violations("possible_defs_skipped"))).to eq([])
+    end
+
+    it "records the wrap-around `private def hidden` as public today (C1d-b's gap)" do
+      expect(violations("possible_defs_skipped", relations: %i[visibilities]))
+        .to contain_exactly(a_string_including("Probe#hidden"))
+    end
+
+    it "reads the conditional definers as possible and the meta-new block and private def as certain" do
+      tables, = DeclarationWitness.rigor_tables(fixture("possible_defs_skipped"))
+
+      expect(tables.possible_discovered_methods).to eq(
+        "Probe" => { gated: :instance, gated_reader: :instance, gated_alias: :instance, in_block: :instance,
+                     rescued_main: :instance, gated_singleton: :singleton },
+        "Reopened" => { reopened: :instance }
+      )
+      expect(tables.contested_discovered_def_nodes)
+        .to include(["Probe", :both], ["Probe", :gated], ["Probe", :in_block])
+      expect(tables.contested_discovered_singleton_def_nodes).to eq(Set[["Probe", :gated_singleton]])
+      expect(tables.discovered_methods.fetch("Probe::Made")).to eq(made: :instance)
+      expect(tables.discovered_methods.fetch("Probe")).to include(hidden: :instance)
+    end
+  end
+
   describe "filed bugs" do
     it "#1518: declines a class self::X opened on a receiver no constant names" do
       pending "https://github.com/rigortype/rigor/issues/1518 — the index build raises 'anonymous class has no name'"

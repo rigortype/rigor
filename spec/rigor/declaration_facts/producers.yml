@@ -181,9 +181,11 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#accumulate_project_index: grandfathered
     Rigor::Inference::ScopeIndexer#accumulate_unpositioned: folds one file's unpositioned mixin edges into the project table by union; it computes no declaration context, only merges a per-file fact
     Rigor::Inference::ScopeIndexer#add_declared_name: grandfathered
+    Rigor::Inference::ScopeIndexer#add_file_possible: ADR-119 WD3, the `∪ (P_f − C)` half of the possible-methods fold; it combines two tables' kinds per name and side and decides no declaration context
     Rigor::Inference::ScopeIndexer#add_header_nesting: grandfathered
     Rigor::Inference::ScopeIndexer#alias_renamed_header_nestings: grandfathered
     Rigor::Inference::ScopeIndexer#append_ancestry_signature: grandfathered
+    Rigor::Inference::ScopeIndexer#append_certainty_signature: ADR-119 WD3, it renders the file's filled siblings (possible names, contested slots) into the ADR-89 declaration signature so a certainty-only edit (`… end if X`) moves it; it reads the siblings the walk produced and decides no context
     Rigor::Inference::ScopeIndexer#append_constant_signature: grandfathered
     Rigor::Inference::ScopeIndexer#append_declaration_tables: grandfathered
     Rigor::Inference::ScopeIndexer#append_def_signatures: grandfathered
@@ -249,8 +251,8 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#fold_per_file_extends: grandfathered
     Rigor::Inference::ScopeIndexer#fold_project_extends: runs fold_extends_into_singleton_tables, the grandfathered producer, over the finalize accumulator's tables and siblings; it passes them on and decides nothing itself
     Rigor::Inference::ScopeIndexer#fold_refinements: grandfathered
-    Rigor::Inference::ScopeIndexer#fold_siblings: ADR-119 WD1 carriage, it unions the sibling tables of a file's index into the accumulator and records no declaration; every sibling is empty until PR C1's first possible producer, which gets its own entry
     Rigor::Inference::ScopeIndexer#follow_extend_siblings: ADR-119 WD1, the sibling half of one name the extends fold copies onto a singleton; it marks the slot contested and the name possible when the extend edge is unpositioned or the source is, and writes only the singleton side
+    Rigor::Inference::ScopeIndexer#follow_slot_writer: ADR-119 WD3, a single-valued slot's contest follows the write that holds it (a certain write clears the key, a possible one sets it); the certainty comes from Certainty, it decides no declaration context
     Rigor::Inference::ScopeIndexer#freeze_mixin_lists: it freezes the mixin accumulator's per-class lists into the include and prepend tables; it is the one place the two are projected, and the include projection alone is a set (#1587)
     Rigor::Inference::ScopeIndexer#gather_aliased_mutations: grandfathered
     Rigor::Inference::ScopeIndexer#gather_cvar_writes: grandfathered
@@ -277,12 +279,14 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#own_mixin_effects: names the ancestry side a receiverless mixin call reshapes on the owner the walk passes in; it computes no declaration context
     Rigor::Inference::ScopeIndexer#own_sibling_table: copy on write for one sibling table of the extends fold; it adds no entry, it only makes the table the fold writes into private to that fold
     Rigor::Inference::ScopeIndexer#path_mutation_candidates: grandfathered
+    Rigor::Inference::ScopeIndexer#per_file_siblings: ADR-119 WD3, the per-file merge of the slot siblings under the members' own merges (the file wins every slot it writes, envelope contests union); it combines walk products and decides no context
     Rigor::Inference::ScopeIndexer#propagate: grandfathered
     Rigor::Inference::ScopeIndexer#propagate_call: grandfathered
     Rigor::Inference::ScopeIndexer#propagate_end_body: grandfathered
     Rigor::Inference::ScopeIndexer#propagate_if_branches: grandfathered
     Rigor::Inference::ScopeIndexer#propagate_unless_branches: grandfathered
     Rigor::Inference::ScopeIndexer#receiver_mixin_effects: names the ancestry sides a receiver-form mixin call reshapes; it computes no declaration context
+    Rigor::Inference::ScopeIndexer#record_alias_call_entry: the alias_method call's alias-map write, split out of record_alias_leaf? so the AliasMap can note the writer's certainty (ADR-119 WD3); the owner is the caller's
     Rigor::Inference::ScopeIndexer#record_alias_leaf?: grandfathered
     Rigor::Inference::ScopeIndexer#record_alias_map_entry: grandfathered
     Rigor::Inference::ScopeIndexer#record_aliased_ivar_mutations!: grandfathered
@@ -413,6 +417,12 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#walk_typed_declaration?: grandfathered
     Rigor::Inference::ScopeIndexer#walk_visibility_singleton_class: grandfathered
     Rigor::Inference::ScopeIndexer#write_mixin_targets: grandfathered
+    Rigor::Inference::ScopeIndexer#write_singleton_slot: ADR-119 WD3, the singleton walk's one slot write, routed through SingletonDefTable so the slot's contest follows its writer; the owner and side are the walk's, it adds no context of its own
+lib/rigor/inference/scope_indexer/certainty.rb:
+  computes: ADR-119 WD3's certainty, the identity Set of a file's possible def contributions
+  producers:
+    Rigor::Inference::ScopeIndexer::Certainty: ADR-119 WD3, the one classifier of which contributions run whenever the file's top level does; it names node classes to tell control flow, blocks and declarations apart and answers a Set of nodes, never an owner or a side, which stay the walks'
+    Rigor::Inference::ScopeIndexer::Certainty::Classifier#possible: ADR-119 WD3, marks every contribution node under a possible region (CONTRIBUTIONS names the node classes the producers record from); it decides certainty only, not the declaration context
 lib/rigor/inference/scope_indexer/class_cvars_collector.rb:
   computes: the per-class class-variable writes, as a collector on the shared declaration walk
   producers:

@@ -8,3 +8,7 @@ the shapes it is meant to silence.
 `named_mark_discharged.rb` is the one survivor with a conditional `include`: its module cannot answer the name, so
 the candidate-set read discharges the mark (ADR-119 WD2's relevance) and the firing stays. A change that drops
 relevance silences it and the differential reports an unadjudicated removal.
+
+`meta_new_block_def.rb` is the certain control of ADR-119 WD3's classifier: a `def` in a `K = Class.new do … end`
+block runs whenever the write does, so the definer is certain. A classifier that read every block as possible would
+silence it.

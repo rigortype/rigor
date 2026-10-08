@@ -810,6 +810,15 @@ producers: `possible_discovered_methods`, the def-node, singleton def-node and e
   imprecision rather than fixed in C1d-a.
 - *The C1d row's `Helpers2#fmt2`.* Its override silencing needs only C1d-b's contested visibility; PR B is needed only
   for the fabricated singleton copy.
+- *C1d-b's visibility contest (2026-10-08).* Beyond a conditional `def`'s slot, a visibility slot is contested when a
+  possible named target (`private :x if …`) wrote it, or when its `def` follows an uncertain bare toggle: `private`,
+  `protected`, `public` or `module_function` with no argument that is possible, or that sits under a child of the body
+  other than its statement list (`begin private end`, `(private)`, a block), which Ruby applies to the later `def`s
+  and the walk does not. A certain toggle in the body settles the default again; a named target after an uncertain
+  toggle is not contested, since it does not read the default. Recorded values do not change, so the wrap-around
+  `private def x` stays recorded public (the witness's `Probe#hidden` pin) and the `Helpers2` lint spec's includer
+  declares its private `fmt2` under a bare `private`, the form master records. The singleton copy is `possible`
+  through the module's self-extend edge, so the witness needs no pin for it.
 
 Precision estimate, unchanged from v12 and not re-measured (the landed PRs changed no producer that
 moves it): about 13 of 940 mixin calls in Mastodon's `app`, 6 of 85 in `app/lib`, sit outside

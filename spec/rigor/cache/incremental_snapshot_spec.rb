@@ -354,4 +354,102 @@ RSpec.describe Rigor::Cache::IncrementalSnapshot do
       end
     end
   end
+
+  # Issue #1532 — the gem set is identified by the RESOLVED lockfiles, the same files the run-result key digests.
+  describe ".fingerprint lockfile resolution" do
+    def config(overrides = {})
+      Rigor::Configuration.new(Rigor::Configuration::DEFAULTS.merge(overrides))
+    end
+
+    def fingerprint(configuration)
+      described_class.fingerprint(configuration: configuration, roots: ["lib"])
+    end
+
+    around do |example|
+      Dir.mktmpdir("rigor-lockfp-") do |dir|
+        Dir.chdir(dir) { example.run }
+      end
+    end
+
+    it "moves when only a bundler.lockfile: at a non-default path changes" do
+      FileUtils.mkdir_p("deps")
+      File.write("deps/custom.lock", "one\n")
+      configuration = config("bundler" => { "lockfile" => "deps/custom.lock" })
+      before = fingerprint(configuration)
+      File.write("deps/custom.lock", "two\n")
+
+      expect(fingerprint(configuration)).not_to eq(before)
+    end
+
+    it "moves when only an rbs_collection.lockfile: at a non-default path changes" do
+      File.write("coll.lock", "one\n")
+      configuration = config("rbs_collection" => { "lockfile" => "coll.lock" })
+      before = fingerprint(configuration)
+      File.write("coll.lock", "two\n")
+
+      expect(fingerprint(configuration)).not_to eq(before)
+    end
+
+    it "ignores a ./Gemfile.lock the configuration does not resolve to" do
+      File.write("other.lock", "x\n")
+      File.write("Gemfile.lock", "one\n")
+      configuration = config("bundler" => { "lockfile" => "other.lock" })
+      before = fingerprint(configuration)
+      File.write("Gemfile.lock", "two\n")
+
+      expect(fingerprint(configuration)).to eq(before)
+    end
+
+    it "still digests ./Gemfile.lock by auto-detection" do
+      File.write("Gemfile.lock", "one\n")
+      before = fingerprint(config)
+      File.write("Gemfile.lock", "two\n")
+
+      expect(fingerprint(config)).not_to eq(before)
+    end
+
+    it "ignores ./Gemfile.lock under bundler.auto_detect: false" do
+      File.write("Gemfile.lock", "one\n")
+      configuration = config("bundler" => { "auto_detect" => false })
+      before = fingerprint(configuration)
+      File.write("Gemfile.lock", "two\n")
+
+      expect(fingerprint(configuration)).to eq(before)
+    end
+
+    # [configuration, the absolute paths it must resolve to] for each lockfile-resolution mode.
+    def lockfile_cases
+      [
+        [config, [File.expand_path("Gemfile.lock"), nil]],
+        [config("bundler" => { "lockfile" => "deps.lock" }, "rbs_collection" => { "lockfile" => "coll.lock" }),
+         [File.expand_path("deps.lock"), File.expand_path("coll.lock")]],
+        [config("bundler" => { "auto_detect" => false }, "rbs_collection" => { "auto_detect" => false }), [nil, nil]]
+      ]
+    end
+
+    def run_key_entry_hashes(configuration)
+      Rigor::Analysis::RunCacheKey.lockfile_entries(configuration).to_h { |e| [e.key, e.value_hash] }
+    end
+
+    it "resolves the same lockfile paths as the run-result key for the same configuration" do
+      File.write("deps.lock", "x\n")
+      File.write("coll.lock", "y\n")
+      File.write("Gemfile.lock", "z\n")
+      lockfile_cases.each do |configuration, expected|
+        bundler, collection = Rigor::Analysis::RunCacheKey.resolved_lockfile_paths(configuration)
+        expect([bundler, collection].map { |path| path && File.expand_path(path.to_s) }).to eq(expected)
+        expect(run_key_entry_hashes(configuration)).to eq(
+          "bundler.lockfile" => Rigor::Analysis::RunCacheKey.lockfile_entry("bundler.lockfile", bundler).value_hash,
+          "rbs_collection.lockfile" =>
+            Rigor::Analysis::RunCacheKey.lockfile_entry("rbs_collection.lockfile", collection).value_hash
+        )
+        # The snapshot digests exactly those files: swapping the content of each resolved file moves it.
+        [bundler, collection].compact.each do |path|
+          before = fingerprint(configuration)
+          File.write(path.to_s, "changed #{path}\n")
+          expect(fingerprint(configuration)).not_to eq(before)
+        end
+      end
+    end
+  end
 end

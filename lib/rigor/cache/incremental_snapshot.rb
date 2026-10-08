@@ -7,6 +7,7 @@ require "zlib"
 require_relative "engine_source"
 require_relative "store"
 require_relative "../analysis/shadow_harness"
+require_relative "../analysis/run_cache_key"
 require_relative "../environment"
 
 module Rigor
@@ -239,8 +240,10 @@ module Rigor
       # rebuild — the engine version + schema, the engine's own SOURCE when the version does not pin it, the
       # resolved configuration, the analysis **roots** (the path arguments, e.g. `["lib"]`, NOT the expanded
       # file list — so a snapshot is keyed to an invocation's roots but adding / removing a file under them is
-      # handled incrementally by the session, not a full rebuild), the resolved gem set (`Gemfile.lock` /
-      # `rbs_collection`), the project's own RBS (the `sig/` roots the environment actually loads: the explicit
+      # handled incrementally by the session, not a full rebuild), the resolved gem set (the lockfiles
+      # {Analysis::RunCacheKey.resolved_lockfile_paths} resolves — `bundler.lockfile:` / `rbs_collection.lockfile:`,
+      # else `./Gemfile.lock` / `./rbs_collection.lock.yaml` — the same files the run-result key digests), the
+      # project's own RBS (the `sig/` roots the environment actually loads: the explicit
       # `signature_paths`, or the auto-detected `<root>/sig` when `signature_paths` is nil), and the contents of
       # every `pre_eval:` file (its PATH is in the configuration, but an edit to a file outside the analysed
       # paths changes no analysed file, so it needs its own part). Built WITHOUT
@@ -257,12 +260,13 @@ module Rigor
       # part, so a released gem's fingerprint is byte-identical to the pre-#289 one and its warm snapshots
       # survive the upgrade untouched.
       def self.fingerprint(configuration:, roots:)
+        bundler_lock, collection_lock = Analysis::RunCacheKey.resolved_lockfile_paths(configuration)
         parts = [
           "engine:#{Rigor::VERSION}:#{SCHEMA}",
           "config:#{Digest::SHA256.hexdigest(Marshal.dump(configuration.to_h))}",
           "roots:#{Array(roots).map(&:to_s).sort.join("\n")}",
-          "gems:#{digest_file_if_present('Gemfile.lock')}",
-          "rbs_collection:#{digest_file_if_present('rbs_collection.lock.yaml')}",
+          "gems:#{digest_file_if_present(bundler_lock)}",
+          "rbs_collection:#{digest_file_if_present(collection_lock)}",
           "sig:#{digest_signature_paths(project_sig_roots(configuration))}",
           "pre_eval:#{digest_pre_eval(configuration.pre_eval)}"
         ]
@@ -283,7 +287,8 @@ module Rigor
       end
 
       def self.digest_file_if_present(path)
-        File.file?(path) ? Digest::SHA256.file(path).hexdigest : "absent"
+        path = path&.to_s
+        path && File.file?(path) ? Digest::SHA256.file(path).hexdigest : "absent"
       end
       private_class_method :digest_file_if_present
 

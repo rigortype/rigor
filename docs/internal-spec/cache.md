@@ -803,14 +803,33 @@ full run, so the snapshot can never wedge or stale an analysis.
    (`configuration.to_h`, which omits the keys that change no diagnostic —
    `effects:`, below, and `test_paths:`, which only `sig-gen` reads), the
    analysis **roots** (not the expanded file list — so adding/removing a
-   file under a root does not drop the snapshot), `Gemfile.lock`,
-   `rbs_collection.lock.yaml`, the project's RBS (the `signature_paths` roots,
+   file under a root does not drop the snapshot), the **resolved** dependency
+   lockfiles (`bundler.lockfile:` / `rbs_collection.lockfile:`, else
+   auto-detected `./Gemfile.lock` / `./rbs_collection.lock.yaml`), the project's RBS (the `signature_paths` roots,
    or the auto-detected `<root>/sig` when `signature_paths` is nil — the
    contents of its `.rbs` files), and the **contents** of every `pre_eval:`
    file (its path is in the configuration; a file outside the analysed paths
    would otherwise leave the snapshot stale) — but **not** the analyzed source
    contents. A missing `pre_eval:` file digests as absent, so creating one also
    drops the snapshot. A mismatch drops the snapshot.
+
+   The lockfile paths are resolved by `Analysis::RunCacheKey.resolved_lockfile_paths`
+   — the same call that builds the ADR-45 run-result key's `bundler.lockfile` /
+   `rbs_collection.lockfile` slots — so the two caches identify the gem set by the
+   same files ([#1532](https://github.com/rigortype/rigor/issues/1532)). A project
+   using `./Gemfile.lock` digests that file exactly as before, so `SCHEMA` did not
+   move. A project whose resolved lockfile differs from `./Gemfile.lock` sees a
+   different fingerprint once (a safe cold run): one whose `bundler.lockfile:`
+   names another file, one with `auto_detect: false` and an existing
+   `./Gemfile.lock` (now unread, so the part is `absent`), and one whose
+   `bundler.lockfile:` names a missing file (no fallback to auto-detection) —
+   the last only when a `./Gemfile.lock` also exists. With neither file, master
+   and now both digest the part as `absent`, so the fingerprint does not move.
+   A plugin that reads a dependency file on its own, such as `rigor-ffi` reading
+   `./Gemfile.lock` for its `:ffx` / `:ffi` target, covers it through the
+   `incremental_state_fingerprint` hook instead. That covers the snapshot gate
+   only: a change to such an input with no source edit is still served from the
+   run-result slot ([#1652](https://github.com/rigortype/rigor/issues/1652)).
 2. **Per-file digests (drive the decision).** When the fingerprint matches,
    the `Payload` is loaded unconditionally and its per-file content digests
    determine the changed set `ΔF`; the affected closure `ΔF ∪ dependents[ΔF]`

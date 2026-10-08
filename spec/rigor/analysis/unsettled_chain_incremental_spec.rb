@@ -144,8 +144,8 @@ end
 class Base
   def self.inherited(sub)
     super
-" \
-               "    sub.prepend(P)
+    " \
+               "sub.prepend(P)
   end
 end
 "

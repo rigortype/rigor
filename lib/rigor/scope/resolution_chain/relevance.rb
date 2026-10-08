@@ -89,10 +89,11 @@ module Rigor
 
         # ADR-119 WD2's declared-module category (#1612): a module the project declares that the chain holds as
         # external, because nothing makes it a project entry (`Scope#known_user_class?`: no method, `def` or
-        # mixin row on either side, which an external entry has by construction), defines no name, so it lacks every name — when nothing the tables cannot
-        # see can define one on it or on its includer. Every candidate of the spelling the project declares must
-        # be such a module, and at least one must be declared (an undeclared spelling is assumed absent, as the
-        # chain's own name resolution assumes). A declared candidate passes when, from the tables alone:
+        # mixin row on either side, which an external entry has by construction), defines no name, so it lacks
+        # every name — when nothing the tables cannot see can define one on it or on its includer. Every candidate
+        # of the spelling the project declares must be such a module, and at least one must be declared (an
+        # undeclared spelling is assumed absent, as the chain's own name resolution assumes). A declared candidate
+        # passes when, from the tables alone:
         #
         # - it is declared with `module` and its envelope bucket holds nothing else: no name a call in its body
         #   mentions (`delegate :foo`, a concern's `included do my_macro :foo end`), no dynamic, refinement or
@@ -153,10 +154,10 @@ module Rigor
         # outside a method or block body, and memoised per discovery index.
         def foreign_hook?(scope)
           memo = ResolutionChain.relevance_memo(scope, :methods)
-          memo.fetch(:foreign_hook) { memo[:foreign_hook] = scan_foreign_hooks(scope) }
+          memo.fetch(:foreign_hook) { memo[:foreign_hook] = foreign_hook_row?(scope) }
         end
 
-        def scan_foreign_hooks(scope)
+        def foreign_hook_row?(scope)
           seen = {}
           scope.discovered_deferred_ranges.each_value do |rows|
             rows.each do |(_start, _finish, name, kind, owner)|
@@ -169,7 +170,7 @@ module Rigor
           end
           false
         end
-        private_class_method :bare?, :scan_foreign_hooks
+        private_class_method :bare?, :foreign_hook_row?
 
         # One verdict's working state: the scope, the resolver, and the edges the tests read.
         class Context

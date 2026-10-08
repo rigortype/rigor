@@ -275,6 +275,36 @@ RSpec.describe Rigor::Cache::IncrementalSnapshot do
       conf = Rigor::Configuration.new("paths" => [])
       expect(described_class.fingerprint(configuration: conf, roots: [bad_root])).to be_nil
     end
+
+    # #1585 — a `pre_eval:` file is read by the run but may sit outside the analysed paths, so its content
+    # belongs to the fingerprint (its path already does, through the configuration).
+    it "changes when the content of a pre_eval: file changes (#1585)" do
+      Dir.mktmpdir do |dir|
+        pre = File.join(dir, "pre.rb")
+        File.write(pre, "class String; def shout = upcase; end\n")
+        conf = Rigor::Configuration.new("paths" => [], "pre_eval" => [pre])
+        before = described_class.fingerprint(configuration: conf, roots: [dir])
+
+        File.write(pre, "class String; def yell = upcase; end\n")
+        expect(described_class.fingerprint(configuration: conf, roots: [dir])).not_to eq(before)
+      end
+    end
+
+    # #1554 — with `signature_paths:` nil the environment loads `<root>/sig` on its own, so an edit there must
+    # move the fingerprint even though no configured path names it.
+    it "changes when an auto-detected sig/*.rbs changes (#1554)" do
+      Dir.mktmpdir do |dir|
+        Dir.chdir(dir) do
+          Dir.mkdir("sig")
+          File.write("sig/foo.rbs", "class Foo\n  def bar: () -> Integer\nend\n")
+          conf = Rigor::Configuration.new("paths" => [])
+          before = described_class.fingerprint(configuration: conf, roots: ["lib"])
+
+          File.write("sig/foo.rbs", "class Foo\n  def bar: () -> String\nend\n")
+          expect(described_class.fingerprint(configuration: conf, roots: ["lib"])).not_to eq(before)
+        end
+      end
+    end
   end
 
   describe ".digest_file_if_present" do

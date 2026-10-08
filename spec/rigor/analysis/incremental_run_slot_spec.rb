@@ -277,6 +277,16 @@ RSpec.describe Rigor::Analysis::IncrementalRunSlot do
       expect(served(config, paths: paths)).to be_nil
     end
 
+    # #1585 / #1554 — a `pre_eval:` file and an auto-detected `sig/` root are part of the snapshot fingerprint, so
+    # editing one is a snapshot miss: the run is a full one, not a recheck, and the slot it writes answers the
+    # changed tree. Nothing is left for a recheck to decline on these two inputs.
+    def expect_full_run_after_fingerprint_change(config = configuration, paths: nil, closure: false)
+      write("lib/c.rb", "class Other\n  def go\n    3\n  end\nend\n") if closure
+      _, warm = incremental_run(config, paths: paths)
+      expect(warm).to be(false)
+      expect(rows(served(config, paths: paths).result.diagnostics)).to eq(rows(cold(config, paths: paths)))
+    end
+
     [false, true].each do |closure|
       context(closure ? "through a recheck that re-analyses a file" : "through a recheck with an empty closure") do
         it "a discovered-not-analysed file (a run over `lib` with `ext` among the configured paths)" do
@@ -294,7 +304,7 @@ RSpec.describe Rigor::Analysis::IncrementalRunSlot do
           incremental_run
           expect(served).not_to be_nil
           write("sig/widget.rbs", "class Widget\n  def price: () -> String\nend\n")
-          expect_declined_through_a_recheck(closure: closure)
+          expect_full_run_after_fingerprint_change(closure: closure)
         end
 
         it "a `pre_eval:` file outside the analysed set" do
@@ -304,7 +314,7 @@ RSpec.describe Rigor::Analysis::IncrementalRunSlot do
           incremental_run(config)
           expect(served(config)).not_to be_nil
           write("boot/constants.rb", "LIMIT = \"three\"\n")
-          expect_declined_through_a_recheck(config, closure: closure)
+          expect_full_run_after_fingerprint_change(config, closure: closure)
         end
       end
     end

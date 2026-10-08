@@ -299,6 +299,7 @@ module Rigor
     def class_ivars_for: (String | Symbol? class_name) -> Hash[Symbol, Type::t]
     def class_cvars_for: (String | Symbol? class_name) -> Hash[Symbol, Type::t]
     def discovered_method?: (String | Symbol class_name, String | Symbol method_name, Symbol kind) -> bool
+    def def_node_slot: (untyped class_name, untyped method_name, ?Symbol kind) -> untyped
     def user_def_for: (String | Symbol class_name, String | Symbol method_name) -> ::Prism::DefNode?
     def user_def_through_ancestors: (String | Symbol class_name, String | Symbol method_name, ?name_memo: Hash[untyped, untyped]) -> ([::Prism::DefNode, String] | [nil, nil])
     def discovered_method_through_ancestors?: (String | Symbol? class_name, String | Symbol method_name, Symbol kind, ?name_memo: Hash[untyped, untyped]) -> bool

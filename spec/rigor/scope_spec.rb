@@ -1003,4 +1003,43 @@ RSpec.describe Rigor::Scope do
       expect(recorded.join(described_class.empty.with_local(:x, bot)).bot_guard_classes).to be_empty
     end
   end
+
+  # ADR-119 WD1 — `def_node_slot` is the raw read the def-table consumers share. It returns the slot as stored, so a
+  # `DefHandle` comes back as the handle (no resolution to a node) and a live node comes back as the same object.
+  describe "#def_node_slot" do
+    let(:handle) do
+      Rigor::Inference::DefHandle.new(path: "lib/c.rb", node_id: 7, name: "bar", fingerprint: "fp", nesting: ["C"])
+    end
+    let(:singleton_handle) do
+      Rigor::Inference::DefHandle.new(path: "lib/c.rb", node_id: 9, name: "make", fingerprint: "fp2", nesting: ["C"])
+    end
+    let(:live_node) { Prism.parse("def baz = 1\n").value.statements.body.first }
+    let(:indexed) do
+      index = Rigor::Scope::DiscoveryIndex::EMPTY.with(
+        discovered_def_nodes: { "C" => { bar: handle, baz: live_node } }.freeze,
+        discovered_singleton_def_nodes: { "C" => { make: singleton_handle } }.freeze,
+        contested_discovered_def_nodes: Set.new.freeze,
+        contested_discovered_singleton_def_nodes: Set.new.freeze
+      )
+      described_class.empty.with_discovery(index)
+    end
+
+    it "returns a stored DefHandle itself, not a resolved node" do
+      expect(indexed.def_node_slot("C", :bar)).to equal(handle)
+    end
+
+    it "returns a stored live node as the same object" do
+      expect(indexed.def_node_slot("C", :baz)).to equal(live_node)
+    end
+
+    it "reads the singleton side only for kind :singleton" do
+      expect(indexed.def_node_slot("C", :make, :singleton)).to equal(singleton_handle)
+      expect(indexed.def_node_slot("C", :make)).to be_nil
+    end
+
+    it "returns nil for an unknown class or method" do
+      expect(indexed.def_node_slot("Missing", :bar)).to be_nil
+      expect(indexed.def_node_slot("C", :missing)).to be_nil
+    end
+  end
 end

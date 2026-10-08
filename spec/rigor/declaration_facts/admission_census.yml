@@ -68,7 +68,6 @@ members:
     - lib/rigor/inference/block_call_timing.rb
     - lib/rigor/inference/expression_typer.rb
     - lib/rigor/inference/parameter_inference_collector.rb
-    - lib/rigor/inference/statement_evaluator.rb
     - lib/rigor/inference/void_tail_summary.rb
     copies:
     - lib/rigor/inference/definer_resolution.rb

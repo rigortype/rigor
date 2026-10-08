@@ -1064,6 +1064,16 @@ module Rigor
       @self_type.nil?
     end
 
+    # ADR-119 WD1 — the RAW slot of the def tables for `class_name` and `method_name`: the instance side by default,
+    # the singleton side for `kind: :singleton`. The slot is a live `Prism::DefNode` or a {Inference::DefHandle}
+    # (ADR-85 WD3), returned as stored: no dependency recording and no handle resolution. ADR-119 C1d/C2 decide how
+    # a contested slot answers here. Callers that need a node go through {#user_def_for} or {#singleton_def_for}.
+    def def_node_slot(class_name, method_name, kind = :instance)
+      table = kind == :singleton ? discovered_singleton_def_nodes : discovered_def_nodes
+      per_class = table[class_name]
+      per_class && per_class[method_name]
+    end
+
     # v0.0.2 #5 — per-class table mapping `method_name (Symbol) → Prism::DefNode`. Populated by `ScopeIndexer`
     # alongside `discovered_methods` for instance-side defs only (singleton-side and `define_method`-introduced
     # methods do not contribute a static body the engine can re-type). Consumed by `ExpressionTyper` to do

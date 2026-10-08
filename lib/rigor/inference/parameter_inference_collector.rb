@@ -362,9 +362,7 @@ module Rigor
       end
 
       def lookup_def(scope, class_name, method, kind)
-        table = kind == :singleton ? scope.discovered_singleton_def_nodes : scope.discovered_def_nodes
-        per_class = table[class_name]
-        per_class && per_class[method]
+        scope.def_node_slot(class_name, method, kind)
       end
 
       # The leading required-positional parameters — the ones a call's leading positional arguments

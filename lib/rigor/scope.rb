@@ -1068,6 +1068,8 @@ module Rigor
     # the singleton side for `kind: :singleton`. The slot is a live `Prism::DefNode` or a {Inference::DefHandle}
     # (ADR-85 WD3), returned as stored: no dependency recording and no handle resolution. ADR-119 C1d/C2 decide how
     # a contested slot answers here. Callers that need a node go through {#user_def_for} or {#singleton_def_for}.
+    # The `same_slot` census reads of this slot stay justified: certainty reaches them through the declaration
+    # signature the producer fingerprints (C1d-a), not through this accessor.
     def def_node_slot(class_name, method_name, kind = :instance)
       table = kind == :singleton ? discovered_singleton_def_nodes : discovered_def_nodes
       per_class = table[class_name]
@@ -1161,6 +1163,9 @@ module Rigor
       same_file_top_level_def?(method_name) ? node : nil
     end
 
+    # ADR-119 WD1 errata, deliberately unchanged: this compares the recorded site's FILE with the call's file, and
+    # which file a def sits in does not depend on whether it executes. The `<toplevel>` slots are contested
+    # truthfully (ADR-119 C1d-a) but unread until C2 makes the top-level reader decline on them.
     def same_file_top_level_def?(method_name)
       key = Inference::ScopeIndexer::TOP_LEVEL_DEF_KEY
       site = discovered_def_sources.dig(key, method_name.to_sym)

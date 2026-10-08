@@ -41,6 +41,7 @@ members:
     - lib/rigor/inference/method_dispatcher/singleton_mixin_dispatch.rb
     - lib/rigor/inference/narrowing.rb
     - lib/rigor/inference/pre_eval_constants.rb
+    - lib/rigor/inference/singleton_hook_decline.rb
     - lib/rigor/protection/discovery_seed.rb
     - lib/rigor/reflection.rb
     - lib/rigor/reflection/constant_ancestors.rb
@@ -103,6 +104,7 @@ members:
     reads:
     - lib/rigor/analysis/runner.rb
     - lib/rigor/inference/expression_typer.rb
+    - lib/rigor/inference/singleton_hook_decline.rb
     copies:
     - lib/rigor/analysis/runner.rb
     - lib/rigor/protection/discovery_seed.rb
@@ -242,6 +244,7 @@ members:
     - lib/rigor/analysis/runner.rb
     - lib/rigor/analysis/worker_session.rb
     - lib/rigor/inference/method_dispatcher/rbs_dispatch.rb
+    - lib/rigor/inference/singleton_hook_decline.rb
     - lib/rigor/reflection/constant_ancestors.rb
     - lib/rigor/scope/resolution_chain.rb
     - lib/rigor/scope/resolution_chain/relevance.rb
@@ -262,6 +265,7 @@ members:
     - lib/rigor/inference/last_line/implicit_self.rb
     - lib/rigor/inference/macro_block_self_type.rb
     - lib/rigor/inference/method_dispatcher/rbs_dispatch.rb
+    - lib/rigor/inference/singleton_hook_decline.rb
     - lib/rigor/scope/resolution_chain.rb
     - lib/rigor/scope/resolution_chain/relevance.rb
     copies:
@@ -270,6 +274,7 @@ members:
   unpositioned_mixins:
     reads:
     - lib/rigor/analysis/runner.rb
+    - lib/rigor/inference/singleton_hook_decline.rb
     - lib/rigor/scope/resolution_chain.rb
     - lib/rigor/scope/resolution_chain/relevance.rb
     copies:
@@ -280,6 +285,7 @@ members:
     reads:
     - lib/rigor/analysis/incremental_session.rb
     - lib/rigor/analysis/runner.rb
+    - lib/rigor/inference/singleton_hook_decline.rb
     - lib/rigor/scope/resolution_chain.rb
     copies:
     - lib/rigor/analysis/runner.rb

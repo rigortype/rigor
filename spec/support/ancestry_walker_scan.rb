@@ -32,12 +32,15 @@ module AncestryWalkerScan
   CHAIN_BUILDER = CHAIN_BUILDERS.first
 
   # The files that may read what `settle`'s `unknown_for:` decision is made of — fork counts, marks, the
-  # unpositioned table — or pass the option: the chain's files, and the candidate-set read that is its one caller.
+  # unpositioned table — or pass the option: the chain's files, and the candidate-set read that is its one caller
+  # (with its singleton-side hook decline, which reads the unpositioned table's `"*"`).
   DECISION_INPUTS = /
     \.forks\b | \.skip_count\b | \.marks\b | \.unpositioned_mixins(?:\[|\.(?:dig|fetch|key\?)) | \bunknown_for:
   /x
 
-  DECISION_READERS = (CHAIN_BUILDERS + %w[lib/rigor/inference/definer_resolution.rb]).freeze
+  DECISION_READERS = (CHAIN_BUILDERS + %w[
+    lib/rigor/inference/definer_resolution.rb lib/rigor/inference/singleton_hook_decline.rb
+  ]).freeze
 
   Finding = Data.define(:key, :reasons)
 

@@ -40,7 +40,7 @@ RSpec.describe "Declaration producers" do
 
   # The closed grandfathered list. Lower it when an entry goes; never raise it for a new producer.
   let(:grandfathered_pin) do
-    { count: 371, digest: "07a9729d32eade6934d5e87ab4752b95e4d6201eed68ed18896eb52f09b5927c" }
+    { count: 370, digest: "781b95ab0b3941dd7d8b69864f6c55c922db39b6d69a1a1f9a90ed152e04c4d5" }
   end
 
   define_method(:found) do |parsed = DeclarationFactSources.parsed_under|

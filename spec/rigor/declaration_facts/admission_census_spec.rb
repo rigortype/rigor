@@ -45,8 +45,8 @@ RSpec.describe "Discovery-table admission census" do
   end
   let(:members) { Rigor::Scope::DiscoveryIndex.members }
   # `same_slot` is a value read that compares the slot with itself across runs (`IncrementalSession#scan_def_node`,
-  # `Runner#evaluate_spec_returns`), so it answers from nothing a contested slot could change. ADR-119 C1d must
-  # revisit each once `user_def_for` / `singleton_def_for` decline on contested slots.
+  # `Runner#evaluate_spec_returns`), so it answers from nothing a contested slot could change; certainty
+  # changes reach it through the declaration signature (ADR-119 C1d-a), which the producer fingerprints.
   let(:kinds_allowed) { %w[existence identity cache_key same_slot paired_copy consults_contested] }
   let(:contested_members) do
     Rigor::Scope::DiscoveryIndex::SIBLINGS.filter_map do |member, sibling|

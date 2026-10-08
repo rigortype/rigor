@@ -9,7 +9,7 @@ require "rigor/protection/discovery_seed"
 #
 # - `possible_discovered_methods` per name and side, `P' = (P − C_f) ∪ (P_f − C)` with `C = member − P`, so a side
 #   any file supplies certainly is never possible, whatever the file order;
-# - a def-node slot's contest follows the file that wrote the slot (the member folds later-wins);
+# - a def-node or visibility slot's contest follows the file that wrote the slot (the member folds later-wins);
 # - the joined envelopes' contests by union.
 #
 # Each rule is checked in both file orders, and the cold direct walk, the bundle fold of a cold run and the bundle
@@ -118,6 +118,26 @@ RSpec.describe "Discovery certainty (ADR-119 WD3)" do
     end
   end
 
+  # ADR-119 C1d-b — the visibility slots fold later-wins as the def-node slots do.
+  describe "contested visibility slots" do
+    it "follows the file that wrote the slot last" do
+      later_possible = agreed_siblings("a.rb" => certain_file, "b.rb" => possible_file)
+      later_certain = agreed_siblings("a.rb" => possible_file, "b.rb" => certain_file)
+
+      expect(later_possible.fetch(:contested_discovered_method_visibilities)).to eq(Set[["C", :m]])
+      expect(later_certain.fetch(:contested_discovered_method_visibilities)).to be_empty
+    end
+
+    it "contests every def after an uncertain toggle, until a certain one settles the default" do
+      siblings = agreed_siblings(
+        "a.rb" => "class C\n  def a = 1\n  [1].each { private }\n  def b = 1\n  private :a if ENV[\"X\"]\n  " \
+                  "public\n  def c = 1\nend\n"
+      )
+
+      expect(siblings.fetch(:contested_discovered_method_visibilities)).to eq(Set[["C", :a], ["C", :b]])
+    end
+  end
+
   describe "contested envelopes" do
     it "union across files, in either order" do
       [%w[a.rb b.rb], %w[b.rb a.rb]].each do |order|
@@ -138,6 +158,8 @@ RSpec.describe "Discovery certainty (ADR-119 WD3)" do
       expect(discovery.contested_discovered_def_nodes).to eq(project.fetch(:contested_discovered_def_nodes))
       expect(discovery.contested_discovered_parameter_envelopes)
         .to eq(project.fetch(:contested_discovered_parameter_envelopes))
+      expect(discovery.contested_discovered_method_visibilities)
+        .to eq(project.fetch(:contested_discovered_method_visibilities))
       # The project table drops `def`-declared instance names from the member and its sibling at finalize
       # (`subtract_def_methods`); the per-file member keeps the file's own, so `m` is possible here only.
       expect(project.fetch(:possible_discovered_methods)).to eq("C" => { y: :instance })
@@ -148,6 +170,7 @@ RSpec.describe "Discovery certainty (ADR-119 WD3)" do
       discovery = per_file_discovery({ "a.rb" => possible_file, "b.rb" => certain_file }, "a.rb")
 
       expect(discovery.contested_discovered_def_nodes).to eq(Set[["C", :m]])
+      expect(discovery.contested_discovered_method_visibilities).to eq(Set[["C", :m]])
     end
   end
 end

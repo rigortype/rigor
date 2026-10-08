@@ -119,6 +119,7 @@ module Rigor
         @marks = marks
         @flavor = flavor
         @retro = retro
+        @memo = {} # the chain is frozen; this table is not, and holds {#levels}
         freeze
       end
 
@@ -160,7 +161,7 @@ module Rigor
         # The verdict depends on EVERY node of the chain (a fork, an unpositioned edge, a second declaring file),
         # and `:master` changes the answer, so the entries past the answer are dependencies whichever way it
         # goes; `search` files only the entries ahead of an answer. `owner` names the entry that answered.
-        record_beyond(scope, owner)
+        record_beyond(scope, owner, unknown_for.nil?)
         return settle_unknown(scope, answer, unknown_for, &) unless unknown_for.nil?
         return :master unless @marks.empty?
 
@@ -234,16 +235,28 @@ module Rigor
       # edge there sends the reader to master's answer), so they are filed here, and only where master's answer
       # could differ from the chain's:
       #
-      # - the answer is the root's own entry and nothing is prepended (the root heads its chain): master's first
-      #   candidate is the root too, so no verdict can move it and nothing more is filed;
+      # - the answer is the root's own entry and nothing is prepended (the root heads its chain), and the verdict
+      #   is `:chain` or `:master` (`master_only`): master's first candidate is the root too, so no verdict can
+      #   move it and nothing more is filed. Under `unknown_for:` a mark or a `"*"` elsewhere on the chain turns
+      #   it `:unknown`, so the rest of the chain is filed as for any other answer;
       # - otherwise every entry after the answer (the whole chain when `owner` names none) files its class edge
       #   and, for a project entry, the negative class edge on its unqualified name, so a NEW file declaring or
       #   reopening it re-checks the reader. An external entry files only the sites of the names it can denote.
-      def record_beyond(scope, owner)
+      #
+      # What is filed is a function of this chain, the entry the filing starts from and the discovery index the
+      # sites are read from, so a consumer that settles the same chain from the same entry again (the common case:
+      # one hierarchy read at every call site of a file) files it once ({Analysis::DependencyRecorder.file_chain_once},
+      # #1590). The recorded edges are the same; only the repeated filing is gone.
+      def record_beyond(scope, owner, master_only)
         return unless Analysis::DependencyRecorder.active?
-        return if !owner.nil? && owner == @root && @entries.first&.name == @root
+        return if master_only && !owner.nil? && owner == @root && @entries.first&.name == @root
 
         start = owner.nil? ? nil : @entries.index { |entry| entry.name == owner }
+        Analysis::DependencyRecorder.file_chain_once(self, start, scope.discovery) { file_beyond(scope, start) }
+      end
+      private :record_beyond
+
+      def file_beyond(scope, start)
         ResolutionChain.record_class(scope, @root) if start.nil?
         index = start.nil? ? 0 : start + 1
         while index < @entries.size
@@ -253,7 +266,7 @@ module Rigor
           index += 1
         end
       end
-      private :record_beyond
+      private :file_beyond
 
       def record_head(scope, start, side)
         ResolutionChain.record_class(scope, @root) unless start.zero? && @entries.first&.name == @root
@@ -299,7 +312,9 @@ module Rigor
       # Each complete level up to the first superclass the project does not declare, as `[class_name,
       # modules, externals]`: the level's class, the project modules around it (each once), and the candidate
       # lists of the ancestors in it the project does not declare — the shape `call.wrong-arity` reads.
-      def levels
+      def levels = (@memo[:levels] ||= compute_levels)
+
+      def compute_levels
         out = []
         level_count.times do |index|
           class_name = @level_classes[index]
@@ -307,10 +322,11 @@ module Rigor
 
           externals, entries = level_entries(index).partition(&:external?)
           modules = entries.filter_map { |entry| entry.name unless entry.name == class_name && entry.side == @side }
-          out << [class_name, modules.uniq, externals.map(&:candidates)]
+          out << [class_name, modules.uniq.freeze, externals.map(&:candidates).freeze].freeze
         end
-        out
+        out.freeze
       end
+      private :compute_levels
 
       MEMO_KEY = :__rigor_resolution_chain__
       private_constant :MEMO_KEY
@@ -396,6 +412,12 @@ module Rigor
         flavor_bucket(scope.discovery, flavor)[:relevance] ||= {}
       end
 
+      # The singleton-side hook verdicts' memo (`Inference::DefinerResolution`'s positional decline, ADR-119 WD3),
+      # one table per flavor bucket.
+      def self.hook_memo(scope, flavor)
+        flavor_bucket(scope.discovery, flavor)[:hooks] ||= {}
+      end
+
       # The name resolver of `flavor`, over the same memo the chain builder shares: {Relevance} resolves a
       # mark's listed entry from the node that listed it, exactly as the chain did.
       def self.resolver_for(scope, flavor)
@@ -465,28 +487,6 @@ module Rigor
           end
         end
 
-        # `call.wrong-arity`'s level walk: each class up the superclass chain with every module its own
-        # mixins (`extend`s on the singleton side) reach, transitively, and the mixins that resolve to none.
-        # Returns `[levels, whole]`, a level being `[class_name, modules, externals]`.
-        def arity_levels(scope, root, side)
-          ResolutionChain.master_memo(scope, :arity, [:levels, root, side]) do |resolver|
-            levels = []
-            current = root
-            seen = {}
-            whole = true
-            while current && !seen[current]
-              if seen.size >= LIMIT
-                whole = false
-                break
-              end
-              seen[current] = true
-              levels << arity_level(scope, resolver, current, side)
-              current = resolver.resolve_one(current, scope.discovery.discovered_superclasses[current])
-            end
-            [levels.freeze, whole].freeze
-          end
-        end
-
         def direct_edges(scope, resolver, name)
           discovery = scope.discovery
           raws = (discovery.discovered_includes[name] || EMPTY_NAMES) + [discovery.discovered_superclasses[name]]
@@ -527,33 +527,6 @@ module Rigor
             next groups << resolver.candidates(current, raw) if resolved.nil?
 
             collect_externals(scope, resolver, resolved, mixins, groups, seen)
-          end
-        end
-
-        def arity_level(scope, resolver, class_name, side)
-          discovery = scope.discovery
-          table = side == :singleton ? discovery.discovered_extends : discovery.discovered_includes
-          own = table[class_name]
-          modules = []
-          externals = []
-          collect_mixins(scope, resolver, class_name, own || EMPTY_NAMES, [modules, externals], {})
-          [class_name, modules.freeze, externals.freeze].freeze
-        end
-
-        def collect_mixins(scope, resolver, owner, raws, found, seen)
-          raws.each do |raw|
-            resolved = resolver.resolve(owner, raw)
-            names = resolved.is_a?(String) ? [resolved] : Array(resolved)
-            next found[1] << resolver.candidates(owner, raw) if names.empty?
-
-            names.each do |name|
-              next if seen[name]
-
-              seen[name] = true
-              found[0] << name
-              collect_mixins(scope, resolver, name, scope.discovery.discovered_includes[name] || EMPTY_NAMES,
-                             found, seen)
-            end
           end
         end
       end

@@ -196,8 +196,9 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#apply_dynamic_target_writes: grandfathered
     Rigor::Inference::ScopeIndexer#apply_named_visibility: grandfathered
     Rigor::Inference::ScopeIndexer#apply_visibility_call: grandfathered
+    Rigor::Inference::ScopeIndexer#bare_visibility_toggle?: ADR-119 WD3, names the receiverless argument-less `private` / `protected` / `public` / `module_function` call whose certainty the visibility walk's statement loop tracks; it answers whether a node is a toggle and decides no owner or side
     Rigor::Inference::ScopeIndexer#block_mixes_in?: scans an eval block for a mixin call; it answers a question and derives no declaration context
-    Rigor::Inference::ScopeIndexer#build_discovered_method_visibilities: grandfathered
+    Rigor::Inference::ScopeIndexer#build_method_visibility_tables: the grandfathered visibility walk's entry point, moved from build_discovered_method_visibilities (now a projection of it) so the walk also returns ADR-119 WD3's contested visibility slots; it starts the walk at the top level with the same default and adds no context of its own
     Rigor::Inference::ScopeIndexer#collect_alias_map_block_call?: grandfathered
     Rigor::Inference::ScopeIndexer#collect_alias_map_declaration: grandfathered
     Rigor::Inference::ScopeIndexer#collect_alias_map_meta_new?: grandfathered
@@ -445,6 +446,11 @@ lib/rigor/inference/scope_indexer/superclasses_collector.rb:
   computes: each class's superclass and header nesting, as a collector on the shared declaration walk
   producers:
     Rigor::Inference::ScopeIndexer::SuperclassesCollector: grandfathered
+lib/rigor/inference/singleton_hook_decline.rb:
+  computes: the singleton-side candidate-set read's positional hook decline (ADR-119 WD3, errata 2026-10-08)
+  producers:
+    Rigor::Inference::SingletonHookDecline: a consumer, not a declaration producer; `SIDES` names the two sides of `unpositioned_mixins` it reads for a `"*"`, and it writes no table
+    Rigor::Inference::SingletonHookDecline::Context#project_capable?: a consumer, not a declaration producer; it reads `unpositioned_mixins` through `SIDES` and writes no table
 lib/rigor/inference/statement_evaluator.rb:
   computes: the scope a class, module or class << self body is evaluated in
   producers:

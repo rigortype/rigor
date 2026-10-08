@@ -845,7 +845,7 @@ jobs:
           bundle exec ruby tool/engine_diag_diff.rb --base "$merge_base" --head "$HEAD_SHA" --corpus "$HEAD_SHA" \
             --target "$fixtures" --target spec/integration/fixtures/declaration_witness \
             --rule call.wrong-arity --adjudication "$fixtures/arity_adjudication.yml" \
-            --require-rows-in "$fixtures/survivors/:6" --summary "$GITHUB_STEP_SUMMARY"
+            --require-rows-in "$fixtures/survivors/:7" --summary "$GITHUB_STEP_SUMMARY"
 
   # ── Fan-in: single required-check target for branch protection ───
   # Configure branch protection to require only "CI required" rather

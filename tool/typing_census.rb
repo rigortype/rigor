@@ -116,7 +116,7 @@ module TypingCensus
       untyped_only_pairs: index.count { |_, v| v[0].zero? } }
   end
 
-  # rubocop:disable-next-line Metrics/AbcSize -- one report, one straight run of lines
+  # rubocop:disable-next Metrics/AbcSize -- one report, one straight run of lines
   def render(result, classes)
     lines = ["### Typing census (`try_user_method_inference`)", ""]
     result[:totals].each do |side, t|

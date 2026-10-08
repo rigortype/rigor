@@ -579,6 +579,28 @@ RSpec.describe Rigor::Inference::DefinerResolution do # rubocop:disable RSpec/Sp
       end
     end
 
+    # The same holds for an external superclass RBS does not know: its `inherited` is unseen, so it is hook-capable.
+    # One RBS knows is clean (WD2(i)'s limit).
+    describe "an external superclass's inherited hook (e)" do
+      let(:gem) do
+        "module Gemmy; class Base\n  def self.inherited(sub) = (super; sub.define_singleton_method(:bar) { :hook })\n" \
+          "end; end\n"
+      end
+
+      it "declines a read past the subclass's own level when RBS does not know the superclass" do
+        source = "module X; def bar = :x; end\nclass C < Gemmy::Base; extend X; end\n"
+        expect(ruby_singleton(source, "C", :bar, prelude: gem)).to eq([%w[#<Class:C> X #<Class:Gemmy::Base>],
+                                                                       "#<Class:C>", ":hook"])
+        expect(singleton(scope_for(source), "C", :bar)).to eq(:unknown)
+      end
+
+      it "is Known past an RBS-known superclass" do
+        source = "module X; def bar = :x; end\nclass C < Exception; extend X; end\n"
+        expect(ruby_singleton(source, "C", :bar)).to eq([%w[#<Class:C> X #<Class:Exception>], "X", ":x"])
+        expect(singleton(scope_for(source), "C", :bar)).to eq("X")
+      end
+    end
+
     # The extends fold copies X#x onto C's singleton tables, so the read finds it at C's own entry. The copy is not
     # where Ruby finds it: the read asks past it, X answers at its own entry, and a hook in the same level can still
     # insert ahead of X.

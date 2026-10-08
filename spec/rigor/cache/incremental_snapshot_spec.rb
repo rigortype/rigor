@@ -408,19 +408,37 @@ RSpec.describe Rigor::Cache::IncrementalSnapshot do
       expect(fingerprint(config)).not_to eq(before)
     end
 
+    it "ignores ./Gemfile.lock under bundler.auto_detect: false" do
+      File.write("Gemfile.lock", "one\n")
+      configuration = config("bundler" => { "auto_detect" => false })
+      before = fingerprint(configuration)
+      File.write("Gemfile.lock", "two\n")
+
+      expect(fingerprint(configuration)).to eq(before)
+    end
+
+    # [configuration, the absolute paths it must resolve to] for each lockfile-resolution mode.
+    def lockfile_cases
+      [
+        [config, [File.expand_path("Gemfile.lock"), nil]],
+        [config("bundler" => { "lockfile" => "deps.lock" }, "rbs_collection" => { "lockfile" => "coll.lock" }),
+         [File.expand_path("deps.lock"), File.expand_path("coll.lock")]],
+        [config("bundler" => { "auto_detect" => false }, "rbs_collection" => { "auto_detect" => false }), [nil, nil]]
+      ]
+    end
+
+    def run_key_entry_hashes(configuration)
+      Rigor::Analysis::RunCacheKey.lockfile_entries(configuration).to_h { |e| [e.key, e.value_hash] }
+    end
+
     it "resolves the same lockfile paths as the run-result key for the same configuration" do
       File.write("deps.lock", "x\n")
       File.write("coll.lock", "y\n")
       File.write("Gemfile.lock", "z\n")
-      [
-        config,
-        config("bundler" => { "lockfile" => "deps.lock" }, "rbs_collection" => { "lockfile" => "coll.lock" }),
-        config("bundler" => { "auto_detect" => false }, "rbs_collection" => { "auto_detect" => false })
-      ].each do |configuration|
+      lockfile_cases.each do |configuration, expected|
         bundler, collection = Rigor::Analysis::RunCacheKey.resolved_lockfile_paths(configuration)
-        entries = Rigor::Analysis::RunCacheKey.lockfile_entries(configuration).to_h { |e| [e.key, e.value_hash] }
-
-        expect(entries).to eq(
+        expect([bundler, collection].map { |path| path && File.expand_path(path.to_s) }).to eq(expected)
+        expect(run_key_entry_hashes(configuration)).to eq(
           "bundler.lockfile" => Rigor::Analysis::RunCacheKey.lockfile_entry("bundler.lockfile", bundler).value_hash,
           "rbs_collection.lockfile" =>
             Rigor::Analysis::RunCacheKey.lockfile_entry("rbs_collection.lockfile", collection).value_hash

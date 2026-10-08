@@ -818,8 +818,14 @@ full run, so the snapshot can never wedge or stale an analysis.
    `rbs_collection.lockfile` slots — so the two caches identify the gem set by the
    same files ([#1532](https://github.com/rigortype/rigor/issues/1532)). A project
    using `./Gemfile.lock` digests that file exactly as before, so `SCHEMA` did not
-   move; only a project whose lockfile lives elsewhere sees a different
-   fingerprint.
+   move. A project whose resolved lockfile differs from `./Gemfile.lock` sees a
+   different fingerprint once (a safe cold run): one whose `bundler.lockfile:`
+   names another file, one with `auto_detect: false` and an existing
+   `./Gemfile.lock` (now unread, so the part is `absent`), and one whose
+   `bundler.lockfile:` names a missing file (no fallback to auto-detection).
+   A plugin that reads a dependency file on its own, such as `rigor-ffi` reading
+   `./Gemfile.lock` for its `:ffx` / `:ffi` target, covers it through the
+   `incremental_state_fingerprint` hook instead.
 2. **Per-file digests (drive the decision).** When the fingerprint matches,
    the `Payload` is loaded unconditionally and its per-file content digests
    determine the changed set `ΔF`; the affected closure `ΔF ∪ dependents[ΔF]`

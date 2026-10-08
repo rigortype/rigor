@@ -669,8 +669,8 @@ A sibling exists **iff its member is declared in `DiscoveryIndex::SIBLINGS`** �
   table must satisfy `certain ⊆ runtime ⊆ certain ∪ possible`, a single-valued one must agree wherever
   it answers. Since no `possible_*` table exists yet, every entry reads as `certain` except the
   self-extend edge Ruby does not show. `issue_1519`, `issue_1520` and `issue_1550` are
-  `pending` beside a pin of today's exact violations (`witness_spec.rb:75–119`); `issue_1518` passes
-  since #1642 (the declaration is declined). `issue_1573` is pinned too, since #1597 (`:131–140`). #1592's block shapes are the relation's `runtime ⊄ certain ∪
+  `pending` beside a pin of today's exact violations (`witness_spec.rb:147–189`); `issue_1518` passes
+  since #1642 (the declaration is declined, `:136–145`). `issue_1573` is pinned too, since #1597 (`:191–203`). #1592's block shapes are the relation's `runtime ⊄ certain ∪
   possible` case that no fixture held; #1593 added its block shapes at the read level
   (`ruby_order_resolution_spec.rb:588`) and pinned the hook shapes at their false positive
   (`:718–735`).

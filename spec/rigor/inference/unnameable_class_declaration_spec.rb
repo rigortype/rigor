@@ -111,6 +111,63 @@ RSpec.describe "unnameable class declarations" do
     end
   end
 
+  # `class self::X` written straight inside `class << self` defines `#<Class:Foo>::X`, which nothing names. Its
+  # empty frame stack is not the top level: an implicit-self call in a `def` there has a receiver Rigor cannot
+  # type, so it answers `Dynamic` instead of an unresolved top-level call.
+  context "when `self::X` is declared directly inside `class << self`" do
+    %w[class module].each do |keyword|
+      it "reads implicit-self calls in a `#{keyword} self::X` def as calls on an untyped receiver" do
+        source = <<~RUBY
+          class Foo
+            class << self
+              #{keyword} self::Bar
+                def x = 1
+                def y = x + 1
+                def z = helper_attr
+                attr_reader :helper_attr
+              end
+            end
+          end
+        RUBY
+
+        expect(analyze(source).diagnostics).to eq([])
+      end
+    end
+
+    it "stays silent on implicit-self calls at the body level and in a nested `class << self`" do
+      source = <<~RUBY
+        class Foo
+          class << self
+            class self::Bar
+              attr_reader :a
+              helper_call
+              private
+              def x = a
+              class << self
+                def k = zork
+              end
+            end
+          end
+        end
+      RUBY
+
+      expect(analyze(source).diagnostics).to eq([])
+    end
+
+    it "still checks arity on a nameable `class self::Bar`" do
+      source = <<~RUBY
+        class Foo
+          class self::Bar
+            def x(a) = a
+          end
+        end
+        Foo::Bar.new.x
+      RUBY
+
+      expect(analyze(source).diagnostics.map(&:rule)).to include("call.wrong-arity")
+    end
+  end
+
   context "when the header is a parse-error recovery with no constant" do
     let(:source) do
       <<~RUBY
@@ -145,6 +202,21 @@ RSpec.describe "unnameable class declarations" do
       expect(result.diagnostics.map(&:message)).not_to include(a_string_matching(/internal analyzer error/))
       expect(result.diagnostics.map(&:path)).to include(a_string_ending_with("broken.rb"))
       expect(result.diagnostics.map(&:path)).to include(a_string_ending_with("typed.rb"))
+    end
+
+    # A file with a parse error runs no check rules, so the top-level reading is asserted on the scope the
+    # rules would consult rather than on a diagnostic.
+    it "does not read a def in the nameless body as the top level" do
+      root = Prism.parse(<<~RUBY).value
+        class foo
+          def x = 1
+          def y = x + 1
+        end
+      RUBY
+      call = Rigor::Source::NodeWalker.each(root).find { |n| n.is_a?(Prism::CallNode) && n.name == :x }
+      scope = Rigor::Inference::ScopeIndexer.index(root, default_scope: Rigor::Scope.empty)[call]
+
+      expect(scope.toplevel?).to be(false)
     end
 
     it "keeps the Prism parse error and raises no internal error" do

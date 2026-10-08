@@ -273,10 +273,16 @@ module Rigor
       #   {OperandWalk} rooted inside an operand still records its later operands ({#walk_recorder}).
       # @param operand_types — the later operands' own values ({OperandWalk#types}) for the evaluator that runs a
       #   call from the scope its operands left, read by {#type_operand}.
+      # @param opaque_class — true while the walk is inside the body of a class nothing names (issue #1518:
+      #   a declined `class self::X`, a parse-error header), where `class_context` is empty without the code
+      #   being at the top level. A `def` (or `class << self`) there runs under an untyped `self` instead of
+      #   the top level's nil one, so its implicit-self calls answer `Dynamic` and no top-level rule fires.
       def initialize(scope:, tracer: nil, on_enter: nil, class_context: [].freeze, # rubocop:disable Metrics/ParameterLists
                      lexical_nesting: EMPTY_NESTING, converged_loop_recording: false, next_scope_sink: nil,
-                     operand_scope: nil, in_operand: false, operand_recorder: nil, operand_types: nil)
+                     operand_scope: nil, in_operand: false, operand_recorder: nil, operand_types: nil,
+                     opaque_class: false)
         @scope = scope
+        @opaque_class = opaque_class
         @tracer = tracer
         @on_enter = on_enter
         @class_context = class_context.freeze
@@ -5210,6 +5216,9 @@ module Rigor
         # A-engine: `self` inside a class body is the class object itself, so we set `self_type` to
         # `Singleton[<qualified>]`.
         fresh = build_fresh_body_scope
+        # Issue #1518 — `class << self` inside an unnameable class body keeps that body's opacity: it opens the
+        # singleton of a class nothing names, and its empty frame stack is not the top level.
+        opaque_self ||= node.is_a?(Prism::SingletonClassNode) && @opaque_class && new_context.empty?
         body_self = opaque_self ? Type::Combinator.untyped : self_type_for_class_body(new_context)
         fresh = fresh.with_self_type(body_self) if body_self
         # Issue #963 — `self` in a `class << ...` body is the SINGLETON class, which shares the `Singleton[X]`
@@ -5218,7 +5227,7 @@ module Rigor
         fresh = fresh.with_singleton_class_body(node.is_a?(Prism::SingletonClassNode))
         fresh = fresh.with_match_frame(node.body)
         fresh = stamp_nesting(fresh, new_nesting)
-        sub_eval(node.body, fresh, class_context: new_context, lexical_nesting: new_nesting)
+        sub_eval(node.body, fresh, class_context: new_context, lexical_nesting: new_nesting, opaque_class: opaque_self)
       end
 
       def build_method_entry_scope(def_node) # rubocop:disable Metrics/AbcSize
@@ -5437,7 +5446,9 @@ module Rigor
       # Returns nil for top-level defs that have no enclosing class.
       def self_type_for_method_body(singleton:)
         path = current_class_path
-        return nil if path.nil?
+        # Issue #1518 — a `def` in a class nothing names has a receiver, just not one Rigor can type; nil would
+        # read its body as the top level and its implicit-self calls as unresolved top-level calls.
+        return (Type::Combinator.untyped if @opaque_class) if path.nil?
 
         if singleton
           Type::Combinator.singleton_of(path)
@@ -5576,10 +5587,14 @@ module Rigor
       # `on_enter: nil` evaluates without recording into the per-node scope index — for a pass whose scopes are not
       # the ones the index should keep. `next_scope_sink:` is replaced only by {#evaluate_invocation} and
       # {#loop_iteration}.
-      def sub_eval(node, with_scope, class_context: @class_context, lexical_nesting: @lexical_nesting,
-                   on_enter: @on_enter, next_scope_sink: @next_scope_sink, operand_recorder: @operand_recorder)
+      # `opaque_class:` survives only while the frame stack stays empty: a named class opened inside an
+      # unnameable body gets a frame, and its `def`s a nominal `self`, as they did before #1518.
+      def sub_eval(node, with_scope, class_context: @class_context, lexical_nesting: @lexical_nesting, # rubocop:disable Metrics/ParameterLists
+                   on_enter: @on_enter, next_scope_sink: @next_scope_sink, operand_recorder: @operand_recorder,
+                   opaque_class: @opaque_class && class_context.empty?)
         evaluator_at(with_scope, class_context: class_context, lexical_nesting: lexical_nesting, on_enter: on_enter,
-                                 next_scope_sink: next_scope_sink, operand_recorder: operand_recorder).evaluate(node)
+                                 next_scope_sink: next_scope_sink, operand_recorder: operand_recorder,
+                                 opaque_class: opaque_class).evaluate(node)
       end
 
       # An evaluator over `with_scope` that inherits everything else from this one. `operand_scope:` and
@@ -5587,7 +5602,8 @@ module Rigor
       # operands left.
       def evaluator_at(with_scope, class_context: @class_context, lexical_nesting: @lexical_nesting, # rubocop:disable Metrics/ParameterLists
                        on_enter: @on_enter, next_scope_sink: @next_scope_sink, operand_scope: nil,
-                       in_operand: @in_operand, operand_recorder: @operand_recorder, operand_types: nil)
+                       in_operand: @in_operand, operand_recorder: @operand_recorder, operand_types: nil,
+                       opaque_class: @opaque_class)
         StatementEvaluator.new(
           scope: with_scope,
           tracer: tracer,
@@ -5599,7 +5615,8 @@ module Rigor
           operand_scope: operand_scope,
           in_operand: in_operand,
           operand_recorder: operand_recorder,
-          operand_types: operand_types
+          operand_types: operand_types,
+          opaque_class: opaque_class
         )
       end
 

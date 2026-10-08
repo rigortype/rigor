@@ -847,10 +847,20 @@ Errata (2026-10-08), C2 splits and C2-b1 lands (the instance typing site; lane 2
   `ruby_order_resolution_spec.rb`. The read files the class edges of every entry, the negative class edge of
   each, and per project entry the method edge (`read_missing(:method, "Owner#name")` where it lacks the `def`),
   since `candidates` returning nil skips `settle` and `DefinerResolution` files nothing past the external.
-- *WD7(f) census* (`tool/typing_census.rb`, `try_user_method_inference`, `--workers 0`): Rigor `lib` 54,605 typed calls
-  to 54,453 (24 pairs lost); Mastodon `app lib config` 44,389 to 30,034 (1,814 pairs lost); GitLab `app/models` and
-  `app/controllers` 78,014 to 18,556 (7,830 pairs lost, 832 of them on ten core models: Project 188, MergeRequest 157,
-  User 124, Ci::Build 101, Ci::Pipeline 59, Group 55, Note 49, Namespace 41, Member 36, Issue 22).
+- *WD7(f) census* (`tool/typing_census.rb`, `try_user_method_inference`, `--workers 0`, base master `f65193940`, with
+  the `bot` exception): Rigor `lib` 55,174 typed calls to 55,022 (24 pairs lost); Mastodon `af3596316` `app lib
+  config` under `data/oss-sweep/mastodon-rigor.yml` 44,398 to 30,841 (1,710 pairs lost), under its plugin-enabled
+  `.rigor.dist.yml` 92,128 to 73,103 (1,712); GitLab `289f6e1c` `app/models` and `app/controllers` without plugins
+  78,018 to 18,765 (7,814 pairs lost, 831 on ten core models: Project, MergeRequest, User, Ci::Build, Ci::Pipeline,
+  Group, Note, Namespace, Member, Issue), with its plugins 92,316 to 23,667 (7,789, 840 on those models). No pair
+  is gained. Before the exception the same Mastodon run lost 1,814 pairs. The loss is accepted on master (Q9).
+- *Corpus differentials* (`tool/engine_diag_diff.rb`, all rules, same base): Rigor `lib` 1 to 1; Mastodon under
+  the sweep config 19 to 19 and under its plugins 2,611 to 2,602 (9 removed, 0 added); GitLab without plugins 57 to
+  53 and with them 2,631 to 2,625 (4 and 6 removed, 0 added). Every removed row is `fp-silenced` except Mastodon's
+  `quote_request.rb:28:26`, `tp-lost` (a `FetchRemoteStatusService#call` that returns nil). `rigor sig-gen --print`
+  is byte-identical on Rigor `lib`; Mastodon drops `RoutingHelper#frontend_asset_url`'s `-> String`, GitLab 15
+  signatures of concern modules (13 dropped, 2 widened), among them master's unsound `FastDestroyAll#fast_destroy_all:
+  () -> bot` (its callee is an abstract stub each includer overrides). No signature is added or narrowed.
 
 Precision estimate, unchanged from v12 and not re-measured (the landed PRs changed no producer that
 moves it): about 13 of 940 mixin calls in Mastodon's `app`, 6 of 85 in `app/lib`, sit outside

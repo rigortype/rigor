@@ -3,8 +3,9 @@
 require "spec_helper"
 
 # ADR-119 WD1 — `subtract_def_methods` drops a name that has a project `def` from `methods`. The `possible` copy of
-# `methods` (`possible_discovered_methods`) takes the same subtraction in `subtract_sibling_methods`, so the sibling
-# stays a subset of its member. Driven through `finalize_def_index`, the pass that runs both.
+# `methods` (`possible_discovered_methods`) loses only the instance half of such a name in `subtract_sibling_methods!`
+# (a singleton-only entry stays), so the sibling stays a subset of its member. Driven through `finalize_def_index`, the
+# pass that runs both.
 RSpec.describe "ScopeIndexer sibling subtraction (ADR-119 WD1)" do
   let(:indexer) { Rigor::Inference::ScopeIndexer }
   let(:def_node) { Prism.parse("def run = 1\n").value.statements.body.first }
@@ -29,6 +30,25 @@ RSpec.describe "ScopeIndexer sibling subtraction (ADR-119 WD1)" do
 
   it "keeps the singleton half of a :both possible entry whose name has an instance def" do
     expect(finalized.fetch(:siblings).fetch(:possible_discovered_methods).dig("Gadget", :stop)).to eq(:singleton)
+  end
+
+  it "keeps a singleton-only possible entry whose name also has an instance def" do
+    acc[:methods] = { "Gadget" => { run: :both } }
+    acc[:siblings] = acc[:siblings].merge(possible_discovered_methods: { "Gadget" => { run: :singleton } })
+
+    expect(finalized.fetch(:siblings).fetch(:possible_discovered_methods)).to eq("Gadget" => { run: :singleton })
+    expect(finalized.fetch(:methods)).to eq("Gadget" => { run: :singleton })
+  end
+
+  it "keeps a conditional singleton extend possible beside an instance def of the name" do
+    source = "module M\n  def foo = 1\nend\nclass C\n  def foo = 2\n  extend M if ENV[\"X\"]\nend\n"
+    acc = indexer.new_def_index_accumulator
+    indexer.accumulate_project_index(acc, "lib/probe.rb", Prism.parse(source).value)
+    result = indexer.finalize_def_index(acc)
+
+    expect(result.fetch(:methods).dig("C", :foo)).to eq(:singleton)
+    expect(result.fetch(:siblings).fetch(:possible_discovered_methods)).to eq("C" => { foo: :singleton })
+    expect(result.fetch(:siblings).fetch(:contested_discovered_singleton_def_nodes)).to eq(Set[["C", :foo]])
   end
 
   it "keeps every possible entry inside its member" do

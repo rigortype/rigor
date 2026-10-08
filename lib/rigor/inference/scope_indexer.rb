@@ -8102,14 +8102,28 @@ module Rigor
         end
       end
 
-      # ADR-119 WD1 — the same subtraction for the `possible` copy of `methods`, so `possible_discovered_methods`
-      # stays a subset of its member after the rule above. Only that sibling is rewritten.
+      # ADR-119 WD1 — the `possible` copy of `methods` loses the INSTANCE half of a name that has a project `def`
+      # (`:instance` goes, `:both` becomes `:singleton`), so `possible_discovered_methods` stays a subset of its
+      # member after the rule above. A `:singleton` entry stays: the `def` is the instance side, and the member
+      # keeps the name's singleton half. Only that sibling is rewritten.
       def subtract_sibling_methods!(acc)
         possible = acc[:siblings][:possible_discovered_methods]
         return if possible.nil?
 
         acc[:siblings] =
-          acc[:siblings].merge(possible_discovered_methods: subtract_def_methods(possible, acc[:def_nodes]))
+          acc[:siblings].merge(possible_discovered_methods: subtract_sibling_instance_defs(possible, acc[:def_nodes]))
+      end
+
+      def subtract_sibling_instance_defs(possible, def_nodes)
+        possible.each_with_object({}) do |(class_name, table), out|
+          defs = def_nodes[class_name] || {}
+          kept = table.each_with_object({}) do |(method_name, kind), acc|
+            next acc[method_name] = kind unless defs.key?(method_name)
+
+            acc[method_name] = :singleton unless kind == :instance
+          end
+          out[class_name] = kept unless kept.empty?
+        end
       end
 
       # Folds one file's class-keyed indexes into the cross-file accumulator. `method_visibilities` (ADR-35) is

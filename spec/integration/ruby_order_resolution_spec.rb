@@ -1044,6 +1044,7 @@ RSpec.describe "resolution in Ruby's ancestor order (#1567, #1568, #1570, #1571)
     # `define_method` (or `attr_reader`) of it keeps the `def` in the table, so the exception reads only the
     # raising body. Ruby runs the later definition, which returns, and line 12 raises NoMethodError. The Known path
     # reads the same slot, so without the unknown include master and C2-b1 miss it too (the second expectation).
+    # Flip this when #1657 is fixed.
     it "misses a later define_method beside a raising def on the same entry (deliberate false negative)" do
       extra = "class Base; define_method(:fail_with) { |_m| nil }; end"
       source = media_source(includes: unknown_include, extra: extra)
@@ -1080,7 +1081,8 @@ RSpec.describe "resolution in Ruby's ancestor order (#1567, #1568, #1570, #1571)
     # A chain cut by the budget (`ResolutionChain::LIMIT` project entries) declines the exception: a definer past
     # the cut cannot be read. Here the raising `Raiser` sits ahead of the cut and ahead of `Base`, so Ruby raises
     # (ArgumentError) and line 12 cannot see nil: the report is a FALSE POSITIVE, the budget's conservative cost
-    # (ADR-41 WD4), pinned so that relaxing the cut is a decision rather than an accident.
+    # (ADR-41 WD4), pinned so that relaxing the cut is a decision rather than an accident. Flip this when #1656 is
+    # fixed.
     it "keeps a call Dynamic on a chain cut by the budget (a pinned false positive)" do
       # Each filler defines a method of its own: a module that records none is not a project entry on a `:methods`
       # chain, and would not count toward the cut.

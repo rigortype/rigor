@@ -11,8 +11,12 @@ require "yaml"
 # `@@slot = :def_nodes.freeze`, a multi-write), and, apart from them, the whole-index reads and copies (`with(**x)`,
 # `new(*x)`, `to_h`, `deconstruct`, iterating `DiscoveryIndex.members`, a computed `send`, a `discovered_`-prefixed
 # interpolated name). The census is compared with `admission_census.yml`, so a new raw read or copy path fails until
-# it is recorded; the ADR admits a member to `possible` facts only once its entry here is empty.
-# `RIGOR_REGENERATE_GATES=1` rewrites the file.
+# it is recorded. The ADR admits a single-valued member to `possible` facts only once every read recorded for it
+# consults its `contested_*` sibling, goes through a `Scope` reader, or is justified (WD1(ii)): a member with a
+# `contested_*` sibling carries, per recorded file, a `justified:` classification (`existence`, `identity`,
+# `cache_key`, `paired_copy` or `consults_contested`, the reads WD2 allows beside #1600's paired copies), which
+# this spec checks is complete and names no unrecorded file. `RIGOR_REGENERATE_GATES=1` rewrites the file and
+# keeps the `justified:` entries of files still recorded.
 #
 # Threat model: the census catches a raw read or copy added in the codebase's normal styles, not a deliberate evasion.
 # It does not see a slot named by a String (`fetch("def_nodes")`) or a computed Symbol not prefixed `discovered_`
@@ -31,12 +35,47 @@ RSpec.describe "Discovery-table admission census" do
       # Discovery-table admission census (#1507, ADR-119 WD1): per Scope::DiscoveryIndex member, the files outside
       # the table owners (scope.rb, scope/discovery_index.rb, scope_indexer.rb with its collectors under
       # scope_indexer/, and runner/project_pre_passes.rb) that read the whole table ("reads") or copy it ("copies"),
-      # and the files that read or copy every member at once ("whole_index"). admission_census_spec.rb computes it
-      # with Prism and compares it with this file; `RIGOR_REGENERATE_GATES=1` rewrites it.
+      # and the files that read or copy every member at once ("whole_index"). A member with a `contested_*` sibling
+      # also carries "justified": per recorded file, why that read or copy may stay once the member admits possible
+      # facts (WD1(ii)) -- existence, identity, cache_key, paired_copy or consults_contested. admission_census_spec.rb
+      # computes the rest with Prism and compares it with this file; `RIGOR_REGENERATE_GATES=1` rewrites it and keeps
+      # the "justified" entries of files still recorded.
 
     YAML
   end
   let(:members) { Rigor::Scope::DiscoveryIndex.members }
+  let(:kinds_allowed) { %w[existence identity cache_key paired_copy consults_contested] }
+  let(:contested_members) do
+    Rigor::Scope::DiscoveryIndex::SIBLINGS.filter_map do |member, sibling|
+      member.to_s if sibling.start_with?("contested_")
+    end
+  end
+
+  # `found` with each recorded member's `justified:` carried over, files no longer read or copied dropped.
+  define_method(:with_justified) do |found, recorded|
+    members = found.fetch("members").to_h do |member, kinds|
+      justified = recorded&.dig("members", member, "justified")
+      next [member, kinds] if justified.nil?
+
+      files = kinds.values.flatten
+      [member, kinds.merge("justified" => justified.slice(*files))]
+    end
+    found.merge("members" => members)
+  end
+
+  define_method(:justification_problems) do |recorded|
+    contested_members.flat_map do |member|
+      entry = recorded.dig("members", member) || {}
+      files = %w[reads copies].flat_map { |kind| entry[kind] || [] }.uniq
+      justified = entry["justified"] || {}
+      files.reject { |file| justified.key?(file) }.map { |file| "#{member}: #{file} has no justified entry" } +
+        (justified.keys - files).map { |file| "#{member}: justified names #{file}, which is not recorded" } +
+        justified.flat_map do |file, kinds|
+          (Array(kinds) - kinds_allowed).map { |kind| "#{member}: #{file} is justified as #{kind.inspect}" } +
+            (Array(kinds).empty? ? ["#{member}: #{file} is justified as nothing"] : [])
+        end
+    end
+  end
 
   define_method(:census_problems) do |found, recorded|
     lines = found.fetch("members").flat_map do |member, kinds|
@@ -53,15 +92,52 @@ RSpec.describe "Discovery-table admission census" do
 
   it "records exactly the reads and copies the tree has" do
     found = DiscoveryReadScan.census(DeclarationFactSources.parsed_under, members)
-    DeclarationFactSources.write_yaml(snapshot, header, found) if DeclarationFactSources.regenerate?
+    if DeclarationFactSources.regenerate?
+      existing = File.exist?(snapshot) ? YAML.load_file(snapshot) : nil
+      DeclarationFactSources.write_yaml(snapshot, header, with_justified(found, existing))
+    end
 
     problems = census_problems(found, YAML.load_file(snapshot))
     expect(problems).to eq([]), "#{problems.join("\n")}\nRead the table through a Scope reader, or record the path " \
                                 "in admission_census.yml (#{DeclarationFactSources::REGENERATE_ENV}=1 rewrites it)."
   end
 
+  it "justifies every read and copy of a member that has a contested sibling" do
+    problems = justification_problems(YAML.load_file(snapshot))
+    expect(problems).to eq([]), "#{problems.join("\n")}\nClassify each file as one of #{kinds_allowed.join(', ')} " \
+                                "under `justified:` in admission_census.yml."
+  end
+
   it "records one entry per member" do
     expect(YAML.load_file(snapshot).fetch("members").keys).to eq(members.map(&:to_s))
+  end
+
+  describe "the justification check" do
+    def recorded(justified, reads: ["lib/a.rb"], copies: [])
+      { "members" => { "discovered_def_nodes" => { "reads" => reads, "copies" => copies, "justified" => justified } } }
+    end
+
+    def problems_for(data) = justification_problems(data).select { |line| line.start_with?("discovered_def_nodes:") }
+
+    it "accepts a complete classification" do
+      expect(problems_for(recorded({ "lib/a.rb" => ["existence"] }))).to eq([])
+    end
+
+    it "reports a file without an entry, a stale path and an unknown kind" do
+      expect(problems_for(recorded({}))).to eq(["discovered_def_nodes: lib/a.rb has no justified entry"])
+      expect(problems_for(recorded({ "lib/a.rb" => ["existence"], "lib/gone.rb" => ["identity"] })))
+        .to eq(["discovered_def_nodes: justified names lib/gone.rb, which is not recorded"])
+      expect(problems_for(recorded({ "lib/a.rb" => ["reads_value"] })))
+        .to eq(["discovered_def_nodes: lib/a.rb is justified as \"reads_value\""])
+    end
+
+    it "keeps a recorded classification across regeneration and drops a file that is gone" do
+      found = { "members" => { "discovered_def_nodes" => { "reads" => ["lib/a.rb"], "copies" => [] } },
+                "whole_index" => [] }
+      carried = with_justified(found, recorded({ "lib/a.rb" => ["identity"], "lib/gone.rb" => ["existence"] }))
+
+      expect(carried.dig("members", "discovered_def_nodes", "justified")).to eq("lib/a.rb" => ["identity"])
+    end
   end
 
   describe "the census itself" do

@@ -482,6 +482,11 @@ stays silent), only a proven (`:no`) violation fires, and severity
 maps through `severity_profile:` (`lenient` → off, `balanced` →
 warning, `strict` → error). The ancestor scope is the superclass
 chain plus included/prepended modules, resolved cross-file.
+Constructors and copy hooks (`initialize`, `initialize_copy`,
+`initialize_dup`, `initialize_clone`) are outside the family:
+`Class#new`, `dup` and `clone` call them on the receiver's own class,
+never through a parent-typed reference, so a subclass constructor
+that takes different arguments is not a violation.
 
 The escape hatch for a *legitimate* specialization that looks like a
 narrowing is **generics first, not suppression**: declare the parent

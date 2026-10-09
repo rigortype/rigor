@@ -848,4 +848,116 @@ RSpec.describe "return-type and Liskov override rules", type: :runner do
       end
     end
   end
+
+  # Issue #1716 — the object-lifecycle hooks Ruby makes private on every non-singleton `def`
+  # (`vm_method.c`'s `rb_method_entry_make`) sit outside the substitutability frame the three rules
+  # check. `initialize` is reached through `Class#new` on the class the caller names, so no caller
+  # holding a `Base` passes `Base`'s constructor arguments to `Sub#initialize`; the copy hooks are
+  # handed an instance of the receiver's own class by `dup` / `clone`, which the parent's declared
+  # parameter cannot bound; `new` / `dup` / `clone` discard all four returns. Each example pairs the
+  # hook with an ordinary method narrowed or widened the same way, so it observes that the rule ran
+  # and declined the hook rather than missing the class.
+  describe "object-lifecycle hooks (issue #1716)" do
+    lifecycle_hooks = %w[initialize initialize_copy initialize_dup initialize_clone]
+
+    def hook_source(hook)
+      <<~RUBY
+        class Base
+          def #{hook}(value)
+          end
+
+          def consume(value)
+          end
+        end
+
+        class Sub < Base
+          def #{hook}(value)
+          end
+
+          def consume(value)
+          end
+        end
+      RUBY
+    end
+
+    lifecycle_hooks.each do |hook|
+      it "does not report `#{hook}' narrowing an inherited parameter" do
+        result = analyze(hook_source(hook), sig: { "demo.rbs" => <<~RBS })
+          class Base
+            def #{hook}: (Numeric value) -> void
+            def consume: (Numeric value) -> void
+          end
+
+          class Sub < Base
+            def #{hook}: (Integer value) -> void
+            def consume: (Integer value) -> void
+          end
+        RBS
+        expect(diags_for(result, "def.override-param-narrowed").map(&:method_name)).to eq(["consume"])
+      end
+
+      it "does not report `#{hook}' widening an inherited return" do
+        result = analyze(hook_source(hook), sig: { "demo.rbs" => <<~RBS })
+          class Base
+            def #{hook}: (untyped value) -> Integer
+            def consume: (untyped value) -> Integer
+          end
+
+          class Sub < Base
+            def #{hook}: (untyped value) -> Object
+            def consume: (untyped value) -> Object
+          end
+        RBS
+        expect(diags_for(result, "def.override-return-widened").map(&:method_name)).to eq(["consume"])
+      end
+    end
+
+    it "does not report a constructor that takes different arguments and builds its parent's (the #1716 repro)" do
+      result = analyze(<<~RUBY, sig: { "demo.rbs" => <<~RBS })
+        class Plain
+          def initialize(name = "x") = @name = name
+        end
+
+        class Child < Plain
+          def initialize(list, extra) = super(list.join)
+        end
+      RUBY
+        class Plain
+          def initialize: (?String name) -> void
+        end
+
+        class Child < Plain
+          def initialize: (Array[String] list, untyped extra) -> void
+        end
+      RBS
+      expect(diags_for(result, "def.override-param-narrowed")).to be_empty
+    end
+
+    (lifecycle_hooks + ["respond_to_missing?"]).each do |hook|
+      it "does not report `#{hook}' under a `private` section as reducing visibility" do
+        # Ruby makes the hook private wherever it is written, so the parent's `public` section reading
+        # is not its runtime visibility and nothing is reduced.
+        result = analyze(<<~RUBY)
+          class Base
+            def #{hook}(*)
+            end
+
+            def greet
+            end
+          end
+
+          class Sub < Base
+            private
+
+            def #{hook}(*)
+            end
+
+            def greet
+            end
+          end
+        RUBY
+        expect(diags_for(result, "def.override-visibility-reduced").map(&:method_name)).to eq(["greet"])
+      end
+    end
+  end
 end

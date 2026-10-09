@@ -10,7 +10,7 @@ module Rigor
   module Plugin
     class Alba < Rigor::Plugin::Base
       # A {Rigor::Inference::DeclarationWalk} collector over one file: the classes it declares, whether each
-      # `include Alba::Resource`s or defines `#serialize`, and the association declarations whose resource
+      # `include Alba::Resource`s, and the association declarations whose resource
       # class alba infers from the name.
       #
       # An association is recorded only when alba would take the inference path (`Alba::Association#
@@ -29,29 +29,26 @@ module Rigor
         def initialize
           @entries = {}
           @includes = {}
-          @serialize_defs = {}
+          @nestings = {}
+          @blocks = []
           @associations = []
         end
 
-        def on_declaration(node, _context, body_context)
+        def on_declaration(node, context, body_context)
           return Rigor::Inference::DeclarationWalk::DESCEND unless node.is_a?(Prism::ClassNode)
 
           name = body_context.prefix.join("::")
-          @entries[name] = superclass_name(node.superclass) unless name.empty?
+          unless name.empty?
+            @entries[name] = superclass_name(node.superclass)
+            @nestings[name] = context.nesting || []
+          end
           Rigor::Inference::DeclarationWalk::DESCEND
-        end
-
-        # A `def` body is instance-level; only `def serialize` matters, and nothing below a def declares a
-        # resource.
-        def on_def(node, context)
-          owner = context.prefix.join("::")
-          @serialize_defs[owner] = true if node.name == :serialize && node.receiver.nil? && !owner.empty?
-          Rigor::Inference::DeclarationWalk::DECLINE
         end
 
         def on_call(node, context)
           owner = context.prefix.join("::")
           record_call(node, owner) unless owner.empty? || !node.receiver.nil?
+          remember_block(node)
           Rigor::Inference::DeclarationWalk::DESCEND
         end
 
@@ -59,8 +56,8 @@ module Rigor
         def class_entries
           @entries.map do |name, superclass|
             ResourceIndex::ClassEntry.new(
-              name: name, superclass: superclass,
-              includes_resource: @includes.fetch(name, false), defines_serialize: @serialize_defs.fetch(name, false)
+              name: name, superclass: superclass, nesting: @nestings.fetch(name),
+              includes_resource: @includes.fetch(name, false)
             )
           end
         end
@@ -72,8 +69,19 @@ module Rigor
             @includes[owner] = true if includes_resource?(node)
           elsif ASSOCIATION_METHODS.include?(node.name)
             name = inferred_association_name(node)
-            @associations << ResourceIndex::Association.new(owner: owner, name: name) if name
+            @associations << ResourceIndex::Association.new(owner: owner, name: name, in_block: in_block?(node)) if name
           end
+        end
+
+        # The calls are visited outer-first, so a call's block is known before the calls inside it.
+        def remember_block(node)
+          block = node.block
+          @blocks << (block.location.start_offset...block.location.end_offset) if block.is_a?(Prism::BlockNode)
+        end
+
+        def in_block?(node)
+          offset = node.location.start_offset
+          @blocks.any? { |range| range.cover?(offset) }
         end
 
         def includes_resource?(node)

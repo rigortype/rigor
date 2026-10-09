@@ -9,9 +9,10 @@ diagnostic or adds a type — it never adds a firing (issue #1682):
    the block on an anonymous `Class.new { include Alba::Resource }`. The DSL calls inside bind to
    `singleton(Alba::Resource)` (alba's own sig declares `[self: singleton(Resource)]`) instead of firing
    `call.unresolved-toplevel`.
-2. **`serialize` returns `String`** — for `Alba.serialize(...)` and for `#serialize` on the project's resource
-   classes. `hashify`, `to_h`, `serializable_hash` and `as_json` are left alone: alba's own RBS declares them
-   `untyped`, and `to_json` already reads `String`.
+2. **`Alba.serialize(...)` returns `String`**, unless the call passes `with:` (a custom resource may override
+   `#serialize`) or a keyword splat. Instance `#serialize`, `hashify`, `to_h`, `serializable_hash` and
+   `as_json` are left alone: a project module, `define_method` or a reopening outside `resource_search_paths`
+   can redefine `#serialize`, alba's own RBS declares the rest `untyped`, and `to_json` already reads `String`.
 3. **`rigor unused` roots.** A resource class body that says `many :articles` (also `one`, `has_many`,
    `has_one`, `association`) with no `resource:` makes alba load `ArticleResource` — or, failing that,
    `ArticleSerializer` — through `Alba.inflector`. That name appears nowhere in the source, so the class would
@@ -31,12 +32,12 @@ diagnostic or adds a type — it never adds a firing (issue #1682):
 .rigor.yml:1:1: info: 1 gem(s) in Gemfile.lock have no RBS available: alba. Consider `rbs collection install` to fetch community RBS from `ruby/gem_rbs_collection`, ship `sig/` in the gem itself, or opt the gem into `dependencies.source_inference:` in `.rigor.yml`. [rbs.coverage.missing-gem]
 demo.rb:9:7: info: dump_type: String [dump.type]
 demo.rb:14:7: info: dump_type: Dynamic[top] [dump.type]
-demo.rb:17:7: info: dump_type: String [dump.type]
+demo.rb:17:7: info: dump_type: Dynamic[top] [dump.type]
 demo.rb:18:7: info: dump_type: Dynamic[top] [dump.type]
-demo.rb:19:7: info: dump_type: String [dump.type]
+demo.rb:19:7: info: dump_type: Dynamic[top] [dump.type]
 ```
 
-Lines 9, 17 and 19 are `Alba.serialize` and `#serialize`; 14 is `Alba.hashify` and 18 is `#to_h`, both unmodelled.
+Line 9 is `Alba.serialize`; 14 is `Alba.hashify`, 17 and 19 are instance `#serialize` and 18 is `#to_h`, all left to Rigor's own resolution.
 
 `rigor unused` (from `demo/`) lists the two resources nothing loads. `ArticleResource`,
 `CommentSerializer` and `Admin::EntryResource` are not candidates — alba infers them from the `many` calls —
@@ -59,7 +60,9 @@ plugin publishes nothing rather than approximate).
 
 alba then tries `<Nesting>::<X>Resource`, `<X>Resource`, `<Nesting>::<X>Serializer`, `<X>Serializer`, where
 `<Nesting>` is the owning resource's namespace. The plugin publishes the first candidate that is a class the
-project declares, and nothing otherwise — so a name no class matches can never become a root. Only classes
+project declares, and nothing otherwise — so a name no class matches can never become a root. An association
+inside a block of the resource body (`trait`, `nested`, an association's own block) is `class_eval`ed by alba on
+an anonymous class, so only the top-level candidates are tried for it. Only classes
 that include `Alba::Resource` (directly or through a project superclass) count as owners, which keeps
 ActiveRecord's `has_many :articles` out.
 
@@ -122,7 +125,7 @@ signatures alba's runtime may not honour, which is the false-positive direction 
 | --- | --- |
 | `manifest(... block_as_methods:)` | `Alba.serialize` / `Alba.hashify` block `self` (`singleton(Alba::Resource)`) |
 | `manifest(... signature_paths:, open_receivers:)` | the two-namespace sig and its open surface |
-| `dynamic_return receivers: [..], methods: [..]` | `String` for `Alba.serialize`; run-time receiver list (`receivers: -> {}`) for resource instances |
+| `dynamic_return receivers: [..], methods: [..]` | `String` for `Alba.serialize` without `with:` |
 | `Plugin::Base.producer :resource_index` | cached project scan, `watch:` on the search paths |
 | `Inference::DeclarationWalk::Collector` | declaration context (`Module.nesting`-correct class names) without a bespoke walker |
 | `#prepare` + `fact_store.publish` (ADR-9) | the `:reachability_roots` fact |

@@ -6,8 +6,8 @@
 #
 # 1. The block of `Alba.serialize` / `Alba.hashify` runs on an anonymous `Alba::Resource` class, so the DSL
 #    calls inside no longer read as `call.unresolved-toplevel`.
-# 2. `Alba.serialize` and `#serialize` on the project's resource classes read `String`; `hashify` / `to_h`
-#    stay `Dynamic[top]` (alba's own RBS declares them `untyped`).
+# 2. `Alba.serialize` reads `String` unless `with:` (or a keyword splat) is passed; `hashify` stays
+#    `Dynamic[top]` (alba's own RBS declares it `untyped`). Instance `#serialize` is left to the engine.
 # 3. An association that makes alba infer its resource class roots that class for `rigor unused` — and only
 #    when the association names no resource and a class of the inferred name exists.
 # 4. The plugin never adds a diagnostic.
@@ -46,14 +46,23 @@ RSpec.describe "rigor-alba integration" do
         class AdminUserResource < BaseResource
         end
       RUBY
-      "app/resources/custom_resource.rb" => <<~RUBY,
-        class CustomResource
-          include Alba::Resource
-          def serialize(**) = 1
+      "app/resources/over_resource.rb" => <<~RUBY,
+        module Serializes
+          def serialize(**) = { a: 1 }
         end
-        class ChildOfCustomResource < CustomResource
+        class OverChild
+          include Alba::Resource
+          include Serializes
+        end
+        class DefinedByMacro
+          include Alba::Resource
+          define_method(:serialize) { |**| { a: 1 } }
+        end
+        class OwnDef
+          include Alba::Resource
         end
       RUBY
+      "lib/reopen.rb" => "class OwnDef\n  def serialize(**) = { a: 1 }\nend\n",
       "app/models/plain.rb" => "class Plain\n  def serialize = 1\nend\n"
     }
   end
@@ -112,30 +121,42 @@ RSpec.describe "rigor-alba integration" do
         r = UserResource.new(1)
         Rigor.dump_type(Alba.serialize(1))
         Rigor.dump_type(Alba.hashify(1))
-        Rigor.dump_type(r.serialize)
         Rigor.dump_type(r.to_h)
-        Rigor.dump_type(r.as_json)
-        Rigor.dump_type(AdminUserResource.new(1).serialize)
       RUBY
     end
 
-    it "types Alba.serialize and Resource#serialize as String and leaves the rest Dynamic" do
-      expect(dump_types(run_alba(source))).to eq(
-        ["String", "Dynamic[top]", "String", "Dynamic[top]", "Dynamic[top]", "String"]
-      )
+    it "types Alba.serialize as String and leaves hashify and to_h Dynamic" do
+      expect(dump_types(run_alba(source))).to eq(["String", "Dynamic[top]", "Dynamic[top]"])
     end
 
     it "reads Dynamic everywhere without the plugin" do
       expect(dump_types(run_alba(source, enabled: false)).uniq).to eq(["Dynamic[top]"])
     end
 
-    it "declines a resource that defines its own #serialize, and a class that is no resource" do
+    it "declines Alba.serialize when a custom resource (with:) or a keyword splat is passed" do
       source = <<~RUBY
-        Rigor.dump_type(CustomResource.new(1).serialize)
-        Rigor.dump_type(ChildOfCustomResource.new(1).serialize)
+        opts = {}
+        Rigor.dump_type(Alba.serialize(1, with: UserResource))
+        Rigor.dump_type(Alba.serialize(1, root_key: :a, with: UserResource))
+        Rigor.dump_type(Alba.serialize(1, **opts))
+        Rigor.dump_type(Alba.serialize(1, root_key: :a))
+      RUBY
+      expect(dump_types(run_alba(source))).to eq(["Dynamic[top]", "Dynamic[top]", "Dynamic[top]", "String"])
+    end
+
+    it "leaves instance #serialize to the engine, whatever redefines it" do
+      source = <<~RUBY
+        Rigor.dump_type(UserResource.new(1).serialize)
+        Rigor.dump_type(OverChild.new(1).serialize)
+        Rigor.dump_type(OverChild.new(1).serialize.fetch(:a))
+        Rigor.dump_type(DefinedByMacro.new(1).serialize)
+        Rigor.dump_type(OwnDef.new(1).serialize)
         Rigor.dump_type(Plain.new.serialize)
       RUBY
-      expect(dump_types(run_alba(source)).join(" ")).not_to include("String")
+      with = run_alba(source, files: resource_files)
+      without = run_alba(source, files: resource_files, enabled: false)
+      expect(dump_types(with)).to eq(dump_types(without))
+      expect(with.diagnostics.map(&:qualified_rule)).to eq(without.diagnostics.map(&:qualified_rule))
     end
   end
 
@@ -151,11 +172,14 @@ RSpec.describe "rigor-alba integration" do
       RUBY
       with = run_alba(source)
       without = run_alba(source, enabled: false)
-      key = ->(d) { [d.path, d.line, d.qualified_rule] }
-      noisy = ->(d) { d.severity != :info }
+      tally = lambda do |result|
+        result.diagnostics.reject { |d| d.severity == :info }.map { |d| [d.path, d.line, d.qualified_rule] }.tally
+      end
+      without_tally = tally.call(without)
 
       expect(plugin_diagnostics(with)).to be_empty
-      expect(with.diagnostics.select(&noisy).map(&key) - without.diagnostics.select(&noisy).map(&key)).to be_empty
+      added = tally.call(with).select { |key, count| count > without_tally.fetch(key, 0) }
+      expect(added).to be_empty
     end
   end
 
@@ -248,6 +272,9 @@ RSpec.describe "rigor-alba integration" do
         "app/resources/tag_resource.rb" => "class TagResource\n  include Alba::Resource\nend\n",
         "app/resources/note_resource.rb" => "class NoteResource\n  include Alba::Resource\nend\n",
         "app/resources/item_resource.rb" => "class ItemResource\n  include Alba::Resource\nend\n",
+        "app/resources/thing_resource.rb" => "class ThingResource\n  include Alba::Resource\nend\n",
+        "app/resources/name_from_variable_resource.rb" =>
+          "class NameFromVariableResource\n  include Alba::Resource\nend\n",
         "app/resources/user_resource.rb" => <<~RUBY
           class UserResource
             include Alba::Resource
@@ -314,6 +341,47 @@ RSpec.describe "rigor-alba integration" do
         "app/resources/base_resource.rb" => "class BaseResource\n  include Alba::Resource\nend\n",
         "app/resources/user_resource.rb" => "class UserResource < BaseResource\n  many :articles\nend\n",
         "app/resources/article_resource.rb" => "class ArticleResource < BaseResource\nend\n"
+      }
+      roots_for(files) { |contribution, _dir| expect(contribution.roots).to eq(["ArticleResource"]) }
+    end
+
+    it "tries only top-level candidates for an association inside a trait, nested or association block" do
+      files = {
+        "app/a.rb" => <<~RUBY
+          module Admin
+            class UserResource
+              include Alba::Resource
+              trait(:x) { many :comments }
+              many :notes do
+                many :tags
+              end
+            end
+            class CommentResource; end
+            class TagResource; end
+          end
+          class CommentResource; end
+          class TagResource; end
+        RUBY
+      }
+      roots_for(files) do |contribution, _dir|
+        expect(contribution.roots).to contain_exactly("CommentResource", "TagResource")
+      end
+    end
+
+    it "resolves a compact header's superclass against the lexical scope, not the class's own namespace" do
+      files = {
+        "app/a.rb" => <<~RUBY
+          class BaseResource
+            include Alba::Resource
+          end
+          module Admin
+            class BaseResource; end
+          end
+          class Admin::UserResource < BaseResource
+            many :articles
+          end
+          class ArticleResource; end
+        RUBY
       }
       roots_for(files) { |contribution, _dir| expect(contribution.roots).to eq(["ArticleResource"]) }
     end

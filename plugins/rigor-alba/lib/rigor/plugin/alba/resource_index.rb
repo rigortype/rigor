@@ -6,20 +6,22 @@ module Rigor
       # The project's alba resource classes, as the {ResourceCollector} found them. A frozen value object the
       # `:resource_index` producer caches.
       #
-      # Three questions are answered from it, and each is deliberately conservative — a wrong "no" costs a
+      # One question is answered from it, and deliberately conservatively — a wrong "no" costs a
       # missing type or a missing root, a wrong "yes" costs a false positive or a hidden dead class:
       #
-      # - {#resource_names}: which classes are alba resources (`include Alba::Resource`, directly or through a
-      #   superclass the project also defines), minus those that define their own `#serialize`.
-      # - {#inferred_roots}: which classes alba's association inference would load, for associations that name
-      #   neither `resource:` nor `serializer:` (see {ResourceCollector}).
-      # - {#empty?}.
+      # {#inferred_roots}: which classes alba's association inference would load, for associations that name
+      # neither `resource:` nor `serializer:` (see {ResourceCollector}).
       class ResourceIndex
-        # `lexical` is the enclosing class's full name, which alba hands to `Object.const_get` as `nesting`.
-        Association = Data.define(:owner, :name)
+        # `owner` is the enclosing class's full name, which alba hands to `Object.const_get` as `nesting`.
+        # `in_block` is true when the call sits in a block of the resource body (`trait`, `nested`, an
+        # association's own block): alba `class_eval`s those on an anonymous class, whose `name` is nil, so
+        # only the top-level candidates are tried.
+        Association = Data.define(:owner, :name, :in_block)
 
-        # A class the project declares. `superclass` is the constant as written (`nil` when absent).
-        ClassEntry = Data.define(:name, :superclass, :includes_resource, :defines_serialize)
+        # A class the project declares. `superclass` is the constant as written (`nil` when absent) and
+        # `nesting` the `Module.nesting` chain (innermost first) its header was written under, which is where
+        # Ruby resolves that constant.
+        ClassEntry = Data.define(:name, :superclass, :nesting, :includes_resource)
 
         # The resource-class suffixes alba's `infer_resource_class` tries, in order.
         SUFFIXES = %w[Resource Serializer].freeze
@@ -33,11 +35,6 @@ module Rigor
 
         def empty?
           @classes.empty?
-        end
-
-        # Full names of the alba resource classes whose `#serialize` is alba's own.
-        def resource_names
-          @classes.keys.select { |name| resource?(name) && !overrides_serialize?(name) }.sort
         end
 
         # The classes alba infers for the associations that name no resource, limited to
@@ -62,7 +59,7 @@ module Rigor
           base = classify.call(association.name)
           return nil unless base.is_a?(String) && /\A[A-Z][A-Za-z0-9]*\z/.match?(base)
 
-          nesting = association.owner.rpartition("::").first
+          nesting = association.in_block ? "" : association.owner.rpartition("::").first
           SUFFIXES.each do |suffix|
             candidates = ["#{base}#{suffix}"]
             candidates.unshift("#{nesting}::#{base}#{suffix}") unless nesting.empty?
@@ -87,18 +84,9 @@ module Rigor
           !parent.nil? && resource_chain?(parent, seen)
         end
 
-        def overrides_serialize?(name, seen = {})
-          entry = @classes[name]
-          return false if entry.nil? || seen[name]
-
-          seen[name] = true
-          return true if entry.defines_serialize
-
-          parent = superclass_of(entry)
-          !parent.nil? && overrides_serialize?(parent, seen)
-        end
-
-        # Resolves the superclass as written against the project's classes, innermost lexical scope first.
+        # Resolves the superclass as written the way Ruby does: against the `Module.nesting` chain of the header,
+        # innermost first, then the top level. A compact header (`class Admin::UserResource < Base`) does not put
+        # `Admin` on the chain, so `Base` is not looked up under it.
         def superclass_of(entry)
           written = entry.superclass
           return nil if written.nil?
@@ -108,14 +96,7 @@ module Rigor
             return @classes.key?(rooted) ? rooted : nil
           end
 
-          segments = entry.name.split("::")[0...-1]
-          until segments.nil?
-            candidate = (segments + [written]).join("::")
-            return candidate if @classes.key?(candidate)
-
-            segments = segments.empty? ? nil : segments[0...-1]
-          end
-          nil
+          (entry.nesting.map { |scope| "#{scope}::#{written}" } + [written]).find { |name| @classes.key?(name) }
         end
       end
     end

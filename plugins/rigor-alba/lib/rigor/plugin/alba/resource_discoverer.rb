@@ -29,7 +29,9 @@ module Rigor
             next unless parsed.success?
 
             collector = ResourceCollector.new
-            Rigor::Inference::DeclarationWalk.run(parsed.value, [collector])
+            Rigor::Inference::DeclarationWalk.run(
+              parsed.value, [collector], Rigor::Inference::DeclarationWalk::Context.root(nesting: [])
+            )
             entries.concat(collector.class_entries)
             associations.concat(collector.associations)
           end
@@ -41,11 +43,12 @@ module Rigor
         # A class reopened across files: it is a resource if any opening says so.
         def merge(entries)
           entries.group_by(&:name).map do |name, openings|
+            headed = openings.find(&:superclass) || openings.first
             ResourceIndex::ClassEntry.new(
               name: name,
-              superclass: openings.filter_map(&:superclass).first,
-              includes_resource: openings.any?(&:includes_resource),
-              defines_serialize: openings.any?(&:defines_serialize)
+              superclass: headed.superclass,
+              nesting: headed.nesting,
+              includes_resource: openings.any?(&:includes_resource)
             )
           end
         end

@@ -15,9 +15,9 @@ module Rigor
     #    their block on an anonymous `Class.new { include Alba::Resource }`, so the DSL calls inside resolve
     #    against `singleton(Alba::Resource)` (alba's own sig declares `[self: singleton(Resource)]`) instead of
     #    firing `call.unresolved-toplevel`.
-    # 2. **`serialize` returns `String`** — `Alba.serialize(...)` and `#serialize` on the project's resource
-    #    classes. `hashify`, `to_h`, `serializable_hash` and `as_json` stay unmodelled: alba's own RBS
-    #    declares them `untyped`.
+    # 2. **`Alba.serialize(...)` returns `String`** (when no `with:` is given). Instance `#serialize`,
+    #    `hashify`, `to_h`, `serializable_hash` and `as_json` stay unmodelled: the project may redefine
+    #    `#serialize`, and alba's own RBS declares the rest `untyped`.
     # 3. **`rigor unused` roots.** `many :articles` with no `resource:` makes alba infer `ArticleResource` (or
     #    `ArticleSerializer`) through `Alba.inflector`; that name appears nowhere in source, so the class would
     #    be listed as unused. It is published as a root — and only when a class of that name exists.
@@ -56,15 +56,15 @@ module Rigor
         @resource_search_paths = Array(config.fetch("resource_search_paths")).map(&:to_s)
       end
 
-      # `Alba.serialize(...)` — the class-level entry point. `Alba::Resource#serialize` is declared
-      # `-> String` and `Alba.serialize` ends in `Alba.encoder.call(...)` or `resource.serialize`.
-      dynamic_return receivers: ["singleton(Alba)"], methods: [:serialize] do |_call_node, _scope|
-        Rigor::Type::Combinator.nominal_of("String")
-      end
+      # `Alba.serialize(...)` — the class-level entry point ends in `Alba.encoder.call(...)` or
+      # `resource.serialize`, both `String`. A `with:` keyword names a custom resource that may override
+      # `#serialize`, and a keyword splat might carry one, so the call declines then. Instance `#serialize` on
+      # a resource class is deliberately NOT contributed: a project module, `define_method` or a reopening
+      # outside `resource_search_paths` can redefine it, and the engine already resolves that.
+      dynamic_return receivers: ["singleton(Alba)"], methods: [:serialize] do |call_node, _scope|
+        next nil unless call_node.is_a?(Prism::CallNode)
+        next nil if custom_resource_possible?(call_node)
 
-      # `UserResource.new(user).serialize` — instances of the classes the project's own source shows to be alba
-      # resources and that do not redefine `#serialize`. Resolved after `#prepare`.
-      dynamic_return receivers: -> { resource_index&.resource_names || [] }, methods: [:serialize] do |_call_node, _scope|
         Rigor::Type::Combinator.nominal_of("String")
       end
 
@@ -85,6 +85,22 @@ module Rigor
       end
 
       private
+
+      # `with:` names a custom resource; a splat (positional or keyword) might carry one.
+      def custom_resource_possible?(call_node)
+        arguments = call_node.arguments&.arguments || []
+        arguments.any? do |argument|
+          case argument
+          when Prism::SplatNode, Prism::ForwardingArgumentsNode then true
+          when Prism::KeywordHashNode then argument.elements.any? { |element| unknown_or_with_key?(element) }
+          else false
+          end
+        end
+      end
+
+      def unknown_or_with_key?(element)
+        !element.is_a?(Prism::AssocNode) || !element.key.is_a?(Prism::SymbolNode) || element.key.unescaped == "with"
+      end
 
       def resource_index
         producer_value(:resource_index)

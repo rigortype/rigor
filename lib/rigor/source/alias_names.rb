@@ -14,14 +14,6 @@ module Rigor
     module AliasNames
       module_function
 
-      # The pair for an `alias` keyword node or an `alias_method` call, or nil for any other node.
-      def of(node)
-        case node
-        when Prism::AliasMethodNode then keyword_names(node)
-        when Prism::CallNode then alias_method_call_names(node)
-        end
-      end
-
       # The pair for an `alias` keyword whose two names are plain symbols (a bare identifier parses as one), or nil.
       def keyword_names(alias_node)
         new_name = symbol_name(alias_node.new_name)

@@ -3701,7 +3701,7 @@ module Rigor
       def record_alias_method_call(call_node, qualified_prefix, in_singleton_class, accumulator)
         return if qualified_prefix.empty?
 
-        names = alias_method_call_names(call_node)
+        names = Source::AliasNames.alias_method_call_names(call_node)
         return if names.nil?
 
         kind = in_singleton_class ? :singleton : :instance
@@ -7415,7 +7415,7 @@ module Rigor
         # `alias_method :new, :old` — the CallNode twin of the `alias` keyword (#533; liquid's i18n
         # `t` alias was the corpus case). Unlike AliasMethodNode a call's children can carry further
         # class bodies (`Class.new do … end`), so the walk continues below it either way.
-        names = alias_method_call_names(node)
+        names = Source::AliasNames.alias_method_call_names(node)
         if names && !rec_prefix.empty? && !(singleton_cref && leaf_owner.nil?)
           record_alias_call_entry(accumulator, rec_prefix.join("::"), names, node)
         end
@@ -7474,12 +7474,6 @@ module Rigor
                                   singleton_cref: singleton_cref)
         end
         true
-      end
-
-      # `[new_name, old_name]` for an implicit-self `alias_method` call with two literal symbol /
-      # string arguments, or nil. A variable-named alias is runtime data and stays unrecorded.
-      def alias_method_call_names(call_node)
-        Source::AliasNames.alias_method_call_names(call_node)
       end
 
       # The class/module arm of {#collect_class_alias_map}: under an unnameable cref a

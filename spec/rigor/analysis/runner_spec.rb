@@ -961,6 +961,42 @@ RSpec.describe Rigor::Analysis::Runner do
         end
       end
 
+      # Issue #1702 — the alias's type end to end, on a receiver that is not a literal (a literal receiver is
+      # answered above the patched tier and never reaches the alias).
+      it "types an alias of a pre-existing method as that method, including one a later patch def redefines" do # rubocop:disable RSpec/ExampleLength
+        Dir.mktmpdir("rigor-pre-eval-alias-type-") do |tmpdir|
+          ext_path = File.join(tmpdir, "integer_ext.rb")
+          consumer_path = File.join(tmpdir, "consumer.rb")
+          File.write(ext_path, <<~RUBY)
+            class Integer
+              alias_method :orig_succ, :succ
+              def succ
+                nil
+              end
+              alias old_plus +
+              def magic = "m"
+              alias to_magic magic
+            end
+          RUBY
+          File.write(consumer_path, <<~RUBY)
+            require "rigor/testing"
+            include Rigor::Testing
+
+            i = rand(10)
+            assert_type("Dynamic[Float]", i.old_plus(1.5))
+            assert_type("Dynamic[Integer]", i.orig_succ)
+            assert_type("Dynamic[String]", i.to_magic)
+          RUBY
+          Dir.chdir(tmpdir) do
+            configuration = Rigor::Configuration.new("paths" => [consumer_path], "pre_eval" => [ext_path])
+            result = guarded_run(described_class.new(configuration: configuration, cache_store: nil))
+            mismatches = result.diagnostics.select { |d| d.message.start_with?("assert_type ") }.map(&:message)
+
+            expect(mismatches).to eq([])
+          end
+        end
+      end
+
       it "surfaces `pre-eval.parse-error` :warning when a pre_eval file has a parse error" do
         Dir.mktmpdir("rigor-pre-eval-parse-") do |tmpdir|
           broken_path = File.join(tmpdir, "broken.rb")

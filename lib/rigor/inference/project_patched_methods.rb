@@ -23,9 +23,9 @@ module Rigor
       # `Rigor::Type::*`) or `nil` when the heuristic declined. The dispatcher wraps a non-nil
       # `return_type` in `Dynamic[T]`; a `nil` `return_type` falls back to `Dynamic[top]`.
       #
-      # Issue #1702 — an `alias new old` / `alias_method :new, :old` in a patch is recorded too. When `old` is a
-      # method the `pre_eval:` files define, the alias's entry copies that entry's `return_type` (and its
-      # `alias_of`); otherwise `alias_of` names `old`, a method the class is expected to have already, and the
+      # Issue #1702 — an `alias new old` / `alias_method :new, :old` in a patch is recorded too. When a `def` or
+      # alias earlier in the `pre_eval:` files binds `old`, the alias's entry copies that entry's `return_type` (and
+      # its `alias_of`); otherwise `alias_of` names `old`, a method the class had before the patch, and the
       # dispatcher answers the alias with what that method answers. `alias_of` is nil for a `def`.
       Entry = Data.define(:class_name, :method_name, :kind, :source_path, :source_line, :return_type, :alias_of) do
         def initialize(class_name:, method_name:, kind:, source_path:, source_line:, return_type: nil, alias_of: nil)

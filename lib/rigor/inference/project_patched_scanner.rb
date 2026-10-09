@@ -85,31 +85,45 @@ module Rigor
       end
       private_class_method :duplicate_declaration_diagnostics
 
-      # Turns each {PendingAlias} into the entry it publishes, in source order across the files. An alias of a
-      # method the patch files define — by `def` anywhere in them, or by an alias earlier in that order — copies
-      # its return type, so `alias to_m to_modint` answers what `to_modint` does. An alias of any other name
-      # records that name as `alias_of`, for the dispatcher to answer with the class's existing method
-      # (`alias old_plus +` on Integer), or with `Dynamic[top]` when nothing knows the name: the alias is still
-      # published, since a call to it is not the undefined method a dropped entry would report.
+      # Turns each {PendingAlias} into the entry it publishes, walking the bindings in configuration-then-source
+      # order as Ruby runs them. An alias binds to the body its old name has WHEN IT RUNS, so only a `def` or alias
+      # earlier in that order may supply its return type: `alias to_m to_modint` after `def to_modint` answers what
+      # `to_modint` does, while `alias_method :orig_succ, :succ` ahead of a patch's `def succ` is the method
+      # Integer already had. An alias whose old name nothing earlier binds records that name as `alias_of`, for the
+      # dispatcher to answer with the class's existing method (`alias old_plus +` on Integer), or with
+      # `Dynamic[top]` when nothing knows the name: the alias is still published, since a call to it is not the
+      # undefined method a dropped entry would report.
+      #
+      # Within one file the later binding of a name replaces the earlier, as at runtime: the alias-method-chain
+      # idiom (`def foo`, `alias_method :foo_without_x, :foo`, `alias_method :foo, :foo_with_x`) leaves `foo` the
+      # alias. Bindings of one name in DIFFERENT files are what `pre-eval.duplicate-declaration` reports, and the
+      # registry keeps the first of those, as it always has for `def`s.
       def resolve_aliases(collected)
-        known = {}
-        collected.each do |item|
-          known[[item.class_name, item.method_name, item.kind]] ||= item if item.is_a?(ProjectPatchedMethods::Entry)
+        bound = {}
+        per_file = collected.group_by(&:source_path).values.map do |items|
+          final = {}
+          items.each do |item|
+            entry = item.is_a?(PendingAlias) ? alias_entry(item, bound) : item
+            key = [entry.class_name, entry.method_name, entry.kind]
+            bound[key] = entry
+            final.delete(key)
+            final[key] = entry
+          end
+          final.values
         end
-        collected.map do |item|
-          next item unless item.is_a?(PendingAlias)
-
-          target = known[[item.class_name, item.old_name, item.kind]]
-          entry = ProjectPatchedMethods::Entry.new(
-            class_name: item.class_name, method_name: item.new_name, kind: item.kind,
-            source_path: item.source_path, source_line: item.source_line,
-            return_type: target&.return_type, alias_of: target ? target.alias_of : item.old_name
-          )
-          known[[item.class_name, item.new_name, item.kind]] ||= entry
-          entry
-        end
+        per_file.flatten(1)
       end
       private_class_method :resolve_aliases
+
+      def alias_entry(item, bound)
+        target = bound[[item.class_name, item.old_name, item.kind]]
+        ProjectPatchedMethods::Entry.new(
+          class_name: item.class_name, method_name: item.new_name, kind: item.kind,
+          source_path: item.source_path, source_line: item.source_line,
+          return_type: target&.return_type, alias_of: target ? target.alias_of : item.old_name
+        )
+      end
+      private_class_method :alias_entry
 
       def scan_file(path, entries, diagnostics, buffer = nil, census = Set.new)
         physical = buffer ? buffer.resolve(path) : path

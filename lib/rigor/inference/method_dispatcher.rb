@@ -101,7 +101,7 @@ module Rigor
       # the tier commits the buffer only if it goes on to answer. See {#try_composite_receiver}.
       def resolve(receiver_type:, method_name:, arg_types:, # rubocop:disable Metrics/AbcSize, Metrics/MethodLength, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity, Metrics/ParameterLists
                   block_type: nil, environment: nil,
-                  call_node: nil, scope: nil, plugin_typed_sink: nil)
+                  call_node: nil, scope: nil, plugin_typed_sink: nil, skip_project_patched: false)
         return nil if receiver_type.nil?
 
         # Build the call context once and thread it — unchanged — through every tier
@@ -205,7 +205,10 @@ module Rigor
         # the pre-pass populated `ProjectPatchedMethods` with the `(class, method, kind)` triple;
         # this tier surfaces it as `Dynamic[top]` so the patched call resolves cross-file without
         # `call.undefined-method`.
-        patched_result = try_project_patched_method(receiver_type, method_name, arg_types, block_type, environment)
+        patched_result =
+          unless skip_project_patched
+            try_project_patched_method(receiver_type, method_name, arg_types, block_type, environment)
+          end
         if patched_result
           scope&.record_dynamic_origin(call_node, DynamicOrigin::EXTERNAL_GEM_WITHOUT_RBS)
           return patched_result
@@ -626,23 +629,22 @@ module Rigor
         return nil if entry.nil?
         return Type::Combinator.dynamic(entry.return_type) if entry.return_type
 
-        aliased = project_patched_alias_target(registry, entry, receiver_type, arg_types, block_type, environment)
+        aliased = project_patched_alias_target(entry, receiver_type, arg_types, block_type, environment)
         aliased ? Type::Combinator.dynamic(aliased) : Type::Combinator.untyped
       end
 
-      # Issue #1702 — an alias in a `pre_eval:` patch of a method the patch files do not define (`alias old_plus +`
-      # on Integer) answers what the original answers for the same arguments, behind the `Dynamic` every patched
-      # method carries. Only a name the registry lacks is resolved, so the re-entry cannot reach this tier again
-      # (an alias of an alias the scanner could not order, or of itself, stays `Dynamic[top]`). The re-entry
-      # carries no call node or scope: it answers a type and records nothing at the call site.
-      def project_patched_alias_target(registry, entry, receiver_type, arg_types, block_type, environment)
-        old_name = entry.alias_of
-        return nil if old_name.nil?
-        return nil if registry.lookup(class_name: entry.class_name, method_name: old_name, kind: entry.kind)
+      # Issue #1702 — an alias in a `pre_eval:` patch whose old name no earlier patch binding defines
+      # (`alias old_plus +` on Integer, or `alias_method :orig_succ, :succ` ahead of the patch's own `def succ`)
+      # names the method the class had before the patch, so it answers what that method answers for the same
+      # arguments, behind the `Dynamic` every patched method carries. The re-entry skips this tier: a later patch
+      # `def` of the old name is not the body the alias copied, and the skip is also what ends an alias cycle. It
+      # carries no call node or scope, so it answers a type and records nothing at the call site.
+      def project_patched_alias_target(entry, receiver_type, arg_types, block_type, environment)
+        return nil if entry.alias_of.nil?
 
         resolve(
-          receiver_type: receiver_type, method_name: old_name, arg_types: arg_types,
-          block_type: block_type, environment: environment
+          receiver_type: receiver_type, method_name: entry.alias_of, arg_types: arg_types,
+          block_type: block_type, environment: environment, skip_project_patched: true
         )
       end
 

@@ -542,11 +542,21 @@ RSpec.describe Rigor::Inference::MethodDispatcher do
         expect(result).to eq(Rigor::Type::Combinator.dynamic(integer))
       end
 
+      it "answers the pre-existing method, not a later patch def of the old name" do
+        patched_succ = Rigor::Inference::ProjectPatchedMethods::Entry.new(
+          class_name: "Integer", method_name: :succ, kind: :instance,
+          source_path: "lib/ext.rb", source_line: 2, return_type: Rigor::Type::Combinator.constant_of(nil)
+        )
+        result = dispatch_alias([alias_entry(:orig_succ, :succ), patched_succ], :orig_succ, [])
+
+        expect(result).to eq(Rigor::Type::Combinator.dynamic(integer))
+      end
+
       it "answers Dynamic[top] when nothing knows the old name" do
         expect(dispatch_alias([alias_entry(:ghost, :not_a_method)], :ghost, [])).to eq(Rigor::Type::Combinator.untyped)
       end
 
-      it "does not re-enter the tier for an old name the registry holds (an alias cycle terminates)" do
+      it "terminates on an alias cycle" do
         entries = [alias_entry(:a, :b), alias_entry(:b, :a)]
 
         expect(dispatch_alias(entries, :a, [])).to eq(Rigor::Type::Combinator.untyped)

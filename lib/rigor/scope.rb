@@ -66,8 +66,9 @@ module Rigor
 
     # Issue #1673 (ADR-121 WD1) — the in-effect refinements at `node`: the refining-module names whose refinements
     # Ruby applies there, ordered so a later activation comes later (the later one wins), each once at its first
-    # position, with every `using`'d module's includes ahead of it. `declared` is a block source's modules, appended
-    # on the same terms: a plugin-declared refined block's (#1667). An entry may be
+    # position, each `using`'d module expanded through its includes and prepends in CRuby's activation order.
+    # `declared` is a block source's modules, appended and expanded on the same terms: a plugin-declared refined
+    # block's (#1667). An entry may be
     # `Inference::InEffectRefinements::UNKNOWN`, which means any refinement may be in effect. A node another file
     # wrote (a callee body typed under this file's scope) answers `declared` alone. Reads include edges, so it records
     # the dependencies `Inference::InEffectRefinements.activated_modules` names; a consumer that asks for a method

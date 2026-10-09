@@ -17,12 +17,14 @@ module Rigor
           declared.empty? ? EMPTY : declared.uniq.freeze
         end
 
-        # Issue #1671 — the modules whose refinements `using name` puts in effect, in activation order: every
-        # project module on `name`'s instance-side `Scope::ResolutionChain` (what a module includes and prepends,
-        # transitively) deepest first, then `name`, so the includer wins. CRuby's `using_module_recursive` walks
-        # the superclass chain to its end before the module itself. Nil, read as "any module may be in effect",
-        # when the chain may hold a module it does not list: it was cut at its limit, or a module on it records a
-        # mixin the tables cannot name.
+        # Issue #1671 — the modules whose refinements `using name` puts in effect, in activation order: the project
+        # modules on `name`'s instance-side `Scope::ResolutionChain` (what a module includes and prepends,
+        # transitively) in reverse ancestor order, each at its first position, so the module's own refinements
+        # follow its includes and a module it prepends follows it and wins. CRuby's `using_module_recursive` walks
+        # `RCLASS_SUPER` to its end before each link, and a prepended module sits above the module's origin. `name`
+        # itself goes last when the chain does not list it. Nil, read as "any module may be in effect", when the
+        # chain may hold a module it does not list: it was cut at its limit, or a module on it records a mixin the
+        # tables cannot name.
         #
         # ADR-46 — the answer reads include edges declared in other files, so it depends on every file that
         # declares a module on the chain, and on the existence of each one's name: a new file reopening `name`, or
@@ -33,10 +35,8 @@ module Rigor
           record_chain(scope, name, chain) if Analysis::DependencyRecorder.active?
           return nil if chain.truncated? || chain.wildcard_mixin?
 
-          modules = chain.entries.reverse_each.filter_map do |entry|
-            entry.name unless entry.external? || entry.name == name
-          end
-          modules << name
+          modules = chain.entries.reverse_each.filter_map { |entry| entry.name unless entry.external? }.uniq
+          modules.include?(name) ? modules : modules << name
         end
 
         # Issue #1120 — every module that refines `method_name` into `class_name` or one of its ancestors (a

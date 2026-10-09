@@ -11,9 +11,9 @@ module Rigor
       # Issue #1120 — the two ways one file makes a method callable at some sites and not at others, which
       # `call.undefined-method` has to ask the file's syntax about because no project-wide table can answer:
       #
-      # - **Refinements.** Issue #1673 — answered by the file's in-effect refinements ({#refinements}, an
-      #   {Inference::InEffectRefinements}), the ordered list the typer reads too; the rules ask it for derived
-      #   answers (`refinement_active?`, `any_at?`, `refinement_def?`).
+      # - **Refinements.** Issue #1673 — answered by the file's in-effect refinements ({#refinements}, the
+      #   {Inference::InEffectRefinements} the typer reads too); the rules ask it for derived answers
+      #   (`refinement_active?`, `any_at?`, `refinement_def?`).
       # - **Singleton defs on locals.** `def o.m` defines `m` on the one object `o` holds. The local's type
       #   is not changed; `o.m` is simply not reported within the scope the `def` is written in (the
       #   enclosing `def`, `class` / `module` body, or file — a block shares its enclosing scope's locals).
@@ -23,13 +23,15 @@ module Rigor
       class LexicalMethodSites
         # Issue #1703 — the file's root, which `call.possible-nil-receiver` re-walks for a `key?` guard.
         attr_reader :root
-        attr_reader :refinements
-
-        def initialize(root)
+        # `refinements` is the query `Inference::ScopeIndexer` stamped on the file's discovery index, so the rules and
+        # the typer share one walk; a query over another tree, or none, builds this file's own on the first ask.
+        def initialize(root, refinements = nil)
           @root = root
           @built = false
-          @refinements = Inference::InEffectRefinements.new(root)
+          @refinements = refinements if refinements&.over?(root)
         end
+
+        def refinements = (@refinements ||= Inference::InEffectRefinements.new(@root))
 
         # Does a `def <local>.<name>` for this call's local receiver and method name sit in the scope the call
         # is in?

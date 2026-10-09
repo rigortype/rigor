@@ -189,7 +189,7 @@ module Rigor
       # diagnostics carry it (ADR-53 B3c hosts it on the same walk).
       def build_node_collectors(path, scope_index, root = nil)
         eval_ranges = receiver_eval_block_ranges(root)
-        lexical_sites = LexicalMethodSites.new(root)
+        lexical_sites = LexicalMethodSites.new(root, stamped_refinements(scope_index, root))
         main_pass = ->(node) { main_pass_node_diagnostics(path, node, scope_index, eval_ranges, lexical_sites) }
         {
           main_pass: MainPassCollector.new(main_pass),
@@ -263,6 +263,14 @@ module Rigor
         collector.class.new(scope_index).collect(root)
       end
 
+      # Issue #1673 — the in-effect refinements `Inference::ScopeIndexer` stamped for `root`, read off the root's scope
+      # so the rules answer from the query the typer reads; nil where the index holds no scope for it.
+      def stamped_refinements(scope_index, root)
+        return nil if root.nil? || scope_index.nil?
+
+        scope_index[root]&.discovery&.in_effect_refinements
+      end
+
       # The former inline main pass, kept as the shadow oracle: walks the
       # tree with `Source::NodeWalker.each` and accumulates the same
       # per-node diagnostics in the same order {MainPassCollector} now
@@ -270,7 +278,7 @@ module Rigor
       def main_pass_oracle(path, root, scope_index)
         diagnostics = []
         eval_ranges = receiver_eval_block_ranges(root)
-        lexical_sites = LexicalMethodSites.new(root)
+        lexical_sites = LexicalMethodSites.new(root, stamped_refinements(scope_index, root))
         Source::NodeWalker.each(root) do |node|
           diagnostics.concat(main_pass_node_diagnostics(path, node, scope_index, eval_ranges, lexical_sites))
         end

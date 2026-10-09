@@ -373,6 +373,7 @@ members:
     copies: []
   in_effect_refinements:
     reads:
+    - lib/rigor/analysis/check_rules.rb
     - lib/rigor/inference/in_effect_refinements/scope_reads.rb
     copies: []
   possible_discovered_methods:

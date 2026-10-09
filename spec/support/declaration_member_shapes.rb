@@ -24,12 +24,12 @@ module DeclarationMemberShapes
   VISIBILITIES = %i[public private protected].freeze
   SITE = /:\d+\z/
   TABLES_AND_FACTS = [Hash, Set, Array, TrueClass, FalseClass].freeze
-  # The two members the fixture cannot fill, and why.
   # The syntactic members whose value is a lazy per-file query over the file's tree rather than a table.
   PER_FILE_QUERIES = {
     implicit_self_evidence: Rigor::Inference::LastLine::SelfEvidence,
     in_effect_refinements: Rigor::Inference::InEffectRefinements
   }.freeze
+  # The two members the fixture cannot fill, and why.
   UNFILLED = {
     param_inferred_types: "only `coverage --protection`'s collection pass fills it"
   }.freeze

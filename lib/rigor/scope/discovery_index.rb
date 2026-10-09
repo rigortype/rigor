@@ -420,9 +420,9 @@ module Rigor
         # indexed, declines every such reader.
         implicit_self_evidence: nil,
         # Issue #1673 (ADR-121 WD1) — the file's in-effect refinements (`Inference::InEffectRefinements`, walked on the
-        # first ask), which `Scope#in_effect_refinements` reads for the typer. The check rules build their own over the
-        # same tree, so both answer from one rule set. Filled by `Inference::ScopeIndexer.index` from the file's own
-        # tree only; nil, where no file was indexed, answers no lexical refinement.
+        # first ask), which `Scope#in_effect_refinements` reads for the typer and the check rules read off the root's
+        # scope. Filled by `Inference::ScopeIndexer.index` from the file's own tree only; nil, where no file was
+        # indexed, answers no lexical refinement.
         in_effect_refinements: nil,
         # ADR-119 WD1 — the siblings of the members {SIBLINGS} pairs, empty until a producer admits a possible fact.
         possible_discovered_methods: EMPTY_TABLE,

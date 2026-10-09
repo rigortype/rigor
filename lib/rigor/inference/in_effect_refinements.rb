@@ -11,8 +11,8 @@ module Rigor
     # ADR-121 WD1 (issue #1673) — the in-effect refinements of one file: at each program point, the ORDERED list of
     # refining modules whose refinements Ruby applies there (`CONTEXT.md` § in-effect refinements). A later entry
     # wins over an earlier one. The check rules ({Analysis::CheckRules::LexicalMethodSites}) and the typer
-    # ({Scope#in_effect_refinements}) both read this one object, so a call cannot be silenced as refined and typed
-    # as unrefined.
+    # ({Scope#in_effect_refinements}) both read the one `Inference::ScopeIndexer` stamps for the file, so a call
+    # cannot be silenced as refined and typed as unrefined.
     #
     # The list is built from activations, each in effect over a span of the file and placed by its activation
     # offset:
@@ -20,20 +20,21 @@ module Rigor
     # - **Lexical `using M`**, from the end of the call to the end of the body that holds it: the file's top level
     #   or a `class` / `module` / `class << …` body, including everything nested in it. An outer body's `using`s
     #   precede an inner body's, and a body's own `using`s keep their textual order. A `using` inside a `def`
-    #   raises in Ruby and activates nothing. `M` is resolved lexically, and each name its spelling can denote
-    #   sits at the `using`'s position, innermost first. The caller's expansion block puts `M`'s included modules
-    #   ahead of `M` (issue #1671), so the includer wins.
+    #   raises in Ruby and activates nothing. `M` is resolved lexically: each name its spelling can denote sits at
+    #   the `using`'s position, innermost LAST, so where several are declared the one Ruby's lookup finds wins.
+    #   The caller's expansion block puts `M`'s included modules ahead of `M` and its prepended modules after it
+    #   (issue #1671), as CRuby activates them.
     # - **A `refine X do … end` block**, over the block: its own refining module, after the enclosing `using`s.
     #   The module is named where the block's `self` is: the innermost `module` / `class` body, or the constant a
     #   `M = Module.new do … end` write names. Anywhere else (another block, a `def`, `class << …`, the top
     #   level) the module is not named, and the block contributes {UNKNOWN}.
-    # - **A `using` whose argument is not a constant** (`using Module.new { … }`, or a path on a computed base,
-    #   `using mod::Refinements`) names no module. It contributes {UNKNOWN} throughout its file, which is broader
-    #   than Ruby's scoping and the declining direction.
+    # - **A `using` whose argument is not a constant** (`using Module.new { … }`) names no module. It contributes
+    #   {UNKNOWN} throughout its file, which is broader than Ruby's scoping and the declining direction.
     # - **Block sources** (ADR-121 WD1's third and fourth): a `Proc#refined` literal (#1666) records an activation
     #   over the literal's body through {#record_block_activation}, which nothing calls yet; a plugin-declared
     #   refined block (#1667) is typing-time knowledge, so its declared modules arrive as the `declared` argument
-    #   of {#at} and {#for_node} and are appended after the block site's lexical list.
+    #   of {#at} and {#for_node} and are appended after the block site's lexical list. Both expand through
+    #   includes as a `using` does.
     #
     # Activating a module that is already listed changes nothing: it keeps its first position
     # (`rb_using_refinement` returns early, CRuby `eval.c`; `using A; using B; using A` answers B's method).
@@ -59,13 +60,12 @@ module Rigor
       def initialize(root)
         @root = root
         @built = false
-        @members = nil
       end
 
       # The in-effect refinements at `offset` of this file, ordered so a later activation comes later, each module
       # once at its first position, then `declared` (a block source's modules) on the same terms. The block, when
-      # given, answers the modules `using name` puts in effect, `name` last and its included modules ahead of it,
-      # or nil when it cannot tell, which contributes {UNKNOWN}; without it a `using` contributes its own name.
+      # given, answers the modules `using name` puts in effect, in CRuby's activation order, or nil when it cannot
+      # tell, which contributes {UNKNOWN}; without it a `using` contributes its own name.
       # The caller vouches that `offset` is in this file; {#for_node} checks.
       def at(offset, declared = EMPTY, &expand)
         build
@@ -73,15 +73,14 @@ module Rigor
         @activations.each do |activation|
           append_activation(list, activation, expand) if activation.covers?(offset)
         end
-        declared.each { |name| list << name unless list.include?(name) }
+        declared.each { |name| append_expanded(list, name, expand) }
         list.empty? ? EMPTY : list.freeze
       end
 
       # {#at} for a node, or only `declared` when `node` is not this file's: a callee body another file wrote,
       # typed under this file's scope, finds no lexical refinement here. Its own file's are not consulted.
       def for_node(node, declared = EMPTY, &)
-        build
-        return at(EMPTY_OFFSET, declared) unless member?(node)
+        return at(EMPTY_OFFSET, declared, &) unless member?(node)
 
         at(node.location.start_offset, declared, &)
       end
@@ -96,6 +95,9 @@ module Rigor
 
         at(offset, &).any? { |name| name == UNKNOWN || modules.include?(name) }
       end
+
+      # Is this the query over `root`'s tree?
+      def over?(root) = @root.equal?(root)
 
       # Issue #1367 — is any refinement in effect at `offset`?
       def any_at?(offset) = !at(offset).empty?
@@ -119,40 +121,24 @@ module Rigor
           return
         end
 
-        names.each do |name|
-          expanded = activation.expand && expand ? expand.call(name) : [name]
-          if expanded.nil?
-            list << UNKNOWN unless list.include?(UNKNOWN)
-          else
-            expanded.each { |entry| list << entry unless list.include?(entry) }
-          end
+        # A spelling's candidates are alternatives, innermost first; Ruby's lexical lookup finds the innermost one
+        # that exists, so it goes last and wins where several are declared.
+        names.reverse_each { |name| append_expanded(list, name, activation.expand && expand) }
+      end
+
+      def append_expanded(list, name, expand)
+        expanded = expand ? expand.call(name) : [name]
+        if expanded.nil?
+          list << UNKNOWN unless list.include?(UNKNOWN)
+        else
+          expanded.each { |entry| list << entry unless list.include?(entry) }
         end
       end
 
-      # Is `node` one this file's tree holds? Only nodes inside some activation can answer anything, so only those
-      # are collected, by identity, on the first ask.
+      # Is `node` one this file's parse holds? Prism gives every node of one parse the same `Prism::Source`, so a
+      # node another file's parse made answers false in O(1); a node synthesised over this parse's source counts.
       def member?(node)
-        return false if @activations.empty?
-
-        @members ||= collect_members
-        @members.include?(node)
-      end
-
-      def collect_members
-        members = Set.new.compare_by_identity
-        collect_members_in(@root, members)
-        members.freeze
-      end
-
-      def collect_members_in(node, members)
-        location = node.location
-        inside = @activations.any? do |activation|
-          location.end_offset > activation.start && location.start_offset < activation.stop
-        end
-        return unless inside
-
-        members << node
-        node.rigor_each_child { |child| collect_members_in(child, members) }
+        node.send(:source).equal?(@root.send(:source))
       end
 
       def build
@@ -204,7 +190,7 @@ module Rigor
       # for `M`. The write's other parts walk as they would anyway.
       def walked_meta_new_write?(node, prefix, body, in_def, owner)
         call = ScopeIndexer.meta_new_block_call(node)
-        return false if call.nil?
+        return false if call.nil? || !ScopeIndexer.module_new_call?(call)
 
         named = meta_new_owner(node, prefix)
         walk(call.receiver, prefix, body, in_def, owner) if call.receiver

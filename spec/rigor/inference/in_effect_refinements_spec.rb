@@ -56,11 +56,11 @@ RSpec.describe Rigor::Inference::InEffectRefinements do
       RUBY
 
       expect(refinements.at(":before")).to be_empty
-      expect(refinements.at(":inside")).to eq(%w[Box::Inner Inner])
+      expect(refinements.at(":inside")).to eq(%w[Inner Box::Inner])
       expect(refinements.at(":after")).to be_empty
     end
 
-    it "appends a nested class body's `using`s to the file's list, each spelling's candidates innermost first" do
+    it "appends a nested class body's `using`s to the file's list, each spelling's candidates innermost last" do
       refinements = query(<<~RUBY)
         using A
         class Box
@@ -70,7 +70,7 @@ RSpec.describe Rigor::Inference::InEffectRefinements do
         :outside
       RUBY
 
-      expect(refinements.at(":inside")).to eq(%w[A Box::B B])
+      expect(refinements.at(":inside")).to eq(%w[A B Box::B])
       expect(refinements.at(":outside")).to eq(%w[A])
     end
 
@@ -133,11 +133,15 @@ RSpec.describe Rigor::Inference::InEffectRefinements do
           [1].each do
             refine(String) { :blocked }
           end
+          Shape = Struct.new(:a) do
+            refine(String) { :struct }
+          end
         end
       RUBY
 
       expect(refinements.at(":named")).to eq(%w[Outer::Named])
       expect(refinements.at(":blocked")).to eq([unknown])
+      expect(refinements.at(":struct")).to eq([unknown])
     end
 
     it "records the defs the body defines on the refined class" do
@@ -238,6 +242,43 @@ RSpec.describe Rigor::Inference::InEffectRefinements do
 
       expect(index[call].in_effect_refinements(call)).to eq(%w[Mixin Outer])
       expect(Rigor::Scope.empty.in_effect_refinements(call)).to be_empty
+    end
+
+    # Ruby 4.0.5 prints `:Pre`: a prepended module is activated after the module that prepends it.
+    it "activates a `using`'d module's prepended modules after it, so the prepended one wins" do
+      source = <<~RUBY
+        module Inc1; refine(String) { def w = :Inc1 }; end
+        module Pre; refine(String) { def w = :Pre }; end
+        module Top
+          include Inc1
+          prepend Pre
+          refine(String) { def w = :Top }
+        end
+        using Top
+        "x".w
+      RUBY
+      root = Prism.parse(source).value
+      index = Rigor::Inference::ScopeIndexer.index(root, default_scope: Rigor::Scope.empty)
+      call = root.statements.body.last
+
+      expect(index[call].in_effect_refinements(call)).to eq(%w[Inc1 Top Pre])
+    end
+
+    # Ruby 4.0.5 prints `:box`: the lexical lookup finds `Box::Inner` before the top-level `Inner`.
+    it "lets the innermost spelling of a `using`'s constant win" do
+      source = <<~RUBY
+        module Inner; refine(String) { def w = :top }; end
+        class Box
+          module Inner; refine(String) { def w = :box }; end
+          using Inner
+          "x".w
+        end
+      RUBY
+      root = Prism.parse(source).value
+      index = Rigor::Inference::ScopeIndexer.index(root, default_scope: Rigor::Scope.empty)
+      call = root.statements.body.last.body.body.last
+
+      expect(index[call].in_effect_refinements(call).last).to eq("Box::Inner")
     end
   end
 end

@@ -275,6 +275,145 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
     end
   end
 
+  # Issue #1671 — `using C` also activates the refinements of every module `C` includes, transitively (CRuby
+  # `doc/syntax/refinements.rdoc` § "Refinement inheritance by Module#include").
+  describe "a refinement inherited through `include`" do
+    it "is in effect after `using` of a module that includes the refining module" do
+      write("lib/inherit.rb", <<~RUBY)
+        module A
+          refine(String) { def shout = upcase + "!" }
+        end
+
+        module C
+          include A
+        end
+
+        using C
+        "hi".shout
+        "hi".whisper
+      RUBY
+
+      expect(undefined_rows).to eq([["inherit.rb", 11, "whisper"]])
+    end
+
+    it "is not in effect when the `using`'d module does not include the refining module" do
+      write("lib/inherit.rb", <<~RUBY)
+        module A
+          refine(String) { def shout = upcase + "!" }
+        end
+
+        module C
+        end
+
+        using C
+        "hi".shout
+      RUBY
+
+      expect(undefined_rows).to eq([["inherit.rb", 9, "shout"]])
+    end
+
+    it "follows a two-level include, with the edges declared in other files" do
+      write("lib/a.rb", "module A\n  refine(String) { def shout = upcase + \"!\" }\nend\n")
+      write("lib/b.rb", "module B\n  include A\nend\n")
+      write("lib/c.rb", "module C\n  include B\nend\n")
+      write("lib/use.rb", "using C\n\"hi\".shout\n")
+      write("lib/other.rb", "using B\n\"hi\".shout\nusing Comparable\n")
+
+      expect(undefined_rows).to eq([])
+    end
+
+    it "does not reach a module that includes the `using`'d one" do
+      write("lib/inherit.rb", <<~RUBY)
+        module C
+        end
+
+        module A
+          include C
+          refine(String) { def shout = upcase + "!" }
+        end
+
+        using C
+        "hi".shout
+      RUBY
+
+      expect(undefined_rows).to eq([["inherit.rb", 10, "shout"]])
+    end
+
+    # The answer reads an include edge declared in another file, so editing that edge must reach the `using`
+    # file on a warm run.
+    describe "when the include edge is edited between runs" do
+      let(:shout_fires) { [["use.rb", 2, "shout"]] }
+
+      def write_project(include_line)
+        write("lib/a.rb", "module A\n  refine(String) { def shout = upcase }\nend\n")
+        write("lib/c.rb", "module C\n#{include_line}end\n")
+        write("lib/use.rb", "using C\n\"a\".shout\n")
+      end
+
+      def cached_rows
+        undefined_rows(cache_store: Rigor::Cache::Store.new(root: File.join(Dir.pwd, ".rigor", "cache")))
+      end
+
+      def incremental_rows(paths)
+        root = File.join(Dir.pwd, ".rigor", "cache")
+        snapshot = Rigor::Cache::IncrementalSnapshot.new(root: root)
+        fingerprint = Rigor::Cache::IncrementalSnapshot.fingerprint(configuration: configuration, roots: paths)
+        session = Rigor::Analysis::IncrementalSession.new(
+          configuration: configuration, paths: paths, cache_store: Rigor::Cache::Store.new(root: root)
+        )
+        found, warm = guarded_run_incremental(session, snapshot: snapshot, fingerprint: fingerprint)
+        rows = found.select { |d| d.qualified_rule == "call.undefined-method" }
+                    .map { |d| [File.basename(d.path.to_s), d.line, d.method_name.to_s] }.sort
+        [rows, warm]
+      end
+
+      it "answers on a cached run as a cold run does" do
+        write_project("")
+        expect(cached_rows).to eq(shout_fires)
+
+        write_project("  include A\n")
+        expect(cached_rows).to eq([])
+        expect(undefined_rows).to eq([])
+
+        write_project("")
+        expect(cached_rows).to eq(shout_fires)
+        expect(undefined_rows).to eq(shout_fires)
+      end
+
+      it "re-checks the `using` file under --incremental when the include appears and then goes" do
+        paths = %w[lib/a.rb lib/c.rb lib/use.rb]
+        write_project("")
+        expect(incremental_rows(paths)).to eq([shout_fires, false])
+
+        write_project("  include A\n")
+        expect(incremental_rows(paths)).to eq([[], true])
+
+        write_project("")
+        expect(incremental_rows(paths)).to eq([shout_fires, true])
+      end
+
+      it "re-checks the `using` file under --incremental when a new file reopens the module to include" do
+        write_project("")
+        expect(incremental_rows(%w[lib])).to eq([shout_fires, false])
+
+        write("lib/c_ext.rb", "module C\n  include A\nend\n")
+        expect(incremental_rows(%w[lib])).to eq([[], true])
+        expect(undefined_rows).to eq([])
+      end
+
+      # `use.rb` names `C` and not `B`, so only the chain's own edges can tie it to a file reopening `B`.
+      it "re-checks the `using` file under --incremental when a new file gives an included module the include" do
+        write_project("  include B\n")
+        write("lib/b.rb", "module B\nend\n")
+        expect(incremental_rows(%w[lib])).to eq([shout_fires, false])
+
+        write("lib/b_ext.rb", "module B\n  include A\nend\n")
+        expect(incremental_rows(%w[lib])).to eq([[], true])
+        expect(undefined_rows).to eq([])
+      end
+    end
+  end
+
   describe "a singleton def on a local" do
     it "declines for that local's method in the same scope and nowhere else" do
       write("lib/locals.rb", <<~RUBY)

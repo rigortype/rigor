@@ -22,6 +22,14 @@ module Rigor
           arg_types[0...-1]
         end
 
+        # {.positional} for the selector's `shared` bundle, computed once per selection: every overload that takes the
+        # keyword hash reads the same trimmed list. A bundle rebuilt with other arguments must reset the cache.
+        def selection_positional(method_type, shared)
+          return shared[:arg_types] unless shared[:keywords_last] && declares?(method_type.type)
+
+          shared[:positional_arguments] ||= positional(method_type, shared[:arg_types], true)
+        end
+
         def declares?(fun)
           return false unless fun.respond_to?(:required_keywords)
 

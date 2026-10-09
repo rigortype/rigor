@@ -202,7 +202,8 @@ module Rigor
             stand_ins = ImpreciseArgument.untyped_stand_ins(shared[:arg_types])
             return matches if stand_ins.nil?
 
-            (matches + find_matching_overload(overloads, shared.merge(arg_types: stand_ins), strict: false)).uniq
+            stand_in_shared = shared.merge(arg_types: stand_ins, positional_arguments: nil)
+            (matches + find_matching_overload(overloads, stand_in_shared, strict: false)).uniq
           end
 
           # Pass 0. With every argument a plain value (a `Constant`, or a `Nominal` with no type arguments), the
@@ -271,14 +272,13 @@ module Rigor
             # Dynamic arg pinned `Array#*(string) -> String` purely by declaration order.
             return nil if shared[:arg_types].any? { |t| ImpreciseArgument.imprecise?(t) }
 
-            block_required = shared[:block_required]
             overloads.find do |method_type|
-              next false unless engages_block_shape?(method_type, block_required)
+              next false unless engages_block_shape?(method_type, shared[:block_required])
 
               fun = method_type.type
               next false unless keywords_accepted?(fun, shared, false)
 
-              arg_types = KeywordArguments.positional(method_type, shared[:arg_types], shared[:keywords_last])
+              arg_types = KeywordArguments.selection_positional(method_type, shared)
               next false unless arity_compatible?(fun, arg_types.size)
 
               params = positional_params_for(fun, arg_types.size)
@@ -334,7 +334,7 @@ module Rigor
           # translator's current shape — those gradually accept any arg, so an overload that includes one
           # would beat strictly-typed alternatives in pass 2 of the selector.
           def strictly_typed_params?(method_type, shared)
-            actual_count = KeywordArguments.positional(method_type, shared[:arg_types], shared[:keywords_last]).size
+            actual_count = KeywordArguments.selection_positional(method_type, shared).size
             fun = method_type.type
             # A `(?)` method type declares no params at all: it is the gradual case by construction, so it
             # must never win the strict pass over a genuinely typed sibling overload.
@@ -374,7 +374,7 @@ module Rigor
             fun = method_type.type
             return false unless keywords_accepted?(fun, shared, strict)
 
-            arg_types = KeywordArguments.positional(method_type, shared[:arg_types], shared[:keywords_last])
+            arg_types = KeywordArguments.selection_positional(method_type, shared)
             return false unless arity_compatible?(fun, arg_types.size)
 
             params = positional_params_for(fun, arg_types.size)

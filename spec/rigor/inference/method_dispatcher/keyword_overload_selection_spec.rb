@@ -24,6 +24,7 @@ RSpec.describe "Keyword arguments in overload selection (#1727)", type: :runner 
                 | (String) -> String
         def positional_hash: (Hash[Symbol, Integer] options) -> Integer
                            | () -> String
+        def either: [T] (?default: T) { () -> T } -> T
       end
     RBS
   end
@@ -84,6 +85,15 @@ RSpec.describe "Keyword arguments in overload selection (#1727)", type: :runner 
   it "passes keywords to an overload that declares none as a positional Hash" do
     expect(dumped_types(<<~RUBY)).to eq(%w[Integer])
       dump_type(p.positional_hash(a: 1))
+    RUBY
+  end
+
+  # The keyword hash is an argument that reaches the block's variable through a keyword parameter, so the variable
+  # does not bind to the block's type alone: `either(default: 1) { "s" }` may return `1`.
+  it "lets a keyword argument reach a block-return variable" do
+    expect(dumped_types(<<~RUBY)).to eq(["Dynamic[top]", %("s")])
+      dump_type(p.either(default: 1) { "s" })
+      dump_type(p.either { "s" })
     RUBY
   end
 

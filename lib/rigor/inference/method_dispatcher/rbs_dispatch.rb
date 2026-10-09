@@ -1096,8 +1096,8 @@ module Rigor
             returns = candidates.map do |method_type|
               # An overload that takes the keyword hash as its keywords binds no positional parameter to it.
               positional = KeywordArguments.positional(method_type, args, keywords_last)
-              full_type_vars = compose_type_vars(method_type, type_vars, positional, block_type, scope, call_node,
-                                                 call_site)
+              full_type_vars = compose_type_vars(method_type, type_vars, args, positional, block_type, scope,
+                                                 call_node, call_site)
               returned = RbsTypeTranslator.translate(
                 method_type.type.return_type,
                 self_type: self_type,
@@ -1118,11 +1118,17 @@ module Rigor
             Type::Combinator.dynamic(Type::Combinator.union(*distinct))
           end
 
-          def compose_type_vars(method_type, type_vars, args, block_type, scope, call_node, call_site)
+          # `positional` is `args` less a keyword hash the overload takes as its keywords (#1727). The block-return
+          # rule reads every argument, the keyword hash included: a keyword parameter naming the block's variable
+          # (`[T] (?default: T) { () -> T } -> T`) is an argument reaching it. The positional binding reads only the
+          # arguments that land in positional parameters.
+          # rubocop:disable Metrics/ParameterLists
+          def compose_type_vars(method_type, type_vars, args, positional, block_type, scope, call_node, call_site)
+            # rubocop:enable Metrics/ParameterLists
             vars = compose_block_type_vars(method_type, type_vars, block_type, args,
                                            scope: scope, call_node: call_node, call_site: call_site)
-            compose_arg_type_vars(method_type, vars, args, scope: scope, call_node: call_node,
-                                                           call_site: call_site)
+            compose_arg_type_vars(method_type, vars, positional, scope: scope, call_node: call_node,
+                                                                 call_site: call_site)
           end
 
           # Whether the overload is one `Enumerable` declares for `sum`, whose declared return the tier reads
@@ -1288,7 +1294,8 @@ module Rigor
           # Whether an argument the call passes may land in a parameter whose type names `name`, anywhere
           # inside it (`hash[_Key, K2]` names `K2`). The argument count is not matched against the
           # parameter list: a `*splat` argument stands for any number of arguments, and keyword arguments
-          # arrive as one more entry in `args`, so any argument counts as reaching every parameter.
+          # arrive as one more entry in `args` (untrimmed, #1727), so any argument counts as reaching every
+          # parameter.
           def argument_reaches_variable?(method_type, name, args)
             return false if args.empty?
 

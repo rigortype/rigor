@@ -304,7 +304,7 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
       RUBY
     end
 
-    it "declines the argument-type and arity checks where it is in effect, and nowhere else" do
+    it "declines the argument-type and arity checks after the `using`, for the refined names only" do
       write("lib/use.rb", <<~RUBY)
         :before[:age]
         1.succ(2)
@@ -313,6 +313,17 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
         1.succ(2)
         1.gcd(:x)
       RUBY
+
+      expect(call_rows).to eq(
+        [
+          ["use.rb", 1, "call.argument-type-mismatch"],
+          ["use.rb", 2, "call.wrong-arity"],
+          ["use.rb", 6, "call.argument-type-mismatch"]
+        ]
+      )
+    end
+
+    it "keeps checking a file with no `using`, or a `using` of a module refining other names" do
       write("lib/plain.rb", <<~RUBY)
         :authors[:age]
         1.succ(2)
@@ -326,10 +337,7 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
         [
           ["plain.rb", 1, "call.argument-type-mismatch"],
           ["plain.rb", 2, "call.wrong-arity"],
-          ["unrelated.rb", 2, "call.argument-type-mismatch"],
-          ["use.rb", 1, "call.argument-type-mismatch"],
-          ["use.rb", 2, "call.wrong-arity"],
-          ["use.rb", 6, "call.argument-type-mismatch"]
+          ["unrelated.rb", 2, "call.argument-type-mismatch"]
         ]
       )
     end

@@ -1629,12 +1629,18 @@ module Rigor
             source_arity&.settle_by_definitions
             return nil
           end
-          # Issue #992 — a source envelope's remaining declines can only withhold, so they run only now.
-          source_arity&.settle_by_walk
-          return nil if source_arity && !source_arity.authoritative?(class_name)
-          return nil if refinement_in_effect?(class_name, call_node, scope, kind, lexical_sites)
+          return nil if arity_report_withheld?(source_arity, class_name, call_node, scope, kind, lexical_sites)
 
           build_arity_diagnostic(path, call_node, class_name, min, max, actual)
+        end
+
+        # The declines `call.wrong-arity` asks only once the arity is out of the envelope.
+        def arity_report_withheld?(source_arity, class_name, call_node, scope, kind, lexical_sites)
+          # Issue #992 — a source envelope's remaining declines can only withhold, so they run only now.
+          source_arity&.settle_by_walk
+          return true if source_arity && !source_arity.authoritative?(class_name)
+
+          refinement_in_effect?(class_name, call_node, scope, kind, lexical_sites)
         end
 
         # The `[min, max]` the call is checked against — a declared signature's, or (issue #992) the project
@@ -2953,12 +2959,17 @@ module Rigor
           param_overrides = Rigor::RbsExtended.param_type_override_map(method_def, environment: scope.environment)
           mismatch = argument_mismatch(method_def.method_types, call_node, scope, param_overrides, scope_index)
           return nil if mismatch.nil?
-          return nil if inferred_param_mismatch_verdict?(call_node, mismatch, scope)
-
-          kind = receiver_type.is_a?(Type::Singleton) ? :singleton : :instance
-          return nil if refinement_in_effect?(class_name, call_node, scope, kind, lexical_sites)
+          return nil if argument_report_withheld?(receiver_type, class_name, call_node, mismatch, scope, lexical_sites)
 
           build_argument_type_diagnostic(path, call_node, class_name, mismatch)
+        end
+
+        # The declines `call.argument-type-mismatch` asks only once an argument mismatches.
+        def argument_report_withheld?(receiver_type, class_name, call_node, mismatch, scope, lexical_sites)
+          return true if inferred_param_mismatch_verdict?(call_node, mismatch, scope)
+
+          kind = receiver_type.is_a?(Type::Singleton) ? :singleton : :instance
+          refinement_in_effect?(class_name, call_node, scope, kind, lexical_sites)
         end
 
         # ADR-67 WD6b — an argument-type-mismatch verdict resting on an open-call-site lower bound, on

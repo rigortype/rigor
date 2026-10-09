@@ -1,0 +1,1 @@
+- **[engine]** `def.ivar-write-mismatch` no longer fires on writes to an instance variable whose type the class or module RBS declares (`@key: Symbol | true`); the declaration, not the first write, is the slot's type. ([#1662](https://github.com/rigortype/rigor/pull/1662))

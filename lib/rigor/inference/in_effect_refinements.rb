@@ -4,6 +4,7 @@ require "prism"
 
 require_relative "../source/constant_path"
 require_relative "../source/node_children"
+require_relative "in_effect_refinements/proc_literals"
 require_relative "in_effect_refinements/scope_reads"
 
 module Rigor
@@ -235,7 +236,7 @@ module Rigor
           @chained_refined_calls << receiver.location.start_offset
           receiver = receiver.receiver
         end
-        literal = refinable_proc_literal(receiver)
+        literal = ProcLiterals.refinable(receiver)
         return if literal.nil?
 
         chain.reverse_each do |call|
@@ -243,32 +244,6 @@ module Rigor
             record_block_activation(literal, refined_argument_candidates(argument, prefix))
           end
         end
-      end
-
-      # The node whose span is the body a Proc literal's `.refined` applies to: a lambda literal, or the literal block
-      # of a bare `proc` / `lambda` call or of `Proc.new`. A Proc held in a variable, or one passed as `&blk`, is not
-      # one: which block it holds is not syntax.
-      def refinable_proc_literal(node)
-        case node
-        when Prism::LambdaNode then node
-        when Prism::CallNode
-          block = node.block
-          return nil unless block.is_a?(Prism::BlockNode)
-
-          block if bare_proc_call?(node) || proc_new_call?(node)
-        end
-      end
-
-      def bare_proc_call?(node)
-        node.receiver.nil? && (node.name == :proc || node.name == :lambda)
-      end
-
-      def proc_new_call?(node)
-        receiver = node.receiver
-        node.name == :new &&
-          (receiver.is_a?(Prism::ConstantReadNode) ||
-            (receiver.is_a?(Prism::ConstantPathNode) && receiver.parent.nil?)) &&
-          receiver.name == :Proc
       end
 
       # A constant argument's lexical candidates, or nil ({UNKNOWN}) for any other argument: a local, a splat, a call.

@@ -21,8 +21,8 @@
 # Proc's own signature.
 #
 # Not modelled: `refined` raises `ArgumentError` on a Proc not backed by a
-# Ruby block (`:sym.to_proc`, `method(:m).to_proc`) and for a non-Module
-# argument the `*Module` parameter does not already reject.
+# Ruby block (`:sym.to_proc`, `method(:m).to_proc`), and `TypeError` for a
+# Class argument (`Check_Type(arg, T_MODULE)`), which `*Module` accepts.
 #
 # Unconditional, not gated on `target_ruby >= 4.1` (issue #1665): gating would
 # report `call.undefined-method` on every correct 4.1 project still on the

@@ -15,13 +15,12 @@ The session handoff (ADR-98). It answers ONE question: what should the next sess
 Transient; replaced wholesale. Backlog lives in GitHub Issues, release planning in Milestones.
 If this file disagrees with an ADR, the CHANGELOG, or an issue, this file is the one that is wrong.
 
-## State at 2026-10-08 (master `5a8ca1512`)
+## State at 2026-10-09 (master after #1659)
 
-**The `v0.4.1` milestone is complete**: all seven issues are closed (#1510 #1639, #1518 #1642, #1525
-#1643, #1532 #1644, #1590 #1640; #1585/#1554 earlier). Cutting it is the maintainer's call through
-`/rigor-release-prep` only. Note: master also carries ADR-119 C1d0 onward and now C2-b1 (#1629), which
-the `v0.4.1` scope said to leave out — release prep must decide whether to cut `v0.4.1` from a branch
-off the pre-ADR-119-C1d0 history or ship master as is; raise this with the maintainer before cutting.
+**`v0.4.1` is released** (2026-10-08, tag `v0.4.1` = `8a5d6e2c6`, RubyGems and GitHub Release). It shipped
+from master, ADR-119 C1d0 onward and C2-b1 included; the `0.3.x` notes moved to
+`docs/CHANGELOG-0.3.x.md`. The Mastodon sweep precision floor went from 0.523 to 0.520 for C2-b1's accepted
+loss, and the perf-gate corpus now is `v0.4.1` (#1659).
 
 **ADR-119 C2-b1 landed (#1629)** with the `bot` exception (errata on the C2 rows). The maintainer
 accepted its typing loss on master (Q9, 2026-10-08): GitLab controllers typed calls −74%, Mastodon

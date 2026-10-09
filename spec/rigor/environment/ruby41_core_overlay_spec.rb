@@ -2,7 +2,8 @@
 
 require "tmpdir"
 
-# Issues #1691 and #1718 — the core overlay's Ruby 4.1 entries build on every rbs line, and stand down for a later declaration.
+# Issues #1691 and #1718 — the core overlay's Ruby 4.1 entries build on every rbs line, and stand down for a later
+# declaration.
 #
 # No rbs release through 4.2 declares Ruby 4.1's new core methods, so `data/core_overlay/` does. Two ways that could
 # go wrong silently, since Rigor fails soft to `Dynamic[top]` for a class whose definition does not build:

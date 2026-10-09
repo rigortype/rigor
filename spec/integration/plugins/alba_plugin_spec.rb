@@ -6,8 +6,7 @@
 #
 # 1. The block of `Alba.serialize` / `Alba.hashify` runs on an anonymous `Alba::Resource` class, so the DSL
 #    calls inside no longer read as `call.unresolved-toplevel`.
-# 2. `Alba.serialize` reads `String` unless `with:` (or a keyword splat) is passed; `hashify` stays
-#    `Dynamic[top]` (alba's own RBS declares it `untyped`). Instance `#serialize` is left to the engine.
+# 2. The plugin contributes no return type: every alba call reads exactly as it does without the plugin.
 # 3. An association that makes alba infer its resource class roots that class for `rigor unused` — and only
 #    when the association names no resource and a class of the inferred name exists.
 # 4. The plugin never adds a diagnostic.
@@ -115,39 +114,18 @@ RSpec.describe "rigor-alba integration" do
     end
   end
 
-  describe "serialize return type" do
-    let(:source) do
-      <<~RUBY
-        r = UserResource.new(1)
-        Rigor.dump_type(Alba.serialize(1))
-        Rigor.dump_type(Alba.hashify(1))
-        Rigor.dump_type(r.to_h)
-      RUBY
-    end
-
-    it "types Alba.serialize as String and leaves hashify and to_h Dynamic" do
-      expect(dump_types(run_alba(source))).to eq(["String", "Dynamic[top]", "Dynamic[top]"])
-    end
-
-    it "reads Dynamic everywhere without the plugin" do
-      expect(dump_types(run_alba(source, enabled: false)).uniq).to eq(["Dynamic[top]"])
-    end
-
-    it "declines Alba.serialize when a custom resource (with:) or a keyword splat is passed" do
+  describe "return types" do
+    # The plugin contributes none: `Alba.serialize(obj)` runs the project's `<Class>Resource#serialize`, which
+    # may return anything, so every shape below must read exactly as it does without the plugin.
+    it "leaves Alba.serialize, hashify and instance methods as the engine resolves them" do
       source = <<~RUBY
-        opts = {}
+        class Boxed; end
+        Rigor.dump_type(Alba.serialize(Boxed.new))
+        Rigor.dump_type(Alba.serialize(Boxed.new).keys)
         Rigor.dump_type(Alba.serialize(1, with: UserResource))
-        Rigor.dump_type(Alba.serialize(1, root_key: :a, with: UserResource))
-        Rigor.dump_type(Alba.serialize(1, **opts))
         Rigor.dump_type(Alba.serialize(1, root_key: :a))
-      RUBY
-      expect(dump_types(run_alba(source))).to eq(["Dynamic[top]", "Dynamic[top]", "Dynamic[top]", "String"])
-    end
-
-    it "leaves instance #serialize to the engine, whatever redefines it" do
-      source = <<~RUBY
-        Rigor.dump_type(UserResource.new(1).serialize)
-        Rigor.dump_type(OverChild.new(1).serialize)
+        Rigor.dump_type(Alba.hashify(1))
+        Rigor.dump_type(UserResource.new(1).to_h)
         Rigor.dump_type(OverChild.new(1).serialize.fetch(:a))
         Rigor.dump_type(DefinedByMacro.new(1).serialize)
         Rigor.dump_type(OwnDef.new(1).serialize)
@@ -157,6 +135,16 @@ RSpec.describe "rigor-alba integration" do
       without = run_alba(source, files: resource_files, enabled: false)
       expect(dump_types(with)).to eq(dump_types(without))
       expect(with.diagnostics.map(&:qualified_rule)).to eq(without.diagnostics.map(&:qualified_rule))
+    end
+
+    it "does not type Alba.serialize over a resource that overrides #serialize" do
+      files = resource_files.merge(
+        "app/resources/boxed_resource.rb" => "class BoxedResource\n  include Alba::Resource\n  " \
+                                             "def serialize(**) = { a: 1 }\nend\n"
+      )
+      source = "class Boxed; end\nAlba.serialize(Boxed.new).keys\n"
+      with = run_alba(source, files: files)
+      expect(with.diagnostics.map(&:qualified_rule)).not_to include("call.undefined-method")
     end
   end
 
@@ -384,6 +372,22 @@ RSpec.describe "rigor-alba integration" do
         RUBY
       }
       roots_for(files) { |contribution, _dir| expect(contribution.roots).to eq(["ArticleResource"]) }
+    end
+
+    it "keeps the owner's nesting for an association in a block of an ordinary call" do
+      files = {
+        "app/a.rb" => <<~RUBY
+          module N
+            class OwnerResource
+              include Alba::Resource
+              %i[x].each { many :doodads }
+            end
+            class DoodadResource; end
+          end
+          class DoodadResource; end
+        RUBY
+      }
+      roots_for(files) { |contribution, _dir| expect(contribution.roots).to eq(["N::DoodadResource"]) }
     end
   end
 end

@@ -2,7 +2,7 @@
 
 Teaches Rigor about the [alba](https://github.com/okuramasafumi/alba) JSON serializer. alba does not ship its
 RBS in the gem, so without this plugin every alba call in your project reads `Dynamic[top]`. The plugin only
-removes false diagnostics and adds types; it adds no diagnostic of its own.
+removes false diagnostics and publishes `rigor unused` roots; it adds no diagnostic and no return type.
 
 It ships bundled in `rigortype`. Activate it under `plugins:`:
 
@@ -16,13 +16,12 @@ plugins:
 ```ruby
 # Inline resources: the block runs on an anonymous Alba::Resource class, so `attributes` and friends resolve
 # instead of firing call.unresolved-toplevel.
-json = Alba.serialize(user) { attributes :id, :name }   # String (not when `with:` is given)
-hash = Alba.hashify(user) { attributes :id }            # untyped, as alba declares it
-
-# Instance methods on your resource classes are left to Rigor's own resolution: the project may redefine them.
-UserResource.new(user).serialize
-UserResource.new(user).to_h
+json = Alba.serialize(user) { attributes :id, :name }
+hash = Alba.hashify(user) { attributes :id }
 ```
+
+The plugin contributes no return types: `Alba.serialize(obj)` runs your own `<Class>Resource#serialize`, which
+you may override to return anything.
 
 A block that is itself the argument of another call (`render json: Alba.serialize(x) { ... }`) is not
 narrowed yet; assign the result first if you want the DSL calls inside it resolved.

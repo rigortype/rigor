@@ -23,6 +23,9 @@ module Rigor
         ASSOCIATION_METHODS = %i[association one many has_one has_many].freeze
         RESOURCE_MODULE = "Alba::Resource"
         RESOURCE_KEYWORDS = %i[resource serializer].freeze
+        # The calls whose block alba `class_eval`s on an anonymous class (`name == nil`): an association
+        # lookup inside one sees no nesting. Any other block (`each`, `class_eval`, ...) leaves it alone.
+        ANONYMOUS_CLASS_BLOCK_METHODS = (ASSOCIATION_METHODS + %i[trait nested nested_attribute]).freeze
 
         attr_reader :classes, :associations
 
@@ -76,7 +79,9 @@ module Rigor
         # The calls are visited outer-first, so a call's block is known before the calls inside it.
         def remember_block(node)
           block = node.block
-          @blocks << (block.location.start_offset...block.location.end_offset) if block.is_a?(Prism::BlockNode)
+          return unless block.is_a?(Prism::BlockNode) && ANONYMOUS_CLASS_BLOCK_METHODS.include?(node.name)
+
+          @blocks << (block.location.start_offset...block.location.end_offset)
         end
 
         def in_block?(node)

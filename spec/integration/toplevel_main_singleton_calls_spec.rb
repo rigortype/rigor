@@ -48,9 +48,13 @@ RSpec.describe "top-level calls to main's singleton methods (#1383)" do
       ruby2_keywords
 
       [1].each do
+        using Helpers
         include Comparable
+        public
         private
         define_method(:wave) { "wave" }
+        private :wave
+        ruby2_keywords
       end
     RUBY
 

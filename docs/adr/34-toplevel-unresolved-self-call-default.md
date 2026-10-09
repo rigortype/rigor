@@ -87,7 +87,10 @@ does not resolve against any of:
    (`using`, `include`, `public`, `private`, `define_method`),
    drawn from RBS core's `RBS::Unnamed::TopLevelSelfClass`, plus
    `ruby2_keywords`, which `main` has in CRuby 4.0 but RBS does
-   not declare. *(Amended 2026-10-10: item 3 alone reported these
+   not declare. rbs 3.x lacks that class, so there only
+   `ruby2_keywords` is covered. This item only silences the
+   rule; inference does not dispatch these calls against `main`.
+   *(Amended 2026-10-10: item 3 alone reported these
    on correct code, and `pre_eval:` cannot apply to them;
    [#1383](https://github.com/rigortype/rigor/issues/1383).)*
 

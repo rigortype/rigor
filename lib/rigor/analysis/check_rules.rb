@@ -1050,6 +1050,7 @@ module Rigor
         # Issue #1383 — RBS core declares `main`'s private singleton methods on
         # `RBS::Unnamed::TopLevelSelfClass`, so the set follows RBS rather than a hand-kept
         # list. CRuby 4.0's `main` also has `ruby2_keywords`, which RBS does not declare.
+        # rbs 3.x has no `TopLevelSelfClass`, so there only `ruby2_keywords` is covered.
         # A call inside a top-level block (`describe do include M end`) is judged here too;
         # silencing it is the cheaper error.
         MAIN_SINGLETON_CLASS_NAME = "RBS::Unnamed::TopLevelSelfClass"

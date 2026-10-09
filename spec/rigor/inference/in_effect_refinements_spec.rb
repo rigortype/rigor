@@ -185,6 +185,85 @@ RSpec.describe Rigor::Inference::InEffectRefinements do
     end
   end
 
+  # Issue #1666 — a Proc literal that is directly the receiver of `Proc#refined`.
+  describe "a `Proc#refined` literal" do
+    it "puts the arguments in effect over the literal's body only, after its lexical list" do
+      refinements = query(<<~RUBY)
+        using A
+        :before
+        ->(s) { :lambda }.refined(B, C)
+        proc { :proc }.refined(B)
+        lambda { :kernel_lambda }.refined(B)
+        Proc.new { :proc_new }.refined(B)
+        ::Proc.new { :rooted_proc_new }.refined(B)
+        :after
+      RUBY
+
+      expect(refinements.at(":lambda")).to eq(%w[A B C])
+      %w[:proc :kernel_lambda :proc_new :rooted_proc_new].each do |marker|
+        expect(refinements.at(marker)).to eq(%w[A B])
+      end
+      expect(refinements.at(":before")).to eq(%w[A])
+      expect(refinements.at(":after")).to eq(%w[A])
+    end
+
+    it "orders a `.refined` chain in call order, and lets a nested block and literal inherit" do
+      refinements = query(<<~RUBY)
+        proc {
+          [1].map { :nested_block }
+          proc { :inner }.refined(C, A)
+          :outer
+        }.refined(A).refined(B)
+      RUBY
+
+      expect(refinements.at(":outer")).to eq(%w[A B])
+      expect(refinements.at(":nested_block")).to eq(%w[A B])
+      expect(refinements.at(":inner")).to eq(%w[A B C])
+    end
+
+    it "reads a chain through parentheses and `dup` / `clone`, and a `Kernel`-qualified literal" do
+      refinements = query(<<~RUBY)
+        (proc { :parens }.refined(A)).refined(B)
+        (-> { :paren_literal }).refined(A)
+        proc { :copied }.dup.refined(A).clone.refined(B)
+        Kernel.proc { :kernel }.refined(A)
+        ::Kernel.lambda { :rooted_kernel }.refined(A)
+        proc { :tapped }.tap {}.refined(A)
+        Other.proc { :other }.refined(A)
+        proc { :dup_with_argument }.dup(1).refined(A)
+      RUBY
+
+      expect(refinements.at(":parens")).to eq(%w[A B])
+      expect(refinements.at(":copied")).to eq(%w[A B])
+      %w[:paren_literal :kernel :rooted_kernel].each { |marker| expect(refinements.at(marker)).to eq(%w[A]) }
+      %w[:tapped :other :dup_with_argument].each { |marker| expect(refinements.at(marker)).to be_empty }
+    end
+
+    it "contributes the unknown marker over the literal's body for an argument that is not a constant" do
+      refinements = query(<<~RUBY)
+        def m(mod) = proc { :refined }.refined(A, mod)
+        :outside
+      RUBY
+
+      expect(refinements.at(":refined")).to eq(["A", unknown])
+      expect(refinements.at(":outside")).to be_empty
+      expect(refinements.refinements.refinement_active?(refinements.offset(":outside"), %w[A])).to be(false)
+    end
+
+    it "activates nothing for a Proc that is not a literal receiver" do
+      refinements = query(<<~RUBY)
+        l = -> { :held }
+        l.refined(A)
+        run { :passed }.refined(A)
+        proc(&l).refined(A)
+        Other.new { :other_new }.refined(A)
+        proc { :bare }.refined
+      RUBY
+
+      %w[:held :passed :other_new :bare].each { |marker| expect(refinements.at(marker)).to be_empty }
+    end
+  end
+
   describe "#for_node" do
     it "answers a node of its own file by position and another file's node with no lexical refinement" do
       source = <<~RUBY

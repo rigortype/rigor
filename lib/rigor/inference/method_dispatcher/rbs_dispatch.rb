@@ -1017,9 +1017,11 @@ module Rigor
             # type-argument-bearing projection through it ({SelfSubstitute}, #1092).
             self_type = self_type_override || resolved_self_type
 
+            keywords_last = keyword_arguments_last?(call_node, args)
             candidates = OverloadSelector.select_candidates(
               method_definition,
               arg_types: args,
+              keywords_last: keywords_last,
               # A `Dynamic` self (#1092) is a return-side answer; overload selection and ReceiverAffinity
               # read the static facet, as they did before the substitute carried the wrapping.
               self_type: self_type.is_a?(Type::Dynamic) ? self_type.static_facet : self_type,
@@ -1037,8 +1039,20 @@ module Rigor
               method_definition: method_definition,
               self_type: self_type, instance_type: instance_type, type_vars: type_vars,
               args: args, block_type: block_type, scope: scope, call_node: call_node, call_site: call_site,
-              alias_expander: environment.rbs_loader
+              alias_expander: environment.rbs_loader, keywords_last: keywords_last
             )
+          end
+
+          # Issue #1727 — whether `args`' last entry is the call's keyword hash (`f(a, k: 1)`), which the overload
+          # selector then matches against an overload's keywords. Only the AST tells a keyword hash from a
+          # braced positional one (`f(a, { k: 1 })`), so a dispatch without the call node, or one whose
+          # arguments are not the node's own (a forwarded `...`, a `send` re-dispatch), answers false and keeps
+          # reading every argument positionally.
+          def keyword_arguments_last?(call_node, args)
+            return false if args.empty? || !call_node.respond_to?(:arguments)
+
+            arguments = call_node.arguments&.arguments
+            !arguments.nil? && arguments.size == args.size && arguments.last.is_a?(Prism::KeywordHashNode)
           end
 
           # The two provenance side-tables the return-typing tier is the last place able to populate, recorded
@@ -1074,10 +1088,16 @@ module Rigor
           # A candidate whose return does not translate leaves the join incomplete — decline (fail-soft
           # to Dynamic downstream) rather than answer a join missing an arm the runtime can take.
           # rubocop:disable-next Metrics/ParameterLists
+          # rubocop:disable Metrics/ParameterLists
           def join_candidate_returns(candidates, method_definition:, self_type:, instance_type:, type_vars:, args:,
-                                     block_type:, scope:, call_node:, call_site:, alias_expander: nil)
+                                     block_type:, scope:, call_node:, call_site:, alias_expander: nil,
+                                     keywords_last: false)
+            # rubocop:enable Metrics/ParameterLists
             returns = candidates.map do |method_type|
-              full_type_vars = compose_type_vars(method_type, type_vars, args, block_type, scope, call_node, call_site)
+              # An overload that takes the keyword hash as its keywords binds no positional parameter to it.
+              positional = KeywordArguments.positional(method_type, args, keywords_last)
+              full_type_vars = compose_type_vars(method_type, type_vars, positional, block_type, scope, call_node,
+                                                 call_site)
               returned = RbsTypeTranslator.translate(
                 method_type.type.return_type,
                 self_type: self_type,
@@ -1087,7 +1107,7 @@ module Rigor
               )
               next returned unless combining_overload?(method_definition, method_type, call_site)
 
-              class_level_sum(returned, method_type, args)
+              class_level_sum(returned, method_type, positional)
             end
             return returns.first if returns.size == 1
             return nil if returns.any?(&:nil?)

@@ -45,9 +45,9 @@ ENV.fetch_values("HOME") { |name| name.size }
 GC.start(global: false)
 GC.start(full_mark: false, global: false)
 ObjectSpace.garbage_collect(global: false)
-GC.stat(:count, scope: :global) + 1
-GC.stat({}, scope: :local).each_key { |key| key }
-GC.stat(scope: :global).fetch(:count)
+assert_type("Integer", GC.stat(:count, scope: :global))
+assert_type("Hash[Symbol, Dynamic[top]]", GC.stat({}, scope: :local))
+assert_type("Hash[Symbol, Dynamic[top]]", GC.stat(scope: :global))
 assert_type("Integer", GC.stat(:count))
 buffer = IO::Buffer.new(8)
 assert_type("Integer", buffer.bit_count)

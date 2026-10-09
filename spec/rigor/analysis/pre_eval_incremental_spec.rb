@@ -69,6 +69,32 @@ RSpec.describe "pre_eval and auto-detected sig — incremental fingerprint" do
     end
   end
 
+  describe "an alias in a pre_eval: file (#1702)" do
+    it "re-checks when only the alias changes, matching a cold run" do
+      Dir.mktmpdir do |tmp|
+        lib = File.join(tmp, "lib")
+        support = File.join(tmp, "support")
+        Dir.mkdir(lib)
+        Dir.mkdir(support)
+        pre = File.join(support, "pre.rb")
+        File.write(File.join(lib, "a.rb"), %("a".yell\n))
+        File.write(pre, "class String; def shout = upcase; alias yell shout; end\n")
+
+        config = Rigor::Configuration.new("paths" => [lib], "pre_eval" => [pre])
+        snapshot = Rigor::Cache::IncrementalSnapshot.new(root: File.join(tmp, ".cache"))
+
+        diags1, = process_run(config, [lib], snapshot: snapshot, fingerprint: fingerprint(config, [lib]))
+        expect(diags1).to eq([])
+
+        # The def stays; only the alias's new name moves, so `yell` is no longer published.
+        File.write(pre, "class String; def shout = upcase; alias holler shout; end\n")
+        diags2, = process_run(config, [lib], snapshot: snapshot, fingerprint: fingerprint(config, [lib]))
+        expect(diags2).to eq(cold_run(config))
+        expect(diags2).to eq([["a.rb", 1]])
+      end
+    end
+  end
+
   describe "an auto-detected sig/ directory (#1554)" do
     it "re-checks when the auto-detected sig/*.rbs changes, matching a cold run" do
       Dir.mktmpdir do |tmp|

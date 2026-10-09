@@ -926,6 +926,41 @@ RSpec.describe Rigor::Analysis::Runner do
         end
       end
 
+      # Issue #1702 — a patch's `alias` / `alias_method` publishes the new name as its `def`s do; a typo still fires.
+      it "suppresses `call.undefined-method` on a name a patch defines with `alias` or `alias_method`" do # rubocop:disable RSpec/ExampleLength
+        Dir.mktmpdir("rigor-pre-eval-alias-") do |tmpdir|
+          ext_path = File.join(tmpdir, "integer_ext.rb")
+          consumer_path = File.join(tmpdir, "consumer.rb")
+          File.write(ext_path, <<~RUBY)
+            class Integer
+              def to_modint = self
+              alias to_m to_modint
+              alias :to_sm :to_modint
+              alias_method :to_mm, :to_modint
+              alias_method "to_ms", "to_modint"
+              alias old_plus +
+              alias ghost not_a_method
+            end
+          RUBY
+          File.write(consumer_path, <<~RUBY)
+            3.to_m
+            3.to_sm
+            3.to_mm
+            3.to_ms
+            3.old_plus(1)
+            3.ghost
+            3.to_mmm
+          RUBY
+          Dir.chdir(tmpdir) do
+            configuration = Rigor::Configuration.new("paths" => [consumer_path], "pre_eval" => [ext_path])
+            result = guarded_run(described_class.new(configuration: configuration, cache_store: nil))
+            lines = result.diagnostics.select { |d| d.rule.to_s == "call.undefined-method" }.map(&:line)
+
+            expect(lines).to eq([7])
+          end
+        end
+      end
+
       it "surfaces `pre-eval.parse-error` :warning when a pre_eval file has a parse error" do
         Dir.mktmpdir("rigor-pre-eval-parse-") do |tmpdir|
           broken_path = File.join(tmpdir, "broken.rb")

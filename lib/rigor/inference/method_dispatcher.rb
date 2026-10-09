@@ -205,7 +205,7 @@ module Rigor
         # the pre-pass populated `ProjectPatchedMethods` with the `(class, method, kind)` triple;
         # this tier surfaces it as `Dynamic[top]` so the patched call resolves cross-file without
         # `call.undefined-method`.
-        patched_result = try_project_patched_method(receiver_type, method_name, environment)
+        patched_result = try_project_patched_method(receiver_type, method_name, arg_types, block_type, environment)
         if patched_result
           scope&.record_dynamic_origin(call_node, DynamicOrigin::EXTERNAL_GEM_WITHOUT_RBS)
           return patched_result
@@ -614,7 +614,7 @@ module Rigor
       # `def to_url; "hello"; end` patched onto `String` now resolves `s.to_url` to
       # `Dynamic[Nominal[String]]` instead of the pre-3a `Dynamic[Top]`. Falls back to
       # `Dynamic[Top]` when the heuristic declined (non-literal tail expression).
-      def try_project_patched_method(receiver_type, method_name, environment)
+      def try_project_patched_method(receiver_type, method_name, arg_types, block_type, environment)
         registry = environment&.project_patched_methods
         return nil if registry.nil? || registry.empty?
 
@@ -624,9 +624,26 @@ module Rigor
         kind = receiver_type.is_a?(Type::Singleton) ? :singleton : :instance
         entry = registry.lookup(class_name: class_name, method_name: method_name, kind: kind)
         return nil if entry.nil?
-        return Type::Combinator.untyped if entry.return_type.nil?
+        return Type::Combinator.dynamic(entry.return_type) if entry.return_type
 
-        Type::Combinator.dynamic(entry.return_type)
+        aliased = project_patched_alias_target(registry, entry, receiver_type, arg_types, block_type, environment)
+        aliased ? Type::Combinator.dynamic(aliased) : Type::Combinator.untyped
+      end
+
+      # Issue #1702 — an alias in a `pre_eval:` patch of a method the patch files do not define (`alias old_plus +`
+      # on Integer) answers what the original answers for the same arguments, behind the `Dynamic` every patched
+      # method carries. Only a name the registry lacks is resolved, so the re-entry cannot reach this tier again
+      # (an alias of an alias the scanner could not order, or of itself, stays `Dynamic[top]`). The re-entry
+      # carries no call node or scope: it answers a type and records nothing at the call site.
+      def project_patched_alias_target(registry, entry, receiver_type, arg_types, block_type, environment)
+        old_name = entry.alias_of
+        return nil if old_name.nil?
+        return nil if registry.lookup(class_name: entry.class_name, method_name: old_name, kind: entry.kind)
+
+        resolve(
+          receiver_type: receiver_type, method_name: old_name, arg_types: arg_types,
+          block_type: block_type, environment: environment
+        )
       end
 
       # ADR-10 slice 2b-ii. Consults the per-run `Analysis::DependencySourceInference::Index`

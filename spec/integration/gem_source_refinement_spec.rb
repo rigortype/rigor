@@ -104,7 +104,7 @@ RSpec.describe "Gem source inference over `refine` bodies (#1672)" do
     RUBY
     root = File.join(Dir.pwd, ".rigor-cache")
     cold = undefined_rows(cache_store: Rigor::Cache::Store.new(root: root))
-    File.write("lib/app.rb", "#{File.read("lib/app.rb")}\"again\".shout\n")
+    File.write("lib/app.rb", "#{File.read('lib/app.rb')}\"again\".shout\n")
 
     warm = undefined_rows(cache_store: Rigor::Cache::Store.new(root: root))
 

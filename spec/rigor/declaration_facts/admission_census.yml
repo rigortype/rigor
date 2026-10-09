@@ -222,9 +222,9 @@ members:
     - lib/rigor/protection/discovery_seed.rb
   discovered_refinements:
     reads:
-    - lib/rigor/analysis/check_rules.rb
     - lib/rigor/analysis/incremental_session.rb
     - lib/rigor/analysis/runner.rb
+    - lib/rigor/inference/in_effect_refinements/scope_reads.rb
     copies:
     - lib/rigor/analysis/runner.rb
     - lib/rigor/protection/discovery_seed.rb
@@ -370,6 +370,11 @@ members:
   implicit_self_evidence:
     reads:
     - lib/rigor/inference/last_line/implicit_self.rb
+    copies: []
+  in_effect_refinements:
+    reads:
+    - lib/rigor/analysis/check_rules.rb
+    - lib/rigor/inference/in_effect_refinements/scope_reads.rb
     copies: []
   possible_discovered_methods:
     reads: []

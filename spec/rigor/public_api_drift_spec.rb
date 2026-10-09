@@ -93,6 +93,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     guard_narrowed_ivar?(req:name)
     guard_records()
     hash()
+    in_effect_refinements(req:node,opt:declared)
     in_source_constants()
     includes_of(req:class_name)
     indexed_narrowing(req:receiver_kind,req:receiver_name,req:key)

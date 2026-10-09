@@ -80,6 +80,27 @@ RSpec.describe "external chain entry hooks — incremental" do
     end
   end
 
+  # The other hook names ride the same list: an external superclass gaining `inherited`, and an extended external
+  # module gaining `extended`, each re-check the reader.
+  it "re-checks a reader of an external superclass when a new file gives it an inherited hook" do
+    files = { "a.rb" => "class C < StandardError\n  def foo(x) = x\nend\n", "b.rb" => "C.new.foo\n" }
+    hook = "module P\n  def foo(*) = 1\nend\n\nclass StandardError\n  def self.inherited(sub) = sub.prepend(P)\nend\n"
+    walk(files, [{ "x.rb" => hook }]) do |warm, cold|
+      expect(cold).to eq([])
+      expect(warm).to eq(cold)
+    end
+  end
+
+  it "re-checks a singleton reader when a new file gives an extended external module an extended hook" do
+    files = { "a.rb" => "class C\n  extend Comparable\n\n  def self.foo(x) = x\nend\n", "b.rb" => "C.foo\n" }
+    hook = "module P\n  def foo(*) = 1\nend\n\n" \
+           "module Comparable\n  def self.extended(base) = base.singleton_class.prepend(P)\nend\n"
+    walk(files, [{ "x.rb" => hook }]) do |warm, cold|
+      expect(cold).to eq([])
+      expect(warm).to eq(cold)
+    end
+  end
+
   it "keeps warm equal to cold when the hook file is later edited and then removed" do
     colds = []
     walk(root_answers, [{ "x.rb" => hook }, { "x.rb" => plain }, { "x.rb" => hook }, { "x.rb" => nil }]) do |warm, cold|

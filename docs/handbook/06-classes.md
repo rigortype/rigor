@@ -96,7 +96,9 @@ u.name    # Constant<"Alice">  — through in-source dispatch +
 both. The setter's argument type is whatever the call site
 provides. The `def.ivar-write-mismatch` rule (v0.1.2) checks
 that two writes to the same ivar in the same class body
-agree on the concrete class — see
+agree on the concrete class, unless the class's RBS
+declaration of the ivar (`@name: String | Integer`, or
+`attr_reader name: String | Integer`) admits both — see
 [manual — Diagnostics](../manual/04-diagnostics.md)
 for the rule's exact contract; it lets you catch an
 accidental rebind from `String` to `Array` in the same class

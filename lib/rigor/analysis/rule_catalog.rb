@@ -640,6 +640,8 @@ module Rigor
           ],
           does_not_fire_when: [
             "Later write is `nil` — the `@cache = nil` clear-idiom is allowlisted.",
+            "The class's RBS declares the ivar (`@var: T`, or the slot an `attr_*` member implies, own or " \
+            "inherited) and that type accepts both the first write and the later one.",
             "Either side is Union / Dynamic / IntegerRange / a shape-varied carrier.",
             "Writes live in different classes that happen to share an ivar name.",
             "Writes are in a singleton body — `def self.foo` or a `class << self` def — those track " \

@@ -40,8 +40,10 @@ module Rigor
         NODE_CLASSES = [Prism::DefNode].freeze
         RULE_WALK_GATES = %i[inside_def detached_ivar_facet].freeze
 
-        # Returns `Hash[class_name (String) => Hash[ivar_name (Symbol) => Array<{node:, type:}>]]`. Empty
-        # when the tree has no qualifying writes.
+        # Returns `Hash[class_name (String) => Hash[ivar_name (Symbol) => Array<{node:, type:, declared:}>]]`.
+        # Empty when the tree has no qualifying writes. `declared` is the translated type of the class's RBS
+        # declaration of the ivar — an `@x: T` member or the slot an `attr_*` member implies, own or
+        # inherited — and nil when the RBS declares none.
         def initialize(scope_index)
           @scope_index = scope_index
           @accumulator = {}
@@ -112,9 +114,31 @@ module Rigor
           return if scope.nil?
 
           rvalue_type = scope.type_of(node.value)
+          declared = declared_ivar(scope, class_name, node.name)
           @accumulator[class_name] ||= {}
           @accumulator[class_name][node.name] ||= []
-          @accumulator[class_name][node.name] << { node: node, type: rvalue_type }
+          @accumulator[class_name][node.name] << { node: node, type: rvalue_type, declared: declared }
+        end
+
+        def declared_ivar(scope, class_name, ivar_name)
+          loader = scope.environment&.rbs_loader
+          return nil if loader.nil?
+
+          variable = loader.instance_definition(class_name)&.instance_variables&.[](ivar_name)
+          return nil if variable.nil?
+
+          translate_declared(variable.type, loader, class_name)
+        end
+
+        # `self` / `instance` in a class's declaration is that class; a module's stays untyped, since its
+        # instances belong to includers no RBS type names. A translation failure reads as untyped, which only
+        # ever withholds a finding.
+        def translate_declared(rbs_type, loader, class_name)
+          owner = Type::Combinator.nominal_of(class_name) unless loader.rbs_module?(class_name)
+          Inference::RbsTypeTranslator.translate(rbs_type, self_type: owner, instance_type: owner,
+                                                           alias_expander: loader)
+        rescue StandardError
+          Type::Combinator.untyped
         end
       end
     end

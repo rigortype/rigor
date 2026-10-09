@@ -1,0 +1,1 @@
+- **[engine]** `def.ivar-write-mismatch` no longer fires when the class or module RBS declares the instance variable (`@key: Symbol | true`, or an `attr_*` member) with a type that admits both the first write and the later one. ([#1662](https://github.com/rigortype/rigor/pull/1662))

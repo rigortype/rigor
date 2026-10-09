@@ -316,6 +316,10 @@ module Rigor
       #   Class-level ivars (`@x = 1` outside any def, in the
       #   class body) are also skipped — they're a separate
       #   surface (`Module#@var`) the engine doesn't yet model.
+      # - A divergence the class's RBS declaration admits is withheld: when the ivar is declared (`@x: T`,
+      #   or the slot an `attr_*` member implies) and that type accepts both the first write and the
+      #   later one, the union is the author's intent. The declaration only silences here; checking
+      #   writes against it is #1406.
       def ivar_write_mismatch_diagnostics(path, ivar_writes)
         ivar_writes.flat_map do |class_name, writes_by_ivar|
           writes_by_ivar.flat_map do |ivar_name, writes|
@@ -427,9 +431,16 @@ module Rigor
         writes[(canonical_index + 1)..].filter_map do |write|
           other_class = ivar_class_for(write[:type])
           next nil if other_class.nil? || other_class == "NilClass" || other_class == first_class
+          next nil if declaration_admits?(write[:declared], canonical[:type], write[:type])
 
           build_ivar_write_mismatch_diagnostic(path, write[:node], class_name, ivar_name, first_class, other_class)
         end
+      end
+
+      def declaration_admits?(declared, *write_types)
+        return false if declared.nil?
+
+        write_types.none? { |type| Inference::Acceptance.accepts(declared, type, mode: :gradual).no? }
       end
 
       # v0.0.2 #6 — diagnostic suppression. Three kinds of

@@ -3355,6 +3355,76 @@ RSpec.describe Rigor::Analysis::Runner do
         expect(diag.message).to include("Integer")
       end
 
+      # A divergence the declaration admits is the author's union, not drift: alba's
+      # `@_key: Symbol | String | nil | true` takes a Symbol in one writer and `true` in another.
+      it "does not flag a divergence a module's RBS ivar declaration admits" do
+        result = analyze(<<~RUBY, sig: { "demo.rbs" => <<~RBS })
+          module Keyed
+            def root_key
+              @key = :name
+            end
+
+            def root_key!
+              @key = true
+            end
+          end
+        RUBY
+          module Keyed
+            @key: Symbol | String | nil | true
+          end
+        RBS
+        expect(ivar_diags(result)).to be_empty
+      end
+
+      it "does not flag a divergence a class's RBS attr declaration admits" do
+        result = analyze(<<~RUBY, sig: { "demo.rbs" => <<~RBS })
+          class Node
+            def initialize
+              @label = "a"
+            end
+
+            def reset
+              @label = 1
+            end
+          end
+        RUBY
+          class Node
+            attr_reader label: String | Integer
+          end
+        RBS
+        expect(ivar_diags(result)).to be_empty
+      end
+
+      # The declaration only silences; it is not checked against the writes (#1406).
+      # `@count` is declared `Integer`, which admits the later write but not the first; `@peer: self`
+      # admits neither, so the class's `self` must translate to the class, not to untyped.
+      it "still flags a divergence the declaration rejects, or an ivar it leaves undeclared" do
+        result = analyze(<<~RUBY, sig: { "demo.rbs" => <<~RBS })
+          class Node
+            def initialize
+              @label = "a"
+              @size = "s"
+              @count = "c"
+              @peer = "p"
+            end
+
+            def reset
+              @label = 1
+              @size = 2
+              @count = 3
+              @peer = 4
+            end
+          end
+        RUBY
+          class Node
+            attr_reader label: String
+            @count: Integer
+            @peer: self
+          end
+        RBS
+        expect(ivar_diags(result).map(&:line)).to contain_exactly(10, 11, 12, 13)
+      end
+
       it "does not flag widening to nil (intentional 'clear' idiom)" do
         result = analyze(<<~RUBY)
           class Foo

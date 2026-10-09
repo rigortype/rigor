@@ -1,0 +1,1 @@
+- **[engine]** A class that `extend`s a module whose `self.extended` hook (or instance `included` hook) mixes another module into it no longer gets `call.wrong-arity` or `call.undefined-method` on instance calls that module answers. ([#1730](https://github.com/rigortype/rigor/issues/1730), [#1735](https://github.com/rigortype/rigor/pull/1735))

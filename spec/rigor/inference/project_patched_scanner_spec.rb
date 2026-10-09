@@ -121,6 +121,141 @@ RSpec.describe Rigor::Inference::ProjectPatchedScanner do
       end
     end
 
+    describe "alias and alias_method (#1702)" do
+      def scan_source(source)
+        Dir.mktmpdir do |dir|
+          path = File.join(dir, "ext.rb")
+          File.write(path, source)
+          return described_class.scan([path]).registry
+        end
+      end
+
+      def lookup(registry, name, kind = :instance, class_name: "Integer")
+        registry.lookup(class_name: class_name, method_name: name, kind: kind)
+      end
+
+      it "publishes each literal spelling with the aliased def's return type" do
+        registry = scan_source(<<~RUBY)
+          class Integer
+            def magic = 42
+            alias to_m magic
+            alias :to_sm :magic
+            alias_method :to_mm, :magic
+            alias_method "to_ms", "magic"
+          end
+        RUBY
+
+        %i[to_m to_sm to_mm to_ms].each do |name|
+          entry = lookup(registry, name)
+          expect(entry).not_to be_nil, name.to_s
+          expect(entry.return_type).to eq(Rigor::Type::Combinator.constant_of(42))
+          expect(entry.alias_of).to be_nil
+        end
+      end
+
+      it "records the old name of a method the patch does not define, without a return type" do
+        registry = scan_source("class Integer
+  alias old_plus +
+  alias_method :ghost, :not_a_method
+end
+")
+
+        expect(lookup(registry, :old_plus)).to have_attributes(alias_of: :+, return_type: nil, source_line: 2)
+        expect(lookup(registry, :ghost)).to have_attributes(alias_of: :not_a_method, return_type: nil)
+      end
+
+      it "follows an alias of an earlier alias" do
+        registry = scan_source(<<~RUBY)
+          class Integer
+            def magic = "s"
+            alias early magic
+            alias chained early
+          end
+        RUBY
+
+        expect(lookup(registry, :chained).return_type).to eq(Rigor::Type::Combinator.nominal_of("String"))
+      end
+
+      # Ruby binds an alias to the body its old name has when the alias runs, so a patch `def` written after it
+      # is not what the alias calls.
+      it "reads an alias ahead of the patch's own def of the old name as the pre-existing method" do
+        registry = scan_source(<<~RUBY)
+          class Integer
+            alias_method :orig_succ, :succ
+            def succ
+              nil
+            end
+          end
+        RUBY
+
+        expect(lookup(registry, :orig_succ)).to have_attributes(alias_of: :succ, return_type: nil)
+        expect(lookup(registry, :succ).return_type).to eq(Rigor::Type::Combinator.constant_of(nil))
+      end
+
+      it "lets the later binding of a name win within a file (alias method chain), without a duplicate report" do
+        Dir.mktmpdir do |dir|
+          path = File.join(dir, "ext.rb")
+          File.write(path, <<~RUBY)
+            class Integer
+              def foo = 1
+              def foo_with_log = "logged"
+              alias_method :foo_without_log, :foo
+              alias_method :foo, :foo_with_log
+            end
+          RUBY
+          outcome = described_class.scan([path])
+
+          expect(lookup(outcome.registry, :foo_without_log).return_type).to eq(Rigor::Type::Combinator.constant_of(1))
+          expect(lookup(outcome.registry, :foo).return_type).to eq(Rigor::Type::Combinator.nominal_of("String"))
+          expect(outcome.diagnostics).to be_empty
+        end
+      end
+
+      it "reports an alias that declares a name another pre_eval file already declares" do
+        Dir.mktmpdir do |dir|
+          first = File.join(dir, "a.rb")
+          second = File.join(dir, "b.rb")
+          File.write(first, "class Integer; def foo = 1; end\n")
+          File.write(second, "class Integer; def bar = 2; alias foo bar; end\n")
+          outcome = described_class.scan([first, second])
+
+          reported = outcome.diagnostics.map { |d| [d[:rule], d[:path]] }
+          expect(reported).to eq([["pre-eval.duplicate-declaration", second]])
+          expect(lookup(outcome.registry, :foo).source_path).to eq(first)
+        end
+      end
+
+      it "binds both forms on the singleton inside `class << self`" do
+        registry = scan_source(<<~RUBY)
+          class Foo
+            class << self
+              def build = 1
+              alias make build
+              alias_method :create, :build
+            end
+          end
+        RUBY
+
+        expect(lookup(registry, :make, :singleton, class_name: "Foo")).not_to be_nil
+        expect(lookup(registry, :create, :singleton, class_name: "Foo")).not_to be_nil
+        expect(lookup(registry, :make, :instance, class_name: "Foo")).to be_nil
+      end
+
+      it "leaves a computed name, a receiver call and a top-level alias unrecorded" do
+        registry = scan_source(<<~RUBY)
+          alias top_level puts
+          class Integer
+            def magic = 1
+            alias_method name_var, :magic
+            self.alias_method :via_self, :magic
+            alias_method :one_arg
+          end
+        RUBY
+
+        expect(registry.by_key.keys.map { |key| key[1] }).to eq([:magic])
+      end
+    end
+
     it "emits `pre-eval.duplicate-declaration` :info when two pre-eval files declare the same (class, method, kind)" do
       Dir.mktmpdir do |dir|
         a = File.join(dir, "a.rb")

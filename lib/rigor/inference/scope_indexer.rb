@@ -4,6 +4,7 @@ require "prism"
 
 require_relative "../scope"
 require_relative "../type"
+require_relative "../source/alias_names"
 require_relative "../source/constant_path"
 require_relative "../source/node_children"
 require_relative "../source/node_walker"
@@ -3700,7 +3701,7 @@ module Rigor
       def record_alias_method_call(call_node, qualified_prefix, in_singleton_class, accumulator)
         return if qualified_prefix.empty?
 
-        names = alias_method_call_names(call_node)
+        names = Source::AliasNames.alias_method_call_names(call_node)
         return if names.nil?
 
         kind = in_singleton_class ? :singleton : :instance
@@ -7414,7 +7415,7 @@ module Rigor
         # `alias_method :new, :old` — the CallNode twin of the `alias` keyword (#533; liquid's i18n
         # `t` alias was the corpus case). Unlike AliasMethodNode a call's children can carry further
         # class bodies (`Class.new do … end`), so the walk continues below it either way.
-        names = alias_method_call_names(node)
+        names = Source::AliasNames.alias_method_call_names(node)
         if names && !rec_prefix.empty? && !(singleton_cref && leaf_owner.nil?)
           record_alias_call_entry(accumulator, rec_prefix.join("::"), names, node)
         end
@@ -7475,21 +7476,6 @@ module Rigor
         true
       end
 
-      # `[new_name, old_name]` for an implicit-self `alias_method` call with two literal symbol /
-      # string arguments, or nil. A variable-named alias is runtime data and stays unrecorded.
-      def alias_method_call_names(call_node)
-        return nil unless call_node.name == :alias_method && call_node.receiver.nil?
-
-        args = call_node.arguments&.arguments
-        return nil unless args && args.size == 2
-
-        new_name = literal_method_name(args[0])
-        old_name = literal_method_name(args[1])
-        return nil if new_name.nil? || old_name.nil?
-
-        [new_name, old_name]
-      end
-
       # The class/module arm of {#collect_class_alias_map}: under an unnameable cref a
       # bare/`self::` header opens `#<singleton>::Name` — the map files nothing for it;
       # a rooted or explicit-base header re-anchors at a nameable prefix.
@@ -7532,11 +7518,12 @@ module Rigor
 
       def record_alias_map_entry(alias_node, qualified_prefix, accumulator)
         return if qualified_prefix.empty?
-        return unless alias_node.new_name.is_a?(Prism::SymbolNode) && alias_node.old_name.is_a?(Prism::SymbolNode)
+
+        names = Source::AliasNames.keyword_names(alias_node)
+        return if names.nil?
 
         class_name = qualified_prefix.join("::")
-        new_name = alias_node.new_name.unescaped.to_sym
-        old_name = alias_node.old_name.unescaped.to_sym
+        new_name, old_name = names
         (accumulator[class_name] ||= {})[new_name] = old_name
         accumulator.wrote(class_name, new_name, alias_node) if accumulator.is_a?(AliasMap)
       end

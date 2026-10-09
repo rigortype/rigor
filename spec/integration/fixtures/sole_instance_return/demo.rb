@@ -1,3 +1,5 @@
+require "rigor/testing"
+
 # The only instance of `FalseClass` is `false`, so a body typed `FalseClass` (`Array.new(n, false)`
 # binds `[T] (Integer, T)` to the nominal) satisfies a declared `bool`. Read apart, each `ok_*`
 # method drew `def.return-type-mismatch` on correct code; `genuinely_wrong` is the live-rule control.
@@ -18,3 +20,7 @@ class Flags
     Array.new(n, "no")
   end
 end
+
+seeded = Array.new(2, false)
+Rigor.assert_type("[false, false]", seeded)
+Rigor.assert_type("bool", Flags.new.ok_element(2))

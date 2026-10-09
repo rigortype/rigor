@@ -226,5 +226,83 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::Walker do
         end
       end
     end
+
+    # Issue #1672 — a refine body defines refinements of its target, not methods of the refining module.
+    describe "`refine` bodies" do
+      def walk_source(source)
+        with_fake_gem do |gem_dir|
+          File.write(File.join(gem_dir, "lib", "fake.rb"), source)
+          return walker.walk(gem_dir: gem_dir, roots: %w[lib])
+        end
+      end
+
+      it "records a refine-body def as a refinement of the target and keeps it out of the catalog" do
+        outcome = walk_source(<<~RUBY)
+          module Shouty
+            refine String do
+              def shout = upcase + "!"
+              def self.ignored = nil
+            end
+
+            def whisper = "psst"
+          end
+        RUBY
+
+        expect(outcome.catalog.keys).to eq([["Shouty", :whisper]])
+        expect(outcome.refinements).to eq(
+          "Shouty::String" => { shout: ["Shouty"] }, "String" => { shout: ["Shouty"] }
+        )
+        expect(outcome.refinements).to be_frozen
+      end
+
+      it "accepts a `self` receiver and a qualified target, and unions every refining module" do
+        outcome = walk_source(<<~RUBY)
+          module A
+            self.refine(::Kernel) { def a = 1 }
+          end
+          module B
+            refine ::Kernel do
+              def a = 2
+            end
+          end
+        RUBY
+
+        expect(outcome.catalog).to eq({})
+        expect(outcome.refinements).to include("Kernel" => { a: %w[A B] })
+      end
+
+      it "still walks a declaration nested in a refine body under the lexical prefix" do
+        outcome = walk_source(<<~RUBY)
+          module Shouty
+            refine ::String do
+              class Helper
+                def help = nil
+              end
+            end
+          end
+        RUBY
+
+        expect(outcome.catalog.keys).to eq([["Shouty::Helper", :help]])
+        expect(outcome.refinements).to eq({})
+      end
+
+      it "walks a computed `refine` target generically, as before" do
+        outcome = walk_source(<<~RUBY)
+          module Shouty
+            refine(target_class) { def shout = nil }
+          end
+        RUBY
+
+        expect(outcome.catalog.keys).to eq([["Shouty", :shout]])
+        expect(outcome.refinements).to eq({})
+      end
+
+      it "records nothing for a `refine` with no enclosing module" do
+        outcome = walk_source("refine(::String) { def shout = nil }\n")
+
+        expect(outcome.catalog).to eq({})
+        expect(outcome.refinements).to eq({})
+      end
+    end
   end
 end

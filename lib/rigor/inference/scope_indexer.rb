@@ -6,6 +6,7 @@ require_relative "../scope"
 require_relative "../type"
 require_relative "../source/alias_names"
 require_relative "../source/constant_path"
+require_relative "object_mixins"
 require_relative "../source/node_children"
 require_relative "../source/node_walker"
 require_relative "../source/parameter_envelope"
@@ -5878,6 +5879,7 @@ module Rigor
       def mixin_tables(root)
         accumulator = MixinAccumulator.new
         accumulator.direct_body(program_statements(root))
+        accumulator.program_body(program_statements(root))
         walk_class_includes(root, [], nil, accumulator)
         {
           includes: freeze_mixin_lists(accumulator, :include),
@@ -6086,6 +6088,7 @@ module Rigor
         kind, _arguments, via_send = mixin_call_view(node)
         return if kind.nil?
 
+        current_class ||= toplevel_include_owner(node, qualified_prefix, current_class, accumulator)
         effects = mixin_effects(node, kind, qualified_prefix, current_class, accumulator, in_singleton: false)
                   .select { |_owner, side| side == :include }
         return if effects.empty?
@@ -6264,6 +6267,25 @@ module Rigor
         return !current_class.nil? if node.receiver.nil?
 
         node.name == :prepend
+      end
+
+      # Issue #1697 — a receiverless `include M` written as a statement of the file's own top level is
+      # `main.include`, which is `Object.include`: it mixes M into `Object`. It is recorded under its own
+      # owner key, `ObjectMixins::TOPLEVEL_INCLUDE_KEY`, rather than on `Object`, so it rides every table an include
+      # rides (the declaration signature, `discovered_class_sources`, the seed bundle) while no ancestry
+      # walk that types a call reaches it: what Ruby reaches first for a name such an include supplies
+      # depends on more than the chain shows (a block that rebinds `self`, an `extend` or a singleton `def`
+      # on `main`), so only the diagnostic silences read it (`Inference::ObjectMixins`), and typing is
+      # issue #1715's. Only a direct program statement counts.
+      # The same call inside a top-level block, a method body or a conditional stays unrecorded, as before:
+      # its `self` may not be `main` (a `describe do include M end` or `class_exec` block rebinds it, while
+      # `[1].each do include M end` does not, and the walk cannot tell them apart), and it may not run. `main`
+      # has no `prepend`, and a top-level `extend M` reaches `main`'s singleton alone, so neither is recorded.
+      def toplevel_include_owner(node, qualified_prefix, current_class, accumulator)
+        return nil unless current_class.nil? && qualified_prefix.empty?
+        return nil unless node.receiver.nil? && node.name == :include
+
+        accumulator.program_statement?(node) ? ObjectMixins::TOPLEVEL_INCLUDE_KEY : nil
       end
 
       # Issue #1123 — the class a `Recv.prepend(M)` call form targets, as the qualified name the prepend

@@ -42,6 +42,7 @@ members:
     - lib/rigor/inference/last_line/implicit_self.rb
     - lib/rigor/inference/method_dispatcher/singleton_mixin_dispatch.rb
     - lib/rigor/inference/narrowing.rb
+    - lib/rigor/inference/object_mixins.rb
     - lib/rigor/inference/pre_eval_constants.rb
     - lib/rigor/inference/singleton_hook_decline.rb
     - lib/rigor/protection/discovery_seed.rb

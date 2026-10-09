@@ -93,6 +93,19 @@ does not resolve against any of:
    *(Amended 2026-10-10: item 3 alone reported these
    on correct code, and `pre_eval:` cannot apply to them;
    [#1383](https://github.com/rigortype/rigor/issues/1383).)*
+5. The instance methods of a module the project mixes into
+   `Object`: a top-level `include M` (`main.include` is
+   `Object.include`), or `include M` inside `class Object`.
+   A module neither RBS nor the project declares cannot be
+   enumerated, so it resolves every name, and an RBS module's
+   singleton method counts too, since core declares `Math`'s
+   `module_function`s as `def self.`. Like item 4 this item only
+   silences the rule; typing such a call is
+   [#1715](https://github.com/rigortype/rigor/issues/1715).
+   *(Amended 2026-10-10: the include itself was silent after
+   [#1383](https://github.com/rigortype/rigor/issues/1383), but
+   what it brought in still reported;
+   [#1697](https://github.com/rigortype/rigor/issues/1697).)*
 
 then the engine emits a new `call.unresolved-toplevel` diagnostic.
 On a hit, the resolved method's return type and parameter
@@ -386,3 +399,9 @@ original WD3 framing left implicit.
   call inside a top-level block is judged as top level too, so the
   same names are silent there; that false negative is cheaper than
   the false positive it replaces.
+- 2026-10-10 — Decision item 5 added: a module mixed into
+  `Object` resolves a top-level call
+  ([#1697](https://github.com/rigortype/rigor/issues/1697)). The
+  edge is project-wide, as Ruby's is once the file runs, so a
+  file that never loads the including one is silent too; that
+  false negative is the cheaper error.

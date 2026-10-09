@@ -154,6 +154,10 @@ lib/rigor/inference/method_dispatcher/rbs_dispatch.rb:
   computes: whether an RBS-declared method is private
   producers:
     Rigor::Inference::MethodDispatcher::RbsDispatch.method_private?: grandfathered
+lib/rigor/inference/object_mixins.rb:
+  computes: how the modules the project mixes into Object answer a method name (issue #1697)
+  producers:
+    Rigor::Inference::ObjectMixins#private_definition?: reads an RBS method definition's accessibility (`:private`) to tell a bare call's reach from an explicit receiver's (issue #1697); it produces no declaration fact
 lib/rigor/inference/module_function_state.rb:
   computes: what a module_function call does to the defs around it, for each of its four readers
   producers:
@@ -425,6 +429,7 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#walk_visibility_singleton_class: grandfathered
     Rigor::Inference::ScopeIndexer#write_mixin_targets: grandfathered
     Rigor::Inference::ScopeIndexer#write_singleton_slot: ADR-119 WD3, the singleton walk's one slot write, routed through SingletonDefTable so the slot's contest follows its writer; the owner and side are the walk's, it adds no context of its own
+    Rigor::Inference::ScopeIndexer#toplevel_include_owner: names `Object` as the owner of a receiverless `include` written as a direct statement of the program (`main.include`, issue #1697); it reads only whether the call is a top-level statement, and the walk's own empty prefix and owner
 lib/rigor/inference/scope_indexer/certainty.rb:
   computes: ADR-119 WD3's certainty, the identity Set of a file's possible def contributions
   producers:

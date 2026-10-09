@@ -59,9 +59,11 @@ severity_overrides:
 - The gem is loaded per file (`require "ac-library-rb/segtree"`) or whole (`require "ac-library-rb/all"`), and the
   math functions are reached through `include AcLibraryRb`. The signatures cannot include the module into
   `Object` for you: `Object` including a module whose classes inherit from `Object` is a recursive ancestry RBS
-  rejects. Rigor accepts the top-level `include` itself ([#1383](https://github.com/rigortype/rigor/issues/1383)),
-  but a bare top-level call to an included method (`crt(...)` after `include AcLibraryRb`) still reports
-  `call.unresolved-toplevel` and reads `Dynamic[top]` ([#1697](https://github.com/rigortype/rigor/issues/1697)).
+  rejects. Rigor reads a top-level `include AcLibraryRb` as that include instead, so a bare top-level call to an
+  included method (`crt(...)`) no longer reports `call.unresolved-toplevel`
+  ([#1383](https://github.com/rigortype/rigor/issues/1383), [#1697](https://github.com/rigortype/rigor/issues/1697)).
+  It still reads `Dynamic[top]`: typing it from these signatures is
+  [#1715](https://github.com/rigortype/rigor/issues/1715).
 - The core extensions are declared whether or not the file that defines them is loaded. `ac-library-rb/modint`
   loads the `ModInt` conversions; `Integer#divisors`, `#each_divisor` and the `Array` conversions need
   `ac-library-rb/core_ext/all` (or `core_ext/integer`), and calling them without it passes the check and raises

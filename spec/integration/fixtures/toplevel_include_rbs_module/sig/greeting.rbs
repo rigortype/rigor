@@ -1,0 +1,4 @@
+module Greeting
+  def greeting_count: () -> Integer
+  def greeting_label: () -> String
+end

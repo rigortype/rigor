@@ -6,6 +6,7 @@ require_relative "../reflection"
 require_relative "../source/node_walker"
 require_relative "../source/constant_path"
 require_relative "../inference/singleton_object_constant"
+require_relative "../inference/object_mixins"
 require_relative "shadow_harness"
 require_relative "../type"
 require_relative "diagnostic"
@@ -886,8 +887,23 @@ module Rigor
           return true if module_mixin_receiver?(receiver_type, scope)
           return true if mixin_self_class_receiver?(call_node, scope)
           return true if unknown_mixin_includer?(class_name, scope)
+          return true if object_mixin_may_define?(receiver_type, class_name, call_node.name, scope)
 
           ancestry_declares_method?(scope, class_name, call_node.name, kind)
+        end
+
+        # Issue #1697 — a module the project mixes into `Object` (a top-level `include M`, or `include M` in
+        # `class Object`) gives every object its instance methods, and the RBS lookup above only saw core's
+        # `Object`. A class object is an `Object` whatever class it is, so the singleton side always reaches
+        # it; the instance side does when the receiver's class descends from `Object`. A mixed-in module
+        # whose surface is unknown, or a `module_function` reached only privately, does not count here
+        # ({Inference::ObjectMixins.may_define?}).
+        def object_mixin_may_define?(receiver_type, class_name, method_name, scope)
+          unless receiver_type.is_a?(Type::Singleton) || Inference::ObjectMixins.reaches_object?(scope, class_name)
+            return false
+          end
+
+          Inference::ObjectMixins.may_define?(scope, method_name, receiver: :explicit)
         end
 
         # Issue #739 — the singleton twin of the module-mixin receiver, and the only shape that reaches the
@@ -1032,6 +1048,10 @@ module Rigor
         #    `define_method`), read from RBS core's
         #    `RBS::Unnamed::TopLevelSelfClass`, plus
         #    `ruby2_keywords` (issue #1383).
+        # 5. The instance methods of a module the project mixes
+        #    into `Object` — a top-level `include M`, or an
+        #    `include M` in `class Object` — or any call at all
+        #    when such a module's surface is unknown (issue #1697).
         #
         # The rule deliberately does NOT generalise to
         # implicit-self calls inside `def` / `class` / `module`
@@ -1055,6 +1075,7 @@ module Rigor
           return nil if source_declared_method?(scope, "Object", name, :instance)
           return nil if Rigor::Reflection.instance_method_definition("Object", name, scope: scope)
           return nil if main_singleton_method?(name, scope)
+          return nil if Inference::ObjectMixins.may_define?(scope, name, receiver: :implicit)
           # `Target.class_eval { def added = 1; def use_added = added }` files the defs on Target
           # but leaves the eval body with a nil `self_type`, so `toplevel?` still holds. An eval
           # body is morally a class body, so ADR-34 stays silent there — including on a genuinely
@@ -2024,7 +2045,9 @@ module Rigor
 
           # Issue #723 — the arm's own RBS does not have it; its project ancestry still might. Last, for
           # the reason {#ancestry_declares_method?} carries: this is the probe that walks the class graph.
-          ancestry_declares_method?(scope, class_name, method_name, :instance)
+          return true if ancestry_declares_method?(scope, class_name, method_name, :instance)
+
+          object_mixin_may_define?(member, class_name, method_name, scope)
         end
 
         def nil_class_has_method?(method_name, scope)

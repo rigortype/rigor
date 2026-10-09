@@ -69,8 +69,8 @@ in that order; otherwise move on. A refinement of `C` therefore beats a module p
 on a more derived class beats a refinement of a less derived one. "Defines the method" is read from
 RBS and project `def`s. Core RBS sometimes redeclares an inherited method on a subclass, and the walk
 then stops there and declines the refinement: a known imprecision, in the declining direction for
-refinements of `Object`, `Kernel`, `Comparable` or `Numeric`. A union receiver is decided per member, and a `Dynamic`
-receiver stays `Dynamic`.
+refinements of `Object`, `Kernel`, `Comparable` or `Numeric`. A union receiver is decided per member,
+and a `Dynamic` receiver stays `Dynamic`.
 
 ### WD3 — What the arm returns
 

@@ -435,6 +435,50 @@ no new mechanism. A structured RBS::Extended opt-out annotation
 (`%a{rigor:v1:override-exempt}`-shape) as a middle ground between
 tier 1 and tier 3 is deferred — see Open Questions.
 
+### WD10 — Object-lifecycle hooks are outside the substitutability frame
+
+Added 2026-10-10 ([#1716](https://github.com/rigortype/rigor/issues/1716)).
+The three rules skip `initialize` and the copy hooks
+`initialize_copy` / `initialize_dup` / `initialize_clone`;
+`def.override-visibility-reduced` also skips `respond_to_missing?`.
+
+**Why:** the rules verify that a caller holding the parent can be
+handed the subclass. No such caller reaches these methods.
+
+- `initialize` is reached only through `Class#new` (or `super`) on
+  the class the caller names, so a caller holding a `Base` never
+  passes `Base`'s constructor arguments to `Sub#initialize`. A
+  subclass that takes different arguments and builds its parent's
+  in `super(...)` — an exception subclass that takes structured data
+  and formats the message — is idiomatic Ruby, and PHP's LSP rule
+  exempts constructors for the same reason.
+- `dup` / `clone` hand a copy hook an instance of the *receiver's own
+  class*. The argument's type follows `self`, not the parent's
+  declaration: narrowing `Base#initialize_copy: (Base)` to
+  `Sub#initialize_copy: (Sub)` is the correct signature, yet it reads
+  as a narrowing. A copy hook *can* break `dup` — when its parameter
+  excludes the receiver's own class — but that is a fault of the
+  signature against `self`, present with or without a parent, and the
+  parent comparison would report the correct `(Sub)` just the same.
+  It is the wrong instrument, so the hooks are exempt rather than
+  checked.
+- `new`, `dup` and `clone` discard all four methods' return values, so
+  no widened return reaches a caller.
+- CRuby makes these five names private on every non-singleton `def`,
+  whatever section it is written in (`vm_method.c`
+  `rb_method_entry_make`). A source-discovered `public` for them is
+  not the runtime visibility, so a `private` section in the subclass
+  reduces nothing.
+
+`respond_to_missing?` keeps the two signature rules: `respond_to?`
+calls it on any instance with a fixed `(Symbol, bool)` protocol, so a
+narrowed parameter there does break a parent-typed caller.
+
+**How to apply:** `CheckRules::LIFECYCLE_HOOKS` gates
+`resolve_authored_override` (the shared entry of the param and return
+rules); `CheckRules::IMPLICITLY_PRIVATE_METHODS` gates
+`override_visibility_diagnostic`. The change only removes diagnostics.
+
 ## Implementation slicing
 
 Recommended order; each slice independently shippable.
@@ -664,3 +708,9 @@ for an inherited contract.
   degrades to `Dynamic[Top]` and stays silent, so it adds no
   false-positive risk). RBS-only-ancestor reach and singleton (`def
   self.`) coverage stay deferred.
+- 2026-10-10 — added WD10: `initialize`, `initialize_copy`,
+  `initialize_dup` and `initialize_clone` are exempt from all three
+  rules, and `respond_to_missing?` from the visibility rule, after
+  `def.override-param-narrowed` fired on an exception subclass's
+  constructor in sorah/protobufable
+  ([#1716](https://github.com/rigortype/rigor/issues/1716)).

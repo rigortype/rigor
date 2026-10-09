@@ -285,8 +285,8 @@ module Rigor
         [
           undefined_method_diagnostic(path, node, scope_index, lexical_sites),
           unresolved_toplevel_diagnostic(path, node, scope_index, eval_ranges),
-          wrong_arity_diagnostic(path, node, scope_index),
-          argument_type_diagnostic(path, node, scope_index),
+          wrong_arity_diagnostic(path, node, scope_index, lexical_sites),
+          argument_type_diagnostic(path, node, scope_index, lexical_sites),
           nil_receiver_diagnostic(path, node, scope_index),
           dump_type_diagnostic(path, node, scope_index),
           assert_type_diagnostic(path, node, scope_index),
@@ -800,12 +800,21 @@ module Rigor
         # effect here, or a `def o.m` on the receiver local in this scope. Asked from {#last_resort_surface_answers?},
         # once every project-wide table has come back "absent", so the file walk behind {LexicalMethodSites} runs
         # only for a call about to fire.
-        # A refinement answers instance-side receivers only: a refined singleton (`refine X.singleton_class`) names
-        # no constant target, so nothing records it.
         def lexically_defined_method?(class_name, call_node, scope, kind, lexical_sites)
           return false if lexical_sites.nil?
           return true if lexical_sites.singleton_local_def?(call_node)
-          return false unless kind == :instance
+
+          refined_method_in_effect?(class_name, call_node, scope, kind, lexical_sites)
+        end
+
+        # Is a refinement of `call_node`'s method name into `class_name` (or an ancestor) in effect at the call?
+        # Issue #1120 asks it for a method the class lacks; issue #1663 asks it before `call.wrong-arity` and
+        # `call.argument-type-mismatch` report, because a refinement that REDEFINES a method the class already has
+        # replaces the signature those rules check against. Typing the call from the refine body is #1664.
+        # A refinement answers instance-side receivers only: a refined singleton (`refine X.singleton_class`) names
+        # no constant target, so nothing records it.
+        def refined_method_in_effect?(class_name, call_node, scope, kind, lexical_sites)
+          return false if lexical_sites.nil? || kind != :instance
 
           # ADR-46 — the answer below is a function of every refinement of this name in the project, so the
           # consumer depends on the name whichever way it answers; a refine body edited in another file must
@@ -1579,7 +1588,7 @@ module Rigor
         # when the call's receiver / RBS coverage / call shape
         # disqualifies the rule.
         # rubocop:disable-next Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
-        def wrong_arity_diagnostic(path, call_node, scope_index)
+        def wrong_arity_diagnostic(path, call_node, scope_index, lexical_sites = nil)
           return nil if call_node.receiver.nil?
           return nil unless plain_positional_call?(call_node)
 
@@ -1620,11 +1629,18 @@ module Rigor
             source_arity&.settle_by_definitions
             return nil
           end
-          # Issue #992 — a source envelope's remaining declines can only withhold, so they run only now.
-          source_arity&.settle_by_walk
-          return nil if source_arity && !source_arity.authoritative?(class_name)
+          return nil if arity_report_withheld?(source_arity, class_name, call_node, scope, kind, lexical_sites)
 
           build_arity_diagnostic(path, call_node, class_name, min, max, actual)
+        end
+
+        # The declines `call.wrong-arity` asks only once the arity is out of the envelope.
+        def arity_report_withheld?(source_arity, class_name, call_node, scope, kind, lexical_sites)
+          # Issue #992 — a source envelope's remaining declines can only withhold, so they run only now.
+          source_arity&.settle_by_walk
+          return true if source_arity && !source_arity.authoritative?(class_name)
+
+          refined_method_in_effect?(class_name, call_node, scope, kind, lexical_sites)
         end
 
         # The `[min, max]` the call is checked against — a declared signature's, or (issue #992) the project
@@ -2916,7 +2932,7 @@ module Rigor
         COERCE_DISPATCH_METHODS = %i[+ - * / % ** & | ^ << >> < > <= >=].to_set.freeze
         private_constant :COERCE_DISPATCH_METHODS
 
-        def argument_type_diagnostic(path, call_node, scope_index)
+        def argument_type_diagnostic(path, call_node, scope_index, lexical_sites = nil)
           return nil if call_node.receiver.nil?
           return nil if UNIVERSAL_EQUALITY_METHODS.include?(call_node.name)
           return nil unless plain_positional_call?(call_node)
@@ -2943,9 +2959,17 @@ module Rigor
           param_overrides = Rigor::RbsExtended.param_type_override_map(method_def, environment: scope.environment)
           mismatch = argument_mismatch(method_def.method_types, call_node, scope, param_overrides, scope_index)
           return nil if mismatch.nil?
-          return nil if inferred_param_mismatch_verdict?(call_node, mismatch, scope)
+          return nil if argument_report_withheld?(receiver_type, class_name, call_node, mismatch, scope, lexical_sites)
 
           build_argument_type_diagnostic(path, call_node, class_name, mismatch)
+        end
+
+        # The declines `call.argument-type-mismatch` asks only once an argument mismatches.
+        def argument_report_withheld?(receiver_type, class_name, call_node, mismatch, scope, lexical_sites)
+          return true if inferred_param_mismatch_verdict?(call_node, mismatch, scope)
+
+          kind = receiver_type.is_a?(Type::Singleton) ? :singleton : :instance
+          refined_method_in_effect?(class_name, call_node, scope, kind, lexical_sites)
         end
 
         # ADR-67 WD6b — an argument-type-mismatch verdict resting on an open-call-site lower bound, on

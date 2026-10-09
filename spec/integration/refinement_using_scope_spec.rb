@@ -275,6 +275,86 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
     end
   end
 
+  # Issue #1663 — a refinement that REDEFINES a method the class already has replaces the signature the call-site
+  # argument and arity rules read, so while it is in effect those rules decline. Typing the call from the refine
+  # body is #1664; here the call keeps the unrefined return type.
+  describe "a refinement redefining an existing method" do
+    def call_rows(cache_store: nil)
+      diagnostics(cache_store: cache_store)
+        .select { |d| %w[call.argument-type-mismatch call.wrong-arity].include?(d.qualified_rule) }
+        .map { |d| [File.basename(d.path.to_s), d.line, d.qualified_rule] }
+        .sort
+    end
+
+    before do
+      write("lib/ext.rb", <<~RUBY)
+        module SymSyntax
+          refine Symbol do
+            def [](other) = "\#{self}.\#{other}"
+          end
+          refine Integer do
+            def succ(step) = self + step
+          end
+        end
+        module Unrelated
+          refine Symbol do
+            def other_method = 1
+          end
+        end
+      RUBY
+    end
+
+    it "declines the argument-type and arity checks after the `using`, for the refined names only" do
+      write("lib/use.rb", <<~RUBY)
+        :before[:age]
+        1.succ(2)
+        using SymSyntax
+        :authors[:age]
+        1.succ(2)
+        1.gcd(:x)
+      RUBY
+
+      expect(call_rows).to eq(
+        [
+          ["use.rb", 1, "call.argument-type-mismatch"],
+          ["use.rb", 2, "call.wrong-arity"],
+          ["use.rb", 6, "call.argument-type-mismatch"]
+        ]
+      )
+    end
+
+    it "keeps checking a file with no `using`, or a `using` of a module refining other names" do
+      write("lib/plain.rb", <<~RUBY)
+        :authors[:age]
+        1.succ(2)
+      RUBY
+      write("lib/unrelated.rb", <<~RUBY)
+        using Unrelated
+        :authors[:age]
+      RUBY
+
+      expect(call_rows).to eq(
+        [
+          ["plain.rb", 1, "call.argument-type-mismatch"],
+          ["plain.rb", 2, "call.wrong-arity"],
+          ["unrelated.rb", 2, "call.argument-type-mismatch"]
+        ]
+      )
+    end
+
+    it "answers the same through a warm cache as cold" do
+      write("lib/use.rb", "using SymSyntax\n:authors[:age]\n:x[:y]\n")
+      write("lib/plain.rb", ":authors[:age]\n")
+      root = File.join(Dir.pwd, ".rigor", "cache")
+
+      cold = call_rows(cache_store: Rigor::Cache::Store.new(root: root))
+      warm = call_rows(cache_store: Rigor::Cache::Store.new(root: root))
+
+      expect(cold).to eq([["plain.rb", 1, "call.argument-type-mismatch"]])
+      expect(warm).to eq(cold)
+    end
+  end
+
   describe "a singleton def on a local" do
     it "declines for that local's method in the same scope and nowhere else" do
       write("lib/locals.rb", <<~RUBY)

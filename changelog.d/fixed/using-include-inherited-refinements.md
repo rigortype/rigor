@@ -1,0 +1,1 @@
+- **[engine]** `using C` now also activates the refinements of every module `C` includes, transitively, as Ruby does, instead of reporting `call.undefined-method` on a method such a refinement defines. ([#1671](https://github.com/rigortype/rigor/issues/1671), [#1684](https://github.com/rigortype/rigor/pull/1684))

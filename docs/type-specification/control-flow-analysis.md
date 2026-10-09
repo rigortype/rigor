@@ -97,10 +97,10 @@ Supported narrowing sources include:
   The narrowing MUST only remove `call.possible-nil-receiver` reports, and it is fail-closed by construction rather than by tracing where a narrowed value flows. The analysis every rule, return summary and `rigor sig-gen` reads never applies it. When `call.possible-nil-receiver` is about to report on a file that holds a guard-shaped call, it re-walks the file once with the narrowing on, from a scope whose side tables are private copies. It withholds the report only when the re-walk types the receiver as exactly the analysis's type without `nil`. Callee return summaries inside the re-walk are still computed without the narrowing, since they are memoised for the whole run. So no other diagnostic can appear or change: certainty verdicts (`flow.always-truthy-condition`, the `&&` / `||` polarity gate, branch elision, `flow.unreachable-branch`, `flow.unreachable-clause`), `flow.dead-assignment`, argument and return checks, inferred return types and signatures all see the un-narrowed program.
 
   A guard is relied on only when nothing in reach can change what it proved:
-  - A local receiver is never handed on anywhere in its method body. That means no argument (`purge(h, k)`), no written value (`g = h`, before or after the guard), no read inside a block, and no call on it other than a blockless read (`[]`, `key?`, `fetch`, `dig`, `size`, `dup`, …).
+  - A local receiver is never handed on anywhere in its method body. That means no argument (`purge(h, k)`), no written value (`g = h`, before or after the guard), no read inside a block, and no call on it other than a blockless read that does not answer the receiver itself (`[]`, `key?`, `fetch`, `dig`, `size`, `dup`, …; not `itself`, `to_h` or `freeze`).
   - An instance-variable receiver is never handed on anywhere in the file.
   - A constant receiver is assigned exactly once in the file, to a frozen hash literal (`MAP = { … }.freeze`), and is never handed on in the file. An unfrozen constant may be mutated by code the file does not show.
-  - A local key root is bound nowhere in its method body after the guard (a loop or `rescue` rebinding included), never stored elsewhere (`j = k`), and never read inside a block. An instance-variable key root is bound nowhere in the file.
+  - A local key root is bound nowhere in its method body after the guard (a loop or `rescue` rebinding included), never stored elsewhere, bare or through a call on the key (`j = k`, `s = k.itself`, `s = prop.column_type.to_s`), and never read inside a block. An instance-variable key root is bound nowhere in the file.
 
   Between a guard and its read, read in source order (so a later operand of the guard's own condition counts, as in `h.key?(k) && purge(h, k)`), the guard ends at:
   - a rebinding of the receiver or the key's root;
@@ -113,7 +113,14 @@ Supported narrowing sources include:
 
   A read that comes before its guard in the source (a loop back-edge) is not narrowed. Passing the key's root as an argument (`overridden?(prop)`) does not end the guard. This follows the method-chain narrowing's any-call-against-the-root rule, and typelizer's guarded read depends on it.
 
-  Known limits, each able only to withhold a report that should stand: a method of the key root's class that mutates it through a reader-shaped name the deny list does not know, and code outside the file mutating a frozen constant's nested values (the narrowing drops only the miss `nil`, never a value's own).
+  The withholding is off while an effect collector records the walk (`effects:` enabled), so such a run reports these reads as the un-narrowed analysis does.
+
+  Known limits, each able only to withhold a report that should stand:
+  - a user-defined reader in a key chain that answers something new on each call under a name the deny list does not know;
+  - a method of the key root's class that mutates it under such a name;
+  - a zero-argument `super` inside the guarded region, which hands the method's parameters (a receiver or key root among them) on without spelling them;
+  - an instance-variable receiver exposed through `attr_reader` (or another accessor) and mutated by code outside the method through it;
+  - code outside the file mutating a frozen constant's nested values (the guard drops only the miss `nil`, never a value's own).
 - `Array#empty?` / `#any?` / `#none?` (bare, no block or args) when the receiver is an `Array[T]`. The edge that implies "at least one element" — the false edge of `empty?` / `none?`, the true edge of `any?` — refines the receiver to `non-empty-array[T]`, so length-returning methods (`size` / `length` / `count`) read `positive-int`. The opposite edge is a no-op (`any?` / `none?` being false does not imply emptiness). A Ruby analogue of a non-empty (`tuple_size`-style) collection refinement. The refinement describes the receiver's *content*, not its binding, so an in-place mutator that can empty the receiver (`clear`, `pop`, `shift`, `delete_if`, …) MUST invalidate it: the binding widens back to `Array[T]` and a later `size` reads the base `non-negative-int` envelope again. Retaining the refinement past such a call folds `arr.size == 0` to a constant and reports a false always-falsey condition on correct code.
 - Pattern matching and case analysis.
 - A `gets` / `readline` condition on a reader receiver, or a `gets` condition on implicit `self`, which binds `$_` on its edges (see [Last-line (`$_`) narrowing](#last-line-_-narrowing)).

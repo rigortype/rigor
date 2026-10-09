@@ -1,13 +1,14 @@
 # frozen_string_literal: true
 
-# Issue #1703 — a `key?` guard with a non-literal key did not narrow the matching index read. A closed hash shape
-# read by a computed key answers every value plus the miss `nil` (#1278), so typelizer 0.14.0's
+# Issue #1703 — a `key?` guard with a non-literal key did not rule out the miss `nil` of the matching index read. A
+# closed hash shape read by a computed key answers every value plus the miss `nil` (#1278), so typelizer 0.14.0's
 # `COLUMN_TYPE_MAP.key?(property.column_type) && …` followed by `COLUMN_TYPE_MAP[property.column_type].dup` and a
-# `[]=` on the copy reported `call.possible-nil-receiver` on correct code.
+# `[]=` on the copy reported `call.possible-nil-receiver` on correct code. The guard now only withholds that report;
+# the types every other rule reads are unchanged.
 #
-# The narrowing may only remove diagnostics. Each example below other than the first pins a way an earlier version of
-# the fix added one, or kept narrowing where the guard no longer held; every source line marked `# fires` is a report
-# the un-narrowed engine makes and this one must keep.
+# The guard may only remove that report. Each example below other than the first pins a way an earlier version of
+# the fix added a diagnostic, or kept withholding where the guard no longer held; every source line marked `# fires`
+# is a report the un-narrowed engine makes and this one must keep.
 
 require "spec_helper"
 require "fileutils"
@@ -16,7 +17,7 @@ require "tmpdir"
 require "rigor/analysis/runner"
 require "rigor/configuration"
 
-RSpec.describe "a key? guard with a non-literal key narrows the index read (#1703)" do
+RSpec.describe "a key? guard with a non-literal key withholds the nil-receiver report on the index read (#1703)" do
   def diagnostics(source)
     FileUtils.mkdir_p("lib")
     File.write(File.join("lib", "mapper.rb"), source)
@@ -237,6 +238,36 @@ RSpec.describe "a key? guard with a non-literal key narrows the index read (#170
               r = h[k]
               r[:y] = 1 # fires
             end
+          end
+        end
+
+        def aliased_through_itself(k)
+          h = { a: "x", b: "y" }
+          x = h.itself
+          if h.key?(k)
+            x.delete(k)
+            v = h[k]
+            v.upcase # fires
+          end
+        end
+
+        def aliased_through_to_h(k)
+          h = { a: "x", b: "y" }
+          x = h.to_h
+          if h.key?(k)
+            x.clear
+            v = h[k]
+            v.upcase # fires
+          end
+        end
+
+        def key_aliased_through_a_call(k)
+          map = { "a" => "x", "b" => "y" }
+          s = k.itself
+          if map.key?(k)
+            s << "zz"
+            v = map[k]
+            v.upcase # fires
           end
         end
 

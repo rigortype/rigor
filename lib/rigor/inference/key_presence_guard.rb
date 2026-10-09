@@ -62,12 +62,18 @@ module Rigor
       private_constant :STATE_KEY, :CACHE_KEY
 
       # The re-walk's state: the file's root, the end offset of each recorded guard, and the per-file scans.
-      Walk = Struct.new(:root, :guard_ends, :defs, :frozen_constants) do
+      Walk = Struct.new(:root, :guard_ends, :defs, :frozen_constants, :memo) do
+        # The innermost `def` holding `node`. The defs are collected once, in source order, so the innermost holder
+        # is the last one starting at or before the node that also ends after it.
         def enclosing_def(node)
           self.defs ||= collect_defs(root, [])
           offset = node.location.start_offset
-          defs.select { |d| d.location.start_offset <= offset && offset < d.location.end_offset }
-              .min_by { |d| d.location.end_offset - d.location.start_offset }
+          index = defs.bsearch_index { |d| d.location.start_offset > offset } || defs.size
+          (index - 1).downto(0) do |i|
+            candidate = defs[i]
+            return candidate if offset < candidate.location.end_offset
+          end
+          nil
         end
 
         def collect_defs(node, out)
@@ -83,7 +89,7 @@ module Rigor
       # Ractor worker too.
       def with_guards(root)
         previous = Thread.current[STATE_KEY]
-        Thread.current[STATE_KEY] = Walk.new(root, {})
+        Thread.current[STATE_KEY] = Walk.new(root, {}, nil, nil, {})
         yield
       ensure
         Thread.current[STATE_KEY] = previous
@@ -126,12 +132,13 @@ module Rigor
         cached = Thread.current[CACHE_KEY]
         return cached.last if cached&.first.equal?(root)
 
-        index = nil
-        if guard_shaped_call?(root)
-          base = scope_index[root]
-          index = base && with_guards(root) do
-            ScopeIndexer.index(root, default_scope: base.with_isolated_side_tables)
-          end
+        # Cached before the walk, so a re-walk that raises is attempted once per file and then answers nil.
+        Thread.current[CACHE_KEY] = [root, nil]
+        return nil unless guard_shaped_call?(root)
+
+        base = scope_index[root]
+        index = base && with_guards(root) do
+          ScopeIndexer.index(root, default_scope: base.with_isolated_side_tables)
         end
         Thread.current[CACHE_KEY] = [root, index]
         index

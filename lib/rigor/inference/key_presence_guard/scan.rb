@@ -9,12 +9,13 @@ module Rigor
       # ({.eligible?}), whether the source between a guard and its read may have broken it ({.intervening?}), and
       # whether one call or write breaks it ({.breaks?}, {.aliases_guard?}). Every answer errs towards breaking.
       module Scan
-        # Blockless calls on a guarded receiver that cannot remove a key or rebind a slot. Any other call on it, and
-        # any call with a block, may (`h.delete(k)`, `h.send(:delete, k)`, `h.each { … h.clear }`).
+        # Blockless calls on a guarded receiver that cannot remove a key or rebind a slot, and do not answer the
+        # receiver itself (so `x = h.itself` or `x = h.to_h` is a hand-on, not a read). Any other call on it, and any
+        # call with a block, may break the guard (`h.delete(k)`, `h.send(:delete, k)`, `h.each { … h.clear }`).
         READ_ONLY_RECEIVER_CALLS = %i[
           [] key? has_key? include? member? fetch dig values_at fetch_values size length count empty? any? none?
-          keys values to_a to_h dup clone freeze frozen? itself hash == != eql? equal? inspect to_s is_a? kind_of?
-          instance_of? nil? respond_to?
+          keys values to_a dup clone frozen? hash == != eql? equal? inspect to_s is_a? kind_of? instance_of? nil?
+          respond_to?
         ].to_set.freeze
 
         # The nodes whose `value` a write stores: storing the receiver or the key's root somewhere else aliases it.
@@ -56,10 +57,18 @@ module Rigor
         def eligible?(walk, call_node, guard)
           kind, name, key = guard
           body = walk.enclosing_def(call_node) || walk.root
-          receiver_eligible?(walk, body, kind, name) && key_root_eligible?(walk, body, key.root, call_node)
+          receiver_eligible?(walk, body, kind, name) && key_root_eligible?(walk, body, key, call_node)
         end
 
+        # Memoised per receiver and, for a local, per method body: the answer depends on neither the guard nor its key.
         def receiver_eligible?(walk, body, kind, name)
+          memo_key = [:receiver, kind, name, kind == :local ? body.location.start_offset : nil]
+          return walk.memo[memo_key] if walk.memo.key?(memo_key)
+
+          walk.memo[memo_key] = scan_receiver_eligible?(walk, body, kind, name)
+        end
+
+        def scan_receiver_eligible?(walk, body, kind, name)
           case kind
           when :local then !mentions?(body, [kind, name])
           when :ivar then !mentions?(walk.root, [kind, name])
@@ -91,13 +100,17 @@ module Rigor
             value.receiver.is_a?(Prism::HashNode)
         end
 
-        def key_root_eligible?(walk, body, root_ref, guard_node)
+        def key_root_eligible?(walk, body, key, guard_node)
+          root_ref = key.root
           kind, name = root_ref
           if kind == :ivar
-            !binds?(walk.root, IVAR_BINDERS, name, -1) && !closure_reads?(walk.root, root_ref)
+            memo_key = [:ivar_key_root, name]
+            return walk.memo[memo_key] if walk.memo.key?(memo_key)
+
+            walk.memo[memo_key] = !binds?(walk.root, IVAR_BINDERS, name, -1) && !closure_reads?(walk.root, root_ref)
           else
             !binds?(body, LOCAL_BINDERS, name, guard_node.location.start_offset) &&
-              !aliases?(body, root_ref) && !closure_reads?(body, root_ref)
+              !aliases?(body, key) && !closure_reads?(body, root_ref)
           end
         end
 
@@ -108,13 +121,29 @@ module Rigor
           node.compact_child_nodes.any? { |child| binds?(child, binders, name, offset) }
         end
 
-        # Whether a write stores a bare read of `ref` (`j = k`).
-        def aliases?(node, ref)
-          if WRITE_NODES.include?(node.class)
-            value = node.value
-            return true if receiver_ref(value) == ref
+        # Whether a write stores the key's value or something a call on it answers (`j = k`, `s = k.itself`,
+        # `s = prop.column_type.to_s`): its value is the key's root read, or a receiver chain that starts with the
+        # whole key chain. Such a copy may be the key object itself, and mutating it changes the key.
+        def aliases?(node, key)
+          return true if WRITE_NODES.include?(node.class) && derived_from_key?(node.value, key)
+
+          node.compact_child_nodes.any? { |child| aliases?(child, key) }
+        end
+
+        def derived_from_key?(value, key)
+          path = receiver_path(value)
+          !path.nil? && path.first(key.path.size) == key.path
+        end
+
+        # `[[root_kind, root_name], method, …]` for a local / ivar read or a receiver chain rooted at one, or nil.
+        def receiver_path(node)
+          names = []
+          while node.is_a?(Prism::CallNode) && node.receiver
+            names.unshift(node.name)
+            node = node.receiver
           end
-          node.compact_child_nodes.any? { |child| aliases?(child, ref) }
+          root = chain_root(node)
+          root && [root, *names]
         end
 
         # Whether a block or lambda body reads `ref` at all.

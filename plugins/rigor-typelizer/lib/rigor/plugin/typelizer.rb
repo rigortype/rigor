@@ -34,12 +34,13 @@ module Rigor
         produces: [:reachability_roots]
       )
 
-      producer :serializer_index, watch: -> { [[@dirs, "**/*.rb"]] } do |_params|
-        SerializerDiscoverer.new(io_boundary: io_boundary, dirs: @dirs).discover
+      producer :serializer_index, watch: -> { watch_globs } do |_params|
+        SerializerDiscoverer.new(io_boundary: io_boundary, dirs: @dirs, project_paths: @project_paths).discover
       end
 
-      def init(_services)
+      def init(services)
         @dirs = Array(config.fetch("dirs")).map(&:to_s)
+        @project_paths = Array(services.configuration.paths).map(&:to_s)
       end
 
       def prepare(services)
@@ -50,6 +51,20 @@ module Rigor
         return if roots.empty?
 
         services.fact_store.publish(plugin_id: manifest.id, name: :reachability_roots, value: roots)
+      end
+
+      private
+
+      # Superclass resolution reads every file of the project's `paths:` (a shadowing `Admin::Base` may live
+      # outside `dirs`), so all of them are watched, not only `dirs`.
+      def watch_globs
+        (@dirs + @project_paths).filter_map do |entry|
+          if io_boundary.directory?(File.expand_path(entry))
+            [entry, "**/*.rb"]
+          elsif entry.end_with?(".rb") && io_boundary.file?(File.expand_path(entry))
+            [File.dirname(entry), File.basename(entry)]
+          end
+        end
       end
     end
 

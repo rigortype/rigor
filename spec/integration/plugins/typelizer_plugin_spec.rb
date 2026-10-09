@@ -32,7 +32,9 @@ RSpec.describe "rigor-typelizer integration" do
   after { Rigor::Plugin.unregister! }
 
   def project(files, plugins: ["rigor-typelizer"])
-    Dir.mktmpdir do |dir|
+    Dir.mktmpdir do |tmp|
+      # macOS spells the temp root through a symlink; the read policy compares the resolved path.
+      dir = File.realpath(tmp)
       files.each do |relative, contents|
         full = File.join(dir, relative)
         FileUtils.mkdir_p(File.dirname(full))
@@ -137,11 +139,19 @@ RSpec.describe "rigor-typelizer integration" do
     end
   end
 
+  # A negative example is only meaningful if the producer ran: every project here carries a DSL class under
+  # `app/serializers`, and the assertion is that the roots are exactly it.
   describe "what is not rooted" do
+    let(:sentinel) { { "app/serializers/sentinel.rb" => "class Sentinel\n  include Typelizer::DSL\nend\n" } }
+
+    def expect_only_sentinel(files)
+      roots_for(sentinel.merge(files)) { |roots| expect(roots).to eq(["Sentinel"]) }
+    end
+
     it "leaves a plain class a candidate" do
       files = { "app/serializers/formatter.rb" => "class Formatter\n  def format(v) = v.to_s\nend\n" }
-      roots_for(files) { |roots| expect(roots).to be_empty }
-      expect(candidates_for(files)).to include("Formatter")
+      expect_only_sentinel(files)
+      expect(candidates_for(sentinel.merge(files))).to include("Formatter")
     end
 
     it "leaves a class outside the configured dirs alone" do
@@ -149,8 +159,8 @@ RSpec.describe "rigor-typelizer integration" do
         "app/lib/stray.rb" => "class Stray\n  include Typelizer::DSL\nend\n",
         "app/lib/stray_child.rb" => "class StrayChild < Stray\nend\n"
       }
-      roots_for(files) { |roots| expect(roots).to be_empty }
-      expect(candidates_for(files)).to include("StrayChild")
+      expect_only_sentinel(files)
+      expect(candidates_for(sentinel.merge(files))).to include("StrayChild")
     end
 
     it "does not root a class that includes something else, nor a bare constant mention" do
@@ -166,16 +176,16 @@ RSpec.describe "rigor-typelizer integration" do
           end
         RUBY
       }
-      roots_for(files) { |roots| expect(roots).to be_empty }
+      expect_only_sentinel(files)
     end
 
     it "ignores a DSL include inside `class << self`" do
-      files = { "app/serializers/a.rb" => "class A\n  class << self\n    include Typelizer::DSL\n  end\nend\n" }
-      roots_for(files) { |roots| expect(roots).to be_empty }
+      source = "class A\n  class << self\n    include Typelizer::DSL\n  end\nend\n"
+      expect_only_sentinel("app/serializers/a.rb" => source)
     end
 
-    # typelizer registers the module's own name, then calls `.descendants` on it (a Module has none), and
-    # `DSL.included` never fires for a class that only includes the module: neither is a generated interface.
+    # A plain module that includes the DSL makes typelizer's `target_serializers` call `.descendants` on a
+    # module (NoMethodError), and a class that only includes the module is never registered by the hook.
     it "roots neither a module that includes the DSL nor a class that includes that module" do
       files = {
         "app/serializers/shared.rb" => <<~RUBY
@@ -187,8 +197,42 @@ RSpec.describe "rigor-typelizer integration" do
           end
         RUBY
       }
-      roots_for(files) { |roots| expect(roots).to be_empty }
-      expect(candidates_for(files)).to include("User")
+      expect_only_sentinel(files)
+      expect(candidates_for(sentinel.merge(files))).to include("User")
+    end
+
+    # The call must run with the lexical class as `self`: anywhere else it registers some other class, or none.
+    {
+      "a Class.new constant" => "Inner = Class.new { include Typelizer::DSL }",
+      "a Class.new inside a method" => "def self.build = Class.new { include Typelizer::DSL }",
+      "a Struct.new block" => "Pair = Struct.new(:a) do\n    include Typelizer::DSL\n  end",
+      "a class_eval on another receiver" => "Other.class_eval { include Typelizer::DSL }",
+      "an instance_exec on another receiver" => "Other.instance_exec { extend Typelizer::DSL }",
+      "an instance method" => "def setup\n    include Typelizer::DSL\n  end",
+      "a singleton method" => "def self.enable!\n    include Typelizer::DSL\n  end",
+      "a lambda" => "HOOK = -> { include Typelizer::DSL }",
+      "an ordinary call's block" => "many :x do\n    include Typelizer::DSL\n  end",
+      "an included hook block" => "included do\n    include Typelizer::DSL\n  end"
+    }.each do |label, body|
+      it "does not credit the lexical class with an include in #{label}" do
+        expect_only_sentinel("app/serializers/outer.rb" => "class Outer\n  #{body}\nend\n")
+      end
+    end
+
+    it "does credit a conditional include in the class body" do
+      files = { "app/serializers/a.rb" => "class A\n  include Typelizer::DSL if RUBY_VERSION\nend\n" }
+      roots_for(files) { |roots| expect(roots).to eq(["A"]) }
+    end
+
+    it "follows a shadowing class declared outside dirs" do
+      base = {
+        "app/serializers/base.rb" => "class Base\n  include Typelizer::DSL\nend\n",
+        "app/serializers/admin/x.rb" => "module Admin\n  class X < Base; end\nend\n"
+      }
+      shadow = { "app/models/admin/base.rb" => "module Admin\n  class Base; end\nend\n" }
+      # Control: with nothing shadowing it, `Base` is the top-level DSL class and `Admin::X` is rooted.
+      roots_for(base) { |roots| expect(roots).to contain_exactly("Base", "Admin::X") }
+      roots_for(base.merge(shadow)) { |roots| expect(roots).to eq(["Base"]) }
     end
 
     it "does not root a class whose same-named superclass resolves to a non-DSL class" do
@@ -211,6 +255,24 @@ RSpec.describe "rigor-typelizer integration" do
       # `class Admin::Child < Base` is a compact header: `Base` is the top-level DSL class. `Inner` sits inside
       # `module Admin`, so `Base` is `Admin::Base`, which has no DSL.
       roots_for(files) { |roots| expect(roots).to contain_exactly("Base", "Admin::Child") }
+    end
+
+    # Ruby searches the innermost cref's ancestors before the top level; that is not modelled, so decline.
+    it "declines a superclass that might come from the enclosing class's own ancestors" do
+      files = {
+        "app/serializers/a.rb" => <<~RUBY
+          class Base
+            include Typelizer::DSL
+          end
+          class Parent
+            class Base; end
+          end
+          class Kid < Parent
+            class Y < Base; end
+          end
+        RUBY
+      }
+      roots_for(files) { |roots| expect(roots).to eq(["Base"]) }
     end
   end
 

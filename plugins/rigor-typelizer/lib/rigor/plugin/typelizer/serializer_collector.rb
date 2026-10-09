@@ -12,10 +12,15 @@ module Rigor
       # A {Rigor::Inference::DeclarationWalk} collector over one file: the classes it declares, and whether each
       # one's own body says `include Typelizer::DSL` / `extend Typelizer::DSL`.
       #
-      # Only the class body itself counts. A `module` that includes the DSL is deliberately not recorded:
-      # typelizer registers the module's own name and later calls `.descendants` on it, which a Module does not
-      # have, and `DSL.included` never fires for a class that merely includes that module (see the README).
-      # A `class << self` body is skipped too, since the hook would see the singleton class there.
+      # A `module` that includes the DSL is deliberately not recorded: typelizer registers the module's own
+      # name and `target_serializers` then calls `.descendants` on it, which a plain Module lacks. A class that
+      # reaches the DSL through a module's `included do ... end` hook is a known missed root (see the README).
+      #
+      # Only a statement of the class body itself counts, because only there is `self` the class: the walk is
+      # over the body's own statements (through `if` / `unless` / `begin`), never into a `def`, a block, a
+      # lambda or a nested class, so `Class.new { include Typelizer::DSL }`, `Other.class_eval { include ... }`,
+      # `included do include Typelizer::DSL end` and a `def` that includes it credit nothing to the lexical
+      # class. A `class << self` body is a different node and is not entered either.
       class SerializerCollector
         include Rigor::Inference::DeclarationWalk::Collector
 
@@ -33,17 +38,10 @@ module Rigor
 
           name = body_context.prefix.join("::")
           unless name.empty?
-            @entries[name] = superclass_name(node.superclass)
+            superclass = superclass_name(node.superclass)
+            @entries[name] = superclass if superclass || !@entries.key?(name)
             @nestings[name] = context.nesting || []
-          end
-          Rigor::Inference::DeclarationWalk::DESCEND
-        end
-
-        def on_call(node, context)
-          owner = context.prefix.join("::")
-          if DSL_CALLS.include?(node.name) && node.receiver.nil? && !owner.empty? && !context.singleton_cref &&
-             dsl_argument?(node)
-            @dsl[owner] = true
+            @dsl[name] = true if dsl_in?(node.body) && !body_context.singleton_cref
           end
           Rigor::Inference::DeclarationWalk::DESCEND
         end
@@ -52,12 +50,31 @@ module Rigor
         def class_entries
           @entries.map do |name, superclass|
             SerializerIndex::ClassEntry.new(
-              name: name, superclass: superclass, nesting: @nestings.fetch(name), dsl: @dsl.fetch(name, false)
+              name: name, superclass: superclass, nesting: @nestings.fetch(name), dsl: @dsl.fetch(name, false),
+              in_dirs: false
             )
           end
         end
 
         private
+
+        # Whether a statement reachable without entering a def, block, lambda or nested declaration is a
+        # receiverless `include` / `extend` of the DSL module.
+        def dsl_in?(node)
+          case node
+          when Prism::StatementsNode then node.body.any? { |child| dsl_in?(child) }
+          when Prism::BeginNode then dsl_in?(node.statements) || dsl_in?(node.else_clause)
+          when Prism::ElseNode then dsl_in?(node.statements)
+          when Prism::IfNode then dsl_in?(node.statements) || dsl_in?(node.subsequent)
+          when Prism::UnlessNode then dsl_in?(node.statements) || dsl_in?(node.else_clause)
+          when Prism::CallNode then dsl_call?(node)
+          else false
+          end
+        end
+
+        def dsl_call?(node)
+          DSL_CALLS.include?(node.name) && node.receiver.nil? && node.block.nil? && dsl_argument?(node)
+        end
 
         def dsl_argument?(node)
           arguments = node.arguments&.arguments || []

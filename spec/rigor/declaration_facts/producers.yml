@@ -652,5 +652,5 @@ plugins/rigor-typelizer/lib/rigor/plugin/typelizer/serializer_collector.rb:
   computes: which project classes include or extend Typelizer::DSL
   producers:
     Rigor::Plugin::Typelizer::SerializerCollector: a DeclarationWalk collector, so the class name and Module.nesting come from DeclarationWalk::Context#prefix; it computes no context itself
-    Rigor::Plugin::Typelizer::SerializerCollector#on_call: reads the `include`/`extend Typelizer::DSL` call as a fact about the class the walk's context names, not as a declaration
-    Rigor::Plugin::Typelizer::SerializerCollector#on_declaration: records each class header under the walk's body-context prefix; it decides nothing about nesting
+    Rigor::Plugin::Typelizer::SerializerCollector#on_declaration: records each class header under the walk's body-context prefix and reads the class body's own `include`/`extend Typelizer::DSL` statements as a fact about that class; it decides nothing about nesting
+    Rigor::Plugin::Typelizer::SerializerCollector#dsl_call?: reads one receiverless `include`/`extend Typelizer::DSL` statement of a class body as a fact about that class, not as a declaration

@@ -40,11 +40,14 @@ A subclass is followed through any chain of project classes, and a compact heade
 
 ## What it does not root
 
-- A class outside the configured `dirs`. typelizer only loads those directories.
-- A `module` that includes `Typelizer::DSL`, and a class that includes such a module. typelizer registers the
-  module's own name and then calls `.descendants` on it, which a module does not have, and the DSL hook never
-  runs for a class that merely includes the module. Neither produces an interface, so neither is rooted.
-- A DSL call inside `class << self`.
+- A class outside the configured `dirs`. typelizer generates any DSL class that is loaded, but it loads only `dirs`;
+  a class elsewhere is loaded when something references it, so it is not dead.
+- A `module` that includes `Typelizer::DSL`. typelizer registers the module's own name and then calls
+  `.descendants` on it, which a plain module does not have, so it generates no interface.
+- A DSL call that does not run with the class as `self`: inside a method, a block, a lambda or `class << self`.
+- A class whose DSL comes only from an `ActiveSupport::Concern` `included do include Typelizer::DSL end` block.
+  typelizer does register such a class; the plugin does not follow module hooks, so this is a missed root and the
+  class stays a candidate.
 
 `reject_class`, the lambda typelizer's configuration uses to drop a class from the output, is evaluated at
 runtime and is not modelled. A rejected class is still rooted, which hides a candidate and never invents a
@@ -60,7 +63,8 @@ plugins:
 ```
 
 `dirs` mirrors `Typelizer.dirs`; the default is what `Typelizer::Railtie` sets when you configure none. Set it
-to the same list you give typelizer.
+to the same list you give typelizer. Superclasses are resolved over all of your project's `paths:`, so a class
+that shadows a base outside `dirs` is noticed.
 
 ## More
 

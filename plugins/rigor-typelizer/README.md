@@ -33,15 +33,18 @@ plugin all eight are candidates. `rigor check` prints only the coverage note: th
 ### What is and is not published
 
 - A class declared in a file under `dirs` whose own body says `include Typelizer::DSL` or
-  `extend Typelizer::DSL` (also `::Typelizer::DSL`, and among several arguments).
-- Every project class whose superclass chain reaches such a class. The superclass is resolved as Ruby does, against
-  the `Module.nesting` of the class header, so a compact `class Admin::X < Base` looks `Base` up lexically and
-  not under `Admin`.
-- **Not** a `module` that includes the DSL, and **not** a class that includes such a module. `DSL.included`
-  registers the module's own name, `target_serializers` then calls `.descendants` on it (a `Module` has no such
-  method), and the hook never runs for a class that only includes the module. Neither yields an interface, and a
-  spurious root would hide a dead class.
-- **Not** a DSL call inside `class << self`, and not a class outside `dirs`.
+  `extend Typelizer::DSL` (also `::Typelizer::DSL`, among several arguments, or under an `if`). Only a statement of
+  the class body counts, because only there is `self` the class: an include inside a `def`, a block, a lambda
+  (`Class.new { ... }`, `Struct.new do ... end`, `Other.class_eval { ... }`, `included do ... end`) or
+  `class << self` is not credited to the lexical class.
+- Every class under `dirs` whose superclass chain reaches such a class. Class declarations are read from all of
+  the project's `paths:` as well as `dirs`, so a same-named class elsewhere that shadows the base
+  (`Admin::Base` with no DSL) is seen. The superclass is resolved as Ruby does, against the `Module.nesting` of the
+  class header, so a compact `class Admin::X < Base` looks `Base` up lexically and not under `Admin`.
+- **Not** a `module` that includes the DSL: `DSL.included` registers the module's own name and
+  `target_serializers` then calls `.descendants` on it, which a plain `Module` lacks (a `NoMethodError` in
+  typelizer), so it generates no interface.
+- **Not** a class outside `dirs`.
 
 ## Layout
 
@@ -54,7 +57,7 @@ plugins/rigor-typelizer/
 │       ├── typelizer.rb                    ← manifest, root publication
 │       └── typelizer/
 │           ├── serializer_collector.rb     ← DeclarationWalk collector (classes, DSL include/extend)
-│           ├── serializer_discoverer.rb    ← walks dirs through IoBoundary
+│           ├── serializer_discoverer.rb    ← walks dirs and paths through IoBoundary
 │           └── serializer_index.rb         ← frozen index; the superclass-chain walk
 └── demo/
     ├── .rigor.yml
@@ -78,17 +81,19 @@ nix develop --command \
 - `reject_class` is a runtime lambda in typelizer's configuration and is not modelled. A rejected class is still
   rooted: a hidden candidate, never a false finding.
 - `dirs` (default `["app/resources", "app/serializers"]`, what `Typelizer::Railtie` sets when `dirs` is empty)
-  bounds both the classes that count and the superclasses followed. A DSL base declared outside `dirs` roots
-  nothing below it.
-- Only the static header and body are read: a conditional `include`, a DSL applied through `send` or a
-  metaprogrammed macro is not seen.
+  bounds which classes are published. Superclasses are resolved over every file of the project's `paths:`.
+- A **missed root**: a class that reaches the DSL through an `ActiveSupport::Concern` whose `included do
+  include Typelizer::DSL end` block registers the including class in typelizer, but the plugin does not follow
+  module hooks and does not root it. A DSL applied through `send` or another macro is missed the same way.
+- A superclass name not found on the lexical chain is declined (not rooted) when the innermost enclosing scope is a
+  class with a superclass, since Ruby would search that class's ancestors first and they are not modelled.
 - typelizer's `writer` configuration may select files per writer; every writer is treated alike.
 
 ## Plugin authoring surface this exercises
 
 | Surface | Used for |
 | --- | --- |
-| `Plugin::Base.producer :serializer_index` | cached project scan, `watch:` on `dirs` |
+| `Plugin::Base.producer :serializer_index` | cached project scan, `watch:` on `dirs` and the project `paths:` |
 | `Inference::DeclarationWalk::Collector` | `Module.nesting`-correct class names without a bespoke walker |
 | `#prepare` + `fact_store.publish` (ADR-9) | the `:reachability_roots` fact |
 

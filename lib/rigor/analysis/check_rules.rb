@@ -287,7 +287,7 @@ module Rigor
           unresolved_toplevel_diagnostic(path, node, scope_index, eval_ranges),
           wrong_arity_diagnostic(path, node, scope_index, lexical_sites),
           argument_type_diagnostic(path, node, scope_index, lexical_sites),
-          nil_receiver_diagnostic(path, node, scope_index),
+          nil_receiver_diagnostic(path, node, scope_index, lexical_sites),
           dump_type_diagnostic(path, node, scope_index),
           assert_type_diagnostic(path, node, scope_index),
           always_raises_diagnostic(path, node, scope_index),
@@ -1905,7 +1905,7 @@ module Rigor
         # and union receivers where every member already
         # disqualifies the call (avoid duplicating the
         # undefined-method diagnostic).
-        def nil_receiver_diagnostic(path, call_node, scope_index)
+        def nil_receiver_diagnostic(path, call_node, scope_index, lexical_sites = nil)
           return nil if call_node.receiver.nil?
           # Safe-navigation calls (`recv&.method`) already
           # short-circuit on nil at runtime, so a nil-bearing
@@ -1954,6 +1954,10 @@ module Rigor
           return nil unless Rigor::Reflection.rbs_class_known?("NilClass", scope: scope)
 
           return nil unless nil_bearing_union_witnesses?(receiver_type, call_node.name, scope)
+          # Issue #1703 — a `nil` that only a `key?` guard on the same receiver and key rules out. Asked last: it
+          # re-walks the file once with guards on, and only to withhold this report.
+          return nil if Inference::KeyPresenceGuard.withholds_nil?(call_node, receiver_type, lexical_sites&.root,
+                                                                   scope_index)
 
           build_nil_receiver_diagnostic(path, call_node)
         end

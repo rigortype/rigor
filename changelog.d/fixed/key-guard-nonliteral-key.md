@@ -1,0 +1,1 @@
+- **[engine]** A `key?` / `has_key?` / `include?` / `member?` guard with a variable or reader-chain key on a closed hash now rules out the miss `nil` for `call.possible-nil-receiver` on the matching `H[k]` read, so `result = MAP[prop.column_type].dup` after `MAP.key?(prop.column_type)` no longer reports. ([#1709](https://github.com/rigortype/rigor/pull/1709))

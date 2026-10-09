@@ -182,7 +182,9 @@ module Rigor
     #   today.
     # - `receiver_name` is the variable's Symbol.
     # - `key` is the Ruby value of the literal index (Symbol / String / Integer). Non-literal keys
-    #   (`params[field]`) are not recorded; they have no stable address.
+    #   (`params[field]`) have no stable address for a recorded value. A `key?` guard with a non-literal key
+    #   (issue #1703) records an {Inference::KeyPresenceGuard::KeyExpr} here instead, with `receiver_kind`
+    #   `:const` allowed; its entry marks presence only.
     IndexedKey = Data.define(:receiver_kind, :receiver_name, :key)
 
     # Narrowing key for a no-arg / no-block method-call chain `receiver.method_name` (a "single-hop" chain per A1
@@ -376,6 +378,14 @@ module Rigor
     def record_optimistic_origin(node, cause)
       @optimistic_origins[node] = cause
       self
+    end
+
+    # Issue #1703 — this scope with private copies of the identity-keyed side tables (dynamic, void and optimistic
+    # origins, plugin-typed calls), so a second walk from it — the `key?`-guarded re-walk — records into its own
+    # tables and never into the ones the file's analysis reads.
+    def with_isolated_side_tables
+      rebuild(dynamic_origins: @dynamic_origins.dup, void_origins: @void_origins.dup,
+              plugin_typed_calls: @plugin_typed_calls.dup, optimistic_origins: @optimistic_origins.dup)
     end
 
     def optimistic_local(name) = Inference::OptimisticOrigin.bound_cause(@optimistic_locals[name.to_sym])
@@ -2246,9 +2256,17 @@ module Rigor
       sym_kind = receiver_kind.to_sym
       sym_name = receiver_name.to_sym
       filtered = @indexed_narrowings.reject do |k, _|
-        k.receiver_kind == sym_kind && k.receiver_name == sym_name
+        (k.receiver_kind == sym_kind && k.receiver_name == sym_name) || key_guard_rooted_at?(k.key, sym_kind, sym_name)
       end
       filtered.size == @indexed_narrowings.size ? @indexed_narrowings : filtered.freeze
+    end
+
+    # Issue #1703 — whether `key` is a `key?` guard's key that is the variable `kind`/`name`, or a chain read from it.
+    def key_guard_rooted_at?(key, kind, name)
+      return false unless key.is_a?(Inference::KeyPresenceGuard::KeyExpr)
+
+      root = key.root
+      root[0] == kind && root[1] == name
     end
 
     # ADR-58 WD1 — set/clear the declaration-sourced provenance mark.

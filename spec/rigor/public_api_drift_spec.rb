@@ -185,6 +185,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     with_guarded_ivar(req:name,req:type,req:pre_guard)
     with_indexed_narrowing(req:receiver_kind,req:receiver_name,req:key,req:type)
     with_inferred_param_mark(req:name)
+    with_isolated_side_tables()
     with_ivar(req:name,req:type)
     with_ivar_origin(req:name,req:cause)
     with_lexical_nesting(req:chain)

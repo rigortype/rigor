@@ -31,6 +31,7 @@ require_relative "match_rebinding"
 require_relative "element_read_widening"
 require_relative "hash_lookup_mutation"
 require_relative "indexed_narrowing"
+require_relative "key_presence_guard"
 require_relative "index_write_widening"
 require_relative "method_dispatcher"
 require_relative "method_parameter_binder"
@@ -352,7 +353,7 @@ module Rigor
         @on_enter&.call(node, @scope)
 
         handler = HANDLERS[node.class]
-        return forget_implicit_call_guards(node, send(handler, node)) if handler
+        return forget_aliased_key_guards(node, forget_implicit_call_guards(node, send(handler, node))) if handler
 
         # Default: the node is treated as a pure expression. Type it through the existing expression typer (which
         # observes the current scope's locals) and leave the scope unchanged, but for the match globals a call in it
@@ -371,6 +372,16 @@ module Rigor
                              GuardRebinding.implicit_call_may_rebind?(node, @scope)
 
         [type, after.forget_guard_narrowings]
+      end
+
+      # Issue #1703 — a write that stores a `key?` guard's receiver or key root elsewhere (`g = h`) aliases it, so
+      # the guard ends ({KeyPresenceGuard.invalidate_after_write}).
+      def forget_aliased_key_guards(node, result)
+        type, after = result
+        return result unless after.is_a?(Scope)
+
+        guarded = KeyPresenceGuard.invalidate_after_write(node, after)
+        guarded.equal?(after) ? result : [type, guarded]
       end
 
       # Issue #1359 — the nodes whose handler runs their parts in order, each from the scope the parts before it
@@ -2994,6 +3005,8 @@ module Rigor
         # outer receiver is itself a chain node (e.g. `x.last << y`) do NOT drop narrowings keyed on `x` — only direct
         # calls against the root variable invalidate the chain.
         post_scope = IndexedNarrowing.invalidate_chain_after_call(call_node: node, current_scope: post_scope)
+        # Issue #1703 — a non-literal-key `key?` guard the call may break ({KeyPresenceGuard.breaks?}).
+        post_scope = KeyPresenceGuard.invalidate_after_call(node, post_scope)
         # B2.2 — intervening method call ivar invalidation. An implicit-self / self-receiver call could mutate any ivar
         # of the enclosing class (we cannot prove purity without an effect system). Reset each ivar whose current local
         # binding has narrowed below the class-ivar seed back to the seed itself, so a subsequent `if @flag` predicate

@@ -10,6 +10,7 @@ require_relative "../rbs_extended"
 require_relative "../analysis/fact_store"
 require_relative "../builtins/regex_refinement"
 require_relative "guard_rebinding"
+require_relative "key_presence_guard"
 require_relative "last_line"
 require_relative "operand_effects"
 require_relative "optimistic_origin"
@@ -1273,7 +1274,7 @@ module Rigor
         end
 
         def simple_dispatch_name?(name)
-          %i[nil? ! is_a? kind_of? instance_of? == != === =~ !~ match? key? has_key? empty? any?
+          %i[nil? ! is_a? kind_of? instance_of? == != === =~ !~ match? key? has_key? include? member? empty? any?
              none? respond_to? nan? finite?].include?(name)
         end
 
@@ -1286,7 +1287,7 @@ module Rigor
           when :=== then analyse_case_equality_predicate(node, scope)
           when :=~, :!~ then dispatch_regex_match_predicate(node, scope, name)
           when :match? then analyse_whole_regex_match_predicate(node, scope)
-          when :key?, :has_key? then analyse_key_presence_predicate(node, scope)
+          when :key?, :has_key?, :include?, :member? then analyse_key_presence_predicate(node, scope)
           when :empty?, :any?, :none? then analyse_array_emptiness_predicate(node, scope, name)
           when :respond_to? then analyse_respond_to_predicate(node, scope)
           when :nan?, :finite? then analyse_float_class_predicate(node, scope, name)
@@ -1462,14 +1463,16 @@ module Rigor
         # `h[:foo]` nil-typed). The falsey edge is left unchanged — "key absent" is the
         # conservative no-op. Only literal `Symbol`/`String` arguments and
         # `LocalVariableReadNode`/`InstanceVariableReadNode` receivers narrow; everything else
-        # (Dynamic, `Nominal[Hash]`, method-chain receivers, dynamic keys) bails to no
-        # narrowing.
+        # (Dynamic, `Nominal[Hash]`, method-chain receivers) bails to no narrowing. A non-literal
+        # key goes to {#analyse_computed_key_presence_predicate} (issue #1703).
         def analyse_key_presence_predicate(node, scope)
           return nil if node.arguments.nil?
           return nil unless node.arguments.arguments.size == 1
 
-          key = static_hash_key(node.arguments.arguments.first)
-          return nil if key.nil?
+          # A literal key promotes a shape's optional key only for `key?` / `has_key?`; `include?` / `member?` reach
+          # the computed-key guard alone, so a String or Array receiver's `include?` keeps its own narrowings.
+          key = static_hash_key(node.arguments.arguments.first) if %i[key? has_key?].include?(node.name)
+          return analyse_computed_key_presence_predicate(node, scope) if key.nil?
 
           case node.receiver
           when Prism::LocalVariableReadNode
@@ -1477,6 +1480,17 @@ module Rigor
           when Prism::InstanceVariableReadNode
             key_presence_scopes(node.receiver.name, key, scope, reader: :ivar, writer: :with_ivar)
           end
+        end
+
+        # Issue #1703 — `H.key?(k)` / `has_key?` / `include?` / `member?` with a non-literal key (a local, an ivar,
+        # or a reader chain such as `prop.column_type`) on a closed hash shape held in a local, an ivar or a
+        # constant. The truthy edge records the guard, and a later `H[k]` of the same receiver and structurally the
+        # same key drops the miss `nil` ({KeyPresenceGuard}). The falsey edge is the no-op: an
+        # absent computed key says nothing a shape can record. Nil when the guard does not apply, so a collection's
+        # `include?` still reaches the membership and String predicates.
+        def analyse_computed_key_presence_predicate(node, scope)
+          truthy = KeyPresenceGuard.record(node, scope)
+          truthy && [truthy, scope]
         end
 
         def key_presence_scopes(name, key, scope, reader:, writer:)

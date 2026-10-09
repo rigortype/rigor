@@ -7,6 +7,7 @@ require_relative "activerecord/schema_parser"
 require_relative "activerecord/structure_sql_parser"
 require_relative "activerecord/model_index"
 require_relative "activerecord/model_discoverer"
+require_relative "activerecord/association_roots"
 require_relative "activerecord/analyzer"
 require_relative "activerecord/effects"
 
@@ -64,6 +65,11 @@ module Rigor
       manifest(
         id: "activerecord",
         target_gems: ["activerecord"],
+        # 0.14.0, 2026-10-10 (#1721) — the plugin publishes `:reachability_roots`: the models ActiveRecord loads
+        # by name from an association. The association rows gain `macro`, `class_name_option`, `through` and
+        # `source_type_option`, so a cached 0.13.0 payload lacks the fields the roots are derived from and
+        # would publish none; the bump (part of the producer cache KEY) is what stops a warm run serving it.
+        #
         # 0.13.0, 2026-09-24 (#1321) — the class-side `Model.find` with two or more arguments returns
         # `Array[Model]` instead of the model, and its `model-call` note says so. A model that defines its own
         # `self.find` keeps its own answer; the note reads syntax alone and does not see that override. No
@@ -118,7 +124,7 @@ module Rigor
         # a scope lambda body / class-method body now contributes `Relation[Model]` via `scope.self_type`
         # instead of falling through to `Kernel#select` (the IO multiplexer, `Array[String]` return). Plus
         # `:select` added to the relation-entry-point list.
-        version: "0.13.0",
+        version: "0.14.0",
         description: "Types ActiveRecord finders against the project's db/schema.rb and AR models.",
         config_schema: {
           "schema_file" => { kind: :string, default: "db/schema.rb" },
@@ -128,7 +134,7 @@ module Rigor
           "model_search_paths" => { kind: :array, default: ["app/models"] },
           "model_base_classes" => { kind: :array, default: %w[ApplicationRecord ActiveRecord::Base] }
         },
-        produces: [:model_index],
+        produces: %i[model_index reachability_roots],
         # ADR-25 — the bundled `ActiveRecord::Relation` RBS that relation-typed call sites (`has_many`
         # accessors, `Model.where`, scopes) dispatch against.
         signature_paths: ["sig"],
@@ -241,6 +247,9 @@ module Rigor
         # this, so the disclosure is in the coordinator's table before a single worker is forked.
         disclose_load_errors
         return if index.nil? || index.empty?
+
+        # Roots do not read columns, so reduced mode (Redmine) publishes them too.
+        publish_association_roots(services, index)
         # Reduced mode stays UNPUBLISHED. Every consumer reads `columns:` as authoritative and fires on a
         # key missing from it — rigor-actionpack's `permit(:title)` check and rigor-shoulda-matchers'
         # `have_db_column(:title)` / `validate_presence_of(:title)` matchers both do — so publishing the
@@ -255,6 +264,18 @@ module Rigor
           value: index_to_published_hash(index)
         )
       end
+
+      # ADR-102 WD3 — the models an association loads by name; see {AssociationRoots}. An unavailable
+      # inflector (ADR-39: decline, never approximate) leaves the report as it was.
+      def publish_association_roots(services, index)
+        roots = AssociationRoots.call(index)
+        return if roots.empty?
+
+        services.fact_store.publish(plugin_id: manifest.id, name: :reachability_roots, value: roots)
+      rescue Rigor::Plugin::Inflector::Unavailable
+        nil
+      end
+      private :publish_association_roots
 
       def diagnostics_for_file(path:, scope:, root:)
         index = model_index

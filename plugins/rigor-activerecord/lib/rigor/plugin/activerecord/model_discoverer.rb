@@ -1263,9 +1263,10 @@ module Rigor
         # association / enum / validation declared inside is invisible to the discoverer, turning
         # `where(<assoc>: ...)` into a false `unknown-column`. Nested `with_options` blocks recurse.
         #
-        # The options the `with_options` call itself carries (e.g. `with_options class_name: 'Account'`)
-        # are NOT merged into the nested calls — discovering the declaration name is what clears the
-        # false positive; the merged-option target precision is a separate refinement.
+        # This method returns only the nodes and does NOT merge the group's own options (e.g.
+        # `with_options class_name: 'Account'`); {#association_calls} is the variant that does, and it is
+        # what the association rows use. The other lookups (enums, scopes, validations, callbacks) ignore
+        # group options.
         def declaration_calls(body)
           return [] if body.nil?
 
@@ -1291,20 +1292,42 @@ module Rigor
           return [] if body.nil?
 
           rows = []
-          declaration_calls(body).each do |node|
+          association_calls(body, [], false).each do |node, inherited, opaque|
             kind = ASSOCIATION_METHODS[node.name]
             next if kind.nil?
             next if node.receiver # skip `self.has_many` and similar
 
-            row = build_association_row(node, kind)
+            row = build_association_row(node, kind, inherited, opaque)
             rows << row unless row.nil?
           end
           rows
         end
 
-        def build_association_row(node, kind)
-          args = node.arguments&.arguments
-          return nil if args.nil? || args.empty?
+        # {#declaration_calls} that also carries the options of the enclosing `with_options(...)` groups, as
+        # `[node, option_args, opaque]`. `option_args` are the keyword-hash arguments of those groups, which
+        # ActiveRecord merges under the call's own options; `opaque` is true when a group passes anything
+        # else (`with_options opts do`), so its options are unknown.
+        def association_calls(body, inherited, opaque)
+          return [] if body.nil?
+
+          body.compact_child_nodes.flat_map do |node|
+            next [] unless node.is_a?(Prism::CallNode)
+
+            if node.name == :with_options && node.block.is_a?(Prism::BlockNode)
+              args = node.arguments&.arguments || []
+              hashes = args.grep(Prism::KeywordHashNode)
+              association_calls(node.block.body, hashes + inherited, opaque || hashes.size != args.size)
+            else
+              [[node, inherited, opaque]]
+            end
+          end
+        end
+
+        def build_association_row(node, kind, inherited, opaque)
+          own = node.arguments&.arguments
+          return nil if own.nil? || own.empty?
+
+          args = own + inherited
 
           name = Rigor::Source::Literals.symbol_name(args.first)
           return nil if name.nil?
@@ -1322,7 +1345,65 @@ module Rigor
           end
 
           { name: name, kind: kind, target: target, polymorphic: polymorphic,
-            nullable: association_nullable?(node.name, args) }
+            nullable: association_nullable?(node.name, args),
+            macro: node.name, class_name_option: class_name_option(args),
+            through: association_key?(args, "through"),
+            source_type_option: literal_option(args, "source_type"),
+            roots_declined: opaque || association_key?(args, "anonymous_class") || own_options_unknown?(own) }
+        end
+
+        # The `class_name:` option as ActiveRecord's `compute_type` will read it: the literal String (a
+        # Symbol is `to_s`'d by Rails too), `nil` when the option is absent, and `:dynamic` when it is
+        # present but not a literal — the `:reachability_roots` consumer must decline then, where the
+        # `target` above falls back to the inferred name.
+        # A `**opts` splat may carry a `class_name:` too, so it reads as present-but-unknown.
+        def class_name_option(args)
+          literal_option(args, "class_name") ||
+            (args.any? { |a| a.is_a?(Prism::KeywordHashNode) && a.elements.any?(Prism::AssocSplatNode) } ? :dynamic : nil)
+        end
+
+        def literal_option(args, key)
+          args.each do |arg|
+            next unless arg.is_a?(Prism::KeywordHashNode)
+
+            arg.elements.each do |pair|
+              next unless pair.is_a?(Prism::AssocNode) && Source::Literals.symbol_named?(pair.key, key)
+
+              value = pair.value
+              return value.unescaped if value.is_a?(Prism::StringNode) || value.is_a?(Prism::SymbolNode)
+
+              return :dynamic
+            end
+          end
+          nil
+        end
+
+        ROOT_OPTION_KEYS = %w[class_name polymorphic through source_type anonymous_class].freeze
+        LITERAL_OPTION_VALUES = [Prism::StringNode, Prism::SymbolNode, Prism::TrueNode, Prism::FalseNode].freeze
+        private_constant :ROOT_OPTION_KEYS, :LITERAL_OPTION_VALUES
+
+        # Whether the association call's OWN arguments hide an option that decides its target class: a
+        # positional options hash or variable, a `**splat`, or a non-literal value for one of the keys. A
+        # `with_options` group's literal value must not stand in for it.
+        def own_options_unknown?(own)
+          own.drop(1).any? do |arg|
+            next false if arg.is_a?(Prism::LambdaNode) # the scope argument carries no class option
+            next true unless arg.is_a?(Prism::KeywordHashNode)
+
+            arg.elements.any? do |pair|
+              next true unless pair.is_a?(Prism::AssocNode)
+
+              ROOT_OPTION_KEYS.any? { |key| Source::Literals.symbol_named?(pair.key, key) } &&
+                LITERAL_OPTION_VALUES.none? { |klass| pair.value.is_a?(klass) }
+            end
+          end
+        end
+
+        def association_key?(args, key)
+          args.any? do |arg|
+            arg.is_a?(Prism::KeywordHashNode) &&
+              arg.elements.any? { |pair| pair.is_a?(Prism::AssocNode) && Source::Literals.symbol_named?(pair.key, key) }
+          end
         end
 
         # Whether a `:singular` association's accessor can return `nil`. `has_one` genuinely can (no
@@ -1356,6 +1437,9 @@ module Rigor
 
               return true if pair.value.is_a?(Prism::TrueNode)
               return false if pair.value.is_a?(Prism::FalseNode)
+
+              # The call's own non-literal value shadows a `with_options` group's literal one.
+              return nil
             end
           end
           nil

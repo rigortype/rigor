@@ -14,7 +14,8 @@ The full catalogue, with a one-line scope for every plugin, is
 ## Available pages
 
 - [rigor-activerecord](rigor-activerecord.md) — ActiveRecord
-  finder / relation typing and schema-checked columns.
+  finder / relation typing and schema-checked columns; roots models reached only through an
+  association for `rigor unused`.
 - [rigor-rails-routes](rigor-rails-routes.md) — `*_path` / `*_url`
   helper validation against a parsed `config/routes.rb`.
 - [rigor-rails-i18n](rigor-rails-i18n.md) — `t(...)` / `I18n.t(...)`

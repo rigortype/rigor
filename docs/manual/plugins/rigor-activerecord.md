@@ -228,6 +228,27 @@ member left out stays lenient rather than reported.
 `ActiveRecord::Base` is deliberately **not** declared: closing it would
 close every model in the project.
 
+## Roots for `rigor unused`
+
+```ruby
+class Recipe < ApplicationRecord
+  belongs_to :user                              # ActiveRecord loads User
+  has_many :comments, as: :commentable          # ... and Comment
+  has_many :tags, through: :taggings            # no root of its own, see below
+  belongs_to :owner, polymorphic: true          # no single target: no root
+end
+```
+
+`User` and `Comment` are named nowhere in the source, so [`rigor unused`](../02-cli-reference.md#rigor-unused) would list a model reached only this way. The plugin publishes the class each association resolves to as a `:reachability_roots` fact, mirroring ActiveRecord's own lookup:
+
+- a literal `class_name:` (String or Symbol, or a rooted `"::Foo"`) wins;
+- otherwise `has_many` / `has_and_belongs_to_many` use the singularized, camelized name and `belongs_to` / `has_one` the camelized name;
+- the name is tried as nested in the owner itself (`Post` looks for `Post::Comment`), then in the owner's enclosing namespaces innermost first (`Admin::Recipe` looks for `Admin::User`), then at top level. If a candidate is not a model but is a namespace of one, nothing is rooted, since ActiveRecord would pick that module.
+
+A root is published only when the project declares a model of that name. Nothing is published for a `polymorphic: true` association, a non-literal `class_name:` or `**options`, or a `through:` association without a literal `class_name:` / `source_type:` (a literal `source_type:` names the class; otherwise its target is the source association's, and that association roots it). Associations written inside `class << self`, a `def` or a block other than `with_options` are not seen, and neither is the block-parameter form `with_options(...) do |o| o.belongs_to :x end`. Literal options of a `with_options` group are merged into the associations inside it, the innermost group winning as in Rails; a group with non-literal options (`with_options opts do`) is skipped, as is `anonymous_class:`, an association whose own options hide the class (a `**splat`, an options variable, a non-literal `class_name:`), and a computed name equal to the owner's own name (Rails 7.2+ tries the top-level class first). The merged options also decide the association reader's type: `with_options optional: true` makes `belongs_to` readers nilable, and `class_name:` and `polymorphic:` set the target or make it `Dynamic`. The name is inflected with the real `ActiveSupport::Inflector`; if it cannot be loaded the plugin publishes nothing.
+
+The roots are flat: an association on a model `rigor unused` itself reports as dead still roots its target, so a chain of dead models can leave the last one unlisted. Project-custom inflections are not read, so a model whose name relies on one is under-rooted rather than wrongly rooted. The roots are published in reduced mode too, since they do not depend on the schema.
+
 ## Limitations
 
 - **Direct-superclass match only.** `class Admin < User` where

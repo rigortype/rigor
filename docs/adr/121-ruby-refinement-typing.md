@@ -34,27 +34,41 @@ call site, so falling back to it is a confident wrong answer, the failure ADR-5 
 ### WD1 — One ordered list: in-effect refinements
 
 At every program point Rigor answers one **ordered list** of refining modules (`CONTEXT.md` § in-effect
-refinements). A later activation wins over an earlier one. Four sources feed it, in Ruby's own order:
+refinements). A later activation wins over an earlier one. Activating a module that is already in the
+list changes nothing, so the list keeps a module at its first position (`rb_using_refinement` returns
+early, CRuby `eval.c`; `using A; using B; using A` still answers B's method). Four sources feed it, in
+Ruby's own order:
 
 - lexical `using`, in textual order, outer bodies before inner ones;
 - a `refine` block's own module, inside that block;
-- a block literal that is the receiver of `Proc#refined`: the literal's lexical list, then each
-  `.refined` argument in call order (CRuby duplicates the block's cref and then appends);
+- a Proc literal (`->{}`, `proc {}`, `lambda {}`) that is the receiver of `Proc#refined`: the
+  literal's lexical list, then each `.refined` argument in call order (CRuby duplicates the block's
+  cref and then appends). A Proc bound to a local first and refined later (`l = ->{}; l.refined(M)`)
+  is not covered, so its body keeps reporting a refined call: a known false positive, accepted until
+  the survey corpus shows the shape;
 - a block a plugin declares as refined (WD5): the block's lexical list, then the declared modules.
 
 A module's `include`d modules expand ahead of it, so the includer wins (#1671). A non-constant `using`
 contributes an *unknown* marker. Check rules and the typer read the same list (#1673). Two lists would
 let a call be silenced as refined and typed as unrefined.
 
-### WD2 — The typed arm sits ahead of dispatch
+### WD2 — The typed arm sits ahead of every other answer
 
-The refined arm runs in `ExpressionTyper#call_result_type_for`, beside `try_overriding_def_dispatch`
-and before `MethodDispatcher.dispatch`. It therefore precedes constant folding, shape dispatch and
-plugin contributions: a refined `String#upcase` must not fold, and a plugin models the class's own
-method, which the refinement replaces. Precedence follows `refinements.rdoc` § Method Lookup. Walk the
-receiver's ancestors from the most derived class. A method defined on a more derived class (or a
-singleton method) wins over a refinement of an ancestor. At the first refined ancestor, the latest
-in-effect module that refines the name wins. A union receiver is decided per member, and a `Dynamic`
+The refined arm runs in `ExpressionTyper#call_result_type_for` directly after `indexed_narrowing_for`,
+ahead of `try_literal_send`, `try_local_def_dispatch`, `try_receiver_block_folds`,
+`try_overriding_def_dispatch` and `MethodDispatcher.dispatch`. Each of those answers from the method
+the refinement replaces: a refined `String#upcase` must not fold, a refined `map` on a Tuple must not
+fold per element, a top-level `def` must not bind ahead of a refinement of `Object`, and a plugin
+models the class's own method.
+
+Precedence follows `refinements.rdoc` § Method Lookup. Walk the receiver's ancestors from the most
+derived, singleton class and prepended modules included. At each ancestor, the latest in-effect module
+that refines the name for that ancestor wins; otherwise the ancestor's own method, if any, wins;
+otherwise move on. So a refinement beats its own class's `def`, and a method on a more derived
+ancestor beats a refinement of a less derived one. "Defines the method" is read from RBS and project
+`def`s. Core RBS sometimes redeclares an inherited method on a subclass, and the walk then stops there
+and declines the refinement: a known imprecision, in the declining direction for refinements of
+`Object`, `Kernel`, `Comparable` or `Numeric`. A union receiver is decided per member, and a `Dynamic`
 receiver stays `Dynamic`.
 
 ### WD3 — What the arm returns
@@ -62,15 +76,23 @@ receiver stays `Dynamic`.
 It returns the winning refine-body `def`'s inferred return type, with the call's receiver as `self`. If
 that body is not analysable, it returns `Dynamic[top]`. That covers a gem refinement (#1672), whose
 bodies are not inferred, and a list that carries the unknown marker while some refinement defines the
-name. `super` inside a refine body types against the refined class's own method. Following the next
-in-effect refinement is out of scope. A refined call skips argument-type and arity checks, because
-refine-body parameters bind as an undeclared method's do and have nothing to check against.
+name. `super` inside a refine body continues at the next refinement in effect **at the `super` site**,
+excluding the current one, and only then at the refined class (`refinements.rdoc` § super). Rigor types
+it against the refined class's own method when no other module in the refine body's own in-effect
+list refines the name, and as `Dynamic[top]` when one does. Following that chain precisely is
+deferred. A refined call skips argument-type and arity checks, because
+refine-body parameters bind as an undeclared method's do and have nothing to check against. Inside a
+refined Proc, a nested `def` keeps the Proc's refinements, and a `using` raises at runtime, so it adds
+nothing to the list.
 
-### WD4 — Direct calls only
+### WD4 — Direct calls typed, refined indirect calls unknown
 
-The arm covers `recv.m`, operators and implicit-self calls. Indirect calls (`send`, `public_send`,
-`&:m`, `method`) keep today's typing. Ruby's behaviour there has varied across versions and its
-introspection ignores refinements, so modelling it needs its own CRuby check first.
+The arm types `recv.m`, operators and implicit-self calls. `send`, `public_send` and `&:m` also honour
+refinements (CRuby `test/ruby/test_refinement.rb`: `test_send_should_use_refinements`,
+`test_public_send_should_use_refinements`, `test_symbol_proc`). When the name they reach is refined in
+effect for the receiver, they answer `Dynamic[top]` and skip argument checks; typing them through the
+arm is deferred. Introspection (`method`, `methods`, `respond_to?`) ignores refinements in Ruby and
+keeps today's answer.
 
 ### WD5 — Plugins declare callee-activated refinements
 
@@ -80,9 +102,11 @@ introspection ignores refinements, so modelling it needs its own CRuby check fir
 
 ### WD6 — Default on
 
-The arm ships without a bleeding-edge flag. Refinements are rare in the survey corpus, and the change
-only removes types Rigor knew to be wrong. The release-gate OSS sweep is the check. A `:behaviour` flag
-would also have to enter the analysis-cache identity (ADR-50 WD2), which costs more than the risk.
+The arm ships without a bleeding-edge flag. Refinements are rare in the survey corpus. The change
+removes types Rigor knew to be wrong, but it also adds types where a refined call was fail-soft before
+(`:a.shout` becomes `String`), so calls downstream are checked for the first time and new findings are
+possible. The release-gate OSS sweep is the check. A `:behaviour` flag would also have to enter the
+analysis-cache identity (`lib/rigor/bleeding_edge.rb`), which costs more than the risk.
 
 ## Rejected and deferred alternatives
 
@@ -99,14 +123,14 @@ would also have to enter the analysis-cache identity (ADR-50 WD2), which costs m
 
 - Positive: refined calls stop producing argument and undefined-method findings, and their types stop
   propagating the replaced method's return.
-- Negative: refine-body defs need a `(module, class, method) → def` table in the seed bundle, which is
-  new state for the warm cache to carry. A gem refinement types as `Dynamic[top]` until a plugin or
+- Negative: `discovered_refinements` already travels in the seed bundle, but refine-body def handles
+  do not; a `(module, class, method) → def` table is new state for the warm cache to carry. A gem refinement types as `Dynamic[top]` until a plugin or
   RBS can say more.
-- Carry-over: plugin-declared refined-call return types (for activerecord-refined's column nodes) and
-  indirect calls are open. #1669 decides the former.
+- Carry-over: plugin-declared refined-call return types (for activerecord-refined's column nodes),
+  typed indirect calls, the precise `super` chain, and a Proc refined after binding are open. #1669 decides the former.
 
 ## Relationship to other ADRs
 
 ADR-5 (robustness: `Dynamic` over a wrong answer) is the criterion's root. ADR-16 Tier A owns
 `BlockAsMethod`, which WD5 extends. ADR-110's overriding-def dispatch is the precedent for WD2's slot.
-ADR-50 WD2 is why WD6 avoids a behaviour flag.
+ADR-50 WD2 defines the bleeding-edge overlay WD6 declines.

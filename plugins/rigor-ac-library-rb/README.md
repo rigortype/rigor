@@ -36,6 +36,22 @@ plugins:
   - rigor-ac-library-rb
 ```
 
+## Competitive programming
+
+Contest code leans on methods whose RBS return admits `nil` for an input the problem's constraints rule out:
+`a.max_by { … }`, `a.min_by`, `a.find`, `a.bsearch`, `a.index`, `a.pop`, `s[i]`, `s.index`. Bound to a local and
+then called (`b = a.max_by { |x| x }; b + 1`), each reports `call.possible-nil-receiver`, an error. That is the
+rule working as specified: the value is `nil` on an empty array or a miss. Where the constraints make that
+impossible, lower the rule rather than guard every call:
+
+```yaml
+# .rigor.yml
+plugins:
+  - rigor-ac-library-rb
+severity_overrides:
+  call.possible-nil-receiver: warning   # or "off", quoted: a bare off is a YAML boolean
+```
+
 ## Scope and limits
 
 - The signatures cover the gem as installed (`lib_lock/`, under `AcLibraryRb`). Code that pastes ACL's top-level

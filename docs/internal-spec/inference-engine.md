@@ -659,6 +659,15 @@ This is the contract that the Slice 3 phase 1 [Immutable Scope Discipline](#immu
 
 The CLI commands `rigor type-of` and `rigor type-scan` MUST consult the index when typing nodes from a parsed file, so locals bound earlier in the program flow into the scope used to type later nodes. Both commands look up `index[node]` and then run `node_scope.type_of(node, tracer:)`. The contract above is what makes this composition correct.
 
+### Key-presence re-walk ([#1703](https://github.com/rigortype/rigor/issues/1703))
+
+The computed-key `key?` narrowing ([control-flow-analysis.md](../type-specification/control-flow-analysis.md#supported-narrowing-sources)) MUST NOT run in the index a file's rules read. `Inference::KeyPresenceGuard.record` and `.guarded_read` act only inside `KeyPresenceGuard.with_guards`, a thread-local frame. The only caller is `KeyPresenceGuard.withholds_nil?`, which `call.possible-nil-receiver` asks last, once every other condition for its report holds. It MUST:
+
+- re-walk only a file that holds a guard-shaped call, at most once per file (`ScopeIndexer.index(root, default_scope: index[root].with_isolated_side_tables)`), so the re-walk's dynamic, void and optimistic origins and plugin-typed calls never reach the tables the file's analysis reads;
+- run each callee's return summary inside the re-walk with guards off (`KeyPresenceGuard.without_guards` in `ExpressionTyper#infer_user_method_return`), since the summary memo is shared with the run;
+- withhold only when the re-walk types the receiver as exactly the analysis's type with `nil` removed;
+- decline while an effect collector or a flow trace records the walk, and on any failure.
+
 ### Cross-File Method Discovery (ADR-24)
 
 To resolve implicit-self calls against user-defined classes that carry no RBS, `Rigor::Inference::ScopeIndexer` runs a bounded project pre-pass and threads the discovered tables through derived scopes. `Rigor::Scope` exposes them as pure queries keyed by qualified class name:

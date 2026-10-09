@@ -66,6 +66,17 @@ module Rigor
       # resolution chain's.
       VISIBILITY_RANK = { public: 2, protected: 1, private: 0 }.freeze
 
+      # ADR-35 WD10 (issue #1716) — the object-lifecycle hooks the three override rules skip. `initialize` is
+      # reached through `Class#new` on the class the caller names, and the copy hooks are handed an instance
+      # of the receiver's own class by `dup` / `clone`, so neither is called with the PARENT's declared
+      # arguments through a parent-typed reference; `new` / `dup` / `clone` discard all four returns.
+      LIFECYCLE_HOOKS = %i[initialize initialize_copy initialize_dup initialize_clone].freeze
+
+      # The names CRuby makes private on every non-singleton `def` whatever section it is written in
+      # (`vm_method.c` `rb_method_entry_make`), so a source-discovered visibility for them is not the
+      # runtime one and `def.override-visibility-reduced` cannot prove a reduction.
+      IMPLICITLY_PRIVATE_METHODS = (LIFECYCLE_HOOKS + %i[respond_to_missing?]).freeze
+
       # Resolves a user-supplied rule token (`undefined-method`,
       # `call.undefined-method`, or the family wildcard `call`)
       # to the set of canonical rule identifiers it disables.
@@ -287,7 +298,7 @@ module Rigor
           unresolved_toplevel_diagnostic(path, node, scope_index, eval_ranges),
           wrong_arity_diagnostic(path, node, scope_index, lexical_sites),
           argument_type_diagnostic(path, node, scope_index, lexical_sites),
-          nil_receiver_diagnostic(path, node, scope_index),
+          nil_receiver_diagnostic(path, node, scope_index, lexical_sites),
           dump_type_diagnostic(path, node, scope_index),
           assert_type_diagnostic(path, node, scope_index),
           always_raises_diagnostic(path, node, scope_index),
@@ -1842,7 +1853,7 @@ module Rigor
         # and union receivers where every member already
         # disqualifies the call (avoid duplicating the
         # undefined-method diagnostic).
-        def nil_receiver_diagnostic(path, call_node, scope_index)
+        def nil_receiver_diagnostic(path, call_node, scope_index, lexical_sites = nil)
           return nil if call_node.receiver.nil?
           # Safe-navigation calls (`recv&.method`) already
           # short-circuit on nil at runtime, so a nil-bearing
@@ -1891,6 +1902,10 @@ module Rigor
           return nil unless Rigor::Reflection.rbs_class_known?("NilClass", scope: scope)
 
           return nil unless nil_bearing_union_witnesses?(receiver_type, call_node.name, scope)
+          # Issue #1703 — a `nil` that only a `key?` guard on the same receiver and key rules out. Asked last: it
+          # re-walks the file once with guards on, and only to withhold this report.
+          return nil if Inference::KeyPresenceGuard.withholds_nil?(call_node, receiver_type, lexical_sites&.root,
+                                                                   scope_index)
 
           build_nil_receiver_diagnostic(path, call_node)
         end
@@ -3775,6 +3790,7 @@ module Rigor
         # silent.
         def override_visibility_diagnostic(path, def_node, scope_index)
           return nil unless def_node.receiver.nil? # instance methods only
+          return nil if IMPLICITLY_PRIVATE_METHODS.include?(def_node.name)
 
           scope = scope_index[def_node]
           return nil if scope.nil?
@@ -3906,6 +3922,7 @@ module Rigor
         # fire) when any gate is unmet.
         def resolve_authored_override(def_node, scope_index)
           return nil unless def_node.receiver.nil? # instance methods only (singleton: follow-on)
+          return nil if LIFECYCLE_HOOKS.include?(def_node.name) # ADR-35 WD10: outside substitutability
 
           scope = scope_index[def_node]
           return nil if scope.nil?

@@ -28,6 +28,7 @@ require_relative "fallback"
 require_relative "flow_tracer"
 require_relative "index_write_widening"
 require_relative "indexed_narrowing"
+require_relative "key_presence_guard"
 require_relative "jump_targets"
 require_relative "define_method_block_self"
 require_relative "macro_block_self_type"
@@ -1811,7 +1812,8 @@ module Rigor
       # that normal return is `untyped` — the result's declared type — so `loop { e.next }` is not `bot` and
       # `loop { x = e.next; break x if x }` keeps its arm beside it.
       def call_dispatch_type_for(node, receiver_override: nil)
-        result = loop_completion_type(node, call_result_type_for(node, receiver_override: receiver_override))
+        result = key_guarded_type(node, call_result_type_for(node, receiver_override: receiver_override))
+        result = loop_completion_type(node, result)
         arms = call_break_arm_types(node, receiver_override: receiver_override)
         if exactly_once_block_never_completes?(node, receiver_override)
           return arms.empty? ? Type::Combinator.bot : Type::Combinator.union(*arms)
@@ -1819,6 +1821,15 @@ module Rigor
 
         combined = arms.empty? ? result : Type::Combinator.union(result, *arms)
         widen_optimistic_predicate_constant(node, combined)
+      end
+
+      # Issue #1703 — `H[k]` under a true `H.key?(k)` with a non-literal key drops the miss `nil`
+      # ({KeyPresenceGuard.guarded_read}). Only inside the guarded re-walk `call.possible-nil-receiver` runs to
+      # decide whether to withhold a report; the analysis every other rule reads never records a guard.
+      def key_guarded_type(node, type)
+        return type unless node.name == :[]
+
+        KeyPresenceGuard.guarded_read(node, type, scope) || type
       end
 
       # Issue #1172 — the nil-collapsing predicates (`nil?`, `!`, `x == nil`, …) answer a `Constant` that
@@ -2959,9 +2970,21 @@ module Rigor
       # not observable on the body scope, so it does need its own memo-key slot. It is dropped for a def
       # that cannot reach a `yield` — nearly all of them — which keeps the key shape constant for the
       # methods the memo actually carries and confines the extra dimension to yielding callees.
+      # Issue #1703 — inside the guarded re-walk a callee's return summary is still computed with `key?` guards off
+      # ({KeyPresenceGuard.without_guards}): summaries are memoised for the whole run, and one computed with a guard
+      # would reach the analysis every rule reads.
       def infer_user_method_return(def_node, receiver, arg_types, self_fold_safe: false, yield_type: nil)
         return nil if def_node.body.nil?
+        unless KeyPresenceGuard.active?
+          return infer_user_method_return_unguarded(def_node, receiver, arg_types, self_fold_safe, yield_type)
+        end
 
+        KeyPresenceGuard.without_guards do
+          infer_user_method_return_unguarded(def_node, receiver, arg_types, self_fold_safe, yield_type)
+        end
+      end
+
+      def infer_user_method_return_unguarded(def_node, receiver, arg_types, self_fold_safe, yield_type)
         yield_type = nil unless yield_type && body_yields?(def_node)
         body_scope = build_user_method_body_scope(def_node, receiver, arg_types,
                                                   self_fold_safe: self_fold_safe)

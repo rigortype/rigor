@@ -21,6 +21,8 @@ module Rigor
       # Built lazily: the walk runs the first time a would-fire call asks, so a file with no such call pays
       # one small object and nothing else.
       class LexicalMethodSites
+        # Issue #1703 — the file's root, which `call.possible-nil-receiver` re-walks for a `key?` guard.
+        attr_reader :root
         attr_reader :refinements
 
         def initialize(root)

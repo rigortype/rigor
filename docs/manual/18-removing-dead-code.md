@@ -171,11 +171,15 @@ Candidates — nothing reachable references these (45)
     1  Api::V1::Timelines::TopicController   app/controllers/api/v1/timelines/topic_controller.rb:3
 ```
 
-A base class is live whenever one of its subclasses is:
+A base class is reachable whenever one of its subclasses is:
 `class Sub < Base` names `Base` on `Sub`'s behalf. So a base class
 that nothing else names appears together with its subclasses when none
 of them is reachable, and the decision belongs to the whole family
-rather than to one row.
+rather than to one row. When a subclass sits under **Cannot decide**,
+its base moves there too. A subclass declared outside `paths:` — in a
+spec, say — names its base only from the scope around it: at the top
+of a file that keeps the base live, but nested in a module that
+nothing reaches it does not.
 
 The 53 false positives in the adjudicated run fell into a few recurring
 shapes, and 28 of them were the first one. Recognising these lets you

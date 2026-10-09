@@ -350,14 +350,17 @@ RSpec.describe Rigor::Analysis::Reachability do
     def report_for(files, roots: [], declared: files.keys)
       decls = []
       refs = []
+      uses = []
       files.each do |path, source|
         result = Rigor::Analysis::Reachability::Scan.call(path: path, source: source)
         raise "fixture #{path} did not parse" if result.nil?
 
         decls.concat(result.declarations) if declared.include?(path)
         refs.concat(result.references)
+        uses.concat(result.dynamic_uses)
       end
-      Rigor::Analysis::Reachability::Graph.new(declarations: decls, references: refs, root_fqns: roots).report
+      Rigor::Analysis::Reachability::Graph.new(declarations: decls, references: refs, root_fqns: roots,
+                                               dynamic_uses: uses).report
     end
 
     let(:hierarchy) do
@@ -435,6 +438,30 @@ RSpec.describe Rigor::Analysis::Reachability do
                           roots: ["Root"], declared: ["lib/base.rb"])
       expect(report.candidates.map(&:fqn)).to be_empty
       expect(report.test_only.map(&:fqn)).to eq(["Base"])
+    end
+
+    # A base whose only subclass cannot be decided cannot be decided either: listing it as a definite
+    # candidate invites deleting the base of a class that may be live.
+    it "demotes the base of an undecidable subclass to undecidable, naming the subclass" do
+      report = report_for({ "lib/a.rb" => "class Base; end\nclass Sub < Base; end\n",
+                            "lib/m.rb" => "\"Sub\#{ARGV.first}\".constantize\n" })
+      expect(report.candidates.map(&:fqn)).to be_empty
+      expect(report.undecidable.to_h { [it.fqn, it.reason] })
+        .to include("Sub" => a_string_including("constantize"),
+                    "Base" => "reachable from Sub, which cannot be decided")
+    end
+
+    it "still reports a base that only a dead subclass names when another class is undecidable" do
+      report = report_for({ "lib/a.rb" => "class Base; end\nclass Dead < Base; end\nclass Other; end\n",
+                            "lib/m.rb" => "\"Other\#{ARGV.first}\".constantize\n" })
+      expect(report.candidates.map(&:fqn)).to eq(%w[Base Dead])
+    end
+
+    # Ruby reads the superclass before `Api::User` exists, so `User` there is `::User`.
+    it "never resolves a superclass to the subclass it declares" do
+      report = report_for({ "lib/a.rb" => "class User; end\nmodule Api\n  class User < User; end\nend\n",
+                            "lib/m.rb" => "Api::User.new\n" })
+      expect(report.candidates.map(&:fqn)).to be_empty
     end
 
     it "keeps the role of the subclass's file on the superclass edge" do

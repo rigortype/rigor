@@ -1,4 +1,5 @@
-# The core extensions `require "ac-library-rb"` loads (`core_ext/`).
+# The core extensions under `ac-library-rb/core_ext/`. `ac-library-rb/modint` loads the `ModInt` conversions;
+# `Integer#divisors` and the `Array` conversions need `ac-library-rb/core_ext/all` (or `integer`).
 class Object
   private
 
@@ -9,11 +10,18 @@ class Array[unchecked out Elem]
   def to_fenwick_tree: () -> AcLibraryRb::FenwickTree
   alias to_fetree to_fenwick_tree
 
-  def to_priority_queue: () -> AcLibraryRb::PriorityQueue[Elem]
+  # The element type is not carried over: a literal array would pin it to the literals it starts with.
+  def to_priority_queue: () -> AcLibraryRb::PriorityQueue[untyped]
   alias to_pq to_priority_queue
 end
 
 class Integer
+  # `ModInt#coerce` makes an Integer on the left answer a `ModInt`.
+  def +: (AcLibraryRb::ModInt) -> AcLibraryRb::ModInt | ...
+  def -: (AcLibraryRb::ModInt) -> AcLibraryRb::ModInt | ...
+  def *: (AcLibraryRb::ModInt) -> AcLibraryRb::ModInt | ...
+  def /: (AcLibraryRb::ModInt) -> AcLibraryRb::ModInt | ...
+
   def divisors: () -> Array[Integer]
 
   def each_divisor: () { (Integer) -> void } -> Array[Integer]

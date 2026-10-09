@@ -1,6 +1,9 @@
 # frozen_string_literal: true
 
-require "ac-library-rb"
+require "ac-library-rb/segtree"
+require "ac-library-rb/dsu"
+require "ac-library-rb/modint"
+require "ac-library-rb/max_flow"
 
 seg = AcLibraryRb::Segtree.new([5, 3, 8, 1], -Float::INFINITY) { |x, y| [x, y].max }
 puts seg.prod(1, 3)

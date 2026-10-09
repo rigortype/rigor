@@ -7,7 +7,9 @@ Library (ACL). It declares the gem's `AcLibraryRb` namespace: `Segtree`, `LazySe
 `PriorityQueue`, `Deque`, `ModInt`, `MaxFlow`, `MinCostFlow`, `SCC`, `TwoSAT`, `Convolution`, the math and string
 functions (`crt`, `inv_mod`, `pow_mod`, `floor_sum`, `convolution`, `suffix_array`, `lcp_array`, `z_algorithm`),
 the class aliases (`UnionFind`, `SegTree`, `LazySegTree`, `HeapQueue`, `TwoSat`), and the core extensions
-(`Integer#divisors`, `#to_modint`, `Array#to_fenwick_tree`, `Kernel#ModInt`, …). It emits no diagnostic of its own.
+(`Integer#divisors`, `#to_modint`, `Array#to_fenwick_tree`, the private `ModInt()` on `Object`, …), plus the
+`ModInt` overloads of `Integer#+`, `#-`, `#*` and `#/` that `ModInt#coerce` makes true (`1 + m` is a `ModInt`). It
+emits no diagnostic of its own.
 
 ## Why it exists
 
@@ -38,9 +40,19 @@ plugins:
 
 - The signatures cover the gem as installed (`lib_lock/`, under `AcLibraryRb`). Code that pastes ACL's top-level
   `lib/` sources into a submission defines its own classes and does not need the plugin.
-- `require "ac-library-rb"` runs `include AcLibraryRb` at the top level. The signatures cannot say so: `Object`
-  including a module whose classes inherit from `Object` is a recursive ancestry RBS rejects. Call the math
-  functions through a class or module that includes `AcLibraryRb`. Rigor reports the top-level `include` itself as
-  `call.unresolved-toplevel` ([#1383](https://github.com/rigortype/rigor/issues/1383)).
+- The gem is loaded per file (`require "ac-library-rb/segtree"`) or whole (`require "ac-library-rb/all"`), and the
+  math functions are reached through `include AcLibraryRb`. The signatures cannot include the module into
+  `Object` for you: `Object` including a module whose classes inherit from `Object` is a recursive ancestry RBS
+  rejects. Rigor reports a top-level `include` itself as `call.unresolved-toplevel`
+  ([#1383](https://github.com/rigortype/rigor/issues/1383)).
+- The core extensions are declared whether or not the file that defines them is loaded. `ac-library-rb/modint`
+  loads the `ModInt` conversions; `Integer#divisors`, `#each_divisor` and the `Array` conversions need
+  `ac-library-rb/core_ext/all` (or `core_ext/integer`), and calling them without it passes the check and raises
+  `NoMethodError` at runtime.
+- `PriorityQueue.new`, `.max`, `.min`, `.[]`, `Array#to_priority_queue` and `Deque.[]` answer an `untyped` element
+  type: bound from a literal array it would be the literals the array starts with, and a later `pop` would read as
+  one of them.
+- `MaxFlow#flow`, `MinCostFlow#flow` and `#slope` answer `Integer` for an `Integer` limit or none, and
+  `Integer | Float` for a `Float` limit, which comes back as the flow when the capacities do not bound it.
 - `ModInt#**` returns `ModInt | Integer`: it answers `0` when the modulus is 1.
 - `ModInt.mod` is `Integer`; before `ModInt.set_mod` it is `nil`, and every other `ModInt` operation raises then.

@@ -51,11 +51,13 @@ module AcLibraryRb
   # A binary heap that pops the highest-priority element first: the largest by default, or the first
   # argument of the block when it returns truthy.
   class PriorityQueue[T]
-    def self.max: [T] (Array[T] array) -> PriorityQueue[T]
+    # The factories answer `PriorityQueue[untyped]`: bound from a literal array, `T` would be the literals it
+    # starts with, and a later `pop` would read as one of them.
+    def self.max: (Array[untyped] array) -> PriorityQueue[untyped]
 
-    def self.min: [T] (Array[T] array) -> PriorityQueue[T]
+    def self.min: (Array[untyped] array) -> PriorityQueue[untyped]
 
-    def self.[]: [T] (*T array) ?{ (T, T) -> boolish } -> PriorityQueue[T]
+    def self.[]: (*untyped array) ?{ (untyped, untyped) -> boolish } -> PriorityQueue[untyped]
 
     def initialize: (?Array[T] array) ?{ (T, T) -> boolish } -> void
 
@@ -84,7 +86,7 @@ module AcLibraryRb
   class Deque[T]
     include Enumerable[T]
 
-    def self.[]: [T] (*T args) -> Deque[T]
+    def self.[]: (*untyped args) -> Deque[untyped]
 
     def initialize: (?Array[T] arg, ?untyped value, ?initial_capacity: Integer) -> void
                   | (Integer size, ?T value, ?initial_capacity: Integer) -> void
@@ -128,7 +130,7 @@ module AcLibraryRb
 
     def reversed?: () -> bool
 
-    def dig: (Integer idx, *untyped) -> untyped
+    def dig: (int idx, *untyped) -> untyped
 
     def each: () { (T) -> void } -> Array[T]
             | () -> Enumerator[T, Array[T]]

@@ -55,6 +55,40 @@ RSpec.describe "plugins/rigor-ac-library-rb" do
     expect(run_plugin(source: source).diagnostics.map(&:message)).to be_empty
   end
 
+  # Review findings on #1680: each read as a wrong type or a diagnostic on correct code before the fix.
+  it "types an Integer on the left of a ModInt as a ModInt, through ModInt#coerce" do
+    source = <<~RUBY
+      require "rigor/testing"
+
+      AcLibraryRb::ModInt.set_mod(11)
+      m = AcLibraryRb::ModInt.new(3)
+      Rigor.assert_type("AcLibraryRb::ModInt", 1 + m)
+      Rigor.assert_type("Integer", (2 * m).val)
+      Rigor.assert_type("3", 1 + 2)
+    RUBY
+    expect(run_plugin(source: source).diagnostics.map(&:message)).to be_empty
+  end
+
+  it "does not pin a priority queue built from a literal array to its literals" do
+    source = <<~RUBY
+      pq = [3, 1].to_pq
+      pq << 5
+      v = pq.pop
+      puts "five" if v == 5
+    RUBY
+    expect(run_plugin(source: source).diagnostics.map(&:message)).to be_empty
+  end
+
+  it "takes a MaxFlow edge read as an Array of Integers" do
+    source = <<~RUBY
+      def read_edge = gets.to_s.split.map(&:to_i)
+      graph = AcLibraryRb::MaxFlow.new(3)
+      graph << read_edge
+      graph.push(read_edge)
+    RUBY
+    expect(run_plugin(source: source).diagnostics.map(&:message)).to be_empty
+  end
+
   it "reports a misspelled method and a wrong argument, which read as untyped without the plugin" do
     source = <<~RUBY
       uf = AcLibraryRb::DSU.new(4)

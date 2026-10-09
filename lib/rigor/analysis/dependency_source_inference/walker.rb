@@ -49,7 +49,8 @@ module Rigor
           def truncated? = truncated
         end
 
-        # The walk's two accumulators. The budget counts `catalog` only.
+        # The walk's two accumulators. The budget counts `catalog` only, but stops the whole walk: a refine body
+        # reached after it trips is not recorded.
         Harvest = Struct.new(:catalog, :refinements)
         private_constant :Harvest
 

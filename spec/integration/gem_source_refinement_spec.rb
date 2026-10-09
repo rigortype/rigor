@@ -46,18 +46,18 @@ RSpec.describe "Gem source inference over `refine` bodies (#1672)" do
     File.write(relative, contents)
   end
 
-  def configuration
+  def configuration(workers: 0)
     Rigor::Configuration.new(
       Rigor::Configuration::DEFAULTS.merge(
-        "paths" => %w[lib], "workers" => 0,
+        "paths" => %w[lib], "workers" => workers,
         "dependencies" => { "source_inference" => [{ "gem" => "shouty", "mode" => "when_missing" }] }
       )
     )
   end
 
   # `[file basename, line, method name]` for every `call.undefined-method`, sorted.
-  def undefined_rows(cache_store: nil)
-    runner = Rigor::Analysis::Runner.new(configuration: configuration, cache_store: cache_store)
+  def undefined_rows(cache_store: nil, workers: 0)
+    runner = Rigor::Analysis::Runner.new(configuration: configuration(workers: workers), cache_store: cache_store)
     guarded_run(runner, %w[lib]).diagnostics
                                 .select { |d| d.qualified_rule == "call.undefined-method" }
                                 .map { |d| [File.basename(d.path.to_s), d.line, d.method_name.to_s] }
@@ -96,18 +96,30 @@ RSpec.describe "Gem source inference over `refine` bodies (#1672)" do
     expect(index.refinements).to include("String" => { shout: ["Shouty"] })
   end
 
-  it "answers the same through a warm cache as cold" do
+  it "seeds a file re-analysed on a warm run with the gem refinements" do
     write("lib/app.rb", <<~RUBY)
       using Shouty
       "hi".shout
       "hi".nope
     RUBY
     root = File.join(Dir.pwd, ".rigor-cache")
-
     cold = undefined_rows(cache_store: Rigor::Cache::Store.new(root: root))
+    File.write("lib/app.rb", "#{File.read("lib/app.rb")}\"again\".shout\n")
+
     warm = undefined_rows(cache_store: Rigor::Cache::Store.new(root: root))
 
     expect(cold).to eq([["app.rb", 3, "nope"]])
     expect(warm).to eq(cold)
+  end
+
+  it "seeds pool workers with the gem refinements" do
+    write("lib/app.rb", <<~RUBY)
+      using Shouty
+      "hi".shout
+      "hi".nope
+    RUBY
+    write("lib/other.rb", "\"x\".shout\n")
+
+    expect(undefined_rows(workers: 2)).to eq([["app.rb", 3, "nope"], ["other.rb", 1, "shout"]])
   end
 end

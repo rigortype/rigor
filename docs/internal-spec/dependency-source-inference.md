@@ -225,11 +225,16 @@ the runner unions that into the project's
 that `using`s a gem's refining module therefore resolves the
 gem's refined calls in that lexical region and still reports
 them elsewhere. The index is rebuilt by the pre-passes every
-run takes, so a warm run seeds the same table a cold one does.
-Per ADR-121 WD3 the gem's refine bodies are not inferred: the
-refined dispatch arm (#1664) types a call into one as
-`Dynamic[top]`, as a gem-source catalog hit without a heuristic
-facet types.
+run takes, so a file re-analysed on a warm run is seeded the
+same table a cold run seeds. An unchanged file's cached result
+is keyed on the gem's name, version and mode (see "Cache slice"),
+as the catalog's contributions are, so editing a gem's refine
+body without a version bump is not seen until that file is
+re-analysed. Refine bodies the walker reaches after the
+per-gem budget trips are not recorded. Per ADR-121 WD3 the
+gem's refine bodies are not inferred: a refined call into one
+types as `Dynamic[top]` (today through the unresolved-method
+fallback; the refined dispatch arm, #1664, keeps that answer).
 
 Per-file errors silently degrade to "no contribution from this
 file":

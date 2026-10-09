@@ -1268,7 +1268,7 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
         rbs_collection_lockfile: configuration.rbs_collection_lockfile,
         rbs_collection_auto_detect: configuration.rbs_collection_auto_detect,
         synthetic_method_index: :the_synthetic_index, project_patched_methods: :the_patched_methods,
-        source_files: ["a.rb"]
+        source_files: ["a.rb"], required_features: an_instance_of(Array)
       )
     end
 
@@ -1306,7 +1306,7 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
         bundler_lockfile: configuration.bundler_lockfile,
         rbs_collection_lockfile: configuration.rbs_collection_lockfile,
         rbs_collection_auto_detect: configuration.rbs_collection_auto_detect,
-        source_files: ["a.rb", "b.rb"], locked_gems: nil
+        source_files: ["a.rb", "b.rb"], locked_gems: nil, required_features: an_instance_of(Array)
       )
     end
 

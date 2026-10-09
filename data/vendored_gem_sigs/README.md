@@ -67,11 +67,14 @@ longer ships `stdlib/prime`, so after `require "prime"` a call such as
 `sig/` (0.1.4) is vendored here, but it declares a top-level
 `class Prime` and reopens `Integer`, which algorithm collections and
 exercise solutions define for themselves. So the directory loads only
-when some source file in the run carries a literal `require "prime"`:
+when the project asks for it — a `require "prime"` somewhere under the
+configured paths, or `prime` under `libraries:` —
+and only when nothing else in the environment already declares what it
+declares: a `prime` library that resolves, or a project or gem
+signature that declares one of its members, makes it stand down
+(`Rigor::Environment::GatedSignatureGuard`).
 `Rigor::Environment::RequiredFeatures::VENDORED_DIRS` maps the feature
-to the directory, and is the place to add another such gem. A gem whose
-own `sig/` the bundle already supplies, or which the project lists
-under `libraries:`, is left to that source.
+to the directory, and is the place to add another such gem.
 
 The copy carries one local fix, recorded in `prime/LICENSE.upstream`:
 upstream types `Integer.from_prime_division` as taking

@@ -87,7 +87,7 @@ module Rigor
       # file is parsed and scope-indexed once, however many positions land in it.
       def execute(targets:, options:, buffer: nil)
         configuration = Configuration.load(options.fetch(:config))
-        environment = project_environment(targets.map(&:file).uniq, configuration)
+        environment = project_environment(targets.map(&:file).uniq, configuration, buffer)
         base_scope = Scope.empty(environment: environment)
 
         results_by_target = Array.new(targets.length)
@@ -218,8 +218,10 @@ module Rigor
       # closes). The probed file is threaded as the synthesizer's `source_files:`. Project-RBS auto-detection
       # roots at CWD today; future work will walk parent directories to find the enclosing `Gemfile`/`*.gemspec`
       # so probes against files outside the current process's CWD still see the right `sig/` tree.
-      def project_environment(files, configuration)
-        ProjectEnvironment.build(configuration: configuration, source_files: files)
+      # Issue #1700 — an editor buffer is scanned for required features in place of the file it stands for.
+      def project_environment(files, configuration, buffer = nil)
+        ProjectEnvironment.build(configuration: configuration, source_files: files,
+                                 feature_sources: ProjectEnvironment.buffer_sources(buffer))
       end
 
       def file_exists?(file)

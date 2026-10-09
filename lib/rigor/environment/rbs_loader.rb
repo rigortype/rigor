@@ -8,6 +8,7 @@ require_relative "../builtins/imported_refinements"
 require_relative "rbs_hierarchy"
 require_relative "member_consistency"
 require_relative "required_features"
+require_relative "gated_signature_guard"
 
 module Rigor
   class Environment
@@ -87,15 +88,15 @@ module Rigor
           rbs_loader = RBS::EnvironmentLoader.new
           libraries = libraries_without_shadowed_bigdecimal_math(libraries)
           # Issue #1700 — a `RequiredFeatures` token names a gated vendored directory, never an RBS library.
-          gated_dirs = RequiredFeatures.active_dirs(libraries.map(&:to_s))
           loaded_libraries = libraries.select do |library|
-            next false if library.to_s.start_with?(RequiredFeatures::TOKEN_PREFIX)
+            next false if RequiredFeatures.feature_of_token(library)
 
             rbs_loader.has_library?(library: library, version: nil)
           end
           loaded_libraries.each do |library|
             rbs_loader.add(library: library, version: nil)
           end
+          gated_dirs = loadable_gated_dirs(libraries, loaded_libraries, signature_paths, virtual_rbs)
           # Project `signature_paths:` are loaded per-file by {.add_project_signatures} AFTER `from_loader`,
           # NOT added to the loader here: `RBS::Environment.from_loader` parses every added file all-or-nothing,
           # so one unparseable user `.rbs` raises `RBS::ParsingError` and collapses the WHOLE env to nil (every
@@ -1282,6 +1283,22 @@ module Rigor
 
               rbs_loader.add(path: file)
             end
+          end
+        end
+
+        # Issue #1700 — the {RequiredFeatures}-gated directories `libraries` activates that can join this
+        # environment: not one whose feature resolved as an RBS library here (`libraries: [prime]` on a host
+        # whose `prime` gem ships its `sig/`), whose copy is then already loaded, and not one that clashes with
+        # a declaration the other signature sources make ({GatedSignatureGuard}). Decided here, against what
+        # the environment holds, so the env-cache producer — which rebuilds through this method from the same
+        # inputs — decides the same way.
+        def loadable_gated_dirs(libraries, loaded_libraries, signature_paths, virtual_rbs)
+          resolved = loaded_libraries.to_set(&:to_s)
+          RequiredFeatures.active_dirs(libraries.map(&:to_s)).select do |dir|
+            next false if resolved.include?(RequiredFeatures.feature_for_dir(dir))
+
+            !GatedSignatureGuard.clashes?(Pathname(File.join(VENDORED_GEM_SIGS_ROOT, dir)),
+                                          project_sig_files(signature_paths), virtual_rbs)
           end
         end
 

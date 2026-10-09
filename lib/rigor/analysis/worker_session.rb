@@ -86,7 +86,7 @@ module Rigor
                      plugin_blueprints: [], explain: false, buffer: nil,
                      synthetic_method_index: nil, project_patched_methods: nil,
                      project_scope_seed: {}, source_files: [], record_dependencies: false,
-                     template_units: nil, locked_gems: nil)
+                     template_units: nil, locked_gems: nil, required_features: nil)
         @configuration = configuration
         @cache_store = cache_store
         @explain = explain
@@ -119,7 +119,9 @@ module Rigor
         # RubyGems module state a non-main Ractor may not touch, so a Ractor worker that resolved it here got
         # `Ractor::IsolationError` and an empty map — no gem `sig/` directories, no ADR-72 overlays. nil (the
         # fork backend and every other caller) resolves inside `Environment.for_project` exactly as before.
-        @locked_gems = locked_gems
+        # Issue #1700 — `required_features` is the coordinator's scan ({Runner::PoolCoordinator#required_features_for});
+        # nil scans `source_files` inside `Environment.for_project`.
+        @environment_inputs = { locked_gems: locked_gems, required_features: required_features }.freeze
 
         # NOTE: `Inference::MethodDispatcher::FileFolding.fold_platform_specific_paths` is process-global
         # state. Writing it from a non-main Ractor would raise `Ractor::IsolationError`, so the session does
@@ -153,7 +155,7 @@ module Rigor
           synthetic_method_index: @synthetic_method_index,
           project_patched_methods: @project_patched_methods,
           source_files: @source_files,
-          locked_gems: @locked_gems
+          **@environment_inputs
         )
         @prepare_diagnostics = run_plugin_prepare.freeze
       end

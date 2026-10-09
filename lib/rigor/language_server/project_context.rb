@@ -46,6 +46,9 @@ module Rigor
 
       def initialize(configuration:)
         @configuration = configuration
+        @buffer_sources = {}
+        @disk_feature_files = nil
+        @environment_features = nil
         @generation = 0
         @environment = nil
         @cache_store = nil
@@ -77,9 +80,9 @@ module Rigor
           dependency_source_index: project_scan.dependency_source_index,
           synthetic_method_index: project_scan.synthetic_method_index,
           project_patched_methods: project_scan.project_patched_methods,
-          # Issue #1700 — scanned from disk; a saved edit that adds or drops a `require "prime"` reaches
-          # `#invalidate!` through `workspace/didChangeWatchedFiles`, which rebuilds this.
-          required_features: ProjectEnvironment.required_features(@configuration),
+          # Issue #1700 — the configured paths' files overlaid with the open buffers; {#note_buffers}
+          # rebuilds this when an edit or a save changes the set.
+          required_features: (@environment_features = required_features),
           **ProjectEnvironment.dependency_discovery_options(@configuration)
         )
       end
@@ -122,12 +125,37 @@ module Rigor
         diagnostics
       end
 
+      # Issue #1700 — records the open buffers' text (absolute path => source) and rebuilds the environment
+      # when it changes the {Environment::RequiredFeatures} set the current one was built with: a buffer that
+      # gains or drops a `require "prime"` loads or unloads the vendored `prime` signatures. The server calls
+      # it on every open, change, save and close; neither `didSave` nor a `.rb` edit reaches
+      # `workspace/didChangeWatchedFiles`, which most clients send only for the files they were asked to watch.
+      # The configured paths are read once per environment and only the buffers are re-scanned, so a keystroke
+      # costs a substring test per open buffer.
+      def note_buffers(sources)
+        @buffer_sources = sources
+        return if @environment.nil? || required_features == @environment_features
+
+        invalidate!
+      end
+
+      # The required-feature set for the configured paths' files on disk, each open buffer read in place of its
+      # file.
+      def required_features
+        disk = (@disk_feature_files ||= Environment::RequiredFeatures.feature_files(@configuration))
+        found = disk.reject { |path, _| @buffer_sources.key?(path) }.values.flatten
+        found += @buffer_sources.values.flat_map { |source| Environment::RequiredFeatures.features_of(source) }
+        found.uniq.sort.freeze
+      end
+
       # Drops every cached collaborator and bumps the generation. The next reader rebuilds from scratch.
       # Triggered by `workspace/didChangeWatchedFiles` for project source files and by
       # `workspace/didChangeConfiguration`.
       def invalidate!
         @generation += 1
         @environment = nil
+        @environment_features = nil
+        @disk_feature_files = nil
         @project_scan = nil
         # The session's per-file cache was computed against the old environment / project scan, so it cannot
         # outlive them. The next save round primes a fresh one.

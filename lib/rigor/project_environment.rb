@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
 require_relative "environment"
-require_relative "analysis/path_expansion"
 require_relative "plugin"
 require_relative "plugin/loader"
 require_relative "plugin/services"
@@ -54,8 +53,10 @@ module Rigor
     #   ADR-93 auto-wired `rigor-rbs-inline` entry when the library is resolvable).
     # @param source_files — the file(s) the command inspects. Threaded so each loaded plugin's
     #   `source_rbs_synthesizer` runs over them at env-build time; an empty list contributes no synthesized RBS.
-    def build(configuration:, source_files:)
-      features = required_features(configuration, source_files)
+    # @param feature_sources — path => source text the required-feature scan reads in place of that file (an
+    #   editor buffer bound with `--tmp-file` / `--instead-of`).
+    def build(configuration:, source_files:, feature_sources: {})
+      features = required_features(configuration, source_files, sources: feature_sources)
       Environment.for_project(
         libraries: configuration.libraries,
         signature_paths: configuration.signature_paths,
@@ -68,15 +69,21 @@ module Rigor
       bare(configuration, features)
     end
 
-    # Issue #1700 — the {Environment::RequiredFeatures} a `rigor check` over the configured paths would scan,
-    # plus `extra_files` (the file a probe inspects, which may lie outside them). A probe that scanned only its
-    # own file would type `12.prime_division` in a file that does not itself `require "prime"` differently
-    # from the run that analyses it. Fails soft to no features.
-    def required_features(configuration, extra_files = [])
-      files = Analysis::PathExpansion.ruby_files(configuration.paths, configuration.exclude_patterns)
-      Environment::RequiredFeatures.scan(files + Array(extra_files).map(&:to_s))
-    rescue StandardError
-      []
+    # Issue #1700 — the {Environment::RequiredFeatures} the environment gates on: the configured paths plus
+    # `extra_files` (the file a probe inspects, which may lie outside them), the same set `rigor check` scans
+    # whichever files it is given, so a position types as `rigor check` types it.
+    def required_features(configuration, extra_files = [], sources: {})
+      Environment::RequiredFeatures.for_configuration(configuration, extra_files, sources: sources)
+    end
+
+    # The required-feature scan's view of an editor buffer (`--tmp-file` / `--instead-of`): its logical path
+    # read from its physical file. Empty without a buffer or when the file cannot be read.
+    def buffer_sources(buffer)
+      return {} if buffer.nil?
+
+      { buffer.logical_path => File.binread(buffer.physical_path) }
+    rescue SystemCallError
+      {}
     end
 
     # The dependency-discovery axes `check` reads off the configuration, as a keyword hash. Extracted so the

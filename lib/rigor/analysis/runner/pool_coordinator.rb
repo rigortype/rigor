@@ -45,7 +45,8 @@ module Rigor
                        snapshots:, plugin_registry:, dependency_source_index:,
                        synthetic_method_index:, project_patched_methods:,
                        analyze_file:, project_scope_seed: -> { {} }, record_dependencies: false,
-                       restored_run_level_rows: nil, template_units: -> { TemplateUnits.empty })
+                       restored_run_level_rows: nil, template_units: -> { TemplateUnits.empty },
+                       feature_sources: -> { {} })
           @configuration = configuration
           @cache_store = cache_store
           @explain = explain
@@ -67,6 +68,7 @@ module Rigor
           @collected_run_disclosures = {}
           @collect_stats = collect_stats
           @buffer = buffer
+          @feature_sources = feature_sources
           @environment_override = environment_override
           @rbs_extended_reporter = rbs_extended_reporter
           @boundary_cross_reporter = boundary_cross_reporter
@@ -459,7 +461,22 @@ module Rigor
             **ProjectEnvironment.dependency_discovery_options(@configuration),
             synthetic_method_index: synthetic_method_index,
             project_patched_methods: project_patched_methods,
-            source_files: source_files
+            source_files: source_files,
+            required_features: required_features_for(source_files)
+          )
+        end
+
+        # Issue #1700 — the {Environment::RequiredFeatures} this run's environments gate on: the configured paths
+        # plus `source_files`, whichever files the run checks, with an editor buffer or an in-memory source read
+        # in place of its file. Taken once per file list and handed to every build (the sequential one, the
+        # pool's prewarm and each worker), so they agree and a pool does not re-read the project per worker.
+        def required_features_for(source_files)
+          key = source_files.map(&:to_s)
+          return @required_features if @required_features_key == key
+
+          @required_features_key = key
+          @required_features = Ractor.make_shareable(
+            Environment::RequiredFeatures.for_configuration(@configuration, key, sources: @feature_sources.call)
           )
         end
 
@@ -575,9 +592,10 @@ module Rigor
           # a frozen Array<String>; cheaply shareable. Issue #793 — it IS the full project now
           # (`source_files`), not the analyzed subset this comment always described.
           shareable_source_files = source_files.map { |path| path.to_s.dup.freeze }.freeze
+          features = required_features_for(source_files)
 
           pool = Array.new(@workers) do
-            Ractor.new(configuration, cache_root, blueprints, explain, shareable_source_files, locked_gems) do |configuration, cache_root, blueprints, explain, shareable_source_files, locked_gems| # rubocop:disable Layout/LineLength
+            Ractor.new(configuration, cache_root, blueprints, explain, shareable_source_files, locked_gems, features) do |configuration, cache_root, blueprints, explain, shareable_source_files, locked_gems, features| # rubocop:disable Layout/LineLength
               cache_store = cache_root ? Rigor::Cache::Store.new(root: cache_root) : nil
               session = Rigor::Analysis::WorkerSession.new(
                 configuration: configuration,
@@ -585,7 +603,8 @@ module Rigor
                 plugin_blueprints: blueprints,
                 explain: explain,
                 source_files: shareable_source_files,
-                locked_gems: locked_gems
+                locked_gems: locked_gems,
+                required_features: features
               )
               main = Ractor.main
               main.send([:prepare, session.prepare_diagnostics])
@@ -713,7 +732,8 @@ module Rigor
             project_scope_seed: project_scope_seed,
             source_files: source_files,
             record_dependencies: @record_dependencies,
-            template_units: template_units
+            template_units: template_units,
+            required_features: required_features_for(source_files)
           )
           # Force the full RBS load on the parent so children copy-on-write inherit a warm Environment
           # rather than each rebuilding it after the fork.
@@ -890,6 +910,7 @@ module Rigor
             plugin_registry: plugin_registry,
             source_files: source_files,
             locked_gems: locked_gems,
+            required_features: required_features_for(source_files),
             **ProjectEnvironment.dependency_discovery_options(@configuration)
           )
           warm_env.rbs_loader&.prewarm

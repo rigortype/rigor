@@ -339,6 +339,29 @@ RSpec.describe Rigor::LanguageServer::Server do
     end
   end
 
+  # Issue #1700 — every buffer event hands the open Ruby buffers to the project context, which rebuilds its
+  # environment when they change the required-feature set the vendored `prime` signatures are gated on.
+  describe "buffer events and the project context" do
+    let(:context) { instance_double(Rigor::LanguageServer::ProjectContext, note_buffers: nil) }
+    let(:server) { described_class.new(project_context: context) }
+    let(:uri) { "file:///tmp/rigor-lsp/a.rb" }
+
+    before { server.dispatch("initialize", {}) }
+
+    it "passes the open buffers on open, change, save and close" do
+      server.dispatch("textDocument/didOpen",
+                      { textDocument: { uri: uri, languageId: "ruby", version: 1, text: "p 1\n" } })
+      server.dispatch("textDocument/didChange",
+                      { textDocument: { uri: uri, version: 2 }, contentChanges: [{ text: "require 'prime'\n" }] })
+      server.dispatch("textDocument/didSave", { textDocument: { uri: uri } })
+      server.dispatch("textDocument/didClose", { textDocument: { uri: uri } })
+
+      expect(context).to have_received(:note_buffers).with("/tmp/rigor-lsp/a.rb" => "p 1\n").ordered
+      expect(context).to have_received(:note_buffers).with("/tmp/rigor-lsp/a.rb" => "require 'prime'\n").twice.ordered
+      expect(context).to have_received(:note_buffers).with({}).ordered
+    end
+  end
+
   # #246 — didSave marks the buffer clean and starts the whole-project publish round.
 
   describe "textDocument/didSave" do

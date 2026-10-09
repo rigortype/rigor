@@ -317,7 +317,7 @@ module Rigor
         # `RBS::DuplicatedDeclarationError` hazard).
         # Issue #1700 — plus the gated vendored directories this run's source activates ({#feature_tokens}).
         merged_libraries = (DEFAULT_LIBRARIES + libraries.map(&:to_s) +
-                            feature_tokens(required_features, source_files, gem_sig_paths, libraries)).uniq
+                            feature_tokens(required_features, source_files, libraries)).uniq
         skip_gem_names = collection_skip_gem_names(merged_libraries)
         collection_paths = RbsCollectionDiscovery.discover(
           lockfile_path: rbs_collection_lockfile,
@@ -403,23 +403,19 @@ module Rigor
 
       private
 
-      # Issue #1700 — the `RequiredFeatures` library tokens for the gated vendored directories this run's source
-      # activates. `required_features` is the scan a caller already took; nil scans `source_files`. A feature the
-      # configuration lists under `libraries:`, or whose gem `sig/` the bundle walk found (`gem_sig_paths`), is
-      # left to that source.
-      def feature_tokens(required_features, source_files, gem_sig_paths, libraries)
-        bundle_supplied = gem_sig_paths.map { |path| BundleSigDiscovery.gem_name_from_sig_path(Pathname(path)) }
-        RequiredFeatures.tokens((required_features || RequiredFeatures.scan(source_files)) - bundle_supplied, libraries)
+      # Issue #1700 — the `RequiredFeatures` library tokens for the gated vendored directories this run asks for:
+      # each feature its source requires and each one the configuration's `libraries:` names. `required_features`
+      # is the scan a caller already took; nil scans `source_files`. Whether a directory then loads is decided
+      # by `RbsLoader.build_env_for` against the environment it builds.
+      def feature_tokens(required_features, source_files, libraries)
+        RequiredFeatures.tokens(required_features || RequiredFeatures.scan(source_files), libraries)
       end
 
-      # The gem names an `rbs collection` copy must not double-declare against: the library list, and every
-      # vendored directory less a `RequiredFeatures`-gated one this library list did not activate — that one
-      # loads nothing, so the collection's copy is the only one there is.
+      # The gem names an `rbs collection` copy must not double-declare against: the library list and every
+      # vendored directory except a `RequiredFeatures`-gated one. A gated directory stands down for any other
+      # copy of its declarations (`GatedSignatureGuard`), so the collection's copy is kept and wins.
       def collection_skip_gem_names(library_names)
-        active = RequiredFeatures.active_dirs(library_names)
-        library_names + RbsLoader.vendored_gem_names.reject do |name|
-          RequiredFeatures.gated_dir?(name) && !active.include?(name)
-        end
+        library_names + RbsLoader.vendored_gem_names.reject { |name| RequiredFeatures.gated_dir?(name) }
       end
 
       def default_signature_paths(root)

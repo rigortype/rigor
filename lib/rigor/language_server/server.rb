@@ -2,6 +2,7 @@
 
 require_relative "../version"
 require_relative "buffer_table"
+require_relative "uri"
 
 module Rigor
   module LanguageServer
@@ -221,6 +222,7 @@ module Rigor
           bytes: doc.fetch(:text),
           version: doc.fetch(:version)
         )
+        note_buffers
         @publisher&.publish_for(uri)
         nil
       end
@@ -242,6 +244,7 @@ module Rigor
           changes: changes,
           version: doc.fetch(:version)
         )
+        note_buffers
         @publisher&.publish_for(uri)
         nil
       end
@@ -257,6 +260,7 @@ module Rigor
       def handle_did_save(params)
         uri = params.fetch(:textDocument).fetch(:uri)
         @buffer_table.save(uri: uri)
+        note_buffers
         @publisher&.publish_project(uri)
         nil
       end
@@ -361,8 +365,22 @@ module Rigor
         doc = params.fetch(:textDocument)
         uri = doc.fetch(:uri)
         @buffer_table.close(uri: uri)
+        note_buffers
         @publisher&.publish_empty(uri)
         nil
+      end
+
+      # Issue #1700 — hands the open Ruby buffers to the project context, which rebuilds its environment when
+      # they change the set of required features the vendored signatures are gated on.
+      def note_buffers
+        return unless @project_context.respond_to?(:note_buffers)
+
+        sources = @buffer_table.uris.each_with_object({}) do |uri, acc|
+          path = Uri.to_path(uri)
+          entry = @buffer_table[uri]
+          acc[File.expand_path(path)] = entry.bytes if path&.end_with?(".rb") && entry
+        end
+        @project_context.note_buffers(sources)
       end
 
       def method_not_found(method)

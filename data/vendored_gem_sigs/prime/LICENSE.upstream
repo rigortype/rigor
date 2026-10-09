@@ -18,8 +18,9 @@ verbatim, `Integer.from_prime_division([[2, 2], [3, 1]])` drew a false
 `call.argument-type-mismatch`. Nothing else differs from upstream.
 
 Loading (issue #1700): this directory declares a top-level `class Prime` and
-reopens `Integer`, so it loads only when the project's source carries a literal
-`require "prime"` (`Rigor::Environment::RequiredFeatures`).
+reopens `Integer`, so it loads only when the project requires `prime` (or lists
+it under `libraries:`) and no other signature source already declares what it
+declares (`Rigor::Environment::RequiredFeatures`, `GatedSignatureGuard`).
 
 ----------------------------------------------------------------------------
 Copyright (C) 1993-2013 Yukihiro Matsumoto. All rights reserved.

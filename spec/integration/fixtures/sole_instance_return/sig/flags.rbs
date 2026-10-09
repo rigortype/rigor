@@ -1,0 +1,6 @@
+class Flags
+  def ok_array: (Integer n) -> Array[bool]
+  def ok_element: (Integer n) -> bool
+  def ok_nil_class: (Integer n) -> nil
+  def genuinely_wrong: (Integer n) -> Array[bool]
+end

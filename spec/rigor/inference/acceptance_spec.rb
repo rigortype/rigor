@@ -213,6 +213,21 @@ RSpec.describe Rigor::Inference::Acceptance do
     it "rejects a Nominal carrier" do
       expect(accepts(int_constant, int_nominal)).to be_no
     end
+
+    # `Array.new(n, false)` is `Array[FalseClass]`; a declared `-> Array[bool]` must take it.
+    it "accepts the nominal of the class whose only instance it is" do
+      c = Rigor::Type::Combinator
+      expect(accepts(c.constant_of(false), c.nominal_of("FalseClass"))).to be_yes
+      expect(accepts(c.constant_of(true), c.nominal_of("TrueClass"))).to be_yes
+      expect(accepts(c.constant_of(nil), c.nominal_of("NilClass"))).to be_yes
+      expect(accepts(c.union(c.constant_of(true), c.constant_of(false)), c.nominal_of("FalseClass"))).to be_yes
+    end
+
+    it "keeps rejecting the other singleton classes" do
+      c = Rigor::Type::Combinator
+      expect(accepts(c.constant_of(true), c.nominal_of("FalseClass"))).to be_no
+      expect(accepts(c.constant_of(false), c.nominal_of("NilClass"))).to be_no
+    end
   end
 
   describe "Union" do

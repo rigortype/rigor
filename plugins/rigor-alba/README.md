@@ -4,12 +4,12 @@ Recognises applications that use the [alba](https://github.com/okuramasafumi/alb
 JSON serializer. alba keeps its `sig/` in the repository but does not ship it in the gem, so in a user
 project every alba method reads `Dynamic[top]`. The plugin contributes two things, and each only removes a
 diagnostic or adds a root — it never adds a firing (issue #1682). It contributes no return types: `Alba.serialize(obj)`
-runs the project's own `<Class>Resource#serialize`, which the project may override to return anything, and alba's RBS
-declares `hashify`, `to_h` and `as_json` `untyped`.
+runs the project's own `<Class>Resource#serialize`, which the project may override to return anything, and
+`hashify` / `to_h` / `as_json` return whatever the resource's attributes build.
 
 1. **Block `self`.** `Alba.serialize(obj) { attributes :id }` and `Alba.hashify(obj) { ... }` `class_eval`
    the block on an anonymous `Class.new { include Alba::Resource }`. The DSL calls inside bind to
-   `singleton(Alba::Resource)` (alba's own sig declares `[self: singleton(Resource)]`) instead of firing
+   `singleton(Alba::Resource)` (alba's own sig declares `[self: singleton(Resource)]` from 4.0) instead of firing
    `call.unresolved-toplevel`.
 2. **`rigor unused` roots.** A resource class body that says `many :articles` (also `one`, `has_many`,
    `has_one`, `association`) with no `resource:` makes alba load `ArticleResource` — or, failing that,
@@ -68,7 +68,7 @@ plugins/rigor-alba/
 ├── lib/
 │   ├── rigor-alba.rb
 │   └── rigor/plugin/
-│       ├── alba.rb                       ← manifest, dynamic_return rules, root publication
+│       ├── alba.rb                       ← manifest, block-self entry, root publication
 │       └── alba/
 │           ├── resource_collector.rb     ← DeclarationWalk collector (classes, includes, associations)
 │           ├── resource_discoverer.rb    ← walks resource_search_paths through IoBoundary
@@ -104,6 +104,9 @@ signatures alba's runtime may not honour, which is the false-positive direction 
 
 - `resource_search_paths` (default `["app"]`) bounds both the classes that count as resources and the classes
   an inferred association may resolve to.
+- Names are classified with `Rigor::Plugin::Inflector` (ActiveSupport's `classify`), even when the project sets
+  `Alba.inflector = :dry` or a custom inflector. Because a root needs a class of the classified name to exist, a
+  differing inflection costs a missing root, never a spurious one.
 
 ## Plugin authoring surface this exercises
 

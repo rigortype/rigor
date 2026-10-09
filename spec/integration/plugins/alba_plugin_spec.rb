@@ -354,17 +354,37 @@ RSpec.describe "rigor-alba integration" do
               many :notes do
                 many :tags
               end
+              nested(:meta) { many :labels }
             end
             class CommentResource; end
             class TagResource; end
+            class LabelResource; end
           end
           class CommentResource; end
           class TagResource; end
+          class LabelResource; end
         RUBY
       }
       roots_for(files) do |contribution, _dir|
-        expect(contribution.roots).to contain_exactly("CommentResource", "TagResource")
+        expect(contribution.roots).to contain_exactly("CommentResource", "TagResource", "LabelResource")
       end
+    end
+
+    # `Alba.hashify(obj) { ... }` evaluates its block on an anonymous class even inside a namespaced resource.
+    it "tries only top-level candidates for an association inside an inline Alba block" do
+      files = {
+        "app/a.rb" => <<~RUBY
+          module Admin
+            class UserResource
+              include Alba::Resource
+              def self.inline(obj) = Alba.hashify(obj) { many :marks }
+            end
+            class MarkResource; end
+          end
+          class MarkResource; end
+        RUBY
+      }
+      roots_for(files) { |contribution, _dir| expect(contribution.roots).to eq(["MarkResource"]) }
     end
 
     it "resolves a compact header's superclass against the lexical scope, not the class's own namespace" do

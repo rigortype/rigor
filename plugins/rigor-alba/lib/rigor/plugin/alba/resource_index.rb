@@ -7,7 +7,7 @@ module Rigor
       # `:resource_index` producer caches.
       #
       # One question is answered from it, and deliberately conservatively — a wrong "no" costs a
-      # missing type or a missing root, a wrong "yes" costs a false positive or a hidden dead class:
+      # missing root, a wrong "yes" costs a false positive or a hidden dead class:
       #
       # {#inferred_roots}: which classes alba's association inference would load, for associations that name
       # neither `resource:` nor `serializer:` (see {ResourceCollector}).

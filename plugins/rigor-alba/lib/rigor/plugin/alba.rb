@@ -13,15 +13,15 @@ module Rigor
     #
     # 1. **Block self.** `Alba.serialize(obj) { attributes :id }` and `Alba.hashify(obj) { ... }` `class_eval`
     #    their block on an anonymous `Class.new { include Alba::Resource }`, so the DSL calls inside resolve
-    #    against `singleton(Alba::Resource)` (alba's own sig declares `[self: singleton(Resource)]`) instead of
+    #    against `singleton(Alba::Resource)` (alba's own sig declares `[self: singleton(Resource)]` from 4.0) instead of
     #    firing `call.unresolved-toplevel`.
     # 2. **`rigor unused` roots.** `many :articles` with no `resource:` makes alba infer `ArticleResource` (or
     #    `ArticleSerializer`) through `Alba.inflector`; that name appears nowhere in source, so the class would
     #    be listed as unused. It is published as a root — and only when a class of that name exists.
     #
     # No return type is contributed. `Alba.serialize(obj)` runs the project's own `<Class>Resource#serialize`,
-    # which the project may override to return anything, and alba's RBS declares `hashify`, `to_h` and
-    # `as_json` `untyped`.
+    # which the project may override to return anything, and `hashify` / `to_h` / `as_json` return whatever the
+    # resource's attributes build.
     #
     # alba keeps its `sig/` in the repository but does not ship it in the gem, so in a user project the
     # constant `Alba` is unknown. The bundled `sig/alba.rbs` therefore declares just the two namespaces the

@@ -26,6 +26,9 @@ module Rigor
         # The calls whose block alba `class_eval`s on an anonymous class (`name == nil`): an association
         # lookup inside one sees no nesting. Any other block (`each`, `class_eval`, ...) leaves it alone.
         ANONYMOUS_CLASS_BLOCK_METHODS = (ASSOCIATION_METHODS + %i[trait nested nested_attribute]).freeze
+        # `Alba.serialize(x) { ... }` / `Alba.hashify` / `Alba.resource_class` evaluate their block on an anonymous
+        # class too, wherever they are written — including inside a namespaced resource.
+        ALBA_ANONYMOUS_BLOCK_METHODS = %i[serialize hashify resource_class].freeze
 
         attr_reader :classes, :associations
 
@@ -79,9 +82,15 @@ module Rigor
         # The calls are visited outer-first, so a call's block is known before the calls inside it.
         def remember_block(node)
           block = node.block
-          return unless block.is_a?(Prism::BlockNode) && ANONYMOUS_CLASS_BLOCK_METHODS.include?(node.name)
+          return unless block.is_a?(Prism::BlockNode)
+          return unless ANONYMOUS_CLASS_BLOCK_METHODS.include?(node.name) || alba_anonymous_block_call?(node)
 
           @blocks << (block.location.start_offset...block.location.end_offset)
+        end
+
+        def alba_anonymous_block_call?(node)
+          ALBA_ANONYMOUS_BLOCK_METHODS.include?(node.name) &&
+            constant_name(node.receiver)&.delete_prefix("::") == "Alba"
         end
 
         def in_block?(node)

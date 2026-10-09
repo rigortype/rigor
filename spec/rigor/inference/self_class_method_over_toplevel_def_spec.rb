@@ -514,6 +514,19 @@ RSpec.describe "a class's own method beats a top-level def of the same name" do
     RUBY
   end
 
+  # The evaluator does not enter a block in a value position, so `private define_method(:shout) { ... }`
+  # reached its body only through the scope indexer's unentered-block walk, which inherited the class
+  # body's `Singleton[C]` and missed the narrowing above.
+  it "reads an attr_reader inside a `define_method` block passed as an argument" do
+    expect(upcase_errors(<<~RUBY)).to be_empty
+      class Widget
+        attr_reader :text
+
+        private define_method(:shout) { text.upcase }
+      end
+    RUBY
+  end
+
   it "still binds a top-level def inside a `define_method` block when the class answers nothing" do
     expect(upcase_errors(<<~RUBY)).not_to be_empty
       class Widget

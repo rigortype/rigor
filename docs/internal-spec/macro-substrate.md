@@ -181,6 +181,12 @@ instance method on `receiver_constraint`'s subclass tree, with `self`
 typed accordingly." Canonical target: Sinatra's `get '/path' { ... }`
 (the block literally becomes the route method body).
 
+The narrowing applies wherever the block-carrying call sits: a statement, an
+assignment's value, or a value position the evaluator does not enter (a call
+argument, a keyword argument, a receiver chain), where the scope indexer's
+unentered-block walk applies the same match
+([`inference-engine.md`](inference-engine.md)).
+
 | Field | Type | Notes |
 | --- | --- | --- |
 | `receiver_constraint` | non-empty `String` | FQ class name the call's lexical receiver must be or inherit from. |

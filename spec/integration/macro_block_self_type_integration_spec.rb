@@ -114,6 +114,34 @@ RSpec.describe "ADR-16 Tier A — block-as-method engine hook" do
     # cases; the integration here proves the engine consumes the helper's output for actual block-body resolution.
   end
 
+  # The evaluator enters the block of a statement, an assignment's value or a def body, but not one in a
+  # value position — a call argument, a keyword argument, a receiver chain. That block's body reaches the
+  # per-node scope index through the indexer's unentered-block walk, which must apply the same narrowing,
+  # or every DSL call in it reads as a call on the enclosing `self` (here the top level, where it fires
+  # `call.unresolved-toplevel`).
+  describe "a matching call in a value position" do
+    {
+      "a positional argument" => "puts(MyApp.get(\"/hello\") { redirect \"/landing\" })",
+      "a keyword argument" => "puts(json: MyApp.get(\"/hello\") { redirect \"/landing\" })",
+      "a receiver chain" => "MyApp.get(\"/hello\") { redirect \"/landing\" }.to_s",
+      "an argument whose sibling writes" => "puts(y = 1, MyApp.get(\"/hello\") { redirect \"/landing\" + y.to_s })"
+    }.each do |position, call|
+      it "narrows the block self in #{position}" do
+        result = run_analysis("class MyApp < Sinatra::Base; end\n#{call}\n", plugin_class: tier_a_plugin)
+        unresolved = result.diagnostics.select { |d| d.message.include?("`redirect`") }
+        expect(unresolved).to be_empty, "got diagnostics: #{unresolved.map(&:message).inspect}"
+      end
+    end
+
+    it "leaves a value-position block of a verb outside `method_names:` on the enclosing self" do
+      result = run_analysis(<<~RUBY, plugin_class: tier_a_plugin)
+        class MyApp < Sinatra::Base; end
+        puts(MyApp.delete("/hello") { redirect "/landing" })
+      RUBY
+      expect(result.diagnostics.map(&:message)).to include(a_string_including("`redirect`"))
+    end
+  end
+
   describe "non-matching call shapes" do
     # The substrate's correctness model is "Tier A narrows self_type only when (receiver_constraint matches,
     # verb matches)." The negative-side observable is the *inference effect* — Type::Singleton of the outer

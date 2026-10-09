@@ -241,7 +241,8 @@ module Rigor
       #   it `:unknown`, so the rest of the chain is filed as for any other answer;
       # - otherwise every entry after the answer (the whole chain when `owner` names none) files its class edge
       #   and, for a project entry, the negative class edge on its unqualified name, so a NEW file declaring or
-      #   reopening it re-checks the reader. An external entry files only the sites of the names it can denote.
+      #   reopening it re-checks the reader. An external entry files only the sites of the names it can denote,
+      #   and every external on the chain files its hook edges ({#record_hooks}, #1641).
       #
       # What is filed is a function of this chain, the entry the filing starts from and the discovery index the
       # sites are read from, so a consumer that settles the same chain from the same entry again (the common case:
@@ -253,6 +254,7 @@ module Rigor
 
         start = owner.nil? ? nil : @entries.index { |entry| entry.name == owner }
         Analysis::DependencyRecorder.file_chain_once(self, start, scope.discovery) { file_beyond(scope, start) }
+        record_hooks(scope)
       end
       private :record_beyond
 
@@ -267,6 +269,37 @@ module Rigor
         end
       end
       private :file_beyond
+
+      # #1641 — the hook edges of every EXTERNAL entry on the chain, ahead of the answer or past it. A project file
+      # that gives an external module a hook (`module Comparable; def self.included(base) = base.prepend(P); end`)
+      # can put a definer ahead of the answer wherever the module sits, and a candidate-set read declines on it
+      # (the hook's mixin lists `"*"` on the module). The entry's class edges are the sites of the names it can
+      # denote, which a NEW file is not among, and a negative class edge on its name would re-check every reader of
+      # `Kernel` or `Enumerable` on any reopening. So each candidate name files the negative method edge of every
+      # {Relevance::HOOKS} name on its singleton side (`method:Comparable.included`, the key a new `def
+      # self.included` satisfies); a file adding any other method to the module re-checks nothing, and once the
+      # module is declared its sites carry later edits and the removal. The edges are a function of the chain alone,
+      # so a consumer files them once per chain ({Analysis::DependencyRecorder.file_chain_once}, #1590). A hook
+      # written another way — an instance `def included` in a module extended onto the external, a
+      # `define_singleton_method(:included)` — satisfies no such key and is not seen.
+      def record_hooks(scope)
+        externals = (@memo[:externals] ||= @entries.select(&:external?).freeze)
+        return if externals.empty?
+
+        Analysis::DependencyRecorder.file_chain_once(self, :hooks, scope.discovery) do
+          externals.each do |entry|
+            entry.candidates.each { |name| Analysis::DependencyRecorder.read_keys(ResolutionChain.hook_keys(name)) }
+          end
+        end
+      end
+      private :record_hooks
+
+      @hook_keys = {}
+
+      # The frozen `method:Name.hook` negative keys of `name`'s {Relevance::HOOKS}, built once per name.
+      def self.hook_keys(name)
+        @hook_keys[name] ||= Relevance::HOOKS.map { |hook| "method:#{name}.#{hook}".freeze }.freeze
+      end
 
       def record_head(scope, start, side)
         ResolutionChain.record_class(scope, @root) unless start.zero? && @entries.first&.name == @root

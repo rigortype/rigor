@@ -227,6 +227,19 @@ RSpec.describe Rigor::Inference::Acceptance do
       c = Rigor::Type::Combinator
       expect(accepts(c.constant_of(true), c.nominal_of("FalseClass"))).to be_no
       expect(accepts(c.constant_of(false), c.nominal_of("NilClass"))).to be_no
+      expect(accepts(c.constant_of(nil), c.nominal_of("Foo::NilClass"))).to be_no
+    end
+
+    it "lets overload selection reach a literal arm for the matching nominal" do
+      c = Rigor::Type::Combinator
+      env = Rigor::Environment.for_project(libraries: [], signature_paths: [])
+      true_class = c.nominal_of("TrueClass")
+      method = env.rbs_loader.instance_definition("TrueClass").methods[:&]
+      picked = Rigor::Inference::MethodDispatcher::OverloadSelector.select(
+        method, arg_types: [c.nominal_of("FalseClass")], self_type: true_class, instance_type: true_class,
+                environment: env
+      )
+      expect(picked.type.return_type.to_s).to eq("false")
     end
   end
 

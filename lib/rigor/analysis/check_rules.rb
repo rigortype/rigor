@@ -1019,6 +1019,11 @@ module Rigor
         # 3. The standard `Kernel` / `Object` private-method
         #    surface (`puts`, `p`, `require`, `loop`, `raise`,
         #    …) drawn from the loaded RBS environment.
+        # 4. The private singleton methods of the top-level `main`
+        #    object (`using`, `include`, `public`, `private`,
+        #    `define_method`), read from RBS core's
+        #    `RBS::Unnamed::TopLevelSelfClass`, plus
+        #    `ruby2_keywords` (issue #1383).
         #
         # The rule deliberately does NOT generalise to
         # implicit-self calls inside `def` / `class` / `module`
@@ -1041,6 +1046,7 @@ module Rigor
           return nil if scope.top_level_def_for(name)
           return nil if source_declared_method?(scope, "Object", name, :instance)
           return nil if Rigor::Reflection.instance_method_definition("Object", name, scope: scope)
+          return nil if main_singleton_method?(name, scope)
           # `Target.class_eval { def added = 1; def use_added = added }` files the defs on Target
           # but leaves the eval body with a nil `self_type`, so `toplevel?` still holds. An eval
           # body is morally a class body, so ADR-34 stays silent there — including on a genuinely
@@ -1048,6 +1054,25 @@ module Rigor
           return nil if call_inside_receiver_eval_ranges?(eval_ranges, call_node)
 
           build_unresolved_toplevel_diagnostic(path, call_node)
+        end
+
+        # Issue #1383 — RBS core declares `main`'s private singleton methods on
+        # `RBS::Unnamed::TopLevelSelfClass`, so the set follows RBS rather than a hand-kept
+        # list. CRuby 4.0's `main` also has `ruby2_keywords`, which RBS does not declare.
+        # rbs 3.x has no `TopLevelSelfClass`, so there only `ruby2_keywords` is covered.
+        # A call inside a top-level block (`describe do include M end`) is judged here too;
+        # silencing it is the cheaper error.
+        MAIN_SINGLETON_CLASS_NAME = "RBS::Unnamed::TopLevelSelfClass"
+        MAIN_SINGLETON_METHODS_MISSING_FROM_RBS = %i[ruby2_keywords].freeze
+        private_constant :MAIN_SINGLETON_CLASS_NAME, :MAIN_SINGLETON_METHODS_MISSING_FROM_RBS
+
+        def main_singleton_method?(name, scope)
+          return true if MAIN_SINGLETON_METHODS_MISSING_FROM_RBS.include?(name)
+          # `TopLevelSelfClass < Object`: when the project's own RBS broke `Object`, building it would only
+          # fail again and report a second, unfixable class name beside `Object` (#696's report).
+          return false if Rigor::Reflection.instance_definition("Object", scope: scope).nil?
+
+          !Rigor::Reflection.instance_method_definition(MAIN_SINGLETON_CLASS_NAME, name, scope: scope).nil?
         end
 
         # ScopeIndexer keeps RECEIVER_EVAL_CALLS private; this list is the same family

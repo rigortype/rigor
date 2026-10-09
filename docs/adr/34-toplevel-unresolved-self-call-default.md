@@ -83,6 +83,13 @@ does not resolve against any of:
 3. The standard `Kernel` / `Object` private-method surface
    (`puts`, `p`, `require`, `loop`, `raise`, …) drawn from the
    loaded RBS environment,
+4. The private singleton methods of the top-level `main` object
+   (`using`, `include`, `public`, `private`, `define_method`),
+   drawn from RBS core's `RBS::Unnamed::TopLevelSelfClass`, plus
+   `ruby2_keywords`, which `main` has in CRuby 4.0 but RBS does
+   not declare. *(Amended 2026-10-10: item 3 alone reported these
+   on correct code, and `pre_eval:` cannot apply to them;
+   [#1383](https://github.com/rigortype/rigor/issues/1383).)*
 
 then the engine emits a new `call.unresolved-toplevel` diagnostic.
 On a hit, the resolved method's return type and parameter
@@ -370,3 +377,9 @@ original WD3 framing left implicit.
   default. ADR-17's pre-eval mechanism is the natural escape
   hatch — no new config surface is introduced beyond the new
   rule identity itself.
+- 2026-10-10 — Decision item 4 added: `main`'s private singleton
+  methods resolve a top-level call
+  ([#1383](https://github.com/rigortype/rigor/issues/1383)). A
+  call inside a top-level block is judged as top level too, so the
+  same names are silent there; that false negative is cheaper than
+  the false positive it replaces.

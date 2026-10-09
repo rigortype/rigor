@@ -200,7 +200,7 @@ module Rigor
           # come first, so the singular `select` keeps its answer.
           def with_untyped_reach(overloads, shared, matches)
             args = shared[:arg_types]
-            return matches unless args.any? { |t| t.is_a?(Type::Union) && imprecise_arg?(t) }
+            return matches unless args.any? { |t| !untyped_arg?(t) && imprecise_arg?(t) }
 
             untyped_args = args.map { |t| imprecise_arg?(t) ? Type::Combinator.untyped : t }
             reached = find_matching_overload(overloads, shared.merge(arg_types: untyped_args), strict: false)
@@ -272,9 +272,16 @@ module Rigor
           # members alone — `Dynamic[top] | nil` pinned `Regexp#match?(nil) -> false` and typed a live
           # predicate as the literal `false`. The gradual pass still accepts against the whole union, so
           # `Dynamic[top] | nil` keeps both `match?` overloads and the #521 join answers `Dynamic[bool]`.
-          # A `Dynamic` with a concrete static facet stays out: its facet discriminates.
+          # A `Dynamic` with a concrete static facet stays out: its facet discriminates. One whose facet itself
+          # holds the untyped carrier does not (#1675): `Array[untyped] | Array[Integer]` indexed with an untyped
+          # position answers `Dynamic[Array[untyped] | untyped | nil] | Dynamic[Array[Integer] | Integer | nil]`,
+          # and read as precise, `0 + @data[i]` took `(Integer) -> Integer`.
           def imprecise_arg?(type)
-            untyped_arg?(type) || (type.is_a?(Type::Union) && type.members.any? { |member| untyped_arg?(member) })
+            case type
+            when Type::Dynamic then type.static_facet.is_a?(Type::Top) || imprecise_arg?(type.static_facet)
+            when Type::Union then type.members.any? { |member| imprecise_arg?(member) }
+            else false
+            end
           end
 
           # Pass 1.5: for arity-compatible overloads whose every positional param is either a strict

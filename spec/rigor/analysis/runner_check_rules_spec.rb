@@ -3333,12 +3333,12 @@ RSpec.describe Rigor::Analysis::Runner do
       end
 
       # The declaration, not the first write, is the slot's type: alba's `@_key: Symbol | String | nil | true`
-      # takes `key.to_sym` in one writer and `true` in another.
+      # takes a Symbol in one writer and `true` in another.
       it "does not flag writes to an ivar a module's RBS declares" do
         result = analyze(<<~RUBY, sig: { "demo.rbs" => <<~RBS })
           module Keyed
-            def root_key(key)
-              @key = key.to_sym
+            def root_key
+              @key = :name
             end
 
             def root_key!
@@ -3351,6 +3351,46 @@ RSpec.describe Rigor::Analysis::Runner do
           end
         RBS
         expect(ivar_diags(result)).to be_empty
+      end
+
+      it "flags a write the declared ivar type rejects, even a first write" do
+        result = analyze(<<~RUBY, sig: { "demo.rbs" => <<~RBS })
+          class Node
+            def initialize
+              @label = 1
+            end
+
+            def reset
+              @label = "a"
+            end
+          end
+        RUBY
+          class Node
+            @label: String
+          end
+        RBS
+        expect(ivar_diags(result).map { [it.line, it.message] }).to contain_exactly(
+          [3, a_string_including("declared String; this write assigns Integer")]
+        )
+      end
+
+      it "takes an RBS attr member's implied slot as the declaration" do
+        result = analyze(<<~RUBY, sig: { "demo.rbs" => <<~RBS })
+          class Node
+            def initialize
+              @label = "a"
+            end
+
+            def reset
+              @label = 1
+            end
+          end
+        RUBY
+          class Node
+            attr_reader label: String
+          end
+        RBS
+        expect(ivar_diags(result).map(&:line)).to eq([7])
       end
 
       it "does not flag writes to an ivar a class's RBS declares" do

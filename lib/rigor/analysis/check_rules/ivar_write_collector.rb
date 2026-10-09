@@ -27,9 +27,6 @@ module Rigor
       #   doesn't yet model.
       # - Nested classes / modules / defs inside a method body are barriers, mirroring the indexer's
       #   `IVAR_BARRIER_NODES` policy.
-      # - Ivars the class's RBS declares (`@x: T`, own or inherited). The declaration, not the first write,
-      #   is the slot's type, so a later write of another class the declared union admits is not a
-      #   divergence.
       class IvarWriteCollector
         BARRIER_NODES = [Prism::DefNode, Prism::ClassNode, Prism::ModuleNode].freeze
         private_constant :BARRIER_NODES
@@ -43,8 +40,10 @@ module Rigor
         NODE_CLASSES = [Prism::DefNode].freeze
         RULE_WALK_GATES = %i[inside_def detached_ivar_facet].freeze
 
-        # Returns `Hash[class_name (String) => Hash[ivar_name (Symbol) => Array<{node:, type:}>]]`. Empty
-        # when the tree has no qualifying writes.
+        # Returns `Hash[class_name (String) => Hash[ivar_name (Symbol) => Array<{node:, type:, declared:}>]]`.
+        # Empty when the tree has no qualifying writes. `declared` is the translated type of the class's RBS
+        # declaration of the ivar — an `@x: T` member or the slot an `attr_*` member implies, own or
+        # inherited — and nil when the RBS declares none.
         def initialize(scope_index)
           @scope_index = scope_index
           @accumulator = {}
@@ -113,19 +112,24 @@ module Rigor
         def record_write(node, class_name)
           scope = @scope_index[node]
           return if scope.nil?
-          return if rbs_declared_ivar?(scope, class_name, node.name)
 
           rvalue_type = scope.type_of(node.value)
+          declared = declared_ivar_type(scope, class_name, node.name)
           @accumulator[class_name] ||= {}
           @accumulator[class_name][node.name] ||= []
-          @accumulator[class_name][node.name] << { node: node, type: rvalue_type }
+          @accumulator[class_name][node.name] << { node: node, type: rvalue_type, declared: declared }
         end
 
-        def rbs_declared_ivar?(scope, class_name, ivar_name)
-          definition = scope.environment&.rbs_loader&.instance_definition(class_name)
-          return false if definition.nil?
+        def declared_ivar_type(scope, class_name, ivar_name)
+          loader = scope.environment&.rbs_loader
+          return nil if loader.nil?
 
-          definition.instance_variables.key?(ivar_name)
+          variable = loader.instance_definition(class_name)&.instance_variables&.[](ivar_name)
+          return nil if variable.nil?
+
+          Inference::RbsTypeTranslator.translate(variable.type, alias_expander: loader)
+        rescue StandardError
+          Type::Combinator.untyped
         end
       end
     end

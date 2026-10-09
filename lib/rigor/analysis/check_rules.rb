@@ -316,8 +316,9 @@ module Rigor
       #   Class-level ivars (`@x = 1` outside any def, in the
       #   class body) are also skipped — they're a separate
       #   surface (`Module#@var`) the engine doesn't yet model.
-      # - An ivar the class's RBS declares is skipped by the collector: the declaration, not the
-      #   first write, is that slot's type.
+      # - An ivar the class's RBS declares (`@x: T`, or the slot an `attr_*` member implies) is compared
+      #   against that declaration instead of its first write: a write fires only when the declared type
+      #   rejects it, under the same concrete-class and `NilClass` envelope.
       def ivar_write_mismatch_diagnostics(path, ivar_writes)
         ivar_writes.flat_map do |class_name, writes_by_ivar|
           writes_by_ivar.flat_map do |ivar_name, writes|
@@ -405,6 +406,8 @@ module Rigor
       end
 
       def ivar_mismatch_diagnostics_for(path, class_name, ivar_name, writes)
+        declared = writes.first[:declared]
+        return declared_ivar_mismatch_diagnostics(path, class_name, ivar_name, declared, writes) if declared
         return [] if writes.size < 2
 
         # Skip past leading `NilClass` writes when establishing
@@ -431,6 +434,17 @@ module Rigor
           next nil if other_class.nil? || other_class == "NilClass" || other_class == first_class
 
           build_ivar_write_mismatch_diagnostic(path, write[:node], class_name, ivar_name, first_class, other_class)
+        end
+      end
+
+      def declared_ivar_mismatch_diagnostics(path, class_name, ivar_name, declared, writes)
+        writes.filter_map do |write|
+          write_class = ivar_class_for(write[:type])
+          next nil if write_class.nil? || write_class == "NilClass"
+          next nil unless Inference::Acceptance.accepts(declared, write[:type], mode: :gradual).no?
+
+          build_declared_ivar_write_mismatch_diagnostic(path, write[:node], class_name, ivar_name, declared,
+                                                        write_class)
         end
       end
 
@@ -2821,6 +2835,17 @@ module Rigor
             path: path,
             message: "instance variable `#{ivar_name}' on #{class_name} was previously assigned " \
                      "#{first_class}; this write assigns #{other_class}",
+            severity: :error
+          )
+        end
+
+        def build_declared_ivar_write_mismatch_diagnostic(path, node, class_name, ivar_name, declared, write_class)
+          Diagnostic.from_name_loc(
+            node,
+            rule: RULE_IVAR_WRITE_MISMATCH,
+            path: path,
+            message: "instance variable `#{ivar_name}' on #{class_name} is declared #{declared.describe}; " \
+                     "this write assigns #{write_class}",
             severity: :error
           )
         end

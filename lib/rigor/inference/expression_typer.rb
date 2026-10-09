@@ -28,6 +28,7 @@ require_relative "fallback"
 require_relative "flow_tracer"
 require_relative "index_write_widening"
 require_relative "indexed_narrowing"
+require_relative "key_presence_guard"
 require_relative "jump_targets"
 require_relative "define_method_block_self"
 require_relative "macro_block_self_type"
@@ -1823,13 +1824,14 @@ module Rigor
       end
 
       # Issue #1703 — `H[k]` under a true `H.key?(k)` with a non-literal key drops the miss `nil`
-      # ({IndexedNarrowing.key_guarded_read}). The read is marked optimistic, so the certainty consumers
-      # (`flow.always-truthy-condition`, the `&&` / `||` polarity gate, branch elision) decline a verdict
-      # folded from it: the guard rests on the key expression re-reading the same value, which a reader
-      # chain only promises, and the narrowing exists to silence nil-receiver reports, not to prove a
-      # defensive `H[k].nil?` dead.
+      # ({KeyPresenceGuard.guarded_read}). The read is marked optimistic, and {OptimisticOrigin.resolve} derives
+      # the mark through every value computed from it, so the certainty consumers (`flow.always-truthy-condition`,
+      # the `&&` / `||` polarity gate, branch elision) decline a verdict folded from it: the narrowing exists to
+      # silence nil-receiver reports, not to prove a defensive check dead.
       def key_guarded_type(node, type)
-        narrowed = IndexedNarrowing.key_guarded_read(node, type, scope)
+        return type unless node.name == :[]
+
+        narrowed = KeyPresenceGuard.guarded_read(node, type, scope)
         return type if narrowed.nil?
 
         scope.record_optimistic_origin(node, OptimisticOrigin::KEY_PRESENCE_GUARD)
@@ -2974,9 +2976,18 @@ module Rigor
       # not observable on the body scope, so it does need its own memo-key slot. It is dropped for a def
       # that cannot reach a `yield` — nearly all of them — which keeps the key shape constant for the
       # methods the memo actually carries and confines the extra dimension to yielding callees.
+      # Issue #1703 — a callee's return summary is computed with `key?` guards off ({KeyPresenceGuard.without_guards}):
+      # the guard's narrowing and its optimistic mark live in one method body, and a narrowed type published across
+      # the boundary would let a caller's defensive `nil?` check fold.
       def infer_user_method_return(def_node, receiver, arg_types, self_fold_safe: false, yield_type: nil)
         return nil if def_node.body.nil?
 
+        KeyPresenceGuard.without_guards do
+          infer_user_method_return_unguarded(def_node, receiver, arg_types, self_fold_safe, yield_type)
+        end
+      end
+
+      def infer_user_method_return_unguarded(def_node, receiver, arg_types, self_fold_safe, yield_type)
         yield_type = nil unless yield_type && body_yields?(def_node)
         body_scope = build_user_method_body_scope(def_node, receiver, arg_types,
                                                   self_fold_safe: self_fold_safe)

@@ -117,15 +117,19 @@ module Rigor
         map.transform_values { |entries| entries.map { |entry| ObservedCall.from(entry) } }
       end
 
+      # Issue #1703 — a `key?` guard's narrowing is a diagnostic aid inside one method body and is never published
+      # in a signature, so the whole run types with guards off ({Inference::KeyPresenceGuard.without_guards}).
       def run
-        resolved = resolve_paths(@paths)
-        @environment = build_environment(resolved)
-        candidates = resolved.flat_map { |path| analyse_file(path, @environment) }
-        annotate_effects(
-          demote_overridden_base_methods(
-            demote_unresolvable_superclasses(demote_inline_generic_classes(resolve_superclass_spellings(candidates)))
+        Inference::KeyPresenceGuard.without_guards do
+          resolved = resolve_paths(@paths)
+          @environment = build_environment(resolved)
+          candidates = resolved.flat_map { |path| analyse_file(path, @environment) }
+          annotate_effects(
+            demote_overridden_base_methods(
+              demote_unresolvable_superclasses(demote_inline_generic_classes(resolve_superclass_spellings(candidates)))
+            )
           )
-        )
+        end
       end
 
       private

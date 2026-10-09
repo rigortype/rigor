@@ -10,7 +10,7 @@ require_relative "../rbs_extended"
 require_relative "../analysis/fact_store"
 require_relative "../builtins/regex_refinement"
 require_relative "guard_rebinding"
-require_relative "indexed_narrowing"
+require_relative "key_presence_guard"
 require_relative "last_line"
 require_relative "operand_effects"
 require_relative "optimistic_origin"
@@ -1485,11 +1485,11 @@ module Rigor
         # Issue #1703 — `H.key?(k)` / `has_key?` / `include?` / `member?` with a non-literal key (a local, an ivar,
         # or a reader chain such as `prop.column_type`) on a closed hash shape held in a local, an ivar or a
         # constant. The truthy edge records the guard, and a later `H[k]` of the same receiver and structurally the
-        # same key drops the miss `nil` ({IndexedNarrowing.key_guarded_read}). The falsey edge is the no-op: an
+        # same key drops the miss `nil` ({KeyPresenceGuard}). The falsey edge is the no-op: an
         # absent computed key says nothing a shape can record. Nil when the guard does not apply, so a collection's
         # `include?` still reaches the membership and String predicates.
         def analyse_computed_key_presence_predicate(node, scope)
-          truthy = IndexedNarrowing.record_key_guard(node, scope)
+          truthy = KeyPresenceGuard.record(node, scope)
           truthy && [truthy, scope]
         end
 

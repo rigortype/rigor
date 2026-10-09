@@ -183,7 +183,7 @@ module Rigor
     # - `receiver_name` is the variable's Symbol.
     # - `key` is the Ruby value of the literal index (Symbol / String / Integer). Non-literal keys
     #   (`params[field]`) have no stable address for a recorded value. A `key?` guard with a non-literal key
-    #   (issue #1703) records an {Inference::IndexedNarrowing::KeyExpr} here instead, with `receiver_kind`
+    #   (issue #1703) records an {Inference::KeyPresenceGuard::KeyExpr} here instead, with `receiver_kind`
     #   `:const` allowed; its entry marks presence only.
     IndexedKey = Data.define(:receiver_kind, :receiver_name, :key)
 
@@ -377,6 +377,10 @@ module Rigor
     # metadata, ignored by `==` / `hash`, and never varying a flow decision on its own.
     def record_optimistic_origin(node, cause)
       @optimistic_origins[node] = cause
+      # Issue #1703 — lets {Inference::OptimisticOrigin.resolve_through_guarded_value} skip a file with no guard.
+      if cause == Inference::OptimisticOrigin::KEY_PRESENCE_GUARD
+        @optimistic_origins[Inference::OptimisticOrigin::KEY_PRESENCE_SEEN] = true
+      end
       self
     end
 
@@ -2247,13 +2251,18 @@ module Rigor
 
       sym_kind = receiver_kind.to_sym
       sym_name = receiver_name.to_sym
-      root = [sym_kind, sym_name]
       filtered = @indexed_narrowings.reject do |k, _|
-        (k.receiver_kind == sym_kind && k.receiver_name == sym_name) ||
-          # Issue #1703 — a `key?` guard whose key is this variable, or a chain read from it.
-          (k.key.is_a?(Inference::IndexedNarrowing::KeyExpr) && k.key.root == root)
+        (k.receiver_kind == sym_kind && k.receiver_name == sym_name) || key_guard_rooted_at?(k.key, sym_kind, sym_name)
       end
       filtered.size == @indexed_narrowings.size ? @indexed_narrowings : filtered.freeze
+    end
+
+    # Issue #1703 — whether `key` is a `key?` guard's key that is the variable `kind`/`name`, or a chain read from it.
+    def key_guard_rooted_at?(key, kind, name)
+      return false unless key.is_a?(Inference::KeyPresenceGuard::KeyExpr)
+
+      root = key.root
+      root[0] == kind && root[1] == name
     end
 
     # ADR-58 WD1 — set/clear the declaration-sourced provenance mark.

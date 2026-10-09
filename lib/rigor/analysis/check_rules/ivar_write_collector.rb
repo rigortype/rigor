@@ -127,11 +127,16 @@ module Rigor
           variable = loader.instance_definition(class_name)&.instance_variables&.[](ivar_name)
           return nil if variable.nil?
 
-          translate_declared(variable.type, loader)
+          translate_declared(variable.type, loader, class_name)
         end
 
-        def translate_declared(rbs_type, loader)
-          Inference::RbsTypeTranslator.translate(rbs_type, alias_expander: loader)
+        # `self` / `instance` in a class's declaration is that class; a module's stays untyped, since its
+        # instances belong to includers no RBS type names. A translation failure reads as untyped, which only
+        # ever withholds a finding.
+        def translate_declared(rbs_type, loader, class_name)
+          owner = Type::Combinator.nominal_of(class_name) unless loader.rbs_module?(class_name)
+          Inference::RbsTypeTranslator.translate(rbs_type, self_type: owner, instance_type: owner,
+                                                           alias_expander: loader)
         rescue StandardError
           Type::Combinator.untyped
         end

@@ -441,7 +441,7 @@ module Rigor
         writes.filter_map do |write|
           write_class = ivar_class_for(write[:type])
           next nil if write_class.nil? || write_class == "NilClass"
-          next nil unless Inference::Acceptance.accepts(declared, write[:type], mode: :gradual).no?
+          next nil unless Inference::Acceptance.accepts(declared[:type], write[:type], mode: :gradual).no?
 
           build_declared_ivar_write_mismatch_diagnostic(path, write[:node], class_name, ivar_name, declared,
                                                         write_class)
@@ -2844,7 +2844,7 @@ module Rigor
             node,
             rule: RULE_IVAR_WRITE_MISMATCH,
             path: path,
-            message: "instance variable `#{ivar_name}' on #{class_name} is declared #{declared.describe}; " \
+            message: "instance variable `#{ivar_name}' on #{class_name} is declared #{declared[:label]}; " \
                      "this write assigns #{write_class}",
             severity: :error
           )

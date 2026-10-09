@@ -2,7 +2,7 @@ module Rigor
   module Analysis
     module DependencySourceInference
       class Index
-        def initialize: (?resolved_gems: untyped, ?unresolvable: untyped, ?method_catalog: untyped, ?budget_exceeded: untyped, ?class_to_gem: untyped, ?budget_overrun_strategy: untyped) -> void
+        def initialize: (?resolved_gems: untyped, ?unresolvable: untyped, ?method_catalog: untyped, ?budget_exceeded: untyped, ?class_to_gem: untyped, ?budget_overrun_strategy: untyped, ?gem_modes: untyped, ?refinements: untyped) -> void
       end
     end
   end

@@ -34,7 +34,7 @@ module Rigor
         # @param refinements — issue #1672: the opt-in gems' `refine X do … end` bodies, `{refined class =>
         #   {method => [refining modules]}}` ({Walker::Outcome#refinements}). The runner merges it into the
         #   project's `discovered_refinements` seed, so `using M` for a gem's `M` reaches the check rules.
-        def initialize(
+        def initialize( # rubocop:disable Metrics/ParameterLists
           resolved_gems: [], unresolvable: [], method_catalog: {},
           budget_exceeded: [], class_to_gem: {},
           budget_overrun_strategy: :walker_cap, gem_modes: {}, refinements: {}

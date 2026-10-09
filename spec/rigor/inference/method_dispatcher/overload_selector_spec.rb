@@ -285,6 +285,48 @@ RSpec.describe Rigor::Inference::MethodDispatcher::OverloadSelector do
         expect(first_param_names(candidates)).to contain_exactly("::string", "::int")
       end
 
+      # Issue #1675 — `(Float)` refuses the `1`, so the whole-union match kept only `(Integer)`.
+      it "adds the overloads the untyped member reaches for Integer#+ with a `1 | Dynamic[top]` argument" do
+        one = Rigor::Type::Combinator.constant_of(1)
+        candidates = select_candidates("Integer", :+, [Rigor::Type::Combinator.union(one, untyped)])
+        expect(first_param_names(candidates)).to include("::Integer", "::Float", "::Rational", "::Complex")
+        expect(first_param_names(candidates).first).to eq("::Integer")
+      end
+
+      it "types `0 + (1 | untyped)` as the untyped join, not Integer" do
+        env = Rigor::Environment.for_project(libraries: [], signature_paths: [])
+        scope = Rigor::Scope.empty(environment: env)
+        root = Prism.parse("def f(u, c)\n  w = c ? u : 1\n  0 + w\nend\n").value
+        index = Rigor::Inference::ScopeIndexer.index(root, default_scope: scope)
+        call = nil
+        Rigor::Source::NodeWalker.each(root) { |n| call = n if n.is_a?(Prism::CallNode) && n.name == :+ }
+        type = index[call].type_of(call)
+        expect(type).to be_a(Rigor::Type::Dynamic)
+        expect(type.describe(:short)).to include("Float")
+      end
+
+      it "reads a Dynamic whose facet holds the untyped carrier as imprecise" do
+        integer = Rigor::Type::Combinator.nominal_of("Integer")
+        nested = Rigor::Type::Combinator.dynamic(Rigor::Type::Combinator.union(integer, untyped))
+        candidates = select_candidates("Integer", :+, [nested])
+        expect(first_param_names(candidates)).to include("::Integer", "::Float")
+      end
+
+      it "types `0 + @data[i]` over `Array[untyped] | Array[Integer]` as the untyped join" do
+        source = <<~RUBY
+          def f(arg, i)
+            data = arg ? [0].concat(arg) : Array.new(3, 0)
+            0 + data[i]
+          end
+        RUBY
+        env = Rigor::Environment.for_project(libraries: [], signature_paths: [])
+        root = Prism.parse(source).value
+        index = Rigor::Inference::ScopeIndexer.index(root, default_scope: Rigor::Scope.empty(environment: env))
+        call = nil
+        Rigor::Source::NodeWalker.each(root) { |n| call = n if n.is_a?(Prism::CallNode) && n.name == :+ }
+        expect(index[call].type_of(call).describe(:short)).to include("Float")
+      end
+
       it "still picks `(interned) -> bool` for a precise String argument" do
         candidates = select_candidates("Regexp", :match?, [Rigor::Type::Combinator.nominal_of("String")])
         expect(first_param_names(candidates)).to eq(["::interned"])
@@ -457,12 +499,14 @@ RSpec.describe Rigor::Inference::MethodDispatcher::OverloadSelector do
         expect(rational_plus(dynamic_of("Integer", "Float", "Complex"))).to eq(["Numeric"])
       end
 
-      it "keeps the wrapper for a facet with an untyped member" do
-        # Read member by member, the untyped member joined every arm beside the Integer's `(Numeric)`.
+      it "reads a facet with an untyped member as imprecise, not member by member (#1675)" do
+        # The untyped member may take any arm at runtime, so the affinity arm's `(Numeric) -> Rational` alone was a
+        # precise answer the runtime contradicts for a Float. The singular `select` keeps that first arm.
         untyped_member = Rigor::Type::Combinator.dynamic(
           Rigor::Type::Combinator.union(Rigor::Type::Combinator.nominal_of("Integer"), Rigor::Type::Combinator.untyped)
         )
-        expect(rational_plus(untyped_member)).to eq(["Numeric"])
+        expect(rational_plus(untyped_member)).to include("Numeric", "Float", "Complex")
+        expect(rational_plus(untyped_member, singular: true)).to eq(["Numeric"])
       end
 
       it "keeps the wrapper for a single supertype member that a subclass arm names" do

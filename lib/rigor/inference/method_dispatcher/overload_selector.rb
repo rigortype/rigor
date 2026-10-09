@@ -5,6 +5,7 @@ require_relative "../acceptance"
 require_relative "../rbs_type_translator"
 require_relative "alias_strict_nominals"
 require_relative "facet_distribution"
+require_relative "imprecise_argument"
 require_relative "proven_overload"
 require_relative "receiver_affinity"
 
@@ -153,7 +154,7 @@ module Rigor
           private
 
           # Overload search after pass 0 (`find_proven_overload`):
-          # - Pass 1 (strict): skipped when any arg is imprecise (`imprecise_arg?`), because gradual
+          # - Pass 1 (strict): skipped when any arg is imprecise (`ImpreciseArgument.imprecise?`), because gradual
           #   acceptance against an untyped arg accepts every param indiscriminately and would let pass 1
           #   lock in an arbitrary strict overload (e.g. `Regexp#=~(nil) -> nil` over the
           #   `(::interned?) -> Integer?` overload).
@@ -188,9 +189,15 @@ module Rigor
             # matches are indistinguishable by types — position alone would pick — so ALL of them come back
             # and the dispatch layer unions their returns (#521).
             matches = find_matching_overload(overloads, shared, strict: false)
-            return matches.first(1) unless shared[:arg_types].any? { |t| imprecise_arg?(t) }
+            return matches.first(1) unless shared[:arg_types].any? { |t| ImpreciseArgument.imprecise?(t) }
 
-            matches
+            # Issue #1675 — and every overload the arguments' untyped parts reach on their own
+            # ({ImpreciseArgument.untyped_stand_ins}), after the whole-argument matches so the singular `select`
+            # keeps its answer.
+            stand_ins = ImpreciseArgument.untyped_stand_ins(shared[:arg_types])
+            return matches if stand_ins.nil?
+
+            (matches + find_matching_overload(overloads, shared.merge(arg_types: stand_ins), strict: false)).uniq
           end
 
           # Pass 0. With every argument a plain value (a `Constant`, or a `Nominal` with no type arguments), the
@@ -219,7 +226,7 @@ module Rigor
           # type_vars, block_required, param_overrides, alias_expander).
           def find_matching_overload(overloads, shared, strict:)
             arg_types = shared[:arg_types]
-            return NO_MATCH if strict && arg_types.any? { |t| imprecise_arg?(t) }
+            return NO_MATCH if strict && arg_types.any? { |t| ImpreciseArgument.imprecise?(t) }
 
             block_required = shared[:block_required]
             # Strict keeps its historical first-match short-circuit (a dispatch hot path); the gradual
@@ -247,22 +254,6 @@ module Rigor
             !OverloadSelector.overload_requires_block?(method_type)
           end
 
-          # Treats the literal `untyped` carrier (`Dynamic[Top]`) as too imprecise to drive a strict-pass
-          # match. Other `Dynamic`-wrapped types with a concrete static facet carry enough information to
-          # pick a sensible overload.
-          def untyped_arg?(type) = type.is_a?(Type::Dynamic) && type.static_facet.is_a?(Type::Top)
-
-          # Issue #1021 — the strict and alias passes must not discriminate on an argument whose type
-          # cannot rule an overload out: the bare untyped carrier, or a union with an untyped member. That
-          # member may reach any overload at runtime, so a strict match is decided by the union's other
-          # members alone — `Dynamic[top] | nil` pinned `Regexp#match?(nil) -> false` and typed a live
-          # predicate as the literal `false`. The gradual pass still accepts against the whole union, so
-          # `Dynamic[top] | nil` keeps both `match?` overloads and the #521 join answers `Dynamic[bool]`.
-          # A `Dynamic` with a concrete static facet stays out: its facet discriminates.
-          def imprecise_arg?(type)
-            untyped_arg?(type) || (type.is_a?(Type::Union) && type.members.any? { |member| untyped_arg?(member) })
-          end
-
           # Pass 1.5: for arity-compatible overloads whose every positional param is either a strict
           # nominal OR a well-known core alias (`int` / `string` / `interned` / etc.), check the arg
           # against the alias's STRICT arm. An Integer literal arg matches `int` here but not `string`, so
@@ -273,7 +264,7 @@ module Rigor
             # Issue #521 — an untyped argument "maybe"-accepts EVERY alias's strict arm, so it cannot
             # discriminate between overloads here any more than in the strict pass; without this guard a
             # Dynamic arg pinned `Array#*(string) -> String` purely by declaration order.
-            return nil if arg_types.any? { |t| imprecise_arg?(t) }
+            return nil if arg_types.any? { |t| ImpreciseArgument.imprecise?(t) }
 
             overloads.find do |method_type|
               next false unless engages_block_shape?(method_type, block_required)
@@ -447,7 +438,7 @@ module Rigor
             # overloads purely by list position. Decline the pair; only the strict pass (where the arg
             # proves the value) or the final first-overload fallback may select such an overload. (Pass 1
             # already skips untyped args entirely, so this only engages pass 2.)
-            return false if untyped_arg?(arg) && value_pinning?(param_type)
+            return false if ImpreciseArgument.untyped?(arg) && value_pinning?(param_type)
 
             result = param_type.accepts(arg, mode: :gradual)
             return result.yes? && ProvenOverload.names_arg_class?(param_type, arg) if strict == :proven

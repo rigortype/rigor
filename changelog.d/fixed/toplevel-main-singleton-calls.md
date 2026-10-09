@@ -1,0 +1,1 @@
+- **[engine]** A bare top-level call to one of `main`'s private singleton methods (`using`, `include`, `public`, `private`, `define_method`, `ruby2_keywords`) no longer reports `call.unresolved-toplevel`. ([#1383](https://github.com/rigortype/rigor/issues/1383), [#1683](https://github.com/rigortype/rigor/pull/1683))

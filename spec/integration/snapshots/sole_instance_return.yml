@@ -1,0 +1,6 @@
+---
+locals:
+  seeded: "[false, false]"
+assertions:
+  '1': "[false, false]"
+  '2': bool

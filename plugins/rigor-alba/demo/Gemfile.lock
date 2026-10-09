@@ -1,0 +1,13 @@
+GEM
+  remote: https://rubygems.org/
+  specs:
+    alba (3.10.0)
+
+PLATFORMS
+  ruby
+
+DEPENDENCIES
+  alba
+
+BUNDLED WITH
+   2.6.9

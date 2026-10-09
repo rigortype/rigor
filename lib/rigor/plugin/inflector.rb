@@ -54,7 +54,7 @@ module Rigor
       # by `rigor plugins` (ADR-90) to probe {available?} at activation time — so a standalone install
       # where inflection silently degrades reports the degradation instead of an unqualified `[OK]`. When
       # a new plugin adopts the helper, add its manifest id here.
-      CONSUMER_PLUGIN_IDS = %w[actionmailer actionpack activerecord factorybot rails-routes].freeze
+      CONSUMER_PLUGIN_IDS = %w[actionmailer actionpack activerecord alba factorybot rails-routes].freeze
 
       # Raised when `ActiveSupport::Inflector` is required for an inflection but cannot be loaded. Caught by
       # the per-plugin isolation boundary, so it surfaces as "this plugin produced no diagnostics" rather than

@@ -119,7 +119,8 @@ Signature changes update the matching
 | `Rigor::Analysis::DependencySourceInference::Index#budget_exceeded` | Analysis | Slice 4 |
 | `Rigor::Analysis::DependencySourceInference::Builder.build` | Analysis | Slice 2a |
 | `Rigor::Analysis::DependencySourceInference::Walker.walk(budget:)` | Analysis | Slice 2b-i / 4 |
-| `Rigor::Analysis::DependencySourceInference::Walker::Outcome` Data shape | Analysis | Slice 4 |
+| `Rigor::Analysis::DependencySourceInference::Walker::Outcome` Data shape | Analysis | Slice 4 / #1672 (`refinements`) |
+| `Rigor::Analysis::DependencySourceInference::Index#refinements` | Analysis | #1672 |
 | `Rigor::Environment#dependency_source_index` | Environment | Slice 2b-ii |
 | `Rigor::Cache::Descriptor::DependencyEntry` | Cache | Slice 3 |
 | `Rigor::Cache::Descriptor#dependencies` slot | Cache | Slice 3 |
@@ -163,6 +164,9 @@ gem).
   populated by the walker (slice 2b-i).
 - `#contribution_for(class_name:, method_name:)` — returns the
   recorded kind or `nil`.
+- `#refinements` — the gems' `refine` bodies (issue #1672; see
+  "Refine bodies" below), frozen
+  `Hash{refined_class => Hash{method_name => Array<refining_module>}}`.
 - `#empty?` — true when no resolved gems were registered.
 - `#cache_descriptor` — frozen
   [`Cache::Descriptor`](cache.md) with one `DependencyEntry`
@@ -192,6 +196,45 @@ Recognition rules:
 - Per-class first-write wins. Methods of identical name on the
   same class with different kinds (rare; private API mostly)
   carry the kind that wins the per-class first walk.
+- `refine X do … end` is a refine body, not part of the
+  enclosing module (see "Refine bodies" below).
+
+### Refine bodies (issue #1672)
+
+The walker recognises the refine-call shape the project walk
+does (`Inference::ScopeIndexer.refine_target`): an implicit- or
+`self`-receiver `refine` with one constant argument and a
+literal block. Its body's instance `def`s MUST NOT enter the
+catalog: they are not methods of the refining module, and of
+the refined class only after `using`. The walker instead records
+each as a refinement of the target by the enclosing module, in
+`Walker::Outcome#refinements`, with the target resolved
+lexically the way the project walk resolves it (every name it
+can denote). `def self.x` and `def`s nested in a `def` or a
+declaration define nothing on the target and are dropped; a
+`class` / `module` declared in the body is still walked under
+the lexical prefix. A `refine` with no enclosing module, or
+inside `class << self`, refines nothing Ruby accepts and records
+nothing. A computed target (`refine(klass) { … }`) names no
+class to key, so its body walks as any other block.
+
+`Builder` unions every gem's table into `Index#refinements`, and
+the runner unions that into the project's
+`discovered_refinements` seed (the table issue #1120's
+`call.undefined-method` refinement check reads). A project file
+that `using`s a gem's refining module therefore resolves the
+gem's refined calls in that lexical region and still reports
+them elsewhere. The index is rebuilt by the pre-passes every
+run takes, so a file re-analysed on a warm run is seeded the
+same table a cold run seeds. An unchanged file's cached result
+is keyed on the gem's name, version and mode (see "Cache slice"),
+as the catalog's contributions are, so editing a gem's refine
+body without a version bump is not seen until that file is
+re-analysed. Refine bodies the walker reaches after the
+per-gem budget trips are not recorded. Per ADR-121 WD3 the
+gem's refine bodies are not inferred: a refined call into one
+types as `Dynamic[top]` (today through the unresolved-method
+fallback; the refined dispatch arm, #1664, keeps that answer).
 
 Per-file errors silently degrade to "no contribution from this
 file":

@@ -128,6 +128,7 @@ subset; they cross-reference through ADR-9 facts.
 | [`rigor-devise`](rigor-devise/) | **ADR-16 macro expansion substrate Tier B consumer** — declarative `Plugin::Macro::TraitRegistry` manifest mirroring Devise's `lib/devise/modules.rb` symbol → module table. The substrate explodes each `devise :strategy_a, :strategy_b` call's included modules' RBS instance methods onto the calling AR model. |
 | [`rigor-sinatra`](rigor-sinatra/) | **ADR-16 macro expansion substrate Tier A consumer** — declarative `Plugin::Macro::BlockAsMethod` manifest narrows the block body's `self_type` for `get` / `post` / `put` / `delete` / `head` / `options` / `patch` / `link` / `unlink` against `Sinatra::Base` subclasses. |
 | [`rigor-grape`](rigor-grape/) | **ADR-16 Tier A + ADR-43 WD4 + bundled-RBS consumer** — types the `Grape::API` endpoint DSL (`params`, `namespace`, verb macros, `desc`, `route_setting`, `helpers`) and the `Grape::Entity` `expose` DSL. `BlockAsMethod` named-`self_type` entries (`"Grape::Validations::ParamsScope"`, `"singleton(Grape::API::Instance)"`, `"Grape::Endpoint"`) bind each `instance_eval`'d block body to the object Grape evaluates it on; the bundled `sig/grape.rbs` supplies the shared `Grape::DSL::ClassMethods` surface via `rbs_complete_ancestors` bridging. |
+| [`rigor-alba`](rigor-alba/) | **alba JSON serializer** — binds the `Alba.serialize` / `Alba.hashify` block `self` to `singleton(Alba::Resource)` (ADR-16 Tier A) and publishes the inferred association resources (`many :articles` → `ArticleResource`) as `:reachability_roots` for `rigor unused`. Declares only the `Alba` / `Alba::Resource` namespaces. No diagnostics. |
 | [`rigor-sorbet`](rigor-sorbet/) | **External type DSL adapter** — reads inline `sig { params(...).returns(T) }` blocks plus `T.let` / `T.cast` / `T.must` / `T.unsafe` assertions and contributes return types via `dynamic_return` (per ADR-11 / ADR-52). |
 | [`rigor-hanami`](rigor-hanami/) | **ADR-28 path-scoped protocol contract** — enforces `#handle(Hanami::Action::Request, Hanami::Action::Response) → void` on every class under `app/actions/**/*.rb`. The engine **provides** `Hanami::Action::Request` / `Hanami::Action::Response` into action bodies (replacing `Dynamic[Top]`) so misuse surfaces as core diagnostics. Plugin ships its own Hanami Action RBS stubs. Config override: `action_path:`. |
 | [`rigor-statesman`](rigor-statesman/) | State machine DSL recognition (`state` + `transition` declarations) and `transition_to(:state)` / `can_transition_to?(:state)` validation against the per-class state set. Two-pass collect → validate analysis. |
@@ -167,6 +168,7 @@ their plugin bodies are purely declarative
 | --- | --- | --- |
 | [`rigor-sinatra`](rigor-sinatra/) | A | `Plugin::Macro::BlockAsMethod` |
 | [`rigor-grape`](rigor-grape/) | A | `Plugin::Macro::BlockAsMethod` (named `self_type` bindings) |
+| [`rigor-alba`](rigor-alba/) | A | `Plugin::Macro::BlockAsMethod` (named `singleton(...)` `self_type`) |
 | [`rigor-devise`](rigor-devise/) | B | `Plugin::Macro::TraitRegistry` |
 | [`rigor-dry-struct`](rigor-dry-struct/) | C | `Plugin::Macro::HeredocTemplate` |
 

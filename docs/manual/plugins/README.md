@@ -69,6 +69,8 @@ The full catalogue, with a one-line scope for every plugin, is
   (`params`, `namespace`, verb macros, `desc`, `route_setting`) and
   `Grape::Entity` `expose` declarations, including the `instance_eval`'d
   block `self` bindings.
+- [rigor-alba](rigor-alba.md) — types the inline `Alba.serialize { }` block `self`, and
+  roots the resources alba infers from `many :articles` for `rigor unused`.
 - [rigor-rspec-rails](rigor-rspec-rails.md) — `have_http_status`
   argument validation (out-of-range codes, unknown status symbols).
 - [rigor-shoulda-matchers](rigor-shoulda-matchers.md) — shoulda matcher

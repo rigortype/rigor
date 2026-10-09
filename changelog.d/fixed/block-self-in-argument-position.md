@@ -1,0 +1,1 @@
+- **[engine]** A plugin's `block_as_methods` self narrowing, and `define_method`'s, now also apply when the block-carrying call is an argument, a receiver chain or a literal element, so a Sinatra route written as `puts(get("/") { redirect "/x" })` no longer reports `call.unresolved-toplevel`. ([#1690](https://github.com/rigortype/rigor/pull/1690))

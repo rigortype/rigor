@@ -82,6 +82,10 @@ ALLOWED_ANCESTRY_WALKERS = {
   "lib/rigor/inference/method_dispatcher/rbs_dispatch.rb#each_source_ancestor_candidate" =>
     "yields every candidate spelling to three shadow guards and files no ADR-46 edge; two guards are unions, " \
     "the third (`allowed_rbs_complete_ancestor`) is a breadth-first first-definer walk deferred to #1572",
+  "plugins/rigor-alba/lib/rigor/plugin/alba/resource_index.rb#resource_chain?" =>
+    "existential over the project's own superclass chain (does any ancestor `include Alba::Resource`), read " \
+    "from the plugin's cached file scan, which has no Scope or discovery tables to build a chain from; " \
+    "order-independent, and it only ever ADDS a root for a name that must also resolve to a declared class",
   "lib/rigor/scope.rb#singleton_extends_of" =>
     "union of every `extend` up the superclass chain, read by `Narrowing` only to withhold a `Bot`; " \
     "order-independent"

@@ -9985,12 +9985,41 @@ module Rigor
       def unentered_block_entry(node, block, table, current_scope)
         return current_scope unless block.is_a?(Prism::BlockNode) && !table.key?(block)
 
+        narrowed_self = unentered_block_self(node, current_scope)
         current_scope = Narrowing.safe_navigation_block_scope(node, current_scope)
         # Issue #1429 — nor a guard's narrowing of a global or constant the body may run after code rebinds.
         current_scope = GuardRebinding.block_entry(current_scope, block, node)
-        return FreshFrameBlocks.entry(current_scope, node) if FreshFrameBlocks.fresh_entry?(node, current_scope)
+        entry =
+          if FreshFrameBlocks.fresh_entry?(node, current_scope)
+            FreshFrameBlocks.entry(current_scope, node)
+          else
+            LastLine.block_entry(FreshFrameBlocks.closure_entry(current_scope, block, node), block, node)
+          end
+        narrowed_self ? entry.with_self_type(narrowed_self) : entry
+      end
 
-        LastLine.block_entry(FreshFrameBlocks.closure_entry(current_scope, block, node), block, node)
+      # The `self` an unentered block's body runs with, when the call is one whose block `self` the engine
+      # narrows: an ADR-16 Tier A `block_as_methods:` match ({MacroBlockSelfType}) or `define_method` on the
+      # lexical `self` ({DefineMethodBlockSelf}, issue #963). The evaluator applies the same two narrowings to
+      # the blocks it enters ({StatementEvaluator#build_block_entry_scope}, {StatementEvaluator#enter_call_block})
+      # and the value pass to every block it types ({ExpressionTyper#block_body_self_narrowing}); without this a
+      # block in a value position — `puts(MyApp.get("/x") { redirect "/y" })`, `render json: Alba.serialize(x) {
+      # attributes :id }`, `private define_method(:m) { helper }` — kept the enclosing `self`, and every DSL call
+      # in it read as a call on that. The receiver is typed only when some plugin declares an entry for the
+      # call's name, so a call no entry names costs one table lookup. A miss, or a raise, keeps the entry as
+      # built — the false-positive-safe direction.
+      def unentered_block_self(node, scope)
+        registry = scope.environment&.plugin_registry
+        if registry && !registry.empty? && !registry.contribution_index.block_entries_for(node.name).empty?
+          receiver_type = node.receiver ? scope.type_of(node.receiver) : scope.self_type
+          narrowed = MacroBlockSelfType.narrow_self_type_for(
+            scope: scope, call_node: node, receiver_type: receiver_type
+          )
+          return narrowed if narrowed
+        end
+        DefineMethodBlockSelf.narrow_self_type_for(scope: scope, call_node: node)
+      rescue StandardError
+        nil
       end
 
       # The scope the children of an unentered block or lambda inherit. The evaluator enters a statement-level

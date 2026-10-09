@@ -308,6 +308,15 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  describe "fixtures/sole_instance_return/ — FalseClass satisfies a declared bool" do
+    let(:harness) { harness_for("sole_instance_return") }
+
+    it "draws def.return-type-mismatch only on the genuinely wrong return" do
+      mismatches = harness.diagnostics.select { |d| d.rule == "def.return-type-mismatch" }
+      expect(mismatches.map(&:line)).to eq(marked_lines(harness, "# GENUINE-MISMATCH"))
+    end
+  end
+
   describe "fixtures/mutation_join_declared_sig/ — the join stays inside a hand-written signature" do
     let(:harness) { harness_for("mutation_join_declared_sig") }
 

@@ -1,0 +1,9 @@
+paths:
+  - app
+  - demo.rb
+
+plugins:
+  - rigor-alba
+
+cache:
+  path: tmp/.rigor/cache

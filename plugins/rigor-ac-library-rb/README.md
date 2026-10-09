@@ -36,6 +36,22 @@ plugins:
   - rigor-ac-library-rb
 ```
 
+## Competitive programming
+
+Contest code leans on methods whose RBS return admits `nil` for an input the problem's constraints rule out:
+`a.max_by { … }`, `a.min_by`, `a.find`, `a.bsearch`, `a.index`, `a.pop`, `s[i]`, `s.index`. Bound to a local and
+then called (`b = a.max_by { |x| x }; b + 1`), each reports `call.possible-nil-receiver`, an error. That is the
+rule working as specified: the value is `nil` on an empty array or a miss. Where the constraints make that
+impossible, lower the rule rather than guard every call:
+
+```yaml
+# .rigor.yml
+plugins:
+  - rigor-ac-library-rb
+severity_overrides:
+  call.possible-nil-receiver: warning   # or "off", quoted: a bare off is a YAML boolean
+```
+
 ## Scope and limits
 
 - The signatures cover the gem as installed (`lib_lock/`, under `AcLibraryRb`). Code that pastes ACL's top-level
@@ -43,8 +59,9 @@ plugins:
 - The gem is loaded per file (`require "ac-library-rb/segtree"`) or whole (`require "ac-library-rb/all"`), and the
   math functions are reached through `include AcLibraryRb`. The signatures cannot include the module into
   `Object` for you: `Object` including a module whose classes inherit from `Object` is a recursive ancestry RBS
-  rejects. Rigor reports a top-level `include` itself as `call.unresolved-toplevel`
-  ([#1383](https://github.com/rigortype/rigor/issues/1383)).
+  rejects. Rigor accepts the top-level `include` itself ([#1383](https://github.com/rigortype/rigor/issues/1383)),
+  but a bare top-level call to an included method (`crt(...)` after `include AcLibraryRb`) still reports
+  `call.unresolved-toplevel` and reads `Dynamic[top]` ([#1697](https://github.com/rigortype/rigor/issues/1697)).
 - The core extensions are declared whether or not the file that defines them is loaded. `ac-library-rb/modint`
   loads the `ModInt` conversions; `Integer#divisors`, `#each_divisor` and the `Array` conversions need
   `ac-library-rb/core_ext/all` (or `core_ext/integer`), and calling them without it passes the check and raises

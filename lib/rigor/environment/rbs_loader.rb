@@ -7,6 +7,7 @@ require_relative "../inference/rbs_type_translator"
 require_relative "../builtins/imported_refinements"
 require_relative "rbs_hierarchy"
 require_relative "member_consistency"
+require_relative "required_features"
 
 module Rigor
   class Environment
@@ -85,7 +86,11 @@ module Rigor
         def build_env_for(libraries:, signature_paths:, virtual_rbs: [], deferred_signature_paths: [])
           rbs_loader = RBS::EnvironmentLoader.new
           libraries = libraries_without_shadowed_bigdecimal_math(libraries)
+          # Issue #1700 — a `RequiredFeatures` token names a gated vendored directory, never an RBS library.
+          gated_dirs = RequiredFeatures.active_dirs(libraries.map(&:to_s))
           loaded_libraries = libraries.select do |library|
+            next false if library.to_s.start_with?(RequiredFeatures::TOKEN_PREFIX)
+
             rbs_loader.has_library?(library: library, version: nil)
           end
           loaded_libraries.each do |library|
@@ -97,7 +102,7 @@ module Rigor
           # type-of query then degrades to `Dynamic[top]` — the "sig looks harmful" failure of the 2026-07-06
           # mastodon coverage note). Per-file loading quarantines the broken file instead. Vendored / core-overlay
           # sigs are Rigor-shipped and trusted, so they stay on the loader's fast batch path.
-          add_bundled_signatures(rbs_loader, loaded_libraries.to_set(&:to_s))
+          add_bundled_signatures(rbs_loader, loaded_libraries.to_set(&:to_s), gated_dirs)
           env = unload_upstream_core_shims(RBS::Environment.from_loader(rbs_loader), rbs_loader)
           project_files = project_sig_files(signature_paths)
           # Issue #1075 — decided from the inputs before either side enters `env`: the consistency rule may
@@ -1228,6 +1233,7 @@ module Rigor
         # Keyed by `data/vendored_gem_sigs/` directory basename.
         LIBRARY_SUPPLEMENT_VENDORED_DIRS = {
           "cgi" => "cgi",
+          "prime" => "singleton",
           "prism" => "prism"
         }.freeze
         private_constant :LIBRARY_SUPPLEMENT_VENDORED_DIRS
@@ -1258,13 +1264,13 @@ module Rigor
         # overlay is added per-file, not per-directory, because the `LIBRARY_SUPPLEMENT_CORE_OVERLAYS` and
         # `RBS_LINE_CORE_OVERLAYS` files must be gated individually.
         #
+        # A directory {RequiredFeatures} gates loads only when the library list activated it (issue #1700).
+        #
         # @param loaded_library_names — libraries that actually resolved on this loader.
-        def add_bundled_signatures(rbs_loader, loaded_library_names)
+        # @param gated_dirs — the {RequiredFeatures}-gated directory basenames this library list activates.
+        def add_bundled_signatures(rbs_loader, loaded_library_names, gated_dirs = [])
           vendored_gem_sig_paths.each do |path|
-            next unless path.directory?
-            next unless supplement_dependency_loaded?(LIBRARY_SUPPLEMENT_VENDORED_DIRS, path, loaded_library_names)
-
-            rbs_loader.add(path: path)
+            rbs_loader.add(path: path) if vendored_dir_loads?(path, loaded_library_names, gated_dirs)
           end
           core_overlay_sig_paths.each do |dir|
             next unless dir.directory?
@@ -1277,6 +1283,18 @@ module Rigor
               rbs_loader.add(path: file)
             end
           end
+        end
+
+        # @param path — a `data/vendored_gem_sigs/<gem>/` entry.
+        # @return true when the directory exists, its supplemented library (if any) loaded, and — for a
+        #   {RequiredFeatures}-gated directory — the library list activated it.
+        def vendored_dir_loads?(path, loaded_library_names, gated_dirs)
+          return false unless path.directory?
+          return false unless supplement_dependency_loaded?(LIBRARY_SUPPLEMENT_VENDORED_DIRS, path,
+                                                            loaded_library_names)
+
+          basename = path.basename.to_s
+          !RequiredFeatures.gated_dir?(basename) || gated_dirs.include?(basename)
         end
 
         # @param supplements — basename → gating library map.

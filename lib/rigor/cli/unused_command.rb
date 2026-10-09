@@ -235,6 +235,7 @@ module Rigor
       def foreign_predicate(configuration)
         env = Environment.for_project(libraries: configuration.libraries, signature_paths: [],
                                       cache_store: cache_store(configuration),
+                                      required_features: ProjectEnvironment.required_features(configuration),
                                       **ProjectEnvironment.dependency_discovery_options(configuration))
         ->(fqn) { !env.singleton_for_name(fqn).nil? }
       rescue StandardError

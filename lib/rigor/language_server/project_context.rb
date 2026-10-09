@@ -77,6 +77,9 @@ module Rigor
           dependency_source_index: project_scan.dependency_source_index,
           synthetic_method_index: project_scan.synthetic_method_index,
           project_patched_methods: project_scan.project_patched_methods,
+          # Issue #1700 — scanned from disk; a saved edit that adds or drops a `require "prime"` reaches
+          # `#invalidate!` through `workspace/didChangeWatchedFiles`, which rebuilds this.
+          required_features: ProjectEnvironment.required_features(@configuration),
           **ProjectEnvironment.dependency_discovery_options(@configuration)
         )
       end

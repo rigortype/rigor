@@ -194,4 +194,35 @@ RSpec.describe "bundled RBS definition builds" do
       acc << "#{name}: #{e.class}: #{e.message.lines.first.to_s.strip}"
     end
   end
+
+  # Issue #1700 — `data/vendored_gem_sigs/prime/` is gated on a `require "prime"` in the project's source, so the
+  # environment above never loads it; this one activates it the way such a run does.
+  describe "the require-gated prime signatures" do
+    let(:prime_env) do
+      Rigor::Environment::RbsLoader.build_env_for(
+        libraries: Rigor::Environment::DEFAULT_LIBRARIES + [Rigor::Environment::RequiredFeatures.token("prime")],
+        signature_paths: []
+      )
+    end
+
+    let(:prime_builder) { RBS::DefinitionBuilder.new(env: prime_env) }
+
+    ["::Prime", "::Prime::PseudoPrimeGenerator", "::Prime::EratosthenesGenerator", "::Integer"].each do |name|
+      it "builds the instance and singleton definition of #{name}" do
+        type_name = RBS::TypeName.parse(name)
+
+        expect(prime_builder.build_instance(type_name)).not_to be_nil
+        expect(prime_builder.build_singleton(type_name)).not_to be_nil
+      end
+    end
+
+    it "resolves Integer#prime_division and Prime.each" do
+      expect(prime_builder.build_instance(RBS::TypeName.parse("::Integer")).methods[:prime_division]).not_to be_nil
+      expect(prime_builder.build_singleton(RBS::TypeName.parse("::Prime")).methods[:each]).not_to be_nil
+    end
+
+    it "is absent from an environment no require activated" do
+      expect(env.class_decls.key?(RBS::TypeName.parse("::Prime"))).to be(false)
+    end
+  end
 end

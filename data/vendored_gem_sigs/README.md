@@ -58,6 +58,26 @@ the cheaper failure.
 pins this: it builds each affected class's definition and fails the
 suite if a collision reappears on an `rbs` bump.
 
+## Gated on a required feature: `prime`
+
+`prime/` is the exception to "each gem owns its own namespace" below.
+`prime` left Ruby's default gems for the bundled gems and rbs 4.x no
+longer ships `stdlib/prime`, so after `require "prime"` a call such as
+`12.prime_division` reported `call.undefined-method`. The gem's own
+`sig/` (0.1.4) is vendored here, but it declares a top-level
+`class Prime` and reopens `Integer`, which algorithm collections and
+exercise solutions define for themselves. So the directory loads only
+when some source file in the run carries a literal `require "prime"`:
+`Rigor::Environment::RequiredFeatures::VENDORED_DIRS` maps the feature
+to the directory, and is the place to add another such gem. A gem whose
+own `sig/` the bundle already supplies, or which the project lists
+under `libraries:`, is left to that source.
+
+The copy carries one local fix, recorded in `prime/LICENSE.upstream`:
+upstream types `Integer.from_prime_division` as taking
+`Array[[ String ]]`; it takes the `[[prime, exponent], ...]` pairs, and
+the copy says `Array[[ Integer, Integer ]]`.
+
 ## Layout
 
 ```

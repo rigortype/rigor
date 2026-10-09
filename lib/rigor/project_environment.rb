@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "environment"
+require_relative "analysis/path_expansion"
 require_relative "plugin"
 require_relative "plugin/loader"
 require_relative "plugin/services"
@@ -54,15 +55,28 @@ module Rigor
     # @param source_files — the file(s) the command inspects. Threaded so each loaded plugin's
     #   `source_rbs_synthesizer` runs over them at env-build time; an empty list contributes no synthesized RBS.
     def build(configuration:, source_files:)
+      features = required_features(configuration, source_files)
       Environment.for_project(
         libraries: configuration.libraries,
         signature_paths: configuration.signature_paths,
         plugin_registry: load_plugin_registry(configuration),
         source_files: source_files,
+        required_features: features,
         **dependency_discovery_options(configuration)
       )
     rescue StandardError
-      bare(configuration)
+      bare(configuration, features)
+    end
+
+    # Issue #1700 — the {Environment::RequiredFeatures} a `rigor check` over the configured paths would scan,
+    # plus `extra_files` (the file a probe inspects, which may lie outside them). A probe that scanned only its
+    # own file would type `12.prime_division` in a file that does not itself `require "prime"` differently
+    # from the run that analyses it. Fails soft to no features.
+    def required_features(configuration, extra_files = [])
+      files = Analysis::PathExpansion.ruby_files(configuration.paths, configuration.exclude_patterns)
+      Environment::RequiredFeatures.scan(files + Array(extra_files).map(&:to_s))
+    rescue StandardError
+      []
     end
 
     # The dependency-discovery axes `check` reads off the configuration, as a keyword hash. Extracted so the
@@ -116,22 +130,24 @@ module Rigor
 
     # The first fail-soft floor: no plugin tier and no synthesized RBS, but still the project's own dependency
     # sources — dropping those is what issue #821 was, so a plugin-loading failure must not cost them.
-    def bare(configuration)
+    def bare(configuration, features = required_features(configuration))
       Environment.for_project(
         libraries: configuration.libraries,
         signature_paths: configuration.signature_paths,
+        required_features: features,
         **dependency_discovery_options(configuration)
       )
     rescue StandardError
-      minimal(configuration)
+      minimal(configuration, features)
     end
 
     # The last floor: RBS core plus the project's own signature paths, which cannot fail on anything outside
     # the project itself.
-    def minimal(configuration)
+    def minimal(configuration, features = [])
       Environment.for_project(
         libraries: configuration.libraries,
-        signature_paths: configuration.signature_paths
+        signature_paths: configuration.signature_paths,
+        required_features: features
       )
     end
   end

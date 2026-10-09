@@ -99,8 +99,17 @@ RSpec.describe "union-receiver undefined-method" do
     expect(undefined_method_messages(source)).to be_empty
   end
 
-  it "stays silent on literals of two classes when one class defines the method" do
+  it "stays silent on literals of two classes when either class defines the method" do
     # `even?` is Integer's and not Float's; judging `0 | 1.5` as either one class would be a false positive.
+    # And `nan?` is Float's and not Integer's, so the guard is witnessed whichever class the union lists first.
+    float_only = <<~RUBY
+      def f(flag)
+        x = flag ? 0 : 1.5
+        x.nan?
+      end
+    RUBY
+    expect(undefined_method_messages(float_only)).to be_empty
+
     source = <<~RUBY
       def f(flag)
         x = flag ? 0 : 1.5

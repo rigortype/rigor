@@ -18,7 +18,8 @@ module Rigor
       #   each module refines is the project-wide `Scope#discovered_refinements`; this answers whether any of
       #   those modules is in effect at a call site. A `using` whose argument is not a constant
       #   (`using Module.new { refine … }`) names no module, so every refinement counts as in effect throughout
-      #   its file. A `using` inside a `def` raises in Ruby and activates nothing.
+      #   its file. A `using` inside a `def` raises in Ruby and activates nothing. `using M` also activates the
+      #   refinements of every module M includes, transitively (issue #1671); the caller supplies that expansion.
       # - **Singleton defs on locals.** `def o.m` defines `m` on the one object `o` holds. The local's type
       #   is not changed; `o.m` is simply not reported within the scope the `def` is written in (the
       #   enclosing `def`, `class` / `module` body, or file — a block shares its enclosing scope's locals).
@@ -31,8 +32,11 @@ module Rigor
           @built = false
         end
 
-        # Is a refinement from one of `modules` (refining-module names) in effect at `call_node`?
-        def refinement_active?(call_node, modules)
+        # Is a refinement from one of `modules` (refining-module names) in effect at `call_node`? Issue #1671 —
+        # `using C` also activates the refinements of every module `C` includes, transitively; the block, when
+        # given, answers the module names one `using` candidate puts in effect (itself among them), or nil when any
+        # module may be in effect, a fact of the project's include edges this file's syntax cannot see.
+        def refinement_active?(call_node, modules, &activated)
           build
           return true if @unresolved_using
 
@@ -40,7 +44,7 @@ module Rigor
           return true if @refine_blocks.any? { |start, stop| offset >= start && offset < stop }
 
           @usings.any? do |start, stop, candidates|
-            offset >= start && offset < stop && candidates.any? { |name| modules.include?(name) }
+            offset >= start && offset < stop && candidates.any? { |name| activates?(name, modules, activated) }
           end
         end
 
@@ -155,6 +159,14 @@ module Rigor
           Inference::ScopeIndexer.each_refinement_def(body) do |def_node|
             @refinement_defs << def_node.location.start_offset
           end
+        end
+
+        def activates?(name, modules, activated)
+          return true if modules.include?(name)
+          return false if activated.nil?
+
+          active = activated.call(name)
+          active.nil? || active.any? { |module_name| modules.include?(module_name) }
         end
 
         def using_call?(node)

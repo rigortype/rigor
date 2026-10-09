@@ -821,7 +821,47 @@ module Rigor
           # re-check it (`IncrementalSession#refinement_affected`).
           DependencyRecorder.read_name(:refinement, call_node.name) if DependencyRecorder.active?
           modules = refining_modules(scope, class_name, call_node.name)
-          !modules.nil? && lexical_sites.refinement_active?(call_node, modules)
+          !modules.nil? && refinement_in_effect?(scope, call_node, modules, lexical_sites)
+        end
+
+        # Is a refinement from one of `modules` (refining-module names) in effect at `call_node`, counting the
+        # modules a `using`'d module includes ({#refinement_activated_modules})?
+        def refinement_in_effect?(scope, call_node, modules, lexical_sites)
+          lexical_sites.refinement_active?(call_node, modules) do |name|
+            refinement_activated_modules(scope, name)
+          end
+        end
+
+        # Issue #1671 — the modules whose refinements `using name` puts in effect: `name` and every project module
+        # on its instance-side resolution chain, which for a module is what it includes (and prepends),
+        # transitively. CRuby's `rb_using_module_recursive` walks exactly that chain. The answer is a set: the
+        # order (the includer's refinement wins, ADR-121 WD1) does not change whether a method is in effect, and
+        # every world a fork leaves open holds the same modules. Nil, read as "any module may be in effect", when
+        # the chain may hold a module it does not list: it was cut at its limit, or a module on it records a mixin
+        # the tables cannot name.
+        #
+        # ADR-46 — the answer reads include edges declared in other files, so it depends on every file that
+        # declares a module on the chain, and on the existence of each one's name: a new file reopening `name`, or
+        # declaring an included module the project did not declare before, re-checks the consumer through
+        # `class:<name>`.
+        def refinement_activated_modules(scope, name)
+          chain = Scope::ResolutionChain.for(scope, name, :instance, :constants)
+          record_refinement_chain(scope, name, chain) if DependencyRecorder.active?
+          return nil if chain.truncated? || chain.wildcard_mixin?
+
+          chain.entries.filter_map { |entry| entry.name unless entry.external? }
+        end
+
+        def record_refinement_chain(scope, name, chain)
+          chain.record(scope)
+          DependencyRecorder.read_last_segment(:class, name)
+          chain.entries.each do |entry|
+            if entry.external?
+              entry.candidates.each { |candidate| DependencyRecorder.read_last_segment(:class, candidate) }
+            else
+              DependencyRecorder.read_missing(:class, entry.last_segment)
+            end
+          end
         end
 
         # Issue #1120 — every module that refines `method_name` into `class_name` or one of its ancestors (a

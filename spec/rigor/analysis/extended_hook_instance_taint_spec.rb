@@ -88,7 +88,11 @@ RSpec.describe "a hook on an extended module — instance-side taint" do
     let(:hooked) { "module ClassMethods\n  def self.extended(base)\n    base.include(Y)\n  end\nend\n" }
     let(:plain) { "module ClassMethods\n  def self.extended(base) = nil\nend\n" }
     let(:files) do
-      { "g.rb" => greeters, "k.rb" => "class K < Base\n  extend ClassMethods\nend\n", "b.rb" => "K.new.greet(\"bob\")\n" }
+      {
+        "g.rb" => greeters,
+        "k.rb" => "class K < Base\n  extend ClassMethods\nend\n",
+        "b.rb" => "K.new.greet(\"bob\")\n"
+      }
     end
 
     def walk(initial, steps)
@@ -110,7 +114,8 @@ RSpec.describe "a hook on an extended module — instance-side taint" do
 
     it "matches a cold run as the extended module's hook appears, goes and comes back" do
       colds = []
-      walk(files.merge("cm.rb" => plain), [{ "cm.rb" => hooked }, { "cm.rb" => plain }, { "cm.rb" => hooked }]) do |warm, cold|
+      steps = [{ "cm.rb" => hooked }, { "cm.rb" => plain }, { "cm.rb" => hooked }]
+      walk(files.merge("cm.rb" => plain), steps) do |warm, cold|
         colds << cold
         expect(warm).to eq(cold)
       end

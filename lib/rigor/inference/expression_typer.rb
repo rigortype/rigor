@@ -4180,7 +4180,8 @@ module Rigor
         block_scope = BlockParameterBinder.new(expected_param_types: expected).bind_onto(block_node, entry)
         return block_scope unless narrowed_self_type
 
-        block_scope.with_self_type(narrowed_self_type)
+        keeps_unknown = call_node ? scope.block_self_narrowing_unknown?(call_node) : false
+        block_scope.with_block_self_type(narrowed_self_type, keeps_unknown: keeps_unknown)
       end
 
       # The #587 (b) captured binding when the call may run the block more than once ({#block_may_repeat?}), and

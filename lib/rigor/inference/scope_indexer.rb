@@ -9921,9 +9921,20 @@ module Rigor
           propagate(node.expression, table, current_scope)
           propagate(node.rescue_expression, table, current_scope.forget_error_info.forget_last_status)
         when Prism::PostExecutionNode then propagate_end_body(node, table, current_scope)
-        else
-          node.rigor_each_child { |child| propagate(child, table, current_scope) }
+        else propagate_children(node, table, current_scope)
         end
+      end
+
+      SELF_OPENING_BODIES = [Prism::DefNode, Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode].freeze
+      private_constant :SELF_OPENING_BODIES
+
+      # Issue #1717 — a `def` / `class` / `module` body opens its own `self`, so an enclosing unentered block's
+      # unknown-`self` mark ({Scope#block_self_unknown?}) stops at it, as the evaluator's fresh body scope does.
+      # Every other node hands its children the scope as is.
+      def propagate_children(node, table, current_scope)
+        child_scope =
+          SELF_OPENING_BODIES.include?(node.class) ? current_scope.with_block_self_unknown(false) : current_scope
+        node.rigor_each_child { |child| propagate(child, table, child_scope) }
       end
 
       # Issue #1361 — the block of `Thread.new`, `Fiber.new`, `define_method` and the other calls
@@ -9982,7 +9993,11 @@ module Rigor
           else
             LastLine.block_entry(FreshFrameBlocks.closure_entry(current_scope, block, node), block, node)
           end
-        narrowed_self ? entry.with_self_type(narrowed_self) : entry
+        # Issue #1717 — the body's `self` is unknown unless narrowed, as on the evaluator's entry; only the
+        # `call.undefined-method` mark is set here, never #316's opaque mark (its bind gate reads the evaluator's).
+        return entry.with_block_self_unknown(true) unless narrowed_self
+
+        entry.with_block_self_type(narrowed_self, keeps_unknown: current_scope.block_self_narrowing_unknown?(node))
       end
 
       # The `self` an unentered block's body runs with, when the call is one whose block `self` the engine

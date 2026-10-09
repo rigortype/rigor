@@ -648,15 +648,15 @@ RSpec.describe Rigor::Inference::MethodDispatcher do
         expect(result.class_name).to eq("String")
       end
 
-      it "types Nominal[<core module>].class as Dynamic, not the module's singleton" do
+      it "types Nominal[<core module>].class as Dynamic[Class], not the module's singleton" do
         result = described_class.dispatch(
           receiver_type: Rigor::Type::Combinator.nominal_of("Comparable"),
           method_name: :class, arg_types: [], environment: env
         )
         # The meta-introspection tier answers first. An instance of a module is an instance of some includer, so
-        # its `class` is that unnamed includer — `Dynamic`, not `Singleton[Comparable]`, whose singleton methods a
-        # chained call would wrongly be checked against.
-        expect(result).to eq(Rigor::Type::Combinator.untyped)
+        # its `class` is that unnamed includer — `Dynamic[Class]`, not `Singleton[Comparable]`, whose singleton
+        # methods a chained call would wrongly be checked against.
+        expect(result).to eq(Rigor::Type::Combinator.dynamic(Rigor::Type::Combinator.nominal_of("Class")))
       end
 
       it "does NOT route Nominal[<core class>] through the module fallback" do

@@ -1114,7 +1114,11 @@ module Rigor
         when Type::Nominal
           # An instance of module `M` is an instance of some class that includes `M`, never of `M`
           # itself: `self.class` in `M`'s instance method is that includer, which no RBS type names.
-          return Type::Combinator.untyped if environment&.rbs_module?(receiver_type.class_name)
+          # `Dynamic[Class]` keeps the surface every class shares (`name`, `ancestors`) and answers
+          # nothing for the includer's own singleton methods.
+          if environment&.rbs_module?(receiver_type.class_name)
+            return Type::Combinator.dynamic(Type::Combinator.nominal_of("Class"))
+          end
 
           Type::Combinator.singleton_of(receiver_type.class_name)
         when Type::Constant then constant_metaclass(receiver_type.value)

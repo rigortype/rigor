@@ -63,6 +63,7 @@ RSpec.describe Rigor::Analysis::Runner do
         module Serializer
           def derive
             Rigor.dump_type(self.class)
+            Rigor.dump_type(self.class.name)
             klass = Class.new(self.class)
             klass.transform_keys(:camel)
             klass.new
@@ -73,8 +74,8 @@ RSpec.describe Rigor::Analysis::Runner do
           def derive: () -> untyped
         end
       RBS
-      expect(result.diagnostics.map(&:rule)).to eq(["dump.type"])
-      expect(result.diagnostics.first.message).not_to include("singleton(Serializer)")
+      expect(result.diagnostics.map(&:rule)).to eq(["dump.type", "dump.type"])
+      expect(result.diagnostics.map(&:message)).to eq(["dump_type: Dynamic[Class]", "dump_type: String"])
     end
 
     describe "wrong-arity rule (Slice 7 phase 11)" do

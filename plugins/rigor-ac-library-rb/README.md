@@ -54,5 +54,6 @@ plugins:
   one of them.
 - `MaxFlow#flow`, `MinCostFlow#flow` and `#slope` answer `Integer` for an `Integer` limit or none, and
   `Integer | Float` for a `Float` limit, which comes back as the flow when the capacities do not bound it.
-- `ModInt#**` returns `ModInt | Integer`: it answers `0` when the modulus is 1.
+- `ModInt#**` is declared `ModInt`, though it answers the Integer `0` when the modulus is 1: the honest union typed
+  `1 + m ** 2` as `Integer` ([#1356](https://github.com/rigortype/rigor/issues/1356)) and reported `.val` on it.
 - `ModInt.mod` is `Integer`; before `ModInt.set_mod` it is `nil`, and every other `ModInt` operation raises then.

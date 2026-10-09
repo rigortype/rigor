@@ -34,8 +34,10 @@ module AcLibraryRb
 
     def -@: () -> ModInt
 
-    # `0` when the modulus is 1.
-    def **: (Integer other) -> (ModInt | Integer)
+    # Answers the Integer `0` when the modulus is 1. Declared `ModInt` all the same: a union return reached
+    # `1 + m ** 2` as an argument, where overload selection reads a union whole (#1356), typed the sum `Integer`
+    # and reported `call.undefined-method` for `.val` on correct code.
+    def **: (Integer other) -> ModInt
     alias pow **
 
     def inv: () -> ModInt

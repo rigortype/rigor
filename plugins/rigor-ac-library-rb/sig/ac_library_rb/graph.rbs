@@ -25,7 +25,7 @@ module AcLibraryRb
 
     # A `Float` limit the capacities do not bound comes back as the flow.
     def flow: (Integer s, Integer t, ?Integer flow_limit) -> Integer
-            | (Integer s, Integer t, Float flow_limit) -> (Integer | Float)
+            | (Integer s, Integer t, (Integer | Float) flow_limit) -> (Integer | Float)
     alias max_flow flow
 
     # Whether each vertex is reachable from `s` in the residual graph.
@@ -53,14 +53,14 @@ module AcLibraryRb
     # `[flow, cost]`.
     # The default limit is `Float::MAX`, which the capacities always bound; a smaller `Float` limit may not.
     def flow: (Integer s, Integer t, ?Integer flow_limit) -> [Integer, Integer]
-            | (Integer s, Integer t, Float flow_limit) -> [Integer | Float, Integer | Float]
+            | (Integer s, Integer t, (Integer | Float) flow_limit) -> [Integer | Float, Integer | Float]
     alias min_cost_max_flow flow
 
     def dual_ref: (Integer s, Integer t) -> bool
 
     # The `[flow, cost]` breakpoints of the cost curve.
     def slope: (Integer s, Integer t, ?Integer flow_limit) -> Array[[Integer, Integer]]
-             | (Integer s, Integer t, Float flow_limit) -> Array[[Integer | Float, Integer | Float]]
+             | (Integer s, Integer t, (Integer | Float) flow_limit) -> Array[[Integer | Float, Integer | Float]]
     alias min_cost_slop slope
   end
 

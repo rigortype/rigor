@@ -65,6 +65,7 @@ RSpec.describe "plugins/rigor-ac-library-rb" do
       Rigor.assert_type("AcLibraryRb::ModInt", 1 + m)
       Rigor.assert_type("Integer", (2 * m).val)
       Rigor.assert_type("3", 1 + 2)
+      Rigor.assert_type("Integer", (1 + (m ** 2)).val)
     RUBY
     expect(run_plugin(source: source).diagnostics.map(&:message)).to be_empty
   end
@@ -75,6 +76,19 @@ RSpec.describe "plugins/rigor-ac-library-rb" do
       pq << 5
       v = pq.pop
       puts "five" if v == 5
+    RUBY
+    expect(run_plugin(source: source).diagnostics.map(&:message)).to be_empty
+  end
+
+  it "answers an Integer flow for an Integer limit and admits a Float for a Float one" do
+    source = <<~RUBY
+      require "rigor/testing"
+
+      graph = AcLibraryRb::MaxFlow.new(2)
+      Rigor.assert_type("Integer", graph.flow(0, 1))
+      Rigor.assert_type("Float | Integer", graph.flow(0, 1, 2.5))
+      Rigor.assert_type("Float | Integer", graph.flow(0, 1, gets ? 3 : 2.5))
+      Rigor.assert_type("[Integer, Integer]", AcLibraryRb::MinCostFlow.new(2).flow(0, 1))
     RUBY
     expect(run_plugin(source: source).diagnostics.map(&:message)).to be_empty
   end

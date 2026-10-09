@@ -364,7 +364,8 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
     it "declines when the `using`'d module's chain is cut at its limit" do
       depth = Rigor::Scope::ResolutionChain::LIMIT + 5
       links = (1..depth).map { |i| "module M#{i}\n  include M#{i - 1}\nend\n" }.join
-      write("lib/deep.rb", "module M0\n  refine(String) { def shout = upcase }\nend\n#{links}using M#{depth}\n\"a\".shout\n")
+      refining = "module M0\n  refine(String) { def shout = upcase }\nend\n"
+      write("lib/deep.rb", "#{refining}#{links}using M#{depth}\n\"a\".shout\n")
 
       expect(undefined_rows).to eq([])
     end

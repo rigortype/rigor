@@ -340,4 +340,135 @@ RSpec.describe Rigor::Analysis::Reachability do
       expect(report.candidates.map(&:fqn)).to include("SignageResource")
     end
   end
+
+  # Issue #1720 — a superclass (or a meta-new rvalue's argument) is part of the subclass's declaration, so the
+  # edge to the base leaves the SUBCLASS. Crediting the enclosing scope instead left a base nested in a module
+  # that is never reached itself unreachable, and rooted a top-level base even when every subclass was dead.
+  describe "a superclass reference is credited to the subclass (#1720)" do
+    # `declared:` mirrors `rigor unused`'s split: declarations come from `paths:` only, references from every
+    # file. Defaults to every file declaring.
+    def report_for(files, roots: [], declared: files.keys)
+      decls = []
+      refs = []
+      uses = []
+      files.each do |path, source|
+        result = Rigor::Analysis::Reachability::Scan.call(path: path, source: source)
+        raise "fixture #{path} did not parse" if result.nil?
+
+        decls.concat(result.declarations) if declared.include?(path)
+        refs.concat(result.references)
+        uses.concat(result.dynamic_uses)
+      end
+      Rigor::Analysis::Reachability::Graph.new(declarations: decls, references: refs, root_fqns: roots,
+                                               dynamic_uses: uses).report
+    end
+
+    let(:hierarchy) do
+      <<~RUBY
+        class Base; end
+        class Child < Base; end
+
+        module Outer
+          class OBase; end
+          class OChild < OBase; end
+        end
+      RUBY
+    end
+
+    it "reaches a base nested in a namespace through its reachable subclass" do
+      report = report_for({ "lib/a.rb" => hierarchy, "lib/main.rb" => "Child.new\nOuter::OChild.new\n" })
+      expect(report.candidates.map(&:fqn)).to be_empty
+    end
+
+    it "reports a top-level base whose only subclass is dead" do
+      report = report_for({ "lib/a.rb" => hierarchy, "lib/main.rb" => "Outer::OChild.new\n" })
+      expect(report.candidates.map(&:fqn)).to eq(%w[Base Child])
+    end
+
+    it "reports a nested base whose only subclass is dead" do
+      report = report_for({ "lib/a.rb" => hierarchy, "lib/main.rb" => "Child.new\n" })
+      expect(report.candidates.map(&:fqn)).to eq(%w[Outer Outer::OBase Outer::OChild])
+    end
+
+    it "resolves the superclass against the outer nesting, not the subclass's body" do
+      result = Rigor::Analysis::Reachability::Scan.call(path: "lib/a.rb", source: hierarchy)
+      superclass = result.references.find { |ref| ref.as_written == "OBase" }
+      expect([superclass.from, superclass.nesting]).to eq(["Outer::OChild", ["Outer"]])
+    end
+
+    it "credits a meta-new rvalue's arguments and block to the declared constant" do
+      source = <<~RUBY
+        class LiveBase; end
+        class DeadBase; end
+        class Helper; end
+        module Ns
+          Live = Class.new(LiveBase) do
+            def go = Helper.new
+          end
+          Dead = Class.new(DeadBase)
+        end
+      RUBY
+      report = report_for({ "lib/a.rb" => source, "lib/main.rb" => "Ns::Live.new\n" })
+      expect(report.candidates.map(&:fqn)).to eq(%w[DeadBase Ns::Dead])
+    end
+
+    it "does not leak a meta-new credit into a class declared inside its block" do
+      result = Rigor::Analysis::Reachability::Scan.call(path: "lib/a.rb", source: <<~RUBY)
+        Made = Class.new do
+          class Inner
+            def go = Target.new
+          end
+        end
+      RUBY
+      expect(result.references.find { |ref| ref.as_written == "Target" }.from).to eq("Inner")
+    end
+
+    it "reaches a base named by any one opening of a reopened subclass" do
+      report = report_for({ "lib/a.rb" => "class Base; end\nclass Child < Base; end\n",
+                            "lib/b.rb" => "class Child\n  def go = 1\nend\n",
+                            "lib/main.rb" => "Child.new\n" })
+      expect(report.candidates.map(&:fqn)).to be_empty
+    end
+
+    # A subclass declared outside `paths:` is not a node, so its liveness cannot be judged; its superclass
+    # edge falls back to the scope it is written in, keeping the test-only answer it had before the fix.
+    it "keeps a base subclassed only by an undeclared spec class test-reachable" do
+      report = report_for({ "lib/base.rb" => "class Base; end\nclass Root; end\n",
+                            "spec/support/fake.rb" => "class FakeBase < Base; end\n" },
+                          roots: ["Root"], declared: ["lib/base.rb"])
+      expect(report.candidates.map(&:fqn)).to be_empty
+      expect(report.test_only.map(&:fqn)).to eq(["Base"])
+    end
+
+    # A base whose only subclass cannot be decided cannot be decided either: listing it as a definite
+    # candidate invites deleting the base of a class that may be live.
+    it "demotes the base of an undecidable subclass to undecidable, naming the subclass" do
+      report = report_for({ "lib/a.rb" => "class Base; end\nclass Sub < Base; end\n",
+                            "lib/m.rb" => "\"Sub\#{ARGV.first}\".constantize\n" })
+      expect(report.candidates.map(&:fqn)).to be_empty
+      expect(report.undecidable.to_h { [it.fqn, it.reason] })
+        .to include("Sub" => a_string_including("constantize"),
+                    "Base" => "reachable from Sub, which cannot be decided")
+    end
+
+    it "still reports a base that only a dead subclass names when another class is undecidable" do
+      report = report_for({ "lib/a.rb" => "class Base; end\nclass Dead < Base; end\nclass Other; end\n",
+                            "lib/m.rb" => "\"Other\#{ARGV.first}\".constantize\n" })
+      expect(report.candidates.map(&:fqn)).to eq(%w[Base Dead])
+    end
+
+    # Ruby reads the superclass before `Api::User` exists, so `User` there is `::User`.
+    it "never resolves a superclass to the subclass it declares" do
+      report = report_for({ "lib/a.rb" => "class User; end\nmodule Api\n  class User < User; end\nend\n",
+                            "lib/m.rb" => "Api::User.new\n" })
+      expect(report.candidates.map(&:fqn)).to be_empty
+    end
+
+    it "keeps the role of the subclass's file on the superclass edge" do
+      report = report_for({ "lib/a.rb" => "class Base; end\nclass Child < Base; end\n",
+                            "spec/child_spec.rb" => "Child.new\n" })
+      expect(report.candidates.map(&:fqn)).to be_empty
+      expect(report.test_only.map(&:fqn)).to eq(%w[Base Child])
+    end
+  end
 end

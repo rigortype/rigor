@@ -63,6 +63,23 @@ The model is mark-and-sweep from an explicit root set. Two measured facts force 
   the same analysed-file predicate, so they widen together and cancel: +1 / −3 / +2
   candidates. Rigor MUST NOT ship advice that says "add `config/` and the report improves".
 
+An edge leaves the declaration whose code holds the reference, or the file level for code
+outside every declaration. A declaration's own header belongs to that declaration: the
+superclass of `class Sub < Base`, and the arguments and block of `Sub = Class.new(Base) { … }`,
+put the edge to `Base` on `Sub`, while the name still resolves in the outer scope
+([#1720](https://github.com/rigortype/rigor/issues/1720)). Crediting the enclosing scope
+instead made a base nested in a namespace module unreachable, since the module itself is
+never referenced, and rooted a top-level base even when every subclass was dead. A subclass
+that is not an owned node, either declared outside `paths:` (a spec, an initializer) or a
+reopened gem class (WD6), credits its header to the enclosing scope instead. That keeps the
+evidence when the enclosing scope is the file level or a reached declaration; under a
+namespace that is never reached it is lost, as it was before. A superclass never resolves
+to the subclass it declares: `module Api; class User < User; end; end` names `::User`.
+
+Whatever an undecidable declaration (WD4) reaches is undecidable too, with a reason naming
+it. Otherwise the base of a subclass reached only through `"Sub#{x}".constantize` would be a
+definite candidate, and deleting it would break a subclass that may be live.
+
 ### WD3 — Roots are plugin-supplied
 
 The core defines the root *protocol*; framework knowledge stays in plugins, carried by the

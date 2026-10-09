@@ -496,7 +496,6 @@ lib/rigor/scope/resolution_chain.rb:
     Rigor::Scope::ResolutionChain.extend_reshapes_instance?: a consumer, not a declaration producer; it reads whether an extended module lists `"*"` on its :include side and defines an extend-time hook (#1730), and writes no table
     Rigor::Scope::ResolutionChain::Builder#compute_instance: a consumer, not a declaration producer; it reads `unpositioned_mixins` on the :include side to mark a chain unsettled, and reads the tables raw by design (ADR-24)
     Rigor::Scope::ResolutionChain::Builder#compute_singleton: the singleton-side twin, reading the :extend side
-    Rigor::Scope::ResolutionChain::Builder#mark_unsettled: a consumer, not a declaration producer; it reads `unpositioned_mixins` on the side being linearised, and adds `"*"` on the :include side when an extended module's hook may mix into the node (#1730), into the chain's mark only
 lib/rigor/scope/resolution_chain/relevance.rb:
   computes: whether a mark on a chain is discharged for one method name, from the closure of the module it names (ADR-119 WD2)
   producers:

@@ -98,7 +98,9 @@ module Rigor
       # module whose mixin edges' order is not a fact, `kind` the side read (`:include` or `:extend`), `listed`
       # the entries `DiscoveryIndex#unpositioned_mixins` lists for it (`"*"` included), and `multi_file` whether
       # the multi-file rule fired (two or more files declare it and it has two or more edges on that side).
-      # Interned per `[node, kind]` in the flavor's bucket, so equal marks are one object.
+      # Interned per `[node, kind]` in the flavor's bucket, so equal marks are one object. Kind `:extend_hook`
+      # (#1730, listing `"*"`) marks a node a module it extends may mix into through a hook; it is not an order mark
+      # ({#order_marks}).
       Mark = Data.define(:node, :kind, :listed, :multi_file)
 
       NO_MARKS = [].freeze
@@ -135,7 +137,16 @@ module Rigor
 
       # True when a class on the chain has mixin edges whose order the tables cannot vouch for
       # (`DiscoveryIndex#unpositioned_mixins`, or a class declared in several files with several edges).
-      def unsettled? = !@marks.empty?
+      def unsettled? = !order_marks.empty?
+
+      # The marks that make the chain's ORDER doubtful. An `:extend_hook` mark (#1730) says only that an extended
+      # module's hook may have mixed something in that the chain does not list: it makes a candidate-set read
+      # `:unknown` and {#wildcard_mixin?} true, and leaves every other reader on the chain's own order. Sending
+      # those readers to master's order would answer a constant lookup breadth-first, which is wrong for the
+      # #1567 shape on every class that extends such a module.
+      def order_marks
+        @memo[:order_marks] ||= @marks.reject { |mark| mark.kind == :extend_hook }.freeze
+      end
 
       # True when a class on the chain records a mixin the tables cannot name (`"*"`: an `include` of a
       # non-constant, or a call the walk cannot record), so the chain may hold a module it does not list.
@@ -167,7 +178,7 @@ module Rigor
         # goes; `search` files only the entries ahead of an answer. `owner` names the entry that answered.
         record_beyond(scope, owner, unknown_for.nil?)
         return settle_unknown(scope, answer, unknown_for, &) unless unknown_for.nil?
-        return :master unless @marks.empty?
+        return :master unless order_marks.empty?
 
         case @forks
         when 0 then :chain
@@ -317,7 +328,8 @@ module Rigor
         return if targets.empty?
 
         Analysis::DependencyRecorder.file_chain_once(self, :extend_hooks, scope.discovery) do
-          targets.each do |resolved, candidates|
+          targets.each do |raw, resolved, candidates|
+            Analysis::DependencyRecorder.read_last_segment(:class, raw)
             if resolved
               ResolutionChain.record_class(scope, resolved)
               Analysis::DependencyRecorder.read_keys(ResolutionChain.extend_hook_keys(resolved))
@@ -363,7 +375,7 @@ module Rigor
         !defs.nil? && hooks.any? { |hook| defs.key?(hook) }
       end
 
-      # `[[resolved name or nil, candidate names], …]`: every module the project entries of an instance chain
+      # `[[spelling, resolved name or nil, candidate names], …]`: every module the project entries of an instance chain
       # `extend`, as {Builder#extend_hook_taint?} resolved them.
       def self.extend_targets(scope, flavor, entries)
         resolver = resolver_for(scope, flavor)
@@ -373,7 +385,7 @@ module Rigor
 
           (extends[entry.name] || EMPTY_NAMES).each do |raw|
             resolved = resolver.resolve_one(entry.name, raw)
-            out << [resolved, resolved ? EMPTY_NAMES : resolver.candidates(entry.name, raw)].freeze
+            out << [raw, resolved, resolved ? EMPTY_NAMES : resolver.candidates(entry.name, raw)].freeze
           end
         end.uniq.freeze
       end
@@ -718,7 +730,8 @@ module Rigor
         # The chain for `root`, carrying its retro world when the skip rule skipped anything on the way.
         def chain(root, side)
           entries, starts, classes, forks, marks, retro_ok = lin_for(root, side)
-          retro = build_retro(root, side) if forks == 1 && retro_ok && marks.empty? && !@retro
+          order_marked = marks.any? { |mark| mark.kind != :extend_hook }
+          retro = build_retro(root, side) if forks == 1 && retro_ok && !order_marked && !@retro
           cut_at = cut_position(entries)
           return whole_chain(root, side, entries, starts, classes, [forks, marks], retro) if cut_at.nil?
 
@@ -818,6 +831,7 @@ module Rigor
         def compute_instance(name, depth)
           # `discovered_includes` already carries the prepended names, so it counts every instance-side edge once.
           mark_unsettled(name, :include, (@discovery.discovered_includes[name] || EMPTY).size)
+          @frames.last.add_marks(mark_for(name, :extend_hook, WILDCARD_LIST, false)) if extend_hook_taint?(name)
           entries = [project_entry(name, :instance)]
           super_lin = superclass_lin(name, :instance, depth)
           entries.concat(super_lin[0])
@@ -847,7 +861,6 @@ module Rigor
         def mark_unsettled(name, kind, edge_count)
           listed = @discovery.unpositioned_mixins[name]&.dig(kind)
           listed = nil if listed && listed.empty?
-          listed = (listed || EMPTY) | WILDCARD_LIST if kind == :include && extend_hook_taint?(name)
           multi = edge_count >= 2 && multi_file?(name)
           return if listed.nil? && !multi
 

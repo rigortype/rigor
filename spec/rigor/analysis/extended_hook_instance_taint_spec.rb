@@ -76,6 +76,36 @@ RSpec.describe "a hook on an extended module — instance-side taint" do
         .to eq([["k.rb", 4, "call.wrong-arity"]])
     end
 
+    # The mark makes a candidate-set read unknown and leaves every other reader on the chain's own order: master's
+    # breadth-first order would find `Base::LIMIT` ahead of the `M::LIMIT` that `A` includes.
+    it "leaves a constant lookup on the chain's order" do
+      source = <<~RUBY
+        module Y
+          def other = 1
+        end
+        module M
+          LIMIT = "str"
+        end
+        module A
+          include M
+        end
+        class Base
+          LIMIT = 1
+        end
+        module ClassMethods
+          def self.extended(base)
+            base.include(Y)
+          end
+        end
+        class K < Base
+          extend ClassMethods
+          include A
+          def run = LIMIT.upcase
+        end
+      RUBY
+      expect(cold("k.rb" => source)).to eq([])
+    end
+
     it "still reports when the extended module mixes into its parameter outside a hook" do
       cm = "module ClassMethods\n  def self.setup(base)\n    base.include(Y)\n  end\nend\n"
       expect(cold("g.rb" => greeters, "cm.rb" => cm,
@@ -120,6 +150,18 @@ RSpec.describe "a hook on an extended module — instance-side taint" do
         expect(warm).to eq(cold)
       end
       expect(colds).to eq([[], [["b.rb", 1, "call.wrong-arity"]], []])
+    end
+
+    it "matches a cold run when a nearer module of the extended name appears and goes" do
+      k = "module Outer\n  class K < Base\n    extend ClassMethods\n  end\nend\n"
+      initial = files.merge("cm.rb" => hooked, "k.rb" => k, "b.rb" => "Outer::K.new.greet(\"bob\")\n")
+      shadow = "module Outer\n  module ClassMethods\n  end\nend\n"
+      colds = []
+      walk(initial, [{ "s.rb" => shadow }, { "s.rb" => nil }]) do |warm, cold|
+        colds << cold
+        expect(warm).to eq(cold)
+      end
+      expect(colds).to eq([[["b.rb", 1, "call.wrong-arity"]], []])
     end
 
     it "matches a cold run when a new file reopens the extended module to add the hook" do

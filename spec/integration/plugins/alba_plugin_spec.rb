@@ -112,6 +112,17 @@ RSpec.describe "rigor-alba integration" do
       rows = unresolved(run_alba(source, enabled: false))
       expect(rows.map(&:line)).to eq([1, 3, 4])
     end
+
+    # The `render json: Alba.serialize(x) { ... }` shape: a block on a call in argument position (#1690).
+    it "resolves the DSL calls when the call is itself an argument" do
+      argument_source = <<~RUBY
+        def render(json:) = json
+        render json: Alba.serialize(1) { attributes :id }
+        puts(Alba.hashify(1) { attributes :id })
+      RUBY
+      expect(unresolved(run_alba(argument_source))).to be_empty
+      expect(unresolved(run_alba(argument_source, enabled: false)).map(&:line)).to eq([2, 3])
+    end
   end
 
   describe "return types" do

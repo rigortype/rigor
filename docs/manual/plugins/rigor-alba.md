@@ -23,8 +23,8 @@ hash = Alba.hashify(user) { attributes :id }
 The plugin contributes no return types: `Alba.serialize(obj)` runs your own `<Class>Resource#serialize`, which
 you may override to return anything.
 
-A block that is itself the argument of another call (`render json: Alba.serialize(x) { ... }`) is not
-narrowed yet; assign the result first if you want the DSL calls inside it resolved.
+The block may sit anywhere a value can: `render json: Alba.serialize(x) { ... }` resolves the same as an
+assignment.
 
 ## Roots for `rigor unused`
 

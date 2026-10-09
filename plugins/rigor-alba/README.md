@@ -102,11 +102,6 @@ signatures alba's runtime may not honour, which is the false-positive direction 
 
 ## Known limits
 
-- The block `self` is bound where the engine evaluates a block as a statement or an assignment value
-  (`json = Alba.serialize(x) { ... }`). A block on a call that is itself an argument of another call
-  (`render json: Alba.serialize(x) { ... }`, `puts Alba.serialize(x) { ... }`) is not narrowed yet, so its DSL
-  calls still read as `call.unresolved-toplevel`. That is the engine's operand-evaluation path, not something
-  a plugin can supply.
 - `resource_search_paths` (default `["app"]`) bounds both the classes that count as resources and the classes
   an inferred association may resolve to.
 

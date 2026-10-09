@@ -1,0 +1,1 @@
+- **[rigor check]** A method declared to return `bool` (or `Array[bool]`, `nil`, …) no longer reports `def.return-type-mismatch` when its body is typed `FalseClass`, `TrueClass` or `NilClass`, as `Array.new(n, false)` is. ([#1681](https://github.com/rigortype/rigor/pull/1681))

@@ -963,17 +963,32 @@ module Rigor
           end
         end
 
-        # Constant[v] accepts only Constant[v'] with structurally equal value. Any other type is rejected
-        # (modulo the universal Bot/Dynamic short-circuits already applied upstream).
+        # Constant[v] accepts Constant[v'] with structurally equal value, and the plain nominal of a class whose
+        # only instance is `v`. Any other type is rejected (modulo the universal Bot/Dynamic short-circuits
+        # already applied upstream).
         def accepts_constant(self_type, other_type, mode)
           if other_type.is_a?(Type::Constant) && self_type == other_type
             Type::AcceptsResult.yes(mode: mode, reasons: "structural literal match")
+          elsif sole_instance_nominal?(self_type, other_type)
+            Type::AcceptsResult.yes(mode: mode, reasons: "#{other_type.class_name} has no instance but the literal")
           else
             Type::AcceptsResult.no(
               mode: mode,
               reasons: "Constant[#{self_type.value.inspect}] rejects #{other_type.class}"
             )
           end
+        end
+
+        # `true`, `false` and `nil` are the only instances of their classes, so `FalseClass` holds exactly the
+        # values `false` holds. Read apart, `Array.new(n, false)`, typed `Array[FalseClass]` through the
+        # `[T] (Integer, T)` binding, failed a declared `-> Array[bool]` and fired `def.return-type-mismatch` on
+        # correct code.
+        SOLE_INSTANCE_CLASSES = { true => "TrueClass", false => "FalseClass", nil => "NilClass" }.freeze
+        private_constant :SOLE_INSTANCE_CLASSES
+
+        def sole_instance_nominal?(constant, other_type)
+          other_type.is_a?(Type::Nominal) && other_type.type_args.empty? &&
+            SOLE_INSTANCE_CLASSES.key?(constant.value) && SOLE_INSTANCE_CLASSES[constant.value] == other_type.class_name
         end
 
         # Tuple[A1..An] accepts:

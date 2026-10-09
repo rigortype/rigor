@@ -1,0 +1,71 @@
+module AcLibraryRb
+  # An integer modulo the global modulus set by `ModInt.set_mod`.
+  class ModInt < ::Numeric
+    def self.set_mod: (Integer mod) -> bool
+
+    def self.mod=: (Integer mod) -> bool
+
+    def self.mod: () -> Integer
+
+    def self.raw: (_ToI val) -> ModInt
+
+    def self.prime?: (Integer n) -> bool
+
+    def self.inv_gcd: (Integer a, Integer b) -> [Integer, Integer]
+
+    attr_accessor val: Integer
+    alias to_i val
+
+    def initialize: (?_ToI val) -> void
+
+    def inc!: () -> self
+
+    def dec!: () -> self
+
+    def add!: (_ToI other) -> self
+
+    def sub!: (_ToI other) -> self
+
+    def mul!: (_ToI other) -> self
+
+    def div!: (_ToI other) -> self
+
+    def +@: () -> self
+
+    def -@: () -> ModInt
+
+    # Answers the Integer `0` when the modulus is 1. Declared `ModInt` all the same: a union return reached
+    # `1 + m ** 2` as an argument, where overload selection reads a union whole (#1356), typed the sum `Integer`
+    # and reported `call.undefined-method` for `.val` on correct code.
+    def **: (Integer other) -> ModInt
+    alias pow **
+
+    def inv: () -> ModInt
+
+    def coerce: (_ToI other) -> [ModInt, ModInt]
+
+    def +: (_ToI other) -> ModInt
+
+    def -: (_ToI other) -> ModInt
+
+    def *: (_ToI other) -> ModInt
+
+    def /: (_ToI other) -> ModInt
+
+    def ==: (untyped other) -> bool
+
+    def pred: () -> ModInt
+
+    def succ: () -> ModInt
+
+    def zero?: () -> bool
+
+    def dup: () -> ModInt
+
+    def to_int: () -> Integer
+
+    def to_s: () -> String
+
+    def inspect: () -> String
+  end
+end

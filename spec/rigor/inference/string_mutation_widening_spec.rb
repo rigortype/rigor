@@ -602,7 +602,9 @@ RSpec.describe "String mutation widening", type: :runner do
         end
       end
 
-      expect(refusing).to match_array(mutators.to_a)
+      # The table lists Ruby 4.1's bit operations (#1691) ahead of the interpreter: on an older Ruby there is no
+      # method to call, so only the names this Ruby defines can refuse.
+      expect(refusing).to match_array(mutators.select { |name| String.public_method_defined?(name) })
     end
 
     # `data/builtins/ruby_core/string.yml` tags a C body that checks `rb_check_frozen` as `c_effects: mutate`: an

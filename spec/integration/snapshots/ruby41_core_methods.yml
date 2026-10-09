@@ -1,0 +1,17 @@
+---
+locals:
+  bits: String
+assertions:
+  '1': Integer
+  '2': Integer
+  '3': String
+  '4': Array[Module]
+  '5': Range[Integer]
+  '6': Range[Integer]
+  '7': Range[Integer]
+  '8': Integer?
+  '9': Ruby::SourceRange
+  '10': String?
+  '11': Ruby::SourceRange?
+  '12': Ruby::SourceRange?
+  '13': Ruby::SourceRange?

@@ -23,6 +23,39 @@ RSpec.describe "Ruby 4.1 core methods (#1691)" do
     expect(reported.map { |d| "#{d.line}: #{d.qualified_rule}: #{d.message}" }).to eq([])
   end
 
+  # The bit operations rewrite the receiver in place, so a String literal must not outlive them: `s == "\xAA"` after
+  # `s.bit_set(0)` would otherwise fold always-truthy on correct code. Each mutator is paired with a non-mutating call
+  # in the same position that keeps the literal, so a seam that stopped folding altogether cannot pass. The calls are
+  # not run under Ruby here: the suite's interpreter (4.0) does not define them.
+  describe "the in-place bit operations", type: :runner do
+    def dumped_types(source)
+      analyze(%(require "rigor/testing"\ninclude Rigor::Testing\n#{source})).diagnostics.filter_map do |d|
+        d.message.delete_prefix("dump_type: ") if d.message.start_with?("dump_type")
+      end
+    end
+
+    {
+      "bit_set(0)" => "bit_get(0)",
+      "bit_clear(0, 4)" => "bit_set?(0)",
+      "bit_flip(0..3)" => "bit_count",
+      "bitwise_not!" => "bitwise_not",
+      'bitwise_and!("\\x0F")' => 'bitwise_and("\\x0F")',
+      'bitwise_or!("\\x0F")' => 'bitwise_or("\\x0F")',
+      'bitwise_xor!("\\x0F")' => 'bitwise_xor("\\x0F")'
+    }.each do |mutator, sibling|
+      it "widens a literal under `#{mutator}`, and keeps it under `#{sibling}`" do
+        expect(dumped_types(<<~RUBY)).to eq(["String", '"ab"'])
+          s = +"ab"
+          s.#{mutator}
+          dump_type(s)
+          t = +"ab"
+          t.#{sibling}
+          dump_type(t)
+        RUBY
+      end
+    end
+  end
+
   describe "controls", type: :runner do
     def error_rules(source)
       analyze(source).diagnostics.select(&:error?).map { |d| [d.line, d.qualified_rule] }

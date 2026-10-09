@@ -69,12 +69,16 @@ RSpec.describe "Ruby 4.1 core overlay (#1691)" do
 
     it "adds the three-argument method_defined? and the Hash form of tr / tr! to the upstream overloads" do
       method_defined = loader.instance_definition("Module").methods[:method_defined?]
-      expect(method_defined.method_types.map { |t| t.type.required_positionals.size + t.type.optional_positionals.size })
-        .to include(2, 3)
+      arities = method_defined.method_types.map do |method_type|
+        method_type.type.required_positionals.size + method_type.type.optional_positionals.size
+      end
+      expect(arities).to include(2, 3)
 
       string = loader.instance_definition("String").methods
-      expect(string[:tr].method_types.map(&:to_s)).to include(a_string_including("Hash[")).and(have_attributes(size: 2))
-      expect(string[:tr!].method_types.map(&:to_s)).to include(a_string_including("Hash[")).and(have_attributes(size: 2))
+      %i[tr tr!].each do |name|
+        overloads = string[name].method_types.map(&:to_s)
+        expect(overloads).to include(a_string_including("Hash[")).and(have_attributes(size: 2))
+      end
     end
   end
 

@@ -1,0 +1,1 @@
+- **[inference]** Overload selection now reads keyword arguments: a call passing a keyword selects the overload that declares it, instead of falling back to the first declared overload, so `GC.stat(:count, scope: :global) + 1` no longer reports `+` as undefined on `Hash`. ([#1736](https://github.com/rigortype/rigor/pull/1736))

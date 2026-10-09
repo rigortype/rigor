@@ -9,13 +9,16 @@ assertions:
   '4': Array[Module]
   '5': Array[Class]
   '6': Integer
-  '7': Integer
-  '8': Range[Integer]
-  '9': Range[Integer]
-  '10': Range[Integer]
-  '11': Integer?
-  '12': Ruby::SourceRange
-  '13': String?
-  '14': Ruby::SourceRange?
-  '15': Ruby::SourceRange?
-  '16': Ruby::SourceRange?
+  '7': Hash[Symbol, Dynamic[top]]
+  '8': Hash[Symbol, Dynamic[top]]
+  '9': Integer
+  '10': Integer
+  '11': Range[Integer]
+  '12': Range[Integer]
+  '13': Range[Integer]
+  '14': Integer?
+  '15': Ruby::SourceRange
+  '16': String?
+  '17': Ruby::SourceRange?
+  '18': Ruby::SourceRange?
+  '19': Ruby::SourceRange?

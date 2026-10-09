@@ -81,7 +81,7 @@ RSpec.describe "Ruby 4.1 core overlay (#1691, #1718)" do
       end
       gc = loader.singleton_definition("GC")
       expect(keyword_arms.call(gc, :start, :global, required: false).size).to eq(1)
-      expect(keyword_arms.call(gc, :stat, :scope, required: true).size).to eq(1)
+      expect(keyword_arms.call(gc, :stat, :scope, required: true).size).to eq(2)
       expect(gc.methods[:stat].method_types.size).to be > 1
       [
         loader.instance_definition("GC"), loader.singleton_definition("ObjectSpace"),

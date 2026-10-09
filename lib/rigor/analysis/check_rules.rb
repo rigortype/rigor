@@ -804,7 +804,7 @@ module Rigor
           return false if lexical_sites.nil?
           return true if lexical_sites.singleton_local_def?(call_node)
 
-          refinement_in_effect?(class_name, call_node, scope, kind, lexical_sites)
+          refined_method_in_effect?(class_name, call_node, scope, kind, lexical_sites)
         end
 
         # Is a refinement of `call_node`'s method name into `class_name` (or an ancestor) in effect at the call?
@@ -813,7 +813,7 @@ module Rigor
         # replaces the signature those rules check against. Typing the call from the refine body is #1664.
         # A refinement answers instance-side receivers only: a refined singleton (`refine X.singleton_class`) names
         # no constant target, so nothing records it.
-        def refinement_in_effect?(class_name, call_node, scope, kind, lexical_sites)
+        def refined_method_in_effect?(class_name, call_node, scope, kind, lexical_sites)
           return false if lexical_sites.nil? || kind != :instance
 
           # ADR-46 — the answer below is a function of every refinement of this name in the project, so the
@@ -1640,7 +1640,7 @@ module Rigor
           source_arity&.settle_by_walk
           return true if source_arity && !source_arity.authoritative?(class_name)
 
-          refinement_in_effect?(class_name, call_node, scope, kind, lexical_sites)
+          refined_method_in_effect?(class_name, call_node, scope, kind, lexical_sites)
         end
 
         # The `[min, max]` the call is checked against — a declared signature's, or (issue #992) the project
@@ -2969,7 +2969,7 @@ module Rigor
           return true if inferred_param_mismatch_verdict?(call_node, mismatch, scope)
 
           kind = receiver_type.is_a?(Type::Singleton) ? :singleton : :instance
-          refinement_in_effect?(class_name, call_node, scope, kind, lexical_sites)
+          refined_method_in_effect?(class_name, call_node, scope, kind, lexical_sites)
         end
 
         # ADR-67 WD6b — an argument-type-mismatch verdict resting on an open-call-site lower bound, on

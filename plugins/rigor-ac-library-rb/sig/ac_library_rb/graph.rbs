@@ -1,0 +1,88 @@
+module AcLibraryRb
+  class MaxFlow
+    def initialize: (Integer n) -> void
+
+    # The index of the added edge.
+    def add_edge: (Integer from, Integer to, Integer cap) -> Integer
+
+    def add_edges: (_Each[[Integer, Integer, Integer]] edges) -> self
+
+    def add: (Integer from, Integer to, Integer cap) -> Integer
+           | (_Each[[Integer, Integer, Integer]] edges) -> self
+
+    def push: ([Integer, Integer, Integer] edge) -> Integer
+    alias << push
+
+    # `[from, to, cap, flow]` of the `i`-th edge.
+    def []: (Integer i) -> [Integer, Integer, Integer, Integer]
+    alias get_edge []
+    alias edge []
+
+    def edges: () -> Array[[Integer, Integer, Integer, Integer]]
+
+    def change_edge: (Integer i, Integer new_cap, Integer new_flow) -> void
+
+    def flow: (Integer s, Integer t, ?(Integer | Float) flow_limit) -> Integer
+    alias max_flow flow
+
+    # Whether each vertex is reachable from `s` in the residual graph.
+    def min_cut: (Integer s) -> Array[bool]
+  end
+
+  class MinCostFlow
+    def initialize: (Integer n) -> void
+
+    # The index of the added edge.
+    def add_edge: (Integer from, Integer to, Integer cap, Integer cost) -> Integer
+
+    def add_edges: (_Each[[Integer, Integer, Integer, Integer]] edges) -> self
+
+    def add: (Integer from, Integer to, Integer cap, Integer cost) -> Integer
+           | (_Each[[Integer, Integer, Integer, Integer]] edges) -> self
+
+    # `[from, to, cap, flow, cost]` of the `i`-th edge.
+    def get_edge: (Integer i) -> [Integer, Integer, Integer, Integer, Integer]
+    alias edge get_edge
+    alias [] get_edge
+
+    def edges: () -> Array[[Integer, Integer, Integer, Integer, Integer]]
+
+    # `[flow, cost]`.
+    def flow: (Integer s, Integer t, ?(Integer | Float) flow_limit) -> [Integer, Integer]
+    alias min_cost_max_flow flow
+
+    def dual_ref: (Integer s, Integer t) -> bool
+
+    # The `[flow, cost]` breakpoints of the cost curve.
+    def slope: (Integer s, Integer t, ?(Integer | Float) flow_limit) -> Array[[Integer, Integer]]
+    alias min_cost_slop slope
+  end
+
+  class SCC
+    def initialize: (Integer n) -> void
+
+    def add_edge: (Integer from, Integer to) -> self
+
+    def add_edges: (_Each[[Integer, Integer]] edges) -> self
+
+    def add: (Integer from, Integer to) -> self
+           | (_Each[[Integer, Integer]] edges) -> self
+
+    # The strongly connected components in topological order.
+    def scc: () -> Array[Array[Integer]]
+  end
+
+  class TwoSAT
+    def initialize: (Integer n) -> void
+
+    # One assignment per variable once `satisfiable?` has answered true; `nil` before that.
+    attr_reader answer: Array[bool?]
+
+    def add_clause: (Integer i, boolish f, Integer j, boolish g) -> nil
+
+    def satisfiable?: () -> bool
+    alias satisfiable satisfiable?
+  end
+
+  class TwoSat = TwoSAT
+end

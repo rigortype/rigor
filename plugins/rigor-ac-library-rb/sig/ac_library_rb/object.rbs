@@ -1,0 +1,29 @@
+# The core extensions `require "ac-library-rb"` loads (`core_ext/`).
+class Object
+  private
+
+  def ModInt: (_ToI val) -> AcLibraryRb::ModInt
+end
+
+class Array[unchecked out Elem]
+  def to_fenwick_tree: () -> AcLibraryRb::FenwickTree
+  alias to_fetree to_fenwick_tree
+
+  def to_priority_queue: () -> AcLibraryRb::PriorityQueue[Elem]
+  alias to_pq to_priority_queue
+end
+
+class Integer
+  def divisors: () -> Array[Integer]
+
+  def each_divisor: () { (Integer) -> void } -> Array[Integer]
+                  | () -> Enumerator[Integer, Array[Integer]]
+
+  def to_modint: () -> AcLibraryRb::ModInt
+  alias to_m to_modint
+end
+
+class String
+  def to_modint: () -> AcLibraryRb::ModInt
+  alias to_m to_modint
+end

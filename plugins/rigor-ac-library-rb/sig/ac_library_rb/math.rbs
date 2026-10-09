@@ -1,0 +1,42 @@
+# ac-library-rb's math and string algorithms, instance methods of `AcLibraryRb` that a caller reaches by
+# including the module (`require "ac-library-rb"` does so at the top level).
+module AcLibraryRb
+  # A callable taking two arguments: a `Proc`, a lambda or a `Method`.
+  interface _Call2[A, B, R]
+    def call: (A, B) -> R
+  end
+
+  # An object `Deque#replace` can read elements from.
+  interface _ToA[T]
+    def to_a: () -> Array[T]
+  end
+
+  def convolution: (Array[Integer] a, Array[Integer] b, ?mod: Integer, ?k: Integer, ?z: Integer) -> Array[Integer]
+
+  # `[remainder, modulus]`, or `[0, 0]` when there is no solution.
+  def crt: (Array[Integer] r, Array[Integer] m) -> [Integer, Integer]
+
+  def inv_gcd: (Integer a, Integer b) -> [Integer, Integer]
+
+  def floor_sum: (Integer n, Integer m, Integer a, Integer b) -> Integer
+
+  def floor_sum_unsigned: (Integer n, Integer m, Integer a, Integer b) -> Integer
+
+  def inv_mod: (Integer x, Integer m) -> Integer
+
+  def _inv_gcd: (Integer a, Integer b) -> [Integer, Integer]
+
+  def pow_mod: (Integer x, Integer n, Integer m) -> Integer
+
+  def suffix_array: (String s) -> Array[Integer]
+                  | (Array[untyped] a, ?Integer? upper) -> Array[Integer]
+
+  def sa_is: (Array[Integer] s, Integer upper) -> Array[Integer]
+
+  def sa_is_induce: (Array[Integer] s, Array[bool] ls, Array[Integer] sum_l, Array[Integer] sum_s,
+                     Array[Integer] lms) -> Array[Integer]
+
+  def lcp_array: (String | Array[untyped] s, Array[Integer] sa) -> Array[Integer]
+
+  def z_algorithm: (String | Array[untyped] s) -> Array[Integer]
+end

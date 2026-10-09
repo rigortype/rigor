@@ -1,0 +1,158 @@
+module AcLibraryRb
+  class DSU
+    attr_reader parent_or_size: Array[Integer]
+    attr_reader n: Integer
+
+    def initialize: (?Integer n) -> void
+
+    # The leader of the merged component.
+    def merge: (Integer a, Integer b) -> Integer
+    alias unite merge
+
+    def same?: (Integer a, Integer b) -> bool
+    alias same same?
+
+    def leader: (Integer a) -> Integer
+    alias root leader
+    alias find leader
+
+    # Like `leader`, growing the set to hold `a` when it is out of range.
+    def []: (Integer a) -> Integer
+
+    def size: (Integer a) -> Integer
+
+    def groups: () -> Array[Array[Integer]]
+
+    def to_s: () -> String
+  end
+
+  class UnionFind = DSU
+
+  # Element values are whatever the caller adds: the tree starts from `0` and adds with `+`, so an
+  # `Integer`, a `Float` and a `ModInt` all work.
+  class FenwickTree
+    attr_reader data: Array[untyped]
+    attr_reader size: Integer
+
+    def initialize: (Array[untyped] | Integer arg) -> void
+
+    def add: (Integer i, untyped x) -> void
+
+    def sum: (Integer l, Integer r) -> untyped
+           | (Integer r) -> untyped
+           | (Range[Integer] range) -> untyped
+
+    def _sum: (Integer i) -> untyped
+    alias left_sum _sum
+
+    def to_s: () -> String
+  end
+
+  # A binary heap that pops the highest-priority element first: the largest by default, or the first
+  # argument of the block when it returns truthy.
+  class PriorityQueue[T]
+    def self.max: [T] (Array[T] array) -> PriorityQueue[T]
+
+    def self.min: [T] (Array[T] array) -> PriorityQueue[T]
+
+    def self.[]: [T] (*T array) ?{ (T, T) -> boolish } -> PriorityQueue[T]
+
+    def initialize: (?Array[T] array) ?{ (T, T) -> boolish } -> void
+
+    attr_reader heap: Array[T]
+    alias to_a heap
+
+    def push: (T item) -> self
+    alias << push
+    alias append push
+
+    def pop: () -> T?
+
+    def get: () -> T?
+    alias top get
+    alias first get
+
+    def empty?: () -> bool
+
+    def size: () -> Integer
+
+    def to_s: () -> String
+  end
+
+  class HeapQueue = PriorityQueue
+
+  class Deque[T]
+    include Enumerable[T]
+
+    def self.[]: [T] (*T args) -> Deque[T]
+
+    def initialize: (?Array[T] arg, ?untyped value, ?initial_capacity: Integer) -> void
+                  | (Integer size, ?T value, ?initial_capacity: Integer) -> void
+
+    def empty?: () -> bool
+
+    def size: () -> Integer
+    alias length size
+
+    def <<: (T x) -> self
+
+    def push: (*T args) -> self
+    alias append push
+
+    def unshift: (*T args) -> self
+    alias prepend unshift
+
+    def pop: () -> T?
+
+    def shift: () -> T?
+
+    def last: () -> T?
+
+    def slice: (Integer idx) -> T?
+
+    def []: (Integer idx) -> T?
+          | (Integer start, Integer length) -> Deque[T]?
+          | (Range[Integer] range) -> Deque[T]?
+
+    def at: (Integer idx) -> T?
+
+    def []=: (Integer idx, T value) -> T
+
+    def ==: (untyped other) -> bool
+
+    def hash: () -> Integer
+
+    def reverse: () -> Deque[T]
+
+    def reverse!: () -> self
+
+    def reversed?: () -> bool
+
+    def dig: (Integer idx, *untyped) -> untyped
+
+    def each: () { (T) -> void } -> Array[T]
+            | () -> Enumerator[T, Array[T]]
+
+    def clear: () -> self
+
+    def join: (?String? sep) -> String
+
+    def rotate!: (?Integer cnt) -> self
+
+    def rotate: (?Integer cnt) -> Deque[T]
+
+    def sample: () -> T?
+
+    def shuffle: () -> Deque[T]
+
+    def replace: (_ToA[T] other) -> self
+
+    def swap: (Integer i, Integer j) -> self
+
+    def to_a: () -> Array[T]
+
+    def to_s: () -> String
+
+    def inspect: () -> String
+  end
+end

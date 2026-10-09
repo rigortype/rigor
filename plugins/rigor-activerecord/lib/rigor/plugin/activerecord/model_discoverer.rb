@@ -1291,20 +1291,42 @@ module Rigor
           return [] if body.nil?
 
           rows = []
-          declaration_calls(body).each do |node|
+          association_calls(body, [], false).each do |node, inherited, opaque|
             kind = ASSOCIATION_METHODS[node.name]
             next if kind.nil?
             next if node.receiver # skip `self.has_many` and similar
 
-            row = build_association_row(node, kind)
+            row = build_association_row(node, kind, inherited, opaque)
             rows << row unless row.nil?
           end
           rows
         end
 
-        def build_association_row(node, kind)
-          args = node.arguments&.arguments
-          return nil if args.nil? || args.empty?
+        # {#declaration_calls} that also carries the options of the enclosing `with_options(...)` groups, as
+        # `[node, option_args, opaque]`. `option_args` are the keyword-hash arguments of those groups, which
+        # ActiveRecord merges under the call's own options; `opaque` is true when a group passes anything
+        # else (`with_options opts do`), so its options are unknown.
+        def association_calls(body, inherited, opaque)
+          return [] if body.nil?
+
+          body.compact_child_nodes.flat_map do |node|
+            next [] unless node.is_a?(Prism::CallNode)
+
+            if node.name == :with_options && node.block.is_a?(Prism::BlockNode)
+              args = node.arguments&.arguments || []
+              hashes = args.grep(Prism::KeywordHashNode)
+              association_calls(node.block.body, inherited + hashes, opaque || hashes.size != args.size)
+            else
+              [[node, inherited, opaque]]
+            end
+          end
+        end
+
+        def build_association_row(node, kind, inherited, opaque)
+          own = node.arguments&.arguments
+          return nil if own.nil? || own.empty?
+
+          args = own + inherited
 
           name = Rigor::Source::Literals.symbol_name(args.first)
           return nil if name.nil?
@@ -1325,7 +1347,8 @@ module Rigor
             nullable: association_nullable?(node.name, args),
             macro: node.name, class_name_option: class_name_option(args),
             through: association_key?(args, "through"),
-            source_type_option: literal_option(args, "source_type") }
+            source_type_option: literal_option(args, "source_type"),
+            roots_declined: opaque || association_key?(args, "anonymous_class") }
         end
 
         # The `class_name:` option as ActiveRecord's `compute_type` will read it: the literal String (a

@@ -154,6 +154,72 @@ RSpec.describe "rigor-activerecord association roots" do
     end
   end
 
+  it "tries the owner's own namespace first: Post::Comment beats a top-level Comment" do
+    files = project(
+      "post" => model("Post", "has_many :comments"),
+      "post/comment" => model("Post::Comment"), "comment" => model("Comment")
+    )
+    files["app/main.rb"] = "Post.new\n"
+    with_project(files) do |contribution, dir|
+      expect(contribution.roots).to eq(["Post::Comment"])
+      expect(candidates_for(dir, files, contribution.roots)).to include("Comment")
+    end
+  end
+
+  it "declines when the first candidate is a namespace of models rather than a model" do
+    files = project(
+      "post" => model("Post", "has_one :email"),
+      "post/email/draft" => model("Post::Email::Draft"), "email" => model("Email")
+    )
+    result = outcome(files)
+    expect(result[:roots]).to be_empty
+    expect(result[:kept]).to include("Email")
+  end
+
+  it "merges literal with_options options into the associations inside the group" do
+    files = project(
+      "owner" => model("Owner", <<~RUBY.strip),
+        with_options class_name: "Person" do
+            belongs_to :creator
+            has_many :editors, class_name: "Staff"
+          end
+          with_options polymorphic: true do
+            belongs_to :subject
+          end
+          with_options through: :taggings, source_type: "Tag" do
+            has_many :labels
+          end
+      RUBY
+      "person" => model("Person"), "staff" => model("Staff"), "creator" => model("Creator"),
+      "editor" => model("Editor"), "subject" => model("Subject"), "label" => model("Label"),
+      "tag" => model("Tag")
+    )
+    result = outcome(files)
+    expect(result[:roots]).to match_array(%w[Person Staff Tag])
+    expect(result[:kept]).to include("Creator", "Editor", "Subject", "Label")
+  end
+
+  it "declines associations in a with_options group whose options are not literal" do
+    files = project(
+      "owner" => model("Owner", "with_options opts do\n    belongs_to :creator\n  end"),
+      "creator" => model("Creator")
+    )
+    result = outcome(files)
+    expect(result[:roots]).to be_empty
+    expect(result[:kept]).to include("Creator")
+  end
+
+  it "roots a through: association's literal source_type: and declines anonymous_class:" do
+    files = project(
+      "owner" => model("Owner", "has_many :tags, through: :taggings, source_type: \"Label\"\n  " \
+                                "belongs_to :thing, anonymous_class: Klass"),
+      "label" => model("Label"), "tag" => model("Tag"), "thing" => model("Thing")
+    )
+    result = outcome(files)
+    expect(result[:roots]).to eq(["Label"])
+    expect(result[:kept]).to include("Tag", "Thing")
+  end
+
   it "skips polymorphic associations" do
     files = project(
       "owner" => model("Owner", "belongs_to :commentable, polymorphic: true\n  has_many :things, as: :owner"),

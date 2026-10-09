@@ -30,11 +30,14 @@ module Rigor
     #   level) the module is not named, and the block contributes {UNKNOWN}.
     # - **A `using` whose argument is not a constant** (`using Module.new { … }`) names no module. It contributes
     #   {UNKNOWN} throughout its file, which is broader than Ruby's scoping and the declining direction.
-    # - **Block sources** (ADR-121 WD1's third and fourth): a `Proc#refined` literal (#1666) records an activation
-    #   over the literal's body through {#record_block_activation}, which nothing calls yet; a plugin-declared
-    #   refined block (#1667) is typing-time knowledge, so its declared modules arrive as the `declared` argument
-    #   of {#at} and {#for_node} and are appended after the block site's lexical list. Both expand through
-    #   includes as a `using` does.
+    # - **Block sources** (ADR-121 WD1's third and fourth). A Proc literal that is directly the receiver of
+    #   `Proc#refined` (#1666) — a lambda literal, or the literal block of a bare `proc` / `lambda` call or of
+    #   `Proc.new` — puts each `.refined` argument in effect over the literal's body, after the literal's lexical
+    #   list and in call order along a `.refined(A).refined(B)` chain (CRuby duplicates the block's cref and appends).
+    #   Nested blocks and literals inherit it, being inside the span. An argument that is not a constant names no
+    #   module and contributes {UNKNOWN} over that literal's body only. A plugin-declared refined block (#1667) is
+    #   typing-time knowledge, so its declared modules arrive as the `declared` argument of {#at} and {#for_node} and
+    #   are appended after the block site's lexical list. Both expand through includes as a `using` does.
     #
     # Activating a module that is already listed changes nothing: it keeps its first position
     # (`rb_using_refinement` returns early, CRuby `eval.c`; `using A; using B; using A` answers B's method).
@@ -147,12 +150,15 @@ module Rigor
         @built = true
         @activations = []
         @refinement_defs = Set.new
+        @chained_refined_calls = Set.new
         @unresolved_using = false
         return if @root.nil?
 
         location = @root.location
         walk(@root, [], [location.start_offset, location.end_offset], false, nil)
-        @activations.sort_by!(&:order)
+        # Stable: a `.refined` chain's activations share the literal's offset and were recorded in call order.
+        @activations = @activations.each_with_index.sort_by { |activation, index| [activation.order, index] }
+                                   .map(&:first)
         @activations.freeze
       end
 
@@ -212,14 +218,70 @@ module Rigor
           record_refine_block(node, owner)
         elsif using_call?(node) && !in_def
           record_using(node, prefix, body)
+        elsif node.name == :refined
+          record_refined_chain(node, prefix)
         end
-        # ADR-121 WD1's `Proc#refined` source (#1666) is recognised here: a call chain whose receiver is a Proc
-        # literal records {#record_block_activation} over the literal's body with each `.refined` argument's
-        # candidates, in call order.
+      end
+
+      # ADR-121 WD1's `Proc#refined` source (#1666). The walk meets a chain's outermost `.refined` first, so it records
+      # the whole chain from the literal outwards — the call order — and marks the inner calls done.
+      def record_refined_chain(node, prefix)
+        return if @chained_refined_calls.include?(node.location.start_offset)
+
+        chain = [node]
+        receiver = node.receiver
+        while receiver.is_a?(Prism::CallNode) && receiver.name == :refined
+          chain << receiver
+          @chained_refined_calls << receiver.location.start_offset
+          receiver = receiver.receiver
+        end
+        literal = refinable_proc_literal(receiver)
+        return if literal.nil?
+
+        chain.reverse_each do |call|
+          (call.arguments&.arguments || EMPTY).each do |argument|
+            record_block_activation(literal, refined_argument_candidates(argument, prefix))
+          end
+        end
+      end
+
+      # The node whose span is the body a Proc literal's `.refined` applies to: a lambda literal, or the literal block
+      # of a bare `proc` / `lambda` call or of `Proc.new`. A Proc held in a variable, or one passed as `&blk`, is not
+      # one: which block it holds is not syntax.
+      def refinable_proc_literal(node)
+        case node
+        when Prism::LambdaNode then node
+        when Prism::CallNode
+          block = node.block
+          return nil unless block.is_a?(Prism::BlockNode)
+
+          block if bare_proc_call?(node) || proc_new_call?(node)
+        end
+      end
+
+      def bare_proc_call?(node)
+        node.receiver.nil? && (node.name == :proc || node.name == :lambda)
+      end
+
+      def proc_new_call?(node)
+        receiver = node.receiver
+        node.name == :new &&
+          (receiver.is_a?(Prism::ConstantReadNode) ||
+            (receiver.is_a?(Prism::ConstantPathNode) && receiver.parent.nil?)) &&
+          receiver.name == :Proc
+      end
+
+      # A constant argument's lexical candidates, or nil ({UNKNOWN}) for any other argument: a local, a splat, a call.
+      def refined_argument_candidates(argument, prefix)
+        return nil unless argument.is_a?(Prism::ConstantReadNode) || argument.is_a?(Prism::ConstantPathNode)
+
+        candidates = ScopeIndexer.constant_receiver_candidates(argument, prefix)
+        candidates.empty? ? nil : candidates
       end
 
       # An activation over a block's body (`block` a `Prism::BlockNode` or `Prism::LambdaNode`) that puts `names` in
-      # effect after the block site's lexical list, each expanded through its includes as a `using`'s is.
+      # effect after the block site's lexical list, each expanded through its includes as a `using`'s is; nil names
+      # contribute {UNKNOWN}.
       def record_block_activation(block, names)
         start, stop = span_of(block)
         @activations << Activation.new(order: start, start: start, stop: stop, names: names, expand: true,

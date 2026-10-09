@@ -28,8 +28,11 @@ module Rigor
 
         # One constant reference. `from` is the fully-qualified name of the innermost enclosing declaration, or
         # nil for a reference written at file level — that is what makes the graph a reachability graph rather
-        # than a reference count (ADR-102 WD2). `role` is the referring FILE's role (WD8). `rooted` is true
-        # when the constant was written with a leading `::` (#625).
+        # than a reference count (ADR-102 WD2). A reference in a declaration's own header — `class Sub < Base`,
+        # `Sub = Class.new(Base)` — is credited to that declaration, while `nesting` stays the outer scope it
+        # resolves in (#1720); that header case is the only one where `from` is not `nesting` joined. `role` is
+        # the referring FILE's role (WD8). `rooted` is true when the constant was written with a leading `::`
+        # (#625).
         Reference = Data.define(:as_written, :nesting, :from, :role, :path, :line, :rooted) do
           def initialize(rooted: false, **) = super
         end
@@ -111,6 +114,8 @@ module Rigor
             @declarations = []
             @references = []
             @dynamic_uses = []
+            # The declaration a meta-new rvalue is being walked for, or nil. See {#walk_constant_write}.
+            @owner = nil
           end
 
           def walk(node, nesting)
@@ -126,8 +131,7 @@ module Rigor
               # candidates on Rigor's own lib came from exactly that in the #345 probe).
               return
             when Prism::ConstantWriteNode
-              record_meta_new(node, nesting)
-              walk(node.value, nesting)
+              walk_constant_write(node, nesting)
               return
             when Prism::CallNode
               record_dynamic_use(node)
@@ -144,13 +148,22 @@ module Rigor
 
             fqn = (nesting + [name]).join("::")
             # The superclass position IS a reference — `class Sub < Base` reads `Base` — and it resolves against
-            # the OUTER nesting, not inside the body being opened.
-            record_reference(superclass, nesting) if superclass
+            # the OUTER nesting, not inside the body being opened. It is part of `Sub`'s declaration, though, so
+            # it is credited to `Sub` (#1720): crediting the enclosing scope left a base nested in a module that
+            # is never itself reached unreachable, and rooted a top-level base even when every subclass is dead.
+            record_reference(superclass, nesting, from: fqn) if superclass
             includes = node.body ? mixin_names(node.body) : []
             @declarations << Declaration.new(fqn: fqn, path: @path, line: node.location.start_line,
                                              superclass: superclass && Source::ConstantPath.qualified_name(superclass),
                                              includes: includes.freeze)
-            walk(node.body, nesting + [name]) if node.body
+            return unless node.body
+
+            # The body's nesting names the declaration itself, so a credit inherited from a meta-new rvalue
+            # this declaration sits in must not leak into it.
+            owner = @owner
+            @owner = nil
+            walk(node.body, nesting + [name])
+            @owner = owner
           end
 
           # `Const = Class.new` / `Module.new` / `Data.define(...)` / `Struct.new(...)` declare a class under a
@@ -160,6 +173,20 @@ module Rigor
           META_NEW = { "Class" => :new, "Module" => :new, "Data" => :define, "Struct" => :new }.freeze
           private_constant :META_NEW
 
+          # A meta-new rvalue — `Class.new(Base) { ... }`, `Struct.new(:a) do ... end` — is the declaration's
+          # header and body, so the references in it are credited to the declared constant, exactly as a
+          # `class Sub < Base` superclass is (#1720). Its lexical nesting is unchanged: a block opens no cref.
+          def walk_constant_write(node, nesting)
+            fqn = record_meta_new(node, nesting)
+            return walk(node.value, nesting) if fqn.nil?
+
+            owner = @owner
+            @owner = fqn
+            walk(node.value, nesting)
+            @owner = owner
+          end
+
+          # @return the declared FQN, or nil when the rvalue is not a meta-new form.
           def record_meta_new(node, nesting)
             call = node.value
             return unless call.is_a?(Prism::CallNode)
@@ -167,8 +194,10 @@ module Rigor
             recv = call.receiver
             return unless recv.is_a?(Prism::ConstantReadNode) && META_NEW[recv.name.to_s] == call.name
 
-            @declarations << Declaration.new(fqn: (nesting + [node.name.to_s]).join("::"), path: @path,
+            fqn = (nesting + [node.name.to_s]).join("::")
+            @declarations << Declaration.new(fqn: fqn, path: @path,
                                              line: node.location.start_line, superclass: nil, includes: [].freeze)
+            fqn
           end
 
           # `include` / `prepend` / `extend` argument names written directly in the declaration body. Only the
@@ -245,12 +274,14 @@ module Rigor
             trimmed.empty? ? nil : trimmed
           end
 
-          def record_reference(node, nesting)
+          # `from` defaults to the innermost enclosing declaration; a declaration's own header (its superclass,
+          # its meta-new rvalue) is credited to that declaration instead.
+          def record_reference(node, nesting, from: @owner)
             as_written = Source::ConstantPath.qualified_name_or_nil(node)
             return if as_written.nil?
 
-            @references << Reference.new(as_written: as_written, nesting: nesting.dup.freeze,
-                                         from: nesting.empty? ? nil : nesting.join("::"),
+            from ||= nesting.empty? ? nil : nesting.join("::")
+            @references << Reference.new(as_written: as_written, nesting: nesting.dup.freeze, from: from,
                                          role: @role, path: @path, line: node.location.start_line,
                                          rooted: Source::ConstantPath.rooted?(node))
           end

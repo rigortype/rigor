@@ -56,6 +56,7 @@ module Rigor
           # contract says and what the implementation had narrowed (#370). See {#tainted}.
           test_only = reachable - production
           undecidable = tainted(unreached - namespaces).merge(tainted(test_only))
+          undecidable = spread_undecidable(edges, undecidable, (unreached - namespaces) | test_only)
           build_report(edges: edges, reachable: reachable, unreached: unreached, namespaces: namespaces,
                        test_only: test_only, undecidable: undecidable)
         end
@@ -109,6 +110,29 @@ module Rigor
           end
         end
 
+        # Whatever an undecidable declaration reaches is undecidable too (#1720 review). `class Sub < Base` with
+        # `Sub` reachable through `"Sub#{x}".constantize` left `Base` a DEFINITE candidate, and acting on that row
+        # deletes the base of a class that may well be live. Only declarations that would otherwise be
+        # reported — unreached or test-only — are moved; the reason names the declaration they hang from.
+        def spread_undecidable(edges, undecidable, reportable)
+          return undecidable if undecidable.empty?
+
+          out = Hash.new { |h, k| h[k] = [] }
+          edges.each { |from, to, _role| out[from] << to }
+          result = undecidable.dup
+          queue = undecidable.keys
+          until queue.empty?
+            from = queue.shift
+            out[from].each do |target|
+              next if result.key?(target) || !reportable.include?(target)
+
+              result[target] = "reachable from #{from}, which cannot be decided"
+              queue << target
+            end
+          end
+          result
+        end
+
         def undecidable_row(fqn, reason)
           site = @by_fqn.fetch(fqn).first
           Undecidable.new(fqn: fqn, path: site.path, line: site.line, reason: reason)
@@ -132,14 +156,28 @@ module Rigor
         # Seeds that make a declaration live in PRODUCTION: named entry points, plus anything referenced at
         # file level by a non-test file (file-level code runs on load, so its target is live).
         def production_seeds
-          @production_seeds ||= (@root_fqns & @owned) | seeds_from { |ref| ref.from.nil? && ref.role != :test }
+          @production_seeds ||= (@root_fqns & @owned) | seeds_from { |ref| source(ref).nil? && ref.role != :test }
         end
 
         # Seeds that make a declaration live only through TEST code. Kept separate from production seeds
         # rather than folded in: a spec's file-level `Foo.new` would otherwise promote `Foo` to a root and
         # erase the very distinction WD8 exists to report.
         def test_seeds
-          @test_seeds ||= seeds_from { |ref| ref.from.nil? && ref.role == :test }
+          @test_seeds ||= seeds_from { |ref| source(ref).nil? && ref.role == :test }
+        end
+
+        # The node an edge leaves. A declaration-header reference (`class Sub < Base`) is credited to `Sub`
+        # (#1720), but only an owned declaration from `paths:` is a node: the subclass a spec, an initializer
+        # or a support file declares is outside the declaration set, so its own liveness cannot be judged and
+        # an edge leaving it would silently drop the evidence. That reference falls back to the scope it is
+        # written in — the file level for a top-level `class FakeAdapter < Adapter` in a spec, which keeps
+        # `Adapter` test-reachable exactly as before the credit moved. For every other reference `from` is
+        # `nesting` joined already, so the fallback is the identity.
+        def source(ref)
+          from = ref.from
+          return from if from.nil? || @owned.include?(from)
+
+          ref.nesting.empty? ? nil : ref.nesting.join("::")
         end
 
         def seeds_from
@@ -147,7 +185,7 @@ module Rigor
           @references.each do |ref|
             next unless yield(ref)
 
-            target = resolve(ref.as_written, ref.nesting, rooted: ref.rooted)
+            target = resolve_ref(ref)
             set << target if target && @owned.include?(target)
           end
           set
@@ -156,12 +194,30 @@ module Rigor
         # `[from_fqn_or_nil, to_fqn, role]` for every reference that resolves to an owned declaration.
         def resolved_edges
           @resolved_edges ||= @references.filter_map do |ref|
-            target = resolve(ref.as_written, ref.nesting, rooted: ref.rooted)
+            target = resolve_ref(ref)
             next unless target && @owned.include?(target)
-            next if ref.from == target # a declaration referencing itself is not evidence of use
 
-            [ref.from, target, ref.role]
+            from = source(ref)
+            next if from == target # a declaration referencing itself is not evidence of use
+
+            [from, target, ref.role]
           end
+        end
+
+        # A declaration-header reference never names the declaration it belongs to: `module Api; class User <
+        # User; end; end` reads `User` before `Api::User` exists, so Ruby answers `::User`. Every other reference
+        # resolves as written, and one that lands on its own declaration is dropped as a self-reference.
+        def resolve_ref(ref)
+          target = resolve(ref.as_written, ref.nesting, rooted: ref.rooted)
+          return target unless target && target == ref.from && header?(ref)
+
+          resolve(ref.as_written, ref.nesting, rooted: ref.rooted, exclude: target)
+        end
+
+        # Only a header reference is credited to something other than the scope it is written in (see
+        # {Scan::Reference}).
+        def header?(ref)
+          ref.from != (ref.nesting.empty? ? nil : ref.nesting.join("::"))
         end
 
         # Mark-and-sweep, not reference counting: an edge only propagates if its SOURCE is itself reachable, so
@@ -198,18 +254,19 @@ module Rigor
         # Ruby's constant lookup at name granularity: `Module.nesting` innermost first, then the ancestors of
         # the innermost cresting scope (#354), then the bare name. When `rooted: true`, lexical nesting and
         # ancestors are skipped, answering the top-level declaration directly (#625).
-        def resolve(as_written, nesting, rooted: false)
+        # `exclude` names a declaration the answer must not be (see {#resolve_ref}).
+        def resolve(as_written, nesting, rooted: false, exclude: nil)
           if rooted
-            return as_written if @by_fqn.key?(as_written)
+            return as_written if declared?(as_written, exclude)
 
             idx = as_written.rindex("::")
-            return idx ? resolve(as_written[0, idx], nesting, rooted: true) : nil
+            return idx ? resolve(as_written[0, idx], nesting, rooted: true, exclude: exclude) : nil
           end
 
           walker = nesting.dup
           until walker.empty?
             candidate = (walker + [as_written]).join("::")
-            return candidate if @by_fqn.key?(candidate)
+            return candidate if declared?(candidate, exclude)
 
             walker.pop
           end
@@ -217,11 +274,11 @@ module Rigor
           unless nesting.empty?
             ancestor_scopes(nesting.join("::")).each do |ancestor|
               candidate = "#{ancestor}::#{as_written}"
-              return candidate if @by_fqn.key?(candidate)
+              return candidate if declared?(candidate, exclude)
             end
           end
 
-          return as_written if @by_fqn.key?(as_written)
+          return as_written if declared?(as_written, exclude)
 
           # `Scope::DiscoveryIndex::EMPTY` names a constant INSIDE a class, and reading it is a use of that
           # class — but the leaf is not itself a declaration, so the reference would resolve to nothing and
@@ -229,7 +286,11 @@ module Rigor
           # on the first run of this report against Rigor's own `lib`). Peel the trailing segment and retry:
           # a reference to a member is a reference to its owner.
           idx = as_written.rindex("::")
-          idx ? resolve(as_written[0, idx], nesting) : nil
+          idx ? resolve(as_written[0, idx], nesting, exclude: exclude) : nil
+        end
+
+        def declared?(fqn, exclude)
+          fqn != exclude && @by_fqn.key?(fqn)
         end
 
         # Breadth-first over superclass + included modules, mixins first, terminating on a cycle. As-written
@@ -260,7 +321,8 @@ module Rigor
           segments = subclass_fqn.split("::")
           (segments.length - 1).downto(0) do |i|
             candidate = (segments[0, i] + [raw]).join("::")
-            return candidate if @by_fqn.key?(candidate)
+            # `class Api::User < User` cannot inherit from itself; the name was read before it existed.
+            return candidate if candidate != subclass_fqn && @by_fqn.key?(candidate)
           end
           nil
         end

@@ -29,6 +29,9 @@ module Rigor
     attr_reader opaque_block_self: bool
     # sig-gen gap: #1154 — sig-gen skips the reader (sig.skipped.untyped-return): an `attr_reader`
     # over an ivar assigned in `initialize` from a parameter, so inference reaches `untyped`.
+    attr_reader block_self_unknown: bool
+    # sig-gen gap: #1154 — sig-gen skips the reader (sig.skipped.untyped-return): an `attr_reader`
+    # over an ivar assigned in `initialize` from a parameter, so inference reaches `untyped`.
     attr_reader singleton_class_body: bool
     attr_reader lexical_nesting: Array[String]?
     # Issue #1429 — a guard's narrowing of a constant reference, keyed by its spelling.
@@ -66,6 +69,9 @@ module Rigor
     # sig-gen gap: #1148 — sig-gen skips the endless-def reader (untyped return), so the refinement table's
     # shape is hand-written.
     def discovered_refinements: () -> Hash[String, Hash[Symbol, Array[String]]]
+    # authored: the list holds module names and the `InEffectRefinements::UNKNOWN` Symbol; sig-gen reads the delegated
+    # return through an unsigned class as untyped.
+    def in_effect_refinements: (untyped node, ?Array[String] declared) -> Array[String | Symbol]
     # sig-gen gap: #1148 — sig-gen skips the endless-def reader (untyped return), so the census shape is
     # hand-written.
     def discovered_global_write_census: () -> Set[Array[untyped]]
@@ -157,6 +163,9 @@ module Rigor
       # `untyped`: the value is an `Inference::LastLine::SelfEvidence` (or nil), and that class carries no signature,
       # as `Inference::MatchRebinding::Frame` carries none for `match_frame`.
       attr_reader implicit_self_evidence: untyped
+      # sig-gen gap: #1150 — `Data.define` members carry no type; the value is an `Inference::InEffectRefinements`
+      # (or nil), which carries no signature either.
+      attr_reader in_effect_refinements: untyped
       # sig-gen gap: #1150 — `Data.define` members carry no type, as for every other row in this class.
       attr_reader possible_discovered_methods: Hash[String, Hash[Symbol, Symbol]]
       # sig-gen gap: #1150 — `Data.define` members carry no type, as for every other row in this class.
@@ -188,7 +197,7 @@ module Rigor
       # authored: ADR-119 WD1 sibling pairing; no inferred signature exists for it (#1150).
       def sibling_tables: () -> Hash[Symbol, untyped]
 
-      def with: (?declared_types: Hash[untyped, Type::t], ?class_ivars: Hash[String, Hash[Symbol, Type::t]], ?class_cvars: Hash[String, Hash[Symbol, Type::t]], ?program_globals: Hash[Symbol, Type::t], ?program_global_seeds: Hash[Symbol, Type::t], ?discovered_classes: Hash[String, Type::Singleton], ?in_source_constants: Hash[String, Type::t], ?discovered_methods: Hash[String, Hash[Symbol, Symbol]], ?discovered_def_nodes: Hash[String, Hash[Symbol, untyped]], ?discovered_def_nestings: Hash[untyped, Array[String]], ?discovered_singleton_def_nodes: Hash[String, Hash[Symbol, untyped]], ?discovered_def_sources: Hash[String, Hash[Symbol, String]], ?discovered_singleton_def_sources: Hash[String, Hash[Symbol, String]], ?discovered_method_visibilities: Hash[String, Hash[Symbol, Symbol]], ?discovered_parameter_envelopes: Hash[String, Hash[untyped, untyped]], ?discovered_superclasses: Hash[String, String], ?discovered_includes: Hash[String, Array[String]], ?discovered_prepends: Hash[String, Array[String]], ?discovered_extends: Hash[String, Array[String]], ?discovered_class_sources: Hash[String, Set[String]], ?constant_sources: Hash[String, Set[String]], ?constant_writers: Hash[String, Array[String]], ?constant_shadowers: Hash[String, Array[String]], ?published_constant_names: Set[String], ?local_constant_names: Set[String], ?published_constant_alias_names: Set[String], ?published_constant_ivars: Hash[String, Set[Symbol]], ?data_member_layouts: Hash[String, Array[Symbol]], ?struct_member_layouts: Hash[String, { members: Array[Symbol], keyword_init: bool }], ?param_inferred_types: Hash[[String, Symbol, Symbol], Hash[Symbol, Type::t]], ?discovered_deferred_ranges: Hash[String, Array[[Integer, Integer, Symbol?, Symbol?, String?]]], ?discovered_refinements: Hash[String, Hash[Symbol, Array[String]]], ?discovered_global_write_census: Set[Array[untyped]], ?run_generation: Object?, ?patched_line_readers: Set[Symbol], ?clears_last_status: bool, ?defines_case_equality: bool, ?implicit_self_evidence: untyped, ?possible_discovered_methods: Hash[String, Hash[Symbol, Symbol]], ?possible_discovered_deferred_ranges: Hash[String, Array[[Integer, Integer, Symbol?, Symbol?, String?]]], ?contested_discovered_def_nodes: Set[Array[untyped]], ?contested_discovered_singleton_def_nodes: Set[Array[untyped]], ?contested_discovered_method_visibilities: Set[Array[untyped]], ?contested_discovered_parameter_envelopes: Set[Array[untyped]]) -> DiscoveryIndex
+      def with: (?declared_types: Hash[untyped, Type::t], ?class_ivars: Hash[String, Hash[Symbol, Type::t]], ?class_cvars: Hash[String, Hash[Symbol, Type::t]], ?program_globals: Hash[Symbol, Type::t], ?program_global_seeds: Hash[Symbol, Type::t], ?discovered_classes: Hash[String, Type::Singleton], ?in_source_constants: Hash[String, Type::t], ?discovered_methods: Hash[String, Hash[Symbol, Symbol]], ?discovered_def_nodes: Hash[String, Hash[Symbol, untyped]], ?discovered_def_nestings: Hash[untyped, Array[String]], ?discovered_singleton_def_nodes: Hash[String, Hash[Symbol, untyped]], ?discovered_def_sources: Hash[String, Hash[Symbol, String]], ?discovered_singleton_def_sources: Hash[String, Hash[Symbol, String]], ?discovered_method_visibilities: Hash[String, Hash[Symbol, Symbol]], ?discovered_parameter_envelopes: Hash[String, Hash[untyped, untyped]], ?discovered_superclasses: Hash[String, String], ?discovered_includes: Hash[String, Array[String]], ?discovered_prepends: Hash[String, Array[String]], ?discovered_extends: Hash[String, Array[String]], ?discovered_class_sources: Hash[String, Set[String]], ?constant_sources: Hash[String, Set[String]], ?constant_writers: Hash[String, Array[String]], ?constant_shadowers: Hash[String, Array[String]], ?published_constant_names: Set[String], ?local_constant_names: Set[String], ?published_constant_alias_names: Set[String], ?published_constant_ivars: Hash[String, Set[Symbol]], ?data_member_layouts: Hash[String, Array[Symbol]], ?struct_member_layouts: Hash[String, { members: Array[Symbol], keyword_init: bool }], ?param_inferred_types: Hash[[String, Symbol, Symbol], Hash[Symbol, Type::t]], ?discovered_deferred_ranges: Hash[String, Array[[Integer, Integer, Symbol?, Symbol?, String?]]], ?discovered_refinements: Hash[String, Hash[Symbol, Array[String]]], ?discovered_global_write_census: Set[Array[untyped]], ?run_generation: Object?, ?patched_line_readers: Set[Symbol], ?clears_last_status: bool, ?defines_case_equality: bool, ?implicit_self_evidence: untyped, ?in_effect_refinements: untyped, ?possible_discovered_methods: Hash[String, Hash[Symbol, Symbol]], ?possible_discovered_deferred_ranges: Hash[String, Array[[Integer, Integer, Symbol?, Symbol?, String?]]], ?contested_discovered_def_nodes: Set[Array[untyped]], ?contested_discovered_singleton_def_nodes: Set[Array[untyped]], ?contested_discovered_method_visibilities: Set[Array[untyped]], ?contested_discovered_parameter_envelopes: Set[Array[untyped]]) -> DiscoveryIndex
     end
 
     class IndexedKey
@@ -211,6 +220,9 @@ module Rigor
     def with_lexical_nesting: (Array[String]? chain) -> Scope
     def struct_fold_safe?: (String | Symbol name) -> bool
     def entering_opaque_block: () -> Scope
+    # sig-gen gap: #1148 — sig-gen skips the endless-def reader (sig.skipped.untyped-return); the row is hand-written.
+    def block_self_unknown?: () -> bool
+    def with_block_self_unknown: (bool flag) -> Scope
     def opaque_block_self?: () -> bool
     def with_singleton_class_body: (bool) -> Scope
     # sig-gen gap: #1148 — sig-gen skips the endless-def reader (sig.skipped.untyped-return); the row is hand-written.
@@ -346,6 +358,8 @@ module Rigor
     def without_method_chain_narrowings_for: (Symbol receiver_kind, String | Symbol receiver_name) -> Scope
     def with_fact: (Analysis::FactStore::Fact fact) -> Scope
     def with_self_type: (Type::t? type) -> Scope
+    def with_block_self_type: (Type::t? type, ?keeps_unknown: bool) -> Scope
+    def block_self_narrowing_unknown?: (Prism::CallNode call_node) -> bool
     def facts_for: (?target: Analysis::FactStore::Target?, ?bucket: Symbol?) -> Array[Analysis::FactStore::Fact]
     def local_facts: (String | Symbol name, ?bucket: Symbol?) -> Array[Analysis::FactStore::Fact]
     def type_of: (untyped node, ?tracer: Inference::FallbackTracer?) -> Type::t

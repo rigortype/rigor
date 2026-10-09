@@ -1,0 +1,1 @@
+- **[engine]** An explicit `self.foo` inside a block whose `self` Rigor does not know (a Rails renderer block, an `instance_exec`-style DSL) no longer reports `call.undefined-method` against the enclosing method's `self`, matching the bare `foo`. ([#1726](https://github.com/rigortype/rigor/pull/1726))

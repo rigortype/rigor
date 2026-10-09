@@ -18,12 +18,17 @@
 #   member. No producer fills one yet, so on the fixture the check is vacuous and {sibling_problem} is exercised
 #   directly with injected values.
 #
-# `implicit_self_evidence` must also never ride a seed: it holds its own file's parse.
+# `implicit_self_evidence` and `in_effect_refinements` must also never ride a seed: each holds its own file's parse.
 module DeclarationMemberShapes
   SCALARS = [String, Symbol, Integer, NilClass, TrueClass, FalseClass].freeze
   VISIBILITIES = %i[public private protected].freeze
   SITE = /:\d+\z/
   TABLES_AND_FACTS = [Hash, Set, Array, TrueClass, FalseClass].freeze
+  # The syntactic members whose value is a lazy per-file query over the file's tree rather than a table.
+  PER_FILE_QUERIES = {
+    implicit_self_evidence: Rigor::Inference::LastLine::SelfEvidence,
+    in_effect_refinements: Rigor::Inference::InEffectRefinements
+  }.freeze
   # The two members the fixture cannot fill, and why.
   UNFILLED = {
     param_inferred_types: "only `coverage --protection`'s collection pass fills it"
@@ -204,9 +209,10 @@ module DeclarationMemberShapes
     when :discovered_def_nestings
       root = fixture.fetch(:discovery).last
       "the file's parse alone gives other nestings" unless nestings(value, root) == nestings(alone, file_root)
-    when :implicit_self_evidence
-      return "not a LastLine::SelfEvidence" unless value.is_a?(Rigor::Inference::LastLine::SelfEvidence)
-      return "the file's parse alone gives none" unless alone.is_a?(Rigor::Inference::LastLine::SelfEvidence)
+    when :implicit_self_evidence, :in_effect_refinements
+      klass = PER_FILE_QUERIES.fetch(member)
+      return "not a #{klass.name}" unless value.is_a?(klass)
+      return "the file's parse alone gives none" unless alone.is_a?(klass)
 
       "it rides a seed" if in_runner_seed?(member, fixture) || in_bundles?(member, fixture)
     else

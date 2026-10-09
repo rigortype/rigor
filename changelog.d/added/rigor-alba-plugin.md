@@ -1,0 +1,1 @@
+- **[plugins]** New `rigor-alba` plugin for applications that use the alba serializer. It types the self of `Alba.serialize` / `Alba.hashify` blocks so their DSL calls stop firing `call.unresolved-toplevel`, and roots the resource classes that alba infers for `many` / `one` associations so `rigor unused` does not list them. ([#1688](https://github.com/rigortype/rigor/pull/1688))

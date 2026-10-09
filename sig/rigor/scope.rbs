@@ -337,6 +337,7 @@ module Rigor
     def singleton_extends_of: (String | Symbol class_name) -> Array[String]
     def indexed_narrowing: (Symbol receiver_kind, String | Symbol receiver_name, untyped key) -> Type::t?
     def with_indexed_narrowing: (Symbol receiver_kind, String | Symbol receiver_name, untyped key, Type::t type) -> Scope
+    def with_isolated_side_tables: () -> Scope
     def without_indexed_narrowing: (Symbol receiver_kind, String | Symbol receiver_name, untyped key) -> Scope
     def without_indexed_narrowings_for: (Symbol receiver_kind, String | Symbol receiver_name) -> Scope
     def method_chain_narrowing: (Symbol receiver_kind, String | Symbol receiver_name, String | Symbol method_name) -> Type::t?

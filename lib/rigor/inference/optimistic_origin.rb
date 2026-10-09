@@ -35,21 +35,6 @@ module Rigor
       # distinguish further optimistic families without changing the table's shape.
       IMPLICITLY_RETURNS_NIL = :implicitly_returns_nil
 
-      # Issue #1703 — a hash-shape read by a non-literal key whose miss `nil` a `key?` guard on structurally the
-      # same key dropped ({KeyPresenceGuard.guarded_read}).
-      KEY_PRESENCE_GUARD = :key_presence_guard
-
-      # Issue #1703 — a value computed from a {KEY_PRESENCE_GUARD} read whose un-narrowed counterpart differs: a
-      # method `NilClass` also defines called on the read (`NUM[k].to_i` reads `0` on the miss), any call on such a
-      # value (`NUM[k].to_i > 0`), or any call taking one as an argument ({.resolve_through_guarded_value}).
-      KEY_PRESENCE_DERIVED = :key_presence_derived
-
-      KEY_PRESENCE_CAUSES = [KEY_PRESENCE_GUARD, KEY_PRESENCE_DERIVED].freeze
-
-      # The key `Scope#record_optimistic_origin` sets in the shared mark table once a {KEY_PRESENCE_GUARD} read is
-      # marked, so {.resolve_through_guarded_value} costs one lookup in a file that has none.
-      KEY_PRESENCE_SEEN = Object.new.freeze
-
       # The argument-free unary predicates whose folded result is a statement about the receiver's
       # *nil-freeness* and nothing else, which is what makes the derivation sound rather than a general taint:
       # `nil?` answers the exact question the optimism is a bet on, and `!` (which Prism spells as a `CallNode`
@@ -130,38 +115,9 @@ module Rigor
         when Prism::LocalVariableReadNode, Prism::LocalVariableWriteNode then scope.optimistic_local(node.name)
         when Prism::InstanceVariableReadNode, Prism::InstanceVariableWriteNode then scope.optimistic_ivar(node.name)
         when Prism::AndNode, Prism::OrNode then resolve(node.left, scope) || resolve(node.right, scope)
-        when Prism::CallNode
-          resolve_through_safe_navigation(node, scope) || resolve_through_predicate(node, scope) ||
-            resolve_through_guarded_value(node, scope)
+        when Prism::CallNode then resolve_through_safe_navigation(node, scope) || resolve_through_predicate(node, scope)
         when Prism::ParenthesesNode then resolve_through_parentheses(node, scope)
         end
-      end
-
-      # Issue #1703 — the derivation the nil-collapsing predicates get, widened for a `key?`-guarded read: the read
-      # dropped a `nil` the un-narrowed program can produce, so any value computed from it may differ from the
-      # un-narrowed one, and a verdict folded from it is not one the program without the guard would earn. On the read
-      # itself only a method `NilClass` also defines answers differently (any other raises on the miss, so the
-      # surviving value is the same); past it, any call does. A call taking such a value as an argument is derived as
-      # well, since the callee sees the narrowed type.
-      def resolve_through_guarded_value(node, scope)
-        return nil unless scope.optimistic_origins[KEY_PRESENCE_SEEN]
-
-        receiver = node.receiver && resolve(node.receiver, scope)
-        if receiver == KEY_PRESENCE_DERIVED ||
-           (receiver == KEY_PRESENCE_GUARD && nil_class_method?(node.name, scope))
-          return KEY_PRESENCE_DERIVED
-        end
-
-        arguments = node.arguments&.arguments
-        return nil if arguments.nil?
-
-        KEY_PRESENCE_DERIVED if arguments.any? { |argument| KEY_PRESENCE_CAUSES.include?(resolve(argument, scope)) }
-      end
-
-      # Conservative when NilClass's definition is unavailable: every method counts as one `nil` answers.
-      def nil_class_method?(method_name, scope)
-        definition = Rigor::Reflection.instance_definition("NilClass", scope: scope)
-        definition.nil? || !definition.methods[method_name].nil?
       end
 
       # `recv&.m` is `nil` exactly when `recv` is (or when `m` answers `nil`), so it restates `recv`'s presence

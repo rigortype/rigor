@@ -377,11 +377,15 @@ module Rigor
     # metadata, ignored by `==` / `hash`, and never varying a flow decision on its own.
     def record_optimistic_origin(node, cause)
       @optimistic_origins[node] = cause
-      # Issue #1703 — lets {Inference::OptimisticOrigin.resolve_through_guarded_value} skip a file with no guard.
-      if cause == Inference::OptimisticOrigin::KEY_PRESENCE_GUARD
-        @optimistic_origins[Inference::OptimisticOrigin::KEY_PRESENCE_SEEN] = true
-      end
       self
+    end
+
+    # Issue #1703 — this scope with private copies of the identity-keyed side tables (dynamic, void and optimistic
+    # origins, plugin-typed calls), so a second walk from it — the `key?`-guarded re-walk — records into its own
+    # tables and never into the ones the file's analysis reads.
+    def with_isolated_side_tables
+      rebuild(dynamic_origins: @dynamic_origins.dup, void_origins: @void_origins.dup,
+              plugin_typed_calls: @plugin_typed_calls.dup, optimistic_origins: @optimistic_origins.dup)
     end
 
     def optimistic_local(name) = Inference::OptimisticOrigin.bound_cause(@optimistic_locals[name.to_sym])

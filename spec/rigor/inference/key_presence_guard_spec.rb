@@ -88,9 +88,19 @@ RSpec.describe Rigor::Inference::KeyPresenceGuard do
     expect(guarded.with_local(:other, present).indexed_narrowing(:const, :MAP, chain_key)).not_to be_nil
   end
 
-  it "neither records nor reads a guard inside without_guards" do
-    node = last_node("MAP = { a: 1 }\nk = 1\nMAP.key?(k)\n")
-    described_class.without_guards { expect(described_class.record(node, scope)).to be_nil }
-    expect(described_class.off?).to be(false)
+  it "records a guard only inside the guarded re-walk, and never inside without_guards" do
+    root = Prism.parse("MAP = { a: 1 }.freeze\nk = 1\nMAP.key?(k)\n").value
+    node = root.statements.body.last
+    shape = scope.with_local(:k, present)
+    expect(described_class.active?).to be(false)
+    expect(described_class.record(node, shape)).to be_nil
+    described_class.with_guards(root) do
+      described_class.without_guards { expect(described_class.record(node, shape)).to be_nil }
+    end
+  end
+
+  it "re-walks only a file that holds a guard-shaped call" do
+    expect(described_class.guard_shaped_call?(Prism.parse("h = {}\nk = 1\nh.key?(k)\n").value)).to be(true)
+    expect(described_class.guard_shaped_call?(Prism.parse("h = {}\nh.key?(:a)\nfoo.key?(1)\n").value)).to be(false)
   end
 end

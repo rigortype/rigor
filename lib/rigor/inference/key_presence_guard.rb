@@ -4,6 +4,7 @@ require "prism"
 
 require_relative "../type"
 require_relative "mutation_widening"
+require_relative "key_presence_guard/scan"
 
 module Rigor
   module Inference
@@ -13,16 +14,17 @@ module Rigor
     # (`ShapeDispatch#hash_dig_step`), so the guarded read in typelizer's
     # `COLUMN_TYPE_MAP.key?(property.column_type) && …; COLUMN_TYPE_MAP[property.column_type].dup` kept the `nil`
     # and its `[]=` reported `call.possible-nil-receiver`.
-    # On the true edge the guard is recorded in the scope's indexed-narrowing table under a {KeyExpr} address, and a
-    # later read of the same receiver by structurally the same key drops the miss `nil` ({.guarded_read}).
     #
-    # The narrowing exists to remove nil-receiver reports and must not add a diagnostic anywhere else:
-    # - the read and every value computed from it are marked optimistic ({OptimisticOrigin::KEY_PRESENCE_GUARD} /
-    #   `KEY_PRESENCE_DERIVED`), so certainty verdicts folded from them decline;
-    # - a method's return summary and `sig-gen` are computed with guards off ({.without_guards}), so no narrowed type
-    #   crosses a method boundary;
-    # - the guard is dropped wherever the receiver or the key may have changed ({.invalidate_after_call},
-    #   {.invalidate_after_write}, and `Scope#bind_local` / `#bind_ivar` for a rebinding).
+    # **Fail-closed by construction.** The analysis every rule reads never records a guard: {.record} and
+    # {.guarded_read} act only inside {.with_guards}, which nothing but {.withholds_nil?} enters. When
+    # `call.possible-nil-receiver` is about to report on a file that holds a guard-shaped call, it re-walks the file
+    # once with guards on, from a scope whose side tables are private copies, and withholds the report only when the
+    # re-walk types the receiver as exactly the analysis's type without `nil`. No other type, verdict, summary or
+    # signature can change, so the guard can only remove that one report.
+    #
+    # Inside the re-walk a guard is recorded only when it is safe to rely on ({.eligible?}) and is dropped where the
+    # receiver or the key may have changed ({.invalidate_after_call}, {.invalidate_after_write}, a rebinding through
+    # `Scope#bind_local` / `#bind_ivar`, and the region check in {.guarded_read}).
     module KeyPresenceGuard
       # The key half of a guard's address: a local, an instance variable, or a chain of plain readers rooted at one
       # (`prop.column_type`). `path` is `[[root_kind, root_name], method, …]`, so two spellings of one chain compare
@@ -39,8 +41,7 @@ module Rigor
       # recomputes its type from the receiver, so the value carries nothing.
       PRESENT = Type::Combinator.constant_of(true)
 
-      OFF_KEY = :__rigor_key_presence_guards_off
-      private_constant :OFF_KEY
+      PREDICATES = %i[key? has_key? include? member?].to_set.freeze
 
       # A plain reader's name: lower-case, no operator, writer or bang.
       READER_NAME = /\A[a-z_][a-z0-9_]*\??\z/
@@ -56,37 +57,93 @@ module Rigor
         ] + MutationWidening::SHAPE_MUTATORS.to_a
       ).to_set.freeze
 
-      # Blockless calls on a guarded receiver that cannot remove a key or rebind a slot. Any other call on it, and
-      # any call with a block, may (`h.delete(k)`, `h.send(:delete, k)`, `h.each { … h.clear }`).
-      READ_ONLY_RECEIVER_CALLS = %i[
-        [] key? has_key? include? member? fetch dig values_at fetch_values size length count empty? any? none?
-        keys values to_a to_h dup clone freeze frozen? itself hash == != eql? equal? inspect to_s is_a? kind_of?
-        instance_of? nil? respond_to?
-      ].to_set.freeze
+      STATE_KEY = :__rigor_key_presence_guard
+      CACHE_KEY = :__rigor_key_presence_guard_rewalk
+      private_constant :STATE_KEY, :CACHE_KEY
 
-      # The nodes whose `value` a write stores: storing the receiver or the key's root somewhere else aliases it.
-      WRITE_NODES = [
-        Prism::LocalVariableWriteNode, Prism::InstanceVariableWriteNode, Prism::ClassVariableWriteNode,
-        Prism::GlobalVariableWriteNode, Prism::ConstantWriteNode, Prism::ConstantPathWriteNode, Prism::MultiWriteNode,
-        Prism::LocalVariableOrWriteNode, Prism::LocalVariableAndWriteNode, Prism::LocalVariableOperatorWriteNode,
-        Prism::InstanceVariableOrWriteNode, Prism::InstanceVariableAndWriteNode,
-        Prism::InstanceVariableOperatorWriteNode, Prism::IndexOrWriteNode, Prism::IndexAndWriteNode,
-        Prism::IndexOperatorWriteNode, Prism::CallOrWriteNode, Prism::CallAndWriteNode, Prism::CallOperatorWriteNode
-      ].to_set.freeze
+      # The re-walk's state: the file's root, the end offset of each recorded guard, and the per-file scans.
+      Walk = Struct.new(:root, :guard_ends, :defs, :frozen_constants) do
+        def enclosing_def(node)
+          self.defs ||= collect_defs(root, [])
+          offset = node.location.start_offset
+          defs.select { |d| d.location.start_offset <= offset && offset < d.location.end_offset }
+              .min_by { |d| d.location.end_offset - d.location.start_offset }
+        end
+
+        def collect_defs(node, out)
+          out << node if node.is_a?(Prism::DefNode)
+          node.compact_child_nodes.each { |child| collect_defs(child, out) }
+          out
+        end
+      end
 
       module_function
 
-      # Runs the block with guards neither recorded nor read, for the analyses whose answer leaves the method: a
-      # callee's return summary and `sig-gen`. Thread-local, so it holds under a Ractor worker too.
-      def without_guards
-        previous = Thread.current[OFF_KEY]
-        Thread.current[OFF_KEY] = true
+      # Runs the block with guards recorded and read, for the re-walk of `root`. Thread-local, so it holds under a
+      # Ractor worker too.
+      def with_guards(root)
+        previous = Thread.current[STATE_KEY]
+        Thread.current[STATE_KEY] = Walk.new(root, {})
         yield
       ensure
-        Thread.current[OFF_KEY] = previous
+        Thread.current[STATE_KEY] = previous
       end
 
-      def off? = Thread.current[OFF_KEY] == true
+      # Runs the block with guards off again: a callee's return summary, memoised for the whole run, must be the one
+      # the file's analysis reads.
+      def without_guards
+        previous = Thread.current[STATE_KEY]
+        Thread.current[STATE_KEY] = nil
+        yield
+      ensure
+        Thread.current[STATE_KEY] = previous
+      end
+
+      def active? = !Thread.current[STATE_KEY].nil?
+
+      # Whether `call.possible-nil-receiver` should withhold its report on `call_node`, whose receiver the file's
+      # analysis types `receiver_type`: true only when the guarded re-walk types that receiver as exactly
+      # `receiver_type` without `nil`. False for a file with no guard-shaped call, while an effect or flow trace
+      # records the walk, and on any failure.
+      def withholds_nil?(call_node, receiver_type, root, scope_index)
+        return false if root.nil? || active?
+        return false if Effects::Collector.active? || FlowTracer.active?
+
+        guarded_index = rewalk(root, scope_index)
+        scope = guarded_index && guarded_index[call_node]
+        return false if scope.nil?
+
+        guarded_type = with_guards(root) { scope.type_of(call_node.receiver) }
+        expected = Narrowing.narrow_non_nil(receiver_type)
+        !expected.equal?(receiver_type) && expected == guarded_type && guarded_type != receiver_type
+      rescue StandardError
+        false
+      end
+
+      # The guarded scope index of `root`, built once per file (the cache holds the last file only), or nil when the
+      # file holds no guard-shaped call.
+      def rewalk(root, scope_index)
+        cached = Thread.current[CACHE_KEY]
+        return cached.last if cached&.first.equal?(root)
+
+        index = nil
+        if guard_shaped_call?(root)
+          base = scope_index[root]
+          index = base && with_guards(root) do
+            ScopeIndexer.index(root, default_scope: base.with_isolated_side_tables)
+          end
+        end
+        Thread.current[CACHE_KEY] = [root, index]
+        index
+      end
+
+      def guard_shaped_call?(node)
+        if node.is_a?(Prism::CallNode) && PREDICATES.include?(node.name)
+          args = node.arguments&.arguments
+          return true if args&.size == 1 && address(node.receiver, args.first)
+        end
+        node.compact_child_nodes.any? { |child| guard_shaped_call?(child) }
+      end
 
       # The {KeyExpr} for `node`, or nil unless it is a local / ivar read or a chain of plain, idempotent readers
       # (no argument, block or `&.`) rooted at one. A literal key is the shape path's business and answers nil.
@@ -138,10 +195,11 @@ module Rigor
 
       def closed_shape?(type) = type.is_a?(Type::HashShape) && type.closed? && !type.pairs.empty?
 
-      # The truthy edge of `receiver.key?(key)` with a non-literal key: `scope` with the guard recorded, or nil when
-      # the guard does not apply.
+      # The truthy edge of `receiver.key?(key)` with a non-literal key, inside the re-walk: `scope` with the guard
+      # recorded, or nil when the guard does not apply.
       def record(call_node, scope)
-        return nil if off?
+        walk = Thread.current[STATE_KEY]
+        return nil if walk.nil?
 
         args = call_node.arguments&.arguments
         return nil unless args&.size == 1
@@ -149,32 +207,40 @@ module Rigor
         guard = address(call_node.receiver, args.first)
         return nil if guard.nil?
         return nil unless receiver_type?(scope.type_of(call_node.receiver))
+        return nil unless Scan.eligible?(walk, call_node, guard)
 
+        walk.guard_ends[guard] = call_node.location.end_offset
         scope.with_indexed_narrowing(*guard, PRESENT)
       end
 
-      # `type`, the un-narrowed answer of the read `node`, with the miss `nil` dropped when a guard on the same
-      # receiver and structurally the same key holds in `scope` and no value of the receiver can be `nil` (the read
-      # cannot tell a value's own `nil` from the miss). Nil when no guard applies or nothing would change.
+      # `type`, the un-narrowed answer of the read `node`, with the miss `nil` dropped when, inside the re-walk, a
+      # guard on the same receiver and structurally the same key holds in `scope`, nothing between the guard and the
+      # read may have changed it ({.intervening?}), and no value of the receiver can be `nil` (the read cannot tell a
+      # value's own `nil` from the miss). Nil when no guard applies or nothing would change.
       def guarded_read(node, type, scope)
-        return nil unless node.name == :[] && guarded?(node, scope)
+        walk = Thread.current[STATE_KEY]
+        guard = walk && held_guard(node, scope)
+        return nil if guard.nil? || Scan.intervening?(walk, guard, node)
 
         receiver_type = scope.type_of(node.receiver)
-        return nil unless receiver_type?(receiver_type)
-
-        shapes = receiver_type.is_a?(Type::Union) ? receiver_type.members : [receiver_type]
-        return nil if shapes.any? { |shape| shape.pairs.each_value.any? { |value| value_may_be_nil?(value) } }
+        return nil unless receiver_type?(receiver_type) && nil_free_values?(receiver_type)
 
         narrowed = Narrowing.narrow_non_nil(type)
         narrowed == type || narrowed.is_a?(Type::Bot) ? nil : narrowed
       end
 
-      def guarded?(node, scope)
-        return false if off? || !any_guard?(scope) || !node.block.nil?
+      # The guard `scope` holds at the address of the blockless single-key read `node`, or nil.
+      def held_guard(node, scope)
+        return nil if !node.block.nil? || !any_guard?(scope)
 
         args = node.arguments&.arguments
         guard = args&.size == 1 ? address(node.receiver, args.first) : nil
-        !guard.nil? && !scope.indexed_narrowing(*guard).nil?
+        guard && !scope.indexed_narrowing(*guard).nil? ? guard : nil
+      end
+
+      def nil_free_values?(receiver_type)
+        shapes = receiver_type.is_a?(Type::Union) ? receiver_type.members : [receiver_type]
+        shapes.none? { |shape| shape.pairs.each_value.any? { |value| value_may_be_nil?(value) } }
       end
 
       # Whether `scope` holds any guard. Walks the keys without allocating, so the common no-guard case costs a size
@@ -201,19 +267,20 @@ module Rigor
       def invalidate_after_call(call_node, scope)
         return scope unless call_node.is_a?(Prism::CallNode) && any_guard?(scope)
 
-        drop_guards(scope) { |guard| breaks?(call_node, guard) }
+        drop_guards(scope) { |guard| Scan.breaks?(call_node, triple(guard)) }
       end
 
       # Drops the guards a write aliases: one whose value holds the guarded receiver or the key's root variable
       # (`g = h`, `j = k`, `@cache = [MAP]`), since the copy may then be mutated or rebound out of sight.
       def invalidate_after_write(node, scope)
-        return scope unless WRITE_NODES.include?(node.class) && any_guard?(scope)
+        return scope unless Scan::WRITE_NODES.include?(node.class) && any_guard?(scope)
 
-        value = node.value
         drop_guards(scope) do |guard|
-          mentions?(value, [guard.receiver_kind, guard.receiver_name]) || mentions?(value, guard.key.root)
+          Scan.aliases_guard?(node, triple(guard))
         end
       end
+
+      def triple(guard) = [guard.receiver_kind, guard.receiver_name, guard.key]
 
       def drop_guards(scope)
         result = scope
@@ -223,75 +290,6 @@ module Rigor
           result = result.without_indexed_narrowing(guard.receiver_kind, guard.receiver_name, guard.key)
         end
         result
-      end
-
-      # A guard ends at:
-      # - a call that passes the receiver as an argument (or `self`, when an instance variable is involved), or whose
-      #   block mentions the receiver or the key's root;
-      # - a call on the receiver other than a blockless read ({READ_ONLY_RECEIVER_CALLS});
-      # - a call rooted at the key's variable that does not re-read the key chain (`prop.reload`, `prop.x = 1`);
-      # - a call on `self` when the receiver or the key is an instance variable.
-      # Passing the key's root as an argument (`overridden?(prop)`) does not end it, as it does not end a method-chain
-      # narrowing.
-      def breaks?(call_node, guard)
-        receiver_ref = [guard.receiver_kind, guard.receiver_name]
-        return true if escapes_through_operands?(call_node, receiver_ref, guard.key.root)
-
-        receiver = call_node.receiver
-        if receiver.nil? || receiver.is_a?(Prism::SelfNode)
-          return guard.receiver_kind == :ivar || guard.key.root.first == :ivar
-        end
-        return true if receiver_ref(receiver) == receiver_ref && !read_only_call?(call_node)
-
-        touches_key_root?(call_node, guard.key)
-      end
-
-      def escapes_through_operands?(call_node, receiver_ref, key_root)
-        args = call_node.arguments
-        return true if args && mentions?(args, receiver_ref)
-        # `other.mutate_owner(self)` hands on every instance variable.
-        return true if args && (receiver_ref.first == :ivar || key_root.first == :ivar) && mentions_self?(args)
-
-        block = call_node.block
-        return false if block.nil?
-
-        mentions?(block, receiver_ref) || (block.is_a?(Prism::BlockNode) && mentions?(block, key_root))
-      end
-
-      def read_only_call?(call_node) = call_node.block.nil? && READ_ONLY_RECEIVER_CALLS.include?(call_node.name)
-
-      def touches_key_root?(call_node, key)
-        return false unless chain_root(call_node.receiver) == key.root
-
-        own = key_expr(call_node)
-        own.nil? || !key.prefixed_by?(own)
-      end
-
-      # The `[kind, name]` of the local / ivar a receiver chain (`a.b.c`, `a[0].b`) starts from, or nil.
-      def chain_root(node)
-        node = node.receiver while node.is_a?(Prism::CallNode) && node.receiver
-        case node
-        when Prism::LocalVariableReadNode then [:local, node.name]
-        when Prism::InstanceVariableReadNode then [:ivar, node.name]
-        end
-      end
-
-      def mentions_self?(node)
-        node.is_a?(Prism::SelfNode) || node.compact_child_nodes.any? { |child| mentions_self?(child) }
-      end
-
-      # Whether `node` holds a read of the variable `ref` in a position that may hand it on: anywhere but as the
-      # receiver of a blockless read ({READ_ONLY_RECEIVER_CALLS}), so `h[k]` and `MAP.key?(x)` do not count while
-      # `zap(h)`, `[h]` and `h.delete(k)` do.
-      def mentions?(node, ref)
-        return false if node.nil?
-        return receiver_ref(node) == ref if receiver_ref(node)
-
-        if node.is_a?(Prism::CallNode) && receiver_ref(node.receiver) == ref && read_only_call?(node)
-          return [node.arguments, node.block].any? { |part| mentions?(part, ref) }
-        end
-
-        node.compact_child_nodes.any? { |child| mentions?(child, ref) }
       end
     end
   end

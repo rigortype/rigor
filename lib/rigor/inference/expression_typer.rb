@@ -1824,18 +1824,12 @@ module Rigor
       end
 
       # Issue #1703 — `H[k]` under a true `H.key?(k)` with a non-literal key drops the miss `nil`
-      # ({KeyPresenceGuard.guarded_read}). The read is marked optimistic, and {OptimisticOrigin.resolve} derives
-      # the mark through every value computed from it, so the certainty consumers (`flow.always-truthy-condition`,
-      # the `&&` / `||` polarity gate, branch elision) decline a verdict folded from it: the narrowing exists to
-      # silence nil-receiver reports, not to prove a defensive check dead.
+      # ({KeyPresenceGuard.guarded_read}). Only inside the guarded re-walk `call.possible-nil-receiver` runs to
+      # decide whether to withhold a report; the analysis every other rule reads never records a guard.
       def key_guarded_type(node, type)
         return type unless node.name == :[]
 
-        narrowed = KeyPresenceGuard.guarded_read(node, type, scope)
-        return type if narrowed.nil?
-
-        scope.record_optimistic_origin(node, OptimisticOrigin::KEY_PRESENCE_GUARD)
-        narrowed
+        KeyPresenceGuard.guarded_read(node, type, scope) || type
       end
 
       # Issue #1172 — the nil-collapsing predicates (`nil?`, `!`, `x == nil`, …) answer a `Constant` that
@@ -2976,11 +2970,14 @@ module Rigor
       # not observable on the body scope, so it does need its own memo-key slot. It is dropped for a def
       # that cannot reach a `yield` — nearly all of them — which keeps the key shape constant for the
       # methods the memo actually carries and confines the extra dimension to yielding callees.
-      # Issue #1703 — a callee's return summary is computed with `key?` guards off ({KeyPresenceGuard.without_guards}):
-      # the guard's narrowing and its optimistic mark live in one method body, and a narrowed type published across
-      # the boundary would let a caller's defensive `nil?` check fold.
+      # Issue #1703 — inside the guarded re-walk a callee's return summary is still computed with `key?` guards off
+      # ({KeyPresenceGuard.without_guards}): summaries are memoised for the whole run, and one computed with a guard
+      # would reach the analysis every rule reads.
       def infer_user_method_return(def_node, receiver, arg_types, self_fold_safe: false, yield_type: nil)
         return nil if def_node.body.nil?
+        unless KeyPresenceGuard.active?
+          return infer_user_method_return_unguarded(def_node, receiver, arg_types, self_fold_safe, yield_type)
+        end
 
         KeyPresenceGuard.without_guards do
           infer_user_method_return_unguarded(def_node, receiver, arg_types, self_fold_safe, yield_type)

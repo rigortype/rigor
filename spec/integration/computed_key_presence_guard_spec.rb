@@ -85,6 +85,7 @@ RSpec.describe "a key? guard with a non-literal key narrows the index read (#170
         MAP = { integer: { type: :integer }, string: { type: :string } }.freeze
         NILS = { integer: { type: :integer }, none: nil }.freeze
         OPEN = { integer: { type: :integer }, string: { type: :string } }
+        LOOSE = { integer: { type: :integer }, string: { type: :string } }
 
         def key_rebound(prop)
           k = prop.column_type
@@ -182,8 +183,159 @@ RSpec.describe "a key? guard with a non-literal key narrows the index read (#170
           end
         end
 
+        def aliased_before_guard(name)
+          h = { a: { x: 1 }, b: { x: 2 } }
+          g = h
+          k = name.to_sym
+          if h.key?(k)
+            g.delete(k)
+            r = h[k]
+            r[:y] = 1 # fires
+          end
+        end
+
+        def purged_in_condition(name)
+          h = { a: { x: 1 }, b: { x: 2 } }
+          k = name.to_sym
+          if h.key?(k) && purge(h, k)
+            r = h[k]
+            r[:y] = 1 # fires
+          end
+        end
+
+        def key_aliased_before_guard(name)
+          k = name.dup
+          j = k
+          h = { "a" => { x: 1 }, "b" => { x: 2 } }
+          if h.key?(k)
+            j << "zz"
+            r = h[k]
+            r[:y] = 1 # fires
+          end
+        end
+
+        def key_rebound_in_loop(names)
+          h = { a: { x: 1 }, b: { x: 2 } }
+          k = names.first.to_sym
+          if h.key?(k)
+            names.each do |n|
+              r = h[k]
+              r[:y] = 1 # fires
+              k = n.to_sym
+            end
+          end
+        end
+
+        def deleted_before_rescue(name)
+          h = { a: { x: 1 }, b: { x: 2 } }
+          k = name.to_sym
+          if h.key?(k)
+            begin
+              h.delete(k)
+              raise "x"
+            rescue StandardError
+              r = h[k]
+              r[:y] = 1 # fires
+            end
+          end
+        end
+
+        def unfrozen_constant(name)
+          k = name.to_sym
+          if LOOSE.key?(k)
+            r = LOOSE[k]
+            r[:y] = 1 # fires
+          end
+        end
+
         def purge(h, k) = h.delete(k)
         def refresh; end
+      end
+    RUBY
+  end
+
+  # Every shape a value read under the guard can flow through: the analysis the certainty rules read is the one
+  # without the guard, so none of them reaches a verdict the guard would have made. Each `if` / `case` here is live.
+  let(:merges) do
+    <<~RUBY
+      class Mapper
+        STR = { a: "x", b: "y" }.freeze
+        NUM = { a: 1, b: 2 }.freeze
+
+        def ternary(k, f)
+          if STR.key?(k)
+            v = f ? STR[k] : "z"
+            return 1 if v == nil
+            v = if f then STR[k] else "w" end
+            return 2 if v == nil
+            v = begin
+              STR[k]
+            end
+            return 3 if v == nil
+            v = (1; STR[k])
+            return 4 if v == nil
+            v = (STR[k] rescue "r")
+            return 5 if v == nil
+            v
+          end
+        end
+
+        def containers(k)
+          if STR.key?(k)
+            arr = [STR[k]]
+            return 1 if arr[0] == nil
+            return 2 if arr.first == nil
+            h = { v: STR[k] }
+            return 3 if h[:v] == nil
+            return 4 if h.fetch(:v) == nil
+            h
+          end
+        end
+
+        def writes(k)
+          if NUM.key?(k) && STR.key?(k)
+            n = 0
+            n += NUM[k].to_i
+            return 1 if n == 0
+            v = nil
+            v ||= STR[k]
+            return 2 if v == nil
+            $gq = STR[k]
+            return 3 if $gq == nil
+            v
+          end
+        end
+
+        def clauses(k)
+          if STR.key?(k)
+            v = STR[k]
+            a = case v
+                when String then 1
+                when NilClass then 2
+                end
+            b = case v
+                in String then 1
+                in nil then 2
+                end
+            c = case v
+                when String then 1
+                else 2
+                end
+            [a, b, c]
+          end
+        end
+
+        def aliased_before_guard(name, f)
+          h = { a: "x", b: "y" }
+          g = h
+          k = name.to_sym
+          if h.key?(k)
+            g.delete(k)
+            v = f ? h[k] : "z"
+            return :reachable if v == nil
+            v
+          end
+        end
       end
     RUBY
   end
@@ -269,6 +421,10 @@ RSpec.describe "a key? guard with a non-literal key narrows the index read (#170
 
   it "does not let a value computed from the narrowed read fold a defensive check into a certainty verdict" do
     expect(diagnostics(defensive)).to eq([])
+  end
+
+  it "reaches no certainty or clause verdict through any value computed from a guarded read" do
+    expect(diagnostics(merges)).to eq([])
   end
 
   it "does not publish the narrowed read in a method's return summary" do

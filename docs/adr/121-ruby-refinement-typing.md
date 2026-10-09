@@ -61,14 +61,15 @@ the refinement replaces: a refined `String#upcase` must not fold, a refined `map
 fold per element, a top-level `def` must not bind ahead of a refinement of `Object`, and a plugin
 models the class's own method.
 
-Precedence follows `refinements.rdoc` § Method Lookup. Walk the receiver's ancestors from the most
-derived, singleton class and prepended modules included. At each ancestor, the latest in-effect module
-that refines the name for that ancestor wins; otherwise the ancestor's own method, if any, wins;
-otherwise move on. So a refinement beats its own class's `def`, and a method on a more derived
-ancestor beats a refinement of a less derived one. "Defines the method" is read from RBS and project
-`def`s. Core RBS sometimes redeclares an inherited method on a subclass, and the walk then stops there
-and declines the refinement: a known imprecision, in the declining direction for refinements of
-`Object`, `Kernel`, `Comparable` or `Numeric`. A union receiver is decided per member, and a `Dynamic`
+Precedence follows `refinements.rdoc` § Method Lookup. Walk the receiver's classes from the most
+derived, the singleton class first. At each class, the latest in-effect module that refines the name
+for that class wins; otherwise its prepended modules, its own method and its included modules answer
+in that order; otherwise move on. A refinement of `C` therefore beats a module prepended to `C`
+(probed on Ruby 4.0.5), and a refinement of a module is decided where that module sits. A method
+on a more derived class beats a refinement of a less derived one. "Defines the method" is read from
+RBS and project `def`s. Core RBS sometimes redeclares an inherited method on a subclass, and the walk
+then stops there and declines the refinement: a known imprecision, in the declining direction for
+refinements of `Object`, `Kernel`, `Comparable` or `Numeric`. A union receiver is decided per member, and a `Dynamic`
 receiver stays `Dynamic`.
 
 ### WD3 — What the arm returns
@@ -91,8 +92,9 @@ The arm types `recv.m`, operators and implicit-self calls. `send`, `public_send`
 refinements (CRuby `test/ruby/test_refinement.rb`: `test_send_should_use_refinements`,
 `test_public_send_should_use_refinements`, `test_symbol_proc`). When the name they reach is refined in
 effect for the receiver, they answer `Dynamic[top]` and skip argument checks; typing them through the
-arm is deferred. Introspection (`method`, `methods`, `respond_to?`) ignores refinements in Ruby and
-keeps today's answer.
+arm is deferred. `respond_to?` and `method` honour refinements too
+(`test_respond_to_should_use_refinements`; probed on Ruby 4.0.5), so for a refined name they answer
+`Dynamic[top]` and never fold to `false`. Only `methods` ignores refinements and keeps today's answer.
 
 ### WD5 — Plugins declare callee-activated refinements
 
@@ -123,11 +125,13 @@ analysis-cache identity (`lib/rigor/bleeding_edge.rb`), which costs more than th
 
 - Positive: refined calls stop producing argument and undefined-method findings, and their types stop
   propagating the replaced method's return.
-- Negative: `discovered_refinements` already travels in the seed bundle, but refine-body def handles
-  do not; a `(module, class, method) → def` table is new state for the warm cache to carry. A gem refinement types as `Dynamic[top]` until a plugin or
+- Negative: `discovered_refinements` already travels in the seed bundle, but refine-body def
+  handles do not; a `(module, class, method) → def` table is new state for the warm cache to
+  carry. A gem refinement types as `Dynamic[top]` until a plugin or
   RBS can say more.
 - Carry-over: plugin-declared refined-call return types (for activerecord-refined's column nodes),
-  typed indirect calls, the precise `super` chain, and a Proc refined after binding are open. #1669 decides the former.
+  typed indirect calls, the precise `super` chain, and a Proc refined after binding are open. #1669
+  decides the first.
 
 ## Relationship to other ADRs
 

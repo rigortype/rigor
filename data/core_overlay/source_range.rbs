@@ -1,19 +1,26 @@
 # Rigor core overlay — supplemental core signatures.
 #
-# --- Thread::Backtrace::Location#source_range and Ruby::SourceRange (Ruby 4.1) ---
+# --- Ruby::SourceRange and the #source_range readers (Ruby 4.1) ---
 #
-# Issue #1691. Ruby 4.1 adds `Thread::Backtrace::Location#source_range`
-# (`vm_backtrace.c`, call-seq `location.source_range -> Ruby::SourceRange`)
-# and the `Ruby::SourceRange` class it answers (`proc.c`), whose readers
-# are, per their call-seqs:
+# Issue #1691. Ruby 4.1 adds the `Ruby::SourceRange` class (`proc.c`) and
+# four methods that answer one:
+#
+#   Thread::Backtrace::Location#source_range -> Ruby::SourceRange  (vm_backtrace.c)
+#   Proc#source_range, Method#source_range,
+#   UnboundMethod#source_range -> Ruby::SourceRange or nil          (proc.c)
+#
+# NEWS lists only the backtrace reader; `proc.c` defines the other three
+# alongside the class. They answer `nil` for a proc or method with no Ruby
+# source (a C method, a `Symbol#to_proc`). The class's readers are, per
+# their call-seqs:
 #
 #   path -> String               absolute_path -> String or nil
 #   start_line -> Integer        start_column -> Integer
 #   end_line -> Integer          end_column -> Integer
 #
 # `Ruby::SourceRange` has no allocator (`new` is undefined), so no
-# constructor is declared. No rbs release through 4.2 declares either, so
-# correct 4.1 code reported `call.undefined-method`.
+# constructor is declared. No rbs release through 4.2 declares any of
+# this, so correct 4.1 code reported `call.undefined-method`.
 #
 # TEMPORARY: delete this file once the rbs release Rigor bundles declares
 # the methods upstream.
@@ -25,8 +32,12 @@
 # for the whole class (see `process.rbs`). `Ruby::SourceRange` is declared
 # without a superclass, so a later upstream `< Object` reopening agrees.
 module RigorCoreOverlay
-  module Ruby41BacktraceLocation
+  module Ruby41LocationSourceRange
     def source_range: () -> Ruby::SourceRange
+  end
+
+  module Ruby41CallableSourceRange
+    def source_range: () -> Ruby::SourceRange?
   end
 
   module Ruby41SourceRange
@@ -45,7 +56,19 @@ module RigorCoreOverlay
 end
 
 class Thread::Backtrace::Location
-  include RigorCoreOverlay::Ruby41BacktraceLocation
+  include RigorCoreOverlay::Ruby41LocationSourceRange
+end
+
+class Proc
+  include RigorCoreOverlay::Ruby41CallableSourceRange
+end
+
+class Method
+  include RigorCoreOverlay::Ruby41CallableSourceRange
+end
+
+class UnboundMethod
+  include RigorCoreOverlay::Ruby41CallableSourceRange
 end
 
 module Ruby

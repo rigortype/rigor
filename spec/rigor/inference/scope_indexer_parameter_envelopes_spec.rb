@@ -54,6 +54,18 @@ RSpec.describe "ScopeIndexer parameter envelopes (#992)" do
       .to eq(%i[instance f] => opaque)
   end
 
+  # Issue #1691 — Ruby 4.1's `autoload_relative`, like `autoload`, names a constant rather than a method.
+  it "leaves the envelope table alone for an autoload or autoload_relative call" do
+    table = envelopes(<<~RUBY)
+      class A
+        def f(a) = a
+        autoload :Lazy, "lazy"
+        autoload_relative :Later, "later"
+      end
+    RUBY
+    expect(table.fetch("A")).to eq(%i[instance f] => [1, 1, false])
+  end
+
   it "marks modules, and classes whose method table is rewritten beyond what a literal names" do
     table = envelopes(<<~RUBY)
       module M

@@ -391,6 +391,21 @@ module Rigor
       end
       private_class_method :plain_constant_path?
 
+      # {read_name} for prebuilt, frozen `"kind:name"` keys: a caller that files the same keys on every read
+      # (a resolution chain's hook edges, #1641) builds them once and adds them here without a String apiece.
+      def read_keys(keys)
+        accumulator = Thread.current[KEY]
+        return if accumulator.nil?
+
+        captures = Thread.current[CAPTURE_KEY]
+        open = captures && !captures.empty?
+        missing = accumulator.missing
+        keys.each do |entry|
+          tee_missing(captures, entry) if open
+          missing.add(entry)
+        end
+      end
+
       # The miss-only spelling of {read_name}: a cross-file lookup of `name` (kind `:method` / `:class` /
       # `:toplevel` / …) that resolved to nothing. Kept as the name the internal spec's negative-edge
       # contract uses.

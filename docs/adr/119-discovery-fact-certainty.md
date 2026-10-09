@@ -245,6 +245,12 @@ and `docs/internal-spec/inference-engine.md:670`. This ADR relies on the followi
   read (no `unknown_for:`, RC:206); under `unknown_for:` the entries after it are filed as for any
   other answer (#1637). A master answer records every class that order lists;
   `spec/rigor/analysis/unsettled_chain_incremental_spec.rb` pins warm equals cold. A per-consumer de-duplication of those edges is #1590.
+  Errata (2026-10-09, #1641): "no negative edge" left a new project file that gives an external entry a hook
+  (`module Comparable; def self.included(base) = base.prepend(P); end`) re-checking nothing, while the cold read
+  declines on it, so v0.4.1's warm run kept a diagnostic the cold run withholds. `record_beyond` now also files,
+  once per consumer and chain, the negative method edge `method:Name.hook` for every `Relevance::HOOKS` name of
+  every candidate name of every external entry on the chain; a file adding a non-hook method re-checks nothing,
+  and the negative class edge stays unfiled. `spec/rigor/analysis/external_hook_incremental_spec.rb` pins it.
 - **What it leaves open, and this ADR does not reopen:** #1570 (a one-fork disagreement whose readers
   keep master's answer; `ruby_order_resolution_spec.rb:142–147` pins it with a "flip this when ADR-119
   PR C" comment), #1572 (an external definer ahead of a project one), #1573 (a repeated `extend`'s

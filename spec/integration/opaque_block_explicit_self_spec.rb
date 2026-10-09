@@ -24,10 +24,12 @@ RSpec.describe "an explicit self call in an opaque block (#1717)" do
     Dir.mktmpdir("rigor-opaque-block-self-") { |dir| Dir.chdir(dir) { example.run } }
   end
 
+  # `source` is one file's text, or a `{ "name.rb" => text }` hash for several.
   def undefined_messages(source, rbs, plugin_class: nil)
     FileUtils.mkdir_p("lib")
     FileUtils.mkdir_p("sig")
-    File.write(File.join("lib", "demo.rb"), source)
+    files = source.is_a?(Hash) ? source : { "demo.rb" => source }
+    files.each { |name, text| File.write(File.join("lib", name), text) }
     File.write(File.join("sig", "demo.rbs"), rbs)
     settings = { "paths" => %w[lib], "signature_paths" => %w[sig], "workers" => 0 }
     settings["plugins"] = ["rigor-opaqueselftest"] if plugin_class
@@ -132,6 +134,75 @@ RSpec.describe "an explicit self call in an opaque block (#1717)" do
 
         Registry.add(:x) do
           define_method(:dm) { self.zap3 }
+        end
+      end
+    RUBY
+    expect(messages).to be_empty
+  end
+
+  # The exemption has a mark of its own: #316's opaque mark also gates `Scope#bindable_top_level_def_for`, so
+  # setting THAT mark on a value-position block declined a cross-file top-level def there and the call fell
+  # through to `Kernel#format` / `Kernel#select` — three new false positives on correct code.
+  it "leaves a cross-file top-level def bound in a value-position block" do
+    messages = undefined_messages(
+      {
+        "helpers.rb" => <<~RUBY,
+          def format(x) = 42
+          def select(*a) = "s"
+        RUBY
+        "script.rb" => <<~RUBY
+          def report(rows)
+            puts(rows.map { |r| format(r).bit_length })
+          end
+          File.write("out", [1, 2].map { |r| format(r).digits }.inspect)
+          puts [1].map { select(1).upcase }
+        RUBY
+      },
+      registry_rbs
+    )
+    expect(messages).to be_empty
+  end
+
+  # The indexer's walk drops the mark at a `def` inside an unentered block, as the evaluator's fresh body
+  # scope does: the method's `self` is the class's instance again.
+  it "keeps checking a def body written inside a value-position block" do
+    messages = undefined_messages(<<~RUBY, registry_rbs)
+      module Registry
+        def self.add(name, &block) = nil
+      end
+
+      class Widget
+        def run
+          puts(Registry.add(:y) { def h2 = self.zap22 })
+        end
+      end
+    RUBY
+    expect(messages).to eq(["undefined method `zap22' for Widget"])
+  end
+
+  # A class-creating meta call's body runs on the new class whatever encloses it, so its `self` is known.
+  it "keeps checking a Class.new body" do
+    messages = undefined_messages(<<~RUBY, "#{registry_rbs}class Klass\nend\n")
+      Klass = Class.new do
+        self.zap9
+      end
+    RUBY
+    expect(messages).to eq(["undefined method `zap9' for singleton(Klass)"])
+  end
+
+  # The indexer's narrowing of a value-position `define_method` keeps the unknown mark when the lexical
+  # `self` it reads is itself unknown.
+  it "leaves a value-position define_method narrowed off an unknown enclosing self exempt" do
+    messages = undefined_messages(<<~RUBY, registry_rbs)
+      module Registry
+        def self.add(name, &block) = nil
+      end
+
+      class Widget
+        def run = nil
+
+        Registry.add(:x) do
+          puts(define_method(:dm) { self.zap3 })
         end
       end
     RUBY

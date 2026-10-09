@@ -26,7 +26,7 @@ module Rigor
                 :indexed_narrowings, :method_chain_narrowings,
                 :declaration_sourced, :published_constant_sourced,
                 :source_path, :discovery, :struct_fold_safe_locals,
-                :opaque_block_self, :singleton_class_body, :lexical_nesting,
+                :opaque_block_self, :block_self_unknown, :singleton_class_body, :lexical_nesting,
                 :dynamic_origins, :local_origins, :ivar_origins,
                 :void_origins, :plugin_typed_calls,
                 :optimistic_origins, :optimistic_locals, :optimistic_ivars,
@@ -322,6 +322,7 @@ module Rigor
       source_path: nil,
       struct_fold_safe_locals: EMPTY_FOLD_SAFE,
       opaque_block_self: false,
+      block_self_unknown: false,
       singleton_class_body: false,
       lexical_nesting: nil,
       dynamic_origins: {}.compare_by_identity,
@@ -353,6 +354,7 @@ module Rigor
       @source_path = source_path
       @struct_fold_safe_locals = struct_fold_safe_locals
       @opaque_block_self = opaque_block_self
+      @block_self_unknown = block_self_unknown
       @singleton_class_body = singleton_class_body
       @lexical_nesting = lexical_nesting
       @dynamic_origins = dynamic_origins
@@ -487,21 +489,19 @@ module Rigor
     end
 
     # Issue #1717 — installs the `self` a block body runs with when the engine KNOWS it: an ADR-16
-    # `block_as_methods:` match, `define_method`, or a `Class.new` / `refine` body (#319). The narrowing models
-    # the block's `self`, so the body is no longer an opaque block ({#entering_opaque_block}) and an explicit
-    # `self.m` there keeps being checked against `type` — unless `keeps_opaque` says the narrowing was read off
-    # an enclosing `self` that is itself unmodelled ({#block_self_narrowing_opaque?}). A nil `type` narrows
-    # nothing and keeps the mark.
-    def with_block_self_type(type, keeps_opaque: false)
-      rebuild(self_type: type, opaque_block_self: type.nil? ? @opaque_block_self : keeps_opaque)
+    # `block_as_methods:` match, `define_method`, or a `Class.new` / `refine` body (#319). Like
+    # {#with_self_type} it leaves the #316 mark alone; it also sets {#block_self_unknown?} to `keeps_unknown`,
+    # which a caller passes from {#block_self_narrowing_unknown?}. A nil `type` narrows nothing and keeps it.
+    def with_block_self_type(type, keeps_unknown: false)
+      rebuild(self_type: type, block_self_unknown: type.nil? ? @block_self_unknown : keeps_unknown)
     end
 
     # Issue #1717 — whether a block-self narrowing for `call_node`, asked from this (the CALLER's) scope, is
-    # built on an unmodelled `self`. `define_method` and an implicit-receiver `block_as_methods:` match read
-    # the lexical `self`, and inside an opaque block that is the enclosing method's, not the block's; a
-    # narrowing keyed on an explicit receiver (`Grape::API.namespace do`) does not depend on it.
-    def block_self_narrowing_opaque?(call_node)
-      return false unless @opaque_block_self
+    # built on an unknown `self`. `define_method` and an implicit- or `self`-receiver `block_as_methods:` match
+    # read the lexical `self`, which inside a block of unknown `self` is the enclosing method's, not the
+    # block's; a narrowing keyed on an explicit receiver (`Grape::API.namespace do`) does not depend on it.
+    def block_self_narrowing_unknown?(call_node)
+      return false unless @block_self_unknown
 
       receiver = call_node.receiver
       receiver.nil? || receiver.is_a?(Prism::SelfNode)
@@ -548,27 +548,33 @@ module Rigor
     # `self`-rebinding DSL — RSpec example groups, `Class.new { … }`, Rake, Sinatra) is indistinguishable from
     # `Array#each` without knowing the callee. The flag is set at every block entry that leaves `self_type`
     # unnarrowed and is inherited by every scope derived inside the block; it never leaks past the block,
-    # because `eval_call` returns the caller's scope unchanged. A block whose `self` the engine does narrow
-    # clears it through {#with_block_self_type}. While it holds, `self_type` is still the ENCLOSING `self`, so
-    # types keep flowing from it; what the mark withdraws is the confidence to call a method missing there
-    # (`call.undefined-method` on an explicit `self.m`, issue #1717).
+    # because `eval_call` returns the caller's scope unchanged.
+    #
+    # Entering also sets {#block_self_unknown?} (issue #1717), the separate mark `call.undefined-method` reads.
     def entering_opaque_block
-      return self if @opaque_block_self
+      return self if @opaque_block_self && @block_self_unknown
 
-      rebuild(opaque_block_self: true)
-    end
-
-    # Issue #1717 — the inverse, for a `def` / `class` / `module` body the per-node scope index reaches inside
-    # a block the evaluator did not enter. The evaluator starts such a body from a fresh scope, which never
-    # carries the mark; the indexer's walk inherits its parent's scope and has to drop it explicitly.
-    def leaving_opaque_block
-      return self unless @opaque_block_self
-
-      rebuild(opaque_block_self: false)
+      rebuild(opaque_block_self: true, block_self_unknown: true)
     end
 
     # True when this scope sits inside a block whose `self` is unmodelled ({#entering_opaque_block}).
     def opaque_block_self? = @opaque_block_self
+
+    # Issue #1717 — true when this scope sits in a block whose `self` the engine does not know, so an explicit
+    # `self.m` there is no evidence `m` is missing: the yielding method may `instance_exec` the block on another
+    # object. Read ONLY by `call.undefined-method`'s explicit-`self` exemption, and kept apart from
+    # {#opaque_block_self?} so that mark's reach (the top-level-def bind gate) is untouched. Set with
+    # {#entering_opaque_block} on the evaluator's block entries and by the indexer's walk of an unentered block
+    # ({#with_block_self_unknown}); cleared where a block's `self` is narrowed ({#with_block_self_type}) and, on
+    # the indexer's walk, at a `def` / `class` / `module` body, which the evaluator starts from a fresh scope.
+    def block_self_unknown? = @block_self_unknown
+
+    # Issue #1717 — sets {#block_self_unknown?} to `flag`, leaving every other field (the #316 mark included).
+    def with_block_self_unknown(flag)
+      return self if @block_self_unknown == flag
+
+      rebuild(block_self_unknown: flag)
+    end
 
     # Issue #963 — marks the body of a `class << ...` as such. Inside it `self` is the SINGLETON class, which
     # Rigor models with the same `Singleton[X]` carrier a `class X` body gets, so the carrier alone cannot say
@@ -1997,6 +2003,7 @@ module Rigor
       source_path: @source_path,
       struct_fold_safe_locals: @struct_fold_safe_locals,
       opaque_block_self: @opaque_block_self,
+      block_self_unknown: @block_self_unknown,
       singleton_class_body: @singleton_class_body,
       lexical_nesting: @lexical_nesting,
       dynamic_origins: @dynamic_origins,
@@ -2025,6 +2032,7 @@ module Rigor
         source_path: source_path,
         struct_fold_safe_locals: struct_fold_safe_locals,
         opaque_block_self: opaque_block_self,
+        block_self_unknown: block_self_unknown,
         singleton_class_body: singleton_class_body,
         lexical_nesting: lexical_nesting,
         dynamic_origins: dynamic_origins,
@@ -2057,7 +2065,8 @@ module Rigor
       result.freeze
     end
 
-    def build_joined_scope(joined_locals, joined_ivars, joined_cvars, joined_globals, other)
+    # One keyword per Scope field, each with its join rule beside it; the size is the field count.
+    def build_joined_scope(joined_locals, joined_ivars, joined_cvars, joined_globals, other) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
       self.class.new(
         environment: @environment,
         locals: joined_locals.freeze,
@@ -2105,6 +2114,8 @@ module Rigor
         # block entry by `entering_opaque_block` and inherited through `rebuild`), so both arms usually carry
         # the same value and the `||` is that value.
         opaque_block_self: @opaque_block_self || other.opaque_block_self,
+        # Issue #1717 — the same body property, and `||` keeps the exemption it grants (the FP-safe side).
+        block_self_unknown: @block_self_unknown || other.block_self_unknown,
         # Issue #963 — a body property like the two above, so both arms of an in-body merge carry the identical
         # value and the `||` is that value. `||` is also the safe direction on its own terms: keeping the mark
         # declines the `define_method` narrowing, which is the pre-#963 answer.

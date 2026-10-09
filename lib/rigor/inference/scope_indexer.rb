@@ -9928,11 +9928,12 @@ module Rigor
       SELF_OPENING_BODIES = [Prism::DefNode, Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode].freeze
       private_constant :SELF_OPENING_BODIES
 
-      # Issue #1717 — a `def` / `class` / `module` body opens its own `self`, so the opaque-block mark of an
-      # enclosing unentered block stops at it ({Scope#leaving_opaque_block}), as the evaluator's fresh body
-      # scope does. Every other node hands its children the scope as is.
+      # Issue #1717 — a `def` / `class` / `module` body opens its own `self`, so an enclosing unentered block's
+      # unknown-`self` mark ({Scope#block_self_unknown?}) stops at it, as the evaluator's fresh body scope does.
+      # Every other node hands its children the scope as is.
       def propagate_children(node, table, current_scope)
-        child_scope = SELF_OPENING_BODIES.include?(node.class) ? current_scope.leaving_opaque_block : current_scope
+        child_scope =
+          SELF_OPENING_BODIES.include?(node.class) ? current_scope.with_block_self_unknown(false) : current_scope
         node.rigor_each_child { |child| propagate(child, table, child_scope) }
       end
 
@@ -9992,10 +9993,11 @@ module Rigor
           else
             LastLine.block_entry(FreshFrameBlocks.closure_entry(current_scope, block, node), block, node)
           end
-        # Issue #1717 — an unnarrowed body is an opaque block (#316) here too, as on the evaluator's entry.
-        return entry.entering_opaque_block unless narrowed_self
+        # Issue #1717 — the body's `self` is unknown unless narrowed, as on the evaluator's entry; only the
+        # `call.undefined-method` mark is set here, never #316's opaque mark (its bind gate reads the evaluator's).
+        return entry.with_block_self_unknown(true) unless narrowed_self
 
-        entry.with_block_self_type(narrowed_self, keeps_opaque: current_scope.block_self_narrowing_opaque?(node))
+        entry.with_block_self_type(narrowed_self, keeps_unknown: current_scope.block_self_narrowing_unknown?(node))
       end
 
       # The `self` an unentered block's body runs with, when the call is one whose block `self` the engine

@@ -23,6 +23,9 @@ module Rigor
       # `through:` association without a literal `class_name:` / `source_type:`. Without them a `through:` target is the SOURCE association's class on the through model, and
       # that association (declared there, hence in this same index) roots it itself.
       #
+      # A computed name equal to the owner's own demodulized name declines too (Rails 7.2+ tries `::Name`
+      # first; the target is then the owner itself or a top-level class).
+      #
       # ActiveRecord takes the first candidate that is a defined constant. The index knows only models, so the
       # walk stops (declines) at a candidate that is not a model but is a namespace of one: Rails would pick
       # that module and fail, never the next candidate. A non-model class at an earlier candidate is invisible
@@ -59,6 +62,9 @@ module Rigor
 
           type_name = type_name(row)
           return nil if type_name.nil? || !VALID_NAME.match?(type_name)
+          # Rails 7.2+ (`MacroReflection#_klass`) tries `::Name` first when the computed name is the owner's
+          # own demodulized name, so the target may be the owner or a top-level class: decline.
+          return nil if type_name == owner.split("::").last
 
           candidates(owner, type_name).each do |candidate|
             return candidate if model_index.model?(candidate)

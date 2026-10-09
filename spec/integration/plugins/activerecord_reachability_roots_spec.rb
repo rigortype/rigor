@@ -199,6 +199,54 @@ RSpec.describe "rigor-activerecord association roots" do
     expect(result[:kept]).to include("Creator", "Editor", "Subject", "Label")
   end
 
+  it "lets the innermost nested with_options group win" do
+    files = project(
+      "owner" => model("Owner", <<~RUBY.strip),
+        with_options class_name: "Person" do
+            with_options class_name: "Member" do
+              belongs_to :leader
+            end
+            belongs_to :boss
+          end
+      RUBY
+      "person" => model("Person"), "member" => model("Member"), "leader" => model("Leader")
+    )
+    result = outcome(files)
+    expect(result[:roots]).to match_array(%w[Person Member])
+  end
+
+  it "declines a computed name equal to the owner's own name (Rails tries ::Name first)" do
+    files = project(
+      "billing/account" => "module Billing\n  class Account < ApplicationRecord\n    has_one :account\n  end\nend\n",
+      "account" => model("Account")
+    )
+    files["app/main.rb"] = "Billing::Account.new\n"
+    with_project(files) do |contribution, _dir|
+      expect(contribution.roots).to be_empty
+    end
+  end
+
+  it "does not let a group's literal option stand in for the call's own non-literal one" do
+    files = project(
+      "owner" => model("Owner", <<~RUBY.strip),
+        with_options class_name: "Reviewer" do
+            belongs_to :checker, **OPTS
+            belongs_to :auditor, OPTS
+            belongs_to :tester, class_name: Settings.tester
+            belongs_to :poly, polymorphic: flag
+          end
+      RUBY
+      "reviewer" => model("Reviewer"), "checker" => model("Checker"), "auditor" => model("Auditor"),
+      "tester" => model("Tester"), "poly" => model("Poly")
+    )
+    expect(outcome(files)[:roots]).to be_empty
+  end
+
+  it "still roots through a scope lambda argument" do
+    files = project("owner" => model("Owner", "has_many :comments, -> { order(:id) }"), "comment" => model("Comment"))
+    expect(outcome(files)[:roots]).to eq(["Comment"])
+  end
+
   it "declines associations in a with_options group whose options are not literal" do
     files = project(
       "owner" => model("Owner", "with_options opts do\n    belongs_to :creator\n  end"),

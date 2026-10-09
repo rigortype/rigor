@@ -1322,7 +1322,43 @@ module Rigor
           end
 
           { name: name, kind: kind, target: target, polymorphic: polymorphic,
-            nullable: association_nullable?(node.name, args) }
+            nullable: association_nullable?(node.name, args),
+            macro: node.name, class_name_option: class_name_option(args),
+            through: association_key?(args, "through"),
+            source_type_option: literal_option(args, "source_type") }
+        end
+
+        # The `class_name:` option as ActiveRecord's `compute_type` will read it: the literal String (a
+        # Symbol is `to_s`'d by Rails too), `nil` when the option is absent, and `:dynamic` when it is
+        # present but not a literal — the `:reachability_roots` consumer must decline then, where the
+        # `target` above falls back to the inferred name.
+        # A `**opts` splat may carry a `class_name:` too, so it reads as present-but-unknown.
+        def class_name_option(args)
+          literal_option(args, "class_name") ||
+            (args.any? { |a| a.is_a?(Prism::KeywordHashNode) && a.elements.any?(Prism::AssocSplatNode) } ? :dynamic : nil)
+        end
+
+        def literal_option(args, key)
+          args.each do |arg|
+            next unless arg.is_a?(Prism::KeywordHashNode)
+
+            arg.elements.each do |pair|
+              next unless pair.is_a?(Prism::AssocNode) && Source::Literals.symbol_named?(pair.key, key)
+
+              value = pair.value
+              return value.unescaped if value.is_a?(Prism::StringNode) || value.is_a?(Prism::SymbolNode)
+
+              return :dynamic
+            end
+          end
+          nil
+        end
+
+        def association_key?(args, key)
+          args.any? do |arg|
+            arg.is_a?(Prism::KeywordHashNode) &&
+              arg.elements.any? { |pair| pair.is_a?(Prism::AssocNode) && Source::Literals.symbol_named?(pair.key, key) }
+          end
         end
 
         # Whether a `:singular` association's accessor can return `nil`. `has_one` genuinely can (no

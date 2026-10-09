@@ -102,6 +102,10 @@ pattern documented at the top of
 AFTER `cache_for` would leave the descriptor without a file
 digest and the cache would never invalidate.
 
+## Association roots for `rigor unused`
+
+`prepare` also publishes `:reachability_roots` ([ADR-102](../../docs/adr/102-unused-code-reachability-report.md) WD3): the models an association loads by name (`belongs_to :user` → `User`). `AssociationRoots` resolves the association rows `ModelDiscoverer` already extracts (no second scanner) against the `ModelIndex`; the rules and limits are in the [manual page](../../docs/manual/plugins/rigor-activerecord.md#roots-for-rigor-unused).
+
 ## Plugin authoring surface this exercises
 
 | Surface | Where in this plugin |

@@ -316,6 +316,8 @@ module Rigor
       #   Class-level ivars (`@x = 1` outside any def, in the
       #   class body) are also skipped — they're a separate
       #   surface (`Module#@var`) the engine doesn't yet model.
+      # - An ivar the class's RBS declares is skipped by the collector: the declaration, not the
+      #   first write, is that slot's type.
       def ivar_write_mismatch_diagnostics(path, ivar_writes)
         ivar_writes.flat_map do |class_name, writes_by_ivar|
           writes_by_ivar.flat_map do |ivar_name, writes|

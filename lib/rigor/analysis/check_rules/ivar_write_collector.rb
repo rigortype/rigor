@@ -27,6 +27,9 @@ module Rigor
       #   doesn't yet model.
       # - Nested classes / modules / defs inside a method body are barriers, mirroring the indexer's
       #   `IVAR_BARRIER_NODES` policy.
+      # - Ivars the class's RBS declares (`@x: T`, own or inherited). The declaration, not the first write,
+      #   is the slot's type, so a later write of another class the declared union admits is not a
+      #   divergence.
       class IvarWriteCollector
         BARRIER_NODES = [Prism::DefNode, Prism::ClassNode, Prism::ModuleNode].freeze
         private_constant :BARRIER_NODES
@@ -110,11 +113,19 @@ module Rigor
         def record_write(node, class_name)
           scope = @scope_index[node]
           return if scope.nil?
+          return if rbs_declared_ivar?(scope, class_name, node.name)
 
           rvalue_type = scope.type_of(node.value)
           @accumulator[class_name] ||= {}
           @accumulator[class_name][node.name] ||= []
           @accumulator[class_name][node.name] << { node: node, type: rvalue_type }
+        end
+
+        def rbs_declared_ivar?(scope, class_name, ivar_name)
+          definition = scope.environment&.rbs_loader&.instance_definition(class_name)
+          return false if definition.nil?
+
+          definition.instance_variables.key?(ivar_name)
         end
       end
     end

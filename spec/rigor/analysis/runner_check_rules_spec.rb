@@ -3332,6 +3332,65 @@ RSpec.describe Rigor::Analysis::Runner do
         expect(diag.message).to include("Integer")
       end
 
+      # The declaration, not the first write, is the slot's type: alba's `@_key: Symbol | String | nil | true`
+      # takes `key.to_sym` in one writer and `true` in another.
+      it "does not flag writes to an ivar a module's RBS declares" do
+        result = analyze(<<~RUBY, sig: { "demo.rbs" => <<~RBS })
+          module Keyed
+            def root_key(key)
+              @key = key.to_sym
+            end
+
+            def root_key!
+              @key = true
+            end
+          end
+        RUBY
+          module Keyed
+            @key: Symbol | String | nil | true
+          end
+        RBS
+        expect(ivar_diags(result)).to be_empty
+      end
+
+      it "does not flag writes to an ivar a class's RBS declares" do
+        result = analyze(<<~RUBY, sig: { "demo.rbs" => <<~RBS })
+          class Node
+            def initialize
+              @label = "a"
+            end
+
+            def reset
+              @label = 1
+            end
+          end
+        RUBY
+          class Node
+            @label: String | Integer
+          end
+        RBS
+        expect(ivar_diags(result)).to be_empty
+      end
+
+      it "still flags an ivar the class's RBS leaves undeclared" do
+        result = analyze(<<~RUBY, sig: { "demo.rbs" => <<~RBS })
+          class Node
+            def initialize
+              @label = "a"
+            end
+
+            def reset
+              @label = 1
+            end
+          end
+        RUBY
+          class Node
+            @other: String
+          end
+        RBS
+        expect(ivar_diags(result).map(&:message)).to contain_exactly(a_string_including("@label"))
+      end
+
       it "does not flag widening to nil (intentional 'clear' idiom)" do
         result = analyze(<<~RUBY)
           class Foo

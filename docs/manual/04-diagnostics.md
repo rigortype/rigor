@@ -66,7 +66,7 @@ carries no `documentation_url`.
 | <a id="rule-flow-return-in-ensure"></a>`flow.return-in-ensure` | An explicit `return` inside an `ensure` clause — it overrides the method's in-flight return value and silently swallows any in-flight exception. A `return` in a nested `def`, lambda, or `define_method` block inside the `ensure` does not fire (it exits that inner frame). | high |
 | <a id="rule-flow-shadowed-rescue-clause"></a>`flow.shadowed-rescue-clause` | A `rescue` clause can never run because an earlier clause of the same chain already catches a superclass (or the same class) of every exception class it names. | high |
 | <a id="rule-def-return-type-mismatch"></a>`def.return-type-mismatch` | The method body's result violates its declared RBS return type. | medium |
-| <a id="rule-def-ivar-write-mismatch"></a>`def.ivar-write-mismatch` | An instance variable is written with a type disagreeing with its first write, or, when the RBS declares it (`@x: T` or an `attr_*` member), with a type that declaration rejects. | high |
+| <a id="rule-def-ivar-write-mismatch"></a>`def.ivar-write-mismatch` | An instance variable is written with a type disagreeing with its first write, unless its RBS declaration (`@x: T` or an `attr_*` member) admits both writes. | high |
 | <a id="rule-def-method-visibility-mismatch"></a>`def.method-visibility-mismatch` | An explicit-receiver call reaches a private method. | high |
 | <a id="rule-def-override-visibility-reduced"></a>`def.override-visibility-reduced` | An override reduces the visibility it inherits from a project-defined ancestor. | high |
 | <a id="rule-def-override-return-widened"></a>`def.override-return-widened` | An override's declared return type widens the inherited return (covariance). | high |

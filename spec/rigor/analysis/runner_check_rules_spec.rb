@@ -3332,9 +3332,9 @@ RSpec.describe Rigor::Analysis::Runner do
         expect(diag.message).to include("Integer")
       end
 
-      # The declaration, not the first write, is the slot's type: alba's `@_key: Symbol | String | nil | true`
-      # takes a Symbol in one writer and `true` in another.
-      it "does not flag writes to an ivar a module's RBS declares" do
+      # A divergence the declaration admits is the author's union, not drift: alba's
+      # `@_key: Symbol | String | nil | true` takes a Symbol in one writer and `true` in another.
+      it "does not flag a divergence a module's RBS ivar declaration admits" do
         result = analyze(<<~RUBY, sig: { "demo.rbs" => <<~RBS })
           module Keyed
             def root_key
@@ -3353,36 +3353,37 @@ RSpec.describe Rigor::Analysis::Runner do
         expect(ivar_diags(result)).to be_empty
       end
 
-      it "flags a write the declared ivar type rejects, even a first write" do
+      it "does not flag a divergence a class's RBS attr declaration admits" do
         result = analyze(<<~RUBY, sig: { "demo.rbs" => <<~RBS })
           class Node
             def initialize
-              @label = 1
+              @label = "a"
             end
 
             def reset
-              @label = "a"
+              @label = 1
             end
           end
         RUBY
           class Node
-            @label: String
+            attr_reader label: String | Integer
           end
         RBS
-        expect(ivar_diags(result).map { [it.line, it.message] }).to contain_exactly(
-          [3, a_string_including("declared String; this write assigns Integer")]
-        )
+        expect(ivar_diags(result)).to be_empty
       end
 
-      it "takes an RBS attr member's implied slot as the declaration" do
+      # The declaration only silences; it is not checked against the writes (#1406).
+      it "still flags a divergence the declaration rejects, or an ivar it leaves undeclared" do
         result = analyze(<<~RUBY, sig: { "demo.rbs" => <<~RBS })
           class Node
             def initialize
-              @label = 1
+              @label = "a"
+              @size = "s"
             end
 
             def reset
-              @label = "a"
+              @label = 1
+              @size = 2
             end
           end
         RUBY
@@ -3390,66 +3391,7 @@ RSpec.describe Rigor::Analysis::Runner do
             attr_reader label: String
           end
         RBS
-        expect(ivar_diags(result).map(&:line)).to eq([3])
-      end
-
-      # Rigor's own `ProtocolContract` writes `severity.to_sym` after a membership check into
-      # `attr_reader severity: :error | :warning | :info`; the rule compares classes, not values.
-      it "compares a declared ivar at class grain, so a literal union admits its class" do
-        result = analyze(<<~RUBY, sig: { "demo.rbs" => <<~RBS })
-          class Contract
-            def initialize(severity, names)
-              @severity = severity.to_sym
-              @names = Array.new(3)
-            end
-          end
-        RUBY
-          class Contract
-            attr_reader severity: :error | :warning
-            @names: Array[String]
-
-            def initialize: (Symbol | String, untyped) -> void
-          end
-        RBS
-        expect(ivar_diags(result)).to be_empty
-      end
-
-      it "does not flag writes to an ivar a class's RBS declares" do
-        result = analyze(<<~RUBY, sig: { "demo.rbs" => <<~RBS })
-          class Node
-            def initialize
-              @label = "a"
-            end
-
-            def reset
-              @label = 1
-            end
-          end
-        RUBY
-          class Node
-            @label: String | Integer
-          end
-        RBS
-        expect(ivar_diags(result)).to be_empty
-      end
-
-      it "still flags an ivar the class's RBS leaves undeclared" do
-        result = analyze(<<~RUBY, sig: { "demo.rbs" => <<~RBS })
-          class Node
-            def initialize
-              @label = "a"
-            end
-
-            def reset
-              @label = 1
-            end
-          end
-        RUBY
-          class Node
-            @other: String
-          end
-        RBS
-        expect(ivar_diags(result).map(&:message)).to contain_exactly(a_string_including("@label"))
+        expect(ivar_diags(result).map(&:line)).to contain_exactly(8, 9)
       end
 
       it "does not flag widening to nil (intentional 'clear' idiom)" do

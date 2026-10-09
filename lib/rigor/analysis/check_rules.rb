@@ -316,9 +316,10 @@ module Rigor
       #   Class-level ivars (`@x = 1` outside any def, in the
       #   class body) are also skipped — they're a separate
       #   surface (`Module#@var`) the engine doesn't yet model.
-      # - An ivar the class's RBS declares (`@x: T`, or the slot an `attr_*` member implies) is compared
-      #   against that declaration instead of its first write: a write fires only when the declared type
-      #   rejects it, under the same concrete-class and `NilClass` envelope.
+      # - A divergence the class's RBS declaration admits is withheld: when the ivar is declared (`@x: T`,
+      #   or the slot an `attr_*` member implies) and that type accepts both the first write and the
+      #   later one, the union is the author's intent. The declaration only silences here; checking
+      #   writes against it is #1406.
       def ivar_write_mismatch_diagnostics(path, ivar_writes)
         ivar_writes.flat_map do |class_name, writes_by_ivar|
           writes_by_ivar.flat_map do |ivar_name, writes|
@@ -406,8 +407,6 @@ module Rigor
       end
 
       def ivar_mismatch_diagnostics_for(path, class_name, ivar_name, writes)
-        declared = writes.first[:declared]
-        return declared_ivar_mismatch_diagnostics(path, class_name, ivar_name, declared, writes) if declared
         return [] if writes.size < 2
 
         # Skip past leading `NilClass` writes when establishing
@@ -432,39 +431,16 @@ module Rigor
         writes[(canonical_index + 1)..].filter_map do |write|
           other_class = ivar_class_for(write[:type])
           next nil if other_class.nil? || other_class == "NilClass" || other_class == first_class
+          next nil if declaration_admits?(write[:declared], canonical[:type], write[:type])
 
           build_ivar_write_mismatch_diagnostic(path, write[:node], class_name, ivar_name, first_class, other_class)
         end
       end
 
-      # The rule compares concrete classes, so a declared ivar is compared at that grain too: the
-      # declaration is erased to its classes (`:a | :b` → `Symbol`, `Array[String]` → `Array`) and a
-      # write fires only when its class is outside them. A literal union guarded at runtime
-      # (`@severity = severity.to_sym` after a membership check) or a preallocated `Array.new(3)`
-      # under `Array[String]` is ordinary Ruby the rule cannot see the narrowing for.
-      def declared_ivar_mismatch_diagnostics(path, class_name, ivar_name, declared, writes)
-        admitted = erase_to_classes(declared[:type])
-        writes.filter_map do |write|
-          write_class = ivar_class_for(write[:type])
-          next nil if write_class.nil? || write_class == "NilClass"
+      def declaration_admits?(declared, *write_types)
+        return false if declared.nil?
 
-          write_nominal = Type::Combinator.nominal_of(concrete_class_name(write[:type]))
-          next nil unless Inference::Acceptance.accepts(admitted, write_nominal, mode: :gradual).no?
-
-          build_declared_ivar_write_mismatch_diagnostic(path, write[:node], class_name, ivar_name, declared,
-                                                        write_class)
-        end
-      end
-
-      def erase_to_classes(type)
-        case type
-        when Type::Union then Type::Combinator.union(*type.members.map { |member| erase_to_classes(member) })
-        when Type::Constant, Type::Tuple, Type::HashShape, Type::Refined, Type::Difference, Type::IntegerRange
-          class_name = concrete_class_name(type)
-          class_name ? Type::Combinator.nominal_of(class_name) : Type::Combinator.untyped
-        when Type::Nominal then Type::Combinator.nominal_of(type.class_name)
-        else type
-        end
+        write_types.none? { |type| Inference::Acceptance.accepts(declared, type, mode: :gradual).no? }
       end
 
       # v0.0.2 #6 — diagnostic suppression. Three kinds of
@@ -2854,17 +2830,6 @@ module Rigor
             path: path,
             message: "instance variable `#{ivar_name}' on #{class_name} was previously assigned " \
                      "#{first_class}; this write assigns #{other_class}",
-            severity: :error
-          )
-        end
-
-        def build_declared_ivar_write_mismatch_diagnostic(path, node, class_name, ivar_name, declared, write_class)
-          Diagnostic.from_name_loc(
-            node,
-            rule: RULE_IVAR_WRITE_MISMATCH,
-            path: path,
-            message: "instance variable `#{ivar_name}' on #{class_name} is declared #{declared[:label]}; " \
-                     "this write assigns #{write_class}",
             severity: :error
           )
         end

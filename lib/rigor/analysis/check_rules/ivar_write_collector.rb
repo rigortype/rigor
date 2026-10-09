@@ -41,7 +41,7 @@ module Rigor
         RULE_WALK_GATES = %i[inside_def detached_ivar_facet].freeze
 
         # Returns `Hash[class_name (String) => Hash[ivar_name (Symbol) => Array<{node:, type:, declared:}>]]`.
-        # Empty when the tree has no qualifying writes. `declared` is `{type:, label:}` for the class's RBS
+        # Empty when the tree has no qualifying writes. `declared` is the translated type of the class's RBS
         # declaration of the ivar — an `@x: T` member or the slot an `attr_*` member implies, own or
         # inherited — and nil when the RBS declares none.
         def initialize(scope_index)
@@ -120,7 +120,6 @@ module Rigor
           @accumulator[class_name][node.name] << { node: node, type: rvalue_type, declared: declared }
         end
 
-        # `{type:, label:}` — the translated declaration and its RBS spelling for the message.
         def declared_ivar(scope, class_name, ivar_name)
           loader = scope.environment&.rbs_loader
           return nil if loader.nil?
@@ -128,8 +127,7 @@ module Rigor
           variable = loader.instance_definition(class_name)&.instance_variables&.[](ivar_name)
           return nil if variable.nil?
 
-          # The definition builder absolutizes names (`::String`); the message spells them as written.
-          { type: translate_declared(variable.type, loader), label: variable.type.to_s.gsub(/(?<![\w:])::/, "") }
+          translate_declared(variable.type, loader)
         end
 
         def translate_declared(rbs_type, loader)

@@ -20,6 +20,7 @@ require_relative "last_line"
 require_relative "last_status"
 require_relative "error_info"
 require_relative "hash_lookup_mutation"
+require_relative "in_effect_refinements"
 require_relative "index_write_widening"
 require_relative "module_function_state"
 require_relative "multi_target_binder"
@@ -2255,6 +2256,7 @@ module Rigor
         gather_global_writes(root, default_scope, accumulator, census)
         census[:patched_line_readers] = census[:patched_line_readers].freeze
         census[:implicit_self_evidence] = LastLine::SelfEvidence.new(root)
+        census[:in_effect_refinements] = InEffectRefinements.new(root)
         [accumulator.freeze, census]
       end
 

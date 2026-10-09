@@ -1104,14 +1104,23 @@ module Rigor
       # `instance_of?(self)` later as the rule catalogue grows; for now only `class` is handled.
       def try_meta_introspection(receiver_type, method_name, arg_types = [], context = nil)
         case method_name
-        when :class then meta_class(receiver_type)
+        when :class then meta_class(receiver_type, context&.environment)
         when :new then meta_new(receiver_type, arg_types, context)
         end
       end
 
-      def meta_class(receiver_type)
+      def meta_class(receiver_type, environment = nil)
         case receiver_type
-        when Type::Nominal then Type::Combinator.singleton_of(receiver_type.class_name)
+        when Type::Nominal
+          # An instance of module `M` is an instance of some class that includes `M`, never of `M`
+          # itself: `self.class` in `M`'s instance method is that includer, which no RBS type names.
+          # `Dynamic[Class]` keeps the surface every class shares (`name`, `ancestors`) and answers
+          # nothing for the includer's own singleton methods.
+          if environment&.rbs_module?(receiver_type.class_name)
+            return Type::Combinator.dynamic(Type::Combinator.nominal_of("Class"))
+          end
+
+          Type::Combinator.singleton_of(receiver_type.class_name)
         when Type::Constant then constant_metaclass(receiver_type.value)
         end
       end

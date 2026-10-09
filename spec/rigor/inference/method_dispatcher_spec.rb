@@ -648,15 +648,15 @@ RSpec.describe Rigor::Inference::MethodDispatcher do
         expect(result.class_name).to eq("String")
       end
 
-      it "routes Nominal[<core module>].class through Nominal[Object]" do
+      it "types Nominal[<core module>].class as Dynamic[Class], not the module's singleton" do
         result = described_class.dispatch(
           receiver_type: Rigor::Type::Combinator.nominal_of("Comparable"),
           method_name: :class, arg_types: [], environment: env
         )
-        # `meta_class` for a Nominal returns Singleton[<class_name>] — the receiver-side `class` always wins at the
-        # meta-introspection tier (above the fallback). The point of the test is that this doesn't surface as
-        # `undefined-method` because the fallback would have caught it even if meta-introspection didn't.
-        expect(result).to be_a(Rigor::Type::Singleton)
+        # The meta-introspection tier answers first. An instance of a module is an instance of some includer, so
+        # its `class` is that unnamed includer — `Dynamic[Class]`, not `Singleton[Comparable]`, whose singleton
+        # methods a chained call would wrongly be checked against.
+        expect(result).to eq(Rigor::Type::Combinator.dynamic(Rigor::Type::Combinator.nominal_of("Class")))
       end
 
       it "does NOT route Nominal[<core class>] through the module fallback" do

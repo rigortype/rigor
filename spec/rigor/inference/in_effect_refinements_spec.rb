@@ -221,6 +221,24 @@ RSpec.describe Rigor::Inference::InEffectRefinements do
       expect(refinements.at(":inner")).to eq(%w[A B C])
     end
 
+    it "reads a chain through parentheses and `dup` / `clone`, and a `Kernel`-qualified literal" do
+      refinements = query(<<~RUBY)
+        (proc { :parens }.refined(A)).refined(B)
+        (-> { :paren_literal }).refined(A)
+        proc { :copied }.dup.refined(A).clone.refined(B)
+        Kernel.proc { :kernel }.refined(A)
+        ::Kernel.lambda { :rooted_kernel }.refined(A)
+        proc { :tapped }.tap {}.refined(A)
+        Other.proc { :other }.refined(A)
+        proc { :dup_with_argument }.dup(1).refined(A)
+      RUBY
+
+      expect(refinements.at(":parens")).to eq(%w[A B])
+      expect(refinements.at(":copied")).to eq(%w[A B])
+      %w[:paren_literal :kernel :rooted_kernel].each { |marker| expect(refinements.at(marker)).to eq(%w[A]) }
+      %w[:tapped :other :dup_with_argument].each { |marker| expect(refinements.at(marker)).to be_empty }
+    end
+
     it "contributes the unknown marker over the literal's body for an argument that is not a constant" do
       refinements = query(<<~RUBY)
         def m(mod) = proc { :refined }.refined(A, mod)

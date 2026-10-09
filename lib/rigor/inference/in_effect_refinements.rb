@@ -151,15 +151,13 @@ module Rigor
         @built = true
         @activations = []
         @refinement_defs = Set.new
-        @chained_refined_calls = Set.new
+        @chained_refined_calls = nil
         @unresolved_using = false
         return if @root.nil?
 
         location = @root.location
         walk(@root, [], [location.start_offset, location.end_offset], false, nil)
-        # Stable: a `.refined` chain's activations share the literal's offset and were recorded in call order.
-        @activations = @activations.each_with_index.sort_by { |activation, index| [activation.order, index] }
-                                   .map(&:first)
+        sort_activations
         @activations.freeze
       end
 
@@ -224,22 +222,27 @@ module Rigor
         end
       end
 
+      # By `order`; activations a `.refined` chain recorded share the literal's offset and keep their recording (call)
+      # order, so only then does the sort carry the index.
+      def sort_activations
+        if @chained_refined_calls.nil?
+          @activations.sort_by!(&:order)
+        else
+          @activations = @activations.sort_by.with_index { |activation, index| [activation.order, index] }
+        end
+      end
+
       # ADR-121 WD1's `Proc#refined` source (#1666). The walk meets a chain's outermost `.refined` first, so it records
       # the whole chain from the literal outwards — the call order — and marks the inner calls done.
       def record_refined_chain(node, prefix)
-        return if @chained_refined_calls.include?(node.location.start_offset)
+        return if @chained_refined_calls&.include?(node)
 
-        chain = [node]
-        receiver = node.receiver
-        while receiver.is_a?(Prism::CallNode) && receiver.name == :refined
-          chain << receiver
-          @chained_refined_calls << receiver.location.start_offset
-          receiver = receiver.receiver
-        end
-        literal = ProcLiterals.refinable(receiver)
+        @chained_refined_calls ||= Set.new.compare_by_identity
+        literal, chain = ProcLiterals.refined_chain(node)
+        chain.each { |call| @chained_refined_calls << call }
         return if literal.nil?
 
-        chain.reverse_each do |call|
+        chain.each do |call|
           (call.arguments&.arguments || EMPTY).each do |argument|
             record_block_activation(literal, refined_argument_candidates(argument, prefix))
           end

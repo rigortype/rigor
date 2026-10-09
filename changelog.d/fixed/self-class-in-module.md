@@ -1,1 +1,1 @@
-- **[engine]** `self.class` inside an instance method of a module the RBS declares now types as `Dynamic` instead of the module's singleton, so `Class.new(self.class).some_class_method` no longer reports `call.undefined-method`. ([#1668](https://github.com/rigortype/rigor/pull/1668))
+- **[engine]** `self.class` inside an instance method of a module the RBS declares now types as `Dynamic[Class]` instead of the module's singleton, so `Class.new(self.class).some_class_method` no longer reports `call.undefined-method`. ([#1668](https://github.com/rigortype/rigor/pull/1668))

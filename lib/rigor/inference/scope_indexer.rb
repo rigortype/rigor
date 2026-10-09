@@ -6166,6 +6166,8 @@ module Rigor
         owner = prepend_call_receiver(node, qualified_prefix)
         return [[owner, side]] if owner
         return [] unless hook_receiver?(receiver, accumulator)
+        # Issue #1687 — `base.extend X` reaches the includer's singleton only; its instance side is untouched.
+        return [[current_class, :extend]] if side == :extend
 
         [[current_class, :include], [current_class, :extend]]
       end

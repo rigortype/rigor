@@ -219,7 +219,6 @@ RSpec.describe Rigor::Inference::ScopeIndexer::MixinAccumulator do
       both = { "Concern" => { include: ["*"], extend: ["*"] } }
       [
         "def self.included(base)\n    base.include X\n  end",
-        "def self.included(base)\n    base.extend X\n  end",
         "def self.included(base)\n    base.prepend X\n  end",
         "def self.included(base)\n    base.singleton_class.include X\n  end",
         "def self.extended(base)\n    base.send(:include, X)\n  end",
@@ -229,6 +228,17 @@ RSpec.describe Rigor::Inference::ScopeIndexer::MixinAccumulator do
         "class << self\n    def included(base)\n      base.include X\n    end\n  end"
       ].each do |hook|
         expect(unpositioned("module Concern\n  #{hook}\nend\n")).to eq(both), hook
+      end
+    end
+
+    # Issue #1687 — `extend` on the hook parameter reaches the includer's singleton only.
+    it "taints only the extend side for an `extend` on a hook parameter", :aggregate_failures do
+      [
+        "def self.included(base)\n    base.extend X\n  end",
+        "def self.included(base)\n    base.send(:extend, X)\n  end",
+        "def self.inherited(sub)\n    sub.extend X\n  end"
+      ].each do |hook|
+        expect(unpositioned("module Concern\n  #{hook}\nend\n")).to eq("Concern" => { extend: ["*"] }), hook
       end
     end
 

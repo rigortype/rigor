@@ -387,6 +387,55 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
       expect(diagnostics.map(&:qualified_rule)).not_to include("call.argument-type-mismatch")
     end
 
+    # Issue #1687 — a hook's `base.extend` reaches the includer's singleton only, so it leaves the `using`'d
+    # module's instance-side chain, which the refinement expansion reads, fully named.
+    it "is not widened by an included hook that only extends the includer" do
+      write("lib/hook.rb", <<~RUBY)
+        module X
+          def cm = 1
+        end
+        module Plain
+          def self.included(base) = base.extend(X)
+        end
+        module A
+          refine(String) { def shout = upcase }
+        end
+        module D
+          include Plain
+        end
+        class K
+          include Plain
+        end
+
+        K.cm
+        using D
+        "a".shout
+      RUBY
+
+      expect(undefined_rows).to eq([["hook.rb", 19, "shout"]])
+    end
+
+    it "still declines for an included hook that includes into or evaluates on the includer" do
+      ["base.include(Y)", "base.send(:include, Y)", "base.class_eval { include(Y) }"].each do |call|
+        write("lib/hook.rb", <<~RUBY)
+          module Y; end
+          module Plain
+            def self.included(base) = #{call}
+          end
+          module A
+            refine(String) { def shout = upcase }
+          end
+          module D
+            include Plain
+          end
+          using D
+          "a".shout
+        RUBY
+
+        expect(undefined_rows).to eq([]), call
+      end
+    end
+
     it "does not reach a module that includes the `using`'d one" do
       write("lib/inherit.rb", <<~RUBY)
         module C

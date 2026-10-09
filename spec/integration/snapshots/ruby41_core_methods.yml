@@ -1,18 +1,21 @@
 ---
 locals:
   bits: String
+  buffer: IO::Buffer
 assertions:
   '1': Integer
   '2': Integer
   '3': String
   '4': Array[Module]
   '5': Array[Class]
-  '6': Range[Integer]
-  '7': Range[Integer]
+  '6': Integer
+  '7': Integer
   '8': Range[Integer]
-  '9': Integer?
-  '10': Ruby::SourceRange
-  '11': String?
-  '12': Ruby::SourceRange?
-  '13': Ruby::SourceRange?
+  '9': Range[Integer]
+  '10': Range[Integer]
+  '11': Integer?
+  '12': Ruby::SourceRange
+  '13': String?
   '14': Ruby::SourceRange?
+  '15': Ruby::SourceRange?
+  '16': Ruby::SourceRange?

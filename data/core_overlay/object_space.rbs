@@ -1,0 +1,29 @@
+# Rigor core overlay — supplemental core signatures.
+#
+# --- ObjectSpace.garbage_collect `global:` (Ruby 4.1) ---
+#
+# Issue #1718. Ruby 4.1's `gc.rb` adds the `global:` keyword to
+# `ObjectSpace#garbage_collect` (a `module_function`, so both the singleton
+# and the private instance method), as it does to `GC.start` (`gc.rbs`):
+#
+#   def garbage_collect full_mark: true, immediate_mark: true, immediate_sweep: true, global: true
+#
+# No rbs release through 4.2 declares it. Rigor does not check keyword
+# names today, so this entry makes the signature correct for when it does.
+# The return mirrors upstream's own `void`.
+#
+# TEMPORARY: delete this file once the rbs release Rigor bundles declares
+# the keyword upstream.
+#
+# Declared unconditionally, not gated on `target_ruby` (ADR-121 § Rejected
+# alternatives; false positives outrank), as `| ...` continuations of the
+# upstream declarations. `global:` is optional in the added arm, which then
+# answers every call the upstream arm does with the same type; a required
+# keyword would switch `call.wrong-arity` off for the method (see `gc.rbs`).
+module ObjectSpace
+  def self.garbage_collect: (?full_mark: bool, ?immediate_mark: bool, ?immediate_sweep: bool, ?global: boolish) -> void
+                          | ...
+
+  def garbage_collect: (?full_mark: bool, ?immediate_mark: bool, ?immediate_sweep: bool, ?global: boolish) -> void
+                     | ...
+end

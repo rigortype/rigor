@@ -516,6 +516,53 @@ RSpec.describe Rigor::Inference::MethodDispatcher do
       end
     end
 
+    describe "a `pre_eval:` alias of a method the patch files do not define (#1702)" do
+      def alias_entry(name, old_name)
+        Rigor::Inference::ProjectPatchedMethods::Entry.new(
+          class_name: "Integer", method_name: name, kind: :instance,
+          source_path: "lib/ext.rb", source_line: 1, alias_of: old_name
+        )
+      end
+
+      def dispatch_alias(entries, name, args)
+        env = Rigor::Environment.for_project(
+          project_patched_methods: Rigor::Inference::ProjectPatchedMethods.new(entries: entries)
+        )
+        described_class.dispatch(
+          receiver_type: Rigor::Type::Combinator.nominal_of("Integer"),
+          method_name: name, arg_types: args, environment: env
+        )
+      end
+
+      let(:integer) { Rigor::Type::Combinator.nominal_of("Integer") }
+
+      it "answers what the class's existing method answers, behind Dynamic" do
+        result = dispatch_alias([alias_entry(:old_plus, :+)], :old_plus, [integer])
+
+        expect(result).to eq(Rigor::Type::Combinator.dynamic(integer))
+      end
+
+      it "answers the pre-existing method, not a later patch def of the old name" do
+        patched_succ = Rigor::Inference::ProjectPatchedMethods::Entry.new(
+          class_name: "Integer", method_name: :succ, kind: :instance,
+          source_path: "lib/ext.rb", source_line: 2, return_type: Rigor::Type::Combinator.constant_of(nil)
+        )
+        result = dispatch_alias([alias_entry(:orig_succ, :succ), patched_succ], :orig_succ, [])
+
+        expect(result).to eq(Rigor::Type::Combinator.dynamic(integer))
+      end
+
+      it "answers Dynamic[top] when nothing knows the old name" do
+        expect(dispatch_alias([alias_entry(:ghost, :not_a_method)], :ghost, [])).to eq(Rigor::Type::Combinator.untyped)
+      end
+
+      it "terminates on an alias cycle" do
+        entries = [alias_entry(:a, :b), alias_entry(:b, :a)]
+
+        expect(dispatch_alias(entries, :a, [])).to eq(Rigor::Type::Combinator.untyped)
+      end
+    end
+
     describe "boundary-cross recording on RBS dispatch (ADR-10 slice 5c)" do
       let(:reporter) { Rigor::Analysis::DependencySourceInference::BoundaryCrossReporter.new }
 

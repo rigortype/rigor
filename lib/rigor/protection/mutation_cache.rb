@@ -220,7 +220,7 @@ module Rigor
         def patched_rows(patched)
           patched.by_key.map do |(class_name, method_name, kind), entry|
             [class_name.to_s, method_name.to_s, kind.to_s, entry.source_path.to_s, entry.source_line,
-             entry.return_type&.describe(:short).to_s]
+             entry.return_type&.describe(:short).to_s, entry.alias_of.to_s]
           end.sort
         end
 

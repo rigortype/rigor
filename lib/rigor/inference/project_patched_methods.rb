@@ -7,9 +7,9 @@ module Rigor
     # ADR-17 § "Inference contract" — project-wide patched-method registry populated by the pre-eval
     # pre-pass (slice 2) from the user's `.rigor.yml` `pre_eval:` list.
     #
-    # Each entry records one `def` declaration the pre-pass observed inside a class / module body. The
-    # dispatcher's `try_project_patched_method` tier consults this registry between the plugin tier and
-    # the dependency-source tier so project-side `lib/core_ext/string_extensions.rb` patches are visible
+    # Each entry records one `def`, `alias` or `alias_method` declaration the pre-pass observed inside a class /
+    # module body. The dispatcher's `try_project_patched_method` tier consults this registry between the plugin
+    # tier and the dependency-source tier so project-side `lib/core_ext/string_extensions.rb` patches are visible
     # to cross-file dispatch.
     #
     # The dispatcher answers `Dynamic[T]` (with a heuristic static facet) when `Entry#return_type` is
@@ -22,8 +22,13 @@ module Rigor
       # the {Analysis::DependencySourceInference::ReturnTypeHeuristic}-extracted static facet (a
       # `Rigor::Type::*`) or `nil` when the heuristic declined. The dispatcher wraps a non-nil
       # `return_type` in `Dynamic[T]`; a `nil` `return_type` falls back to `Dynamic[top]`.
-      Entry = Data.define(:class_name, :method_name, :kind, :source_path, :source_line, :return_type) do
-        def initialize(class_name:, method_name:, kind:, source_path:, source_line:, return_type: nil)
+      #
+      # Issue #1702 — an `alias new old` / `alias_method :new, :old` in a patch is recorded too. When a `def` or
+      # alias earlier in the `pre_eval:` files binds `old`, the alias's entry copies that entry's `return_type` (and
+      # its `alias_of`); otherwise `alias_of` names `old`, a method the class had before the patch, and the
+      # dispatcher answers the alias with what that method answers. `alias_of` is nil for a `def`.
+      Entry = Data.define(:class_name, :method_name, :kind, :source_path, :source_line, :return_type, :alias_of) do
+        def initialize(class_name:, method_name:, kind:, source_path:, source_line:, return_type: nil, alias_of: nil)
           super
         end
       end

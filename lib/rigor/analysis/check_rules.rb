@@ -1059,6 +1059,9 @@ module Rigor
 
         def main_singleton_method?(name, scope)
           return true if MAIN_SINGLETON_METHODS_MISSING_FROM_RBS.include?(name)
+          # `TopLevelSelfClass < Object`: when the project's own RBS broke `Object`, building it would only
+          # fail again and report a second, unfixable class name beside `Object` (#696's report).
+          return false if Rigor::Reflection.instance_definition("Object", scope: scope).nil?
 
           !Rigor::Reflection.instance_method_definition(MAIN_SINGLETON_CLASS_NAME, name, scope: scope).nil?
         end

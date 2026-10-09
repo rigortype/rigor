@@ -1,5 +1,5 @@
 class Ruby41Demo
-  def clamp_range: (Range[Integer] range, Integer? lower) -> void
+  def clamp_range: (Range[Integer] range, Integer? lower, Float? fraction) -> void
   def match: (MatchData md) -> void
   def locate: (Thread::Backtrace::Location loc) -> void
 end

@@ -8,12 +8,14 @@
 # declares it, so `(1..10).clamp(2, 5)` reported `call.undefined-method` on
 # correct 4.1 code.
 #
-# Either bound may be `nil` (unbounded), and the result holds values from
-# both the receiver and the bounds. The first overload answers the common
-# case, bounds of the receiver's own element type, as `Range[Elem]`. The
-# generic overloads take bounds of another type (`(1..10).clamp(2.5, nil)`)
-# rather than report them; `nil` gets arms of its own because a type
-# variable is not bound through an optional parameter (`T?`).
+# Either bound may be `nil` (unbounded), which leaves that end of the
+# receiver as it is. The first two overloads answer the common case, bounds
+# of the receiver's own element type, as `Range[Elem]`. Bounds of another
+# type (`(1..10).clamp(2.5, nil)`) take the `untyped` arms rather than be
+# reported. Those arms are deliberately not generic: a `[T] (T min, T max)`
+# arm binds `T` to `Float | nil` for a `Float?` bound and puts a `nil` in the
+# result's elements that CRuby never produces, which then reports
+# `call.possible-nil-receiver` on correct code that iterates the result.
 #
 # TEMPORARY: delete this file once the rbs release Rigor bundles declares
 # the method upstream.
@@ -22,15 +24,14 @@
 # alternatives; false positives outrank), and on a module `Range` includes
 # so that a later direct declaration overrides it instead of raising
 # `DuplicatedMethodDefinitionError` for the whole class (see `process.rbs`).
-# `Elem` is `unchecked` on the module because the first overload reads it in
-# parameter position.
+# `Elem` is `unchecked` on the module because the first two overloads read it
+# in parameter position.
 module RigorCoreOverlay
   module Ruby41Range[unchecked out Elem]
     def clamp: (Elem? min, Elem? max) -> Range[Elem]
-             | [T] (nil min, T max) -> Range[Elem | T]
-             | [T] (T min, nil max) -> Range[Elem | T]
-             | [T] (T min, T max) -> Range[Elem | T]
-             | [T] (Range[T] range) -> Range[Elem | T]
+             | (Range[Elem?] range) -> Range[Elem]
+             | (untyped min, untyped max) -> Range[untyped]
+             | (Range[untyped] range) -> Range[untyped]
   end
 end
 

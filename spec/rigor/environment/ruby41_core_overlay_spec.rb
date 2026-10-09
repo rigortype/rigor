@@ -26,6 +26,7 @@ RSpec.describe "Ruby 4.1 core overlay (#1691)" do
     ["Range", :instance, %i[clamp], "range.rbs"],
     ["MatchData", :instance, %i[integer_at], "match_data.rbs"],
     ["Module", :instance, %i[descendants autoload_relative], "module.rbs"],
+    ["Class", :instance, %i[descendants], "module.rbs"],
     ["Kernel", :instance, %i[autoload_relative], "kernel.rbs"],
     ["Kernel", :singleton, %i[autoload_relative], "kernel.rbs"],
     ["RBS::Unnamed::ENVClass", :instance, %i[fetch_values], "env.rbs"],

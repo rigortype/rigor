@@ -603,8 +603,14 @@ RSpec.describe "String mutation widening", type: :runner do
       end
 
       # The table lists Ruby 4.1's bit operations (#1691) ahead of the interpreter: on an older Ruby there is no
-      # method to call, so only the names this Ruby defines can refuse.
-      expect(refusing).to match_array(mutators.select { |name| String.public_method_defined?(name) })
+      # method to call, so a name this Ruby does not define is held out of the oracle — but only one the core overlay
+      # declares on `String`, so a misspelt entry still fails here.
+      ahead = mutators.reject { |name| String.public_method_defined?(name) }
+      overlay = Rigor::Environment::RbsLoader.new(libraries: []).instance_definition("String").methods.select do |_, m|
+        m.defs.any? { |d| d.member.location.buffer.name.to_s.end_with?("data/core_overlay/string.rbs") }
+      end
+      expect(ahead - overlay.keys).to be_empty
+      expect(refusing).to match_array(mutators.to_a - ahead)
     end
 
     # `data/builtins/ruby_core/string.yml` tags a C body that checks `rb_check_frozen` as `c_effects: mutate`: an

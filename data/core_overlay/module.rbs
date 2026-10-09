@@ -12,7 +12,9 @@
 # No rbs release through 4.2 declares the first two or the third argument,
 # so correct 4.1 code reported `call.undefined-method` or
 # `call.wrong-arity`. `descendants` answers classes and modules alike,
-# hence `Array[Module]`.
+# hence `Array[Module]`; on a `Class` it answers only classes, since no
+# module has a class among its ancestors, so `Class` narrows it to
+# `Array[Class]` as rbs's `Class#subclasses` does.
 #
 # TEMPORARY: delete each entry once the rbs release Rigor bundles declares
 # it upstream.
@@ -31,6 +33,10 @@ module RigorCoreOverlay
 
     def autoload_relative: (Symbol | string const, string | _ToPath filename) -> nil
   end
+
+  module Ruby41ClassDescendants
+    def descendants: () -> Array[Class]
+  end
 end
 
 class Module
@@ -38,4 +44,8 @@ class Module
 
   def method_defined?: (Symbol | string name, boolish inherit, boolish include_all) -> bool
                      | ...
+end
+
+class Class
+  include RigorCoreOverlay::Ruby41ClassDescendants
 end

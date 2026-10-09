@@ -35,6 +35,7 @@ assert_type("String", "hello".tr("e" => "er", "l" => ""))
 (1..10).clamp(2.5, nil)
 
 assert_type("Array[Module]", Comparable.descendants)
+assert_type("Array[Class]", Numeric.descendants)
 String.method_defined?(:upcase, true, true)
 
 ENV.fetch_values("HOME", "PATH")
@@ -47,10 +48,13 @@ Ruby41Autoloads.autoload_relative(:Later, "later")
 autoload_relative :TopLevel, "top_level"
 
 class Ruby41Demo
-  def clamp_range(range, lower)
+  def clamp_range(range, lower, fraction)
     assert_type("Range[Integer]", range.clamp(2, 5))
     assert_type("Range[Integer]", range.clamp(lower, 5))
     assert_type("Range[Integer]", range.clamp(3..7))
+    # A nil bound leaves that end as it is, so no element of the result is nil.
+    range.clamp(fraction, 5).each { |value| value + 1 }
+    range.clamp(nil, fraction).each { |value| value + 1 }
   end
 
   def match(md)

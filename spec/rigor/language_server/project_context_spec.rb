@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "tmpdir"
+require "fileutils"
 
 require "rigor/language_server"
 require "rigor/configuration"
@@ -52,6 +53,45 @@ RSpec.describe Rigor::LanguageServer::ProjectContext do
       expect(scan.synthetic_method_index).to eq(Rigor::Inference::SyntheticMethodIndex::EMPTY)
       expect(scan.plugin_prepare_diagnostics).to eq([])
       expect(scan.pre_eval_diagnostics).to eq([])
+    end
+  end
+
+  # Issue #1700 — the vendored `prime` signatures are gated on a `require "prime"`; an open buffer that gains
+  # or drops one rebuilds the environment, since neither `didSave` nor a `.rb` edit reaches
+  # `workspace/didChangeWatchedFiles`.
+  describe "#note_buffers" do
+    around do |example|
+      Dir.mktmpdir("rigor-lsp-features-") { |dir| Dir.chdir(dir) { example.run } }
+    end
+
+    let(:configuration) { Rigor::Configuration.new("paths" => %w[lib]) }
+    let(:path) { File.expand_path("lib/a.rb") }
+
+    before do
+      FileUtils.mkdir_p("lib")
+      File.write("lib/a.rb", "p 12\n")
+    end
+
+    def prime_loaded?(environment)
+      !environment.singleton_for_name("Prime").nil?
+    end
+
+    it "rebuilds the environment only when a buffer changes the required-feature set" do
+      expect(prime_loaded?(context.environment)).to be(false)
+
+      expect { context.note_buffers(path => "p 13\n") }.not_to change(context, :generation)
+      expect { context.note_buffers(path => "require 'prime'\np 12\n") }.to change(context, :generation).by(1)
+      expect(prime_loaded?(context.environment)).to be(true)
+
+      expect { context.note_buffers(path => "p 12\n") }.to change(context, :generation).by(1)
+      expect(prime_loaded?(context.environment)).to be(false)
+    end
+
+    it "reads a buffer in place of its file on disk" do
+      File.write("lib/a.rb", "require 'prime'\n")
+      context.note_buffers(path => "p 12\n")
+
+      expect(context.required_features).to be_empty
     end
   end
 

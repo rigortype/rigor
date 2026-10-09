@@ -9,6 +9,7 @@ require_relative "store"
 require_relative "../analysis/shadow_harness"
 require_relative "../analysis/run_cache_key"
 require_relative "../environment"
+require_relative "../analysis/path_expansion"
 
 module Rigor
   module Cache
@@ -272,6 +273,15 @@ module Rigor
         ]
         identity = EngineSource.process_identity
         parts << "engine-source:#{identity}" if identity
+        # Issue #1700 — the gated vendored signatures the run's source activates. A file that gains or drops a
+        # `require "prime"` changes the environment every other file was analysed against, which no per-file
+        # dependency edge records, so the whole snapshot goes. Scanned over the configured paths plus the roots'
+        # files, the set the run's environment scans; no part when nothing is required, so every other
+        # project's fingerprint is as it was.
+        features = Environment::RequiredFeatures.for_configuration(
+          configuration, Analysis::PathExpansion.ruby_files(roots, configuration.exclude_patterns)
+        )
+        parts << "required-features:#{features.join(',')}" unless features.empty?
         # ADR-116 WD5 — the snapshot's per-file rows and seed bundles are only as checked as the run that
         # wrote them ({Inference::DeclarationWalk::Shadow}); nil with the harness off adds no part.
         shadow = Analysis::ShadowHarness.cache_identity

@@ -575,6 +575,12 @@ module Rigor
         @in_memory_sources = nil
       end
 
+      # Issue #1700 — the sources the required-feature scan reads in place of a file on disk: an in-memory
+      # source ({#run_source}) and an editor buffer (`--tmp-file` read for its `--instead-of` path).
+      def required_feature_sources
+        (@in_memory_sources || {}).merge(ProjectEnvironment.buffer_sources(@buffer))
+      end
+
       # ADR-46 — the project file set that a run over `paths` would analyze, computed by globbing only (no
       # RBS environment build), so the incremental fingerprint can be derived cheaply on the warm path
       # before deciding whether to build the env at all.
@@ -2005,7 +2011,8 @@ module Rigor
           project_scope_seed: -> { project_scope_seed_tables },
           template_units: -> { template_units },
           analyze_file: ->(path, environment) { analyze_file(path, environment) },
-          restored_run_level_rows: @restored_run_level_rows
+          restored_run_level_rows: @restored_run_level_rows,
+          feature_sources: -> { required_feature_sources }
         )
         @diagnostic_aggregator = DiagnosticAggregator.new(
           configuration: @configuration,

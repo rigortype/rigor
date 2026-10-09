@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "spec_helper"
+require "rigor/analysis/buffer_binding"
 
 RSpec.describe Rigor::ProjectEnvironment do
   # Every `Environment.for_project` keyword that is NOT a dependency-discovery axis. The gate below asserts
@@ -31,6 +32,7 @@ RSpec.describe Rigor::ProjectEnvironment do
       project_patched_methods
       source_files
       locked_gems
+      required_features
     ].freeze
   end
 
@@ -93,6 +95,37 @@ RSpec.describe Rigor::ProjectEnvironment do
 
       expect(options).to eq(options.keys.to_h { |key| [key, configuration.public_send(key)] })
       expect(options.values).to include("vendor/spec-bundle", "spec/rbs_collection.lock", true)
+    end
+  end
+
+  # Issue #1700 — a probe scans the configured paths for gated vendored features, as `rigor check` does, plus
+  # the file it inspects; scanning only that file would type it differently from the run that analyses it.
+  describe ".required_features" do
+    around do |example|
+      Dir.mktmpdir("rigor-project-env-features-") { |dir| Dir.chdir(dir) { example.run } }
+    end
+
+    it "scans the configured paths and the inspected file, and .build passes the result" do
+      FileUtils.mkdir_p("lib")
+      File.write("lib/setup.rb", "require 'prime'\n")
+      File.write("probe.rb", "p 1\n")
+      config = Rigor::Configuration.new(Rigor::Configuration::DEFAULTS.merge("paths" => %w[lib]))
+
+      expect(described_class.required_features(config, ["probe.rb"])).to eq(%w[prime])
+      captured = capture_for_project_keywords do
+        described_class.build(configuration: config, source_files: ["probe.rb"])
+      end
+      expect(captured).to include(required_features: %w[prime])
+    end
+
+    it "reads an editor buffer bound to a relative path in place of its file, so it can drop a require" do
+      FileUtils.mkdir_p("lib")
+      File.write("lib/setup.rb", "require 'prime'\n")
+      config = Rigor::Configuration.new(Rigor::Configuration::DEFAULTS.merge("paths" => %w[lib]))
+      buffer = Rigor::Analysis::BufferBinding.new(logical_path: "lib/setup.rb", physical_path: "buffer.rb")
+      File.write("buffer.rb", "p 1\n")
+
+      expect(described_class.required_features(config, [], sources: described_class.buffer_sources(buffer))).to be_empty
     end
   end
 

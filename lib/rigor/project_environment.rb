@@ -53,16 +53,37 @@ module Rigor
     #   ADR-93 auto-wired `rigor-rbs-inline` entry when the library is resolvable).
     # @param source_files — the file(s) the command inspects. Threaded so each loaded plugin's
     #   `source_rbs_synthesizer` runs over them at env-build time; an empty list contributes no synthesized RBS.
-    def build(configuration:, source_files:)
+    # @param feature_sources — path => source text the required-feature scan reads in place of that file (an
+    #   editor buffer bound with `--tmp-file` / `--instead-of`).
+    def build(configuration:, source_files:, feature_sources: {})
+      features = required_features(configuration, source_files, sources: feature_sources)
       Environment.for_project(
         libraries: configuration.libraries,
         signature_paths: configuration.signature_paths,
         plugin_registry: load_plugin_registry(configuration),
         source_files: source_files,
+        required_features: features,
         **dependency_discovery_options(configuration)
       )
     rescue StandardError
-      bare(configuration)
+      bare(configuration, features)
+    end
+
+    # Issue #1700 — the {Environment::RequiredFeatures} the environment gates on: the configured paths plus
+    # `extra_files` (the file a probe inspects, which may lie outside them), the same set `rigor check` scans
+    # whichever files it is given, so a position types as `rigor check` types it.
+    def required_features(configuration, extra_files = [], sources: {})
+      Environment::RequiredFeatures.for_configuration(configuration, extra_files, sources: sources)
+    end
+
+    # The required-feature scan's view of an editor buffer (`--tmp-file` / `--instead-of`): its logical path
+    # read from its physical file. Empty without a buffer or when the file cannot be read.
+    def buffer_sources(buffer)
+      return {} if buffer.nil?
+
+      { buffer.logical_path => File.binread(buffer.physical_path) }
+    rescue SystemCallError
+      {}
     end
 
     # The dependency-discovery axes `check` reads off the configuration, as a keyword hash. Extracted so the
@@ -116,22 +137,24 @@ module Rigor
 
     # The first fail-soft floor: no plugin tier and no synthesized RBS, but still the project's own dependency
     # sources — dropping those is what issue #821 was, so a plugin-loading failure must not cost them.
-    def bare(configuration)
+    def bare(configuration, features = required_features(configuration))
       Environment.for_project(
         libraries: configuration.libraries,
         signature_paths: configuration.signature_paths,
+        required_features: features,
         **dependency_discovery_options(configuration)
       )
     rescue StandardError
-      minimal(configuration)
+      minimal(configuration, features)
     end
 
     # The last floor: RBS core plus the project's own signature paths, which cannot fail on anything outside
     # the project itself.
-    def minimal(configuration)
+    def minimal(configuration, features = [])
       Environment.for_project(
         libraries: configuration.libraries,
-        signature_paths: configuration.signature_paths
+        signature_paths: configuration.signature_paths,
+        required_features: features
       )
     end
   end

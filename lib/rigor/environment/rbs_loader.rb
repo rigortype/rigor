@@ -7,6 +7,8 @@ require_relative "../inference/rbs_type_translator"
 require_relative "../builtins/imported_refinements"
 require_relative "rbs_hierarchy"
 require_relative "member_consistency"
+require_relative "required_features"
+require_relative "gated_signature_guard"
 
 module Rigor
   class Environment
@@ -83,21 +85,42 @@ module Rigor
         # per-gem RBS bundled with Rigor itself is in scope for every analysis run. The gem stubs are
         # intentionally read-only and appended LAST so user-supplied `signature_paths` win on name conflicts.
         def build_env_for(libraries:, signature_paths:, virtual_rbs: [], deferred_signature_paths: [])
+          env, gated_dirs = build_env_attempt(libraries, signature_paths, virtual_rbs, deferred_signature_paths)
+          return env if gated_dirs.empty?
+
+          # Issue #1700 — a {RequiredFeatures}-gated directory joined; keep it only if it does not cost the
+          # environment anything ({#gated_trouble}).
+          trouble = gated_trouble(env, gated_dirs, signature_paths, virtual_rbs)
+          return env if trouble.zero?
+
+          tokens = gated_dirs.map { |dir| RequiredFeatures.token(RequiredFeatures.feature_for_dir(dir)) }
+          fallback, = build_env_attempt(libraries.reject { |library| tokens.include?(library.to_s) },
+                                        signature_paths, virtual_rbs, deferred_signature_paths)
+          gated_trouble(fallback, gated_dirs, signature_paths, virtual_rbs) < trouble ? fallback : env
+        end
+
+        # One environment build ({.build_env_for}'s body before the issue #1700 trial). Returns the environment
+        # and the gated vendored directories it loaded.
+        def build_env_attempt(libraries, signature_paths, virtual_rbs, deferred_signature_paths)
           rbs_loader = RBS::EnvironmentLoader.new
           libraries = libraries_without_shadowed_bigdecimal_math(libraries)
+          # Issue #1700 — a `RequiredFeatures` token names a gated vendored directory, never an RBS library.
           loaded_libraries = libraries.select do |library|
+            next false if RequiredFeatures.feature_of_token(library)
+
             rbs_loader.has_library?(library: library, version: nil)
           end
           loaded_libraries.each do |library|
             rbs_loader.add(library: library, version: nil)
           end
+          gated_dirs = loadable_gated_dirs(libraries, loaded_libraries)
           # Project `signature_paths:` are loaded per-file by {.add_project_signatures} AFTER `from_loader`,
           # NOT added to the loader here: `RBS::Environment.from_loader` parses every added file all-or-nothing,
           # so one unparseable user `.rbs` raises `RBS::ParsingError` and collapses the WHOLE env to nil (every
           # type-of query then degrades to `Dynamic[top]` — the "sig looks harmful" failure of the 2026-07-06
           # mastodon coverage note). Per-file loading quarantines the broken file instead. Vendored / core-overlay
           # sigs are Rigor-shipped and trusted, so they stay on the loader's fast batch path.
-          add_bundled_signatures(rbs_loader, loaded_libraries.to_set(&:to_s))
+          add_bundled_signatures(rbs_loader, loaded_libraries.to_set(&:to_s), gated_dirs)
           env = unload_upstream_core_shims(RBS::Environment.from_loader(rbs_loader), rbs_loader)
           project_files = project_sig_files(signature_paths)
           # Issue #1075 — decided from the inputs before either side enters `env`: the consistency rule may
@@ -119,7 +142,64 @@ module Rigor
           # Issue #777 — resolve-time backstop: also unload colliding PROJECT buffers (class-vs-module /
           # constant redeclarations against bundled RBS). Virtual culprits are preferred when both appear.
           env, resolved = resolve_quarantining_virtual_collisions(env, virtual_rbs, project_files: project_files)
-          stub_missing_referenced_types(env, resolved, project_files)
+          [stub_missing_referenced_types(env, resolved, project_files), gated_dirs]
+        end
+
+        # Issue #1700 — what loading the gated vendored `dirs` costs `env`: each type they declare whose instance
+        # or singleton definition fails to build, plus each project signature file or inline-synthesized RBS
+        # buffer quarantined for a duplicate declaration. A vendored copy joins signatures the project chose — its
+        # own `sig/`, a `signature_paths:` entry, a gem's `sig/`, an `rbs collection` copy, plugin signatures,
+        # inline RBS — and any clash with them (a member both declare, a class one side declares as a module,
+        # a different superclass or generic arity) surfaces here as a failed definition or a quarantine, and
+        # degrades the whole class to `Dynamic[top]` or drops the project's file. A trial build is the oracle
+        # rather than a comparison of declarations because it answers exactly what RBS itself decides — an
+        # overload continuation (`| ...`), a superclass written relative or absolute, a type parameter — with no
+        # second reading of the rules to drift. It runs only when a gated directory joined, on an env-cache miss.
+        def gated_trouble(env, dirs, signature_paths, virtual_rbs)
+          type_names = gated_type_names(dirs)
+          builder = RBS::DefinitionBuilder.new(env: env)
+          failed = type_names.count do |type_name|
+            entry = env.class_decls[type_name]
+            next false if entry.nil?
+
+            # rbs 4 validates the declarations' type parameters here (`GenericParameterMismatchError`), which
+            # the definition builds below do not reach on their own.
+            entry.type_params if entry.respond_to?(:type_params)
+            builder.build_instance(type_name)
+            builder.build_singleton(type_name)
+            false
+          rescue StandardError
+            true
+          end
+          declares = gated_declaration_pattern(type_names)
+          quarantined = collision_quarantined_project_signatures(env, signature_paths).count do |file, _note|
+            File.read(file).match?(declares)
+          rescue SystemCallError, IOError, ArgumentError
+            false
+          end
+          failed + quarantined + quarantined_virtual_count(env, virtual_rbs, declares)
+        end
+
+        # A `class` / `module` line declaring one of the gated types, by its last name segment. A quarantine is
+        # counted only for a file that declares one, so a project whose other signature files were already
+        # quarantined (a duplicated gem `sig/`) does not read every gated directory as costly and pay a second
+        # build on each env-cache miss.
+        def gated_declaration_pattern(type_names)
+          segments = type_names.map { |name| Regexp.escape(name.name.to_s) }.uniq.join("|")
+          /^\s*(?:class|module)\s+(?:::)?(?:[\w:]*::)?(?:#{segments})\b/
+        end
+
+        def gated_type_names(dirs)
+          roots = dirs.map { |dir| Pathname(File.join(VENDORED_GEM_SIGS_ROOT, dir)) }
+          names = roots.flat_map { |root| GatedSignatureGuard.type_names(root) }
+          names.uniq.map { |name| ::RBS::TypeName.parse("::#{name}") }
+        end
+
+        def quarantined_virtual_count(env, virtual_rbs, declares)
+          present = env.buffers.to_set(&:name)
+          virtual_rbs.count do |name, content|
+            !content.empty? && !present.include?(name) && content.match?(declares) && parseable_rbs?(content)
+          end
         end
 
         # rbs ships `stdlib/bigdecimal/` and `stdlib/bigdecimal-math/` as two libraries, so
@@ -1228,6 +1308,7 @@ module Rigor
         # Keyed by `data/vendored_gem_sigs/` directory basename.
         LIBRARY_SUPPLEMENT_VENDORED_DIRS = {
           "cgi" => "cgi",
+          "prime" => "singleton",
           "prism" => "prism"
         }.freeze
         private_constant :LIBRARY_SUPPLEMENT_VENDORED_DIRS
@@ -1258,13 +1339,13 @@ module Rigor
         # overlay is added per-file, not per-directory, because the `LIBRARY_SUPPLEMENT_CORE_OVERLAYS` and
         # `RBS_LINE_CORE_OVERLAYS` files must be gated individually.
         #
+        # A directory {RequiredFeatures} gates loads only when the library list activated it (issue #1700).
+        #
         # @param loaded_library_names — libraries that actually resolved on this loader.
-        def add_bundled_signatures(rbs_loader, loaded_library_names)
+        # @param gated_dirs — the {RequiredFeatures}-gated directory basenames this library list activates.
+        def add_bundled_signatures(rbs_loader, loaded_library_names, gated_dirs = [])
           vendored_gem_sig_paths.each do |path|
-            next unless path.directory?
-            next unless supplement_dependency_loaded?(LIBRARY_SUPPLEMENT_VENDORED_DIRS, path, loaded_library_names)
-
-            rbs_loader.add(path: path)
+            rbs_loader.add(path: path) if vendored_dir_loads?(path, loaded_library_names, gated_dirs)
           end
           core_overlay_sig_paths.each do |dir|
             next unless dir.directory?
@@ -1277,6 +1358,31 @@ module Rigor
               rbs_loader.add(path: file)
             end
           end
+        end
+
+        # Issue #1700 — the {RequiredFeatures}-gated directories `libraries` activates, less one whose feature
+        # resolved as an RBS library here (`libraries: [prime]` on a host whose `prime` gem ships its `sig/`),
+        # whose own copy is then already loaded. {.build_env_for} then keeps a directory that joined only if the
+        # trial build finds it costs nothing ({.gated_trouble}). Both decisions are made inside the build, against
+        # what the environment holds, so the env-cache producer — which rebuilds through it from the same inputs
+        # — decides the same way.
+        def loadable_gated_dirs(libraries, loaded_libraries)
+          resolved = loaded_libraries.to_set(&:to_s)
+          RequiredFeatures.active_dirs(libraries.map(&:to_s)).reject do |dir|
+            resolved.include?(RequiredFeatures.feature_for_dir(dir))
+          end
+        end
+
+        # @param path — a `data/vendored_gem_sigs/<gem>/` entry.
+        # @return true when the directory exists, its supplemented library (if any) loaded, and — for a
+        #   {RequiredFeatures}-gated directory — the library list activated it.
+        def vendored_dir_loads?(path, loaded_library_names, gated_dirs)
+          return false unless path.directory?
+          return false unless supplement_dependency_loaded?(LIBRARY_SUPPLEMENT_VENDORED_DIRS, path,
+                                                            loaded_library_names)
+
+          basename = path.basename.to_s
+          !RequiredFeatures.gated_dir?(basename) || gated_dirs.include?(basename)
         end
 
         # @param supplements — basename → gating library map.

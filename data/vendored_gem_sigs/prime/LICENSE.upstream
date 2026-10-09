@@ -1,0 +1,47 @@
+Source: the `prime` gem 0.1.4 (https://github.com/ruby/prime), its own `sig/` directory
+Files:  sig/prime.rbs             -> prime.rbs
+        sig/integer-extension.rbs -> integer-extension.rbs
+        (sig/manifest.yaml is not copied: its one dependency, `singleton`, is
+        the library `RbsLoader::LIBRARY_SUPPLEMENT_VENDORED_DIRS` gates this
+        directory on.)
+SHA-256 of the upstream files as shipped in prime-0.1.4.gem:
+        412db65a4774a53eb6e7df9408a0dce40d7907612b8ca3b2a12f2486f62552c3  sig/prime.rbs
+        2af60558aa353e4d183557f6091978a915d682fabb9a95a3d87e77dc7ba129f5  sig/integer-extension.rbs
+License: Ruby's license or the 2-clause BSD license (gemspec: "Ruby", "BSD-2-Clause");
+         this copy is used under the 2-clause BSD license, reproduced below.
+
+Local change (Rigor): `integer-extension.rbs` declares
+`Integer.from_prime_division: (Array[[ String ]]) -> Integer` upstream. The
+method takes the `[[prime, exponent], ...]` pairs `Integer#prime_division`
+returns, so the copy here reads `(Array[[ Integer, Integer ]]) -> Integer`;
+verbatim, `Integer.from_prime_division([[2, 2], [3, 1]])` drew a false
+`call.argument-type-mismatch`. Nothing else differs from upstream.
+
+Loading (issue #1700): this directory declares a top-level `class Prime` and
+reopens `Integer`, so it loads only when the project requires `prime` (or lists
+it under `libraries:`) and a trial build finds it clashes with no other
+signature source (`Rigor::Environment::RequiredFeatures`, `RbsLoader`).
+
+----------------------------------------------------------------------------
+Copyright (C) 1993-2013 Yukihiro Matsumoto. All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions
+are met:
+1. Redistributions of source code must retain the above copyright
+   notice, this list of conditions and the following disclaimer.
+2. Redistributions in binary form must reproduce the above copyright
+   notice, this list of conditions and the following disclaimer in the
+   documentation and/or other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+SUCH DAMAGE.

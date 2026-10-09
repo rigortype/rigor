@@ -2295,11 +2295,28 @@ module Rigor
       # global-write census (the `global.*` write rules); the issue #992 envelopes ride {#seed_paired_tables}. Split
       # out of {#project_scope_seed_tables} to keep it under the complexity budget.
       def seed_call_surface_tables(tables)
-        tables[:discovered_refinements] = @project_discovered_refinements unless @project_discovered_refinements.empty?
+        refinements = seed_refinements(tables)
+        tables[:discovered_refinements] = refinements unless refinements.nil? || refinements.empty?
         # Issue #1367 — read by the `global.*` write rules.
         return if @project_discovered_global_write_census.empty?
 
         tables[:discovered_global_write_census] = @project_discovered_global_write_census
+      end
+
+      # Issue #1672 — the project's refinements (this run's discovery, else an opt-in `discovery_seed:` base's)
+      # unioned with the opt-in gems' ({DependencySourceInference::Index#refinements}). The gem half comes from
+      # the pre-passes every run takes, warm or cold, so a file re-analysed warm is seeded what a cold run seeds.
+      # The seed is rebuilt per file, so the union is kept while its two inputs are the same objects.
+      def seed_refinements(tables)
+        project = @project_discovered_refinements
+        project = tables[:discovered_refinements] if project.empty?
+        gems = @dependency_source_index.refinements
+        memo = @seed_refinements
+        return memo[2] if memo && memo[0].equal?(project) && memo[1].equal?(gems)
+
+        merged = Inference::ScopeIndexer.merge_refinement_tables(project, gems)
+        @seed_refinements = [project, gems, merged]
+        merged
       end
 
       # The three mixin tables: the ADR-24 instance-side `include` map, its issue #1123 `prepend` twin

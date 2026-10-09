@@ -39,9 +39,10 @@ lib/rigor/analysis/check_rules/source_arity.rb:
   producers:
     Rigor::Analysis::CheckRules::SourceArity#public_at?: grandfathered
 lib/rigor/analysis/dependency_source_inference/walker.rb:
-  computes: the method catalog of an opt-in gem's source roots, per class and side
+  computes: the method catalog of an opt-in gem's source roots, per class and side, and its refine bodies' refinements
   producers:
     Rigor::Analysis::DependencySourceInference::Walker#walk_node: grandfathered
+    Rigor::Analysis::DependencySourceInference::Walker#walk_refine_declarations: a dispatcher over a refine body; it hands each nested class or module back to walk_node under the prefix it was given and derives no declaration context itself
 lib/rigor/analysis/reachability/scan.rb:
   computes: every constant declaration and reference with the lexical nesting in force there (ADR-102)
   producers:

@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../../cache/descriptor"
+require_relative "../../inference/scope_indexer"
 
 module Rigor
   module Analysis
@@ -11,7 +12,7 @@ module Rigor
       # entries.
       class Index
         attr_reader :resolved_gems, :unresolvable, :method_catalog, :budget_exceeded,
-                    :class_to_gem, :budget_overrun_strategy, :gem_modes
+                    :class_to_gem, :budget_overrun_strategy, :gem_modes, :refinements
 
         # @param method_catalog — => Symbol}] the flat
         #   `(class_name, method_name) → :instance | :singleton` table produced by {Walker.walk}, aggregated
@@ -30,10 +31,13 @@ module Rigor
         #   gem-source and RBS both contribute under `mode: :full`. The map is keyed on `gem_name` (not
         #   class) because re-opened classes belong to the first gem they appeared in per `class_to_gem`;
         #   `mode_for(class_name)` chains the two lookups.
-        def initialize(
+        # @param refinements — issue #1672: the opt-in gems' `refine X do … end` bodies, `{refined class =>
+        #   {method => [refining modules]}}` ({Walker::Outcome#refinements}). The runner merges it into the
+        #   project's `discovered_refinements` seed, so `using M` for a gem's `M` reaches the check rules.
+        def initialize( # rubocop:disable Metrics/ParameterLists
           resolved_gems: [], unresolvable: [], method_catalog: {},
           budget_exceeded: [], class_to_gem: {},
-          budget_overrun_strategy: :walker_cap, gem_modes: {}
+          budget_overrun_strategy: :walker_cap, gem_modes: {}, refinements: {}
         )
           @resolved_gems = resolved_gems.freeze
           @unresolvable = unresolvable.freeze
@@ -42,6 +46,7 @@ module Rigor
           @class_to_gem = class_to_gem.freeze
           @budget_overrun_strategy = budget_overrun_strategy
           @gem_modes = gem_modes.freeze
+          @refinements = Inference::ScopeIndexer.freeze_refinements(refinements)
           freeze
         end
 

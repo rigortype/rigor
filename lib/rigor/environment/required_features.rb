@@ -34,11 +34,15 @@ module Rigor
 
       # A `require` call naming a listed feature as a string literal, with or without parentheses: the bare call
       # and `Kernel.require` count, a `require` that follows any other `.` (`obj.require`) or is part of a longer
-      # word (`require_relative`) does not, and a computed name never does. The match is textual and leans
-      # toward loading: a `require "prime"` inside a comment, a heredoc or an `=begin` block counts too. That
-      # direction only loads the gem's own signatures, and `RbsLoader` still declines them when the project
-      # declares a clashing member itself.
+      # word (`require_relative`) does not, and a computed name never does. A match after a `#` line comment
+      # marker on its line ({#commented?}) does not count, so a mention in a comment changes nothing. Otherwise
+      # the match is textual and leans toward loading: a `require "prime"` inside a heredoc or an `=begin` block
+      # counts. That direction only loads the gem's own signatures, and `RbsLoader` still declines them when the
+      # project declares a clashing member itself.
       PATTERN = /(?:(?<![\w.$@])|(?<=Kernel\.))require[ \t]*\(?[ \t]*(["'])(#{FEATURE_ALTERNATION})\1/
+
+      QUOTES = ["\"", "'"].freeze
+      private_constant :QUOTES
 
       module_function
 
@@ -127,9 +131,37 @@ module Rigor
         # the regexp on a file that does not.
         return [] unless VENDORED_DIRS.each_key.any? { |feature| source.include?(feature) }
 
-        named = source.b.scan(PATTERN).map(&:last)
+        bytes = source.b
+        named = []
+        position = 0
+        while (match = PATTERN.match(bytes, position))
+          named << match[2] unless commented?(bytes, match.begin(0))
+          position = match.end(0)
+        end
         # The table's own frozen keys, so the result is shareable across Ractors whatever the source's encoding.
         VENDORED_DIRS.each_key.select { |feature| named.include?(feature) }
+      end
+
+      # Whether the text before `offset` on its line holds a `#` outside a string literal: the first `#` not
+      # inside single or double quotes starts a comment. Quote tracking is per line and ignores `%q` forms and
+      # heredocs, which can only make a commented match count, never drop a real one.
+      def commented?(bytes, offset)
+        return false if offset.zero?
+
+        line_start = (bytes.rindex("\n", offset - 1) || -1) + 1
+        quote = nil
+        escaped = false
+        bytes.byteslice(line_start, offset - line_start).each_char do |char|
+          if quote
+            if escaped then escaped = false
+            elsif char == "\\" then escaped = true
+            elsif char == quote then quote = nil
+            end
+          elsif QUOTES.include?(char) then quote = char
+          elsif char == "#" then return true
+          end
+        end
+        false
       end
 
       # The library tokens for `features` and for any listed feature the configuration's `libraries:` names.

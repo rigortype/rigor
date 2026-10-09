@@ -28,10 +28,19 @@ RSpec.describe Rigor::Environment::RequiredFeatures do
     ].each { |source| expect(scan_source(source)).to eq(%w[prime]), source.inspect }
   end
 
-  # The match is textual and leans toward loading: a mention in a comment, a heredoc or an `=begin` block
-  # counts too, and `RbsLoader` still declines the signatures when the project declares a clashing member.
-  it "counts a mention in a comment" do
-    expect(scan_source(%(# require "prime"\n))).to eq(%w[prime])
+  it "ignores a mention after a line comment marker, but not a # inside a string before the call" do
+    expect(scan_source(%(# require "prime"\n))).to be_empty
+    expect(scan_source(%(p 1 # then require "prime"\n))).to be_empty
+    expect(scan_source(%(x = "#"; require "prime"\n))).to eq(%w[prime])
+    expect(scan_source(%(x = '#'; require "prime"\n))).to eq(%w[prime])
+    expect(scan_source(%(x = "\\"#"; require "prime"\n))).to eq(%w[prime])
+  end
+
+  # Beyond line comments the match is textual and leans toward loading: a mention in a heredoc or an `=begin`
+  # block counts, and `RbsLoader` still declines the signatures when the project declares a clashing member.
+  it "counts a mention in a heredoc or an =begin block" do
+    expect(scan_source(%(doc = <<~TXT\n  require "prime"\nTXT\n))).to eq(%w[prime])
+    expect(scan_source(%(=begin\nrequire "prime"\n=end\n))).to eq(%w[prime])
   end
 
   it "ignores another receiver's require, require_relative, a longer feature name and a computed name" do

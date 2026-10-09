@@ -1,0 +1,78 @@
+# Rigor core overlay — supplemental core signatures.
+#
+# --- Ruby::SourceRange and the #source_range readers (Ruby 4.1) ---
+#
+# Issue #1691. Ruby 4.1 adds the `Ruby::SourceRange` class (`proc.c`) and
+# four methods that answer one:
+#
+#   Thread::Backtrace::Location#source_range -> Ruby::SourceRange  (vm_backtrace.c)
+#   Proc#source_range, Method#source_range,
+#   UnboundMethod#source_range -> Ruby::SourceRange or nil          (proc.c)
+#
+# NEWS lists only the backtrace reader; `proc.c` defines the other three
+# alongside the class. They answer `nil` for a proc or method with no Ruby
+# source (a C method, a `Symbol#to_proc`). The class's readers are, per
+# their call-seqs:
+#
+#   path -> String               absolute_path -> String or nil
+#   start_line -> Integer        start_column -> Integer
+#   end_line -> Integer          end_column -> Integer
+#
+# `Ruby::SourceRange` has no allocator (`new` is undefined), so no
+# constructor is declared. No rbs release through 4.2 declares any of
+# this, so correct 4.1 code reported `call.undefined-method`.
+#
+# TEMPORARY: delete this file once the rbs release Rigor bundles declares
+# the methods upstream.
+#
+# Declared unconditionally, not gated on `target_ruby` (ADR-121 § Rejected
+# alternatives; false positives outrank). Every method sits on a module the
+# class includes, so that a later direct declaration from rbs or a project
+# `sig/` overrides it instead of raising `DuplicatedMethodDefinitionError`
+# for the whole class (see `process.rbs`). `Ruby::SourceRange` is declared
+# without a superclass, so a later upstream `< Object` reopening agrees.
+module RigorCoreOverlay
+  module Ruby41LocationSourceRange
+    def source_range: () -> Ruby::SourceRange
+  end
+
+  module Ruby41CallableSourceRange
+    def source_range: () -> Ruby::SourceRange?
+  end
+
+  module Ruby41SourceRange
+    def path: () -> String
+
+    def absolute_path: () -> String?
+
+    def start_line: () -> Integer
+
+    def start_column: () -> Integer
+
+    def end_line: () -> Integer
+
+    def end_column: () -> Integer
+  end
+end
+
+class Thread::Backtrace::Location
+  include RigorCoreOverlay::Ruby41LocationSourceRange
+end
+
+class Proc
+  include RigorCoreOverlay::Ruby41CallableSourceRange
+end
+
+class Method
+  include RigorCoreOverlay::Ruby41CallableSourceRange
+end
+
+class UnboundMethod
+  include RigorCoreOverlay::Ruby41CallableSourceRange
+end
+
+module Ruby
+  class SourceRange
+    include RigorCoreOverlay::Ruby41SourceRange
+  end
+end

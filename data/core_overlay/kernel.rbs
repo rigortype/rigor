@@ -1,0 +1,40 @@
+# Rigor core overlay — supplemental core signatures.
+#
+# --- Kernel#autoload_relative (Ruby 4.1) ---
+#
+# Issue #1691. Ruby 4.1 adds the global function `autoload_relative`
+# (`load.c`, call-seq `autoload_relative(const, filename) -> nil`), the
+# top-level counterpart of `Module#autoload_relative` (`module.rbs`). No rbs
+# release through 4.2 declares it, so a top-level call reported
+# `call.undefined-method` on correct 4.1 code.
+#
+# TEMPORARY: delete this file once the rbs release Rigor bundles declares
+# the method upstream.
+#
+# Declared unconditionally, not gated on `target_ruby` (ADR-121 § Rejected
+# alternatives; false positives outrank). A global function is a private
+# instance method plus a public singleton method on `Kernel` — what rbs
+# spells `def self?.` — so the two halves are declared on two modules,
+# one `Kernel` includes and one it extends. A later direct `def self?.`
+# from rbs or a project `sig/` overrides both instead of raising
+# `DuplicatedMethodDefinitionError` for the whole module (see
+# `process.rbs`). The included module's self type is `BasicObject`: the
+# default, `Object`, includes `Kernel` itself, and that cycle is a
+# `RecursiveAncestorError` that takes `Object` and every class under it
+# down to `Dynamic[top]`.
+module RigorCoreOverlay
+  module Ruby41KernelAutoloadRelative : BasicObject
+    private
+
+    def autoload_relative: (Symbol | string const, string | _ToPath filename) -> nil
+  end
+
+  module Ruby41KernelSingletonAutoloadRelative
+    def autoload_relative: (Symbol | string const, string | _ToPath filename) -> nil
+  end
+end
+
+module Kernel
+  include RigorCoreOverlay::Ruby41KernelAutoloadRelative
+  extend RigorCoreOverlay::Ruby41KernelSingletonAutoloadRelative
+end

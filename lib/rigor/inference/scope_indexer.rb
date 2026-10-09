@@ -7199,7 +7199,7 @@ module Rigor
       # `def_delegator :@x, :f`) would leave a `def`'s envelope standing for a method that no longer has it.
       NAME_NEUTRAL_MACROS = %i[
         private public protected module_function private_class_method public_class_method
-        private_constant public_constant require require_relative autoload
+        private_constant public_constant require require_relative autoload autoload_relative
       ].to_set.freeze
       private_constant :NAME_NEUTRAL_MACROS
 

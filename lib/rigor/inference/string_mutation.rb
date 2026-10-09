@@ -22,6 +22,9 @@ module Rigor
       # the effect classifier and the effect catalogue's `mutators: string` cite it rather than keep a list of their
       # own (ADR-103 WD3). A spec holds it to every bang method `String` defines plus the non-bang mutators reflection
       # cannot find by name.
+      #
+      # The last row is Ruby 4.1's bit operations (#1691), which `data/core_overlay/string.rbs` declares whatever Ruby
+      # runs the analysis; they rewrite bytes in place and keep the byte length.
       MUTATORS = %i[
         << concat insert prepend replace clear []= slice!
         setbyte bytesplice append_as_bytes force_encoding
@@ -29,18 +32,21 @@ module Rigor
         upcase! downcase! capitalize! swapcase! reverse!
         strip! lstrip! rstrip! chomp! chop!
         delete_prefix! delete_suffix! encode! scrub! unicode_normalize!
+        bit_set bit_clear bit_flip bitwise_not! bitwise_and! bitwise_or! bitwise_xor!
       ].to_set.freeze
 
       # The {MUTATORS} that CANNOT leave a non-empty receiver empty, and so keep a `non-empty-string` refinement:
       # appenders (`<<`, `concat`, `insert`, `prepend`, `append_as_bytes`), and rewrites that keep at least one
       # character (`setbyte`, `force_encoding`, the case mappings, `reverse!`, `succ!` / `next!`, `squeeze!`,
-      # `unicode_normalize!`). A whitelist, as `RefinementMutation::EMPTY_PRESERVING` is for Array and Hash: a mutator
-      # missing here retracts the witness, which costs precision, where a mutator missing from a list of emptiers kept
-      # the witness of a string it had just emptied — `tr!` and `tr_s!` did, since `"a".tr!("a", "")` is `""`.
+      # `unicode_normalize!`, and the bit operations, which keep every byte). A whitelist, as
+      # `RefinementMutation::EMPTY_PRESERVING` is for Array and Hash: a mutator missing here retracts the witness, which
+      # costs precision, where a mutator missing from a list of emptiers kept the witness of a string it had just
+      # emptied — `tr!` and `tr_s!` did, since `"a".tr!("a", "")` is `""`.
       EMPTY_PRESERVING = %i[
         << concat insert prepend append_as_bytes
         setbyte force_encoding
         upcase! downcase! capitalize! swapcase! reverse! succ! next! squeeze! unicode_normalize!
+        bit_set bit_clear bit_flip bitwise_not! bitwise_and! bitwise_or! bitwise_xor!
       ].to_set.freeze
 
       # `tr!` / `tr_s!` map every character they match to one character of the replacement (padded with its last), so

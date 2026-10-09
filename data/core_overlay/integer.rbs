@@ -1,0 +1,31 @@
+# Rigor core overlay — supplemental core signatures.
+#
+# --- Integer#bit_count (Ruby 4.1) ---
+#
+# Issue #1691. Ruby 4.1 adds `Integer#bit_count`, the population count of
+# the receiver's binary representation (`numeric.c`, call-seq
+# `bit_count -> integer`). No rbs release through 4.2 declares it, so
+# `5.bit_count` reported `call.undefined-method` on correct 4.1 code.
+#
+# TEMPORARY: delete this file once the rbs release Rigor bundles declares
+# the method upstream.
+#
+# Declared unconditionally, not gated on `target_ruby`: a 4.0-targeted
+# project calling it is an error Rigor then misses, but gating would report
+# every correct 4.1 call under the default target (ADR-121 § Rejected
+# alternatives; false positives outrank).
+#
+# Declared on a module `Integer` includes, not as a direct `def`: a second
+# direct `def` from a later rbs or a project `sig/` is a
+# `DuplicatedMethodDefinitionError` that takes all of `Integer` down to
+# `Dynamic[top]`, while a direct `def` from either source simply overrides
+# a method the class gets through `include` (see `process.rbs`).
+module RigorCoreOverlay
+  module Ruby41Integer
+    def bit_count: () -> Integer
+  end
+end
+
+class Integer
+  include RigorCoreOverlay::Ruby41Integer
+end

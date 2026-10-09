@@ -1,0 +1,1 @@
+- **[engine]** `rigor unused` credits a class's superclass to the subclass, so a base class inside a namespace is no longer listed when a reachable subclass names it, and a top-level base used only by dead subclasses is no longer hidden. ([#1724](https://github.com/rigortype/rigor/pull/1724))

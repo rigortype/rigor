@@ -1,7 +1,7 @@
 require "rigor/testing"
 include Rigor::Testing
 
-# Issue #1691 — every core method Ruby 4.1 adds, called once. Each one
+# Issues #1691 and #1718 — every core method Ruby 4.1 adds, called once. Each one
 # reported `call.undefined-method` (or `call.wrong-arity`) before
 # `data/core_overlay/` declared it.
 
@@ -40,6 +40,19 @@ String.method_defined?(:upcase, true, true)
 
 ENV.fetch_values("HOME", "PATH")
 ENV.fetch_values("HOME") { |name| name.size }
+
+# #1718 — the `global:` and `scope:` keywords, and `IO::Buffer#bit_count`.
+GC.start(global: false)
+GC.start(full_mark: false, global: false)
+ObjectSpace.garbage_collect(global: false)
+GC.stat(:count, scope: :global) + 1
+GC.stat({}, scope: :local).each_key { |key| key }
+GC.stat(scope: :global).fetch(:count)
+assert_type("Integer", GC.stat(:count))
+buffer = IO::Buffer.new(8)
+assert_type("Integer", buffer.bit_count)
+buffer.bit_count(0, 4)
+buffer.bit_count(nil, 4)
 
 module Ruby41Autoloads
   autoload_relative :Lazy, "lazy"

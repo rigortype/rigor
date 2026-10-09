@@ -1,0 +1,1 @@
+- **[rbs]** More Ruby 4.1 core additions resolve: `IO::Buffer#bit_count`, and the `global:` keyword on `GC.start` / `ObjectSpace.garbage_collect` and `scope:` on `GC.stat`, so `GC.stat(:count, scope: :global) + 1` no longer reports `+` as undefined on `Hash`. ([#1731](https://github.com/rigortype/rigor/pull/1731))

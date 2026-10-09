@@ -1,0 +1,28 @@
+# Rigor core overlay — supplemental core signatures.
+#
+# --- MatchData#integer_at (Ruby 4.1) ---
+#
+# Issue #1691. Ruby 4.1 adds `MatchData#integer_at` (`re.c`, call-seq
+# `integer_at(index, base = 10) -> integer or nil` and
+# `integer_at(name, base = 10) -> integer or nil`): `$~.integer_at(N)` is
+# `$N&.to_i`. No rbs release through 4.2 declares it, so correct 4.1 code
+# reported `call.undefined-method`. A non-Integer first argument is read as
+# a group name; `base` goes through `NUM2INT`, hence `int`.
+#
+# TEMPORARY: delete this file once the rbs release Rigor bundles declares
+# the method upstream.
+#
+# Declared unconditionally, not gated on `target_ruby` (ADR-121 § Rejected
+# alternatives; false positives outrank), and on a module `MatchData`
+# includes so that a later direct declaration overrides it instead of
+# raising `DuplicatedMethodDefinitionError` for the whole class (see
+# `process.rbs`).
+module RigorCoreOverlay
+  module Ruby41MatchData
+    def integer_at: (Integer | String | Symbol index_or_name, ?int base) -> Integer?
+  end
+end
+
+class MatchData
+  include RigorCoreOverlay::Ruby41MatchData
+end

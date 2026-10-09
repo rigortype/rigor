@@ -1,0 +1,41 @@
+# Rigor core overlay — supplemental core signatures.
+#
+# --- Module#descendants, #autoload_relative, method_defined?'s include_all (Ruby 4.1) ---
+#
+# Issue #1691. Ruby 4.1 adds, on `Module`:
+#
+#   descendants -> array                                  (class.c)
+#   autoload_relative(const, filename) -> nil             (load.c)
+#   method_defined?(symbol, inherit=true, include_all = false) -> true or false
+#                                                         (vm_method.c, Feature #22297)
+#
+# No rbs release through 4.2 declares the first two or the third argument,
+# so correct 4.1 code reported `call.undefined-method` or
+# `call.wrong-arity`. `descendants` answers classes and modules alike,
+# hence `Array[Module]`.
+#
+# TEMPORARY: delete each entry once the rbs release Rigor bundles declares
+# it upstream.
+#
+# Declared unconditionally, not gated on `target_ruby` (ADR-121 § Rejected
+# alternatives; false positives outrank). The new methods sit on a module
+# `Module` includes so that a later direct declaration overrides them
+# instead of raising `DuplicatedMethodDefinitionError` for the whole class
+# (see `process.rbs`). The three-argument `method_defined?` is an `| ...`
+# continuation of the upstream declaration, which every supported rbs
+# release carries. `interned` and `path` are spelled out because rbs 3.0-3.2
+# predate both aliases.
+module RigorCoreOverlay
+  module Ruby41Module
+    def descendants: () -> Array[Module]
+
+    def autoload_relative: (Symbol | string const, string | _ToPath filename) -> nil
+  end
+end
+
+class Module
+  include RigorCoreOverlay::Ruby41Module
+
+  def method_defined?: (Symbol | string name, boolish inherit, boolish include_all) -> bool
+                     | ...
+end

@@ -1,0 +1,86 @@
+# Rigor core overlay — supplemental core signatures.
+#
+# --- String bit operations and String#tr with a Hash (Ruby 4.1) ---
+#
+# Issue #1691. Ruby 4.1 adds bit access and bitwise operations on a
+# string's bytes (`string.c`), and lets `tr` / `tr!` take a single Hash of
+# replacement pairs (Feature #22238). No rbs release through 4.2 declares
+# any of them, so correct 4.1 code reported `call.undefined-method`, or
+# `call.wrong-arity` for `"hello".tr("e" => "er")`. Signatures follow the
+# CRuby call-seqs:
+#
+#   bit_get(offset, lsb_first: true) -> 0, 1, or nil
+#   bit_set?(offset, lsb_first: true) -> true, false, or nil
+#   bit_set / bit_clear / bit_flip(offset, lsb_first: true) -> self
+#                                 (offset, length, lsb_first: true) -> self
+#                                 (range, lsb_first: true) -> self
+#   bit_count -> integer
+#   bit_count(offset, length, lsb_first: true) -> integer
+#   bit_count(range, lsb_first: true) -> integer
+#   bitwise_not -> string             bitwise_not! -> self
+#   bitwise_and / _or / _xor(other) -> string, and their `!` forms -> self
+#   tr(pairs) -> new_string           tr!(pairs) -> self or nil
+#
+# `lsb_first` raises unless it is `true` or `false`, hence `bool`. `other`
+# is converted with `to_str`, hence `string`.
+#
+# TEMPORARY: delete each entry once the rbs release Rigor bundles declares
+# it upstream.
+#
+# Declared unconditionally, not gated on `target_ruby` (ADR-121 § Rejected
+# alternatives; false positives outrank). The new methods sit on a module
+# `String` includes so that a later direct declaration from rbs or a
+# project `sig/` overrides them instead of raising
+# `DuplicatedMethodDefinitionError` for the whole class (see
+# `process.rbs`). The `tr` / `tr!` Hash form is an `| ...` continuation of
+# the upstream declaration, which every supported rbs release carries; a
+# later release that declares the same overload only repeats it.
+module RigorCoreOverlay
+  module Ruby41StringBits
+    def bit_get: (int offset, ?lsb_first: bool) -> (0 | 1)?
+
+    def bit_set?: (int offset, ?lsb_first: bool) -> bool?
+
+    def bit_set: (int offset, ?lsb_first: bool) -> self
+               | (int offset, int length, ?lsb_first: bool) -> self
+               | (Range[Integer?] range, ?lsb_first: bool) -> self
+
+    def bit_clear: (int offset, ?lsb_first: bool) -> self
+                 | (int offset, int length, ?lsb_first: bool) -> self
+                 | (Range[Integer?] range, ?lsb_first: bool) -> self
+
+    def bit_flip: (int offset, ?lsb_first: bool) -> self
+                | (int offset, int length, ?lsb_first: bool) -> self
+                | (Range[Integer?] range, ?lsb_first: bool) -> self
+
+    def bit_count: () -> Integer
+                 | (int offset, int length, ?lsb_first: bool) -> Integer
+                 | (Range[Integer?] range, ?lsb_first: bool) -> Integer
+
+    def bitwise_not: () -> String
+
+    def bitwise_not!: () -> self
+
+    def bitwise_and: (string other) -> String
+
+    def bitwise_and!: (string other) -> self
+
+    def bitwise_or: (string other) -> String
+
+    def bitwise_or!: (string other) -> self
+
+    def bitwise_xor: (string other) -> String
+
+    def bitwise_xor!: (string other) -> self
+  end
+end
+
+class String
+  include RigorCoreOverlay::Ruby41StringBits
+
+  def tr: (Hash[string, string] pairs) -> String
+        | ...
+
+  def tr!: (Hash[string, string] pairs) -> self?
+         | ...
+end

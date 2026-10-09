@@ -706,7 +706,7 @@ module Rigor
           scope = scope_index[call_node]
           return nil if scope.nil?
 
-          # The two exemptions that hold whatever shape the receiver has. Ahead of the receiver-shape
+          # The exemptions that hold whatever shape the receiver has. Ahead of the receiver-shape
           # branch below because a plugin is consulted ONCE for the whole receiver, union included, so the
           # gate belongs where that one consult is rather than duplicated into each shape's path.
           #
@@ -805,6 +805,17 @@ module Rigor
           return nil if project_sidecar_owns_method?(scope, class_name, call_node.name, kind)
 
           build_undefined_method_diagnostic(path, call_node, receiver_type, definition_site, class_name)
+        end
+
+        # Issue #1717 — an explicit `self.m` / `self.m = v` inside a block whose `self` the engine does not model
+        # (issue #316, `Scope#opaque_block_self?`). The receiver still types as the ENCLOSING `self`, but the
+        # yielding method may `instance_exec` the block on another object (`ActionController::Renderers.add`
+        # runs its block on the controller), so a method missing on the enclosing `self` is no evidence. The
+        # implicit `m` in the same block is already silent; the explicit spelling must not be stricter. A block
+        # whose `self` IS narrowed (`block_as_methods:`, `define_method`, a `Class.new` body) has cleared the
+        # mark and keeps being checked.
+        def opaque_block_self_receiver?(call_node, scope)
+          call_node.receiver.is_a?(Prism::SelfNode) && scope.opaque_block_self?
         end
 
         # Issue #1120 — the method exists at THIS call site but not everywhere: a refinement whose `using` is in
@@ -1401,8 +1412,11 @@ module Rigor
         # - ADR-67 WD6b — an inferred-parameter receiver's type is an open-call-site lower bound, so firing
         #   undefined-method against it is a false positive by construction.
         # - Issue #653 — a plugin answered this call site ({#plugin_typed_call?}).
+        # - Issue #1717 — an explicit `self` receiver in a block whose `self` is unmodelled
+        #   ({#opaque_block_self_receiver?}).
         def call_site_exempt?(call_node, scope)
-          inferred_param_receiver?(call_node, scope) || plugin_typed_call?(call_node, scope)
+          inferred_param_receiver?(call_node, scope) || plugin_typed_call?(call_node, scope) ||
+            opaque_block_self_receiver?(call_node, scope)
         end
 
         # Issue #653 — true when a plugin's `dynamic_return` supplied the return type for THIS call node

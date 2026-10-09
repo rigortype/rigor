@@ -486,6 +486,27 @@ module Rigor
       rebuild(self_type: type)
     end
 
+    # Issue #1717 — installs the `self` a block body runs with when the engine KNOWS it: an ADR-16
+    # `block_as_methods:` match, `define_method`, or a `Class.new` / `refine` body (#319). The narrowing models
+    # the block's `self`, so the body is no longer an opaque block ({#entering_opaque_block}) and an explicit
+    # `self.m` there keeps being checked against `type` — unless `keeps_opaque` says the narrowing was read off
+    # an enclosing `self` that is itself unmodelled ({#block_self_narrowing_opaque?}). A nil `type` narrows
+    # nothing and keeps the mark.
+    def with_block_self_type(type, keeps_opaque: false)
+      rebuild(self_type: type, opaque_block_self: type.nil? ? @opaque_block_self : keeps_opaque)
+    end
+
+    # Issue #1717 — whether a block-self narrowing for `call_node`, asked from this (the CALLER's) scope, is
+    # built on an unmodelled `self`. `define_method` and an implicit-receiver `block_as_methods:` match read
+    # the lexical `self`, and inside an opaque block that is the enclosing method's, not the block's; a
+    # narrowing keyed on an explicit receiver (`Grape::API.namespace do`) does not depend on it.
+    def block_self_narrowing_opaque?(call_node)
+      return false unless @opaque_block_self
+
+      receiver = call_node.receiver
+      receiver.nil? || receiver.is_a?(Prism::SelfNode)
+    end
+
     # Issue #652 — installs the body's REAL `Module.nesting`, innermost first, as recorded at declaration
     # time by `Inference::StatementEvaluator` (`["Admin::UsersController"]` for a compact
     # `class Admin::UsersController`, `["Admin::UsersController", "Admin"]` for the nested spelling). A
@@ -527,11 +548,23 @@ module Rigor
     # `self`-rebinding DSL — RSpec example groups, `Class.new { … }`, Rake, Sinatra) is indistinguishable from
     # `Array#each` without knowing the callee. The flag is set at every block entry that leaves `self_type`
     # unnarrowed and is inherited by every scope derived inside the block; it never leaks past the block,
-    # because `eval_call` returns the caller's scope unchanged.
+    # because `eval_call` returns the caller's scope unchanged. A block whose `self` the engine does narrow
+    # clears it through {#with_block_self_type}. While it holds, `self_type` is still the ENCLOSING `self`, so
+    # types keep flowing from it; what the mark withdraws is the confidence to call a method missing there
+    # (`call.undefined-method` on an explicit `self.m`, issue #1717).
     def entering_opaque_block
       return self if @opaque_block_self
 
       rebuild(opaque_block_self: true)
+    end
+
+    # Issue #1717 — the inverse, for a `def` / `class` / `module` body the per-node scope index reaches inside
+    # a block the evaluator did not enter. The evaluator starts such a body from a fresh scope, which never
+    # carries the mark; the indexer's walk inherits its parent's scope and has to drop it explicitly.
+    def leaving_opaque_block
+      return self unless @opaque_block_self
+
+      rebuild(opaque_block_self: false)
     end
 
     # True when this scope sits inside a block whose `self` is unmodelled ({#entering_opaque_block}).

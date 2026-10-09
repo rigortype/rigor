@@ -3614,7 +3614,9 @@ module Rigor
         narrowed = DefineMethodBlockSelf.narrow_self_type_for(
           scope: scope, call_node: call_node
         )
-        narrowed ? block_entry.with_self_type(narrowed) : block_entry
+        return block_entry unless narrowed
+
+        block_entry.with_block_self_type(narrowed, keeps_opaque: scope.block_self_narrowing_opaque?(call_node))
       end
 
       # Enters a meta-new `block` as the body of the class `class_context` names: `self_type` is that class's
@@ -3630,7 +3632,9 @@ module Rigor
       # frame is still pushed — it is what a nested `def` registers its method under — which is exactly the
       # divergence that makes the chain a separate record rather than a view of the frame stack.
       def enter_meta_class_body(block, block_entry, class_context)
-        entry = block_entry.with_self_type(self_type_for_class_body(class_context)).with_singleton_class_body(false)
+        # Issue #1717 — the body runs on the new class whatever encloses it, so its `self` is modelled.
+        entry = block_entry.with_block_self_type(self_type_for_class_body(class_context))
+                           .with_singleton_class_body(false)
         sub_eval(block, stamp_nesting(entry, @lexical_nesting), class_context: class_context)
       end
 
@@ -5154,7 +5158,10 @@ module Rigor
         # typing; without it here the recorded per-node scopes — what `dump_type`/`assert_type` and the
         # survey read — keep the enclosing `self_type` and every DSL call inside stays `Dynamic[top]`.
         narrowed = call_node && narrow_macro_block_self(call_node)
-        scope_with_params = scope_with_params.with_self_type(narrowed) if narrowed
+        if narrowed
+          keeps_opaque = scope.block_self_narrowing_opaque?(call_node)
+          scope_with_params = scope_with_params.with_block_self_type(narrowed, keeps_opaque: keeps_opaque)
+        end
         block_local_names(block_node).reduce(scope_with_params) do |acc, name|
           acc.with_local(name, Type::Combinator.constant_of(nil))
         end

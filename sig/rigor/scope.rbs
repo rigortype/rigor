@@ -211,6 +211,7 @@ module Rigor
     def with_lexical_nesting: (Array[String]? chain) -> Scope
     def struct_fold_safe?: (String | Symbol name) -> bool
     def entering_opaque_block: () -> Scope
+    def leaving_opaque_block: () -> Scope
     def opaque_block_self?: () -> bool
     def with_singleton_class_body: (bool) -> Scope
     # sig-gen gap: #1148 — sig-gen skips the endless-def reader (sig.skipped.untyped-return); the row is hand-written.
@@ -346,6 +347,8 @@ module Rigor
     def without_method_chain_narrowings_for: (Symbol receiver_kind, String | Symbol receiver_name) -> Scope
     def with_fact: (Analysis::FactStore::Fact fact) -> Scope
     def with_self_type: (Type::t? type) -> Scope
+    def with_block_self_type: (Type::t? type, ?keeps_opaque: bool) -> Scope
+    def block_self_narrowing_opaque?: (Prism::CallNode call_node) -> bool
     def facts_for: (?target: Analysis::FactStore::Target?, ?bucket: Symbol?) -> Array[Analysis::FactStore::Fact]
     def local_facts: (String | Symbol name, ?bucket: Symbol?) -> Array[Analysis::FactStore::Fact]
     def type_of: (untyped node, ?tracer: Inference::FallbackTracer?) -> Type::t

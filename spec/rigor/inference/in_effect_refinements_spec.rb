@@ -2,20 +2,23 @@
 
 require "spec_helper"
 
+# A query and its source, answering at the first occurrence of a marker string.
+InEffectRefinementsAtMarker = Struct.new(:refinements, :source) do
+  def offset(marker) = source.index(marker) || raise("no #{marker.inspect} in the source")
+
+  def at(marker, declared = Rigor::Inference::InEffectRefinements::EMPTY, &)
+    refinements.at(offset(marker), declared, &)
+  end
+end
+
 # Issue #1673 (ADR-121 WD1) — the ordered in-effect refinements of one file, which the check rules and the typer
 # both read.
 RSpec.describe Rigor::Inference::InEffectRefinements do
-  unknown = described_class::UNKNOWN
+  let(:unknown) { described_class::UNKNOWN }
 
+  # A query over `source` whose `at(marker, …)` answers at the first occurrence of `marker`.
   def query(source)
-    @source = source
-    described_class.new(Prism.parse(source).value)
-  end
-
-  # The list at the first occurrence of `marker` in the source.
-  def at(refinements, marker, declared = described_class::EMPTY, &)
-    offset = @source.index(marker) or raise "no #{marker.inspect} in the source"
-    refinements.at(offset, declared, &)
+    InEffectRefinementsAtMarker.new(described_class.new(Prism.parse(source).value), source)
   end
 
   describe "lexical `using`" do
@@ -27,7 +30,7 @@ RSpec.describe Rigor::Inference::InEffectRefinements do
         :probe
       RUBY
 
-      expect(at(refinements, ":probe")).to eq(%w[A B])
+      expect(refinements.at(":probe")).to eq(%w[A B])
     end
 
     it "orders two modules refining the same method by textual order" do
@@ -39,7 +42,7 @@ RSpec.describe Rigor::Inference::InEffectRefinements do
         :probe
       RUBY
 
-      expect(at(refinements, ":probe")).to eq(%w[Second First])
+      expect(refinements.at(":probe")).to eq(%w[Second First])
     end
 
     it "takes effect after the call and ends with the body that holds it" do
@@ -52,9 +55,9 @@ RSpec.describe Rigor::Inference::InEffectRefinements do
         :after
       RUBY
 
-      expect(at(refinements, ":before")).to be_empty
-      expect(at(refinements, ":inside")).to eq(%w[Box::Inner Inner])
-      expect(at(refinements, ":after")).to be_empty
+      expect(refinements.at(":before")).to be_empty
+      expect(refinements.at(":inside")).to eq(%w[Box::Inner Inner])
+      expect(refinements.at(":after")).to be_empty
     end
 
     it "appends a nested class body's `using`s to the file's list, each spelling's candidates innermost first" do
@@ -67,8 +70,8 @@ RSpec.describe Rigor::Inference::InEffectRefinements do
         :outside
       RUBY
 
-      expect(at(refinements, ":inside")).to eq(%w[A Box::B B])
-      expect(at(refinements, ":outside")).to eq(%w[A])
+      expect(refinements.at(":inside")).to eq(%w[A Box::B B])
+      expect(refinements.at(":outside")).to eq(%w[A])
     end
 
     it "ignores a `using` inside a `def`, which raises in Ruby" do
@@ -80,8 +83,8 @@ RSpec.describe Rigor::Inference::InEffectRefinements do
         :after
       RUBY
 
-      expect(at(refinements, ":inside")).to be_empty
-      expect(at(refinements, ":after")).to be_empty
+      expect(refinements.at(":inside")).to be_empty
+      expect(refinements.at(":after")).to be_empty
     end
 
     it "puts a `using`'d module's included modules ahead of it through the caller's expansion" do
@@ -92,7 +95,7 @@ RSpec.describe Rigor::Inference::InEffectRefinements do
       RUBY
       expansion = { "Outer" => %w[Base Mixin Outer], "Base" => %w[Base] }
 
-      expect(at(refinements, ":probe") { |name| expansion.fetch(name) }).to eq(%w[Base Mixin Outer])
+      expect(refinements.at(":probe") { |name| expansion.fetch(name) }).to eq(%w[Base Mixin Outer])
     end
 
     it "contributes the unknown marker where the expansion cannot tell" do
@@ -101,7 +104,7 @@ RSpec.describe Rigor::Inference::InEffectRefinements do
         :probe
       RUBY
 
-      expect(at(refinements, ":probe") { nil }).to eq([unknown])
+      expect(refinements.at(":probe") { nil }).to eq([unknown])
     end
   end
 
@@ -117,8 +120,8 @@ RSpec.describe Rigor::Inference::InEffectRefinements do
         end
       RUBY
 
-      expect(at(refinements, ":inside")).to eq(%w[A Shout])
-      expect(at(refinements, ":beside")).to eq(%w[A])
+      expect(refinements.at(":inside")).to eq(%w[A Shout])
+      expect(refinements.at(":beside")).to eq(%w[A])
     end
 
     it "names the module a `Module.new` constant write creates, and nothing it cannot name" do
@@ -133,8 +136,8 @@ RSpec.describe Rigor::Inference::InEffectRefinements do
         end
       RUBY
 
-      expect(at(refinements, ":named")).to eq(%w[Outer::Named])
-      expect(at(refinements, ":blocked")).to eq([unknown])
+      expect(refinements.at(":named")).to eq(%w[Outer::Named])
+      expect(refinements.at(":blocked")).to eq([unknown])
     end
 
     it "records the defs the body defines on the refined class" do
@@ -144,7 +147,7 @@ RSpec.describe Rigor::Inference::InEffectRefinements do
         end
         def shout = 1
       RUBY
-      refinements = query(source)
+      refinements = query(source).refinements
       defs = Prism.parse(source).value.statements.body
       refined = defs.first.body.body.first.block.body.body.first
 
@@ -162,8 +165,8 @@ RSpec.describe Rigor::Inference::InEffectRefinements do
         :after
       RUBY
 
-      expect(at(refinements, ":before")).to eq([unknown])
-      expect(at(refinements, ":after")).to eq([unknown])
+      expect(refinements.at(":before")).to eq([unknown])
+      expect(refinements.at(":after")).to eq([unknown])
     end
   end
 
@@ -174,7 +177,7 @@ RSpec.describe Rigor::Inference::InEffectRefinements do
         :probe
       RUBY
 
-      expect(at(refinements, ":probe", %w[B A C])).to eq(%w[A B C])
+      expect(refinements.at(":probe", %w[B A C])).to eq(%w[A B C])
     end
   end
 
@@ -184,8 +187,9 @@ RSpec.describe Rigor::Inference::InEffectRefinements do
         using A
         :probe
       RUBY
-      refinements = described_class.new(Prism.parse(source).value)
-      own = refinements.instance_variable_get(:@root).statements.body.last
+      root = Prism.parse(source).value
+      refinements = described_class.new(root)
+      own = root.statements.body.last
       foreign = Prism.parse(source).value.statements.body.last
 
       expect(refinements.for_node(own)).to eq(%w[A])
@@ -203,14 +207,15 @@ RSpec.describe Rigor::Inference::InEffectRefinements do
         using Shout
         :after
       RUBY
-      inside = @source.index(":inside")
-      after = @source.index(":after")
+      inside = refinements.offset(":inside")
+      after = refinements.offset(":after")
 
-      expect(refinements.refinement_active?(inside, %w[Unrelated])).to be(true)
-      expect(refinements.refinement_active?(after, %w[Unrelated])).to be(false)
-      expect(refinements.refinement_active?(after, %w[Shout])).to be(true)
-      expect(refinements.any_at?(after)).to be(true)
-      expect(refinements.any_at?(0)).to be(false)
+      query = refinements.refinements
+      expect(query.refinement_active?(inside, %w[Unrelated])).to be(true)
+      expect(query.refinement_active?(after, %w[Unrelated])).to be(false)
+      expect(query.refinement_active?(after, %w[Shout])).to be(true)
+      expect(query.any_at?(after)).to be(true)
+      expect(query.any_at?(0)).to be(false)
     end
   end
 

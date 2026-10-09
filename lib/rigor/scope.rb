@@ -75,6 +75,7 @@ module Rigor
     def in_effect_refinements(node, declared = Inference::InEffectRefinements::EMPTY)
       Inference::InEffectRefinements.for_node(self, node, declared)
     end
+
     # Issue #1367 — the project's `Inference::GlobalWriteCensus`, a `Set` of frozen entries.
     def discovered_global_write_census = @discovery.discovered_global_write_census
     def discovered_includes = @discovery.discovered_includes

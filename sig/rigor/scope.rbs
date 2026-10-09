@@ -66,6 +66,9 @@ module Rigor
     # sig-gen gap: #1148 — sig-gen skips the endless-def reader (untyped return), so the refinement table's
     # shape is hand-written.
     def discovered_refinements: () -> Hash[String, Hash[Symbol, Array[String]]]
+    # authored: the list holds module names and the `InEffectRefinements::UNKNOWN` Symbol; sig-gen reads the delegated
+    # return through an unsigned class as untyped.
+    def in_effect_refinements: (untyped node, ?Array[String] declared) -> Array[String | Symbol]
     # sig-gen gap: #1148 — sig-gen skips the endless-def reader (untyped return), so the census shape is
     # hand-written.
     def discovered_global_write_census: () -> Set[Array[untyped]]

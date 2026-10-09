@@ -224,7 +224,7 @@ members:
     reads:
     - lib/rigor/analysis/incremental_session.rb
     - lib/rigor/analysis/runner.rb
-    - lib/rigor/inference/in_effect_refinements.rb
+    - lib/rigor/inference/in_effect_refinements/scope_reads.rb
     copies:
     - lib/rigor/analysis/runner.rb
     - lib/rigor/protection/discovery_seed.rb
@@ -373,7 +373,7 @@ members:
     copies: []
   in_effect_refinements:
     reads:
-    - lib/rigor/inference/in_effect_refinements.rb
+    - lib/rigor/inference/in_effect_refinements/scope_reads.rb
     copies: []
   possible_discovered_methods:
     reads: []

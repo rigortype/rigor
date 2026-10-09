@@ -156,8 +156,8 @@ module Rigor
           patched_line_readers: "the gets / readline names the file defines through the define_method family",
           clears_last_status: "whether the analysed file holds a call that may set $? to nil",
           defines_case_equality: "whether the analysed file holds a define_method naming ===",
-          implicit_self_evidence: "where the file's implicit-self readers sit; built lazily from its tree, never seeded",
-          in_effect_refinements: "the file's ordered in-effect refinements; built lazily from its tree, never seeded"
+          in_effect_refinements: "the file's ordered in-effect refinements; built lazily from its tree, never seeded",
+          implicit_self_evidence: "where the file's implicit-self readers sit; built lazily from its tree, never seeded"
         }.freeze,
         run_state: {
           run_generation: "the identity token of the current run"

@@ -18,6 +18,9 @@ define *behaviour*.
   object (flow state + discovery index); **analysis scope** is which files one invocation produces
   diagnostics for (editor mode's option A / option B); **publish set** is the LSP's notification
   target. Qualify which one you mean on every use.
+- **refinement** — overloaded two ways, so never write it bare. A **type refinement** narrows a
+  type (a `Refined` carrier, an `RBS::Extended` refinement, narrowing); a **Ruby refinement** is
+  the language feature `Module#refine` / `using` / `Proc#refined`. Qualify which one you mean.
 - **budget** — the spec's configurable `budgets:` table is **not wired** (#123 tracks it); operative
   cutoffs today are three hard-coded guards plus ADR-10's `budget_per_gem`. Do not describe budget
   behaviour as configurable.
@@ -32,6 +35,11 @@ define *behaviour*.
   routes remediation.
 - **narrowing** — flow-sensitive refinement of a binding's type along control-flow edges
   (`docs/type-specification/control-flow-analysis.md`).
+- **in-effect refinements** — the ordered list of refining modules whose Ruby refinements apply at
+  one program point; a later activation wins over an earlier one, and re-activating a listed module
+  changes nothing. Four sources feed the one list: a lexical `using`, a `refine` block's own body, a
+  Proc literal that is the receiver of `Proc#refined`, and a block a plugin declares as refined by the
+  method it is passed to. _Avoid_: "active refinements", "using scope".
 - **folding** — evaluating an expression to a value-precise carrier at analysis time
   (`[1,2].first → Constant[1]`).
 - **declaration-sourced** — type information whose only origin is a declaration, not the flow of

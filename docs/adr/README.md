@@ -134,6 +134,7 @@ This directory contains the Architecture Decision Records (ADRs) for Rigor. Each
 | ADR-117 | [Standard streams: typed by idiom, checked by runtime contract](117-standard-streams-typed-by-idiom.md) | Accepted (`$_` explicit readers since #1405; open: #1362, #1366, #1367, #1415, #1423, #1426, #1427, #1429) |
 | ADR-119 | [Certainty on discovery facts, candidate-set reads over the resolution chain](119-discovery-fact-certainty.md) | Accepted (2026-10-01; the gates, `unpositioned_mixins`, the chain, #1593, #1597, #1598, #1599 and WD1's siblings landed ahead of it; WD2–WD3 and PR C open) |
 | ADR-120 | [`--incremental` as the default local `check` route](120-incremental-by-default.md) | Proposed (awaiting the maintainer; the flip waits on WD7's gates) |
+| ADR-121 | [Typing calls through Ruby refinements, and `Proc#refined`](121-ruby-refinement-typing.md) | Accepted (2026-10-09; not implemented, tracked by #1670) |
 
 ## Adding a New ADR
 

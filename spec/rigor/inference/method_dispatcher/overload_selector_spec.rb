@@ -285,6 +285,26 @@ RSpec.describe Rigor::Inference::MethodDispatcher::OverloadSelector do
         expect(first_param_names(candidates)).to contain_exactly("::string", "::int")
       end
 
+      # Issue #1675 — `(Float)` refuses the `1`, so the whole-union match kept only `(Integer)`.
+      it "adds the overloads the untyped member reaches for Integer#+ with a `1 | Dynamic[top]` argument" do
+        one = Rigor::Type::Combinator.constant_of(1)
+        candidates = select_candidates("Integer", :+, [Rigor::Type::Combinator.union(one, untyped)])
+        expect(first_param_names(candidates)).to include("::Integer", "::Float", "::Rational", "::Complex")
+        expect(first_param_names(candidates).first).to eq("::Integer")
+      end
+
+      it "types `0 + (1 | untyped)` as the untyped join, not Integer" do
+        env = Rigor::Environment.for_project(libraries: [], signature_paths: [])
+        scope = Rigor::Scope.empty(environment: env)
+        root = Prism.parse("def f(u, c)\n  w = c ? u : 1\n  0 + w\nend\n").value
+        index = Rigor::Inference::ScopeIndexer.index(root, default_scope: scope)
+        call = nil
+        Rigor::Source::NodeWalker.each(root) { |n| call = n if n.is_a?(Prism::CallNode) && n.name == :+ }
+        type = index[call].type_of(call)
+        expect(type).to be_a(Rigor::Type::Dynamic)
+        expect(type.describe(:short)).to include("Float")
+      end
+
       it "still picks `(interned) -> bool` for a precise String argument" do
         candidates = select_candidates("Regexp", :match?, [Rigor::Type::Combinator.nominal_of("String")])
         expect(first_param_names(candidates)).to eq(["::interned"])

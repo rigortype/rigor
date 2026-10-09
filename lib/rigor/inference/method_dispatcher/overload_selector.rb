@@ -190,7 +190,21 @@ module Rigor
             matches = find_matching_overload(overloads, shared, strict: false)
             return matches.first(1) unless shared[:arg_types].any? { |t| imprecise_arg?(t) }
 
-            matches
+            with_untyped_reach(overloads, shared, matches)
+          end
+
+          # Issue #1675 — a union with an untyped member reaches, through that member, every overload the bare
+          # untyped argument reaches, including one a precise member rules out of the whole-union match:
+          # `0 + (1 | untyped)` kept only `(Integer) -> Integer`, because `(Float)` refuses the `1`, and typed the
+          # sum `Integer` where the untyped arm may be a `Float` or a project `Numeric`. The whole-union matches
+          # come first, so the singular `select` keeps its answer.
+          def with_untyped_reach(overloads, shared, matches)
+            args = shared[:arg_types]
+            return matches unless args.any? { |t| t.is_a?(Type::Union) && imprecise_arg?(t) }
+
+            untyped_args = args.map { |t| imprecise_arg?(t) ? Type::Combinator.untyped : t }
+            reached = find_matching_overload(overloads, shared.merge(arg_types: untyped_args), strict: false)
+            (matches + reached).uniq(&:object_id)
           end
 
           # Pass 0. With every argument a plain value (a `Constant`, or a `Nominal` with no type arguments), the

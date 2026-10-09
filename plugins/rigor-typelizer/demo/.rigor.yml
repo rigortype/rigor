@@ -1,0 +1,9 @@
+paths:
+  - app
+  - demo.rb
+
+plugins:
+  - rigor-typelizer
+
+cache:
+  path: tmp/.rigor/cache

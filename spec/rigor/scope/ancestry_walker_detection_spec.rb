@@ -86,6 +86,13 @@ ALLOWED_ANCESTRY_WALKERS = {
     "existential over the project's own superclass chain (does any ancestor `include Alba::Resource`), read " \
     "from the plugin's cached file scan, which has no Scope or discovery tables to build a chain from; " \
     "order-independent, and it only ever ADDS a root for a name that must also resolve to a declared class",
+  "plugins/rigor-typelizer/lib/rigor/plugin/typelizer/serializer_index.rb#roots" =>
+    "the caller of `typelized?`, listed with it: one existential per declared class over the project superclass " \
+    "chain",
+  "plugins/rigor-typelizer/lib/rigor/plugin/typelizer/serializer_index.rb#typelized?" =>
+    "existential over the project's own superclass chain (does any ancestor `include`/`extend Typelizer::DSL`), " \
+    "read from the plugin's cached file scan, which has no Scope or discovery tables to build a chain from; " \
+    "order-independent, and it only ever ADDS a root for a class the scan itself declared",
   "lib/rigor/scope.rb#singleton_extends_of" =>
     "union of every `extend` up the superclass chain, read by `Narrowing` only to withhold a `Bot`; " \
     "order-independent"

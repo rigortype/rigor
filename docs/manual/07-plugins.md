@@ -54,7 +54,7 @@ each plugin's options — but the families today are:
   `rigor-ffi` provides the `ffi_binding_recognizer` class DSL on
   `Rigor::Plugin::Base` to recognize custom binding definitions.
 - **Other ecosystems** — `rigor-sinatra`, `rigor-hanami`,
-  `rigor-devise`, `rigor-pundit`, `rigor-alba`, `rigor-sidekiq`,
+  `rigor-devise`, `rigor-pundit`, `rigor-alba`, `rigor-typelizer`, `rigor-sidekiq`,
   `rigor-graphql`, `rigor-statesman`, `rigor-sorbet`,
   `rigor-typescript-utility-types`,
   `rigor-activesupport-core-ext`.

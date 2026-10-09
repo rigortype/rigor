@@ -71,6 +71,8 @@ The full catalogue, with a one-line scope for every plugin, is
   block `self` bindings.
 - [rigor-alba](rigor-alba.md) — types the inline `Alba.serialize { }` block `self`, and
   roots the resources alba infers from `many :articles` for `rigor unused`.
+- [rigor-typelizer](rigor-typelizer.md) — roots the serializer classes typelizer generates TypeScript
+  interfaces from, for `rigor unused`.
 - [rigor-rspec-rails](rigor-rspec-rails.md) — `have_http_status`
   argument validation (out-of-range codes, unknown status symbols).
 - [rigor-shoulda-matchers](rigor-shoulda-matchers.md) — shoulda matcher

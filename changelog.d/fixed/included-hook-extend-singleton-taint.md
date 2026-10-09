@@ -1,0 +1,1 @@
+- **[engine]** An `include`d module whose `self.included` hook calls `base.extend` no longer makes `using` of a module that includes it treat every refinement as in effect, so `call.undefined-method` reports a refined method Ruby would reject there. ([#1687](https://github.com/rigortype/rigor/issues/1687), [#1728](https://github.com/rigortype/rigor/pull/1728))

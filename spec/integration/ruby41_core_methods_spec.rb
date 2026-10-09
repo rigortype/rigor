@@ -70,10 +70,12 @@ RSpec.describe "Ruby 4.1 core methods (#1691, #1718)" do
         ENV.fetch_valuez("A")
         IO::Buffer.new(8).bit_countz
         IO::Buffer.new(8).bit_count(0, 4, 1)
+        GC.start(1)
+        ObjectSpace.garbage_collect(1)
       RUBY
         [[1, "call.undefined-method"], [2, "call.wrong-arity"], [3, "call.undefined-method"],
          [4, "call.undefined-method"], [5, "call.undefined-method"], [6, "call.undefined-method"],
-         [7, "call.wrong-arity"]]
+         [7, "call.wrong-arity"], [8, "call.wrong-arity"], [9, "call.wrong-arity"]]
       )
     end
   end

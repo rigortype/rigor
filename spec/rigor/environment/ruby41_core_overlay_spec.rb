@@ -70,18 +70,25 @@ RSpec.describe "Ruby 4.1 core overlay (#1691, #1718)" do
       expect(loader.instance_definition("BasicObject")).not_to be_nil
     end
 
-    # #1718 — each keyword arm requires its keyword, so a call without it still selects the upstream overloads.
+    # #1718. `global:` is an optional keyword, so the arity rule still reads these methods; `scope:` is required, so
+    # a call without it still selects the upstream `GC.stat` arms.
     it "adds the global: and scope: keywords to the upstream GC and ObjectSpace overloads" do
-      keyword_arms = lambda do |definition, name, keyword|
-        definition.methods[name].method_types.select { |t| t.type.required_keywords.key?(keyword) }
+      keyword_arms = lambda do |definition, name, keyword, required:|
+        definition.methods[name].method_types.select do |method_type|
+          keywords = required ? method_type.type.required_keywords : method_type.type.optional_keywords
+          keywords.key?(keyword)
+        end
       end
       gc = loader.singleton_definition("GC")
-      expect(keyword_arms.call(gc, :start, :global).size).to eq(1)
-      expect(keyword_arms.call(gc, :stat, :scope).size).to eq(1)
+      expect(keyword_arms.call(gc, :start, :global, required: false).size).to eq(1)
+      expect(keyword_arms.call(gc, :stat, :scope, required: true).size).to eq(1)
       expect(gc.methods[:stat].method_types.size).to be > 1
-      expect(keyword_arms.call(loader.instance_definition("GC"), :garbage_collect, :global).size).to eq(1)
-      expect(keyword_arms.call(loader.singleton_definition("ObjectSpace"), :garbage_collect, :global).size).to eq(1)
-      expect(keyword_arms.call(loader.instance_definition("ObjectSpace"), :garbage_collect, :global).size).to eq(1)
+      [
+        loader.instance_definition("GC"), loader.singleton_definition("ObjectSpace"),
+        loader.instance_definition("ObjectSpace")
+      ].each do |definition|
+        expect(keyword_arms.call(definition, :garbage_collect, :global, required: false).size).to eq(1)
+      end
     end
 
     it "adds the three-argument method_defined? and the Hash form of tr / tr! to the upstream overloads" do

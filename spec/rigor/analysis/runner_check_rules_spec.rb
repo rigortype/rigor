@@ -55,6 +55,28 @@ RSpec.describe Rigor::Analysis::Runner do
       expect(analyze("YAML.dump({})\nYAML.safe_load_file(\"x\")\n")).to be_success
     end
 
+    # `self.class` in a module's instance method is the including class, never the module: alba's
+    # `Class.new(self.class).transform_keys(...)` in `Alba::Resource::InstanceMethods` reported
+    # `transform_keys` and `new` as undefined on `singleton(InstanceMethods)`.
+    it "does not type self.class in a module as the module's singleton" do
+      result = analyze(<<~RUBY, sig: { "demo.rbs" => <<~RBS })
+        module Serializer
+          def derive
+            Rigor.dump_type(self.class)
+            klass = Class.new(self.class)
+            klass.transform_keys(:camel)
+            klass.new
+          end
+        end
+      RUBY
+        module Serializer
+          def derive: () -> untyped
+        end
+      RBS
+      expect(result.diagnostics.map(&:rule)).to eq(["dump.type"])
+      expect(result.diagnostics.first.message).not_to include("singleton(Serializer)")
+    end
+
     describe "wrong-arity rule (Slice 7 phase 11)" do
       it "flags too many positional arguments to a fixed-arity method" do
         result = analyze("[1, 2].rotate(1, 2)\n")

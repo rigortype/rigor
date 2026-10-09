@@ -212,7 +212,10 @@ module Rigor
       def search(scope, start = 0, stop = nil, side: nil)
         recording = Analysis::DependencyRecorder.active?
         stop ||= @entries.size
-        record_head(scope, start, side) if recording
+        if recording
+          record_head(scope, start, side)
+          record_extend_hooks(scope)
+        end
         index = start
         while index < stop
           entry = @entries[index]
@@ -232,6 +235,7 @@ module Rigor
 
         ResolutionChain.record_class(scope, @root)
         (stop || @entries.size).times { |index| ResolutionChain.record_entry(scope, @entries[index], side) }
+        record_extend_hooks(scope)
       end
 
       # What a {#settle} verdict adds to what the search already filed. The search files the root and every entry
@@ -259,6 +263,7 @@ module Rigor
         start = owner.nil? ? nil : @entries.index { |entry| entry.name == owner }
         Analysis::DependencyRecorder.file_chain_once(self, start, scope.discovery) { file_beyond(scope, start) }
         record_hooks(scope)
+        record_extend_hooks(scope)
       end
       private :record_beyond
 
@@ -297,6 +302,81 @@ module Rigor
         end
       end
       private :record_hooks
+
+      # #1730 — the edges of the {Builder#extend_hook_taint?} decision: an instance chain's project entries may carry
+      # a `"*"` mark because a module one of them `extend`s has a hook that mixes into the extender, and the
+      # module is often declared in a file the chain records nothing of. Each such module the decision read files
+      # its class edges (an edit to its hook moves its declaration signature) and the negative method edges of
+      # the hooks the decision reads ({ResolutionChain.extend_hook_keys}), which a NEW file reopening the module
+      # to add a hook satisfies; a spelling no project module answers files the singleton hook keys of each name
+      # it can denote, as {#record_hooks} does. Filed once per consumer and chain.
+      def record_extend_hooks(scope)
+        return unless @side == :instance
+
+        targets = (@memo[:extend_targets] ||= ResolutionChain.extend_targets(scope, @flavor, @entries))
+        return if targets.empty?
+
+        Analysis::DependencyRecorder.file_chain_once(self, :extend_hooks, scope.discovery) do
+          targets.each do |resolved, candidates|
+            if resolved
+              ResolutionChain.record_class(scope, resolved)
+              Analysis::DependencyRecorder.read_keys(ResolutionChain.extend_hook_keys(resolved))
+            else
+              candidates.each { |name| Analysis::DependencyRecorder.read_keys(ResolutionChain.hook_keys(name)) }
+            end
+          end
+        end
+      end
+      private :record_extend_hooks
+
+      # The hooks that let a module `extend`ed onto N reshape N's INSTANCE side (#1730): its singleton `extended` /
+      # `extend_object` run against N at the `extend` and may mix into N; its instance `included` /
+      # `append_features` / `prepended` / `prepend_features` / `inherited` become N's own singleton hooks and run
+      # against N's includers, prependers and subclasses, which the mark on N reaches through their chains.
+      SINGLETON_EXTEND_HOOKS = %i[extended extend_object].freeze
+      INSTANCE_EXTEND_HOOKS = %i[included append_features prepended prepend_features inherited].freeze
+
+      @extend_hook_keys = {}
+
+      # The frozen negative method keys of `name`'s {SINGLETON_EXTEND_HOOKS} and {INSTANCE_EXTEND_HOOKS}.
+      def self.extend_hook_keys(name)
+        @extend_hook_keys[name] ||= (
+          SINGLETON_EXTEND_HOOKS.map { |hook| "method:#{name}.#{hook}".freeze } +
+          INSTANCE_EXTEND_HOOKS.map { |hook| "method:#{name}##{hook}".freeze }
+        ).freeze
+      end
+
+      # Whether extending `name` may mix modules into the extender's instance side, or into its includers' (#1730):
+      # `name` records a mixin it cannot name on its own instance side (`"*"`, which a hook's `base.include X` or
+      # `base.class_eval { … }` lists on the hook's module) and defines one of the hooks that would run it there.
+      def self.extend_reshapes_instance?(scope, name)
+        listed = scope.discovery.unpositioned_mixins[name]&.dig(:include)
+        return false unless listed&.include?(Relevance::WILDCARD)
+
+        defines_any?(scope.discovered_singleton_def_nodes[name], SINGLETON_EXTEND_HOOKS) ||
+          defines_any?(scope.discovered_def_nodes[name], INSTANCE_EXTEND_HOOKS)
+      end
+
+      # Read off the def-node tables: the existence table does not carry a module's own instance hook once the
+      # extend fold has copied it onto the extender's singleton.
+      def self.defines_any?(defs, hooks)
+        !defs.nil? && hooks.any? { |hook| defs.key?(hook) }
+      end
+
+      # `[[resolved name or nil, candidate names], …]`: every module the project entries of an instance chain
+      # `extend`, as {Builder#extend_hook_taint?} resolved them.
+      def self.extend_targets(scope, flavor, entries)
+        resolver = resolver_for(scope, flavor)
+        extends = scope.discovery.discovered_extends
+        entries.each_with_object([]) do |entry, out|
+          next if entry.external? || entry.side != :instance
+
+          (extends[entry.name] || EMPTY_NAMES).each do |raw|
+            resolved = resolver.resolve_one(entry.name, raw)
+            out << [resolved, resolved ? EMPTY_NAMES : resolver.candidates(entry.name, raw)].freeze
+          end
+        end.uniq.freeze
+      end
 
       @hook_keys = {}
 
@@ -767,6 +847,7 @@ module Rigor
         def mark_unsettled(name, kind, edge_count)
           listed = @discovery.unpositioned_mixins[name]&.dig(kind)
           listed = nil if listed && listed.empty?
+          listed = (listed || EMPTY) | WILDCARD_LIST if kind == :include && extend_hook_taint?(name)
           multi = edge_count >= 2 && multi_file?(name)
           return if listed.nil? && !multi
 
@@ -778,6 +859,20 @@ module Rigor
           by_node = (@bucket[:marks][kind] ||= {})
           by_node[name] ||= [ResolutionChain::Mark.new(name, kind, listed.nil? ? EMPTY : listed.to_a.freeze,
                                                        multi)].freeze
+        end
+
+        WILDCARD_LIST = ["*"].freeze # Relevance::WILDCARD, which loads after this file
+        private_constant :WILDCARD_LIST
+
+        # #1730 — whether a module `name` extends has a hook that may mix into `name`'s instance side or its
+        # includers' ({ResolutionChain.extend_reshapes_instance?}). Ruby runs it at the `extend`, so the mixin is
+        # not a fact of the tables and `name`'s instance side is unpositioned. A spelling no project module
+        # answers taints nothing: the project cannot see its hooks.
+        def extend_hook_taint?(name)
+          (@discovery.discovered_extends[name] || EMPTY).any? do |raw|
+            resolved = @resolver.resolve_one(name, raw)
+            !resolved.nil? && ResolutionChain.extend_reshapes_instance?(@scope, resolved)
+          end
         end
 
         def multi_file?(name)

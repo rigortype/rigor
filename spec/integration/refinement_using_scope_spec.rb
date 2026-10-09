@@ -322,6 +322,53 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
       expect(undefined_rows).to eq([])
     end
 
+    it "follows a `prepend` and not an `extend`, as CRuby's ancestor walk does" do
+      write("lib/inherit.rb", <<~RUBY)
+        module A
+          refine(String) { def shout = upcase + "!" }
+        end
+        module P
+          prepend A
+        end
+        module E
+          extend A
+        end
+
+        module Ok
+          using P
+          "hi".shout
+        end
+        using E
+        "hi".shout
+      RUBY
+
+      expect(undefined_rows).to eq([["inherit.rb", 16, "shout"]])
+    end
+
+    it "declines when the `using`'d module includes a module the tables cannot name" do
+      write("lib/inherit.rb", <<~RUBY)
+        module A
+          refine(String) { def shout = upcase + "!" }
+        end
+        module C
+          [A].each { |m| include m }
+        end
+
+        using C
+        "hi".shout
+      RUBY
+
+      expect(undefined_rows).to eq([])
+    end
+
+    it "declines when the `using`'d module's chain is cut at its limit" do
+      depth = Rigor::Scope::ResolutionChain::LIMIT + 5
+      links = (1..depth).map { |i| "module M#{i}\n  include M#{i - 1}\nend\n" }.join
+      write("lib/deep.rb", "module M0\n  refine(String) { def shout = upcase }\nend\n#{links}using M#{depth}\n\"a\".shout\n")
+
+      expect(undefined_rows).to eq([])
+    end
+
     it "does not reach a module that includes the `using`'d one" do
       write("lib/inherit.rb", <<~RUBY)
         module C
@@ -397,6 +444,16 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
         expect(incremental_rows(%w[lib])).to eq([shout_fires, false])
 
         write("lib/c_ext.rb", "module C\n  include A\nend\n")
+        expect(incremental_rows(%w[lib])).to eq([[], true])
+        expect(undefined_rows).to eq([])
+      end
+
+      # `Helpers` is declared by no file on the first run, so it sits on `C`'s chain as an external entry.
+      it "re-checks the `using` file under --incremental when a new file declares an included module" do
+        write_project("  include Helpers\n")
+        expect(incremental_rows(%w[lib])).to eq([shout_fires, false])
+
+        write("lib/helpers.rb", "module Helpers\n  include A\nend\n")
         expect(incremental_rows(%w[lib])).to eq([[], true])
         expect(undefined_rows).to eq([])
       end

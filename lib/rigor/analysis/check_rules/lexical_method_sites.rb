@@ -34,8 +34,8 @@ module Rigor
 
         # Is a refinement from one of `modules` (refining-module names) in effect at `call_node`? Issue #1671 —
         # `using C` also activates the refinements of every module `C` includes, transitively; the block, when
-        # given, answers the module names one `using` candidate puts in effect (itself among them), a fact of the
-        # project's include edges this file's syntax cannot see.
+        # given, answers the module names one `using` candidate puts in effect (itself among them), or nil when any
+        # module may be in effect, a fact of the project's include edges this file's syntax cannot see.
         def refinement_active?(call_node, modules, &activated)
           build
           return true if @unresolved_using
@@ -165,7 +165,8 @@ module Rigor
           return true if modules.include?(name)
           return false if activated.nil?
 
-          activated.call(name).any? { |active| modules.include?(active) }
+          active = activated.call(name)
+          active.nil? || active.any? { |module_name| modules.include?(module_name) }
         end
 
         def using_call?(node)

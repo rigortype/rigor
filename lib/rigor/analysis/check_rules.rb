@@ -827,21 +827,32 @@ module Rigor
         # on its instance-side resolution chain, which for a module is what it includes (and prepends),
         # transitively. CRuby's `rb_using_module_recursive` walks exactly that chain. The answer is a set: the
         # order (the includer's refinement wins, ADR-121 WD1) does not change whether a method is in effect, and
-        # every world a fork leaves open holds the same modules.
+        # every world a fork leaves open holds the same modules. Nil, read as "any module may be in effect", when
+        # the chain may hold a module it does not list: it was cut at its limit, or a module on it records a mixin
+        # the tables cannot name.
         #
         # ADR-46 — the answer reads include edges declared in other files, so it depends on every file that
-        # declares a module on the chain, and on the existence of each one's name: a new file reopening `name` to
-        # add an `include` re-checks the consumer through `class:<name>`.
+        # declares a module on the chain, and on the existence of each one's name: a new file reopening `name`, or
+        # declaring an included module the project did not declare before, re-checks the consumer through
+        # `class:<name>`.
         def refinement_activated_modules(scope, name)
           chain = Scope::ResolutionChain.for(scope, name, :instance, :constants)
-          if DependencyRecorder.active?
-            chain.record(scope)
-            DependencyRecorder.read_last_segment(:class, name)
-            chain.entries.each do |entry|
-              DependencyRecorder.read_missing(:class, entry.last_segment) unless entry.external?
+          record_refinement_chain(scope, name, chain) if DependencyRecorder.active?
+          return nil if chain.truncated? || chain.wildcard_mixin?
+
+          chain.entries.filter_map { |entry| entry.name unless entry.external? }
+        end
+
+        def record_refinement_chain(scope, name, chain)
+          chain.record(scope)
+          DependencyRecorder.read_last_segment(:class, name)
+          chain.entries.each do |entry|
+            if entry.external?
+              entry.candidates.each { |candidate| DependencyRecorder.read_last_segment(:class, candidate) }
+            else
+              DependencyRecorder.read_missing(:class, entry.last_segment)
             end
           end
-          chain.entries.filter_map { |entry| entry.name unless entry.external? }
         end
 
         # Issue #1120 — every module that refines `method_name` into `class_name` or one of its ancestors (a

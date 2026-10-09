@@ -137,6 +137,10 @@ module Rigor
       # (`DiscoveryIndex#unpositioned_mixins`, or a class declared in several files with several edges).
       def unsettled? = !@marks.empty?
 
+      # True when a class on the chain records a mixin the tables cannot name (`"*"`: an `include` of a
+      # non-constant, or a call the walk cannot record), so the chain may hold a module it does not list.
+      def wildcard_mixin? = @marks.any? { |mark| mark.listed.include?(Relevance::WILDCARD) }
+
       # The ONE decision every first-definer reader makes: does `answer`, read off this chain, stand, or does
       # the reader answer what the walk this chain replaced answered ({MasterOrder})? Returns `:chain` or
       # `:master`.

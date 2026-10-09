@@ -32,7 +32,7 @@ module Rigor
       # hard-coding is acceptable; a directory walk at every call would add stat-cost to no benefit.)
       VENDORED_GEM_NAMES = Set[
         "ast", "bcrypt", "bundler", "cgi", "did_you_mean",
-        "idn-ruby", "mysql2", "nokogiri", "pg", "prism", "racc", "redis", "rubygems"
+        "idn-ruby", "mysql2", "nokogiri", "pg", "prime", "prism", "racc", "redis", "rubygems"
       ].freeze
 
       # @param locked_gems — The lockfile-resolved gem set. Empty

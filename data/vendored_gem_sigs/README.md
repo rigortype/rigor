@@ -69,10 +69,11 @@ longer ships `stdlib/prime`, so after `require "prime"` a call such as
 exercise solutions define for themselves. So the directory loads only
 when the project asks for it — a `require "prime"` somewhere under the
 configured paths, or `prime` under `libraries:` —
-and only when nothing else in the environment already declares what it
-declares: a `prime` library that resolves, or a project or gem
-signature that declares one of its members, makes it stand down
-(`Rigor::Environment::GatedSignatureGuard`).
+and only when it costs the environment nothing: a `prime` library that
+resolves keeps it out, and a trial build drops it again when any of its
+types fails to build beside the project's or a gem's signatures, or a
+project file declaring one of them is quarantined
+(`Rigor::Environment::RbsLoader.build_env_for`).
 `Rigor::Environment::RequiredFeatures::VENDORED_DIRS` maps the feature
 to the directory, and is the place to add another such gem.
 

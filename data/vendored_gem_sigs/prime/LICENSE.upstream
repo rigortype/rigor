@@ -19,8 +19,8 @@ verbatim, `Integer.from_prime_division([[2, 2], [3, 1]])` drew a false
 
 Loading (issue #1700): this directory declares a top-level `class Prime` and
 reopens `Integer`, so it loads only when the project requires `prime` (or lists
-it under `libraries:`) and no other signature source already declares what it
-declares (`Rigor::Environment::RequiredFeatures`, `GatedSignatureGuard`).
+it under `libraries:`) and a trial build finds it clashes with no other
+signature source (`Rigor::Environment::RequiredFeatures`, `RbsLoader`).
 
 ----------------------------------------------------------------------------
 Copyright (C) 1993-2013 Yukihiro Matsumoto. All rights reserved.

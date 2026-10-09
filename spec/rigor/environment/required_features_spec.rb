@@ -28,19 +28,23 @@ RSpec.describe Rigor::Environment::RequiredFeatures do
     ].each { |source| expect(scan_source(source)).to eq(%w[prime]), source.inspect }
   end
 
-  it "ignores a mention after a line comment marker, but not a # inside a string before the call" do
+  # Only a whole-line comment is read as a comment: a `#` later on a line may be inside `?#`, `%q(#)`, a regexp
+  # or a continued string, and reading it as a comment would drop a real require. A trailing comment therefore
+  # counts, as do a heredoc and an `=begin` block — the lenient direction, which only loads the gem's own
+  # signatures. `require(` with the name on the next line and `send(:require, "prime")` are not matched.
+  it "ignores a require on a whole-line comment only" do
     expect(scan_source(%(# require "prime"\n))).to be_empty
-    expect(scan_source(%(p 1 # then require "prime"\n))).to be_empty
-    expect(scan_source(%(x = "#"; require "prime"\n))).to eq(%w[prime])
-    expect(scan_source(%(x = '#'; require "prime"\n))).to eq(%w[prime])
-    expect(scan_source(%(x = "\\"#"; require "prime"\n))).to eq(%w[prime])
-  end
-
-  # Beyond line comments the match is textual and leans toward loading: a mention in a heredoc or an `=begin`
-  # block counts, and `RbsLoader` still declines the signatures when the project declares a clashing member.
-  it "counts a mention in a heredoc or an =begin block" do
-    expect(scan_source(%(doc = <<~TXT\n  require "prime"\nTXT\n))).to eq(%w[prime])
-    expect(scan_source(%(=begin\nrequire "prime"\n=end\n))).to eq(%w[prime])
+    expect(scan_source(%(  # require "prime"\n))).to be_empty
+    [
+      %(p 1 # then require "prime"\n),
+      %(x = "#"; require "prime"\n),
+      %(x = ?#; require "prime"\n),
+      %(x = %q(#); require "prime"\n),
+      %(x = %w[a#b]; require "prime"\n),
+      %(x = /#/; require "prime"\n),
+      %(doc = <<~TXT\n  require "prime"\nTXT\n),
+      %(=begin\nrequire "prime"\n=end\n)
+    ].each { |source| expect(scan_source(source)).to eq(%w[prime]), source.inspect }
   end
 
   it "ignores another receiver's require, require_relative, a longer feature name and a computed name" do
@@ -64,6 +68,18 @@ RSpec.describe Rigor::Environment::RequiredFeatures do
     end
   end
 
+  it "replaces a file with a source keyed by a relative path" do
+    Dir.mktmpdir("rigor-required-features-") do |dir|
+      Dir.chdir(dir) do
+        FileUtils.mkdir_p("lib")
+        File.write("lib/a.rb", "require 'prime'\n")
+
+        expect(described_class.scan([File.expand_path("lib/a.rb")], sources: { "lib/a.rb" => "p 1\n" })).to be_empty
+        expect(described_class.scan(["lib/a.rb"], sources: { "./lib/a.rb" => "p 1\n" })).to be_empty
+      end
+    end
+  end
+
   it "re-reads a file whose stat moved" do
     Dir.mktmpdir("rigor-required-features-") do |dir|
       path = File.join(dir, "a.rb")
@@ -81,7 +97,8 @@ RSpec.describe Rigor::Environment::RequiredFeatures do
       described_class.scan(paths)
       described_class.scan(paths.first(1))
 
-      expect(described_class.instance_variable_get(:@memo).keys).to eq(paths.first(1))
+      expected = paths.first(1).map { |path| File.expand_path(path) }
+      expect(described_class.instance_variable_get(:@memo).keys).to eq(expected)
     end
   end
 

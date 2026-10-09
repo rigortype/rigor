@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "spec_helper"
+require "rigor/analysis/buffer_binding"
 
 RSpec.describe Rigor::ProjectEnvironment do
   # Every `Environment.for_project` keyword that is NOT a dependency-discovery axis. The gate below asserts
@@ -115,6 +116,16 @@ RSpec.describe Rigor::ProjectEnvironment do
         described_class.build(configuration: config, source_files: ["probe.rb"])
       end
       expect(captured).to include(required_features: %w[prime])
+    end
+
+    it "reads an editor buffer bound to a relative path in place of its file, so it can drop a require" do
+      FileUtils.mkdir_p("lib")
+      File.write("lib/setup.rb", "require 'prime'\n")
+      config = Rigor::Configuration.new(Rigor::Configuration::DEFAULTS.merge("paths" => %w[lib]))
+      buffer = Rigor::Analysis::BufferBinding.new(logical_path: "lib/setup.rb", physical_path: "buffer.rb")
+      File.write("buffer.rb", "p 1\n")
+
+      expect(described_class.required_features(config, [], sources: described_class.buffer_sources(buffer))).to be_empty
     end
   end
 

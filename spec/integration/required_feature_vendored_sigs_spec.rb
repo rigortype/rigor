@@ -110,6 +110,15 @@ RSpec.describe "vendored signatures gated on a required feature (#1700)" do
     expect(call_rows(result)).to be_empty
   end
 
+  it "drops the require an editor buffer bound to a relative path removes" do
+    write("lib/use.rb", "require 'prime'\np 12.prime_division\n")
+    write("buffer.rb", "p 12.prime_division\n")
+    buffer = Rigor::Analysis::BufferBinding.new(logical_path: "lib/use.rb", physical_path: "buffer.rb")
+    result = guarded_run(Rigor::Analysis::Runner.new(configuration: config, buffer: buffer), %w[lib/use.rb])
+
+    expect(call_rows(result)).to contain_exactly(a_string_matching(/prime_division' for 12/))
+  end
+
   describe "standing down for another copy of the declarations" do
     it "stands down for a project signature that declares a member it declares, keeping Integer typed" do
       write("sig/ext.rbs", "class Integer\n  def prime?: () -> bool\nend\n")
@@ -128,6 +137,59 @@ RSpec.describe "vendored signatures gated on a required feature (#1700)" do
 
       expect(build_failures(result)).to be_empty
       expect(call_rows(result)).to be_empty
+    end
+
+    it "loads beside a project overload continuation of one of its members" do
+      write("sig/ext.rbs", "class Integer\n  def prime?: (String) -> bool | ...\nend\n")
+      write("lib/use.rb", "require 'prime'\np 7.prime?\np 7.prime?(\"x\")\np 12.prime_division\np 1.nope\n")
+      result = run(configuration: config(signature_paths: %w[sig]))
+
+      expect(build_failures(result)).to be_empty
+      expect(call_rows(result)).to contain_exactly(a_string_matching(/nope' for 1/))
+    end
+
+    it "loads beside a project subclass declaration that names the same superclass absolutely" do
+      write("sig/ext.rbs", <<~RBS)
+        class Prime
+          class EratosthenesGenerator < ::Prime::PseudoPrimeGenerator
+            def extra: () -> void
+          end
+        end
+      RBS
+      write("lib/use.rb", "require 'prime'\np 12.prime_division\np 7.prime?\nPrime.each(10) { |x| p x }\n")
+      result = run(configuration: config(signature_paths: %w[sig]))
+
+      expect(build_failures(result)).to be_empty
+      expect(call_rows(result)).to be_empty
+    end
+
+    it "stands down for a project Prime at another generic arity, keeping the project's" do
+      write("sig/prime.rbs", "class Prime[T]\n  def initialize: () -> void\n  def extra: () -> T\nend\n")
+      write("lib/use.rb", "require 'prime'\np Prime.new.extra\nPrime.new.nope\n")
+      result = run(configuration: config(signature_paths: %w[sig]))
+
+      expect(build_failures(result)).to be_empty
+      expect(call_rows(result)).to contain_exactly(a_string_matching(/nope' for Prime/))
+    end
+
+    it "stands down for a project module Prime, keeping the project's file" do
+      write("sig/prime.rbs", "module Prime\n  def self.sieve: (Integer) -> Array[Integer]\nend\n")
+      write("lib/use.rb", "require 'prime'\nPrime.sieve(10).zzz\n")
+      result = run(configuration: config(signature_paths: %w[sig]))
+
+      expect(result.diagnostics.map(&:qualified_rule)).not_to include("rbs.coverage.quarantined-signature")
+      expect(call_rows(result)).to contain_exactly(a_string_matching(/zzz' for Array\[Integer\]/))
+    end
+
+    it "builds once when the only quarantined project file declares none of its types", :fresh_rbs_env do
+      write("sig/base64.rbs", "class Base64\nend\n")
+      allow(Rigor::Environment::RbsLoader).to receive(:build_env_attempt).and_call_original
+      Rigor::Environment::RbsLoader.build_env_for(
+        libraries: Rigor::Environment::DEFAULT_LIBRARIES + [Rigor::Environment::RequiredFeatures.token("prime")],
+        signature_paths: [Pathname("sig")]
+      )
+
+      expect(Rigor::Environment::RbsLoader).to have_received(:build_env_attempt).once
     end
 
     it "loads beside a project signature that reopens Integer with other members" do

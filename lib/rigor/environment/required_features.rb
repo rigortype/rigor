@@ -34,15 +34,13 @@ module Rigor
 
       # A `require` call naming a listed feature as a string literal, with or without parentheses: the bare call
       # and `Kernel.require` count, a `require` that follows any other `.` (`obj.require`) or is part of a longer
-      # word (`require_relative`) does not, and a computed name never does. A match after a `#` line comment
-      # marker on its line ({#commented?}) does not count, so a mention in a comment changes nothing. Otherwise
-      # the match is textual and leans toward loading: a `require "prime"` inside a heredoc or an `=begin` block
-      # counts. That direction only loads the gem's own signatures, and `RbsLoader` still declines them when the
-      # project declares a clashing member itself.
+      # word (`require_relative`) does not, and a computed name never does; nor do `require(` with the name on
+      # the next line or `send(:require, "prime")`. A match on a whole-line comment ({#commented?}) does not
+      # count, so commenting a require out changes nothing. Otherwise the match is textual and leans toward
+      # loading: a `require "prime"` in a trailing comment, a heredoc or an `=begin` block counts. That direction
+      # only loads the gem's own signatures, and `RbsLoader` still drops them when they cost the environment
+      # anything.
       PATTERN = /(?:(?<![\w.$@])|(?<=Kernel\.))require[ \t]*\(?[ \t]*(["'])(#{FEATURE_ALTERNATION})\1/
-
-      QUOTES = ["\"", "'"].freeze
-      private_constant :QUOTES
 
       module_function
 
@@ -64,7 +62,8 @@ module Rigor
       #   `files` does not list them.
       # @return the sorted, frozen features some file requires.
       def scan(files, sources: {})
-        paths = (Array(files).map(&:to_s) + sources.keys.map(&:to_s)).uniq
+        sources = sources.to_h { |path, text| [File.expand_path(path.to_s), text] }
+        paths = (Array(files).map { |path| source_key(File.expand_path(path.to_s), sources) } + sources.keys).uniq
         found = Set.new
         paths.each do |path|
           break if found.size == VENDORED_DIRS.size
@@ -78,15 +77,35 @@ module Rigor
       # @return path (absolute) => the features that file requires, for every file under the configured paths
       #   that requires any. A long-lived reader (the language server) keeps this and overlays its open buffers.
       def feature_files(configuration)
-        files = Analysis::PathExpansion.ruby_files(configuration.paths, configuration.exclude_patterns)
+        listed = Analysis::PathExpansion.ruby_files(configuration.paths, configuration.exclude_patterns)
+        files = listed.map { |path| File.expand_path(path.to_s) }
         result = files.each_with_object({}) do |path, acc|
-          features = memoized_features_in(path.to_s)
-          acc[File.expand_path(path.to_s)] = features unless features.empty?
+          features = memoized_features_in(path)
+          acc[path] = features unless features.empty?
         end
-        prune_memo(files.map(&:to_s))
+        prune_memo(files)
         result
       rescue StandardError
         {}
+      end
+
+      # Paths are compared expanded, so a relative `--instead-of=lib/a.rb` replaces the configured
+      # `/project/lib/a.rb`; a source whose real path matches (a symlinked directory) replaces it too. The real
+      # path is asked only for a file that shares a source's basename, so a scan does not resolve every path.
+      def source_key(path, sources)
+        return path if sources.empty? || sources.key?(path)
+
+        candidates = sources.keys.select { |key| File.basename(key) == File.basename(path) }
+        return path if candidates.empty?
+
+        real = real_path(path)
+        candidates.find { |key| real_path(key) == real } || path
+      end
+
+      def real_path(path)
+        File.realpath(path)
+      rescue SystemCallError
+        path
       end
 
       # One run scans the same files more than once (the incremental snapshot fingerprint, then the environment
@@ -142,26 +161,14 @@ module Rigor
         VENDORED_DIRS.each_key.select { |feature| named.include?(feature) }
       end
 
-      # Whether the text before `offset` on its line holds a `#` outside a string literal: the first `#` not
-      # inside single or double quotes starts a comment. Quote tracking is per line and ignores `%q` forms and
-      # heredocs, which can only make a commented match count, never drop a real one.
+      # Whether the match at `offset` sits on a line whose first non-blank character is `#`: a whole-line comment.
+      # Deliberately narrower than "after a `#`": a `#` later on a line may be inside `?#`, `%q(#)`, `%w[a#b]`,
+      # a regexp or a string continued from an earlier line, and reading it as a comment would drop a real
+      # require — a false `call.undefined-method` on every call into the feature. A trailing comment
+      # (`p 1 # require "prime"`) therefore still counts, which only loads the gem's own signatures.
       def commented?(bytes, offset)
-        return false if offset.zero?
-
-        line_start = (bytes.rindex("\n", offset - 1) || -1) + 1
-        quote = nil
-        escaped = false
-        bytes.byteslice(line_start, offset - line_start).each_char do |char|
-          if quote
-            if escaped then escaped = false
-            elsif char == "\\" then escaped = true
-            elsif char == quote then quote = nil
-            end
-          elsif QUOTES.include?(char) then quote = char
-          elsif char == "#" then return true
-          end
-        end
-        false
+        line_start = offset.zero? ? 0 : (bytes.rindex("\n", offset - 1) || -1) + 1
+        bytes.byteslice(line_start, offset - line_start).lstrip.start_with?("#")
       end
 
       # The library tokens for `features` and for any listed feature the configuration's `libraries:` names.

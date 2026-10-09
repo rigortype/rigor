@@ -616,8 +616,8 @@ module Rigor
             "Either side lacks an authored RBS signature (WD1 both-sides-authored gate).",
             "The override widens or preserves the parameter (contravariant-safe).",
             "`initialize` and the `initialize_copy` / `_dup` / `_clone` hooks: `Class#new` / `dup` / " \
-            "`clone` reach them on the receiver's own class and discard their return, outside " \
-            "substitutability (ADR-35 WD10).",
+            "`clone` reach them only on the receiver's own class, so no parent-typed caller passes the " \
+            "parent's arguments (ADR-35 WD10).",
             "Either side is overloaded (more than one method type — arm mapping is ambiguous).",
             "The ancestor's parameter is `untyped` / an unbound generic / an interface (degrades " \
             "to `Dynamic[Top]`, which is passable to anything — FP-safe).",

@@ -182,7 +182,9 @@ module Rigor
     #   today.
     # - `receiver_name` is the variable's Symbol.
     # - `key` is the Ruby value of the literal index (Symbol / String / Integer). Non-literal keys
-    #   (`params[field]`) are not recorded; they have no stable address.
+    #   (`params[field]`) have no stable address for a recorded value. A `key?` guard with a non-literal key
+    #   (issue #1703) records an {Inference::IndexedNarrowing::KeyExpr} here instead, with `receiver_kind`
+    #   `:const` allowed; its entry marks presence only.
     IndexedKey = Data.define(:receiver_kind, :receiver_name, :key)
 
     # Narrowing key for a no-arg / no-block method-call chain `receiver.method_name` (a "single-hop" chain per A1
@@ -2245,8 +2247,11 @@ module Rigor
 
       sym_kind = receiver_kind.to_sym
       sym_name = receiver_name.to_sym
+      root = [sym_kind, sym_name]
       filtered = @indexed_narrowings.reject do |k, _|
-        k.receiver_kind == sym_kind && k.receiver_name == sym_name
+        (k.receiver_kind == sym_kind && k.receiver_name == sym_name) ||
+          # Issue #1703 — a `key?` guard whose key is this variable, or a chain read from it.
+          (k.key.is_a?(Inference::IndexedNarrowing::KeyExpr) && k.key.root == root)
       end
       filtered.size == @indexed_narrowings.size ? @indexed_narrowings : filtered.freeze
     end

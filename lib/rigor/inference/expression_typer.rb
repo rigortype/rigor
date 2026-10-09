@@ -1811,7 +1811,8 @@ module Rigor
       # that normal return is `untyped` — the result's declared type — so `loop { e.next }` is not `bot` and
       # `loop { x = e.next; break x if x }` keeps its arm beside it.
       def call_dispatch_type_for(node, receiver_override: nil)
-        result = loop_completion_type(node, call_result_type_for(node, receiver_override: receiver_override))
+        result = key_guarded_type(node, call_result_type_for(node, receiver_override: receiver_override))
+        result = loop_completion_type(node, result)
         arms = call_break_arm_types(node, receiver_override: receiver_override)
         if exactly_once_block_never_completes?(node, receiver_override)
           return arms.empty? ? Type::Combinator.bot : Type::Combinator.union(*arms)
@@ -1819,6 +1820,20 @@ module Rigor
 
         combined = arms.empty? ? result : Type::Combinator.union(result, *arms)
         widen_optimistic_predicate_constant(node, combined)
+      end
+
+      # Issue #1703 — `H[k]` under a true `H.key?(k)` with a non-literal key drops the miss `nil`
+      # ({IndexedNarrowing.key_guarded_read}). The read is marked optimistic, so the certainty consumers
+      # (`flow.always-truthy-condition`, the `&&` / `||` polarity gate, branch elision) decline a verdict
+      # folded from it: the guard rests on the key expression re-reading the same value, which a reader
+      # chain only promises, and the narrowing exists to silence nil-receiver reports, not to prove a
+      # defensive `H[k].nil?` dead.
+      def key_guarded_type(node, type)
+        narrowed = IndexedNarrowing.key_guarded_read(node, type, scope)
+        return type if narrowed.nil?
+
+        scope.record_optimistic_origin(node, OptimisticOrigin::KEY_PRESENCE_GUARD)
+        narrowed
       end
 
       # Issue #1172 — the nil-collapsing predicates (`nil?`, `!`, `x == nil`, …) answer a `Constant` that

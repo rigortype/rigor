@@ -35,6 +35,10 @@ module Rigor
       # distinguish further optimistic families without changing the table's shape.
       IMPLICITLY_RETURNS_NIL = :implicitly_returns_nil
 
+      # Issue #1703 — a hash-shape read by a non-literal key whose miss `nil` a `key?` guard on structurally the
+      # same key dropped ({IndexedNarrowing.key_guarded_read}).
+      KEY_PRESENCE_GUARD = :key_presence_guard
+
       # The argument-free unary predicates whose folded result is a statement about the receiver's
       # *nil-freeness* and nothing else, which is what makes the derivation sound rather than a general taint:
       # `nil?` answers the exact question the optimism is a bet on, and `!` (which Prism spells as a `CallNode`

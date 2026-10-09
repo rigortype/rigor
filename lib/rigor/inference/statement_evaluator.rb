@@ -2994,6 +2994,9 @@ module Rigor
         # outer receiver is itself a chain node (e.g. `x.last << y`) do NOT drop narrowings keyed on `x` — only direct
         # calls against the root variable invalidate the chain.
         post_scope = IndexedNarrowing.invalidate_chain_after_call(call_node: node, current_scope: post_scope)
+        # Issue #1703 — a non-literal-key `key?` guard: dropped by a write to its receiver, by a call rooted at its
+        # key's variable other than the key chain itself, and, when an ivar is involved, by a call on `self`.
+        post_scope = IndexedNarrowing.invalidate_key_guards_after_call(call_node: node, current_scope: post_scope)
         # B2.2 — intervening method call ivar invalidation. An implicit-self / self-receiver call could mutate any ivar
         # of the enclosing class (we cannot prove purity without an effect system). Reset each ivar whose current local
         # binding has narrowed below the class-ivar seed back to the seed itself, so a subsequent `if @flag` predicate

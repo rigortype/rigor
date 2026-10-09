@@ -118,10 +118,12 @@ module Rigor
 
           # One keyword bundle for the pass pipeline (see `run_selection_passes`); a block retry rebuilds it
           # with the block flag cleared. Built once and passed positionally -- the previous lambda plus a
-          # `**shared` splat per pass allocated three objects per selection (#775).
+          # `**shared` splat per pass allocated three objects per selection (#775). Keep it at eight keys or fewer:
+          # CRuby embeds a Hash that small, and a ninth key allocates a table on every selection (the RBS loader is
+          # read from `environment` rather than carried as a key of its own, #1727).
           shared = { arg_types: arg_types, self_type: self_type, instance_type: instance_type,
                      type_vars: type_vars, block_required: block_required, param_overrides: param_overrides,
-                     alias_expander: environment&.rbs_loader, environment: environment, keywords_last: keywords_last }
+                     environment: environment, keywords_last: keywords_last }
 
           matches = run_selection_passes(declared, overloads, shared)
           return matches unless matches.empty?
@@ -229,7 +231,7 @@ module Rigor
           private_constant :NO_MATCH
 
           # `shared` is the keyword bundle `select_candidates` assembled (arg_types, self_type, instance_type,
-          # type_vars, block_required, param_overrides, alias_expander).
+          # type_vars, block_required, param_overrides, environment, keywords_last).
           def find_matching_overload(overloads, shared, strict:)
             arg_types = shared[:arg_types]
             return NO_MATCH if strict && arg_types.any? { |t| ImpreciseArgument.imprecise?(t) }
@@ -436,7 +438,7 @@ module Rigor
               self_type: shared[:self_type],
               instance_type: shared[:instance_type],
               type_vars: shared[:type_vars],
-              alias_expander: shared[:alias_expander]
+              alias_expander: shared[:environment]&.rbs_loader
             )
             # An `untyped` arg gradually accepts against every param, so a value-pinning param would be
             # "matched" with zero evidence and its value-precise return (`(nil) -> []`) would beat broader

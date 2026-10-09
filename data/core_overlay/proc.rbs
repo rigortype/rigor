@@ -1,0 +1,45 @@
+# Rigor core overlay — supplemental core signatures.
+#
+# --- Proc#refined (Ruby 4.1) ---
+#
+# Ruby 4.1 adds `Proc#refined(*modules)` (Feature #22097, `proc_refined` in
+# CRuby's `proc.c`): it returns a copy of the receiver whose body runs with
+# the given modules' refinements active. Upstream `ruby/rbs` does not declare
+# it through 4.2, so
+#
+#   pr = ->(s) { s.shout }.refined(Shout)
+#
+# reported `call.undefined-method` on correct 4.1 code.
+#
+# The return is `self`, not `Proc`. CRuby builds the copy with
+# `proc_create(rb_obj_class(self), …, is_lambda)` (`vm.c`'s
+# `rb_proc_dup_with_iseq_and_recipe`) and returns the receiver itself when
+# called with no modules, so the class, lambda-ness, `parameters`, `arity`
+# and source location all carry over (`test_refined_preserves_lambda`,
+# `test_refined_preserves_location_and_parameters` in `test/ruby/test_proc.rb`).
+# A refinement changes which methods the body's calls reach, never the
+# Proc's own signature.
+#
+# Not modelled: `refined` raises `ArgumentError` on a Proc not backed by a
+# Ruby block (`:sym.to_proc`, `method(:m).to_proc`) and for a non-Module
+# argument the `*Module` parameter does not already reject.
+#
+# Unconditional, not gated on `target_ruby >= 4.1` (issue #1665): gating would
+# report `call.undefined-method` on every correct 4.1 project still on the
+# default `target_ruby`. False positives outrank the missed 4.0-target error.
+#
+# Declared on a module `Proc` includes, not with a direct `def`, for the reason
+# `process.rbs` gives: a later rbs release or a project `sig/` is likely to
+# declare `Proc#refined` itself, and a second direct `def` is a
+# `DuplicatedMethodDefinitionError` that takes `Proc`'s whole instance surface
+# down to `Dynamic[top]`. A direct `def` overrides an included module's method,
+# so the overlay stands down instead of colliding.
+module RigorCoreOverlay
+  module ProcRefined
+    def refined: (*Module) -> self
+  end
+end
+
+class Proc
+  include RigorCoreOverlay::ProcRefined
+end

@@ -132,14 +132,28 @@ module Rigor
         # Seeds that make a declaration live in PRODUCTION: named entry points, plus anything referenced at
         # file level by a non-test file (file-level code runs on load, so its target is live).
         def production_seeds
-          @production_seeds ||= (@root_fqns & @owned) | seeds_from { |ref| ref.from.nil? && ref.role != :test }
+          @production_seeds ||= (@root_fqns & @owned) | seeds_from { |ref| source(ref).nil? && ref.role != :test }
         end
 
         # Seeds that make a declaration live only through TEST code. Kept separate from production seeds
         # rather than folded in: a spec's file-level `Foo.new` would otherwise promote `Foo` to a root and
         # erase the very distinction WD8 exists to report.
         def test_seeds
-          @test_seeds ||= seeds_from { |ref| ref.from.nil? && ref.role == :test }
+          @test_seeds ||= seeds_from { |ref| source(ref).nil? && ref.role == :test }
+        end
+
+        # The node an edge leaves. A declaration-header reference (`class Sub < Base`) is credited to `Sub`
+        # (#1720), but only an owned declaration from `paths:` is a node: the subclass a spec, an initializer
+        # or a support file declares is outside the declaration set, so its own liveness cannot be judged and
+        # an edge leaving it would silently drop the evidence. That reference falls back to the scope it is
+        # written in — the file level for a top-level `class FakeAdapter < Adapter` in a spec, which keeps
+        # `Adapter` test-reachable exactly as before the credit moved. For every other reference `from` is
+        # `nesting` joined already, so the fallback is the identity.
+        def source(ref)
+          from = ref.from
+          return from if from.nil? || @owned.include?(from)
+
+          ref.nesting.empty? ? nil : ref.nesting.join("::")
         end
 
         def seeds_from
@@ -158,9 +172,11 @@ module Rigor
           @resolved_edges ||= @references.filter_map do |ref|
             target = resolve(ref.as_written, ref.nesting, rooted: ref.rooted)
             next unless target && @owned.include?(target)
-            next if ref.from == target # a declaration referencing itself is not evidence of use
 
-            [ref.from, target, ref.role]
+            from = source(ref)
+            next if from == target # a declaration referencing itself is not evidence of use
+
+            [from, target, ref.role]
           end
         end
 

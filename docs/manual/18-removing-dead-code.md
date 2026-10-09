@@ -171,6 +171,12 @@ Candidates — nothing reachable references these (45)
     1  Api::V1::Timelines::TopicController   app/controllers/api/v1/timelines/topic_controller.rb:3
 ```
 
+A base class is live whenever one of its subclasses is:
+`class Sub < Base` names `Base` on `Sub`'s behalf. So a base class
+that nothing else names appears together with its subclasses when none
+of them is reachable, and the decision belongs to the whole family
+rather than to one row.
+
 The 53 false positives in the adjudicated run fell into a few recurring
 shapes, and 28 of them were the first one. Recognising these lets you
 skip most of a list quickly:

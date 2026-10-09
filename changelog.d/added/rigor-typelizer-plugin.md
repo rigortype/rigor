@@ -1,0 +1,1 @@
+- **[plugins]** New `rigor-typelizer` plugin. It roots the serializers that typelizer generates TypeScript types from (classes that include or extend `Typelizer::DSL`, and their subclasses) so `rigor unused` does not list them. ([#1707](https://github.com/rigortype/rigor/pull/1707))

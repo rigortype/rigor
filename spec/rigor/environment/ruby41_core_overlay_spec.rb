@@ -2,7 +2,7 @@
 
 require "tmpdir"
 
-# Issue #1691 — the core overlay's Ruby 4.1 entries build on every rbs line, and stand down for a later declaration.
+# Issues #1691 and #1718 — the core overlay's Ruby 4.1 entries build on every rbs line, and stand down for a later declaration.
 #
 # No rbs release through 4.2 declares Ruby 4.1's new core methods, so `data/core_overlay/` does. Two ways that could
 # go wrong silently, since Rigor fails soft to `Dynamic[top]` for a class whose definition does not build:
@@ -16,7 +16,7 @@ require "tmpdir"
 # This file lives under `spec/rigor/environment` because that is what CI's "RBS compatibility (RBS 3.x)" job runs.
 require "spec_helper"
 
-RSpec.describe "Ruby 4.1 core overlay (#1691)" do
+RSpec.describe "Ruby 4.1 core overlay (#1691, #1718)" do
   # `[class, kind, methods, overlay file]` for every declaration the 4.1 entries add.
   declarations = [
     ["Integer", :instance, %i[bit_count], "integer.rbs"],
@@ -34,6 +34,7 @@ RSpec.describe "Ruby 4.1 core overlay (#1691)" do
     ["Proc", :instance, %i[source_range], "source_range.rbs"],
     ["Method", :instance, %i[source_range], "source_range.rbs"],
     ["UnboundMethod", :instance, %i[source_range], "source_range.rbs"],
+    ["IO::Buffer", :instance, %i[bit_count], "io_buffer.rbs"],
     ["Ruby::SourceRange", :instance,
      %i[path absolute_path start_line start_column end_line end_column], "source_range.rbs"]
   ].freeze
@@ -66,6 +67,20 @@ RSpec.describe "Ruby 4.1 core overlay (#1691)" do
     it "keeps Object and BasicObject buildable" do
       expect(loader.instance_definition("Object")&.methods).to include(:autoload_relative, :puts)
       expect(loader.instance_definition("BasicObject")).not_to be_nil
+    end
+
+    # #1718 — each keyword arm requires its keyword, so a call without it still selects the upstream overloads.
+    it "adds the global: and scope: keywords to the upstream GC and ObjectSpace overloads" do
+      keyword_arms = lambda do |definition, name, keyword|
+        definition.methods[name].method_types.select { |t| t.type.required_keywords.key?(keyword) }
+      end
+      gc = loader.singleton_definition("GC")
+      expect(keyword_arms.call(gc, :start, :global).size).to eq(1)
+      expect(keyword_arms.call(gc, :stat, :scope).size).to eq(1)
+      expect(gc.methods[:stat].method_types.size).to be > 1
+      expect(keyword_arms.call(loader.instance_definition("GC"), :garbage_collect, :global).size).to eq(1)
+      expect(keyword_arms.call(loader.singleton_definition("ObjectSpace"), :garbage_collect, :global).size).to eq(1)
+      expect(keyword_arms.call(loader.instance_definition("ObjectSpace"), :garbage_collect, :global).size).to eq(1)
     end
 
     it "adds the three-argument method_defined? and the Hash form of tr / tr! to the upstream overloads" do
@@ -106,6 +121,9 @@ RSpec.describe "Ruby 4.1 core overlay (#1691)" do
         class Module
           def descendants: () -> Array[Module]
         end
+        class IO::Buffer
+          def bit_count: () -> Integer
+        end
         module Ruby
           class SourceRange < Object
             def path: () -> String
@@ -123,7 +141,8 @@ RSpec.describe "Ruby 4.1 core overlay (#1691)" do
       ["Kernel", :instance, :autoload_relative],
       ["Kernel", :singleton, :autoload_relative],
       ["Module", :instance, :descendants],
-      ["Ruby::SourceRange", :instance, :path]
+      ["Ruby::SourceRange", :instance, :path],
+      ["IO::Buffer", :instance, :bit_count]
     ].each do |class_name, kind, name|
       it "builds #{class_name} and answers #{kind} #{name} from the direct declaration" do
         methods_table = definition(loader, class_name, kind)&.methods

@@ -1,0 +1,27 @@
+# Rigor core overlay — supplemental core signatures.
+#
+# --- IO::Buffer#bit_count (Ruby 4.1) ---
+#
+# Issue #1718. Ruby 4.1 adds `IO::Buffer#bit_count` (`io_buffer.c`, call-seq
+# `bit_count([offset, [length]]) -> integer`), the population count of the
+# buffer or of a subrange. Either argument may be `nil` for its default
+# (`io_buffer_extract_offset_length`). No rbs release through 4.2 declares
+# it, so correct 4.1 code reported `call.undefined-method`.
+#
+# TEMPORARY: delete this file once the rbs release Rigor bundles declares
+# the method upstream.
+#
+# Declared unconditionally, not gated on `target_ruby` (ADR-121 § Rejected
+# alternatives; false positives outrank), and on a module `IO::Buffer`
+# includes so that a later direct declaration overrides it instead of
+# raising `DuplicatedMethodDefinitionError` for the whole class (see
+# `process.rbs`).
+module RigorCoreOverlay
+  module Ruby41IOBuffer
+    def bit_count: (?Integer? offset, ?Integer? length) -> Integer
+  end
+end
+
+class IO::Buffer
+  include RigorCoreOverlay::Ruby41IOBuffer
+end

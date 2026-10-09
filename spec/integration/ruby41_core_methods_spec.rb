@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-# Issue #1691 — Ruby 4.1's new core methods resolve through `data/core_overlay/`.
+# Issues #1691 and #1718 — Ruby 4.1's new core methods resolve through `data/core_overlay/`.
 #
 # No rbs release through 4.2 declares them, so correct 4.1 code reported `call.undefined-method`. The fixture calls
 # every one, and its `assert_type` lines pin a representative subset of the declared returns. The controls below keep
@@ -10,7 +10,7 @@
 require "spec_helper"
 require_relative "support/fixture_harness"
 
-RSpec.describe "Ruby 4.1 core methods (#1691)" do
+RSpec.describe "Ruby 4.1 core methods (#1691, #1718)" do
   let(:harness) { Rigor::IntegrationSupport::FixtureHarness.new("ruby41_core_methods") }
 
   # The harness has no `pre_eval:`, so the toplevel `assert_type` helper itself reads as unresolved; that row is the
@@ -68,9 +68,12 @@ RSpec.describe "Ruby 4.1 core methods (#1691)" do
         (1..2).clampp(1, 2)
         Comparable.descendantz
         ENV.fetch_valuez("A")
+        IO::Buffer.new(8).bit_countz
+        IO::Buffer.new(8).bit_count(0, 4, 1)
       RUBY
         [[1, "call.undefined-method"], [2, "call.wrong-arity"], [3, "call.undefined-method"],
-         [4, "call.undefined-method"], [5, "call.undefined-method"]]
+         [4, "call.undefined-method"], [5, "call.undefined-method"], [6, "call.undefined-method"],
+         [7, "call.wrong-arity"]]
       )
     end
   end

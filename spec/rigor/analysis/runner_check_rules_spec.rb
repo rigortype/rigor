@@ -3378,11 +3378,11 @@ RSpec.describe Rigor::Analysis::Runner do
         result = analyze(<<~RUBY, sig: { "demo.rbs" => <<~RBS })
           class Node
             def initialize
-              @label = "a"
+              @label = 1
             end
 
             def reset
-              @label = 1
+              @label = "a"
             end
           end
         RUBY
@@ -3390,7 +3390,28 @@ RSpec.describe Rigor::Analysis::Runner do
             attr_reader label: String
           end
         RBS
-        expect(ivar_diags(result).map(&:line)).to eq([7])
+        expect(ivar_diags(result).map(&:line)).to eq([3])
+      end
+
+      # Rigor's own `ProtocolContract` writes `severity.to_sym` after a membership check into
+      # `attr_reader severity: :error | :warning | :info`; the rule compares classes, not values.
+      it "compares a declared ivar at class grain, so a literal union admits its class" do
+        result = analyze(<<~RUBY, sig: { "demo.rbs" => <<~RBS })
+          class Contract
+            def initialize(severity, names)
+              @severity = severity.to_sym
+              @names = Array.new(3)
+            end
+          end
+        RUBY
+          class Contract
+            attr_reader severity: :error | :warning
+            @names: Array[String]
+
+            def initialize: (Symbol | String, untyped) -> void
+          end
+        RBS
+        expect(ivar_diags(result)).to be_empty
       end
 
       it "does not flag writes to an ivar a class's RBS declares" do

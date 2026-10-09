@@ -437,14 +437,33 @@ module Rigor
         end
       end
 
+      # The rule compares concrete classes, so a declared ivar is compared at that grain too: the
+      # declaration is erased to its classes (`:a | :b` → `Symbol`, `Array[String]` → `Array`) and a
+      # write fires only when its class is outside them. A literal union guarded at runtime
+      # (`@severity = severity.to_sym` after a membership check) or a preallocated `Array.new(3)`
+      # under `Array[String]` is ordinary Ruby the rule cannot see the narrowing for.
       def declared_ivar_mismatch_diagnostics(path, class_name, ivar_name, declared, writes)
+        admitted = erase_to_classes(declared[:type])
         writes.filter_map do |write|
           write_class = ivar_class_for(write[:type])
           next nil if write_class.nil? || write_class == "NilClass"
-          next nil unless Inference::Acceptance.accepts(declared[:type], write[:type], mode: :gradual).no?
+
+          write_nominal = Type::Combinator.nominal_of(concrete_class_name(write[:type]))
+          next nil unless Inference::Acceptance.accepts(admitted, write_nominal, mode: :gradual).no?
 
           build_declared_ivar_write_mismatch_diagnostic(path, write[:node], class_name, ivar_name, declared,
                                                         write_class)
+        end
+      end
+
+      def erase_to_classes(type)
+        case type
+        when Type::Union then Type::Combinator.union(*type.members.map { |member| erase_to_classes(member) })
+        when Type::Constant, Type::Tuple, Type::HashShape, Type::Refined, Type::Difference, Type::IntegerRange
+          class_name = concrete_class_name(type)
+          class_name ? Type::Combinator.nominal_of(class_name) : Type::Combinator.untyped
+        when Type::Nominal then Type::Combinator.nominal_of(type.class_name)
+        else type
         end
       end
 

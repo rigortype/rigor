@@ -636,10 +636,15 @@ module Rigor
             "Two or more `@var = ...` writes occur in instance methods of the same class.",
             "First write's rvalue resolves to a concrete class (Nominal / Singleton / Constant / Tuple → " \
             "\"Array\" / HashShape → \"Hash\").",
-            "A later write's rvalue resolves to a different concrete class."
+            "A later write's rvalue resolves to a different concrete class.",
+            "Or, when the class's RBS declares the ivar (`@var: T`, or the slot an `attr_*` member implies, " \
+            "own or inherited): any write — the first included — resolves to a concrete class outside the " \
+            "declaration's classes."
           ],
           does_not_fire_when: [
             "Later write is `nil` — the `@cache = nil` clear-idiom is allowlisted.",
+            "The RBS declares the ivar and the write's class is among the declaration's classes, compared " \
+            "after erasure: a Symbol into `:a | :b`, or `Array.new(3)` into `Array[String]`, does not fire.",
             "Either side is Union / Dynamic / IntegerRange / a shape-varied carrier.",
             "Writes live in different classes that happen to share an ivar name.",
             "Writes are in a singleton body — `def self.foo` or a `class << self` def — those track " \

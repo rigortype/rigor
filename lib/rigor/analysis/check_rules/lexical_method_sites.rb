@@ -23,6 +23,7 @@ module Rigor
       class LexicalMethodSites
         # Issue #1703 — the file's root, which `call.possible-nil-receiver` re-walks for a `key?` guard.
         attr_reader :root
+
         # `refinements` is the query `Inference::ScopeIndexer` stamped on the file's discovery index, so the rules and
         # the typer share one walk; a query over another tree, or none, builds this file's own on the first ask.
         def initialize(root, refinements = nil)

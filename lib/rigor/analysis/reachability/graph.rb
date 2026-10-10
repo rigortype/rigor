@@ -17,7 +17,8 @@ module Rigor
         # A literal `const_get` on a known receiver is looked up where Ruby looks it up (#1761): the receiver,
         # then its ancestors unless the call passes `inherit = false`, then the top level unless it does. The
         # FIRST scope holding the name is the answer — resolving it anywhere else too would make a dead
-        # same-named constant reachable. A receiver that resolves to nothing is unknown, and falls back to the
+        # same-named constant reachable. A receiver that does not resolve as a whole is unknown — `Outer::Missing`
+        # peeled to `Outer` may alias anything, and `const_get` never searches `Outer` — so it falls back to the
         # top level as an unknown receiver does.
         #
         # The reference carries the referring file's role (WD8): a spec's `const_get("Foo")` keeps `Foo`
@@ -37,24 +38,27 @@ module Rigor
         end
 
         # The declaration a literal `name` names when looked up from `use.within`: the first receiver scope
-        # declaring it, a member's owner peeled as {#resolve} peels it. nil falls through to the top level;
-        # `:unreachable` when `inherit = false` confines the lookup to a receiver that does not declare it.
+        # declaring it, a member's owner peeled as {#resolve} peels it. nil falls through to the top level, as
+        # for a receiver that does not resolve as a whole; `:unreachable` when `inherit = false` confines the
+        # lookup to a resolved receiver that does not declare it (Ruby raises `NameError` there).
         def literal_target(use, name)
+          receiver = use.receiver { |ref| resolve_ref(ref) }
+          return nil if receiver.nil?
+
           local = @shadows[use.path]
           segments = name.split("::")
-          receiver_scopes(use).each do |scope|
+          receiver_scopes(use, [receiver]).each do |scope|
             segments.length.downto(1) do |count|
               candidate = "#{scope}::#{segments.first(count).join('::')}"
               return candidate if declared?(candidate, nil, local)
             end
           end
-          use.inherit || resolve_ref(use.within).nil? ? nil : :unreachable
+          use.inherit ? nil : :unreachable
         end
 
-        # The namespaces a `const_get` on `use.within` searches before the top level: the receiver, then, with
-        # the default `inherit = true`, its superclass chain and mixins (#1761).
-        def receiver_scopes(use)
-          anchors = use.anchors { |ref| resolve_ref(ref) }
+        # The namespaces a `const_get` on `anchors` searches before the top level: the receiver, then, with the
+        # default `inherit = true`, its superclass chain and mixins (#1761).
+        def receiver_scopes(use, anchors)
           return anchors unless use.inherit
 
           anchors.flat_map { |anchor| [anchor, *ancestor_scopes(anchor)] }.uniq
@@ -64,7 +68,8 @@ module Rigor
         def anchored(use)
           return [use] if use.within.nil? || use.prefix.nil?
 
-          receiver_scopes(use).map { |scope| use.with(prefix: "#{scope}::#{use.prefix}", within: nil) }
+          anchors = use.anchors { |ref| resolve_ref(ref) }
+          receiver_scopes(use, anchors).map { |scope| use.with(prefix: "#{scope}::#{use.prefix}", within: nil) }
         end
       end
 

@@ -525,6 +525,19 @@ Everything else keeps both arms live, which is always the safe answer: `<=>` (it
 
 Rationale and the false-positive argument: [ADR-47](../adr/47-narrowing-driven-clause-reachability.md) § WD5.
 
+### Guards read against a stated runtime
+
+`target_ruby` carries two meanings ([ADR-47](../adr/47-narrowing-driven-clause-reachability.md) § "Amendment 2026-10-10"). Every value, the default included, is the Prism parse version. A value the user sets explicitly in `.rigor.yml`, other than `"latest"`, is also a **stated runtime**: the lowest Ruby the project runs on. Version-guard folding above MUST NOT read the stated runtime; it stays on the analyzer's Ruby.
+
+The Ruby-deprecation rules read guards against the stated runtime instead. For a call such a rule would report:
+
+- An `if` / `unless` arm (statement, modifier or ternary) is reported only when its guard folds, with `RUBY_VERSION` read as the stated runtime padded to `x.y.z` (`"4.1"` reads as `"4.1.0"`), and selects that arm. Under the stated runtime only `RUBY_VERSION` is readable; a guard on `RUBY_ENGINE` or a default gem's `VERSION` is undecidable.
+- A call under a guard that reads `RUBY_VERSION` but is undecidable, a `case` / `while` / `until` condition that reads it, or the right operand of an `&&` / `||` whose left operand reads it, MUST NOT be reported.
+- The statements after an `if` / `unless` whose condition reads `RUBY_VERSION` and whose arms contain a `return`, `next`, `break`, `raise`, `fail`, `exit`, `exit!` or `abort` MUST NOT be reported.
+- The analyzer-Ruby dead-arm filter MUST NOT drop these diagnostics, since the analyzer's Ruby says nothing about where the call runs.
+
+The stated runtime is a lower bound, so an arm dead on it but live on a later Ruby is not reported. That loses some true findings and reports nothing on correct code.
+
 ## Diagnostics
 
 Diagnostics that arise from control-flow analysis live primarily in the `flow.*` family. Strict modes that depend on dynamic-origin provenance live in the `dynamic.*` family. Cutoff diagnostics live in `static.*`. The full identifier taxonomy is in [diagnostic-policy.md](diagnostic-policy.md).

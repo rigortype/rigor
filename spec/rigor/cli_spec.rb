@@ -2653,7 +2653,7 @@ RSpec.describe Rigor::CLI do
 
         written = File.read(path)
         rule_block = written[/each one catches\):\n(.*?)\n\s*#\s*A bare family token/m, 1]
-        listed_ids = rule_block.scan(/[a-z]+(?:\.[a-z][a-z-]*)+/).uniq
+        listed_ids = rule_block.scan(/[a-z]+(?:\.[a-z][a-z0-9-]*)+/).uniq
 
         expect(listed_ids.sort).to eq(Rigor::Analysis::CheckRules::ALL_RULES.sort)
       end

@@ -1,6 +1,6 @@
 # ADR-47 — Narrowing-driven clause reachability (`flow.unreachable-clause`)
 
-Status: **Accepted — WD1 + WD2 + WD3a + WD5 implemented. Extends Rigor's two existing `if`/`unless` reachability rules to `case`/`when` AND `case`/`in` clauses, using the narrowing the flow engine already computes. WD5 runs the mirror direction — an `if`/`unless` arm a decidable version guard deselects is unreachable, and reports nothing. Inspired by Elixir v1.20's redundant-`case`-clause reporting; scoped to stay inside Rigor's false-positive envelope.**
+Status: **Accepted — WD1 + WD2 + WD3a + WD5 implemented. Extends Rigor's two existing `if`/`unless` reachability rules to `case`/`when` AND `case`/`in` clauses, using the narrowing the flow engine already computes. WD5 runs the mirror direction — an `if`/`unless` arm a decidable version guard deselects is unreachable, and reports nothing. Inspired by Elixir v1.20's redundant-`case`-clause reporting; scoped to stay inside Rigor's false-positive envelope.** **WD5 amended 2026-10-10 (#1692): an explicit `target_ruby` is also a stated runtime, read by the Ruby-deprecation rules only.**
 
 **WD1 landed (v0.1.17).** `flow.unreachable-clause` fires when a `case <local>` clause's class/module-constant condition (`when String` / `when MyClass`) narrows the subject to `Type::Bot` — read back from `scope_index` (the evaluator's own per-clause `body_scope`), so the rule and the body typing cannot diverge. The single `body_scope == bot` signal covers both shapes the design names (per-clause disjointness AND prior-exhaustion) since an exhausted entry scope narrows to `bot` too. FP envelope enforced: subject must be a narrowing local, never `Dynamic` (gradual guarantee) nor already-`Bot` (dead code), class/module-constant conditions only (`when nil` / ranges / regexps / expressions excluded), clauses inside loops/blocks skipped. Per **WD4**, it ships at `:info` in lenient + balanced (the default) and `:warning` only in strict, pending the regression-corpus FP gate before any balanced→`:warning` promotion; clean (zero firings) on Rigor's own `lib` + `plugins` + `examples`.
 
@@ -247,6 +247,52 @@ the same risk class:
   and honouring a `target_ruby` that disagrees with the analyzer's own
   Ruby (the setting is a Prism *parse* version today and is not threaded to
   the inference layer).
+  The [2026-10-10 amendment](#amendment-2026-10-10--an-explicit-target_ruby-is-a-stated-runtime)
+  threads an explicit `target_ruby` to the deprecation rules, and to nothing
+  else.
+
+## Amendment 2026-10-10 — an explicit `target_ruby` is a stated runtime
+
+Archetype: deliberative. Stakes: mid. Reversible, and it reaches only projects that set `target_ruby`
+themselves, but it decides when correct code on one Ruby counts as a finding for another.
+
+**Context.** Ruby 4.1 deprecates calls that are correct on 4.0: the `ruby2_keywords` family (Feature
+#22205) and two `alias` lookups (Bug #22273, Bug #22276). Reporting them needs the Ruby the project runs
+on, and WD5 says Rigor has none: `target_ruby` is a Prism parse version whose default `"4.0"` is not a
+user statement ([#1692](https://github.com/rigortype/rigor/issues/1692)).
+
+**Decision.** `target_ruby` has two meanings, and the criterion is who wrote the value.
+
+- **Parse version** — every value, the default included. Unchanged.
+- **Stated runtime** — a value the user set in `.rigor.yml` or an included file, other than `"latest"`
+  (`Configuration#stated_runtime_ruby`). It is the lowest Ruby the project runs on. Only the
+  Ruby-deprecation rules read it, starting with `call.deprecated-ruby2-keywords` under a stated 4.1 or
+  later.
+
+`VersionGuard`, narrowing and `DeadVersionGuardArms` keep the analyzer's own `RUBY_VERSION`, so WD5's
+premise holds for every rule but these. The deprecation rule reads a version guard around a call
+against the stated runtime instead (`VersionGuard.verdict(stated_ruby:)`), skips the analyzer-Ruby
+dead-arm filter, and stays silent under a `RUBY_VERSION` guard it cannot decide. The normative rule is
+[control-flow-analysis.md § Guards read against a stated runtime](../type-specification/control-flow-analysis.md#guards-read-against-a-stated-runtime).
+
+`"latest"` states no runtime. It names the newest syntax the bundled Prism parses, so a Rigor upgrade
+would turn new deprecations on for an unchanged configuration, and nobody who wrote it said which Ruby
+runs the code.
+
+**Rejected / deferred.**
+
+- *Report regardless of target* — rejected: a diagnostic on correct 4.0 code.
+- *Treat the default as a statement* — rejected: the default would start reporting 4.1 deprecations the
+  day it moves to `"4.1"`, on projects that never chose it.
+- *Thread the stated runtime into `VersionGuard` for every rule* — rejected: the core and stdlib RBS
+  Rigor reads still belong to the analyzer's Ruby, so folding guards for another Ruby would pair one
+  Ruby's arms with another's signatures.
+- *Read `required_ruby_version`, `.ruby-version` or the Gemfile `ruby` line* — deferred to a separate
+  issue: it widens who states a runtime, and this amendment does not depend on it.
+
+**Consequences.** `Configuration` records whether `target_ruby` was written (`#target_ruby_explicit?`),
+and `#to_h` carries it, so caches tell a stated `"4.0"` from the default. The two `alias` rules wait for
+a probe of their resolution facts, as #1692 requires.
 
 ## Rejected / deferred alternatives
 

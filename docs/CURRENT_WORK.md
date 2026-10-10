@@ -54,9 +54,11 @@ Landed: #1662 #1668 #1688(rigor-alba) #1690 #1707(rigor-typelizer) #1709 #1723 #
 `sig/alba.rbs` + `open_receivers` for gems that ship RBS (projects that hand-declare
 `Alba.register_type`, e.g. sorah/protobufable, will hit duplicate-definition errors).
 
-In flight at handoff: **#1767** (fixes #1761, Draft): literal `const_get` anchored at a fully resolved
-receiver + ancestors. Its round-2 delta review (after a severe round-1 false candidate) was running;
-merge when it finds nothing severe and CI is green. Lesson from #1769: `Set#reject` returns an Array on
+In flight at handoff: **#1767** (fixes #1761, Draft, branch `unused-literal-const-get`). Round 2 found
+five shapes that list a live top-level class as a candidate (see the PR comment): `extend` taken as a
+const_get ancestor, `self.class` in a singleton method, `class << Other`, compact-class ancestor
+resolution, DSL blocks. Next: round-3 fix (read at the top level when the receiver scope is uncertain),
+then a round-3 review — the last round; if it is still severe, ask the user. Lesson from #1769: `Set#reject` returns an Array on
 Ruby 4.0 — filter scope carriers with `dup.delete_if` so each keeps its class.
 
 Next: #1760 (one realpath'd project root for `rigor unused`; start after #1767 lands), then #1768

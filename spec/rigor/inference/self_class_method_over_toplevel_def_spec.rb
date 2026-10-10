@@ -783,11 +783,24 @@ RSpec.describe "a class's own method beats a top-level def of the same name" do
     RUBY
   end
 
-  # The control: the plain spelling the three above are variations of is unchanged, and so is a trailing call
-  # that is NOT value-preserving — `.members` answers an Array, so the constant names no class the body owns.
-  it "still binds a top-level def inside a body whose write ends in a non-`freeze` call" do
-    expect(upcase_errors(<<~RUBY)).not_to be_empty
+  # A trailing call that is NOT value-preserving — `.members` answers an Array — leaves the constant naming no
+  # class the body owns, so the body is not keyed by `Line`. Since #1696 it is still entered, as the anonymous
+  # struct's body (the receiver-chain spelling of a value-position `Struct.new` block), so `text` is the member
+  # reader Ruby calls, not the top-level `def text`.
+  it "reads a struct member inside a body whose write ends in a non-`freeze` call" do
+    expect(upcase_errors(<<~RUBY)).to be_empty
       Line = Struct.new(:text) do
+        def shout
+          text.upcase
+        end
+      end.members
+    RUBY
+  end
+
+  # The control: in that anonymous body a name no member answers still binds the top-level def.
+  it "still binds a top-level def inside a non-`freeze`-tail body answering nothing" do
+    expect(upcase_errors(<<~RUBY)).not_to be_empty
+      Line = Struct.new(:other) do
         def shout
           text.upcase
         end

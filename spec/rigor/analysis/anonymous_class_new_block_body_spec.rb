@@ -180,15 +180,45 @@ RSpec.describe "anonymous Class.new block body" do
       expect(index[call_named(program, :probe_class)].self_type).to eq(Rigor::Type::Combinator.singleton_of(name))
     end
 
-    it "gives a refine block in a value position the refined class's self" do
+    # Ruby runs a refine body's defs on an instance of the refined class, but the block itself on the refinement
+    # module (a `Refinement`), which Rigor does not model: the block keeps an unknown `self`, the defs get String.
+    it "gives the defs of a refine block in a value position the refined class's instance self" do
       program = Prism.parse(<<~RUBY).value
         module Shouting
-          p(refine(String) { def shout = probe })
+          p(refine(String) { def shout = probe; block_probe })
         end
       RUBY
       index = Rigor::Inference::ScopeIndexer.index(program, default_scope: Rigor::Scope.empty)
 
       expect(index[call_named(program, :probe)].self_type).to eq(Rigor::Type::Combinator.nominal_of("String"))
+      block_scope = index[call_named(program, :block_probe)]
+      expect(block_scope.self_type).to eq(Rigor::Type::Combinator.singleton_of("Shouting"))
+      expect(block_scope.block_self_unknown?).to be(true)
+    end
+
+    it "does not check a value-position refine block's own self calls against the refined class" do
+      rules = rules_for(<<~RUBY)
+        module Helpers
+          def helper = 1
+        end
+        module Shouting
+          p(refine(String) do
+            self.import_methods(Helpers)
+            self.target
+          end)
+        end
+      RUBY
+      expect(rules).not_to include("call.undefined-method")
+    end
+
+    # The statement form reports the same call: a def of a refine body runs on a String.
+    it "still checks a value-position refine def's self calls against the refined class" do
+      rules = rules_for(<<~RUBY)
+        module Shouting
+          p(refine(String) { def shout = self.not_a_string_method_qq })
+        end
+      RUBY
+      expect(rules).to include("call.undefined-method")
     end
 
     # Issue #1689 — `Class` undefines `refine`, so the call in a class body is the class's own method and its block
@@ -204,7 +234,7 @@ RSpec.describe "anonymous Class.new block body" do
       RUBY
       index = Rigor::Inference::ScopeIndexer.index(program, default_scope: Rigor::Scope.empty)
 
-      expect(index[call_named(program, :probe)].self_type).not_to eq(Rigor::Type::Combinator.nominal_of("String"))
+      expect(index[call_named(program, :probe)].self_type).to eq(Rigor::Type::Combinator.singleton_of("Widget"))
     end
 
     # The instrument can say "yes": a genuinely wrong call in a value-position body is still checked.

@@ -334,6 +334,14 @@ Contract:
   `rigor-activesupport-core-ext` do exactly this. `rigor-ffi` returns its
   detected `:ffx` / `:ffi` target instead, because that target is read from
   `./Gemfile.lock` and `ext/**/extconf.rb`, which no analysed file's content covers.
+- The hook covers the `--incremental` snapshot only. The run-result caches —
+  the `--incremental` slot and the plain `rigor check` entry — answer an
+  unchanged run without loading the plugin, so they never call the hook: they
+  see the state behind it only through the rows the plugin's `IoBoundary`
+  recorded. A hook whose value depends on project files MUST therefore read
+  them through the boundary (`#read_file`, `#file?`, `#glob`, …), or a change
+  to one with no source edit is served the previous answer. `rigor-ffi` reads
+  its target's inputs that way ([#1652](https://github.com/rigortype/rigor/issues/1652)).
 - A plugin that registers `dynamic_return` / `narrowing_facts` contributions
   and provides **none** of the three channels makes the snapshot un-reusable
   for the run and is named in the run output — incremental degrades to a full

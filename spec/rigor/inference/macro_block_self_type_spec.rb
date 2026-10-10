@@ -452,4 +452,43 @@ RSpec.describe Rigor::Inference::MacroBlockSelfType do
       Rigor::Plugin::Registry.new(plugins: [first, second])
     end
   end
+
+  # Issue #1667 — the entry's `refinements:` ride the match, and a `:lexical` entry keeps the caller's `self`.
+  describe ".match_for" do
+    def registry_for(entry)
+      klass = Class.new(Rigor::Plugin::Base) do
+        manifest(id: "macroblockrefined", version: "0.1.0", block_as_methods: [entry])
+      end
+      Rigor::Plugin::Registry.new(plugins: [klass.new(services: services)])
+    end
+
+    let(:build_node) { Prism.parse("build { }").value.statements.body.first }
+
+    it "carries the entry's refinements beside the narrowed self" do
+      entry = Rigor::Plugin::Macro::BlockAsMethod.new(
+        receiver_constraint: "Object", method_names: %i[build], self_type: "Ctx", refinements: %w[SymSyntax]
+      )
+      env = stub_environment(registry: registry_for(entry), hierarchy: {})
+      match = described_class.match_for(
+        scope: scope_with(env), call_node: build_node, receiver_type: Rigor::Type::Nominal.new("Caller")
+      )
+
+      expected = described_class::Match.new(self_type: Rigor::Type::Nominal.new("Ctx"), refinements: %w[SymSyntax])
+      expect(match).to eq(expected)
+    end
+
+    it "answers the calling scope's self for a :lexical entry, on a Nominal receiver" do
+      entry = Rigor::Plugin::Macro::BlockAsMethod.new(
+        receiver_constraint: "Object", method_names: %i[build], self_type: :lexical, refinements: %w[SymSyntax]
+      )
+      env = stub_environment(registry: registry_for(entry), hierarchy: {})
+      scope = scope_with(env).with_self_type(Rigor::Type::Nominal.new("Caller"))
+      match = described_class.match_for(
+        scope: scope, call_node: build_node, receiver_type: Rigor::Type::Nominal.new("Caller")
+      )
+
+      expect(match.self_type).to eq(Rigor::Type::Nominal.new("Caller"))
+      expect(described_class.apply(scope, match, keeps_unknown: false).declared_refinements).to eq(%w[SymSyntax])
+    end
+  end
 end

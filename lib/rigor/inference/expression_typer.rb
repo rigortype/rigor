@@ -4172,7 +4172,7 @@ module Rigor
         block_return_for(
           block_arg, expected,
           call_node: call_node,
-          narrowed_self_type: block_body_self_narrowing(call_node, receiver_type),
+          narrowing: block_body_self_narrowing(call_node, receiver_type),
           repeats: !BLOCK_VALUE_DISCARDING.include?(call_node.name) && block_may_repeat?(call_node, receiver_type)
         )
       rescue StandardError
@@ -4239,7 +4239,7 @@ module Rigor
         block_scope = block_entry_scope(
           block_node, param_types,
           call_node: call_node,
-          narrowed_self_type: block_body_self_narrowing(call_node, receiver),
+          narrowing: block_body_self_narrowing(call_node, receiver),
           captured: repeating_captured_bindings(block_node, param_types, block_may_repeat?(call_node, receiver))
         )
         _result, collected = StatementEvaluator.with_break_value_sink do
@@ -4248,10 +4248,12 @@ module Rigor
         collected.filter_map { |jump, type| type if targets.key?(jump) }
       end
 
-      # The block body's narrowed `self_type`, or `nil` to leave the scope contract unchanged.
+      # The block body's narrowing — a {MacroBlockSelfType::Match} carrying the narrowed `self_type` and the declared
+      # refinements — or `nil` to leave the scope contract unchanged.
       #
       # ADR-16 Tier A: a registered plugin's `block_as_methods` entry matching `(receiver_type,
-      # call_node.name)` narrows to the receiver class's instance type.
+      # call_node.name)` narrows to the receiver class's instance type, and puts its `refinements:` in effect in the
+      # body (issue #1667).
       #
       # Issue #963: `define_method(:name) { ... }` installs its block as an instance method and runs it with
       # `self` bound to the receiving instance, so the block body's `self` is the INSTANCE side of a class body's
@@ -4261,9 +4263,11 @@ module Rigor
       # matters wherever the block's value is observable, e.g. a project-declared generic `define_method`
       # signature that returns the block's own type.
       def block_body_self_narrowing(call_node, receiver_type)
-        MacroBlockSelfType.narrow_self_type_for(
-          scope: scope, call_node: call_node, receiver_type: receiver_type
-        ) || DefineMethodBlockSelf.narrow_self_type_for(scope: scope, call_node: call_node)
+        match = MacroBlockSelfType.match_for(scope: scope, call_node: call_node, receiver_type: receiver_type)
+        return match if match
+
+        defined = DefineMethodBlockSelf.narrow_self_type_for(scope: scope, call_node: call_node)
+        defined && MacroBlockSelfType::Match.new(self_type: defined, refinements: InEffectRefinements::EMPTY)
       end
 
       def break_arm_param_types(call_node, receiver)
@@ -4276,12 +4280,12 @@ module Rigor
         )
       end
 
-      def block_return_for(block_arg, expected, call_node: nil, narrowed_self_type: nil, repeats: false)
+      def block_return_for(block_arg, expected, call_node: nil, narrowing: nil, repeats: false)
         case block_arg
         when Prism::BlockNode
           captured = repeating_captured_bindings(block_arg, expected, repeats)
           entry = block_entry_scope(
-            block_arg, expected, call_node: call_node, narrowed_self_type: narrowed_self_type, captured: captured
+            block_arg, expected, call_node: call_node, narrowing: narrowing, captured: captured
           )
           type_block_body(block_arg, entry, captured: captured)
         when Prism::BlockArgumentNode
@@ -4297,14 +4301,14 @@ module Rigor
       # Issue #316 — mirrors `StatementEvaluator#build_block_entry_scope`: the block body's `self` is the
       # yielding method's business, so the return-typing pass must see the same unmodelled-self mark. Issue #1358
       # — and the same match-global view ({MatchRebinding.block_entry}), which reads the owning `call_node`.
-      def block_entry_scope(block_node, expected, call_node: nil, narrowed_self_type: nil, captured: nil)
+      def block_entry_scope(block_node, expected, call_node: nil, narrowing: nil, captured: nil)
         entry = MatchRebinding.block_entry(scope.entering_opaque_block, block_node, call_node)
         entry = captured.lay(entry) if captured
         block_scope = BlockParameterBinder.new(expected_param_types: expected).bind_onto(block_node, entry)
-        return block_scope unless narrowed_self_type
+        return block_scope unless narrowing
 
         keeps_unknown = call_node ? scope.block_self_narrowing_unknown?(call_node) : false
-        block_scope.with_block_self_type(narrowed_self_type, keeps_unknown: keeps_unknown)
+        MacroBlockSelfType.apply(block_scope, narrowing, keeps_unknown: keeps_unknown)
       end
 
       # The #587 (b) captured binding when the call may run the block more than once ({#block_may_repeat?}), and

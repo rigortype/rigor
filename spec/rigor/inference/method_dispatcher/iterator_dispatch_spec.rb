@@ -96,6 +96,55 @@ RSpec.describe Rigor::Inference::MethodDispatcher::IteratorDispatch do
     end
   end
 
+  # Issue #1783. Every expectation is what CRuby's block form yields: `1.step(10, 2)` Integers, `1.step(10, 0.5)`
+  # and `1.step(10.0)` Floats, `1.step(10, 2r)` Rationals after the first value.
+  describe ".step" do
+    def float_nominal = Rigor::Type::Combinator.nominal_of("Float")
+    def untyped = Rigor::Type::Combinator.untyped
+    def dynamic_numeric = Rigor::Type::Combinator.dynamic(Rigor::Type::Combinator.nominal_of("Numeric"))
+    def keywords(pairs) = Rigor::Type::Combinator.hash_shape_of(pairs)
+
+    it "binds Integer when the receiver, limit and step are all Integer" do
+      expect(block_params(constant_of(1), :step, [constant_of(10), constant_of(2)])).to eq([integer_nominal])
+      expect(block_params(integer_nominal, :step, [integer_nominal])).to eq([integer_nominal])
+      expect(block_params(constant_of(1), :step)).to eq([integer_nominal])
+      expect(block_params(constant_of(1), :step, [constant_of(nil), constant_of(2)])).to eq([integer_nominal])
+    end
+
+    it "reads the by: / to: keyword forms" do
+      by_to = keywords(by: constant_of(2), to: constant_of(10))
+      expect(block_params(constant_of(1), :step, [by_to])).to eq([integer_nominal])
+      expect(block_params(constant_of(1), :step, [constant_of(10), keywords(by: constant_of(2))]))
+        .to eq([integer_nominal])
+      expect(block_params(constant_of(1), :step, [keywords(by: untyped)])).to eq([dynamic_numeric])
+      expect(block_params(constant_of(1), :step, [keywords(by: constant_of(0.5))])).to be_nil
+    end
+
+    it "binds Dynamic[Numeric] when an operand is untyped, since it may be a Float" do
+      expect(block_params(constant_of(1), :step, [untyped, constant_of(2)])).to eq([dynamic_numeric])
+      expect(block_params(constant_of(1), :step, [untyped])).to eq([dynamic_numeric])
+    end
+
+    it "declines to the RBS Numeric binding when an operand is a Float, so the step's Floats stay visible" do
+      expect(block_params(constant_of(1), :step, [constant_of(10), constant_of(0.5)])).to be_nil
+      expect(block_params(constant_of(1), :step, [untyped, constant_of(0.5)])).to be_nil
+      expect(block_params(constant_of(1), :step, [constant_of(10.0)])).to be_nil
+      expect(block_params(constant_of(1), :step, [constant_of(10), constant_of(2r)])).to be_nil
+      expect(block_params(constant_of(1), :step, [constant_of(10), constant_of(nil)])).to be_nil
+    end
+
+    it "declines for a non-Integer receiver" do
+      expect(block_params(constant_of(1.0), :step, [untyped, constant_of(2)])).to be_nil
+      expect(block_params(float_nominal, :step, [constant_of(10)])).to be_nil
+      expect(block_params(untyped, :step, [constant_of(10)])).to be_nil
+    end
+
+    it "declines for an argument list step does not take" do
+      expect(block_params(constant_of(1), :step, [constant_of(1), constant_of(2), constant_of(3)])).to be_nil
+      expect(block_params(constant_of(1), :step, [keywords(foo: constant_of(2))])).to be_nil
+    end
+  end
+
   describe ".each_with_index" do
     def nominal(name, type_args: []) = Rigor::Type::Combinator.nominal_of(name, type_args: type_args)
     def tuple(*elements) = Rigor::Type::Combinator.tuple_of(*elements)

@@ -262,6 +262,33 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
       expect(incremental_rows).to eq([whisper_fires, true])
     end
 
+    # Issue #1664 — the typed refined arm answers with the refine body's return, so an edit inside a body that keeps
+    # the refinement table unchanged must still reach the `using` file.
+    it "re-types the `using` file when only a refine body's return changes" do
+      write("lib/r.rb", "module Shout\n  refine String do\n    def shout = upcase\n  end\nend\n")
+      write("lib/u.rb", "using Shout\nRigor.dump_type(\"a\".shout)\n")
+      dump = lambda do |found|
+        found.select { |d| d.qualified_rule == "dump.type" }.map(&:message)
+      end
+      root = File.join(Dir.pwd, ".rigor", "cache")
+      snapshot = Rigor::Cache::IncrementalSnapshot.new(root: root)
+      run = lambda do
+        fingerprint = Rigor::Cache::IncrementalSnapshot.fingerprint(configuration: configuration, roots: paths)
+        session = Rigor::Analysis::IncrementalSession.new(
+          configuration: configuration, paths: paths, cache_store: Rigor::Cache::Store.new(root: root)
+        )
+        found, warm = guarded_run_incremental(session, snapshot: snapshot, fingerprint: fingerprint)
+        [dump.call(found), warm]
+      end
+      expect(run.call).to eq([["dump_type: String"], false])
+
+      write("lib/r.rb", "module Shout\n  refine String do\n    def shout = size\n  end\nend\n")
+      expect(run.call).to eq([["dump_type: non-negative-int"], true])
+      expect(dump.call(diagnostics(cache_store: Rigor::Cache::Store.new(root: root)))).to eq(
+        ["dump_type: non-negative-int"]
+      )
+    end
+
     it "answers an edited refinement on a cached run as a cold run does" do
       write_project
       root = File.join(Dir.pwd, ".rigor", "cache")

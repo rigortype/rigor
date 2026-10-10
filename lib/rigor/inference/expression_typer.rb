@@ -1957,7 +1957,59 @@ module Rigor
         Analysis::DependencyRecorder.read_name(:refinement, node.name) if Analysis::DependencyRecorder.active?
         return nil if scope.discovered_refinements.empty?
 
-        refined_receiver_result(node, receiver, list, arg_types, block_type)
+        refined_indirect_result(node, receiver, list) ||
+          refined_receiver_result(node, receiver, list, arg_types, block_type)
+      end
+
+      # ADR-121 WD4 — `send` / `__send__` / `public_send` with a literal name, `respond_to?` and `method` /
+      # `public_method` with one, and a `&:name` block argument honour refinements too (CRuby `test_refinement.rb`;
+      # probed on Ruby 4.0.5). When the name they reach is refined in effect for the receiver they answer
+      # `Dynamic[top]`: typing them through the arm is deferred, and `respond_to?` must never fold to `false`. A
+      # `&:name` block's receiver is the yielded element, which is not known here, so any in-effect refinement of the
+      # name answers. Only `methods` ignores refinements and keeps its answer.
+      def refined_indirect_result(node, receiver, list)
+        name = REFINED_NAMING_CALLS.include?(node.name) ? literal_method_name_argument(node) : nil
+        return dynamic_top if name && refined_name_for?(receiver, name, list)
+
+        block_name = symbol_block_argument(node)
+        dynamic_top if block_name && refined_anywhere?(block_name, list)
+      end
+
+      REFINED_NAMING_CALLS = Set[:send, :__send__, :public_send, :respond_to?, :method, :public_method].freeze
+      private_constant :REFINED_NAMING_CALLS
+
+      def literal_method_name_argument(node)
+        argument = node.arguments&.arguments&.first
+        name = argument.unescaped if argument.is_a?(Prism::SymbolNode) || argument.is_a?(Prism::StringNode)
+        return nil if name.nil?
+
+        name = name.to_sym
+        Analysis::DependencyRecorder.read_name(:refinement, name) if Analysis::DependencyRecorder.active?
+        name
+      end
+
+      def symbol_block_argument(node)
+        block = node.block
+        return nil unless block.is_a?(Prism::BlockArgumentNode) && block.expression.is_a?(Prism::SymbolNode)
+
+        name = block.expression.unescaped.to_sym
+        Analysis::DependencyRecorder.read_name(:refinement, name) if Analysis::DependencyRecorder.active?
+        name
+      end
+
+      def refined_name_for?(receiver, name, list)
+        members = receiver.is_a?(Type::Union) ? receiver.members : [receiver]
+        members.any? do |member|
+          class_name = refined_receiver_class_name(member)
+          !class_name.nil? && !RefinedDispatch.winner(scope, class_name, name, list).nil?
+        end
+      end
+
+      def refined_anywhere?(name, list)
+        return true if list.include?(InEffectRefinements::UNKNOWN) &&
+                       scope.discovered_refinements.any? { |_refined, methods| methods.key?(name) }
+
+        !RefinedDispatch.targets(scope.discovered_refinements, name, list).nil?
       end
 
       def refined_receiver_result(node, receiver, list, arg_types, block_type)

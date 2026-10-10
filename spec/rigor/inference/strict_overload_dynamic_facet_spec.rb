@@ -42,7 +42,7 @@ RSpec.describe "strict overload pass on a Dynamic[T] argument", type: :runner do
     expect(rules).not_to include("call.undefined-method")
   end
 
-  it "keeps a facet's nil from choosing an overload the value never reaches" do
+  it "joins Kernel#Complex's arms for a faceted argument (the #1782 cost; the nil rule is pinned by the (nil) arm below)" do
     # Runtime: a Complex. Chosen by the facet's `nil`, `Kernel#Complex` took its `nil`-returning form. Its parameters
     # are not provable, so the call now reads through the wrapper; the `(nil)` arm below pins the nil rule itself.
     # Read through the wrapper, the call joins every arm the `Dynamic` gradually matches (#1782), so the catch-all

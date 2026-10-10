@@ -17,6 +17,8 @@ RSpec.describe "Return of a faceted argument's fallback (#1782)", type: :runner 
                     | (Integer x) -> Integer
         def loose: ((String | :x) x, mode: Symbol) -> String
                  | (Integer x, mode: Symbol) -> Integer
+        def kw2: ((String | :x) x, mode: Symbol) -> String
+               | (Integer x, mode: Symbol) -> Integer
         def int_or_nil: (Integer x) -> Integer
                       | (String x) -> nil
         def int_or_sym: (Integer x) -> Integer
@@ -47,9 +49,20 @@ RSpec.describe "Return of a faceted argument's fallback (#1782)", type: :runner 
     RUBY
   end
 
+  # `provable` passes `FacetDistribution.provable?`, so the fallback here is the `picks.empty?` one: the facet's Symbol
+  # member matches neither overload.
   it "joins every gradual match where a member matches no overload" do
     expect(dumped_types(<<~RUBY)).to eq(["Dynamic[Integer | String]"])
-      dump_type(w.fmt(w.int_or_sym(w.untyped_value)))
+      dump_type(w.provable(w.int_or_sym(w.untyped_value)))
+    RUBY
+  end
+
+  # What sets the join apart from the block probe's `:gradual`: a call no arm gradually matches (a missing required
+  # keyword, an extra positional) keeps the first overload's return instead of answering none.
+  it "keeps the first overload's return where no arm matches at all" do
+    expect(dumped_types(<<~RUBY)).to eq(%w[String String])
+      dump_type(w.kw2(n))
+      dump_type(w.kw2(n, 1, 2))
     RUBY
   end
 

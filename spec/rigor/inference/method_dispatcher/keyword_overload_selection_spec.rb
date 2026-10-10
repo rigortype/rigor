@@ -50,6 +50,10 @@ RSpec.describe "Keyword arguments in overload selection (#1727)", type: :runner 
                | (?headers: false) -> Integer
         def single: (?a: Integer | String | Symbol, ?b: Integer | String | Symbol) -> Float
         def wide_value: () -> (Integer | String | Symbol)
+        def hash_or_string: (Hash[Symbol, untyped] h) -> Integer
+                          | (String s) -> String
+        def ret_block: (headers: true) { (Integer) -> void } -> Symbol
+                     | (?headers: false) { (Integer) -> void } -> Integer
       end
     RBS
   end
@@ -204,7 +208,16 @@ RSpec.describe "Keyword arguments in overload selection (#1727)", type: :runner 
     RUBY
   end
 
-  it "reports nothing on a call the member the first overload skipped makes correct" do
+  # A keyword hash no overload declares keywords for is a positional `Hash`, so its union values are not split (nine
+  # lists here would pass the limit), and a block-bearing call splits as a block-less one does.
+  it "splits only a keyword hash some overload takes as keywords, with or without a block" do
+    expect(dumped_types(<<~RUBY)).to eq(["Integer", "Integer | Symbol"])
+      dump_type(p.hash_or_string(a: p.wide_value, b: p.wide_value))
+      dump_type(p.ret_block(headers: p.flag_value) { |n| n })
+    RUBY
+  end
+
+  it "reports nothing on a call that is correct for the member the first overload skipped" do
     result = analyze(<<~RUBY, sig: sig)
       p = Picker.new
       r = p.ret(headers: p.flag_value)

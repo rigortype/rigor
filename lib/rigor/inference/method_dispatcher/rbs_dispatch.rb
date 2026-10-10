@@ -1063,7 +1063,10 @@ module Rigor
             # rubocop:enable Metrics/ParameterLists
             # One overload is the only one any member can select, and a wide union value (`receiver_type: Type::t`)
             # spelled out member by member would only pass the distribution limit.
-            return NOT_DISTRIBUTED if method_definition.method_types.size < 2
+            method_types = method_definition.method_types
+            return NOT_DISTRIBUTED if method_types.size < 2
+            # A keyword hash no overload takes as keywords is a positional `Hash` throughout (#1737).
+            return NOT_DISTRIBUTED unless KeywordArguments.any_declares?(method_types)
 
             keywords = args.last
             return NOT_DISTRIBUTED if keywords.pairs.none? { |_name, value| KeywordArguments.union_members(value) }

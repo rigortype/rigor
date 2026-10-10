@@ -272,7 +272,7 @@ module Rigor
               found = overloads.find do |method_type|
                 engages_block_shape?(method_type, block_required) &&
                   strictly_typed_params?(method_type, shared) &&
-                  matches?(method_type, shared, strict: true)
+                  matches?(method_type, shared, strict: strict)
               end
               return found ? [found] : NO_MATCH
             end
@@ -371,7 +371,8 @@ module Rigor
           end
 
           # `shared` is the keyword bundle `select_candidates` assembled (see `find_matching_overload`).
-          # `strict:` is `false` (gradual), `true` (strict pass) or `:proven` (pass 0; see `find_proven_overload`).
+          # `strict:` is `false` (gradual), `true` (strict pass), `:proven` (pass 0; see `find_proven_overload`) or
+          # `:yes` (the strict pass with a `yes` at every pair, #1800's proof; see `KeywordArguments.prefer_takers`).
           def matches?(method_type, shared, strict: false)
             fun = method_type.type
             ok = KeywordArguments.accepted_by?(fun, shared, strict) { |*kv| accepts_param?(*kv, shared, strict, true) }
@@ -455,7 +456,7 @@ module Rigor
             return false if !keyword && ImpreciseArgument.untyped?(arg) && value_pinning?(param_type)
 
             result = param_type.accepts(arg, mode: :gradual)
-            return result.yes? && ProvenOverload.names_arg_class?(param_type, arg) if strict == :proven
+            return proof?(result, param_type, arg, strict) if strict.is_a?(Symbol)
 
             # A record's `maybe` for a `Hash` with a gradual arm or an open shape is no evidence for the overload:
             # with `({ a: Integer }) -> Integer | (Hash[Symbol, untyped]) -> String`, `{ **o, b: 2 }` has a key the
@@ -464,6 +465,11 @@ module Rigor
             return false if strict && result.maybe? && Acceptance.maybe_rests_on_unread_hash?(param_type, arg)
 
             result.yes? || result.maybe?
+          end
+
+          # Pass 0 (`:proven`) takes a `yes` naming the argument's own class; #1800's keyword proof (`:yes`) any `yes`.
+          def proof?(result, param_type, arg, strict)
+            result.yes? && (strict == :yes || ProvenOverload.names_arg_class?(param_type, arg))
           end
 
           # A type that admits only specific VALUES rather than a class of values: a `Constant` carrier

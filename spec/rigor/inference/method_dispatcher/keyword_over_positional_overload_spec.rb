@@ -22,6 +22,10 @@ RSpec.describe "Keyword overloads over positional readers of the keyword hash (#
                             | (a: Integer) -> Integer
         def untyped_value: () -> untyped
         def opts: () -> Hash[Symbol, Integer]
+        def foo: (a: Foo) -> Integer
+               | (Object) -> String
+      end
+      class Foo
       end
     RBS
   end
@@ -72,6 +76,25 @@ RSpec.describe "Keyword overloads over positional readers of the keyword hash (#
     expect(dumped_types(<<~RUBY)).to eq(["Dynamic[Integer | String]"])
       dump_type(r.first_positional(a: 1))
     RUBY
+  end
+
+  # A class only the source declares is a `maybe` instance of every declared class, so `a: Bar.new` proves nothing about
+  # the keyword overload: `Bar` may not be an `Integer` (or a `Foo`), and Ruby then hands the hash to `(Object)`.
+  it "joins the overloads where a keyword value only maybe takes the keyword overload" do
+    expect(dumped_types(<<~RUBY)).to eq(["Dynamic[Integer | String]", "Dynamic[Integer | String]"])
+      class Bar; end
+      dump_type(r.ob(a: Bar.new))
+      dump_type(r.foo(a: Bar.new))
+    RUBY
+  end
+
+  it "reports nothing on the positional reading of a keyword value the keyword overload only maybe takes" do
+    result = analyze(<<~RUBY, sig: sig)
+      class Bar; end
+      R.new.ob(a: Bar.new).upcase
+      R.new.foo(a: Bar.new).upcase
+    RUBY
+    expect(result.diagnostics.select(&:error?).map(&:message)).to eq([])
   end
 
   # An untyped value or an unshaped `**opts` takes the keyword overload only gradually, which proves nothing.

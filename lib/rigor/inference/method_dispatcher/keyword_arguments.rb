@@ -194,7 +194,9 @@ module Rigor
         # keywords binds `a: 1` to them) read `(a: Integer) -> Integer | (Object) -> String`'s `ob(a: 1)` as the
         # keyword overload, but `ReceiverAffinity` moves `(Object)` first and the strict pass took it, reading the hash
         # positionally. `matches` is a selection pass's answer for a call with a keyword hash; the block answers the
-        # keyword-declaring overloads' strict (`true`) or gradual (`false`) matches. When one matches strictly, a
+        # keyword-declaring overloads' proven (`:yes`, every pair accepted with a `yes`) or gradual (`false`) matches.
+        # A `maybe` proves nothing: a source-only class is a `maybe` instance of every declared class, so
+        # `(a: Integer) | (Object)` would have taken `i(a: Bar.new)` as `Integer`. When one is proven, a
         # positional reader declared after it is dropped. One declared before it is what RBS takes, while a method
         # accepting keywords still binds them as keywords, so both stay and the caller joins their returns. A keyword
         # overload that only gradually takes the hash (an unshaped `**opts`, an imprecise value) proves nothing either
@@ -204,7 +206,7 @@ module Rigor
           return matches if readers.empty?
 
           takers = declared.select { |method_type| declares?(method_type.type) }
-          proven = yield(takers, true).first
+          proven = yield(takers, :yes).first
           unless proven
             joined = matches | yield(takers, false)
             return joined.size == matches.size ? matches : in_declared_order(declared, joined)

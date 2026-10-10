@@ -127,4 +127,95 @@ RSpec.describe "anonymous Class.new block body" do
     expect(scope.discovered_method?(name, :alpha, :instance)).to be(true)
     expect(scope.superclass_of(name)).to eq("StandardError")
   end
+
+  # Issue #1696 — the same body in a VALUE position: a call argument, a receiver chain, a literal element. The
+  # evaluator enters only the statement and assignment forms; the others reach `ScopeIndexer`'s walk of unentered
+  # blocks, which left them on the enclosing `self` — at the top level a nil one, so every macro and every implicit-self
+  # call in a `def` of the body read as `call.unresolved-toplevel`.
+  describe "in a value position (#1696)" do
+    def find_node(node, &predicate)
+      return node if predicate.call(node)
+
+      node.compact_child_nodes.each do |child|
+        found = find_node(child, &predicate)
+        return found if found
+      end
+      nil
+    end
+
+    def call_named(program, name) = find_node(program) { |n| n.is_a?(Prism::CallNode) && n.name == name }
+
+    it "reports nothing for the issue's repro" do
+      expect(diagnostics_for("Object.const_set(:Other, Class.new { attr_reader :x })\n").map(&:message)).to be_empty
+    end
+
+    it "reads the macros and the defs of every class-creating form as a class body" do
+      expect(rules_for(<<~RUBY)).not_to include("call.unresolved-toplevel")
+        Object.const_set(:Other, Class.new do
+          attr_accessor :y
+          def hello = y
+          private def helper = y
+          def self.build = new
+        end)
+        Object.const_set(:Mixin, Module.new { module_function })
+        pairs = [Struct.new(:a) { def b = a }, Data.define(:c) { def d = c }]
+        Class.new { attr_reader :z }.new
+        p pairs
+      RUBY
+    end
+
+    it "gives the body the class's self and each def its instance or class self" do
+      program = Prism.parse(<<~RUBY).value
+        Object.const_set(:Other, Class.new do
+          attr_reader :x
+          def hello = probe_instance
+          def self.build = probe_class
+        end)
+      RUBY
+      index = Rigor::Inference::ScopeIndexer.index(program, default_scope: Rigor::Scope.empty)
+      name = Rigor::Inference::AnonymousMetaClass.name_for(call_named(program, :new))
+
+      expect(index[call_named(program, :attr_reader)].self_type).to eq(Rigor::Type::Combinator.singleton_of(name))
+      expect(index[call_named(program, :probe_instance)].self_type).to eq(Rigor::Type::Combinator.nominal_of(name))
+      expect(index[call_named(program, :probe_class)].self_type).to eq(Rigor::Type::Combinator.singleton_of(name))
+    end
+
+    it "gives a refine block in a value position the refined class's self" do
+      program = Prism.parse(<<~RUBY).value
+        module Shouting
+          p(refine(String) { def shout = probe })
+        end
+      RUBY
+      index = Rigor::Inference::ScopeIndexer.index(program, default_scope: Rigor::Scope.empty)
+
+      expect(index[call_named(program, :probe)].self_type).to eq(Rigor::Type::Combinator.nominal_of("String"))
+    end
+
+    # Issue #1689 — `Class` undefines `refine`, so the call in a class body is the class's own method and its block
+    # an ordinary one, in a value position as at a statement.
+    it "leaves a refine call where self is a class on the enclosing self" do
+      program = Prism.parse(<<~RUBY).value
+        class Base
+          def self.refine(_target) = yield
+        end
+        class Widget < Base
+          p(refine(String) { def shout = probe })
+        end
+      RUBY
+      index = Rigor::Inference::ScopeIndexer.index(program, default_scope: Rigor::Scope.empty)
+
+      expect(index[call_named(program, :probe)].self_type).not_to eq(Rigor::Type::Combinator.nominal_of("String"))
+    end
+
+    # The instrument can say "yes": a genuinely wrong call in a value-position body is still checked.
+    it "still reports a genuine error inside a value-position body" do
+      rules = rules_for(<<~RUBY)
+        Object.const_set(:Other, Class.new do
+          BAD = Object.new(1)
+          def hello = 1.no_such_method_in_body
+        end)
+      RUBY
+      expect(rules).to include("call.wrong-arity", "call.undefined-method")
+    end
+  end
 end

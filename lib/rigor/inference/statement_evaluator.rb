@@ -3581,11 +3581,10 @@ module Rigor
 
         return nil if InEffectRefinements.class_body_refine?(scope, node)
 
-        refined = scope.type_of(target)
-        name = refined.is_a?(Type::Singleton) ? refined.class_name : Source::ConstantPath.qualified_name(target)
+        name = ScopeIndexer.refined_class_name(target, scope)
         return nil if name.nil?
 
-        [ClassFrame.new(name: name.delete_prefix("::"), singleton: false, refinement: true)]
+        [ClassFrame.new(name: name, singleton: false, refinement: true)]
       end
 
       # The block calls whose body `return` leaves only the block ({ReturnBarrier.block_call?}). Like a `->` body

@@ -46,6 +46,13 @@ module Rigor
         NO_DEF = [nil, nil].freeze
         private_constant :NO_DEF
 
+        # Issue #1689 — {InEffectRefinements#class_body_refine?} on the query stamped for `scope`'s file; false where no
+        # index stamped one, which keeps the call's refine-body reading.
+        def class_body_refine?(scope, call_node)
+          query = scope.discovery.in_effect_refinements
+          !query.nil? && query.class_body_refine?(call_node)
+        end
+
         # Issue #1671 — the modules whose refinements `using name` puts in effect, in activation order: the project
         # modules on `name`'s instance-side `Scope::ResolutionChain` (what a module includes and prepends,
         # transitively) in reverse ancestor order, each at its first position, so the module's own refinements

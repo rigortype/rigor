@@ -30,7 +30,10 @@ module Rigor
     # - **A `refine X do … end` block**, over the block: its own refining module, after the enclosing `using`s.
     #   The module is named where the block's `self` is: the innermost `module` / `class` body, or the constant a
     #   `M = Module.new do … end` write names. Anywhere else (another block, a `def`, `class << …`, the top
-    #   level) the module is not named, and the block contributes {UNKNOWN}.
+    #   level) the module is not named, and the block contributes {UNKNOWN}. Where the `refine`'s `self` is known to
+    #   be a class — directly in a `class` or `class << …` body, or in the block of a `Class.new` / `Struct.new` /
+    #   `Data.define` call — it is not `Module#refine` (`Class` undefines it), so it activates nothing and its block
+    #   is an ordinary one (issue #1689; {#class_body_refine?}).
     # - **A `using` whose argument is not a constant** (`using Module.new { … }`) names no module. It contributes
     #   {UNKNOWN} throughout its file, which is broader than Ruby's scoping and the declining direction.
     # - **Block sources** (ADR-121 WD1's third and fourth). A Proc literal that is directly the receiver of
@@ -127,6 +130,18 @@ module Rigor
         @refine_defs ? @refine_defs.nestings : {}
       end
 
+      # Issue #1689 — is `call_node` an implicit- or `self`-receiver `refine` call with a literal block
+      # ({ScopeIndexer.refine_call?}, whatever its argument) whose `self` this walk knows to be a class? `Class`
+      # undefines `refine`, so such a call is the class's own method (a DSL a base class defines), not
+      # `Module#refine`: its block is an ordinary block, and its `def`s refine nothing. Every walk that recognises a
+      # refine body asks this, so they agree on which calls are refine bodies. A node another file's parse made
+      # answers false.
+      def class_body_refine?(call_node)
+        build
+        offsets = @class_body_refines
+        !offsets.nil? && member?(call_node) && offsets.include?(call_node.block.location.start_offset)
+      end
+
       # Is this the query over `root`'s tree?
       def over?(root) = @root.equal?(root)
 
@@ -181,6 +196,7 @@ module Rigor
         @refinement_defs = EMPTY_SET
         @refine_defs = nil
         @chained_refined_calls = nil
+        @class_body_refines = nil
         @unresolved_using = false
         return if @root.nil? || !mentions_refinements?
 
@@ -189,7 +205,7 @@ module Rigor
         @refine_defs = RefineDefs.new
         @nesting = EMPTY
         location = @root.location
-        walk(@root, [], [location.start_offset, location.end_offset], false, nil)
+        walk(@root, [], [location.start_offset, location.end_offset], false, nil, false)
         sort_activations
         @activations.freeze
       end

@@ -82,7 +82,7 @@ module Rigor
 
       # A standalone walk, for a file no existing descent visits (a `pre_eval:` entry).
       def scan(root)
-        collector = Collector.new
+        collector = Collector.new(InEffectRefinements.new(root))
         walk(root, collector, true)
         collector.census.freeze
       end
@@ -98,13 +98,16 @@ module Rigor
 
       # Accumulates one file's census, fed each node of a pre-order descent. `top_level` says whether the node sits
       # outside every `class` / `module` body; it is the host walk's to track. `refine` blocks are remembered by
-      # offset as they are met, so a node inside one is known without the host walk tracking it.
+      # offset as they are met, so a node inside one is known without the host walk tracking it. `in_effect` is the
+      # file's {InEffectRefinements}: a `refine` it places where `self` is a class is the class's own method, so its
+      # block is not a refinement (issue #1689).
       class Collector
         attr_reader :census
 
-        def initialize
+        def initialize(in_effect)
           @census = Set.new
           @refine_ranges = []
+          @in_effect = in_effect
         end
 
         # A node the collector cannot read must not fail the analysis of its file, nor of every file the pre-pass
@@ -223,7 +226,7 @@ module Rigor
         def self_receiver?(node) = node.receiver.nil? || node.receiver.is_a?(Prism::SelfNode)
 
         def remember_refine(node)
-          return unless node.name == :refine && self_receiver?(node) && node.block.is_a?(Prism::BlockNode)
+          return unless ScopeIndexer.refine_call?(node) && !@in_effect.class_body_refine?(node)
 
           location = node.block.location
           @refine_ranges << (location.start_offset...location.end_offset)

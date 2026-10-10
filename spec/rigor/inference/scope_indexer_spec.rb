@@ -923,6 +923,21 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
       expect(methods).not_to have_key("String")
     end
 
+    # Issue #1689 — `Class` undefines `refine`, so in a class body it is the class's own method and its block's
+    # `def` is the class's, as any `def` in a block in that body is.
+    it "files a `refine` call's defs in a class body under the class" do
+      methods, _def_nodes, _envelopes, refinements = described_class.build_methods_and_def_nodes(parse(<<~RUBY))
+        class Widget < Base
+          refine String do
+            def label = "widget"
+          end
+        end
+      RUBY
+
+      expect(refinements).to be_empty
+      expect(methods.fetch("Widget")).to eq(label: :instance)
+    end
+
     it "shares one frozen empty table for a file that refines nothing" do
       refinements = described_class.build_methods_and_def_nodes(parse("class A\n  def f = 1\nend\n")).fetch(3)
 

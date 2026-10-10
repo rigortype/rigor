@@ -51,7 +51,7 @@ module Rigor
         paths = @argv.empty? ? configuration.paths : @argv
         scan_cache = Analysis::Reachability::ScanCache.open(configuration.cache_path,
                                                             target_ruby: configuration.target_ruby)
-        declarations, references, dynamic_uses = scan(paths, configuration, scan_cache)
+        declarations, references, dynamic_uses, shadows = scan(paths, configuration, scan_cache)
         references.concat(signature_references(configuration))
         dynamic_uses.concat(template_mentions(declarations, scan_cache))
 
@@ -59,7 +59,8 @@ module Rigor
                                                                    cache_store: cache_store(configuration))
         references.concat(plugin_references(contribution.references))
         graph = build_graph(configuration, options, contribution,
-                            declarations: declarations, references: references, dynamic_uses: dynamic_uses)
+                            declarations: declarations, references: references, dynamic_uses: dynamic_uses,
+                            shadows: shadows)
         emit(graph.report, options, supply: root_supply(contribution.roots, declarations))
         scan_cache.save
         0
@@ -67,9 +68,9 @@ module Rigor
 
       private
 
-      def build_graph(configuration, options, contribution, declarations:, references:, dynamic_uses:)
+      def build_graph(configuration, options, contribution, declarations:, references:, dynamic_uses:, shadows:)
         Analysis::Reachability::Graph.new(
-          declarations: declarations, references: references, dynamic_uses: dynamic_uses,
+          declarations: declarations, references: references, dynamic_uses: dynamic_uses, shadows: shadows,
           root_fqns: root_fqns(declarations, options.fetch(:entry_points)) + contribution.roots,
           foreign: foreign_predicate(configuration)
         )
@@ -106,22 +107,25 @@ module Rigor
       end
 
       # Declarations come from the analysed paths; references additionally from the wider corpus (WD7).
+      # A wider-corpus file's own declarations come back as shadows: never nodes, only what that file's own
+      # references resolve to first (#1732).
       # Every file is consulted every run — an unchanged one contributes its cached scan, so the
       # whole-project completeness the `--incremental` refusal protects is unaffected.
       def scan(paths, configuration, cache)
         declaration_files = Analysis::PathExpansion.ruby_files(paths, configuration.exclude_patterns).to_set
         declarations = []
+        shadows = []
         references = []
         dynamic_uses = []
         (declaration_files + reference_files(paths, configuration)).sort.each do |file|
           result = cache.serve(:scan, file) { read_and_scan(file, configuration) }
           next if result.nil?
 
-          declarations.concat(result.declarations) if declaration_files.include?(file)
+          (declaration_files.include?(file) ? declarations : shadows).concat(result.declarations)
           references.concat(result.references)
           dynamic_uses.concat(result.dynamic_uses)
         end
-        [declarations, references, dynamic_uses]
+        [declarations, references, dynamic_uses, shadows]
       end
 
       # The reference corpus is the PROJECT, not the analysed paths. A constant declared in `lib/` is commonly

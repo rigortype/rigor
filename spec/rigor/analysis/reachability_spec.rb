@@ -478,18 +478,19 @@ RSpec.describe Rigor::Analysis::Reachability do
   describe "a reference from a class that is not an owned node is file-level (#1732)" do
     def report_for(files, declared:, roots: [], foreign: ->(_fqn) { false })
       decls = []
+      shadows = []
       refs = []
       uses = []
       files.each do |path, source|
         result = Rigor::Analysis::Reachability::Scan.call(path: path, source: source)
         raise "fixture #{path} did not parse" if result.nil?
 
-        decls.concat(result.declarations) if declared.include?(path)
+        (declared.include?(path) ? decls : shadows).concat(result.declarations)
         refs.concat(result.references)
         uses.concat(result.dynamic_uses)
       end
       Rigor::Analysis::Reachability::Graph.new(declarations: decls, references: refs, root_fqns: roots,
-                                               dynamic_uses: uses, foreign: foreign).report
+                                               dynamic_uses: uses, shadows: shadows, foreign: foreign).report
     end
 
     it "keeps a class used from an initializer's class body live in production" do
@@ -591,6 +592,39 @@ class Dead; end
       expect(report.test_only).to be_empty
       expect(report.undecidable.to_h { [it.fqn, it.reason] })
         .to include("Leaf" => "reachable from Mid, which cannot be decided")
+    end
+
+    # A migration's local model stub is what its own body names, as in Ruby; rooting the app's dead model of
+    # the same name instead would hide it.
+    it "resolves a name to a class its own file declares outside paths first" do
+      migration = <<~RUBY
+        class Drop < ActiveRecord::Migration[7.0]
+          class LegacyThing < ActiveRecord::Base; end
+          def up = LegacyThing.delete_all
+        end
+      RUBY
+      report = report_for({ "app/models/legacy_thing.rb" => "class LegacyThing < ApplicationRecord; end\n",
+                            "db/migrate/1_drop.rb" => migration },
+                          declared: ["app/models/legacy_thing.rb"])
+      expect(report.candidates.map(&:fqn)).to eq(["LegacyThing"])
+    end
+
+    it "resolves a spec helper's sibling to the helper's own file, not to a same-named app class" do
+      helper = "module H\n  class Formatter; end\n  class Fake\n    def x = Formatter.new\n  end\nend\n"
+      report = report_for({ "app/fmt.rb" => "class Formatter; end\n", "spec/support/h.rb" => helper },
+                          declared: ["app/fmt.rb"])
+      expect(report.candidates.map(&:fqn)).to eq(["Formatter"])
+      expect(report.test_only).to be_empty
+    end
+
+    # A spec support stub is loaded with the specs only, so it must not shadow another file's reference.
+    it "does not let another file's outside-paths declaration shadow a reference" do
+      report = report_for({ "app/user.rb" => "class User; end\n",
+                            "spec/support/stub.rb" => "module Admin\n  class User; end\nend\n",
+                            "config/initializers/admin.rb" => "module Admin\n  def self.go = User.new\nend\n" },
+                          declared: ["app/user.rb"])
+      expect(report.candidates).to be_empty
+      expect(report.test_only).to be_empty
     end
 
     # The fallback is only for scopes that are not nodes: an owned class's body still credits the class, so a

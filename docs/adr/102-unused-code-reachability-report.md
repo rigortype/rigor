@@ -78,9 +78,14 @@ instead, in that file's role
 `Application` roots `MyMw` the way a top-level line of `config/application.rb` would, and a
 spec's `module Outer; class Fake < OBase` keeps `OBase` test-reachable. Crediting the
 enclosing scope instead lost that evidence whenever the scope was a module nothing reaches.
-For a header and a class body's own statements the reading is exact, since they run when the
-file loads; for a method body it is the reading that cannot report live code as dead. A
-superclass never resolves to the subclass it declares: `module Api; class User < User; end;
+A header and a class body's own statements run when the file loads, so they root what they
+name as top-level code does; a method body is rooted the same way because whether it runs
+cannot be decided, and the other reading would report live code as dead. A name written in
+such a file resolves to a class that file itself declares before an owned one, as Ruby's
+lookup does: in a migration, `LegacyThing` under a local `class LegacyThing <
+ActiveRecord::Base` stub names the stub, not the app's model, so the edge is dropped. Only
+the referring file's own declarations shadow — a spec support file is never loaded with
+production code, so its stub cannot hide another file's reference. A superclass never resolves to the subclass it declares: `module Api; class User < User; end;
 end` names `::User`.
 
 Whatever an undecidable declaration (WD4) reaches is undecidable too, with a reason naming

@@ -35,13 +35,18 @@ module Rigor
         #   a reopened gem or stdlib class must never be a candidate (WD6). Defaults to "nothing is foreign".
         # @param dynamic_uses — sites where a constant is reached by name at runtime.
         #   A literal-argument site contributes a real reference; a dynamic one taints a namespace (WD4).
-        def initialize(declarations:, references:, root_fqns: [], dynamic_uses: [], foreign: ->(_fqn) { false })
+        # @param shadows — declarations made in files outside the analysed paths. They are never nodes, but a
+        #   reference written in the SAME file resolves to them first, as Ruby would (#1732, see {#resolve_ref}).
+        def initialize(declarations:, references:, root_fqns: [], dynamic_uses: [], shadows: [],
+                       foreign: ->(_fqn) { false })
           @declarations = declarations
           @dynamic_uses = dynamic_uses
           @references = references + literal_dynamic_references(dynamic_uses)
           @root_fqns = root_fqns.to_set
           @foreign = foreign
           @by_fqn = declarations.group_by(&:fqn)
+          @shadows = shadows.group_by(&:path).transform_values { |decls| decls.to_set(&:fqn) }
+          @shadows.default = Set.new.freeze
           @owned = @by_fqn.keys.reject { |fqn| @foreign.call(fqn) }.to_set
           @ancestors = {}
         end
@@ -192,10 +197,11 @@ module Rigor
         # module that is never reached itself, or is not a node at all (#1732).
         #
         # Such a reference counts as file-level code of its file instead, in that file's role: a spec helper's
-        # reference keeps its target test-reachable, an initializer's keeps it live in production. That is exact
-        # for a class header and for a class body's own statements, which run when the file loads; for a method
-        # body it is the reading that cannot report live code as dead, since whether the method runs is not
-        # decidable from a declaration this report does not own.
+        # reference keeps its target test-reachable, an initializer's keeps it live in production. A class header
+        # and a class body's own statements run when the file loads; a method body is read the same way because
+        # whether it runs is not decidable from a declaration this report does not own, and the other reading
+        # would report live code as dead. What the reference NAMES is still resolved against its own file's
+        # declarations first (see {#resolve_ref}).
         def source(ref)
           @owned.include?(ref.from) ? ref.from : nil
         end
@@ -227,11 +233,18 @@ module Rigor
         # A declaration-header reference never names the declaration it belongs to: `module Api; class User <
         # User; end; end` reads `User` before `Api::User` exists, so Ruby answers `::User`. Every other reference
         # resolves as written, and one that lands on its own declaration is dropped as a self-reference.
+        #
+        # A class its own file declares outside `paths:` shadows a same-named owned one, as Ruby's lookup does:
+        # `LegacyThing` inside a migration's local `class LegacyThing < ActiveRecord::Base` stub names the stub,
+        # not the app's model. The answer is then not an owned node and the reference is dropped. Only the
+        # referring file's own declarations count: a spec support file's stub is loaded with the specs, never
+        # with production, so letting it shadow other files could hide a production reference (#1732).
         def resolve_ref(ref)
-          target = resolve(ref.as_written, ref.nesting, rooted: ref.rooted)
+          local = @shadows[ref.path]
+          target = resolve(ref.as_written, ref.nesting, rooted: ref.rooted, local: local)
           return target unless target && target == ref.from && header?(ref)
 
-          resolve(ref.as_written, ref.nesting, rooted: ref.rooted, exclude: target)
+          resolve(ref.as_written, ref.nesting, rooted: ref.rooted, exclude: target, local: local)
         end
 
         # Only a header reference is credited to something other than the scope it is written in (see
@@ -275,18 +288,18 @@ module Rigor
         # the innermost cresting scope (#354), then the bare name. When `rooted: true`, lexical nesting and
         # ancestors are skipped, answering the top-level declaration directly (#625).
         # `exclude` names a declaration the answer must not be (see {#resolve_ref}).
-        def resolve(as_written, nesting, rooted: false, exclude: nil)
+        def resolve(as_written, nesting, rooted: false, exclude: nil, local: nil)
           if rooted
-            return as_written if declared?(as_written, exclude)
+            return as_written if declared?(as_written, exclude, local)
 
             idx = as_written.rindex("::")
-            return idx ? resolve(as_written[0, idx], nesting, rooted: true, exclude: exclude) : nil
+            return idx ? resolve(as_written[0, idx], nesting, rooted: true, exclude: exclude, local: local) : nil
           end
 
           walker = nesting.dup
           until walker.empty?
             candidate = (walker + [as_written]).join("::")
-            return candidate if declared?(candidate, exclude)
+            return candidate if declared?(candidate, exclude, local)
 
             walker.pop
           end
@@ -294,11 +307,11 @@ module Rigor
           unless nesting.empty?
             ancestor_scopes(nesting.join("::")).each do |ancestor|
               candidate = "#{ancestor}::#{as_written}"
-              return candidate if declared?(candidate, exclude)
+              return candidate if declared?(candidate, exclude, local)
             end
           end
 
-          return as_written if declared?(as_written, exclude)
+          return as_written if declared?(as_written, exclude, local)
 
           # `Scope::DiscoveryIndex::EMPTY` names a constant INSIDE a class, and reading it is a use of that
           # class — but the leaf is not itself a declaration, so the reference would resolve to nothing and
@@ -306,11 +319,11 @@ module Rigor
           # on the first run of this report against Rigor's own `lib`). Peel the trailing segment and retry:
           # a reference to a member is a reference to its owner.
           idx = as_written.rindex("::")
-          idx ? resolve(as_written[0, idx], nesting, exclude: exclude) : nil
+          idx ? resolve(as_written[0, idx], nesting, exclude: exclude, local: local) : nil
         end
 
-        def declared?(fqn, exclude)
-          fqn != exclude && @by_fqn.key?(fqn)
+        def declared?(fqn, exclude, local)
+          fqn != exclude && (@by_fqn.key?(fqn) || local&.include?(fqn))
         end
 
         # Breadth-first over superclass + included modules, mixins first, terminating on a cycle. As-written

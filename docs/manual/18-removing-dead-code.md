@@ -183,7 +183,10 @@ A class declared outside `paths:` — `config/application.rb`'s
 itself in the report, so what it names counts as named from its file:
 `config.middleware.use MyMw` keeps `MyMw` live, and a fake subclass in
 `spec/support` keeps its base reachable from tests. The same holds for
-a gem class you reopen inside `paths:`.
+a gem class you reopen inside `paths:`. A name the file declares
+itself still means that declaration: a migration's local
+`class LegacyThing < ActiveRecord::Base` stub does not keep the app's
+`LegacyThing` model live.
 
 The 53 false positives in the adjudicated run fell into a few recurring
 shapes, and 28 of them were the first one. Recognising these lets you

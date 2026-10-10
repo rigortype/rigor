@@ -24,6 +24,10 @@ RSpec.describe "Keyword overloads over positional readers of the keyword hash (#
         def opts: () -> Hash[Symbol, Integer]
         def foo: (a: Foo) -> Integer
                | (Object) -> String
+        def sup: (a: Numeric) -> Integer
+               | (Object) -> String
+        def lit: (a: 1 | 2) -> Integer
+               | (Object) -> String
       end
       class Foo
       end
@@ -75,6 +79,15 @@ RSpec.describe "Keyword overloads over positional readers of the keyword hash (#
   it "joins a positional overload declared before the keyword overload" do
     expect(dumped_types(<<~RUBY)).to eq(["Dynamic[Integer | String]"])
       dump_type(r.first_positional(a: 1))
+    RUBY
+  end
+
+  # Any `yes` proves the keyword overload, not only a parameter naming the value's own class: a supertype or a
+  # literal-union declaration takes the value as surely.
+  it "takes the keyword overload on a yes from a supertype or a literal union" do
+    expect(dumped_types(<<~RUBY)).to eq(%w[Integer Integer])
+      dump_type(r.sup(a: 1.0))
+      dump_type(r.lit(a: 1))
     RUBY
   end
 

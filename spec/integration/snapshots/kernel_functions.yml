@@ -14,7 +14,7 @@ assertions:
   '5': "[1, 2]"
   '6': nil
   '7': nil
-  '8': Dynamic[top]
+  '8': Dynamic[Array[Dynamic[top]] | Dynamic[top] | nil]
   '9': "{ 1 => 2, 1.0 => 4 }"
   '10': "{ 1 => 2, 1.0 => 4 }"
   '11': "{ 1 => 2, 1.0 => 4 }"

@@ -1,6 +1,7 @@
 ---
 locals:
-  dyn: Dynamic[top]
+  dyn: Dynamic[Array[Dynamic[top]] | Dynamic[top] | nil]
+  untyped: Dynamic[top]
   xs: "[1, 2]"
 assertions:
   '1': '"x"'
@@ -10,3 +11,5 @@ assertions:
   '5': "[1, 2]"
   '6': Dynamic[top]
   '7': Dynamic[top]
+  '8': Dynamic[Array[Dynamic[top]] | Dynamic[top] | nil]
+  '9': Dynamic[Array[Dynamic[top]] | Dynamic[top] | nil]

@@ -164,6 +164,11 @@ module Rigor
               # A constant path's segments are not separate references — `A::B::C` is one reference to the leaf,
               # and descending would record `A` and `A::B` as references in their own right (22 spurious
               # candidates on Rigor's own lib came from exactly that in the #345 probe).
+              #
+              # A path on a computed base is the exception: `Migration[2.2]::MigrationRecord` names no constant
+              # this reading can resolve, but its base is a call whose receiver and arguments do.
+              walk(node.parent, nesting) if node.is_a?(Prism::ConstantPathNode) &&
+                                            Source::ConstantPath.qualified_name_or_nil(node).nil?
               return
             when Prism::ConstantWriteNode
               walk_constant_write(node, nesting)

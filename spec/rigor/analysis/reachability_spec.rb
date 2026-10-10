@@ -614,6 +614,15 @@ RSpec.describe Rigor::Analysis::Reachability do
       expect(report.candidates.map(&:fqn)).to eq(%w[Foo Sub])
     end
 
+    # The GitLab shape `< ::Gitlab::Database::Migration[2.2]::MigrationRecord`: a constant path on a computed
+    # base names nothing resolvable, but the call it hangs from does.
+    it "walks the computed base of a constant-path superclass" do
+      report = report_for({ "lib/a.rb" => "class Mig\n  def self.[](v) = self\n  class Rec; end\nend\n" \
+                                          "class UsesMig < Mig[2.2]::Rec; end\n",
+                            "lib/main.rb" => "UsesMig.new\n" })
+      expect(report.candidates.map(&:fqn)).not_to include("Mig")
+    end
+
     it "resolves the superclass expression against the outer nesting" do
       result = Rigor::Analysis::Reachability::Scan.call(path: "lib/a.rb", source: <<~RUBY)
         module Outer

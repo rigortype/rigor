@@ -311,7 +311,7 @@ module Rigor
       def call_node_diagnostics(path, node, scope_index, eval_ranges = nil, lexical_sites = nil)
         [
           undefined_method_diagnostic(path, node, scope_index, lexical_sites),
-          unresolved_toplevel_diagnostic(path, node, scope_index, eval_ranges),
+          unresolved_toplevel_diagnostic(path, node, scope_index, eval_ranges, lexical_sites),
           wrong_arity_diagnostic(path, node, scope_index, lexical_sites),
           argument_type_diagnostic(path, node, scope_index, lexical_sites),
           nil_receiver_diagnostic(path, node, scope_index, lexical_sites),
@@ -769,7 +769,9 @@ module Rigor
           # below cannot reason about it, but the call is still definitely
           # undefined when EVERY arm lacks the method — see
           # `union_undefined_method_diagnostic`.
-          return union_undefined_method_diagnostic(path, call_node, receiver_type, scope) if class_name.nil?
+          if class_name.nil?
+            return union_undefined_method_diagnostic(path, call_node, receiver_type, scope, lexical_sites)
+          end
 
           # ADR-26 — a plugin may declare a class "open": one
           # known to respond beyond its RBS-declared method
@@ -1092,7 +1094,7 @@ module Rigor
         # Authored severity is `:warning`; the severity profile
         # remaps it (`strict` → `:error`, `balanced` →
         # `:warning`, `lenient` → `:off` / suppressed).
-        def unresolved_toplevel_diagnostic(path, call_node, scope_index, eval_ranges = nil)
+        def unresolved_toplevel_diagnostic(path, call_node, scope_index, eval_ranges = nil, lexical_sites = nil)
           return nil unless call_node.receiver.nil?
 
           scope = scope_index[call_node]
@@ -1110,6 +1112,8 @@ module Rigor
           # body is morally a class body, so ADR-34 stays silent there — including on a genuinely
           # undefined name inside the block. Ranges are computed once per file.
           return nil if call_inside_receiver_eval_ranges?(eval_ranges, call_node)
+          # ADR-121 WD7 — a refinement of `Object` (or one Rigor cannot read) in effect here may define the name.
+          return nil if refined_method_in_effect?("Object", call_node, scope, :instance, lexical_sites)
 
           build_unresolved_toplevel_diagnostic(path, call_node)
         end
@@ -2103,7 +2107,7 @@ module Rigor
         # `possible-nil-receiver` rule, safe-navigation, and ADR-58
         # declaration-sourced nil. Slice 1 handles pure non-nil unions
         # (e.g. `String | Symbol`).
-        def union_undefined_method_diagnostic(path, call_node, receiver_type, scope)
+        def union_undefined_method_diagnostic(path, call_node, receiver_type, scope, lexical_sites = nil)
           return nil unless receiver_type.is_a?(Type::Union)
           return nil if call_node.safe_navigation?
 
@@ -2125,8 +2129,16 @@ module Rigor
           # `.pack`). Require at least two distinct arm classes.
           return nil if members.map { |member| concrete_class_name(member) }.uniq.size < 2
           return nil if members.any? { |member| method_present_anywhere?(member, call_node.name, scope) }
+          return nil if refined_on_some_arm?(members, call_node, scope, lexical_sites)
 
           build_undefined_method_diagnostic(path, call_node, receiver_type)
+        end
+
+        # ADR-121 WD7 — a refinement in effect (or one Rigor cannot read) may define the name on one arm's class.
+        def refined_on_some_arm?(members, call_node, scope, lexical_sites)
+          members.any? do |member|
+            refined_method_in_effect?(concrete_class_name(member), call_node, scope, :instance, lexical_sites)
+          end
         end
 
         # Issue #1699 — a union of one class's literals, alone or beside that class's plain nominal

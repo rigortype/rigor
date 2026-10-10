@@ -914,6 +914,24 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
       end
     end
 
+    # The union receiver rule and `call.unresolved-toplevel` ask the refinement predicate too. Ruby 4.0.5 prints `:int`
+    # and `1` under a `using` of the module (read from outside the analysed paths or from the project alike), and
+    # raises `NoMethodError` for both calls in `plain.rb`.
+    it "declines a union receiver's call and an implicit-self top-level call a refinement in effect may define" do
+      refinement = "refine(Integer) { def shout = :int }\n  refine(Symbol) { def shout = :sym }\n  " \
+                   "refine(Object) { def helper(x) = x }\n"
+      calls = "x = ARGV.empty? ? 1 : :a\np x.shout\np helper(1)\n"
+      write("outside/gemref.rb", "module GemRef\n  #{refinement}end\n")
+      write("lib/opaque.rb", "$LOAD_PATH.unshift(File.join(__dir__, \"..\", \"outside\"))\nrequire \"gemref\"\n" \
+                             "using GemRef\n#{calls}")
+      write("lib/readable.rb", "module R\n  #{refinement}end\nusing R\n#{calls}")
+      write("lib/plain.rb", calls)
+
+      rows = diagnostics.select { |d| %w[call.undefined-method call.unresolved-toplevel].include?(d.qualified_rule) }
+                        .map { |d| [File.basename(d.path.to_s), d.line, d.qualified_rule] }.sort
+      expect(rows).to eq([["plain.rb", 2, "call.undefined-method"], ["plain.rb", 3, "call.unresolved-toplevel"]])
+    end
+
     # Critique F5a. Ruby 4.0.5 prints `:via_alias` (`rb/p4_alias_refine.rb`).
     it "declines under a module that refines through an alias of `refine`" do
       write("lib/m.rb", <<~RUBY)

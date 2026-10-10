@@ -189,6 +189,37 @@ module Rigor
 
         def any_declares?(method_types) = method_types.any? { |method_type| declares?(method_type.type) }
 
+        # Issue #1800 — a keyword hash an overload declares and takes as its keywords is no positional argument of
+        # another. Both RBS (the first overload in declared order that takes the call) and Ruby (a method that accepts
+        # keywords binds `a: 1` to them) read `(a: Integer) -> Integer | (Object) -> String`'s `ob(a: 1)` as the
+        # keyword overload, but `ReceiverAffinity` moves `(Object)` first and the strict pass took it, reading the hash
+        # positionally. `matches` is a selection pass's answer for a call with a keyword hash; the block answers the
+        # keyword-declaring overloads' strict (`true`) or gradual (`false`) matches. When one matches strictly, a
+        # positional reader declared after it is dropped. One declared before it is what RBS takes, while a method
+        # accepting keywords still binds them as keywords, so both stay and the caller joins their returns. A keyword
+        # overload that only gradually takes the hash (an unshaped `**opts`, an imprecise value) proves nothing either
+        # way, so it joins the positional readers rather than replace them.
+        def prefer_takers(declared, matches)
+          readers = matches.reject { |method_type| declares?(method_type.type) }
+          return matches if readers.empty?
+
+          takers = declared.select { |method_type| declares?(method_type.type) }
+          proven = yield(takers, true).first
+          unless proven
+            joined = matches | yield(takers, false)
+            return joined.size == matches.size ? matches : in_declared_order(declared, joined)
+          end
+
+          position = declared.index(proven)
+          earlier = readers.select { |method_type| declared.index(method_type) < position }
+          kept = matches.select { |method_type| declares?(method_type.type) }
+          in_declared_order(declared, kept | [proven] | earlier)
+        end
+
+        def in_declared_order(declared, method_types)
+          method_types.sort_by { |method_type| declared.index(method_type) }
+        end
+
         # Whether `fun`'s keywords take `keywords` (nil for a call without a keyword hash). Without one, an
         # overload that requires a keyword is not viable. With one, a closed shape must carry every required
         # keyword, and every key it carries must be declared (or taken by `**rest`) with a value the block accepts

@@ -22,7 +22,8 @@ module Rigor
       #    against the overload's keywords rather than as a positional `Hash` — every required keyword
       #    present, every key declared, every value accepted. An overload that declares no keywords still
       #    reads it as a trailing positional `Hash`, as Ruby passes it, but never in place of a keyword overload that
-      #    takes it (#1800, `prefer_keyword_takers`). A call without keywords skips an overload that requires one.
+      #    takes it (#1800, `KeywordArguments.prefer_takers`). A call without keywords skips an overload that requires
+      #    one.
       # 1a. **Pass 0 — proven, in declared order (#1344).** With only plain-value arguments, the first
       #    overload they do not rule out wins outright when each of its params names its argument's own
       #    class and accepts it with a `yes`; every later pass reads the receiver-affinity order instead.
@@ -50,7 +51,8 @@ module Rigor
       module OverloadSelector
         module_function
 
-        # `ALIAS_STRICT_NOMINALS`, the alias-strict pass's table, lives in `alias_strict_nominals.rb`.
+        # `ALIAS_STRICT_NOMINALS`, the alias-strict pass's table, lives in `alias_strict_nominals.rb`, with the pass's
+        # per-parameter test (`alias_param_accepts?`).
 
         # @param arg_types — caller-provided types in positional order. Empty when
         #   there are no arguments.
@@ -199,37 +201,10 @@ module Rigor
             matches = run_passes(declared, overloads, shared, gradual)
             return matches unless shared[:keywords_last]
 
-            prefer_keyword_takers(declared, matches, shared)
-          end
-
-          # Issue #1800 — a keyword hash an overload declares and takes as its keywords is no positional argument of
-          # another. Both RBS (the first overload in declared order that takes the call) and Ruby (a method that
-          # accepts keywords binds `a: 1` to them) read `(a: Integer) -> Integer | (Object) -> String`'s `ob(a: 1)` as
-          # the keyword overload, but `ReceiverAffinity` moves `(Object)` first and the strict pass took it, reading
-          # the hash positionally. When a strict match among the keyword-declaring overloads exists, a positional
-          # reader declared after it is dropped. One declared before it is what RBS takes, while a method accepting
-          # keywords still binds them as keywords, so both stay and the caller joins their returns. A keyword
-          # overload that only gradually takes the hash (an unshaped `**opts`, an imprecise value) proves nothing
-          # either way, so it joins the positional readers rather than replace them.
-          def prefer_keyword_takers(declared, matches, shared)
-            readers = matches.reject { |method_type| KeywordArguments.declares?(method_type.type) }
-            return matches if readers.empty?
-
-            takers = declared.select { |method_type| KeywordArguments.declares?(method_type.type) }
-            proven = find_matching_overload(takers, shared, strict: true).first
-            unless proven
-              joined = matches | find_matching_overload(takers, shared, strict: false)
-              return joined.size == matches.size ? matches : in_declared_order(declared, joined)
+            # Issue #1800 — never a positional reader of the keyword hash in place of a keyword overload that takes it.
+            KeywordArguments.prefer_takers(declared, matches) do |takers, strict|
+              find_matching_overload(takers, shared, strict:)
             end
-
-            position = declared.index(proven)
-            earlier = readers.select { |method_type| declared.index(method_type) < position }
-            kept = matches.select { |method_type| KeywordArguments.declares?(method_type.type) }
-            in_declared_order(declared, kept | [proven] | earlier)
-          end
-
-          def in_declared_order(declared, method_types)
-            method_types.sort_by { |method_type| declared.index(method_type) }
           end
 
           def run_passes(declared, overloads, shared, gradual)
@@ -347,38 +322,6 @@ module Rigor
           def each_param_accepts?(params, arg_types)
             index = -1
             params.all? { |param| yield(param, arg_types[index += 1]) }
-          end
-
-          # Checks the param's RBS type against an arg using alias-strict-arm matching. Optional / Union
-          # wrappers are flattened; alias resolution is one level deep (the canonical core aliases all have
-          # non-alias strict arms).
-          def alias_param_accepts?(rbs_type, arg)
-            nominal_names = strict_nominal_names_for(rbs_type)
-            return false if nominal_names.nil? || nominal_names.empty?
-
-            nominal_names.any? do |class_name|
-              result = Type::Combinator.nominal_of(class_name).accepts(arg, mode: :gradual)
-              result.yes? || result.maybe?
-            end
-          end
-
-          # Returns the candidate class names a param's RBS type accepts under alias-resolved strict
-          # matching, or nil when the shape cannot be reduced to a closed set of nominals (e.g. an
-          # Interface or an unrecognised alias).
-          def strict_nominal_names_for(rbs_type)
-            case rbs_type
-            when RBS::Types::ClassInstance
-              [rbs_type.name.to_s.delete_prefix("::")]
-            when RBS::Types::Alias
-              ALIAS_STRICT_NOMINALS[rbs_type.name.to_s]
-            when RBS::Types::Optional
-              strict_nominal_names_for(rbs_type.type)
-            when RBS::Types::Union
-              parts = rbs_type.types.map { |t| strict_nominal_names_for(t) }
-              return nil if parts.any?(&:nil?)
-
-              parts.flatten
-            end
           end
 
           # Returns true when every positional param the call site engages translates to a non-`Dynamic[Top]`

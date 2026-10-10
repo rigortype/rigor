@@ -17,7 +17,7 @@ lib/rigor/analysis/check_rules/ivar_write_collector.rb:
     Rigor::Analysis::CheckRules::IvarWriteCollector#gather_writes: grandfathered
     Rigor::Analysis::CheckRules::IvarWriteCollector#walk: grandfathered
 lib/rigor/analysis/check_rules/lexical_method_sites.rb:
-  computes: where a using activates refinements and where a singleton def on a local is in scope
+  computes: where a singleton def on a local is in scope
   producers:
     Rigor::Analysis::CheckRules::LexicalMethodSites#walk: grandfathered
 lib/rigor/analysis/check_rules/rule_walk.rb:
@@ -110,6 +110,10 @@ lib/rigor/inference/guard_rebinding.rb:
   producers:
     Rigor::Inference::GuardRebinding::ScanScope: grandfathered
     Rigor::Inference::GuardRebinding::ScanScope#collect_local_writes: grandfathered
+lib/rigor/inference/in_effect_refinements.rb:
+  computes: the lexical prefix a using's constant and a refine block's own module resolve in, and the body a using stays in effect to the end of
+  producers:
+    Rigor::Inference::InEffectRefinements#walk: moved from LexicalMethodSites#walk (#1673), which was grandfathered; the prefix only spells a using's candidate names, as ScopeIndexer.constant_receiver_candidates does for the refinement table, and decides no declaration
 lib/rigor/inference/jump_targets.rb:
   computes: the break and next nodes that target a construct
   producers:
@@ -284,6 +288,7 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#per_file_siblings: ADR-119 WD3, the per-file merge of the slot siblings under the members' own merges (the file wins every slot it writes, envelope contests union); it combines walk products and decides no context
     Rigor::Inference::ScopeIndexer#propagate: grandfathered
     Rigor::Inference::ScopeIndexer#propagate_call: grandfathered
+    Rigor::Inference::ScopeIndexer#propagate_children: drops the opaque-block mark at a def, class or module body the per-node scope walk reaches inside an unentered block (#1717); it records which scope a child is typed under, not what a declaration is
     Rigor::Inference::ScopeIndexer#propagate_end_body: grandfathered
     Rigor::Inference::ScopeIndexer#propagate_if_branches: grandfathered
     Rigor::Inference::ScopeIndexer#propagate_unless_branches: grandfathered

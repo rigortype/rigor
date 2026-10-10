@@ -13,21 +13,17 @@
 # otherwise; it is declared `Symbol` so that a scope held in a variable is
 # not reported. No rbs release through 4.2 declares either keyword. Rigor
 # does not check keyword names today, so these entries make the signatures
-# correct for when it does; `GC.stat`'s also fixes a false positive (below).
+# correct for when it does.
 # `ObjectSpace.garbage_collect` takes `global:` too (`object_space.rbs`).
 #
 # TEMPORARY: delete this file once the rbs release Rigor bundles declares
 # the keywords upstream.
 #
-# `GC.stat` with `scope:` answers `untyped` rather than one arm per form
-# (`(Symbol key, scope:) -> Integer`, `(?Hash hash, scope:) -> Hash`).
-# Rigor's overload selector does not thread keyword arguments yet: it skips
-# an overload that requires one and reads the keywords as a trailing
-# positional Hash, so `GC.stat(:count, scope: :global)` matches no overload
-# and takes the FIRST declared one. With per-form arms either order reports
-# the other form's correct use (`GC.stat(:count, scope: :global) + 1`
-# reported `+` undefined on `Hash` before this file). `untyped` keeps both
-# silent; the precise arms wait on keyword threading (#1727).
+# `GC.stat` with `scope:` has one arm per form, each answering what the
+# upstream arm of that form does. The overload selector matches a call's
+# keyword hash against an overload's keywords (#1727), so
+# `GC.stat(:count, scope: :global)` takes the `Integer` arm and
+# `GC.stat({}, scope: :global)` the `Hash` one.
 #
 # Declared unconditionally, not gated on `target_ruby` (ADR-121 § Rejected
 # alternatives; false positives outrank). Each entry is an `| ...`
@@ -40,12 +36,13 @@
 # declines any method with one), losing `GC.start(1)`. `GC.stat`'s `scope:`
 # arm does require its keyword, so that a call without it still selects
 # the upstream `(Symbol) -> Integer` / `(?Hash) -> Hash` arms; the cost is
-# that `GC.stat` is not arity-checked until #1727.
+# that `GC.stat` is not arity-checked.
 module GC
   def self.start: (?immediate_sweep: boolish, ?immediate_mark: boolish, ?full_mark: boolish, ?global: boolish) -> nil
                 | ...
 
-  def self.stat: (?(Symbol | Hash[Symbol, untyped])? key_or_hash, scope: Symbol) -> untyped
+  def self.stat: (Symbol key, scope: Symbol) -> Integer
+               | (?Hash[Symbol, untyped]? hash, scope: Symbol) -> Hash[Symbol, untyped]
                | ...
 
   def garbage_collect: (?immediate_sweep: boolish, ?immediate_mark: boolish, ?full_mark: boolish, ?global: boolish) -> nil

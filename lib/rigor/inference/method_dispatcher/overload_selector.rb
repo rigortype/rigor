@@ -6,6 +6,7 @@ require_relative "../rbs_type_translator"
 require_relative "alias_strict_nominals"
 require_relative "facet_distribution"
 require_relative "imprecise_argument"
+require_relative "keyword_arguments"
 require_relative "proven_overload"
 require_relative "receiver_affinity"
 
@@ -15,9 +16,13 @@ module Rigor
       # Picks the RBS overload that should answer a call given the caller's actual argument types. Slice 4
       # phase 2c shape (with the v0.1.2 interface-strictness preference layered on top):
       #
-      # 1. Filter overloads by positional arity (required, optional and rest_positionals are honored;
-      #    required_keywords disqualify the overload because we do not yet thread keyword args through
-      #    `call_arg_types`).
+      # 1. Filter overloads by positional arity (required, optional and rest_positionals are honored).
+      #    Keyword arguments (#1727): when the call's last argument is a keyword hash (`keywords_last:`, which
+      #    only the caller can tell from the AST) and an overload declares keywords, that argument is matched
+      #    against the overload's keywords rather than as a positional `Hash` — every required keyword
+      #    present, every key declared, every value accepted. An overload that declares no keywords still
+      #    reads it as a trailing positional `Hash`, as Ruby passes it. A call without keywords skips an
+      #    overload that requires one.
       # 1a. **Pass 0 — proven, in declared order (#1344).** With only plain-value arguments, the first
       #    overload they do not rule out wins outright when each of its params names its argument's own
       #    class and accepts it with a `yes`; every later pass reads the receiver-affinity order instead.
@@ -77,15 +82,17 @@ module Rigor
         #
         # @return matching overloads; empty when the definition declares none.
         # rubocop:disable-next Metrics/ParameterLists -- the selection keywords plus the member-wise switch.
+        # @param keywords_last — the call's last argument is a keyword hash (`f(a, k: 1)`, not `f(a, { k: 1 })`).
         def select_candidates(definition, arg_types:, self_type:, instance_type:, type_vars: {},
-                              block_required: false, environment: nil, member_wise: true)
+                              block_required: false, environment: nil, member_wise: true, keywords_last: false)
           unless FacetDistribution.faceted?(arg_types)
             return select_declared(definition, arg_types, self_type, instance_type, type_vars, block_required,
-                                   environment, false)
+                                   environment, false, keywords_last)
           end
 
           FacetDistribution.select(arg_types, definition, member_wise:, environment:) do |args, member|
-            select_declared(definition, args, self_type, instance_type, type_vars, block_required, environment, member)
+            select_declared(definition, args, self_type, instance_type, type_vars, block_required, environment, member,
+                            keywords_last)
           end
         end
 
@@ -93,7 +100,7 @@ module Rigor
         # `FacetDistribution.select`) answers only a genuine match, never the first-overload fallback.
         # rubocop:disable-next Metrics/ParameterLists -- the selection inputs plus the member-wise flag.
         def select_declared(method_definition, arg_types, self_type, instance_type, type_vars, block_required,
-                            environment, member)
+                            environment, member, keywords_last)
           declared = method_definition.method_types
           return [] if declared.empty?
 
@@ -111,10 +118,12 @@ module Rigor
 
           # One keyword bundle for the pass pipeline (see `run_selection_passes`); a block retry rebuilds it
           # with the block flag cleared. Built once and passed positionally -- the previous lambda plus a
-          # `**shared` splat per pass allocated three objects per selection (#775).
+          # `**shared` splat per pass allocated three objects per selection (#775). Keep it at eight keys or fewer:
+          # CRuby embeds a Hash that small, and a ninth key allocates a table on every selection (the RBS loader is
+          # read from `environment` rather than carried as a key of its own, #1727).
           shared = { arg_types: arg_types, self_type: self_type, instance_type: instance_type,
                      type_vars: type_vars, block_required: block_required, param_overrides: param_overrides,
-                     alias_expander: environment&.rbs_loader, environment: environment }
+                     environment: environment, keywords_last: keywords_last }
 
           matches = run_selection_passes(declared, overloads, shared)
           return matches unless matches.empty?
@@ -179,9 +188,7 @@ module Rigor
             strict = proven || find_matching_overload(overloads, shared, strict: true)
             return strict unless strict.empty?
 
-            alias_hit = find_matching_overload_via_aliases(
-              overloads, arg_types: shared[:arg_types], block_required: shared[:block_required]
-            )
+            alias_hit = find_matching_overload_via_aliases(overloads, shared)
             return [alias_hit] if alias_hit
 
             # Pass 2, array-valued. With every argument carrying real type information the first gradual
@@ -197,7 +204,8 @@ module Rigor
             stand_ins = ImpreciseArgument.untyped_stand_ins(shared[:arg_types])
             return matches if stand_ins.nil?
 
-            (matches + find_matching_overload(overloads, shared.merge(arg_types: stand_ins), strict: false)).uniq
+            stand_in_shared = shared.merge(arg_types: stand_ins, positional_arguments: nil)
+            (matches + find_matching_overload(overloads, stand_in_shared, strict: false)).uniq
           end
 
           # Pass 0. With every argument a plain value (a `Constant`, or a `Nominal` with no type arguments), the
@@ -214,7 +222,7 @@ module Rigor
 
             index = declared.index { |mt| engages_block_shape?(mt, shared[:block_required]) && matches?(mt, shared) }
             first = index && declared[index]
-            proven = first && strictly_typed_params?(first, args.size) && matches?(first, shared, strict: :proven)
+            proven = first && strictly_typed_params?(first, shared) && matches?(first, shared, strict: :proven)
             [first] if proven && !ProvenOverload.contested?(declared, index, args, shared[:environment])
           end
 
@@ -223,7 +231,7 @@ module Rigor
           private_constant :NO_MATCH
 
           # `shared` is the keyword bundle `select_candidates` assembled (arg_types, self_type, instance_type,
-          # type_vars, block_required, param_overrides, alias_expander).
+          # type_vars, block_required, param_overrides, environment, keywords_last).
           def find_matching_overload(overloads, shared, strict:)
             arg_types = shared[:arg_types]
             return NO_MATCH if strict && arg_types.any? { |t| ImpreciseArgument.imprecise?(t) }
@@ -234,7 +242,7 @@ module Rigor
             if strict
               found = overloads.find do |method_type|
                 engages_block_shape?(method_type, block_required) &&
-                  strictly_typed_params?(method_type, arg_types.size) &&
+                  strictly_typed_params?(method_type, shared) &&
                   matches?(method_type, shared, strict: true)
               end
               return found ? [found] : NO_MATCH
@@ -260,16 +268,19 @@ module Rigor
           # `Array#*(int)` wins over the `Array#*(string) -> String` overload — even though both translate
           # to `Dynamic[Top]` at the param level. Only fires when EVERY positional param has a known
           # alias-or-strict shape; otherwise gradual matching takes over.
-          def find_matching_overload_via_aliases(overloads, arg_types:, block_required:)
+          def find_matching_overload_via_aliases(overloads, shared)
             # Issue #521 — an untyped argument "maybe"-accepts EVERY alias's strict arm, so it cannot
             # discriminate between overloads here any more than in the strict pass; without this guard a
             # Dynamic arg pinned `Array#*(string) -> String` purely by declaration order.
-            return nil if arg_types.any? { |t| ImpreciseArgument.imprecise?(t) }
+            return nil if shared[:arg_types].any? { |t| ImpreciseArgument.imprecise?(t) }
 
             overloads.find do |method_type|
-              next false unless engages_block_shape?(method_type, block_required)
+              next false unless engages_block_shape?(method_type, shared[:block_required])
 
               fun = method_type.type
+              next false unless keywords_accepted?(fun, shared, false)
+
+              arg_types = KeywordArguments.selection_positional(method_type, shared)
               next false unless arity_compatible?(fun, arg_types.size)
 
               params = positional_params_for(fun, arg_types.size)
@@ -324,7 +335,8 @@ module Rigor
           # carrier. Alias / Interface / Intersection RBS types all degrade to `Dynamic[Top]` per the
           # translator's current shape — those gradually accept any arg, so an overload that includes one
           # would beat strictly-typed alternatives in pass 2 of the selector.
-          def strictly_typed_params?(method_type, actual_count)
+          def strictly_typed_params?(method_type, shared)
+            actual_count = KeywordArguments.selection_positional(method_type, shared).size
             fun = method_type.type
             # A `(?)` method type declares no params at all: it is the gradual case by construction, so it
             # must never win the strict pass over a genuinely typed sibling overload.
@@ -361,24 +373,19 @@ module Rigor
           # `shared` is the keyword bundle `select_candidates` assembled (see `find_matching_overload`).
           # `strict:` is `false` (gradual), `true` (strict pass) or `:proven` (pass 0; see `find_proven_overload`).
           def matches?(method_type, shared, strict: false)
-            return false if method_type.respond_to?(:type_params) && rejects_keyword_required?(method_type)
-
-            arg_types = shared[:arg_types]
             fun = method_type.type
+            return false unless keywords_accepted?(fun, shared, strict)
+
+            arg_types = KeywordArguments.selection_positional(method_type, shared)
             return false unless arity_compatible?(fun, arg_types.size)
 
             params = positional_params_for(fun, arg_types.size)
-            each_param_accepts?(params, arg_types) { |param, arg| accepts_param?(param, arg, shared, strict) }
+            each_param_accepts?(params, arg_types) { |kw, arg| accepts_param?(kw, arg, shared, strict) }
           end
 
-          # Slice 4 phase 2c does not pass keyword arguments through the call site (caller passes only
-          # positional `arg_types`). An overload that requires keywords is therefore not a viable
-          # candidate; we skip it instead of forcing a fallback.
-          def rejects_keyword_required?(method_type)
-            fun = method_type.type
-            return false unless fun.respond_to?(:required_keywords)
-
-            !fun.required_keywords.empty?
+          def keywords_accepted?(fun, shared, strict)
+            keywords = KeywordArguments.keyword_hash(fun, shared[:arg_types], shared[:keywords_last])
+            KeywordArguments.accepted?(fun, keywords, strict) { |kw, arg| accepts_param?(kw, arg, shared, strict) }
           end
 
           # `RBS::Types::UntypedFunction` (`(?)`) declares no arity to enforce, so every call site is
@@ -431,7 +438,7 @@ module Rigor
               self_type: shared[:self_type],
               instance_type: shared[:instance_type],
               type_vars: shared[:type_vars],
-              alias_expander: shared[:alias_expander]
+              alias_expander: shared[:environment]&.rbs_loader
             )
             # An `untyped` arg gradually accepts against every param, so a value-pinning param would be
             # "matched" with zero evidence and its value-precise return (`(nil) -> []`) would beat broader

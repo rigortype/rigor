@@ -177,7 +177,7 @@ module Rigor
         diagnostic = return_type_mismatch_diagnostic(path, node, scope_index)
         return diagnostic if diagnostic.nil? || lexical_sites.nil?
 
-        lexical_sites.refinement_def?(node) ? nil : diagnostic
+        lexical_sites.refinements.refinement_def?(node) ? nil : diagnostic
       end
 
       # Constructs the fresh, unpopulated built-in collector set keyed by
@@ -189,7 +189,7 @@ module Rigor
       # diagnostics carry it (ADR-53 B3c hosts it on the same walk).
       def build_node_collectors(path, scope_index, root = nil)
         eval_ranges = receiver_eval_block_ranges(root)
-        lexical_sites = LexicalMethodSites.new(root)
+        lexical_sites = LexicalMethodSites.new(root, stamped_refinements(scope_index, root))
         main_pass = ->(node) { main_pass_node_diagnostics(path, node, scope_index, eval_ranges, lexical_sites) }
         {
           main_pass: MainPassCollector.new(main_pass),
@@ -263,6 +263,14 @@ module Rigor
         collector.class.new(scope_index).collect(root)
       end
 
+      # Issue #1673 — the in-effect refinements `Inference::ScopeIndexer` stamped for `root`, read off the root's scope
+      # so the rules answer from the query the typer reads; nil where the index holds no scope for it.
+      def stamped_refinements(scope_index, root)
+        return nil if root.nil? || scope_index.nil?
+
+        scope_index[root]&.discovery&.in_effect_refinements
+      end
+
       # The former inline main pass, kept as the shadow oracle: walks the
       # tree with `Source::NodeWalker.each` and accumulates the same
       # per-node diagnostics in the same order {MainPassCollector} now
@@ -270,7 +278,7 @@ module Rigor
       def main_pass_oracle(path, root, scope_index)
         diagnostics = []
         eval_ranges = receiver_eval_block_ranges(root)
-        lexical_sites = LexicalMethodSites.new(root)
+        lexical_sites = LexicalMethodSites.new(root, stamped_refinements(scope_index, root))
         Source::NodeWalker.each(root) do |node|
           diagnostics.concat(main_pass_node_diagnostics(path, node, scope_index, eval_ranges, lexical_sites))
         end
@@ -706,7 +714,7 @@ module Rigor
           scope = scope_index[call_node]
           return nil if scope.nil?
 
-          # The two exemptions that hold whatever shape the receiver has. Ahead of the receiver-shape
+          # The exemptions that hold whatever shape the receiver has. Ahead of the receiver-shape
           # branch below because a plugin is consulted ONCE for the whole receiver, union included, so the
           # gate belongs where that one consult is rather than duplicated into each shape's path.
           #
@@ -807,6 +815,18 @@ module Rigor
           build_undefined_method_diagnostic(path, call_node, receiver_type, definition_site, class_name)
         end
 
+        # Issue #1717 — an explicit `self.m` / `self.m = v` inside a block whose `self` the engine does not know
+        # (`Scope#block_self_unknown?`, set where issue #316's opaque mark is). The receiver still types as the
+        # ENCLOSING `self`, but the yielding method may `instance_exec` the block on another object
+        # (`ActionController::Renderers.add` runs its block on the controller), so a method missing on the
+        # enclosing `self` is no evidence. The implicit `m` in the same block is already silent; the explicit
+        # spelling must not be stricter. A block
+        # whose `self` IS narrowed (`block_as_methods:`, `define_method`, a `Class.new` body) has cleared the
+        # mark and keeps being checked, unless the narrowing was read off an unknown enclosing `self`.
+        def unknown_block_self_receiver?(call_node, scope)
+          call_node.receiver.is_a?(Prism::SelfNode) && scope.block_self_unknown?
+        end
+
         # Issue #1120 — the method exists at THIS call site but not everywhere: a refinement whose `using` is in
         # effect here, or a `def o.m` on the receiver local in this scope. Asked from {#last_resort_surface_answers?},
         # once every project-wide table has come back "absent", so the file walk behind {LexicalMethodSites} runs
@@ -823,80 +843,17 @@ module Rigor
         # `call.argument-type-mismatch` report, because a refinement that REDEFINES a method the class already has
         # replaces the signature those rules check against. Typing the call from the refine body is #1664.
         # A refinement answers instance-side receivers only: a refined singleton (`refine X.singleton_class`) names
-        # no constant target, so nothing records it.
+        # no constant target, so nothing records it. Issue #1673 — the answer is derived from the file's in-effect
+        # refinements ({Inference::InEffectRefinements}), the list the typer reads, with each `using` expanded
+        # through its module's includes (issue #1671).
         def refined_method_in_effect?(class_name, call_node, scope, kind, lexical_sites)
           return false if lexical_sites.nil? || kind != :instance
 
-          # ADR-46 — the answer below is a function of every refinement of this name in the project, so the
-          # consumer depends on the name whichever way it answers; a refine body edited in another file must
-          # re-check it (`IncrementalSession#refinement_affected`).
-          DependencyRecorder.read_name(:refinement, call_node.name) if DependencyRecorder.active?
-          modules = refining_modules(scope, class_name, call_node.name)
-          !modules.nil? && refinement_in_effect?(scope, call_node, modules, lexical_sites)
-        end
-
-        # Is a refinement from one of `modules` (refining-module names) in effect at `call_node`, counting the
-        # modules a `using`'d module includes ({#refinement_activated_modules})?
-        def refinement_in_effect?(scope, call_node, modules, lexical_sites)
-          lexical_sites.refinement_active?(call_node, modules) do |name|
-            refinement_activated_modules(scope, name)
-          end
-        end
-
-        # Issue #1671 — the modules whose refinements `using name` puts in effect: `name` and every project module
-        # on its instance-side resolution chain, which for a module is what it includes (and prepends),
-        # transitively. CRuby's `rb_using_module_recursive` walks exactly that chain. The answer is a set: the
-        # order (the includer's refinement wins, ADR-121 WD1) does not change whether a method is in effect, and
-        # every world a fork leaves open holds the same modules. Nil, read as "any module may be in effect", when
-        # the chain may hold a module it does not list: it was cut at its limit, or a module on it records a mixin
-        # the tables cannot name.
-        #
-        # ADR-46 — the answer reads include edges declared in other files, so it depends on every file that
-        # declares a module on the chain, and on the existence of each one's name: a new file reopening `name`, or
-        # declaring an included module the project did not declare before, re-checks the consumer through
-        # `class:<name>`.
-        def refinement_activated_modules(scope, name)
-          chain = Scope::ResolutionChain.for(scope, name, :instance, :constants)
-          record_refinement_chain(scope, name, chain) if DependencyRecorder.active?
-          return nil if chain.truncated? || chain.wildcard_mixin?
-
-          chain.entries.filter_map { |entry| entry.name unless entry.external? }
-        end
-
-        def record_refinement_chain(scope, name, chain)
-          chain.record(scope)
-          DependencyRecorder.read_last_segment(:class, name)
-          chain.entries.each do |entry|
-            if entry.external?
-              entry.candidates.each { |candidate| DependencyRecorder.read_last_segment(:class, candidate) }
-            else
-              DependencyRecorder.read_missing(:class, entry.last_segment)
+          modules = Inference::InEffectRefinements.refining_modules(scope, class_name, call_node.name)
+          !modules.nil? &&
+            lexical_sites.refinements.refinement_active?(call_node.location.start_offset, modules) do |name|
+              Inference::InEffectRefinements.activated_modules(scope, name)
             end
-          end
-        end
-
-        # Issue #1120 — every module that refines `method_name` into `class_name` or one of its ancestors (a
-        # refinement of `Object` reaches a `String` receiver), or nil when none does. The table is empty on a
-        # project that refines nothing, which answers without a lookup.
-        def refining_modules(scope, class_name, method_name)
-          refinements = scope.discovered_refinements
-          return nil if refinements.empty?
-
-          modules = nil
-          refinements.each do |refined, methods|
-            names = methods[method_name]
-            next if names.nil? || !refined_receiver_class?(scope, class_name, refined)
-
-            (modules ||= []).concat(names)
-          end
-          modules
-        end
-
-        def refined_receiver_class?(scope, class_name, refined)
-          return true if class_name == refined
-
-          environment = scope.environment
-          !environment.nil? && environment.class_ordering(class_name, refined) == :subclass
         end
 
         # The probes that run only once every cheaper answer has come back "absent", kept together
@@ -1401,8 +1358,11 @@ module Rigor
         # - ADR-67 WD6b — an inferred-parameter receiver's type is an open-call-site lower bound, so firing
         #   undefined-method against it is a false positive by construction.
         # - Issue #653 — a plugin answered this call site ({#plugin_typed_call?}).
+        # - Issue #1717 — an explicit `self` receiver in a block whose `self` is unmodelled
+        #   ({#unknown_block_self_receiver?}).
         def call_site_exempt?(call_node, scope)
-          inferred_param_receiver?(call_node, scope) || plugin_typed_call?(call_node, scope)
+          inferred_param_receiver?(call_node, scope) || plugin_typed_call?(call_node, scope) ||
+            unknown_block_self_receiver?(call_node, scope)
         end
 
         # Issue #653 — true when a plugin's `dynamic_return` supplied the return type for THIS call node
@@ -2658,7 +2618,7 @@ module Rigor
         # conversion, do not, so a refinement that adds only those leaves the write reported.
         def refined_writer_in_effect?(census, node, lexical_sites)
           Inference::GlobalWriteCensus.refines_write?(census) &&
-            (lexical_sites.nil? || lexical_sites.using_in_effect?(node))
+            (lexical_sites.nil? || lexical_sites.refinements.any_at?(node.location.start_offset))
         end
 
         def build_global_write_type_diagnostic(path, node, contract, class_name)

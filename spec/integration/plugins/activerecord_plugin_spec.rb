@@ -4579,4 +4579,39 @@ RSpec.describe "plugins/rigor-activerecord" do
       expect(enum[:type]).to be_nil
     end
   end
+
+  describe "association options inherited from a `with_options` group" do
+    let(:models) do
+      {
+        "app/models/application_record.rb" => "class ApplicationRecord\nend\n",
+        "app/models/gadget.rb" => "class Gadget < ApplicationRecord\nend\n",
+        "app/models/widget.rb" => <<~RUBY
+          class Widget < ApplicationRecord
+            with_options optional: true do
+              belongs_to :gadget
+            end
+            with_options class_name: "Gadget" do
+              belongs_to :tool
+            end
+            with_options polymorphic: true do
+              belongs_to :thing
+            end
+          end
+        RUBY
+      }
+    end
+
+    def reader_type(reader)
+      source = "widget = Widget.find(1)\nRigor.dump_type(widget.#{reader})\n"
+      run_ar(source, schema: nil, models: models).diagnostics
+                                                 .select { |d| d.qualified_rule == "dump.type" }
+                                                 .map { |d| d.message.sub("dump_type: ", "") }
+    end
+
+    it "types the readers as Rails does once the group's options are applied" do
+      expect(reader_type("gadget")).to eq(["Gadget?"])
+      expect(reader_type("tool")).to eq(["Gadget"])
+      expect(reader_type("thing")).to eq(["Dynamic[top]"])
+    end
+  end
 end

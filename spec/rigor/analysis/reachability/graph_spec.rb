@@ -39,6 +39,12 @@ RSpec.describe Rigor::Analysis::Reachability::Graph do
       expect(graph.send(:resolve, "KEY", ["Sub"])).to eq("Base::KEY")
     end
 
+    it "never takes a class as its own ancestor when its superclass shares its name" do
+      decls = [make_decl("User"), make_decl("User::KEY"), make_decl("Api::User", superclass: "User")]
+      graph = make_graph(decls)
+      expect(graph.send(:resolve, "KEY", %w[Api User])).to eq("User::KEY")
+    end
+
     it "peels member constants when resolving" do
       decls = [make_decl("Holder")]
       graph = make_graph(decls)

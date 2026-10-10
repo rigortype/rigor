@@ -10,6 +10,7 @@ This document defines the general erasure rules and the hash-shape erasure algor
 - Refined types erase to their unrefined base.
 - Unsupported literal kinds erase to their nominal class.
 - Integer ranges erase to `Integer`; Float ranges erase to `Float`.
+- A type argument Rigor carries on a class RBS declares without one erases away: `Enumerator::ArithmeticSequence[Integer]`, the sequence `1.step(10, 2)` returns, erases to `Enumerator::ArithmeticSequence` ([#1794](https://github.com/rigortype/rigor/issues/1794)).
 - Complement and difference refinements erase to their current domain type.
 - Hash-shape openness, extra-key, and read-only markers are erased by the hash-shape erasure algorithm below.
 - Object shapes erase to a matching named interface when one exists, otherwise a conservative nominal or `top`.

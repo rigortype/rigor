@@ -53,6 +53,15 @@ module Rigor
 
           arg_types.map { |arg| imprecise?(arg) ? Type::Combinator.untyped : arg }
         end
+
+        # `matches` joined by the overloads the selector's `shared` bundle reaches with its arguments' untyped parts
+        # standing in for them ({.untyped_stand_ins}), which the block selects for that bundle.
+        def with_stand_ins(matches, shared)
+          stand_ins = untyped_stand_ins(shared[:arg_types])
+          return matches if stand_ins.nil?
+
+          (matches + yield(shared.merge(arg_types: stand_ins, positional_arguments: nil))).uniq
+        end
       end
     end
   end

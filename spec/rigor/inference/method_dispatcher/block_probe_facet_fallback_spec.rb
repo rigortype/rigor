@@ -28,6 +28,11 @@ RSpec.describe "Block parameters of a faceted argument's fallback (#1750)", type
         def int_or_float: (Integer x) -> Integer
                         | (String x) -> Float
         def untyped_value: () -> untyped
+        def mode_value: () -> (:a | :b)
+        def paired: ((Integer | :x) n, Integer x, mode: Symbol) { (Integer) -> void } -> Integer
+                  | ((Integer | :x) n, Float x, mode: Symbol) { (Float) -> void } -> Float
+        def kret: ((String | :x) x, mode: Symbol) -> String
+                | (Integer x, mode: Symbol) -> Integer
       end
     RBS
   end
@@ -74,6 +79,23 @@ RSpec.describe "Block parameters of a faceted argument's fallback (#1750)", type
   it "binds what every gradual match agrees on" do
     expect(dumped_types(<<~RUBY)).to eq(%w[Integer])
       w.same(w.int_or_nil(w.untyped_value)) { |v| dump_type(v) }
+    RUBY
+  end
+
+  # The fallback's agreement runs over every arm the arguments reach, including those an untyped part of a union
+  # argument reaches on its own (#1675): `1 | untyped` may be a Float, which takes the `(Float)` arm.
+  it "counts the arms an argument's untyped part reaches toward the agreement" do
+    expect(errors(<<~RUBY)).to eq([])
+      u = rand > 0.5 ? 1 : w.untyped_value
+      w.paired(w.int_or_nil(w.untyped_value), u, mode: :a) { |v| v.nan? }
+    RUBY
+  end
+
+  # The return path's per-list keyword matches (#1746) read the fallback the same way, so a union keyword value with a
+  # faceted argument the overloads cannot prove joins every arm rather than typing the first.
+  it "joins every gradual match on the return path of a keyword call" do
+    expect(dumped_types(<<~RUBY)).to eq(["Dynamic[Integer | String]"])
+      dump_type(w.kret(w.int_or_nil(w.untyped_value), mode: w.mode_value))
     RUBY
   end
 

@@ -49,19 +49,18 @@ local run under an agent harness — run long spec commands with `< /dev/null` a
 ## Serializer / `rigor unused` line (2026-10-10, separate from the ADR-119 line above)
 
 Landed: #1662 #1668 #1688(rigor-alba) #1690 #1707(rigor-typelizer) #1709 #1723 #1724 #1725 #1726
-#1748 #1756 #1757 #1758 #1762 #1766. External: okuramasafumi/alba#575 (ship `sig/` minus
+#1748 #1756 #1757 #1758 #1762 #1766 #1769. External: okuramasafumi/alba#575 (ship `sig/` minus
 `external.rbs`/`railtie.rbs`) awaits the maintainer; once released, rigor-alba must drop its stub
 `sig/alba.rbs` + `open_receivers` for gems that ship RBS (projects that hand-declare
 `Alba.register_type`, e.g. sorah/protobufable, will hit duplicate-definition errors).
 
-In flight at handoff (both Draft, round-2 delta review running; merge when it finds nothing severe
-and CI is green — each fixed a severe round-1 finding):
-- **#1767** (fixes #1761): literal `const_get` anchored at a fully resolved receiver + ancestors.
-- **#1769** (fixes #1695): `with_block_self_type` drops enclosing ivar state; `reject_kept` must
-  keep each carrier's class (`Set#reject` returns an Array on Ruby 4.0 — that crashed a file).
+In flight at handoff: **#1767** (fixes #1761, Draft): literal `const_get` anchored at a fully resolved
+receiver + ancestors. Its round-2 delta review (after a severe round-1 false candidate) was running;
+merge when it finds nothing severe and CI is green. Lesson from #1769: `Set#reject` returns an Array on
+Ruby 4.0 — filter scope carriers with `dup.delete_if` so each keeps its class.
 
 Next: #1760 (one realpath'd project root for `rigor unused`; start after #1767 lands), then #1768
-(ADR-58 census misses `define_method` writes), #1406. Survey runs of `rigor unused` must set a
+(ADR-58 census misses `define_method` writes), #1772 (#1695 leftovers), #1406. Survey runs of `rigor unused` must set a
 scratch `cache.path`: earlier runs rewrote pre-existing `.rigor/cache` in redmine/mastodon/gitlab.
 
 ## Special-variable semantics (ADR-117), carried over unverified

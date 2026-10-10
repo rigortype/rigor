@@ -684,6 +684,24 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
       expect(call_rows).to eq([["use.rb", 5, "call.wrong-arity"]])
     end
 
+    # Ruby 4.0.5 prints `:c`: a refine block is in effect inside itself whatever its target, and its class-unknown row
+    # reaches the String receiver there.
+    it "is in effect inside its own refine block whose target the walk cannot name" do
+      write("lib/m.rb", <<~RUBY)
+        module M
+          [String].each do |k|
+            refine(k) do
+              def center(a, b, c) = :c
+              def twice = "x".center(1, 2, 3)
+            end
+          end
+        end
+        "x".center(1, 2, 3)
+      RUBY
+
+      expect(call_rows).to eq([["m.rb", 9, "call.wrong-arity"]])
+    end
+
     # Round 2 of #1793's review. Ruby 4.0.5 prints `:vendored`.
     it "declines under a `using` of a module that includes a module declared outside the analysed paths" do
       write("vendor/b.rb", "module B; refine(String) { def center(a, b, c) = :vendored }; end\n")

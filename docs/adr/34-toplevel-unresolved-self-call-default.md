@@ -99,13 +99,31 @@ does not resolve against any of:
    A module neither RBS nor the project declares cannot be
    enumerated, so it resolves every name, and an RBS module's
    singleton method counts too, since core declares `Math`'s
-   `module_function`s as `def self.`. Like item 4 this item only
-   silences the rule; typing such a call is
-   [#1715](https://github.com/rigortype/rigor/issues/1715).
+   `module_function`s as `def self.`. Unlike item 4, one shape
+   is also typed: a bare call in a top-level statement
+   position (read off the tree, never inside a block, lambda,
+   method or class body) whose name the program defines
+   nowhere, in any spelling, and exactly one RBS module on the
+   top-level include chain declares as a public instance
+   method takes that declaration. Every other call this item
+   resolves stays `Dynamic[top]`. Definers outside the project
+   and its `pre_eval:` files are not seen: a gem that extends
+   `main` (Sinatra's classic style, `Rake::DSL`), a gem's
+   refinements, a C extension, or a framework that
+   `instance_eval`s the file can still answer the name first.
+   In practice this is for script-style projects such as
+   competitive-programming submissions: one mixin onto a
+   receiver no constant names (`base.extend(M)` in a
+   `self.included` hook), a computed `define_method` name or a
+   string `eval` anywhere in the project turns it off, and so
+   does a scope built without the whole-project pre-pass (an
+   editor's per-buffer run, `rigor type-of`).
    *(Amended 2026-10-10: the include itself was silent after
    [#1383](https://github.com/rigortype/rigor/issues/1383), but
    what it brought in still reported;
-   [#1697](https://github.com/rigortype/rigor/issues/1697).)*
+   [#1697](https://github.com/rigortype/rigor/issues/1697).
+   Amended 2026-10-10 again: the typed shape,
+   [#1715](https://github.com/rigortype/rigor/issues/1715).)*
 
 then the engine emits a new `call.unresolved-toplevel` diagnostic.
 On a hit, the resolved method's return type and parameter
@@ -405,3 +423,14 @@ original WD3 framing left implicit.
   edge is project-wide, as Ruby's is once the file runs, so a
   file that never loads the including one is silent too; that
   false negative is the cheaper error.
+- 2026-10-10 — Decision item 5 extended to type one shape
+  ([#1715](https://github.com/rigortype/rigor/issues/1715)): a
+  bare call in a top-level statement position, to a name no
+  project file or `pre_eval:` file defines in any spelling, that
+  exactly one RBS module on the top-level include chain declares
+  publicly. Three review rounds on
+  [#1706](https://github.com/rigortype/rigor/pull/1706) found a
+  wrong precise type in every wider reading (a block that rebinds
+  `self`, definitions on `main` or `Object` nearer than the
+  mixin, receivers, two mixins), so anything outside that shape
+  keeps reading `Dynamic[top]`.

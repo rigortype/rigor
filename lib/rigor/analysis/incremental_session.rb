@@ -12,6 +12,7 @@ require_relative "../effects/file_collection"
 require_relative "../effects/identity"
 require_relative "../effects/propagator"
 require_relative "../inference/scope_indexer"
+require_relative "../inference/object_mixins"
 
 module Rigor
   module Analysis
@@ -1093,7 +1094,45 @@ module Rigor
         keys.concat(moved_classes.map { |klass| "class:#{klass.split('::').last}" })
         keys.concat(moved_constants.map { |name| "constant:#{name.split('::').last}" })
         Incremental.negative_closure(keys, @negative_dependents) | refinement_affected(changed + removed, summary) |
-          global_write_reporters
+          census_affected(changed + removed, summary) | global_write_reporters
+      end
+
+      # Issue #1715 — the consumers whose answer read the program's definition census for a name whose census
+      # entries moved in this edit: a bare top-level call typed through a top-level `include` holds only while the
+      # name is defined nowhere ({Inference::ObjectMixins.sole_rbs_declaration}). A definition in a spelling no
+      # method table records (`attr_reader`, `def self.x` on `main`, `Object.define_method`) moves no symbol
+      # fingerprint, so only this diff sees it. The before-state is each file's seed bundle, the after-state the
+      # scan's per-file census; an entry that names no method (a marker or a main mixin) moves the `*` key.
+      def census_affected(paths, summary)
+        after = (summary && summary[:censuses]) || {}
+        empty = Inference::GlobalWriteCensus::EMPTY
+        keys = Set.new
+        paths.each do |path|
+          bundle = @seed_bundles[path]
+          census, names = after[path] || [empty, empty]
+          moved_census_keys(bundle&.dig(:global_write_census) || empty, census || empty, keys)
+          moved_census_keys(bundle&.dig(:defined_names) || empty, names || empty, keys)
+        end
+        return Set.new if keys.empty?
+
+        Incremental.negative_closure(keys.to_a, @negative_dependents)
+      end
+
+      # The keys of the entries in one but not both of `before` and `after`: a defined name (a Symbol, or a census
+      # `[:defines | :refines, name]`) keys its name, any other census entry the `*` key.
+      def moved_census_keys(before, after, keys)
+        before = before.to_set # a seed bundle carries its defined names as an Array
+        after = after.to_set
+        return if before == after
+
+        ((before - after) | (after - before)).each { |entry| keys << census_key(entry) }
+      end
+
+      def census_key(entry)
+        return "defines:#{entry}" if entry.is_a?(Symbol)
+
+        named = %i[defines refines].include?(entry[0])
+        "defines:#{named ? entry[1] : Inference::ObjectMixins::CENSUS_ANY_KEY}"
       end
 
       # Issue #1120 — the consumers whose `call.undefined-method` answer read the refinement table for a method

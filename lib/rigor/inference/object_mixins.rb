@@ -2,6 +2,7 @@
 
 require_relative "../reflection"
 require_relative "../analysis/dependency_recorder"
+require_relative "global_write_census"
 
 module Rigor
   module Inference
@@ -14,10 +15,10 @@ module Rigor
     # environment knows nothing of either: `Object`'s RBS ancestry is core's, so a direct lookup on an
     # RBS-known receiver misses every one of M's methods. This module is the one place that asks the
     # project's `Object` edges instead, for the
-    # `call.unresolved-toplevel` and `call.undefined-method` silences in `Analysis::CheckRules`. Nothing
-    # types a call through these edges yet: what Ruby reaches first, even for a bare top-level call, depends
-    # on more than the chain shows (a block that rebinds `self`, an `extend` or a singleton `def` on `main`),
-    # so typing is issue #1715's.
+    # `call.unresolved-toplevel` and `call.undefined-method` silences in `Analysis::CheckRules`, and for the one
+    # shape `RbsDispatch` types through them ({sole_rbs_declaration}, issue #1715). What Ruby reaches first
+    # depends on more than the chain shows (a block that rebinds `self`, an `extend` or a singleton `def` on
+    # `main`, a definition of the name anywhere), so that typing is narrow by design.
     #
     # The edges are read through `Scope::ResolutionChain`, the two owners' instance chains, whose search
     # files the ADR-46 class edge of every project entry it passes, the declaring files among them (a file
@@ -95,6 +96,87 @@ module Rigor
       # `call.undefined-method` on every receiver in the project.
       EXPLICIT_RECEIVER_SKIP = %i[private_rbs singleton_function opaque].freeze
       private_constant :NO_SKIP, :EXPLICIT_RECEIVER_SKIP
+
+      # Issue #1715 — the RBS declaration a bare call in a top-level statement position reaches through a top-level
+      # `include`, or nil when anything may answer the name instead. The caller has already placed the call
+      # ({ToplevelStatementCalls}); this answers for the name, and only when every one of these holds:
+      #
+      # - the program defines the name nowhere, in any spelling, on any receiver, and holds no definition whose name
+      #   no literal spells, no string eval and no mixin into `Object` or `main`'s singleton that no include table
+      #   orders ({GlobalWriteCensus.may_define?}, the `pre_eval:` files' included). This covers a top-level `def`,
+      #   `def self.x` / `class << self` / `define_method` / `alias` on `main`, `Object.define_method`, an
+      #   `extend`ed source module's method, and a `def` of the name
+      #   on any class, which an object may reach in ways no table records;
+      # - every module mixed in at the top level by `include`, `extend` or `prepend` (the census's main mixins) is
+      #   a top-level `include` the indexer recorded: an `extend` is nearer than any `include`, and one written in a
+      #   block may not reach `main` at all;
+      # - nothing on `Object`'s own chain (`class Object; include M; end`) answers the name;
+      # - exactly one entry of the top-level include chain answers, an RBS module declaring the name as a public
+      #   instance method, and the chain was not cut at its budget. Cross-file include order is unknown, so a second
+      #   answer of any kind (an undeclared module included) is ambiguous.
+      #
+      # The answer depends on the whole program's census, so it files the name edges an incremental recheck matches
+      # against a census change (`defines:<name>` and `defines:*`, {CENSUS_ANY_KEY}), beside the include chain's
+      # edges.
+      def sole_rbs_declaration(scope, method_name)
+        return nil if scope.nil?
+
+        record_census_edges(method_name)
+        if Analysis::DependencyRecorder.active?
+          Analysis::DependencyRecorder.read_last_segment(:class, TOPLEVEL_INCLUDE_KEY)
+        end
+        return nil unless scope.known_user_class?(TOPLEVEL_INCLUDE_KEY)
+        return nil if census_declines?(scope, method_name.to_sym)
+        return nil if scope.known_user_class?(OWNER) && answer_on_chain(scope, OWNER, method_name, NO_SKIP)
+
+        sole_chain_declaration(scope, method_name)
+      end
+
+      # The census key {sole_rbs_declaration} files for a census entry that is not a named definition: a marker
+      # (a computed name, a string eval) or a main mixin.
+      CENSUS_ANY_KEY = "*"
+
+      def record_census_edges(method_name)
+        return unless Analysis::DependencyRecorder.active?
+
+        Analysis::DependencyRecorder.read_name(:defines, method_name.to_s)
+        Analysis::DependencyRecorder.read_name(:defines, CENSUS_ANY_KEY)
+      end
+      private_class_method :record_census_edges
+
+      def census_declines?(scope, name)
+        census = scope.discovered_global_write_census
+        # Absence is evidence only where the census is the whole project's: a scope no pre-pass seeded (an editor's
+        # per-buffer run, `type-of`, a single-source probe) holds one file's names, so it declines.
+        return true unless scope.discovered_defined_names.include?(GlobalWriteCensus::PROJECT_NAMES)
+
+        patched = scope.environment&.project_patched_methods
+        pre_eval = patched&.write_census
+        return true if GlobalWriteCensus.may_define?(census, scope.discovered_defined_names, name)
+        if pre_eval && GlobalWriteCensus.may_define?(pre_eval, patched.defined_names || GlobalWriteCensus::EMPTY, name)
+          return true
+        end
+
+        included = Array(scope.discovered_includes[TOPLEVEL_INCLUDE_KEY]).map { |raw| raw.to_s.delete_prefix("::") }
+        mixins = GlobalWriteCensus.main_mixins(census)
+        mixins += GlobalWriteCensus.main_mixins(pre_eval) if pre_eval
+        mixins.any? { |mixin| !included.include?(mixin) }
+      end
+      private_class_method :census_declines?
+
+      def sole_chain_declaration(scope, method_name)
+        chain = Scope::ResolutionChain.for(scope, TOPLEVEL_INCLUDE_KEY, :instance, :methods)
+        answers = []
+        chain.search(scope, side: :instance) do |entry|
+          entry_answer = answer_for_entry(scope, entry, method_name)
+          answers << entry_answer if entry_answer
+          answers.size > 1 # a second answer makes it ambiguous: stop
+        end
+        return nil if chain.truncated? || answers.size != 1 || answers.first.first != :rbs
+
+        answers.first[2]
+      end
+      private_class_method :sole_chain_declaration
 
       # Whether some `Object` mixin may define `method_name`: the question the silences ask. A bare
       # top-level call (`receiver: :implicit`, `call.unresolved-toplevel`) counts every answer, an unknown

@@ -79,6 +79,8 @@ module Rigor
 
     # Issue #1367 — the project's `Inference::GlobalWriteCensus`, a `Set` of frozen entries.
     def discovered_global_write_census = @discovery.discovered_global_write_census
+    # Issue #1715 — every method name the project defines, in any spelling on any receiver: a `Set` of Symbols.
+    def discovered_defined_names = @discovery.discovered_defined_names
     def discovered_includes = @discovery.discovered_includes
     # Issue #1123 — `{qualified class or module name => [module names it `prepend`s, as written]}`, in
     # instance-ancestor search order (nearest prepend first). The one table that tells a `prepend` from an

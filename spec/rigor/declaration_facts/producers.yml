@@ -106,10 +106,11 @@ lib/rigor/inference/expression_typer.rb:
     Rigor::Inference::ExpressionTyper#untraced_type_of: grandfathered
     Rigor::Inference::ExpressionTyper#yield_reachable?: grandfathered
 lib/rigor/inference/global_write_census.rb:
-  computes: the global write census (aliases, answer-method defines, top-level mixins)
+  computes: the global write census (aliases, answer-method defines, top-level mixins, and the markers issue 1715 declines on) and every defined method name
   producers:
     Rigor::Inference::GlobalWriteCensus: grandfathered
     Rigor::Inference::GlobalWriteCensus#walk: grandfathered
+    Rigor::Inference::GlobalWriteCensus::Collector#visit: dispatches each node to its reader; a ClassNode only has its body range remembered when it names Object, so a mixin inside it is known to reach main (issue 1715); it records no class, module or method
     Rigor::Inference::GlobalWriteCensus::Collector#visit_call: grandfathered
 lib/rigor/inference/guard_rebinding.rb:
   computes: where a guard's narrowing of a global or constant stops holding
@@ -256,6 +257,7 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#extends_block_handled?: a dispatcher over the block-carrying call; it decides which extends-walk arm owns a block (rebound, skipped, or descended) and adds no table entry itself, the arms it calls being the listed producers
     Rigor::Inference::ScopeIndexer#finalize_call_surface_tables: grandfathered
     Rigor::Inference::ScopeIndexer#finalize_def_index: grandfathered
+    Rigor::Inference::ScopeIndexer#finalize_defined_names: merges the files' defined-name Sets into the project's at finalize, only when a top-level include exists and no census marker declines every call, and then marks the census as the whole project's (issue 1715); it records names, not a declaration context
     Rigor::Inference::ScopeIndexer#finalize_project_index: grandfathered
     Rigor::Inference::ScopeIndexer#fold_ancestry_tables: grandfathered
     Rigor::Inference::ScopeIndexer#fold_constant_tables: grandfathered
@@ -498,6 +500,11 @@ lib/rigor/inference/synthetic_method_scanner.rb:
     Rigor::Inference::SyntheticMethodScanner#walk_class_decls: grandfathered
     Rigor::Inference::SyntheticMethodScanner#walk_classes: grandfathered
     Rigor::Inference::SyntheticMethodScanner#walk_module_decls: grandfathered
+lib/rigor/inference/toplevel_statement_calls.rb:
+  computes: which receiverless calls of a file sit in a top-level statement position, outside every body that may rebind self (issue 1715)
+  producers:
+    Rigor::Inference::ToplevelStatementCalls: names the bodies the walk does not enter (block, lambda, def, class, module, singleton class, BEGIN and END); it records no class, module or method, only call nodes
+    Rigor::Inference::ToplevelStatementCalls#visit: stops at those bodies and collects the receiverless calls outside them; it decides no declaration context and keeps no nesting
 lib/rigor/language_server/document_symbol_provider.rb:
   computes: the editor outline of classes, modules and defs
   producers:

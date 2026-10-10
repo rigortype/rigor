@@ -58,6 +58,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     discovered_def_nodes()
     discovered_def_sources()
     discovered_deferred_ranges()
+    discovered_defined_names()
     discovered_extends()
     discovered_global_write_census()
     discovered_includes()

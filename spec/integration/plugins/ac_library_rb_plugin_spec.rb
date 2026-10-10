@@ -104,18 +104,20 @@ RSpec.describe "plugins/rigor-ac-library-rb" do
   end
 
   # Issue #1697 — the library's documented idiom: a top-level `include AcLibraryRb` mixes the module into
-  # `Object`, so its instance methods answer bare top-level calls. They are silent; typing them is #1715's.
-  it "silences a bare top-level call through a top-level include AcLibraryRb, untyped" do
+  # `Object`, so its instance methods answer bare top-level calls. They are silent, and issue #1715 types a bare call
+  # in a top-level statement from the module's signature.
+  it "types a bare top-level call through a top-level include AcLibraryRb" do
     source = <<~RUBY
       require "rigor/testing"
       require "ac-library-rb/crt"
       include AcLibraryRb
 
-      Rigor.assert_type("Dynamic[top]", crt([2, 3], [3, 5]))
-      Rigor.assert_type("Dynamic[top]", pow_mod(2, 10, 1000))
+      Rigor.assert_type("[Integer, Integer]", crt([2, 3], [3, 5]))
+      x = pow_mod(2, 10, 1000)
+      Rigor.assert_type("Integer", x)
       frobnicate
     RUBY
-    expect(rules(run_plugin(source: source))).to eq([[7, "call.unresolved-toplevel"]])
+    expect(rules(run_plugin(source: source))).to eq([[8, "call.unresolved-toplevel"]])
   end
 
   # Review of #1706: a project method on the receiver's own class outranks the module mixed into Object.

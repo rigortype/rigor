@@ -20,6 +20,14 @@ module Rigor
     #   method name is computed, a string `eval` / `class_eval` whose code is interpolated or not a literal, a name
     #   literal whose bytes are not valid in its encoding, or a top-level mixin of a non-constant. A node the
     #   collector fails to read records it too ({Collector#visit}).
+    # - {STRING_EVAL} — a string `eval` / `class_eval` whose code is a literal. The `global.*` rules read the literal
+    #   for {ANSWER_NAMES} and record those as `[:defines, …]`; any other name the code may define is not recorded,
+    #   so a reader asking about every name declines on the marker.
+    # - {MIXIN_ANY} — a mixin that may reach `main` or `Object` and that no include table orders: an `include`,
+    #   `prepend` or `extend` (or the same through `send`) whose receiver is `Object`, or any expression other than
+    #   a constant or `self` (`singleton_class.include(M)`, `TOPLEVEL_BINDING.receiver.extend(M)`,
+    #   `Object.const_get(:Object).include(M)`, `obj.extend(M)`), and any mixin with an implicit receiver written in
+    #   a `class Object` body. Issue #1715's typing declines every call on it.
     # - `[:refines, name]` / {REFINES_ANY} — the same, inside a `refine` block. A refinement changes what
     #   `respond_to?(:write)` answers where a `using` is in effect, and nothing else the setters consult: an
     #   implicit conversion and a refined `respond_to?` / `respond_to_missing?` ignore it, so these entries are
@@ -30,6 +38,12 @@ module Rigor
     # The census is a `Set` of those frozen entries, merged by union across files, the project pre-pass and the
     # `pre_eval:` files. It is recorded inside descents that already visit every node ({Collector#visit}), never
     # by a walk of its own, except for a `pre_eval:` file ({.scan}).
+    #
+    # Issue #1715 — the same descent also collects the file's DEFINED NAMES ({Collector#names}): a frozen `Set` of
+    # Symbols, one per method name the file defines in any of the spellings above, inside a refinement or not. It
+    # is kept apart from the census, so the `global.*` rules' small set keeps its size, and travels beside it as
+    # `discovered_defined_names`. The typing of a bare top-level call through a top-level `include` asks it whether
+    # the program defines the called name anywhere ({may_define?}).
     module GlobalWriteCensus
       # The methods whose presence lets an object answer a setter: the one it asks `respond_to?` about (`write`),
       # the implicit conversions (`to_str`, `to_int`), and the escape hatches both consult.
@@ -37,6 +51,12 @@ module Rigor
 
       DEFINES_ANY = [:defines_any].freeze
       REFINES_ANY = [:refines_any].freeze
+      STRING_EVAL = [:string_eval].freeze
+      MIXIN_ANY = [:mixin_any].freeze
+      # Issue #1715 — the entry the whole-project pre-pass adds to the merged defined names when it folds them, so
+      # the set says itself that it is the whole program's. No file's own names carry it, and no literal a program
+      # plausibly writes spells it.
+      PROJECT_NAMES = :"\x00rigor:project-names"
 
       # `define_method`-family calls whose first argument names the method they define.
       NAMING_CALLS = %i[define_method define_singleton_method alias_method].to_set.freeze
@@ -74,6 +94,16 @@ module Rigor
         census.include?(DEFINES_ANY) || names.any? { |name| census.include?([:defines, name]) }
       end
 
+      # Issue #1715 — the census markers on which a program may define any name, or mix into `main` or `Object` a
+      # module no include table orders.
+      ANY_MARKERS = [DEFINES_ANY, REFINES_ANY, STRING_EVAL, MIXIN_ANY].freeze
+
+      # Issue #1715 — whether the program, by `census` and `names` (its defined names), defines `name` anywhere, or
+      # may define any name or reach `main` through an unordered mixin.
+      def may_define?(census, names, name)
+        names.include?(name) || ANY_MARKERS.any? { |marker| census.include?(marker) }
+      end
+
       # Whether some refinement may add `write`.
       def refines_write?(census) = census.include?(REFINES_ANY) || census.include?(%i[refines write])
 
@@ -81,10 +111,13 @@ module Rigor
       def main_mixins(census) = census.filter_map { |entry| entry[1] if entry[0] == :main_mixin }
 
       # A standalone walk, for a file no existing descent visits (a `pre_eval:` entry).
-      def scan(root)
+      def scan(root) = scan_collector(root).census.freeze
+
+      # {.scan}'s walk, returning the collector, whose {Collector#names} a `pre_eval:` file's reader also needs.
+      def scan_collector(root)
         collector = Collector.new(InEffectRefinements.new(root))
         walk(root, collector, true)
-        collector.census.freeze
+        collector
       end
 
       def walk(node, collector, top_level)
@@ -102,11 +135,13 @@ module Rigor
       # file's {InEffectRefinements}: a `refine` it places where `self` is a class is the class's own method, so its
       # block is not a refinement (issue #1689).
       class Collector
-        attr_reader :census
+        attr_reader :census, :names
 
         def initialize(in_effect)
           @census = Set.new
+          @names = Set.new
           @refine_ranges = []
+          @object_body_ranges = []
           @in_effect = in_effect
         end
 
@@ -118,6 +153,7 @@ module Rigor
           when Prism::DefNode then record(node, node.name)
           when Prism::AliasMethodNode then record_argument(node, node.new_name)
           when Prism::CallNode then visit_call(node, top_level)
+          when Prism::ClassNode then remember_object_body(node)
           end
         rescue StandardError
           @census << DEFINES_ANY
@@ -150,7 +186,33 @@ module Rigor
             arguments = arguments.drop(1)
           end
           visit_defining_call(node, name, arguments)
-          visit_main_mixin(node, arguments) if top_level && MIXIN_CALLS.include?(name) && self_receiver?(node)
+          return unless MIXIN_CALLS.include?(name)
+
+          visit_main_mixin(node, arguments) if top_level && self_receiver?(node)
+          @census << MIXIN_ANY if unordered_mixin?(node)
+        end
+
+        # Issue #1715 — a mixin into `Object`, `main`'s singleton or an object no constant names, or one written in a
+        # `class Object` body: what it reaches is no include table's to order.
+        def unordered_mixin?(node)
+          receiver = node.receiver
+          return inside_object_body?(node) if receiver.nil? || receiver.is_a?(Prism::SelfNode)
+          return true unless constant_node?(receiver)
+
+          Source::ConstantPath.qualified_name(receiver).to_s.delete_prefix("::") == "Object"
+        end
+
+        def remember_object_body(node)
+          return unless constant_node?(node.constant_path)
+          return unless Source::ConstantPath.qualified_name(node.constant_path).to_s.delete_prefix("::") == "Object"
+
+          location = node.location
+          @object_body_ranges << (location.start_offset...location.end_offset)
+        end
+
+        def inside_object_body?(node)
+          offset = node.location.start_offset
+          @object_body_ranges.any? { |range| range.cover?(offset) }
         end
 
         def visit_defining_call(node, name, arguments)
@@ -178,6 +240,7 @@ module Rigor
         end
 
         def record(node, name)
+          @names << name
           return unless ANSWER_NAMES.include?(name)
 
           @census << [inside_refine?(node) ? :refines : :defines, name].freeze
@@ -204,6 +267,7 @@ module Rigor
 
         def record_eval_text(node, argument)
           if argument.is_a?(Prism::StringNode) && argument.unescaped.valid_encoding?
+            @census << STRING_EVAL
             argument.unescaped.scan(NAME_PATTERN) { |name| record(node, name.to_sym) }
           else
             @census << any_entry(node)

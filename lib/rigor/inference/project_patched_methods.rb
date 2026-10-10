@@ -33,19 +33,21 @@ module Rigor
         end
       end
 
-      attr_reader :by_key, :write_census
+      attr_reader :by_key, :write_census, :defined_names
 
       # @param entries — flat list of declarations observed during the pre-pass.
       #   First-write-wins on `(class_name, method_name, kind)` duplicates so the
       #   `pre-eval.duplicate-declaration` diagnostic emission stays decoupled from registry behaviour.
       # @param write_census — issue #1367: the `pre_eval:` files' {GlobalWriteCensus}, which the `global.*` write
       #   rules join with the project's, since a patch file is loaded ahead of the code it patches.
-      def initialize(entries: [], write_census: GlobalWriteCensus::EMPTY)
+      # @param defined_names — issue #1715: every method name the `pre_eval:` files define, a Set of Symbols.
+      def initialize(entries: [], write_census: GlobalWriteCensus::EMPTY, defined_names: GlobalWriteCensus::EMPTY)
         @by_key = entries.each_with_object({}) do |entry, acc|
           key = [entry.class_name, entry.method_name, entry.kind]
           acc[key] ||= entry
         end.freeze
         @write_census = write_census.frozen? ? write_census : write_census.dup.freeze
+        @defined_names = defined_names.frozen? ? defined_names : defined_names.dup.freeze
         freeze
       end
 

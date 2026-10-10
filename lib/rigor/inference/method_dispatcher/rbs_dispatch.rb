@@ -1053,7 +1053,8 @@ module Rigor
           # `Dynamic[top]` rather than lend the first-overload fallback to the join. A precise union value joins the
           # returns as a union; a `Dynamic` value keeps the answer `Dynamic`, as the #521 join does, since the split
           # dropped the value's `nil` and the untyped input behind it. A keyword hash with no union value answers
-          # {NOT_DISTRIBUTED}, and the call selects as before.
+          # {NOT_DISTRIBUTED}, and the call selects as before; so does one whose values do not split (#1779) and that no
+          # overload genuinely takes.
           NOT_DISTRIBUTED = Object.new.freeze
           private_constant :NOT_DISTRIBUTED
 
@@ -1073,7 +1074,8 @@ module Rigor
 
             selector_self = self_type.is_a?(Type::Dynamic) ? self_type.static_facet : self_type
             per_list = distributed_keyword_matches(method_definition, args, selector_self, instance_type, type_vars,
-                                                   !block_type.nil?, environment)
+                                                   !block_type.nil?, environment, positional_splat?(call_node))
+            return NOT_DISTRIBUTED if per_list.equal?(NOT_DISTRIBUTED)
             return Type::Combinator.untyped if per_list.nil?
 
             overloads = per_list.flat_map(&:last).uniq
@@ -1093,16 +1095,22 @@ module Rigor
           end
 
           # Each distribution list with its genuine matches, or nil past the distribution limit or when a list has
-          # none.
+          # none. When no value split (no union value's key discriminates between the overloads, #1779), the one list
+          # is the call as given, and one with no genuine match answers {NOT_DISTRIBUTED}: the call then selects as it
+          # did before #1746, first-overload fallback included (`1.step(10, by: (c ? 1 : 2.0))` is
+          # `Enumerator::ArithmeticSequence` through the incomplete stdlib RBS).
+          # rubocop:disable Metrics/ParameterLists
           def distributed_keyword_matches(method_definition, args, selector_self, instance_type, type_vars,
-                                          block_required, environment)
-            distributions = KeywordArguments.distributions(args, true)
+                                          block_required, environment, splat)
+            # rubocop:enable Metrics/ParameterLists
+            distributions = keyword_distributions(method_definition, args, selector_self, instance_type, type_vars,
+                                                  environment, splat)
             return nil if distributions.nil?
 
             distributions.map do |arg_types|
               matches = keyword_matches(method_definition, arg_types, selector_self, instance_type, type_vars,
                                         block_required, environment)
-              return nil if matches.empty?
+              return arg_types.equal?(args) ? NOT_DISTRIBUTED : nil if matches.empty?
 
               [arg_types, matches]
             end
@@ -1126,6 +1134,11 @@ module Rigor
 
             arguments = call_node.arguments&.arguments
             !arguments.nil? && arguments.size == args.size && arguments.last.is_a?(Prism::KeywordHashNode)
+          end
+
+          # Whether the call passes a splat argument (`f(*xs, k: 1)`), whose positional count is not known statically.
+          def positional_splat?(call_node)
+            call_node.arguments.arguments.any?(Prism::SplatNode)
           end
 
           # The two provenance side-tables the return-typing tier is the last place able to populate, recorded
@@ -1705,11 +1718,12 @@ module Rigor
           def probe_block_param_types(receiver:, method_name:, args:, environment:, scope: nil, call_node: nil)
             args ||= []
             keywords_last = keyword_arguments_last?(call_node, args)
+            splat = keywords_last && positional_splat?(call_node)
             case receiver
             when Type::Union
-              probe_block_param_types_union(receiver, method_name, args, environment, scope, keywords_last)
+              probe_block_param_types_union(receiver, method_name, args, environment, scope, keywords_last, splat)
             else
-              probe_block_param_types_one(receiver, method_name, args, environment, scope, keywords_last)
+              probe_block_param_types_one(receiver, method_name, args, environment, scope, keywords_last, splat)
             end
           end
 
@@ -1717,9 +1731,9 @@ module Rigor
           # member resolves the same arity and types (otherwise the call sites would have to thread
           # per-member binders, which the slice does not support yet). Mismatches degrade to the empty
           # array so the binder defaults all params to Dynamic[Top].
-          def probe_block_param_types_union(receiver, method_name, args, environment, scope, keywords_last)
+          def probe_block_param_types_union(receiver, method_name, args, environment, scope, keywords_last, splat)
             results = receiver.members.map do |member|
-              probe_block_param_types_one(member, method_name, args, environment, scope, keywords_last)
+              probe_block_param_types_one(member, method_name, args, environment, scope, keywords_last, splat)
             end
             return [] if results.empty?
             return [] unless results.all? { |r| r == results.first }
@@ -1727,7 +1741,7 @@ module Rigor
             results.first
           end
 
-          def probe_block_param_types_one(receiver, method_name, args, environment, scope, keywords_last)
+          def probe_block_param_types_one(receiver, method_name, args, environment, scope, keywords_last, splat)
             descriptor = receiver_descriptor(receiver)
             return [] unless descriptor
 
@@ -1746,7 +1760,7 @@ module Rigor
               receiver: receiver,
               receiver_args: receiver_args,
               method_name: method_name,
-              keywords_last: keywords_last
+              keywords_last: keywords_last, positional_splat: splat
             )
           rescue StandardError
             []
@@ -1755,7 +1769,7 @@ module Rigor
           # rubocop:disable Metrics/ParameterLists
           def extract_block_param_types(method_definition, class_name:, kind:, args:, type_vars:,
                                         environment: nil, receiver: nil, receiver_args: [],
-                                        method_name: nil, keywords_last: false)
+                                        method_name: nil, keywords_last: false, positional_splat: false)
             # rubocop:enable Metrics/ParameterLists
             instance_type = Type::Combinator.nominal_of(class_name)
             self_type =
@@ -1779,7 +1793,7 @@ module Rigor
             selector_self = self_type.is_a?(Type::Dynamic) ? self_type.static_facet : self_type
             if keywords_last
               return agreed_keyword_block_params(method_definition, args, self_type, selector_self, instance_type,
-                                                 type_vars, environment)
+                                                 type_vars, environment, positional_splat)
             end
 
             if FacetDistribution.faceted?(args)
@@ -1825,9 +1839,31 @@ module Rigor
             )
           end
 
+          # {KeywordArguments.distributions} for the call's keyword hash. An overload that declares no keywords may read
+          # the hash as a positional `Hash`, and then every union value splits: with
+          # `(a: Integer) -> Integer | (Hash[Symbol, String]) -> String`, `a: Integer | String`'s `String` member takes
+          # the second overload and its `Integer` member the first. A parameter that cannot take a `Hash` (`(String)`)
+          # leaves the split to the keyword declarations.
+          # `splat`: a splat argument hides how many positional arguments precede the hash.
+          def keyword_distributions(method_definition, args, selector_self, instance_type, type_vars, environment,
+                                    splat)
+            hash = Type::Combinator.nominal_of("Hash")
+            count = splat ? nil : args.size
+            KeywordArguments.distributions(args, true, method_definition.method_types, count) do |param|
+              param_type = RbsTypeTranslator.translate(
+                param.type, self_type: selector_self, instance_type: instance_type, type_vars: type_vars,
+                            alias_expander: environment.rbs_loader
+              )
+              !param_type.accepts(hash, mode: :gradual).no?
+            end
+          end
+
+          # rubocop:disable Metrics/ParameterLists
           def agreed_keyword_block_params(method_definition, args, self_type, selector_self, instance_type, type_vars,
-                                          environment)
-            distributions = KeywordArguments.distributions(args, true)
+                                          environment, splat)
+            # rubocop:enable Metrics/ParameterLists
+            distributions = keyword_distributions(method_definition, args, selector_self, instance_type, type_vars,
+                                                  environment, splat)
             return [] if distributions.nil?
 
             candidates = []

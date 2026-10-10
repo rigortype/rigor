@@ -41,13 +41,21 @@ module Rigor
         # union-typed keyword values (`headers: bool` stands for `headers: true` and `headers: false`, and so does a
         # `Dynamic[bool]`, which the #521 join produces), or nil when that is more than {DISTRIBUTION_LIMIT} lists. A
         # precise union value selects per member at runtime, so an answer that holds for the call must hold for every
-        # member (#1737). Without a keyword hash, or with no union value, the one list.
-        def distributions(arg_types, keywords_last)
+        # member (#1737). Only a key that discriminates between `method_types` ({.discriminating?}) splits (#1779):
+        # every overload reads any other key's members alike, so splitting it only multiplies the lists toward the
+        # limit (`(a: Symbol, b: Symbol)` with two three-member values made nine). An overload that declares no
+        # keywords but may take the hash as a positional `Hash` ({.positional_hash_reader?}, whose block says whether
+        # a positional parameter may accept a `Hash`) reads every value against that parameter, so then every union
+        # value splits. `count` is the call's argument count, nil when a splat hides it. Without a keyword hash, or
+        # with no discriminating union value, the one list, `arg_types` itself.
+        def distributions(arg_types, keywords_last, method_types, count = arg_types.size, &hash_param)
           keywords = keywords_last && arg_types.last
           return [arg_types] unless keywords.is_a?(Type::HashShape)
-          return [arg_types] if keywords.pairs.each_value.none? { |value| union_members(value) }
 
-          choices = keywords.pairs.map { |name, value| [name, union_members(value) || [value]] }
+          choices = split_choices(keywords, method_types) do
+            hash_param && positional_hash_reader?(method_types, count, &hash_param)
+          end
+          return [arg_types] if choices.nil?
           return nil if choices.reduce(1) { |count, (_, members)| count * members.size } > DISTRIBUTION_LIMIT
 
           combinations(choices).map do |pairs|
@@ -57,6 +65,83 @@ module Rigor
             )
             arg_types[0...-1] + [shape]
           end
+        end
+
+        # Each key of `keywords` with the values its lists take: a discriminating union value's members, any other
+        # value whole. Nil when no value splits. The block answers whether every union value splits (read once).
+        def split_choices(keywords, method_types)
+          split = false
+          every = nil
+          choices = keywords.pairs.map do |name, value|
+            members = union_members(value)
+            next [name, [value]] unless members
+
+            unless discriminating?(name, method_types)
+              every = yield ? true : false if every.nil?
+              next [name, [value]] unless every
+            end
+
+            split = true
+            [name, members]
+          end
+          choices if split
+        end
+
+        # Whether the members of `name`'s value may select different overloads among `method_types`: the overloads
+        # that take the key (by name or through `**rest`) declare it with different types (`headers: true` in one,
+        # `?headers: false` in another). Where they all declare one type, a member it rejects is rejected by every
+        # overload, so the split only adds lists: four `flag: bool` keywords alone made sixteen. An overload that
+        # declares others but not this key rejects it whatever its value. One that declares no keywords reads the
+        # hash positionally, which {.positional_hash_reader?} decides for every key at once.
+        def discriminating?(name, method_types)
+          first = nil
+          method_types.any? do |method_type|
+            fun = method_type.type
+            next false unless declares?(fun)
+
+            type = (fun.required_keywords[name] || fun.optional_keywords[name] || fun.rest_keywords)&.type
+            next false if type.nil?
+
+            first ||= type
+            type != first
+          end
+        end
+
+        # Whether an overload of `method_types` that declares no keywords takes `count` arguments and may read the last,
+        # the keyword hash, as a positional `Hash`: the block answers for the RBS parameter at that position (the
+        # `(String)` of `(a: Symbol) | (String)` cannot take one, the `(Hash[Symbol, String])` of
+        # `(a: Integer) | (Hash[Symbol, String])` can, and its members then select per value), and an untyped `(?)`
+        # parameter list may take anything. A nil `count` (a splat hides how many arguments precede the hash, and
+        # `ph(*[], a: v)` passes `{ a: v }` to a one-parameter `(Hash)`) asks about every positional parameter.
+        def positional_hash_reader?(method_types, count, &)
+          method_types.any? do |method_type|
+            fun = method_type.type
+            next false if declares?(fun)
+            next true unless fun.respond_to?(:required_positionals)
+            next positional_params(fun).any?(&) if count.nil?
+
+            param = positional_param_at(fun, count, count - 1)
+            !param.nil? && yield(param)
+          end
+        end
+
+        def positional_params(fun)
+          params = fun.required_positionals + fun.optional_positionals + fun.trailing_positionals
+          fun.rest_positionals ? params + [fun.rest_positionals] : params
+        end
+
+        # The positional parameter `fun` binds the argument at `index` to when called with `count` arguments, or nil
+        # when the count does not fit its arity.
+        def positional_param_at(fun, count, index)
+          required = fun.required_positionals
+          trailing = fun.trailing_positionals
+          optional = fun.optional_positionals
+          minimum = required.size + trailing.size
+          return nil if count < minimum || (fun.rest_positionals.nil? && count > minimum + optional.size)
+          return required[index] if index < required.size
+          return trailing[index - (count - trailing.size)] if index >= count - trailing.size
+
+          optional[index - required.size] || fun.rest_positionals
         end
 
         # The members a keyword value splits into: a union's, or those of a `Dynamic` whose static facet is a union,

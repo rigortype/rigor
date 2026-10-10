@@ -64,9 +64,14 @@ module Rigor
 
         # Roles a referring file can have (ADR-102 WD8). A reference edge carries its referrer's role so
         # "used only by its own test" is a reportable category rather than a bucket boundary.
+        #
+        # End-to-end suites (`qa/`, `e2e/`, GitLab's QA; `features/`, cucumber) are test code too (#1751). They
+        # are matched at the project root only: `app/models/features/` is an ordinary namespace directory, and
+        # a false :test would hide a production reference. Tooling directories (`rubocop/`, `keeps/`,
+        # `tooling/`, `scripts/`) stay :production on purpose — deleting a class they use breaks the tooling.
         def self.role_for(path)
           case path
-          when %r{(\A|/)(spec|test)/}, /_(spec|test)\.rb\z/ then :test
+          when %r{(\A|/)(spec|test)/}, /_(spec|test)\.rb\z/, %r{\A(\./)?(qa|e2e|features)/} then :test
           when /\.rake\z/, %r{(\A|/)(lib/)?tasks/} then :task
           when %r{(\A|/)config/} then :config
           else :production

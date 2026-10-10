@@ -147,7 +147,8 @@ module Rigor
       def project_mixin?(scope, name)
         Analysis::DependencyRecorder.read_last_segment(:class, name) if Analysis::DependencyRecorder.active?
         !scope.includes_of(name).empty? || scope.discovery.discovered_prepends.key?(name) ||
-          scope.discovery.unpositioned_mixins.key?(name)
+          (scope.discovered_classes.key?(name) &&
+            Scope::ResolutionChain.for(scope, name, :instance, :methods).wildcard_mixin?)
       end
 
       def project_levels(scope, class_name)

@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "../../source/constant_path"
+
 module Rigor
   module Inference
     class InEffectRefinements

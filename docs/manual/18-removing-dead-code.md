@@ -257,10 +257,13 @@ can only bound the namespace, so everything under `Foo` is demoted;
 `"V#{version}"` is the start of a name, so `V1`, `V2_0` and everything
 under them are. `const_get` looks the name up from its receiver, so
 `const_get("V#{version}")` inside `class Migration` demotes
-`Migration::V1` — and the top-level `V*` names as well, unless the call
-passes `false` as its second argument. A name built into a local
-variable first (`name = "V#{version}"; const_get(name)`) is read the
-same way. A
+`Migration::V1` — and the `V*` names under `Migration`'s superclasses
+and mixins and at the top level as well, unless the call passes `false`
+as its second argument. A literal `const_get("Handler")` is a reference
+looked up in the same order, so it names `Migration::Handler` when
+that exists rather than a top-level `Handler`. A name built into a
+local variable first (`name = "V#{version}"; const_get(name)`) is read
+the same way. A
 class name appearing as a string in a `.yml`, `.json` or template file
 demotes the same way — weaker evidence than a constant reference, and
 neither proof of use nor grounds to call it dead.

@@ -410,6 +410,210 @@ RSpec.describe Rigor::Analysis::Reachability do
         expect(report.candidates.map(&:fqn)).to eq(%w[Ns Ns::SubBeta])
       end
     end
+
+    # Issue #1761 — a literal `const_get` is looked up where Ruby looks it up: the receiver, its ancestors
+    # unless `inherit = false`, then the top level unless `inherit = false`. Resolving it at the top level
+    # alone left the receiver's own constant a false candidate, and a dead same-named top-level one
+    # reachable.
+    describe "a literal const_get resolves against its receiver (#1761)" do
+      it "resolves an implicit-receiver literal in the enclosing declaration, not at the top level" do
+        report = report_for({ "lib/a.rb" => <<~RUBY, "lib/main.rb" => "LitInside.go\nLitSym.go\nAfter.go\n" })
+          class Inner1; end
+          class Inner2; end
+          class Early; end
+          module LitInside
+            class Inner1; end
+            def self.go = const_get("Inner1")
+          end
+          module LitSym
+            class Inner2; end
+            def self.go = self.const_get(:Inner2)
+          end
+          module After
+            class Early; end
+            def self.go
+              n = "Early"
+              const_get(n)
+            end
+          end
+        RUBY
+        expect(report.candidates.map(&:fqn)).to eq(%w[Early Inner1 Inner2])
+      end
+
+      it "still falls through to the top level when the receiver does not declare the name" do
+        report = report_for({ "lib/a.rb" => <<~RUBY, "lib/main.rb" => "Holder.go\n" })
+          class OnlyTop; end
+          module Holder
+            def self.go = const_get("OnlyTop")
+          end
+        RUBY
+        expect(report.candidates.map(&:fqn)).to be_empty
+      end
+
+      it "resolves a constant receiver against the call site's nesting, and honours inherit = false" do
+        report = report_for({ "lib/a.rb" => <<~RUBY, "lib/main.rb" => "Ns::Reg.go\n" })
+          class HAlpha; end
+          class TopOnly; end
+          module Ns
+            module Handlers
+              class HAlpha; end
+            end
+            class Reg
+              def self.go
+                Handlers.const_get("HAlpha")
+                Handlers.const_get("TopOnly", false)
+              end
+            end
+          end
+        RUBY
+        expect(report.candidates.map(&:fqn)).to eq(%w[HAlpha TopOnly])
+      end
+
+      # An unknown receiver is not confined by `inherit = false`: it may be anything, so the name keeps the
+      # top-level reading it had.
+      it "keeps the top-level reading for an unknown receiver" do
+        report = report_for({ "lib/a.rb" => <<~RUBY, "lib/main.rb" => "Box.go(Object)\n" })
+          class Target; end
+          class Box
+            def self.go(k) = k.const_get("Target", false)
+          end
+        RUBY
+        expect(report.candidates.map(&:fqn)).to be_empty
+      end
+
+      it "searches the receiver's superclass chain and mixins unless inherit = false" do
+        report = report_for({ "lib/a.rb" => <<~RUBY, "lib/main.rb" => "Kid.go\n" })
+          class Z1; end
+          class Z2; end
+          class Z3; end
+          class Mom
+            class Z1; end
+            class Z3; end
+          end
+          module Mixin
+            class Z2; end
+          end
+          class Kid < Mom
+            include Mixin
+            def self.go
+              const_get("Z1")
+              Kid.const_get(:Z2)
+              const_get("Z3", false)
+            end
+          end
+        RUBY
+        # `Z3` with `inherit = false` reaches neither `Mom::Z3` nor the top-level `Z3`.
+        expect(report.candidates.map(&:fqn)).to eq(%w[Mom::Z3 Z1 Z2 Z3])
+      end
+
+      # A concern's `included do` runs on the including class, which this reading cannot name, so a literal
+      # there keeps the top-level reading rather than resolving against the concern.
+      it "keeps the top-level reading for a literal inside a block that rebinds self" do
+        report = report_for({ "lib/a.rb" => <<~RUBY, "lib/main.rb" => "Concern\n" })
+          class Thing; end
+          module Concern
+            class Thing; end
+            included do
+              const_get("Thing")
+            end
+          end
+        RUBY
+        expect(report.candidates.map(&:fqn)).to eq(["Concern::Thing"])
+      end
+
+      # A receiver resolved only by peeling (`Outer::Missing` to `Outer`) is unknown: `const_get` never
+      # searches its lexical parent, and anchoring there made the live top-level `Foo` a candidate.
+      it "reads a literal on a partly-resolved receiver at the top level" do
+        report = report_for({ "lib/a.rb" => <<~RUBY, "lib/main.rb" => "User.go\nOuter\n" })
+          class Foo; end
+          class Other; end
+          module Outer
+            class Foo; end
+            Missing = Other
+          end
+          class User
+            def self.go
+              Outer::Missing.const_get(:Foo)
+              Outer::Missing.const_get(:Other, false)
+            end
+          end
+        RUBY
+        expect(report.candidates.map(&:fqn)).to eq(["Outer::Foo"])
+      end
+
+      # In a `class << self` body outside its methods `self` is the singleton class, whose ancestors do not
+      # include the class, so the lookup is the top level's.
+      it "reads a literal in a class << self body at the top level, and in its methods at the class" do
+        report = report_for({ "lib/a.rb" => <<~RUBY, "lib/main.rb" => "Host.go\n" })
+          class Foo; end
+          class Bar; end
+          class Host
+            class Foo; end
+            class Bar; end
+            class << self
+              const_get(:Foo)
+              def go = const_get(:Bar)
+            end
+          end
+        RUBY
+        expect(report.candidates.map(&:fqn)).to eq(%w[Bar Host::Foo])
+      end
+
+      it "credits a literal const_get in a spec file to the test role" do
+        report = report_for({ "app/models/target.rb" => "class Target; end\n",
+                              "spec/models/target_spec.rb" => "Object.const_get(\"Target\")\n" })
+        expect(report.test_only.map(&:fqn)).to eq(["Target"])
+      end
+    end
+
+    describe "an interpolated const_get searches the receiver's ancestors (#1761)" do
+      let(:family) do
+        <<~RUBY
+          class Mom
+            class ZX; end
+          end
+          module Mixin
+            class ZY; end
+          end
+          class Kid < Mom
+            include Mixin
+          end
+          class Other
+            class ZW; end
+          end
+        RUBY
+      end
+
+      it "taints the superclass and mixin namespaces by default" do
+        report = report_for({ "lib/a.rb" => family, "lib/main.rb" => "Kid.const_get(\"Z\#{ARGV.first}\")\n" })
+        expect(report.undecidable.map(&:fqn)).to contain_exactly("Mom::ZX", "Mixin::ZY")
+        expect(report.candidates.map(&:fqn)).to include("Other::ZW")
+      end
+
+      it "taints only the receiver with inherit = false" do
+        report = report_for({ "lib/a.rb" => family,
+                              "lib/main.rb" => "Kid.const_get(\"Z\#{ARGV.first}\", false)\n" })
+        expect(report.undecidable).to be_empty
+        expect(report.candidates.map(&:fqn)).to include("Mom::ZX", "Mixin::ZY")
+      end
+
+      it "reads an interpolated symbol and a frozen interpolated string the same way" do
+        report = report_for({ "lib/a.rb" => <<~RUBY, "lib/main.rb" => "Reg.go(1)\n" })
+          class Reg
+            class SAlpha; end
+            class VAlpha; end
+            class Other; end
+            def self.go(x)
+              const_get(:"S\#{x}", false)
+              name = "V\#{x}".freeze
+              const_get(name, false)
+            end
+          end
+        RUBY
+        expect(report.undecidable.map(&:fqn)).to contain_exactly("Reg::SAlpha", "Reg::VAlpha")
+        expect(report.candidates.map(&:fqn)).to eq(["Reg::Other"])
+      end
+    end
   end
 
   # A byte sequence that is not valid UTF-8 cannot be a constant name. Carrying one forward crashed the whole

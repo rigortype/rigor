@@ -48,6 +48,7 @@ lib/rigor/analysis/reachability/scan.rb:
   producers:
     Rigor::Analysis::Reachability::Scan::LocalValues: SCOPE_GATES lists the nodes that open a local-variable scope, so an interpolated const_get argument is read through its own method's assignments (#1734); it derives no declaration context
     Rigor::Analysis::Reachability::Scan::LocalValues#collect_local_writes: stops a local-variable search at a nested def, class, module or singleton class (#1734); it derives no declaration context
+    Rigor::Analysis::Reachability::Scan::Walker#in_local_scope: notes a `class << self` body so a literal const_get on `self` there is read at the top level, where Ruby looks it up (#1761); it derives no declaration context
     Rigor::Analysis::Reachability::Scan::Walker#mixin_names: grandfathered
     Rigor::Analysis::Reachability::Scan::Walker#walk: grandfathered
 lib/rigor/effects/definition_context.rb:

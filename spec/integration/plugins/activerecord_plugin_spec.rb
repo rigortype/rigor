@@ -1046,6 +1046,24 @@ RSpec.describe "plugins/rigor-activerecord" do
       expect(dumped(source)).to eq(["dump_type: Post"] * 5)
     end
 
+    # #1801 lets the engine read a splat as any number of arguments; the relation side keeps the bundled `find`'s
+    # policy of counting it, and a `**` hash, as one argument, as the class side does.
+    it "counts a splat as one argument on the relation side" do
+      source = <<~RUBY
+        class Lookup
+          def self.run(id, ids, args, opts)
+            user = User.find(1)
+            Rigor.dump_type(user.posts.find(id, *ids))
+            Rigor.dump_type(user.posts.find(*args, **opts))
+            Rigor.dump_type(user.posts.where(title: "x").find(*ids))
+            Rigor.dump_type(Post.where(title: "x").find(id, *ids))
+          end
+        end
+      RUBY
+      expect(dumped(source)).to eq(["dump_type: Array[Post]", "dump_type: Array[Post]", "dump_type: Post",
+                                    "dump_type: Array[Post]"])
+    end
+
     it "leaves a model's own two-argument `self.find` to the model" do
       # The Array reading describes Rails' `find`. This `find(owner, id)` returns one record.
       source = <<~RUBY

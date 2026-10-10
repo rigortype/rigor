@@ -422,6 +422,7 @@ module Rigor
 
         if call_node.receiver
           class_call_return_type(call_node, scope, index) ||
+            relation_splat_find_return_type(call_node, scope) ||
             relation_call_return_type(call_node, scope, index) ||
             instance_call_return_type(call_node, scope, index)
         else
@@ -689,6 +690,25 @@ module Rigor
         return nil unless entry.scope?(call_node.name)
 
         relation_of(model_name)
+      end
+
+      # `relation.find(*ids)` answers by argument count as `Model.find` does (`finder_return_type`), counting a splat or
+      # a `**` hash as one argument, which is the policy the bundled `Relation#find` documents: `find(*ids)` is the
+      # element, and `find(id, *ids)` and `find(*args, **opts)` are Arrays. The engine lets a splat stand for any
+      # number of arguments (#1801), so through the RBS overloads `find(*ids)` would join `Dynamic[Array[Elem] |
+      # Elem]`, on which a following `update` or `save` no longer resolves on the model and loses its
+      # `io.db.write`. Only a block-less call with a splat is answered here; every other `find` stays with the RBS.
+      def relation_splat_find_return_type(call_node, scope)
+        return nil unless call_node.name == :find && call_node.block.nil?
+        return nil unless call_node.arguments&.arguments&.any?(Prism::SplatNode)
+
+        model_name = relation_element_class_name(scope.type_of(call_node.receiver))
+        return nil if model_name.nil?
+
+        model = Rigor::Type::Combinator.nominal_of(model_name)
+        return model if call_argument_count(call_node) < 2
+
+        Rigor::Type::Combinator.nominal_of("Array", type_args: [model])
       end
 
       # Whether `name` is a declared `scope` on ANY model in the index. A run-lifetime memoised Set so the

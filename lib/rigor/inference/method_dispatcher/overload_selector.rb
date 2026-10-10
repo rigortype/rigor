@@ -384,7 +384,13 @@ module Rigor
 
             # #1801 — a splat stands for any number of arguments: some count of its elements must fit.
             lists = SplatArity.expansions(fun, arg_types, splats)
-            lists.nil? || lists.any? { |list| positionals_accept?(fun, list, shared, strict) }
+            return lists.any? { |list| positionals_accept?(fun, list, shared, strict) } if lists
+
+            # Past the cap the position each other argument lands at is not spelled out, but it lands at one.
+            params = KeywordArguments.positional_params(fun)
+            arg_types.each_with_index.all? do |arg, index|
+              splats.include?(index) || params.any? { |param| accepts_param?(param, arg, shared, strict) }
+            end
           end
 
           def positionals_accept?(fun, arg_types, shared, strict)

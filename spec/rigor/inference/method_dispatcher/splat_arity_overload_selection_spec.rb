@@ -23,6 +23,8 @@ RSpec.describe "Overload selection behind a splat argument (#1801)", type: :runn
         def each_same: (Integer) { (Integer) -> void } -> void
                      | (Integer, Integer) { (Integer) -> void } -> void
         def opts: () -> Hash[Symbol, untyped]
+        def rest3: (Integer, Integer, Integer, *Integer) -> Integer
+                 | (String) -> String
       end
     RBS
   end
@@ -74,6 +76,14 @@ RSpec.describe "Overload selection behind a splat argument (#1801)", type: :runn
       dump_type(s.two("x", *xs))
       dump_type(s.tail(*xs, "x"))
       dump_type(s.tail(*xs, :x))
+    RUBY
+  end
+
+  # Three splats against `rest3` pass the cap on spelled-out counts; the other arguments must still fit a parameter.
+  it "keeps type-checking the other arguments past the cap on spelled-out counts" do
+    expect(dumped_types(<<~RUBY)).to eq(%w[String Integer])
+      dump_type(s.rest3("s", *xs, *xs, *xs))
+      dump_type(s.rest3(1, *xs, *xs, *xs))
     RUBY
   end
 

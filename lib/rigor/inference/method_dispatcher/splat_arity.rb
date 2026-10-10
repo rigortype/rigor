@@ -12,7 +12,8 @@ module Rigor
       # overload matches when some count of the splats' elements fits its arity and every argument, the splats'
       # untyped elements included, is accepted at the parameter that count binds it to.
       module SplatArity
-        # The most argument lists {.expansions} spells out; past it, the overload is matched by arity alone.
+        # The most argument lists {.expansions} spells out; past it, the selector only asks that every other argument
+        # fit some positional parameter of the overload.
         LIMIT = 32
         private_constant :LIMIT
 

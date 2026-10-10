@@ -3106,6 +3106,9 @@ module Rigor
       #
       # Issue #1664 — `refinements` are the modules in effect in a refine body another file wrote, which the body scope
       # carries as declared refinements: its nodes are not this file's, so this file's lexical list cannot answer them.
+      # The return memo and the recursion guard do not key on them, which holds because such a node comes only from
+      # `DefNodeResolver.refinement_query`'s own parse and always carries that file's one list; a caller that types
+      # the same node under another list must add it to the key.
       def infer_user_method_return(def_node, receiver, arg_types, self_fold_safe: false, yield_type: nil,
                                    refinements: nil)
         return nil if def_node.body.nil?

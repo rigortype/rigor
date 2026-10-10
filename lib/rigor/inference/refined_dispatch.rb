@@ -102,10 +102,14 @@ module Rigor
         end
       end
 
+      # A level the project mixes a module into whose position RBS does not record (`mixed`) is decided by its own
+      # refinement first, as any level is; past that, the mixin may define the name, so a refinement further up the
+      # walk may or may not win and the answer is {UNKNOWN}, never the replaced method's.
       def walk(scope, levels, method_name, targets)
-        levels.each do |level_class, entries|
+        levels.each_with_index do |(level_class, entries, mixed), index|
           refining = level_class && targets[level_class]
           return Winner.new(module_name: refining, refined_class: level_class) if refining
+          return targeted_after?(levels, index, targets) ? UNKNOWN : nil if mixed
 
           entries.each do |entry|
             refining = entry == level_class ? nil : targets[entry]
@@ -116,7 +120,12 @@ module Rigor
         nil
       end
 
-      # `[[level class, [entries in lookup order]], …]` for an instance of `class_name`, or nil when the walk cannot
+      def targeted_after?(levels, index, targets)
+        levels.drop(index).any? { |_level_class, entries| entries.any? { |entry| targets.key?(entry) } }
+      end
+
+      # `[[level class, [entries in lookup order], mixed], …]` for an instance of `class_name`, or nil when the walk
+      # cannot
       # be trusted: a chain cut at its limit, or one that records a mixin the tables cannot name.
       def levels(scope, class_name)
         environment = scope.environment
@@ -125,16 +134,14 @@ module Rigor
         project_levels(scope, class_name)
       end
 
-      # The RBS ancestors, each a level of its own; nil when the project reopens one of them to mix a module in
-      # (`class String; include Loud; end`), whose position among them RBS does not record. Each ancestor's name
-      # is a dependency, so a file that adds such a reopening re-checks the consumer.
+      # The RBS ancestors, each a level of its own, `mixed` where the project reopens one to mix a module in (`class
+      # String; include Loud; end`), whose position among them RBS does not record. Each ancestor's name is a
+      # dependency, so a file that adds such a reopening re-checks the consumer.
       def rbs_levels(scope, class_name)
         loader = scope.environment.rbs_loader
         names = loader ? loader.ancestor_names_for(class_name) : []
         names = [class_name] if names.empty?
-        return nil if names.any? { |name| project_mixin?(scope, name) }
-
-        names.map { |name| [name, [name]] }
+        names.map { |name| [name, [name], project_mixin?(scope, name)] }
       end
 
       def project_mixin?(scope, name)
@@ -154,12 +161,7 @@ module Rigor
           names = chain.level_entries(index).filter_map { |entry| entry_name(scope, entry) }
           next out << [level_class, names] if level_class
 
-          names.each do |name|
-            spliced = rbs_levels(scope, name)
-            return nil if spliced.nil?
-
-            out.concat(spliced)
-          end
+          names.each { |name| out.concat(rbs_levels(scope, name)) }
         end
         out
       end

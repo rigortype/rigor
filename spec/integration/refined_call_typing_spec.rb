@@ -140,6 +140,19 @@ RSpec.describe "Typing calls through Ruby refinements (#1664)", type: :runner do
     RUBY
   end
 
+  # Review of #1747: a mixin into a less derived ancestor (`Object.include`) cannot outrank a refinement of the
+  # receiver's own class; Ruby prints `true`.
+  it "keeps a refinement of the receiver's class winning over a project mixin into a less derived ancestor" do
+    expect(rows(<<~RUBY)).to eq([["dump.type", 5, "dump_type: 42"]])
+      module Helpers; def hh = 1; end
+      Object.include(Helpers)
+      module R; refine(String) { def upcase = 42 }; end
+      using R
+      Rigor.dump_type("a".upcase)
+      "a".upcase.even?
+    RUBY
+  end
+
   # Review of #1747: `refine String` inside a module that declares its own `String` refines that one; Ruby prints `X`.
   it "refines the class the `refine` argument resolves to, not every name its spelling could denote" do
     expect(dumps(<<~RUBY)).to eq([%("X")])

@@ -69,8 +69,10 @@ RSpec.describe "a hook on an extended module — instance-side taint" do
       expect(cold("u.rb" => source)).to eq([])
     end
 
-    it "still reports when the extended module's hook mixes nothing in" do
-      cm = "module ClassMethods\n  def self.extended(base) = nil\nend\n"
+    # #1687 — a hook of any body counts: `base.class_eval { attr_accessor … }` defines methods with no mixin, so
+    # the readers cannot tell a harmless hook from one that answers. Only a hook-free module keeps the report.
+    it "still reports when the extended module defines no hook" do
+      cm = "module ClassMethods\n  def build = new\nend\n"
       expect(cold("g.rb" => greeters, "cm.rb" => cm,
                   "k.rb" => "class K < Base\n  extend ClassMethods\nend\nK.new.greet(\"bob\")\n"))
         .to eq([["k.rb", 4, "call.wrong-arity"]])
@@ -116,7 +118,7 @@ RSpec.describe "a hook on an extended module — instance-side taint" do
 
   describe "a warm run" do
     let(:hooked) { "module ClassMethods\n  def self.extended(base)\n    base.include(Y)\n  end\nend\n" }
-    let(:plain) { "module ClassMethods\n  def self.extended(base) = nil\nend\n" }
+    let(:plain) { "module ClassMethods\n  def build = new\nend\n" }
     let(:files) do
       {
         "g.rb" => greeters,

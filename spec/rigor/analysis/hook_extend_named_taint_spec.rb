@@ -67,6 +67,71 @@ RSpec.describe "a hook's base.extend — named instance-side taint" do
       expect(cold("g.rb" => greeters, "x.rb" => x, "p.rb" => hook_module, "c.rb" => n)).to eq([])
     end
 
+    # Review shapes from #1741: the extended module may reshape the includer through any code Ruby runs on the
+    # extend, which only {ResolutionChain.extend_clean?} rules out.
+    {
+      "a chained hook extend" => "module Z\n  def self.extended(b) = b.include(A)\nend\n" \
+                                 "module X\n  def self.extended(b) = b.extend(Z)\nend\n",
+      "an extend_object hook" => "module X\n  def self.extend_object(b)\n    super\n    b.include(A)\n  end\nend\n",
+      "a hook written outside the module body" => "module X; end\ndef X.extended(b) = b.include(A)\n",
+      "an extended hook lent by an extended module" => "module Hooky\n  def extended(b) = b.include(A)\nend\n" \
+                                                       "module X\n  extend Hooky\nend\n"
+    }.each do |shape, x|
+      it "declines a refined call through #{shape}" do
+        expect(cold("a.rb" => refiner, "x.rb" => x, "p.rb" => hook_module, "u.rb" => using_file)).to eq([])
+      end
+    end
+
+    # X lends D an instance hook; including D into E runs it. Each is seen by one test of `extend_clean?` alone.
+    {
+      "an instance hook the walk cannot read as a mixin" =>
+        "module X\n  def included(o)\n    super\n    kind = :include\n    o.send(kind, A)\n  end\nend\n",
+      "a module included in a way the walk cannot name" =>
+        "module W\n  def included(o)\n    super\n    o.include(A)\n  end\nend\n" \
+        "module X\n  include(*[W])\nend\n"
+    }.each do |shape, x|
+      it "declines a refined call through #{shape} on the hook-extended module" do
+        user = "module D\n  include Plain\nend\nmodule E\n  include D\nend\nusing E\n\"a\".shout\n"
+        expect(cold("a.rb" => refiner, "x.rb" => x, "p.rb" => hook_module, "u.rb" => user)).to eq([])
+      end
+    end
+
+    it "declines a refined call through a direct extend of a module whose hook extends a hooked module" do
+      x = "module Z\n  def self.extended(b) = b.include(A)\nend\nmodule X\n  def self.extended(b) = b.extend(Z)\nend\n"
+      expect(cold("a.rb" => refiner, "x.rb" => x, "u.rb" => "module D\n  extend X\nend\nusing D\n\"a\".shout\n")).to eq([])
+    end
+
+    it "declines an arity read through a hook-extended ClassMethods with an instance inherited hook" do
+      foo = "module Foo\n  def self.included(base)\n    base.extend(ClassMethods)\n  end\n" \
+            "  module ClassMethods\n    def inherited(sub)\n      super\n      sub.include(Y)\n    end\n  end\nend\n"
+      k = "class Parent < Base\n  include Foo\nend\nclass Child < Parent\nend\nChild.new.greet(\"bob\")\n"
+      expect(cold("g.rb" => greeters, "f.rb" => foo, "k.rb" => k)).to eq([])
+    end
+
+    # No mixin call: only the instance-hook test sees it.
+    it "declines an arity read through a hook-extended module whose instance inherited hook defines methods" do
+      foo = "module Foo\n  def self.included(base)\n    base.extend(ClassMethods)\n  end\n" \
+            "  module ClassMethods\n    def inherited(sub)\n      super\n      sub.define_method(:greet) { |n| n }\n" \
+            "    end\n  end\nend\n"
+      k = "class Parent < Base\n  include Foo\nend\nclass Child < Parent\nend\nChild.new.greet(\"bob\")\n"
+      expect(cold("g.rb" => greeters, "f.rb" => foo, "k.rb" => k)).to eq([])
+    end
+
+    # No hook on X itself: only the unpositioned-mixin test sees the module it includes.
+    it "declines an arity read through a hook-extended module that includes a module it cannot name" do
+      w = "module W\n  def inherited(sub)\n    super\n    sub.define_method(:greet) { |n| n }\n  end\nend\n"
+      foo = "module Foo\n  def self.included(base)\n    base.extend(X)\n  end\nend\n" \
+            "module X\n  include(*[W])\nend\n"
+      k = "class Parent < Base\n  include Foo\nend\nclass Child < Parent\nend\nChild.new.greet(\"bob\")\n"
+      expect(cold("g.rb" => greeters, "w.rb" => w, "f.rb" => foo, "k.rb" => k)).to eq([])
+    end
+
+    it "declines an arity read when the extended module's instance included hook extends a hooked module" do
+      x = "module Z\n  def self.extended(b) = b.include(Y)\nend\nmodule X\n  def included(o) = o.extend(Z)\nend\n"
+      n = "module N\n  include Plain\nend\n\nclass C < Base\n  include N\nend\nC.new.greet(\"bob\")\n"
+      expect(cold("g.rb" => greeters, "x.rb" => x, "p.rb" => hook_module, "c.rb" => n)).to eq([])
+    end
+
     it "reports an arity read when the extended module has no hook, and keeps its class methods" do
       x = "module X\n  def cm = 1\nend\n"
       k = "class K < Base\n  include Plain\nend\nK.new.greet(\"bob\")\nK.cm\n"

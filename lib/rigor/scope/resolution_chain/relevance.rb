@@ -53,7 +53,7 @@ module Rigor
 
         def listed_discharged?(context)
           mark = context.mark
-          mark.listed.all? { |raw| context.closure_clean?(raw) }
+          mark.listed.all? { |raw| context.closure_clean?(raw) && context.off_chain_clean?(raw) }
         end
 
         def multi_file_discharged?(context)
@@ -71,6 +71,7 @@ module Rigor
             when :method then Analysis::DependencyRecorder.read_missing(:method, value)
             when :external then Analysis::DependencyRecorder.read_missing(:class, value)
             when :hooks then Analysis::DependencyRecorder.read_keys(ResolutionChain.hook_keys(value))
+            when :extend_clean then ResolutionChain.record_extend_clean(scope, value)
             end
           end
         end
@@ -114,6 +115,21 @@ module Rigor
             when Array then resolved.all? { |name| project_closure_clean?(name) }
             else external_clean?(@resolver.candidates(@mark.node, raw), raw)
             end
+          end
+
+          # #1687 — a listed name that is not one of the node's own edges is a hook's `base.extend X` (the indexer lists
+          # it on the hook module's instance side). `X` lands on the includer's singleton, so its closure does not
+          # answer the name, but its own hooks may reshape the instance side: clean only when extending it provably
+          # leaves the instance side alone ({ResolutionChain.extend_clean?}).
+          def off_chain_clean?(raw)
+            return true if @mark.kind != :include || edge_names.include?(raw)
+
+            resolved = ResolutionChain.resolver_for(@scope, :constants).resolve_one(@mark.node, raw)
+            @edges << [:external, raw.to_s.split("::").last]
+            return false if resolved.nil?
+
+            @edges << [:extend_clean, resolved]
+            ResolutionChain.extend_clean?(@scope, resolved)
           end
 
           private

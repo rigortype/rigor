@@ -139,6 +139,9 @@ module Rigor
       # (`DiscoveryIndex#unpositioned_mixins`, or a class declared in several files with several edges).
       def unsettled? = !order_marks.empty?
 
+      # True when any mark, an order mark or an `:extend_hook` one, is on the chain.
+      def marked? = !@marks.empty?
+
       # The marks that make the chain's ORDER doubtful. An `:extend_hook` mark (#1730) says only that an extended
       # module's hook may have mixed something in that the chain does not list: it makes a candidate-set read
       # `:unknown` and {#wildcard_mixin?} true, and leaves every other reader on the chain's own order. Sending
@@ -172,10 +175,7 @@ module Rigor
 
         if Analysis::DependencyRecorder.active?
           Analysis::DependencyRecorder.read_last_segment(:class, raw)
-          if resolved
-            ResolutionChain.record_class(scope, resolved)
-            Analysis::DependencyRecorder.read_keys(ResolutionChain.extend_hook_keys(resolved))
-          end
+          ResolutionChain.record_extend_clean(scope, resolved) if resolved
         end
         resolved.nil? || ResolutionChain.extend_reshapes_instance?(scope, resolved)
       end
@@ -360,8 +360,7 @@ module Rigor
           targets.each do |raw, resolved, candidates|
             Analysis::DependencyRecorder.read_last_segment(:class, raw)
             if resolved
-              ResolutionChain.record_class(scope, resolved)
-              Analysis::DependencyRecorder.read_keys(ResolutionChain.extend_hook_keys(resolved))
+              ResolutionChain.record_extend_clean(scope, resolved)
             else
               candidates.each { |name| Analysis::DependencyRecorder.read_keys(ResolutionChain.hook_keys(name)) }
             end
@@ -370,32 +369,94 @@ module Rigor
       end
       private :record_extend_hooks
 
-      # The hooks that let a module `extend`ed onto N reshape N's INSTANCE side (#1730): its singleton `extended` /
-      # `extend_object` run against N at the `extend` and may mix into N; its instance `included` /
-      # `append_features` / `prepended` / `prepend_features` / `inherited` become N's own singleton hooks and run
-      # against N's includers, prependers and subclasses, which the mark on N reaches through their chains.
+      # The singleton hooks Ruby runs against N when a module is `extend`ed onto N (#1730). A module's instance
+      # {Relevance::HOOKS} become N's own singleton hooks and run against N's includers, prependers and subclasses.
       SINGLETON_EXTEND_HOOKS = %i[extended extend_object].freeze
-      INSTANCE_EXTEND_HOOKS = %i[included append_features prepended prepend_features inherited].freeze
 
       @extend_hook_keys = {}
 
-      # The frozen negative method keys of `name`'s {SINGLETON_EXTEND_HOOKS} and {INSTANCE_EXTEND_HOOKS}.
+      # The frozen negative method keys of `name`'s singleton {SINGLETON_EXTEND_HOOKS} and instance {Relevance::HOOKS}.
       def self.extend_hook_keys(name)
         @extend_hook_keys[name] ||= (
           SINGLETON_EXTEND_HOOKS.map { |hook| "method:#{name}.#{hook}".freeze } +
-          INSTANCE_EXTEND_HOOKS.map { |hook| "method:#{name}##{hook}".freeze }
+          Relevance::HOOKS.map { |hook| "method:#{name}##{hook}".freeze }
         ).freeze
       end
 
-      # Whether extending `name` may mix modules into the extender's instance side, or into its includers' (#1730):
-      # `name` records a mixin it cannot name on its own instance side (`"*"`, which a hook's `base.include X` or
-      # `base.class_eval { … }` lists on the hook's module) and defines one of the hooks that would run it there.
-      def self.extend_reshapes_instance?(scope, name)
-        listed = scope.discovery.unpositioned_mixins[name]&.dig(:include)
-        return false unless listed&.include?(Relevance::WILDCARD)
+      # Whether extending `name` may mix modules into the extender's instance side, or into its includers', or
+      # define methods there (#1730, #1687): the negation of {.extend_clean?}.
+      def self.extend_reshapes_instance?(scope, name) = !extend_clean?(scope, name)
 
-        defines_any?(scope.discovered_singleton_def_nodes[name], SINGLETON_EXTEND_HOOKS) ||
-          defines_any?(scope.discovered_def_nodes[name], INSTANCE_EXTEND_HOOKS)
+      # #1687 — whether `extend name` provably leaves the extender's instance side, and its includers' and
+      # subclasses', alone. Ruby runs two kinds of code at or after the `extend`: the singleton `extended` /
+      # `extend_object` of `name` (its own, or an instance one of a module `name` extends), and every instance
+      # method of `name`'s instance chain, which becomes the extender's singleton method, so an `included` /
+      # `inherited` / … there is the extender's own hook. The answer is true only when
+      #
+      # - every entry of `name`'s instance chain is a project module that defines none of {Relevance::HOOKS}
+      #   and lists nothing in `unpositioned_mixins`, or an external one RBS knows and whose declaration lacks every
+      #   hook;
+      # - every entry of `name`'s singleton chain is clean the same way for `extended` / `extend_object` (`name`'s
+      #   own singleton defs, which the extend fold also fills from the modules `name` extends, and each extended
+      #   module's instance chain); and
+      # - neither chain is cut or carries a mark.
+      #
+      # Anything else may run code the tables do not model, so it is not clean. Memoised per discovery index;
+      # {.record_extend_clean} files the edges the answer read.
+      def self.extend_clean?(scope, name)
+        memo = (flavor_bucket(scope.discovery, :constants)[:extend_clean] ||= {})
+        return memo[name] if memo.key?(name)
+
+        memo[name] = false # a cycle through `name` answers "not clean"
+        memo[name] = compute_extend_clean(scope, name)
+      end
+
+      def self.compute_extend_clean(scope, name)
+        # A name no project file declares is a module the project cannot see the hooks of.
+        return false unless scope.discovery.discovered_class_sources.key?(name)
+
+        instance = self.for(scope, name, :instance, :constants)
+        singleton = self.for(scope, name, :singleton, :constants)
+        return false if instance.truncated? || singleton.truncated? || instance.marked? || singleton.marked?
+
+        instance.entries.all? { |entry| entry_hook_free?(scope, entry, Relevance::HOOKS) } &&
+          singleton.entries.all? { |entry| entry_hook_free?(scope, entry, SINGLETON_EXTEND_HOOKS) }
+      end
+      private_class_method :compute_extend_clean
+
+      def self.entry_hook_free?(scope, entry, hooks)
+        if entry.external?
+          return hooks.all? { |hook| Relevance.external_lacks?(scope, entry.candidates, hook) }
+        end
+
+        name = entry.name
+        defs = entry.side == :singleton ? scope.discovered_singleton_def_nodes[name] : scope.discovered_def_nodes[name]
+        return false if defines_any?(defs, hooks)
+
+        sides = scope.discovery.unpositioned_mixins[name]
+        sides.nil? || sides.values.all?(&:empty?)
+      end
+      private_class_method :entry_hook_free?
+
+      # The ADR-46 edges of {.extend_clean?}: both chains' class edges, and per project entry the negative class edge
+      # on its name and the negative method edges of every hook, per external one the singleton hook keys of each
+      # name it can denote, so a hook or a mixin added to any of them, in its file or a new one, re-checks the reader.
+      def self.record_extend_clean(scope, name)
+        return unless Analysis::DependencyRecorder.active?
+
+        %i[instance singleton].each do |side|
+          chain = self.for(scope, name, side, :constants)
+          chain.record(scope)
+          chain.entries.each do |entry|
+            if entry.external?
+              entry.candidates.each { |candidate| Analysis::DependencyRecorder.read_keys(hook_keys(candidate)) }
+            else
+              Analysis::DependencyRecorder.read_missing(:class, entry.last_segment)
+              Analysis::DependencyRecorder.read_keys(hook_keys(entry.name))
+              Analysis::DependencyRecorder.read_keys(extend_hook_keys(entry.name))
+            end
+          end
+        end
       end
 
       # Read off the def-node tables: the existence table does not carry a module's own instance hook once the

@@ -5959,6 +5959,7 @@ module Rigor
       # The generic descent of {#walk_class_includes}; a `self.included(base)`-style hook's body walks with
       # its parameters in scope ({MixinAccumulator#with_hook_params}).
       def walk_includes_children(node, qualified_prefix, current_class, accumulator, singleton_self, singleton_cref)
+        taint_constant_receiver_hook(node, qualified_prefix, accumulator)
         hook_params = hook_def_params(node)
         if hook_params
           return accumulator.with_hook_params(hook_params) do
@@ -6192,6 +6193,24 @@ module Rigor
 
         [[current_class, :include], [current_class, :extend]]
       end
+
+      # Issue #1687 — a hook written on a constant from outside its body (`def X.extended(base)`) is recorded in no
+      # def table, so nothing could tell that extending or including `X` runs it. Taint both of `X`'s sides, as a
+      # hook's opaque body would.
+      def taint_constant_receiver_hook(node, qualified_prefix, accumulator)
+        return unless node.is_a?(Prism::DefNode) && CONSTANT_RECEIVER_HOOKS.include?(node.name)
+        return unless node.receiver.is_a?(Prism::ConstantReadNode) || node.receiver.is_a?(Prism::ConstantPathNode)
+
+        owner = prepend_call_receiver(node, qualified_prefix)
+        return if owner.nil?
+
+        accumulator.taint(owner, :include)
+        accumulator.taint(owner, :extend)
+      end
+
+      CONSTANT_RECEIVER_HOOKS = %i[included extended prepended inherited append_features extend_object
+                                   prepend_features].freeze
+      private_constant :CONSTANT_RECEIVER_HOOKS
 
       HOOK_DEFS = %i[included extended prepended inherited].freeze
       MIXIN_EVAL_CALLS = %i[class_eval module_eval class_exec module_exec instance_eval instance_exec].freeze

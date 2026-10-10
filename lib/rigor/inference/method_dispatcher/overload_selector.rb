@@ -76,7 +76,8 @@ module Rigor
         # position, not by types — `[true] * n` with an untyped `n` pinned `Array#*(string) -> String`
         # and answered a wrong precise type the runtime can contradict. The caller unions the candidates'
         # returns, which contains the truth whichever overload the runtime takes. The member-wise reading of a
-        # two-member `Dynamic` facet (#1350, `FacetDistribution`) returns one candidate per member the same way.
+        # two-member `Dynamic` facet (#1350, `FacetDistribution`) returns one candidate per member the same way, and
+        # where that reading falls back to the arguments as given, every overload they gradually match (#1782).
         # Every other path (strict, alias-resolved, typed-gradual, arity fallback) yields exactly one candidate,
         # and `select` (`member_wise: false`) keeps its historical single answer.
         #
@@ -91,8 +92,11 @@ module Rigor
           end
 
           FacetDistribution.select(arg_types, definition, member_wise:, environment:) do |args, member|
-            select_declared(definition, args, self_type, instance_type, type_vars, block_required, environment, member,
-                            keywords_last)
+            # Issue #1782 — the fallback (`member` false) reads the arguments as given, where the bare `Dynamic`
+            # gradually matches every arm and the strict pass's pick is the first by position, so the member-wise answer
+            # is every gradual match (`:joined`), as the block probe reads it (#1750); the caller joins their returns.
+            select_declared(definition, args, self_type, instance_type, type_vars, block_required, environment,
+                            member || (member_wise && :joined), keywords_last)
           end
         end
 
@@ -101,7 +105,8 @@ module Rigor
         # `:gradual` answers every overload the arguments gradually match instead (#1750): where
         # `FacetDistribution.select` falls back to the arguments as given, a bare `Dynamic` positional gradually
         # matches every arm and the strict pass's single pick is decided by position, so the block-parameter probe
-        # binds only what all of them agree on.
+        # binds only what all of them agree on. `:joined` answers the same matches, but where none matches it keeps the
+        # first-overload fallback, as the return path's reading of the arguments as given always has (#1782).
         # rubocop:disable-next Metrics/ParameterLists -- the selection inputs plus the member-wise flag.
         def select_declared(method_definition, arg_types, self_type, instance_type, type_vars, block_required,
                             environment, member, keywords_last)
@@ -132,7 +137,8 @@ module Rigor
                      type_vars: type_vars, block_required: block_required, param_overrides: param_overrides,
                      environment: environment, keywords_last: keywords_last }
 
-          matches = run_selection_passes(declared, overloads, shared, member == :gradual)
+          gradual = member.is_a?(Symbol) # `:gradual` or `:joined`
+          matches = run_selection_passes(declared, overloads, shared, gradual)
           return matches unless matches.empty?
 
           # A block at the call site that no block-declaring overload matched: Ruby ignores a block handed
@@ -141,10 +147,10 @@ module Rigor
           # `define_command(:x) do … end` against `def define_command: (Symbol) -> Symbol`) degraded to
           # `Dynamic[Top]` — and on a self-send suppressed the whole method's return type.
           if block_required
-            matches = run_selection_passes(declared, overloads, shared.merge(block_required: false), member == :gradual)
+            matches = run_selection_passes(declared, overloads, shared.merge(block_required: false), gradual)
             return matches unless matches.empty?
           end
-          return [] if member
+          return [] if member && member != :joined
 
           # No (usable) block at the call site: prefer an overload that does not REQUIRE a block over
           # `overloads.first`. Methods like `Array#filter` / `Enumerable#map` declare the block-bearing

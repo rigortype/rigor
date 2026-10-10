@@ -128,6 +128,23 @@ RSpec.describe Rigor::Analysis::Reachability do
                 app/models/features/flag.rb lib/qa/runner.rb].map(&role)).to all(eq(:production))
     end
 
+    # The CLI hands the scan ABSOLUTE paths, so the role must be decided against the project root: a rule
+    # anchored on the absolute path never fires for qa/, and an unanchored one fires on any directory above
+    # the project (a checkout under ~/src/test/myapp).
+    it "decides the role from the path relative to the project root" do
+      scan = lambda do |root, rel|
+        Rigor::Analysis::Reachability::Scan.call(path: "#{root}/#{rel}", source: "class A\n  B.new\nend\n", root: root)
+                                           .references.first.role
+      end
+      expect(scan.call("/home/me/proj", "qa/page.rb")).to eq(:test)
+      expect(scan.call("/home/me/proj", "e2e/x.rb")).to eq(:test)
+      expect(scan.call("/home/me/proj", "spec/x_spec.rb")).to eq(:test)
+      expect(scan.call("/home/me/proj", "lib/a.rb")).to eq(:production)
+      expect(scan.call("/home/me/test/proj", "lib/a.rb")).to eq(:production)
+      expect(scan.call("/home/me/spec/proj", "config/a.rb")).to eq(:config)
+      expect(scan.call("/home/me/qa/proj", "lib/a.rb")).to eq(:production)
+    end
+
     # Reachable only from test code is its own answer — neither a candidate nor silently "used".
     it "separates a test-only reachable declaration from both buckets" do
       decls = []

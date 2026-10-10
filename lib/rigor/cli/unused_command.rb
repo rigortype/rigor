@@ -141,7 +141,8 @@ module Rigor
 
       def read_and_scan(file, configuration)
         Analysis::Reachability::Scan.call(path: file, source: File.read(file),
-                                          target_ruby: configuration.target_ruby)
+                                          target_ruby: configuration.target_ruby,
+                                          root: File.absolute_path(Dir.pwd))
       rescue SystemCallError
         nil
       end

@@ -49,6 +49,46 @@ RSpec.describe Rigor::CLI::UnusedCommand do
     end
   end
 
+  # #1751 — the command scans absolute paths, so a role rule must be judged against the project root.
+  describe "file roles" do
+    def write_e2e_project(dir)
+      FileUtils.mkdir_p(File.join(dir, "lib"))
+      FileUtils.mkdir_p(File.join(dir, "qa"))
+      FileUtils.mkdir_p(File.join(dir, "spec"))
+      File.write(File.join(dir, ".rigor.yml"), "paths:\n  - lib\n")
+      File.write(File.join(dir, "lib/e2e_only.rb"), "class E2eOnly\nend\n")
+      File.write(File.join(dir, "lib/spec_only.rb"), "class SpecOnly\nend\n")
+      File.write(File.join(dir, "lib/prod.rb"), "class Prod\nend\n")
+      File.write(File.join(dir, "lib/main.rb"), "class Main\n  Prod.new\nend\n")
+      File.write(File.join(dir, "qa/page.rb"), "class Page\n  E2eOnly.new\nend\n")
+      File.write(File.join(dir, "spec/x_spec.rb"), "class XSpec\n  SpecOnly.new\nend\n")
+      backdate(dir)
+    end
+
+    it "reads a qa/ class-body reference as test evidence" do
+      Dir.mktmpdir do |dir|
+        write_e2e_project(dir)
+
+        _, report, = run_in(dir, "--entry-point=lib/main.rb")
+
+        expect(report["test_only"].map { |r| r["name"] }).to contain_exactly("E2eOnly", "SpecOnly")
+      end
+    end
+
+    it "does not read a project checked out under a test/ directory as test code" do
+      Dir.mktmpdir do |outer|
+        dir = File.join(outer, "test", "proj")
+        FileUtils.mkdir_p(dir)
+        write_e2e_project(dir)
+
+        _, report, = run_in(dir, "--entry-point=lib/main.rb")
+
+        expect(report["roots"]).to be_positive
+        expect(report["test_only"].map { |r| r["name"] }).to contain_exactly("E2eOnly", "SpecOnly")
+      end
+    end
+  end
+
   describe "template mentions (ADR-102 WD4)" do
     it "demotes a declaration named inside a longer identifier — substring, not token, semantics" do
       Dir.mktmpdir do |dir|

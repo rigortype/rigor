@@ -158,7 +158,8 @@ So an edge in the reference graph MUST carry the **role of the file it came from
 category rather than a bucket boundary. This is a data-model decision, not a filter: the
 role has to be recorded when the edge is, so it cannot be retrofitted after #349.
 
-Test role is decided from the path: `spec/` and `test/` anywhere, `*_spec.rb` / `*_test.rb`, and the
+Test role is decided from the path relative to the project root (a directory above the root never
+counts): `spec/` and `test/` anywhere below it, `*_spec.rb` / `*_test.rb`, and the
 conventional end-to-end trees `qa/`, `e2e/` and `features/` at the project root (#1751; root-only because
 `app/models/features/` is an ordinary namespace). Tooling trees — `rubocop/`, `keeps/`, `tooling/`,
 `scripts/`, `metrics_server/` — are deliberately `production`: a class they use cannot be deleted without

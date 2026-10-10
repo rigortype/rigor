@@ -1,1 +1,2 @@
 - **[engine]** `rigor unused` reads `qa/`, `e2e/` and `features/` at the project root as test code, so a class used only from an end-to-end suite is listed as test-only rather than counted as production-reachable. ([#1756](https://github.com/rigortype/rigor/pull/1756))
+- **[engine]** `rigor unused` decides a file's role from its path relative to the project root, so a project checked out under a directory named `test/`, `spec/` or `config/` is no longer read as entirely test or config code. ([#1756](https://github.com/rigortype/rigor/pull/1756))

@@ -15,7 +15,8 @@ module Rigor
     #
     # A body is fully read when every call on its own `self` (the refinement module) is one that defines a name the
     # walk can spell, or one that defines nothing: a `def`, an `alias` or `alias_method` of two literal names, a
-    # `define_method` of a literal name, an `attr_*` of literal names, an `undef`, or a visibility call. Anything
+    # `define_method` of a literal name, an `attr_*` of literal names, an `undef`, a visibility call, or
+    # `Refinement#target`. Anything
     # else (`import_methods`, `send`, a computed `define_method`, `include`, a nested `refine`, any other call on
     # `self`) may define a name the walk cannot spell, so the body's names are incomplete and the table gets a
     # names-wildcard row for each target. A call on another receiver cannot define a method on the refinement, and
@@ -30,6 +31,9 @@ module Rigor
       # Calls on the refinement that define nothing: visibility, with no argument, literal names, a `def`, or an
       # allowlisted definer call.
       VISIBILITY_CALLS = Set[:private, :public, :protected, :module_function, :private_constant].freeze
+      # `Refinement#target`, a reader of the refined class (the other `Refinement` method on Ruby 4.0.5 is
+      # `import_methods`).
+      READER_CALLS = Set[:target].freeze
       # `attr_*` and whether each defines the reader and the writer.
       ATTR_CALLS = {
         attr_reader: [true, false].freeze, attr_writer: [false, true].freeze, attr_accessor: [true, true].freeze,
@@ -46,7 +50,7 @@ module Rigor
       ].freeze
       REFINE_WORD = /\brefine\b/
 
-      private_constant :VISIBILITY_CALLS, :ATTR_CALLS, :REFINE_WORD
+      private_constant :VISIBILITY_CALLS, :READER_CALLS, :ATTR_CALLS, :REFINE_WORD
 
       module_function
 
@@ -180,11 +184,16 @@ module Rigor
           record_define_method(arguments, reading)
         elsif name == :alias_method
           record_alias(Source::AliasNames.alias_method_call_names(node), reading, latest)
-        elsif VISIBILITY_CALLS.include?(name)
-          reading.complete = false unless arguments.all? { |argument| visibility_argument?(argument) }
         else
-          reading.complete = false
+          reading.complete = false unless defines_nothing?(node, arguments)
         end
+      end
+
+      # A visibility call with no argument, literal names, a `def` or a call; `Refinement#target` with none.
+      def defines_nothing?(node, arguments)
+        return arguments.all? { |argument| visibility_argument?(argument) } if VISIBILITY_CALLS.include?(node.name)
+
+        READER_CALLS.include?(node.name) && arguments.empty? && node.block.nil?
       end
 
       def record_attr(arguments, (reader, writer), reading)

@@ -178,7 +178,7 @@ declaration is opaque.**
   names-wildcard row of a level reached before a definer answers `Dynamic`, and so does a winner whose
   module shares its last segment with another listed module.
 - A plugin-declared module (WD5) is the plugin's declaration, not code Rigor failed to read: it is
-  never opaque, and one nothing declares refines nothing visible.
+  never opaque, and one nothing declares matches no row, so it silences nothing.
 
 Limits it does not remove: a module reopened in a file outside the analysed paths or under
 `exclude:`, a module declared or reopened inside an eval string, and

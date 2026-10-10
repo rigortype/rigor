@@ -189,7 +189,7 @@ lib/rigor/inference/refine_census.rb:
   computes: the method names a refine body defines on its refined class, and whether those are all of them (ADR-121 WD7)
   producers:
     Rigor::Inference::RefineCensus: VISIBILITY_CALLS names the calls a refine body may make on the refinement without defining a name (`private`, `public`, `protected`, `module_function`, `private_constant`); it reads which calls define nothing and derives no owner or side
-    Rigor::Inference::RefineCensus#classify_call: sorts a call on the refinement into a definer of literal names, a visibility call or an unreadable one; the refining module and the refined class are the caller's, so it derives no declaration context
+    Rigor::Inference::RefineCensus#defines_nothing?: answers whether a call on the refinement is a visibility call or `Refinement#target`, which define no name; the refining module and the refined class are the caller's, so it derives no declaration context
     Rigor::Inference::RefineCensus#scan_body: stops at a nested def, class, module or singleton class, which run on something other than the refinement; it collects names and derives no declaration context
 lib/rigor/inference/scope_indexer.rb:
   computes: the per-file and project discovery tables (methods, def nodes, visibilities, mixins, constants, ranges)

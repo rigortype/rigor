@@ -192,10 +192,11 @@ module Rigor
         list << names.last unless declared || list.include?(names.last)
       end
 
-      # A block source's declared module (#1667). One nothing declares refines nothing Rigor can see: it leaves.
+      # A block source's declared module (#1667), listed as declared. One nothing declares refines nothing Rigor can
+      # see, so it matches no row; the readers never treat a declared module as opaque.
       def append_expanded(list, name, expand)
         expanded = expand ? expand.call(name) : [name]
-        append_entries(list, expanded) unless expanded == UNDECLARED
+        append_entries(list, expanded == UNDECLARED ? [name] : expanded)
       end
 
       def append_entries(list, expanded)

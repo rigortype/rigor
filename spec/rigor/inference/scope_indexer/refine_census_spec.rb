@@ -233,8 +233,10 @@ RSpec.describe Rigor::Inference::ScopeIndexer, ".refine_census" do
       )
     end
 
-    it "keeps a body with visibility calls and a def under a condition fully read" do
+    # `Refinement#target` reads the refined class; on Ruby 4.0.5 `Refinement`'s only other method is `import_methods`.
+    it "keeps a body with visibility calls, Refinement#target and a def under a condition fully read" do
       expect(rows(<<~RUBY)).to eq({ a: ["M"], b: ["M"], c: ["M"], d: ["M"] })
+        self.target
         private
         def a = 1
         public def b = 1

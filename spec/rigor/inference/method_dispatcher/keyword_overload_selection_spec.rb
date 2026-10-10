@@ -25,6 +25,13 @@ RSpec.describe "Keyword arguments in overload selection (#1727)", type: :runner 
         def positional_hash: (Hash[Symbol, Integer] options) -> Integer
                            | () -> String
         def either: [T] (?default: T) { () -> T } -> T
+        def mode: (Integer x, mode: Symbol) -> :a
+                | (Integer x, mode: Integer) -> :b
+        def loose: (Integer x, mode: untyped) -> :loose
+                 | (Integer x, mode: Symbol) -> :sym
+        def yielding: (Integer x, as: Symbol) { (Symbol) -> void } -> void
+                    | (Integer x) { (Integer) -> void } -> void
+        def untyped_value: () -> untyped
       end
     RBS
   end
@@ -94,6 +101,31 @@ RSpec.describe "Keyword arguments in overload selection (#1727)", type: :runner 
     expect(dumped_types(<<~RUBY)).to eq(["Dynamic[top]", %("s")])
       dump_type(p.either(default: 1) { "s" })
       dump_type(p.either { "s" })
+    RUBY
+  end
+
+  # #1737 — an untyped keyword value reaches every overload's keyword, as an untyped positional reaches every
+  # positional parameter, so the #521 union answers rather than the first arm by position. A value-pinned keyword
+  # (`exception: false`) joins that union instead of declining the untyped value outright.
+  it "joins the overloads an untyped keyword value reaches" do
+    expect(dumped_types(<<~RUBY)).to eq(["Dynamic[:a | :b]", ":a", "Dynamic[Integer?]"])
+      dump_type(p.mode(1, mode: p.untyped_value))
+      dump_type(p.mode(1, mode: :q))
+      dump_type(p.flag(exception: p.untyped_value))
+    RUBY
+  end
+
+  it "does not let an untyped keyword win the strict pass over a typed one" do
+    expect(dumped_types(<<~RUBY)).to eq([":sym"])
+      dump_type(p.loose(1, mode: :q))
+    RUBY
+  end
+
+  # The block-parameter probe reads the call's keywords as the return path does.
+  it "selects the block-bearing overload by its keywords when typing block parameters" do
+    expect(dumped_types(<<~RUBY)).to eq(%w[Symbol Integer])
+      p.yielding(1, as: :x) { |value| dump_type(value) }
+      p.yielding(1) { |value| dump_type(value) }
     RUBY
   end
 

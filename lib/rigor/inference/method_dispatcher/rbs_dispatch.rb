@@ -243,7 +243,8 @@ module Rigor
             method_name: context.method_name,
             args: context.args,
             environment: environment,
-            scope: context.scope
+            scope: context.scope,
+            call_node: context.call_node
           )
         end
 
@@ -1629,11 +1630,14 @@ module Rigor
 
           # ----- block parameter probe (Phase C sub-phase 1) -----
 
-          def probe_block_param_types(receiver:, method_name:, args:, environment:, scope: nil)
+          def probe_block_param_types(receiver:, method_name:, args:, environment:, scope: nil, call_node: nil)
             args ||= []
+            keywords_last = keyword_arguments_last?(call_node, args)
             case receiver
-            when Type::Union then probe_block_param_types_union(receiver, method_name, args, environment, scope)
-            else                  probe_block_param_types_one(receiver, method_name, args, environment, scope)
+            when Type::Union
+              probe_block_param_types_union(receiver, method_name, args, environment, scope, keywords_last)
+            else
+              probe_block_param_types_one(receiver, method_name, args, environment, scope, keywords_last)
             end
           end
 
@@ -1641,9 +1645,9 @@ module Rigor
           # member resolves the same arity and types (otherwise the call sites would have to thread
           # per-member binders, which the slice does not support yet). Mismatches degrade to the empty
           # array so the binder defaults all params to Dynamic[Top].
-          def probe_block_param_types_union(receiver, method_name, args, environment, scope)
+          def probe_block_param_types_union(receiver, method_name, args, environment, scope, keywords_last)
             results = receiver.members.map do |member|
-              probe_block_param_types_one(member, method_name, args, environment, scope)
+              probe_block_param_types_one(member, method_name, args, environment, scope, keywords_last)
             end
             return [] if results.empty?
             return [] unless results.all? { |r| r == results.first }
@@ -1651,7 +1655,7 @@ module Rigor
             results.first
           end
 
-          def probe_block_param_types_one(receiver, method_name, args, environment, scope)
+          def probe_block_param_types_one(receiver, method_name, args, environment, scope, keywords_last)
             descriptor = receiver_descriptor(receiver)
             return [] unless descriptor
 
@@ -1669,7 +1673,8 @@ module Rigor
               environment: environment,
               receiver: receiver,
               receiver_args: receiver_args,
-              method_name: method_name
+              method_name: method_name,
+              keywords_last: keywords_last
             )
           rescue StandardError
             []
@@ -1678,7 +1683,7 @@ module Rigor
           # rubocop:disable Metrics/ParameterLists
           def extract_block_param_types(method_definition, class_name:, kind:, args:, type_vars:,
                                         environment: nil, receiver: nil, receiver_args: [],
-                                        method_name: nil)
+                                        method_name: nil, keywords_last: false)
             # rubocop:enable Metrics/ParameterLists
             instance_type = Type::Combinator.nominal_of(class_name)
             self_type =
@@ -1708,6 +1713,7 @@ module Rigor
               instance_type: instance_type,
               type_vars: type_vars,
               block_required: true,
+              keywords_last: keywords_last,
               environment: environment
             )
             return [] unless method_type

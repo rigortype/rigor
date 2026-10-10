@@ -63,6 +63,17 @@ module Rigor
             end
         end
 
+        # The declarations the keys of the call's keyword hash land in, for the selector's `shared` bundle; empty
+        # without a shaped keyword hash `fun` takes (a key nothing declares lands nowhere).
+        def passed_params(fun, shared)
+          keywords = keyword_hash(fun, shared[:arg_types], shared[:keywords_last])
+          return [] unless keywords.is_a?(Type::HashShape)
+
+          keywords.pairs.each_key.filter_map do |name|
+            fun.required_keywords[name] || fun.optional_keywords[name] || fun.rest_keywords
+          end
+        end
+
         def required_present?(fun, keywords, strict)
           fun.required_keywords.each_key.all? do |name|
             next true if keywords.pairs.key?(name) && !keywords.optional_key?(name)

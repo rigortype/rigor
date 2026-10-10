@@ -406,7 +406,7 @@ module Rigor
           arguments = call_node.arguments&.arguments || []
           MethodDispatcher.expected_block_param_types(
             receiver_type: receiver, method_name: call_node.name, environment: scope.environment, scope: scope,
-            arg_types: arguments.map { |argument| scope.type_of(argument) }
+            arg_types: arguments.map { |argument| scope.type_of(argument) }, call_node: call_node
           )
         rescue StandardError
           []

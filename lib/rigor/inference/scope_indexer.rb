@@ -3348,7 +3348,7 @@ module Rigor
       # `:recorded` (a literal target and block, its names recorded), `:class_unknown` (a block whose target the walk
       # cannot name), `:targets_wildcard` (a `refine` in a `def`, charged to its module), `:literal` (A3's `:refine`
       # / eval-string literal), `:nested` (a `refine` in a refine body), `:dsl` (where `self` is a class, #1689) and
-      # `:raises` (no block, a Proc as the block, another receiver, or `main`).
+      # `:raises` (no block, a Proc as the block, another receiver, or a computed target where `self` is `main`).
       def refine_census(root)
         census = []
         refinements = build_methods_and_def_nodes(root, census: census)[3]

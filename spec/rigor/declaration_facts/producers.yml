@@ -246,6 +246,7 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#detect_multi_write_target_writes: grandfathered
     Rigor::Inference::ScopeIndexer#detect_read_before_write: grandfathered
     Rigor::Inference::ScopeIndexer#each_refinement_def: grandfathered
+    Rigor::Inference::ScopeIndexer#each_class_body_def: yields the defs of a value-position class-body block so the per-node scope walk records the self each body runs on (#1696); it registers no method, the def index having keyed them already
     Rigor::Inference::ScopeIndexer#extends_block_handled?: a dispatcher over the block-carrying call; it decides which extends-walk arm owns a block (rebound, skipped, or descended) and adds no table entry itself, the arms it calls being the listed producers
     Rigor::Inference::ScopeIndexer#finalize_call_surface_tables: grandfathered
     Rigor::Inference::ScopeIndexer#finalize_def_index: grandfathered
@@ -304,6 +305,7 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#record_anonymous_body_def_as_toplevel: grandfathered
     Rigor::Inference::ScopeIndexer#record_anonymous_meta_superclass: grandfathered
     Rigor::Inference::ScopeIndexer#record_attr_writer_ivars: grandfathered
+    Rigor::Inference::ScopeIndexer#record_class_body_defs: records in the per-node scope table the self each def of a value-position class-body or refine block runs on (#1696); it records which scope a node is typed under, not what a declaration is
     Rigor::Inference::ScopeIndexer#record_class_new_constant_decl: grandfathered
     Rigor::Inference::ScopeIndexer#record_class_or_module?: grandfathered
     Rigor::Inference::ScopeIndexer#record_class_sources: grandfathered
@@ -349,6 +351,8 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#subtract_sibling_methods!: rewrites only the possible_discovered_methods sibling in the finalize pass, dropping the names a def declares; it derives no declaration context
     Rigor::Inference::ScopeIndexer#surface_mixin_call?: grandfathered
     Rigor::Inference::ScopeIndexer#taint_opaque_eval: taints the enclosing owner the walk passes in when an eval block on an opaque receiver mixes a module in; it computes no declaration context
+    Rigor::Inference::ScopeIndexer#unentered_block_entry: the entry scope of a block the evaluator never entered; it passes the scope table to unentered_meta_class_body_entry, which records which scope a node is typed under, not what a declaration is
+    Rigor::Inference::ScopeIndexer#unentered_meta_class_body_entry: records the class-body self of a value-position Class.new / Module.new / Struct.new / Data.define block in the per-node scope table (#1696), under the name AnonymousMetaClass.name_for gives; it records which scope a node is typed under, not what a declaration is
     Rigor::Inference::ScopeIndexer#walk_anonymous_meta_block: grandfathered
     Rigor::Inference::ScopeIndexer#walk_class_cvars: grandfathered
     Rigor::Inference::ScopeIndexer#walk_class_extends: grandfathered

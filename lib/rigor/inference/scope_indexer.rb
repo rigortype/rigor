@@ -10050,6 +10050,12 @@ module Rigor
           else
             LastLine.block_entry(FreshFrameBlocks.closure_entry(current_scope, block, node), block, node)
           end
+        anonymous = AnonymousMetaClass.name_for(node, current_scope.source_path)
+        return unentered_meta_class_body_entry(block, entry, anonymous, table) if anonymous
+
+        refined = refined_body_name(node, current_scope)
+        record_class_body_defs(block, entry, table, Type::Combinator.nominal_of(refined), nil) if refined
+
         # Issue #1717 — the body's `self` is unknown unless narrowed, as on the evaluator's entry; only the
         # `call.undefined-method` mark is set here, never #316's opaque mark (its bind gate reads the evaluator's).
         entry = entry.with_block_self_unknown(true) unless narrowing&.self_type
@@ -10057,6 +10063,70 @@ module Rigor
 
         MacroBlockSelfType.apply(entry, narrowing, keeps_unknown: current_scope.block_self_narrowing_unknown?(node))
       end
+
+      # Issue #1120 — the class a `refine X do … end` call's block refines, or nil when the call is not that shape
+      # or is a `refine` where `self` is a class (issue #1689: the class's own method, its block an ordinary one).
+      # The evaluator asks the same two questions ({StatementEvaluator#refined_class_context}).
+      def refined_body_name(node, scope)
+        target = refine_target(node)
+        return nil if target.nil? || InEffectRefinements.class_body_refine?(scope, node)
+
+        refined_class_name(target, scope)
+      end
+
+      # Issue #1120 — the name of the class `refine target do … end` refines: the class `target` types as, or the
+      # constant as written when it does not type as a class object (a gem class with no RBS). Shared by
+      # {StatementEvaluator#refined_class_context} and {#refined_body_name}.
+      def refined_class_name(target, scope)
+        refined = scope.type_of(target)
+        name = refined.is_a?(Type::Singleton) ? refined.class_name : Source::ConstantPath.qualified_name(target)
+        name&.delete_prefix("::")
+      end
+
+      # Issue #1696 — the entry of a `Class.new` / `Module.new` / `Struct.new` / `Data.define` block the evaluator
+      # never entered because it sits in a value position: `Object.const_set(:K, Class.new { attr_reader :x })`,
+      # `[Struct.new(:a) { def b = a }]`. Its `self` is the class `name` ({AnonymousMetaClass.name_for}) names, as
+      # {StatementEvaluator#enter_meta_class_body} gives the statement form; left on the enclosing `self`, a
+      # top-level one read every macro in it as `call.unresolved-toplevel`. Its `def`s are recorded as
+      # {#record_class_body_defs} says.
+      def unentered_meta_class_body_entry(block, entry, name, table)
+        entry = entry.with_block_self_type(Type::Combinator.singleton_of(name)).with_singleton_class_body(false)
+        record_class_body_defs(block, entry, table, Type::Combinator.nominal_of(name), entry.self_type)
+        entry
+      end
+
+      # Issue #1696 — records each `def` a value-position class-body block defines ({#each_class_body_def}) with the
+      # `self` its body runs on, since no evaluator pass enters it: `instance_self` for a plain `def`, `class_self`
+      # for a `def self.m` (skipped when nil). A `refine X` block passes only `Nominal[X]`: Ruby runs its defs on an
+      # instance of X, but the block itself on the refinement module, which Rigor does not model, so the block keeps
+      # the unknown `self` an unnarrowed block has. A `def obj.m` is left to the walk.
+      def record_class_body_defs(block, entry, table, instance_self, class_self)
+        each_class_body_def(block.body) do |def_node|
+          next if table.key?(def_node)
+
+          receiver = def_node.receiver
+          def_self =
+            if receiver.nil? then instance_self
+            elsif receiver.is_a?(Prism::SelfNode) then class_self
+            end
+          table[def_node] = entry.with_block_self_type(def_self) if def_self
+        end
+      end
+
+      # The `def`s a class-body block defines on its class: every one in the body, `private def m` included, short
+      # of a nested block, lambda or `class` / `module` / `class << …` body, each of which opens its own.
+      def each_class_body_def(node, &)
+        return unless node.is_a?(Prism::Node)
+        return yield(node) if node.is_a?(Prism::DefNode)
+        return if CLASS_BODY_DEF_BARRIERS.include?(node.class)
+
+        node.rigor_each_child { |child| each_class_body_def(child, &) }
+      end
+
+      CLASS_BODY_DEF_BARRIERS = [
+        Prism::BlockNode, Prism::LambdaNode, Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode
+      ].freeze
+      private_constant :CLASS_BODY_DEF_BARRIERS
 
       # The narrowing ({MacroBlockSelfType::Match}) an unentered block's body runs with — its `self` and, for a
       # `block_as_methods:` entry, the declared refinements (issue #1667) — when the call is one whose block the

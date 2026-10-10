@@ -805,11 +805,28 @@ module Rigor
           vendored_partial_standdown_message(subject, declarations)
         end
 
+        # One sentence per kind of stand-down present ({Environment::GatedSignaturePlan.standdowns}' reasons).
+        VENDORED_STANDDOWN_SENTENCES = {
+          "member" => "left out %<count>d method declaration(s) another signature source also makes, since two " \
+                      "declarations of one method fail the class's definition build, and uses the other " \
+                      "source's: %<list>s.",
+          "type" => "stood %<count>d type(s) down whole, keeping only the types nested in them, because another " \
+                    "source declares each with a different kind (class or module) or generic arity, or the type " \
+                    "failed to build beside that source's declaration: %<list>s.",
+          "open" => "kept %<count>d type(s) without their superclass, because each failed to build beside the " \
+                    "other signatures although no other source declares it; calls they no longer answer read " \
+                    "untyped rather than undefined: %<list>s."
+        }.freeze
+        private_constant :VENDORED_STANDDOWN_SENTENCES
+
         def vendored_partial_standdown_message(subject, declarations)
-          "#{subject} left out " \
-            "#{declarations.size} declaration(s) another signature source also makes: " \
-            "#{sampled(vendored_standdown_labels(declarations), 5)}. Two declarations of one method fail the " \
-            "class's definition build, so the other source's declaration is used for these and the rest of the " \
+          sentences = VENDORED_STANDDOWN_SENTENCES.filter_map do |reason, template|
+            group = declarations.select { |entry| (entry[2] || "member") == reason }
+            next if group.empty?
+
+            format(template, count: group.size, list: sampled(vendored_standdown_labels(group), 5))
+          end
+          "#{subject} loaded without some of their declarations. Rigor #{sentences.join(' Rigor ')} The rest of the " \
             "vendored signatures still load. Nothing to fix unless the other declaration is an outdated copy; " \
             "removing it brings the vendored one back."
         end

@@ -248,7 +248,7 @@ module Rigor
         end
 
         def gated_type_names(dirs)
-          roots = dirs.map { |dir| Pathname(File.join(VENDORED_GEM_SIGS_ROOT, dir)) }
+          roots = dirs.map { |dir| gated_dir_root(dir) }
           names = roots.flat_map { |root| GatedSignatureGuard.type_names(root) }
           names.uniq.map { |name| ::RBS::TypeName.parse("::#{name}") }
         end
@@ -1702,19 +1702,24 @@ module Rigor
       end
 
       # Issue #1713 — what stood down from each {RequiredFeatures}-gated vendored directory this loader's library
-      # list activated, as {GatedSignaturePlan.standdowns} reports it: `[dir, [[declaration, cause_file], ...],
-      # whole]`. Derived from the final env, so a cache HIT reports what the cold build decided. Empty, without
+      # list activated, as {GatedSignaturePlan.standdowns} reports it: `[dir, [[declaration, cause_file, reason],
+      # ...], whole]`. Derived from the final env, so a cache HIT reports what the cold build decided. Empty, without
       # building the env, when no gated directory is active; empty too for a directory whose feature resolved as
       # an RBS library, which the build never loads ({.loadable_gated_dirs}).
       def vendored_standdowns
-        @state[:vendored_standdowns] ||= begin
-          names = @libraries.map(&:to_s)
-          roots = RequiredFeatures.active_dirs(names).uniq.each_with_object({}) do |dir, acc|
-            acc[dir] = self.class.gated_dir_root(dir) unless gated_feature_resolved?(dir, names)
-          end
-          (roots.empty? ? [] : GatedSignaturePlan.standdowns(env, roots)).freeze
-        end
+        @state[:vendored_standdowns] ||= derive_vendored_standdowns.freeze
       end
+
+      def derive_vendored_standdowns
+        names = @libraries.map(&:to_s)
+        roots = RequiredFeatures.active_dirs(names).uniq.each_with_object({}) do |dir, acc|
+          acc[dir] = self.class.gated_dir_root(dir) unless gated_feature_resolved?(dir, names)
+        end
+        return [] if roots.empty?
+
+        GatedSignaturePlan.standdowns(env, roots, self.class.project_sig_files(@signature_paths))
+      end
+      private :derive_vendored_standdowns
 
       def gated_feature_resolved?(dir, library_names)
         feature = RequiredFeatures.feature_for_dir(dir)

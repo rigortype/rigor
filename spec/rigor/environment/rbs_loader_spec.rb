@@ -2298,7 +2298,7 @@ RSpec.describe Rigor::Environment::RbsLoader do
       cold = build_loader(root).vendored_standdowns
       warm = build_loader(root).vendored_standdowns
 
-      expect(cold).to eq([["prime", [["Integer#prime?", File.join(tmpdir, "ext.rbs")]], false]])
+      expect(cold).to eq([["prime", [["Integer#prime?", File.join(tmpdir, "ext.rbs"), "member"]], false]])
       expect(warm).to eq(cold)
     end
 
@@ -2308,9 +2308,70 @@ RSpec.describe Rigor::Environment::RbsLoader do
       File.write(File.join(tmpdir, "prime.rbs"), "class Prime[T]\n  def extra: () -> T\nend\n")
       loader = build_loader
 
-      expect(loader.vendored_standdowns).to eq([["prime", [["Prime", File.join(tmpdir, "prime.rbs")]], false]])
+      expect(loader.vendored_standdowns).to eq([["prime", [["Prime", File.join(tmpdir, "prime.rbs"), "type"]], false]])
       expect(loader.project_declared_classes).to include("Prime")
       expect(loader.instance_method(class_name: "Integer", method_name: :prime_division)).not_to be_nil
+    end
+
+    # Shapes the shipped prime signatures do not carry, through a stand-in gated directory.
+    describe "with a stand-in gated directory" do
+      # Outside `tmpdir`, which is the signature path.
+      let(:vendored_root) { Dir.mktmpdir("rigor-rbs-loader-vendored-") }
+      let(:vendored) { File.join(vendored_root, "prime") }
+
+      after { FileUtils.rm_rf(vendored_root) }
+
+      before do
+        FileUtils.mkdir_p(vendored)
+        root = Pathname(vendored)
+        allow(described_class).to receive_messages(vendored_gem_sig_paths: [root], gated_dir_root: root)
+      end
+
+      def standdown_entries(loader)
+        loader.vendored_standdowns.flat_map { |_dir, entries, _whole| entries }
+      end
+
+      it "narrows a def self? to the side another source does not declare" do
+        File.write(File.join(vendored, "both.rbs"), "class Integer\n  def self?.zzz_both: () -> Integer\nend\n")
+        File.write(File.join(tmpdir, "ext.rbs"), "class Integer\n  def self.zzz_both: () -> String\nend\n")
+        loader = build_loader
+
+        expect(loader.instance_method(class_name: "Integer", method_name: :zzz_both)).not_to be_nil
+        expect(loader.singleton_method(class_name: "Integer", method_name: :zzz_both).method_types.map(&:to_s))
+          .to eq(["() -> ::String"])
+        expect(standdown_entries(loader)).to eq([["Integer.zzz_both", File.join(tmpdir, "ext.rbs"), "member"]])
+      end
+
+      # The subclass fails only because the project made its superclass a module; no other source declares the
+      # subclass, so it keeps its own members and reads as a synthesized stub type for what it inherited.
+      it "keeps a failing type no other source declares, without its superclass, as a stub type" do
+        File.write(File.join(vendored, "tree.rbs"), <<~RBS)
+          class ZzzBase
+            def from_base: () -> Integer
+          end
+          class ZzzChild < ZzzBase
+            def own: () -> Integer
+          end
+        RBS
+        File.write(File.join(tmpdir, "base.rbs"), "module ZzzBase\nend\n")
+        loader = build_loader
+
+        expect(loader.instance_method(class_name: "ZzzChild", method_name: :own)).not_to be_nil
+        expect(loader.synthesized_type_names).to include("ZzzChild")
+        expect(standdown_entries(loader)).to contain_exactly(
+          ["ZzzBase", File.join(tmpdir, "base.rbs"), "type"], ["ZzzChild", nil, "open"]
+        )
+      end
+
+      # Only the trial build sees the superclass disagree with core's `Integer < Numeric`; the type is shelled,
+      # and core's declaration is not named as if it were the project's clashing one.
+      it "names no cause for a type that only failed beside core" do
+        File.write(File.join(vendored, "int.rbs"), "class Integer < String\n  def zzz_own: () -> Integer\nend\n")
+        loader = build_loader
+
+        expect(standdown_entries(loader)).to eq([["Integer", nil, "type"]])
+        expect(loader.instance_method(class_name: "Integer", method_name: :succ)).not_to be_nil
+      end
     end
 
     it "reports nothing, and builds nothing, when no gated directory is active" do

@@ -14,13 +14,18 @@ module Rigor
     #
     # - a method, attribute or alias another source declares on the same class is left out (an overload
     #   continuation, `def m: ... | ...`, declares nothing of its own and needs the vendored base, so it keeps
-    #   it);
+    #   it); a member declaring two methods loses only the one taken — an `attr_accessor` narrows to its reader
+    #   or writer, a `def self?.m` to its instance or singleton side;
     # - a type whose header disagrees with another source's — a class one side declares as a module, or a
     #   different generic arity — stands down as a whole: its declaration becomes a *shell*, the other source's
     #   header with no members and no superclass, which keeps the vendored types nested inside it in their
     #   lexical context;
     # - a type in `shelled` (the types the trial build of a previous plan still failed for) is shelled the same
-    #   way.
+    #   way when another source declares it. When none does — the type failed because something it names was
+    #   displaced, a superclass the project redeclared as a module, say — it keeps its own members and nested
+    #   types but loses its superclass, and is stamped as a Rigor-synthesized stub type
+    #   (`RbsLoader::SYNTHETIC_STUB_BUFFER`): its own members still type, and a call it no longer answers reads
+    #   `Dynamic[top]` rather than drawing `call.undefined-method` for a method it inherits at runtime.
     #
     # The kept declarations load where the directory would have loaded, ahead of the project's signatures, so
     # which declaration is a class's primary one does not move; the shells load after them, so a shell never
@@ -78,22 +83,31 @@ module Rigor
           others = GatedSignaturePlan.other_declarations(@base_env, name)
           nested = decl.members.select { |member| GatedSignaturePlan.type_declaration?(member) }
           nested_lead, nested_shell = plan_decls(nested, name)
-          if @shelled.include?(name) || GatedSignaturePlan.header_conflict?(decl, others)
+          if GatedSignaturePlan.header_conflict?(decl, others) || (@shelled.include?(name) && !others.empty?)
             @changed = true
-            return [nil, GatedSignaturePlan.header_copy(others.first || decl, decl.name, nested_lead + nested_shell)]
+            return [nil, GatedSignaturePlan.header_copy(others.first, decl.name, nested_lead + nested_shell)]
           end
+          return [nil, open_type(decl, nested_lead + nested_shell)] if @shelled.include?(name)
 
           wrapper = nested_shell.empty? ? nil : GatedSignaturePlan.header_copy(decl, decl.name, nested_shell)
           [keep_type(decl, others, nested_lead), wrapper]
         end
 
-        # `decl` less the members `others` declare, with its nested types replaced by their planned kept halves.
+        # `decl` less the methods `others` declare, with its nested types replaced by their planned kept halves.
         def keep_type(decl, others, nested_lead)
           taken = GatedSignaturePlan.declared_keys(others)
           own = decl.members.reject { |member| GatedSignaturePlan.type_declaration?(member) }
-          members = own.reject { |member| GatedSignaturePlan.clashes?(member, taken) }
-          @changed ||= members.size != own.size
+          members = own.filter_map { |member| GatedSignaturePlan.untaken(member, taken) }
+          @changed ||= members.size != own.size || members.zip(own).any? { |kept, member| !kept.equal?(member) }
           GatedSignaturePlan.rebuild(decl, members: members + nested_lead)
+        end
+
+        # A type no other source declares that still failed to build: its own members, no superclass, stamped as a
+        # synthesized stub type so what it no longer inherits reads untyped.
+        def open_type(decl, nested)
+          @changed = true
+          own = decl.members.reject { |member| GatedSignaturePlan.type_declaration?(member) }
+          GatedSignaturePlan.header_copy(decl, decl.name, own + nested, buffer_name: RbsLoader::SYNTHETIC_STUB_BUFFER)
         end
       end
 
@@ -153,14 +167,35 @@ module Rigor
         end
       end
 
-      def clashes?(member, taken)
-        RbsLoader.member_method_keys(member).any? { |key| taken.include?(key) }
+      # `member` less the methods in `taken`: itself when it declares none of them, nil when it declares only
+      # them, else narrowed to the one it declares that is not taken.
+      def untaken(member, taken)
+        keys = RbsLoader.member_method_keys(member)
+        left = keys.reject { |key| taken.include?(key) }
+        return member if left.size == keys.size
+        return nil if left.empty?
+
+        narrowed(member, left.first)
+      end
+
+      # The two members that declare two methods: an `attr_accessor` (a reader and a writer) and a
+      # `def self?.m` (an instance and a singleton method).
+      def narrowed(member, key)
+        method_name, kind = key
+        return member.update(kind: kind) if member.is_a?(::RBS::AST::Members::MethodDefinition)
+
+        attribute = method_name.to_s.end_with?("=") ? ::RBS::AST::Members::AttrWriter : ::RBS::AST::Members::AttrReader
+        attribute.new(
+          name: member.name, type: member.type, ivar_name: member.ivar_name, kind: member.kind,
+          annotations: member.annotations, location: member.location, comment: member.comment,
+          visibility: member.visibility
+        )
       end
 
       # `source`'s kind and type parameters under `name`, carrying only `members` — no superclass, self types,
       # annotations or members of its own, all of which a reopening declaration may omit.
-      def header_copy(source, name, members)
-        location = ::RBS::Location.new(shell_buffer, 0, 0)
+      def header_copy(source, name, members, buffer_name: SHELL_BUFFER)
+        location = ::RBS::Location.new(::RBS::Buffer.new(name: buffer_name, content: ""), 0, 0)
         if source.is_a?(::RBS::AST::Declarations::Class)
           ::RBS::AST::Declarations::Class.new(
             name: name, type_params: source.type_params, super_class: nil, members: members,
@@ -200,32 +235,39 @@ module Rigor
       end
 
       # What stood down from each of `roots` in `env`, as `[dir, entries, whole]`: `entries` are
-      # `[declaration, cause_file]` pairs, `declaration` reading `Integer#prime?`, `Integer.from_prime_division`
+      # `[declaration, cause_file, reason]`, `declaration` reading `Integer#prime?`, `Integer.from_prime_division`
       # or `Prime` (a whole type), `cause_file` the buffer name of the other source's declaration, or nil when it
-      # cannot be named. `whole` is true when the directory stood down entirely; its entries are then only the
-      # clashes the environment still shows. A directory nothing stood down from is left out.
+      # cannot be named, and `reason` one of `"member"` (another source declares that method), `"type"` (the
+      # type stood down whole, its header contradicted or failing beside another source's declaration) or
+      # `"open"` (it failed with no other source declaring it, and was kept without its superclass, unchecked).
+      # `whole` is true when the directory stood down entirely; its entries are then only the clashes the
+      # environment still shows. A directory nothing stood down from is left out.
       #
       # @param roots — `{dir_basename => Pathname}` of the gated directories the run activated.
-      def standdowns(env, roots)
+      # @param project_files — the project's own signature files: a cause is named from them (or from inline
+      #   RBS) in preference to another source, and only from them when the type failed rather than clashed.
+      def standdowns(env, roots, project_files = Set.new)
         return [] if env.nil?
 
         loaded = RbsLoader.loaded_signature_buffers(env)&.to_set { |buffer| buffer.name.to_s } || Set.new
         roots.sort.filter_map do |dir, root|
           files = signature_files([root])
           whole = files.none? { |file| loaded.include?(file) }
-          entries = files.flat_map { |file| file_standdowns(env, file, whole) }.uniq
+          entries = files.flat_map { |file| file_standdowns(env, file, whole, project_files) }.uniq
           [dir, entries, whole] if whole || !entries.empty?
         end
       rescue ::RBS::BaseError
         []
       end
 
-      def file_standdowns(env, file, whole)
+      def file_standdowns(env, file, whole, project_files)
         _buffer, _directives, decls = RbsLoader.parse_signature_file(file)
         return [] if decls.nil?
 
         entries = []
-        each_type(decls, nil) { |decl, name| entries.concat(type_standdowns(env, file, decl, name, whole)) }
+        each_type(decls, nil) do |decl, name|
+          entries.concat(type_standdowns(env, file, [decl, name], whole, project_files))
+        end
         entries
       end
 
@@ -239,29 +281,45 @@ module Rigor
         end
       end
 
-      def type_standdowns(env, file, decl, name, whole)
+      def type_standdowns(env, file, (decl, name), whole, project_files)
         entry = env.class_decls[::RBS::TypeName.parse("::#{name}")]
         declarations = entry.nil? ? [] : RbsLoader.entry_declarations(entry)
         vendored = declarations.select { |other| RbsLoader.declaration_buffer_name(other) == file }
         others = declarations.reject { |other| vendored.include?(other) || synthetic?(other) }
         # A partial load shells a type that stood down, so its vendored declaration is gone; a whole stand-down
         # removed every vendored declaration, and only a header the environment still contradicts names a type.
-        type_stood_down = whole ? header_conflict?(decl, others) : vendored.empty?
-        return [[name, buffer_of(others.first)]] if type_stood_down
+        conflict = header_conflict?(decl, others)
+        type_row = [[name, type_cause(others, conflict, project_files), "type"]]
+        return conflict ? type_row : member_standdowns(decl, name, [], others, true) if whole
+        return member_standdowns(decl, name, vendored, others, false) unless vendored.empty?
+        return [[name, nil, "open"]] if others.empty? && declarations.any? { |other| stub?(other) }
 
-        member_standdowns(decl, name, vendored, others, whole)
+        type_row
+      end
+
+      # A header clash names the declaration it clashed with, preferring the project's own; a type that only
+      # failed beside another source names a project or inline declaration of it, never core or a gem's copy.
+      def type_cause(others, conflict, project_files)
+        own = others.find do |other|
+          name = buffer_of(other).to_s
+          project_files.include?(name) || name.start_with?("virtual:")
+        end
+        buffer_of(own || (conflict ? others.first : nil))
+      end
+
+      def stub?(decl)
+        RbsLoader.declaration_buffer_name(decl) == RbsLoader::SYNTHETIC_STUB_BUFFER
       end
 
       def member_standdowns(decl, name, vendored, others, whole)
         present = declared_keys(vendored)
-        decl.members.filter_map do |member|
-          keys = RbsLoader.member_method_keys(member)
-          next if keys.empty? || keys.all? { |key| present.include?(key) }
+        decl.members.flat_map do |member|
+          RbsLoader.member_method_keys(member).reject { |key| present.include?(key) }.filter_map do |key|
+            cause = others.find { |other| other.members.any? { |m| RbsLoader.member_method_keys(m).include?(key) } }
+            next if whole && cause.nil?
 
-          cause = others.find { |other| other.members.any? { |m| RbsLoader.member_method_keys(m).intersect?(keys) } }
-          next if whole && cause.nil?
-
-          [member_label(name, keys.first), buffer_of(cause)]
+            [member_label(name, key), buffer_of(cause), "member"]
+          end
         end
       end
 

@@ -76,10 +76,14 @@ fails to build, or a project file declaring one of them is quarantined),
 it loads again less what clashes
 (`Rigor::Environment::RbsLoader.build_env_for`,
 `Rigor::Environment::GatedSignaturePlan`). A member another source also
-declares is left out, so a project shim declaring only `Integer#prime?`
+declares is left out (only that half of an `attr_accessor` or
+`def self?.m`), so a project shim declaring only `Integer#prime?`
 keeps `12.prime_division` and `Prime.each`; a type whose header another
 source contradicts (a class against a module, a different generic arity,
-or a superclass the trial build rejects) stands down whole; and only if
+or a superclass the trial build rejects) stands down whole; a type that
+fails only because something it names was displaced keeps its own
+members but not its superclass, and is unchecked for what it inherits;
+and only if
 that still does not build does the whole directory stand down. The files
 here are never rewritten: the declarations are filtered after parsing.
 What stood down is reported as the `:info` notice

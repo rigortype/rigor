@@ -255,7 +255,7 @@ RSpec.describe "vendored signatures gated on a required feature (#1700)" do
       expect(rows.size).to eq(1)
       expect(rows.first.severity).to eq(:info)
       expect(rows.first.path).to eq(".rigor.yml")
-      expect(rows.first.message).to include("left out 1 declaration(s)", "`Integer#prime?` (sig/ext.rbs)")
+      expect(rows.first.message).to include("left out 1 method declaration(s)", "`Integer#prime?` (sig/ext.rbs)")
     end
 
     it "reports the stand-down cold, warm and under --incremental, and drops it with the clash" do
@@ -372,7 +372,48 @@ RSpec.describe "vendored signatures gated on a required feature (#1700)" do
 
       expect(call_rows(result)).to contain_exactly(a_string_matching(/nope' for 1/))
       expect(standdown_rows(result).map(&:message))
-        .to contain_exactly(a_string_including("left out 1 declaration(s)", "`Integer#prime_division` (sig/ext.rbs)"))
+        .to contain_exactly(a_string_including("left out 1 method declaration(s)",
+                                               "`Integer#prime_division` (sig/ext.rbs)"))
+    end
+
+    it "keeps an accessor's reader when another source declares only its writer" do
+      write("sig/ext.rbs",
+            "class Prime\n  class PseudoPrimeGenerator\n    attr_writer upper_bound: Integer?\n  end\nend\n")
+      write("lib/use.rb", "require 'prime'\ng = Prime::EratosthenesGenerator.new\np g.upper_bound\n" \
+                          "g.upper_bound = 3\np 12.prime_division\np 1.nope\n")
+      result = run(configuration: sig_config)
+
+      expect(call_rows(result)).to contain_exactly(a_string_matching(/nope' for 1/))
+      expect(standdown_rows(result).map(&:message))
+        .to contain_exactly(a_string_including("`Prime::PseudoPrimeGenerator#upper_bound=` (sig/ext.rbs)."))
+    end
+
+    it "keeps an accessor's writer when another source declares only its reader" do
+      write("sig/ext.rbs",
+            "class Prime\n  class PseudoPrimeGenerator\n    def upper_bound: () -> Integer?\n  end\nend\n")
+      write("lib/use.rb", "require 'prime'\ng = Prime::EratosthenesGenerator.new\np g.upper_bound\n" \
+                          "g.upper_bound = 3\np 1.nope\n")
+      result = run(configuration: sig_config)
+
+      expect(call_rows(result)).to contain_exactly(a_string_matching(/nope' for 1/))
+      expect(standdown_rows(result).map(&:message))
+        .to contain_exactly(a_string_including("`Prime::PseudoPrimeGenerator#upper_bound` (sig/ext.rbs)."))
+    end
+
+    # The project makes the generators' superclass a module, so each generator fails on its superclass although
+    # nothing else declares it; they stay, unchecked for what they inherited, rather than lose every method.
+    it "does not report a generator's inherited method once its superclass stood down" do
+      write("sig/ext.rbs", "class Prime\n  module PseudoPrimeGenerator\n    def foo: () -> Integer\n  end\nend\n")
+      write("lib/use.rb", "require 'prime'\np 12.prime_division\nPrime.each(10) { |x| p x }\n" \
+                          "p Prime::Generator23.new.succ\np 1.nope\n")
+      result = run(configuration: sig_config)
+
+      expect(build_failures(result)).to be_empty
+      expect(call_rows(result)).to contain_exactly(a_string_matching(/nope' for 1/))
+      message = standdown_rows(result).map(&:message).first
+      expect(message).to include("`Prime::PseudoPrimeGenerator` (sig/ext.rbs)", "without their superclass",
+                                 "`Prime::Generator23`")
+      expect(message).not_to include("declarations of one method")
     end
 
     it "keeps everything, without a notice, beside an overload continuation" do

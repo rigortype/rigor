@@ -15,7 +15,7 @@ module Rigor
         NO_PARAMS = [].freeze
         private_constant :NO_PARAMS
 
-        # The most argument lists {.distributions} spells out before it gives up.
+        # The most argument lists {.distributions} spells out; past it, the block probe answers no information.
         DISTRIBUTION_LIMIT = 8
         private_constant :DISTRIBUTION_LIMIT
 
@@ -38,16 +38,17 @@ module Rigor
         end
 
         # The argument lists a call with a keyword hash stands for, one per combination of the members of its
-        # union-typed keyword values (`headers: bool` stands for `headers: true` and `headers: false`), or nil past
-        # {DISTRIBUTION_LIMIT}. A precise union value selects per member at runtime, so an answer that holds for the
-        # call must hold for every member (#1737). Without a keyword hash, or with no union value, the one list.
+        # union-typed keyword values (`headers: bool` stands for `headers: true` and `headers: false`, and so does a
+        # `Dynamic[bool]`, which the #521 join produces), or nil when that is more than {DISTRIBUTION_LIMIT} lists. A
+        # precise union value selects per member at runtime, so an answer that holds for the call must hold for every
+        # member (#1737). Without a keyword hash, or with no union value, the one list.
         def distributions(arg_types, keywords_last)
           keywords = keywords_last && arg_types.last
           return [arg_types] unless keywords.is_a?(Type::HashShape)
+          return [arg_types] if keywords.pairs.each_value.none? { |value| union_members(value) }
 
-          choices = keywords.pairs.map { |name, value| [name, value.is_a?(Type::Union) ? value.members : [value]] }
-          return nil if choices.sum(1) { |_, members| members.size - 1 } > DISTRIBUTION_LIMIT
-          return [arg_types] if choices.all? { |_, members| members.size == 1 }
+          choices = keywords.pairs.map { |name, value| [name, union_members(value) || [value]] }
+          return nil if choices.reduce(1) { |count, (_, members)| count * members.size } > DISTRIBUTION_LIMIT
 
           combinations(choices).map do |pairs|
             shape = Type::HashShape.new(
@@ -56,6 +57,12 @@ module Rigor
             )
             arg_types[0...-1] + [shape]
           end
+        end
+
+        # The members a keyword value splits into: a union's, or a `Dynamic` whose static facet is a union's.
+        def union_members(value)
+          value = value.static_facet if value.is_a?(Type::Dynamic)
+          value.members if value.is_a?(Type::Union)
         end
 
         def combinations(choices)

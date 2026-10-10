@@ -1744,12 +1744,16 @@ module Rigor
             distributions = KeywordArguments.distributions(args, true)
             return [] if distributions.nil?
 
-            candidates = distributions.flat_map do |arg_types|
-              OverloadSelector.select_candidates(
-                method_definition, arg_types: arg_types, self_type: selector_self, instance_type: instance_type,
-                                   type_vars: type_vars, block_required: true, keywords_last: true,
-                                   environment: environment
+            candidates = []
+            distributions.each do |arg_types|
+              # Genuine matches only (`member` true): a member no overload takes must not lend the first-overload
+              # fallback to the agreement, which bound `headers: (true | nil)`'s block to the `true` arm.
+              matches = OverloadSelector.select_declared(
+                method_definition, arg_types, selector_self, instance_type, type_vars, true, environment, true, true
               )
+              return [] if matches.empty?
+
+              candidates.concat(matches)
             end
             answers = candidates.uniq.map do |method_type|
               block_params_of(method_type, self_type, instance_type, type_vars, environment)

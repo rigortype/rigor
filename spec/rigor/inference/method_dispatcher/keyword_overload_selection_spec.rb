@@ -33,6 +33,8 @@ RSpec.describe "Keyword arguments in overload selection (#1727)", type: :runner 
                     | (Integer x) { (Integer) -> void } -> void
         def untyped_value: () -> untyped
         def flag_value: () -> bool
+        def joined_flag: (Integer x) -> true
+                       | (String x) -> false
         def each_row: (headers: true) { (Symbol) -> void } -> void
                     | (?headers: false) { (Array[String]) -> void } -> void
       end
@@ -144,11 +146,15 @@ RSpec.describe "Keyword arguments in overload selection (#1727)", type: :runner 
     RUBY
   end
 
+  # A `Dynamic[bool]` (what the #521 join answers) splits like a `bool`; a member no overload takes (`nil` here)
+  # answers no information rather than lending the first-overload fallback to the agreement.
   it "reports nothing in a block whose keyword value may select either overload" do
     result = analyze(<<~RUBY, sig: sig)
       p = Picker.new
       p.each_row(headers: p.untyped_value) { |row| row.join(",") }
       p.each_row(headers: p.flag_value) { |row| row.join(",") }
+      p.each_row(headers: p.joined_flag(p.untyped_value)) { |row| row.join(",") }
+      p.each_row(headers: [true, nil].sample) { |row| row.join(",") }
     RUBY
     expect(result.diagnostics.select(&:error?).map(&:message)).to eq([])
   end

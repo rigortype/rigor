@@ -19,6 +19,48 @@ RSpec.describe "Typing calls through Ruby refinements (#1664)", type: :runner do
     RUBY
   end
 
+  let(:later_definers) do
+    <<~RUBY
+      module DM
+        refine(String) do
+          def center(a) = 1
+          define_method(:center) { |a| "dm" }
+        end
+      end
+      module AM
+        refine(Symbol) do
+          def center(a) = 1
+          alias_method :center, :to_s
+        end
+      end
+      module AL
+        refine(Integer) do
+          def c3 = 1
+          define_method(:c3) { "s" }
+          alias center c3
+        end
+      end
+      module AT
+        refine(Float) do
+          def center = 1
+          attr_reader :center
+        end
+      end
+      using DM
+      using AM
+      using AL
+      using AT
+      p "x".center(1).upcase
+      p :x.center.upcase
+      p 1.center.upcase
+      p 1.5.center.inspect
+      Rigor.dump_type("x".center(1))
+      Rigor.dump_type(:x.center)
+      Rigor.dump_type(1.center)
+      Rigor.dump_type(1.5.center)
+    RUBY
+  end
+
   # `[rule, line, message]` for every diagnostic in `app.rb`.
   def rows(source, files: {})
     result = analyze(files: files.merge("app.rb" => source))
@@ -299,6 +341,13 @@ RSpec.describe "Typing calls through Ruby refinements (#1664)", type: :runner do
       Rigor.dump_type("x".center(1, 2, 3))
       Rigor.dump_type("x".rjust(1, 2, 3))
     RUBY
+  end
+
+  # ADR-121 WD7 — a later definer replaces an earlier `def` of the name. Ruby 4.0.5 prints `"DM"`, `"X"`, `"S"` and
+  # `"nil"`: the `define_method`, the alias of `Symbol#to_s`, the alias of a `define_method` and the `attr_reader`
+  # are what runs, and none has a `def` to type.
+  it "answers Dynamic[top] for a name a later definer with no def replaced" do
+    expect(rows(later_definers)).to eq(Array.new(4) { |i| ["dump.type", 34 + i, "dump_type: Dynamic[top]"] })
   end
 
   it "types a refine body's `super` as Dynamic[top] with no finding when another refinement is in effect there" do

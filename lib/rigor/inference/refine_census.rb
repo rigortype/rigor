@@ -23,9 +23,10 @@ module Rigor
     # a call inside a `def` or `define_method` body runs on an instance of the refined class, so neither counts.
     module RefineCensus
       # `names`, every name the body is read to define, in textual order; `complete`, whether those are all of them;
-      # `defs`, `[name, Prism::DefNode]` for each name a `def` or an alias of an earlier `def` defines, the typed
-      # refined arm's bodies. A name with no `DefNode` (`define_method`, `attr_*`, an alias of a name the body did
-      # not define earlier) types as `Dynamic[top]`.
+      # `defs`, the typed refined arm's bodies in textual order: `[name, Prism::DefNode]` for a `def` or an alias of
+      # an earlier `def`, and `[name, nil]` for any other definer (`define_method`, `attr_*`, `undef`, an alias of a
+      # name the body did not define earlier). A later definer replaces an earlier one, as Ruby's method table
+      # keeps the last, so a name whose last definer has no `DefNode` types as `Dynamic[top]`.
       BodyReading = Struct.new(:names, :complete, :defs)
 
       # Calls on the refinement that define nothing: visibility, with no argument, literal names, a `def`, or an
@@ -132,7 +133,7 @@ module Rigor
         when Prism::AliasMethodNode
           return record_alias(Source::AliasNames.keyword_names(node), reading, latest)
         when Prism::UndefNode
-          return record_undef(node, reading)
+          return record_undef(node, reading, latest)
         when Prism::CallNode
           if classify && self_call?(node)
             classify_call(node, reading, latest)
@@ -158,16 +159,25 @@ module Rigor
         new_name, old_name = pair
         reading.names << new_name
         def_node = latest[old_name]
-        return if def_node.nil?
+        return record_bodiless(new_name, reading, latest) if def_node.nil?
 
         reading.defs << [new_name, def_node]
         latest[new_name] = def_node
       end
 
-      def record_undef(node, reading)
+      # A name a definer with no `DefNode` defines: it replaces any earlier `def` of the name, so the typed arm
+      # finds no body for it (`refine(String) { def center(a) = 1; define_method(:center) { |a| "dm" } }` answers
+      # `"dm"` on Ruby 4.0.5), and an alias of it copies no body either.
+      def record_bodiless(name, reading, latest)
+        reading.names << name
+        reading.defs << [name, nil]
+        latest.delete(name)
+      end
+
+      def record_undef(node, reading, latest)
         node.names.each do |name|
           if name.is_a?(Prism::SymbolNode)
-            reading.names << name.unescaped.to_sym
+            record_bodiless(name.unescaped.to_sym, reading, latest)
           else
             reading.complete = false
           end
@@ -179,9 +189,9 @@ module Rigor
         name = node.name
         arguments = node.arguments&.arguments || []
         if (attr = ATTR_CALLS[name])
-          record_attr(arguments, attr, reading)
+          record_attr(arguments, attr, reading, latest)
         elsif name == :define_method
-          record_define_method(arguments, reading)
+          record_define_method(arguments, reading, latest)
         elsif name == :alias_method
           record_alias(Source::AliasNames.alias_method_call_names(node), reading, latest)
         else
@@ -196,19 +206,19 @@ module Rigor
         READER_CALLS.include?(node.name) && arguments.empty? && node.block.nil?
       end
 
-      def record_attr(arguments, (reader, writer), reading)
+      def record_attr(arguments, (reader, writer), reading, latest)
         arguments.each do |argument|
           name = literal_name(argument)
           next reading.complete = false if name.nil?
 
-          reading.names << name if reader
-          reading.names << :"#{name}=" if writer
+          record_bodiless(name, reading, latest) if reader
+          record_bodiless(:"#{name}=", reading, latest) if writer
         end
       end
 
-      def record_define_method(arguments, reading)
+      def record_define_method(arguments, reading, latest)
         name = arguments.first && literal_name(arguments.first)
-        name ? reading.names << name : reading.complete = false
+        name ? record_bodiless(name, reading, latest) : reading.complete = false
       end
 
       # `private`, `private :a, "b"`, `private def x`, `private attr_reader :x`: the nested call is classified on

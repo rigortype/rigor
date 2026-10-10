@@ -14,11 +14,12 @@ module Rigor
           @nestings = {}.compare_by_identity
         end
 
-        # `name` is the method `def_node` answers for: its own name, or an alias's (ADR-121 WD7).
+        # `name` is the method `def_node` answers for: its own name, or an alias's (ADR-121 WD7). A nil `def_node` is a
+        # later definer with no body (`define_method`, `attr_*`, `undef`), which replaces the earlier `def`.
         def record(owner, targets, name, def_node, nesting)
           by_class = (@nodes[owner] ||= {})
           targets.each { |class_name| (by_class[class_name] ||= {})[name] = def_node }
-          @nestings[def_node] = nesting
+          @nestings[def_node] = nesting if def_node
         end
 
         def lookup(module_name, class_name, method_name) = @nodes.dig(module_name, class_name, method_name)

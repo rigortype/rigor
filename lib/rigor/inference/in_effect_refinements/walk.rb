@@ -167,8 +167,8 @@ module Rigor
           ScopeIndexer.each_refinement_def(body) { |def_node| @refinement_defs << def_node.location.start_offset }
           return if owner.nil? || targets.empty?
 
-          # ADR-121 WD7 (issue #1799) — a `def`, and an alias of a `def` the body wrote earlier; the other names the
-          # body defines have no body to type (`Dynamic[top]`).
+          # ADR-121 WD7 (issue #1799) — a `def`, and an alias of a `def` the body wrote earlier; a later definer with no
+          # body (`define_method`, `attr_*`, `undef`) clears the name, which then types as `Dynamic[top]`.
           RefineCensus.read_body(body).defs.each do |name, def_node|
             @refine_defs.record(owner, targets, name, def_node, @nesting)
           end

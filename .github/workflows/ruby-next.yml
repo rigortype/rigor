@@ -36,6 +36,8 @@ jobs:
     # The suite runs in one process here (ci.yml spreads it across three shards); ~30 minutes is the
     # expected wall time, so this only bounds a hang.
     timeout-minutes: 90
+    env:
+      BUNDLE_VERSION: system
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -48,10 +50,16 @@ jobs:
       #
       # No `bundler-cache`: it installs in deployment (frozen) mode from the committed Gemfile.lock,
       # and the bound relaxed below has to re-resolve. A weekly run can afford an uncached install.
+      #
+      # `bundler: default` takes the Bundler that ships with that Ruby instead of Gemfile.lock's
+      # `BUNDLED WITH`: Bundler 4.0.11 crashes on ruby-head (`uninitialized constant
+      # Pathname::SEPARATOR_PAT`, run 38055522321), and the next Ruby's own Bundler is the one its
+      # users will have. BUNDLE_VERSION=system stops that Bundler re-executing the locked version.
       - name: Set up Ruby
         uses: ruby/setup-ruby@v1
         with:
           ruby-version: ${{ inputs.ruby || 'head' }}
+          bundler: default
 
       # The Gemfile's `ruby` directive and rigortype.gemspec's `required_ruby_version` both stop at
       # `< 4.1`, so Bundler refuses the local gem on 4.1. That published range is deliberately NOT

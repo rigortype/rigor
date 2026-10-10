@@ -857,6 +857,18 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
         expect(call_rows).to eq([])
       end
 
+      # A6: `refine(K)` keeps a normal row; once a file binds `K` to a value, the row's class is the wildcard. Ruby
+      # 4.0.5 prints `:alias_target` for `K = String; refine(K) { … }` (`refine_census_spec.rb`).
+      it "re-checks the `using` file when a new file binds the constant a `refine` targets" do
+        write("lib/m.rb", "module M\n  refine(K) { def center(a, b, c) = 1 }\nend\n")
+        write("lib/u.rb", "using M\n\"a\".center(1, 2, 3)\n")
+        expect(incremental_rows).to eq([center_fires, false])
+
+        write("lib/k.rb", "K = String\n")
+        expect(incremental_rows).to eq([[], true])
+        expect(call_rows).to eq([])
+      end
+
       # The `using`'s only candidate is declared by no file, so it is opaque; a new file declaring it with no
       # refinement makes it known, and the call reports. Ruby 4.0.5 raises `ArgumentError` for that program.
       it "re-checks the `using` file when a new file declares the module its `using` names" do

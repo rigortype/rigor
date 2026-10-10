@@ -25,11 +25,28 @@ module Rigor
       # name on a class the walk reaches: any of them may answer.
       UNKNOWN = :unknown
 
+      # {.decision}'s answer when the walk reaches a class or module that defines the name itself before any in-effect
+      # refinement of it: the receiver's own method answers and shadows every refinement further up (issue #1740).
+      SHADOWED = :shadowed
+
       module_function
 
       # A {Winner}, {UNKNOWN}, or nil when no in-effect refinement answers `method_name` on an instance of
       # `class_name` (the class's own lookup does). `list` is the call site's in-effect refinements.
       def winner(scope, class_name, method_name, list)
+        answer = decision(scope, class_name, method_name, list)
+        answer == SHADOWED ? nil : answer
+      end
+
+      # Issue #1740 — is `method_name` on an instance of `class_name` provably answered by the receiver's own lookup:
+      # the walk reaches a definer before any refinement in effect in `list`? False wherever {.winner}'s nil rests on
+      # anything weaker (no readable ancestry, no resolvable refined class, a project mixin of unknown position).
+      def own_method_answers?(scope, class_name, method_name, list)
+        decision(scope, class_name, method_name, list) == SHADOWED
+      end
+
+      # {.winner}, with the nil that a definer reached first answers kept apart as {SHADOWED}.
+      def decision(scope, class_name, method_name, list)
         targets = resolved(scope, targets(scope.discovered_refinements, method_name, list), method_name)
         unknown = list.include?(InEffectRefinements::UNKNOWN)
         return nil if targets.nil? && !unknown
@@ -111,13 +128,32 @@ module Rigor
           return Winner.new(module_name: refining, refined_class: level_class) if refining
           return targeted_after?(levels, index, targets) ? UNKNOWN : nil if mixed
 
-          entries.each do |entry|
+          entries.each_with_index do |entry, position|
             refining = entry == level_class ? nil : targets[entry]
             return Winner.new(module_name: refining, refined_class: entry) if refining
-            return nil if defines?(scope, entry, method_name)
+            return own_definition(scope, levels, index, position, method_name) if defines?(scope, entry, method_name)
           end
         end
         nil
+      end
+
+      # {SHADOWED} for the definer at `levels[index]`'s entry `position`, or nil when the definition it stops at may
+      # be an RBS redeclaration of an inherited method. Core RBS redeclares some (`Integer#quo`, `Float#polar`,
+      # `Time#<`), whose CRuby owner is an ancestor, so a refinement of that ancestor does answer the call
+      # (`refine Numeric do def quo(a, b, c)` makes `1.quo(1, 2, 3)` return 1 on Ruby 4.0.5). A project definer, or an
+      # RBS declaration no later entry also declares, is the method Ruby finds.
+      def own_definition(scope, levels, index, position, method_name)
+        entry = levels[index][1][position]
+        return SHADOWED if scope.user_def_for(entry, method_name)
+        return SHADOWED if scope.discovered_method?(entry, method_name, :instance)
+
+        later = levels[index][1].drop(position + 1) + levels.drop(index + 1).flat_map { |_level, names| names }
+        later.any? { |name| declares?(scope, name, method_name) } ? nil : SHADOWED
+      end
+
+      def declares?(scope, name, method_name)
+        definition = ExternalAncestorResolution.method_definition(name, method_name, :instance, scope: scope)
+        ExternalAncestorResolution.declared_on_class?(definition, name)
       end
 
       def targeted_after?(levels, index, targets)
@@ -181,8 +217,7 @@ module Rigor
         return true if scope.user_def_for(name, method_name)
         return true if scope.discovered_method?(name, method_name, :instance)
 
-        definition = ExternalAncestorResolution.method_definition(name, method_name, :instance, scope: scope)
-        ExternalAncestorResolution.declared_on_class?(definition, name)
+        declares?(scope, name, method_name)
       end
     end
   end

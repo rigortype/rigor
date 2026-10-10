@@ -583,6 +583,53 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
       )
     end
 
+    # Issue #1740 — Ruby finds a method the receiver's class (or a nearer ancestor) defines before it consults an
+    # ancestor's refinement, so the decline holds only where the refined class or module sits at or below the
+    # method's owner. Each call is witnessed on Ruby 4.0.5.
+    describe "of an ancestor (#1740)" do
+      before do
+        write("lib/ancestors.rb", <<~RUBY)
+          module ObjCenter; refine(Object) { def center(a, b, c) = a }; end
+          module KernCenter; refine(Kernel) { def center(a, b, c) = a }; end
+          module ObjIndex; refine(Object) { def [](other) = other }; end
+          module NumDigits; refine(Numeric) { def digits(a, b, c) = a }; end
+          module NumQuo; refine(Numeric) { def quo(a, b, c) = a }; end
+          module CmpClamp; refine(Comparable) { def clamp(a, b, c) = a }; end
+          class Own
+            def center(width) = width
+          end
+        RUBY
+      end
+
+      # Each of these raises: `String#center`, `Symbol#[]`, `Integer#digits` and `Own#center` answer, not the
+      # refinement.
+      it "keeps checking a method the receiver's class defines itself" do
+        write("lib/object.rb", "using ObjCenter\n\"x\".center(1, 2, 3)\nOwn.new.center(1, 2, 3)\n")
+        write("lib/kernel.rb", "using KernCenter\n\"x\".center(1, 2, 3)\n")
+        write("lib/index.rb", "using ObjIndex\n:authors[:age]\n")
+        write("lib/numeric.rb", "using NumDigits\n1.digits(1, 2, 3)\n")
+
+        expect(call_rows).to eq(
+          [
+            ["index.rb", 2, "call.argument-type-mismatch"],
+            ["kernel.rb", 2, "call.wrong-arity"],
+            ["numeric.rb", 2, "call.wrong-arity"],
+            ["object.rb", 2, "call.wrong-arity"],
+            ["object.rb", 3, "call.wrong-arity"]
+          ]
+        )
+      end
+
+      # Both return 1. `Comparable#clamp` is the owner, so `refine Comparable` replaces it. Core RBS redeclares `quo`
+      # on Integer, but CRuby's owner is `Numeric`: an RBS definer a later ancestor also declares keeps the decline.
+      it "declines where the refinement sits at or below the method's owner" do
+        write("lib/comparable.rb", "using CmpClamp\n\"a\".clamp(1, 2, 3)\n")
+        write("lib/quo.rb", "using NumQuo\n1.quo(1, 2, 3)\n")
+
+        expect(call_rows).to eq([])
+      end
+    end
+
     it "answers the same through a warm cache as cold" do
       write("lib/use.rb", "using SymSyntax\n:authors[:age]\n:x[:y]\n")
       write("lib/plain.rb", ":authors[:age]\n")

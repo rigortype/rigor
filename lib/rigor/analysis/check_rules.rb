@@ -853,7 +853,8 @@ module Rigor
         # Is a refinement of `call_node`'s method name into `class_name` (or an ancestor) in effect at the call?
         # Issue #1120 asks it for a method the class lacks; issue #1663 asks it before `call.wrong-arity` and
         # `call.argument-type-mismatch` report, because a refinement that REDEFINES a method the class already has
-        # replaces the signature those rules check against. Typing the call from the refine body is #1664.
+        # replaces the signature those rules check against, narrowed to the refinements Ruby's lookup reaches before
+        # the receiver's own method by {#refined_redefinition_in_effect?} (issue #1740).
         # A refinement answers instance-side receivers only: a refined singleton (`refine X.singleton_class`) names
         # no constant target, so nothing records it. Issue #1673 — the answer is derived from the file's in-effect
         # refinements ({Inference::InEffectRefinements}), the list the typer reads, with each `using` expanded
@@ -867,6 +868,20 @@ module Rigor
                                                          scope.declared_refinements) do |name|
               Inference::InEffectRefinements.activated_modules(scope, name)
             end
+        end
+
+        # Issue #1740 — {#refined_method_in_effect?} for `call.wrong-arity` and `call.argument-type-mismatch`. That
+        # answer reaches a refinement of any ancestor, which #1120 needs for a method the class lacks; but Ruby finds a
+        # method the receiver's class (or a nearer ancestor) defines before it consults an ancestor's refinement, so a
+        # refinement of `Object` does not replace `String#center`. The typed arm's precedence walk decides it
+        # ({Inference::RefinedDispatch.own_method_answers?}) over the in-effect list the typer reads: only a walk that
+        # provably reaches the receiver's own definer first lets the two rules report. An unreadable ancestry, an
+        # unresolvable refined class or a list that may hold any refinement keeps the decline.
+        def refined_redefinition_in_effect?(class_name, call_node, scope, kind, lexical_sites)
+          return false unless refined_method_in_effect?(class_name, call_node, scope, kind, lexical_sites)
+
+          list = scope.in_effect_refinements(call_node)
+          !Inference::RefinedDispatch.own_method_answers?(scope, class_name, call_node.name, list)
         end
 
         # The probes that run only once every cheaper answer has come back "absent", kept together
@@ -1709,7 +1724,7 @@ module Rigor
           source_arity&.settle_by_walk
           return true if source_arity && !source_arity.authoritative?(class_name)
 
-          refined_method_in_effect?(class_name, call_node, scope, kind, lexical_sites)
+          refined_redefinition_in_effect?(class_name, call_node, scope, kind, lexical_sites)
         end
 
         # The `[min, max]` the call is checked against — a declared signature's, or (issue #992) the project
@@ -3071,7 +3086,7 @@ module Rigor
           return true if inferred_param_mismatch_verdict?(call_node, mismatch, scope)
 
           kind = receiver_type.is_a?(Type::Singleton) ? :singleton : :instance
-          refined_method_in_effect?(class_name, call_node, scope, kind, lexical_sites)
+          refined_redefinition_in_effect?(class_name, call_node, scope, kind, lexical_sites)
         end
 
         # ADR-67 WD6b — an argument-type-mismatch verdict resting on an open-call-site lower bound, on

@@ -509,8 +509,17 @@ module Rigor
     # `block_as_methods:` match, `define_method`, or a `Class.new` / `refine` body (#319). Like
     # {#with_self_type} it leaves the #316 mark alone; it also sets {#block_self_unknown?} to `keeps_unknown`,
     # which a caller passes from {#block_self_narrowing_unknown?}. A nil `type` narrows nothing and keeps it.
+    #
+    # Issue #1695 — instance variables belong to `self`, so a narrowing onto a DIFFERENT `self` than the enclosing
+    # scope's also drops every instance-variable binding the body would otherwise inherit ({#without_ivar_bindings}):
+    # a `define_method` block in a class body runs on an instance, and the class body's `@label = nil` is the class
+    # object's ivar, not the one the block reads. The body's reads answer `Dynamic` until it writes them. A narrowing
+    # that keeps the caller's `self` (an ADR-16 `:lexical` entry) keeps them.
     def with_block_self_type(type, keeps_unknown: false)
-      rebuild(self_type: type, block_self_unknown: type.nil? ? @block_self_unknown : keeps_unknown)
+      unknown = type.nil? ? @block_self_unknown : keeps_unknown
+      return rebuild(self_type: type, block_self_unknown: unknown) if type.nil? || type == @self_type
+
+      without_ivar_bindings(type, unknown)
     end
 
     # Issue #1717 — whether a block-self narrowing for `call_node`, asked from this (the CALLER's) scope, is
@@ -702,6 +711,45 @@ module Rigor
               bot_guard_classes: drop_bot_guard_class(:ivar, name))
     end
     private :bind_ivar
+
+    # Issue #1695 — this scope with no instance-variable binding and none of the per-ivar state that rides on one:
+    # the narrowings keyed on or rooted at an ivar, its ADR-58 and #667 marks, ADR-82 origins, #286 optimistic marks
+    # and #1446 guard records, the state {#bind_ivar} drops for one name. It installs {#with_block_self_type}'s
+    # `self_type` and unknown-`self` mark in the same rebuild.
+    def without_ivar_bindings(self_type, block_self_unknown)
+      rebuild(
+        self_type: self_type,
+        block_self_unknown: block_self_unknown,
+        ivars: EMPTY_VAR_BINDINGS,
+        indexed_narrowings: reject_kept(@indexed_narrowings) { |k, _| ivar_indexed_key?(k) },
+        method_chain_narrowings: reject_kept(@method_chain_narrowings) { |k, _| k.receiver_kind == :ivar },
+        declaration_sourced: reject_kept(@declaration_sourced) { |ref| ref[0] == :ivar },
+        published_constant_sourced: reject_kept(@published_constant_sourced) { |ref| ref[0] == :ivar },
+        ivar_origins: EMPTY_ORIGINS,
+        optimistic_ivars: EMPTY_ORIGINS,
+        guard_records: reject_kept(@guard_records) { |key, _| key[0] == :ivar },
+        bot_guard_classes: reject_kept(@bot_guard_classes) { |key, _| key[0] == :ivar }
+      )
+    end
+    private :without_ivar_bindings
+
+    # `collection` without the entries the block selects, or `collection` itself when it selects none. It keeps the
+    # collection's class: `Set#reject` answers an Array, which a Set carrier's readers (`merge`, `|`, `==`) reject.
+    def reject_kept(collection, &)
+      return collection if collection.empty? || collection.none?(&)
+
+      collection.dup.delete_if(&).freeze
+    end
+    private :reject_kept
+
+    # An indexed narrowing of an ivar, or of a `key?` guard's key read from one ({#key_guard_rooted_at?}).
+    def ivar_indexed_key?(indexed_key)
+      return true if indexed_key.receiver_kind == :ivar
+
+      key = indexed_key.key
+      key.is_a?(Inference::KeyPresenceGuard::KeyExpr) && key.root[0] == :ivar
+    end
+    private :ivar_indexed_key?
 
     # ADR-58 WD1 — used by the method-entry seed to mark an ivar whose only provenance is the class-ivar index.
     # Unlike `with_ivar` this binds the type AND records the declaration-sourced mark in one transition.

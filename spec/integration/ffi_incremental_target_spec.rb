@@ -43,8 +43,8 @@ RSpec.describe "rigor check --incremental over rigor-ffi target detection" do
   def write_project(extra_config = "")
     FileUtils.mkdir_p("deps")
     File.write(".rigor.yml",
-               "paths:\n  - .\nbundler:\n  lockfile: deps/my.lock\nplugins:\n  - gem: rigor-ffi\n    id: ffi\n" +
-               extra_config)
+               "paths:\n  - .\nbundler:\n  lockfile: deps/my.lock\nplugins:\n  - gem: rigor-ffi\n    id: ffi\n" \
+               "#{extra_config}")
     File.write("deps/my.lock", "GEM\n  specs:\n")
     File.write("Gemfile.lock", "GEM\n  specs:\n    ffi (1.17.0)\n")
     File.write("a.rb", "module L\n  extend FFI::Library\n  callback :cb, [:int], :void\nend\n")

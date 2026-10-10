@@ -65,17 +65,18 @@ module Rigor
             fqn == prefix || fqn.start_with?("#{prefix}::")
           end
 
-          # This site with `within` resolved by the block into an absolute `prefix`. Only a resolution of the
-          # whole written path counts: {Graph#resolve} peels an unknown `Foo::Bar` to `Foo`, which would anchor
-          # the lookup a level too high. A receiver that does not resolve keeps its written name, so it can
-          # taint only a declaration spelled under it.
+          # This site with `within` resolved by the block into absolute `prefix`es. A resolution of the whole
+          # written path is the anchor. {Graph#resolve} peels an unknown `Foo::Bar` to `Foo`, though, and
+          # anchoring there alone looked for `Foo::V*` and missed `Foo::Bar::V1`; the written name is then the
+          # anchor as well as the peeled one, since an undeclared receiver may be an alias of either. A
+          # receiver that does not resolve at all keeps its written name.
           def anchored
-            return self if within.nil?
+            return [self] if within.nil?
 
             written = within.as_written
             resolved = yield(within)
-            whole = resolved && (resolved == written || resolved.end_with?("::#{written}"))
-            with(prefix: "#{whole ? resolved : written}::#{prefix}", within: nil)
+            anchors = resolved == written || resolved&.end_with?("::#{written}") ? [resolved] : [written, resolved]
+            anchors.compact.map { |anchor| with(prefix: "#{anchor}::#{prefix}", within: nil) }
           end
         end
 

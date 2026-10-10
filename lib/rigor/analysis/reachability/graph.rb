@@ -49,7 +49,7 @@ module Rigor
           @owned = @by_fqn.keys.reject { |fqn| @foreign.call(fqn) }.to_set
           @ancestors = {}
           # `Foo.const_get("V#{k}")` bounds its reach by `Foo`, a reference like any other (#1734).
-          @dynamic_uses = dynamic_uses.map { |use| use.anchored { |ref| resolve_ref(ref) } }
+          @dynamic_uses = dynamic_uses.flat_map { |use| use.anchored { |ref| resolve_ref(ref) } }
         end
 
         def report

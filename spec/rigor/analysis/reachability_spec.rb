@@ -372,12 +372,13 @@ RSpec.describe Rigor::Analysis::Reachability do
         expect(report.candidates.map(&:fqn)).to eq(["Ns::Handlers::Other"])
       end
 
-      # `Foo::Bar` declares nothing itself, so resolving it peels to `Foo`; anchoring there would look for
-      # `Foo::V*` and miss the member the call can actually reach.
-      it "anchors at the written receiver when only part of it resolves" do
-        report = report_for({ "lib/a.rb" => "module Foo; end\nclass Foo::Bar::V1; end\n" \
+      # `Foo::Bar` declares nothing itself, so resolving it peels to `Foo`; anchoring there alone would look
+      # for `Foo::V*` and miss the member the call can reach. An undeclared receiver may be an alias of
+      # either, so both anchors stay.
+      it "anchors at the written receiver as well when only part of it resolves" do
+        report = report_for({ "lib/a.rb" => "module Foo; end\nclass Foo::Bar::V1; end\nclass Foo::V2; end\n" \
                                             "Foo::Bar.const_get(\"V\#{ARGV.first}\")\n" })
-        expect(report.undecidable.map(&:fqn)).to eq(["Foo::Bar::V1"])
+        expect(report.undecidable.map(&:fqn)).to contain_exactly("Foo::Bar::V1", "Foo::V2")
       end
 
       # A block parameter shadows the method's local: the literal assigned outside the block is not what the

@@ -164,6 +164,12 @@ RSpec.describe Rigor::Inference::ScopeIndexer, ".refine_census" do
       "Ext = Module.new do\n  refine(String) { def shout = 1 }\nend\n",
       %i[recorded], { "String" => { shout: ["Ext"] } }
     ],
+    # The walk names a bare `Module.new` block by its position; a `using` of the call is the unknown marker.
+    "a bare Module.new block" => [
+      "using Module.new { refine(String) { def whisper = 1 } }\n" \
+      "Module.new do\n  refine(String) { def other = 1 }\nend\n",
+      %i[recorded recorded], { "String" => { whisper: ["#<Module:1:6>"], other: ["#<Module:2:0>"] } }
+    ],
     "a refine in a class body" => [
       "class C\n  refine(String) { def label = 1 }\nend\n", %i[dsl], {}
     ],

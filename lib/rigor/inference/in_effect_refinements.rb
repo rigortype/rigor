@@ -56,6 +56,9 @@ module Rigor
       # that carries it answers "any refinement may be in effect"; its position carries no meaning.
       UNKNOWN = :unknown_refinement
       EMPTY = [].freeze
+      # ADR-121 WD7 (A1) — what a caller's expansion block answers for a name nothing declares: such a candidate of a
+      # `using`'s spelling is not the module Ruby's lookup finds, so it leaves the list. Never itself a list entry.
+      UNDECLARED = :undeclared_module
 
       # One activation: in effect over `[start, stop)`, ordered by `order`. `names` is the module names (several
       # when a lexical spelling can denote several), or nil for {UNKNOWN}; `expand` says whether the caller's
@@ -162,20 +165,40 @@ module Rigor
       EMPTY_SET = Set.new.freeze
       private_constant :EMPTY_OFFSET, :EMPTY_SET
 
+      # A spelling's candidates are alternatives, innermost first; Ruby's lexical lookup finds the innermost one
+      # that exists, so it goes last and wins where several are declared. ADR-121 WD7 (A1): every declared candidate
+      # stays, because which one Ruby finds can depend on load order; one nothing declares
+      # ({UNDECLARED}) leaves; and when none is declared, the spelling enters alone, a module no table declares,
+      # which the readers treat as opaque (`using` of a gem's module, issue #1796).
       def append_activation(list, activation, expand)
         names = activation.names
         if names.nil?
           list << UNKNOWN unless list.include?(UNKNOWN)
           return
         end
+        unless activation.expand && expand
+          names.reverse_each { |name| list << name unless list.include?(name) }
+          return
+        end
 
-        # A spelling's candidates are alternatives, innermost first; Ruby's lexical lookup finds the innermost one
-        # that exists, so it goes last and wins where several are declared.
-        names.reverse_each { |name| append_expanded(list, name, activation.expand && expand) }
+        declared = false
+        names.reverse_each do |name|
+          expanded = expand.call(name)
+          next if expanded == UNDECLARED
+
+          declared = true
+          append_entries(list, expanded)
+        end
+        list << names.last unless declared || list.include?(names.last)
       end
 
+      # A block source's declared module (#1667). One nothing declares refines nothing Rigor can see: it leaves.
       def append_expanded(list, name, expand)
         expanded = expand ? expand.call(name) : [name]
+        append_entries(list, expanded) unless expanded == UNDECLARED
+      end
+
+      def append_entries(list, expanded)
         if expanded.nil?
           list << UNKNOWN unless list.include?(UNKNOWN)
         else

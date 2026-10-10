@@ -21,9 +21,6 @@ module Rigor
         end
 
         def lookup(module_name, class_name, method_name) = @nodes.dig(module_name, class_name, method_name)
-
-        # The table of a file that refines nothing.
-        EMPTY = new.freeze
       end
     end
   end

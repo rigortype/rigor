@@ -1101,7 +1101,8 @@ module Rigor
           # `Enumerator::ArithmeticSequence` through the incomplete stdlib RBS).
           def distributed_keyword_matches(method_definition, args, selector_self, instance_type, type_vars,
                                           block_required, environment)
-            distributions = KeywordArguments.distributions(args, true, method_definition.method_types)
+            distributions = keyword_distributions(method_definition, args, selector_self, instance_type, type_vars,
+                                                  environment)
             return nil if distributions.nil?
 
             distributions.map do |arg_types|
@@ -1830,9 +1831,26 @@ module Rigor
             )
           end
 
+          # {KeywordArguments.distributions} for the call's keyword hash. An overload that declares no keywords may read
+          # the hash as a positional `Hash`, and then every union value splits: with
+          # `(a: Integer) -> Integer | (Hash[Symbol, String]) -> String`, `a: Integer | String`'s `String` member takes
+          # the second overload and its `Integer` member the first. A parameter that cannot take a `Hash` (`(String)`)
+          # leaves the split to the keyword declarations.
+          def keyword_distributions(method_definition, args, selector_self, instance_type, type_vars, environment)
+            hash = Type::Combinator.nominal_of("Hash")
+            KeywordArguments.distributions(args, true, method_definition.method_types) do |param|
+              param_type = RbsTypeTranslator.translate(
+                param.type, self_type: selector_self, instance_type: instance_type, type_vars: type_vars,
+                            alias_expander: environment.rbs_loader
+              )
+              !param_type.accepts(hash, mode: :gradual).no?
+            end
+          end
+
           def agreed_keyword_block_params(method_definition, args, self_type, selector_self, instance_type, type_vars,
                                           environment)
-            distributions = KeywordArguments.distributions(args, true, method_definition.method_types)
+            distributions = keyword_distributions(method_definition, args, selector_self, instance_type, type_vars,
+                                                  environment)
             return [] if distributions.nil?
 
             candidates = []

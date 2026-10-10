@@ -63,6 +63,13 @@ RSpec.describe "Keyword arguments in overload selection (#1727)", type: :runner 
                        | (String) { (String) -> void } -> void
         def mixed: (headers: true, a: Symbol, b: Symbol) -> Symbol
                  | (?headers: false, a: Symbol, b: Symbol) -> Integer
+        def int_or_str: () -> (Integer | String)
+        def ph: (a: Integer) -> Integer
+              | (Hash[Symbol, String]) -> String
+        def phu: (a: Integer) -> Integer
+               | (Hash[Symbol, untyped]) -> String
+        def blk: (a: Integer) { (Integer) -> void } -> void
+               | (Hash[Symbol, String]) { (String) -> void } -> void
       end
     RBS
   end
@@ -226,9 +233,10 @@ RSpec.describe "Keyword arguments in overload selection (#1727)", type: :runner 
     RUBY
   end
 
-  # #1779 — only a key whose declarations differ across the overloads that take it, or that one of them value-pins,
-  # splits. `a:` and `b:` are `Symbol` wherever declared, so their members select alike and stay whole: splitting them
-  # made nine lists (sixteen for four `bool` keywords), past the limit, and the return `Dynamic[top]`.
+  # #1779 — only a key whose declarations differ across the overloads that take it splits. `a:` and `b:` are `Symbol`
+  # wherever declared, so their members select alike and stay whole: splitting them made nine lists (sixteen for four
+  # `bool` keywords), past the limit, and the return `Dynamic[top]`. `three`'s `(String)` cannot take the keyword hash
+  # as a positional `Hash`, so it splits nothing either.
   it "splits only the keyword values that discriminate between overloads" do
     expected = ["Integer", "Integer", "Integer | Symbol", "Integer | Symbol"]
     expect(dumped_types(<<~RUBY)).to eq(expected)
@@ -242,6 +250,17 @@ RSpec.describe "Keyword arguments in overload selection (#1727)", type: :runner 
   it "binds block parameters past what a split of every union keyword value would allow" do
     expect(dumped_types(<<~RUBY)).to eq(%w[Integer])
       p.three_block(a: p.sym3, b: p.sym3) { |n| dump_type(n) }
+    RUBY
+  end
+
+  # An overload that declares no keywords reads the keyword hash as a positional `Hash`, so where its parameter may take
+  # one, every union value splits: `a: Integer | String`'s `String` member takes the `Hash[Symbol, String]` overload and
+  # its `Integer` member the keyword one. Kept whole, the value took the positional overload alone.
+  it "splits every union keyword value where a no-keyword overload may take the hash positionally" do
+    expect(dumped_types(<<~RUBY)).to eq(["Integer | String", "Integer | String", "Dynamic[top]"])
+      dump_type(p.ph(a: p.int_or_str))
+      dump_type(p.phu(a: p.int_or_str))
+      p.blk(a: p.int_or_str) { |x| dump_type(x) }
     RUBY
   end
 

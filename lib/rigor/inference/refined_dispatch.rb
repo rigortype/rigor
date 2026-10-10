@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "builtins/cruby_definers"
+
 module Rigor
   module Inference
     # ADR-121 WD2 (issue #1664) — which in-effect refinement, if any, answers a call on an instance of a class. The
@@ -25,11 +27,47 @@ module Rigor
       # name on a class the walk reaches: any of them may answer.
       UNKNOWN = :unknown
 
+      # {.decision}'s answer when the walk reaches a class or module that defines the name itself before any in-effect
+      # refinement of it: the receiver's own method answers and shadows every refinement further up (issue #1740).
+      SHADOWED = :shadowed
+
       module_function
 
       # A {Winner}, {UNKNOWN}, or nil when no in-effect refinement answers `method_name` on an instance of
       # `class_name` (the class's own lookup does). `list` is the call site's in-effect refinements.
       def winner(scope, class_name, method_name, list)
+        answer = decision(scope, class_name, method_name, list)
+        answer == SHADOWED ? nil : answer
+      end
+
+      # Issue #1740 — is `method_name` on an instance of `class_name` provably answered by the receiver's own lookup:
+      # the walk reaches a definer before any refinement in effect in `list`? False wherever {.winner}'s nil rests on
+      # anything weaker: no readable ancestry, no resolvable refined class, a project mixin of unknown position, a
+      # definer {#own_definition} cannot prove, or an in-effect module whose refinements the table may not list
+      # ({.refinements_visible?}).
+      def own_method_answers?(scope, class_name, method_name, list)
+        return false unless refinements_visible?(scope, list)
+
+        decision(scope, class_name, method_name, list) == SHADOWED
+      end
+
+      # Does the refinement table list every name the in-effect modules in `list` refine? A module counts only when the
+      # project shows a refine body of it ({InEffectRefinements::UNKNOWN} has none, nor has a gem's `using GemRef`),
+      # every such body holds only `def`s (an `alias_method`, `define_method` or `import_methods` defines names the
+      # table does not record), and it includes or prepends no module: `using` activates the refinements of the
+      # module's ancestors too, and an included module's may not be visible (an `extend` adds no ancestor, and
+      # activates nothing on Ruby 4.0.5).
+      def refinements_visible?(scope, list)
+        list.all? { |entry| !mixes_in?(scope, entry) && InEffectRefinements.plain_refine_bodies?(scope, entry) }
+      end
+
+      def mixes_in?(scope, name)
+        Analysis::DependencyRecorder.read_last_segment(:class, name) if Analysis::DependencyRecorder.active?
+        !scope.includes_of(name).empty? || scope.discovery.discovered_prepends.key?(name)
+      end
+
+      # {.winner}, with the nil that a definer reached first answers kept apart as {SHADOWED}.
+      def decision(scope, class_name, method_name, list)
         targets = resolved(scope, targets(scope.discovered_refinements, method_name, list), method_name)
         unknown = list.include?(InEffectRefinements::UNKNOWN)
         return nil if targets.nil? && !unknown
@@ -111,13 +149,27 @@ module Rigor
           return Winner.new(module_name: refining, refined_class: level_class) if refining
           return targeted_after?(levels, index, targets) ? UNKNOWN : nil if mixed
 
-          entries.each do |entry|
+          entries.each_with_index do |entry, position|
             refining = entry == level_class ? nil : targets[entry]
             return Winner.new(module_name: refining, refined_class: entry) if refining
-            return nil if defines?(scope, entry, method_name)
+            return own_definition(scope, levels, index, position, method_name) if defines?(scope, entry, method_name)
           end
         end
         nil
+      end
+
+      # {SHADOWED} for the definer at `levels[index]`'s entry `position`, or nil when the walk cannot prove Ruby finds
+      # the method there. A project `def`, `attr_*` or `define_method` is the method Ruby finds. An RBS declaration is
+      # not: core RBS redeclares some inherited methods on a subclass (`Integer#quo`, `File#to_path`, whose CRuby owners
+      # are `Numeric` and `IO`, so `refine Numeric do def quo(a, b, c)` makes `1.quo(1, 2, 3)` return 1 on Ruby 4.0.5)
+      # and declares some CRuby no longer defines (`Process::Status#&`). It counts only where the offline CRuby
+      # catalogue ({Builtins::CRubyDefiners}) lists the method on that class.
+      def own_definition(scope, levels, index, position, method_name)
+        entry = levels[index][1][position]
+        return SHADOWED if scope.user_def_for(entry, method_name)
+        return SHADOWED if scope.discovered_method?(entry, method_name, :instance)
+
+        Builtins::CRubyDefiners.defines?(entry, method_name) ? SHADOWED : nil
       end
 
       def targeted_after?(levels, index, targets)

@@ -43,6 +43,22 @@ module Rigor
           NO_DEF
         end
 
+        # Issue #1740 — do the refine bodies the project shows for `module_name` hold only the `def`s the refinement
+        # table records? False when a body may define a name another way (`alias_method`, `define_method`,
+        # `import_methods`, ...), and when neither the call site's file nor a file declaring the module shows one.
+        # Each declaring file is a dependency, so an edit that adds such a statement re-checks the consumer.
+        def plain_refine_bodies?(scope, module_name)
+          states = []
+          own = scope.discovery.in_effect_refinements&.refine_body_state(module_name)
+          states << own if own
+          (scope.discovered_class_sources[module_name] || EMPTY).each do |path|
+            Analysis::DependencyRecorder.read_site("#{path}:1") if Analysis::DependencyRecorder.active?
+            state = DefNodeResolver.refinement_query(path)&.refine_body_state(module_name)
+            states << state if state
+          end
+          !states.empty? && states.all?(:plain)
+        end
+
         NO_DEF = [nil, nil].freeze
         private_constant :NO_DEF
 

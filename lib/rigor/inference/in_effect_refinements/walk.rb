@@ -158,12 +158,22 @@ module Rigor
           @activations << Activation.new(order: start, start: start, stop: stop, names: owner && [owner],
                                          expand: false, refine_block: true)
           body = node.block.body
+          record_refine_body_state(owner, body) if owner
           return if body.nil?
 
           ScopeIndexer.each_refinement_def(body) do |def_node|
             @refinement_defs << def_node.location.start_offset
             @refine_defs.record(owner, targets, def_node, @nesting) if owner
           end
+        end
+
+        # Issue #1740 — `:plain` while every refine body of `owner` in this file holds only `def` statements, which the
+        # refinement table records, else `:opaque`. Any other statement (`alias`, `alias_method`, `define_method`,
+        # `import_methods`, `send`, `attr_*`, even a visibility call) may define or wrap a name the table does not
+        # list, and is read as such.
+        def record_refine_body_state(owner, body)
+          plain = body.nil? || (body.is_a?(Prism::StatementsNode) && body.body.all?(Prism::DefNode))
+          @refine_body_states[owner] = plain && @refine_body_states[owner] != :opaque ? :plain : :opaque
         end
 
         def record_class_body_refine(node) = (@class_body_refines ||= Set.new) << node.block.location.start_offset

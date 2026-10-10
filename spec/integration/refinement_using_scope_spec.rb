@@ -583,6 +583,94 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
       )
     end
 
+    # Issue #1740 — Ruby finds a method the receiver's class (or a nearer ancestor) defines before it consults an
+    # ancestor's refinement, so the decline holds only where the refined class or module sits at or below the
+    # method's owner. Each call is witnessed on Ruby 4.0.5.
+    describe "of an ancestor (#1740)" do
+      before do
+        write("lib/ancestors.rb", <<~RUBY)
+          module ObjCenter; refine(Object) { def center(a, b, c) = a }; end
+          module KernCenter; refine(Kernel) { def center(a, b, c) = a }; end
+          module ObjIndex; refine(Object) { def [](other) = other }; end
+          module NumDigits; refine(Numeric) { def digits(a, b, c) = a }; end
+          module NumQuo; refine(Numeric) { def quo(a, b, c) = a }; end
+          module CmpClamp; refine(Comparable) { def clamp(a, b, c) = a }; end
+          module IOPath; refine(IO) { def to_path(a, b, c) = 1 }; end
+          class Own
+            def center(width) = width
+          end
+        RUBY
+        # The signature puts `Own` under `Object` for the refinement table; its source `def` is what Ruby runs.
+        write("sig/own.rbs", "class Own\n  def center: (Integer) -> Integer\nend\n")
+      end
+
+      # Each of these raises: `String#center`, `Symbol#[]`, `Integer#digits` and `Own#center` answer, not the
+      # refinement. `String#center` is proven by the CRuby catalogue, `Own#center` by its project `def`.
+      it "keeps checking a method the receiver's class defines itself" do
+        write("lib/object.rb", "using ObjCenter\n\"x\".center(1, 2, 3)\nOwn.new.center(1, 2, 3)\n")
+        write("lib/kernel.rb", "using KernCenter\n\"x\".center(1, 2, 3)\n")
+        write("lib/index.rb", "using ObjIndex\n:authors[:age]\n")
+        write("lib/numeric.rb", "using NumDigits\n1.digits(1, 2, 3)\n")
+
+        expect(call_rows).to eq(
+          [
+            ["index.rb", 2, "call.argument-type-mismatch"],
+            ["kernel.rb", 2, "call.wrong-arity"],
+            ["numeric.rb", 2, "call.wrong-arity"],
+            ["object.rb", 2, "call.wrong-arity"],
+            ["object.rb", 3, "call.wrong-arity"]
+          ]
+        )
+      end
+
+      # Each of these returns the refinement's answer. `Comparable#clamp` is the owner, so `refine Comparable`
+      # replaces it. Core RBS declares `Integer#quo` and `File#to_path`, but CRuby's owners are `Numeric` and `IO`:
+      # an RBS declaration the CRuby catalogue does not confirm proves nothing.
+      it "declines where the refinement sits at or below the method's CRuby owner" do
+        write("lib/comparable.rb", "using CmpClamp\n\"a\".clamp(1, 2, 3)\n")
+        write("lib/quo.rb", "using NumQuo\n1.quo(1, 2, 3)\n")
+        write("lib/path.rb", "using IOPath\nFile.new(__FILE__).to_path(1, 2, 3)\n")
+
+        expect(call_rows).to eq([])
+      end
+
+      # `GemRef`'s refine body lives outside the analysed paths, as a gem's does. Its `refine String` answers
+      # `"s".center` ahead of `String#center` (Ruby prints `:gem`), so an in-effect module with no visible refine
+      # body keeps the decline.
+      it "declines while an in-effect module's refinements are not visible" do
+        write("vendor/gem_ref.rb", "module GemRef; refine(String) { def center(a, b, c) = :gem }; end\n")
+        write("lib/gem_use.rb", "using ObjCenter\nusing GemRef\n\"s\".center(1, 2, 3)\n")
+
+        expect(call_rows).to eq([])
+      end
+
+      # The refinement table records `def`s only. Ruby prints `:alias_method`, `:dm` and `:imported`: each refine
+      # body defines the name below `String#center` some other way, so its module keeps the decline.
+      it "declines while an in-effect refine body defines names other than by `def`" do
+        write("lib/str_refs.rb", <<~RUBY)
+          module StrAlias; refine(String) { def c3(a, b, c) = :alias_method; alias_method :center, :c3 }; end
+          module StrDefine; refine(String) { def other = 1; define_method(:center) { |a, b, c| :dm } }; end
+          module Helper; def center(a, b, c) = :imported; end
+          module StrImport; refine(String) { import_methods Helper; def shout = upcase }; end
+        RUBY
+        write("lib/alias_use.rb", "using ObjCenter\nusing StrAlias\n\"x\".center(1, 2, 3)\n")
+        write("lib/define_use.rb", "using ObjCenter\nusing StrDefine\n\"x\".center(1, 2, 3)\n")
+        write("lib/import_use.rb", "using ObjCenter\nusing StrImport\n\"x\".center(1, 2, 3)\n")
+
+        expect(call_rows).to eq([])
+      end
+
+      # `using A` activates the refinements of A's ancestors too. `B`'s refine body is outside the analysed paths,
+      # and Ruby prints `:b`, so a used module that mixes another in keeps the decline.
+      it "declines while a used module mixes in a module" do
+        write("vendor/b.rb", "module B; refine(String) { def center(a, b, c) = :b }; end\n")
+        write("lib/mixer.rb", "module A\n  include B\n  refine(Integer) { def x = 1 }\nend\n")
+        write("lib/mixer_use.rb", "using ObjCenter\nusing A\n\"x\".center(1, 2, 3)\n")
+
+        expect(call_rows).to eq([])
+      end
+    end
+
     it "answers the same through a warm cache as cold" do
       write("lib/use.rb", "using SymSyntax\n:authors[:age]\n:x[:y]\n")
       write("lib/plain.rb", ":authors[:age]\n")

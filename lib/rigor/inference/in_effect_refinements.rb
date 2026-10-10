@@ -123,6 +123,14 @@ module Rigor
         @refine_defs&.lookup(module_name, class_name, method_name)
       end
 
+      # Issue #1740 — `:plain` when every refine body this file gives `module_name` holds only `def` statements, which
+      # {#refinement_def} answers, `:opaque` when one holds anything else, nil when the file gives the module no refine
+      # body.
+      def refine_body_state(module_name)
+        build
+        @refine_body_states[module_name]
+      end
+
       # `{refine-body DefNode => Module.nesting where it is written}` for the defs {#refinement_def} answers, which a
       # body re-typed from another file's parse reads its constants by (`DefNodeResolver.refinement_query`).
       def refine_def_nestings
@@ -159,7 +167,8 @@ module Rigor
 
       EMPTY_OFFSET = -1
       EMPTY_SET = Set.new.freeze
-      private_constant :EMPTY_OFFSET, :EMPTY_SET
+      EMPTY_STATES = {}.freeze
+      private_constant :EMPTY_OFFSET, :EMPTY_SET, :EMPTY_STATES
 
       def append_activation(list, activation, expand)
         names = activation.names
@@ -195,6 +204,7 @@ module Rigor
         @activations = EMPTY
         @refinement_defs = EMPTY_SET
         @refine_defs = nil
+        @refine_body_states = EMPTY_STATES
         @chained_refined_calls = nil
         @class_body_refines = nil
         @unresolved_using = false
@@ -203,6 +213,7 @@ module Rigor
         @activations = []
         @refinement_defs = Set.new
         @refine_defs = RefineDefs.new
+        @refine_body_states = {}
         @nesting = EMPTY
         location = @root.location
         walk(@root, [], [location.start_offset, location.end_offset], false, nil, false)

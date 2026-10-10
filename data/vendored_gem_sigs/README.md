@@ -69,11 +69,26 @@ longer ships `stdlib/prime`, so after `require "prime"` a call such as
 exercise solutions define for themselves. So the directory loads only
 when the project asks for it — a `require "prime"` somewhere under the
 configured paths, or `prime` under `libraries:` —
-and only when it costs the environment nothing: a `prime` library that
-resolves keeps it out, and a trial build drops it again when any of its
-types fails to build beside the project's or a gem's signatures, or a
-project file declaring one of them is quarantined
-(`Rigor::Environment::RbsLoader.build_env_for`).
+and only what costs the environment nothing: a `prime` library that
+resolves keeps it out, and when the whole directory fails a trial build
+beside the project's, a gem's or inline signatures (one of its types
+fails to build, or a project file declaring one of them is quarantined),
+it loads again less what clashes
+(`Rigor::Environment::RbsLoader.build_env_for`,
+`Rigor::Environment::GatedSignaturePlan`). A member another source also
+declares is left out (only that half of an `attr_accessor` or
+`def self?.m`), so a project shim declaring only `Integer#prime?`
+keeps `12.prime_division` and `Prime.each`; a type whose header another
+source contradicts (a class against a module, a different generic arity,
+or a superclass the trial build rejects) stands down whole; a type that
+fails only because something it names was displaced keeps its own
+members but not its superclass, and is unchecked for what it inherits;
+and only if
+that still does not build does the whole directory stand down. The files
+here are never rewritten: the declarations are filtered after parsing.
+What stood down is reported as the `:info` notice
+`rbs.coverage.vendored-signature-stood-down`, naming each declaration and
+the file that displaced it.
 `Rigor::Environment::RequiredFeatures::VENDORED_DIRS` maps the feature
 to the directory, and is the place to add another such gem.
 

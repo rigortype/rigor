@@ -507,18 +507,23 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
       snapshots.synthesized_namespaces = ["stale"]
       snapshots.quarantined_signatures = ["stale"]
       snapshots.signature_standdowns = ["stale"]
+      snapshots.vendored_standdowns = ["stale"]
       snapshots.conformance_results = ["stale"]
       snapshots.env_build_failure = [StandardError, 1, []]
       coordinator = build_coordinator(snapshots: snapshots)
-      # Never touched: the no-signature_paths branch returns before reading the loader at all, and the
-      # #610 stand-down slot asks the (empty) plugin registry, never the environment.
-      environment = instance_double(Rigor::Environment)
+      # Only the #1713 vendored stand-down slot reads the loader, which answers it without building its
+      # environment when no gated directory is active; the no-signature_paths branch returns before reading
+      # anything else, and the #610 stand-down slot asks the (empty) plugin registry.
+      environment = instance_double(
+        Rigor::Environment, rbs_loader: instance_double(Rigor::Environment::RbsLoader, vendored_standdowns: [])
+      )
 
       coordinator.snapshot_project_signature_state(environment)
 
       expect(snapshots.synthesized_namespaces).to eq([])
       expect(snapshots.quarantined_signatures).to eq([])
       expect(snapshots.signature_standdowns).to eq([])
+      expect(snapshots.vendored_standdowns).to eq([])
       expect(snapshots.conformance_results).to eq([])
       expect(snapshots.env_build_failure).to be_nil
     end

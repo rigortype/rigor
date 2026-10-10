@@ -16,7 +16,8 @@ module Rigor
       # back-reference cycle.
       class RunSnapshots
         attr_accessor :class_decl_paths, :signature_paths,
-                      :synthesized_namespaces, :quarantined_signatures, :signature_standdowns, :conformance_results,
+                      :synthesized_namespaces, :quarantined_signatures, :signature_standdowns, :vendored_standdowns,
+                      :conformance_results,
                       :env_build_failure, :definition_build_failures, :hkt_scan_failure,
                       :effect_annotation_carrier
 
@@ -32,12 +33,15 @@ module Rigor
         # `signature_standdowns` (#610) is the quarantine slot's twin for the plugin-contributed files that
         # stood down against a colliding generic arity: a list, assigned once from the loader as
         # `quarantined_signatures` is, and derived from the final env so a cache HIT carries it too.
+        # `vendored_standdowns` (#1713) is the same shape of slot for what a required-feature-gated vendored
+        # directory left out because another signature source declares it.
         def initialize
           @class_decl_paths = {}.freeze
           @signature_paths = [].freeze
           @synthesized_namespaces = [].freeze
           @quarantined_signatures = [].freeze
           @signature_standdowns = [].freeze
+          @vendored_standdowns = [].freeze
           @conformance_results = [].freeze
           @env_build_failure = nil
           @definition_build_failures = [].freeze
@@ -53,6 +57,7 @@ module Rigor
           @synthesized_namespaces = []
           @quarantined_signatures = []
           @signature_standdowns = []
+          @vendored_standdowns = []
           @conformance_results = []
           @env_build_failure = nil
           @definition_build_failures = []

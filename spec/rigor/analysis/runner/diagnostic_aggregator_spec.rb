@@ -51,6 +51,7 @@ RSpec.describe Rigor::Analysis::Runner::DiagnosticAggregator do
                        synthesized_namespaces_snapshot: nil,
                        quarantined_signatures_snapshot: [],
                        signature_standdowns_snapshot: [],
+                       vendored_standdowns_snapshot: [],
                        env_build_failure_snapshot: nil,
                        definition_build_failures_snapshot: [],
                        hkt_scan_failure_snapshot: nil,
@@ -68,6 +69,7 @@ RSpec.describe Rigor::Analysis::Runner::DiagnosticAggregator do
       synthesized_namespaces_snapshot: -> { synthesized_namespaces_snapshot },
       quarantined_signatures_snapshot: -> { quarantined_signatures_snapshot },
       signature_standdowns_snapshot: -> { signature_standdowns_snapshot },
+      vendored_standdowns_snapshot: -> { vendored_standdowns_snapshot },
       env_build_failure_snapshot: -> { env_build_failure_snapshot },
       definition_build_failures_snapshot: -> { definition_build_failures_snapshot },
       hkt_scan_failure_snapshot: -> { hkt_scan_failure_snapshot },
@@ -872,6 +874,50 @@ RSpec.describe Rigor::Analysis::Runner::DiagnosticAggregator do
 
     it "is silent when nothing stood down" do
       expect(build_aggregator(signature_standdowns_snapshot: []).rbs_plugin_signature_stood_down_diagnostics).to eq([])
+    end
+  end
+
+  # Issue #1713 — what a required-feature-gated vendored directory left out for another source's declarations.
+  describe "rbs_vendored_signature_stood_down_diagnostics" do
+    it "emits one :info per directory, naming each declaration and the file that displaced it" do
+      rows = build_aggregator(
+        vendored_standdowns_snapshot: [
+          ["prime", [["Integer#prime?", File.join(Dir.pwd, "sig/ext.rbs"), "member"],
+                     ["Prime", File.join(Dir.pwd, "sig/prime.rbs"), "type"],
+                     ["Prime::Generator23", nil, "open"]], false]
+        ]
+      ).rbs_coverage_notice_diagnostics
+
+      expect(rows.map(&:rule)).to eq(["rbs.coverage.vendored-signature-stood-down"])
+      expect(rows.first.severity).to eq(:info)
+      expect(rows.first.path).to eq(".rigor.yml")
+      expect(rows.first.message).to include(
+        "left out 1 method declaration(s) another signature source also makes", "uses the other source's: " \
+                                                                                "`Integer#prime?` (sig/ext.rbs).",
+        "stood 1 type(s) down whole", "generic arity, or the type failed to build beside that source's " \
+                                      "declaration: `Prime` (sig/prime.rbs).",
+        "kept 1 type(s) without their superclass", "read untyped rather than undefined: `Prime::Generator23`."
+      )
+      expect(rows.first.message).not_to include(Dir.pwd)
+    end
+
+    it "claims a duplicated method only when a method stood down" do
+      rows = build_aggregator(vendored_standdowns_snapshot: [["prime", [["Prime", "sig/prime.rbs", "type"]], false]])
+             .rbs_vendored_signature_stood_down_diagnostics
+
+      expect(rows.first.message).not_to include("declarations of one method")
+    end
+
+    it "says the directory stood down entirely, naming the clashes it can" do
+      rows = build_aggregator(vendored_standdowns_snapshot: [["prime", [], true]])
+             .rbs_vendored_signature_stood_down_diagnostics
+
+      expect(rows.first.message).to include("stood down entirely")
+      expect(rows.first.message).not_to include("clashed with")
+    end
+
+    it "is silent when nothing stood down" do
+      expect(build_aggregator.rbs_vendored_signature_stood_down_diagnostics).to eq([])
     end
   end
 

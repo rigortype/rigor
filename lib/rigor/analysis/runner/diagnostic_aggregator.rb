@@ -36,6 +36,8 @@ module Rigor
         #   that stood down against a colliding generic arity (#610), as
         #   `[path, class_name, existing_arity, incoming_arity, existing_file]` tuples. Defaults to none so
         #   a caller that snapshots nothing of the kind need not say so.
+        # @param vendored_standdowns_snapshot — issue #1713 — reader returning what each required-feature-gated
+        #   vendored directory left out (`Environment::RbsLoader#vendored_standdowns`). Defaults to none.
         # @param env_build_failure_snapshot — reader returning the total RBS env-build failure tuple
         #   (`[error_class, first_error_line, conflicting_buffer_names]`) or nil when the env built.
         # @param definition_build_failures_snapshot — issue #696 — reader returning the per-class
@@ -55,7 +57,7 @@ module Rigor
                        quarantined_signatures_snapshot:, env_build_failure_snapshot:,
                        definition_build_failures_snapshot:, hkt_scan_failure_snapshot:,
                        conformance_results_snapshot:, signature_standdowns_snapshot: -> { [] },
-                       pooled_run_disclosures: -> { [] })
+                       vendored_standdowns_snapshot: -> { [] }, pooled_run_disclosures: -> { [] })
           @configuration = configuration
           @rbs_extended_reporter = rbs_extended_reporter
           @boundary_cross_reporter = boundary_cross_reporter
@@ -68,6 +70,7 @@ module Rigor
           @synthesized_namespaces_snapshot_reader = synthesized_namespaces_snapshot
           @quarantined_signatures_snapshot_reader = quarantined_signatures_snapshot
           @signature_standdowns_snapshot_reader = signature_standdowns_snapshot
+          @vendored_standdowns_snapshot_reader = vendored_standdowns_snapshot
           @env_build_failure_snapshot_reader = env_build_failure_snapshot
           @definition_build_failures_snapshot_reader = definition_build_failures_snapshot
           @hkt_scan_failure_snapshot_reader = hkt_scan_failure_snapshot
@@ -437,11 +440,23 @@ module Rigor
           standdowns.map { |entry| build_rbs_plugin_signature_stood_down_diagnostic(entry) }
         end
 
-        # The two `:info` notices that close the `rbs.coverage.*` ladder, in this order: the namespace
-        # synthesis first, then the stand-down (#610) — the outcome that AVOIDED a definition-build failure
-        # and so the quietest row on it. One method so the runner's assembly reads them as one slot.
+        # Issue #1713 — the other outcome that avoided a definition-build failure: a required-feature-gated
+        # vendored directory (`data/vendored_gem_sigs/prime/`) left out what another signature source already
+        # declares — a member, a whole type, or, when nothing narrower built, the directory. One `:info` per
+        # directory, naming the declarations that stood down and the files that displaced them.
+        def rbs_vendored_signature_stood_down_diagnostics
+          standdowns = vendored_standdowns_snapshot
+          return [] if standdowns.nil? || standdowns.empty?
+
+          standdowns.map { |entry| build_rbs_vendored_signature_stood_down_diagnostic(entry) }
+        end
+
+        # The `:info` notices that close the `rbs.coverage.*` ladder, in this order: the namespace synthesis
+        # first, then the stand-downs (#610, #1713) — the outcomes that AVOIDED a definition-build failure and so
+        # the quietest rows on it. One method so the runner's assembly reads them as one slot.
         def rbs_coverage_notice_diagnostics
-          rbs_synthesized_namespace_diagnostics + rbs_plugin_signature_stood_down_diagnostics
+          rbs_synthesized_namespace_diagnostics + rbs_plugin_signature_stood_down_diagnostics +
+            rbs_vendored_signature_stood_down_diagnostics
         end
 
         # Maps the per-run `rigor:v1:conforms-to` scan results into diagnostics (spec: `rbs-extended.md` §
@@ -767,6 +782,69 @@ module Rigor
             rule: "rbs.coverage.plugin-signature-stood-down",
             source_family: :builtin
           )
+        end
+
+        def build_rbs_vendored_signature_stood_down_diagnostic(entry)
+          dir, declarations, whole = entry
+          Diagnostic.new(
+            path: ".rigor.yml",
+            line: 1,
+            column: 1,
+            message: vendored_standdown_message(dir, declarations, whole),
+            severity: :info,
+            rule: "rbs.coverage.vendored-signature-stood-down",
+            source_family: :builtin
+          )
+        end
+
+        def vendored_standdown_message(dir, declarations, whole)
+          subject = "Rigor's vendored `#{dir}` signatures (loaded because the project requires `#{dir}` or lists " \
+                    "it under `libraries:`)"
+          return vendored_whole_standdown_message(subject, dir, declarations) if whole
+
+          vendored_partial_standdown_message(subject, declarations)
+        end
+
+        # One sentence per kind of stand-down present ({Environment::GatedSignaturePlan.standdowns}' reasons).
+        VENDORED_STANDDOWN_SENTENCES = {
+          "member" => "left out %<count>d method declaration(s) another signature source also makes, since two " \
+                      "declarations of one method fail the class's definition build, and uses the other " \
+                      "source's: %<list>s.",
+          "type" => "stood %<count>d type(s) down whole, keeping only the types nested in them, because another " \
+                    "source declares each with a different kind (class or module) or generic arity, or the type " \
+                    "failed to build beside that source's declaration: %<list>s.",
+          "open" => "kept %<count>d type(s) without their superclass, because each failed to build beside the " \
+                    "other signatures although no other source declares it; calls they no longer answer read " \
+                    "untyped rather than undefined: %<list>s."
+        }.freeze
+        private_constant :VENDORED_STANDDOWN_SENTENCES
+
+        def vendored_partial_standdown_message(subject, declarations)
+          sentences = VENDORED_STANDDOWN_SENTENCES.filter_map do |reason, template|
+            group = declarations.select { |entry| (entry[2] || "member") == reason }
+            next if group.empty?
+
+            format(template, count: group.size, list: sampled(vendored_standdown_labels(group), 5))
+          end
+          "#{subject} loaded without some of their declarations. Rigor #{sentences.join(' Rigor ')} The rest of the " \
+            "vendored signatures still load. Nothing to fix unless the other declaration is an outdated copy; " \
+            "removing it brings the vendored one back."
+        end
+
+        def vendored_whole_standdown_message(subject, dir, declarations)
+          labels = vendored_standdown_labels(declarations)
+          clashes = labels.empty? ? "" : " Declarations it clashed with: #{sampled(labels, 5)}."
+          "#{subject} stood down " \
+            "entirely: a type they declare failed to build beside the other signature sources even with the " \
+            "clashing declarations left out, so calls into `#{dir}`'s API resolve only against what those " \
+            "sources declare.#{clashes}"
+        end
+
+        def vendored_standdown_labels(declarations)
+          declarations.map do |declaration, cause_file|
+            cause = cause_file.nil? ? "" : " (#{relative_signature_path(cause_file.to_s)})"
+            "`#{declaration}`#{cause}"
+          end
         end
 
         def displacing_source_phrase(existing_file)
@@ -1194,6 +1272,10 @@ module Rigor
 
         def signature_standdowns_snapshot
           @signature_standdowns_snapshot_reader.call
+        end
+
+        def vendored_standdowns_snapshot
+          @vendored_standdowns_snapshot_reader.call
         end
 
         def env_build_failure_snapshot

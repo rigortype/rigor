@@ -2027,6 +2027,7 @@ module Rigor
           synthesized_namespaces_snapshot: -> { @snapshots.synthesized_namespaces },
           quarantined_signatures_snapshot: -> { @snapshots.quarantined_signatures },
           signature_standdowns_snapshot: -> { @snapshots.signature_standdowns },
+          vendored_standdowns_snapshot: -> { @snapshots.vendored_standdowns },
           env_build_failure_snapshot: -> { @snapshots.env_build_failure },
           definition_build_failures_snapshot: -> { @snapshots.definition_build_failures },
           hkt_scan_failure_snapshot: -> { @snapshots.hkt_scan_failure },

@@ -141,7 +141,64 @@ RSpec.describe Rigor::Inference::InEffectRefinements do
 
       expect(refinements.at(":named")).to eq(%w[Outer::Named])
       expect(refinements.at(":blocked")).to eq([unknown])
-      expect(refinements.at(":struct")).to eq([unknown])
+      # Issue #1689 — a `Struct.new` block's `self` is a class, so its `refine` is not `Module#refine`.
+      expect(refinements.at(":struct")).to eq([])
+    end
+
+    # Issue #1689 — `Class` undefines `refine`, so where `self` is known to be a class the call is the class's own
+    # method: it activates nothing, and its defs are not refinement defs.
+    context "when `self` is known to be a class" do
+      let(:source) do
+        <<~RUBY
+          class Widget < Base
+            refine(String) { def in_class = :in_class }
+            class << self
+              refine(String) { :in_singleton }
+            end
+            [1].each do
+              refine(String) { :in_block }
+            end
+          end
+          Made = Class.new do
+            refine(String) { :class_new }
+          end
+          Class.new { refine(String) { :anonymous } }
+          Point = Data.define(:x) do
+            refine(String) { :data }
+          end
+          module Shout
+            refine(String) { :in_module }
+          end
+        RUBY
+      end
+      let(:root) { Prism.parse(source).value }
+      let(:refinements) { described_class.new(root) }
+      let(:calls) do
+        found = []
+        Rigor::Source::NodeWalker.each(root) do |node|
+          found << node if node.is_a?(Prism::CallNode) && node.name == :refine
+        end
+        found
+      end
+
+      it "activates nothing there, and a `refine` in a nested block is still a refine block" do
+        at = InEffectRefinementsAtMarker.new(refinements, source)
+
+        expect(%w[:in_class :in_singleton :class_new :anonymous :data].map { |marker| at.at(marker) }).to all(eq([]))
+        # A block may run under another `self`, so a `refine` in one stays a refine block of an unnamed module.
+        expect(at.at(":in_block")).to eq([unknown])
+        expect(at.at(":in_module")).to eq(%w[Shout])
+      end
+
+      it "answers class_body_refine? for exactly those calls, and records none of their defs" do
+        answers = calls.to_h { |call| [call.block.body.body.first.slice[/:\w+/], refinements.class_body_refine?(call)] }
+
+        expect(answers).to eq(
+          ":in_class" => true, ":in_singleton" => true, ":in_block" => false, ":class_new" => true,
+          ":anonymous" => true, ":data" => true, ":in_module" => false
+        )
+        expect(refinements.refinement_def?(calls.first.block.body.body.first)).to be(false)
+      end
     end
 
     it "records the defs the body defines on the refined class" do

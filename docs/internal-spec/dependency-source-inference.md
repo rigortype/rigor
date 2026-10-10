@@ -202,21 +202,26 @@ Recognition rules:
 ### Refine bodies (issue #1672)
 
 The walker recognises the refine-call shape the project walk
-does (`Inference::ScopeIndexer.refine_target`): an implicit- or
-`self`-receiver `refine` with one constant argument and a
-literal block. Its body's instance `def`s MUST NOT enter the
-catalog: they are not methods of the refining module, and of
-the refined class only after `using`. The walker instead records
+does (`Inference::ScopeIndexer.module_refine_target`): an
+implicit- or `self`-receiver `refine` with one constant argument
+and a literal block, where `self` is not known to be a class.
+`Class` undefines `Module#refine`, so a `refine` directly in a
+`class` or `class << …` body, or in a `Class.new` /
+`Struct.new` / `Data.define` block, is the class's own method
+and walks as any other call (issue #1689). A refine body's
+instance `def`s MUST NOT enter the catalog: they are not
+methods of the refining module, and of the refined class only
+after `using`. The walker instead records
 each as a refinement of the target by the enclosing module, in
 `Walker::Outcome#refinements`, with the target resolved
 lexically the way the project walk resolves it (every name it
 can denote). `def self.x` and `def`s nested in a `def` or a
 declaration define nothing on the target and are dropped; a
 `class` / `module` declared in the body is still walked under
-the lexical prefix. A `refine` with no enclosing module, or
-inside `class << self`, refines nothing Ruby accepts and records
-nothing. A computed target (`refine(klass) { … }`) names no
-class to key, so its body walks as any other block.
+the lexical prefix. A `refine` with no enclosing module, or in a
+block under `class << self`, names no refining module and
+records nothing. A computed target (`refine(klass) { … }`)
+names no class to key, so its body walks as any other block.
 
 `Builder` unions every gem's table into `Index#refinements`, and
 the runner unions that into the project's

@@ -286,6 +286,20 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::Walker do
         expect(outcome.refinements).to eq({})
       end
 
+      # Issue #1689 — `Class` undefines `refine`, so in a class body it is the class's own method.
+      it "walks a `refine` call in a class body generically" do
+        outcome = walk_source(<<~RUBY)
+          class Widget < Base
+            refine String do
+              def label = "widget"
+            end
+          end
+        RUBY
+
+        expect(outcome.catalog.keys).to eq([["Widget", :label]])
+        expect(outcome.refinements).to eq({})
+      end
+
       it "walks a computed `refine` target generically, as before" do
         outcome = walk_source(<<~RUBY)
           module Shouty

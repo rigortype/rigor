@@ -27,48 +27,66 @@ module Rigor
         end
 
         # `body` is the `[start, end]` of the body a `using` here stays in effect to the end of; `owner` is the name of
-        # the module `self` is here, or nil where this walk cannot name it.
-        def walk(node, prefix, body, in_def, owner)
+        # the module `self` is here, or nil where this walk cannot name it; `class_self` is true where `self` is known
+        # to be a class (issue #1689). A block or a `def` may run under another `self`, so both reset it.
+        def walk(node, prefix, body, in_def, owner, class_self)
           case node
           when Prism::ClassNode, Prism::ModuleNode
             inner = Source::ConstantPath.declaration_prefix(prefix, node.constant_path) || prefix
             return within_nesting(node) do
-              walk_children(node.body, inner, span_of(node), false, inner.empty? ? nil : inner.join("::"))
+              walk_children(node.body, inner, span_of(node), false, inner.empty? ? nil : inner.join("::"),
+                            node.is_a?(Prism::ClassNode))
             end
           when Prism::SingletonClassNode
-            walk(node.expression, prefix, body, in_def, owner)
-            return walk_children(node.body, prefix, span_of(node), false, nil)
+            walk(node.expression, prefix, body, in_def, owner, class_self)
+            return walk_children(node.body, prefix, span_of(node), false, nil, true)
           when Prism::DefNode
-            return walk_children(node.body, prefix, body, true, nil)
+            return walk_children(node.body, prefix, body, true, nil, false)
           when Prism::ConstantWriteNode, Prism::ConstantPathWriteNode, Prism::ConstantOrWriteNode,
                Prism::ConstantPathOrWriteNode
-            return if walked_meta_new_write?(node, prefix, body, in_def, owner)
+            return if walked_meta_new_write?(node, prefix, body, in_def, owner, class_self)
           when Prism::BlockNode, Prism::LambdaNode
-            return walk_children(node, prefix, body, in_def, nil)
+            return walk_children(node, prefix, body, in_def, nil, false)
           when Prism::CallNode
-            record_call(node, prefix, body, in_def, owner)
+            return if walked_class_new_call?(node, prefix, body, in_def, owner, class_self)
+
+            record_call(node, prefix, body, in_def, owner, class_self)
           end
 
-          walk_children(node, prefix, body, in_def, owner)
+          walk_children(node, prefix, body, in_def, owner, class_self)
         end
 
-        def walk_children(node, prefix, body, in_def, owner)
+        def walk_children(node, prefix, body, in_def, owner, class_self)
           return if node.nil?
 
-          node.rigor_each_child { |child| walk(child, prefix, body, in_def, owner) }
+          node.rigor_each_child { |child| walk(child, prefix, body, in_def, owner, class_self) }
+        end
+
+        # Issue #1689 — `Class.new do … end` (or `Struct.new` / `Data.define` with a block), named or not: the block's
+        # `self` is the class the call creates, so a `refine` directly in it is not `Module#refine`. The call's other
+        # parts walk as they would anyway.
+        def walked_class_new_call?(node, prefix, body, in_def, owner, class_self)
+          block = node.block
+          return false unless block.is_a?(Prism::BlockNode) && ScopeIndexer.meta_new_constant_rvalue?(node)
+          return false if ScopeIndexer.module_new_call?(node)
+
+          walk(node.receiver, prefix, body, in_def, owner, class_self) if node.receiver
+          walk_children(node.arguments, prefix, body, in_def, owner, class_self)
+          walk_children(block, prefix, body, in_def, nil, true)
+          true
         end
 
         # `M = Module.new do … end`: the block's `self` is the module the write names, so a `refine` in it refines
         # for `M`. The write's other parts walk as they would anyway.
-        def walked_meta_new_write?(node, prefix, body, in_def, owner)
+        def walked_meta_new_write?(node, prefix, body, in_def, owner, class_self)
           call = ScopeIndexer.meta_new_block_call(node)
           return false if call.nil? || !ScopeIndexer.module_new_call?(call)
 
           named = meta_new_owner(node, prefix)
-          walk(call.receiver, prefix, body, in_def, owner) if call.receiver
-          walk_children(call.arguments, prefix, body, in_def, owner)
-          record_call(call, prefix, body, in_def, owner)
-          walk_children(call.block, prefix, body, in_def, named)
+          walk(call.receiver, prefix, body, in_def, owner, class_self) if call.receiver
+          walk_children(call.arguments, prefix, body, in_def, owner, class_self)
+          record_call(call, prefix, body, in_def, owner, class_self)
+          walk_children(call.block, prefix, body, in_def, named, false)
           true
         end
 
@@ -79,8 +97,10 @@ module Rigor
           end
         end
 
-        def record_call(node, prefix, body, in_def, owner)
-          if (target = ScopeIndexer.refine_target(node))
+        def record_call(node, prefix, body, in_def, owner, class_self)
+          if class_self && ScopeIndexer.refine_call?(node)
+            record_class_body_refine(node)
+          elsif (target = ScopeIndexer.refine_target(node))
             record_refine_block(node, owner, ScopeIndexer.constant_receiver_candidates(target, prefix))
           elsif using_call?(node) && !in_def
             record_using(node, prefix, body)
@@ -145,6 +165,8 @@ module Rigor
             @refine_defs.record(owner, targets, def_node, @nesting) if owner
           end
         end
+
+        def record_class_body_refine(node) = (@class_body_refines ||= Set.new) << node.block.location.start_offset
 
         def using_call?(node)
           node.name == :using && (node.receiver.nil? || node.receiver.is_a?(Prism::SelfNode)) &&

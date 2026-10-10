@@ -638,4 +638,24 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
 
     expect(undefined_rows).to eq([["patch.rb", 5, "nonexistent_ctl"]])
   end
+
+  # Issue #1689 — `Class` undefines `refine`, so a `refine` call in a class body is the class's own method. Here
+  # `Widget.refine` yields, and the block's `def` defines `Widget#label`, whose `self` is a Widget, like any `def`
+  # in a block in that body. A project class has no RBS, so `call.undefined-method` does not fire on it either way;
+  # the def's `self` is the observable.
+  it "treats a `refine` call in a class body as the class's own method, not a refinement" do
+    write("lib/widget.rb", <<~RUBY)
+      class Widget
+        def self.refine(_target) = yield
+
+        refine String do
+          def label = dump_type(self)
+        end
+      end
+    RUBY
+
+    dumps = diagnostics.select { |d| d.qualified_rule == "dump.type" }.map(&:message)
+
+    expect(dumps).to eq(["dump_type: Widget"])
+  end
 end

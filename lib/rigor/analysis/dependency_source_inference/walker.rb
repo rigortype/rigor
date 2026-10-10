@@ -50,8 +50,17 @@ module Rigor
         end
 
         # The walk's two accumulators. The budget counts `catalog` only, but stops the whole walk: a refine body
-        # reached after it trips is not recorded.
-        Harvest = Struct.new(:catalog, :refinements)
+        # reached after it trips is not recorded. `root` is the file being walked and `in_effect` its
+        # {Inference::InEffectRefinements}, built the first time a `refine`-shaped call asks (issue #1689).
+        Harvest = Struct.new(:catalog, :refinements, :root, :in_effect) do
+          # {Inference::ScopeIndexer.module_refine_target} against this file's in-effect refinements.
+          def refine_target_of(node)
+            return nil if Inference::ScopeIndexer.refine_target(node).nil?
+
+            self.in_effect ||= Inference::InEffectRefinements.new(root)
+            Inference::ScopeIndexer.module_refine_target(node, in_effect)
+          end
+        end
         private_constant :Harvest
 
         # Per-method catalog entry. `kind` is `:instance` or `:singleton`; `return_type` is the
@@ -114,6 +123,8 @@ module Rigor
           parse_result = Prism.parse_file(path)
           return unless parse_result.errors.empty?
 
+          harvest.root = parse_result.value
+          harvest.in_effect = nil
           walk_node(parse_result.value, [], false, harvest, budget)
         rescue StandardError
           # Gem source we can't parse / read silently degrades to "no contribution from this file". The
@@ -137,7 +148,7 @@ module Rigor
           when Prism::DefNode
             record_def_node(node, qualified_prefix, in_singleton_class, harvest, budget)
           when Prism::CallNode
-            if (target = Inference::ScopeIndexer.refine_target(node))
+            if (target = harvest.refine_target_of(node))
               return walk_refine_body(node, target, qualified_prefix, in_singleton_class, harvest, budget)
             end
 
@@ -190,12 +201,13 @@ module Rigor
           harvest.catalog[key] = CatalogEntry.new(kind: kind, return_type: return_type)
         end
 
-        # Issue #1672 — `refine X do … end`, the shape {Inference::ScopeIndexer.refine_target} accepts. The body's
-        # instance `def`s are refinements of X by the enclosing module, recorded the way the project walk records
-        # them (`ScopeIndexer#record_refinement_defs`: X resolved lexically, every name it can denote recorded).
-        # None reaches the catalogue. A `refine` with no enclosing module, or inside `class << self`, refines
-        # nothing Ruby accepts, so its defs are dropped. Declarations nested in the body still walk under the
-        # lexical prefix, as they did before.
+        # Issue #1672 — `refine X do … end`, the shape {Inference::ScopeIndexer.module_refine_target} accepts (not
+        # one whose `self` is a class: that is the class's own method and walks as any other call, issue #1689). The
+        # body's instance `def`s are refinements of X by the enclosing module, recorded the way the project walk
+        # records them (`ScopeIndexer#record_refinement_defs`: X resolved lexically, every name it can denote
+        # recorded). None reaches the catalogue. A `refine` with no enclosing module, or in a block under
+        # `class << self`, names no refining module, so its defs are dropped. Declarations nested in the body still
+        # walk under the lexical prefix, as they did before.
         def walk_refine_body(node, target, qualified_prefix, in_singleton_class, harvest, budget)
           body = node.block.body
           return if body.nil?

@@ -3572,9 +3572,14 @@ module Rigor
       # does not type as a class object (a gem class with no RBS) keeps the name as written: the body is still some
       # class's body, and leaving it on the enclosing `self` made a `refine` at the file's top level report every
       # implicit-self call in it as `call.unresolved-toplevel`.
+      #
+      # Issue #1689 — a `refine` call the file's {InEffectRefinements} places in a class body is the class's own
+      # method, not `Module#refine`, so its block is entered as any other block.
       def refined_class_context(node)
         target = ScopeIndexer.refine_target(node)
         return nil if target.nil?
+
+        return nil if InEffectRefinements.class_body_refine?(scope, node)
 
         refined = scope.type_of(target)
         name = refined.is_a?(Type::Singleton) ? refined.class_name : Source::ConstantPath.qualified_name(target)

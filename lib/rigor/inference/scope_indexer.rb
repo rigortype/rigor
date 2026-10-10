@@ -2252,12 +2252,13 @@ module Rigor
       # @return the `program_globals` table and the census, keyed by the discovery index members it fills
       def build_program_global_index(root, default_scope)
         accumulator = {}
+        in_effect = InEffectRefinements.new(root)
         census = { patched_line_readers: Set.new, clears_last_status: false, defines_case_equality: false,
-                   write_census: GlobalWriteCensus::Collector.new }
+                   write_census: GlobalWriteCensus::Collector.new(in_effect) }
         gather_global_writes(root, default_scope, accumulator, census)
         census[:patched_line_readers] = census[:patched_line_readers].freeze
         census[:implicit_self_evidence] = LastLine::SelfEvidence.new(root)
-        census[:in_effect_refinements] = InEffectRefinements.new(root)
+        census[:in_effect_refinements] = in_effect
         [accumulator.freeze, census]
       end
 
@@ -3251,6 +3252,7 @@ module Rigor
       # when the caller has none).
       def build_methods_and_def_nodes(root, source_path = nil, certainty: Certainty.possible_nodes(root))
         tables = MethodTables.new({}, {}, nil, certainty, true)
+        tables.root = root
         def_nodes = {}
         walk_methods_and_def_nodes(root, [], false, tables, def_nodes, source_path)
         apply_alias_def_nodes(root, def_nodes, tables)
@@ -3267,8 +3269,23 @@ module Rigor
       # ADR-119 WD3 — `certainty` is the file's {Certainty} answer and `certain` whether the contribution being
       # recorded is certain ({#at} sets it before each recorder). `possible`, `contested_envelopes` and
       # `contested_def_nodes` are the siblings the recorders fill, each nil until a possible contribution writes it.
+      #
+      # Issue #1689 — `root` is the walked tree, and `in_effect` its {InEffectRefinements}, built the first time a
+      # `refine`-shaped call asks {#refine_target_of}, so a file without one never builds it.
       MethodTables = Struct.new(:existence, :envelopes, :refinements, :certainty, :certain, :possible,
-                                :contested_envelopes, :contested_def_nodes) do
+                                :contested_envelopes, :contested_def_nodes, :root, :in_effect) do
+        # {ScopeIndexer.module_refine_target} against this tree's {InEffectRefinements}.
+        def refine_target_of(node)
+          return nil if ScopeIndexer.refine_target(node).nil?
+
+          ScopeIndexer.module_refine_target(node, in_effect_query)
+        end
+
+        # {InEffectRefinements#class_body_refine?} for a `refine` call of this tree.
+        def class_body_refine?(node) = ScopeIndexer.refine_call?(node) && in_effect_query.class_body_refine?(node)
+
+        def in_effect_query = (self.in_effect ||= InEffectRefinements.new(root))
+
         # Sets {#certain} for the contribution `node` and returns the tables.
         def at(node)
           self.certain = !Certainty.possible?(certainty, node)
@@ -3323,14 +3340,29 @@ module Rigor
       # implicit- or `self`-receiver `refine` with one constant argument and a literal block. A computed target
       # (`refine(klass) { … }`) names no class this walk can key, so its body walks as it did before.
       def refine_target(node)
-        return nil unless node.name == :refine && node.block.is_a?(Prism::BlockNode)
-        return nil unless node.receiver.nil? || node.receiver.is_a?(Prism::SelfNode)
+        return nil unless refine_call?(node)
 
         arguments = node.arguments&.arguments
         return nil unless arguments&.size == 1
 
         target = arguments.first
         target if target.is_a?(Prism::ConstantReadNode) || target.is_a?(Prism::ConstantPathNode)
+      end
+
+      # An implicit- or `self`-receiver `refine` call with a literal block, whatever its argument.
+      def refine_call?(node)
+        node.name == :refine && node.block.is_a?(Prism::BlockNode) &&
+          (node.receiver.nil? || node.receiver.is_a?(Prism::SelfNode))
+      end
+
+      # Issue #1689 — {#refine_target}, for a call that `in_effect` (its file's {InEffectRefinements}) does not place
+      # where `self` is a class. `Class` undefines `refine`, so `refine X do … end` directly in a `class` body is the
+      # class's own method (a DSL), and its block walks as any other block. Every walk that treats a refine body
+      # specially asks this, so the method tables, the in-effect refinements and the typer agree on which calls are
+      # refine bodies.
+      def module_refine_target(node, in_effect)
+        target = refine_target(node)
+        target unless target.nil? || in_effect.class_body_refine?(node)
       end
 
       # Issue #1120 — records the instance `def`s of a `refine X do … end` body as refinement methods of X, keyed by
@@ -3601,7 +3633,7 @@ module Rigor
           anonymous = record_call_node_methods(node, owner_prefix, in_singleton_class, methods_acc.at(node),
                                                source_path)
           # Issue #1120 — a refine body's defs go to the refinement table and nowhere else.
-          if (target = refine_target(node))
+          if (target = methods_acc.refine_target_of(node))
             return record_refinement_defs(node, target, qualified_prefix, owner_prefix, methods_acc)
           end
 
@@ -7274,7 +7306,8 @@ module Rigor
         if dynamic_surface_call?(node)
           record_surface_mark(tables, class_name, Scope::DiscoveryIndex::ENVELOPE_DYNAMIC_MARK)
         elsif node.name == :refine
-          record_refinement(node, qualified_prefix, tables)
+          # Issue #1689 — a `refine` where `self` is a class is the class's own method, and refines nothing.
+          record_refinement(node, qualified_prefix, tables) unless tables.class_body_refine?(node)
         elsif !NAME_NEUTRAL_MACROS.include?(node.name)
           (node.arguments&.arguments || []).each do |argument|
             # `memoize def f(a)` wraps the def it is handed exactly as `memoize :f` does.
@@ -8777,7 +8810,7 @@ module Rigor
 
       def constant_write_census(root)
         tables = CensusTables.new(writes: {}, seen: Set.new, declared: Set.new, aliases: {},
-                                  write_census: GlobalWriteCensus::Collector.new)
+                                  write_census: GlobalWriteCensus::Collector.new(InEffectRefinements.new(root)))
         walk_constant_write_census(root, [], tables)
         tables
       end

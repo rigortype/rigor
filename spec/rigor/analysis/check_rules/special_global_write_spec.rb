@@ -400,8 +400,23 @@ RSpec.describe "special global writes", type: :runner do
       end
     end
 
+    # Issue #1689 — `Class` undefines `refine`, so in a class body it is the class's own method: a `def write`
+    # in its block defines `Widget#write`, not a refinement.
+    it "counts a `refine` block where `self` is a class as a definition, not a refinement" do
+      tree = Prism.parse(<<~RUBY).value
+        class Widget < Base
+          refine(Integer) { def write(*) = nil }
+        end
+        module Ext
+          refine(Array) { def write(*) = nil }
+        end
+      RUBY
+
+      expect(census.scan(tree)).to eq(Set[%i[defines write], %i[refines write]])
+    end
+
     it "degrades a node it fails to read to a definition of every name, and never raises" do
-      collector = census::Collector.new
+      collector = census::Collector.new(Rigor::Inference::InEffectRefinements.new(nil))
       allow(collector).to receive(:visit_call).and_raise(EncodingError, "invalid symbol in encoding UTF-8")
       node = Prism.parse("k.define_method(:size) { 0 }").value.statements.body.first
       expect { collector.visit(node, top_level: true) }.not_to raise_error
@@ -409,7 +424,7 @@ RSpec.describe "special global writes", type: :runner do
     end
 
     it "keeps analysing the file when it fails to read a node" do
-      collector = census::Collector.new
+      collector = census::Collector.new(Rigor::Inference::InEffectRefinements.new(nil))
       allow(collector).to receive(:visit_call).and_raise(ArgumentError, "invalid byte sequence in UTF-8")
       allow(census::Collector).to receive(:new).and_return(collector)
       expect(fired("k = Integer\nk.define_method(:size) { 0 }\n$stdout = 1\n$/ = 1\n"))

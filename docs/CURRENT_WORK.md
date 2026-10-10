@@ -65,6 +65,33 @@ Next: #1760 (one realpath'd project root for `rigor unused`; start after #1767 l
 (ADR-58 census misses `define_method` writes), #1772 (#1695 leftovers), #1406. Survey runs of `rigor unused` must set a
 scratch `cache.path`: earlier runs rewrote pre-existing `.rigor/cache` in redmine/mastodon/gitlab.
 
+## AtCoder / ac-library-rb line (2026-10-10, separate from the lines above)
+
+Landed: #1677 #1680 (bundled `rigor-ac-library-rb`, RBS for the gem's `AcLibraryRb` namespace) #1681
+#1701 (vendored `prime` RBS, loaded only on a literal `require "prime"`) #1705 (`pre_eval:` reads
+`alias`/`alias_method`) #1706 (top-level `include M` silences `call.unresolved-toplevel` /
+`call.undefined-method`; no typing) #1719 (`0 | Integer` judged as Integer) #1755 (constant through an
+RBS-only include, instance methods only) #1765 (sig-gen lists top-level defs as `sig.skipped.top-level-def`)
+#1770 (vendored `prime` stands down per member, with an `:info` notice).
+
+On hold: **#1715** (type `crt(...)` after a top-level `include AcLibraryRb`). Draft **#1771** stays for
+reference only: five review passes each found a false positive, all from reading "no project file
+defines the name" as proof; the last one is an empty `paths:` expansion (the typical contest directory).
+#1715 records every shape and two non-absence designs. Do not resume #1771 as is.
+
+Open, found on this line: #1676 (default emission of top-level defs, still a decision), #1678
+(rigor-minitest `assert_equal` narrows to the literal), #1708 (`pre_eval:` patch on an ancestor),
+#1710 (ADR-17 first vs last pre_eval file wins), #1722 (core-receiver `undefined-method` FPs:
+`method_missing`, `C.include(M)`, `extend` on a local), #1773 (Object mixin does not shadow Kernel).
+Maintainer decision kept: `call.possible-nil-receiver` stays as specified; the plugin README shows
+`severity_overrides` for contest code.
+
+What bit: #1706, #1755 and #1771 each needed three review rounds; the new holes sat in each fix, not
+in the original change. A subagent waiting on its own idle monitors re-sent its final report a dozen
+times; stop it with TaskStop once its PR is pushed. Worktrees from this line under `../rigor-wt/`
+(constant-through-rbs-include, sig-gen-toplevel-skip, vendored-partial-standdown) can be removed;
+keep `toplevel-include-typing` while #1771 is open.
+
 ## Special-variable semantics (ADR-117), carried over unverified
 
 - ADR-117 order: #1426, then #1427, then #1366's stream part (#1484 lands before it; #1366 stays

@@ -141,6 +141,9 @@ module Rigor
         # Synthesise a new Configuration with `baseline` explicitly disabled. The original Configuration is frozen-ish
         # so we round-trip through the constructor with an override hash.
         defaults = Configuration::DEFAULTS.merge(
+          # Carried with its explicitness (#1692): a stated `target_ruby` turns on the deprecation rules, and a
+          # baseline generated without them would leave every such finding "new" on the next `rigor check`.
+          "target_ruby" => configuration.target_ruby,
           "paths" => configuration.paths,
           "exclude" => configuration.exclude_patterns,
           "plugins" => configuration.plugins,
@@ -153,7 +156,7 @@ module Rigor
           "baseline" => false,
           "cache" => { "path" => configuration.cache_path }
         )
-        Configuration.new(defaults)
+        Configuration.new(defaults, defaults.key?("effects"), configuration.target_ruby_explicit?)
       end
 
       # ---- dump --------------------------------------------------

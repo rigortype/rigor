@@ -283,6 +283,23 @@ module Rigor
                 :effects_snapshot_path, :effects_snapshot_reach, :effects_snapshot_gate, :effects_tolerated,
                 :effects_labels, :effects_attribution, :effects_envelopes
 
+    # ADR-47 WD5 amendment (#1692) — whether `.rigor.yml` (or its `includes:` chain) set `target_ruby:` itself.
+    # The default `"4.0"` is a parse version, not something the user said about the Ruby the project runs on.
+    def target_ruby_explicit?
+      @target_ruby_explicit
+    end
+
+    # ADR-47 WD5 amendment (#1692) — `target_ruby` read as a user statement about the runtime: the configured
+    # version when the user set it explicitly, nil when it is the default or `"latest"`. `"latest"` names the
+    # newest syntax this Prism build parses, which moves with a Rigor upgrade, so it states no runtime. Only the
+    # Ruby-deprecation rules read this; `Inference::VersionGuard` keeps the analyzer's own `RUBY_VERSION`.
+    def stated_runtime_ruby
+      return nil unless target_ruby_explicit?
+      return nil if target_ruby == "latest"
+
+      target_ruby
+    end
+
     # ADR-103 WD13 — whether effect collection runs. True exactly when the loaded configuration carried an
     # `effects:` block, whatever its body; `rigor effects` enables it for its own run by loading an
     # implicit `effects: {}` instead of by consulting anything else. Nothing else — no annotation, no
@@ -327,6 +344,7 @@ module Rigor
       if resolved.nil? || !File.exist?(resolved)
         data = DEFAULTS
         effects_key_present = false
+        target_ruby_key_present = false
       else
         # ADR-103 WD15 — captured from the RAW, pre-`DEFAULTS.merge` file (+ its `includes:` chain) because
         # `DEFAULTS` itself carries an `"effects" => false` entry: once merged, "the file never wrote
@@ -334,9 +352,10 @@ module Rigor
         # indistinguishable to {#initialize}. This is the only place that distinction still exists.
         raw = load_with_includes(resolved)
         effects_key_present = raw.key?("effects")
+        target_ruby_key_present = raw.key?("target_ruby")
         data = DEFAULTS.merge(raw)
       end
-      new(autowire_default_plugins(data), effects_key_present)
+      new(autowire_default_plugins(data), effects_key_present, target_ruby_key_present || false)
     end
 
     # ADR-93 WD2 — the one bundled plugin default-wired without a `plugins:` entry. `rigor-rbs-inline` is the
@@ -519,7 +538,11 @@ module Rigor
     #   `"key" => value` hash literal — this class's usual call shape, all over the spec suite — is coerced
     #   into keyword arguments by Ruby whenever the method declares ANY keyword parameter, which would break
     #   every `Configuration.new("some_key" => value)` call site with an "unknown keyword" `ArgumentError`.
-    def initialize(data = DEFAULTS, effects_key_present = data.key?("effects"))
+    # @param target_ruby_key_present — ADR-47 WD5 amendment (#1692) — whether the file set `target_ruby:` itself,
+    #   captured before `DEFAULTS.merge` for the same reason as `effects_key_present` and positional for the same
+    #   reason. See {#stated_runtime_ruby}.
+    def initialize(data = DEFAULTS, effects_key_present = data.key?("effects"),
+                   target_ruby_key_present = data.key?("target_ruby"))
       # Record before the per-key fetches below discard the evidence. Top level only, deliberately —
       # see {ConfigAudit.unknown_key_warnings} for why a nested check cannot key on DEFAULTS.
       @unknown_keys = (data.keys.map(&:to_s) - KNOWN_KEYS).sort.freeze
@@ -528,6 +551,7 @@ module Rigor
       plugins_io = DEFAULTS.fetch("plugins_io").merge(data.fetch("plugins_io", {}))
 
       @target_ruby = coerce_target_ruby(data.fetch("target_ruby", DEFAULTS.fetch("target_ruby")))
+      @target_ruby_explicit = target_ruby_key_present ? true : false
       @paths = Array(data.fetch("paths", DEFAULTS.fetch("paths"))).map(&:to_s).freeze
       user_excludes = Array(data.fetch("exclude", DEFAULTS.fetch("exclude"))).map(&:to_s)
       @exclude_patterns = (BUILTIN_EXCLUDES + user_excludes).uniq.freeze
@@ -619,6 +643,9 @@ module Rigor
     def to_h # rubocop:disable Metrics/MethodLength, Metrics/AbcSize
       {
         "target_ruby" => target_ruby,
+        # A stated `target_ruby` turns on the deprecation rules a defaulted one leaves off (#1692), so the run cache
+        # key and the incremental fingerprint must tell the two apart even where the value matches.
+        "target_ruby_explicit" => target_ruby_explicit?,
         "paths" => paths,
         "exclude" => exclude_patterns - BUILTIN_EXCLUDES,
         "plugins" => plugins,

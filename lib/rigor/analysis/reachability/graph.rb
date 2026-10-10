@@ -55,8 +55,13 @@ module Rigor
           # The data-file demotion applies to BOTH buckets it can speak to, which is what the tier
           # contract says and what the implementation had narrowed (#370). See {#tainted}.
           test_only = reachable - production
+          # A namespace a test names (`Ns::CONST`) while production reaches a declaration under it is live in
+          # production for the same reason an unreached one is not dead (#1732).
+          live_namespaces = namespace_only(test_only, production)
+          test_only -= live_namespaces
           undecidable = tainted(unreached - namespaces).merge(tainted(test_only))
-          undecidable = spread_undecidable(edges, undecidable, (unreached - namespaces) | test_only)
+          undecidable = spread_undecidable(edges, undecidable, (unreached - namespaces) | test_only,
+                                           through: namespaces | live_namespaces)
           build_report(edges: edges, reachable: reachable, unreached: unreached, namespaces: namespaces,
                        test_only: test_only, undecidable: undecidable)
         end
@@ -114,19 +119,31 @@ module Rigor
         # `Sub` reachable through `"Sub#{x}".constantize` left `Base` a DEFINITE candidate, and acting on that row
         # deletes the base of a class that may well be live. Only declarations that would otherwise be
         # reported — unreached or test-only — are moved; the reason names the declaration they hang from.
-        def spread_undecidable(edges, undecidable, reportable)
+        #
+        # The spread passes `through` a declaration hidden as a namespace without listing it: a service hidden
+        # only because something names a constant nested in it (`Svc::Error`) still carries the undecidable
+        # evidence on to what its body names. Stopping there left the next service down under "reachable only
+        # from tests" (#1732).
+        def spread_undecidable(edges, undecidable, reportable, through:)
           return undecidable if undecidable.empty?
 
           out = Hash.new { |h, k| h[k] = [] }
           edges.each { |from, to, _role| out[from] << to }
           result = undecidable.dup
+          passed = Set.new
           queue = undecidable.keys
           until queue.empty?
             from = queue.shift
             out[from].each do |target|
-              next if result.key?(target) || !reportable.include?(target)
+              next if result.key?(target) || passed.include?(target)
 
-              result[target] = "reachable from #{from}, which cannot be decided"
+              if reportable.include?(target)
+                result[target] = "reachable from #{from}, which cannot be decided"
+              elsif through.include?(target)
+                passed << target
+              else
+                next
+              end
               queue << target
             end
           end
@@ -166,18 +183,21 @@ module Rigor
           @test_seeds ||= seeds_from { |ref| source(ref).nil? && ref.role == :test }
         end
 
-        # The node an edge leaves. A declaration-header reference (`class Sub < Base`) is credited to `Sub`
-        # (#1720), but only an owned declaration from `paths:` is a node: the subclass a spec, an initializer
-        # or a support file declares is outside the declaration set, so its own liveness cannot be judged and
-        # an edge leaving it would silently drop the evidence. That reference falls back to the scope it is
-        # written in — the file level for a top-level `class FakeAdapter < Adapter` in a spec, which keeps
-        # `Adapter` test-reachable exactly as before the credit moved. For every other reference `from` is
-        # `nesting` joined already, so the fallback is the identity.
+        # The node an edge leaves: the owned declaration whose code holds the reference, with a declaration-header
+        # reference (`class Sub < Base`) credited to `Sub` (#1720). Only an owned declaration from `paths:` is a
+        # node, though. A class an initializer, `config/application.rb` or a spec helper declares, or a reopened
+        # gem class (WD6), is outside the declaration set, so the walk can never start from it and an edge
+        # leaving it would silently drop the evidence. Falling back to the enclosing nesting (#1724) did not help
+        # either: `module MyApp; class Application` and a spec's `module Outer; class Fake < OBase` fall back to a
+        # module that is never reached itself, or is not a node at all (#1732).
+        #
+        # Such a reference counts as file-level code of its file instead, in that file's role: a spec helper's
+        # reference keeps its target test-reachable, an initializer's keeps it live in production. That is exact
+        # for a class header and for a class body's own statements, which run when the file loads; for a method
+        # body it is the reading that cannot report live code as dead, since whether the method runs is not
+        # decidable from a declaration this report does not own.
         def source(ref)
-          from = ref.from
-          return from if from.nil? || @owned.include?(from)
-
-          ref.nesting.empty? ? nil : ref.nesting.join("::")
+          @owned.include?(ref.from) ? ref.from : nil
         end
 
         def seeds_from

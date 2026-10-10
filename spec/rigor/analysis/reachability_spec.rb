@@ -431,7 +431,7 @@ RSpec.describe Rigor::Analysis::Reachability do
     end
 
     # A subclass declared outside `paths:` is not a node, so its liveness cannot be judged; its superclass
-    # edge falls back to the scope it is written in, keeping the test-only answer it had before the fix.
+    # reference counts as file-level code of the spec (#1732), keeping the test-only answer it had before.
     it "keeps a base subclassed only by an undeclared spec class test-reachable" do
       report = report_for({ "lib/base.rb" => "class Base; end\nclass Root; end\n",
                             "spec/support/fake.rb" => "class FakeBase < Base; end\n" },
@@ -469,6 +469,137 @@ RSpec.describe Rigor::Analysis::Reachability do
                             "spec/child_spec.rb" => "Child.new\n" })
       expect(report.candidates.map(&:fqn)).to be_empty
       expect(report.test_only.map(&:fqn)).to eq(%w[Base Child])
+    end
+  end
+
+  # Issue #1732 — a reference written inside a class body declared OUTSIDE `paths:` (an initializer, the
+  # Rails `Application`, a spec helper) or in a reopened gem class names a scope that is not a node, so the
+  # walk can never start from it. It counts as file-level code of its own file instead, in that file's role.
+  describe "a reference from a class that is not an owned node is file-level (#1732)" do
+    def report_for(files, declared:, roots: [], foreign: ->(_fqn) { false })
+      decls = []
+      refs = []
+      uses = []
+      files.each do |path, source|
+        result = Rigor::Analysis::Reachability::Scan.call(path: path, source: source)
+        raise "fixture #{path} did not parse" if result.nil?
+
+        decls.concat(result.declarations) if declared.include?(path)
+        refs.concat(result.references)
+        uses.concat(result.dynamic_uses)
+      end
+      Rigor::Analysis::Reachability::Graph.new(declarations: decls, references: refs, root_fqns: roots,
+                                               dynamic_uses: uses, foreign: foreign).report
+    end
+
+    it "keeps a class used from an initializer's class body live in production" do
+      report = report_for({ "app/services/svc.rb" => "class Svc; end
+class Dead; end
+",
+                            "config/initializers/mw.rb" => "class Mw\n  def call = Svc.new\nend\n" },
+                          declared: ["app/services/svc.rb"])
+      expect(report.candidates.map(&:fqn)).to eq(["Dead"])
+      expect(report.test_only).to be_empty
+    end
+
+    it "keeps a middleware named in config/application.rb's Application body live in production" do
+      application = <<~RUBY
+        module MyApp
+          class Application < Rails::Application
+            config.middleware.use MyMw
+          end
+        end
+      RUBY
+      report = report_for({ "lib/my_mw.rb" => "class MyMw; end\n", "config/application.rb" => application },
+                          declared: ["lib/my_mw.rb"])
+      expect(report.candidates.map(&:fqn)).to be_empty
+      expect(report.test_only).to be_empty
+    end
+
+    it "keeps a base subclassed only by a nested spec class test-reachable" do
+      report = report_for({ "lib/outer.rb" => "module Outer\n  class OBase; end\nend\nclass Root; end\n",
+                            "spec/support/fake.rb" => "module Outer\n  class Fake < OBase; end\nend\n" },
+                          declared: ["lib/outer.rb"], roots: ["Root"])
+      expect(report.candidates.map(&:fqn)).to be_empty
+      expect(report.test_only.map(&:fqn)).to eq(["Outer::OBase"])
+    end
+
+    it "keeps a class used from a spec helper's method body test-reachable, not production" do
+      helper = "module Helpers\n  class Fake\n    def go = Svc.new\n  end\nend\n"
+      report = report_for({ "lib/svc.rb" => "class Svc; end\n", "spec/support/helper.rb" => helper },
+                          declared: ["lib/svc.rb"])
+      expect(report.candidates.map(&:fqn)).to be_empty
+      expect(report.test_only.map(&:fqn)).to eq(["Svc"])
+    end
+
+    it "treats a reopened gem class inside paths as file-level code" do
+      report = report_for({ "lib/ext.rb" => "class String\n  def to_svc = Svc.new\nend\nclass Svc; end\n" },
+                          declared: ["lib/ext.rb"], foreign: ->(fqn) { fqn == "String" })
+      expect(report.candidates.map(&:fqn)).to be_empty
+    end
+
+    # Test classes now contribute their references, so a test naming a namespace's own constant reaches the
+    # namespace; one whose members production reaches is not "dead production code with a live test".
+    it "does not report a namespace with a production-reachable member as test-only" do
+      report = report_for({ "lib/ns.rb" => "module Ns\n  CONST = 1\n  class Live; end\nend\n",
+                            "lib/main.rb" => "Ns::Live.new\n",
+                            "test/ns_test.rb" => "class NsTest\n  def test_it = Ns::CONST\nend\n" },
+                          declared: ["lib/ns.rb", "lib/main.rb"])
+      expect(report.candidates.map(&:fqn)).to be_empty
+      expect(report.test_only).to be_empty
+    end
+
+    # A spec class naming `Mid::Error` hides `Mid` as a namespace; the undecidable evidence from the worker
+    # must still reach the service `Mid` calls rather than leaving it "reachable only from tests".
+    it "spreads undecidable through a class hidden as a namespace" do
+      lib = <<~RUBY
+        class Worker
+          def go = Mid.new
+        end
+        class Mid
+          class Error < StandardError; end
+          def go = Leaf.new
+        end
+        class Leaf; end
+      RUBY
+      report = report_for({ "lib/a.rb" => lib,
+                            "lib/m.rb" => "\"Worker\#{ARGV.first}\".constantize\n",
+                            "spec/mid_spec.rb" => "class MidSpec\n  def go = [Mid::Error, Leaf]\nend\n" },
+                          declared: ["lib/a.rb", "lib/m.rb"])
+      expect(report.test_only.map(&:fqn)).to eq(["Mid::Error"])
+      expect(report.undecidable.to_h { [it.fqn, it.reason] })
+        .to include("Leaf" => "reachable from Mid, which cannot be decided")
+    end
+
+    # The same when production names `Mid::Error` and a spec names `Mid`: `Mid` is hidden as a live
+    # namespace rather than listed test-only, and the evidence must still pass through it.
+    it "spreads undecidable through a test-reached class with a production-reachable member" do
+      lib = <<~RUBY
+        class Worker
+          def go = Mid.new
+        end
+        class Mid
+          class Error < StandardError; end
+          def go = Leaf.new
+        end
+        class Leaf; end
+      RUBY
+      report = report_for({ "lib/a.rb" => lib,
+                            "lib/m.rb" => "\"Worker\#{ARGV.first}\".constantize\nMid::Error\n",
+                            "spec/mid_spec.rb" => "class MidSpec\n  def go = [Mid, Leaf]\nend\n" },
+                          declared: ["lib/a.rb", "lib/m.rb"])
+      expect(report.test_only).to be_empty
+      expect(report.undecidable.to_h { [it.fqn, it.reason] })
+        .to include("Leaf" => "reachable from Mid, which cannot be decided")
+    end
+
+    # The fallback is only for scopes that are not nodes: an owned class's body still credits the class, so a
+    # dead owned class keeps what it names dead.
+    it "still credits an owned class reopened outside paths to that class" do
+      report = report_for({ "lib/a.rb" => "class Owned; end\nclass Svc; end\n",
+                            "config/initializers/owned.rb" => "class Owned\n  def go = Svc.new\nend\n" },
+                          declared: ["lib/a.rb"])
+      expect(report.candidates.map(&:fqn)).to eq(%w[Owned Svc])
     end
   end
 end

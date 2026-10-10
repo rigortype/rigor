@@ -69,16 +69,25 @@ superclass of `class Sub < Base`, and the arguments and block of `Sub = Class.ne
 put the edge to `Base` on `Sub`, while the name still resolves in the outer scope
 ([#1720](https://github.com/rigortype/rigor/issues/1720)). Crediting the enclosing scope
 instead made a base nested in a namespace module unreachable, since the module itself is
-never referenced, and rooted a top-level base even when every subclass was dead. A subclass
-that is not an owned node, either declared outside `paths:` (a spec, an initializer) or a
-reopened gem class (WD6), credits its header to the enclosing scope instead. That keeps the
-evidence when the enclosing scope is the file level or a reached declaration; under a
-namespace that is never reached it is lost, as it was before. A superclass never resolves
-to the subclass it declares: `module Api; class User < User; end; end` names `::User`.
+never referenced, and rooted a top-level base even when every subclass was dead. A class
+that is not an owned node, either declared outside `paths:` (`config/application.rb`'s
+`Application`, an initializer, a spec helper) or a reopened gem class (WD6), is no node an
+edge can leave. The references in its header and body count as file-level code of their file
+instead, in that file's role
+([#1732](https://github.com/rigortype/rigor/issues/1732)): `config.middleware.use MyMw` in
+`Application` roots `MyMw` the way a top-level line of `config/application.rb` would, and a
+spec's `module Outer; class Fake < OBase` keeps `OBase` test-reachable. Crediting the
+enclosing scope instead lost that evidence whenever the scope was a module nothing reaches.
+For a header and a class body's own statements the reading is exact, since they run when the
+file loads; for a method body it is the reading that cannot report live code as dead. A
+superclass never resolves to the subclass it declares: `module Api; class User < User; end;
+end` names `::User`.
 
 Whatever an undecidable declaration (WD4) reaches is undecidable too, with a reason naming
 it. Otherwise the base of a subclass reached only through `"Sub#{x}".constantize` would be a
-definite candidate, and deleting it would break a subclass that may be live.
+definite candidate, and deleting it would break a subclass that may be live. The spread
+passes through a declaration hidden as namespace-only without listing it, so a service whose
+class a spec names only as `Svc::Error` still carries the evidence to what it calls.
 
 ### WD3 — Roots are plugin-supplied
 
@@ -143,6 +152,10 @@ So an edge in the reference graph MUST carry the **role of the file it came from
 (production / test / task / config), and `used only by its own test` MUST be a reported
 category rather than a bucket boundary. This is a data-model decision, not a filter: the
 role has to be recorded when the edge is, so it cannot be retrofitted after #349.
+
+A namespace a test names directly (`Ns::CONST`) while production reaches a declaration
+under it is not in that category: it is live in production for the same reason an
+unreached namespace with a live member is not a candidate.
 
 ### Re-evaluation triggers
 

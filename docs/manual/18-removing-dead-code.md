@@ -176,10 +176,14 @@ A base class is reachable whenever one of its subclasses is:
 that nothing else names appears together with its subclasses when none
 of them is reachable, and the decision belongs to the whole family
 rather than to one row. When a subclass sits under **Cannot decide**,
-its base moves there too. A subclass declared outside `paths:` — in a
-spec, say — names its base only from the scope around it: at the top
-of a file that keeps the base live, but nested in a module that
-nothing reaches it does not.
+its base moves there too.
+
+A class declared outside `paths:` — `config/application.rb`'s
+`Application`, a class in an initializer, a spec helper — is not
+itself in the report, so what it names counts as named from its file:
+`config.middleware.use MyMw` keeps `MyMw` live, and a fake subclass in
+`spec/support` keeps its base reachable from tests. The same holds for
+a gem class you reopen inside `paths:`.
 
 The 53 false positives in the adjudicated run fell into a few recurring
 shapes, and 28 of them were the first one. Recognising these lets you

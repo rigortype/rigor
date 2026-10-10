@@ -80,6 +80,24 @@ RSpec.describe "Integer#step enumerator elements (#1794)", type: :runner do
     expect(result.diagnostics.select(&:error?).map { |d| [d.line, d.qualified_rule] }).to eq([])
   end
 
+  # The sequence is `Enumerator[Numeric, void]` by RBS, so a parameter that names a `nil` Return rejects it, as it
+  # rejects `[1].each`.
+  it "reports the sequence against an Enumerator parameter whose Return is not void" do
+    sig = { "consumer.rbs" => <<~RBS }
+      class Consumer
+        def self.nil_return: (Enumerator[Integer, nil]) -> void
+      end
+    RBS
+    result = analyze(<<~RUBY, sig: sig)
+      class Consumer
+        def self.nil_return(e) = nil
+      end
+      Consumer.nil_return(1.step(10, 2))
+    RUBY
+    expect(result.diagnostics.select(&:error?).map { |d| [d.line, d.qualified_rule] })
+      .to eq([[4, "call.argument-type-mismatch"]])
+  end
+
   # `rewind` and a block-taking `each_slice` return the sequence itself, which still answers its own methods.
   it "keeps the sequence as self through the inherited methods that return it" do
     expect(undefined_rows(<<~RUBY)).to eq([])

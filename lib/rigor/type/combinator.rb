@@ -832,7 +832,8 @@ module Rigor
         # instead of several readings of it. The normative relation is
         # docs/type-specification/normalization.md § "Member absorption"; {absorbed_by?} is that list.
         #
-        # Only a `FloatRange`, `Tuple` or `HashShape` member can be dropped, so the O(n²) scan is
+        # Only a `FloatRange`, `Tuple`, `HashShape` or element-carrying `Enumerator::ArithmeticSequence` member
+        # can be dropped (the last also joins with its kind, {join_sequence_elements}), so the O(n²) scan is
         # skipped for every union that carries none of them — this runs on the hot path of every join.
         #
         # The `!absorbed_by?(other, member)` re-check costs one predicate call per pair that absorbed
@@ -863,6 +864,10 @@ module Rigor
           type.is_a?(Nominal) && type.class_name == ARITHMETIC_SEQUENCE && type.type_args.size == 1
         end
 
+        def plain_sequence?(type)
+          type.is_a?(Nominal) && type.class_name == ARITHMETIC_SEQUENCE && type.type_args.empty?
+        end
+
         # Two element-carrying sequences join into one over the union of their elements, so a join of
         # `1.step(10, 2)` and `1.step(10, 3)` stays one sequence whose block reads `Integer`, the answer each arm
         # gives. (A plain sequence absorbing one with an element is the {absorbed_by?} clause.)
@@ -890,7 +895,7 @@ module Rigor
           return true if listed_in_union?(narrower, wider)
 
           case narrower
-          when Nominal then element_sequence?(narrower) && wider == nominal_of(ARITHMETIC_SEQUENCE)
+          when Nominal then element_sequence?(narrower) && plain_sequence?(wider)
           when FloatRange then float_range_absorbed_by?(narrower, wider)
           when Tuple then wider.is_a?(Tuple) && tuple_absorbed_by?(narrower, wider)
           when HashShape then wider.is_a?(HashShape) && hash_shape_absorbed_by?(narrower, wider)

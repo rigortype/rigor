@@ -21,8 +21,9 @@ module Rigor
       #    only the caller can tell from the AST) and an overload declares keywords, that argument is matched
       #    against the overload's keywords rather than as a positional `Hash` — every required keyword
       #    present, every key declared, every value accepted. An overload that declares no keywords still
-      #    reads it as a trailing positional `Hash`, as Ruby passes it. A call without keywords skips an
-      #    overload that requires one.
+      #    reads it as a trailing positional `Hash`, as Ruby passes it, but never in place of a keyword overload that
+      #    takes it (#1800, `KeywordArguments.prefer_takers`). A call without keywords skips an overload that requires
+      #    one.
       # 1a. **Pass 0 — proven, in declared order (#1344).** With only plain-value arguments, the first
       #    overload they do not rule out wins outright when each of its params names its argument's own
       #    class and accepts it with a `yes`; every later pass reads the receiver-affinity order instead.
@@ -50,7 +51,8 @@ module Rigor
       module OverloadSelector
         module_function
 
-        # `ALIAS_STRICT_NOMINALS`, the alias-strict pass's table, lives in `alias_strict_nominals.rb`.
+        # `ALIAS_STRICT_NOMINALS`, the alias-strict pass's table, lives in `alias_strict_nominals.rb`, with the pass's
+        # per-parameter test (`alias_param_accepts?`).
 
         # @param arg_types — caller-provided types in positional order. Empty when
         #   there are no arguments.
@@ -196,6 +198,16 @@ module Rigor
           # matches on a `maybe`, take `Integer#+` of a `bot`, a `Dynamic[Integer | Float | …]` or an
           # unloadable class (612 call sites across the survey corpus).
           def run_selection_passes(declared, overloads, shared, gradual = false) # rubocop:disable Style/OptionalBooleanParameter
+            matches = run_passes(declared, overloads, shared, gradual)
+            return matches unless shared[:keywords_last]
+
+            # Issue #1800 — never a positional reader of the keyword hash in place of a keyword overload that takes it.
+            KeywordArguments.prefer_takers(declared, matches) do |takers, strict|
+              find_matching_overload(takers, shared, strict:)
+            end
+          end
+
+          def run_passes(declared, overloads, shared, gradual)
             # The `:gradual` list (#1750) skips straight to pass 2's every-match answer, stand-ins included.
             unless gradual
               # Unreordered, pass 0 can only pick what the strict pass picks, so it is skipped (#1344's allocations).
@@ -255,7 +267,7 @@ module Rigor
               found = overloads.find do |method_type|
                 engages_block_shape?(method_type, block_required) &&
                   strictly_typed_params?(method_type, shared) &&
-                  matches?(method_type, shared, strict: true)
+                  matches?(method_type, shared, strict: strict)
               end
               return found ? [found] : NO_MATCH
             end
@@ -312,38 +324,6 @@ module Rigor
             params.all? { |param| yield(param, arg_types[index += 1]) }
           end
 
-          # Checks the param's RBS type against an arg using alias-strict-arm matching. Optional / Union
-          # wrappers are flattened; alias resolution is one level deep (the canonical core aliases all have
-          # non-alias strict arms).
-          def alias_param_accepts?(rbs_type, arg)
-            nominal_names = strict_nominal_names_for(rbs_type)
-            return false if nominal_names.nil? || nominal_names.empty?
-
-            nominal_names.any? do |class_name|
-              result = Type::Combinator.nominal_of(class_name).accepts(arg, mode: :gradual)
-              result.yes? || result.maybe?
-            end
-          end
-
-          # Returns the candidate class names a param's RBS type accepts under alias-resolved strict
-          # matching, or nil when the shape cannot be reduced to a closed set of nominals (e.g. an
-          # Interface or an unrecognised alias).
-          def strict_nominal_names_for(rbs_type)
-            case rbs_type
-            when RBS::Types::ClassInstance
-              [rbs_type.name.to_s.delete_prefix("::")]
-            when RBS::Types::Alias
-              ALIAS_STRICT_NOMINALS[rbs_type.name.to_s]
-            when RBS::Types::Optional
-              strict_nominal_names_for(rbs_type.type)
-            when RBS::Types::Union
-              parts = rbs_type.types.map { |t| strict_nominal_names_for(t) }
-              return nil if parts.any?(&:nil?)
-
-              parts.flatten
-            end
-          end
-
           # Returns true when every positional param the call site engages translates to a non-`Dynamic[Top]`
           # carrier. Alias / Interface / Intersection RBS types all degrade to `Dynamic[Top]` per the
           # translator's current shape — those gradually accept any arg, so an overload that includes one
@@ -386,7 +366,8 @@ module Rigor
           end
 
           # `shared` is the keyword bundle `select_candidates` assembled (see `find_matching_overload`).
-          # `strict:` is `false` (gradual), `true` (strict pass) or `:proven` (pass 0; see `find_proven_overload`).
+          # `strict:` is `false` (gradual), `true` (strict pass), `:proven` (pass 0; see `find_proven_overload`) or
+          # `:yes` (the strict pass with a `yes` at every pair, #1800's proof; see `KeywordArguments.prefer_takers`).
           def matches?(method_type, shared, strict: false)
             fun = method_type.type
             ok = KeywordArguments.accepted_by?(fun, shared, strict) { |*kv| accepts_param?(*kv, shared, strict, true) }
@@ -461,7 +442,7 @@ module Rigor
             return false if !keyword && ImpreciseArgument.untyped?(arg) && value_pinning?(param_type)
 
             result = param_type.accepts(arg, mode: :gradual)
-            return result.yes? && ProvenOverload.names_arg_class?(param_type, arg) if strict == :proven
+            return proof?(result, param_type, arg, strict) if strict.is_a?(Symbol)
 
             # A record's `maybe` for a `Hash` with a gradual arm or an open shape is no evidence for the overload:
             # with `({ a: Integer }) -> Integer | (Hash[Symbol, untyped]) -> String`, `{ **o, b: 2 }` has a key the
@@ -470,6 +451,11 @@ module Rigor
             return false if strict && result.maybe? && Acceptance.maybe_rests_on_unread_hash?(param_type, arg)
 
             result.yes? || result.maybe?
+          end
+
+          # Pass 0 (`:proven`) takes a `yes` naming the argument's own class; #1800's keyword proof (`:yes`) any `yes`.
+          def proof?(result, param_type, arg, strict)
+            result.yes? && (strict == :yes || ProvenOverload.names_arg_class?(param_type, arg))
           end
 
           # A type that admits only specific VALUES rather than a class of values: a `Constant` carrier

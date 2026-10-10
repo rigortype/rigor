@@ -30,6 +30,42 @@ module Rigor
                                                         "::range" => ["Range"]
                                                       })
         private_constant :ALIAS_STRICT_NOMINALS
+
+        class << self
+          private
+
+          # Checks the param's RBS type against an arg using alias-strict-arm matching. Optional / Union
+          # wrappers are flattened; alias resolution is one level deep (the canonical core aliases all have
+          # non-alias strict arms).
+          def alias_param_accepts?(rbs_type, arg)
+            nominal_names = strict_nominal_names_for(rbs_type)
+            return false if nominal_names.nil? || nominal_names.empty?
+
+            nominal_names.any? do |class_name|
+              result = Type::Combinator.nominal_of(class_name).accepts(arg, mode: :gradual)
+              result.yes? || result.maybe?
+            end
+          end
+
+          # Returns the candidate class names a param's RBS type accepts under alias-resolved strict
+          # matching, or nil when the shape cannot be reduced to a closed set of nominals (e.g. an
+          # Interface or an unrecognised alias).
+          def strict_nominal_names_for(rbs_type)
+            case rbs_type
+            when RBS::Types::ClassInstance
+              [rbs_type.name.to_s.delete_prefix("::")]
+            when RBS::Types::Alias
+              ALIAS_STRICT_NOMINALS[rbs_type.name.to_s]
+            when RBS::Types::Optional
+              strict_nominal_names_for(rbs_type.type)
+            when RBS::Types::Union
+              parts = rbs_type.types.map { |t| strict_nominal_names_for(t) }
+              return nil if parts.any?(&:nil?)
+
+              parts.flatten
+            end
+          end
+        end
       end
     end
   end

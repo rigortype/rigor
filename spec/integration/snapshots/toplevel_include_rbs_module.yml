@@ -1,7 +1,9 @@
 ---
 locals:
   count: Dynamic[top]
+  in_block: "[Dynamic[top]]"
   label: Dynamic[top]
 assertions:
-  '1': Dynamic[top]
+  '1': Integer
   '2': Dynamic[top]
+  '3': "[Dynamic[top]]"

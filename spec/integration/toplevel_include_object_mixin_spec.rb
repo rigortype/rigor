@@ -3,8 +3,9 @@
 # Issue #1697 — a top-level `include M` is `main.include`, which mixes M into `Object`: M's instance methods
 # answer bare top-level calls and calls on any object, so they must not report `call.unresolved-toplevel` /
 # `call.undefined-method` when M declares them, in source or in RBS. A name no included module declares
-# still reports. Typing such a call is issue #1715's: every example asserts the call stays `Dynamic[top]`,
-# so a dispatch reintroduced without that issue's guards fails here.
+# still reports. Typing is issue #1715's, for one narrow shape (`toplevel_include_typing_spec.rb`): a bare call in
+# a top-level statement to a name one RBS module declares and nothing else in the program defines. Every other
+# example here asserts the call stays `Dynamic[top]`.
 
 require "spec_helper"
 require "fileutils"
@@ -121,7 +122,7 @@ RSpec.describe "a top-level include mixes into Object (#1697)" do
         Rigor.assert_type("Dynamic[top]", h_twice)
         Rigor.assert_type("Dynamic[String]", h_pp)
         Rigor.assert_type("Dynamic[top]", h_ptop)
-        Rigor.assert_type("Dynamic[top]", h_ok)
+        Rigor.assert_type("Integer", h_ok)
         some_dsl do
           Rigor.assert_type("Dynamic[top]", h_top)
         end
@@ -176,13 +177,13 @@ RSpec.describe "a top-level include mixes into Object (#1697)" do
     expect(rules(result)).to eq([["lib/main.rb", 3, "call.unresolved-toplevel"]])
   end
 
-  it "silences the call to a module declared only in sig/, untyped" do
+  it "silences the call to a module declared only in sig/, and types the bare top-level one (#1715)" do
     result = run_project(
       { "lib/main.rb" => <<~RUBY },
         require "rigor/testing"
 
         include Helpers
-        Rigor.assert_type("Dynamic[top]", helper)
+        Rigor.assert_type("Integer", helper)
         Rigor.assert_type("Dynamic[top]", "text".helper)
         frobnicate
       RUBY

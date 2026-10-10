@@ -16,6 +16,7 @@ require_relative "anonymous_meta_class"
 require_relative "def_handle"
 require_relative "fresh_frame_blocks"
 require_relative "global_write_census"
+require_relative "toplevel_statement_calls"
 require_relative "guard_rebinding"
 require_relative "last_line"
 require_relative "last_status"
@@ -2259,6 +2260,7 @@ module Rigor
         census[:patched_line_readers] = census[:patched_line_readers].freeze
         census[:implicit_self_evidence] = LastLine::SelfEvidence.new(root)
         census[:in_effect_refinements] = in_effect
+        census[:toplevel_statement_calls] = ToplevelStatementCalls.new(root)
         [accumulator.freeze, census]
       end
 
@@ -7754,12 +7756,14 @@ module Rigor
       # {#discovered_project_index_incremental}'s changed-file branch) yields the live def nodes the signature
       # reads their parameter structure from. Issue #1120 — and each file's own refinement table, which the merged
       # def-index cannot attribute back to a file, so the session can diff it against the file's seed bundle.
-      # @return `{ def_index:, code_fingerprints:, declaration_signatures:, refinements: }`.
+      # @return `{ def_index:, code_fingerprints:, declaration_signatures:, refinements:, censuses: }`, the last each
+      #   file's own {GlobalWriteCensus}.
       def scan_summary_for_paths(paths, buffer: nil)
         acc = new_def_index_accumulator
         code_fingerprints = {}
         declaration_signatures = {}
         refinements = {}
+        censuses = {}
         paths.each do |path|
           physical = buffer ? buffer.resolve(path) : path
           source = File.read(physical)
@@ -7769,13 +7773,14 @@ module Rigor
           code_fingerprints[path] = code_fingerprint(source, parsed.comments)
           declaration_signatures[path] = declaration_signature(file_index)
           refinements[path] = file_index[:refinements] if file_index[:refinements]
+          censuses[path] = file_index[:global_write_census]
         rescue DeclarationWalk::ContractError
           raise # a broken walk contract, not an unreadable file: skipping it would hide the failure
         rescue StandardError
           next
         end
         { def_index: finalize_def_index(acc), code_fingerprints: code_fingerprints,
-          declaration_signatures: declaration_signatures, refinements: refinements }
+          declaration_signatures: declaration_signatures, refinements: refinements, censuses: censuses }
       end
 
       # ADR-89 WD1 — a per-file digest of every cross-file DECLARATION surface an ancestry / file-level

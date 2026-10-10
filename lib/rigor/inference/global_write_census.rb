@@ -11,15 +11,20 @@ module Rigor
     #
     # - `[:alias, name]` — a global variable name an `alias $new $old` statement names, on either side. After it,
     #   `$new` is `$old`'s variable, setter included, so both rules exempt the name.
-    # - `[:defines, name]` — a method named after one of {ANSWER_NAMES} is defined somewhere, in any spelling and on
-    #   any receiver: `def`, `def obj.m`, a `class << obj` body, `define_method`, `define_singleton_method`,
-    #   `alias`, `alias_method`, `attr_*`, a delegation macro, or the same call through `send`. The
-    #   type check does not ask where it lands: an object can reach any of them (`class << nil`, `K = Integer;
-    #   class K`, `[Integer].each { |k| k.define_method(:write) }`), so a literal of any class declines.
+    # - `[:defines, name]` — a method `name` is defined somewhere, in any spelling and on any receiver: `def`,
+    #   `def obj.m`, a `class << obj` body, `define_method`, `define_singleton_method`, `alias`, `alias_method`,
+    #   `attr_*`, a delegation macro, or the same call through `send`. The type check does not ask where it lands:
+    #   an object can reach any of them (`class << nil`, `K = Integer; class K`,
+    #   `[Integer].each { |k| k.define_method(:write) }`), so a literal of any class declines. The `global.*` rules
+    #   ask only about {ANSWER_NAMES}; issue #1715's typing of a bare call through a top-level `include` asks
+    #   whether the project defines the called name anywhere at all ({defines_or_may_define?}).
     # - {DEFINES_ANY} — a definition whose name no literal spells: a computed `define_method` name, a `send` whose
     #   method name is computed, a string `eval` / `class_eval` whose code is interpolated or not a literal, a name
     #   literal whose bytes are not valid in its encoding, or a top-level mixin of a non-constant. A node the
     #   collector fails to read records it too ({Collector#visit}).
+    # - {STRING_EVAL} — a string `eval` / `class_eval` whose code is a literal. The `global.*` rules read the literal
+    #   for {ANSWER_NAMES} and record those as `[:defines, …]`; any other name the code may define is not recorded,
+    #   so a reader asking about every name declines on the marker.
     # - `[:refines, name]` / {REFINES_ANY} — the same, inside a `refine` block. A refinement changes what
     #   `respond_to?(:write)` answers where a `using` is in effect, and nothing else the setters consult: an
     #   implicit conversion and a refined `respond_to?` / `respond_to_missing?` ignore it, so these entries are
@@ -37,6 +42,7 @@ module Rigor
 
       DEFINES_ANY = [:defines_any].freeze
       REFINES_ANY = [:refines_any].freeze
+      STRING_EVAL = [:string_eval].freeze
 
       # `define_method`-family calls whose first argument names the method they define.
       NAMING_CALLS = %i[define_method define_singleton_method alias_method].to_set.freeze
@@ -72,6 +78,13 @@ module Rigor
       # Whether the program may define one of `names` somewhere, outside a refinement.
       def defines_any_of?(census, names)
         census.include?(DEFINES_ANY) || names.any? { |name| census.include?([:defines, name]) }
+      end
+
+      # Issue #1715 — whether the program defines or refines `name` anywhere, or may through a definition whose name no
+      # literal spells or a string eval.
+      def defines_or_may_define?(census, name)
+        census.include?(DEFINES_ANY) || census.include?(REFINES_ANY) || census.include?(STRING_EVAL) ||
+          census.include?([:defines, name]) || census.include?([:refines, name])
       end
 
       # Whether some refinement may add `write`.
@@ -178,8 +191,6 @@ module Rigor
         end
 
         def record(node, name)
-          return unless ANSWER_NAMES.include?(name)
-
           @census << [inside_refine?(node) ? :refines : :defines, name].freeze
         end
 
@@ -204,6 +215,7 @@ module Rigor
 
         def record_eval_text(node, argument)
           if argument.is_a?(Prism::StringNode) && argument.unescaped.valid_encoding?
+            @census << STRING_EVAL
             argument.unescaped.scan(NAME_PATTERN) { |name| record(node, name.to_sym) }
           else
             @census << any_entry(node)

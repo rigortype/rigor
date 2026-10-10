@@ -12,6 +12,7 @@ require_relative "../effects/file_collection"
 require_relative "../effects/identity"
 require_relative "../effects/propagator"
 require_relative "../inference/scope_indexer"
+require_relative "../inference/object_mixins"
 
 module Rigor
   module Analysis
@@ -1093,7 +1094,33 @@ module Rigor
         keys.concat(moved_classes.map { |klass| "class:#{klass.split('::').last}" })
         keys.concat(moved_constants.map { |name| "constant:#{name.split('::').last}" })
         Incremental.negative_closure(keys, @negative_dependents) | refinement_affected(changed + removed, summary) |
-          global_write_reporters
+          census_affected(changed + removed, summary) | global_write_reporters
+      end
+
+      # Issue #1715 — the consumers whose answer read the program's definition census for a name whose census
+      # entries moved in this edit: a bare top-level call typed through a top-level `include` holds only while the
+      # name is defined nowhere ({Inference::ObjectMixins.sole_rbs_declaration}). A definition in a spelling no
+      # method table records (`attr_reader`, `def self.x` on `main`, `Object.define_method`) moves no symbol
+      # fingerprint, so only this diff sees it. The before-state is each file's seed bundle, the after-state the
+      # scan's per-file census; an entry that names no method (a marker or a main mixin) moves the `*` key.
+      def census_affected(paths, summary)
+        after = (summary && summary[:censuses]) || {}
+        keys = Set.new
+        paths.each do |path|
+          before = @seed_bundles.dig(path, :global_write_census) || Inference::GlobalWriteCensus::EMPTY
+          now = after[path] || Inference::GlobalWriteCensus::EMPTY
+          next if before == now
+
+          ((before - now) | (now - before)).each { |entry| keys << census_key(entry) }
+        end
+        return Set.new if keys.empty?
+
+        Incremental.negative_closure(keys.to_a, @negative_dependents)
+      end
+
+      def census_key(entry)
+        named = %i[defines refines].include?(entry[0])
+        "defines:#{named ? entry[1] : Inference::ObjectMixins::CENSUS_ANY_KEY}"
       end
 
       # Issue #1120 — the consumers whose `call.undefined-method` answer read the refinement table for a method

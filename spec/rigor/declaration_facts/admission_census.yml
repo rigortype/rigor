@@ -241,7 +241,9 @@ members:
   discovered_global_write_census:
     reads:
     - lib/rigor/analysis/check_rules.rb
+    - lib/rigor/analysis/incremental_session.rb
     - lib/rigor/analysis/runner.rb
+    - lib/rigor/inference/object_mixins.rb
     copies:
     - lib/rigor/analysis/runner.rb
     - lib/rigor/protection/discovery_seed.rb
@@ -256,6 +258,7 @@ members:
     - lib/rigor/analysis/runner.rb
     - lib/rigor/analysis/worker_session.rb
     - lib/rigor/inference/method_dispatcher/rbs_dispatch.rb
+    - lib/rigor/inference/object_mixins.rb
     - lib/rigor/inference/singleton_hook_decline.rb
     - lib/rigor/reflection/constant_ancestors.rb
     - lib/rigor/scope/resolution_chain.rb
@@ -388,6 +391,10 @@ members:
     - lib/rigor/analysis/check_rules.rb
     - lib/rigor/inference/expression_typer.rb
     - lib/rigor/inference/in_effect_refinements/scope_reads.rb
+    copies: []
+  toplevel_statement_calls:
+    reads:
+    - lib/rigor/inference/method_dispatcher/rbs_dispatch.rb
     copies: []
   possible_discovered_methods:
     reads: []

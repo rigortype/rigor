@@ -6,6 +6,7 @@ require_relative "../../rbs_extended"
 require_relative "../range_constant"
 require_relative "../rbs_type_translator"
 require_relative "../external_ancestor_resolution"
+require_relative "../object_mixins"
 require_relative "../void_origin"
 require_relative "../optimistic_origin"
 require_relative "overload_selector"
@@ -462,6 +463,9 @@ module Rigor
             included = included_module_method(environment, class_name, kind, method_name, scope)
             return included if included
 
+            toplevel_include = toplevel_include_method(class_name, kind, method_name, scope, call_node)
+            return toplevel_include if toplevel_include
+
             # ADR-43 — scoped inherited-method resolution. The direct lookup misses when `class_name` is a
             # Ruby-source subclass absent from RBS (so no ancestor walk runs). If its discovered
             # superclass chain reaches an allow-listed RBS-complete ancestor, resolve the method there so
@@ -602,6 +606,40 @@ module Rigor
             store_unless_recorded(memo, key) do
               compute_included_module_method(environment, class_name, method_name, scope)
             end
+          end
+
+          # Issue #1715 — a bare call in a top-level statement position (`main` is the receiver, typed `Object`) to a
+          # name one RBS module mixed in by a top-level `include` declares: `include AcLibraryRb; crt(...)` takes
+          # `AcLibraryRb#crt`'s signature. Deliberately that shape alone. The call's place is read off the tree
+          # ({Inference::ToplevelStatementCalls}), never from `Scope#toplevel?`, which stays true in an
+          # `instance_eval` block; a call with a receiver is never typed this way. The name is decided by
+          # {Inference::ObjectMixins.sole_rbs_declaration}, which declines when the program defines it anywhere or
+          # anything else may answer it. Every decline leaves the call where it was, `Dynamic`.
+          def toplevel_include_method(class_name, kind, method_name, scope, call_node)
+            return nil unless kind == :instance && class_name == Inference::ObjectMixins::OWNER
+            # Most projects never write a top-level `include`: they pay one table probe per RBS miss.
+            return nil unless scope&.known_user_class?(Inference::ObjectMixins::TOPLEVEL_INCLUDE_KEY)
+            return nil unless toplevel_statement_call?(call_node, method_name, scope)
+
+            environment = scope.environment
+            return nil if environment.nil?
+
+            memo = ancestor_memo_slot(TOPLEVEL_INCLUDE_MEMO_KEY, environment, scope)
+            key = method_name.to_sym
+            return memo[key] if memo.key?(key)
+
+            store_unless_recorded(memo, key) { Inference::ObjectMixins.sole_rbs_declaration(scope, method_name) }
+          end
+
+          TOPLEVEL_INCLUDE_MEMO_KEY = :__rigor_toplevel_include_dispatch__
+          private_constant :TOPLEVEL_INCLUDE_MEMO_KEY
+
+          # The set holds receiverless calls only, so a call with a receiver is never in it.
+          def toplevel_statement_call?(call_node, method_name, scope)
+            return false unless call_node.is_a?(Prism::CallNode) && call_node.name == method_name.to_sym
+
+            calls = scope.discovery.toplevel_statement_calls
+            !calls.nil? && calls.include?(call_node)
           end
 
           # The declines are conjunctive and ordered as {compute_core_stdlib_ancestor_method}'s are:

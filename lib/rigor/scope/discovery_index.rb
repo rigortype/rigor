@@ -52,6 +52,7 @@ module Rigor
       :defines_case_equality,
       :implicit_self_evidence,
       :in_effect_refinements,
+      :toplevel_statement_calls,
       :possible_discovered_methods,
       :possible_discovered_deferred_ranges,
       :contested_discovered_def_nodes,
@@ -157,7 +158,10 @@ module Rigor
           clears_last_status: "whether the analysed file holds a call that may set $? to nil",
           defines_case_equality: "whether the analysed file holds a define_method naming ===",
           in_effect_refinements: "the file's ordered in-effect refinements; built lazily from its tree, never seeded",
-          implicit_self_evidence: "where the file's implicit-self readers sit; built lazily from its tree, never seeded"
+          implicit_self_evidence:
+            "where the file's implicit-self readers sit; built lazily from its tree, never seeded",
+          toplevel_statement_calls:
+            "the file's bare calls in top-level statements; built lazily from its tree, never seeded"
         }.freeze,
         run_state: {
           run_generation: "the identity token of the current run"
@@ -296,11 +300,12 @@ module Rigor
         # keyed by the name the walk gives the block's owner. Plain data, so the ADR-85 seed bundle
         # round-trips it unchanged.
         discovered_refinements: EMPTY_TABLE,
-        # Issue #1367 — the project's `Inference::GlobalWriteCensus`: the globals any `alias` names, the
-        # `write` / `to_str` / `to_int` / hatch names any file defines (inside a refinement or not), and the
-        # modules a top-level mixin names, over every file and inside method bodies too. The `global.*` write rules
-        # read it. The project pre-pass seeds the whole project's census and `Inference::ScopeIndexer.index` adds the
-        # analysed file's own. Plain data, so the ADR-85 seed bundle round-trips it unchanged.
+        # Issue #1367 — the project's `Inference::GlobalWriteCensus`: the globals any `alias` names, every method
+        # name any file defines (inside a refinement or not), and the modules a top-level mixin names, over every
+        # file and inside method bodies too. The `global.*` write rules read it, and issue #1715's typing of a bare
+        # top-level call through a top-level `include`. The project pre-pass seeds the whole project's census and
+        # `Inference::ScopeIndexer.index` adds the analysed file's own. Plain data, so the ADR-85 seed bundle
+        # round-trips it unchanged.
         discovered_global_write_census: EMPTY_NAME_SET,
         # Issue #682 — `{qualified class name => Module.nesting where its declaration HEADER is written}`,
         # innermost first and EXCLUDING the declaration's own entry. Read by `Scope#ancestor_name_candidates`,
@@ -424,6 +429,11 @@ module Rigor
         # scope. Filled by `Inference::ScopeIndexer.index` from the file's own tree only; nil, where no file was
         # indexed, answers no lexical refinement.
         in_effect_refinements: nil,
+        # Issue #1715 — the file's receiverless calls whose `self` is `main` by their place in the tree
+        # (`Inference::ToplevelStatementCalls`, walked on the first ask), which `RbsDispatch` reads before typing a bare
+        # call through a top-level `include`. Filled by `Inference::ScopeIndexer.index` from the file's own tree only;
+        # nil, where no file was indexed, types no such call.
+        toplevel_statement_calls: nil,
         # ADR-119 WD1 — the siblings of the members {SIBLINGS} pairs, empty until a producer admits a possible fact.
         possible_discovered_methods: EMPTY_TABLE,
         possible_discovered_deferred_ranges: EMPTY_TABLE,

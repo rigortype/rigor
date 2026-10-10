@@ -62,8 +62,11 @@ severity_overrides:
   rejects. Rigor reads a top-level `include AcLibraryRb` as that include instead, so a bare top-level call to an
   included method (`crt(...)`) no longer reports `call.unresolved-toplevel`
   ([#1383](https://github.com/rigortype/rigor/issues/1383), [#1697](https://github.com/rigortype/rigor/issues/1697)).
-  It still reads `Dynamic[top]`: typing it from these signatures is
-  [#1715](https://github.com/rigortype/rigor/issues/1715).
+  A bare call in a top-level statement is also typed from these signatures (`crt([2, 3], [3, 5])` reads
+  `[Integer, Integer]`, `pow_mod(2, 10, 1000)` reads `Integer`) when the project defines no method of that name
+  anywhere ([#1715](https://github.com/rigortype/rigor/issues/1715)). The same call inside a block, a lambda, a
+  method or a class body, beside a same-named method the project defines, or after a top-level `extend`, still
+  reads `Dynamic[top]`.
 - In an instance method of a class or module that writes `include AcLibraryRb`, a bare class name
   (`Segtree.new(...)`) resolves to the `AcLibraryRb` class, as Ruby resolves it through the class's ancestors
   ([#1698](https://github.com/rigortype/rigor/issues/1698)). In the class body, a `def self.` method or a

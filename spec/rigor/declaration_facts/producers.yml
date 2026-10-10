@@ -106,7 +106,7 @@ lib/rigor/inference/expression_typer.rb:
     Rigor::Inference::ExpressionTyper#untraced_type_of: grandfathered
     Rigor::Inference::ExpressionTyper#yield_reachable?: grandfathered
 lib/rigor/inference/global_write_census.rb:
-  computes: the global write census (aliases, answer-method defines, top-level mixins)
+  computes: the global write census (aliases, method defines, string evals, top-level mixins)
   producers:
     Rigor::Inference::GlobalWriteCensus: grandfathered
     Rigor::Inference::GlobalWriteCensus#walk: grandfathered
@@ -498,6 +498,11 @@ lib/rigor/inference/synthetic_method_scanner.rb:
     Rigor::Inference::SyntheticMethodScanner#walk_class_decls: grandfathered
     Rigor::Inference::SyntheticMethodScanner#walk_classes: grandfathered
     Rigor::Inference::SyntheticMethodScanner#walk_module_decls: grandfathered
+lib/rigor/inference/toplevel_statement_calls.rb:
+  computes: which receiverless calls of a file sit in a top-level statement position, outside every body that may rebind self (issue 1715)
+  producers:
+    Rigor::Inference::ToplevelStatementCalls: names the bodies the walk does not enter (block, lambda, def, class, module, singleton class, BEGIN and END); it records no class, module or method, only call nodes
+    Rigor::Inference::ToplevelStatementCalls#visit: stops at those bodies and collects the receiverless calls outside them; it decides no declaration context and keeps no nesting
 lib/rigor/language_server/document_symbol_provider.rb:
   computes: the editor outline of classes, modules and defs
   producers:

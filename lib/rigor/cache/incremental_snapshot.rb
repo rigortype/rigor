@@ -169,7 +169,11 @@ module Rigor
       # file's conditional `def` as certain and a warm run would answer a definer a cold run declines.
       # 37: ADR-119 WD3 — the visibility walk fills `contested_discovered_method_visibilities`, which a pre-37 bundle
       # carries empty.
-      SCHEMA = 37
+      # 38: issue #1715 — a seed bundle's `global_write_census` records every name the file defines, and a string
+      # eval's marker, not only the `global.*` rules' names, and a bare top-level call is typed through a top-level
+      # `include` only when the census holds none of its name. A pre-38 bundle folds as "defines none of them", and
+      # a warm run would type a call a cold run declines.
+      SCHEMA = 38
 
       # The persisted per-file state.
       # `cache` maps an analyzed file to its diagnostics.

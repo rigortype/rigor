@@ -23,6 +23,29 @@ RSpec.describe Rigor::Scope do
     end
   end
 
+  # Issue #1667 — a plugin-declared refined block's modules, stamped at block entry.
+  describe "#with_declared_refinements" do
+    it "appends each module once at its first position, survives derivation, and unions on a join" do
+      declared = scope.with_declared_refinements(%w[A B]).with_declared_refinements(%w[B C])
+      derived = declared.with_local(:x, Rigor::Type::Combinator.constant_of(1))
+
+      expect(declared.declared_refinements).to eq(%w[A B C])
+      expect(derived.declared_refinements).to eq(%w[A B C])
+      expect(scope.with_declared_refinements([])).to equal(scope)
+      expect(derived.join(scope).declared_refinements).to eq(%w[A B C])
+      expect(scope.join(declared.with_declared_refinements(%w[D])).declared_refinements).to eq(%w[A B C D])
+    end
+
+    it "is what #in_effect_refinements appends by default" do
+      root = Prism.parse(":probe").value
+      indexed = scope.with_discovery(
+        scope.discovery.with(in_effect_refinements: Rigor::Inference::InEffectRefinements.new(root))
+      ).with_declared_refinements(%w[SymSyntax])
+
+      expect(indexed.in_effect_refinements(root.statements.body.first)).to eq(%w[SymSyntax])
+    end
+  end
+
   describe "#with_local" do
     it "returns a new scope with the binding added" do
       type = Rigor::Type::Combinator.constant_of(1)
@@ -698,7 +721,7 @@ RSpec.describe Rigor::Scope do
           published_constant_sourced
           struct_fold_safe_locals opaque_block_self block_self_unknown singleton_class_body
           local_origins ivar_origins optimistic_locals optimistic_ivars repeated_or_writes match_frame
-          constant_narrowings guard_records bot_guard_classes
+          constant_narrowings guard_records bot_guard_classes declared_refinements
         ],
         receiver: %i[
           discovery source_path lexical_nesting
@@ -751,7 +774,8 @@ RSpec.describe Rigor::Scope do
         match_frame: Rigor::Inference::MatchRebinding::Frame.new(node),
         constant_narrowings: { "C" => type }.freeze,
         guard_records: { %i[global $g] => type, [:constant, "C"] => type, %i[ivar @i] => type }.freeze,
-        bot_guard_classes: { %i[ivar @i] => ["Proc"].freeze }.freeze
+        bot_guard_classes: { %i[ivar @i] => ["Proc"].freeze }.freeze,
+        declared_refinements: %w[SymSyntax].freeze
       )
     end
 

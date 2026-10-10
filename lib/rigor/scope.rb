@@ -517,8 +517,13 @@ module Rigor
     # built on an unknown `self`. `define_method` and an implicit- or `self`-receiver `block_as_methods:` match
     # read the lexical `self`, which inside a block of unknown `self` is the enclosing method's, not the
     # block's; a narrowing keyed on an explicit receiver (`Grape::API.namespace do`) does not depend on it.
+    #
+    # Issue #1759 — one narrowing is not: a `define_method` written directly in a `refine X` block
+    # ({REFINEMENT_BLOCK_SELF}) defines a method of the refinement, which runs on an instance of X, and the
+    # `Nominal[X]` it reads off the block's lexical `Singleton[X]` is that `self`.
     def block_self_narrowing_unknown?(call_node)
       return false unless @block_self_unknown
+      return false if @block_self_unknown == REFINEMENT_BLOCK_SELF && call_node.name == :define_method
 
       receiver = call_node.receiver
       receiver.nil? || receiver.is_a?(Prism::SelfNode)
@@ -569,7 +574,7 @@ module Rigor
     #
     # Entering also sets {#block_self_unknown?} (issue #1717), the separate mark `call.undefined-method` reads.
     def entering_opaque_block
-      return self if @opaque_block_self && @block_self_unknown
+      return self if @opaque_block_self && @block_self_unknown == true
 
       rebuild(opaque_block_self: true, block_self_unknown: true)
     end
@@ -584,7 +589,21 @@ module Rigor
     # {#entering_opaque_block} on the evaluator's block entries and by the indexer's walk of an unentered block
     # ({#with_block_self_unknown}); cleared where a block's `self` is narrowed ({#with_block_self_type}) and, on
     # the indexer's walk, at a `def` / `class` / `module` body, which the evaluator starts from a fresh scope.
-    def block_self_unknown? = @block_self_unknown
+    def block_self_unknown? = @block_self_unknown ? true : false
+
+    # Issue #1759 — the {#block_self_unknown?} value a `refine X do … end` block body is entered with
+    # (`with_block_self_type(Singleton[X], keeps_unknown: REFINEMENT_BLOCK_SELF)`). It reads as unknown everywhere
+    # `true` does; what it adds is that the body's lexical `self` is X's singleton, which a `define_method` in it
+    # reads correctly ({#block_self_narrowing_unknown?}). A block nested in the body takes plain `true`.
+    REFINEMENT_BLOCK_SELF = :refinement
+
+    # The join of two arms' {#block_self_unknown?} values: `true` if either has it, else either's mark.
+    def merged_block_self_unknown(other)
+      return true if @block_self_unknown == true || other == true
+
+      @block_self_unknown || other
+    end
+    private :merged_block_self_unknown
 
     # Issue #1717 — sets {#block_self_unknown?} to `flag`, leaving every other field (the #316 mark included).
     def with_block_self_unknown(flag)
@@ -2147,7 +2166,8 @@ module Rigor
         # the same value and the `||` is that value.
         opaque_block_self: @opaque_block_self || other.opaque_block_self,
         # Issue #1717 — the same body property, and `||` keeps the exemption it grants (the FP-safe side).
-        block_self_unknown: @block_self_unknown || other.block_self_unknown,
+        # A plain `true` outranks the refine body's {REFINEMENT_BLOCK_SELF} for the same reason.
+        block_self_unknown: merged_block_self_unknown(other.block_self_unknown),
         # Issue #963 — a body property like the two above, so both arms of an in-body merge carry the identical
         # value and the `||` is that value. `||` is also the safe direction on its own terms: keeping the mark
         # declines the `define_method` narrowing, which is the pre-#963 answer.

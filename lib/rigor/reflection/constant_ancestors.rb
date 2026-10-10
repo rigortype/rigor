@@ -184,6 +184,21 @@ module Rigor
     end
     private_class_method :record_external_owner_edges
 
+    # Issue #1698 — whether the walk must stop at the RBS-only mixin `owner` because a module its own RBS ancestry
+    # holds may own the name (`candidate` answers for some ancestor after `owner` itself), or because that
+    # ancestry cannot be read. Ruby searches the mixin's ancestry right after it, before any later entry of the
+    # chain and before the top level, and the chain does not expand it, so a later answer would be a guess.
+    # Where no module of the ancestry owns the name, where they sit does not matter to this name and the walk
+    # goes on.
+    def external_mixin_ancestry_stop?(owner, scope)
+      loader = rbs_loader_for(scope, nil)
+      ancestors = loader ? loader.ancestor_names_for(owner) : []
+      return true if ancestors.empty?
+
+      ancestors.any? { |ancestor| ancestor != owner && yield(ancestor) }
+    end
+    private_class_method :external_mixin_ancestry_stop?
+
     # Whether the project binds `candidate` itself: a namespace under the `:constants` flavor's tables, or a
     # constant write the census records (#1290), typed or not.
     def project_written_candidate?(candidate, scope)

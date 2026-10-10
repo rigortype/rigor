@@ -49,7 +49,52 @@ RSpec.describe "a constant reached through an RBS-only mixin (#1698)" do
     class SigBase
       KIND: Symbol
     end
+    module SigInner
+      class Box
+        def initialize: () -> void
+        def inner_only: () -> Integer
+      end
+    end
+    module SigNear
+      class Box
+        def initialize: () -> void
+      end
+    end
+    module SigOuter
+      include SigInner
+    end
   RBS
+
+  # Ruby searches a mixin's own ancestry right after it, and the chain does not expand an RBS-only mixin's: in
+  # each class below `SigOuter`'s `include SigInner` puts `SigInner::Box` ahead of `SigNear::Box`.
+  let(:mixin_ancestry_source) { <<~RUBY }
+    require "rigor/testing"
+    class Included
+      include SigNear
+      include SigOuter
+      def run = Rigor.assert_type("Dynamic[top]", Box)
+    end
+    class Prepended
+      include SigNear
+      prepend SigOuter
+      def run = Rigor.assert_type("Dynamic[top]", Box)
+    end
+    module Wrap
+      include SigNear
+    end
+    class Wrapped
+      include Wrap
+      include SigOuter
+      def run = Rigor.assert_type("Dynamic[top]", Box)
+    end
+    class Base
+      KIND = 1
+    end
+    class Continues < Base
+      include SigOuter
+      def run = Rigor.assert_type("1", KIND)
+    end
+  RUBY
 
   let(:nearer_spelling_source) { <<~RUBY }
     require "rigor/testing"
@@ -168,6 +213,28 @@ RSpec.describe "a constant reached through an RBS-only mixin (#1698)" do
       end
       class Child < SigBase
         def run = Rigor.assert_type("Dynamic[top]", KIND)
+      end
+    RUBY
+  end
+
+  it "stops at an RBS-only mixin whose own ancestry may hold the name" do
+    expect(run_project(mixin_ancestry_source)).to eq([])
+  end
+
+  # Issue #1305 — a `class << self` body and a `def` in it run under the singleton class's cref, whose ancestors
+  # are not the class's, so the included module's `Box` is not Ruby's answer there: the top-level `Box` is.
+  it "does not read an RBS-only mixin's constant where self is the class object" do
+    expect(run_project(<<~RUBY)).to eq([])
+      require "rigor/testing"
+      class Box
+        def top_only = 1
+      end
+      class Meta
+        include SigHelpers
+        class << self
+          def run = Rigor.assert_type("Box", Box.new)
+        end
+        def control = Rigor.assert_type("SigHelpers::Box", Box.new)
       end
     RUBY
   end

@@ -40,10 +40,11 @@ RSpec.describe "rigor check --incremental over rigor-ffi target detection" do
     JSON.parse(json).fetch("diagnostics").map { |diagnostic| diagnostic.fetch("rule") }
   end
 
-  def write_project
+  def write_project(extra_config = "")
     FileUtils.mkdir_p("deps")
     File.write(".rigor.yml",
-               "paths:\n  - .\nbundler:\n  lockfile: deps/my.lock\nplugins:\n  - gem: rigor-ffi\n    id: ffi\n")
+               "paths:\n  - .\nbundler:\n  lockfile: deps/my.lock\nplugins:\n  - gem: rigor-ffi\n    id: ffi\n" +
+               extra_config)
     File.write("deps/my.lock", "GEM\n  specs:\n")
     File.write("Gemfile.lock", "GEM\n  specs:\n    ffi (1.17.0)\n")
     File.write("a.rb", "module L\n  extend FFI::Library\n  callback :cb, [:int], :void\nend\n")
@@ -91,8 +92,8 @@ RSpec.describe "rigor check --incremental over rigor-ffi target detection" do
   # sees a target flip only through the rows of the reads the target was detected from, which the plugin makes
   # through its IoBoundary.
   context "with no source edit between runs" do
-    def prime(*flags)
-      write_project
+    def prime(*flags, config: "")
+      write_project(config)
       check(*flags)
       check(*flags)
     end
@@ -106,10 +107,12 @@ RSpec.describe "rigor check --incremental over rigor-ffi target detection" do
       expect(rules(out)).to eq(rules(check("--no-cache").first))
     end
 
+    # `ext/` is excluded from analysis, or the new extconf.rb would be a new analysed file: another path set,
+    # which no slot is keyed by.
     it "reports them once an extconf.rb in a new ext/ subdirectory calls FFX.create_makefile" do
       FileUtils.mkdir_p("ext/old")
       File.write("ext/old/extconf.rb", "require \"mkmf\"\ncreate_makefile(\"old\")\n")
-      prime("--incremental")
+      prime("--incremental", config: "exclude:\n  - \"**/ext/**\"\n")
       FileUtils.mkdir_p("ext/x")
       File.write("ext/x/extconf.rb", "require \"mkmf\"\nFFX.create_makefile(\"x\")\n")
       out, = check("--incremental")

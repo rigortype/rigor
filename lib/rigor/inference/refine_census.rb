@@ -32,7 +32,8 @@ module Rigor
       VISIBILITY_CALLS = Set[:private, :public, :protected, :module_function, :private_constant].freeze
       # `attr_*` and whether each defines the reader and the writer.
       ATTR_CALLS = {
-        attr_reader: [true, false], attr_writer: [false, true], attr_accessor: [true, true], attr: [true, false]
+        attr_reader: [true, false].freeze, attr_writer: [false, true].freeze, attr_accessor: [true, true].freeze,
+        attr: [true, false].freeze
       }.freeze
 
       # A3 — the calls whose String argument may hold `refine` as code or as a method name, and the two families

@@ -185,6 +185,12 @@ lib/rigor/inference/receiver_blind_block.rb:
   producers:
     Rigor::Inference::ReceiverBlindBlock: grandfathered
     Rigor::Inference::ReceiverBlindBlock#node_blind?: grandfathered
+lib/rigor/inference/refine_census.rb:
+  computes: the method names a refine body defines on its refined class, and whether those are all of them (ADR-121 WD7)
+  producers:
+    Rigor::Inference::RefineCensus: VISIBILITY_CALLS names the calls a refine body may make on the refinement without defining a name (`private`, `public`, `protected`, `module_function`, `private_constant`); it reads which calls define nothing and derives no owner or side
+    Rigor::Inference::RefineCensus#classify_call: sorts a call on the refinement into a definer of literal names, a visibility call or an unreadable one; the refining module and the refined class are the caller's, so it derives no declaration context
+    Rigor::Inference::RefineCensus#scan_body: stops at a nested def, class, module or singleton class, which run on something other than the refinement; it collects names and derives no declaration context
 lib/rigor/inference/scope_indexer.rb:
   computes: the per-file and project discovery tables (methods, def nodes, visibilities, mixins, constants, ranges)
   producers:
@@ -214,6 +220,7 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#bare_visibility_toggle?: ADR-119 WD3, names the receiverless argument-less `private` / `protected` / `public` / `module_function` call whose certainty the visibility walk's statement loop tracks; it answers whether a node is a toggle and decides no owner or side
     Rigor::Inference::ScopeIndexer#block_mixes_in?: scans an eval block for a mixin call; it answers a question and derives no declaration context
     Rigor::Inference::ScopeIndexer#build_method_visibility_tables: the grandfathered visibility walk's entry point, moved from build_discovered_method_visibilities (now a projection of it) so the walk also returns ADR-119 WD3's contested visibility slots; it starts the walk at the top level with the same default and adds no context of its own
+    Rigor::Inference::ScopeIndexer#census_scan: ADR-121 WD7's census over a def or refine body the method walk does not descend; a nested def, class, module or singleton class only moves the module a `refine` there is charged to to the wildcard, so it derives no declaration context
     Rigor::Inference::ScopeIndexer#collect_alias_map_block_call?: grandfathered
     Rigor::Inference::ScopeIndexer#collect_alias_map_declaration: grandfathered
     Rigor::Inference::ScopeIndexer#collect_alias_map_meta_new?: grandfathered

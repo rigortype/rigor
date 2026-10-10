@@ -109,6 +109,7 @@ RSpec.describe "a define_method block reads the instance's ivars, not the class 
                   .with_self_type(Rigor::Type::Combinator.singleton_of("Store"))
                   .with_ivar(:@label, Rigor::Type::Combinator.constant_of(nil))
     end
+    let(:marked_narrowed) { marked_scope.with_block_self_type(Rigor::Type::Combinator.nominal_of("Store")) }
 
     it "drops the ivar bindings when the narrowed self is a different object" do
       narrowed = outer.with_block_self_type(Rigor::Type::Combinator.nominal_of("Store"))
@@ -121,5 +122,80 @@ RSpec.describe "a define_method block reads the instance's ivars, not the class 
 
       expect(narrowed.ivar(:@label)).to eq(Rigor::Type::Combinator.constant_of(nil))
     end
+
+    # Every per-ivar carrier the narrowing touches, each with a non-ivar entry beside it that must survive.
+    def marked_scope
+      string = Rigor::Type::Combinator.nominal_of("String")
+      origin = Rigor::Inference::DynamicOrigin::INFERRED_RETURN_UNTYPED
+      outer.seed_declaration_sourced_ivar(:@x, string)
+           .seed_declaration_sourced_global(:$/, string)
+           .with_published_constant_mark(:ivar, :@x)
+           .with_published_constant_mark(:global, :$mode)
+           .with_indexed_narrowing(:ivar, :@x, :k, string)
+           .with_indexed_narrowing(:local, :h, :k, string)
+           .with_method_chain_narrowing(:ivar, :@x, :name, string)
+           .with_method_chain_narrowing(:local, :h, :name, string)
+           .with_guarded_ivar(:@y, string, Rigor::Type::Combinator.untyped)
+           .with_bot_guard_classes(:ivar, :@y, ["String"])
+           .with_bot_guard_classes(:global, :$g, ["String"])
+           .with_ivar_origin(:@x, origin)
+           .with_optimistic_ivar(:@x, origin)
+    end
+
+    it "drops the ivar marks, narrowings, origins and guard records with the bindings" do
+      expect(marked_narrowed.declaration_sourced?(:ivar, :@x)).to be(false)
+      expect(marked_narrowed.published_constant_sourced?(:ivar, :@x)).to be(false)
+      expect(marked_narrowed.indexed_narrowing(:ivar, :@x, :k)).to be_nil
+      expect(marked_narrowed.method_chain_narrowing(:ivar, :@x, :name)).to be_nil
+      expect(marked_narrowed.guard_narrowed_ivar?(:@y)).to be(false)
+      expect(marked_narrowed.bot_guard_classes_for(:ivar, :@y)).to be_nil
+      expect(marked_narrowed.ivar_origin(:@x)).to be_nil
+      expect(marked_narrowed.optimistic_ivar(:@x)).to be_nil
+    end
+
+    it "keeps every entry that is not an ivar's" do
+      string = Rigor::Type::Combinator.nominal_of("String")
+
+      expect(marked_narrowed.declaration_sourced?(:global, :$/)).to be(true)
+      expect(marked_narrowed.published_constant_sourced?(:global, :$mode)).to be(true)
+      expect(marked_narrowed.indexed_narrowing(:local, :h, :k)).to eq(string)
+      expect(marked_narrowed.method_chain_narrowing(:local, :h, :name)).to eq(string)
+      expect(marked_narrowed.bot_guard_classes_for(:global, :$g)).to eq(["String"])
+    end
+
+    # Review of #1769 — `Set#reject` answers an Array on Ruby 4, and a Set carrier turned Array raised in
+    # `with_global_copy_marks` (`merge`) and `join_published_constant_sourced` (`|`).
+    it "keeps each carrier's class" do
+      marked = marked_scope
+      %i[declaration_sourced published_constant_sourced indexed_narrowings method_chain_narrowings
+         guard_records bot_guard_classes].each do |carrier|
+        expect(marked_narrowed.public_send(carrier).class).to eq(marked.public_send(carrier).class), carrier.to_s
+      end
+      copied = marked_narrowed.with_declaration_sourced_local(:sep, Rigor::Type::Combinator.nominal_of("String"))
+      expect { copied.with_global_copy_marks(:sep, [:$/]) }.not_to raise_error
+    end
+  end
+
+  it "analyses a Class.new body under a method whose class seeds a marked ivar (review of #1769)" do
+    diagnostics = diagnostics_for(<<~RUBY)
+      $stdout = $stderr
+
+      class Foo
+        def initialize
+          @x = nil
+        end
+
+        def run
+          Class.new do
+            out = $stdout
+            out.zork
+            1.zork
+          end
+        end
+      end
+    RUBY
+
+    expect(diagnostics.map(&:message).grep(/internal analyzer error/)).to be_empty
+    expect(diagnostics.map(&:message).grep(/zork/)).not_to be_empty
   end
 end

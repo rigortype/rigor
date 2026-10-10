@@ -733,11 +733,12 @@ module Rigor
     end
     private :without_ivar_bindings
 
-    # `collection` without the entries the block selects, or `collection` itself when it selects none.
+    # `collection` without the entries the block selects, or `collection` itself when it selects none. It keeps the
+    # collection's class: `Set#reject` answers an Array, which a Set carrier's readers (`merge`, `|`, `==`) reject.
     def reject_kept(collection, &)
       return collection if collection.empty? || collection.none?(&)
 
-      collection.reject(&).freeze
+      collection.dup.delete_if(&).freeze
     end
     private :reject_kept
 

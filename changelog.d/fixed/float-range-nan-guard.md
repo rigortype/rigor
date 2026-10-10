@@ -1,0 +1,1 @@
+- **[engine]** A float range check (narrowing or acceptance) no longer crashes on NaN under Ruby 4.1: `FloatRange#covers?` now answers false for `Float::NAN` before delegating to `Range#cover?`, which raises `ArgumentError` on ruby-head. ([#1784](https://github.com/rigortype/rigor/issues/1784), [#1789](https://github.com/rigortype/rigor/pull/1789))

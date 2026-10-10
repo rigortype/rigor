@@ -9,9 +9,10 @@ module Rigor
       #
       # `ruby/rbs` declares every `Numeric#step` overload with a `{ (Numeric) -> void }` block and `Integer` does
       # not redeclare `step`, so `1.step(n, 2) { |i| i.even? }` reported `even?` on correct code. The block form
-      # yields Integer only while the limit and the step are Integer too: a Float in either makes CRuby's
-      # `ruby_float_step` yield Floats (`1.step(10, 0.5)`, `1.step(10.0)`), and a Rational step yields Rationals
-      # after the first value. So:
+      # yields Integer only while the limit and the step are Integer too: a Float step or a finite Float limit
+      # makes CRuby's `ruby_float_step` yield Floats (`1.step(10, 0.5)`, `1.step(10.0)`; an infinite limit with
+      # an Integer step still yields Integers, which this rule leaves on the RBS binding), and a Rational step yields
+      # Rationals after the first value. So:
       #
       # - every operand provably Integer (an absent one is the Integer default; a nil limit means "no limit")
       #   binds `Integer`;

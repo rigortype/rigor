@@ -25,9 +25,9 @@ module Rigor
       # - `a.downto(b) { |i| … }` yields the same domain `[b, a]`, just iterated in reverse. Lower bound
       #   from the argument, upper bound from the receiver.
       # - `a.step(limit, by) { |i| … }` (and the `by:` / `to:` keyword forms) yields `Integer` when the receiver,
-      #   the limit and the step are all Integer, and `Float` as soon as either operand is a Float
-      #   (`1.step(10, 0.5)`). RBS declares every `Numeric#step` block as `(Numeric)`, which reports `even?` on
-      #   correct Integer loops (issue #1783); see {IntegerStepBlockParams}.
+      #   the limit and the step are all Integer; any other operand keeps the RBS `(Numeric)` binding
+      #   (`1.step(10, 0.5)` yields Floats). RBS declares every `Numeric#step` block as `(Numeric)`, which reports
+      #   `even?` on correct Integer loops (issue #1783); see {IntegerStepBlockParams}.
       # - `h.transform_keys(mapping) { |k| … }` yields the receiver's keys, a rule the RBS probe does not state for
       #   a union of receiver shapes ({HashTransformKeysFolding.block_param_types}).
       module IteratorDispatch

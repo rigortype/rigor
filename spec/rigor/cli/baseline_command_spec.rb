@@ -97,6 +97,17 @@ RSpec.describe Rigor::CLI::BaselineCommand do
       expect(status).to eq(0)
       expect(File.exist?(File.join(tmpdir, "custom-baseline.yml"))).to be(true)
     end
+
+    # Issue #1692 — the generating run keeps an explicit `target_ruby`, so the deprecation rule it turns on is
+    # baselined rather than reported as new on the next `rigor check`.
+    it "keeps an explicit target_ruby, and the deprecation findings it turns on" do
+      File.write(File.join(tmpdir, "lib", "demo.rb"), "class Demo\n  ruby2_keywords :fwd\nend\n")
+      File.write(File.join(tmpdir, ".rigor.yml"), "target_ruby: \"4.1\"\npaths:\n  - lib\n")
+      status, = run_cli("baseline", "generate", cwd: tmpdir)
+      expect(status).to eq(0)
+      rules = YAML.safe_load_file(File.join(tmpdir, ".rigor-baseline.yml"))["ignored"].map { |row| row["rule"] }
+      expect(rules).to include("call.deprecated-ruby2-keywords")
+    end
   end
 
   describe "rigor check --baseline" do

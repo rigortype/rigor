@@ -271,4 +271,27 @@ RSpec.describe "dead version-guard arms" do
       expect(diags.map(&:method_name)).to eq(["frobnicate_live"])
     end
   end
+
+  # The ADR-47 WD5 amendment (#1692) — the deprecation rule reads a guard against an explicit `target_ruby`.
+  describe "a guard read against a stated Ruby" do
+    def stated_verdict(predicate_source, stated)
+      node = Prism.parse("if #{predicate_source}\n1\nend\n").value.statements.body.first
+      Rigor::Inference::VersionGuard.verdict(node.predicate, stated_ruby: stated)
+    end
+
+    it "compares RUBY_VERSION as the stated version, in both spellings" do
+      expect(stated_verdict('RUBY_VERSION < "4.1"', "4.1.0")).to eq(:falsey)
+      expect(stated_verdict('RUBY_VERSION < "4.1"', "4.0.0")).to eq(:truthy)
+      expect(stated_verdict('Gem::Version.new(::RUBY_VERSION) >= Gem::Version.new("4.1")', "4.1.0")).to eq(:truthy)
+    end
+
+    it "reads nothing that belongs to the analyzer's interpreter" do
+      expect(stated_verdict('RUBY_ENGINE == "ruby"', "4.1.0")).to be_nil
+      expect(stated_verdict('Gem::Version.new(Psych::VERSION) >= Gem::Version.new("1.0")', "4.1.0")).to be_nil
+    end
+
+    it "leaves the analyzer's own reading untouched without one" do
+      expect(verdict_for("RUBY_VERSION == #{RUBY_VERSION.dump}")).to eq(:truthy)
+    end
+  end
 end

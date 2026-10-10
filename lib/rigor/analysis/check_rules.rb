@@ -30,6 +30,7 @@ require_relative "check_rules/self_closedness_scanner"
 require_relative "check_rules/source_arity"
 require_relative "check_rules/lexical_method_sites"
 require_relative "check_rules/special_global_setters"
+require_relative "check_rules/ruby_deprecations"
 
 module Rigor
   module Analysis
@@ -108,8 +109,11 @@ module Rigor
       # direct caller with no plugin walk, e.g. a unit test), the standalone
       # {RuleWalk} walk runs here instead, so `diagnose` stays correct
       # without the converged path.
-      def diagnose(path:, root:, scope_index:, self_call_misses: [], comments: [], disabled_rules: [],
-                   node_collectors: nil)
+      #
+      # @param stated_runtime_ruby — {Configuration#stated_runtime_ruby}: the explicit `target_ruby`, or nil. Only
+      #   {RubyDeprecations} reads it, and it walks the file only when the stated Ruby deprecates something.
+      def diagnose(path:, root:, scope_index:, self_call_misses: [], comments: [], disabled_rules: [], # rubocop:disable Metrics/ParameterLists
+                   node_collectors: nil, stated_runtime_ruby: nil)
         collectors = node_collectors || run_node_collectors(path, root, scope_index)
         diagnostics = collectors[:main_pass].results.dup
         diagnostics.concat(self_undefined_method_diagnostics(path, self_call_misses, root, scope_index))
@@ -121,6 +125,9 @@ module Rigor
         # `suppression.*` joins the list, which stays reportable inside a dead arm — a malformed
         # `# rigor:disable` marker is an authoring error regardless of whether its code runs.
         diagnostics = DeadVersionGuardArms.filter(diagnostics, root)
+        # The ADR-47 WD5 amendment (#1692) — joined after that filter: the deprecation rule reads each version guard
+        # against the stated Ruby itself, and the analyzer's own Ruby says nothing about where the call runs.
+        diagnostics.concat(RubyDeprecations.diagnostics(path, root, scope_index, stated_runtime_ruby))
         # Suppression-marker validation (`suppression.*`) runs BEFORE the filter so its own diagnostics are
         # suppressible like any other rule — `# rigor:disable suppression.unknown-rule` on the offending
         # comment's line works, with no regress (the token itself is known, so it never re-fires).

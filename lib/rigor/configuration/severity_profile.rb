@@ -38,6 +38,10 @@ module Rigor
           "call.argument-type-mismatch" => :warning,
           "call.possible-nil-receiver" => :warning,
           "call.raise-non-exception" => :warning,
+          # Issue #1692 — the code runs on the stated Ruby (it warns, and breaks only at the removal version), so the
+          # rule takes the slot of the rules that report working-but-wrong code: `flow.unreachable-branch`'s
+          # info / warning / error. It runs only under an explicit `target_ruby` of 4.1 or later.
+          "call.deprecated-ruby2-keywords" => :info,
           "flow.always-raises" => :warning,
           "flow.unreachable-branch" => :info,
           "flow.dead-assignment" => :info,
@@ -100,6 +104,7 @@ module Rigor
           "call.argument-type-mismatch" => :error,
           "call.possible-nil-receiver" => :error,
           "call.raise-non-exception" => :error,
+          "call.deprecated-ruby2-keywords" => :warning,
           "flow.always-raises" => :error,
           "flow.unreachable-branch" => :warning,
           "flow.dead-assignment" => :warning,
@@ -141,6 +146,7 @@ module Rigor
           "call.argument-type-mismatch" => :error,
           "call.possible-nil-receiver" => :error,
           "call.raise-non-exception" => :error,
+          "call.deprecated-ruby2-keywords" => :error,
           "flow.always-raises" => :error,
           "flow.unreachable-branch" => :error,
           "flow.dead-assignment" => :error,

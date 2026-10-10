@@ -78,6 +78,9 @@ module Rigor
       # (`SpecialGlobalSetters`), not the global's RBS declaration.
       RULE_GLOBAL_WRITE_TYPE_MISMATCH = "global.write-type-mismatch"
       RULE_GLOBAL_READONLY_WRITE = "global.readonly-write"
+      # Issue #1692 (the ADR-47 WD5 amendment) — a call to the `ruby2_keywords` family Ruby 4.1 deprecates. Runs only
+      # under an explicit `target_ruby` of 4.1 or later; see {RubyDeprecations}.
+      RULE_DEPRECATED_RUBY2_KEYWORDS = "call.deprecated-ruby2-keywords"
 
       ALL_RULES = [
         RULE_UNDEFINED_METHOD,
@@ -87,6 +90,7 @@ module Rigor
         RULE_ARGUMENT_TYPE,
         RULE_NIL_RECEIVER,
         RULE_RAISE_NON_EXCEPTION,
+        RULE_DEPRECATED_RUBY2_KEYWORDS,
         RULE_DUMP_TYPE,
         RULE_ASSERT_TYPE,
         RULE_ALWAYS_RAISES,

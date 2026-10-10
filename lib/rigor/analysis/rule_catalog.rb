@@ -292,6 +292,38 @@ module Rigor
           since: "0.0.1"
         ),
 
+        CheckRules::RULE_DEPRECATED_RUBY2_KEYWORDS => Entry.new(
+          id: CheckRules::RULE_DEPRECATED_RUBY2_KEYWORDS,
+          summary: "A call to the ruby2_keywords family Ruby 4.1 deprecates, under an explicit target_ruby >= 4.1.",
+          fires_when: [
+            "`.rigor.yml` sets `target_ruby` explicitly to \"4.1\" or later.",
+            "The call reaches `Module#ruby2_keywords` (no receiver or `self` in a class / module body, a " \
+            "`class << self` body or a singleton method), top-level `ruby2_keywords` (at the top level, outside " \
+            "any block), or `Proc#ruby2_keywords` (a receiver typed `Proc`): removed in Ruby 4.4.",
+            "The call reaches `Hash.ruby2_keywords_hash?` or `Hash.ruby2_keywords_hash` (on `Hash` or a subclass " \
+            "RBS knows): removed in Ruby 4.5.",
+            "The same names through `send` / `__send__` with a literal Symbol."
+          ],
+          does_not_fire_when: [
+            "`target_ruby` is absent, is the default, is below 4.1, or is \"latest\" (which names a parser, " \
+            "not a runtime).",
+            "A project or `pre_eval:` file defines a method by the same name anywhere.",
+            "The call sits in a block at the top level, in an `instance_eval` / `instance_exec` block, in an " \
+            "instance method of a class or module, or on an explicit receiver that is not `Proc` / `Hash`.",
+            "The call sits in a version-guard arm that cannot run on the stated Ruby, under a guard on " \
+            "`RUBY_VERSION` that cannot be decided, or after a guard that returns or raises."
+          ],
+          suppression: "`# rigor:disable call.deprecated-ruby2-keywords` on the call line. To fix it instead, " \
+                       "rewrite the delegation the flag serves to `(...)` or `(*args, **kwargs, &block)` first, then " \
+                       "drop the `ruby2_keywords` call: removing it alone breaks keyword pass-through.",
+          severity_authored: :warning,
+          severity_by_profile: { lenient: :info, balanced: :warning, strict: :error },
+          # Each call names a known core method on a receiver whose class the syntax or the scope fixes, and a
+          # project definition of the name silences it. A file loaded only on an older Ruby is the residual.
+          evidence_tier: :high,
+          since: "0.4.2"
+        ),
+
         CheckRules::RULE_ALWAYS_RAISES => Entry.new(
           id: CheckRules::RULE_ALWAYS_RAISES,
           summary: "Call provably raises (today: Integer division-by-zero).",

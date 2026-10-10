@@ -33,6 +33,10 @@ module Rigor
     # Prism *parse* version (it decides which syntax is accepted), it is not threaded to the inference
     # layer, and its default (`"4.0"`) is a default rather than a user statement about the runtime.
     #
+    # The one exception is the Ruby-deprecation rule (the ADR-47 WD5 amendment, #1692). An explicit
+    # `target_ruby` is a user statement about the runtime, and that rule passes it as `stated_ruby:` to ask
+    # whether a deprecated call can run on the stated Ruby. Narrowing and the dead-arm filter never pass it.
+    #
     # ## What is folded (and what is deliberately not)
     #
     # * `RUBY_VERSION <cmp> "x.y.z"` — compared with **String** semantics, because that is what runs.
@@ -91,9 +95,13 @@ module Rigor
       private_constant :GEM_VERSION_PATH
 
       # @param node — an `if` / `unless` predicate
-      # @return `:truthy` / `:falsey` when the guard is decidable on the analyzer's Ruby,
+      # @param stated_ruby — ADR-47 WD5 amendment (#1692): a `x.y.z` version to read `RUBY_VERSION` as instead of
+      #   the analyzer's own, for the Ruby-deprecation rules only ({Configuration#stated_runtime_ruby}). Under it
+      #   nothing else is readable — `RUBY_ENGINE` and the default gems' `VERSION`s belong to the analyzer's
+      #   interpreter, not to the stated one — so a guard on them answers nil.
+      # @return `:truthy` / `:falsey` when the guard is decidable on the analyzer's Ruby (or on `stated_ruby`),
       #   otherwise nil (both arms stay live)
-      def verdict(node)
+      def verdict(node, stated_ruby: nil)
         return nil unless node.is_a?(Prism::CallNode)
 
         operator = node.name
@@ -103,19 +111,19 @@ module Rigor
         arguments = node.arguments&.arguments
         return nil unless arguments && arguments.length == 1
 
-        left = read_operand(node.receiver)
-        right = read_operand(arguments.first)
+        left = read_operand(node.receiver, stated_ruby)
+        right = read_operand(arguments.first, stated_ruby)
         return nil if left.nil? || right.nil?
 
         decide(left, right, operator)
       end
 
       # Reads one side of the comparison into `[kind, value]`, or nil when it is not readable.
-      def read_operand(node)
+      def read_operand(node, stated_ruby = nil)
         case node
         when Prism::StringNode then [:literal_string, node.unescaped]
-        when Prism::ConstantReadNode, Prism::ConstantPathNode then read_constant(node)
-        when Prism::CallNode then read_gem_version(node)
+        when Prism::ConstantReadNode, Prism::ConstantPathNode then read_constant(node, stated_ruby)
+        when Prism::CallNode then read_gem_version(node, stated_ruby)
         end
       end
       private_class_method :read_operand
@@ -129,9 +137,10 @@ module Rigor
       #
       # The foldable set is unchanged and stays closed: an unqualified name folds only when it is one of
       # {PREDEFINED}, a qualified one only when it is in {VERSION_CONSTANTS}.
-      def read_constant(node)
+      def read_constant(node, stated_ruby = nil)
         path = Source::ConstantPath.qualified_name_or_nil(node)
         return nil unless path
+        return (path == "RUBY_VERSION" ? [:string, stated_ruby] : nil) if stated_ruby
 
         kind =
           if path.include?("::")
@@ -149,14 +158,14 @@ module Rigor
       # `Gem::Version.new(<readable>)`. The inner operand must be a plain version String — an engine name
       # is not a version, and `Gem::Version.new` raises on anything `Gem::Version.correct?` rejects, so a
       # malformed literal keeps both arms live instead of folding a guard the program cannot even reach.
-      def read_gem_version(node)
+      def read_gem_version(node, stated_ruby = nil)
         return nil unless node.name == :new && node.block.nil?
         return nil unless Source::ConstantPath.qualified_name_or_nil(node.receiver) == GEM_VERSION_PATH
 
         arguments = node.arguments&.arguments
         return nil unless arguments && arguments.length == 1
 
-        inner = read_operand(arguments.first)
+        inner = read_operand(arguments.first, stated_ruby)
         return nil unless inner && STRING_KINDS.include?(inner.first)
         return nil unless ::Gem::Version.correct?(inner.last)
 

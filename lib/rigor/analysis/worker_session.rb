@@ -238,7 +238,8 @@ module Rigor
           scope_index: index,
           comments: parse_result.comments,
           disabled_rules: @configuration.disabled_rules,
-          node_collectors: node_collectors
+          node_collectors: node_collectors,
+          stated_runtime_ruby: @configuration.stated_runtime_ruby
         )
         diagnostics += plugin_emitted_diagnostics(path, root, scope, node_results)
         diagnostics + explain_diagnostics(path, parse_result.value, scope)

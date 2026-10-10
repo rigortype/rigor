@@ -2653,7 +2653,7 @@ RSpec.describe Rigor::CLI do
 
         written = File.read(path)
         rule_block = written[/each one catches\):\n(.*?)\n\s*#\s*A bare family token/m, 1]
-        listed_ids = rule_block.scan(/[a-z]+(?:\.[a-z][a-z-]*)+/).uniq
+        listed_ids = rule_block.scan(/[a-z]+(?:\.[a-z][a-z0-9-]*)+/).uniq
 
         expect(listed_ids.sort).to eq(Rigor::Analysis::CheckRules::ALL_RULES.sort)
       end
@@ -2667,6 +2667,17 @@ RSpec.describe Rigor::CLI do
         expect(status).to eq(0)
 
         expect { Rigor::Configuration.load(path) }.not_to raise_error
+      end
+    end
+
+    # Issue #1692 — a written `target_ruby` states the runtime, so the starter leaves it commented out.
+    it "writes target_ruby commented out, so the loaded config states no runtime" do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, ".rigor.yml")
+        run_cli("init", "--path=#{path}")
+
+        expect(File.read(path)).to match(/^# target_ruby: "4\.0"$/)
+        expect(Rigor::Configuration.load(path).target_ruby_explicit?).to be(false)
       end
     end
   end

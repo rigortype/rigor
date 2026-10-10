@@ -12,7 +12,7 @@
       "items": { "type": "string" }
     },
     "target_ruby": {
-      "description": "Ruby version Rigor parses against (forwarded to `Prism.parse_file(version:)`). Format: `<major>.<minor>` or `<major>.<minor>.<patch>`, or the literal `\"latest\"`.",
+      "description": "Ruby version Rigor parses against (forwarded to `Prism.parse_file(version:)`). Format: `<major>.<minor>` or `<major>.<minor>.<patch>`, or the literal `\"latest\"`. A version set explicitly here (not the default, not `\"latest\"`) is also the lowest Ruby the project runs on, and turns on the Ruby-deprecation rules for it (`call.deprecated-ruby2-keywords` from `\"4.1\"`).",
       "type": "string",
       "pattern": "^(\\d+\\.\\d+(\\.\\d+)?|latest)$"
     },

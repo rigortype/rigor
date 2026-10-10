@@ -14,7 +14,9 @@ module Rigor
     def self.load: (?String? path) -> Configuration
     def self.discover: () -> String?
     def self.load_with_includes: (String path, ?visited: Set[String]) -> Hash[String, untyped]
-    def initialize: (?Hash[String, untyped] data, ?bool effects_key_present) -> void
+    def initialize: (?Hash[String, untyped] data, ?bool effects_key_present, ?bool target_ruby_key_present) -> void
+    def target_ruby_explicit?: () -> bool
+    def stated_runtime_ruby: () -> String?
     def to_h: () -> Hash[String, untyped]
     # ADR-103 WD13 — the `effects:` block, nil when the key was absent. Presence is the opt-in.
     attr_reader effects: Hash[String, untyped]?

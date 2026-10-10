@@ -102,6 +102,40 @@ RSpec.describe Rigor::Configuration do
       end
     end
 
+    # Issue #1692 (the ADR-47 WD5 amendment) — an explicit `target_ruby` is a statement about the runtime; the
+    # default is only a parse version.
+    describe "an explicit target_ruby" do
+      def loaded(body, extra = {})
+        Dir.mktmpdir do |dir|
+          extra.each { |name, content| File.write(File.join(dir, name), content) }
+          path = File.join(dir, ".rigor.yml")
+          File.write(path, body)
+          described_class.load(path)
+        end
+      end
+
+      it "is told apart from the default, even when the value is the same" do
+        defaulted = loaded("paths: [lib]\n")
+        stated = loaded("target_ruby: \"4.0\"\n")
+
+        expect([defaulted.target_ruby, defaulted.target_ruby_explicit?]).to eq(["4.0", false])
+        expect([stated.target_ruby, stated.target_ruby_explicit?]).to eq(["4.0", true])
+        expect(defaulted.to_h).not_to eq(stated.to_h)
+        expect(described_class.load(File.join(Dir.tmpdir, "missing-rigor.yml")).target_ruby_explicit?).to be(false)
+      end
+
+      it "counts when it comes through an includes: file" do
+        configuration = loaded("includes: [base.yml]\n", "base.yml" => "target_ruby: \"4.1\"\n")
+        expect(configuration.stated_runtime_ruby).to eq("4.1")
+      end
+
+      it "states a runtime only as a version, never as latest or the default" do
+        expect(loaded("target_ruby: \"4.1\"\n").stated_runtime_ruby).to eq("4.1")
+        expect(loaded("target_ruby: latest\n").stated_runtime_ruby).to be_nil
+        expect(loaded("paths: [lib]\n").stated_runtime_ruby).to be_nil
+      end
+    end
+
     it "treats signature_paths: [] as 'load no project signatures'" do
       Dir.mktmpdir do |dir|
         path = File.join(dir, ".rigor.yml")

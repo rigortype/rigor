@@ -303,6 +303,113 @@ RSpec.describe Rigor::Analysis::Reachability do
       expect(report.candidates.map(&:fqn)).to eq(["Orphan"])
       expect(report.undecidable).to be_empty
     end
+
+    # Issue #1734 — an interpolated `const_get` reaches into its receiver's namespace, and an implicit
+    # receiver is the enclosing declaration. GitLab's `Migration[2.2]` builds the name one line up and looks it
+    # up with `inherit = false`; nothing marked the `V*` family, so every version was a false candidate.
+    describe "an interpolated const_get taints the receiver's namespace (#1734)" do
+      let(:migration) do
+        <<~RUBY
+          module Gitlab
+            module Database
+              class Migration
+                class V1_0; end
+                class V2_0 < V1_0; end
+                class Helper; end
+
+                def self.[](version)
+                  version = version.to_s
+                  name = "V\#{version.tr('.', '_')}"
+                  raise ArgumentError, "Unknown migration version: \#{version}" unless const_defined?(name, false)
+
+                  const_get(name, false)
+                end
+              end
+            end
+          end
+          class V9; end
+        RUBY
+      end
+
+      it "demotes the members whose name starts with the literal head (the GitLab Migration[...] shape)" do
+        report = report_for({ "lib/migration.rb" => migration,
+                              "lib/main.rb" => "Gitlab::Database::Migration[2.2]\n" })
+        expect(report.undecidable.to_h { [it.fqn, it.reason] })
+          .to include("Gitlab::Database::Migration::V1_0" => a_string_including("const_get on an interpolated string"),
+                      "Gitlab::Database::Migration::V2_0" => a_string_including("lib/migration.rb:13"))
+        # A member the head cannot spell stays a candidate, and `inherit = false` keeps the lookup out of the
+        # top level.
+        expect(report.candidates.map(&:fqn)).to eq(%w[Gitlab::Database::Migration::Helper V9])
+      end
+
+      it "reads an inline interpolation the same way, and falls through to the top level by default" do
+        report = report_for({ "lib/a.rb" => <<~RUBY, "lib/main.rb" => "Reg.for(1)\n" })
+          class Reg
+            class V1; end
+            class Other; end
+            def self.for(v) = const_get("V\#{v}")
+          end
+          class V9; end
+          class W9; end
+        RUBY
+        expect(report.undecidable.map(&:fqn)).to contain_exactly("Reg::V1", "V9")
+        expect(report.candidates.map(&:fqn)).to eq(%w[Reg::Other W9])
+      end
+
+      it "resolves a constant receiver against the call site's nesting" do
+        report = report_for({ "lib/a.rb" => <<~RUBY, "lib/main.rb" => "Ns::Reg.for(1)\n" })
+          module Ns
+            module Handlers
+              class HAlpha; end
+              class Other; end
+            end
+            class Reg
+              def self.for(k) = Handlers.const_get("H\#{k}", false)
+            end
+          end
+        RUBY
+        expect(report.undecidable.map(&:fqn)).to eq(["Ns::Handlers::HAlpha"])
+        expect(report.candidates.map(&:fqn)).to eq(["Ns::Handlers::Other"])
+      end
+
+      # `Foo::Bar` declares nothing itself, so resolving it peels to `Foo`; anchoring there alone would look
+      # for `Foo::V*` and miss the member the call can reach. An undeclared receiver may be an alias of
+      # either, so both anchors stay.
+      it "anchors at the written receiver as well when only part of it resolves" do
+        report = report_for({ "lib/a.rb" => "module Foo; end\nclass Foo::Bar::V1; end\nclass Foo::V2; end\n" \
+                                            "Foo::Bar.const_get(\"V\#{ARGV.first}\")\n" })
+        expect(report.undecidable.map(&:fqn)).to contain_exactly("Foo::Bar::V1", "Foo::V2")
+      end
+
+      # A block parameter shadows the method's local: the literal assigned outside the block is not what the
+      # block passes, and reading it as a reference hid a dead constant only that literal named.
+      it "reads a name a block parameter or block-local shadows as a computed value" do
+        report = report_for({ "lib/a.rb" => <<~RUBY })
+          class TopLit; end
+          class LocalLit; end
+          module Shadow
+            def self.go(list)
+              name = "TopLit"
+              list.each { |name| const_get(name) }
+              other = "LocalLit"
+              list.each { |x; other| const_get(other) }
+            end
+          end
+          Shadow.go([])
+        RUBY
+        expect(report.candidates.map(&:fqn)).to eq(%w[LocalLit TopLit])
+      end
+
+      # A head that does not end in `::` is the start of a name for `constantize` too, which reaches the
+      # top level only.
+      it "taints every top-level name an interpolated constantize head starts" do
+        decls = "class SubAlpha; end\nclass Sub; end\nmodule Ns\n  class SubBeta; end\nend\n"
+        report = report_for({ "lib/a.rb" => "class Root\n  def go(k) = \"Sub\#{k}\".constantize\nend\n",
+                              "lib/b.rb" => decls }, roots: ["Root"])
+        expect(report.undecidable.map(&:fqn)).to contain_exactly("Sub", "SubAlpha")
+        expect(report.candidates.map(&:fqn)).to eq(%w[Ns Ns::SubBeta])
+      end
+    end
   end
 
   # A byte sequence that is not valid UTF-8 cannot be a constant name. Carrying one forward crashed the whole
@@ -495,6 +602,63 @@ RSpec.describe Rigor::Analysis::Reachability do
                             "spec/child_spec.rb" => "Child.new\n" })
       expect(report.candidates.map(&:fqn)).to be_empty
       expect(report.test_only.map(&:fqn)).to eq(%w[Base Child])
+    end
+  end
+
+  # Issue #1733 — a superclass that is a call rather than a constant names constants in its receiver and
+  # arguments. Only a constant superclass was ever read, so those were never recorded and every one of them
+  # was a false candidate.
+  describe "a non-constant superclass expression is walked (#1733)" do
+    def report_for(files, roots: [])
+      decls = []
+      refs = []
+      files.each do |path, source|
+        result = Rigor::Analysis::Reachability::Scan.call(path: path, source: source)
+        raise "fixture #{path} did not parse" if result.nil?
+
+        decls.concat(result.declarations)
+        refs.concat(result.references)
+      end
+      Rigor::Analysis::Reachability::Graph.new(declarations: decls, references: refs, root_fqns: roots).report
+    end
+
+    {
+      "DelegateClass(Foo)" => "class Foo; end\nclass Sub < DelegateClass(Foo); end\n",
+      "Struct.new(:a, Foo::X)" => "module Foo\n  X = 1\nend\nclass Sub < Struct.new(:a, Foo::X); end\n",
+      "ActiveRecord::Migration[7.1]" => "module ActiveRecord\n  class Migration; end\nend\n" \
+                                        "class Sub < ActiveRecord::Migration[7.1]; end\n"
+    }.each do |superclass, source|
+      it "reaches what `#{superclass}` names through its reachable subclass" do
+        report = report_for({ "lib/a.rb" => source, "lib/main.rb" => "Sub.new\n" })
+        expect(report.candidates.map(&:fqn)).to be_empty
+      end
+    end
+
+    # The edge leaves the subclass, as a constant superclass's does (#1720): a dead subclass leaves what its
+    # superclass expression names dead too, rather than rooting it from the enclosing scope.
+    it "credits the superclass expression to the subclass" do
+      report = report_for({ "lib/a.rb" => "class Foo; end\nclass Sub < DelegateClass(Foo); end\n",
+                            "lib/main.rb" => "1\n" })
+      expect(report.candidates.map(&:fqn)).to eq(%w[Foo Sub])
+    end
+
+    # The GitLab shape `< ::Gitlab::Database::Migration[2.2]::MigrationRecord`: a constant path on a computed
+    # base names nothing resolvable, but the call it hangs from does.
+    it "walks the computed base of a constant-path superclass" do
+      report = report_for({ "lib/a.rb" => "class Mig\n  def self.[](v) = self\n  class Rec; end\nend\n" \
+                                          "class UsesMig < Mig[2.2]::Rec; end\n",
+                            "lib/main.rb" => "UsesMig.new\n" })
+      expect(report.candidates.map(&:fqn)).not_to include("Mig")
+    end
+
+    it "resolves the superclass expression against the outer nesting" do
+      result = Rigor::Analysis::Reachability::Scan.call(path: "lib/a.rb", source: <<~RUBY)
+        module Outer
+          class Sub < DelegateClass(Inner); end
+        end
+      RUBY
+      ref = result.references.find { |r| r.as_written == "Inner" }
+      expect([ref.from, ref.nesting]).to eq(["Outer::Sub", ["Outer"]])
     end
   end
 

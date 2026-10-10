@@ -40,7 +40,6 @@ module Rigor
         def initialize(declarations:, references:, root_fqns: [], dynamic_uses: [], shadows: [],
                        foreign: ->(_fqn) { false })
           @declarations = declarations
-          @dynamic_uses = dynamic_uses
           @references = references + literal_dynamic_references(dynamic_uses)
           @root_fqns = root_fqns.to_set
           @foreign = foreign
@@ -49,6 +48,8 @@ module Rigor
           @shadows.default = Set.new.freeze
           @owned = @by_fqn.keys.reject { |fqn| @foreign.call(fqn) }.to_set
           @ancestors = {}
+          # `Foo.const_get("V#{k}")` bounds its reach by `Foo`, a reference like any other (#1734).
+          @dynamic_uses = dynamic_uses.flat_map { |use| use.anchored { |ref| resolve_ref(ref) } }
         end
 
         def report

@@ -651,7 +651,8 @@ RSpec.describe Rigor::Plugin::Manifest do
         [{
           "receiver_constraint" => "Sinatra::Base",
           "method_names" => %w[get post put delete],
-          "self_type" => "receiver_instance"
+          "self_type" => "receiver_instance",
+          "refinements" => []
         }]
       )
     end

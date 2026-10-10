@@ -856,7 +856,8 @@ module Rigor
 
           modules = Inference::InEffectRefinements.refining_modules(scope, class_name, call_node.name)
           !modules.nil? &&
-            lexical_sites.refinements.refinement_active?(call_node.location.start_offset, modules) do |name|
+            lexical_sites.refinements.refinement_active?(call_node.location.start_offset, modules,
+                                                         scope.declared_refinements) do |name|
               Inference::InEffectRefinements.activated_modules(scope, name)
             end
         end
@@ -2613,7 +2614,7 @@ module Rigor
           names = [method_name, *GLOBAL_WRITE_HATCHES]
           census = global_write_census(scope)
           program_may_answer?(ancestors, names, census, scope) ||
-            (method_name == :write && refined_writer_in_effect?(census, node, lexical_sites))
+            (method_name == :write && refined_writer_in_effect?(census, node, scope, lexical_sites))
         end
 
         def overridden_hatch?(definition)
@@ -2669,9 +2670,10 @@ module Rigor
         # refine(T)`), so a refined `write` on any class declines every literal. `respond_to?(:write)` honours an
         # active refinement on Ruby 4.0.5; a refined `respond_to_missing?` or `respond_to?`, and every implicit
         # conversion, do not, so a refinement that adds only those leaves the write reported.
-        def refined_writer_in_effect?(census, node, lexical_sites)
+        def refined_writer_in_effect?(census, node, scope, lexical_sites)
           Inference::GlobalWriteCensus.refines_write?(census) &&
-            (lexical_sites.nil? || lexical_sites.refinements.any_at?(node.location.start_offset))
+            (lexical_sites.nil? || !scope.declared_refinements.empty? ||
+              lexical_sites.refinements.any_at?(node.location.start_offset))
         end
 
         def build_global_write_type_diagnostic(path, node, contract, class_name)

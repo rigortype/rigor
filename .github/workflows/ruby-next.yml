@@ -1,0 +1,202 @@
+name: Ruby next (advisory)
+
+# Runs the unit suite and the `rigor check` self-check on the next Ruby, ahead of its release, so that a
+# break surfaces as a finding months before users can hit it (#1764, under #1693). It is a signal, not a
+# gate: this workflow is NOT one of ci.yml's jobs, so it is never in the `CI required` fan-in and cannot
+# fail anyone's pull request. A red run means "file an issue from the summary", not "revert".
+#
+# Weekly rather than per-PR, so it adds no runner time to ordinary pull requests. The `pull_request`
+# trigger is narrowed to edits of this file, so a change to the workflow runs on its own pull request
+# before it reaches master.
+on:
+  schedule:
+    # Mondays 03:17 UTC — off the hour, when scheduled runs queue least.
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+    inputs:
+      ruby:
+        description: "ruby/setup-ruby version (e.g. head, 4.1.0-preview1)"
+        required: false
+        default: head
+  pull_request:
+    paths:
+      - .github/workflows/ruby-next.yml
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Only a superseded pull_request run is cancelled in progress: on master a manual dispatch must not
+  # kill the weekly run mid-suite. (A group still holds one queued run, so a second queued dispatch
+  # replaces the first.)
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  ruby-next:
+    name: Tests + self-check (Ruby ${{ inputs.ruby || 'head' }})
+    runs-on: ubuntu-latest
+    # The suite runs in one process here (ci.yml spreads it across three shards): 58 minutes on
+    # ruby-head in run 38055646689, plus about a minute for the self-check. This only bounds a hang.
+    timeout-minutes: 120
+    env:
+      BUNDLE_VERSION: system
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          submodules: false
+
+      # `head` until ruby/setup-ruby lists a 4.1 preview (none as of 2026-10-10); `head` is the 4.1
+      # development line until 4.1.0 ships in December 2026. After that it becomes 4.2-dev, and this
+      # workflow should be repointed or retired along with widening `required_ruby_version` (#1693).
+      #
+      # No `bundler-cache`: it installs in deployment (frozen) mode from the committed Gemfile.lock,
+      # and the bound relaxed below has to re-resolve. A weekly run can afford an uncached install.
+      #
+      # `bundler: default` takes the Bundler that ships with that Ruby instead of Gemfile.lock's
+      # `BUNDLED WITH`: Bundler 4.0.11 crashes on ruby-head (`uninitialized constant
+      # Pathname::SEPARATOR_PAT`, run 38055522321), and the next Ruby's own Bundler is the one its
+      # users will have. BUNDLE_VERSION=system stops that Bundler re-executing the locked version.
+      - name: Set up Ruby
+        id: setup
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ inputs.ruby || 'head' }}
+          bundler: default
+
+      # The Gemfile's `ruby` directive and rigortype.gemspec's `required_ruby_version` both stop at
+      # `< 4.1`, so Bundler refuses the local gem on 4.1. That published range is deliberately NOT
+      # widened before 4.1.0 is released (#1693); this edits only this job's checkout, raising the bound
+      # to just past the running Ruby. It aborts rather than silently testing an unedited tree when the
+      # bound is no longer `< 4.1` — that means the published range moved and this step needs revisiting.
+      - name: Relax the Ruby upper bound in this checkout only
+        id: relax
+        run: |
+          mkdir -p tmp
+          set -o pipefail
+          ruby -e '
+            major, minor = RUBY_VERSION.split(".").map(&:to_i)
+            bound = %(< #{major}.#{minor + 1})
+            %w[Gemfile rigortype.gemspec].each do |path|
+              src = File.read(path)
+              abort "#{path}: no \"< 4.1\" upper bound to relax; the published range moved" unless src.include?(%("< 4.1"))
+              File.write(path, src.sub(%("< 4.1"), %("#{bound}")))
+              puts "#{path}: \"< 4.1\" -> \"#{bound}\""
+            end
+          ' 2>&1 | tee tmp/relax.txt
+
+      - name: Install gems
+        id: install
+        run: |
+          mkdir -p tmp
+          set -o pipefail
+          bundle install --jobs 4 --retry 3 2>&1 | tee tmp/bundle-install.txt
+
+      # Both checks continue on error so that a suite failure still runs the self-check and every
+      # result reaches the summary; the last step turns either failure into a red run.
+      - name: Run the unit suite
+        id: tests
+        continue-on-error: true
+        run: |
+          mkdir -p tmp
+          bundle exec rspec --format progress --format json --out tmp/rspec.json
+
+      - name: Run rigor self-check
+        id: check
+        continue-on-error: true
+        run: |
+          mkdir -p tmp
+          set -o pipefail
+          bundle exec exe/rigor check --no-cache --no-ci-detect --fail-on=warning lib 2>&1 | tee tmp/rigor-check.txt
+
+      # The summary is what a follow-up issue is filed from, so it names the first failing spec file
+      # first. A file that fails to load has no failed example, only an "error occurred while loading"
+      # message, so those are read from the report's messages too (spec_helper included). When setup
+      # fails, both checks are skipped and the summary carries the install output instead.
+      - name: Write job summary
+        if: always()
+        env:
+          SETUP_OUTCOME: ${{ steps.setup.outcome }}
+          RELAX_OUTCOME: ${{ steps.relax.outcome }}
+          INSTALL_OUTCOME: ${{ steps.install.outcome }}
+          TESTS_OUTCOME: ${{ steps.tests.outcome }}
+          CHECK_OUTCOME: ${{ steps.check.outcome }}
+        run: |
+          {
+            echo "## Ruby next: $(ruby -v)"
+            echo
+            echo "| Check | Outcome |"
+            echo "| --- | --- |"
+            echo "| Set up Ruby | ${SETUP_OUTCOME:-not run} |"
+            echo "| Relax Ruby bound | ${RELAX_OUTCOME:-not run} |"
+            echo "| bundle install | ${INSTALL_OUTCOME:-not run} |"
+            echo "| Unit suite | ${TESTS_OUTCOME:-not run} |"
+            echo "| rigor check lib | ${CHECK_OUTCOME:-not run} |"
+            echo
+            for step in relax:RELAX_OUTCOME bundle-install:INSTALL_OUTCOME; do
+              log=${step%%:*}; var=${step#*:}
+              if [ "${!var}" = failure ]; then
+                echo "### $log"
+                echo
+                echo '```'
+                tail -n 40 "tmp/$log.txt" 2>/dev/null || echo "(no output captured)"
+                echo '```'
+                echo
+              fi
+            done
+            if [ "$TESTS_OUTCOME" = failure ]; then
+              if [ -s tmp/rspec.json ]; then
+                files=$(jq -r '
+                  ([.messages[]? | capture("error occurred while loading (?<f>\\S+?)\\.?(\\s|$)").f]
+                   + [.examples[] | select(.status == "failed") | .file_path])
+                  | reduce .[] as $f ([]; if index([$f]) then . else . + [$f] end) | .[]' tmp/rspec.json)
+                echo "### Unit suite"
+                echo
+                jq -r '"\(.summary_line)"' tmp/rspec.json
+                echo
+                if [ -n "$files" ]; then
+                  echo "**First failing spec file:** \`$(printf '%s\n' "$files" | head -n 1)\`"
+                  echo
+                  echo "Failing spec files, in run order:"
+                  echo
+                  printf '%s\n' "$files" | while read -r f; do
+                    n=$(jq --arg f "$f" '[.examples[] | select(.status == "failed" and .file_path == $f)] | length' tmp/rspec.json)
+                    if [ "$n" = 0 ]; then n="load error"; else n="$n failed"; fi
+                    echo "- \`$f\` ($n)"
+                  done
+                else
+                  echo "No failing example or load error was recorded; see the step log."
+                fi
+              else
+                echo "### Unit suite"
+                echo
+                echo "rspec wrote no JSON report (it crashed before finishing); see the step log."
+              fi
+              echo
+            fi
+            if [ "$CHECK_OUTCOME" = failure ]; then
+              echo "### rigor check lib"
+              echo
+              echo '```'
+              tail -n 40 tmp/rigor-check.txt 2>/dev/null || echo "(no output captured)"
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ruby-next-logs
+          path: |
+            tmp/*.txt
+            tmp/rspec.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Fail if either check failed
+        if: steps.tests.outcome == 'failure' || steps.check.outcome == 'failure'
+        run: |
+          echo "Ruby next run found failures — see the job summary."
+          exit 1

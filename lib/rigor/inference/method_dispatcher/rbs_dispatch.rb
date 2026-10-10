@@ -1030,7 +1030,7 @@ module Rigor
             candidates = OverloadSelector.select_candidates(
               method_definition,
               arg_types: args,
-              keywords_last: keywords_last,
+              keywords_last: keywords_last, splats: splat_indices(call_node, args),
               # A `Dynamic` self (#1092) is a return-side answer; overload selection and ReceiverAffinity
               # read the static facet, as they did before the substitute carried the wrapping.
               self_type: self_type.is_a?(Type::Dynamic) ? self_type.static_facet : self_type,
@@ -1079,7 +1079,7 @@ module Rigor
 
             selector_self = self_type.is_a?(Type::Dynamic) ? self_type.static_facet : self_type
             per_list = distributed_keyword_matches(method_definition, args, selector_self, instance_type, type_vars,
-                                                   !block_type.nil?, environment, positional_splat?(call_node))
+                                                   !block_type.nil?, environment, splat_indices(call_node, args))
             return NOT_DISTRIBUTED if per_list.equal?(NOT_DISTRIBUTED)
             return Type::Combinator.untyped if per_list.nil?
 
@@ -1106,15 +1106,15 @@ module Rigor
           # `Enumerator::ArithmeticSequence` through the incomplete stdlib RBS).
           # rubocop:disable Metrics/ParameterLists
           def distributed_keyword_matches(method_definition, args, selector_self, instance_type, type_vars,
-                                          block_required, environment, splat)
+                                          block_required, environment, splats)
             # rubocop:enable Metrics/ParameterLists
             distributions = keyword_distributions(method_definition, args, selector_self, instance_type, type_vars,
-                                                  environment, splat)
+                                                  environment, splats)
             return nil if distributions.nil?
 
             distributions.map do |arg_types|
               matches = keyword_matches(method_definition, arg_types, selector_self, instance_type, type_vars,
-                                        block_required, environment)
+                                        block_required, environment, splats)
               return arg_types.equal?(args) ? NOT_DISTRIBUTED : nil if matches.empty?
 
               [arg_types, matches]
@@ -1141,9 +1141,16 @@ module Rigor
             !arguments.nil? && arguments.size == args.size && arguments.last.is_a?(Prism::KeywordHashNode)
           end
 
-          # Whether the call passes a splat argument (`f(*xs, k: 1)`), whose positional count is not known statically.
-          def positional_splat?(call_node)
-            call_node.arguments.arguments.any?(Prism::SplatNode)
+          # Issue #1801 — the indices of `args` the call passes as splat arguments (`f(*xs, k: 1)`), whose positional
+          # count is not known statically, or nil without one. As for {#keyword_arguments_last?}, only a call whose
+          # node's arguments are exactly `args` answers.
+          def splat_indices(call_node, args)
+            return nil if args.empty? || !call_node.respond_to?(:arguments)
+
+            arguments = call_node.arguments&.arguments
+            return nil if arguments.nil? || arguments.size != args.size || arguments.none?(Prism::SplatNode)
+
+            arguments.each_index.select { |index| arguments[index].is_a?(Prism::SplatNode) }
           end
 
           # The two provenance side-tables the return-typing tier is the last place able to populate, recorded
@@ -1723,7 +1730,7 @@ module Rigor
           def probe_block_param_types(receiver:, method_name:, args:, environment:, scope: nil, call_node: nil)
             args ||= []
             keywords_last = keyword_arguments_last?(call_node, args)
-            splat = keywords_last && positional_splat?(call_node)
+            splat = splat_indices(call_node, args)
             case receiver
             when Type::Union
               probe_block_param_types_union(receiver, method_name, args, environment, scope, keywords_last, splat)
@@ -1776,7 +1783,7 @@ module Rigor
           # rubocop:disable Metrics/ParameterLists
           def extract_block_param_types(method_definition, class_name:, kind:, args:, type_vars:,
                                         environment: nil, receiver: nil, receiver_args: [],
-                                        method_name: nil, keywords_last: false, positional_splat: false)
+                                        method_name: nil, keywords_last: false, positional_splat: nil)
             # rubocop:enable Metrics/ParameterLists
             instance_type = Type::Combinator.nominal_of(class_name)
             self_type =
@@ -1803,9 +1810,10 @@ module Rigor
                                                  type_vars, environment, positional_splat)
             end
 
-            if FacetDistribution.faceted?(args)
+            # A splat (#1801) leaves the positional count open, so every overload some count reaches must agree.
+            if positional_splat || FacetDistribution.faceted?(args)
               matches = facet_matches(method_definition, args, selector_self, instance_type, type_vars, true,
-                                      environment, false)
+                                      environment, false, positional_splat)
               return agreed_block_params(matches, self_type, instance_type, type_vars, environment)
             end
 
@@ -1851,11 +1859,11 @@ module Rigor
           # `(a: Integer) -> Integer | (Hash[Symbol, String]) -> String`, `a: Integer | String`'s `String` member takes
           # the second overload and its `Integer` member the first. A parameter that cannot take a `Hash` (`(String)`)
           # leaves the split to the keyword declarations.
-          # `splat`: a splat argument hides how many positional arguments precede the hash.
+          # `splats`: a splat argument hides how many positional arguments precede the hash.
           def keyword_distributions(method_definition, args, selector_self, instance_type, type_vars, environment,
-                                    splat)
+                                    splats)
             hash = Type::Combinator.nominal_of("Hash")
-            count = splat ? nil : args.size
+            count = splats ? nil : args.size
             KeywordArguments.distributions(args, true, method_definition.method_types, count) do |param|
               param_type = RbsTypeTranslator.translate(
                 param.type, self_type: selector_self, instance_type: instance_type, type_vars: type_vars,
@@ -1867,10 +1875,10 @@ module Rigor
 
           # rubocop:disable Metrics/ParameterLists
           def agreed_keyword_block_params(method_definition, args, self_type, selector_self, instance_type, type_vars,
-                                          environment, splat)
+                                          environment, splats)
             # rubocop:enable Metrics/ParameterLists
             distributions = keyword_distributions(method_definition, args, selector_self, instance_type, type_vars,
-                                                  environment, splat)
+                                                  environment, splats)
             return [] if distributions.nil?
 
             candidates = []
@@ -1878,7 +1886,7 @@ module Rigor
               # Genuine matches only (`member` true): a member no overload takes must not lend the first-overload
               # fallback to the agreement, which bound `headers: (true | nil)`'s block to the `true` arm.
               matches = keyword_matches(method_definition, arg_types, selector_self, instance_type, type_vars, true,
-                                        environment)
+                                        environment, splats)
               return [] if matches.empty?
 
               candidates.concat(matches)
@@ -1890,15 +1898,17 @@ module Rigor
           # read member-wise as `OverloadSelector.select_candidates` reads it, but every list answers only a genuine
           # match: the first-overload fallback must not count toward the block probe's agreement or the return path's
           # join.
+          # rubocop:disable Metrics/ParameterLists
           def keyword_matches(method_definition, arg_types, selector_self, instance_type, type_vars, block_required,
-                              environment)
+                              environment, splats)
+            # rubocop:enable Metrics/ParameterLists
             unless FacetDistribution.faceted?(arg_types)
               return OverloadSelector.select_declared(method_definition, arg_types, selector_self, instance_type,
-                                                      type_vars, block_required, environment, true, true)
+                                                      type_vars, block_required, environment, true, true, splats)
             end
 
             facet_matches(method_definition, arg_types, selector_self, instance_type, type_vars, block_required,
-                          environment, true)
+                          environment, true, splats)
           end
 
           # Issue #1750 — the overloads a faceted argument list may reach, read member-wise with genuine matches only.
@@ -1908,12 +1918,13 @@ module Rigor
           # (`OverloadSelector.select_declared`'s `:gradual`) and the caller binds only what they all agree on.
           # rubocop:disable Metrics/ParameterLists
           def facet_matches(method_definition, arg_types, selector_self, instance_type, type_vars, block_required,
-                            environment, keywords_last)
+                            environment, keywords_last, splats = nil)
             # rubocop:enable Metrics/ParameterLists
             FacetDistribution.select(arg_types, method_definition, member_wise: true, environment:) do |list, member|
               # The fallback list (`member` false) answers every gradual match rather than the strict pass's pick.
               OverloadSelector.select_declared(method_definition, list, selector_self, instance_type, type_vars,
-                                               block_required, environment, member || :gradual, keywords_last)
+                                               block_required, environment, member || :gradual, keywords_last,
+                                               splats)
             end
           end
 

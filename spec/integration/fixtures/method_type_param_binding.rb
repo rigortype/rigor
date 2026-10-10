@@ -18,9 +18,15 @@ assert_type("[1, 2]", Ractor.make_shareable([1, 2]))
 
 # --- no static evidence, no binding -----------------------------------------
 
-# A splatted `p` has no static arity, so it types as `Dynamic[top]`; feeding that to the identity
-# signature must leave `T` unbound rather than dress the absence of evidence up as an inference.
+# An untyped value is no evidence; feeding it to the identity signature must leave `T` unbound rather
+# than dress the absence of evidence up as an inference.
+untyped = Marshal.load("")
+assert_type("Dynamic[top]", untyped)
+assert_type("Dynamic[top]", Ractor.make_shareable(untyped))
+
+# A splatted `p` has no static arity, so every arm some count of the splat reaches joins (#1801), and the
+# identity signature passes that `Dynamic` through as it is.
 xs = [1, 2]
 dyn = p(*xs)
-assert_type("Dynamic[top]", dyn)
-assert_type("Dynamic[top]", Ractor.make_shareable(dyn))
+assert_type("Dynamic[Array[Dynamic[top]] | Dynamic[top] | nil]", dyn)
+assert_type("Dynamic[Array[Dynamic[top]] | Dynamic[top] | nil]", Ractor.make_shareable(dyn))

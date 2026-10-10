@@ -373,11 +373,12 @@ RSpec.describe Rigor::Inference::Acceptance do
     end
 
     # Issue #1794 — `Enumerator::ArithmeticSequence[E]` carries only the element of its `Enumerator[Numeric, void]`
-    # superclass, so a two-argument `Enumerator` compares the element and lends its own `Return`.
+    # superclass, so a two-argument `Enumerator` compares the element against the `void` (`top`) `Return` RBS gives.
     it "projects an arithmetic sequence's element onto a two-argument Enumerator" do
       seq = Rigor::Type::Combinator.nominal_of("Enumerator::ArithmeticSequence", type_args: [int_nominal])
       enum = ->(*args) { Rigor::Type::Combinator.nominal_of("Enumerator", type_args: args) }
       expect(accepts(enum.call(int_nominal, Rigor::Type::Combinator.untyped), seq)).to be_yes
+      expect(accepts(enum.call(int_nominal, Rigor::Type::Combinator.top), seq)).to be_yes
       expect(accepts(enum.call(int_nominal), seq)).to be_yes
       expect(accepts(enum.call(str_nominal, Rigor::Type::Combinator.untyped), seq)).to be_no
     end

@@ -59,6 +59,27 @@ RSpec.describe "Integer#step enumerator elements (#1794)", type: :runner do
     RUBY
   end
 
+  it "passes the sequence to Enumerator parameters, with or without a Return argument" do
+    sig = { "consumer.rbs" => <<~RBS }
+      class Consumer
+        def self.void_return: (Enumerator[Integer, void]) -> void
+        def self.untyped_return: (Enumerator[Integer, untyped]) -> void
+        def self.bare: (Enumerator[Integer]) -> void
+      end
+    RBS
+    result = analyze(<<~RUBY, sig: sig)
+      class Consumer
+        def self.void_return(e) = nil
+        def self.untyped_return(e) = nil
+        def self.bare(e) = nil
+      end
+      Consumer.void_return(1.step(10, 2))
+      Consumer.untyped_return(1.step(10, 2))
+      Consumer.bare(1.step(10, 2))
+    RUBY
+    expect(result.diagnostics.select(&:error?).map { |d| [d.line, d.qualified_rule] }).to eq([])
+  end
+
   # `rewind` and a block-taking `each_slice` return the sequence itself, which still answers its own methods.
   it "keeps the sequence as self through the inherited methods that return it" do
     expect(undefined_rows(<<~RUBY)).to eq([])

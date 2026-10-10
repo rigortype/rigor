@@ -10007,7 +10007,7 @@ module Rigor
       def unentered_block_entry(node, block, table, current_scope)
         return current_scope unless block.is_a?(Prism::BlockNode) && !table.key?(block)
 
-        narrowed_self = unentered_block_self(node, current_scope)
+        narrowing = unentered_block_narrowing(node, current_scope)
         current_scope = Narrowing.safe_navigation_block_scope(node, current_scope)
         # Issue #1429 — nor a guard's narrowing of a global or constant the body may run after code rebinds.
         current_scope = GuardRebinding.block_entry(current_scope, block, node)
@@ -10019,13 +10019,15 @@ module Rigor
           end
         # Issue #1717 — the body's `self` is unknown unless narrowed, as on the evaluator's entry; only the
         # `call.undefined-method` mark is set here, never #316's opaque mark (its bind gate reads the evaluator's).
-        return entry.with_block_self_unknown(true) unless narrowed_self
+        entry = entry.with_block_self_unknown(true) unless narrowing&.self_type
+        return entry unless narrowing
 
-        entry.with_block_self_type(narrowed_self, keeps_unknown: current_scope.block_self_narrowing_unknown?(node))
+        MacroBlockSelfType.apply(entry, narrowing, keeps_unknown: current_scope.block_self_narrowing_unknown?(node))
       end
 
-      # The `self` an unentered block's body runs with, when the call is one whose block `self` the engine
-      # narrows: an ADR-16 Tier A `block_as_methods:` match ({MacroBlockSelfType}) or `define_method` on the
+      # The narrowing ({MacroBlockSelfType::Match}) an unentered block's body runs with — its `self` and, for a
+      # `block_as_methods:` entry, the declared refinements (issue #1667) — when the call is one whose block the
+      # engine narrows: an ADR-16 Tier A `block_as_methods:` match ({MacroBlockSelfType}) or `define_method` on the
       # lexical `self` ({DefineMethodBlockSelf}, issue #963). The evaluator applies the same two narrowings to
       # the blocks it enters ({StatementEvaluator#build_block_entry_scope}, {StatementEvaluator#enter_call_block})
       # and the value pass to every block it types ({ExpressionTyper#block_body_self_narrowing}); without this a
@@ -10034,16 +10036,15 @@ module Rigor
       # in it read as a call on that. The receiver is typed only when some plugin declares an entry for the
       # call's name, so a call no entry names costs one table lookup. A miss, or a raise, keeps the entry as
       # built — the false-positive-safe direction.
-      def unentered_block_self(node, scope)
+      def unentered_block_narrowing(node, scope)
         registry = scope.environment&.plugin_registry
         if registry && !registry.empty? && !registry.contribution_index.block_entries_for(node.name).empty?
-          receiver_type = node.receiver ? scope.type_of(node.receiver) : scope.self_type
-          narrowed = MacroBlockSelfType.narrow_self_type_for(
-            scope: scope, call_node: node, receiver_type: receiver_type
-          )
-          return narrowed if narrowed
+          receiver_type = node.receiver ? scope.type_of(node.receiver) : MacroBlockSelfType.implicit_receiver_type(scope)
+          match = MacroBlockSelfType.match_for(scope: scope, call_node: node, receiver_type: receiver_type)
+          return match if match
         end
-        DefineMethodBlockSelf.narrow_self_type_for(scope: scope, call_node: node)
+        defined = DefineMethodBlockSelf.narrow_self_type_for(scope: scope, call_node: node)
+        defined && MacroBlockSelfType::Match.new(self_type: defined, refinements: InEffectRefinements::EMPTY)
       rescue StandardError
         nil
       end

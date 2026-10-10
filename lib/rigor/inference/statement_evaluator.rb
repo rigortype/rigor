@@ -5157,30 +5157,31 @@ module Rigor
         # ({ExpressionTyper#block_body_self_narrowing}) already applies the same contract to block-return
         # typing; without it here the recorded per-node scopes — what `dump_type`/`assert_type` and the
         # survey read — keep the enclosing `self_type` and every DSL call inside stays `Dynamic[top]`.
-        narrowed = call_node && narrow_macro_block_self(call_node)
-        if narrowed
+        # Issue #1667 — the entry's `refinements:` are put in effect in the body alongside.
+        match = call_node && macro_block_match(call_node)
+        if match
           keeps_unknown = scope.block_self_narrowing_unknown?(call_node)
-          scope_with_params = scope_with_params.with_block_self_type(narrowed, keeps_unknown: keeps_unknown)
+          scope_with_params = MacroBlockSelfType.apply(scope_with_params, match, keeps_unknown: keeps_unknown)
         end
         block_local_names(block_node).reduce(scope_with_params) do |acc, name|
           acc.with_local(name, Type::Combinator.constant_of(nil))
         end
       end
 
-      # The receiver an ADR-16 `block_as_methods:` match is keyed on: the explicit receiver's type, or the
+      # The ADR-16 `block_as_methods:` match for `call_node`, keyed on the explicit receiver's type, or on the
       # current `self_type` for an implicit-self DSL call (the `params do` / `namespace do` shapes, whose
       # receiver is the enclosing `Singleton[X]`). A miss leaves the entry scope as built — the false-
       # positive-safe direction.
-      def narrow_macro_block_self(call_node)
+      def macro_block_match(call_node)
         receiver_type =
           if call_node.receiver
             explicit_receiver_type(call_node)
           else
-            scope.self_type
+            MacroBlockSelfType.implicit_receiver_type(scope)
           end
         return nil if receiver_type.nil?
 
-        MacroBlockSelfType.narrow_self_type_for(
+        MacroBlockSelfType.match_for(
           scope: scope, call_node: call_node, receiver_type: receiver_type
         )
       rescue StandardError

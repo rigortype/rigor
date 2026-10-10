@@ -43,6 +43,9 @@ module Rigor
     # Issue #1446 — the classes a class guard narrowed a `bot` receiver to.
     # sig-gen gap: #1154 — a reader over an ivar `initialize` assigns from a parameter.
     attr_reader bot_guard_classes: Hash[[Symbol, Symbol | String], Array[String]]
+    # Issue #1667 — the modules a plugin-declared refined block runs under, in declaration order.
+    # sig-gen gap: #1154 — a reader over an ivar `initialize` assigns from a parameter.
+    attr_reader declared_refinements: Array[String]
 
     # ADR-53 Track A — the seed-time discovery tables live on the
     # DiscoveryIndex; Scope keeps per-table readers as delegates.
@@ -225,6 +228,7 @@ module Rigor
     def with_block_self_unknown: (bool flag) -> Scope
     def opaque_block_self?: () -> bool
     def with_singleton_class_body: (bool) -> Scope
+    def with_declared_refinements: (Array[String] names) -> Scope
     # sig-gen gap: #1148 — sig-gen skips the endless-def reader (sig.skipped.untyped-return); the row is hand-written.
     def singleton_class_body?: () -> bool
     def with_discovery: (DiscoveryIndex index) -> Scope

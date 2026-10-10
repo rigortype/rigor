@@ -27,11 +27,21 @@ module Rigor
     # parameter-typed block params, declared per-verb argument contracts — are ceiling concerns
     # for later slices.
     module MacroBlockSelfType
+      # A matched entry's effect on the block body: the `self_type` it runs with (nil keeps the entry scope's), and
+      # the modules its `Proc#refined` puts in effect (issue #1667).
+      Match = Data.define(:self_type, :refinements)
+
       module_function
 
       # @return the narrowed self-type, or
       #   `nil` when no registered entry matches the call shape.
       def narrow_self_type_for(scope:, call_node:, receiver_type:)
+        match_for(scope: scope, call_node: call_node, receiver_type: receiver_type)&.self_type
+      end
+
+      # The block entry `call_node`'s first matching entry contributes, or nil when none matches. A `:lexical`
+      # entry (issue #1667) keeps the caller's `self`, so its `self_type` is the calling scope's.
+      def match_for(scope:, call_node:, receiver_type:)
         return nil if receiver_type.nil?
 
         environment = scope&.environment
@@ -47,19 +57,38 @@ module Rigor
         # by the table key.
         entries = registry.contribution_index.block_entries_for(call_node.name)
         entries.each do |entry|
-          narrowed = entry_self_type_for(entry, singleton_name, nominal_name, call_node,
-                                         scope, environment)
-          return narrowed if narrowed
+          next unless entry_matches?(entry, singleton_name, nominal_name, call_node, scope, environment)
+
+          self_type = entry.lexical_self? ? scope.self_type : narrowed_self_type(entry, singleton_name || nominal_name,
+                                                                                 environment)
+          return Match.new(self_type: self_type, refinements: entry.refinements)
         end
         nil
       end
 
-      # The narrowed `self_type` one entry contributes for this receiver, or nil on a miss. Nominal
-      # receivers exist only inside an already-narrowed `instance_eval` body — they can only re-enter a
-      # *named instance*-binding entry (`params`-family nesting on `Nominal[ParamsScope]`).
-      # `:receiver_instance` and `singleton(...)` entries keep their Singleton-only contract.
-      def entry_self_type_for(entry, singleton_name, nominal_name, call_node, scope, environment)
-        return nil if singleton_name.nil? && !entry.named_instance_binding?
+      # The receiver an implicit-self call is matched on: the scope's `self`, or at the file's top level (no
+      # `self_type`) `Object`, as the value pass types it ({ExpressionTyper#call_receiver_type_for}), so the evaluator,
+      # the indexer and the value pass agree on whether a top-level `build { … }` matches (issue #1667).
+      def implicit_receiver_type(scope)
+        scope.self_type || scope.environment&.nominal_for_name("Object")
+      end
+
+      # Applies `match` to a block body's entry scope: the narrowed `self` (with the #1717 mark `keeps_unknown`
+      # decides) and the declared refinements, appended to those the body already inherits.
+      def apply(block_scope, match, keeps_unknown:)
+        return block_scope if match.nil?
+
+        narrowed = block_scope
+        narrowed = narrowed.with_block_self_type(match.self_type, keeps_unknown: keeps_unknown) if match.self_type
+        narrowed.with_declared_refinements(match.refinements)
+      end
+
+      # Whether one entry matches this receiver. Nominal receivers re-enter a *named instance*-binding entry
+      # (`params`-family nesting on `Nominal[ParamsScope]`), and match a `:lexical` one, whose method is as often an
+      # instance method (`ActiveRecord::Relation#where`) as a class-level one. `:receiver_instance` and
+      # `singleton(...)` entries keep their Singleton-only contract.
+      def entry_matches?(entry, singleton_name, nominal_name, call_node, scope, environment)
+        return false if singleton_name.nil? && !entry.matches_instance_receivers?
 
         method_name = call_node.name
         receiver_name = singleton_name || nominal_name
@@ -73,9 +102,7 @@ module Rigor
           matched = singleton_extends_reach?(receiver_name, entry.receiver_constraint, method_name,
                                              call_node, scope, environment)
         end
-        return nil unless matched
-
-        narrowed_self_type(entry, receiver_name, environment)
+        matched
       end
 
       # The match contract stays narrow: `Singleton[X]` receivers (class-level DSL calls) for every
@@ -113,6 +140,10 @@ module Rigor
       def receiver_class_inherits_from?(class_name, constraint, environment, scope = nil)
         name = class_name.to_s
         return true if name == constraint
+        # Every receiver here is an `Object`: a class's instance or class object, or a module object. A class the
+        # project declares without a superclass reaches `Object` through no recorded edge (issue #1667: a
+        # top-level helper's `receiver_constraint: "Object"`).
+        return true if constraint == "Object"
         return true if rbs_inherits?(name, constraint, environment)
 
         # Source-side ancestry — `class API < Grape::API` lives on the scope's discovery tables, not in

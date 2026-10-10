@@ -6093,9 +6093,27 @@ module Rigor
                   .select { |_owner, side| side == :include }
         return if effects.empty?
         return if !via_send && instance_mixin_recorded?(node, qualified_prefix, current_class, accumulator)
+        return if hook_extend_named?(node, kind, current_class, accumulator)
 
         # A mixin call the tables cannot hold still reshapes the ancestry: taint the whole owner side.
         effects.each { |owner, side| accumulator.taint(owner, side) }
+      end
+
+      # Issue #1687 — `base.extend X` in a `self.included(base)`-style hook reaches the includer's singleton; it
+      # reshapes the includer's INSTANCE side only through a hook of X's own (`X.extended`, or an instance
+      # `included` X lends the includer). X may be declared in another file, so this walk cannot tell; it lists X
+      # by name on the hook module's instance side instead of `"*"`, and the readers test X's closure
+      # (`ResolutionChain::Relevance`, `ResolutionChain#off_chain_mixin_reshapes?`). An argument it cannot name
+      # keeps the `"*"`. The singleton side is tainted by the extends walk as before.
+      def hook_extend_named?(node, kind, current_class, accumulator)
+        return false unless kind == :extend && current_class && hook_receiver?(node.receiver, accumulator)
+
+        _kind, arguments, = mixin_call_view(node)
+        targets = arguments.filter_map { |arg| Source::ConstantPath.qualified_name_or_nil(arg) }
+        return false if targets.empty? || targets.size != arguments.size
+
+        accumulator.note(node, current_class, :include, targets, complete: true)
+        true
       end
 
       # Records the instance-side edges of a call {#mixin_call_recorded?} accepts. False when it recorded

@@ -219,7 +219,6 @@ RSpec.describe Rigor::Inference::ScopeIndexer::MixinAccumulator do
       both = { "Concern" => { include: ["*"], extend: ["*"] } }
       [
         "def self.included(base)\n    base.include X\n  end",
-        "def self.included(base)\n    base.extend X\n  end",
         "def self.included(base)\n    base.prepend X\n  end",
         "def self.included(base)\n    base.singleton_class.include X\n  end",
         "def self.extended(base)\n    base.send(:include, X)\n  end",
@@ -229,6 +228,19 @@ RSpec.describe Rigor::Inference::ScopeIndexer::MixinAccumulator do
         "class << self\n    def included(base)\n      base.include X\n    end\n  end"
       ].each do |hook|
         expect(unpositioned("module Concern\n  #{hook}\nend\n")).to eq(both), hook
+      end
+    end
+
+    # Issue #1687 — `extend` on a hook parameter reaches the includer's instance side only through the extended
+    # module's own hooks, so it lists that module by name there; a name it cannot read keeps the `"*"`.
+    it "lists a hook parameter's `extend` targets by name on the instance side", :aggregate_failures do
+      {
+        "def self.included(base)\n    base.extend X\n  end" => { include: ["X"], extend: ["*"] },
+        "def self.included(base)\n    base.extend(X, Y::Z)\n  end" => { include: ["X", "Y::Z"], extend: ["*"] },
+        "def self.included(base)\n    base.send(:extend, X)\n  end" => { include: ["X"], extend: ["*"] },
+        "def self.included(base)\n    base.extend(helper)\n  end" => { include: ["*"], extend: ["*"] }
+      }.each do |hook, sides|
+        expect(unpositioned("module Concern\n  #{hook}\nend\n")).to eq("Concern" => sides), hook
       end
     end
 

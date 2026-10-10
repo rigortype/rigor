@@ -23,8 +23,8 @@ module Rigor
         # follow its includes and a module it prepends follows it and wins. CRuby's `using_module_recursive` walks
         # `RCLASS_SUPER` to its end before each link, and a prepended module sits above the module's origin. `name`
         # itself goes last when the chain does not list it. Nil, read as "any module may be in effect", when the
-        # chain may hold a module it does not list: it was cut at its limit, or a module on it records a mixin the
-        # tables cannot name.
+        # chain may hold a module it does not list: it was cut at its limit, a module on it records a mixin the
+        # tables cannot name, or a hook on it extends a module whose own hook may mix into the includer (#1687).
         #
         # ADR-46 — the answer reads include edges declared in other files, so it depends on every file that
         # declares a module on the chain, and on the existence of each one's name: a new file reopening `name`, or
@@ -33,7 +33,7 @@ module Rigor
         def activated_modules(scope, name)
           chain = Scope::ResolutionChain.for(scope, name, :instance, :constants)
           record_chain(scope, name, chain) if Analysis::DependencyRecorder.active?
-          return nil if chain.truncated? || chain.wildcard_mixin?
+          return nil if chain.truncated? || chain.wildcard_mixin? || chain.off_chain_mixin_reshapes?(scope)
 
           modules = chain.entries.reverse_each.filter_map { |entry| entry.name unless entry.external? }.uniq
           modules.include?(name) ? modules : modules << name

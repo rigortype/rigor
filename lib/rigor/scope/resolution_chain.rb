@@ -152,6 +152,35 @@ module Rigor
       # non-constant, or a call the walk cannot record), so the chain may hold a module it does not list.
       def wildcard_mixin? = @marks.any? { |mark| mark.listed.include?(Relevance::WILDCARD) }
 
+      # #1687 — whether an order mark names a module that is not on this chain and whose own extend-time hook may
+      # mix into the node the mark is on ({ResolutionChain.extend_reshapes_instance?}). The indexer lists `X` on a
+      # hook module's instance side for its `base.extend X`: `X` lands on the includer's singleton, so it is not an
+      # entry here, and only `X`'s hooks reach the instance side. A spelling no project module answers may have
+      # any hook. Files, while recording, each such module's class edges, its spelling's negative class edge and
+      # its hook keys.
+      def off_chain_mixin_reshapes?(scope)
+        @marks.any? do |mark|
+          mark.kind == :include && mark.listed.any? { |raw| off_chain_reshapes?(scope, mark.node, raw) }
+        end
+      end
+
+      def off_chain_reshapes?(scope, node, raw)
+        return false if raw == Relevance::WILDCARD
+
+        resolved = ResolutionChain.resolver_for(scope, @flavor).resolve_one(node, raw)
+        return false if resolved && @entries.any? { |entry| entry.name == resolved }
+
+        if Analysis::DependencyRecorder.active?
+          Analysis::DependencyRecorder.read_last_segment(:class, raw)
+          if resolved
+            ResolutionChain.record_class(scope, resolved)
+            Analysis::DependencyRecorder.read_keys(ResolutionChain.extend_hook_keys(resolved))
+          end
+        end
+        resolved.nil? || ResolutionChain.extend_reshapes_instance?(scope, resolved)
+      end
+      private :off_chain_reshapes?
+
       # The ONE decision every first-definer reader makes: does `answer`, read off this chain, stand, or does
       # the reader answer what the walk this chain replaced answered ({MasterOrder})? Returns `:chain` or
       # `:master`.

@@ -23,7 +23,8 @@ module Rigor
       #
       # The verdict and the edges it read are memoised per `[mark, name]` in the flavor's bucket and the edges are
       # replayed on every call while a dependency recording is active (ADR-46): per tested project entry its class
-      # edge and the negative method edge on `Owner#name`, per tested external the negative class edge on the last
+      # edge, the negative method edge on `Owner#name` and the negative edges of its singleton {HOOKS} (#1687: a new
+      # file giving it a hook un-cleans it), per tested external the negative class edge on the last
       # segment of its spelling, so a new file declaring the module re-checks the consumer.
       module Relevance
         WILDCARD = "*"
@@ -69,6 +70,7 @@ module Rigor
             when :class then ResolutionChain.record_class(scope, value)
             when :method then Analysis::DependencyRecorder.read_missing(:method, value)
             when :external then Analysis::DependencyRecorder.read_missing(:class, value)
+            when :hooks then Analysis::DependencyRecorder.read_keys(ResolutionChain.hook_keys(value))
             end
           end
         end
@@ -127,7 +129,7 @@ module Rigor
 
           def project_clean?(entry)
             owner = entry.name
-            @edges << [:class, owner] << [:method, "#{owner}##{@name}"]
+            @edges << [:class, owner] << [:method, "#{owner}##{@name}"] << [:hooks, owner]
             return false if Scope::DiscoveryIndex.rewritten_surface?(@scope.parameter_envelopes_of(owner))
             return false if wildcard_listed?(owner)
             return false if @scope.discovered_method?(owner, :method_missing, :instance)

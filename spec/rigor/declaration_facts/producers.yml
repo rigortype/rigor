@@ -430,6 +430,7 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#write_mixin_targets: grandfathered
     Rigor::Inference::ScopeIndexer#write_singleton_slot: ADR-119 WD3, the singleton walk's one slot write, routed through SingletonDefTable so the slot's contest follows its writer; the owner and side are the walk's, it adds no context of its own
     Rigor::Inference::ScopeIndexer#toplevel_include_owner: names `Object` as the owner of a receiverless `include` written as a direct statement of the program (`main.include`, issue #1697); it reads only whether the call is a top-level statement, and the walk's own empty prefix and owner
+    Rigor::Inference::ScopeIndexer#hook_extend_named?: lists a hook's `base.extend X` by name on the enclosing owner the walk passes in (#1687); it computes no declaration context
 lib/rigor/inference/scope_indexer/certainty.rb:
   computes: ADR-119 WD3's certainty, the identity Set of a file's possible def contributions
   producers:
@@ -503,6 +504,7 @@ lib/rigor/plugin/node_context.rb:
 lib/rigor/scope/resolution_chain.rb:
   computes: the ancestor order of a project class or module from the mixin tables, and whether that order is a fact
   producers:
+    Rigor::Scope::ResolutionChain#off_chain_mixin_reshapes?: a consumer, not a declaration producer; it reads whether a mark names a module off the chain whose extend-time hook may mix into the marked node (#1687), and writes no table
     Rigor::Scope::ResolutionChain.extend_reshapes_instance?: a consumer, not a declaration producer; it reads whether an extended module lists `"*"` on its :include side and defines an extend-time hook (#1730), and writes no table
     Rigor::Scope::ResolutionChain::Builder#compute_instance: a consumer, not a declaration producer; it reads `unpositioned_mixins` on the :include side to mark a chain unsettled, and reads the tables raw by design (ADR-24)
     Rigor::Scope::ResolutionChain::Builder#compute_singleton: the singleton-side twin, reading the :extend side

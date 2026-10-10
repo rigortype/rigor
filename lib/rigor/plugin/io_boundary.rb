@@ -207,9 +207,10 @@ module Rigor
       # every `touch`, checkout or restored CI cache, though the content the caller read is unchanged (#979's
       # reasoning). {#list_directory} keeps its `:stat` listing row.
       #
-      # The pattern must stay under `root`: a `..` segment raises {AccessDeniedError} (`:read_outside_scope`),
-      # since the policy is checked against `root` alone. Out of policy, `root` is globbed truthfully and
-      # contributes no row, as in {#list_directory}.
+      # The pattern must stay under `root`, since the policy is checked against `root` alone: a `..` segment, a
+      # brace (`{..,x}`) or a backslash escape (`.\\./`) raises {AccessDeniedError} (`:read_outside_scope`).
+      # The last two are refused outright because `Dir.glob` can spell `..` with them. Out of policy, `root` is
+      # globbed truthfully and contributes no row, as in {#list_directory}.
       #
       # @param root — project directory; relative paths expand against the working directory
       # @param pattern — a `Dir.glob` pattern relative to `root`, such as `"ext/**/extconf.rb"`
@@ -217,10 +218,10 @@ module Rigor
       def glob(root, pattern)
         absolute = File.absolute_path(root.to_s)
         pattern = pattern.to_s
-        if pattern.split(%r{[/\\]}).include?("..")
+        if pattern.match?(/[{\\]/) || pattern.split("/").include?("..")
           raise AccessDeniedError.new(
             "plugin #{@plugin_id.inspect} cannot glob #{pattern.inspect} under #{absolute.inspect}: " \
-            "a `..` segment leaves the root the trusted-read scope was checked against",
+            "a `..` segment, a brace or a backslash can leave the root the trusted-read scope was checked against",
             reason: :read_outside_scope,
             resource: File.join(absolute, pattern)
           )

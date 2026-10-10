@@ -281,10 +281,13 @@ RSpec.describe Rigor::Plugin::IoBoundary do
       expect(boundary.cache_descriptor.globs.map(&:mode)).to eq([:stat])
     end
 
-    it "refuses a pattern with a `..` segment and records nothing" do
+    it "refuses a pattern that can reach `..` and records nothing" do
       expect { boundary.glob(File.join(tmpdir, "ext"), "../*") }
         .to raise_error(Rigor::Plugin::AccessDeniedError) { |e| expect(e.reason).to eq(:read_outside_scope) }
       expect { boundary.glob(tmpdir, "ext/**/../../*") }.to raise_error(Rigor::Plugin::AccessDeniedError)
+      ["{..,x}/*", ".\\./*", ".{.,}/*", "x/{../..}/*"].each do |pattern|
+        expect { boundary.glob(File.join(tmpdir, "ext"), pattern) }.to raise_error(Rigor::Plugin::AccessDeniedError)
+      end
       expect(boundary.cache_descriptor.globs).to be_empty
     end
 

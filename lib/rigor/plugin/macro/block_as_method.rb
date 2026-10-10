@@ -42,8 +42,20 @@ module Rigor
       #   `Nominal[Grape::Endpoint]` (the block is `instance_eval`'d on an instance of that class, e.g. a
       #   route body on `Grape::Endpoint`), and `"singleton(Grape::API::Instance)"` binds
       #   `Singleton[Grape::API::Instance]` (the block is `instance_eval`'d on that *class object*, e.g.
-      #   a `namespace` body on `Grape::API::Instance`). Reserved Symbol names (`:receiver_singleton`,
-      #   `:dsl_recorder`) remain unaccepted.
+      #   a `namespace` body on `Grape::API::Instance`). `:lexical` (issue #1667) leaves `self` as the caller's:
+      #   the method runs the block where it was written (`block.refined(M).call`), so the entry only declares
+      #   `refinements:`. Reserved Symbol names (`:receiver_singleton`, `:dsl_recorder`) remain unaccepted.
+      # - `refinements` — Array of fully-qualified module-name Strings (default `[]`, issue #1667, ADR-121 WD5).
+      #   The method runs the block under `Proc#refined` with these modules (`instance_exec(&block.refined(M))`),
+      #   so they are appended to the block body's in-effect refinements after its lexical list, in the declared
+      #   order (the last one wins). Nested blocks inherit them. A module that refines nothing the project or a
+      #   gem's source inference makes visible contributes nothing.
+      #
+      # ## Matching
+      #
+      # A `:receiver_instance` or `singleton(...)` entry matches `Singleton[X]` receivers only (a class-level DSL
+      # call). A named instance binding (`"Foo::Bar"`) and a `:lexical` entry also match `Nominal[X]` receivers:
+      # a `:lexical` method is as often an instance method (`ActiveRecord::Relation#where`) as a class-level one.
       #
       # ## Ractor-shareability
       #
@@ -51,7 +63,8 @@ module Rigor
       # mutable array does not leak into the value. `Ractor.shareable?` returns true after `#initialize`.
       class BlockAsMethod
         SELF_TYPE_RECEIVER_INSTANCE = :receiver_instance
-        VALID_SELF_TYPES = [SELF_TYPE_RECEIVER_INSTANCE].freeze
+        SELF_TYPE_LEXICAL = :lexical
+        VALID_SELF_TYPES = [SELF_TYPE_RECEIVER_INSTANCE, SELF_TYPE_LEXICAL].freeze
 
         CLASS_NAME_PATTERN = /[A-Z]\w*(?:::[A-Z]\w*)*/
         # `self_type: "Foo::Bar"` — the block is `instance_eval`'d on an instance of `Foo::Bar`.
@@ -60,16 +73,18 @@ module Rigor
         # object itself (Grape's `namespace`/`route_param` bodies run on `Grape::API::Instance`).
         SINGLETON_SELF_TYPE_PATTERN = /\Asingleton\((#{CLASS_NAME_PATTERN})\)\z/
 
-        attr_reader :receiver_constraint, :method_names, :self_type
+        attr_reader :receiver_constraint, :method_names, :self_type, :refinements
 
-        def initialize(receiver_constraint:, method_names:, self_type: SELF_TYPE_RECEIVER_INSTANCE)
+        def initialize(receiver_constraint:, method_names:, self_type: SELF_TYPE_RECEIVER_INSTANCE, refinements: [])
           validate_receiver_constraint!(receiver_constraint)
           validate_method_names!(method_names)
           validate_self_type!(self_type)
+          validate_refinements!(refinements)
 
           @receiver_constraint = receiver_constraint.dup.freeze
           @method_names = method_names.map(&:to_sym).freeze
           @self_type = self_type.is_a?(String) ? self_type.dup.freeze : self_type
+          @refinements = refinements.map { |name| name.dup.freeze }.freeze
           freeze
         end
 
@@ -77,7 +92,8 @@ module Rigor
           {
             "receiver_constraint" => receiver_constraint,
             "method_names" => method_names.map(&:to_s),
-            "self_type" => self_type.to_s
+            "self_type" => self_type.to_s,
+            "refinements" => refinements
           }
         end
 
@@ -85,12 +101,18 @@ module Rigor
           other.is_a?(BlockAsMethod) &&
             receiver_constraint == other.receiver_constraint &&
             method_names == other.method_names &&
-            self_type == other.self_type
+            self_type == other.self_type &&
+            refinements == other.refinements
         end
         alias eql? ==
 
         def hash
-          [receiver_constraint, method_names, self_type].hash
+          [receiver_constraint, method_names, self_type, refinements].hash
+        end
+
+        # Whether the block keeps the caller's `self` (`self_type: :lexical`).
+        def lexical_self?
+          self_type == SELF_TYPE_LEXICAL
         end
 
         # The class name a String `self_type` binds `self` to — `"Foo::Bar"` for both the plain and the
@@ -118,6 +140,12 @@ module Rigor
           self_type.is_a?(String) && !singleton_binding?
         end
 
+        # Whether `Nominal[X]` receivers match, beside `Singleton[X]` ones: a named instance binding, or a
+        # `:lexical` entry.
+        def matches_instance_receivers?
+          named_instance_binding? || lexical_self?
+        end
+
         private
 
         def validate_receiver_constraint!(value)
@@ -140,6 +168,21 @@ module Rigor
             raise ArgumentError,
                   "Plugin::Macro::BlockAsMethod#method_names entries must be Symbol/non-empty String, " \
                   "got #{v.inspect}"
+          end
+        end
+
+        def validate_refinements!(refinements)
+          unless refinements.is_a?(Array)
+            raise ArgumentError,
+                  "Plugin::Macro::BlockAsMethod#refinements must be an Array, got #{refinements.inspect}"
+          end
+
+          refinements.each do |name|
+            next if name.is_a?(String) && name.match?(NAMED_SELF_TYPE_PATTERN)
+
+            raise ArgumentError,
+                  "Plugin::Macro::BlockAsMethod#refinements entries must be module-name Strings ('Foo::Bar'), " \
+                  "got #{name.inspect}"
           end
         end
 

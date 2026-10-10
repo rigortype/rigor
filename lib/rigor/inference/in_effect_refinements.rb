@@ -89,15 +89,16 @@ module Rigor
         at(node.location.start_offset, declared, &)
       end
 
-      # Issue #1120 — is a refinement from one of `modules` (refining-module names) in effect at `offset`? The
+      # Issue #1120 — is a refinement from one of `modules` (refining-module names) in effect at `offset`, with
+      # `declared` (a plugin-declared refined block's modules, issue #1667) appended as {#at} appends them? The
       # silencing answer is broader than the list in two places, both the declining direction: a {UNKNOWN} entry
       # counts as every module, and inside a `refine` block every module counts, not only the block's own.
-      def refinement_active?(offset, modules, &)
+      def refinement_active?(offset, modules, declared = EMPTY, &)
         build
         return true if @unresolved_using
         return true if @activations.any? { |activation| activation.refine_block && activation.covers?(offset) }
 
-        at(offset, &).any? { |name| name == UNKNOWN || modules.include?(name) }
+        at(offset, declared, &).any? { |name| name == UNKNOWN || modules.include?(name) }
       end
 
       # Is this the query over `root`'s tree?

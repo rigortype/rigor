@@ -32,7 +32,7 @@ module Rigor
                 :void_origins, :plugin_typed_calls,
                 :optimistic_origins, :optimistic_locals, :optimistic_ivars,
                 :repeated_or_writes, :match_frame,
-                :constant_narrowings, :guard_records, :bot_guard_classes
+                :constant_narrowings, :guard_records, :bot_guard_classes, :declared_refinements
 
     # ADR-53 Track A — the seed-time discovery tables live on the {DiscoveryIndex} the scope carries by a single
     # reference; the per-table readers stay on Scope so engine call sites and plugins are unaffected by the
@@ -67,13 +67,13 @@ module Rigor
     # Issue #1673 (ADR-121 WD1) — the in-effect refinements at `node`: the refining-module names whose refinements
     # Ruby applies there, ordered so a later activation comes later (the later one wins), each once at its first
     # position, each `using`'d module expanded through its includes and prepends in CRuby's activation order.
-    # `declared` is a block source's modules, appended and expanded on the same terms: a plugin-declared refined
-    # block's (#1667). An entry may be
+    # `declared` is a block source's modules, appended and expanded on the same terms; it defaults to this scope's
+    # {#declared_refinements}, a plugin-declared refined block's (#1667). An entry may be
     # `Inference::InEffectRefinements::UNKNOWN`, which means any refinement may be in effect. A node another file
     # wrote (a callee body typed under this file's scope) answers `declared` alone. Reads include edges, so it records
     # the dependencies `Inference::InEffectRefinements.activated_modules` names; a consumer that asks for a method
     # name also records `refinement:<name>` (`Inference::InEffectRefinements.refining_modules`).
-    def in_effect_refinements(node, declared = Inference::InEffectRefinements::EMPTY)
+    def in_effect_refinements(node, declared = @declared_refinements)
       Inference::InEffectRefinements.for_node(self, node, declared)
     end
 
@@ -352,7 +352,8 @@ module Rigor
       match_frame: nil,
       constant_narrowings: EMPTY_CONSTANT_NARROWINGS,
       guard_records: EMPTY_GUARD_RECORDS,
-      bot_guard_classes: EMPTY_BOT_GUARD_CLASSES
+      bot_guard_classes: EMPTY_BOT_GUARD_CLASSES,
+      declared_refinements: Inference::InEffectRefinements::EMPTY
     )
       @environment = environment
       @locals = locals
@@ -385,6 +386,7 @@ module Rigor
       @constant_narrowings = constant_narrowings
       @guard_records = guard_records
       @bot_guard_classes = bot_guard_classes
+      @declared_refinements = declared_refinements
       freeze
     end
 
@@ -606,6 +608,19 @@ module Rigor
       return self if @singleton_class_body == flag
 
       rebuild(singleton_class_body: flag)
+    end
+
+    # Issue #1667 (ADR-121 WD5) — this scope with `names` appended to {#declared_refinements}, each once at its first
+    # position: the modules a plugin-declared refined block (`block_as_methods:` `refinements:`) runs under. Stamped
+    # at block entry and inherited by every scope derived inside the body, nested blocks included, and by a `def` or
+    # class body written in it (`StatementEvaluator#build_fresh_body_scope`), as CRuby's cref is.
+    def with_declared_refinements(names)
+      return self if names.empty?
+
+      merged = (@declared_refinements | names).freeze
+      return self if merged == @declared_refinements
+
+      rebuild(declared_refinements: merged)
     end
 
     # True when this scope IS a `class << ...` body (not merely inside one lexically — a `def` reached from it
@@ -2033,7 +2048,8 @@ module Rigor
       match_frame: @match_frame,
       constant_narrowings: @constant_narrowings,
       guard_records: @guard_records,
-      bot_guard_classes: @bot_guard_classes
+      bot_guard_classes: @bot_guard_classes,
+      declared_refinements: @declared_refinements
     )
       self.class.new(
         environment: environment, locals: locals,
@@ -2062,7 +2078,8 @@ module Rigor
         match_frame: match_frame,
         constant_narrowings: constant_narrowings,
         guard_records: guard_records,
-        bot_guard_classes: bot_guard_classes
+        bot_guard_classes: bot_guard_classes,
+        declared_refinements: declared_refinements
       )
     end
 
@@ -2155,10 +2172,22 @@ module Rigor
         # of a merge inside one body carry the same one; `||` keeps it should either arm lack it, since dropping
         # it only loses the frame's resets.
         match_frame: @match_frame || other.match_frame,
+        # Issue #1667 — a body property stamped at block entry like the frame above, so both arms of a merge carry
+        # the same list; the union keeps either arm's modules, the declining direction.
+        declared_refinements: join_declared_refinements(other),
         # Issue #1429 — the guard narrowings of globals and constants and their pre-guard records, and of instance
         # variables (#1446).
         **join_guard_narrowings(other, joined_globals, joined_ivars)
       )
+    end
+
+    def join_declared_refinements(other)
+      mine = @declared_refinements
+      theirs = other.declared_refinements
+      return mine if theirs.equal?(mine) || theirs.empty?
+      return theirs if mine.empty?
+
+      (mine | theirs).freeze
     end
 
     def join_guard_narrowings(other, joined_globals, joined_ivars)

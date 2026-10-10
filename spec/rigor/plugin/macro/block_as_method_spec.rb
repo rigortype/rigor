@@ -139,8 +139,64 @@ RSpec.describe Rigor::Plugin::Macro::BlockAsMethod do
       expect(entry.to_h).to eq(
         "receiver_constraint" => "Sinatra::Base",
         "method_names" => %w[get post],
-        "self_type" => "receiver_instance"
+        "self_type" => "receiver_instance",
+        "refinements" => []
       )
+    end
+
+    it "renders refinements and a :lexical self_type" do
+      entry = described_class.new(
+        receiver_constraint: "ActiveRecord::Relation", method_names: %i[where],
+        self_type: :lexical, refinements: %w[ActiveRecord::Refined::BlockSyntax Other]
+      )
+
+      expect(entry.to_h).to include(
+        "self_type" => "lexical", "refinements" => %w[ActiveRecord::Refined::BlockSyntax Other]
+      )
+    end
+  end
+
+  # Issue #1667 (ADR-121 WD5) — the modules a matched call runs its block under, via `Proc#refined`.
+  describe "refinements" do
+    it "defaults to an empty frozen list" do
+      entry = described_class.new(receiver_constraint: "Sinatra::Base", method_names: %i[get])
+      expect(entry.refinements).to eq([])
+      expect(entry.refinements).to be_frozen
+    end
+
+    it "keeps the declared order, frozen and Ractor-shareable, without aliasing the caller's array" do
+      names = +"SymSyntax"
+      declared = [names, "Other::Syntax"]
+      entry = described_class.new(receiver_constraint: "Object", method_names: %i[build], refinements: declared)
+      names << "X"
+      declared << "Third"
+
+      expect(entry.refinements).to eq(%w[SymSyntax Other::Syntax])
+      expect(entry.refinements).to all(be_frozen)
+      expect(Ractor.shareable?(entry)).to be(true)
+    end
+
+    [nil, "SymSyntax", [:SymSyntax], [""], ["sym_syntax"], ["Sym Syntax"]].each do |bad|
+      it "rejects #{bad.inspect}" do
+        expect do
+          described_class.new(receiver_constraint: "Object", method_names: %i[build], refinements: bad)
+        end.to raise_error(ArgumentError, /refinements/)
+      end
+    end
+  end
+
+  describe "self_type: :lexical" do
+    it "is accepted and keeps the caller's self" do
+      entry = described_class.new(receiver_constraint: "Object", method_names: %i[run], self_type: :lexical)
+      expect(entry.lexical_self?).to be(true)
+      expect(entry.self_type_name).to be_nil
+      expect(entry.matches_instance_receivers?).to be(true)
+    end
+
+    it "is the only Symbol self_type that matches instance receivers" do
+      entry = described_class.new(receiver_constraint: "Sinatra::Base", method_names: %i[get])
+      expect(entry.lexical_self?).to be(false)
+      expect(entry.matches_instance_receivers?).to be(false)
     end
   end
 
@@ -162,6 +218,15 @@ RSpec.describe Rigor::Plugin::Macro::BlockAsMethod do
       a = described_class.new(receiver_constraint: "Sinatra::Base", method_names: %i[get])
       b = described_class.new(receiver_constraint: "Sinatra::Base", method_names: %i[post])
       expect(a).not_to eq(b)
+    end
+
+    it "differs when refinements differ, in content or order" do
+      base = { receiver_constraint: "Object", method_names: %i[build] }
+      a = described_class.new(**base, refinements: %w[A B])
+      expect(a).not_to eq(described_class.new(**base, refinements: %w[B A]))
+      expect(a).not_to eq(described_class.new(**base))
+      expect(a).to eq(described_class.new(**base, refinements: %w[A B]))
+      expect(a.hash).to eq(described_class.new(**base, refinements: %w[A B]).hash)
     end
   end
 end

@@ -119,6 +119,32 @@ RSpec.describe Rigor::Analysis::Reachability do
       expect(Rigor::Analysis::Reachability::Scan.role_for("lib/app/thing.rb")).to eq(:production)
     end
 
+    # #1751 — end-to-end trees are test code; tooling trees and same-named namespace dirs are not.
+    it "reads end-to-end trees as test and leaves tooling and nested namespace directories alone" do
+      role = ->(path) { Rigor::Analysis::Reachability::Scan.role_for(path) }
+      expect(%w[qa/qa/page/login.rb e2e/support/helper.rb features/step_definitions/a.rb ./qa/x.rb].map(&role))
+        .to all(eq(:test))
+      expect(%w[rubocop/cop/a.rb keeps/k.rb tooling/t.rb scripts/s.rb metrics_server/m.rb
+                app/models/features/flag.rb lib/qa/runner.rb].map(&role)).to all(eq(:production))
+    end
+
+    # The CLI hands the scan ABSOLUTE paths, so the role must be decided against the project root: a rule
+    # anchored on the absolute path never fires for qa/, and an unanchored one fires on any directory above
+    # the project (a checkout under ~/src/test/myapp).
+    it "decides the role from the path relative to the project root" do
+      scan = lambda do |root, rel|
+        Rigor::Analysis::Reachability::Scan.call(path: "#{root}/#{rel}", source: "class A\n  B.new\nend\n", root: root)
+                                           .references.first.role
+      end
+      expect(scan.call("/home/me/proj", "qa/page.rb")).to eq(:test)
+      expect(scan.call("/home/me/proj", "e2e/x.rb")).to eq(:test)
+      expect(scan.call("/home/me/proj", "spec/x_spec.rb")).to eq(:test)
+      expect(scan.call("/home/me/proj", "lib/a.rb")).to eq(:production)
+      expect(scan.call("/home/me/test/proj", "lib/a.rb")).to eq(:production)
+      expect(scan.call("/home/me/spec/proj", "config/a.rb")).to eq(:config)
+      expect(scan.call("/home/me/qa/proj", "lib/a.rb")).to eq(:production)
+    end
+
     # Reachable only from test code is its own answer — neither a candidate nor silently "used".
     it "separates a test-only reachable declaration from both buckets" do
       decls = []
@@ -603,6 +629,18 @@ class Dead; end
                           declared: ["lib/foo.rb"])
       expect(report.candidates).to be_empty
       expect(report.test_only.map(&:fqn)).to eq(%w[Foo Foo::Bar])
+    end
+
+    # #1751 — a class-body reference from an end-to-end tree outside paths: is test evidence; the same
+    # reference from a tooling tree stays production, because deleting the class breaks the tooling.
+    it "reads a qa/ class-body reference as test evidence and a tooling one as production" do
+      report = report_for({ "lib/e2e_only.rb" => "class E2eOnly; end\n",
+                            "lib/tool_only.rb" => "class ToolOnly; end\n",
+                            "qa/page.rb" => "class Page\n  E2eOnly.new\nend\n",
+                            "rubocop/cop.rb" => "class Cop\n  ToolOnly.new\nend\n" },
+                          declared: ["lib/e2e_only.rb", "lib/tool_only.rb"])
+      expect(report.test_only.map(&:fqn)).to eq(["E2eOnly"])
+      expect(report.candidates.map(&:fqn)).not_to include("ToolOnly")
     end
 
     it "keeps a tainted namespace whose members only tests reach undecidable" do

@@ -64,14 +64,32 @@ module Rigor
 
         # Roles a referring file can have (ADR-102 WD8). A reference edge carries its referrer's role so
         # "used only by its own test" is a reportable category rather than a bucket boundary.
-        def self.role_for(path)
+        #
+        # End-to-end suites (`qa/`, `e2e/`, GitLab's QA; `features/`, cucumber) are test code too (#1751). They
+        # are matched at the project root only: `app/models/features/` is an ordinary namespace directory, and
+        # a false :test would hide a production reference. Tooling directories (`rubocop/`, `keeps/`,
+        # `tooling/`, `scripts/`) stay :production on purpose — deleting a class they use breaks the tooling.
+        #
+        # The role is decided from the path RELATIVE to `root` (the project root), never from the absolute
+        # path: `/home/me/test/app/lib/a.rb` is not test code because a directory above the project is called
+        # `test`. With no `root` the path is taken as already relative.
+        def self.role_for(path, root: nil)
+          path = relative_to(path, root)
           case path
-          when %r{(\A|/)(spec|test)/}, /_(spec|test)\.rb\z/ then :test
+          when %r{(\A|/)(spec|test)/}, /_(spec|test)\.rb\z/, %r{\A(\./)?(qa|e2e|features)/} then :test
           when /\.rake\z/, %r{(\A|/)(lib/)?tasks/} then :task
           when %r{(\A|/)config/} then :config
           else :production
           end
         end
+
+        def self.relative_to(path, root)
+          return path if root.nil?
+
+          prefix = "#{root.to_s.chomp('/')}/"
+          path.start_with?(prefix) ? path.delete_prefix(prefix) : path
+        end
+        private_class_method :relative_to
 
         # A constant name is ASCII by construction, so a byte sequence that is not valid UTF-8 cannot be one.
         # Dropping it is both correct and the only safe answer: carrying it forward crashed the whole run on
@@ -87,9 +105,10 @@ module Rigor
         # @param path — the file's path, as the report should render it.
         # @param source — the file's bytes.
         # @param target_ruby — Prism version string, threaded from the project configuration.
+        # @param root — the project root `path` is made relative to when its role is decided.
         # @return nil when the file does not parse (a parse error is the analyzer's business, not
         #   this scan's — it simply contributes nothing rather than half a file).
-        def self.call(path:, source:, target_ruby: nil)
+        def self.call(path:, source:, target_ruby: nil, root: nil)
           parsed = if target_ruby
                      Prism.parse(source, filepath: path,
                                          version: target_ruby)
@@ -98,7 +117,7 @@ module Rigor
                    end
           return nil unless parsed.success?
 
-          walker = Walker.new(path: path, role: role_for(path))
+          walker = Walker.new(path: path, role: role_for(path, root: root))
           walker.walk(parsed.value, [])
           Result.new(declarations: walker.declarations.freeze, references: walker.references.freeze,
                      dynamic_uses: walker.dynamic_uses.freeze)

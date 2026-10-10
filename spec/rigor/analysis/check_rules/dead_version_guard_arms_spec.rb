@@ -271,6 +271,7 @@ RSpec.describe "dead version-guard arms" do
       expect(diags.map(&:method_name)).to eq(["frobnicate_live"])
     end
   end
+
   # The ADR-47 WD5 amendment (#1692) — the deprecation rule reads a guard against an explicit `target_ruby`.
   describe "a guard read against a stated Ruby" do
     def stated_verdict(predicate_source, stated)

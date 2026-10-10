@@ -39,7 +39,7 @@ module Rigor
         module_function
 
         # The first Ruby that deprecates the family.
-        DEPRECATED_SINCE = ::Gem::Version.new("4.1")
+        DEPRECATED_SINCE = "4.1"
 
         MODULE_FORM = ["Module#ruby2_keywords", "4.4"].freeze
         TOPLEVEL_FORM = ["top-level ruby2_keywords", "4.4"].freeze
@@ -51,11 +51,8 @@ module Rigor
         NAMES = (%i[ruby2_keywords] + HASH_FORMS.keys).freeze
         SEND_NAMES = %i[send __send__].freeze
         INSTANCE_EVAL_NAMES = %i[instance_eval instance_exec].freeze
-        SCOPE_BOUNDARIES = [Prism::DefNode, Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode].freeze
-        # Where Ruby looks a Module receiver's private `ruby2_keywords` up, besides the receiver itself.
-        MODULE_OWNERS = %w[Module Class Object Kernel BasicObject].freeze
         private_constant :MODULE_FORM, :TOPLEVEL_FORM, :PROC_FORM, :HASH_FORMS, :NAMES, :SEND_NAMES,
-                         :INSTANCE_EVAL_NAMES, :SCOPE_BOUNDARIES, :MODULE_OWNERS
+                         :INSTANCE_EVAL_NAMES
 
         # The walk's lexical context: whether a block hides `self`, and whether a version guard makes the node
         # unreportable.
@@ -68,7 +65,7 @@ module Rigor
         def active?(stated_ruby)
           return false if stated_ruby.nil? || !::Gem::Version.correct?(stated_ruby)
 
-          ::Gem::Version.new(stated_ruby) >= DEPRECATED_SINCE
+          ::Gem::Version.new(stated_ruby) >= ::Gem::Version.new(DEPRECATED_SINCE)
         end
 
         def diagnostics(path, root, scope_index, stated_ruby)
@@ -119,12 +116,9 @@ module Rigor
         end
 
         def child_context(node, child, context, guard_ruby)
-          if SCOPE_BOUNDARIES.any? { |klass| node.is_a?(klass) }
-            context = context.with(in_block: false, in_instance_eval: false)
-          end
           if node.is_a?(Prism::CallNode) && child.equal?(node.block) && child.is_a?(Prism::BlockNode)
-            context = context.with(in_block: true,
-                                   in_instance_eval: context.in_instance_eval || INSTANCE_EVAL_NAMES.include?(node.name))
+            instance_eval = context.in_instance_eval || INSTANCE_EVAL_NAMES.include?(node.name)
+            context = context.with(in_block: true, in_instance_eval: instance_eval)
           end
           return context if context.guarded
 
@@ -165,7 +159,8 @@ module Rigor
           return false unless node.is_a?(Prism::IfNode) || node.is_a?(Prism::UnlessNode)
           return false unless reads_ruby_version?(node.predicate)
 
-          contains_jump?(node.statements) || contains_jump?(node.is_a?(Prism::IfNode) ? node.subsequent : node.else_clause)
+          other_arm = node.is_a?(Prism::IfNode) ? node.subsequent : node.else_clause
+          contains_jump?(node.statements) || contains_jump?(other_arm)
         end
 
         JUMP_CALLS = %i[raise fail exit exit! abort].freeze

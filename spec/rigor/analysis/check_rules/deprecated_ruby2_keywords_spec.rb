@@ -7,7 +7,6 @@ require "rigor/analysis/rule_catalog"
 # Ruby 4.1 deprecates (Feature #22205), reported only when `.rigor.yml` states a 4.1+ runtime through an explicit
 # `target_ruby`.
 RSpec.describe "call.deprecated-ruby2-keywords", type: :runner do
-  rule = "call.deprecated-ruby2-keywords"
 
   def deprecations(source, target: "4.1", **config)
     config = config.transform_keys(&:to_s)
@@ -240,9 +239,9 @@ RSpec.describe "call.deprecated-ruby2-keywords", type: :runner do
   end
 
   it "is listed in the rule catalogue with its documentation anchor" do
-    entry = Rigor::Analysis::RuleCatalog::ENTRIES.fetch(rule)
+    entry = Rigor::Analysis::RuleCatalog::ENTRIES.fetch("call.deprecated-ruby2-keywords")
     expect(entry.severity_by_profile).to eq(lenient: :info, balanced: :warning, strict: :error)
     expect(File.read(File.expand_path("../../../../docs/manual/04-diagnostics.md", __dir__)))
-      .to include(%(<a id="rule-call-deprecated-ruby2-keywords"></a>`#{rule}`))
+      .to include('<a id="rule-call-deprecated-ruby2-keywords"></a>`call.deprecated-ruby2-keywords`')
   end
 end

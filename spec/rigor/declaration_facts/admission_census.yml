@@ -65,12 +65,14 @@ members:
     - lib/rigor/inference/expression_typer.rb
   discovered_methods:
     reads:
+    - lib/rigor/analysis/check_rules/ruby_deprecations.rb
     - lib/rigor/analysis/runner.rb
     - lib/rigor/inference/block_call_timing.rb
     copies:
     - lib/rigor/inference/parameter_inference_collector.rb
   discovered_def_nodes:
     reads:
+    - lib/rigor/analysis/check_rules/ruby_deprecations.rb
     - lib/rigor/analysis/incremental_session.rb
     - lib/rigor/analysis/runner.rb
     - lib/rigor/inference/block_call_timing.rb
@@ -83,6 +85,8 @@ members:
     - lib/rigor/inference/parameter_inference_collector.rb
     - lib/rigor/protection/discovery_seed.rb
     justified:
+      lib/rigor/analysis/check_rules/ruby_deprecations.rb:
+      - existence
       lib/rigor/analysis/incremental_session.rb:
       - cache_key
       - same_slot

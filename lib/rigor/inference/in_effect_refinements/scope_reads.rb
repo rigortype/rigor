@@ -25,18 +25,26 @@ module Rigor
         # an unreadable body (`Dynamic[top]`). The consumer's `refinement:<name>` edge covers an edit to that body
         # (`Incremental.changed_refinement_names`).
         def refinement_def(scope, module_name, class_name, method_name)
-          own = scope.discovery.in_effect_refinements&.refinement_def(module_name, class_name, method_name)
-          return own if own
-
-          sources = scope.discovered_class_sources[module_name]
-          return nil if sources.nil?
-
-          sources.each do |path|
-            found = DefNodeResolver.refinement_query(path)&.refinement_def(module_name, class_name, method_name)
-            return found if found
-          end
-          nil
+          refinement_def_with_query(scope, module_name, class_name, method_name).first
         end
+
+        # {.refinement_def} as `[def_node, query]`, where `query` is the other file's {InEffectRefinements} the body was
+        # found in, or nil for this file's own body (or none): the typed arm re-types a foreign body under that file's
+        # in-effect refinements.
+        def refinement_def_with_query(scope, module_name, class_name, method_name)
+          own = scope.discovery.in_effect_refinements&.refinement_def(module_name, class_name, method_name)
+          return [own, nil] if own
+
+          (scope.discovered_class_sources[module_name] || EMPTY).each do |path|
+            query = DefNodeResolver.refinement_query(path)
+            found = query&.refinement_def(module_name, class_name, method_name)
+            return [found, query] if found
+          end
+          NO_DEF
+        end
+
+        NO_DEF = [nil, nil].freeze
+        private_constant :NO_DEF
 
         # Issue #1671 — the modules whose refinements `using name` puts in effect, in activation order: the project
         # modules on `name`'s instance-side `Scope::ResolutionChain` (what a module includes and prepends,

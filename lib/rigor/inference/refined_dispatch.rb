@@ -30,7 +30,7 @@ module Rigor
       # A {Winner}, {UNKNOWN}, or nil when no in-effect refinement answers `method_name` on an instance of
       # `class_name` (the class's own lookup does). `list` is the call site's in-effect refinements.
       def winner(scope, class_name, method_name, list)
-        targets = targets(scope.discovered_refinements, method_name, list)
+        targets = resolved(scope, targets(scope.discovered_refinements, method_name, list), method_name)
         unknown = list.include?(InEffectRefinements::UNKNOWN)
         return nil if targets.nil? && !unknown
 
@@ -53,6 +53,34 @@ module Rigor
           (out ||= {})[refined] = best if best
         end
         out
+      end
+
+      # The refinement table records every name a `refine` argument's spelling can denote (`refine String` inside
+      # `module M` records `M::String` and `String`), which only withholds a check. To type, a key must be the class
+      # Ruby's lexical lookup resolves: one the project or RBS knows, with no longer spelling of the same last segment
+      # that the same module refines the name for and that is known too (that one is innermost, so it wins). Nil
+      # when no key survives.
+      def resolved(scope, targets, method_name)
+        return nil if targets.nil?
+
+        refinements = scope.discovered_refinements
+        kept = targets.select do |refined, module_name|
+          known_class?(scope, refined) && !shadowed?(scope, refinements, refined, module_name, method_name)
+        end
+        kept.empty? ? nil : kept
+      end
+
+      def shadowed?(scope, refinements, refined, module_name, method_name)
+        suffix = "::#{refined.split("::").last}"
+        depth = refined.count(":")
+        refinements.any? do |other, methods|
+          other.count(":") > depth && other.end_with?(suffix) && methods[method_name]&.include?(module_name) &&
+            known_class?(scope, other)
+        end
+      end
+
+      def known_class?(scope, name)
+        scope.discovered_classes.key?(name) || scope.environment&.class_known?(name) || false
       end
 
       def latest(modules, list)
@@ -92,16 +120,27 @@ module Rigor
       # be trusted: a chain cut at its limit, or one that records a mixin the tables cannot name.
       def levels(scope, class_name)
         environment = scope.environment
-        return rbs_levels(environment, class_name) if environment&.class_known?(class_name)
+        return rbs_levels(scope, class_name) if environment&.class_known?(class_name)
 
         project_levels(scope, class_name)
       end
 
-      def rbs_levels(environment, class_name)
-        loader = environment.rbs_loader
+      # The RBS ancestors, each a level of its own; nil when the project reopens one of them to mix a module in
+      # (`class String; include Loud; end`), whose position among them RBS does not record. Each ancestor's name
+      # is a dependency, so a file that adds such a reopening re-checks the consumer.
+      def rbs_levels(scope, class_name)
+        loader = scope.environment.rbs_loader
         names = loader ? loader.ancestor_names_for(class_name) : []
         names = [class_name] if names.empty?
+        return nil if names.any? { |name| project_mixin?(scope, name) }
+
         names.map { |name| [name, [name]] }
+      end
+
+      def project_mixin?(scope, name)
+        Analysis::DependencyRecorder.read_last_segment(:class, name) if Analysis::DependencyRecorder.active?
+        !scope.includes_of(name).empty? || scope.discovery.discovered_prepends.key?(name) ||
+          scope.discovery.unpositioned_mixins.key?(name)
       end
 
       def project_levels(scope, class_name)
@@ -115,7 +154,12 @@ module Rigor
           names = chain.level_entries(index).filter_map { |entry| entry_name(scope, entry) }
           next out << [level_class, names] if level_class
 
-          names.each { |name| out.concat(rbs_levels(scope.environment, name)) }
+          names.each do |name|
+            spliced = rbs_levels(scope, name)
+            return nil if spliced.nil?
+
+            out.concat(spliced)
+          end
         end
         out
       end

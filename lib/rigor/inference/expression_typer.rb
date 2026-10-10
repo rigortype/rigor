@@ -2038,11 +2038,18 @@ module Rigor
 
       # The winning refine body's inferred return, re-typed with the receiver's class as `self` and the call's
       # argument types bound as an undeclared method's are; nil when the body is not readable here.
+      #
+      # A body another file wrote is re-typed with that file's in-effect refinements at the `def` (its own module
+      # among them), so a sibling override it calls answers from its refine body too.
       def refined_body_return(winner, method_name, self_type, arg_types, block_type)
-        def_node = InEffectRefinements.refinement_def(scope, winner.module_name, winner.refined_class, method_name)
+        def_node, foreign =
+          InEffectRefinements.refinement_def_with_query(scope, winner.module_name, winner.refined_class, method_name)
         return nil if def_node.nil?
 
-        infer_user_method_return(def_node, self_type, arg_types, yield_type: block_type)
+        refinements = foreign&.at(def_node.location.start_offset) do |name|
+          InEffectRefinements.activated_modules(scope, name)
+        end
+        infer_user_method_return(def_node, self_type, arg_types, yield_type: block_type, refinements: refinements)
       rescue StandardError
         nil
       end
@@ -3096,22 +3103,29 @@ module Rigor
       # Issue #1703 — inside the guarded re-walk a callee's return summary is still computed with `key?` guards off
       # ({KeyPresenceGuard.without_guards}): summaries are memoised for the whole run, and one computed with a guard
       # would reach the analysis every rule reads.
-      def infer_user_method_return(def_node, receiver, arg_types, self_fold_safe: false, yield_type: nil)
+      #
+      # Issue #1664 — `refinements` are the modules in effect in a refine body another file wrote, which the body scope
+      # carries as declared refinements: its nodes are not this file's, so this file's lexical list cannot answer them.
+      def infer_user_method_return(def_node, receiver, arg_types, self_fold_safe: false, yield_type: nil,
+                                   refinements: nil)
         return nil if def_node.body.nil?
         unless KeyPresenceGuard.active?
-          return infer_user_method_return_unguarded(def_node, receiver, arg_types, self_fold_safe, yield_type)
+          return infer_user_method_return_unguarded(def_node, receiver, arg_types, self_fold_safe, yield_type,
+                                                    refinements)
         end
 
         KeyPresenceGuard.without_guards do
-          infer_user_method_return_unguarded(def_node, receiver, arg_types, self_fold_safe, yield_type)
+          infer_user_method_return_unguarded(def_node, receiver, arg_types, self_fold_safe, yield_type, refinements)
         end
       end
 
-      def infer_user_method_return_unguarded(def_node, receiver, arg_types, self_fold_safe, yield_type)
+      def infer_user_method_return_unguarded(def_node, receiver, arg_types, self_fold_safe, yield_type, refinements = nil)
         yield_type = nil unless yield_type && body_yields?(def_node)
         body_scope = build_user_method_body_scope(def_node, receiver, arg_types,
                                                   self_fold_safe: self_fold_safe)
         return nil if body_scope.nil?
+
+        body_scope = body_scope.with_declared_refinements(refinements) if refinements
 
         # Recursion-guard signature. Keyed on `(receiver, method)` only — NOT the argument types. ADR-24 WD5:
         # a method whose summary is still being computed resolves to `Dynamic[top]` for that cycle. Keying on

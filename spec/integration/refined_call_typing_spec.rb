@@ -101,6 +101,72 @@ RSpec.describe "Typing calls through Ruby refinements (#1664)", type: :runner do
     RUBY
   end
 
+  # Review of #1747: a body another file wrote runs with its own refinements in effect; Ruby prints `true` and `21.0`.
+  it "types a refine body from another file with that file's refinements in effect" do
+    refinement = <<~RUBY
+      module R
+        refine String do
+          def upcase = 42
+          def twice = upcase
+        end
+      end
+    RUBY
+    expect(rows(<<~RUBY, files: { "r.rb" => refinement })).to eq([["dump.type", 3, "dump_type: 42"]])
+      using R
+      x = "a".twice
+      Rigor.dump_type(x)
+      x.even?
+      x.fdiv(2)
+    RUBY
+  end
+
+  # Review of #1747: Ruby prints `LOUD` and `YELL`, because the module a project reopening mixes into a core class
+  # sits ahead of `Object` in the lookup. The arm declines rather than order a mixin RBS does not record.
+  it "declines where the project mixes a module into a core class's ancestry" do
+    expect(rows(<<~RUBY)).to eq([])
+      module Loud; def shout = "loud"; end
+      class String; include Loud; end
+      module Yell; def yell = "yell"; end
+      class Integer; prepend Yell; end
+      module RO
+        refine(Object) do
+          def shout = 1
+          def yell = 2
+        end
+      end
+      using RO
+      "a".shout.upcase
+      1.yell.upcase
+    RUBY
+  end
+
+  # Review of #1747: `refine String` inside a module that declares its own `String` refines that one; Ruby prints `X`.
+  it "refines the class the `refine` argument resolves to, not every name its spelling could denote" do
+    expect(dumps(<<~RUBY)).to eq([%("X")])
+      module M
+        class String; end
+        refine(String) { def upcase = 1 }
+      end
+      using M
+      Rigor.dump_type("x".upcase)
+    RUBY
+  end
+
+  it "reaches any receiver through a refinement of Object, and a project class through a refined included module" do
+    expect(dumps(<<~RUBY)).to eq(%w[1 :mixed])
+      module Mix; def mixed = "mix"; end
+      class Base < Object; end
+      class Kid < Base; include Mix; end
+      module RO
+        refine(Object) { def anything = 1 }
+        refine(Mix) { def mixed = :mixed }
+      end
+      using RO
+      Rigor.dump_type([1].anything)
+      Rigor.dump_type(Kid.new.mixed)
+    RUBY
+  end
+
   it "types a union receiver per member" do
     expect(dumps(<<~RUBY)).to eq([%("big" | 8)])
       module Sizes

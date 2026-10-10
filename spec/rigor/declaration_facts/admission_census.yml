@@ -287,7 +287,6 @@ members:
   unpositioned_mixins:
     reads:
     - lib/rigor/analysis/runner.rb
-    - lib/rigor/inference/refined_dispatch.rb
     - lib/rigor/inference/singleton_hook_decline.rb
     - lib/rigor/scope/resolution_chain.rb
     - lib/rigor/scope/resolution_chain/relevance.rb

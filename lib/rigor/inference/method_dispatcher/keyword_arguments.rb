@@ -61,13 +61,21 @@ module Rigor
 
         # The members a keyword value splits into: a union's, or those of a `Dynamic` whose static facet is a union,
         # less `nil`, which the #521 join usually carries from an arm no call takes (as `FacetDistribution` reads a
-        # facet). A plain union keeps `nil`: there it is a value the call may pass.
+        # facet). One member left stands in for the value (`Dynamic[false | nil]` reads as `false`), since the bare
+        # `Dynamic` would gradually match every overload's keyword. A plain union keeps `nil`: there it is a value
+        # the call may pass.
         def union_members(value)
           return value.members if value.is_a?(Type::Union)
           return nil unless value.is_a?(Type::Dynamic) && value.static_facet.is_a?(Type::Union)
 
-          members = value.static_facet.members.reject { |member| member.is_a?(Type::Constant) && member.value.nil? }
-          members.size > 1 ? members : nil
+          members = value.static_facet.members.reject { |member| nil_member?(member) }
+          members.empty? ? nil : members
+        end
+
+        def nil_member?(member)
+          return member.value.nil? if member.is_a?(Type::Constant)
+
+          member.is_a?(Type::Nominal) && member.class_name == "NilClass"
         end
 
         def combinations(choices)

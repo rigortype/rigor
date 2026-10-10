@@ -37,6 +37,8 @@ RSpec.describe "Keyword arguments in overload selection (#1727)", type: :runner 
                        | (String x) -> false
         def maybe_flag: (Integer x) -> true
                       | (String x) -> nil
+        def maybe_false: (Integer x) -> false
+                       | (String x) -> nil
         def joined_number: (Integer x) -> Integer
                          | (String x) -> nil
         def visit: (String x, ?mode: Symbol) { (String) -> void } -> void
@@ -162,6 +164,7 @@ RSpec.describe "Keyword arguments in overload selection (#1727)", type: :runner 
       p.each_row(headers: p.flag_value) { |row| row.join(",") }
       p.each_row(headers: p.joined_flag(p.untyped_value)) { |row| row.join(",") }
       p.each_row(headers: [true, nil].sample) { |row| row.join(",") }
+      p.each_row(headers: p.maybe_false(p.untyped_value)) { |row| row.join(",") }
     RUBY
     expect(result.diagnostics.select(&:error?).map(&:message)).to eq([])
   end

@@ -87,12 +87,12 @@ module Rigor
         # intentionally read-only and appended LAST so user-supplied `signature_paths` win on name conflicts.
         def build_env_for(libraries:, signature_paths:, virtual_rbs: [], deferred_signature_paths: [])
           inputs = [signature_paths, virtual_rbs, deferred_signature_paths]
-          env, gated_dirs = build_env_attempt(libraries, *inputs)
+          env, gated_dirs = whole_gated_attempt(libraries, inputs)
           return env if gated_dirs.empty?
 
           # Issue #1700 — a {RequiredFeatures}-gated directory joined; keep it whole only if it does not cost the
           # environment anything ({.gated_failures}).
-          failed, quarantined = gated_failures(env, gated_dirs, signature_paths, virtual_rbs)
+          failed, quarantined = env ? gated_failures(env, gated_dirs, signature_paths, virtual_rbs) : [[], 1]
           return env if failed.empty? && quarantined.zero?
 
           tokens = gated_dirs.map { |dir| RequiredFeatures.token(RequiredFeatures.feature_for_dir(dir)) }
@@ -101,7 +101,23 @@ module Rigor
           return partial if partial
 
           trouble = failed.size + quarantined
+          return fallback if env.nil?
+
           gated_trouble(fallback, gated_dirs, signature_paths, virtual_rbs) < trouble ? fallback : env
+        end
+
+        # The first attempt, with every activated gated directory whole. rbs 3.x validates a class's generic
+        # parameters and kind as each declaration is inserted, so a project `class Prime[T]` or `module Prime`
+        # raises out of this build where rbs 4.x lets the trial find it; with a gated directory active that is
+        # the directory's cost, not the environment's, and the build answers nil for the planned builds to
+        # replace. Without one the error is the environment's own and propagates as before.
+        def whole_gated_attempt(libraries, inputs)
+          build_env_attempt(libraries, *inputs)
+        rescue ::RBS::BaseError
+          gated_dirs = loadable_gated_dirs(libraries, library_loader(libraries).last)
+          raise if gated_dirs.empty?
+
+          [nil, gated_dirs]
         end
 
         # Issue #1713 — the directory less what clashes ({GatedSignaturePlan}), planned against `fallback`, the

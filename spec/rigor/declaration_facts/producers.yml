@@ -73,6 +73,10 @@ lib/rigor/effects/visibility.rb:
     Rigor::Effects::Visibility: grandfathered
     Rigor::Effects::Visibility#apply_targets: grandfathered
     Rigor::Effects::Visibility#region_after: grandfathered
+lib/rigor/environment/gated_signature_plan.rb:
+  computes: the kind and visibility of a vendored RBS member narrowed to its untaken half (#1713)
+  producers:
+    Rigor::Environment::GatedSignaturePlan#narrowed: rewrites one parsed vendored RBS member, keeping a `def self?` method's instance side private as RBS's module_function form makes it; it reads no Ruby source and records no declaration context
 lib/rigor/environment/missing_gem_constant_index.rb:
   computes: the top-level constant names an RBS-less gem declares
   producers:

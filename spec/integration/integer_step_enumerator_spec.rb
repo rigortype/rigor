@@ -44,4 +44,26 @@ RSpec.describe "Integer#step enumerator elements (#1794)", type: :runner do
       def float_by(n) = 1.step(by: 0.5, to: n).map { |i| i.even? }
     RUBY
   end
+
+  # A join with a Float-stepped sequence holds a sequence that yields Floats, so the plain sequence absorbs the
+  # Integer one and the call keeps reporting; two Integer sequences join into one whose block still reads Integer.
+  it "keeps reporting through a join with a Float-stepped sequence, and not through a join of Integer ones" do
+    expect(undefined_rows(<<~RUBY)).to eq([[1, "even?"], [5, "even?"]])
+      def ternary(c) = (c ? 1.step(10, 2) : 1.step(10, 0.5)).map { |i| i.even? }
+      def reassigned(c)
+        x = 1.step(10, 2)
+        x = 1.step(10, 0.5) if c
+        x.each { |i| i.even? }
+      end
+      def integers(c) = (c ? 1.step(10, 2) : 1.step(10, 3)).map { |i| i.even? }
+    RUBY
+  end
+
+  # `rewind` and a block-taking `each_slice` return the sequence itself, which still answers its own methods.
+  it "keeps the sequence as self through the inherited methods that return it" do
+    expect(undefined_rows(<<~RUBY)).to eq([])
+      def rewound = 1.step(10, 2).rewind.last
+      def sliced = 1.step(10, 2).each_slice(2) { |pair| pair }.begin
+    RUBY
+  end
 end

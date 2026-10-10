@@ -841,6 +841,7 @@ module Rigor
         def absorb_contained_members(members)
           return members unless members.any? { |m| absorbable_member?(m) }
 
+          members = join_sequence_elements(members)
           members.reject do |member|
             absorbable_member?(member) &&
               members.any? do |other|
@@ -850,7 +851,32 @@ module Rigor
         end
 
         def absorbable_member?(type)
-          type.is_a?(FloatRange) || type.is_a?(Tuple) || type.is_a?(HashShape)
+          type.is_a?(FloatRange) || type.is_a?(Tuple) || type.is_a?(HashShape) || element_sequence?(type)
+        end
+
+        ARITHMETIC_SEQUENCE = "Enumerator::ArithmeticSequence"
+        private_constant :ARITHMETIC_SEQUENCE
+
+        # Issue #1794 — the `Enumerator::ArithmeticSequence[E]` block-less `Integer#step` returns, whose element is
+        # a Rigor-private type argument (`Nominal::RIGOR_PRIVATE_TYPE_ARGS`).
+        def element_sequence?(type)
+          type.is_a?(Nominal) && type.class_name == ARITHMETIC_SEQUENCE && type.type_args.size == 1
+        end
+
+        # Two element-carrying sequences join into one over the union of their elements, so a join of
+        # `1.step(10, 2)` and `1.step(10, 3)` stays one sequence whose block reads `Integer`, the answer each arm
+        # gives. (A plain sequence absorbing one with an element is the {absorbed_by?} clause.)
+        def join_sequence_elements(members)
+          sequences = members.select { |member| element_sequence?(member) }
+          return members if sequences.size < 2
+
+          joined = nominal_of(ARITHMETIC_SEQUENCE, type_args: [union(*sequences.map { |seq| seq.type_args.first })])
+          first = sequences.first
+          members.filter_map do |member|
+            if member.equal?(first) then joined
+            elsif !sequences.include?(member) then member
+            end
+          end
         end
 
         # `narrower`'s inhabitants are a subset of `wider`'s under a rule the union already applies to
@@ -864,6 +890,7 @@ module Rigor
           return true if listed_in_union?(narrower, wider)
 
           case narrower
+          when Nominal then element_sequence?(narrower) && wider == nominal_of(ARITHMETIC_SEQUENCE)
           when FloatRange then float_range_absorbed_by?(narrower, wider)
           when Tuple then wider.is_a?(Tuple) && tuple_absorbed_by?(narrower, wider)
           when HashShape then wider.is_a?(HashShape) && hash_shape_absorbed_by?(narrower, wider)

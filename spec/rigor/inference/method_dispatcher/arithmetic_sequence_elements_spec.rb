@@ -37,6 +37,11 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ArithmeticSequenceElements do
 
     it "declines for the block form and for other methods" do
       expect(step(constant_of(1), [constant_of(10)], block_type: untyped)).to be_nil
+      # A block whose type the typer could not compute still makes the call the block form, which returns self.
+      block_call = Prism.parse("1.step(10, 2) { |i| i }").value.statements.body.first
+      context = cc(receiver: constant_of(1), method_name: :step, args: [constant_of(10), constant_of(2)],
+                   call_node: block_call)
+      expect(described_class.try_dispatch(context)).to be_nil
       expect(step(constant_of(1), [constant_of(10)], method_name: :upto)).to be_nil
     end
   end

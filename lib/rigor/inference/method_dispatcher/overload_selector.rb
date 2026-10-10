@@ -21,8 +21,8 @@ module Rigor
       #    only the caller can tell from the AST) and an overload declares keywords, that argument is matched
       #    against the overload's keywords rather than as a positional `Hash` — every required keyword
       #    present, every key declared, every value accepted. An overload that declares no keywords still
-      #    reads it as a trailing positional `Hash`, as Ruby passes it. A call without keywords skips an
-      #    overload that requires one.
+      #    reads it as a trailing positional `Hash`, as Ruby passes it, but never in place of a keyword overload that
+      #    takes it (#1800, `prefer_keyword_takers`). A call without keywords skips an overload that requires one.
       # 1a. **Pass 0 — proven, in declared order (#1344).** With only plain-value arguments, the first
       #    overload they do not rule out wins outright when each of its params names its argument's own
       #    class and accepts it with a `yes`; every later pass reads the receiver-affinity order instead.
@@ -196,6 +196,43 @@ module Rigor
           # matches on a `maybe`, take `Integer#+` of a `bot`, a `Dynamic[Integer | Float | …]` or an
           # unloadable class (612 call sites across the survey corpus).
           def run_selection_passes(declared, overloads, shared, gradual = false) # rubocop:disable Style/OptionalBooleanParameter
+            matches = run_passes(declared, overloads, shared, gradual)
+            return matches unless shared[:keywords_last]
+
+            prefer_keyword_takers(declared, matches, shared)
+          end
+
+          # Issue #1800 — a keyword hash an overload declares and takes as its keywords is no positional argument of
+          # another. Both RBS (the first overload in declared order that takes the call) and Ruby (a method that
+          # accepts keywords binds `a: 1` to them) read `(a: Integer) -> Integer | (Object) -> String`'s `ob(a: 1)` as
+          # the keyword overload, but `ReceiverAffinity` moves `(Object)` first and the strict pass took it, reading
+          # the hash positionally. When a strict match among the keyword-declaring overloads exists, a positional
+          # reader declared after it is dropped. One declared before it is what RBS takes, while a method accepting
+          # keywords still binds them as keywords, so both stay and the caller joins their returns. A keyword
+          # overload that only gradually takes the hash (an unshaped `**opts`, an imprecise value) proves nothing
+          # either way, so it joins the positional readers rather than replace them.
+          def prefer_keyword_takers(declared, matches, shared)
+            readers = matches.reject { |method_type| KeywordArguments.declares?(method_type.type) }
+            return matches if readers.empty?
+
+            takers = declared.select { |method_type| KeywordArguments.declares?(method_type.type) }
+            proven = find_matching_overload(takers, shared, strict: true).first
+            unless proven
+              joined = matches | find_matching_overload(takers, shared, strict: false)
+              return joined.size == matches.size ? matches : in_declared_order(declared, joined)
+            end
+
+            position = declared.index(proven)
+            earlier = readers.select { |method_type| declared.index(method_type) < position }
+            kept = matches.select { |method_type| KeywordArguments.declares?(method_type.type) }
+            in_declared_order(declared, kept | [proven] | earlier)
+          end
+
+          def in_declared_order(declared, method_types)
+            method_types.sort_by { |method_type| declared.index(method_type) }
+          end
+
+          def run_passes(declared, overloads, shared, gradual)
             # The `:gradual` list (#1750) skips straight to pass 2's every-match answer, stand-ins included.
             unless gradual
               # Unreordered, pass 0 can only pick what the strict pass picks, so it is skipped (#1344's allocations).

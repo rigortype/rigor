@@ -5214,7 +5214,8 @@ module Rigor
           method_name: call_node.name,
           arg_types: arg_types,
           environment: scope.environment,
-          scope: scope
+          scope: scope,
+          call_node: call_node
         )
       rescue StandardError
         []

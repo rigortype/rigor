@@ -25,6 +25,27 @@ RSpec.describe "Keyword arguments in overload selection (#1727)", type: :runner 
         def positional_hash: (Hash[Symbol, Integer] options) -> Integer
                            | () -> String
         def either: [T] (?default: T) { () -> T } -> T
+        def mode: (Integer x, mode: Symbol) -> :a
+                | (Integer x, mode: Integer) -> :b
+        def loose: (Integer x, mode: untyped) -> :loose
+                 | (Integer x, mode: Symbol) -> :sym
+        def yielding: (Integer x, as: Symbol) { (Symbol) -> void } -> void
+                    | (Integer x) { (Integer) -> void } -> void
+        def untyped_value: () -> untyped
+        def flag_value: () -> bool
+        def joined_flag: (Integer x) -> true
+                       | (String x) -> false
+        def maybe_flag: (Integer x) -> true
+                      | (String x) -> nil
+        def maybe_false: (Integer x) -> false
+                       | (String x) -> nil
+        def joined_number: (Integer x) -> Integer
+                         | (String x) -> nil
+        def visit: (String x, ?mode: Symbol) { (String) -> void } -> void
+                 | (Integer x, ?mode: Symbol) { (Integer) -> void } -> void
+        def optional_flag: (?flag: bool) { (String) -> void } -> void
+        def each_row: (headers: true) { (Symbol) -> void } -> void
+                    | (?headers: false) { (Array[String]) -> void } -> void
       end
     RBS
   end
@@ -94,6 +115,74 @@ RSpec.describe "Keyword arguments in overload selection (#1727)", type: :runner 
     expect(dumped_types(<<~RUBY)).to eq(["Dynamic[top]", %("s")])
       dump_type(p.either(default: 1) { "s" })
       dump_type(p.either { "s" })
+    RUBY
+  end
+
+  # #1737 — an untyped keyword value reaches every overload's keyword, as an untyped positional reaches every
+  # positional parameter, so the #521 union answers rather than the first arm by position. A value-pinned keyword
+  # (`exception: false`) joins that union instead of declining the untyped value outright.
+  it "joins the overloads an untyped keyword value reaches" do
+    expect(dumped_types(<<~RUBY)).to eq(["Dynamic[:a | :b]", ":a", "Dynamic[Integer?]"])
+      dump_type(p.mode(1, mode: p.untyped_value))
+      dump_type(p.mode(1, mode: :q))
+      dump_type(p.flag(exception: p.untyped_value))
+    RUBY
+  end
+
+  it "does not let an untyped keyword win the strict pass over a typed one" do
+    expect(dumped_types(<<~RUBY)).to eq([":sym"])
+      dump_type(p.loose(1, mode: :q))
+    RUBY
+  end
+
+  # The block-parameter probe reads the call's keywords as the return path does.
+  it "selects the block-bearing overload by its keywords when typing block parameters" do
+    expect(dumped_types(<<~RUBY)).to eq(%w[Symbol Integer])
+      p.yielding(1, as: :x) { |value| dump_type(value) }
+      p.yielding(1) { |value| dump_type(value) }
+    RUBY
+  end
+
+  # A block parameter has one type per binding, so where the overloads a keyword call may reach disagree on it, the
+  # probe answers no information rather than the first overload's: an untyped keyword value reaches every arm (#521),
+  # and each member of a `bool` value selects its own.
+  it "binds a block parameter only where every overload the keywords may reach agrees" do
+    expect(dumped_types(<<~RUBY)).to eq(%w[Symbol Array[String] Dynamic[top] Dynamic[top]])
+      p.each_row(headers: true) { |row| dump_type(row) }
+      p.each_row { |row| dump_type(row) }
+      p.each_row(headers: p.untyped_value) { |row| dump_type(row) }
+      p.each_row(headers: p.flag_value) { |row| dump_type(row) }
+    RUBY
+  end
+
+  # A `Dynamic[bool]` (what the #521 join answers) splits like a `bool`; a member no overload takes (`nil` here)
+  # answers no information rather than lending the first-overload fallback to the agreement.
+  it "reports nothing in a block whose keyword value may select either overload" do
+    result = analyze(<<~RUBY, sig: sig)
+      p = Picker.new
+      p.each_row(headers: p.untyped_value) { |row| row.join(",") }
+      p.each_row(headers: p.flag_value) { |row| row.join(",") }
+      p.each_row(headers: p.joined_flag(p.untyped_value)) { |row| row.join(",") }
+      p.each_row(headers: [true, nil].sample) { |row| row.join(",") }
+      p.each_row(headers: p.maybe_false(p.untyped_value)) { |row| row.join(",") }
+    RUBY
+    expect(result.diagnostics.select(&:error?).map(&:message)).to eq([])
+  end
+
+  # A faceted positional argument (`Dynamic[Integer]`, the #521 join of `Integer` and `nil`) is read member-wise as
+  # the return path reads it, and a `Dynamic` keyword value's `nil` (which the join carries) is not a member.
+  it "reads a faceted positional argument member-wise and a Dynamic keyword value without its nil" do
+    expect(dumped_types(<<~RUBY)).to eq(%w[Integer String])
+      p.visit(p.joined_number(p.untyped_value), mode: :a) { |value| dump_type(value) }
+      p.optional_flag(flag: p.maybe_flag(p.untyped_value)) { |value| dump_type(value) }
+    RUBY
+  end
+
+  # A keyword hash no overload takes as keywords is a positional `Hash`, so its untyped values are not the call's
+  # imprecision.
+  it "keeps a positional reading precise when no overload declares keywords" do
+    expect(dumped_types(<<~RUBY)).to eq(["Hash[Dynamic[top], Dynamic[top]]"])
+      dump_type(Hash[a: p.untyped_value])
     RUBY
   end
 

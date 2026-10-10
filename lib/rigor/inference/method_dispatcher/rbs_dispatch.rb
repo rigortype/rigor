@@ -243,7 +243,8 @@ module Rigor
             method_name: context.method_name,
             args: context.args,
             environment: environment,
-            scope: context.scope
+            scope: context.scope,
+            call_node: context.call_node
           )
         end
 
@@ -1629,11 +1630,14 @@ module Rigor
 
           # ----- block parameter probe (Phase C sub-phase 1) -----
 
-          def probe_block_param_types(receiver:, method_name:, args:, environment:, scope: nil)
+          def probe_block_param_types(receiver:, method_name:, args:, environment:, scope: nil, call_node: nil)
             args ||= []
+            keywords_last = keyword_arguments_last?(call_node, args)
             case receiver
-            when Type::Union then probe_block_param_types_union(receiver, method_name, args, environment, scope)
-            else                  probe_block_param_types_one(receiver, method_name, args, environment, scope)
+            when Type::Union
+              probe_block_param_types_union(receiver, method_name, args, environment, scope, keywords_last)
+            else
+              probe_block_param_types_one(receiver, method_name, args, environment, scope, keywords_last)
             end
           end
 
@@ -1641,9 +1645,9 @@ module Rigor
           # member resolves the same arity and types (otherwise the call sites would have to thread
           # per-member binders, which the slice does not support yet). Mismatches degrade to the empty
           # array so the binder defaults all params to Dynamic[Top].
-          def probe_block_param_types_union(receiver, method_name, args, environment, scope)
+          def probe_block_param_types_union(receiver, method_name, args, environment, scope, keywords_last)
             results = receiver.members.map do |member|
-              probe_block_param_types_one(member, method_name, args, environment, scope)
+              probe_block_param_types_one(member, method_name, args, environment, scope, keywords_last)
             end
             return [] if results.empty?
             return [] unless results.all? { |r| r == results.first }
@@ -1651,7 +1655,7 @@ module Rigor
             results.first
           end
 
-          def probe_block_param_types_one(receiver, method_name, args, environment, scope)
+          def probe_block_param_types_one(receiver, method_name, args, environment, scope, keywords_last)
             descriptor = receiver_descriptor(receiver)
             return [] unless descriptor
 
@@ -1669,7 +1673,8 @@ module Rigor
               environment: environment,
               receiver: receiver,
               receiver_args: receiver_args,
-              method_name: method_name
+              method_name: method_name,
+              keywords_last: keywords_last
             )
           rescue StandardError
             []
@@ -1678,7 +1683,7 @@ module Rigor
           # rubocop:disable Metrics/ParameterLists
           def extract_block_param_types(method_definition, class_name:, kind:, args:, type_vars:,
                                         environment: nil, receiver: nil, receiver_args: [],
-                                        method_name: nil)
+                                        method_name: nil, keywords_last: false)
             # rubocop:enable Metrics/ParameterLists
             instance_type = Type::Combinator.nominal_of(class_name)
             self_type =
@@ -1699,12 +1704,18 @@ module Rigor
             substitute = SelfSubstitute.for(receiver, receiver_args, method_name, args, nil)
             self_type = Type::Combinator.nominal_of(class_name, type_args: receiver_args) if substitute
 
+            selector_self = self_type.is_a?(Type::Dynamic) ? self_type.static_facet : self_type
+            if keywords_last
+              return agreed_keyword_block_params(method_definition, args, self_type, selector_self, instance_type,
+                                                 type_vars, environment)
+            end
+
             method_type = OverloadSelector.select(
               method_definition,
               arg_types: args,
               # Overload selection reads a `Dynamic` self's static facet, mirroring the return path;
               # the substitution verdict here is built from the receiver's type arguments alone.
-              self_type: self_type.is_a?(Type::Dynamic) ? self_type.static_facet : self_type,
+              self_type: selector_self,
               instance_type: instance_type,
               type_vars: type_vars,
               block_required: true,
@@ -1712,8 +1723,12 @@ module Rigor
             )
             return [] unless method_type
 
+            block_params_of(method_type, self_type, instance_type, type_vars, environment) || []
+          end
+
+          def block_params_of(method_type, self_type, instance_type, type_vars, environment)
             block = method_type.respond_to?(:block) ? method_type.block : nil
-            return [] unless block
+            return nil unless block
 
             translate_block_positional_params(
               block,
@@ -1722,6 +1737,42 @@ module Rigor
               type_vars: type_vars,
               alias_expander: environment.rbs_loader
             )
+          end
+
+          def agreed_keyword_block_params(method_definition, args, self_type, selector_self, instance_type, type_vars,
+                                          environment)
+            distributions = KeywordArguments.distributions(args, true)
+            return [] if distributions.nil?
+
+            candidates = []
+            distributions.each do |arg_types|
+              # Genuine matches only (`member` true): a member no overload takes must not lend the first-overload
+              # fallback to the agreement, which bound `headers: (true | nil)`'s block to the `true` arm.
+              matches = keyword_block_matches(method_definition, arg_types, selector_self, instance_type, type_vars,
+                                              environment)
+              return [] if matches.empty?
+
+              candidates.concat(matches)
+            end
+            answers = candidates.uniq.map do |method_type|
+              block_params_of(method_type, self_type, instance_type, type_vars, environment)
+            end
+            answers.uniq.size == 1 && answers.first ? answers.first : []
+          end
+
+          # One distribution's genuine matches. A faceted positional argument (a `Dynamic` with sealed facet members) is
+          # read member-wise as `OverloadSelector.select_candidates` reads it, but every list, the facet's own
+          # fallback included, answers only a genuine match: the first-overload fallback must not count toward the
+          # agreement.
+          def keyword_block_matches(method_definition, arg_types, selector_self, instance_type, type_vars, environment)
+            select = lambda do |list, _member|
+              OverloadSelector.select_declared(
+                method_definition, list, selector_self, instance_type, type_vars, true, environment, true, true
+              )
+            end
+            return select.call(arg_types, true) unless FacetDistribution.faceted?(arg_types)
+
+            FacetDistribution.select(arg_types, method_definition, member_wise: true, environment: environment, &select)
           end
 
           # `RBS::Types::Block#type` is normally an `RBS::Types::Function` carrying the block's parameter

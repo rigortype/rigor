@@ -104,6 +104,9 @@ module Rigor
           declared = method_definition.method_types
           return [] if declared.empty?
 
+          # A keyword hash only some overload takes as keywords is a plain positional `Hash` otherwise (#1737).
+          keywords_last &&= KeywordArguments.any_declares?(declared)
+
           # `rigor:v1:param: <name> <refinement>` annotations on this method override the RBS-declared
           # parameter type at the matching name. The map is consumed inside `accepts_param?` so overload
           # selection sees the tighter type when filtering candidates by argument compatibility.
@@ -196,7 +199,7 @@ module Rigor
             # matches are indistinguishable by types — position alone would pick — so ALL of them come back
             # and the dispatch layer unions their returns (#521).
             matches = find_matching_overload(overloads, shared, strict: false)
-            return matches.first(1) unless shared[:arg_types].any? { |t| ImpreciseArgument.imprecise?(t) }
+            return matches.first(1) unless ImpreciseArgument.any_in?(shared[:arg_types], shared[:keywords_last])
 
             # Issue #1675 — and every overload the arguments' untyped parts reach on their own
             # ({ImpreciseArgument.untyped_stand_ins}), after the whole-argument matches so the singular `select`
@@ -234,7 +237,7 @@ module Rigor
           # type_vars, block_required, param_overrides, environment, keywords_last).
           def find_matching_overload(overloads, shared, strict:)
             arg_types = shared[:arg_types]
-            return NO_MATCH if strict && arg_types.any? { |t| ImpreciseArgument.imprecise?(t) }
+            return NO_MATCH if strict && ImpreciseArgument.any_in?(arg_types, shared[:keywords_last])
 
             block_required = shared[:block_required]
             # Strict keeps its historical first-match short-circuit (a dispatch hot path); the gradual
@@ -272,13 +275,14 @@ module Rigor
             # Issue #521 — an untyped argument "maybe"-accepts EVERY alias's strict arm, so it cannot
             # discriminate between overloads here any more than in the strict pass; without this guard a
             # Dynamic arg pinned `Array#*(string) -> String` purely by declaration order.
-            return nil if shared[:arg_types].any? { |t| ImpreciseArgument.imprecise?(t) }
+            return nil if ImpreciseArgument.any_in?(shared[:arg_types], shared[:keywords_last])
 
             overloads.find do |method_type|
               next false unless engages_block_shape?(method_type, shared[:block_required])
 
               fun = method_type.type
-              next false unless keywords_accepted?(fun, shared, false)
+              ok = KeywordArguments.accepted_by?(fun, shared, false) { |*kv| accepts_param?(*kv, shared, false, true) }
+              next false unless ok
 
               arg_types = KeywordArguments.selection_positional(method_type, shared)
               next false unless arity_compatible?(fun, arg_types.size)
@@ -343,8 +347,10 @@ module Rigor
             return false unless fun.respond_to?(:required_positionals)
             return false unless arity_compatible?(fun, actual_count)
 
-            params = positional_params_for(fun, actual_count)
-            params.all? { |param| !alias_or_interface_param?(param.type) }
+            # #1737 — the keywords the call passes count too, so an `untyped` keyword cannot win the strict pass over
+            # a typed one.
+            positional_params_for(fun, actual_count).all? { |param| !alias_or_interface_param?(param.type) } &&
+              KeywordArguments.passed_params(fun, shared).all? { |param| !alias_or_interface_param?(param.type) }
           end
 
           # Recursive: an Optional / Union wrapper is strict iff every member is strict. Type args of a
@@ -374,18 +380,14 @@ module Rigor
           # `strict:` is `false` (gradual), `true` (strict pass) or `:proven` (pass 0; see `find_proven_overload`).
           def matches?(method_type, shared, strict: false)
             fun = method_type.type
-            return false unless keywords_accepted?(fun, shared, strict)
+            ok = KeywordArguments.accepted_by?(fun, shared, strict) { |*kv| accepts_param?(*kv, shared, strict, true) }
+            return false unless ok
 
             arg_types = KeywordArguments.selection_positional(method_type, shared)
             return false unless arity_compatible?(fun, arg_types.size)
 
             params = positional_params_for(fun, arg_types.size)
             each_param_accepts?(params, arg_types) { |kw, arg| accepts_param?(kw, arg, shared, strict) }
-          end
-
-          def keywords_accepted?(fun, shared, strict)
-            keywords = KeywordArguments.keyword_hash(fun, shared[:arg_types], shared[:keywords_last])
-            KeywordArguments.accepted?(fun, keywords, strict) { |kw, arg| accepts_param?(kw, arg, shared, strict) }
           end
 
           # `RBS::Types::UntypedFunction` (`(?)`) declares no arity to enforce, so every call site is
@@ -432,7 +434,7 @@ module Rigor
           end
 
           # `shared` is the keyword bundle `select_candidates` assembled (see `find_matching_overload`).
-          def accepts_param?(param, arg, shared, strict)
+          def accepts_param?(param, arg, shared, strict, keyword = false) # rubocop:disable Style/OptionalBooleanParameter
             param_type = shared[:param_overrides][param.name] || RbsTypeTranslator.translate(
               param.type,
               self_type: shared[:self_type],
@@ -445,7 +447,9 @@ module Rigor
             # overloads purely by list position. Decline the pair; only the strict pass (where the arg
             # proves the value) or the final first-overload fallback may select such an overload. (Pass 1
             # already skips untyped args entirely, so this only engages pass 2.)
-            return false if ImpreciseArgument.untyped?(arg) && value_pinning?(param_type)
+            # A keyword value is exempt (#1737): an untyped one marks the call imprecise (`ImpreciseArgument.any_in?`),
+            # so every arm it reaches joins the #521 union instead of one winning by position.
+            return false if !keyword && ImpreciseArgument.untyped?(arg) && value_pinning?(param_type)
 
             result = param_type.accepts(arg, mode: :gradual)
             return result.yes? && ProvenOverload.names_arg_class?(param_type, arg) if strict == :proven

@@ -31,6 +31,18 @@ module Rigor
           end
         end
 
+        # Whether the call holds an imprecise argument: a positional one, or (#1737) a value of the call's keyword
+        # hash when `keywords_last`. An untyped keyword value reaches every overload's keyword just as an untyped
+        # positional reaches every positional parameter, so `m(1, mode: untyped)` must not pick `mode: Symbol` over
+        # `mode: Integer` by declaration order.
+        def any_in?(arg_types, keywords_last)
+          return true if arg_types.any? { |arg| imprecise?(arg) }
+          return false unless keywords_last
+
+          keywords = arg_types.last
+          keywords.is_a?(Type::HashShape) && keywords.pairs.each_value.any? { |value| imprecise?(value) }
+        end
+
         # Issue #1675 — the argument list with each imprecise argument replaced by the bare untyped carrier, or nil
         # when no argument holds the carrier beside something precise. Through its untyped part such an argument
         # reaches every overload the bare carrier reaches, including one a precise member rules out of the

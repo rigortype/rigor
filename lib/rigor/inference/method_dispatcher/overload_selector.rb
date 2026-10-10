@@ -104,6 +104,9 @@ module Rigor
           declared = method_definition.method_types
           return [] if declared.empty?
 
+          # A keyword hash only some overload takes as keywords is a plain positional `Hash` otherwise (#1737).
+          keywords_last &&= KeywordArguments.any_declares?(declared)
+
           # `rigor:v1:param: <name> <refinement>` annotations on this method override the RBS-declared
           # parameter type at the matching name. The map is consumed inside `accepts_param?` so overload
           # selection sees the tighter type when filtering candidates by argument compatibility.
@@ -278,7 +281,8 @@ module Rigor
               next false unless engages_block_shape?(method_type, shared[:block_required])
 
               fun = method_type.type
-              next false unless keywords_accepted?(fun, shared, false)
+              ok = KeywordArguments.accepted_by?(fun, shared, false) { |*kv| accepts_param?(*kv, shared, false, true) }
+              next false unless ok
 
               arg_types = KeywordArguments.selection_positional(method_type, shared)
               next false unless arity_compatible?(fun, arg_types.size)
@@ -376,18 +380,14 @@ module Rigor
           # `strict:` is `false` (gradual), `true` (strict pass) or `:proven` (pass 0; see `find_proven_overload`).
           def matches?(method_type, shared, strict: false)
             fun = method_type.type
-            return false unless keywords_accepted?(fun, shared, strict)
+            ok = KeywordArguments.accepted_by?(fun, shared, strict) { |*kv| accepts_param?(*kv, shared, strict, true) }
+            return false unless ok
 
             arg_types = KeywordArguments.selection_positional(method_type, shared)
             return false unless arity_compatible?(fun, arg_types.size)
 
             params = positional_params_for(fun, arg_types.size)
             each_param_accepts?(params, arg_types) { |kw, arg| accepts_param?(kw, arg, shared, strict) }
-          end
-
-          def keywords_accepted?(fun, shared, strict)
-            keywords = KeywordArguments.keyword_hash(fun, shared[:arg_types], shared[:keywords_last])
-            KeywordArguments.accepted?(fun, keywords, strict) { |k, v| accepts_param?(k, v, shared, strict, true) }
           end
 
           # `RBS::Types::UntypedFunction` (`(?)`) declares no arity to enforce, so every call site is

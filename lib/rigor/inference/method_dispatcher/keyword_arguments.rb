@@ -15,6 +15,10 @@ module Rigor
         NO_PARAMS = [].freeze
         private_constant :NO_PARAMS
 
+        # The most argument lists {.distributions} spells out before it gives up.
+        DISTRIBUTION_LIMIT = 8
+        private_constant :DISTRIBUTION_LIMIT
+
         module_function
 
         # The actuals `method_type`'s positional parameters read: every argument, less the trailing keyword hash
@@ -33,6 +37,33 @@ module Rigor
           shared[:positional_arguments] ||= positional(method_type, shared[:arg_types], true)
         end
 
+        # The argument lists a call with a keyword hash stands for, one per combination of the members of its
+        # union-typed keyword values (`headers: bool` stands for `headers: true` and `headers: false`), or nil past
+        # {DISTRIBUTION_LIMIT}. A precise union value selects per member at runtime, so an answer that holds for the
+        # call must hold for every member (#1737). Without a keyword hash, or with no union value, the one list.
+        def distributions(arg_types, keywords_last)
+          keywords = keywords_last && arg_types.last
+          return [arg_types] unless keywords.is_a?(Type::HashShape)
+
+          choices = keywords.pairs.map { |name, value| [name, value.is_a?(Type::Union) ? value.members : [value]] }
+          return nil if choices.sum(1) { |_, members| members.size - 1 } > DISTRIBUTION_LIMIT
+          return [arg_types] if choices.all? { |_, members| members.size == 1 }
+
+          combinations(choices).map do |pairs|
+            shape = Type::HashShape.new(
+              pairs, required_keys: keywords.required_keys, optional_keys: keywords.optional_keys,
+                     read_only_keys: keywords.read_only_keys, extra_keys: keywords.extra_keys
+            )
+            arg_types[0...-1] + [shape]
+          end
+        end
+
+        def combinations(choices)
+          choices.reduce([{}]) do |partials, (name, members)|
+            partials.flat_map { |partial| members.map { |member| partial.merge(name => member) } }
+          end
+        end
+
         def declares?(fun)
           return false unless fun.respond_to?(:required_keywords)
 
@@ -45,6 +76,13 @@ module Rigor
 
           arg_types.last
         end
+
+        # {.accepted?} for the selector's `shared` bundle: the keyword hash `fun` takes, if any, against its keywords.
+        def accepted_by?(fun, shared, strict, &)
+          accepted?(fun, keyword_hash(fun, shared[:arg_types], shared[:keywords_last]), strict, &)
+        end
+
+        def any_declares?(method_types) = method_types.any? { |method_type| declares?(method_type.type) }
 
         # Whether `fun`'s keywords take `keywords` (nil for a call without a keyword hash). Without one, an
         # overload that requires a keyword is not viable. With one, a closed shape must carry every required

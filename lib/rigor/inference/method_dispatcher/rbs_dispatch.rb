@@ -1704,22 +1704,31 @@ module Rigor
             substitute = SelfSubstitute.for(receiver, receiver_args, method_name, args, nil)
             self_type = Type::Combinator.nominal_of(class_name, type_args: receiver_args) if substitute
 
+            selector_self = self_type.is_a?(Type::Dynamic) ? self_type.static_facet : self_type
+            if keywords_last
+              return agreed_keyword_block_params(method_definition, args, self_type, selector_self, instance_type,
+                                                 type_vars, environment)
+            end
+
             method_type = OverloadSelector.select(
               method_definition,
               arg_types: args,
               # Overload selection reads a `Dynamic` self's static facet, mirroring the return path;
               # the substitution verdict here is built from the receiver's type arguments alone.
-              self_type: self_type.is_a?(Type::Dynamic) ? self_type.static_facet : self_type,
+              self_type: selector_self,
               instance_type: instance_type,
               type_vars: type_vars,
               block_required: true,
-              keywords_last: keywords_last,
               environment: environment
             )
             return [] unless method_type
 
+            block_params_of(method_type, self_type, instance_type, type_vars, environment) || []
+          end
+
+          def block_params_of(method_type, self_type, instance_type, type_vars, environment)
             block = method_type.respond_to?(:block) ? method_type.block : nil
-            return [] unless block
+            return nil unless block
 
             translate_block_positional_params(
               block,
@@ -1728,6 +1737,24 @@ module Rigor
               type_vars: type_vars,
               alias_expander: environment.rbs_loader
             )
+          end
+
+          def agreed_keyword_block_params(method_definition, args, self_type, selector_self, instance_type, type_vars,
+                                          environment)
+            distributions = KeywordArguments.distributions(args, true)
+            return [] if distributions.nil?
+
+            candidates = distributions.flat_map do |arg_types|
+              OverloadSelector.select_candidates(
+                method_definition, arg_types: arg_types, self_type: selector_self, instance_type: instance_type,
+                                   type_vars: type_vars, block_required: true, keywords_last: true,
+                                   environment: environment
+              )
+            end
+            answers = candidates.uniq.map do |method_type|
+              block_params_of(method_type, self_type, instance_type, type_vars, environment)
+            end
+            answers.uniq.size == 1 && answers.first ? answers.first : []
           end
 
           # `RBS::Types::Block#type` is normally an `RBS::Types::Function` carrying the block's parameter

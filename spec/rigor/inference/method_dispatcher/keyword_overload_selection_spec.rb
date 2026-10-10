@@ -32,6 +32,9 @@ RSpec.describe "Keyword arguments in overload selection (#1727)", type: :runner 
         def yielding: (Integer x, as: Symbol) { (Symbol) -> void } -> void
                     | (Integer x) { (Integer) -> void } -> void
         def untyped_value: () -> untyped
+        def flag_value: () -> bool
+        def each_row: (headers: true) { (Symbol) -> void } -> void
+                    | (?headers: false) { (Array[String]) -> void } -> void
       end
     RBS
   end
@@ -126,6 +129,35 @@ RSpec.describe "Keyword arguments in overload selection (#1727)", type: :runner 
     expect(dumped_types(<<~RUBY)).to eq(%w[Symbol Integer])
       p.yielding(1, as: :x) { |value| dump_type(value) }
       p.yielding(1) { |value| dump_type(value) }
+    RUBY
+  end
+
+  # A block parameter has one type per binding, so where the overloads a keyword call may reach disagree on it, the
+  # probe answers no information rather than the first overload's: an untyped keyword value reaches every arm (#521),
+  # and each member of a `bool` value selects its own.
+  it "binds a block parameter only where every overload the keywords may reach agrees" do
+    expect(dumped_types(<<~RUBY)).to eq(%w[Symbol Array[String] Dynamic[top] Dynamic[top]])
+      p.each_row(headers: true) { |row| dump_type(row) }
+      p.each_row { |row| dump_type(row) }
+      p.each_row(headers: p.untyped_value) { |row| dump_type(row) }
+      p.each_row(headers: p.flag_value) { |row| dump_type(row) }
+    RUBY
+  end
+
+  it "reports nothing in a block whose keyword value may select either overload" do
+    result = analyze(<<~RUBY, sig: sig)
+      p = Picker.new
+      p.each_row(headers: p.untyped_value) { |row| row.join(",") }
+      p.each_row(headers: p.flag_value) { |row| row.join(",") }
+    RUBY
+    expect(result.diagnostics.select(&:error?).map(&:message)).to eq([])
+  end
+
+  # A keyword hash no overload takes as keywords is a positional `Hash`, so its untyped values are not the call's
+  # imprecision.
+  it "keeps a positional reading precise when no overload declares keywords" do
+    expect(dumped_types(<<~RUBY)).to eq(["Hash[Dynamic[top], Dynamic[top]]"])
+      dump_type(Hash[a: p.untyped_value])
     RUBY
   end
 

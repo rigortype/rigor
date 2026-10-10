@@ -2336,7 +2336,7 @@ RSpec.describe Rigor::Environment::RbsLoader do
         File.write(File.join(tmpdir, "ext.rbs"), "class Integer\n  def self.zzz_both: () -> String\nend\n")
         loader = build_loader
 
-        expect(loader.instance_method(class_name: "Integer", method_name: :zzz_both)).not_to be_nil
+        expect(loader.instance_method(class_name: "Integer", method_name: :zzz_both)&.accessibility).to eq(:private)
         expect(loader.singleton_method(class_name: "Integer", method_name: :zzz_both).method_types.map(&:to_s))
           .to eq(["() -> ::String"])
         expect(standdown_entries(loader)).to eq([["Integer.zzz_both", File.join(tmpdir, "ext.rbs"), "member"]])

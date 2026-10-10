@@ -179,10 +179,13 @@ module Rigor
       end
 
       # The two members that declare two methods: an `attr_accessor` (a reader and a writer) and a
-      # `def self?.m` (an instance and a singleton method).
+      # `def self?.m` (an instance and a singleton method). The instance side of a `self?` method is private
+      # (a module function), so narrowing to it keeps that.
       def narrowed(member, key)
         method_name, kind = key
-        return member.update(kind: kind) if member.is_a?(::RBS::AST::Members::MethodDefinition)
+        if member.is_a?(::RBS::AST::Members::MethodDefinition)
+          return member.update(kind: kind, visibility: kind == :instance ? :private : member.visibility)
+        end
 
         attribute = method_name.to_s.end_with?("=") ? ::RBS::AST::Members::AttrWriter : ::RBS::AST::Members::AttrReader
         attribute.new(

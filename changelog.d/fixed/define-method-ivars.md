@@ -1,0 +1,1 @@
+- **[engine]** A `define_method` block, and any block whose `self` is narrowed to another object, no longer reads the enclosing class body's ivar bindings, so `define_method(:shout) { @label.upcase }` after a class-level `@label = nil` no longer reports `call.undefined-method`. ([#1769](https://github.com/rigortype/rigor/pull/1769))

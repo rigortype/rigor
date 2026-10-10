@@ -608,6 +608,35 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
   describe "a refinement Rigor cannot read (ADR-121 WD7)" do
     let(:call_rules) { %w[call.undefined-method call.wrong-arity call.argument-type-mismatch] }
 
+    # Issue #1799: one refining module per definer shape.
+    let(:definer_shapes) do
+      <<~RUBY
+        module Helper; def chop(a, b, c) = :im; end
+        module ByAliasMethod
+          refine(String) do
+            def c3(a, b, c) = :alias_method
+            alias_method :center, :c3
+          end
+        end
+        module ByAlias
+          refine(String) do
+            def c3(a, b, c) = :alias
+            alias center c3
+          end
+        end
+        module ByDefineMethod
+          refine(String) { define_method(:center) { |a, b, c| :dm } }
+        end
+        module ByImport
+          refine(String) { import_methods Helper }
+        end
+        module ByComputedName
+          name = :center
+          refine(String) { define_method(name) { |a, b, c| :computed } }
+        end
+      RUBY
+    end
+
     # `[file basename, line, rule]` for every call-check diagnostic in `lib/`, sorted.
     def call_rows
       diagnostics.select { |d| call_rules.include?(d.qualified_rule) }
@@ -632,34 +661,23 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
       expect(call_rows).to eq([["b.rb", 1, "call.wrong-arity"]])
     end
 
-    # Issue #1799. Ruby 4.0.5 prints `[:alias_method, :alias_method, :dm, :im, :computed]`, and the same `center` call
-    # before the `using`s raises `ArgumentError`.
+    # Issue #1799, one refining module per shape so no row masks another. Ruby 4.0.5 prints `:alias_method`,
+    # `:alias`, `:dm`, `:im` and `:computed` for the five refined calls, and raises `ArgumentError` for each
+    # `ljust(1, 2, 3)` / `succ(2)` control and for `center(1, 2, 3)` with no `using`.
     it "declines a name a refine body defines by alias, alias_method, define_method or import_methods" do
-      write("lib/ext.rb", <<~RUBY)
-        module Helper; def chop(a, b, c) = :im; end
-        module StrA
-          refine(String) do
-            def c3(a, b, c) = :alias_method
-            alias_method :center, :c3
-            alias ljust c3
-            define_method(:rjust) { |a, b, c| :dm }
-            import_methods Helper
-          end
-        end
-        module StrB
-          name = :squeeze
-          refine(String) { define_method(name) { |a, b, c| :computed } }
-        end
-      RUBY
-      write("lib/use.rb", <<~RUBY)
-        "x".center(1, 2, 3)
-        using StrA
-        using StrB
-        p ["x".center(1, 2, 3), "x".ljust(1, 2, 3), "x".rjust(1, 2, 3), "x".chop(1, 2, 3), "x".squeeze(1, 2, 3)]
-      RUBY
+      write("lib/ext.rb", definer_shapes)
+      %w[ByAliasMethod ByAlias ByDefineMethod].each do |mod|
+        write("lib/#{mod.downcase}.rb", "using #{mod}\n\"x\".center(1, 2, 3)\n\"x\".ljust(1, 2, 3)\n")
+      end
+      write("lib/byimport.rb", "using ByImport\n\"x\".chop(1, 2, 3)\n1.succ(2)\n")
+      write("lib/bycomputedname.rb", "using ByComputedName\n\"x\".center(1, 2, 3)\n1.succ(2)\n")
       write("lib/plain.rb", "\"x\".center(1, 2, 3)\n")
 
-      expect(call_rows).to eq([["plain.rb", 1, "call.wrong-arity"], ["use.rb", 1, "call.wrong-arity"]])
+      expect(call_rows).to eq(
+        [["byalias.rb", 3, "call.wrong-arity"], ["byaliasmethod.rb", 3, "call.wrong-arity"],
+         ["bycomputedname.rb", 3, "call.wrong-arity"], ["bydefinemethod.rb", 3, "call.wrong-arity"],
+         ["byimport.rb", 3, "call.wrong-arity"], ["plain.rb", 1, "call.wrong-arity"]]
+      )
     end
 
     # Round 3 of #1793's review. Ruby 4.0.5 prints `:each_target` and `:alias_target` (`refine_census_spec.rb`).

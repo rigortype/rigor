@@ -46,6 +46,14 @@ RSpec.describe "Keyword arguments in overload selection (#1727)", type: :runner 
         def optional_flag: (?flag: bool) { (String) -> void } -> void
         def each_row: (headers: true) { (Symbol) -> void } -> void
                     | (?headers: false) { (Array[String]) -> void } -> void
+        def ret: (headers: true) -> Symbol
+               | (?headers: false) -> Integer
+        def single: (?a: Integer | String | Symbol, ?b: Integer | String | Symbol) -> Float
+        def wide_value: () -> (Integer | String | Symbol)
+        def hash_or_string: (Hash[Symbol, untyped] h) -> Integer
+                          | (String s) -> String
+        def ret_block: (headers: true) { (Integer) -> void } -> Symbol
+                     | (?headers: false) { (Integer) -> void } -> Integer
       end
     RBS
   end
@@ -176,6 +184,47 @@ RSpec.describe "Keyword arguments in overload selection (#1727)", type: :runner 
       p.visit(p.joined_number(p.untyped_value), mode: :a) { |value| dump_type(value) }
       p.optional_flag(flag: p.maybe_flag(p.untyped_value)) { |value| dump_type(value) }
     RUBY
+  end
+
+  # #1746 — the return path reads a union keyword value per member as the block probe does: each member of a `bool`
+  # selects its own overload and the returns join. A member no overload takes (`nil` here) answers no information
+  # rather than the first overload's return, and a `Dynamic[bool]` (the #521 join) keeps the answer `Dynamic`.
+  it "joins the returns of the overloads each member of a union keyword value selects" do
+    expected = ["Integer | Symbol", "Symbol", "Integer", "Dynamic[top]", "Dynamic[Integer | Symbol]"]
+    expect(dumped_types(<<~RUBY)).to eq(expected)
+      dump_type(p.ret(headers: p.flag_value))
+      dump_type(p.ret(headers: true))
+      dump_type(p.ret)
+      dump_type(p.ret(headers: [true, nil].sample))
+      dump_type(p.ret(headers: p.joined_flag(p.untyped_value)))
+    RUBY
+  end
+
+  # A method with one overload has nothing to select between, so its keywords are not spelled out member by member,
+  # where a wide union (nine lists here) would pass the distribution limit and lose the declared return.
+  it "keeps the return of a single overload whatever its union keyword values" do
+    expect(dumped_types(<<~RUBY)).to eq(%w[Float])
+      dump_type(p.single(a: p.wide_value, b: p.wide_value))
+    RUBY
+  end
+
+  # A keyword hash no overload declares keywords for is a positional `Hash`, so its union values are not split (nine
+  # lists here would pass the limit), and a block-bearing call splits as a block-less one does.
+  it "splits only a keyword hash some overload takes as keywords, with or without a block" do
+    expect(dumped_types(<<~RUBY)).to eq(["Integer", "Integer | Symbol"])
+      dump_type(p.hash_or_string(a: p.wide_value, b: p.wide_value))
+      dump_type(p.ret_block(headers: p.flag_value) { |n| n })
+    RUBY
+  end
+
+  it "reports nothing on a call that is correct for the member the first overload skipped" do
+    result = analyze(<<~RUBY, sig: sig)
+      p = Picker.new
+      r = p.ret(headers: p.flag_value)
+      r + 1
+      r.no_such_method
+    RUBY
+    expect(result.diagnostics.select(&:error?).map(&:message)).to contain_exactly(a_string_including("no_such_method"))
   end
 
   # A keyword hash no overload takes as keywords is a positional `Hash`, so its untyped values are not the call's

@@ -1007,18 +1007,21 @@ module Rigor
             return override if override
 
             instance_type = Type::Combinator.nominal_of(class_name)
-            resolved_self_type =
-              case kind
-              when :singleton then Type::Combinator.singleton_of(class_name)
-              else                 instance_type
-              end
             # `self_type_override` lets the user-class fallback path preserve the ORIGINAL receiver as the
             # substitute for `Bases::Self` — so `Kernel#dup: () -> self` resolved through the Object
             # fallback returns the caller's type, not Object. `dispatch_one` also routes the receiver's
             # type-argument-bearing projection through it ({SelfSubstitute}, #1092).
-            self_type = self_type_override || resolved_self_type
+            self_type = self_type_override ||
+                        (kind == :singleton ? Type::Combinator.singleton_of(class_name) : instance_type)
 
             keywords_last = keyword_arguments_last?(call_node, args)
+            call_site = [class_name, method_name, kind]
+            if keywords_last && args.last.is_a?(Type::HashShape)
+              distributed = distributed_keyword_return(method_definition, self_type, instance_type, type_vars, args,
+                                                       block_type, scope, call_node, call_site, environment)
+              return distributed unless distributed.equal?(NOT_DISTRIBUTED)
+            end
+
             candidates = OverloadSelector.select_candidates(
               method_definition,
               arg_types: args,
@@ -1026,14 +1029,12 @@ module Rigor
               # A `Dynamic` self (#1092) is a return-side answer; overload selection and ReceiverAffinity
               # read the static facet, as they did before the substitute carried the wrapping.
               self_type: self_type.is_a?(Type::Dynamic) ? self_type.static_facet : self_type,
-              instance_type: instance_type,
-              type_vars: type_vars,
+              instance_type: instance_type, type_vars: type_vars,
               block_required: !block_type.nil?,
               environment: environment
             )
             return nil if candidates.empty?
 
-            call_site = [class_name, method_name, kind]
             record_dispatch_provenance(method_definition, candidates.first, scope, call_node, call_site)
             join_candidate_returns(
               candidates,
@@ -1042,6 +1043,77 @@ module Rigor
               args: args, block_type: block_type, scope: scope, call_node: call_node, call_site: call_site,
               alias_expander: environment.rbs_loader, keywords_last: keywords_last
             )
+          end
+
+          # Issue #1746 — a keyword hash holding a union value (`headers: flag` with `flag : bool`) selects per member
+          # at runtime, so the return reads one overload per {KeywordArguments.distributions} list and joins their
+          # returns, as the block probe does for its parameters (#1737). Selecting once for the whole value took one
+          # member's overload (`Symbol` for `(headers: true) -> Symbol | (?headers: false) -> Integer`). Each list
+          # counts only a genuine match: a member no overload takes, or more lists than the limit, answers
+          # `Dynamic[top]` rather than lend the first-overload fallback to the join. A precise union value joins the
+          # returns as a union; a `Dynamic` value keeps the answer `Dynamic`, as the #521 join does, since the split
+          # dropped the value's `nil` and the untyped input behind it. A keyword hash with no union value answers
+          # {NOT_DISTRIBUTED}, and the call selects as before.
+          NOT_DISTRIBUTED = Object.new.freeze
+          private_constant :NOT_DISTRIBUTED
+
+          # rubocop:disable Metrics/ParameterLists
+          def distributed_keyword_return(method_definition, self_type, instance_type, type_vars, args, block_type,
+                                         scope, call_node, call_site, environment)
+            # rubocop:enable Metrics/ParameterLists
+            # One overload is the only one any member can select, and a wide union value (`receiver_type: Type::t`)
+            # spelled out member by member would only pass the distribution limit.
+            method_types = method_definition.method_types
+            return NOT_DISTRIBUTED if method_types.size < 2
+            # A keyword hash no overload takes as keywords is a positional `Hash` throughout (#1737).
+            return NOT_DISTRIBUTED unless KeywordArguments.any_declares?(method_types)
+
+            keywords = args.last
+            return NOT_DISTRIBUTED if keywords.pairs.none? { |_name, value| KeywordArguments.union_members(value) }
+
+            selector_self = self_type.is_a?(Type::Dynamic) ? self_type.static_facet : self_type
+            per_list = distributed_keyword_matches(method_definition, args, selector_self, instance_type, type_vars,
+                                                   !block_type.nil?, environment)
+            return Type::Combinator.untyped if per_list.nil?
+
+            overloads = per_list.flat_map(&:last).uniq
+            if overloads.size == 1
+              record_dispatch_provenance(method_definition, overloads.first, scope, call_node, call_site)
+            end
+            returns = per_list.map do |arg_types, matches|
+              join_candidate_returns(
+                matches,
+                method_definition: method_definition,
+                self_type: self_type, instance_type: instance_type, type_vars: type_vars,
+                args: arg_types, block_type: block_type, scope: scope, call_node: call_node, call_site: call_site,
+                alias_expander: environment.rbs_loader, keywords_last: true
+              )
+            end
+            join_distributed_returns(returns, keywords)
+          end
+
+          # Each distribution list with its genuine matches, or nil past the distribution limit or when a list has
+          # none.
+          def distributed_keyword_matches(method_definition, args, selector_self, instance_type, type_vars,
+                                          block_required, environment)
+            distributions = KeywordArguments.distributions(args, true)
+            return nil if distributions.nil?
+
+            distributions.map do |arg_types|
+              matches = keyword_matches(method_definition, arg_types, selector_self, instance_type, type_vars,
+                                        block_required, environment)
+              return nil if matches.empty?
+
+              [arg_types, matches]
+            end
+          end
+
+          def join_distributed_returns(returns, keywords)
+            return nil if returns.any?(&:nil?)
+
+            joined = Type::Combinator.union(*returns.uniq)
+            dynamic_value = keywords.pairs.any? { |_name, value| value.is_a?(Type::Dynamic) }
+            dynamic_value && !joined.is_a?(Type::Dynamic) ? Type::Combinator.dynamic(joined) : joined
           end
 
           # Issue #1727 — whether `args`' last entry is the call's keyword hash (`f(a, k: 1)`), which the overload
@@ -1748,8 +1820,8 @@ module Rigor
             distributions.each do |arg_types|
               # Genuine matches only (`member` true): a member no overload takes must not lend the first-overload
               # fallback to the agreement, which bound `headers: (true | nil)`'s block to the `true` arm.
-              matches = keyword_block_matches(method_definition, arg_types, selector_self, instance_type, type_vars,
-                                              environment)
+              matches = keyword_matches(method_definition, arg_types, selector_self, instance_type, type_vars, true,
+                                        environment)
               return [] if matches.empty?
 
               candidates.concat(matches)
@@ -1763,11 +1835,13 @@ module Rigor
           # One distribution's genuine matches. A faceted positional argument (a `Dynamic` with sealed facet members) is
           # read member-wise as `OverloadSelector.select_candidates` reads it, but every list, the facet's own
           # fallback included, answers only a genuine match: the first-overload fallback must not count toward the
-          # agreement.
-          def keyword_block_matches(method_definition, arg_types, selector_self, instance_type, type_vars, environment)
+          # block probe's agreement or the return path's join.
+          def keyword_matches(method_definition, arg_types, selector_self, instance_type, type_vars, block_required,
+                              environment)
             select = lambda do |list, _member|
               OverloadSelector.select_declared(
-                method_definition, list, selector_self, instance_type, type_vars, true, environment, true, true
+                method_definition, list, selector_self, instance_type, type_vars, block_required, environment, true,
+                true
               )
             end
             return select.call(arg_types, true) unless FacetDistribution.faceted?(arg_types)

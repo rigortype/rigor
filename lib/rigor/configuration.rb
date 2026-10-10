@@ -540,9 +540,11 @@ module Rigor
     #   every `Configuration.new("some_key" => value)` call site with an "unknown keyword" `ArgumentError`.
     # @param target_ruby_key_present — ADR-47 WD5 amendment (#1692) — whether the file set `target_ruby:` itself,
     #   captured before `DEFAULTS.merge` for the same reason as `effects_key_present` and positional for the same
-    #   reason. See {#stated_runtime_ruby}.
+    #   reason. See {#stated_runtime_ruby}. The default reads the key off `data`, which is right only for a hash that
+    #   has not been through `DEFAULTS.merge` (DEFAULTS carries the key); a caller that merges passes it explicitly.
+    #   The bare `Configuration.new` is not explicit.
     def initialize(data = DEFAULTS, effects_key_present = data.key?("effects"),
-                   target_ruby_key_present = data.key?("target_ruby"))
+                   target_ruby_key_present = data.key?("target_ruby") && !data.equal?(DEFAULTS))
       # Record before the per-key fetches below discard the evidence. Top level only, deliberately —
       # see {ConfigAudit.unknown_key_warnings} for why a nested check cannot key on DEFAULTS.
       @unknown_keys = (data.keys.map(&:to_s) - KNOWN_KEYS).sort.freeze

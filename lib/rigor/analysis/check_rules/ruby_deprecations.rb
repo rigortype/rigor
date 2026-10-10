@@ -23,8 +23,8 @@ module Rigor
       #
       # - `ruby2_keywords` with no receiver (or `self`), in a class or module body, a `class << self` body or a
       #   singleton method, where `self` is a Module. At the top level outside any block, it is the `main`
-      #   method. Inside a block whose `self` the engine does not know (a top-level block, or any
-      #   `instance_eval` / `instance_exec` block), and in an instance method, it is not judged.
+      #   method (a top-level `def` body included). Inside a top-level block, inside any `instance_eval` /
+      #   `instance_exec` block, and in an instance method of a class or module, it is not judged.
       # - `ruby2_keywords` on a receiver typed `Proc`.
       # - `ruby2_keywords_hash?` / `ruby2_keywords_hash` on `Hash` or a class RBS knows as its subclass, or with
       #   no receiver where `self` is one.

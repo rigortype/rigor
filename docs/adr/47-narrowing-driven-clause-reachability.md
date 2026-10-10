@@ -291,7 +291,11 @@ runs the code.
   issue: it widens who states a runtime, and this amendment does not depend on it.
 
 **Consequences.** `Configuration` records whether `target_ruby` was written (`#target_ruby_explicit?`),
-and `#to_h` carries it, so caches tell a stated `"4.0"` from the default. The two `alias` rules are
+and `#to_h` carries it, so caches tell a stated `"4.0"` from the default. `rigor init` therefore writes
+the key commented out: a starter that wrote the default would turn it into a statement nobody made, and
+the day the default reached `"4.1"` every new project would report deprecations. The gate, held by
+`spec/rigor/analysis/check_rules/deprecated_ruby2_keywords_spec.rb`: silent with no key, with `"4.0"`,
+with `"latest"` and with a `"4.1"` that was not written; reports with a written `"4.1"`. The two `alias` rules are
 [#1776](https://github.com/rigortype/rigor/issues/1776): the probe #1692 required found that Rigor cannot
 yet tell "found only through the `Object` fallback" or "defined in a prepended module" reliably.
 

@@ -30,6 +30,14 @@ RSpec.describe "call.deprecated-ruby2-keywords", type: :runner do
       expect(fired(module_form, target: nil)).to be_empty
     end
 
+    it "is silent under a 4.1 nobody wrote: the value alone does not turn the rule on" do
+      configuration = Rigor::Configuration.new({ "target_ruby" => "4.1" }, false, false)
+      runner = Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil)
+      result = guarded_run_source(runner, source: module_form, path: "code.rb")
+      expect(result.diagnostics.map { |d| d.rule.to_s }).not_to include("call.deprecated-ruby2-keywords")
+      expect(Rigor::Configuration.new.target_ruby_explicit?).to be(false)
+    end
+
     it "is silent under target_ruby 4.0" do
       expect(fired(module_form, target: "4.0")).to be_empty
     end

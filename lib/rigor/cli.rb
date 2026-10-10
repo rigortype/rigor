@@ -281,6 +281,10 @@ module Rigor
         # tempfile, uri, logger, date, prism, rbs). Adding a
         # `sig/<gem>.rbs` file under `sig/` is the simplest way
         # to extend type coverage today.
+        #
+        # `target_ruby` is left commented: the default only picks the syntax Rigor parses. Set it to the lowest
+        # Ruby your project runs on, and Rigor also reports what that Ruby deprecates.
+        # target_ruby: #{Configuration::DEFAULTS.fetch('target_ruby').dump}
         #{YAML.dump(init_settings(path)).sub(/\A---\n/, '')}
       YAML
     end
@@ -288,13 +292,17 @@ module Rigor
     # The settings `rigor init` writes: the defaults, with `test_paths:` spelled out as the test roots found now, so
     # the project's config says where its tests are rather than leaving it to auto-detection. The roots are written
     # relative to the config file's directory, which is what {Configuration.load} resolves them against.
+    #
+    # `target_ruby` is left out (the template writes it commented): a written key is a statement about the runtime
+    # (#1692), and the starter must not make one the user never chose.
     def init_settings(path)
+      settings = Configuration::DEFAULTS.except("target_ruby")
       test_paths = Configuration.new.resolved_test_paths
-      return Configuration::DEFAULTS if test_paths.empty?
+      return settings if test_paths.empty?
 
       config_dir = Pathname(File.absolute_path(File.dirname(path)))
       relative = test_paths.map { |root| Pathname(root).relative_path_from(config_dir).to_s }
-      Configuration::DEFAULTS.merge("test_paths" => relative)
+      settings.merge("test_paths" => relative)
     end
 
     def run_annotate

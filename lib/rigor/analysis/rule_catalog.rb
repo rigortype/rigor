@@ -308,13 +308,14 @@ module Rigor
             "`target_ruby` is absent, is the default, is below 4.1, or is \"latest\" (which names a parser, " \
             "not a runtime).",
             "A project or `pre_eval:` file defines a method by the same name anywhere.",
-            "The call sits in a block whose `self` is unknown (a top-level block, `instance_eval` / " \
-            "`instance_exec`), in an instance method, or on an explicit receiver that is not `Proc` / `Hash`.",
+            "The call sits in a block at the top level, in an `instance_eval` / `instance_exec` block, in an " \
+            "instance method of a class or module, or on an explicit receiver that is not `Proc` / `Hash`.",
             "The call sits in a version-guard arm that cannot run on the stated Ruby, under a guard on " \
             "`RUBY_VERSION` that cannot be decided, or after a guard that returns or raises."
           ],
-          suppression: "`# rigor:disable call.deprecated-ruby2-keywords` on the call line, or remove the call: " \
-                       "a project on Ruby 3.0 or later no longer needs it.",
+          suppression: "`# rigor:disable call.deprecated-ruby2-keywords` on the call line. To fix it instead, " \
+                       "rewrite the delegation the flag serves to `(...)` or `(*args, **kwargs, &block)` first, then " \
+                       "drop the `ruby2_keywords` call: removing it alone breaks keyword pass-through.",
           severity_authored: :warning,
           severity_by_profile: { lenient: :info, balanced: :warning, strict: :error },
           # Each call names a known core method on a receiver whose class the syntax or the scope fixes, and a

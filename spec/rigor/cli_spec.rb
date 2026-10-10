@@ -2669,6 +2669,17 @@ RSpec.describe Rigor::CLI do
         expect { Rigor::Configuration.load(path) }.not_to raise_error
       end
     end
+
+    # Issue #1692 — a written `target_ruby` states the runtime, so the starter leaves it commented out.
+    it "writes target_ruby commented out, so the loaded config states no runtime" do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, ".rigor.yml")
+        run_cli("init", "--path=#{path}")
+
+        expect(File.read(path)).to match(/^# target_ruby: "4\.0"$/)
+        expect(Rigor::Configuration.load(path).target_ruby_explicit?).to be(false)
+      end
+    end
   end
 
   # Issue #609 — the reporter's `rigor triage --format json > triage.json` died on a `SystemStackError`

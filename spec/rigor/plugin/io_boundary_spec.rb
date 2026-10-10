@@ -235,6 +235,32 @@ RSpec.describe Rigor::Plugin::IoBoundary do
     end
   end
 
+  describe "#glob (#1652)" do
+    it "returns the matches and records one glob row, stale once a match appears in a new subdirectory" do
+      FileUtils.mkdir_p(File.join(tmpdir, "ext/a"))
+      File.write(File.join(tmpdir, "ext/a/extconf.rb"), "a")
+
+      expect(boundary.glob(tmpdir, "ext/**/extconf.rb")).to eq([File.join(tmpdir, "ext/a/extconf.rb")])
+      globs = boundary.cache_descriptor.globs
+      expect(globs.map { |row| [row.root, row.pattern] }).to eq([[File.absolute_path(tmpdir), "ext/**/extconf.rb"]])
+      expect(boundary.cache_descriptor.fresh?).to be(true)
+
+      FileUtils.mkdir_p(File.join(tmpdir, "ext/b/deep"))
+      File.write(File.join(tmpdir, "ext/b/deep/extconf.rb"), "b")
+      expect(boundary.cache_descriptor.fresh?).to be(false)
+    end
+
+    it "answers truthfully outside the trusted-read scope and records nothing there" do
+      outside = Dir.mktmpdir("rigor-io-boundary-outside-")
+      File.write(File.join(outside, "x.rb"), "")
+
+      expect(boundary.glob(outside, "*.rb")).to eq([File.join(outside, "x.rb")])
+      expect(boundary.cache_descriptor.globs).to be_empty
+    ensure
+      FileUtils.rm_rf(outside)
+    end
+  end
+
   describe "#open_url" do
     it "denies every URL while the network policy is :disabled" do
       expect { boundary.open_url("https://example.invalid/api") }.to raise_error(

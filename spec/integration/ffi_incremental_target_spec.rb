@@ -86,4 +86,54 @@ RSpec.describe "rigor check --incremental over rigor-ffi target detection" do
 
     expect(check("--incremental")[1]).to include("--incremental warm")
   end
+
+  # Issue #1652 — with no source edit, the run-result slot answers before the engine or the plugin loads, so it
+  # sees a target flip only through the rows of the reads the target was detected from, which the plugin makes
+  # through its IoBoundary.
+  context "with no source edit between runs" do
+    def prime(*flags)
+      write_project
+      check(*flags)
+      check(*flags)
+    end
+
+    it "reports the ffx diagnostics once ./Gemfile.lock gains ffx" do
+      prime("--incremental")
+      File.write("Gemfile.lock", "GEM\n  specs:\n    ffi (1.17.0)\n    ffx (1.0.0)\n")
+      out, = check("--incremental")
+
+      expect(rules(out)).to include("ffx.unsupported-callback")
+      expect(rules(out)).to eq(rules(check("--no-cache").first))
+    end
+
+    it "reports them once an extconf.rb in a new ext/ subdirectory calls FFX.create_makefile" do
+      FileUtils.mkdir_p("ext/old")
+      File.write("ext/old/extconf.rb", "require \"mkmf\"\ncreate_makefile(\"old\")\n")
+      prime("--incremental")
+      FileUtils.mkdir_p("ext/x")
+      File.write("ext/x/extconf.rb", "require \"mkmf\"\nFFX.create_makefile(\"x\")\n")
+      out, = check("--incremental")
+
+      expect(rules(out)).to include("ffx.unsupported-callback")
+      expect(rules(out)).to eq(rules(check("--no-cache").first))
+    end
+
+    it "is still served from the slot, with no analysis, while the target's inputs are unchanged" do
+      prime("--incremental")
+      allow(Rigor::Analysis::IncrementalSession).to receive(:new).and_call_original
+      out, err = check("--incremental")
+
+      expect(err).to include("--incremental warm")
+      expect(Rigor::Analysis::IncrementalSession).not_to have_received(:new)
+      expect(rules(out)).to eq(rules(check("--no-cache").first))
+    end
+
+    it "reports them from a plain cached run too once ./Gemfile.lock gains ffx" do
+      prime
+      File.write("Gemfile.lock", "GEM\n  specs:\n    ffi (1.17.0)\n    ffx (1.0.0)\n")
+      out, = check
+
+      expect(rules(out)).to include("ffx.unsupported-callback")
+    end
+  end
 end

@@ -188,14 +188,27 @@ module Rigor
       # @param path — project directory; relative paths expand against the working directory
       # @return the absolute paths directly under `path` in `Dir.glob` order; empty when not a directory
       def list_directory(path)
-        absolute = File.absolute_path(path.to_s)
-        entries = Dir.glob(File.join(absolute, "*"))
+        glob(path, "*")
+      end
+
+      # Issue #1652 — {#list_directory} for any `Dir.glob` pattern under `root`, `**` included. Returns the
+      # matching paths and records one {Cache::Descriptor::GlobEntry} over `root` and `pattern`, so a match that
+      # appears, disappears or is edited reads stale, in a subdirectory created after the read too. A listing
+      # row cannot stand in for a recursive glob: it covers the files directly under its directory, not a
+      # subdirectory added beside them. The policy gates recording, not the answer, as in {#list_directory}.
+      #
+      # @param root — project directory; relative paths expand against the working directory
+      # @param pattern — a `Dir.glob` pattern relative to `root`, such as `"ext/**/extconf.rb"`
+      # @return the absolute matching paths in `Dir.glob` order
+      def glob(root, pattern)
+        absolute = File.absolute_path(root.to_s)
+        entries = Dir.glob(File.join(absolute, pattern.to_s))
         unless @policy.allow_read?(absolute)
           record_refusal(absolute)
           return entries
         end
 
-        record_glob_entry(absolute, "*")
+        record_glob_entry(absolute, pattern.to_s)
         entries
       end
 

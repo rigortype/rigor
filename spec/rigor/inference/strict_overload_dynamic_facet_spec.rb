@@ -45,10 +45,12 @@ RSpec.describe "strict overload pass on a Dynamic[T] argument", type: :runner do
   it "keeps a facet's nil from choosing an overload the value never reaches" do
     # Runtime: a Complex. Chosen by the facet's `nil`, `Kernel#Complex` took its `nil`-returning form. Its parameters
     # are not provable, so the call now reads through the wrapper; the `(nil)` arm below pins the nil rule itself.
+    # Read through the wrapper, the call joins every arm the `Dynamic` gradually matches (#1782), so the catch-all
+    # `(untyped, ?untyped, ?exception: bool) -> Complex?` joins the `Complex` arm; the answer stays `Dynamic`.
     dumps, = dumped_and_rules(<<~RUBY)
       def run(v) = dump_type(Complex(Integer(v), 1))
     RUBY
-    expect(dumps).to eq(["Complex"])
+    expect(dumps).to eq(["Dynamic[Complex?]"])
   end
 
   it "keeps one unwrapped arm when the facet's other members take none" do
@@ -191,7 +193,9 @@ RSpec.describe "strict overload pass on a Dynamic[T] argument", type: :runner do
           Fmt.fmt(Integer(v)).upcase
         end
       RUBY
-      expect(dumps).to eq(%w[String] * 8)
+      # Read through the wrapper, each call joins every arm the `Dynamic` gradually matches (#1782): the first arm by
+      # position was the runtime's answer here, and the `(Printable) -> String` arm still joins.
+      expect(dumps).to eq(["Dynamic[Integer | String]"] * 8)
       expect(rules).not_to include("call.undefined-method")
     end
 
@@ -205,7 +209,8 @@ RSpec.describe "strict overload pass on a Dynamic[T] argument", type: :runner do
           Fmt.render(Src.sym(v)).upcase + Fmt.gate(Src.flag(v)).upcase
         end
       RUBY
-      expect(dumps).to eq(%w[String String])
+      # `render` joins every arm the wrapper gradually matches (#1782), the `(:json) -> String` arm included.
+      expect(dumps).to eq(["Dynamic[String?]", "String"])
       expect(rules).not_to include("call.undefined-method")
     end
 
@@ -240,12 +245,13 @@ RSpec.describe "strict overload pass on a Dynamic[T] argument", type: :runner do
   end
 
   it "keeps the wrapper for a type-variable parameter (#1369)" do
-    # `Rational#*`'s `[T < Numeric] (T) -> T` is not a provable parameter, so the call reads as master does.
+    # `Rational#*`'s `[T < Numeric] (T) -> T` is not a provable parameter, so the call reads through the wrapper and
+    # joins every arm it gradually matches (#1782), the type-variable arm's `Float` among them.
     # flip this when #1369 is fixed: Ruby answers a Float.
     dumps, = dumped_and_rules(<<~RUBY)
       def run(v) = dump_type(Rational(1, 2) * Float(v))
     RUBY
-    expect(dumps).to eq(["Rational"])
+    expect(dumps).to eq(["Dynamic[BigDecimal | Dynamic[Float?] | Rational]"])
   end
 
   it "keeps joining every arm for an untyped argument" do

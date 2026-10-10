@@ -64,9 +64,9 @@ RSpec.describe "proven overload pass", type: :runner do
     # Runtime: `Float`.
     expect(dumped_types(<<~RUBY)).to eq(%w[Float Complex])
       def run(v)
-        r = Rational(Integer(v), 3)
+        r = Rational(rand(10), 3)
         dump_type(r + 0.5)
-        dump_type(r - Complex(Integer(v), 1))
+        dump_type(r - Complex(rand(10), 1))
       end
     RUBY
   end
@@ -232,7 +232,7 @@ RSpec.describe "proven overload pass", type: :runner do
     # `(Integer | Float | Rational) -> [Integer, Rational]` first, and taking it made `when Float` unreachable.
     source = <<~RUBY
       def calc(v)
-        r = Rational(Integer(v), 3)
+        r = Rational(rand(10), 3)
         _q, rem = r.divmod(0.5)
         case rem
         when Float then :float

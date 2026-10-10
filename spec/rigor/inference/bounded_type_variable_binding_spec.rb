@@ -19,7 +19,7 @@ RSpec.describe "bounded method type variable binding", type: :runner do
     # Runtime: `Rational(3, 3) * 0.5` is `0.5`, a Float the literal only happens to equal here.
     expect(dumped_types(<<~RUBY)).to eq(["Float"])
       def run(v)
-        r = Rational(Integer(v), 3)
+        r = Rational(rand(10), 3)
         dump_type(r * 0.5)
       end
     RUBY
@@ -29,7 +29,7 @@ RSpec.describe "bounded method type variable binding", type: :runner do
     # Runtime: prints only when `v` is `"3"`, so the condition is not always true.
     result = analyze(<<~RUBY)
       def run(v)
-        r = Rational(Integer(v), 3)
+        r = Rational(rand(10), 3)
         puts "half" if (r * 0.5) == 0.5
       end
     RUBY

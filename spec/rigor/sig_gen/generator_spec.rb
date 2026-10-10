@@ -308,16 +308,41 @@ RSpec.describe Rigor::SigGen::Generator do
         .to eq(%i[untyped_return untyped_return])
     end
 
-    it "skips top-level / DSL-block defs (no enclosing nameable class)" do
+    it "reports a plain top-level def as skipped, with no class and no RBS (#1676)" do
       path = write_fixture("lib/toplevel.rb", <<~RUBY)
         def at_root
           1
         end
+
+        class Foo
+          def bar = 1
+        end
       RUBY
 
       candidates = generator(paths: [path]).run
+      top = candidates.find { |c| c.method_name == :at_root }
 
-      expect(candidates).to be_empty
+      expect(top).to have_attributes(class_name: nil, classification: Rigor::SigGen::Classification::SKIPPED,
+                                     skip_reason: :top_level_def, rbs: nil)
+      expect(top.to_h).to include(skip_reason: "sig.skipped.top-level-def", file: path, method: "at_root")
+      expect(candidates.map(&:method_name)).to include(:bar)
+    end
+
+    it "does not report `def self.x`, a def inside a block body or one in `class << obj` as a top-level def" do
+      path = write_fixture("lib/dsl.rb", <<~RUBY)
+        def self.on_main = 1
+
+        describe "x" do
+          def helper = 1
+        end
+
+        obj = Object.new
+        class << obj
+          def on_obj = 1
+        end
+      RUBY
+
+      expect(generator(paths: [path]).run).to be_empty
     end
 
     it "covers both `def self.foo` singleton methods and instance methods (slice 4)" do

@@ -11,8 +11,8 @@ module Rigor
     # applicable to that classification.
     #
     # - `path` — the source `.rb` file the def came from.
-    # - `class_name` — qualified receiver class name (e.g. `"Foo::Bar"`). `nil` for top-level / DSL-block defs
-    #   the MVP skips.
+    # - `class_name` — qualified receiver class name (e.g. `"Foo::Bar"`). `nil` for a top-level `def`, which is only
+    #   ever `skipped` (`sig.skipped.top-level-def`, #1676).
     # - `method_name` — the def's `Symbol` name.
     # - `kind` — `:instance` or `:singleton`.
     # - `inferred_return` — `Rigor::Type` instance (or `nil` when the inference pass disqualified the def).

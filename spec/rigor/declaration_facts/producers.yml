@@ -526,6 +526,9 @@ lib/rigor/sig_gen/generator.rb:
     Rigor::SigGen::Generator#scan_ivar_param_assignments: grandfathered
     Rigor::SigGen::Generator#visibility_excludes?: grandfathered
     Rigor::SigGen::Generator#walk_attr_calls: grandfathered
+    Rigor::SigGen::Generator#walk_def_children: >-
+      the child half of walk_defs; since #1676 it reads a non-self singleton-class body only to keep the defs in it
+      out of the top-level-def skip, and records no declaration context of its own
     Rigor::SigGen::Generator#walk_defs: grandfathered
 lib/rigor/sig_gen/observation_collector.rb:
   computes: the qualified class of each observed call site's enclosing declaration

@@ -159,6 +159,12 @@ The `sig.skipped.*` reasons are:
   inline and in `sig/`, and the two disagree. A refusal:
   `--write` and `--check` exit `1`. See
   [Methods declared inline](#methods-declared-inline).
+- `sig.skipped.top-level-def` — a plain top-level `def`, which
+  defines a private `Object` method. sig-gen lists it (file,
+  method name and this reason in `--format=json`) but writes no
+  RBS for it, so `--write` and `--check` are unaffected. Its
+  JSON row has no `class` key. `def self.x`, a `def` inside a
+  block body and one inside `class << obj` are not reported.
 - `sig.skipped.unrenderable-rbs` — the signature Rigor
   rendered for this method does not parse as RBS. This one
   is a **bug in Rigor**, not a property of your code: every

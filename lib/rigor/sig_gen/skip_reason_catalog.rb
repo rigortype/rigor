@@ -135,6 +135,18 @@ module Rigor
                        "body, not the override the subclass actually runs.",
           next_step: "Generate signatures for the overriding subclass too — widen the `sig-gen` path set to " \
                      "cover it — and the parent's declaration becomes safe to emit."
+        ),
+        "sig.skipped.top-level-def" => Entry.new(
+          id: "sig.skipped.top-level-def",
+          summary: "A top-level `def` defines a private `Object` method, and sig-gen writes no signature for it.",
+          explanation: "Not a gap in inference. A `def` outside any `class` or `module` has no class to " \
+                       "declare the member under, and Ruby makes it a private method on `Object`. sig-gen " \
+                       "reports it instead of dropping it silently, so a file that defines only top-level " \
+                       "methods is not mistaken for one that was never read. Whether to emit it as a private " \
+                       "`Object` method is undecided (#1676); `def self.x` and `def` inside a block body are " \
+                       "not reported.",
+          next_step: "Nothing is required. To type the method, move it into a module (`module_function` or " \
+                     "`extend self` keeps the call sites), or write the `Object` declaration by hand in `sig/`."
         )
       }.freeze
 

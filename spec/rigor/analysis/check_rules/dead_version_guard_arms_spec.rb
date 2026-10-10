@@ -189,11 +189,14 @@ RSpec.describe "dead version-guard arms" do
       expect(verdict_for('RUBY_ENGINE > "jruby"')).to be_nil
     end
 
-    # The two spellings genuinely disagree, and each must answer with its own semantics: `"4.0.5" > "4.0.05"`
+    # The two spellings genuinely disagree, and each must answer with its own semantics: `"4.1.0" > "04.1.0"`
     # is true (Ruby compares strings lexically — that is what runs), while the two `Gem::Version`s are equal.
-    # Built from the running RUBY_VERSION so the pair holds on any Ruby.
+    # The zero goes on the major segment, which is never zero, so the first differing character is that
+    # digit and the String comparison is decided there. Padding the last segment would not do: `"4.1.0"` and
+    # `"4.1.00"` differ only by a trailing suffix, so the shorter string is a prefix and sorts first.
+    # Built from the running RUBY_VERSION so the pair holds on any Ruby, including x.y.0 and two-digit segments.
     it "uses String semantics for a bare comparison and Gem::Version semantics for a wrapped one" do
-      padded = RUBY_VERSION.sub(/(\d+)\z/) { "0#{Regexp.last_match(1)}" }
+      padded = RUBY_VERSION.sub(/\A(\d+)/) { "0#{Regexp.last_match(1)}" }
       expect(verdict_for(%(RUBY_VERSION > "#{padded}"))).to eq(:truthy)
       expect(verdict_for(%(Gem::Version.new(RUBY_VERSION) > Gem::Version.new("#{padded}")))).to eq(:falsey)
     end

@@ -1105,20 +1105,32 @@ module Rigor
       # scan's per-file census; an entry that names no method (a marker or a main mixin) moves the `*` key.
       def census_affected(paths, summary)
         after = (summary && summary[:censuses]) || {}
+        empty = Inference::GlobalWriteCensus::EMPTY
         keys = Set.new
         paths.each do |path|
-          before = @seed_bundles.dig(path, :global_write_census) || Inference::GlobalWriteCensus::EMPTY
-          now = after[path] || Inference::GlobalWriteCensus::EMPTY
-          next if before == now
-
-          ((before - now) | (now - before)).each { |entry| keys << census_key(entry) }
+          bundle = @seed_bundles[path]
+          census, names = after[path] || [empty, empty]
+          moved_census_keys(bundle&.dig(:global_write_census) || empty, census || empty, keys)
+          moved_census_keys(bundle&.dig(:defined_names) || empty, names || empty, keys)
         end
         return Set.new if keys.empty?
 
         Incremental.negative_closure(keys.to_a, @negative_dependents)
       end
 
+      # The keys of the entries in one but not both of `before` and `after`: a defined name (a Symbol, or a census
+      # `[:defines | :refines, name]`) keys its name, any other census entry the `*` key.
+      def moved_census_keys(before, after, keys)
+        before = before.to_set # a seed bundle carries its defined names as an Array
+        after = after.to_set
+        return if before == after
+
+        ((before - after) | (after - before)).each { |entry| keys << census_key(entry) }
+      end
+
       def census_key(entry)
+        return "defines:#{entry}" if entry.is_a?(Symbol)
+
         named = %i[defines refines].include?(entry[0])
         "defines:#{named ? entry[1] : Inference::ObjectMixins::CENSUS_ANY_KEY}"
       end

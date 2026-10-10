@@ -106,10 +106,11 @@ lib/rigor/inference/expression_typer.rb:
     Rigor::Inference::ExpressionTyper#untraced_type_of: grandfathered
     Rigor::Inference::ExpressionTyper#yield_reachable?: grandfathered
 lib/rigor/inference/global_write_census.rb:
-  computes: the global write census (aliases, method defines, string evals, top-level mixins)
+  computes: the global write census (aliases, answer-method defines, top-level mixins, and the markers issue 1715 declines on) and every defined method name
   producers:
     Rigor::Inference::GlobalWriteCensus: grandfathered
     Rigor::Inference::GlobalWriteCensus#walk: grandfathered
+    Rigor::Inference::GlobalWriteCensus::Collector#visit: dispatches each node to its reader; a ClassNode only has its body range remembered when it names Object, so a mixin inside it is known to reach main (issue 1715); it records no class, module or method
     Rigor::Inference::GlobalWriteCensus::Collector#visit_call: grandfathered
 lib/rigor/inference/guard_rebinding.rb:
   computes: where a guard's narrowing of a global or constant stops holding

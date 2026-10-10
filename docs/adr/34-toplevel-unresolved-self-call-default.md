@@ -106,7 +106,11 @@ does not resolve against any of:
    nowhere, in any spelling, and exactly one RBS module on the
    top-level include chain declares as a public instance
    method takes that declaration. Every other call this item
-   resolves stays `Dynamic[top]`.
+   resolves stays `Dynamic[top]`. Definers outside the project
+   and its `pre_eval:` files are not seen: a gem that extends
+   `main` (Sinatra's classic style, `Rake::DSL`), a gem's
+   refinements, a C extension, or a framework that
+   `instance_eval`s the file can still answer the name first.
    *(Amended 2026-10-10: the include itself was silent after
    [#1383](https://github.com/rigortype/rigor/issues/1383), but
    what it brought in still reported;

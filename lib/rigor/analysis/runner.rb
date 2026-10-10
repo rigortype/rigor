@@ -430,6 +430,8 @@ module Rigor
         @project_discovered_refinements = {}.freeze
         # Issue #1367 — the project's `Inference::GlobalWriteCensus`, which the `global.*` write rules read.
         @project_discovered_global_write_census = Set.new.freeze
+        # Issue #1715 — every method name the project defines, which typing through a top-level `include` reads.
+        @project_discovered_defined_names = Set.new.freeze
         @project_discovered_class_sources = {}.freeze
         # Issue #644 — the cross-file VALUE-constant publication table (`{qualified name => Type::Constant}`,
         # literal writes only) and its per-name write attribution. The first seeds `in_source_constants` on
@@ -1733,6 +1735,7 @@ module Rigor
         @project_discovery_siblings = discovery.siblings
         @project_discovered_refinements = discovery.discovered_refinements
         @project_discovered_global_write_census = discovery.discovered_global_write_census
+        @project_discovered_defined_names = discovery.discovered_defined_names
       end
 
       # The three mixin tables the discovery pass carries — the ADR-24 `include` map, its issue #1123
@@ -2305,6 +2308,9 @@ module Rigor
       def seed_call_surface_tables(tables)
         refinements = seed_refinements(tables)
         tables[:discovered_refinements] = refinements unless refinements.nil? || refinements.empty?
+        # Issue #1715 — read by typing through a top-level `include`.
+        names = @project_discovered_defined_names
+        tables[:discovered_defined_names] = names unless names.empty?
         # Issue #1367 — read by the `global.*` write rules.
         return if @project_discovered_global_write_census.empty?
 

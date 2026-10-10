@@ -163,6 +163,7 @@ RSpec.describe Rigor::Analysis::Runner::ProjectPrePasses do
           deferred_ranges: :deferred_ranges_marker,
           refinements: :refinements_marker,
           global_write_census: :global_write_census_marker,
+          defined_names: :defined_names_marker,
           siblings: :siblings_marker
         }
       }
@@ -195,6 +196,7 @@ RSpec.describe Rigor::Analysis::Runner::ProjectPrePasses do
       expect(discovery.discovered_deferred_ranges).to eq(:deferred_ranges_marker)
       expect(discovery.discovered_refinements).to eq(:refinements_marker)
       expect(discovery.discovered_global_write_census).to eq(:global_write_census_marker)
+      expect(discovery.discovered_defined_names).to eq(:defined_names_marker)
     end
 
     it "#discover walks the real project once and returns a Discovery whose class table finds a cross-file class" do

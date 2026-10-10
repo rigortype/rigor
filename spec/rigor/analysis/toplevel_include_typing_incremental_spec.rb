@@ -62,6 +62,41 @@ RSpec.describe "typing through a top-level include — incremental re-check (#17
     end
   end
 
+  # Each definer names no method a literal spells, or mixes a module into `main` no include table orders, so it moves
+  # only the census's `*` key.
+  it "re-checks a typed caller when a definition of any name appears in another file, and again when it goes away" do
+    with_project do |config, snapshot|
+      expect(process_run(config, ["lib"], snapshot)).to eq(typed)
+
+      ["class Widget; end\nWidget.class_eval \"def x; end\"\n", "class Widget\n  define_method(name) { 1 }\nend\n",
+       "module Ext\nend\nextend Ext\n", "class << self\n  include Comparable\nend\n",
+       "Object.include(Comparable)\n"].each do |definer|
+        File.write("lib/b.rb", definer)
+        expect(cold_run(config)).to eq([])
+        expect(process_run(config, ["lib"], snapshot)).to eq([])
+
+        File.delete("lib/b.rb")
+        expect(process_run(config, ["lib"], snapshot)).to eq(typed)
+      end
+    end
+  end
+
+  # Two callers of one name: an answer served from the dispatch memo must still leave each its own edges.
+  it "re-checks every typed caller of the name" do
+    with_project do |config, snapshot|
+      File.write("lib/c.rb", "helper.upcase\n")
+      both = [["a.rb", 1], ["c.rb", 1]]
+      expect(process_run(config, ["lib"], snapshot)).to eq(both)
+
+      File.write("lib/b.rb", "class Widget\n  attr_reader :helper\nend\n")
+      expect(cold_run(config)).to eq([])
+      expect(process_run(config, ["lib"], snapshot)).to eq([])
+
+      File.delete("lib/b.rb")
+      expect(process_run(config, ["lib"], snapshot)).to eq(both)
+    end
+  end
+
   it "re-checks a typed caller when the include chain changes" do
     with_project do |config, snapshot|
       expect(process_run(config, ["lib"], snapshot)).to eq(typed)

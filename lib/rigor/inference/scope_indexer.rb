@@ -2215,8 +2215,13 @@ module Rigor
       # nil or define a singleton `===`.
       def seed_program_globals(root, seeded_scope)
         program_globals, census = build_program_global_index(root, seeded_scope)
+        collector = census.fetch(:write_census)
+        census.delete(:write_census)
         census[:discovered_global_write_census] =
-          union_write_census(seeded_scope.discovered_global_write_census, census.delete(:write_census).census)
+          union_write_census(seeded_scope.discovered_global_write_census, collector.census)
+        # Issue #1715 — the project's defined names with the file's own, which a pre-pass seed already holds unless the
+        # file changed after it (an editor buffer).
+        census[:discovered_defined_names] = union_write_census(seeded_scope.discovered_defined_names, collector.names)
         seeds = join_declared_globals(program_globals, seeded_scope.environment)
         seeded_scope = seeded_scope.with_discovery(
           seeded_scope.discovery.with(program_globals: program_globals, program_global_seeds: seeds, **census)
@@ -7757,7 +7762,7 @@ module Rigor
       # reads their parameter structure from. Issue #1120 — and each file's own refinement table, which the merged
       # def-index cannot attribute back to a file, so the session can diff it against the file's seed bundle.
       # @return `{ def_index:, code_fingerprints:, declaration_signatures:, refinements:, censuses: }`, the last each
-      #   file's own {GlobalWriteCensus}.
+      #   file's own `[census, defined names]` ({GlobalWriteCensus}).
       def scan_summary_for_paths(paths, buffer: nil)
         acc = new_def_index_accumulator
         code_fingerprints = {}
@@ -7773,7 +7778,7 @@ module Rigor
           code_fingerprints[path] = code_fingerprint(source, parsed.comments)
           declaration_signatures[path] = declaration_signature(file_index)
           refinements[path] = file_index[:refinements] if file_index[:refinements]
-          censuses[path] = file_index[:global_write_census]
+          censuses[path] = [file_index[:global_write_census], file_index[:defined_names]]
         rescue DeclarationWalk::ContractError
           raise # a broken walk contract, not an unreadable file: skipping it would hide the failure
         rescue StandardError
@@ -8120,6 +8125,7 @@ module Rigor
         fold_refinements(acc, file_index[:refinements])
         # Issue #1367 — a union, so the fold is order-independent; a pre-29 bundle carries no key.
         acc[:global_write_census].merge(file_index[:global_write_census] || GlobalWriteCensus::EMPTY)
+        acc[:defined_names].merge(file_index[:defined_names] || GlobalWriteCensus::EMPTY)
         fold_ancestry_tables(acc, file_index)
         fold_constant_tables(acc, file_index)
       end
@@ -8446,6 +8452,9 @@ module Rigor
           refinements: file_index[:refinements],
           # Issue #1367 — the file's {GlobalWriteCensus}, a Set of frozen Arrays, which Marshal round-trips.
           global_write_census: file_index[:global_write_census],
+          # Issue #1715 — the file's defined method names as a frozen Array of Symbols, which marshals smaller than
+          # the Set it folds into ({#fold_file_index} merges either).
+          defined_names: file_index[:defined_names].to_a.freeze,
           # ADR-119 WD1 — `{sibling name => table}`, plain Hashes, Sets and rows, so the bundle stays Marshal-clean.
           siblings: file_index[:siblings]
         }
@@ -8454,7 +8463,7 @@ module Rigor
       # ADR-85 WD2 — reconstitutes a cached bundle into a single-file index {#fold_file_index} folds: the
       # def-node triples become {DefHandle}s bound to this file's `path`, and the class-source names become a
       # `{name => Set[path]}` table (the shape `accumulate_project_index` produces).
-      def bundle_to_file_index(bundle, path) # rubocop:disable Metrics/CyclomaticComplexity,Metrics/PerceivedComplexity -- one read per bundle slot
+      def bundle_to_file_index(bundle, path) # rubocop:disable Metrics/AbcSize,Metrics/CyclomaticComplexity,Metrics/PerceivedComplexity -- one read per bundle slot
         {
           def_nodes: bundle_defs_to_handles(bundle[:def_nodes], path),
           singleton_def_nodes: bundle_defs_to_handles(bundle[:singleton_def_nodes], path),
@@ -8489,6 +8498,8 @@ module Rigor
           refinements: bundle[:refinements],
           # Issue #1367 — absent from a pre-29 bundle, which the SCHEMA bump rebuilds cold.
           global_write_census: bundle[:global_write_census] || GlobalWriteCensus::EMPTY,
+          # Issue #1715 — absent from a pre-38 bundle, which the SCHEMA bump rebuilds cold.
+          defined_names: bundle[:defined_names] || GlobalWriteCensus::EMPTY,
           # ADR-119 WD1 — absent from a pre-35 bundle, which the SCHEMA bump rebuilds cold.
           siblings: bundle[:siblings] || Scope::DiscoveryIndex::EMPTY_SIBLINGS
         }
@@ -8532,6 +8543,8 @@ module Rigor
           data_member_layouts: {}, struct_member_layouts: {},
           # Issue #1367 — the project's {GlobalWriteCensus}.
           global_write_census: Set.new,
+          # Issue #1715 — the project's defined method names.
+          defined_names: Set.new,
           # ADR-119 WD1 — the pair siblings, `{sibling name => table}` (see {#fold_siblings}).
           siblings: Scope::DiscoveryIndex::EMPTY_SIBLINGS.dup }
       end
@@ -8580,6 +8593,7 @@ module Rigor
         acc[:parameter_envelopes][Scope::DiscoveryIndex::ENVELOPE_PROJECT_WIDE] ||= {}
         acc[:refinements] = freeze_refinements(acc[:refinements])
         acc[:global_write_census] = acc[:global_write_census].freeze
+        acc[:defined_names] = acc[:defined_names].freeze
         acc[:unpositioned_mixins].each_value { |sides| sides.each_value(&:freeze).freeze }
         freeze_siblings(acc[:siblings])
       end
@@ -8709,6 +8723,7 @@ module Rigor
           (acc[:constant_writes][name] ||= {})[path] = descriptor
         end
         acc[:global_write_census].merge(census.write_census.census)
+        acc[:defined_names].merge(census.write_census.names)
       end
 
       # Folds one file's Data + Struct member-layout tables into the cross-file accumulator (kept out of
@@ -8835,6 +8850,8 @@ module Rigor
           return walk_census_singleton_class(node, qualified_prefix, tables, self_owner,
                                              meta_owner, singleton_cref)
         when Prism::ClassNode, Prism::ModuleNode
+          # Issue #1715 — the census remembers a `class Object` body, whose mixins reach `main`.
+          tables.write_census.visit(node, top_level: qualified_prefix.empty?)
           return walk_census_declaration(node, qualified_prefix, tables, self_owner, meta_owner,
                                          singleton_cref)
         else

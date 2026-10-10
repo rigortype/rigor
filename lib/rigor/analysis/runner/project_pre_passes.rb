@@ -59,7 +59,7 @@ module Rigor
           :unpositioned_mixins, :discovered_class_sources, :constant_values, :constant_sources, :constant_writes,
           :discovered_method_visibilities, :discovered_methods, :discovered_parameter_envelopes, :data_member_layouts,
           :struct_member_layouts, :discovered_deferred_ranges, :discovered_refinements, :siblings,
-          :discovered_global_write_census
+          :discovered_global_write_census, :discovered_defined_names
         )
 
         # Internal: drives every EAGER project-wide pre-pass — the ones whose products feed the RBS
@@ -188,7 +188,8 @@ module Rigor
             discovered_deferred_ranges: def_index.fetch(:deferred_ranges),
             discovered_refinements: def_index.fetch(:refinements), # Issue #1120
             # Issue #1367 — the census; ADR-119 WD1 — `{sibling name => table}` for `DiscoveryIndex::SIBLINGS`.
-            discovered_global_write_census: def_index.fetch(:global_write_census), siblings: def_index.fetch(:siblings)
+            discovered_global_write_census: def_index.fetch(:global_write_census), siblings: def_index.fetch(:siblings),
+            discovered_defined_names: def_index.fetch(:defined_names) # Issue #1715
           )
         end
 

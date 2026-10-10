@@ -48,11 +48,13 @@ module Rigor
         collected = []
         diagnostics = []
         census = Set.new
-        paths.each { |path| scan_file(path, collected, diagnostics, buffer, census) }
+        names = Set.new
+        paths.each { |path| scan_file(path, collected, diagnostics, buffer, census, names) }
         entries = resolve_aliases(collected)
         diagnostics.concat(duplicate_declaration_diagnostics(entries))
         Result.new(
-          registry: ProjectPatchedMethods.new(entries: entries, write_census: census.freeze),
+          registry: ProjectPatchedMethods.new(entries: entries, write_census: census.freeze,
+                                              defined_names: names.freeze),
           diagnostics: diagnostics
         )
       end
@@ -125,7 +127,7 @@ module Rigor
       end
       private_class_method :alias_entry
 
-      def scan_file(path, entries, diagnostics, buffer = nil, census = Set.new)
+      def scan_file(path, entries, diagnostics, buffer = nil, census = Set.new, names = Set.new)
         physical = buffer ? buffer.resolve(path) : path
         parse_result =
           if physical == path
@@ -141,7 +143,10 @@ module Rigor
         walk_node(parse_result.value, [], false, path, entries)
         # Issue #1367 — the file's `global.*` write facts: a patch file may alias a special or give a class the
         # method a setter asks for, as any project file may.
-        census.merge(GlobalWriteCensus.scan(parse_result.value))
+        collector = GlobalWriteCensus.scan_collector(parse_result.value)
+        census.merge(collector.census)
+        # Issue #1715 — and every method name it defines, which typing through a top-level `include` declines on.
+        names.merge(collector.names)
       rescue StandardError => e
         diagnostics << build_diagnostic(
           path: path, line: 1, column: 1,

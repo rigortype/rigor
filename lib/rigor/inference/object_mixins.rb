@@ -102,9 +102,10 @@ module Rigor
       # ({ToplevelStatementCalls}); this answers for the name, and only when every one of these holds:
       #
       # - the program defines the name nowhere, in any spelling, on any receiver, and holds no definition whose name
-      #   no literal spells nor a string eval ({GlobalWriteCensus.defines_or_may_define?}, the `pre_eval:` files'
-      #   census included). This covers a top-level `def`, `def self.x` / `class << self` / `define_method` /
-      #   `alias` on `main`, `Object.define_method`, an `extend`ed source module's method, and a `def` of the name
+      #   no literal spells, no string eval and no mixin into `Object` or `main`'s singleton that no include table
+      #   orders ({GlobalWriteCensus.may_define?}, the `pre_eval:` files' included). This covers a top-level `def`,
+      #   `def self.x` / `class << self` / `define_method` / `alias` on `main`, `Object.define_method`, an
+      #   `extend`ed source module's method, and a `def` of the name
       #   on any class, which an object may reach in ways no table records;
       # - every module mixed in at the top level by `include`, `extend` or `prepend` (the census's main mixins) is
       #   a top-level `include` the indexer recorded: an `extend` is nearer than any `include`, and one written in a
@@ -145,9 +146,12 @@ module Rigor
 
       def census_declines?(scope, name)
         census = scope.discovered_global_write_census
-        pre_eval = scope.environment&.project_patched_methods&.write_census
-        return true if GlobalWriteCensus.defines_or_may_define?(census, name)
-        return true if pre_eval && GlobalWriteCensus.defines_or_may_define?(pre_eval, name)
+        patched = scope.environment&.project_patched_methods
+        pre_eval = patched&.write_census
+        return true if GlobalWriteCensus.may_define?(census, scope.discovered_defined_names, name)
+        if pre_eval && GlobalWriteCensus.may_define?(pre_eval, patched.defined_names || GlobalWriteCensus::EMPTY, name)
+          return true
+        end
 
         included = Array(scope.discovered_includes[TOPLEVEL_INCLUDE_KEY]).map { |raw| raw.to_s.delete_prefix("::") }
         mixins = GlobalWriteCensus.main_mixins(census)

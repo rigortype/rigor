@@ -30,6 +30,7 @@ module Rigor
       :discovered_deferred_ranges,
       :discovered_refinements,
       :discovered_global_write_census,
+      :discovered_defined_names,
       :discovered_header_nestings,
       :discovered_includes,
       :discovered_prepends,
@@ -117,6 +118,7 @@ module Rigor
           discovered_methods: "which names each class answers, and on which side",
           discovered_refinements: "the methods a refine block adds, keyed by the refined class",
           discovered_global_write_census: "the names any file aliases, defines or mixes in at the top level",
+          discovered_defined_names: "every method name any file defines, in any spelling on any receiver",
           discovered_includes: "the modules each class includes, prepends among them",
           discovered_prepends: "the modules each class prepends",
           discovered_extends: "the modules each singleton mixes in; the module itself for module_function",
@@ -300,13 +302,18 @@ module Rigor
         # keyed by the name the walk gives the block's owner. Plain data, so the ADR-85 seed bundle
         # round-trips it unchanged.
         discovered_refinements: EMPTY_TABLE,
-        # Issue #1367 — the project's `Inference::GlobalWriteCensus`: the globals any `alias` names, every method
-        # name any file defines (inside a refinement or not), and the modules a top-level mixin names, over every
-        # file and inside method bodies too. The `global.*` write rules read it, and issue #1715's typing of a bare
-        # top-level call through a top-level `include`. The project pre-pass seeds the whole project's census and
+        # Issue #1367 — the project's `Inference::GlobalWriteCensus`: the globals any `alias` names, the
+        # `write` / `to_str` / `to_int` / hatch names any file defines (inside a refinement or not), the modules a
+        # top-level mixin names, and the markers on which any name may be defined, over every file and inside method
+        # bodies too. The `global.*` write rules read it, and issue #1715's typing reads its markers and main mixins.
+        # The project pre-pass seeds the whole project's census and
         # `Inference::ScopeIndexer.index` adds the analysed file's own. Plain data, so the ADR-85 seed bundle
         # round-trips it unchanged.
         discovered_global_write_census: EMPTY_NAME_SET,
+        # Issue #1715 — every method name any file defines, in any spelling and on any receiver
+        # (`Inference::GlobalWriteCensus::Collector#names`): a `Set` of Symbols, one per name. Typing a bare top-level
+        # call through a top-level `include` declines on a name it holds. Seeded and folded as the census is.
+        discovered_defined_names: EMPTY_NAME_SET,
         # Issue #682 — `{qualified class name => Module.nesting where its declaration HEADER is written}`,
         # innermost first and EXCLUDING the declaration's own entry. Read by `Scope#ancestor_name_candidates`,
         # which resolves a superclass / include name in that cref instead of peeling the subclass's qualified

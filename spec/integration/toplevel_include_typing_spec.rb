@@ -132,10 +132,24 @@ RSpec.describe "typing a bare top-level call through a top-level include (#1715)
     end
   end
 
-  # A definition whose name no literal spells may define any name, `other` included.
+  # A definition whose name no literal spells may define any name, `other` included, and so may a mixin into `Object`
+  # or `main`'s singleton that no include table orders: Ruby may reach the mixed-in module's method first.
   {
     "a computed define_method name" => "class Widget\n  define_method(name) { 1 }\nend\n",
-    "a string class_eval" => "class Widget; end\nWidget.class_eval \"def x; end\"\n"
+    "a string class_eval" => "class Widget; end\nWidget.class_eval \"def x; end\"\n",
+    "a computed define_method name in a refine block" =>
+      "module Refiner\n  refine Integer do\n    define_method(name) { 1 }\n  end\nend\n",
+    "Object.include" => "Object.include(Twice)\n",
+    "::Object.prepend" => "::Object.prepend(Twice)\n",
+    "Object.send(:include)" => "Object.send(:include, Twice)\n",
+    "Object.public_send(:prepend)" => "Object.public_send(:prepend, Twice)\n",
+    "Object.include of a computed module" => "Object.include(Kernel.const_get(:Twice))\n",
+    "an include on a computed Object" => "Object.const_get(:Object).include(Twice)\n",
+    "Object.include in a class body" => "class Foo\n  Object.include(Twice)\nend\n",
+    "a prepend in a class Object body" => "class Object\n  prepend Twice\nend\n",
+    "singleton_class.include" => "singleton_class.include(Ext)\n",
+    "self.singleton_class.prepend" => "self.singleton_class.prepend(Ext)\n",
+    "TOPLEVEL_BINDING.receiver.extend" => "TOPLEVEL_BINDING.receiver.extend(Ext)\n"
   }.each do |shape, definer|
     it "leaves every bare call untyped beside #{shape}" do
       result = run_with("include Helpers\nRigor.assert_type(\"Dynamic[top]\", other)\n", "lib/definer.rb" => definer)
@@ -187,6 +201,22 @@ RSpec.describe "typing a bare top-level call through a top-level include (#1715)
                       { "lib/patch.rb" => "Object.define_method(:helper) { 1 }\n" }, "pre_eval" => %w[lib/patch.rb])
 
     expect(rules(result)).to eq([])
+  end
+
+  # A `pre_eval:` file is loaded ahead of the project, but no load order is assumed: its mixins into `Object` or `main`
+  # decline as a project file's do.
+  {
+    "class Object; include" => "class Object\n  include Twice\nend\n",
+    "Object.include" => "Object.include(Twice)\n",
+    "a top-level extend" => "extend Ext\n"
+  }.each do |shape, patch|
+    it "leaves every bare call untyped beside a pre_eval file's #{shape}" do
+      result = run_with("include Helpers\nRigor.assert_type(\"Dynamic[top]\", helper)\n" \
+                        "Rigor.assert_type(\"Dynamic[top]\", other)\n",
+                        { "pre/mix.rb" => patch }, "pre_eval" => %w[pre/mix.rb])
+
+      expect(rules(result)).to eq([])
+    end
   end
 
   it "leaves a bare call untyped when a pre_eval file outside paths defines the name at the top level only" do

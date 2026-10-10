@@ -1,9 +1,10 @@
 # ADR-121 — Typing calls through Ruby refinements, and `Proc#refined`
 
-Status: **Accepted, 2026-10-09.** Nothing is implemented yet. The work is tracked by #1670: the query
-(#1673), the typed arm (#1664), the include expansion (#1671), gem refine bodies (#1672), the
-redefined-method decline (#1663), and, for Ruby 4.1's `Proc#refined`, #1665, #1666 and #1667. The
-normative rules land in `docs/internal-spec/inference-engine.md` § "Ruby refinements" with each slice.
+Status: **Accepted, 2026-10-09; implemented 2026-10-10.** Landed under #1670: the redefined-method
+decline (#1685), the include expansion (#1684), gem refine bodies (#1686), the query (#1729), the
+typed arm (#1747), and for Ruby 4.1's `Proc#refined` the signature (#1711), refined literals (#1738)
+and the `BlockAsMethod` field (#1744). Open: the carry-overs under Consequences and #1669. The
+normative rules are in `docs/internal-spec/inference-engine.md` § "Ruby refinements".
 
 Grounding: the design session of 2026-10-09 on #1664 and #1667, probes on master `54da094f0` and
 `7baff7b1f` (listed in #1670), CRuby `334b4ffa7f`'s `doc/syntax/refinements.rdoc` and

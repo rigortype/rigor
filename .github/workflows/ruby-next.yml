@@ -24,7 +24,9 @@ on:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Only a superseded pull_request run is cancelled: on master a manual dispatch and the weekly run
+  # share this group and must not cancel each other.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -67,6 +69,7 @@ jobs:
       # to just past the running Ruby. It aborts rather than silently testing an unedited tree when the
       # bound is no longer `< 4.1` — that means the published range moved and this step needs revisiting.
       - name: Relax the Ruby upper bound in this checkout only
+        id: relax
         run: |
           ruby -e '
             major, minor = RUBY_VERSION.split(".").map(&:to_i)
@@ -80,7 +83,11 @@ jobs:
           '
 
       - name: Install gems
-        run: bundle install --jobs 4 --retry 3
+        id: install
+        run: |
+          mkdir -p tmp
+          set -o pipefail
+          bundle install --jobs 4 --retry 3 2>&1 | tee tmp/bundle-install.txt
 
       # Both checks continue on error so that a suite failure still runs the self-check and every
       # result reaches the summary; the last step turns either failure into a red run.
@@ -101,10 +108,13 @@ jobs:
 
       # The summary is what a follow-up issue is filed from, so it names the first failing spec file
       # first. A file that fails to load has no failed example, only an "error occurred while loading"
-      # message, so those are read from the report's messages too.
+      # message, so those are read from the report's messages too (spec_helper included). When setup
+      # fails, both checks are skipped and the summary carries the install output instead.
       - name: Write job summary
         if: always()
         env:
+          RELAX_OUTCOME: ${{ steps.relax.outcome }}
+          INSTALL_OUTCOME: ${{ steps.install.outcome }}
           TESTS_OUTCOME: ${{ steps.tests.outcome }}
           CHECK_OUTCOME: ${{ steps.check.outcome }}
         run: |
@@ -113,13 +123,23 @@ jobs:
             echo
             echo "| Check | Outcome |"
             echo "| --- | --- |"
+            echo "| Relax Ruby bound | ${RELAX_OUTCOME:-not run} |"
+            echo "| bundle install | ${INSTALL_OUTCOME:-not run} |"
             echo "| Unit suite | ${TESTS_OUTCOME:-not run} |"
             echo "| rigor check lib | ${CHECK_OUTCOME:-not run} |"
             echo
+            if [ "$INSTALL_OUTCOME" = failure ]; then
+              echo "### bundle install"
+              echo
+              echo '```'
+              tail -n 40 tmp/bundle-install.txt 2>/dev/null || echo "(no output captured)"
+              echo '```'
+              echo
+            fi
             if [ "$TESTS_OUTCOME" = failure ]; then
               if [ -s tmp/rspec.json ]; then
                 files=$(jq -r '
-                  ([.messages[]? | capture("error occurred while loading (?<f>\\S+?_spec\\.rb)").f]
+                  ([.messages[]? | capture("error occurred while loading (?<f>\\S+?)\\.?(\\s|$)").f]
                    + [.examples[] | select(.status == "failed") | .file_path])
                   | reduce .[] as $f ([]; if index([$f]) then . else . + [$f] end) | .[]' tmp/rspec.json)
                 echo "### Unit suite"
@@ -133,7 +153,8 @@ jobs:
                   echo
                   printf '%s\n' "$files" | while read -r f; do
                     n=$(jq --arg f "$f" '[.examples[] | select(.status == "failed" and .file_path == $f)] | length' tmp/rspec.json)
-                    echo "- \`$f\` ($n failed)"
+                    if [ "$n" = 0 ]; then n="load error"; else n="$n failed"; fi
+                    echo "- \`$f\` ($n)"
                   done
                 else
                   echo "No failing example or load error was recorded; see the step log."

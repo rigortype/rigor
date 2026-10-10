@@ -145,6 +145,18 @@ RSpec.describe "Plugin-declared refined blocks (#1667)" do
     expect(result[:errors]).to eq([[1, "call.undefined-method"]])
   end
 
+  # ADR-121 WD7 — a declared module is the plugin's declaration, not code Rigor failed to read, so it is never
+  # opaque: with a lexical `using` in the file, the declared module nothing declares still silences nothing.
+  it "silences nothing for a declared module that refines nothing, in a file with a lexical `using`" do
+    result = run_analysis(<<~RUBY, plugin_class(entry(refinements: ["NoSuchSyntax"])))
+      module Other; refine(Integer) { def zz = 1 }; end
+      using Other
+      build { :a.shout }
+    RUBY
+
+    expect(result[:errors]).to eq([[3, "call.undefined-method"]])
+  end
+
   # `self_type: :lexical` — `block.refined(M).call` runs the block where it was written, with the caller's `self`.
   it "keeps the caller's self for a `:lexical` entry" do
     lexical = entry(method_names: [:run_lexical], self_type: :lexical)

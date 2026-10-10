@@ -604,7 +604,9 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
 
   # ADR-121 WD7 — the refinement table records what it could not read, and a module whose refinements Rigor cannot
   # read is opaque, so a decline follows from a row or from a module no file declares, never from a missing row. Every
-  # silent line runs on Ruby 4.0.5 and every reported line raises there.
+  # reported line raises on Ruby 4.0.5. A silent line runs there, or sits under an opaque module, whose refinements
+  # Rigor cannot read and which may therefore refine it (the decline is the possibility, not Ruby's answer for the
+  # fixture's own module).
   describe "a refinement Rigor cannot read (ADR-121 WD7)" do
     let(:call_rules) { %w[call.undefined-method call.wrong-arity call.argument-type-mismatch] }
 

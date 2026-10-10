@@ -46,14 +46,14 @@ module Rigor
         # limit (`(a: Symbol, b: Symbol)` with two three-member values made nine). An overload that declares no
         # keywords but may take the hash as a positional `Hash` ({.positional_hash_reader?}, whose block says whether
         # a positional parameter may accept a `Hash`) reads every value against that parameter, so then every union
-        # value splits. Without a keyword hash, or with no discriminating union value, the one list, `arg_types`
-        # itself.
-        def distributions(arg_types, keywords_last, method_types, &hash_param)
+        # value splits. `count` is the call's argument count, nil when a splat hides it. Without a keyword hash, or
+        # with no discriminating union value, the one list, `arg_types` itself.
+        def distributions(arg_types, keywords_last, method_types, count = arg_types.size, &hash_param)
           keywords = keywords_last && arg_types.last
           return [arg_types] unless keywords.is_a?(Type::HashShape)
 
           choices = split_choices(keywords, method_types) do
-            hash_param && positional_hash_reader?(method_types, arg_types.size, &hash_param)
+            hash_param && positional_hash_reader?(method_types, count, &hash_param)
           end
           return [arg_types] if choices.nil?
           return nil if choices.reduce(1) { |count, (_, members)| count * members.size } > DISTRIBUTION_LIMIT
@@ -111,16 +111,23 @@ module Rigor
         # the keyword hash, as a positional `Hash`: the block answers for the RBS parameter at that position (the
         # `(String)` of `(a: Symbol) | (String)` cannot take one, the `(Hash[Symbol, String])` of
         # `(a: Integer) | (Hash[Symbol, String])` can, and its members then select per value), and an untyped `(?)`
-        # parameter list may take anything.
-        def positional_hash_reader?(method_types, count)
+        # parameter list may take anything. A nil `count` (a splat hides how many arguments precede the hash, and
+        # `ph(*[], a: v)` passes `{ a: v }` to a one-parameter `(Hash)`) asks about every positional parameter.
+        def positional_hash_reader?(method_types, count, &)
           method_types.any? do |method_type|
             fun = method_type.type
             next false if declares?(fun)
             next true unless fun.respond_to?(:required_positionals)
+            next positional_params(fun).any?(&) if count.nil?
 
             param = positional_param_at(fun, count, count - 1)
             !param.nil? && yield(param)
           end
+        end
+
+        def positional_params(fun)
+          params = fun.required_positionals + fun.optional_positionals + fun.trailing_positionals
+          fun.rest_positionals ? params + [fun.rest_positionals] : params
         end
 
         # The positional parameter `fun` binds the argument at `index` to when called with `count` arguments, or nil

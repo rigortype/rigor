@@ -70,6 +70,12 @@ RSpec.describe "Keyword arguments in overload selection (#1727)", type: :runner 
                | (Hash[Symbol, untyped]) -> String
         def blk: (a: Integer) { (Integer) -> void } -> void
                | (Hash[Symbol, String]) { (String) -> void } -> void
+        def opt_hash: (a: Integer) -> Integer
+                    | (?Integer, Hash[Symbol, String]) -> String
+        def rest_any: (a: Integer) -> Integer
+                    | (*untyped) -> String
+        def two_req: (a: Integer) -> Integer
+                   | (String, Hash[Symbol, String]) -> String
       end
     RBS
   end
@@ -262,6 +268,37 @@ RSpec.describe "Keyword arguments in overload selection (#1727)", type: :runner 
       dump_type(p.phu(a: p.int_or_str))
       p.blk(a: p.int_or_str) { |x| dump_type(x) }
     RUBY
+  end
+
+  # The parameter the hash lands in follows the call's argument count through optional, rest and trailing positionals,
+  # and an overload whose arity the count does not fit reads no hash at all.
+  it "finds the positional Hash parameter by the call's argument count" do
+    expect(dumped_types(<<~RUBY)).to eq(["Integer | String", "String", "Integer | String", "Integer"])
+      dump_type(p.opt_hash(a: p.int_or_str))
+      dump_type(p.opt_hash(1, a: p.int_or_str))
+      dump_type(p.rest_any(a: p.int_or_str))
+      dump_type(p.two_req(a: p.int_or_str))
+    RUBY
+  end
+
+  # A splat hides how many arguments precede the hash (`ph(*[], a: v)` passes `{ a: v }` to the `(Hash)` overload), so
+  # any no-keyword overload with a positional parameter that may take a `Hash` splits the values.
+  it "splits the values behind a splat whose count may reach a positional Hash" do
+    expect(dumped_types(<<~RUBY)).to eq(["Dynamic[top]", "Dynamic[top]"])
+      xs = [] #: Array[untyped]
+      dump_type(p.ph(*xs, a: p.int_or_str))
+      p.blk(*xs, a: p.int_or_str) { |x| dump_type(x) }
+    RUBY
+  end
+
+  it "reports nothing on a splat call the positional Hash overload may take" do
+    result = analyze(<<~RUBY, sig: sig)
+      p = Picker.new
+      xs = [] #: Array[untyped]
+      p.ph(*xs, a: p.int_or_str).upcase
+      p.ph(*[], a: p.int_or_str).upcase
+    RUBY
+    expect(result.diagnostics.select(&:error?).map(&:message)).to eq([])
   end
 
   # A call no overload genuinely takes, with no value split, selects as before #1746: the incomplete stdlib RBS

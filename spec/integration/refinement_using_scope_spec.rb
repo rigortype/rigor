@@ -737,6 +737,102 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
       expect(call_rows).to eq([["foo.rb", 6, "call.undefined-method"]])
     end
 
+    # Each row kind rides the cross-file pre-pass and the seed bundle: the consumers answer the same cold, warm, and
+    # warm with only the consumers re-analysed (their refining files served from their seed bundles).
+    it "carries each wildcard row kind across files and through a warm run" do
+      write("lib/nw.rb", "module NW\n  refine(String) { import_methods Helper }\nend\n")
+      write("lib/cu.rb", "module CU\n  [String].each { |k| refine(k) { def ljust(a, b, c) = 1 } }\nend\n")
+      write("lib/bu.rb", "module BU\n  def self.setup = refine(String) { def x = 1 }\nend\n")
+      write("lib/u1.rb", "using NW\n\"x\".center(1, 2, 3)\n1.succ(2)\n")
+      write("lib/u2.rb", "using CU\n\"x\".ljust(1, 2, 3)\n\"x\".rjust(1, 2, 3)\n")
+      write("lib/u3.rb", "using BU\n\"x\".nope\n:s.nope\n")
+      write("lib/plain.rb", "\"x\".nope\n")
+      expected = [["plain.rb", 1, "call.undefined-method"], ["u1.rb", 3, "call.wrong-arity"],
+                  ["u2.rb", 3, "call.wrong-arity"]]
+      store = -> { Rigor::Cache::Store.new(root: File.join(Dir.pwd, ".rigor", "cache")) }
+      rows = lambda do
+        diagnostics(cache_store: store.call).select { |d| call_rules.include?(d.qualified_rule) }
+                                            .map { |d| [File.basename(d.path.to_s), d.line, d.qualified_rule] }.sort
+      end
+
+      expect(rows.call).to eq(expected)
+      expect(rows.call).to eq(expected)
+      %w[u1 u2 u3].each { |name| File.write("lib/#{name}.rb", "#{File.read("lib/#{name}.rb")}nil\n") }
+      expect(rows.call).to eq(expected)
+    end
+
+    describe "edited between runs" do
+      def incremental_rows
+        root = File.join(Dir.pwd, ".rigor", "cache")
+        snapshot = Rigor::Cache::IncrementalSnapshot.new(root: root)
+        fingerprint = Rigor::Cache::IncrementalSnapshot.fingerprint(configuration: configuration, roots: %w[lib])
+        session = Rigor::Analysis::IncrementalSession.new(
+          configuration: configuration, paths: %w[lib], cache_store: Rigor::Cache::Store.new(root: root)
+        )
+        found, warm = guarded_run_incremental(session, snapshot: snapshot, fingerprint: fingerprint)
+        rows = found.select { |d| call_rules.include?(d.qualified_rule) }
+                    .map { |d| [File.basename(d.path.to_s), d.line, d.qualified_rule] }.sort
+        [rows, warm]
+      end
+
+      def cached_rows
+        diagnostics(cache_store: Rigor::Cache::Store.new(root: File.join(Dir.pwd, ".rigor", "cache-cold-warm")))
+          .select { |d| call_rules.include?(d.qualified_rule) }
+          .map { |d| [File.basename(d.path.to_s), d.line, d.qualified_rule] }.sort
+      end
+
+      let(:center_fires) { [["u.rb", 2, "call.wrong-arity"]] }
+
+      def write_refinement(extra = "")
+        write("lib/r.rb", "module Shout\n  refine String do\n    def shout = upcase\n#{extra}  end\nend\n")
+      end
+
+      # A names-wildcard row appearing re-checks the consumer through `refinement:*` (A5).
+      it "re-checks the `using` file when a refine body gains and loses an `import_methods`" do
+        write_refinement
+        write("lib/u.rb", "using Shout\n\"a\".center(1, 2, 3)\n")
+        expect(incremental_rows).to eq([center_fires, false])
+        expect(cached_rows).to eq(center_fires)
+
+        write_refinement("    import_methods Helper\n")
+        expect(incremental_rows).to eq([[], true])
+        expect(cached_rows).to eq([])
+        expect(call_rows).to eq([])
+
+        write_refinement
+        expect(incremental_rows).to eq([center_fires, true])
+        expect(cached_rows).to eq(center_fires)
+      end
+
+      # A3 + A5: the new file declares no module and names no class the consumer read; only the `:refine` literal's
+      # targets-wildcard row ties it to the consumer. Ruby 4.0.5 runs `M.send(:refine, String) { … }`
+      # (`refine_census_spec.rb`).
+      it "re-checks the `using` file when a new file refines its module through `send(:refine, …)`" do
+        write("lib/m.rb", "module M\n  refine(String) { def shout = 1 }\nend\n")
+        write("lib/u.rb", "using M\n\"a\".center(1, 2, 3)\n")
+        expect(incremental_rows).to eq([center_fires, false])
+        expect(cached_rows).to eq(center_fires)
+
+        write("lib/m_ext.rb", "M.send(:refine, String) { def center(a, b, c) = 1 }\n")
+        expect(incremental_rows).to eq([[], true])
+        expect(cached_rows).to eq([])
+        expect(call_rows).to eq([])
+      end
+
+      # The `using`'s only candidate is declared by no file, so it is opaque; a new file declaring it with no
+      # refinement makes it known, and the call reports. Ruby 4.0.5 raises `ArgumentError` for that program.
+      it "re-checks the `using` file when a new file declares the module its `using` names" do
+        write("lib/u.rb", "using GemRef\n\"a\".center(1, 2, 3)\n")
+        expect(incremental_rows).to eq([[], false])
+        expect(cached_rows).to eq([])
+
+        write("lib/gemref.rb", "module GemRef\nend\n")
+        expect(incremental_rows).to eq([center_fires, true])
+        expect(cached_rows).to eq(center_fires)
+        expect(call_rows).to eq(center_fires)
+      end
+    end
+
     # Critique F5a. Ruby 4.0.5 prints `:via_alias` (`rb/p4_alias_refine.rb`).
     it "declines under a module that refines through an alias of `refine`" do
       write("lib/m.rb", <<~RUBY)

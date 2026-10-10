@@ -25,8 +25,8 @@ RSpec.describe "Hash.ruby2_keywords_hash? and Hash.ruby2_keywords_hash (core ove
   end
 
   it "declares both singleton methods from the core overlay" do
-    expect(method_type_strings(:ruby2_keywords_hash?)).to eq(["(::Hash[untyped, untyped]) -> bool"])
-    expect(method_type_strings(:ruby2_keywords_hash)).to eq(["[K, V] (::Hash[K, V]) -> ::Hash[K, V]"])
+    expect(method_type_strings(:ruby2_keywords_hash?)).to eq(["(::Hash[untyped, untyped] hash) -> bool"])
+    expect(method_type_strings(:ruby2_keywords_hash)).to eq(["[K, V] (::Hash[K, V] hash) -> ::Hash[K, V]"])
   end
 
   it "declares them through the overlay file, not a direct def" do
@@ -34,6 +34,8 @@ RSpec.describe "Hash.ruby2_keywords_hash? and Hash.ruby2_keywords_hash (core ove
       definitions = hash_singleton_methods[name].defs
       expect(definitions.map { |definition| definition.member.location.buffer.name.to_s })
         .to all(end_with("data/core_overlay/hash.rbs"))
+      expect(definitions.map { |definition| definition.implemented_in.to_s })
+        .to all(eq("::RigorCoreOverlay::HashRuby2Keywords"))
     end
   end
 

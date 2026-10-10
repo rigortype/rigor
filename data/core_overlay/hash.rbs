@@ -35,8 +35,8 @@
 # this declaration.
 module RigorCoreOverlay
   module HashRuby2Keywords
-    def ruby2_keywords_hash?: (Hash[untyped, untyped]) -> bool
-    def ruby2_keywords_hash: [K, V] (Hash[K, V]) -> Hash[K, V]
+    def ruby2_keywords_hash?: (Hash[untyped, untyped] hash) -> bool
+    def ruby2_keywords_hash: [K, V] (Hash[K, V] hash) -> Hash[K, V]
   end
 end
 

@@ -1,0 +1,1 @@
+- **[engine]** A call passing a union keyword value (`ret(headers: flag)` with `flag : bool`) now joins the returns of the overloads each member selects, instead of typing the call by one member's overload. ([#1775](https://github.com/rigortype/rigor/pull/1775))

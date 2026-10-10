@@ -137,26 +137,10 @@ module Rigor
         runner.run(configuration_for_generation.paths).diagnostics
       end
 
+      # The loaded configuration with only `baseline` disabled (#1777): any other key can change the
+      # diagnostic set, and the baseline must record the set `rigor check` will then report.
       def override_configuration_baseline_off(configuration)
-        # Synthesise a new Configuration with `baseline` explicitly disabled. The original Configuration is frozen-ish
-        # so we round-trip through the constructor with an override hash.
-        defaults = Configuration::DEFAULTS.merge(
-          # Carried with its explicitness (#1692): a stated `target_ruby` turns on the deprecation rules, and a
-          # baseline generated without them would leave every such finding "new" on the next `rigor check`.
-          "target_ruby" => configuration.target_ruby,
-          "paths" => configuration.paths,
-          "exclude" => configuration.exclude_patterns,
-          "plugins" => configuration.plugins,
-          "disable" => configuration.disabled_rules,
-          "libraries" => configuration.libraries,
-          "signature_paths" => configuration.signature_paths,
-          "pre_eval" => configuration.pre_eval,
-          "severity_profile" => configuration.severity_profile.to_s,
-          "severity_overrides" => configuration.severity_overrides,
-          "baseline" => false,
-          "cache" => { "path" => configuration.cache_path }
-        )
-        Configuration.new(defaults, defaults.key?("effects"), configuration.target_ruby_explicit?)
+        configuration.without_baseline
       end
 
       # ---- dump --------------------------------------------------

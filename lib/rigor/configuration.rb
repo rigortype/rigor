@@ -746,6 +746,21 @@ module Rigor
       copy.freeze
     end
 
+    # #1777 — a sibling Configuration with only `baseline:` unset, every other field (including the
+    # explicitness of `target_ruby`) shared with the receiver. `rigor baseline generate` analyses with
+    # this so the generating run sees exactly the configuration `rigor check` will, minus the filter it
+    # is about to replace; rebuilding from a key list let each unlisted key revert to its default.
+    #
+    # Same frozen `dup` shape as {#with_bleeding_edge}. `@baseline_path` is the only ivar
+    # `#initialize` derives from the `baseline:` key.
+    def without_baseline
+      return self if baseline_path.nil?
+
+      copy = dup
+      copy.instance_variable_set(:@baseline_path, nil)
+      copy.freeze
+    end
+
     # ADR-103 WD14 — the ad-hoc opt-in `rigor effects` uses when the project's configuration carries no
     # `effects:` block: a sibling Configuration with an implicit empty block, every other field shared.
     # A configuration that already enables effects is returned unchanged, so a project's own settings

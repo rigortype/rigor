@@ -174,6 +174,8 @@ RSpec.describe "plugins/rigor-minitest" do
       it "drops nil, boolean and Symbol members, which an Integer literal cannot equal" do
         union = Rigor::Type::Combinator.union(nominal("Integer"), constant(nil))
         expect(equality_fact_type("assert_equal(42, x)", union)).to eq(constant(42))
+        nominal_union = Rigor::Type::Combinator.union(nominal("Integer"), nominal("Symbol"))
+        expect(equality_fact_type("assert_equal(42, x)", nominal_union)).to eq(constant(42))
       end
 
       it "is silent when no member of the local's type can equal the literal" do

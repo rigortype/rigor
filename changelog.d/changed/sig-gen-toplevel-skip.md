@@ -1,0 +1,1 @@
+- **[sig-gen]** A plain top-level `def` is now listed as a skipped candidate (`sig.skipped.top-level-def`) in `--format=json` and the text skip summary instead of being dropped silently; no RBS is written for it. ([#1765](https://github.com/rigortype/rigor/pull/1765))

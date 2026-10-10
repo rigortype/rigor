@@ -57,7 +57,10 @@ module Rigor
         inline_generic_class: "sig.skipped.inline-generic-class",
         # ADR-112 WD4 — the member is declared inline and in `sig/`, and the two disagree. A refusal, not a
         # skip: `--write` and `--check` exit 1 until a person reconciles them or passes `--overwrite`.
-        inline_differs: "sig.skipped.inline-differs"
+        inline_differs: "sig.skipped.inline-differs",
+        # #1676 — a plain top-level `def` defines a private `Object` method and has no class to write a
+        # declaration under, so it is reported rather than silently dropped. Whether to emit it stays open.
+        top_level_def: "sig.skipped.top-level-def"
       }.freeze
     end
   end

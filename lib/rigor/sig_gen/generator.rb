@@ -478,7 +478,7 @@ module Rigor
           # `rigor sig-gen` run. The `check` path recovers each *file* this way (worker_session.rb); sig-gen
           # recovers per-def so the rest of the file's candidates still emit.
 
-          classify_def(path, def_node, class_name, kind, scope_index)
+          classify_collected_def(path, def_node, class_name, kind, scope_index)
         rescue StandardError
           nil
         end
@@ -489,8 +489,9 @@ module Rigor
 
       # Walks the AST collecting `(def_node, class_name, kind)` tuples for every `def` Rigor can re-type. Slice 1
       # covered instance `def foo` methods inside a nameable `class` / `module` body. Slice 4 extends this to
-      # singleton-side methods via `def self.foo` and `class << self; def foo; end`; top-level / DSL-block defs
-      # still degrade silently (no nameable receiver).
+      # singleton-side methods via `def self.foo` and `class << self; def foo; end`. A plain top-level `def` is
+      # collected with a nil class and reported as skipped (#1676); DSL-block defs still degrade silently (no
+      # nameable receiver).
       #
       # ADR-14 gap-#3 follow-up tracks two extra pieces during the same walk so the Writer can emit kind-correct
       # RBS without guessing:
@@ -506,6 +507,7 @@ module Rigor
         @walk_root = root
         @in_effect_refinements = nil
         out = []
+        @block_depth = 0
         walk_defs(root, [], false, false, out)
         out
       end
@@ -538,12 +540,19 @@ module Rigor
         walk_def_children(node, prefix, in_singleton_class, module_function_active, out)
       end
 
+      # #1676 — a block body is a DSL scope, not the file's top level, so a `def` inside one is not reported
+      # as a top-level def. Neither is a `def` in `class << obj` (a non-`self` singleton body reaches here,
+      # the `self` one returns above): it defines a singleton method on `obj`, not a private `Object` method.
       def walk_def_children(node, prefix, in_singleton_class, module_function_active, out)
         return if refine_block_call?(node)
 
+        in_block = node.is_a?(Prism::BlockNode) || node.is_a?(Prism::LambdaNode) ||
+                   node.is_a?(Prism::SingletonClassNode)
+        @block_depth += 1 if in_block
         node.rigor_each_child do |child|
           walk_defs(child, prefix, in_singleton_class, module_function_active, out)
         end
+        @block_depth -= 1 if in_block
       end
 
       # [#722](https://github.com/rigortype/rigor/issues/722) residue 3 — the qualified name is built by
@@ -709,7 +718,13 @@ module Rigor
       end
 
       def collect_def_node(node, prefix, in_singleton_class, module_function_active, out)
-        return if prefix.empty?
+        if prefix.empty?
+          # #1676 — a plain top-level `def` defines a private `Object` method. It is surfaced as a skipped
+          # candidate (no class to write it under) rather than dropped; `def self.x` and block-body defs stay
+          # unreported.
+          out << [node, nil, :instance] if node.receiver.nil? && !in_singleton_class && @block_depth.zero?
+          return
+        end
 
         kind = node.receiver.is_a?(Prism::SelfNode) || in_singleton_class ? :singleton : :instance
         class_name = prefix.join("::")
@@ -938,6 +953,13 @@ module Rigor
 
           parent ? "#{parent}::#{name}" : name
         end
+      end
+
+      # #1676 — a top-level `def` is collected with no class; it is reported, never typed.
+      def classify_collected_def(path, def_node, class_name, kind, scope_index)
+        return skipped(path, def_node, class_name, kind, :top_level_def) if class_name.nil?
+
+        classify_def(path, def_node, class_name, kind, scope_index)
       end
 
       def classify_def(path, def_node, class_name, kind, scope_index)

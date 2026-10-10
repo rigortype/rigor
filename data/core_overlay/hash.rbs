@@ -1,0 +1,45 @@
+# Rigor core overlay — supplemental core signatures.
+#
+# --- Hash.ruby2_keywords_hash? / Hash.ruby2_keywords_hash ---
+#
+# CRuby's `hash.c` defines both as singleton methods of `Hash`, present since
+# Ruby 2.7:
+#
+#   rb_define_singleton_method(rb_cHash, "ruby2_keywords_hash?", rb_hash_s_ruby2_keywords_hash_p, 1);
+#   rb_define_singleton_method(rb_cHash, "ruby2_keywords_hash", rb_hash_s_ruby2_keywords_hash, 1);
+#
+# `ruby2_keywords_hash?` answers whether the argument is a hash flagged by
+# `ruby2_keywords`; `ruby2_keywords_hash` returns a copy of its argument with
+# that flag set. Upstream `ruby/rbs` declares neither through 4.2, so
+#
+#   Hash.ruby2_keywords_hash?({})
+#
+# reported `call.undefined-method` on correct code. Ruby 4.1 deprecates both
+# (Feature #22205) and removes them in 4.5; `call.deprecated-ruby2-keywords`
+# reports the deprecation under an explicit `target_ruby` of 4.1 or later.
+#
+# The return of `ruby2_keywords_hash` is the argument's own Hash type: the
+# copy has the same keys and values, and the flag does not show in the type.
+#
+# Declared on a module `Hash` extends, not with `def self.…`, for the reason
+# `process.rbs` gives: a project `sig/` or a later rbs release may declare
+# either method directly, and a second direct `def` is a
+# `DuplicatedMethodDefinitionError` that takes `Hash`'s whole singleton surface
+# down to `Dynamic[top]`. A direct `def` overrides a method `Hash` gets through
+# `extend`, so the overlay stands down instead of colliding.
+#
+# Unconditional, not gated on `target_ruby` or the rbs line: both methods exist
+# on every supported Ruby (2.7 through 4.4), and gating would report
+# `call.undefined-method` on a correct project still on the default
+# `target_ruby`. The deprecation for 4.1+ is a separate rule and does not read
+# this declaration.
+module RigorCoreOverlay
+  module HashRuby2Keywords
+    def ruby2_keywords_hash?: (Hash[untyped, untyped]) -> bool
+    def ruby2_keywords_hash: [K, V] (Hash[K, V]) -> Hash[K, V]
+  end
+end
+
+class Hash[unchecked out K, unchecked out V]
+  extend RigorCoreOverlay::HashRuby2Keywords
+end

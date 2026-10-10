@@ -291,8 +291,9 @@ runs the code.
   issue: it widens who states a runtime, and this amendment does not depend on it.
 
 **Consequences.** `Configuration` records whether `target_ruby` was written (`#target_ruby_explicit?`),
-and `#to_h` carries it, so caches tell a stated `"4.0"` from the default. The two `alias` rules wait for
-a probe of their resolution facts, as #1692 requires.
+and `#to_h` carries it, so caches tell a stated `"4.0"` from the default. The two `alias` rules are
+[#1776](https://github.com/rigortype/rigor/issues/1776): the probe #1692 required found that Rigor cannot
+yet tell "found only through the `Object` fallback" or "defined in a prepended module" reliably.
 
 ## Rejected / deferred alternatives
 

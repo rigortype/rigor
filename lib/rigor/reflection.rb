@@ -50,6 +50,11 @@ module Rigor
     WRITTEN_CANDIDATE = Object.new.freeze
     private_constant :WRITTEN_CANDIDATE
 
+    # Issue #1698 — what the constant ladder's ancestor rung answers where an entry's RBS ancestry may
+    # own the name ({.mixin_ancestry_stop?}). Never a type: {.lexical_constant_type} replaces it.
+    MIXIN_ANCESTRY_STOP = Object.new.freeze
+    private_constant :MIXIN_ANCESTRY_STOP
+
     module_function
 
     def class_known?(class_name, scope: Scope.empty)
@@ -197,10 +202,19 @@ module Rigor
       # `P::A < P::Base` is `P::Base::B`, and step 3's `A::B` is a real but different class.
       #
       # Step 3 — the bare name (top level). It takes no `shadows`: nothing sits below it for a stop to replace.
-      first_constant_hit(lexical_nesting_chain(scope), name, scope, shadows) ||
-        ancestor_constant_type(name, scope, enclosing_class_path(scope), shadows) ||
-        constant_path_type(name, scope, shadows: shadows) ||
-        constant_type_at(name, scope)
+      #
+      # Issue #1698 — step 2 answers {MIXIN_ANCESTRY_STOP} where an RBS-only mixin's own ancestry may own the name
+      # ({.mixin_ancestry_stop?}). Ruby reads that ancestry before any later ancestor or the top level, and
+      # the chain does not list it, so a lower rung's answer is replaced by `Dynamic[top]`, as #1290's stop is.
+      lexical = first_constant_hit(lexical_nesting_chain(scope), name, scope, shadows)
+      return lexical if lexical
+
+      ancestor = ancestor_constant_type(name, scope, enclosing_class_path(scope), shadows)
+      stopped = ancestor.equal?(MIXIN_ANCESTRY_STOP)
+      return ancestor if ancestor && !stopped
+
+      below = constant_path_type(name, scope, shadows: shadows) || constant_type_at(name, scope)
+      stopped && below ? Type::Combinator.untyped : below
     end
     private_class_method :lexical_constant_type
 
@@ -216,11 +230,28 @@ module Rigor
     end
     private_class_method :first_constant_hit
 
-    # Step 2's rung on its own: nil when there is no enclosing class path to take ancestors of.
+    # Step 2's rung on its own: nil when there is no enclosing class path to take ancestors of, and
+    # {MIXIN_ANCESTRY_STOP} where an RBS-only mixin's ancestry may own the name.
+    #
+    # Issue #1698 — an entry that stands for an RBS-only mixin ({.external_constant_owner}) is skipped where `self`
+    # is a class object: a `class << self` body and a `def` in it run under the singleton class's cref, whose
+    # ancestors are not the class's ([#1305](https://github.com/rigortype/rigor/issues/1305)), and the scope does
+    # not tell such a body from a `def self.m` or the class body. Skipping keeps the answer this rung gave before
+    # #1698 there.
     def ancestor_constant_type(name, scope, prefix, shadows)
       return nil if prefix.nil? || prefix.empty?
 
-      agreed_ancestor_hit(prefix, scope) { |entry| constant_type_at("#{entry}::#{name}", scope, shadows) }
+      class_object_self = scope.self_type.is_a?(Type::Singleton)
+      agreed_ancestor_hit(prefix, scope) do |entry|
+        external = !known_project_namespace?(entry, scope)
+        next nil if external && (class_object_self || ancestry_unknown_before?(prefix, entry, scope))
+
+        candidate = ->(owner) { constant_type_at("#{owner}::#{name}", scope, shadows) }
+        hit = candidate.call(entry)
+        next hit if hit
+
+        MIXIN_ANCESTRY_STOP if mixin_ancestry_stop?(entry, scope, external, &candidate)
+      end
     end
     private_class_method :ancestor_constant_type
 
@@ -264,8 +295,9 @@ module Rigor
       prefix = enclosing_class_path(scope)
       return nil if prefix.nil? || prefix.empty?
 
-      first_constant_hit(peeled_nesting(prefix), name, scope, shadows) ||
-        ancestor_constant_type(name, scope, prefix, shadows)
+      hit = first_constant_hit(peeled_nesting(prefix), name, scope, shadows) ||
+            ancestor_constant_type(name, scope, prefix, shadows)
+      hit.equal?(MIXIN_ANCESTRY_STOP) ? nil : hit
     end
     private_class_method :caller_derived_constant_type
 

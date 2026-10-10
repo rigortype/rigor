@@ -118,17 +118,28 @@ module Rigor
 
     # {.agreed_ancestor_hit} over the budget-bounded scope lists: the first answer where
     # `Scope::ResolutionChain#settle` lets the chain stand, and otherwise the breadth-first order's.
+    #
+    # Issue #1698 — the path walk reads the project entries only: an RBS-only mixin's own ancestry is not on the
+    # chain, so the rung that reads such a mixin also stops behind it ({.mixin_ancestry_stop?}), and this
+    # walk keeps the answer it gave before.
     def bounded_agreed_hit(class_name, scope, &)
       scopes, chain = ancestor_constant_worlds(class_name, scope)
-      owner, hit = first_ancestor_hit(bounded(scopes), &)
+      owner, hit = first_ancestor_hit(bounded(project_scopes(scopes, scope)), &)
       verdict = chain.settle(scope, owner, owner: owner) do |retro|
-        first_ancestor_hit(bounded(constant_scopes_of(retro, class_name)), &)&.first
+        first_ancestor_hit(bounded(project_scopes(constant_scopes_of(retro, class_name, scope), scope)), &)&.first
       end
       return hit if verdict == :chain
 
       first_ancestor_hit(bounded(master_constant_scopes(class_name, scope)), &)&.last
     end
     private_class_method :bounded_agreed_hit
+
+    def project_scopes(scopes, scope)
+      return scopes if scopes.all? { |name| known_project_namespace?(name, scope) }
+
+      scopes.select { |name| known_project_namespace?(name, scope) }
+    end
+    private_class_method :project_scopes
 
     # How many of {.ancestor_constant_scopes}' entries one segment may consult, under
     # `Scope::ANCESTOR_WALK_LIMIT` — the budget `Scope`'s method lookup already spends on this same

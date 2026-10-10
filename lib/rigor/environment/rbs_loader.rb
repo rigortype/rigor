@@ -1913,6 +1913,69 @@ module Rigor
         false
       end
 
+      # Issue #1698 — the modules and classes `name`'s RBS declarations place in its ancestry, read from the
+      # declarations themselves rather than through the definition builder, so a declaration whose definition
+      # fails to build (a missing mixin, a superclass mismatch) still yields what it declares: each declaration's
+      # `include` / `prepend` members and a class's superclass, followed through the other RBS-declared modules
+      # and classes they name, `::`-stripped and without `name` itself. `[names, complete]`: `complete` is false
+      # when a name on the way is not an RBS class or module (an alias, an undeclared mixin), when the walk
+      # passes 64 names, or when the environment is unavailable; `names` is then what was read so far. Interface
+      # includes own no constants and are skipped. Memoised per loader.
+      def declared_ancestry(name)
+        memo = (@state[:declared_ancestry] ||= {})
+        key = name.to_s.delete_prefix("::")
+        memo[key] ||= build_declared_ancestry(key).freeze
+      end
+
+      def build_declared_ancestry(key)
+        environment = env
+        return [[].freeze, false] if environment.nil?
+
+        names = []
+        complete = true
+        pending = [key]
+        until pending.empty?
+          current = pending.shift
+          entry = environment.class_decls[parse_type_name(current)]
+          if entry.nil?
+            complete = false
+            next
+          end
+          declared_parents(entry).each do |parent|
+            next if parent == key || names.include?(parent)
+
+            names << parent
+            pending << parent
+          end
+          next unless names.size > 64
+
+          complete = false
+          break
+        end
+        [names.freeze, complete]
+      rescue ::RBS::BaseError
+        [[].freeze, false]
+      end
+      private :build_declared_ancestry
+
+      def declared_parents(entry)
+        self.class.entry_declarations(entry).flat_map do |decl|
+          parents = decl.respond_to?(:members) ? decl.members.filter_map { |member| mixin_parent(member) } : []
+          superclass = decl.respond_to?(:super_class) ? decl.super_class : nil
+          parents << superclass.name.to_s.delete_prefix("::") if superclass
+          parents
+        end
+      end
+      private :declared_parents
+
+      def mixin_parent(member)
+        return nil unless member.is_a?(::RBS::AST::Members::Include) || member.is_a?(::RBS::AST::Members::Prepend)
+        return nil if member.name.interface?
+
+        member.name.to_s.delete_prefix("::")
+      end
+      private :mixin_parent
+
       # Yields every known class / module / alias name (top-level prefixed) currently loaded into the
       # environment. The cache producer that materialises the known-name set uses this so it never recurses
       # back through {#class_known?}.

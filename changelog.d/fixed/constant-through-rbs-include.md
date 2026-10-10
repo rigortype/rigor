@@ -1,0 +1,1 @@
+- **[engine]** A constant a class reaches through a module it includes or prepends now resolves when only RBS declares the module, so `Segtree` inside a class that writes `include AcLibraryRb` reads `AcLibraryRb::Segtree` instead of `Dynamic[top]` ([#1698](https://github.com/rigortype/rigor/issues/1698), [#1755](https://github.com/rigortype/rigor/pull/1755)).

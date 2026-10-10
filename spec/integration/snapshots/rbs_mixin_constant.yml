@@ -1,0 +1,9 @@
+---
+locals:
+  shadowed: Dynamic[top]
+  sides: Dynamic[top]
+  square: Dynamic[top]
+assertions:
+  '1': Shapes::Square
+  '2': Integer
+  '3': '"lexical"'

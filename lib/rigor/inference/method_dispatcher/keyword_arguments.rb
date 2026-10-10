@@ -41,13 +41,16 @@ module Rigor
         # union-typed keyword values (`headers: bool` stands for `headers: true` and `headers: false`, and so does a
         # `Dynamic[bool]`, which the #521 join produces), or nil when that is more than {DISTRIBUTION_LIMIT} lists. A
         # precise union value selects per member at runtime, so an answer that holds for the call must hold for every
-        # member (#1737). Without a keyword hash, or with no union value, the one list.
-        def distributions(arg_types, keywords_last)
+        # member (#1737). Only a key that discriminates between `method_types` ({.discriminating?}) splits (#1779):
+        # every overload reads any other key's members alike, so splitting it only multiplies the lists toward the
+        # limit (`(a: Symbol, b: Symbol)` with two three-member values made nine). Without a keyword hash, or with no
+        # discriminating union value, the one list, `arg_types` itself.
+        def distributions(arg_types, keywords_last, method_types)
           keywords = keywords_last && arg_types.last
           return [arg_types] unless keywords.is_a?(Type::HashShape)
-          return [arg_types] if keywords.pairs.each_value.none? { |value| union_members(value) }
 
-          choices = keywords.pairs.map { |name, value| [name, union_members(value) || [value]] }
+          choices = split_choices(keywords, method_types)
+          return [arg_types] if choices.nil?
           return nil if choices.reduce(1) { |count, (_, members)| count * members.size } > DISTRIBUTION_LIMIT
 
           combinations(choices).map do |pairs|
@@ -56,6 +59,40 @@ module Rigor
                      read_only_keys: keywords.read_only_keys, extra_keys: keywords.extra_keys
             )
             arg_types[0...-1] + [shape]
+          end
+        end
+
+        # Each key of `keywords` with the values its lists take: a discriminating union value's members, any other
+        # value whole. Nil when no value splits.
+        def split_choices(keywords, method_types)
+          split = false
+          choices = keywords.pairs.map do |name, value|
+            members = union_members(value)
+            next [name, [value]] unless members && discriminating?(name, method_types)
+
+            split = true
+            [name, members]
+          end
+          choices if split
+        end
+
+        # Whether the members of `name`'s value may select different overloads among `method_types`: the overloads
+        # that take the key (by name or through `**rest`) declare it with different types (`headers: true` in one,
+        # `?headers: false` in another). Where they all declare one type, a member it rejects is rejected by every
+        # overload, so the split only adds lists: four `flag: bool` keywords alone made sixteen. An overload that
+        # declares no keywords reads the hash positionally, and one that declares others but not this key rejects it
+        # whatever its value, so neither tells the members apart.
+        def discriminating?(name, method_types)
+          first = nil
+          method_types.any? do |method_type|
+            fun = method_type.type
+            next false unless declares?(fun)
+
+            type = (fun.required_keywords[name] || fun.optional_keywords[name] || fun.rest_keywords)&.type
+            next false if type.nil?
+
+            first ||= type
+            type != first
           end
         end
 

@@ -54,6 +54,15 @@ RSpec.describe "Keyword arguments in overload selection (#1727)", type: :runner 
                           | (String s) -> String
         def ret_block: (headers: true) { (Integer) -> void } -> Symbol
                      | (?headers: false) { (Integer) -> void } -> Integer
+        def three: (a: Symbol, b: Symbol) -> Integer
+                 | (String) -> String
+        def sym3: () -> (:x | :y | :z)
+        def flags: (a: bool, b: bool, c: bool, d: bool) -> Integer
+                 | (String) -> String
+        def three_block: (a: Symbol, b: Symbol) { (Integer) -> void } -> void
+                       | (String) { (String) -> void } -> void
+        def mixed: (headers: true, a: Symbol, b: Symbol) -> Symbol
+                 | (?headers: false, a: Symbol, b: Symbol) -> Integer
       end
     RBS
   end
@@ -214,6 +223,33 @@ RSpec.describe "Keyword arguments in overload selection (#1727)", type: :runner 
     expect(dumped_types(<<~RUBY)).to eq(["Integer", "Integer | Symbol"])
       dump_type(p.hash_or_string(a: p.wide_value, b: p.wide_value))
       dump_type(p.ret_block(headers: p.flag_value) { |n| n })
+    RUBY
+  end
+
+  # #1779 — only a key whose declarations differ across the overloads that take it, or that one of them value-pins,
+  # splits. `a:` and `b:` are `Symbol` wherever declared, so their members select alike and stay whole: splitting them
+  # made nine lists (sixteen for four `bool` keywords), past the limit, and the return `Dynamic[top]`.
+  it "splits only the keyword values that discriminate between overloads" do
+    expected = ["Integer", "Integer", "Integer | Symbol", "Integer | Symbol"]
+    expect(dumped_types(<<~RUBY)).to eq(expected)
+      dump_type(p.three(a: p.sym3, b: p.sym3))
+      dump_type(p.flags(a: p.flag_value, b: p.flag_value, c: p.flag_value, d: p.flag_value))
+      dump_type(p.ret(headers: p.flag_value))
+      dump_type(p.mixed(headers: p.flag_value, a: p.sym3, b: p.sym3))
+    RUBY
+  end
+
+  it "binds block parameters past what a split of every union keyword value would allow" do
+    expect(dumped_types(<<~RUBY)).to eq(%w[Integer])
+      p.three_block(a: p.sym3, b: p.sym3) { |n| dump_type(n) }
+    RUBY
+  end
+
+  # A call no overload genuinely takes, with no value split, selects as before #1746: the incomplete stdlib RBS
+  # declares no overload with both a limit and `by:`, and the first-overload fallback answers the sequence.
+  it "keeps the fallback answer of an unsplit keyword call no overload genuinely takes" do
+    expect(dumped_types(<<~RUBY)).to eq(%w[Enumerator::ArithmeticSequence])
+      dump_type(1.step(10, by: (rand > 0.5 ? 1 : 2.0)))
     RUBY
   end
 

@@ -1053,7 +1053,8 @@ module Rigor
           # `Dynamic[top]` rather than lend the first-overload fallback to the join. A precise union value joins the
           # returns as a union; a `Dynamic` value keeps the answer `Dynamic`, as the #521 join does, since the split
           # dropped the value's `nil` and the untyped input behind it. A keyword hash with no union value answers
-          # {NOT_DISTRIBUTED}, and the call selects as before.
+          # {NOT_DISTRIBUTED}, and the call selects as before; so does one whose values do not split (#1779) and that no
+          # overload genuinely takes.
           NOT_DISTRIBUTED = Object.new.freeze
           private_constant :NOT_DISTRIBUTED
 
@@ -1074,6 +1075,7 @@ module Rigor
             selector_self = self_type.is_a?(Type::Dynamic) ? self_type.static_facet : self_type
             per_list = distributed_keyword_matches(method_definition, args, selector_self, instance_type, type_vars,
                                                    !block_type.nil?, environment)
+            return per_list if per_list.equal?(NOT_DISTRIBUTED)
             return Type::Combinator.untyped if per_list.nil?
 
             overloads = per_list.flat_map(&:last).uniq
@@ -1093,16 +1095,19 @@ module Rigor
           end
 
           # Each distribution list with its genuine matches, or nil past the distribution limit or when a list has
-          # none.
+          # none. When no value split (no union value's key discriminates between the overloads, #1779), the one list
+          # is the call as given, and one with no genuine match answers {NOT_DISTRIBUTED}: the call then selects as it
+          # did before #1746, first-overload fallback included (`1.step(10, by: (c ? 1 : 2.0))` is
+          # `Enumerator::ArithmeticSequence` through the incomplete stdlib RBS).
           def distributed_keyword_matches(method_definition, args, selector_self, instance_type, type_vars,
                                           block_required, environment)
-            distributions = KeywordArguments.distributions(args, true)
+            distributions = KeywordArguments.distributions(args, true, method_definition.method_types)
             return nil if distributions.nil?
 
             distributions.map do |arg_types|
               matches = keyword_matches(method_definition, arg_types, selector_self, instance_type, type_vars,
                                         block_required, environment)
-              return nil if matches.empty?
+              return arg_types.equal?(args) ? NOT_DISTRIBUTED : nil if matches.empty?
 
               [arg_types, matches]
             end
@@ -1827,7 +1832,7 @@ module Rigor
 
           def agreed_keyword_block_params(method_definition, args, self_type, selector_self, instance_type, type_vars,
                                           environment)
-            distributions = KeywordArguments.distributions(args, true)
+            distributions = KeywordArguments.distributions(args, true, method_definition.method_types)
             return [] if distributions.nil?
 
             candidates = []

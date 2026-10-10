@@ -126,8 +126,10 @@ module Rigor
 
       def collect_diagnostics(configuration, _options)
         cache_store = Cache::Store.new(root: configuration.cache_path)
-        # IMPORTANT: do NOT activate the existing baseline when generating a fresh one — otherwise the new file records
-        # the post-filter (silenced) diagnostic set, which is empty after a successful first run.
+        # The generating run is the loaded configuration with `baseline:` off (#1777): every other key shapes the
+        # diagnostic set `rigor check` reports, so it must shape the recorded one too. The baseline filter itself is
+        # applied CLI-side by `check` (`CheckCommand#apply_baseline_filter`), never by the runner; clearing it here is
+        # defensive.
         configuration_for_generation = override_configuration_baseline_off(configuration)
         runner = Analysis::Runner.new(
           configuration: configuration_for_generation,

@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "builtins/cruby_definers"
+
 module Rigor
   module Inference
     # ADR-121 WD2 (issue #1664) — which in-effect refinement, if any, answers a call on an instance of a class. The
@@ -40,9 +42,23 @@ module Rigor
 
       # Issue #1740 — is `method_name` on an instance of `class_name` provably answered by the receiver's own lookup:
       # the walk reaches a definer before any refinement in effect in `list`? False wherever {.winner}'s nil rests on
-      # anything weaker (no readable ancestry, no resolvable refined class, a project mixin of unknown position).
+      # anything weaker: no readable ancestry, no resolvable refined class, a project mixin of unknown position, a
+      # definer {#own_definition} cannot prove, or an in-effect module whose refine bodies the project does not show
+      # (a gem's `using GemRef`, whose `refine String` may define the name below the definer).
       def own_method_answers?(scope, class_name, method_name, list)
+        return false unless refinements_visible?(scope.discovered_refinements, list)
+
         decision(scope, class_name, method_name, list) == SHADOWED
+      end
+
+      # Is every module in `list` one some discovered refine body belongs to? {InEffectRefinements::UNKNOWN} may be
+      # any module, so it is not.
+      def refinements_visible?(refinements, list)
+        return false if list.include?(InEffectRefinements::UNKNOWN)
+
+        refining = Set.new
+        refinements.each_value { |methods| methods.each_value { |modules| refining.merge(modules) } }
+        list.all? { |entry| refining.include?(entry) }
       end
 
       # {.winner}, with the nil that a definer reached first answers kept apart as {SHADOWED}.
@@ -137,23 +153,18 @@ module Rigor
         nil
       end
 
-      # {SHADOWED} for the definer at `levels[index]`'s entry `position`, or nil when the definition it stops at may
-      # be an RBS redeclaration of an inherited method. Core RBS redeclares some (`Integer#quo`, `Float#polar`,
-      # `Time#<`), whose CRuby owner is an ancestor, so a refinement of that ancestor does answer the call
-      # (`refine Numeric do def quo(a, b, c)` makes `1.quo(1, 2, 3)` return 1 on Ruby 4.0.5). A project definer, or an
-      # RBS declaration no later entry also declares, is the method Ruby finds.
+      # {SHADOWED} for the definer at `levels[index]`'s entry `position`, or nil when the walk cannot prove Ruby finds
+      # the method there. A project `def`, `attr_*` or `define_method` is the method Ruby finds. An RBS declaration is
+      # not: core RBS redeclares some inherited methods on a subclass (`Integer#quo`, `File#to_path`, whose CRuby owners
+      # are `Numeric` and `IO`, so `refine Numeric do def quo(a, b, c)` makes `1.quo(1, 2, 3)` return 1 on Ruby 4.0.5)
+      # and declares some CRuby no longer defines (`Process::Status#&`). It counts only where the offline CRuby
+      # catalogue ({Builtins::CRubyDefiners}) lists the method on that class.
       def own_definition(scope, levels, index, position, method_name)
         entry = levels[index][1][position]
         return SHADOWED if scope.user_def_for(entry, method_name)
         return SHADOWED if scope.discovered_method?(entry, method_name, :instance)
 
-        later = levels[index][1].drop(position + 1) + levels.drop(index + 1).flat_map { |_level, names| names }
-        later.any? { |name| declares?(scope, name, method_name) } ? nil : SHADOWED
-      end
-
-      def declares?(scope, name, method_name)
-        definition = ExternalAncestorResolution.method_definition(name, method_name, :instance, scope: scope)
-        ExternalAncestorResolution.declared_on_class?(definition, name)
+        Builtins::CRubyDefiners.defines?(entry, method_name) ? SHADOWED : nil
       end
 
       def targeted_after?(levels, index, targets)
@@ -217,7 +228,8 @@ module Rigor
         return true if scope.user_def_for(name, method_name)
         return true if scope.discovered_method?(name, method_name, :instance)
 
-        declares?(scope, name, method_name)
+        definition = ExternalAncestorResolution.method_definition(name, method_name, :instance, scope: scope)
+        ExternalAncestorResolution.declared_on_class?(definition, name)
       end
     end
   end

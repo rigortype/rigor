@@ -875,8 +875,9 @@ module Rigor
         # method the receiver's class (or a nearer ancestor) defines before it consults an ancestor's refinement, so a
         # refinement of `Object` does not replace `String#center`. The typed arm's precedence walk decides it
         # ({Inference::RefinedDispatch.own_method_answers?}) over the in-effect list the typer reads: only a walk that
-        # provably reaches the receiver's own definer first lets the two rules report. An unreadable ancestry, an
-        # unresolvable refined class or a list that may hold any refinement keeps the decline.
+        # provably reaches the receiver's own definer first lets the two rules report; whatever it cannot prove (an
+        # unreadable ancestry, an RBS-only definer the CRuby catalogue does not confirm, an in-effect module whose
+        # refine bodies are not visible) keeps the decline.
         def refined_redefinition_in_effect?(class_name, call_node, scope, kind, lexical_sites)
           return false unless refined_method_in_effect?(class_name, call_node, scope, kind, lexical_sites)
 

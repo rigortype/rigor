@@ -1,0 +1,1 @@
+- **[engine]** `rigor unused` now counts references made from class bodies outside the owned set, such as `config/application.rb`, initializers, migrations, test classes and reopened gem classes, as file-level code of their file, so a class used only from there is no longer listed as a candidate. ([#1748](https://github.com/rigortype/rigor/pull/1748))

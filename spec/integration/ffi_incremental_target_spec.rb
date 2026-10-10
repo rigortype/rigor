@@ -121,6 +121,38 @@ RSpec.describe "rigor check --incremental over rigor-ffi target detection" do
       expect(rules(out)).to eq(rules(check("--no-cache").first))
     end
 
+    # The extconf.rb glob records which files match, not their stat tuples: a touch (a checkout, a restored CI
+    # cache) leaves both caches serving, and an edit reaches them through the read_file row of the match.
+    context "with an extconf.rb that does not call FFX.create_makefile" do
+      def prime_both
+        FileUtils.mkdir_p("ext/old")
+        File.write("ext/old/extconf.rb", "require \"mkmf\"\ncreate_makefile(\"old\")\n")
+        prime("--incremental", config: "exclude:\n  - \"**/ext/**\"\n")
+        check
+        check
+      end
+
+      it "keeps serving both run-result caches when the extconf.rb is only touched" do
+        prime_both
+        File.utime(Time.now + 120, Time.now + 120, "ext/old/extconf.rb")
+        allow(Rigor::Analysis::IncrementalSession).to receive(:new).and_call_original
+        allow(Rigor::Analysis::Runner).to receive(:new).and_call_original
+
+        expect(check("--incremental")[1]).to include("--incremental warm")
+        expect(Rigor::Analysis::IncrementalSession).not_to have_received(:new)
+        check
+        expect(Rigor::Analysis::Runner).not_to have_received(:new)
+      end
+
+      it "drops both once the extconf.rb's content flips to FFX.create_makefile" do
+        prime_both
+        File.write("ext/old/extconf.rb", "require \"mkmf\"\nFFX.create_makefile(\"old\")\n")
+
+        expect(rules(check("--incremental").first)).to include("ffx.unsupported-callback")
+        expect(rules(check.first)).to include("ffx.unsupported-callback")
+      end
+    end
+
     it "is still served from the slot, with no analysis, while the target's inputs are unchanged" do
       prime("--incremental")
       allow(Rigor::Analysis::IncrementalSession).to receive(:new).and_call_original

@@ -188,27 +188,51 @@ module Rigor
       # @param path — project directory; relative paths expand against the working directory
       # @return the absolute paths directly under `path` in `Dir.glob` order; empty when not a directory
       def list_directory(path)
-        glob(path, "*")
+        absolute = File.absolute_path(path.to_s)
+        entries = Dir.glob(File.join(absolute, "*"))
+        unless @policy.allow_read?(absolute)
+          record_refusal(absolute)
+          return entries
+        end
+
+        record_glob_entry(absolute, "*")
+        entries
       end
 
-      # Issue #1652 — {#list_directory} for any `Dir.glob` pattern under `root`, `**` included. Returns the
-      # matching paths and records one {Cache::Descriptor::GlobEntry} over `root` and `pattern`, so a match that
-      # appears, disappears or is edited reads stale, in a subdirectory created after the read too. A listing
-      # row cannot stand in for a recursive glob: it covers the files directly under its directory, not a
-      # subdirectory added beside them. The policy gates recording, not the answer, as in {#list_directory}.
+      # Issue #1652 — the MEMBERSHIP fingerprint of a `Dir.glob` pattern under `root`, `**` included. Returns the
+      # matching paths and records one `:names` {Cache::Descriptor::GlobEntry} over `root` and `pattern`: the row
+      # reads stale when a match appears or disappears, in a subdirectory created after the read too, and NOT
+      # when a match's bytes or stat tuple move. A caller whose answer depends on a match's content MUST
+      # {#read_file} each match it reads; that row carries the edit. A stat signature here would read stale on
+      # every `touch`, checkout or restored CI cache, though the content the caller read is unchanged (#979's
+      # reasoning). {#list_directory} keeps its `:stat` listing row.
+      #
+      # The pattern must stay under `root`: a `..` segment raises {AccessDeniedError} (`:read_outside_scope`),
+      # since the policy is checked against `root` alone. Out of policy, `root` is globbed truthfully and
+      # contributes no row, as in {#list_directory}.
       #
       # @param root — project directory; relative paths expand against the working directory
       # @param pattern — a `Dir.glob` pattern relative to `root`, such as `"ext/**/extconf.rb"`
       # @return the absolute matching paths in `Dir.glob` order
       def glob(root, pattern)
         absolute = File.absolute_path(root.to_s)
-        entries = Dir.glob(File.join(absolute, pattern.to_s))
+        pattern = pattern.to_s
+        if pattern.split(%r{[/\\]}).include?("..")
+          raise AccessDeniedError.new(
+            "plugin #{@plugin_id.inspect} cannot glob #{pattern.inspect} under #{absolute.inspect}: " \
+            "a `..` segment leaves the root the trusted-read scope was checked against",
+            reason: :read_outside_scope,
+            resource: File.join(absolute, pattern)
+          )
+        end
+
+        entries = Dir.glob(File.join(absolute, pattern))
         unless @policy.allow_read?(absolute)
           record_refusal(absolute)
           return entries
         end
 
-        record_glob_entry(absolute, pattern.to_s)
+        record_glob_entry(absolute, pattern, mode: :names)
         entries
       end
 
@@ -365,11 +389,12 @@ module Rigor
         self.class.attribute(entry)
       end
 
-      # ADR-45 WD1c (#629) — the listing row for {#list_directory}, deduplicated per (root, pattern) slot.
+      # ADR-45 WD1c (#629) — the listing row for {#list_directory} (and the `:names` row for {#glob}),
+      # deduplicated per (root, pattern, mode) slot.
       # Recomputed on each call rather than `||=`d, so a directory listed again after a mid-run mutation
       # carries the signature of the state the LAST reader saw.
-      def record_glob_entry(root, pattern)
-        entry = Cache::Descriptor::GlobEntry.compute(root: root, pattern: pattern)
+      def record_glob_entry(root, pattern, mode: :stat)
+        entry = Cache::Descriptor::GlobEntry.compute(root: root, pattern: pattern, mode: mode)
         @mutex.synchronize { @glob_entries[entry.slot_key] = entry }
         self.class.attribute(entry)
       end

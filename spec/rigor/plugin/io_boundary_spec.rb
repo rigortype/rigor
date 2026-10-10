@@ -236,18 +236,56 @@ RSpec.describe Rigor::Plugin::IoBoundary do
   end
 
   describe "#glob (#1652)" do
-    it "returns the matches and records one glob row, stale once a match appears in a new subdirectory" do
+    let(:old_extconf) { File.join(tmpdir, "ext/a/extconf.rb") }
+
+    before do
       FileUtils.mkdir_p(File.join(tmpdir, "ext/a"))
-      File.write(File.join(tmpdir, "ext/a/extconf.rb"), "a")
+      File.write(old_extconf, "a")
+    end
 
-      expect(boundary.glob(tmpdir, "ext/**/extconf.rb")).to eq([File.join(tmpdir, "ext/a/extconf.rb")])
+    it "returns the matches and records one :names glob row" do
+      expect(boundary.glob(tmpdir, "ext/**/extconf.rb")).to eq([old_extconf])
       globs = boundary.cache_descriptor.globs
-      expect(globs.map { |row| [row.root, row.pattern] }).to eq([[File.absolute_path(tmpdir), "ext/**/extconf.rb"]])
+      expect(globs.map { |row| [row.root, row.pattern, row.mode] })
+        .to eq([[File.absolute_path(tmpdir), "ext/**/extconf.rb", :names]])
       expect(boundary.cache_descriptor.fresh?).to be(true)
+    end
 
+    it "reads stale once a match appears in a new subdirectory" do
+      boundary.glob(tmpdir, "ext/**/extconf.rb")
       FileUtils.mkdir_p(File.join(tmpdir, "ext/b/deep"))
       File.write(File.join(tmpdir, "ext/b/deep/extconf.rb"), "b")
+
       expect(boundary.cache_descriptor.fresh?).to be(false)
+    end
+
+    it "reads stale once a match disappears" do
+      boundary.glob(tmpdir, "ext/**/extconf.rb")
+      File.delete(old_extconf)
+
+      expect(boundary.cache_descriptor.fresh?).to be(false)
+    end
+
+    # The content is the caller's #read_file row's to carry; a stat row here would miss on every checkout.
+    it "stays fresh when a match is touched or rewritten in place" do
+      boundary.glob(tmpdir, "ext/**/extconf.rb")
+      File.utime(Time.now + 60, Time.now + 60, old_extconf)
+      File.write(old_extconf, "changed")
+
+      expect(boundary.cache_descriptor.fresh?).to be(true)
+    end
+
+    it "keeps #list_directory's :stat listing row" do
+      boundary.list_directory(File.join(tmpdir, "ext/a"))
+
+      expect(boundary.cache_descriptor.globs.map(&:mode)).to eq([:stat])
+    end
+
+    it "refuses a pattern with a `..` segment and records nothing" do
+      expect { boundary.glob(File.join(tmpdir, "ext"), "../*") }
+        .to raise_error(Rigor::Plugin::AccessDeniedError) { |e| expect(e.reason).to eq(:read_outside_scope) }
+      expect { boundary.glob(tmpdir, "ext/**/../../*") }.to raise_error(Rigor::Plugin::AccessDeniedError)
+      expect(boundary.cache_descriptor.globs).to be_empty
     end
 
     it "answers truthfully outside the trusted-read scope and records nothing there" do

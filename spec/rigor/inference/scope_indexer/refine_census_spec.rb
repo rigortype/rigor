@@ -118,6 +118,33 @@ RSpec.describe Rigor::Inference::ScopeIndexer, ".refine_census" do
       "module M\n  [1].each { refine(String) { def shout = 1 } }\nend\n",
       %i[recorded], { "M::String" => { shout: ["M"] }, "String" => { shout: ["M"] } }
     ],
+    # Ruby 4.0.5: `module Helper; define_method(:setup) { refine(String) { … } }; end; module N; extend Helper; setup;
+    # end; using N` refines for `N`, so a `define_method` block on the instance side is charged to the wildcard.
+    "a refine in a define_method block" => [
+      "module Helper\n  define_method(:setup) { refine(String) { def center(a, b, c) = 1 } }\nend\n",
+      %i[targets_wildcard], { any => { any => [any] } }
+    ],
+    "a refine in a define_singleton_method block" => [
+      "module N\n  define_singleton_method(:setup) { refine(String) { def center(a, b, c) = 1 } }\nend\n",
+      %i[targets_wildcard], { any => { any => ["N"] } }
+    ],
+    # Ruby 4.0.5: `Ext.define { refine(String) { … } }` at the top level, with `def self.define(&blk) =
+    # module_eval(&blk)`, refines for `Ext`; at the top level a block may run under any module.
+    "a refine in a top-level block an eval may run" => [
+      "module Ext\n  def self.define(&blk) = module_eval(&blk)\nend\nExt.define do\n  " \
+      "refine(String) { def center(a, b, c) = 1 }\nend\n",
+      %i[targets_wildcard], { any => { any => [any] } }
+    ],
+    # Ruby 4.0.5: `Registry.refining(Ext) { refine(String) { … } }` in `module Setup`, with `def self.refining(mod,
+    # &blk) = mod.module_eval(&blk)`, refines for `Ext`, not `Setup`.
+    "a refine in a block another module's DSL may run" => [
+      "module Setup\n  Registry.refining(Ext) { refine(String) { def center(a, b, c) = 1 } }\nend\n",
+      %i[targets_wildcard], { any => { any => [any] } }
+    ],
+    "a refine in a lambda" => [
+      "module M\n  BODY = -> { refine(String) { def center(a, b, c) = 1 } }\nend\n",
+      %i[targets_wildcard], { any => { any => [any] } }
+    ],
     "a refine in an implicit instance_eval block" => [
       "module M\n  instance_eval { refine(String) { def shout = 1 } }\nend\n",
       %i[recorded], { "M::String" => { shout: ["M"] }, "String" => { shout: ["M"] } }

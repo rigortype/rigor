@@ -3278,10 +3278,12 @@ module Rigor
       # ADR-121 WD7 — `census`, when an Array, collects `[start offset, outcome]` for every `refine`-shaped node the
       # walk accounts for ({ScopeIndexer.refine_census}); `refine_text` memoises whether the file's text names
       # `refine` at all, so a file that does not skips every census scan; `literal_seen` holds the offsets of the
-      # refine literals a call's arguments already accounted for.
+      # refine literals a call's arguments already accounted for; `refine_self` is `[owner prefix, module]` while the
+      # walk is inside a block whose `self` it cannot keep ({ScopeIndexer.block_refine_self}): a `refine` there under
+      # that owner prefix is charged to `module` instead.
       MethodTables = Struct.new(:existence, :envelopes, :refinements, :certainty, :certain, :possible,
                                 :contested_envelopes, :contested_def_nodes, :root, :in_effect, :census,
-                                :refine_text, :literal_seen) do
+                                :refine_text, :literal_seen, :refine_self) do
         # {ScopeIndexer.module_refine_target} against this tree's {InEffectRefinements}.
         def refine_target_of(node)
           return nil if ScopeIndexer.refine_target(node).nil?
@@ -3309,6 +3311,13 @@ module Rigor
         def see_literal(node) = (self.literal_seen ||= Set.new) << node.location.start_offset
 
         def literal_seen?(node) = !literal_seen.nil? && literal_seen.include?(node.location.start_offset)
+
+        # The module a block the walk is inside charges a `refine` to, for code whose owner prefix is `owner_prefix`,
+        # or nil where no such block is open (an enclosing declaration or eval opened a `self` of its own).
+        def refine_self_at(owner_prefix)
+          value = refine_self
+          value[1] if value && value[0] == owner_prefix
+        end
 
         # Sets {#certain} for the contribution `node` and returns the tables.
         def at(node)
@@ -3431,6 +3440,16 @@ module Rigor
         census_scan(body, refining.empty? ? REFINEMENT_WILDCARD : refining, qualified_prefix, tables, refine_body: true)
       end
 
+      # ADR-121 WD7 — a literal-target `refine` inside a block whose `self` the walk does not keep
+      # ({#block_refine_self}): a targets-wildcard for the module the block charges, as a `refine` in a `def` records
+      # ({#census_def}). The body is not walked any further, so the census scans it here.
+      def record_block_refine(node, owner, qualified_prefix, tables)
+        tables.account(node, :targets_wildcard)
+        record_targets_wildcard(tables, owner)
+        body = node.block.body
+        census_scan(body, owner, qualified_prefix, tables, refine_body: true) if body
+      end
+
       # ADR-121 WD7 — a `refine`-shaped call the canonical arm ({#refine_target}) does not take: on another receiver
       # (`Module#refine` is private, so it raises), where `self` is a class (#1689's DSL), with no literal block (no
       # block raises, and so does a Proc passed as one), or with a target the walk cannot name (`refine(k)`,
@@ -3441,6 +3460,9 @@ module Rigor
         outcome =
           if tables.class_body_refine?(node) then :dsl
           elsif !RefineCensus.self_call?(node) || !node.block.is_a?(Prism::BlockNode) then :raises
+          elsif (method_body_owner = tables.refine_self_at(owner_prefix))
+            record_targets_wildcard(tables, method_body_owner)
+            :targets_wildcard
           else
             owner = refining_owner(owner_prefix, def_owner_prefix, singleton_cref)
             owner ? record_unreadable_target(node, owner, tables) : :raises
@@ -3470,6 +3492,54 @@ module Rigor
       # at the top level and wherever `self` cannot be named.
       def literal_self(owner_prefix) = owner_prefix.empty? ? REFINEMENT_WILDCARD : owner_prefix.join("::")
 
+      # {#literal_self}, or the module an enclosing block charges `self` to (`tables.refine_self_at`).
+      def census_self(owner_prefix, tables) = tables.refine_self_at(owner_prefix) || literal_self(owner_prefix)
+
+      DEFINE_METHOD_CALLS = %i[define_method define_singleton_method].to_set.freeze
+      LITERAL_RECEIVERS = [Prism::ArrayNode, Prism::HashNode, Prism::RangeNode, Prism::IntegerNode, Prism::FloatNode,
+                           Prism::StringNode, Prism::InterpolatedStringNode, Prism::SymbolNode].freeze
+      private_constant :DEFINE_METHOD_CALLS, :LITERAL_RECEIVERS
+
+      # ADR-121 WD7 — the module a `refine` inside `node`'s block (or a lambda's body) runs on, when the walk cannot
+      # keep the enclosing `self`, or nil to keep it. A `define_method` / `define_singleton_method` block is a method
+      # body, charged as {#census_def} charges a `def`: the module on the singleton side, the wildcard on the instance
+      # side (any module extending the owner may run it). A block at the top level, a lambda, and the block of any
+      # call that may run it under another `self` (`Ext.define { … }` that `module_eval`s it, a DSL in another
+      # module's body) charge the wildcard. Only a call on a literal (`[String, Symbol].each { |k| refine(k) … }`)
+      # keeps `self`; so do a `refine` call's own block (its body is the refinement) and the `*_eval` / `*_exec` and
+      # `Module.new` blocks, which the walk enters under their own `self`. Once the wildcard, always the wildcard.
+      def block_refine_self(node, owner_prefix, def_owner_prefix, in_singleton_class, current)
+        return REFINEMENT_WILDCARD if current == REFINEMENT_WILDCARD || node.is_a?(Prism::LambdaNode)
+        return nil if node.name == :refine
+        return method_block_refine_self(node, owner_prefix, in_singleton_class) if method_block?(node)
+        return REFINEMENT_WILDCARD if owner_prefix.empty? && def_owner_prefix.nil?
+
+        REFINEMENT_WILDCARD unless LITERAL_RECEIVERS.any? { |klass| node.receiver.is_a?(klass) }
+      end
+
+      def method_block?(node) = DEFINE_METHOD_CALLS.include?(node.name) && RefineCensus.self_call?(node)
+
+      def method_block_refine_self(node, owner_prefix, in_singleton_class)
+        singleton = node.name == :define_singleton_method || in_singleton_class
+        singleton && !owner_prefix.empty? ? owner_prefix.join("::") : REFINEMENT_WILDCARD
+      end
+
+      # Walks `node`'s children, the block (or the lambda's whole body) under `refine_self` charged to `owner`.
+      def walk_refine_self_block(node, owner, owner_prefix, tables)
+        lambda_body = node.is_a?(Prism::LambdaNode)
+        node.rigor_each_child do |child|
+          next yield(child) unless lambda_body || child.equal?(node.block)
+
+          outer = tables.refine_self
+          begin
+            tables.refine_self = [owner_prefix, owner]
+            yield child
+          ensure
+            tables.refine_self = outer
+          end
+        end
+      end
+
       # `{"*" => {"*" => [owner]}}`: some `refine` of `owner` (every module, for the wildcard) is unreadable.
       def record_targets_wildcard(tables, owner)
         tables.refinements = RefineCensus.add_row(tables.refinements || {}, REFINEMENT_WILDCARD, REFINEMENT_WILDCARD,
@@ -3481,6 +3551,7 @@ module Rigor
       # which for a module may be any module extending it, so its `refine` is charged to the wildcard.
       def census_def(node, owner_prefix, singleton, def_owner_prefix, qualified_prefix, tables)
         named = singleton != :unnameable && !owner_prefix.empty? && !def_owner_prefix&.empty? &&
+                tables.refine_self_at(owner_prefix) != REFINEMENT_WILDCARD &&
                 def_singleton?(node, owner_prefix, singleton)
         owner = named ? owner_prefix.join("::") : REFINEMENT_WILDCARD
         node.rigor_each_child { |child| census_scan(child, owner, qualified_prefix, tables) }
@@ -3711,7 +3782,7 @@ module Rigor
             # `owner::Name` instead.
             child_cref = unnameable_decl?(node, self_decl, singleton_cref)
             if node.is_a?(Prism::ClassNode) && node.superclass && methods_acc.mentions_refine?
-              census_scan(node.superclass, literal_self(owner_prefix), qualified_prefix, methods_acc)
+              census_scan(node.superclass, census_self(owner_prefix, methods_acc), qualified_prefix, methods_acc)
             end
             record_declaration_facts(node, child_prefix, methods_acc.at(node)) unless child_cref
             body_prefix = child_cref ? [] : child_prefix
@@ -3795,7 +3866,9 @@ module Rigor
           end
           return
         when Prism::AliasMethodNode, Prism::UndefNode
-          census_scan(node, literal_self(owner_prefix), qualified_prefix, methods_acc) if methods_acc.mentions_refine?
+          if methods_acc.mentions_refine?
+            census_scan(node, census_self(owner_prefix, methods_acc), qualified_prefix, methods_acc)
+          end
           unless def_owner_prefix&.empty? || defs_singleton == :unnameable ||
                  (singleton_cref && owner_prefix.empty?)
             record_alias_or_undef(node, owner_prefix, in_singleton_class || defs_singleton,
@@ -3803,10 +3876,10 @@ module Rigor
           end
           return
         when Prism::SymbolNode
-          census_symbol(node, literal_self(owner_prefix), methods_acc) if methods_acc.mentions_refine?
+          census_symbol(node, census_self(owner_prefix, methods_acc), methods_acc) if methods_acc.mentions_refine?
         when Prism::CallNode
           if methods_acc.mentions_refine?
-            census_literal_arguments(node, literal_self(owner_prefix), qualified_prefix, methods_acc)
+            census_literal_arguments(node, census_self(owner_prefix, methods_acc), qualified_prefix, methods_acc)
           end
           if receiver_eval_call?(node)
             return walk_eval_methods_and_defs(node, qualified_prefix, in_singleton_class, methods_acc,
@@ -3818,6 +3891,10 @@ module Rigor
                                                source_path)
           # Issue #1120 — a refine body's defs go to the refinement table and nowhere else.
           if (target = methods_acc.refine_target_of(node))
+            if (method_body_owner = methods_acc.refine_self_at(owner_prefix))
+              return record_block_refine(node, method_body_owner, qualified_prefix, methods_acc)
+            end
+
             refining = refining_owner(owner_prefix, def_owner_prefix, singleton_cref) || ""
             return record_refinement_defs(node, target, qualified_prefix, refining, methods_acc)
           end
@@ -3834,11 +3911,31 @@ module Rigor
           end
         end
 
+        refine_self = refine_self_block(node, owner_prefix, def_owner_prefix, in_singleton_class, methods_acc)
+        if refine_self
+          return walk_refine_self_block(node, refine_self, owner_prefix, methods_acc) do |child|
+            walk_methods_and_def_nodes(child, qualified_prefix, in_singleton_class, methods_acc, def_nodes_acc,
+                                       source_path, def_owner_prefix, singleton_cref: singleton_cref,
+                                                                      defs_singleton: defs_singleton)
+          end
+        end
+
         node.rigor_each_child do |child|
           walk_methods_and_def_nodes(child, qualified_prefix, in_singleton_class, methods_acc, def_nodes_acc,
                                      source_path, def_owner_prefix, singleton_cref: singleton_cref,
                                                                     defs_singleton: defs_singleton)
         end
+      end
+
+      # ADR-121 WD7 — {#block_refine_self} for a block-carrying call or a lambda in a file that names `refine`, when it
+      # changes the module a `refine` inside is charged to; nil otherwise.
+      def refine_self_block(node, owner_prefix, def_owner_prefix, in_singleton_class, tables)
+        block_owner = (node.is_a?(Prism::CallNode) && node.block.is_a?(Prism::BlockNode)) || node.is_a?(Prism::LambdaNode)
+        return nil unless block_owner && tables.mentions_refine?
+
+        current = tables.refine_self_at(owner_prefix)
+        owner = block_refine_self(node, owner_prefix, def_owner_prefix, in_singleton_class, current)
+        owner unless owner.nil? || owner == current
       end
 
       # {#walk_eval_singleton_defs}'s combined-walk twin: a `*_eval` / `*_exec` block's defs,

@@ -883,6 +883,37 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
       end
     end
 
+    # A `refine` whose `self` is rebound when it runs. Ruby 4.0.5 prints `:dm_extend`, `:top_block` and
+    # `:other_module`: a `define_method` body runs on the module that extends its owner, a top-level block an eval
+    # runs refines for the eval's receiver, and so does a block a DSL in another module's body runs. `plain.rb`, with
+    # no `using`, raises `ArgumentError`.
+    {
+      "a define_method body" => {
+        "lib/m.rb" => "module Helper\n  define_method(:setup) do\n    " \
+                      "refine(String) { def center(a, b, c) = :dm_extend }\n  end\nend\n" \
+                      "module N; extend Helper; setup; end\n",
+        "lib/use.rb" => "using N\n\"x\".center(1, 2, 3)\n"
+      },
+      "a top-level block an eval runs" => {
+        "lib/ext.rb" => "module Ext\n  def self.define(&blk) = module_eval(&blk)\nend\n",
+        "lib/setup.rb" => "Ext.define do\n  refine(String) { def center(a, b, c) = :top_block }\nend\n",
+        "lib/use.rb" => "using Ext\n\"x\".center(1, 2, 3)\n"
+      },
+      "a block another module's DSL runs" => {
+        "lib/registry.rb" => "module Registry\n  def self.refining(mod, &blk) = mod.module_eval(&blk)\nend\n",
+        "lib/m.rb" => "module Ext; end\nmodule Setup\n  Registry.refining(Ext) do\n    " \
+                      "refine(String) { def center(a, b, c) = :other_module }\n  end\nend\n",
+        "lib/use.rb" => "using Ext\n\"x\".center(1, 2, 3)\n"
+      }
+    }.each do |shape, files|
+      it "declines under a `using` of a module refined in #{shape}" do
+        files.each { |path, source| write(path, source) }
+        write("lib/plain.rb", "\"x\".center(1, 2, 3)\n")
+
+        expect(call_rows).to eq([["plain.rb", 1, "call.wrong-arity"]])
+      end
+    end
+
     # Critique F5a. Ruby 4.0.5 prints `:via_alias` (`rb/p4_alias_refine.rb`).
     it "declines under a module that refines through an alias of `refine`" do
       write("lib/m.rb", <<~RUBY)

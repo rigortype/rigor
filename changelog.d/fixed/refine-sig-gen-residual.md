@@ -1,0 +1,1 @@
+- **[engine]** sig-gen no longer emits the defs of a `refine` block as methods of the enclosing module, and a `class << self` body or a `self` held in a local directly in a `refine` block body is no longer checked against the refined class. ([#1766](https://github.com/rigortype/rigor/pull/1766))

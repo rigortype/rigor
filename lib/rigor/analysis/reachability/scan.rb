@@ -170,7 +170,12 @@ module Rigor
             # the OUTER nesting, not inside the body being opened. It is part of `Sub`'s declaration, though, so
             # it is credited to `Sub` (#1720): crediting the enclosing scope left a base nested in a module that
             # is never itself reached unreachable, and rooted a top-level base even when every subclass is dead.
-            record_reference(superclass, nesting, from: fqn) if superclass
+            #
+            # The superclass is WALKED, not only read as a name: `< DelegateClass(Foo)`, `< Struct.new(:a,
+            # Foo::X)` and `< ActiveRecord::Migration[7.1]` are calls whose receiver and arguments name
+            # constants, and reading only a constant node recorded none of them, so `Foo` was a false candidate
+            # (#1733). Its references take the credit a meta-new rvalue's do.
+            walk_owned(superclass, nesting, fqn) if superclass
             includes = node.body ? mixin_names(node.body) : []
             @declarations << Declaration.new(fqn: fqn, path: @path, line: node.location.start_line,
                                              superclass: superclass && Source::ConstantPath.qualified_name(superclass),
@@ -199,9 +204,15 @@ module Rigor
             fqn = record_meta_new(node, nesting)
             return walk(node.value, nesting) if fqn.nil?
 
+            walk_owned(node.value, nesting, fqn)
+          end
+
+          # Walks a declaration's header expression in the outer `nesting` it is evaluated in, crediting the
+          # references in it to the declared `fqn`.
+          def walk_owned(node, nesting, fqn)
             owner = @owner
             @owner = fqn
-            walk(node.value, nesting)
+            walk(node, nesting)
             @owner = owner
           end
 

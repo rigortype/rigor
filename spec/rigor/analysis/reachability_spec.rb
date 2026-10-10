@@ -498,6 +498,54 @@ RSpec.describe Rigor::Analysis::Reachability do
     end
   end
 
+  # Issue #1733 — a superclass that is a call rather than a constant names constants in its receiver and
+  # arguments. Only a constant superclass was ever read, so those were never recorded and every one of them
+  # was a false candidate.
+  describe "a non-constant superclass expression is walked (#1733)" do
+    def report_for(files, roots: [])
+      decls = []
+      refs = []
+      files.each do |path, source|
+        result = Rigor::Analysis::Reachability::Scan.call(path: path, source: source)
+        raise "fixture #{path} did not parse" if result.nil?
+
+        decls.concat(result.declarations)
+        refs.concat(result.references)
+      end
+      Rigor::Analysis::Reachability::Graph.new(declarations: decls, references: refs, root_fqns: roots).report
+    end
+
+    {
+      "DelegateClass(Foo)" => "class Foo; end\nclass Sub < DelegateClass(Foo); end\n",
+      "Struct.new(:a, Foo::X)" => "module Foo\n  X = 1\nend\nclass Sub < Struct.new(:a, Foo::X); end\n",
+      "ActiveRecord::Migration[7.1]" => "module ActiveRecord\n  class Migration; end\nend\n" \
+                                        "class Sub < ActiveRecord::Migration[7.1]; end\n"
+    }.each do |superclass, source|
+      it "reaches what `#{superclass}` names through its reachable subclass" do
+        report = report_for({ "lib/a.rb" => source, "lib/main.rb" => "Sub.new\n" })
+        expect(report.candidates.map(&:fqn)).to be_empty
+      end
+    end
+
+    # The edge leaves the subclass, as a constant superclass's does (#1720): a dead subclass leaves what its
+    # superclass expression names dead too, rather than rooting it from the enclosing scope.
+    it "credits the superclass expression to the subclass" do
+      report = report_for({ "lib/a.rb" => "class Foo; end\nclass Sub < DelegateClass(Foo); end\n",
+                            "lib/main.rb" => "1\n" })
+      expect(report.candidates.map(&:fqn)).to eq(%w[Foo Sub])
+    end
+
+    it "resolves the superclass expression against the outer nesting" do
+      result = Rigor::Analysis::Reachability::Scan.call(path: "lib/a.rb", source: <<~RUBY)
+        module Outer
+          class Sub < DelegateClass(Inner); end
+        end
+      RUBY
+      ref = result.references.find { |r| r.as_written == "Inner" }
+      expect([ref.from, ref.nesting]).to eq(["Outer::Sub", ["Outer"]])
+    end
+  end
+
   # Issue #1732 — a reference written inside a class body declared OUTSIDE `paths:` (an initializer, the
   # Rails `Application`, a spec helper) or in a reopened gem class names a scope that is not a node, so the
   # walk can never start from it. It counts as file-level code of its own file instead, in that file's role.

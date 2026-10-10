@@ -69,7 +69,12 @@ superclass of `class Sub < Base`, and the arguments and block of `Sub = Class.ne
 put the edge to `Base` on `Sub`, while the name still resolves in the outer scope
 ([#1720](https://github.com/rigortype/rigor/issues/1720)). Crediting the enclosing scope
 instead made a base nested in a namespace module unreachable, since the module itself is
-never referenced, and rooted a top-level base even when every subclass was dead. A class
+never referenced, and rooted a top-level base even when every subclass was dead. A
+superclass that is an expression rather than a constant — `DelegateClass(Foo)`,
+`Struct.new(:a, Foo::X)`, `ActiveRecord::Migration[7.1]` — is walked like a meta-new rvalue,
+so every constant in it is part of the header
+([#1733](https://github.com/rigortype/rigor/issues/1733)); reading only a constant superclass
+left those unrecorded, each one a false candidate. A class
 that is not an owned node, either declared outside `paths:` (`config/application.rb`'s
 `Application`, an initializer, a spec helper) or a reopened gem class (WD6), is no node an
 edge can leave. The references in its header and body count as file-level code of their file

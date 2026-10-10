@@ -205,6 +205,7 @@ RSpec.describe "anonymous Class.new block body" do
           p(refine(String) do
             self.import_methods(Helpers)
             self.target
+            self.refined_class
           end)
         end
       RUBY
@@ -246,6 +247,121 @@ RSpec.describe "anonymous Class.new block body" do
         end)
       RUBY
       expect(rules).to include("call.wrong-arity", "call.undefined-method")
+    end
+  end
+
+  # Issue #1759 — the statement form of the #1757 value-position fix: the evaluator enters a refine block under
+  # the refined class's frame, but Ruby runs the block itself on the refinement module, so an explicit `self.`
+  # call in it is not checked against `singleton(String)`. Its defs still run on a String.
+  describe "a refine block in a statement position (#1759)" do
+    it "does not check the block's own self calls against the refined class" do
+      rules = rules_for(<<~RUBY)
+        module Helpers
+          def helper = 1
+        end
+        module Shouting
+          refine(String) do
+            self.import_methods(Helpers)
+            self.target
+            self.refined_class
+          end
+        end
+      RUBY
+      expect(rules).not_to include("call.undefined-method")
+    end
+
+    it "does not check them in a refine block nested in a Module.new body" do
+      rules = rules_for(<<~RUBY)
+        module Helpers
+          def helper = 1
+        end
+        Shouting = Module.new do
+          refine(String) do
+            self.import_methods(Helpers)
+            self.target
+          end
+        end
+      RUBY
+      expect(rules).not_to include("call.undefined-method")
+    end
+
+    # A `def self.m` in the block is a method of the refinement module, not a class method of String.
+    it "does not check a def self.m's self calls against the refined class" do
+      rules = rules_for(<<~RUBY)
+        module Helpers
+          def helper = 1
+        end
+        module Shouting
+          refine(String) do
+            def self.load_helpers = self.import_methods(Helpers)
+          end
+        end
+      RUBY
+      expect(rules).not_to include("call.undefined-method")
+    end
+
+    # A `define_method` in the block defines a method of the refinement, which runs on a String.
+    it "still checks a define_method block's self calls against the refined class" do
+      diagnostics = diagnostics_for(<<~RUBY)
+        module Shouting
+          refine(String) do
+            define_method(:shout) { self.not_a_string_method_dm }
+          end
+        end
+      RUBY
+      expect(diagnostics.map { |d| [d.rule, d.message] })
+        .to contain_exactly(["call.undefined-method", a_string_including("not_a_string_method_dm' for String")])
+    end
+
+    # A `def String.m` in the block defines a real class method of String.
+    it "still checks a def X.m's self calls against the refined class's singleton" do
+      diagnostics = diagnostics_for(<<~RUBY)
+        module Shouting
+          refine(String) do
+            def String.loud = self.not_a_string_class_method_qq
+          end
+        end
+      RUBY
+      expect(diagnostics.map { |d| [d.rule, d.message] })
+        .to contain_exactly(["call.undefined-method", a_string_including("for singleton(String)")])
+    end
+
+    # A `def` in a `class << self` in the block is a method of the refinement module's singleton class.
+    it "does not check a class << self def's self calls against the refined class" do
+      rules = rules_for(<<~RUBY)
+        module Shouting
+          refine(String) do
+            class << self
+              def loud = self.not_a_string_class_method_qq
+            end
+          end
+        end
+      RUBY
+      expect(rules).not_to include("call.undefined-method")
+    end
+
+    it "still checks a class << self def outside a refine block" do
+      rules = rules_for(<<~RUBY)
+        class String
+          class << self
+            def loud = self.not_a_string_class_method_qq
+          end
+        end
+      RUBY
+      expect(rules).to include("call.undefined-method")
+    end
+
+    it "still checks a refine def's self calls against the refined class" do
+      diagnostics = diagnostics_for(<<~RUBY)
+        module Shouting
+          refine(String) do
+            self.target
+            def shout = self.not_a_string_method_qq
+          end
+        end
+      RUBY
+      expect(diagnostics.map { |d| [d.rule, d.message] })
+        .to contain_exactly(["call.undefined-method", a_string_including("not_a_string_method_qq")])
     end
   end
 end

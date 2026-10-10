@@ -1,0 +1,1 @@
+- **[engine]** An explicit `self.` call in a `refine` block body (`self.import_methods`, `self.target`), and in a `def self.m` there, is no longer checked against the refined class, since the block's `self` is the refinement module at runtime; body `def`s are still checked against the refined class. ([#1762](https://github.com/rigortype/rigor/pull/1762))

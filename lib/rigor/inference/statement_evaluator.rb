@@ -3635,9 +3635,16 @@ module Rigor
       # record a `Outer::K` entry: that is a rung Ruby's constant lookup does not have. The `class_context`
       # frame is still pushed — it is what a nested `def` registers its method under — which is exactly the
       # divergence that makes the chain a separate record rather than a view of the frame stack.
+      #
+      # Issue #1759 — a `refine X do … end` block runs on the refinement module, not on X, which Rigor does not
+      # model: the body keeps X's frame and singleton so its `def`s and implicit-self calls resolve as before, but
+      # carries the unknown-`self` mark ({Scope#block_self_unknown?}), so an explicit `self.import_methods(M)` is
+      # not checked against `singleton(X)`. The indexer leaves a value-position refine block unknown the same way.
       def enter_meta_class_body(block, block_entry, class_context)
         # Issue #1717 — the body runs on the new class whatever encloses it, so its `self` is known.
-        entry = block_entry.with_block_self_type(self_type_for_class_body(class_context))
+        entry = block_entry.with_block_self_type(self_type_for_class_body(class_context),
+                                                 keeps_unknown: class_context.last.refinement &&
+                                                                Scope::REFINEMENT_BLOCK_SELF)
                            .with_singleton_class_body(false)
         sub_eval(block, stamp_nesting(entry, @lexical_nesting), class_context: class_context)
       end
@@ -5280,7 +5287,7 @@ module Rigor
         # then receive the parameter bindings. Slice 7 phase 2: instance defs ALSO seed their `ivars` map from the
         # class-level accumulator so `def get; @x; end` reads the type that a sibling `def init; @x = 1; end` wrote.
         fresh = build_fresh_body_scope
-        body_self = self_type_for_method_body(singleton: singleton)
+        body_self = self_type_for_method_body(singleton: singleton, receiver: def_node.receiver)
         fresh = fresh.with_self_type(body_self) if body_self
         # A `def` opens no new `Module.nesting` entry — the body resolves constants against the chain of the
         # declaration that encloses it, which is what the evaluator is already carrying (#652).
@@ -5474,11 +5481,15 @@ module Rigor
       #   `Nominal[Foo]`.
       #
       # Returns nil for top-level defs that have no enclosing class.
-      def self_type_for_method_body(singleton:)
+      def self_type_for_method_body(singleton:, receiver: nil)
         path = current_class_path
         # Issue #1518 — a `def` in a class nothing names has a receiver, just not one Rigor can type; nil would
         # read its body as the top level and its implicit-self calls as unresolved top-level calls.
         return (Type::Combinator.untyped if @opaque_class) if path.nil?
+        # Issue #1759 — a `def self.m` in a `refine X` block (or a `def m` in a `class << self` there) is a method
+        # of the refinement module, which Rigor does not model; reading it as `Singleton[X]` checked its
+        # explicit-self calls against X's class methods. A `def X.m` there does define X's class method.
+        return Type::Combinator.untyped if singleton && @class_context.last.refinement && refinement_self_def?(receiver)
 
         if singleton
           Type::Combinator.singleton_of(path)
@@ -5487,6 +5498,10 @@ module Rigor
         end
       end
 
+      # Issue #1759 — whether a singleton `def` under a refinement frame defines a method on the refinement module
+      # (`def self.m`, or `def m` in a `class << self`) rather than on an explicitly named receiver (`def X.m`).
+      def refinement_self_def?(receiver) = receiver.nil? || receiver.is_a?(Prism::SelfNode)
+
       def singleton_context_for(node)
         case node.expression
         when Prism::SelfNode
@@ -5494,7 +5509,7 @@ module Rigor
 
           outer = @class_context[0..-2]
           last = @class_context.last
-          outer + [ClassFrame.new(name: last.name, singleton: true)]
+          outer + [ClassFrame.new(name: last.name, singleton: true, refinement: last.refinement)]
         when Prism::ConstantReadNode, Prism::ConstantPathNode
           target = singleton_constant_target(node.expression)
           return @class_context unless target

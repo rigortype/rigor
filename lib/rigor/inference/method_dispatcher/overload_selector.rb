@@ -97,7 +97,11 @@ module Rigor
         end
 
         # The selection proper, positional so the hot path forwards no keyword hash. A member-wise call (`member`, see
-        # `FacetDistribution.select`) answers only a genuine match, never the first-overload fallback.
+        # `FacetDistribution.select`) answers only a genuine match, never the first-overload fallback. `member` set to
+        # `:gradual` answers every overload the arguments gradually match instead (#1750): where
+        # `FacetDistribution.select` falls back to the arguments as given, a bare `Dynamic` positional gradually
+        # matches every arm and the strict pass's single pick is decided by position, so the block-parameter probe
+        # binds only what all of them agree on.
         # rubocop:disable-next Metrics/ParameterLists -- the selection inputs plus the member-wise flag.
         def select_declared(method_definition, arg_types, self_type, instance_type, type_vars, block_required,
                             environment, member, keywords_last)
@@ -128,7 +132,7 @@ module Rigor
                      type_vars: type_vars, block_required: block_required, param_overrides: param_overrides,
                      environment: environment, keywords_last: keywords_last }
 
-          matches = run_selection_passes(declared, overloads, shared)
+          matches = run_selection_passes(declared, overloads, shared, member == :gradual)
           return matches unless matches.empty?
 
           # A block at the call site that no block-declaring overload matched: Ruby ignores a block handed
@@ -137,7 +141,7 @@ module Rigor
           # `define_command(:x) do … end` against `def define_command: (Symbol) -> Symbol`) degraded to
           # `Dynamic[Top]` — and on a self-send suppressed the whole method's return type.
           if block_required
-            matches = run_selection_passes(declared, overloads, shared.merge(block_required: false))
+            matches = run_selection_passes(declared, overloads, shared.merge(block_required: false), member == :gradual)
             return matches unless matches.empty?
           end
           return [] if member
@@ -185,30 +189,29 @@ module Rigor
           # order, the strict pass let the `bigdecimal` reopen's `(BigDecimal) -> BigDecimal` arm, which it
           # matches on a `maybe`, take `Integer#+` of a `bot`, a `Dynamic[Integer | Float | …]` or an
           # unloadable class (612 call sites across the survey corpus).
-          def run_selection_passes(declared, overloads, shared)
-            # Unreordered, pass 0 can only pick what the strict pass picks, so it is skipped (#1344's allocations).
-            proven = find_proven_overload(declared, shared) unless overloads.equal?(declared)
-            strict = proven || find_matching_overload(overloads, shared, strict: true)
-            return strict unless strict.empty?
+          def run_selection_passes(declared, overloads, shared, gradual = false) # rubocop:disable Style/OptionalBooleanParameter
+            # The `:gradual` list (#1750) skips straight to pass 2's every-match answer, stand-ins included.
+            unless gradual
+              # Unreordered, pass 0 can only pick what the strict pass picks, so it is skipped (#1344's allocations).
+              proven = find_proven_overload(declared, shared) unless overloads.equal?(declared)
+              strict = proven || find_matching_overload(overloads, shared, strict: true)
+              return strict unless strict.empty?
 
-            alias_hit = find_matching_overload_via_aliases(overloads, shared)
-            return [alias_hit] if alias_hit
+              alias_hit = find_matching_overload_via_aliases(overloads, shared)
+              return [alias_hit] if alias_hit
+            end
 
             # Pass 2, array-valued. With every argument carrying real type information the first gradual
             # match keeps its historical single-winner contract. With an imprecise argument in play the
             # matches are indistinguishable by types — position alone would pick — so ALL of them come back
             # and the dispatch layer unions their returns (#521).
             matches = find_matching_overload(overloads, shared, strict: false)
-            return matches.first(1) unless ImpreciseArgument.any_in?(shared[:arg_types], shared[:keywords_last])
+            every_match = gradual || ImpreciseArgument.any_in?(shared[:arg_types], shared[:keywords_last])
+            return matches.first(1) unless every_match
 
-            # Issue #1675 — and every overload the arguments' untyped parts reach on their own
-            # ({ImpreciseArgument.untyped_stand_ins}), after the whole-argument matches so the singular `select`
-            # keeps its answer.
-            stand_ins = ImpreciseArgument.untyped_stand_ins(shared[:arg_types])
-            return matches if stand_ins.nil?
-
-            stand_in_shared = shared.merge(arg_types: stand_ins, positional_arguments: nil)
-            (matches + find_matching_overload(overloads, stand_in_shared, strict: false)).uniq
+            # Issue #1675 — and every overload the arguments' untyped parts reach on their own, after the
+            # whole-argument matches so the singular `select` keeps its answer.
+            ImpreciseArgument.with_stand_ins(matches, shared) { find_matching_overload(overloads, it, strict: false) }
           end
 
           # Pass 0. With every argument a plain value (a `Constant`, or a `Nominal` with no type arguments), the

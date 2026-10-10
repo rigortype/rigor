@@ -1782,6 +1782,12 @@ module Rigor
                                                  type_vars, environment)
             end
 
+            if FacetDistribution.faceted?(args)
+              matches = facet_matches(method_definition, args, selector_self, instance_type, type_vars, true,
+                                      environment, false)
+              return agreed_block_params(matches, self_type, instance_type, type_vars, environment)
+            end
+
             method_type = OverloadSelector.select(
               method_definition,
               arg_types: args,
@@ -1796,6 +1802,14 @@ module Rigor
             return [] unless method_type
 
             block_params_of(method_type, self_type, instance_type, type_vars, environment) || []
+          end
+
+          # The block parameters every overload in `matches` declares alike, or no information (`[]`).
+          def agreed_block_params(matches, self_type, instance_type, type_vars, environment)
+            answers = matches.uniq.map do |method_type|
+              block_params_of(method_type, self_type, instance_type, type_vars, environment)
+            end
+            answers.uniq.size == 1 && answers.first ? answers.first : []
           end
 
           def block_params_of(method_type, self_type, instance_type, type_vars, environment)
@@ -1826,27 +1840,38 @@ module Rigor
 
               candidates.concat(matches)
             end
-            answers = candidates.uniq.map do |method_type|
-              block_params_of(method_type, self_type, instance_type, type_vars, environment)
-            end
-            answers.uniq.size == 1 && answers.first ? answers.first : []
+            agreed_block_params(candidates, self_type, instance_type, type_vars, environment)
           end
 
           # One distribution's genuine matches. A faceted positional argument (a `Dynamic` with sealed facet members) is
-          # read member-wise as `OverloadSelector.select_candidates` reads it, but every list, the facet's own
-          # fallback included, answers only a genuine match: the first-overload fallback must not count toward the
-          # block probe's agreement or the return path's join.
+          # read member-wise as `OverloadSelector.select_candidates` reads it, but every list answers only a genuine
+          # match: the first-overload fallback must not count toward the block probe's agreement or the return path's
+          # join.
           def keyword_matches(method_definition, arg_types, selector_self, instance_type, type_vars, block_required,
                               environment)
-            select = lambda do |list, _member|
-              OverloadSelector.select_declared(
-                method_definition, list, selector_self, instance_type, type_vars, block_required, environment, true,
-                true
-              )
+            unless FacetDistribution.faceted?(arg_types)
+              return OverloadSelector.select_declared(method_definition, arg_types, selector_self, instance_type,
+                                                      type_vars, block_required, environment, true, true)
             end
-            return select.call(arg_types, true) unless FacetDistribution.faceted?(arg_types)
 
-            FacetDistribution.select(arg_types, method_definition, member_wise: true, environment: environment, &select)
+            facet_matches(method_definition, arg_types, selector_self, instance_type, type_vars, block_required,
+                          environment, true)
+          end
+
+          # Issue #1750 — the overloads a faceted argument list may reach, read member-wise with genuine matches only.
+          # Where `FacetDistribution.select` falls back to the arguments as given (overloads not provable, more lists
+          # than its cap, or a member no overload takes), the bare `Dynamic` gradually matches every arm and the
+          # strict pass's pick is the first by position, so the answer is every gradual match
+          # (`OverloadSelector.select_declared`'s `:gradual`) and the caller binds only what they all agree on.
+          # rubocop:disable Metrics/ParameterLists
+          def facet_matches(method_definition, arg_types, selector_self, instance_type, type_vars, block_required,
+                            environment, keywords_last)
+            # rubocop:enable Metrics/ParameterLists
+            FacetDistribution.select(arg_types, method_definition, member_wise: true, environment:) do |list, member|
+              # The fallback list (`member` false) answers every gradual match rather than the strict pass's pick.
+              OverloadSelector.select_declared(method_definition, list, selector_self, instance_type, type_vars,
+                                               block_required, environment, member || :gradual, keywords_last)
+            end
           end
 
           # `RBS::Types::Block#type` is normally an `RBS::Types::Function` carrying the block's parameter

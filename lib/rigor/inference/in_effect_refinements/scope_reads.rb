@@ -132,22 +132,52 @@ module Rigor
         # refinement of `Object` reaches a `String` receiver), or nil when none does. The table is empty on a
         # project that refines nothing, which answers without a lookup.
         #
+        # ADR-121 WD7 — a row the walk could not read counts too: a names-wildcard row of the class (the body may
+        # define any name), and a row whose class the walk could not name ({.class_wildcard_key?}), which reaches
+        # every receiver.
+        #
         # ADR-46 — the answer is a function of every refinement of this name in the project, so the consumer
         # depends on the name whichever way it answers; a refine body edited in another file must re-check it
-        # (`IncrementalSession#refinement_affected`).
+        # (`IncrementalSession#refinement_affected`). It also depends on the wildcard rows (`refinement:*`).
         def refining_modules(scope, class_name, method_name)
-          Analysis::DependencyRecorder.read_name(:refinement, method_name) if Analysis::DependencyRecorder.active?
+          record_refinement_names(method_name)
           refinements = scope.discovered_refinements
           return nil if refinements.empty?
 
           modules = nil
           refinements.each do |refined, methods|
             names = methods[method_name]
-            next if names.nil? || !refined_receiver_class?(scope, class_name, refined)
+            unread = methods[WILDCARD]
+            next if names.nil? && unread.nil?
+            next unless refined_receiver_class?(scope, class_name, refined) || class_wildcard_key?(scope, refined)
 
-            (modules ||= []).concat(names)
+            modules = (modules || []).concat(names || EMPTY, unread || EMPTY)
           end
           modules
+        end
+
+        # ADR-121 WD7 (A5) — the name edges a consumer of the refinement table records: the method's, and the
+        # wildcard's, so a wildcard row appearing or vanishing in another file re-checks it.
+        def record_refinement_names(method_name)
+          return unless Analysis::DependencyRecorder.active?
+
+          Analysis::DependencyRecorder.read_name(:refinement, method_name)
+          Analysis::DependencyRecorder.read_name(:refinement, WILDCARD)
+        end
+
+        # ADR-121 WD7 — is the refined-class key `refined` a class the walk could not name: the wildcard, or (A6) a
+        # name no class declaration or RBS knows that a project constant write binds (`K = String; refine(K)`), whose
+        # value is the class refined. A constant nothing binds (a gem's class with no RBS) keeps a normal row, which
+        # matches no receiver.
+        def class_wildcard_key?(scope, refined)
+          return true if refined == WILDCARD
+          return false if scope.discovered_classes.key?(refined) || scope.environment&.class_known?(refined)
+
+          if Analysis::DependencyRecorder.active?
+            Analysis::DependencyRecorder.read_last_segment(:constant, refined)
+            Analysis::DependencyRecorder.read_last_segment(:class, refined)
+          end
+          !scope.bound_constant_names(refined).empty?
         end
 
         private

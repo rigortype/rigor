@@ -493,10 +493,16 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
         expect(undefined_rows).to eq([])
       end
 
-      # `Helpers` is declared by no file on the first run, so it sits on `C`'s chain as an external entry.
+      # `Helpers` is declared by no file on the first run, so it sits on `C`'s chain as an external entry. ADR-121 WD7:
+      # such a module may refine anything (it reported before), so the first run is silent; a new file declaring
+      # `Helpers` with no refinement makes it known, and `shout` reports again.
       it "re-checks the `using` file under --incremental when a new file declares an included module" do
         write_project("  include Helpers\n")
-        expect(incremental_rows(%w[lib])).to eq([shout_fires, false])
+        expect(incremental_rows(%w[lib])).to eq([[], false])
+
+        write("lib/helpers.rb", "module Helpers\nend\n")
+        expect(incremental_rows(%w[lib])).to eq([shout_fires, true])
+        expect(undefined_rows).to eq(shout_fires)
 
         write("lib/helpers.rb", "module Helpers\n  include A\nend\n")
         expect(incremental_rows(%w[lib])).to eq([[], true])
@@ -593,6 +599,158 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
 
       expect(cold).to eq([["plain.rb", 1, "call.argument-type-mismatch"]])
       expect(warm).to eq(cold)
+    end
+  end
+
+  # ADR-121 WD7 — the refinement table records what it could not read, and a module whose refinements Rigor cannot
+  # read is opaque, so a decline follows from a row or from a module no file declares, never from a missing row. Every
+  # silent line runs on Ruby 4.0.5 and every reported line raises there.
+  describe "a refinement Rigor cannot read (ADR-121 WD7)" do
+    let(:call_rules) { %w[call.undefined-method call.wrong-arity call.argument-type-mismatch] }
+
+    # `[file basename, line, rule]` for every call-check diagnostic in `lib/`, sorted.
+    def call_rows
+      diagnostics.select { |d| call_rules.include?(d.qualified_rule) }
+                 .map { |d| [File.basename(d.path.to_s), d.line, d.qualified_rule] }
+                 .sort
+    end
+
+    # Issue #1796. Ruby 4.0.5 prints `:gem`; `b.rb`, with no `using`, raises `ArgumentError (given 3, expected 1..2)`.
+    it "declines every call under a `using` of a module required from outside the analysed paths" do
+      write("outside/gemref.rb", "module GemRef; refine(String) { def center(a, b, c) = :gem }; end\n")
+      write("lib/a.rb", <<~RUBY)
+        $LOAD_PATH.unshift(File.join(__dir__, "..", "outside"))
+        require "gemref"
+        using GemRef
+        p "s".center(1, 2, 3)
+        p "s".nope_anything
+        p :sym.center(1, 2, 3)
+        p Integer.oo
+      RUBY
+      write("lib/b.rb", "p \"s\".center(1, 2, 3)\n")
+
+      expect(call_rows).to eq([["b.rb", 1, "call.wrong-arity"]])
+    end
+
+    # Issue #1799. Ruby 4.0.5 prints `[:alias_method, :alias_method, :dm, :im, :computed]`, and the same `center` call
+    # before the `using`s raises `ArgumentError`.
+    it "declines a name a refine body defines by alias, alias_method, define_method or import_methods" do
+      write("lib/ext.rb", <<~RUBY)
+        module Helper; def chop(a, b, c) = :im; end
+        module StrA
+          refine(String) do
+            def c3(a, b, c) = :alias_method
+            alias_method :center, :c3
+            alias ljust c3
+            define_method(:rjust) { |a, b, c| :dm }
+            import_methods Helper
+          end
+        end
+        module StrB
+          name = :squeeze
+          refine(String) { define_method(name) { |a, b, c| :computed } }
+        end
+      RUBY
+      write("lib/use.rb", <<~RUBY)
+        "x".center(1, 2, 3)
+        using StrA
+        using StrB
+        p ["x".center(1, 2, 3), "x".ljust(1, 2, 3), "x".rjust(1, 2, 3), "x".chop(1, 2, 3), "x".squeeze(1, 2, 3)]
+      RUBY
+      write("lib/plain.rb", "\"x\".center(1, 2, 3)\n")
+
+      expect(call_rows).to eq([["plain.rb", 1, "call.wrong-arity"], ["use.rb", 1, "call.wrong-arity"]])
+    end
+
+    # Round 3 of #1793's review. Ruby 4.0.5 prints `:each_target` and `:alias_target` (`refine_census_spec.rb`).
+    it "declines a refined name whose target the walk cannot name, on any receiver" do
+      write("lib/ext.rb", <<~RUBY)
+        K = String
+        module ByEach
+          [String].each { |k| refine(k) { def center(a, b, c) = :each_target } }
+        end
+        module ByAlias
+          refine(K) { def ljust(a, b, c) = :alias_target }
+        end
+      RUBY
+      write("lib/use.rb", <<~RUBY)
+        using ByEach
+        using ByAlias
+        "x".center(1, 2, 3)
+        "x".ljust(1, 2, 3)
+        "x".rjust(1, 2, 3)
+      RUBY
+
+      expect(call_rows).to eq([["use.rb", 5, "call.wrong-arity"]])
+    end
+
+    # Round 2 of #1793's review. Ruby 4.0.5 prints `:vendored`.
+    it "declines under a `using` of a module that includes a module declared outside the analysed paths" do
+      write("vendor/b.rb", "module B; refine(String) { def center(a, b, c) = :vendored }; end\n")
+      write("lib/a.rb", <<~RUBY)
+        require_relative "../vendor/b"
+        module A
+          include B
+        end
+        using A
+        p "s".center(1, 2, 3)
+      RUBY
+
+      expect(call_rows).to eq([])
+    end
+
+    # Ruby 4.0.5 prints `:ext` and raises `NoMethodError` for both `nope` calls.
+    it "keeps checking under a `using` of a project module from a nested body, and of one that refines nothing" do
+      write("lib/ext.rb", "module Ext; refine(String) { def shout = :ext }; end\nmodule Helpers; def helper = 1; end\n")
+      write("lib/use.rb", <<~RUBY)
+        module Outer
+          using Ext
+          "x".shout
+          "x".nope
+        end
+        using Helpers
+        "x".nope
+        "x".center(1, 2, 3)
+      RUBY
+
+      expect(call_rows).to eq(
+        [["use.rb", 4, "call.undefined-method"], ["use.rb", 7, "call.undefined-method"],
+         ["use.rb", 8, "call.wrong-arity"]]
+      )
+    end
+
+    # Critique F1. `rb/p6load`: requiring `foo.rb` first prints `:bar`; requiring `foo_bar.rb` first raises
+    # `ArgumentError`. Which `Bar` the `using` names depends on load order, so both stay listed.
+    it "keeps both declared candidates of a `using` listed" do
+      write("lib/bar.rb", "module Bar; refine(String) { def center(a, b, c) = :bar; def shout = :bar }; end\n")
+      write("lib/foo_bar.rb", "module Foo; module Bar; refine(String) { def upcase = :inner }; end; end\n")
+      write("lib/foo.rb", <<~RUBY)
+        require_relative "bar"
+        module Foo
+          using Bar
+          "x".center(1, 2, 3)
+          "x".shout
+          "x".nope
+        end
+      RUBY
+
+      expect(call_rows).to eq([["foo.rb", 6, "call.undefined-method"]])
+    end
+
+    # Critique F5a. Ruby 4.0.5 prints `:via_alias` (`rb/p4_alias_refine.rb`).
+    it "declines under a module that refines through an alias of `refine`" do
+      write("lib/m.rb", <<~RUBY)
+        module M
+          class << self
+            alias_method :my_refine, :refine
+          end
+          my_refine(String) { def shout = :via_alias }
+        end
+        using M
+        "s".shout
+      RUBY
+
+      expect(call_rows).to eq([])
     end
   end
 

@@ -1959,7 +1959,7 @@ module Rigor
         list = scope.in_effect_refinements(node)
         return nil if list.empty?
 
-        Analysis::DependencyRecorder.read_name(:refinement, node.name) if Analysis::DependencyRecorder.active?
+        InEffectRefinements.record_refinement_names(node.name)
         return nil if scope.discovered_refinements.empty?
 
         refined_indirect_result(node, receiver, list) ||
@@ -1989,7 +1989,7 @@ module Rigor
         return nil if name.nil?
 
         name = name.to_sym
-        Analysis::DependencyRecorder.read_name(:refinement, name) if Analysis::DependencyRecorder.active?
+        InEffectRefinements.record_refinement_names(name)
         name
       end
 
@@ -1998,7 +1998,7 @@ module Rigor
         return nil unless block.is_a?(Prism::BlockArgumentNode) && block.expression.is_a?(Prism::SymbolNode)
 
         name = block.expression.unescaped.to_sym
-        Analysis::DependencyRecorder.read_name(:refinement, name) if Analysis::DependencyRecorder.active?
+        InEffectRefinements.record_refinement_names(name)
         name
       end
 

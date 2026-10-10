@@ -64,6 +64,9 @@ RSpec.describe "Gem source inference over `refine` bodies (#1672)" do
                                 .sort
   end
 
+  # ADR-121 WD7 — a module the project does not declare is opaque, a walked gem's included, so `"hi".nope` after
+  # `using Shouty` declines too (it reported before). Flip the `nope` row back when gem modules whose source the walker
+  # read become known (the gem-refinement-transparency follow-up of #1796).
   it "resolves a gem refinement after `using`, and reports it before" do
     write("lib/app.rb", <<~RUBY)
       "early".shout
@@ -72,7 +75,19 @@ RSpec.describe "Gem source inference over `refine` bodies (#1672)" do
       "hi".nope
     RUBY
 
-    expect(undefined_rows).to eq([["app.rb", 1, "shout"], ["app.rb", 4, "nope"]])
+    expect(undefined_rows).to eq([["app.rb", 1, "shout"]])
+  end
+
+  # Under a `using` that names no module, a name some refinement defines declines and any other name reports, so the
+  # gem's refinements still reach the check rules.
+  it "declines a gem-refined name under a `using` that names no module, and reports any other name" do
+    write("lib/app.rb", <<~RUBY)
+      using Module.new { }
+      "hi".shout
+      "hi".nope
+    RUBY
+
+    expect(undefined_rows).to eq([["app.rb", 3, "nope"]])
   end
 
   it "still reports a refined call in a project that never `using`s the module" do
@@ -96,19 +111,23 @@ RSpec.describe "Gem source inference over `refine` bodies (#1672)" do
     expect(index.refinements).to include("String" => { shout: ["Shouty"] })
   end
 
+  # `unknown.rb` keeps the gem table observable now that `using Shouty` makes `app.rb` opaque (flip `app.rb`'s `nope`
+  # row back with the example above).
   it "seeds a file re-analysed on a warm run with the gem refinements" do
     write("lib/app.rb", <<~RUBY)
       using Shouty
       "hi".shout
       "hi".nope
     RUBY
+    write("lib/unknown.rb", "using Module.new { }\n\"hi\".shout\n\"hi\".nope\n")
     root = File.join(Dir.pwd, ".rigor-cache")
     cold = undefined_rows(cache_store: Rigor::Cache::Store.new(root: root))
     File.write("lib/app.rb", "#{File.read('lib/app.rb')}\"again\".shout\n")
+    File.write("lib/unknown.rb", "#{File.read('lib/unknown.rb')}\"again\".shout\n")
 
     warm = undefined_rows(cache_store: Rigor::Cache::Store.new(root: root))
 
-    expect(cold).to eq([["app.rb", 3, "nope"]])
+    expect(cold).to eq([["unknown.rb", 3, "nope"]])
     expect(warm).to eq(cold)
   end
 
@@ -119,7 +138,8 @@ RSpec.describe "Gem source inference over `refine` bodies (#1672)" do
       "hi".nope
     RUBY
     write("lib/other.rb", "\"x\".shout\n")
+    write("lib/unknown.rb", "using Module.new { }\n\"hi\".shout\n\"hi\".nope\n")
 
-    expect(undefined_rows(workers: 2)).to eq([["app.rb", 3, "nope"], ["other.rb", 1, "shout"]])
+    expect(undefined_rows(workers: 2)).to eq([["other.rb", 1, "shout"], ["unknown.rb", 3, "nope"]])
   end
 end

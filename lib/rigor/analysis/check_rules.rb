@@ -858,8 +858,15 @@ module Rigor
         # no constant target, so nothing records it. Issue #1673 — the answer is derived from the file's in-effect
         # refinements ({Inference::InEffectRefinements}), the list the typer reads, with each `using` expanded
         # through its module's includes (issue #1671).
+        #
+        # ADR-121 WD7 — a module in effect whose refinements Rigor cannot read
+        # ({Inference::InEffectRefinements.opaque_module?}: a gem's, one from outside the analysed paths, one with an
+        # unreadable `refine`) may refine any class, a class object's included, so the call declines whatever its
+        # receiver. Issue #1796; both argument rules ask this predicate too.
         def refined_method_in_effect?(class_name, call_node, scope, kind, lexical_sites)
-          return false if lexical_sites.nil? || kind != :instance
+          return false if lexical_sites.nil?
+          return true if opaque_refinement_in_effect?(call_node, scope, lexical_sites)
+          return false if kind != :instance
 
           modules = Inference::InEffectRefinements.refining_modules(scope, class_name, call_node.name)
           !modules.nil? &&
@@ -867,6 +874,16 @@ module Rigor
                                                          scope.declared_refinements) do |name|
               Inference::InEffectRefinements.activated_modules(scope, name)
             end
+        end
+
+        # ADR-121 WD7 — does the call's in-effect list (its lexical activations, each `using` expanded; a
+        # plugin-declared module is the plugin's declaration and never opaque) hold an opaque module?
+        def opaque_refinement_in_effect?(call_node, scope, lexical_sites)
+          query = lexical_sites.refinements
+          return false if query.empty?
+
+          list = Inference::InEffectRefinements.lexical_list(scope, query, call_node.location.start_offset)
+          Inference::InEffectRefinements.opaque_in?(scope, list)
         end
 
         # The probes that run only once every cheaper answer has come back "absent", kept together

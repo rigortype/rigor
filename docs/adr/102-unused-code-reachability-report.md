@@ -133,8 +133,9 @@ family was a false candidate ([#1734](https://github.com/rigortype/rigor/issues/
 A literal `const_get` is a reference looked up in the same order, and the first scope that
 declares the name is the answer: resolving it at the top level alone left the receiver's own
 constant a false candidate and kept a dead same-named top-level one alive. Where `self` is
-not the enclosing declaration — a concern's `included do`, an eval block — the receiver is
-unknown, and the literal keeps the top-level reading
+not the enclosing declaration — a concern's `included do`, an eval block, a `class << self`
+body — or a constant receiver resolves only in part, the receiver is unknown and the literal
+keeps the top-level reading
 ([#1761](https://github.com/rigortype/rigor/issues/1761)).
 
 ### WD5 — Whole-project only; `--incremental` is refused, not absorbed

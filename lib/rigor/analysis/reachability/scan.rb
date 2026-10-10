@@ -69,15 +69,28 @@ module Rigor
             fqn == prefix || fqn.start_with?("#{prefix}::")
           end
 
-          # The namespaces `within` names, resolved by the block. A resolution of the whole written path is the
-          # anchor. {Graph#resolve} peels an unknown `Foo::Bar` to `Foo`, though, and anchoring there alone
-          # looked for `Foo::V*` and missed `Foo::Bar::V1`; the written name is then an anchor as well as the
-          # peeled one, since an undeclared receiver may be an alias of either. A receiver that does not resolve
-          # at all keeps its written name.
+          # The namespaces an interpolated site's `within` names, resolved by the block. A resolution of the whole
+          # written path is the anchor. {Graph#resolve} peels an unknown `Foo::Bar` to `Foo`, though, and
+          # anchoring there alone looked for `Foo::V*` and missed `Foo::Bar::V1`; the written name is then an
+          # anchor as well as the peeled one, since an undeclared receiver may be an alias of either. A receiver
+          # that does not resolve at all keeps its written name. Over-reaching is safe for a taint only; a
+          # literal anchors at {#receiver} alone.
           def anchors
-            written = within.as_written
             resolved = yield(within)
-            (resolved == written || resolved&.end_with?("::#{written}") ? [resolved] : [written, resolved]).compact
+            whole?(resolved) ? [resolved] : [within.as_written, resolved].compact
+          end
+
+          # The declaration `within` names when it resolves as WHOLE, or nil. A receiver resolved only by peeling
+          # its last segment is unknown: `const_get` never searches the receiver's lexical parent, so anchoring a
+          # literal there could resolve it to a dead constant and miss the live one.
+          def receiver
+            resolved = yield(within)
+            whole?(resolved) ? resolved : nil
+          end
+
+          def whole?(resolved)
+            written = within.as_written
+            resolved == written || resolved&.end_with?("::#{written}")
           end
         end
 
@@ -285,10 +298,13 @@ module Rigor
           # `within` and {Graph} resolves it there first (#1761). A rooted name, or a call whose only anchor is
           # the top level, is looked up from the top level as any reference is. So is one on `self` inside a
           # block that rebinds it: a concern's `included do` runs on the including class, and resolving the name
-          # against the concern could make a dead constant reachable by finding it at the wrong scope. An
-          # interpolated name keeps every anchor there, since a taint is safe to over-reach.
+          # against the concern could make a dead constant reachable by finding it at the wrong scope. A `class
+          # << self` body outside its methods is the same: `self` is the singleton class, whose ancestors do not
+          # include the class, so Ruby looks the name up at the top level. An interpolated name keeps every
+          # anchor in both, since a taint is safe to over-reach.
           def literal_bounds(node, name, anchors)
-            return [] if name.start_with?("::") || (@self_rebound && self_receiver?(node.receiver))
+            return [] if name.start_with?("::")
+            return [] if (@self_rebound || @singleton_body) && self_receiver?(node.receiver)
 
             anchors.grep(Reference).map { |receiver| [nil, :namespace, receiver] }
           end
@@ -332,7 +348,8 @@ module Rigor
             return true if SELF_REBINDING.include?(call.name)
 
             recv = call.receiver
-            @owner.nil? && recv.is_a?(Prism::ConstantReadNode) && META_NEW[recv.name.to_s] == call.name
+            name = recv && Source::ConstantPath.qualified_name_or_nil(recv)&.delete_prefix("::")
+            @owner.nil? && !name.nil? && META_NEW[name] == call.name
           end
 
           def self_receiver?(receiver)
@@ -435,6 +452,8 @@ module Rigor
             # `class_eval` or anonymous `Class.new` block. See {#rebinds_self?}.
             @self_rebound = false
             @rebinding_blocks = Set.new.compare_by_identity
+            # Whether this is a `class << self` body outside its methods, where `self` is the singleton class.
+            @singleton_body = false
           end
 
           def walk(node, nesting)
@@ -549,12 +568,13 @@ module Rigor
           end
 
           def in_local_scope(scope)
-            saved = [@local_scope, @block_params]
+            saved = [@local_scope, @block_params, @singleton_body]
             @local_scope = scope
             @block_params = Set.new.freeze
+            @singleton_body = scope.is_a?(Prism::SingletonClassNode)
             yield
           ensure
-            @local_scope, @block_params = saved
+            @local_scope, @block_params, @singleton_body = saved
           end
 
           def in_block(block)

@@ -521,6 +521,44 @@ RSpec.describe Rigor::Analysis::Reachability do
         expect(report.candidates.map(&:fqn)).to eq(["Concern::Thing"])
       end
 
+      # A receiver resolved only by peeling (`Outer::Missing` to `Outer`) is unknown: `const_get` never
+      # searches its lexical parent, and anchoring there made the live top-level `Foo` a candidate.
+      it "reads a literal on a partly-resolved receiver at the top level" do
+        report = report_for({ "lib/a.rb" => <<~RUBY, "lib/main.rb" => "User.go\nOuter\n" })
+          class Foo; end
+          class Other; end
+          module Outer
+            class Foo; end
+            Missing = Other
+          end
+          class User
+            def self.go
+              Outer::Missing.const_get(:Foo)
+              Outer::Missing.const_get(:Other, false)
+            end
+          end
+        RUBY
+        expect(report.candidates.map(&:fqn)).to eq(["Outer::Foo"])
+      end
+
+      # In a `class << self` body outside its methods `self` is the singleton class, whose ancestors do not
+      # include the class, so the lookup is the top level's.
+      it "reads a literal in a class << self body at the top level, and in its methods at the class" do
+        report = report_for({ "lib/a.rb" => <<~RUBY, "lib/main.rb" => "Host.go\n" })
+          class Foo; end
+          class Bar; end
+          class Host
+            class Foo; end
+            class Bar; end
+            class << self
+              const_get(:Foo)
+              def go = const_get(:Bar)
+            end
+          end
+        RUBY
+        expect(report.candidates.map(&:fqn)).to eq(%w[Bar Host::Foo])
+      end
+
       it "credits a literal const_get in a spec file to the test role" do
         report = report_for({ "app/models/target.rb" => "class Target; end\n",
                               "spec/models/target_spec.rb" => "Object.const_get(\"Target\")\n" })

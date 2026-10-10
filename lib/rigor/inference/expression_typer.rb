@@ -40,6 +40,7 @@ require_relative "optimistic_origin"
 require_relative "receiver_alias"
 require_relative "repeated_or_writes"
 require_relative "singleton_object_constant"
+require_relative "refined_dispatch"
 require_relative "stored_block_call"
 require_relative "struct_fold_safety"
 require_relative "unknown_store_widening"
@@ -1907,6 +1908,9 @@ module Rigor
         # asks nothing further of dispatch. Off (the default) this is one integer read.
         Effects::Collector.record_call(node, receiver, scope) if Effects::Collector.active?
 
+        refined = try_refined_dispatch(node, receiver, arg_types, block_type)
+        return refined if refined
+
         literal_send = try_literal_send(node, receiver)
         return literal_send if literal_send
 
@@ -1936,6 +1940,132 @@ module Rigor
         return result if result
 
         dispatch_miss_result(node, receiver, arg_types, block_type)
+      end
+
+      # ADR-121 WD2 (issue #1664) — a call through an in-effect Ruby refinement, typed from the winning refine body
+      # with the call's receiver as `self`, ahead of every tier below: each answers from the method the refinement
+      # replaces (a refined `String#upcase` must not fold, a refined `map` must not fold per element, a top-level
+      # `def` must not bind ahead of a refinement of `Object`, a plugin models the class's own method). An unreadable
+      # body, or a list that may hold any refinement, answers `Dynamic[top]`, never the replaced method's signature.
+      # A union receiver is decided per member; a `Dynamic` receiver, a class object and a call no refinement wins
+      # fall through. A call site no refinement is in effect at answers nil at once and records nothing: its answer
+      # cannot change without an edit to its own file.
+      def try_refined_dispatch(node, receiver, arg_types, block_type)
+        list = scope.in_effect_refinements(node)
+        return nil if list.empty?
+
+        Analysis::DependencyRecorder.read_name(:refinement, node.name) if Analysis::DependencyRecorder.active?
+        return nil if scope.discovered_refinements.empty?
+
+        refined_indirect_result(node, receiver, list) ||
+          refined_receiver_result(node, receiver, list, arg_types, block_type)
+      end
+
+      # ADR-121 WD4 — `send` / `__send__` / `public_send` with a literal name, `respond_to?` and `method` /
+      # `public_method` with one, and a `&:name` block argument honour refinements too (CRuby `test_refinement.rb`;
+      # probed on Ruby 4.0.5). When the name they reach is refined in effect for the receiver they answer
+      # `Dynamic[top]`: typing them through the arm is deferred, and `respond_to?` must never fold to `false`. A
+      # `&:name` block's receiver is the yielded element, which is not known here, so any in-effect refinement of the
+      # name answers. Only `methods` ignores refinements and keeps its answer.
+      def refined_indirect_result(node, receiver, list)
+        name = REFINED_NAMING_CALLS.include?(node.name) ? literal_method_name_argument(node) : nil
+        return dynamic_top if name && refined_name_for?(receiver, name, list)
+
+        block_name = symbol_block_argument(node)
+        dynamic_top if block_name && refined_anywhere?(block_name, list)
+      end
+
+      REFINED_NAMING_CALLS = Set[:send, :__send__, :public_send, :respond_to?, :method, :public_method].freeze
+      private_constant :REFINED_NAMING_CALLS
+
+      def literal_method_name_argument(node)
+        argument = node.arguments&.arguments&.first
+        name = argument.unescaped if argument.is_a?(Prism::SymbolNode) || argument.is_a?(Prism::StringNode)
+        return nil if name.nil?
+
+        name = name.to_sym
+        Analysis::DependencyRecorder.read_name(:refinement, name) if Analysis::DependencyRecorder.active?
+        name
+      end
+
+      def symbol_block_argument(node)
+        block = node.block
+        return nil unless block.is_a?(Prism::BlockArgumentNode) && block.expression.is_a?(Prism::SymbolNode)
+
+        name = block.expression.unescaped.to_sym
+        Analysis::DependencyRecorder.read_name(:refinement, name) if Analysis::DependencyRecorder.active?
+        name
+      end
+
+      def refined_name_for?(receiver, name, list)
+        members = receiver.is_a?(Type::Union) ? receiver.members : [receiver]
+        members.any? do |member|
+          class_name = refined_receiver_class_name(member)
+          !class_name.nil? && !RefinedDispatch.winner(scope, class_name, name, list).nil?
+        end
+      end
+
+      def refined_anywhere?(name, list)
+        return true if list.include?(InEffectRefinements::UNKNOWN) &&
+                       scope.discovered_refinements.any? { |_refined, methods| methods.key?(name) }
+
+        !RefinedDispatch.targets(scope.discovered_refinements, name, list).nil?
+      end
+
+      def refined_receiver_result(node, receiver, list, arg_types, block_type)
+        return refined_member_result(node, receiver, list, arg_types, block_type) unless receiver.is_a?(Type::Union)
+
+        answers = receiver.members.map { |member| refined_member_result(node, member, list, arg_types, block_type) }
+        return nil if answers.none?
+
+        members = receiver.members.each_with_index.map do |member, index|
+          answers[index] || call_result_type_for(node, receiver_override: member)
+        end
+        Type::Combinator.union(*members)
+      end
+
+      def refined_member_result(node, receiver, list, arg_types, block_type)
+        class_name = refined_receiver_class_name(receiver)
+        return nil if class_name.nil?
+
+        winner = RefinedDispatch.winner(scope, class_name, node.name, list)
+        return nil if winner.nil?
+        return dynamic_top if winner == RefinedDispatch::UNKNOWN
+
+        refined_body_return(winner, node.name, Type::Combinator.nominal_of(class_name), arg_types, block_type) ||
+          dynamic_top
+      end
+
+      # The winning refine body's inferred return, re-typed with the receiver's class as `self` and the call's
+      # argument types bound as an undeclared method's are; nil when the body is not readable here.
+      #
+      # A body another file wrote is re-typed with that file's in-effect refinements at the `def` (its own module
+      # among them), so a sibling override it calls answers from its refine body too.
+      def refined_body_return(winner, method_name, self_type, arg_types, block_type)
+        def_node, foreign =
+          InEffectRefinements.refinement_def_with_query(scope, winner.module_name, winner.refined_class, method_name)
+        return nil if def_node.nil?
+
+        refinements = foreign&.at(def_node.location.start_offset) do |name|
+          InEffectRefinements.activated_modules(scope, name)
+        end
+        infer_user_method_return(def_node, self_type, arg_types, yield_type: block_type, refinements: refinements)
+      rescue StandardError
+        nil
+      end
+
+      # The class an instance-side receiver is an instance of, or nil for one a refinement does not answer here: a
+      # class object (refinements of singleton classes are not recorded), `Dynamic`, `top`, or a shape with no class.
+      def refined_receiver_class_name(receiver)
+        case receiver
+        when Type::Nominal, Type::StructInstance, Type::DataInstance then receiver.class_name
+        when Type::Constant then receiver.value.class.name
+        when Type::Tuple then "Array"
+        when Type::HashShape then "Hash"
+        when Type::IntegerRange then "Integer"
+        when Type::FloatRange then "Float"
+        when Type::Refined, Type::Difference then refined_receiver_class_name(receiver.base)
+        end
       end
 
       # The post-dispatch tiers for a call `MethodDispatcher` could not answer, in their historical
@@ -2973,22 +3103,33 @@ module Rigor
       # Issue #1703 — inside the guarded re-walk a callee's return summary is still computed with `key?` guards off
       # ({KeyPresenceGuard.without_guards}): summaries are memoised for the whole run, and one computed with a guard
       # would reach the analysis every rule reads.
-      def infer_user_method_return(def_node, receiver, arg_types, self_fold_safe: false, yield_type: nil)
+      #
+      # Issue #1664 — `refinements` are the modules in effect in a refine body another file wrote, which the body scope
+      # carries as declared refinements: its nodes are not this file's, so this file's lexical list cannot answer them.
+      # The return memo and the recursion guard do not key on them, which holds because such a node comes only from
+      # `DefNodeResolver.refinement_query`'s own parse and always carries that file's one list; a caller that types
+      # the same node under another list must add it to the key.
+      def infer_user_method_return(def_node, receiver, arg_types, self_fold_safe: false, yield_type: nil,
+                                   refinements: nil)
         return nil if def_node.body.nil?
         unless KeyPresenceGuard.active?
-          return infer_user_method_return_unguarded(def_node, receiver, arg_types, self_fold_safe, yield_type)
+          return infer_user_method_return_unguarded(def_node, receiver, arg_types, self_fold_safe, yield_type,
+                                                    refinements)
         end
 
         KeyPresenceGuard.without_guards do
-          infer_user_method_return_unguarded(def_node, receiver, arg_types, self_fold_safe, yield_type)
+          infer_user_method_return_unguarded(def_node, receiver, arg_types, self_fold_safe, yield_type, refinements)
         end
       end
 
-      def infer_user_method_return_unguarded(def_node, receiver, arg_types, self_fold_safe, yield_type)
+      def infer_user_method_return_unguarded(def_node, receiver, arg_types, self_fold_safe, yield_type,
+                                             refinements = nil)
         yield_type = nil unless yield_type && body_yields?(def_node)
         body_scope = build_user_method_body_scope(def_node, receiver, arg_types,
                                                   self_fold_safe: self_fold_safe)
         return nil if body_scope.nil?
+
+        body_scope = body_scope.with_declared_refinements(refinements) if refinements
 
         # Recursion-guard signature. Keyed on `(receiver, method)` only — NOT the argument types. ADR-24 WD5:
         # a method whose summary is still being computed resolves to `Dynamic[top]` for that cycle. Keying on

@@ -120,18 +120,22 @@ module Rigor
         appeared.freeze
       end
 
-      # Issue #1120 — the method names whose refinements moved in this edit: a `[refined class, method, refining
-      # module]` entry that appeared in, or vanished from, any file in `paths`. A consumer whose
-      # `call.undefined-method` answer consulted the refinement table recorded a `refinement:<method>` edge
-      # whichever way it answered, because the answer is a function of the whole project's refinements of that
-      # name. `paths` MUST include removed files, whose whole before-table vanished. `before` / `after` map a
-      # path to that file's `{refined class => {method => [modules]}}` table (nil when it refines nothing).
+      # Issue #1120 — the method names whose refinements moved in this edit. A consumer whose answer consulted the
+      # refinement table recorded a `refinement:<method>` edge whichever way it answered, because the answer is a
+      # function of the whole project's refinements of that name. `paths` MUST include removed files, whose whole
+      # before-table vanished. `before` / `after` map a path to that file's `{refined class => {method =>
+      # [modules]}}` table (nil when it refines nothing).
+      #
+      # Issue #1664 — every name a changed file refines, before or after the edit, not only the entries that
+      # appeared or vanished: the typed refined arm answers with a refine body's inferred return, which an edit
+      # inside the body changes while the table stays the same. A changed file's refinements are therefore all
+      # re-checked, which over-reports an edit elsewhere in the file and costs only the consumers of its names.
       def changed_refinement_names(paths, before, after)
         moved = Set.new
         paths.each do |path|
-          entries_before = refinement_entries(before[path])
-          entries_after = refinement_entries(after[path])
-          (entries_before ^ entries_after).each { |(_refined, method_name, _module)| moved << method_name }
+          (refinement_entries(before[path]) | refinement_entries(after[path])).each do |(_refined, method_name, _)|
+            moved << method_name
+          end
         end
         moved.freeze
       end

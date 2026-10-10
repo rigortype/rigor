@@ -56,7 +56,8 @@ RSpec.describe "a top-level include mixes into Object (#1697)" do
   RBS
 
   # A call with a receiver is never typed through the mixin, whatever the project does to the receiver's class;
-  # each spelling below would otherwise let `Helpers#helper` stand in for a method Ruby reaches first.
+  # each spelling below would otherwise let `Helpers#helper` stand in for a method Ruby reaches first. The refined
+  # `Float#helper` is typed from its refine body (#1664), which Ruby reaches ahead of every mixin.
   let(:explicit_receiver_source) { <<~RUBY }
     require "rigor/testing"
 
@@ -89,7 +90,7 @@ RSpec.describe "a top-level include mixes into Object (#1697)" do
     Rigor.assert_type("Dynamic[top]", :s.helper)
     Rigor.assert_type(":sym", Widget.new.helper)
     Rigor.assert_type("Dynamic[top]", (1..2).helper)
-    Rigor.assert_type("Dynamic[top]", 1.5.helper)
+    Rigor.assert_type('"refined"', 1.5.helper)
     Rigor.assert_type("Dynamic[top]", 1.helper)
     Rigor.assert_type("Dynamic[top]", Object.new.helper)
   RUBY

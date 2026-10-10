@@ -12,10 +12,39 @@ module Rigor
         # {.activated_modules}, then `declared`. A scope no index stamped answers `declared` alone.
         def for_node(scope, node, declared = EMPTY)
           query = scope.discovery.in_effect_refinements
+          return EMPTY if declared.empty? && (query.nil? || query.empty?)
           return query.for_node(node, declared) { |name| activated_modules(scope, name) } if query
 
-          declared.empty? ? EMPTY : declared.uniq.freeze
+          declared.uniq.freeze
         end
+
+        # Issue #1664 — the `def` a refine body gives `method_name` on `class_name` for the refining module
+        # `module_name`, or nil where none can be read: this file's own refine body first, else one in a file that
+        # declares the module (`Scope#discovered_class_sources`), parsed once a run. A gem refinement, a module a
+        # `Module.new` write names in another file, or an anonymous module answer nil, which the typed arm reads as
+        # an unreadable body (`Dynamic[top]`). The consumer's `refinement:<name>` edge covers an edit to that body
+        # (`Incremental.changed_refinement_names`).
+        def refinement_def(scope, module_name, class_name, method_name)
+          refinement_def_with_query(scope, module_name, class_name, method_name).first
+        end
+
+        # {.refinement_def} as `[def_node, query]`, where `query` is the other file's {InEffectRefinements} the body was
+        # found in, or nil for this file's own body (or none): the typed arm re-types a foreign body under that file's
+        # in-effect refinements.
+        def refinement_def_with_query(scope, module_name, class_name, method_name)
+          own = scope.discovery.in_effect_refinements&.refinement_def(module_name, class_name, method_name)
+          return [own, nil] if own
+
+          (scope.discovered_class_sources[module_name] || EMPTY).each do |path|
+            query = DefNodeResolver.refinement_query(path)
+            found = query&.refinement_def(module_name, class_name, method_name)
+            return [found, query] if found
+          end
+          NO_DEF
+        end
+
+        NO_DEF = [nil, nil].freeze
+        private_constant :NO_DEF
 
         # Issue #1671 — the modules whose refinements `using name` puts in effect, in activation order: the project
         # modules on `name`'s instance-side `Scope::ResolutionChain` (what a module includes and prepends,

@@ -44,6 +44,7 @@ members:
     - lib/rigor/inference/narrowing.rb
     - lib/rigor/inference/object_mixins.rb
     - lib/rigor/inference/pre_eval_constants.rb
+    - lib/rigor/inference/refined_dispatch.rb
     - lib/rigor/inference/singleton_hook_decline.rb
     - lib/rigor/protection/discovery_seed.rb
     - lib/rigor/reflection.rb
@@ -231,7 +232,9 @@ members:
     reads:
     - lib/rigor/analysis/incremental_session.rb
     - lib/rigor/analysis/runner.rb
+    - lib/rigor/inference/expression_typer.rb
     - lib/rigor/inference/in_effect_refinements/scope_reads.rb
+    - lib/rigor/inference/refined_dispatch.rb
     copies:
     - lib/rigor/analysis/runner.rb
     - lib/rigor/protection/discovery_seed.rb
@@ -264,6 +267,7 @@ members:
   discovered_prepends:
     reads:
     - lib/rigor/analysis/runner.rb
+    - lib/rigor/inference/refined_dispatch.rb
     - lib/rigor/scope/resolution_chain.rb
     copies:
     - lib/rigor/analysis/runner.rb
@@ -294,6 +298,7 @@ members:
     reads:
     - lib/rigor/analysis/incremental_session.rb
     - lib/rigor/analysis/runner.rb
+    - lib/rigor/inference/in_effect_refinements/scope_reads.rb
     - lib/rigor/inference/singleton_hook_decline.rb
     - lib/rigor/scope/resolution_chain.rb
     copies:
@@ -381,6 +386,7 @@ members:
   in_effect_refinements:
     reads:
     - lib/rigor/analysis/check_rules.rb
+    - lib/rigor/inference/expression_typer.rb
     - lib/rigor/inference/in_effect_refinements/scope_reads.rb
     copies: []
   possible_discovered_methods:

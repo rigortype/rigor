@@ -43,6 +43,9 @@ RSpec.describe Rigor::Type::FloatRange do
     it "never covers NaN, and covers Infinity only through a closed infinite end" do
       expect(unit.covers?(Float::NAN)).to be(false)
       expect(Rigor::Type::Combinator.non_nan_float.covers?(Float::NAN)).to be(false)
+      expect(half_open.covers?(Float::NAN)).to be(false)
+      expect(described_class.new(0.0, Float::INFINITY).covers?(Float::NAN)).to be(false)
+      expect(described_class.new(0.0, Float::INFINITY, exclude_end: true).covers?(Float::NAN)).to be(false)
       expect(Rigor::Type::Combinator.non_nan_float.covers?(Float::INFINITY)).to be(true)
       expect(Rigor::Type::Combinator.finite_float.covers?(Float::INFINITY)).to be(false)
       expect(described_class.new(0.0, Float::INFINITY, exclude_end: true).covers?(Float::INFINITY)).to be(false)

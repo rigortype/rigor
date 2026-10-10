@@ -58,6 +58,9 @@ module Rigor
       # displays as does.
       def covers?(value)
         return false unless value.is_a?(Float)
+        # NaN is in no bounded range, so answer false here: `Range#cover?(Float::NAN)` raises
+        # ArgumentError on ruby-head (4.1), where Ruby 4.0 returned false.
+        return false if value.nan?
 
         Range.new(min, max, @exclude_end).cover?(value)
       end

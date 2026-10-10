@@ -9,6 +9,7 @@ require_relative "imprecise_argument"
 require_relative "keyword_arguments"
 require_relative "proven_overload"
 require_relative "receiver_affinity"
+require_relative "splat_arity"
 
 module Rigor
   module Inference
@@ -86,11 +87,13 @@ module Rigor
         # @return matching overloads; empty when the definition declares none.
         # rubocop:disable-next Metrics/ParameterLists -- the selection keywords plus the member-wise switch.
         # @param keywords_last — the call's last argument is a keyword hash (`f(a, k: 1)`, not `f(a, { k: 1 })`).
+        # @param splats — the indices of `arg_types` that are splat arguments (`f(*xs)`), or nil (#1801).
         def select_candidates(definition, arg_types:, self_type:, instance_type:, type_vars: {},
-                              block_required: false, environment: nil, member_wise: true, keywords_last: false)
+                              block_required: false, environment: nil, member_wise: true, keywords_last: false,
+                              splats: nil)
           unless FacetDistribution.faceted?(arg_types)
             return select_declared(definition, arg_types, self_type, instance_type, type_vars, block_required,
-                                   environment, false, keywords_last)
+                                   environment, false, keywords_last, splats)
           end
 
           FacetDistribution.select(arg_types, definition, member_wise:, environment:) do |args, member|
@@ -98,7 +101,7 @@ module Rigor
             # gradually matches every arm and the strict pass's pick is the first by position, so the member-wise answer
             # is every gradual match (`:joined`), as the block probe reads it (#1750); the caller joins their returns.
             select_declared(definition, args, self_type, instance_type, type_vars, block_required, environment,
-                            member || (member_wise && :joined), keywords_last)
+                            member || (member_wise && :joined), keywords_last, splats)
           end
         end
 
@@ -111,7 +114,7 @@ module Rigor
         # first-overload fallback, as the return path's reading of the arguments as given always has (#1782).
         # rubocop:disable-next Metrics/ParameterLists -- the selection inputs plus the member-wise flag.
         def select_declared(method_definition, arg_types, self_type, instance_type, type_vars, block_required,
-                            environment, member, keywords_last)
+                            environment, member, keywords_last, splats = nil)
           declared = method_definition.method_types
           return [] if declared.empty?
 
@@ -138,6 +141,8 @@ module Rigor
           shared = { arg_types: arg_types, self_type: self_type, instance_type: instance_type,
                      type_vars: type_vars, block_required: block_required, param_overrides: param_overrides,
                      environment: environment, keywords_last: keywords_last }
+          # Only a call with a splat pays for a ninth key (#1801).
+          shared[:splats] = splats if splats
 
           gradual = member.is_a?(Symbol) # `:gradual` or `:joined`
           matches = run_selection_passes(declared, overloads, shared, gradual)
@@ -373,6 +378,15 @@ module Rigor
             return false unless ok
 
             arg_types = KeywordArguments.selection_positional(method_type, shared)
+            splats = shared[:splats]
+            return positionals_accept?(fun, arg_types, shared, strict) unless splats
+
+            # #1801 — a splat stands for any number of arguments: some count of its elements must fit.
+            lists = SplatArity.expansions(fun, arg_types, splats)
+            lists.nil? || lists.any? { |list| positionals_accept?(fun, list, shared, strict) }
+          end
+
+          def positionals_accept?(fun, arg_types, shared, strict)
             return false unless arity_compatible?(fun, arg_types.size)
 
             params = positional_params_for(fun, arg_types.size)

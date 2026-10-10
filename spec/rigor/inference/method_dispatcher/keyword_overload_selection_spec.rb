@@ -282,9 +282,11 @@ RSpec.describe "Keyword arguments in overload selection (#1727)", type: :runner 
   end
 
   # A splat hides how many arguments precede the hash (`ph(*[], a: v)` passes `{ a: v }` to the `(Hash)` overload), so
-  # any no-keyword overload with a positional parameter that may take a `Hash` splits the values.
+  # any no-keyword overload with a positional parameter that may take a `Hash` splits the values. Since #1801 the
+  # selector also lets the splat stand for no arguments, so the `String` member's list reaches the `(Hash)` overload
+  # and the returns join as `ph(a: int_or_str)`'s do; before, that list matched nothing and the call was `Dynamic[top]`.
   it "splits the values behind a splat whose count may reach a positional Hash" do
-    expect(dumped_types(<<~RUBY)).to eq(["Dynamic[top]", "Dynamic[top]", "Dynamic[top]"])
+    expect(dumped_types(<<~RUBY)).to eq(["Integer | String", "Dynamic[top]", "Integer | String"])
       xs = [] #: Array[untyped]
       dump_type(p.ph(*xs, a: p.int_or_str))
       p.blk(*xs, a: p.int_or_str) { |x| dump_type(x) }

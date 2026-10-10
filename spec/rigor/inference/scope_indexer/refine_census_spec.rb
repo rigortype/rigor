@@ -85,6 +85,16 @@ RSpec.describe Rigor::Inference::ScopeIndexer, ".refine_census" do
       "K = String\nmodule M\n  refine(K) { def center(a, b, c) = 1 }\nend\n",
       %i[recorded], { "M::K" => { center: ["M"] }, "K" => { center: ["M"] } }
     ],
+    # A6, Ruby 4.0.5 prints `:or_assign` and `:const_set_target`: a target the file binds by `||=` or a literal
+    # `const_set` names the value written, which the project-wide constant census leaves out.
+    "a target the file binds by ||=" => [
+      "K ||= String\nmodule M\n  refine(K) { def center(a, b, c) = 1 }\nend\n",
+      %i[class_unknown], { any => { center: ["M"] } }
+    ],
+    "a target the file binds by a literal const_set" => [
+      "Object.const_set(:K, String)\nmodule M\n  refine(K) { def center(a, b, c) = 1 }\nend\n",
+      %i[class_unknown], { any => { center: ["M"] } }
+    ],
     "refine(self)" => [
       "module M\n  refine(self) { def shout = 1 }\nend\n",
       %i[class_unknown], { any => { shout: ["M"] } }

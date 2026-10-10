@@ -704,6 +704,24 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
       expect(call_rows).to eq([["use.rb", 5, "call.wrong-arity"]])
     end
 
+    # A6. Ruby 4.0.5 prints `:or_assign` and `:const_set_target`.
+    it "declines a refined name whose target the file binds by ||= or a literal const_set" do
+      write("lib/ext.rb", <<~RUBY)
+        K ||= String
+        Object.const_set(:L, String)
+        module ByOrAssign
+          refine(K) { def center(a, b, c) = :or_assign }
+        end
+        module ByConstSet
+          refine(L) { def ljust(a, b, c) = :const_set_target }
+        end
+      RUBY
+      write("lib/use.rb", "using ByOrAssign\nusing ByConstSet\n\"x\".center(1, 2, 3)\n\"x\".ljust(1, 2, 3)\n" \
+                          "\"x\".rjust(1, 2, 3)\n")
+
+      expect(call_rows).to eq([["use.rb", 5, "call.wrong-arity"]])
+    end
+
     # Ruby 4.0.5 prints `:c`: a refine block is in effect inside itself whatever its target, and its class-unknown row
     # reaches the String receiver there.
     it "is in effect inside its own refine block whose target the walk cannot name" do

@@ -3283,7 +3283,7 @@ module Rigor
       # that owner prefix is charged to `module` instead.
       MethodTables = Struct.new(:existence, :envelopes, :refinements, :certainty, :certain, :possible,
                                 :contested_envelopes, :contested_def_nodes, :root, :in_effect, :census,
-                                :refine_text, :literal_seen, :refine_self) do
+                                :refine_text, :literal_seen, :refine_self, :loose_constants) do
         # {ScopeIndexer.module_refine_target} against this tree's {InEffectRefinements}.
         def refine_target_of(node)
           return nil if ScopeIndexer.refine_target(node).nil?
@@ -3311,6 +3311,13 @@ module Rigor
         def see_literal(node) = (self.literal_seen ||= Set.new) << node.location.start_offset
 
         def literal_seen?(node) = !literal_seen.nil? && literal_seen.include?(node.location.start_offset)
+
+        # A6 — the last segments of the constants this file binds by `||=` or by a literal `const_set`, which the
+        # project-wide `constant_writers` a reader consults leaves out.
+        def loose_constant?(segment)
+          self.loose_constants ||= ScopeIndexer.loose_constant_segments(root)
+          loose_constants.include?(segment)
+        end
 
         # The module a block the walk is inside charges a `refine` to, for code whose owner prefix is `owner_prefix`,
         # or nil where no such block is open (an enclosing declaration or eval opened a `self` of its own).
@@ -3351,6 +3358,23 @@ module Rigor
       EMPTY_REFINEMENTS = {}.freeze
       REFINEMENT_WILDCARD = Scope::DiscoveryIndex::REFINEMENT_WILDCARD
       private_constant :EMPTY_REFINEMENTS, :REFINEMENT_WILDCARD
+
+      # A6 — the last segments of the constants `root` binds by `||=` (`K ||= String`, `A::K ||= …`) or by a
+      # `const_set` whose name is a literal (`Object.const_set(:K, String)`). Scanned only for a file with a
+      # literal-target `refine`.
+      def loose_constant_segments(root)
+        segments = Set.new
+        Source::NodeWalker.each(root) do |node|
+          case node
+          when Prism::ConstantOrWriteNode then segments << node.name.to_s
+          when Prism::ConstantPathOrWriteNode then segments << node.target.name.to_s
+          when Prism::CallNode
+            name = node.name == :const_set && node.arguments&.arguments&.first
+            segments << name.unescaped if name.is_a?(Prism::SymbolNode) || name.is_a?(Prism::StringNode)
+          end
+        end
+        segments
+      end
 
       # ADR-121 WD7 — the census gate's view of one parsed file (`root`): `[refinement table, [[start offset,
       # outcome], …]]`, one pair for every `refine`-shaped node the method walk accounted for. The outcomes are
@@ -3423,15 +3447,19 @@ module Rigor
       # names-wildcard row per target. `refining` is the module's name, `""` at the top level (where Ruby raises),
       # or the wildcard where the walk cannot name `self`, which records a targets-wildcard for every module
       # instead. The body is not walked any further, so the census scans it here.
+      #
+      # A6 — a target this file binds by `||=` or a literal `const_set` (`K ||= String; refine(K)`) names whatever value
+      # the write holds, so its names go under the wildcard class, as a computed target's do.
       def record_refinement_defs(node, target, qualified_prefix, refining, tables)
-        tables.account(node, :recorded)
+        loose = refining != REFINEMENT_WILDCARD && tables.loose_constant?(target.name.to_s)
+        tables.account(node, loose ? :class_unknown : :recorded)
         body = node.block.body
         return if body.nil?
 
         if refining == REFINEMENT_WILDCARD
           record_targets_wildcard(tables, REFINEMENT_WILDCARD)
         else
-          targets = constant_receiver_candidates(target, qualified_prefix)
+          targets = loose ? [REFINEMENT_WILDCARD] : constant_receiver_candidates(target, qualified_prefix)
           tables.refinements = RefineCensus.record_rows(tables.refinements, targets, RefineCensus.read_body(body),
                                                         refining)
         end

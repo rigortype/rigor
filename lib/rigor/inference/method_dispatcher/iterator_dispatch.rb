@@ -3,6 +3,7 @@
 require_relative "../../type"
 require_relative "singleton_folding"
 require_relative "hash_transform_keys_folding"
+require_relative "integer_step_block_params"
 
 module Rigor
   module Inference
@@ -23,6 +24,10 @@ module Rigor
       #   bound from the argument.
       # - `a.downto(b) { |i| … }` yields the same domain `[b, a]`, just iterated in reverse. Lower bound
       #   from the argument, upper bound from the receiver.
+      # - `a.step(limit, by) { |i| … }` (and the `by:` / `to:` keyword forms) yields `Integer` when the receiver,
+      #   the limit and the step are all Integer, and `Float` as soon as either operand is a Float
+      #   (`1.step(10, 0.5)`). RBS declares every `Numeric#step` block as `(Numeric)`, which reports `even?` on
+      #   correct Integer loops (issue #1783); see {IntegerStepBlockParams}.
       # - `h.transform_keys(mapping) { |k| … }` yields the receiver's keys, a rule the RBS probe does not state for
       #   a union of receiver shapes ({HashTransformKeysFolding.block_param_types}).
       module IteratorDispatch
@@ -38,6 +43,7 @@ module Rigor
           when :times then times_block_params(receiver)
           when :upto  then upto_block_params(receiver, args.first)
           when :downto then downto_block_params(receiver, args.first)
+          when :step then IntegerStepBlockParams.block_param_types(receiver, args)
           when :each_with_index then each_with_index_block_params(receiver)
           when :each_with_object then each_with_object_block_params(receiver, args.first)
           when :inject, :reduce then inject_block_params(receiver, args)

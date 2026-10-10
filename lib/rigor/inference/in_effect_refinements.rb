@@ -4,6 +4,7 @@ require "prism"
 
 require_relative "../source/constant_path"
 require_relative "../source/node_children"
+require_relative "refine_census"
 require_relative "in_effect_refinements/proc_literals"
 require_relative "in_effect_refinements/scope_reads"
 require_relative "in_effect_refinements/refine_defs"

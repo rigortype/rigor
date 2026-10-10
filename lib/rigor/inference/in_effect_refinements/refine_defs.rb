@@ -14,9 +14,10 @@ module Rigor
           @nestings = {}.compare_by_identity
         end
 
-        def record(owner, targets, def_node, nesting)
+        # `name` is the method `def_node` answers for: its own name, or an alias's (ADR-121 WD7).
+        def record(owner, targets, name, def_node, nesting)
           by_class = (@nodes[owner] ||= {})
-          targets.each { |class_name| (by_class[class_name] ||= {})[def_node.name] = def_node }
+          targets.each { |class_name| (by_class[class_name] ||= {})[name] = def_node }
           @nestings[def_node] = nesting
         end
 

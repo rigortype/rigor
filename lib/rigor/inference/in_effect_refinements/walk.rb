@@ -102,6 +102,10 @@ module Rigor
             record_class_body_refine(node)
           elsif (target = ScopeIndexer.refine_target(node))
             record_refine_block(node, owner, ScopeIndexer.constant_receiver_candidates(target, prefix))
+          elsif ScopeIndexer.refine_call?(node)
+            # ADR-121 WD7 — a target the walk cannot name (`refine(k)`): the block is still a refine body, in effect
+            # inside itself, with no class to file its defs under.
+            record_refine_block(node, owner, EMPTY)
           elsif using_call?(node) && !in_def
             record_using(node, prefix, body)
           elsif node.name == :refined
@@ -160,9 +164,13 @@ module Rigor
           body = node.block.body
           return if body.nil?
 
-          ScopeIndexer.each_refinement_def(body) do |def_node|
-            @refinement_defs << def_node.location.start_offset
-            @refine_defs.record(owner, targets, def_node, @nesting) if owner
+          ScopeIndexer.each_refinement_def(body) { |def_node| @refinement_defs << def_node.location.start_offset }
+          return if owner.nil? || targets.empty?
+
+          # ADR-121 WD7 (issue #1799) — a `def`, and an alias of a `def` the body wrote earlier; the other names the
+          # body defines have no body to type (`Dynamic[top]`).
+          RefineCensus.read_body(body).defs.each do |name, def_node|
+            @refine_defs.record(owner, targets, name, def_node, @nesting)
           end
         end
 

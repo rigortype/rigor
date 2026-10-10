@@ -1,0 +1,1 @@
+- **[engine]** `rigor unused` reads `qa/`, `e2e/` and `features/` at the project root as test code, so a class used only from an end-to-end suite is listed as test-only rather than counted as production-reachable. ([#1756](https://github.com/rigortype/rigor/pull/1756))

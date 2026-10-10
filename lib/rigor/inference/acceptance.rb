@@ -486,6 +486,18 @@ module Rigor
             )
           end
 
+          # `Enumerator::ArithmeticSequence[E]` carries only the element of its `Enumerator[Numeric, void]`
+          # superclass (#1794); the target's own `Return` stands in for the one it leaves out.
+          if self_type.class_name == "Enumerator" &&
+             other_type.class_name == "Enumerator::ArithmeticSequence" &&
+             self_type.type_args.size == 2 &&
+             other_type.type_args.size == 1
+            return Type::Combinator.nominal_of(
+              "Enumerator",
+              type_args: [other_type.type_args.first, self_type.type_args.last]
+            )
+          end
+
           nil
         end
 

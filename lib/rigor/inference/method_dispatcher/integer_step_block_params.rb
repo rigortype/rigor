@@ -31,6 +31,14 @@ module Rigor
 
         # @return the block-param types, or nil to fall through to the RBS tier.
         def block_param_types(receiver, args)
+          element = element_type(receiver, args)
+          element && [element]
+        end
+
+        # The type of every value the call yields, or nil when the rule does not decide it. The block-less form
+        # shares it: the `Enumerator::ArithmeticSequence` it returns yields the same values as the block would,
+        # except past an infinite Float limit, which this rule already declines ({ArithmeticSequenceElements}).
+        def element_type(receiver, args)
           return nil unless IteratorDispatch.integer_rooted?(receiver)
 
           operands = operands(args)
@@ -38,9 +46,9 @@ module Rigor
 
           verdicts = operands.map { |role, type| verdict(role, type) }
           return nil if verdicts.include?(:decline)
-          return [Type::Combinator.nominal_of("Integer")] if verdicts.all?(:integer)
+          return Type::Combinator.nominal_of("Integer") if verdicts.all?(:integer)
 
-          [Type::Combinator.dynamic(Type::Combinator.nominal_of("Numeric"))]
+          Type::Combinator.dynamic(Type::Combinator.nominal_of("Numeric"))
         end
 
         # The `[role, type]` pairs of the call's limit and step operands, or nil when the argument list is not

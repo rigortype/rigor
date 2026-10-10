@@ -278,6 +278,14 @@ module Rigor
 
           def dispatch_one(receiver, method_name, args, environment, block_type, self_type_override = nil, # rubocop:disable Metrics/ParameterLists
                            public_only: false, scope: nil, call_node: nil)
+            # Issue #1794 — a sequence's inherited Enumerable surface reads its Rigor-private element argument.
+            element_receiver = ArithmeticSequenceElements.element_receiver(receiver, method_name, environment)
+            if element_receiver
+              return dispatch_one(element_receiver, method_name, args, environment, block_type,
+                                  self_type_override || receiver,
+                                  public_only: public_only, scope: scope, call_node: call_node)
+            end
+
             descriptor = receiver_descriptor(receiver)
             return nil unless descriptor
 
@@ -1742,6 +1750,8 @@ module Rigor
           end
 
           def probe_block_param_types_one(receiver, method_name, args, environment, scope, keywords_last, splat)
+            receiver = ArithmeticSequenceElements.element_receiver(receiver, method_name, environment, block: true) ||
+                       receiver
             descriptor = receiver_descriptor(receiver)
             return [] unless descriptor
 

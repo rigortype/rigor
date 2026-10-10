@@ -643,6 +643,32 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
 
         expect(call_rows).to eq([])
       end
+
+      # The refinement table records `def`s only. Ruby prints `:alias_method`, `:dm` and `:imported`: each refine
+      # body defines the name below `String#center` some other way, so its module keeps the decline.
+      it "declines while an in-effect refine body defines names other than by `def`" do
+        write("lib/str_refs.rb", <<~RUBY)
+          module StrAlias; refine(String) { def c3(a, b, c) = :alias_method; alias_method :center, :c3 }; end
+          module StrDefine; refine(String) { def other = 1; define_method(:center) { |a, b, c| :dm } }; end
+          module Helper; def center(a, b, c) = :imported; end
+          module StrImport; refine(String) { import_methods Helper; def shout = upcase }; end
+        RUBY
+        write("lib/alias_use.rb", "using ObjCenter\nusing StrAlias\n\"x\".center(1, 2, 3)\n")
+        write("lib/define_use.rb", "using ObjCenter\nusing StrDefine\n\"x\".center(1, 2, 3)\n")
+        write("lib/import_use.rb", "using ObjCenter\nusing StrImport\n\"x\".center(1, 2, 3)\n")
+
+        expect(call_rows).to eq([])
+      end
+
+      # `using A` activates the refinements of A's ancestors too. `B`'s refine body is outside the analysed paths,
+      # and Ruby prints `:b`, so a used module that mixes another in keeps the decline.
+      it "declines while a used module mixes in a module" do
+        write("vendor/b.rb", "module B; refine(String) { def center(a, b, c) = :b }; end\n")
+        write("lib/mixer.rb", "module A\n  include B\n  refine(Integer) { def x = 1 }\nend\n")
+        write("lib/mixer_use.rb", "using ObjCenter\nusing A\n\"x\".center(1, 2, 3)\n")
+
+        expect(call_rows).to eq([])
+      end
     end
 
     it "answers the same through a warm cache as cold" do

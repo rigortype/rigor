@@ -43,22 +43,27 @@ module Rigor
       # Issue #1740 — is `method_name` on an instance of `class_name` provably answered by the receiver's own lookup:
       # the walk reaches a definer before any refinement in effect in `list`? False wherever {.winner}'s nil rests on
       # anything weaker: no readable ancestry, no resolvable refined class, a project mixin of unknown position, a
-      # definer {#own_definition} cannot prove, or an in-effect module whose refine bodies the project does not show
-      # (a gem's `using GemRef`, whose `refine String` may define the name below the definer).
+      # definer {#own_definition} cannot prove, or an in-effect module whose refinements the table may not list
+      # ({.refinements_visible?}).
       def own_method_answers?(scope, class_name, method_name, list)
-        return false unless refinements_visible?(scope.discovered_refinements, list)
+        return false unless refinements_visible?(scope, list)
 
         decision(scope, class_name, method_name, list) == SHADOWED
       end
 
-      # Is every module in `list` one some discovered refine body belongs to? {InEffectRefinements::UNKNOWN} may be
-      # any module, so it is not.
-      def refinements_visible?(refinements, list)
-        return false if list.include?(InEffectRefinements::UNKNOWN)
+      # Does the refinement table list every name the in-effect modules in `list` refine? A module counts only when the
+      # project shows a refine body of it ({InEffectRefinements::UNKNOWN} has none, nor has a gem's `using GemRef`),
+      # every such body holds only `def`s (an `alias_method`, `define_method` or `import_methods` defines names the
+      # table does not record), and it includes or prepends no module: `using` activates the refinements of the
+      # module's ancestors too, and an included module's may not be visible (an `extend` adds no ancestor, and
+      # activates nothing on Ruby 4.0.5).
+      def refinements_visible?(scope, list)
+        list.all? { |entry| !mixes_in?(scope, entry) && InEffectRefinements.plain_refine_bodies?(scope, entry) }
+      end
 
-        refining = Set.new
-        refinements.each_value { |methods| methods.each_value { |modules| refining.merge(modules) } }
-        list.all? { |entry| refining.include?(entry) }
+      def mixes_in?(scope, name)
+        Analysis::DependencyRecorder.read_last_segment(:class, name) if Analysis::DependencyRecorder.active?
+        !scope.includes_of(name).empty? || scope.discovery.discovered_prepends.key?(name)
       end
 
       # {.winner}, with the nil that a definer reached first answers kept apart as {SHADOWED}.

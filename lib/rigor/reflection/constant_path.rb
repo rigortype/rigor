@@ -120,7 +120,7 @@ module Rigor
     # `Scope::ResolutionChain#settle` lets the chain stand, and otherwise the breadth-first order's.
     #
     # Issue #1698 — the path walk reads the project entries only: an RBS-only mixin's own ancestry is not on the
-    # chain, so the rung that reads such a mixin also stops behind it ({.external_mixin_ancestry_stop?}), and this
+    # chain, so the rung that reads such a mixin also stops behind it ({.mixin_ancestry_stop?}), and this
     # walk keeps the answer it gave before.
     def bounded_agreed_hit(class_name, scope, &)
       scopes, chain = ancestor_constant_worlds(class_name, scope)

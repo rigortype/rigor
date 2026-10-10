@@ -261,6 +261,52 @@ RSpec.describe "a constant reached through an RBS-only mixin (#1698)" do
     expect(run_project(reopened_source)).to eq([])
   end
 
+  # A declaration whose definition fails to build (here an undeclared mixin) still yields what it declares, and
+  # where an ancestry cannot be read whole only a LATER RBS-only mixin is kept out: project entries, the
+  # superclass chain and the top level answer as they did before #1698.
+  context "with an RBS declaration whose ancestry cannot be read whole" do
+    let(:signatures) { <<~RBS }
+      class RSuper
+      end
+      class RBase < RSuper
+        include MissingMod
+      end
+      module Hidden
+        include MissingMod
+      end
+      module SigHelpers
+        class Box
+          def initialize: () -> void
+        end
+      end
+    RBS
+
+    it "keeps the top level, project constants and a later true positive, and keeps later mixins out" do
+      rows = run_project(<<~RUBY).reject { |_, rule, _| rule.start_with?("rbs.coverage.") }
+        require "rigor/testing"
+        class Thing; end
+        class RBase
+          def x = 1
+        end
+        class Sub < RBase
+          def thing = Rigor.assert_type("singleton(Thing)", Thing)
+          def string = Rigor.assert_type("singleton(String)", String)
+          def call = String.new.bogus_call
+        end
+        class KBase
+          KIND = 1
+        end
+        class Kept < KBase
+          include SigHelpers
+          include Hidden
+          def box = Rigor.assert_type("Dynamic[top]", Box)
+          def kind = Rigor.assert_type("1", KIND)
+        end
+      RUBY
+      expect(rows).to eq([[9, "call.undefined-method", "undefined method `bogus_call' for String"]])
+    end
+  end
+
   # Issue #1305 — a `class << self` body and a `def` in it run under the singleton class's cref, whose ancestors
   # are not the class's, so the included module's `Box` is not Ruby's answer there: the top-level `Box` is.
   it "does not read an RBS-only mixin's constant where self is the class object" do

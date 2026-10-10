@@ -184,46 +184,56 @@ module Rigor
     end
     private_class_method :record_external_owner_edges
 
-    # Issue #1698 — whether the walk must stop at the RBS-only mixin `owner` because a module its own RBS ancestry
-    # holds may own the name (`candidate` answers for some ancestor after `owner` itself), or because that
-    # ancestry cannot be read. Ruby searches the mixin's ancestry right after it, before any later entry of the
-    # chain and before the top level, and the chain does not expand it, so a later answer would be a guess.
-    # Where no module of the ancestry owns the name, where they sit does not matter to this name and the walk
-    # goes on.
-    def external_mixin_ancestry_stop?(owner, scope)
+    # Issue #1698 — whether the walk must stop at `owner` because a module its RBS ancestry holds may own the name
+    # (`candidate` answers for it). Ruby searches that ancestry right after `owner`, before any later entry of
+    # the chain and before the top level, and the chain does not expand it. Where no module of it owns the
+    # name, where they sit does not matter to this name and the walk goes on.
+    #
+    # `owner` is an RBS-only mixin (`external`), or a project entry RBS also declares: a project file that
+    # reopens an RBS module without restating its `include`s makes it a project entry whose chain lists only
+    # the edges the project writes, so its ancestry is read less what that chain lists. The ancestry comes from
+    # the declarations (`RbsLoader#declared_ancestry`), so a definition that fails to build still yields what
+    # it declares. Where it cannot be read whole, {.ancestry_unknown?} keeps the later RBS-only mixins out
+    # instead of stopping here.
+    def mixin_ancestry_stop?(owner, scope, external)
       loader = rbs_loader_for(scope, nil)
-      ancestors = loader ? loader.ancestor_names_for(owner) : []
-      return true if ancestors.empty?
+      return false if loader.nil? || (!external && !loader.class_known?(owner))
 
-      ancestors.any? { |ancestor| ancestor != owner && !IMPLICIT_ANCESTORS.include?(ancestor) && yield(ancestor) }
+      names, = loader.declared_ancestry(owner)
+      listed = nil
+      names.any? do |ancestor|
+        next false if IMPLICIT_ANCESTORS.include?(ancestor)
+
+        listed ||= external ? EMPTY_NAMES : project_chain_names(owner, scope)
+        !listed.include?(ancestor) && yield(ancestor)
+      end
     end
-    private_class_method :external_mixin_ancestry_stop?
+    private_class_method :mixin_ancestry_stop?
+
+    # Issue #1698 — whether an entry ahead of `entry` on `class_name`'s list has an RBS ancestry that cannot be
+    # read whole ({.mixin_ancestry_stop?}): a module it hides may own the name, so `entry`, an RBS-only mixin,
+    # MUST NOT answer. Only those entries are kept out; project entries, the superclass chain and the top level
+    # answer as they did before #1698.
+    def ancestry_unknown_before?(class_name, entry, scope)
+      loader = rbs_loader_for(scope, nil)
+      return true if loader.nil?
+
+      ancestor_constant_scopes(class_name, scope).each do |earlier|
+        break if earlier == entry
+        next unless loader.class_known?(earlier)
+
+        return true unless loader.declared_ancestry(earlier)[1]
+      end
+      false
+    end
+    private_class_method :ancestry_unknown_before?
 
     # Ruby places these after every entry of a chain, so a constant they own is the top level's (step 4).
     IMPLICIT_ANCESTORS = %w[Object Kernel BasicObject].freeze
     private_constant :IMPLICIT_ANCESTORS
 
-    # Issue #1698 — {.external_mixin_ancestry_stop?} for a PROJECT entry RBS also declares: a project file that
-    # reopens an RBS module without restating its `include`s makes it a project entry whose chain lists only
-    # the edges the project writes, while Ruby searches the RBS-declared ones right after it too. The walk stops
-    # when a module RBS records in `owner`'s ancestry, and `owner`'s own project chain does not list, owns the
-    # name. A project namespace RBS does not declare never stops the walk.
-    def reopened_rbs_ancestry_stop?(owner, scope)
-      loader = rbs_loader_for(scope, nil)
-      return false unless loader&.class_known?(owner)
-
-      ancestors = loader.ancestor_names_for(owner)
-      return true if ancestors.empty?
-
-      listed = nil
-      ancestors.any? do |ancestor|
-        next false if ancestor == owner || IMPLICIT_ANCESTORS.include?(ancestor)
-
-        listed ||= project_chain_names(owner, scope)
-        !listed.include?(ancestor) && yield(ancestor)
-      end
-    end
-    private_class_method :reopened_rbs_ancestry_stop?
+    EMPTY_NAMES = [].freeze
+    private_constant :EMPTY_NAMES
 
     # Every name `owner`'s own instance chain lists: its project entries and each external entry's candidates.
     def project_chain_names(owner, scope)

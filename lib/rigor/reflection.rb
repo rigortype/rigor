@@ -50,8 +50,8 @@ module Rigor
     WRITTEN_CANDIDATE = Object.new.freeze
     private_constant :WRITTEN_CANDIDATE
 
-    # Issue #1698 — what the constant ladder's ancestor rung answers where an RBS-only mixin's own ancestry may
-    # own the name ({.external_mixin_ancestry_stop?}). Never a type: {.lexical_constant_type} replaces it.
+    # Issue #1698 — what the constant ladder's ancestor rung answers where an entry's RBS ancestry may
+    # own the name ({.mixin_ancestry_stop?}). Never a type: {.lexical_constant_type} replaces it.
     MIXIN_ANCESTRY_STOP = Object.new.freeze
     private_constant :MIXIN_ANCESTRY_STOP
 
@@ -204,7 +204,7 @@ module Rigor
       # Step 3 — the bare name (top level). It takes no `shadows`: nothing sits below it for a stop to replace.
       #
       # Issue #1698 — step 2 answers {MIXIN_ANCESTRY_STOP} where an RBS-only mixin's own ancestry may own the name
-      # ({.external_mixin_ancestry_stop?}). Ruby reads that ancestry before any later ancestor or the top level, and
+      # ({.mixin_ancestry_stop?}). Ruby reads that ancestry before any later ancestor or the top level, and
       # the chain does not list it, so a lower rung's answer is replaced by `Dynamic[top]`, as #1290's stop is.
       lexical = first_constant_hit(lexical_nesting_chain(scope), name, scope, shadows)
       return lexical if lexical
@@ -244,18 +244,13 @@ module Rigor
       class_object_self = scope.self_type.is_a?(Type::Singleton)
       agreed_ancestor_hit(prefix, scope) do |entry|
         external = !known_project_namespace?(entry, scope)
-        next nil if external && class_object_self
+        next nil if external && (class_object_self || ancestry_unknown_before?(prefix, entry, scope))
 
         candidate = ->(owner) { constant_type_at("#{owner}::#{name}", scope, shadows) }
         hit = candidate.call(entry)
         next hit if hit
 
-        stop = if external
-                 external_mixin_ancestry_stop?(entry, scope, &candidate)
-               else
-                 reopened_rbs_ancestry_stop?(entry, scope, &candidate)
-               end
-        MIXIN_ANCESTRY_STOP if stop
+        MIXIN_ANCESTRY_STOP if mixin_ancestry_stop?(entry, scope, external, &candidate)
       end
     end
     private_class_method :ancestor_constant_type

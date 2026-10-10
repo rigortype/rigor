@@ -210,7 +210,7 @@ module Rigor
 
             env = resolve_sequential_environment(source_files: project_files)
           end
-          snapshot_project_signature_state(signature_state_environment(resolve))
+          snapshot_project_signature_state(signature_state_environment(resolve, project_files))
           snapshot_effect_annotation_carrier(
             annotation_carrier_environment(resolve, in_hand: !env.nil?)&.rbs_loader
           )
@@ -222,11 +222,21 @@ module Rigor
           record_hkt_scan_failure(hkt_scan_outcome(resolve.call))
         end
 
-        # Issue #794 — the signature-state snapshot's own gates, asked BEFORE an environment exists. Both
-        # answers are loader-free (the configuration and the plugin registry), and with neither gate open
-        # {#snapshot_project_signature_state} writes the same empty state a nil environment gives it.
-        def signature_state_environment(resolve)
-          plugin_signature_paths? || project_signature_paths? ? resolve.call : nil
+        # Issue #794 — the signature-state snapshot's own gates, asked BEFORE an environment exists. Every
+        # answer is loader-free (the configuration, the plugin registry and, issue #1713, the required-feature
+        # scan), and with no gate open {#snapshot_project_signature_state} writes the same empty state a nil
+        # environment gives it.
+        def signature_state_environment(resolve, project_files)
+          gated = plugin_signature_paths? || project_signature_paths? || vendored_features_requested?(project_files)
+          gated ? resolve.call : nil
+        end
+
+        # Issue #1713 — whether this run activates a required-feature-gated vendored directory, whose stand-down
+        # {#snapshot_project_signature_state} reports: the scan every build of this run gates on, or the
+        # feature named under `libraries:`.
+        def vendored_features_requested?(project_files)
+          features = project_files.nil? || project_files.empty? ? [] : required_features_for(project_files)
+          !Environment::RequiredFeatures.tokens(features, @configuration.libraries).empty?
         end
 
         # Issue #794 — the same, for the #441 carrier. The carrier is a filter over the loader's
@@ -346,6 +356,10 @@ module Rigor
           # no such plugin reads nothing off its loader here, as before.
           @snapshots.signature_standdowns =
             plugin_signature_paths? ? signature_standdowns_for(environment&.rbs_loader) : []
+          # Issue #1713 — NOT behind the `signature_paths:` gate either: what displaces a vendored declaration may
+          # be a gem's or a collection's copy. The loader answers without building its env when no gated
+          # directory is active.
+          @snapshots.vendored_standdowns = vendored_standdowns_for(environment&.rbs_loader)
           unless project_signature_paths?
             @snapshots.synthesized_namespaces = []
             @snapshots.quarantined_signatures = []
@@ -1113,6 +1127,10 @@ module Rigor
           return [] if loader.deferred_signature_paths.empty?
 
           loader.signature_standdowns
+        end
+
+        def vendored_standdowns_for(loader)
+          loader.respond_to?(:vendored_standdowns) ? loader.vendored_standdowns : []
         end
 
         def plugin_registry

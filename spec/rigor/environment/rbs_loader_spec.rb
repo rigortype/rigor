@@ -2277,4 +2277,47 @@ RSpec.describe Rigor::Environment::RbsLoader do
       end
     end
   end
+
+  # Issue #1713 — a gated vendored directory loads less what another source declares.
+  describe "partial stand-down of a required-feature-gated vendored directory" do
+    let(:tmpdir) { Dir.mktmpdir("rigor-rbs-loader-gated-spec-") }
+    let(:libraries) do
+      Rigor::Environment::DEFAULT_LIBRARIES + [Rigor::Environment::RequiredFeatures.token("prime")]
+    end
+
+    after { FileUtils.rm_rf(tmpdir) }
+
+    def build_loader(cache_root = nil)
+      store = cache_root && Rigor::Cache::Store.new(root: cache_root)
+      described_class.new(libraries: libraries, signature_paths: [tmpdir], cache_store: store)
+    end
+
+    it "derives the same stand-down from an environment served by the env cache" do
+      File.write(File.join(tmpdir, "ext.rbs"), "class Integer\n  def prime?: () -> bool\nend\n")
+      root = File.join(tmpdir, ".rigor", "cache")
+      cold = build_loader(root).vendored_standdowns
+      warm = build_loader(root).vendored_standdowns
+
+      expect(cold).to eq([["prime", [["Integer#prime?", File.join(tmpdir, "ext.rbs")]], false]])
+      expect(warm).to eq(cold)
+    end
+
+    # A shell carries no superclass, so loaded ahead of a project declaration that carries none either it would
+    # become the class's primary declaration and take the class out of the project's own.
+    it "keeps a shelled class the project's own" do
+      File.write(File.join(tmpdir, "prime.rbs"), "class Prime[T]\n  def extra: () -> T\nend\n")
+      loader = build_loader
+
+      expect(loader.vendored_standdowns).to eq([["prime", [["Prime", File.join(tmpdir, "prime.rbs")]], false]])
+      expect(loader.project_declared_classes).to include("Prime")
+      expect(loader.instance_method(class_name: "Integer", method_name: :prime_division)).not_to be_nil
+    end
+
+    it "reports nothing, and builds nothing, when no gated directory is active" do
+      loader = described_class.new(signature_paths: [tmpdir])
+
+      expect(loader.vendored_standdowns).to eq([])
+      expect(loader.instance_variable_get(:@state)[:env_loaded]).to be_nil
+    end
+  end
 end

@@ -10,6 +10,7 @@ This document is the authoritative list of normalization rules. The lattice that
 - Remove duplicate union and intersection operands.
 - Drop a union member that another member absorbs; § "Member absorption" is the complete list.
 - Drop `bot` from unions (`T | bot = T`).
+- Join two `Enumerator::ArithmeticSequence[E]` members into one over the union of their elements: `Enumerator::ArithmeticSequence[A] | Enumerator::ArithmeticSequence[B]` normalizes to `Enumerator::ArithmeticSequence[A | B]`. This widens, unlike absorption, and is sound because every element either arm yields is an `A | B`.
 - Drop `top` from intersections (`T & top = T`).
 - Expand `T?` to `T | nil` internally.
 - Normalize finite set difference and complement when the domain is known.
@@ -28,6 +29,7 @@ A union drops any member that another member already contains, so the join after
 
 - `bot` is absorbed by every member, and `top` absorbs every member.
 - A member is absorbed by a union member that already lists it — flatten-and-dedupe read one level down.
+- An `Enumerator::ArithmeticSequence[E]` (the Rigor-private element of [rbs-erasure.md](rbs-erasure.md)) is absorbed by a bare `Enumerator::ArithmeticSequence` member, which yields `Numeric`. The join of `1.step(10, 2)` and `1.step(10, 0.5)` holds a sequence that yields Floats, so it MUST read as the bare class, not as two readings a block probe cannot agree on ([#1794](https://github.com/rigortype/rigor/issues/1794)).
 - A `FloatRange` is absorbed by a bare `Float` member and by a `FloatRange` that contains it. The rule and its Integer exclusion are in [imported-built-in-types.md](imported-built-in-types.md) (`Float` comparison narrowing widens only the truthy edge, so the falsy edge keeps `Float` and the join would otherwise carry both readings; both `Integer` edges narrow, so `IntegerRange` keeps both members).
 - A structural carrier is absorbed **element-wise over an identical spine**, asking this same list one level down. Two `Tuple` members of **equal arity** absorb when every element of one is equal to, or absorbed by, the element at that position in the other. Two `HashShape` members absorb when their spine — key set, extra-key policy, and required / optional / read-only classification — is identical and every value type is equal to, or absorbed by, the value at that key.
 

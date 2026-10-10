@@ -486,7 +486,17 @@ module Rigor
             )
           end
 
-          nil
+          project_sequence_to_enumerator(self_type, other_type)
+        end
+
+        # `Enumerator::ArithmeticSequence[E]` carries only the element of its `Enumerator[Numeric, void]` superclass
+        # (#1794), so against a two-argument `Enumerator` it projects to `Enumerator[E, top]`, `top` being what RBS
+        # `void` translates to: `Enumerator[Integer, void]` and `[Integer, untyped]` accept it, as RBS would.
+        def project_sequence_to_enumerator(self_type, other_type)
+          return nil unless self_type.class_name == "Enumerator" && self_type.type_args.size == 2
+          return nil unless other_type.class_name == "Enumerator::ArithmeticSequence" && other_type.type_args.size == 1
+
+          Type::Combinator.nominal_of("Enumerator", type_args: [other_type.type_args.first, Type::Combinator.top])
         end
 
         def project_tuple_to_nominal(tuple)

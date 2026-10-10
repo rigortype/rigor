@@ -49,9 +49,14 @@ module Rigor
         "#{rendered_name}[#{rendered}]"
       end
 
+      # Classes RBS declares without a type parameter, on which Rigor carries one of its own: the element type of
+      # the `Enumerator::ArithmeticSequence` that `Integer#step` returns (issue #1794). RBS has no slot for it, so
+      # the argument erases away.
+      RIGOR_PRIVATE_TYPE_ARGS = %w[Enumerator::ArithmeticSequence].freeze
+
       def erase_to_rbs
         return "untyped" if AnonymousClassName.match?(class_name)
-        return class_name if type_args.empty?
+        return class_name if type_args.empty? || RIGOR_PRIVATE_TYPE_ARGS.include?(class_name)
 
         rendered = type_args.map(&:erase_to_rbs).join(", ")
         "#{class_name}[#{rendered}]"

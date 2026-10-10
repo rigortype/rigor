@@ -76,6 +76,7 @@ members:
     - lib/rigor/inference/expression_typer.rb
     - lib/rigor/inference/parameter_inference_collector.rb
     - lib/rigor/inference/void_tail_summary.rb
+    - lib/rigor/scope/resolution_chain.rb
     copies:
     - lib/rigor/inference/definer_resolution.rb
     - lib/rigor/inference/parameter_inference_collector.rb
@@ -99,6 +100,8 @@ members:
       - paired_copy
       lib/rigor/inference/void_tail_summary.rb:
       - identity
+      lib/rigor/scope/resolution_chain.rb:
+      - existence
       lib/rigor/inference/definer_resolution.rb:
       - consults_contested
       lib/rigor/protection/discovery_seed.rb:
@@ -119,6 +122,7 @@ members:
     - lib/rigor/inference/expression_typer.rb
     - lib/rigor/inference/method_dispatcher/process_folding.rb
     - lib/rigor/inference/parameter_inference_collector.rb
+    - lib/rigor/scope/resolution_chain.rb
     copies:
     - lib/rigor/inference/definer_resolution.rb
     - lib/rigor/inference/parameter_inference_collector.rb
@@ -142,6 +146,8 @@ members:
       lib/rigor/inference/parameter_inference_collector.rb:
       - existence
       - paired_copy
+      lib/rigor/scope/resolution_chain.rb:
+      - existence
       lib/rigor/inference/definer_resolution.rb:
       - consults_contested
       lib/rigor/protection/discovery_seed.rb:

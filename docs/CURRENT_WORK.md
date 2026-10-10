@@ -49,10 +49,9 @@ local run under an agent harness — run long spec commands with `< /dev/null` a
 ## Serializer / `rigor unused` line (2026-10-10, separate from the ADR-119 line above)
 
 Landed: #1662 #1668 #1688(rigor-alba) #1690 #1707(rigor-typelizer) #1709 #1723 #1724 #1725 #1726
-#1748 #1756 #1757 #1758 #1762 #1766 #1769. External: okuramasafumi/alba#575 (ship `sig/` minus
-`external.rbs`/`railtie.rbs`) awaits the maintainer; once released, rigor-alba must drop its stub
-`sig/alba.rbs` + `open_receivers` for gems that ship RBS (projects that hand-declare
-`Alba.register_type`, e.g. sorah/protobufable, will hit duplicate-definition errors).
+#1748 #1756 #1757 #1758 #1762 #1766 #1769. External: okuramasafumi/alba#575 merged 2026-10-10 (ships
+`sig/` minus `external.rbs`/`railtie.rbs`; unreleased as of v4.0.0) — #1788 drops rigor-alba's stub
+`sig/alba.rbs` + `open_receivers` once a release ships it.
 
 In flight at handoff: **#1767** (fixes #1761, Draft, branch `unused-literal-const-get`). Round 2 found
 five shapes that list a live top-level class as a candidate (see the PR comment): `extend` taken as a

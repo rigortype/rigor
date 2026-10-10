@@ -48,15 +48,29 @@ module Rigor
         #   children (#370). `config/recurring.yml` mentioning `Admin` is not evidence about
         #   `Admin::CollectionPolicy`; treating it as such demoted 18 unrelated Mastodon rows off one
         #   Afrikaans word ("Administrasie" contains "Admin").
-        DynamicUse = Data.define(:name, :prefix, :reason, :site, :path, :line, :scope) do
-          def initialize(scope: :namespace, **) = super
+        # - `:leading` — `"V#{version}"` is the START of a name, not a namespace, so it can construct `V1_0`
+        #   and `V2_2` as well as anything beneath them: a string-prefix match (#1734).
+        #
+        # `within` is set for `Foo.const_get("Bar::#{k}")`: `prefix` is then relative to the receiver, a
+        # {Reference} that {Graph} resolves as it resolves any other before matching.
+        DynamicUse = Data.define(:name, :prefix, :reason, :site, :path, :line, :scope, :within) do
+          def initialize(scope: :namespace, within: nil, **) = super
 
           # Whether this site's evidence reaches `fqn`.
           def taints?(fqn)
             return false if prefix.nil?
             return fqn == prefix if scope == :exact
+            return fqn.start_with?(prefix) if scope == :leading
 
             fqn == prefix || fqn.start_with?("#{prefix}::")
+          end
+
+          # This site with `within` resolved by the block into an absolute `prefix`. A receiver naming no
+          # declaration keeps its written name, so it can taint only a declaration spelled under it.
+          def anchored
+            return self if within.nil?
+
+            with(prefix: "#{yield(within) || within.as_written}::#{prefix}", within: nil)
           end
         end
 
@@ -135,6 +149,8 @@ module Rigor
             @dynamic_uses = []
             # The declaration a meta-new rvalue is being walked for, or nil. See {#walk_constant_write}.
             @owner = nil
+            # The node whose subtree holds the local variables in scope: the file, a method, or a class body.
+            @local_scope = nil
           end
 
           def walk(node, nesting)
@@ -153,7 +169,9 @@ module Rigor
               walk_constant_write(node, nesting)
               return
             when Prism::CallNode
-              record_dynamic_use(node)
+              record_dynamic_use(node, nesting)
+            when Prism::ProgramNode, Prism::DefNode, Prism::SingletonClassNode
+              return in_local_scope(node) { node.rigor_each_child { |child| walk(child, nesting) } }
             end
 
             node.rigor_each_child { |child| walk(child, nesting) }
@@ -186,7 +204,7 @@ module Rigor
             # this declaration sits in must not leak into it.
             owner = @owner
             @owner = nil
-            walk(node.body, nesting + [name])
+            in_local_scope(node.body) { walk(node.body, nesting + [name]) }
             @owner = owner
           end
 
@@ -248,6 +266,10 @@ module Rigor
           DYNAMIC_RESOLVERS = %i[constantize safe_constantize const_get].freeze
           private_constant :DYNAMIC_RESOLVERS
 
+          # The anchor of a lookup that starts at the top level.
+          TOP_LEVEL = ""
+          private_constant :TOP_LEVEL
+
           SUBJECT_SHAPES = {
             Prism::StringNode => "a literal string",
             Prism::SymbolNode => "a literal symbol",
@@ -257,51 +279,162 @@ module Rigor
 
           # Rigor knows the argument's shape, which is the whole reason this can be tiered rather than treated
           # as a blanket namespace poison: a literal argument names the exact constant and is as good as a
-          # written reference, while an interpolated one can only bound the namespace it reaches into.
-          def record_dynamic_use(node)
+          # written reference, while an interpolated one can only bound the names its literal head reaches.
+          #
+          # A local variable argument is read through its assignments in the same local scope, because the
+          # name is usually built one line up: GitLab's `Migration[2.2]` is `name = "V#{...}"` followed by
+          # `const_get(name, false)` (#1734).
+          def record_dynamic_use(node, nesting)
             return unless DYNAMIC_RESOLVERS.include?(node.name)
 
             subject = node.name == :const_get ? node.arguments&.arguments&.first : node.receiver
             return if subject.nil?
 
-            name, prefix = dynamic_target(subject)
+            anchors = node.name == :const_get ? const_get_anchors(node, nesting) : [TOP_LEVEL]
+            subjects(subject).each { |value| record_dynamic_subject(node, value, anchors) }
+          end
+
+          def record_dynamic_subject(node, subject, anchors)
+            name, head = dynamic_target(subject)
             # A literal whose bytes are not valid UTF-8 cannot name a constant; dropping it is the only safe
             # answer, and carrying it forward crashed the whole run downstream.
             return if subject.is_a?(Prism::StringNode) && name.nil?
             return if subject.is_a?(Prism::SymbolNode) && name.nil?
 
-            @dynamic_uses << DynamicUse.new(
-              name: name, prefix: prefix, site: site(node), path: @path, line: node.location.start_line,
-              reason: "#{node.name} on #{SUBJECT_SHAPES.fetch(subject.class, 'a computed value')}"
-            )
+            reason = "#{node.name} on #{SUBJECT_SHAPES.fetch(subject.class, 'a computed value')}"
+            bounds = head ? anchors.filter_map { |anchor| bound(head, anchor) }.uniq : []
+            bounds = [[nil, :namespace, nil]] if bounds.empty?
+            bounds.each do |prefix, scope, within|
+              @dynamic_uses << DynamicUse.new(name: name, prefix: prefix, scope: scope, within: within,
+                                              site: site(node), path: @path, line: node.location.start_line,
+                                              reason: reason)
+            end
           end
 
-          # `[exact name, bounded namespace]` for a dynamic-resolution subject. A literal names its constant
-          # exactly; an interpolation can only bound the namespace its literal head names; anything else bounds
-          # nothing.
+          # Where a `const_get` looks a name up, as the namespaces its interpolated argument is bounded by. The
+          # receiver's namespace comes first: an implicit receiver, `self` or `self.class` is the enclosing
+          # declaration, and a constant receiver is resolved by {Graph} as any reference is (`within`). With
+          # the default `inherit = true` the lookup also falls through to the top level, which is all the
+          # reading had before, so that stays tainted too; an explicit `false` confines it to the receiver. An
+          # unknown receiver bounds nothing beyond the top level.
+          def const_get_anchors(node, nesting)
+            receiver = node.receiver
+            namespaces =
+              if self_receiver?(receiver)
+                # Inside a meta-new rvalue `self` is the declared class in its block but the outer scope in its
+                # arguments; the walk does not tell the two apart, so both are taken.
+                [@owner, nesting.join("::")].compact.uniq - [TOP_LEVEL]
+              elsif constant_receiver?(receiver)
+                [receiver_reference(receiver, nesting)]
+              else
+                []
+              end
+            return [TOP_LEVEL] if namespaces.empty?
+
+            inherit = node.arguments.arguments[1]
+            inherit.is_a?(Prism::FalseNode) ? namespaces : namespaces + [TOP_LEVEL]
+          end
+
+          def self_receiver?(receiver)
+            receiver.nil? || receiver.is_a?(Prism::SelfNode) ||
+              (receiver.is_a?(Prism::CallNode) && receiver.name == :class && receiver.receiver.is_a?(Prism::SelfNode))
+          end
+
+          # `Object.const_get` is the top level, which every lookup already reaches.
+          def constant_receiver?(receiver)
+            return false unless receiver.is_a?(Prism::ConstantReadNode) || receiver.is_a?(Prism::ConstantPathNode)
+
+            as_written = Source::ConstantPath.qualified_name_or_nil(receiver)
+            !as_written.nil? && as_written.delete_prefix("::") != "Object"
+          end
+
+          def receiver_reference(receiver, nesting)
+            Reference.new(as_written: Source::ConstantPath.qualified_name_or_nil(receiver),
+                          nesting: nesting.dup.freeze, from: nil, role: @role, path: @path,
+                          line: receiver.location.start_line, rooted: Source::ConstantPath.rooted?(receiver))
+          end
+
+          # `[prefix, scope, within]` for a literal head under one anchor. A head ending in `::` names a
+          # namespace and reaches everything beneath it; any other head is the start of a name, so
+          # `"V#{version}"` reaches `V1_0` and `V2_2` alike, and only a string-prefix match says that. A rooted
+          # head ignores the receiver. `within` carries a constant receiver for {Graph} to resolve.
+          def bound(head, anchor)
+            anchor = TOP_LEVEL if head.start_with?("::")
+            head = head.delete_prefix("::")
+            scope = head.end_with?("::") ? :namespace : :leading
+            head = head.delete_suffix("::")
+            return nil if head.empty?
+
+            case anchor
+            when Reference then [head, scope, anchor]
+            when TOP_LEVEL then [head, scope, nil]
+            else ["#{anchor}::#{head}", scope, nil]
+            end
+          end
+
+          # The values a dynamic-resolution subject can hold: the subject itself, or for a local variable every
+          # value assigned to it in the enclosing local scope. A local with an assignment whose value cannot be
+          # read off the node (`+=`, a multiple assignment, `rescue => name`) stays a computed value.
+          def subjects(subject)
+            return [subject] unless subject.is_a?(Prism::LocalVariableReadNode) && @local_scope
+
+            writes = []
+            collect_local_writes(@local_scope, subject.name, writes)
+            return [subject] if writes.empty? || writes.any? { |write| !VALUE_WRITES.include?(write.class) }
+
+            writes.map(&:value)
+          end
+
+          VALUE_WRITES = [Prism::LocalVariableWriteNode, Prism::LocalVariableOrWriteNode,
+                          Prism::LocalVariableAndWriteNode].freeze
+          private_constant :VALUE_WRITES
+
+          LOCAL_WRITES = (VALUE_WRITES + [Prism::LocalVariableOperatorWriteNode, Prism::LocalVariableTargetNode]).freeze
+          private_constant :LOCAL_WRITES
+
+          # Nodes that open a new local-variable scope. A block does not: it shares its method's locals.
+          SCOPE_GATES = [Prism::DefNode, Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode].freeze
+          private_constant :SCOPE_GATES
+
+          def collect_local_writes(node, name, out)
+            node.rigor_each_child do |child|
+              next if SCOPE_GATES.any? { |gate| child.is_a?(gate) }
+
+              out << child if LOCAL_WRITES.any? { |kind| child.is_a?(kind) } && child.name == name
+              collect_local_writes(child, name, out)
+            end
+          end
+
+          def in_local_scope(scope)
+            saved = @local_scope
+            @local_scope = scope
+            yield
+          ensure
+            @local_scope = saved
+          end
+
+          # `[exact name, literal head]` for a dynamic-resolution subject. A literal names its constant exactly;
+          # an interpolation can only bound the names its literal head starts; anything else bounds nothing.
           def dynamic_target(subject)
             case subject
             when Prism::StringNode, Prism::SymbolNode then [Scan.usable_name(subject.unescaped), nil]
-            when Prism::InterpolatedStringNode then [nil, literal_prefix(subject)]
+            when Prism::InterpolatedStringNode then [nil, literal_head(subject)]
             else [nil, nil]
             end
           end
 
-          # The literal head of an interpolated name: `"Foo::Bar::#{k}"` bounds the reach to `Foo::Bar`. Returns
-          # nil when the interpolation starts the string, which bounds nothing.
           def site(node)
             "#{@path}:#{node.location.start_line}"
           end
 
-          def literal_prefix(node)
+          # The literal head of an interpolated name, as written: `"Foo::Bar::#{k}"` gives `Foo::Bar::`. Returns
+          # nil when the interpolation starts the string, which bounds nothing.
+          def literal_head(node)
             head = node.parts.first
             return nil unless head.is_a?(Prism::StringNode)
 
             literal = Scan.usable_name(head.unescaped)
-            return nil if literal.nil?
-
-            trimmed = literal.sub(/::\z/, "")
-            trimmed.empty? ? nil : trimmed
+            literal.nil? || literal.empty? ? nil : literal
           end
 
           # `from` defaults to the innermost enclosing declaration; a declaration's own header (its superclass,

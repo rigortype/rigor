@@ -46,6 +46,8 @@ lib/rigor/analysis/dependency_source_inference/walker.rb:
 lib/rigor/analysis/reachability/scan.rb:
   computes: every constant declaration and reference with the lexical nesting in force there (ADR-102)
   producers:
+    Rigor::Analysis::Reachability::Scan::Walker: SCOPE_GATES lists the nodes that open a local-variable scope, so an interpolated const_get argument is read through its own method's assignments (#1734); it derives no declaration context
+    Rigor::Analysis::Reachability::Scan::Walker#collect_local_writes: stops a local-variable search at a nested def, class, module or singleton class (#1734); it derives no declaration context
     Rigor::Analysis::Reachability::Scan::Walker#mixin_names: grandfathered
     Rigor::Analysis::Reachability::Scan::Walker#walk: grandfathered
 lib/rigor/effects/definition_context.rb:

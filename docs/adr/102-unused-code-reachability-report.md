@@ -120,6 +120,15 @@ names as data in YAML / locales, and ERB templates all demote. Stratify with
 [ADR-65](65-diagnostic-evidence-tier-and-doc-url.md)'s evidence tier so a reader sorts by
 confidence instead of reading a flat list.
 
+An interpolated name is bounded by where its lookup starts and by its literal head. A
+`const_get` starts at its receiver — the enclosing declaration when the receiver is implicit
+— and also at the top level unless it passes `inherit = false`; a head that does not end in
+`::` is the start of a name, so `const_get("V#{version}")` inside `Migration` demotes every
+`Migration::V*`. A name built in a local variable first is read through its assignments.
+Reading every interpolated head as a top-level namespace demoted nothing on GitLab's
+`Migration[2.2]`, and its whole version family was a false candidate
+([#1734](https://github.com/rigortype/rigor/issues/1734)).
+
 ### WD5 — Whole-project only; `--incremental` is refused, not absorbed
 
 A reachability answer is sound only over a full run, which collides with

@@ -303,6 +303,85 @@ RSpec.describe Rigor::Analysis::Reachability do
       expect(report.candidates.map(&:fqn)).to eq(["Orphan"])
       expect(report.undecidable).to be_empty
     end
+
+    # Issue #1734 — an interpolated `const_get` reaches into its receiver's namespace, and an implicit
+    # receiver is the enclosing declaration. GitLab's `Migration[2.2]` builds the name one line up and looks it
+    # up with `inherit = false`; nothing marked the `V*` family, so every version was a false candidate.
+    describe "an interpolated const_get taints the receiver's namespace (#1734)" do
+      let(:migration) do
+        <<~RUBY
+          module Gitlab
+            module Database
+              class Migration
+                class V1_0; end
+                class V2_0 < V1_0; end
+                class Helper; end
+
+                def self.[](version)
+                  version = version.to_s
+                  name = "V\#{version.tr('.', '_')}"
+                  raise ArgumentError, "Unknown migration version: \#{version}" unless const_defined?(name, false)
+
+                  const_get(name, false)
+                end
+              end
+            end
+          end
+          class V9; end
+        RUBY
+      end
+
+      it "demotes the members whose name starts with the literal head (the GitLab Migration[...] shape)" do
+        report = report_for({ "lib/migration.rb" => migration,
+                              "lib/main.rb" => "Gitlab::Database::Migration[2.2]\n" })
+        expect(report.undecidable.to_h { [it.fqn, it.reason] })
+          .to include("Gitlab::Database::Migration::V1_0" => a_string_including("const_get on an interpolated string"),
+                      "Gitlab::Database::Migration::V2_0" => a_string_including("lib/migration.rb:13"))
+        # A member the head cannot spell stays a candidate, and `inherit = false` keeps the lookup out of the
+        # top level.
+        expect(report.candidates.map(&:fqn)).to eq(%w[Gitlab::Database::Migration::Helper V9])
+      end
+
+      it "reads an inline interpolation the same way, and falls through to the top level by default" do
+        report = report_for({ "lib/a.rb" => <<~RUBY, "lib/main.rb" => "Reg.for(1)\n" })
+          class Reg
+            class V1; end
+            class Other; end
+            def self.for(v) = const_get("V\#{v}")
+          end
+          class V9; end
+          class W9; end
+        RUBY
+        expect(report.undecidable.map(&:fqn)).to contain_exactly("Reg::V1", "V9")
+        expect(report.candidates.map(&:fqn)).to eq(%w[Reg::Other W9])
+      end
+
+      it "resolves a constant receiver against the call site's nesting" do
+        report = report_for({ "lib/a.rb" => <<~RUBY, "lib/main.rb" => "Ns::Reg.for(1)\n" })
+          module Ns
+            module Handlers
+              class HAlpha; end
+              class Other; end
+            end
+            class Reg
+              def self.for(k) = Handlers.const_get("H\#{k}", false)
+            end
+          end
+        RUBY
+        expect(report.undecidable.map(&:fqn)).to eq(["Ns::Handlers::HAlpha"])
+        expect(report.candidates.map(&:fqn)).to eq(["Ns::Handlers::Other"])
+      end
+
+      # A head that does not end in `::` is the start of a name for `constantize` too, which reaches the
+      # top level only.
+      it "taints every top-level name an interpolated constantize head starts" do
+        decls = "class SubAlpha; end\nclass Sub; end\nmodule Ns\n  class SubBeta; end\nend\n"
+        report = report_for({ "lib/a.rb" => "class Root\n  def go(k) = \"Sub\#{k}\".constantize\nend\n",
+                              "lib/b.rb" => decls }, roots: ["Root"])
+        expect(report.undecidable.map(&:fqn)).to contain_exactly("Sub", "SubAlpha")
+        expect(report.candidates.map(&:fqn)).to eq(%w[Ns Ns::SubBeta])
+      end
+    end
   end
 
   # A byte sequence that is not valid UTF-8 cannot be a constant name. Carrying one forward crashed the whole

@@ -709,7 +709,7 @@ module Rigor
       class << self
         private
 
-        def undefined_method_diagnostic(path, call_node, scope_index, lexical_sites = nil) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+        def undefined_method_diagnostic(path, call_node, scope_index, lexical_sites = nil) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
           return nil if call_node.receiver.nil?
 
           scope = scope_index[call_node]
@@ -753,6 +753,10 @@ module Rigor
           # the recorded name only: `Merger.nope` still fires.
           return nil if Inference::SingletonObjectConstant.recorded?(call_node, receiver_type, call_node.name, scope)
 
+          # Issue #1699 — judged as its one class; the message still names the union. See
+          # {#single_class_literal_union}.
+          rendered_receiver = receiver_type
+          receiver_type = single_class_literal_union(receiver_type)
           class_name = concrete_class_name(receiver_type)
           # A union receiver has no single concrete class. The scalar path
           # below cannot reason about it, but the call is still definitely
@@ -813,7 +817,7 @@ module Rigor
           # `call.undefined-method` into 171 through exactly this reading, 49 of them here.
           return nil if project_sidecar_owns_method?(scope, class_name, call_node.name, kind)
 
-          build_undefined_method_diagnostic(path, call_node, receiver_type, definition_site, class_name)
+          build_undefined_method_diagnostic(path, call_node, rendered_receiver, definition_site, class_name)
         end
 
         # Issue #1717 — an explicit `self.m` / `self.m = v` inside a block whose `self` the engine does not know
@@ -2098,6 +2102,32 @@ module Rigor
           return nil if members.any? { |member| method_present_anywhere?(member, call_node.name, scope) }
 
           build_undefined_method_diagnostic(path, call_node, receiver_type)
+        end
+
+        # Issue #1699 — a union of one class's literals, alone or beside that class's plain nominal
+        # (`0 | Integer`, which `gets.to_i` types; `"a" | "b"`; `1 | 2`), holds nothing but instances of
+        # that class, so it answers a method-existence question exactly as the class does. The union rule
+        # above declines it through its distinct-class guard, which exists for SHAPE joins
+        # (`Hash[K1, V1] | Hash[K2, V2]`, a corpus misinference on mail), and the scalar rule declined it
+        # for having no single concrete class, so neither judged it. Returns that class's nominal, or `type`
+        # itself. Literal-and-plain-nominal arms only: a generic, shape or refinement arm keeps the union
+        # declined, and so does a union spanning two classes.
+        def single_class_literal_union(type)
+          return type unless type.is_a?(Type::Union)
+
+          members = type.members
+          return type unless members.any?(Type::Constant)
+          return type unless members.all? do |member|
+            member.is_a?(Type::Constant) || (member.is_a?(Type::Nominal) && member.type_args.empty?)
+          end
+
+          class_names = members.map { |member| concrete_class_name(member) }.uniq
+          return type unless class_names.size == 1
+
+          class_name = class_names.first
+          return type if class_name.nil? || class_name == "NilClass"
+
+          Type::Combinator.nominal_of(class_name)
         end
 
         # An arm that makes a sound "undefined on every arm" verdict impossible: a non-class surface

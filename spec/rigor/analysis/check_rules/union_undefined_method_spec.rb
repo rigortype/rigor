@@ -65,6 +65,61 @@ RSpec.describe "union-receiver undefined-method" do
     expect(undefined_method_messages(source)).to be_empty
   end
 
+  # Issue #1699 — a union of one class's literals, alone or beside that class's plain nominal, is that class.
+  it "fires on a literal beside its own class's nominal, the type gets.to_i answers" do
+    source = <<~RUBY
+      n = gets.to_i
+      n.no_such_method_zzz
+    RUBY
+
+    expect(undefined_method_messages(source)).to contain_exactly(
+      a_string_matching(/undefined method `no_such_method_zzz' for 0 \| Integer/)
+    )
+  end
+
+  it "fires on a union of one class's literals" do
+    source = <<~RUBY
+      def f(flag)
+        x = flag ? 1 : 2
+        x.no_such_method_zzz
+      end
+    RUBY
+
+    expect(undefined_method_messages(source)).to contain_exactly(
+      a_string_matching(/undefined method `no_such_method_zzz' for 1 \| 2/)
+    )
+  end
+
+  it "stays silent on a literal-and-nominal union when the class defines the method" do
+    source = <<~RUBY
+      n = gets.to_i
+      n.succ
+    RUBY
+
+    expect(undefined_method_messages(source)).to be_empty
+  end
+
+  it "stays silent on literals of two classes when either class defines the method" do
+    # `even?` is Integer's and not Float's; judging `0 | 1.5` as either one class would be a false positive.
+    # And `nan?` is Float's and not Integer's, so the guard is witnessed whichever class the union lists first.
+    float_only = <<~RUBY
+      def f(flag)
+        x = flag ? 0 : 1.5
+        x.nan?
+      end
+    RUBY
+    expect(undefined_method_messages(float_only)).to be_empty
+
+    source = <<~RUBY
+      def f(flag)
+        x = flag ? 0 : 1.5
+        x.even?
+      end
+    RUBY
+
+    expect(undefined_method_messages(source)).to be_empty
+  end
+
   it "defers nil-bearing unions to the possible-nil-receiver rule (slice 1 is non-nil only)" do
     source = <<~RUBY
       def f(flag)

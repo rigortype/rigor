@@ -63,7 +63,43 @@ RSpec.describe "a constant reached through an RBS-only mixin (#1698)" do
     module SigOuter
       include SigInner
     end
+    module SigReopened
+      include SigInner
+    end
+    module SigRestated
+      include SigInner
+    end
   RBS
+
+  # A project file that reopens an RBS module without restating its `include` makes it a project entry whose
+  # chain lists only what the project writes; Ruby still searches `SigInner` right after it.
+  let(:reopened_source) { <<~RUBY }
+    require "rigor/testing"
+    module SigReopened
+      def extra = 1
+    end
+    class Reopen
+      include SigNear
+      include SigReopened
+      def run = Rigor.assert_type("Dynamic[top]", Box)
+    end
+    module SigRestated
+      include SigInner
+    end
+    class Restated
+      include SigNear
+      include SigRestated
+      def run = Rigor.assert_type("singleton(SigInner::Box)", Box)
+    end
+    module PlainProject
+      def extra = 1
+    end
+    class Plain
+      include SigNear
+      include PlainProject
+      def run = Rigor.assert_type("singleton(SigNear::Box)", Box)
+    end
+  RUBY
 
   # Ruby searches a mixin's own ancestry right after it, and the chain does not expand an RBS-only mixin's: in
   # each class below `SigOuter`'s `include SigInner` puts `SigInner::Box` ahead of `SigNear::Box`.
@@ -219,6 +255,10 @@ RSpec.describe "a constant reached through an RBS-only mixin (#1698)" do
 
   it "stops at an RBS-only mixin whose own ancestry may hold the name" do
     expect(run_project(mixin_ancestry_source)).to eq([])
+  end
+
+  it "stops at a reopened RBS module whose RBS ancestry the project does not restate" do
+    expect(run_project(reopened_source)).to eq([])
   end
 
   # Issue #1305 — a `class << self` body and a `def` in it run under the singleton class's cref, whose ancestors

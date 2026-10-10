@@ -195,9 +195,43 @@ module Rigor
       ancestors = loader ? loader.ancestor_names_for(owner) : []
       return true if ancestors.empty?
 
-      ancestors.any? { |ancestor| ancestor != owner && yield(ancestor) }
+      ancestors.any? { |ancestor| ancestor != owner && !IMPLICIT_ANCESTORS.include?(ancestor) && yield(ancestor) }
     end
     private_class_method :external_mixin_ancestry_stop?
+
+    # Ruby places these after every entry of a chain, so a constant they own is the top level's (step 4).
+    IMPLICIT_ANCESTORS = %w[Object Kernel BasicObject].freeze
+    private_constant :IMPLICIT_ANCESTORS
+
+    # Issue #1698 — {.external_mixin_ancestry_stop?} for a PROJECT entry RBS also declares: a project file that
+    # reopens an RBS module without restating its `include`s makes it a project entry whose chain lists only
+    # the edges the project writes, while Ruby searches the RBS-declared ones right after it too. The walk stops
+    # when a module RBS records in `owner`'s ancestry, and `owner`'s own project chain does not list, owns the
+    # name. A project namespace RBS does not declare never stops the walk.
+    def reopened_rbs_ancestry_stop?(owner, scope)
+      loader = rbs_loader_for(scope, nil)
+      return false unless loader&.class_known?(owner)
+
+      ancestors = loader.ancestor_names_for(owner)
+      return true if ancestors.empty?
+
+      listed = nil
+      ancestors.any? do |ancestor|
+        next false if ancestor == owner || IMPLICIT_ANCESTORS.include?(ancestor)
+
+        listed ||= project_chain_names(owner, scope)
+        !listed.include?(ancestor) && yield(ancestor)
+      end
+    end
+    private_class_method :reopened_rbs_ancestry_stop?
+
+    # Every name `owner`'s own instance chain lists: its project entries and each external entry's candidates.
+    def project_chain_names(owner, scope)
+      Scope::ResolutionChain.for(scope, owner, :instance, :constants).entries.flat_map do |entry|
+        entry.external? ? entry.candidates : [entry.name]
+      end
+    end
+    private_class_method :project_chain_names
 
     # Whether the project binds `candidate` itself: a namespace under the `:constants` flavor's tables, or a
     # constant write the census records (#1290), typed or not.

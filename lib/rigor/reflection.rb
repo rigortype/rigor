@@ -250,7 +250,12 @@ module Rigor
         hit = candidate.call(entry)
         next hit if hit
 
-        MIXIN_ANCESTRY_STOP if external && external_mixin_ancestry_stop?(entry, scope, &candidate)
+        stop = if external
+                 external_mixin_ancestry_stop?(entry, scope, &candidate)
+               else
+                 reopened_rbs_ancestry_stop?(entry, scope, &candidate)
+               end
+        MIXIN_ANCESTRY_STOP if stop
       end
     end
     private_class_method :ancestor_constant_type

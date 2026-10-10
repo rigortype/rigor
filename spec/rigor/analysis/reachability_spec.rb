@@ -522,7 +522,8 @@ class Dead; end
                             "spec/support/fake.rb" => "module Outer\n  class Fake < OBase; end\nend\n" },
                           declared: ["lib/outer.rb"], roots: ["Root"])
       expect(report.candidates.map(&:fqn)).to be_empty
-      expect(report.test_only.map(&:fqn)).to eq(["Outer::OBase"])
+      # `Outer` wraps nothing production reaches, so it is listed with its member (S2 below).
+      expect(report.test_only.map(&:fqn)).to eq(%w[Outer Outer::OBase])
     end
 
     it "keeps a class used from a spec helper's method body test-reachable, not production" do
@@ -592,6 +593,34 @@ class Dead; end
       expect(report.test_only).to be_empty
       expect(report.undecidable.to_h { [it.fqn, it.reason] })
         .to include("Leaf" => "reachable from Mid, which cannot be decided")
+    end
+
+    # A namespace is excused only by a member production reaches. One whose members only tests reach is dead
+    # production code with them, and must not vanish from every bucket.
+    it "lists a namespace whose members only tests reach as test-only" do
+      report = report_for({ "lib/foo.rb" => "module Foo\n  def self.run = 1\n  class Bar; end\nend\n",
+                            "test/foo_test.rb" => "class FooTest < Minitest::Test\n  def t = Foo::Bar.new\nend\n" },
+                          declared: ["lib/foo.rb"])
+      expect(report.candidates).to be_empty
+      expect(report.test_only.map(&:fqn)).to eq(%w[Foo Foo::Bar])
+    end
+
+    it "keeps a tainted namespace whose members only tests reach undecidable" do
+      report = report_for({ "lib/fmt.rb" => "module Fmt\n  class Textile; end\nend\n",
+                            "lib/use.rb" => "\"Fmt::\#{ARGV.first}\".constantize\n",
+                            "test/t_test.rb" => "class TTest\n  def t = Fmt::Textile\nend\n" },
+                          declared: ["lib/fmt.rb", "lib/use.rb"])
+      expect(report.test_only).to be_empty
+      expect(report.undecidable.map(&:fqn)).to contain_exactly("Fmt", "Fmt::Textile")
+    end
+
+    it "still hides a namespace with a member production reaches" do
+      report = report_for({ "lib/foo.rb" => "module Foo\n  class Bar; end\n  class Baz; end\nend\n",
+                            "lib/main.rb" => "Foo::Bar.new\n",
+                            "test/foo_test.rb" => "class FooTest\n  def test_it = Foo::Baz.new\nend\n" },
+                          declared: ["lib/foo.rb", "lib/main.rb"])
+      expect(report.candidates).to be_empty
+      expect(report.test_only.map(&:fqn)).to eq(["Foo::Baz"])
     end
 
     # A migration's local model stub is what its own body names, as in Ruby; rooting the app's dead model of

@@ -158,9 +158,12 @@ So an edge in the reference graph MUST carry the **role of the file it came from
 category rather than a bucket boundary. This is a data-model decision, not a filter: the
 role has to be recorded when the edge is, so it cannot be retrofitted after #349.
 
-A namespace a test names directly (`Ns::CONST`) while production reaches a declaration
-under it is not in that category: it is live in production for the same reason an
-unreached namespace with a live member is not a candidate.
+A namespace is excused from the report only by a member that production reaches. One a
+test names directly (`Ns::CONST`) while production reaches a declaration under it is
+therefore not in this category, and one whose members only tests reach is: it is dead
+production code together with them, and listing only the members would let it vanish from
+every bucket. A namespace that cannot be decided (WD4) stays in that tier on the same
+terms.
 
 ### Re-evaluation triggers
 

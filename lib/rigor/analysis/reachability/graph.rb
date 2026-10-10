@@ -56,27 +56,31 @@ module Rigor
           production = walk(edges, seeds: production_seeds, roles: %i[production task config])
           reachable = walk(edges, seeds: production_seeds | test_seeds, roles: %i[production task config test])
           unreached = @owned - reachable
-          namespaces = namespace_only(unreached, reachable)
-          # The data-file demotion applies to BOTH buckets it can speak to, which is what the tier
-          # contract says and what the implementation had narrowed (#370). See {#tainted}.
-          test_only = reachable - production
+          # A namespace is excused by a member PRODUCTION reaches. One whose members only tests reach is dead
+          # production code like them, so it joins them under test-only rather than vanishing from every
+          # bucket (#1732).
+          namespaces = namespace_only(unreached, production)
+          test_only = (reachable - production) | namespace_only(unreached - namespaces, reachable)
+          unreached -= namespaces | test_only
           # A namespace a test names (`Ns::CONST`) while production reaches a declaration under it is live in
           # production for the same reason an unreached one is not dead (#1732).
           live_namespaces = namespace_only(test_only, production)
           test_only -= live_namespaces
-          undecidable = tainted(unreached - namespaces).merge(tainted(test_only))
-          undecidable = spread_undecidable(edges, undecidable, (unreached - namespaces) | test_only,
+          # The data-file demotion applies to BOTH buckets it can speak to, which is what the tier
+          # contract says and what the implementation had narrowed (#370). See {#tainted}.
+          undecidable = tainted(unreached).merge(tainted(test_only))
+          undecidable = spread_undecidable(edges, undecidable, unreached | test_only,
                                            through: namespaces | live_namespaces)
-          build_report(edges: edges, reachable: reachable, unreached: unreached, namespaces: namespaces,
-                       test_only: test_only, undecidable: undecidable)
+          build_report(edges:, reachable:, unreached:, namespaces:, test_only:, undecidable:)
         end
 
         private
 
         def build_report(edges:, reachable:, unreached:, namespaces:, test_only:, undecidable:)
           demoted = undecidable.keys.to_set
-          Report.new(declared: @owned.size, reachable: reachable.size,
-                     candidates: rows(unreached - namespaces - demoted),
+          # A test-only namespace counts as reachable, like the members it is listed with.
+          Report.new(declared: @owned.size, reachable: (reachable | test_only).size,
+                     candidates: rows(unreached - demoted),
                      undecidable: undecidable.map { |fqn, reason| undecidable_row(fqn, reason) }.freeze,
                      test_only: rows(test_only - demoted),
                      namespaces: namespaces.size, roots: production_seeds.size, edges: edges.size)

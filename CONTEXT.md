@@ -40,6 +40,16 @@ define *behaviour*.
   changes nothing. Four sources feed the one list: a lexical `using`, a `refine` block's own body, a
   Proc literal that is the receiver of `Proc#refined`, and a block a plugin declares as refined by the
   method it is passed to. _Avoid_: "active refinements", "using scope".
+- **wildcard row** — a row of the refinement table that records what the walk could not read, with
+  `"*"` standing for a class it cannot name, names it cannot spell, or a module it cannot name: a
+  *names-wildcard* (`{X => {"*" => [M]}}`), a *class-unknown* row (`{"*" => {name => [M]}}`) or a
+  *targets-wildcard* (`{"*" => {"*" => [M]}}`). [ADR-121](docs/adr/121-ruby-refinement-typing.md) WD7;
+  the rules are `docs/internal-spec/inference-engine.md` § "Ruby refinements".
+- **opaque refining module** — a module in an in-effect list whose refinements Rigor cannot all read:
+  one the project does not declare (a gem's, one required from outside the analysed paths) unless it is
+  core or stdlib, or one a targets-wildcard lists. Under it every call check declines and every
+  instance call types as `Dynamic[top]`. _Avoid_: "unknown module", which reads as the unknown marker a
+  non-constant `using` contributes.
 - **folding** — evaluating an expression to a value-precise carrier at analysis time
   (`[1,2].first → Constant[1]`).
 - **declaration-sourced** — type information whose only origin is a declaration, not the flow of

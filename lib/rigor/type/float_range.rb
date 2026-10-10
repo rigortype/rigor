@@ -11,7 +11,7 @@ module Rigor
     # bounds, never sentinels, because Ruby orders them. The range may exclude its end (`0.0...1.0`)
     # and never its beginning, because Ruby's literal has no exclusive begin.
     #
-    # No bounded range contains NaN: `(a..b).cover?(Float::NAN)` is false for every `a` and `b`, so
+    # No bounded range contains NaN (`#covers?` answers false for it on every Ruby), so
     # the range from `-Float::INFINITY` to `Float::INFINITY` is "every Float except NaN"
     # (`non-nan-float`), not `Float`. The whole of `Float` (`nil..nil` in Ruby, which does cover NaN)
     # is never a carrier; the payload builder normalises it to `Nominal[Float]`.

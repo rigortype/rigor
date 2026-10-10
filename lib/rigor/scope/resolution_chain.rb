@@ -425,9 +425,7 @@ module Rigor
       private_class_method :compute_extend_clean
 
       def self.entry_hook_free?(scope, entry, hooks)
-        if entry.external?
-          return hooks.all? { |hook| Relevance.external_lacks?(scope, entry.candidates, hook) }
-        end
+        return hooks.all? { |hook| Relevance.external_lacks?(scope, entry.candidates, hook) } if entry.external?
 
         name = entry.name
         defs = entry.side == :singleton ? scope.discovered_singleton_def_nodes[name] : scope.discovered_def_nodes[name]
@@ -974,7 +972,8 @@ module Rigor
         def extend_hook_taint?(name)
           (@discovery.discovered_extends[name] || EMPTY).any? do |raw|
             resolved = @resolver.resolve_one(name, raw)
-            !resolved.nil? && ResolutionChain.extend_reshapes_instance?(@scope, resolved)
+            # `extend self` / `module_function` extend the node with itself, whose hooks are its own and on its chain.
+            !resolved.nil? && resolved != name && ResolutionChain.extend_reshapes_instance?(@scope, resolved)
           end
         end
 

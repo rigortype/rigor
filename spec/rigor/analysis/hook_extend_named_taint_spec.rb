@@ -98,21 +98,22 @@ RSpec.describe "a hook's base.extend — named instance-side taint" do
 
     it "declines a refined call through a direct extend of a module whose hook extends a hooked module" do
       x = "module Z\n  def self.extended(b) = b.include(A)\nend\nmodule X\n  def self.extended(b) = b.extend(Z)\nend\n"
-      expect(cold("a.rb" => refiner, "x.rb" => x, "u.rb" => "module D\n  extend X\nend\nusing D\n\"a\".shout\n")).to eq([])
+      expect(cold("a.rb" => refiner, "x.rb" => x,
+                  "u.rb" => "module D\n  extend X\nend\nusing D\n\"a\".shout\n")).to eq([])
     end
 
     it "declines an arity read through a hook-extended ClassMethods with an instance inherited hook" do
-      foo = "module Foo\n  def self.included(base)\n    base.extend(ClassMethods)\n  end\n" \
-            "  module ClassMethods\n    def inherited(sub)\n      super\n      sub.include(Y)\n    end\n  end\nend\n"
+      foo = "module Foo\n  def self.included(base)\n    base.extend(ClassMethods)\n  end\n  " \
+            "module ClassMethods\n    def inherited(sub)\n      super\n      sub.include(Y)\n    end\n  end\nend\n"
       k = "class Parent < Base\n  include Foo\nend\nclass Child < Parent\nend\nChild.new.greet(\"bob\")\n"
       expect(cold("g.rb" => greeters, "f.rb" => foo, "k.rb" => k)).to eq([])
     end
 
     # No mixin call: only the instance-hook test sees it.
     it "declines an arity read through a hook-extended module whose instance inherited hook defines methods" do
-      foo = "module Foo\n  def self.included(base)\n    base.extend(ClassMethods)\n  end\n" \
-            "  module ClassMethods\n    def inherited(sub)\n      super\n      sub.define_method(:greet) { |n| n }\n" \
-            "    end\n  end\nend\n"
+      foo = "module Foo\n  def self.included(base)\n    base.extend(ClassMethods)\n  end\n  " \
+            "module ClassMethods\n    def inherited(sub)\n      super\n      " \
+            "sub.define_method(:greet) { |n| n }\n    end\n  end\nend\n"
       k = "class Parent < Base\n  include Foo\nend\nclass Child < Parent\nend\nChild.new.greet(\"bob\")\n"
       expect(cold("g.rb" => greeters, "f.rb" => foo, "k.rb" => k)).to eq([])
     end

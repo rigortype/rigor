@@ -100,6 +100,9 @@ module Rigor
         @class_shells = Set.new
         @class_superclasses = {}
         @meta_layouts = {}
+        # Issue #1763 — the walked file's tree, and its refine-call query, built only when a `refine` call is walked.
+        @walk_root = nil
+        @in_effect_refinements = nil
         # Whole-run, NOT per-file: a rendering defect is reported once at the end of the run.
         @unrenderable = []
         # Issue #735 — whole-run too: `{ class name => the superclass token that resolves nowhere }`.
@@ -500,6 +503,8 @@ module Rigor
       #   RBS spelling that matches the dual instance + singleton dispatch the runtime produces.
       def collect_method_definitions(root, scope_index)
         @declared_types = scope_index[root].declared_types
+        @walk_root = root
+        @in_effect_refinements = nil
         out = []
         walk_defs(root, [], false, false, out)
         out
@@ -530,6 +535,12 @@ module Rigor
           return
         end
 
+        walk_def_children(node, prefix, in_singleton_class, module_function_active, out)
+      end
+
+      def walk_def_children(node, prefix, in_singleton_class, module_function_active, out)
+        return if refine_block_call?(node)
+
         node.rigor_each_child do |child|
           walk_defs(child, prefix, in_singleton_class, module_function_active, out)
         end
@@ -557,6 +568,20 @@ module Rigor
         record_superclass(node, full, prefix)
         walk_namespace_body(node, child_prefix, out)
         true
+      end
+
+      # Issue #1763 — a `def` (or an `attr_*`) in a `refine X do … end` block defines a method of the refinement
+      # module, not of the namespace the block is written in, and RBS has no declaration for a refinement, so both
+      # walks skip the whole block: writing `def shout: () -> String` under the enclosing module declared a method
+      # that module does not have. Statement and value position alike, since the walks descend every child. The
+      # skip is silent, as for a top-level `def`: a `sig.skipped.*` row would name the enclosing class, the very
+      # misattribution this avoids. A `refine` call the engine reads as a class's own method (`Class` undefines
+      # `refine`, #1689) walks as any other block, as the engine treats it.
+      def refine_block_call?(node)
+        return false unless node.is_a?(Prism::CallNode) && Inference::ScopeIndexer.refine_call?(node)
+
+        @in_effect_refinements ||= Inference::InEffectRefinements.new(@walk_root)
+        !@in_effect_refinements.class_body_refine?(node)
       end
 
       def declined_self_header?(node)
@@ -1712,6 +1737,8 @@ module Rigor
             return
           end
         when Prism::CallNode
+          return if refine_block_call?(node)
+
           collect_attr_call(node, prefix, in_singleton_class, ctx)
         end
 

@@ -597,6 +597,11 @@ module Rigor
     # reads correctly ({#block_self_narrowing_unknown?}). A block nested in the body takes plain `true`.
     REFINEMENT_BLOCK_SELF = :refinement
 
+    # Issue #1763 — true directly in a `refine X do … end` block body ({REFINEMENT_BLOCK_SELF}). The body's
+    # `self_type` is the `Singleton[X]` its implicit-self calls and `define_method` read, but the block runs on the
+    # refinement module, so a `self` read as a value (`x = self`) types as `Dynamic[top]` there.
+    def refinement_block_self? = @block_self_unknown == REFINEMENT_BLOCK_SELF
+
     # The join of two arms' {#block_self_unknown?} values: `true` if either has it, else either's mark.
     def merged_block_self_unknown(other)
       return true if @block_self_unknown == true || other == true

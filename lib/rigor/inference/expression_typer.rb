@@ -650,7 +650,12 @@ module Rigor
       # `StatementEvaluator` at class-body and method-body boundaries) or `Dynamic[Top]` at the top level.
       # Class-body `self` is `Singleton[<class>]`; instance-method `self` is `Nominal[<class>]`;
       # singleton-method `self` is `Singleton[<class>]`.
+      #
+      # Issue #1763 — directly in a `refine X` block body `self` is the refinement module, which Rigor does not
+      # model; its `Singleton[X]` stand-in serves implicit-self calls only, so a value read of `self` is untyped.
       def type_of_self_node(_node)
+        return dynamic_top if scope.refinement_block_self?
+
         scope.self_type || dynamic_top
       end
 

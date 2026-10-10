@@ -146,6 +146,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     record_optimistic_origin(req:node,req:cause)
     record_plugin_typed_call(req:node)
     record_void_origin(req:node,req:origin)
+    refinement_block_self?()
     repeated_or_write?(req:node)
     repeated_or_writes()
     run_generation()

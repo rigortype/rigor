@@ -227,6 +227,8 @@ module Rigor
     # sig-gen gap: #1148 — sig-gen skips the endless-def reader (sig.skipped.untyped-return); the row is hand-written.
     def block_self_unknown?: () -> bool
     REFINEMENT_BLOCK_SELF: :refinement
+    # sig-gen gap: #1148 — sig-gen skips the endless-def predicate (sig.skipped.untyped-return); the row is hand-written.
+    def refinement_block_self?: () -> bool
     def with_block_self_unknown: (bool flag) -> Scope
     def opaque_block_self?: () -> bool
     def with_singleton_class_body: (bool) -> Scope

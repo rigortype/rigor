@@ -5251,13 +5251,19 @@ module Rigor
         fresh = build_fresh_body_scope
         # Issue #1518 — `class << self` inside an unnameable class body keeps that body's opacity: it opens the
         # singleton of a class nothing names, and its empty frame stack is not the top level.
-        opaque_self ||= node.is_a?(Prism::SingletonClassNode) && @opaque_class && new_context.empty?
-        body_self = opaque_self ? Type::Combinator.untyped : self_type_for_class_body(new_context)
+        singleton_body = node.is_a?(Prism::SingletonClassNode)
+        opaque_self ||= singleton_body && @opaque_class && new_context.empty?
+        # Issue #1763 — a `class << self` in a `refine X` block (the refinement frame {#singleton_context_for} built)
+        # opens the refinement module's singleton class, which Rigor does not model, as the `def`s in it already read
+        # ({#self_type_for_method_body}); `Singleton[X]` there checked `self.m` and a local holding `self` against X's
+        # class methods. A `class << X` names X's real singleton class and takes a frame without the flag.
+        untyped_self = opaque_self || (singleton_body && new_context.last&.refinement)
+        body_self = untyped_self ? Type::Combinator.untyped : self_type_for_class_body(new_context)
         fresh = fresh.with_self_type(body_self) if body_self
         # Issue #963 — `self` in a `class << ...` body is the SINGLETON class, which shares the `Singleton[X]`
         # carrier a `class X` body gets. The mark is the only thing that tells the two apart downstream, and a
         # `def` reached from this body clears it by starting from a fresh scope.
-        fresh = fresh.with_singleton_class_body(node.is_a?(Prism::SingletonClassNode))
+        fresh = fresh.with_singleton_class_body(singleton_body)
         fresh = fresh.with_match_frame(node.body)
         fresh = stamp_nesting(fresh, new_nesting)
         sub_eval(node.body, fresh, class_context: new_context, lexical_nesting: new_nesting, opaque_class: opaque_self)

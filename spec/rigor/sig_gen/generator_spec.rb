@@ -61,6 +61,49 @@ RSpec.describe Rigor::SigGen::Generator do
     end
   end
 
+  # Issue #1763 — a `def` or `attr_*` in a `refine X do … end` block is a method of the refinement module, which
+  # RBS cannot declare, not of the namespace the block is written in.
+  describe "#run on a refine block body (#1763)" do
+    it "attributes none of the block's members to the enclosing module, in either position" do
+      path = write_fixture("lib/shouting.rb", <<~RUBY)
+        module Shouting
+          refine(String) do
+            def shout = upcase
+            def self.make = new("a")
+            attr_reader :volume
+            class << self
+              def loud = 1
+            end
+          end
+          DOUBLER = refine(Integer) do
+            def twice = self * 2
+          end
+          def real = 1
+        end
+      RUBY
+
+      candidates = generator(paths: [path]).run
+
+      expect(candidates.map { |c| [c.class_name, c.method_name, c.kind] }).to eq([["Shouting", :real, :instance]])
+    end
+
+    # `Class` undefines `refine`, so in a class body it is the class's own method and its block walks as any other.
+    it "keeps walking a refine call in a class body" do
+      path = write_fixture("lib/host.rb", <<~RUBY)
+        class Host
+          def self.refine(_target) = yield
+          refine(String) do
+            def helper = 1
+          end
+        end
+      RUBY
+
+      candidates = generator(paths: [path]).run
+
+      expect(candidates.map { |c| [c.class_name, c.method_name] }).to include(["Host", :helper])
+    end
+  end
+
   describe "#run on a fresh class without RBS" do
     it "classifies a literal-returning def as new-method with the inferred return" do
       path = write_fixture("lib/widget.rb", "class Widget\n  def n\n    42\n  end\nend\n")

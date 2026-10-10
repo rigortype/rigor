@@ -36,9 +36,9 @@ jobs:
   ruby-next:
     name: Tests + self-check (Ruby ${{ inputs.ruby || 'head' }})
     runs-on: ubuntu-latest
-    # The suite runs in one process here (ci.yml spreads it across three shards); ~30 minutes is the
-    # expected wall time, so this only bounds a hang.
-    timeout-minutes: 90
+    # The suite runs in one process here (ci.yml spreads it across three shards): 58 minutes on
+    # ruby-head in run 38055646689, plus about a minute for the self-check. This only bounds a hang.
+    timeout-minutes: 120
     env:
       BUNDLE_VERSION: system
     steps:

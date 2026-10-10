@@ -64,6 +64,10 @@ severity_overrides:
   ([#1383](https://github.com/rigortype/rigor/issues/1383), [#1697](https://github.com/rigortype/rigor/issues/1697)).
   It still reads `Dynamic[top]`: typing it from these signatures is
   [#1715](https://github.com/rigortype/rigor/issues/1715).
+- Inside a class or module that writes `include AcLibraryRb`, a bare class name (`Segtree.new(...)`) resolves to
+  the `AcLibraryRb` class, as Ruby resolves it through the class's ancestors
+  ([#1698](https://github.com/rigortype/rigor/issues/1698)). After a top-level `include AcLibraryRb` it does not
+  yet: write `AcLibraryRb::Segtree`, or include the module in the class.
 - The core extensions are declared whether or not the file that defines them is loaded. `ac-library-rb/modint`
   loads the `ModInt` conversions; `Integer#divisors`, `#each_divisor` and the `Array` conversions need
   `ac-library-rb/core_ext/all` (or `core_ext/integer`), and calling them without it passes the check and raises

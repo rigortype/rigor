@@ -1,0 +1,7 @@
+module Shapes
+  class Square
+    def initialize: (Integer side) -> void
+    def area: () -> Integer
+  end
+  SIDES: Integer
+end

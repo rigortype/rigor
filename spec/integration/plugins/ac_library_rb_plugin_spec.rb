@@ -133,6 +133,25 @@ RSpec.describe "plugins/rigor-ac-library-rb" do
     expect(rules(run_plugin(source: source))).to eq([])
   end
 
+  # Issue #1698 — the library's documented idiom: `include AcLibraryRb` in a class, then the bare class names.
+  it "resolves a bare class name through `include AcLibraryRb` in a class body" do
+    source = <<~RUBY
+      require "rigor/testing"
+      require "ac-library-rb/segtree"
+
+      class Solver
+        include AcLibraryRb
+
+        def run
+          seg = Segtree.new([1, 2, 3], 0) { |x, y| x + y }
+          Rigor.assert_type("AcLibraryRb::Segtree", seg)
+          seg.frobnicate
+        end
+      end
+    RUBY
+    expect(rules(run_plugin(source: source))).to eq([[10, "call.undefined-method"]])
+  end
+
   it "reports a misspelled method and a wrong argument, which read as untyped without the plugin" do
     source = <<~RUBY
       uf = AcLibraryRb::DSU.new(4)

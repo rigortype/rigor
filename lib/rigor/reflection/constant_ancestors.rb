@@ -27,11 +27,13 @@ module Rigor
     # ancestors are `[C, A, M, Base]`. It reads the chain's `:constants` flavor, whose predicate for a
     # project class also admits a module that holds only constants.
     #
-    # Only PROJECT ancestors appear: an as-written name that resolves to no discovered class or module
-    # is an external entry on the chain and contributes nothing here, so a `class Foo <
-    # ActiveRecord::Base` adds no candidate and a constant owned by an RBS-known ancestor still resolves
-    # only if the bare name reaches it at step 3. That gap is deliberate for this slice: widening to the
-    # RBS ancestor graph is a separate question with its own FP surface.
+    # Project ancestors appear, and (issue #1698) a module the class body `include`s or `prepend`s that
+    # only RBS or the class registry declares: `include AcLibraryRb` puts `AcLibraryRb` at its Ruby
+    # position, so `Segtree` inside the class reads `AcLibraryRb::Segtree` as Ruby does. Such an entry
+    # contributes its OWN constants only; the RBS ancestry behind it is not expanded, as for every external
+    # entry. An external SUPERCLASS (`class Foo < ActiveRecord::Base`) still contributes nothing, and a
+    # constant it owns resolves only if the bare name reaches it at step 3: widening to the superclass's
+    # RBS graph is a separate question with its own FP surface. See {.external_constant_owner}.
     #
     # Memoised per run because step 2 runs on every constant reference whose lexical candidates all
     # miss — which is the common case for a core-class reference (`String` inside `class Foo`). The
@@ -52,7 +54,7 @@ module Rigor
       scopes, chain = ancestor_constant_worlds(class_name, scope)
       owner, hit = first_ancestor_hit(scopes, &)
       verdict = chain.settle(scope, owner, owner: owner) do |retro|
-        first_ancestor_hit(constant_scopes_of(retro, class_name), &)&.first
+        first_ancestor_hit(constant_scopes_of(retro, class_name, scope), &)&.first
       end
       return hit if verdict == :chain
 
@@ -109,7 +111,9 @@ module Rigor
       worlds = bucket[class_name]
       return bucket[class_name] = compute_ancestor_constant_scopes(class_name, scope) if worlds.nil?
 
-      Scope::ResolutionChain.for(scope, class_name.to_s, :instance, :constants).record(scope)
+      chain = Scope::ResolutionChain.for(scope, class_name.to_s, :instance, :constants)
+      chain.record(scope)
+      record_external_owner_edges(chain)
       worlds
     end
     private_class_method :recorded_ancestor_constant_scopes
@@ -118,21 +122,74 @@ module Rigor
     def compute_ancestor_constant_scopes(class_name, scope)
       chain = Scope::ResolutionChain.for(scope, class_name.to_s, :instance, :constants)
       chain.record(scope)
-      scopes = constant_scopes_of(chain, class_name)
+      record_external_owner_edges(chain)
+      scopes = constant_scopes_of(chain, class_name, scope)
       [scopes, chain].freeze
     end
     private_class_method :compute_ancestor_constant_scopes
 
-    # The chain's project entries in order, each once, without `class_name` itself.
-    def constant_scopes_of(chain, class_name)
+    # The chain's project entries in order, each once, without `class_name` itself, with each mixin entry
+    # the project does not declare standing as the module {.external_constant_owner} names.
+    def constant_scopes_of(chain, class_name, scope)
       out = []
       chain.entries.each do |entry|
-        name = entry.name
+        name = entry.external? ? external_constant_owner(entry, scope) : entry.name
         out << name unless name.nil? || name == class_name || out.include?(name)
       end
       out.freeze
     end
     private_class_method :constant_scopes_of
+
+    # Issue #1698 — the module an external `include` / `prepend` entry names, when the constant ladder may
+    # read its constants, or nil. Ruby resolved the spelling at the `include` lexically, so the first of the
+    # entry's candidates (most qualified first) that exists is the module. The answer is the first candidate
+    # RBS or the class registry knows, and nil when a nearer candidate is a constant the project binds
+    # ({.project_written_candidate?}): Ruby's module is then that constant, whose constants nothing here
+    # describes. The candidates are the entry's own, behind the namespace of the body that wrote the edge
+    # (`entry.owner`), which Ruby searches first and the chain's resolver does not consult. An ambiguous
+    # spelling has no candidates and answers nil. A superclass edge answers nil (see
+    # {.ancestor_constant_scopes}).
+    def external_constant_owner(entry, scope)
+      return nil if entry.superclass_edge || entry.candidates.empty?
+
+      env = scope.environment
+      external_owner_candidates(entry).each do |candidate|
+        return nil if project_written_candidate?(candidate, scope)
+        return candidate if env.class_known?(candidate)
+      end
+      nil
+    end
+    private_class_method :external_constant_owner
+
+    def external_owner_candidates(entry)
+      return entry.candidates if entry.owner.nil? || entry.raw.start_with?("::")
+
+      ["#{entry.owner}::#{entry.raw}", *entry.candidates]
+    end
+    private_class_method :external_owner_candidates
+
+    # ADR-46 — the name edges of {.external_constant_owner}'s guard, for every mixin entry it read: a file that
+    # starts writing or declaring a nearer spelling of the module's name (`User::AcLibraryRb = …` in a file the
+    # reader has no other edge to) moves the answer. Keyed on the spelling's last segment, as the ladder's own
+    # `constant:` and `class:` edges are. A memo hit replays them beside the chain's own edges.
+    def record_external_owner_edges(chain)
+      return unless Analysis::DependencyRecorder.active?
+
+      chain.entries.each do |entry|
+        next unless entry.external? && !entry.superclass_edge
+
+        Analysis::DependencyRecorder.read_last_segment(:constant, entry.raw)
+        Analysis::DependencyRecorder.read_last_segment(:class, entry.raw)
+      end
+    end
+    private_class_method :record_external_owner_edges
+
+    # Whether the project binds `candidate` itself: a namespace under the `:constants` flavor's tables, or a
+    # constant write the census records (#1290), typed or not.
+    def project_written_candidate?(candidate, scope)
+      known_project_namespace?(candidate, scope) || scope.shadowing_constant_names(candidate).include?(candidate)
+    end
+    private_class_method :project_written_candidate?
 
     # Whether `name` is a namespace the project declares — the predicate the chain's `:constants` flavor
     # resolves ancestor names with, and the path walk's (`reflection/constant_path.rb`) test for a head.

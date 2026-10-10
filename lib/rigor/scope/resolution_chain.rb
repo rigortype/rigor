@@ -83,10 +83,12 @@ module Rigor
       # One ancestor on a chain. A project entry names a class or module (`name`) on `side` `:instance` (its
       # instance methods) or `:singleton` (the class object's singleton). An external entry has no `name`: it
       # keeps the spelling (`raw`) and its candidate names (`candidates`, most qualified first, empty for an
-      # ambiguous spelling), and `superclass_edge` says it was reached through a superclass edge.
+      # ambiguous spelling), and `superclass_edge` says it was reached through a superclass edge. `owner` names
+      # the class or module whose edge an external entry is (#1698: Ruby resolves an `include`'s argument with
+      # that body as the innermost cref, a namespace `candidates` leaves out); it is nil on a project entry.
       # `last_segment` is the unqualified name a project entry files its negative class edge under, computed once
       # when the entry is interned.
-      Entry = Data.define(:name, :side, :raw, :candidates, :superclass_edge, :last_segment) do
+      Entry = Data.define(:name, :side, :raw, :candidates, :superclass_edge, :last_segment, :owner) do
         def external? = name.nil?
       end
 
@@ -1011,14 +1013,14 @@ module Rigor
 
         def project_entry(name, side)
           by_side = (@bucket[:interned][side] ||= {})
-          by_side[name] ||= Entry.new(name, side, nil, nil, false, name.to_s.split("::").last.freeze)
+          by_side[name] ||= Entry.new(name, side, nil, nil, false, name.to_s.split("::").last.freeze, nil)
         end
 
         def external_entry(owner, raw, side, superclass_edge)
           by_edge = ((@bucket[:externals][side] ||= {})[superclass_edge] ||= {})
           by_owner = (by_edge[owner] ||= {})
           by_owner[raw] ||= Entry.new(nil, side, raw, @scope.ancestor_name_candidates(owner, raw).freeze,
-                                      superclass_edge, nil)
+                                      superclass_edge, nil, owner)
         end
       end
       private_constant :Builder

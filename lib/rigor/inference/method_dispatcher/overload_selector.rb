@@ -345,8 +345,8 @@ module Rigor
 
             # #1737 — the keywords the call passes count too, so an `untyped` keyword cannot win the strict pass over
             # a typed one.
-            params = positional_params_for(fun, actual_count) + KeywordArguments.passed_params(fun, shared)
-            params.all? { |param| !alias_or_interface_param?(param.type) }
+            positional_params_for(fun, actual_count).all? { |param| !alias_or_interface_param?(param.type) } &&
+              KeywordArguments.passed_params(fun, shared).all? { |param| !alias_or_interface_param?(param.type) }
           end
 
           # Recursive: an Optional / Union wrapper is strict iff every member is strict. Type args of a

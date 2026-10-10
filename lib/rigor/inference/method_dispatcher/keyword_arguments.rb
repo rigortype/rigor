@@ -12,6 +12,9 @@ module Rigor
       # it is (`keywords_last`). An overload that declares keywords takes that hash as its keywords; one that
       # declares none reads it as a trailing positional `Hash`, as Ruby passes it.
       module KeywordArguments
+        NO_PARAMS = [].freeze
+        private_constant :NO_PARAMS
+
         module_function
 
         # The actuals `method_type`'s positional parameters read: every argument, less the trailing keyword hash
@@ -67,7 +70,7 @@ module Rigor
         # without a shaped keyword hash `fun` takes (a key nothing declares lands nowhere).
         def passed_params(fun, shared)
           keywords = keyword_hash(fun, shared[:arg_types], shared[:keywords_last])
-          return [] unless keywords.is_a?(Type::HashShape)
+          return NO_PARAMS unless keywords.is_a?(Type::HashShape)
 
           keywords.pairs.each_key.filter_map do |name|
             fun.required_keywords[name] || fun.optional_keywords[name] || fun.rest_keywords

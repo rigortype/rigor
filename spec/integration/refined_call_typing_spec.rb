@@ -216,6 +216,91 @@ RSpec.describe "Typing calls through Ruby refinements (#1664)", type: :runner do
     RUBY
   end
 
+  # ADR-121 WD7 (critique F2). Ruby 4.0.5 prints `43` and `4`: a module whose refinements Rigor cannot read may replace
+  # any instance method, so every instance call in its `using`'s span answers `Dynamic[top]`, never the replaced
+  # method's signature; a class object falls through.
+  it "answers Dynamic[top] for every instance call under a `using` of a module from outside the analysed paths" do
+    result = analyze(
+      files: {
+        "outside/gemref.rb" => "module GemRef; refine(String) { def center(a, b, c) = 42 }; end\n",
+        "lib/app.rb" => <<~RUBY
+          $LOAD_PATH.unshift(File.join(__dir__, "..", "outside"))
+          require "gemref"
+          using GemRef
+          p "s".center(1, 2, 3).succ.times { |i| i }
+          Rigor.dump_type("s".center(1, 2, 3))
+          Rigor.dump_type(Integer.sqrt(16))
+        RUBY
+      },
+      config: { "paths" => ["lib"] }
+    )
+    rows = result.diagnostics.map { |d| [d.qualified_rule, d.line, d.message] }
+
+    expect(rows).to eq([["dump.type", 5, "dump_type: Dynamic[top]"], ["dump.type", 6, "dump_type: Integer"]])
+  end
+
+  # ADR-121 WD7 (A2). Ruby 4.0.5 prints `43` and `"S"`: a refinement whose target the walk cannot name makes only the
+  # names it defines `Dynamic[top]`, on any instance.
+  it "answers Dynamic[top] for a name refined on a class the walk cannot name, and nothing else" do
+    expect(rows(<<~RUBY)).to eq([["dump.type", 6, "dump_type: Dynamic[top]"], ["dump.type", 7, %(dump_type: "S")]])
+      module M
+        [String, Symbol].each { |k| refine(k) { def center(a, b, c) = 42 } }
+      end
+      using M
+      p "s".center(1, 2, 3).succ.times { |i| i }
+      Rigor.dump_type(:s.center(1, 2, 3))
+      Rigor.dump_type("s".upcase)
+    RUBY
+  end
+
+  # ADR-121 WD7. Ruby 4.0.5 prints `:b`, `"S"` and `2`: `import_methods` may define any name on String.
+  it "answers Dynamic[top] on a class a refine body may define any name on, and keeps other classes typed" do
+    expect(dumps(<<~RUBY)).to eq(["Dynamic[top]", "Dynamic[top]", "2"])
+      module H; def b = :b; end
+      module M
+        refine(String) do
+          def a = 1
+          import_methods H
+        end
+      end
+      using M
+      Rigor.dump_type("s".b)
+      Rigor.dump_type("s".upcase)
+      Rigor.dump_type(1.succ)
+    RUBY
+  end
+
+  # ADR-121 WD7 (A1). In this file Ruby 4.0.5 prints `:inner` and raises `ArgumentError`, but with `Foo::Bar` declared
+  # in a file required after this one the top-level `Bar` wins (critique F1), so neither call is typed from a body.
+  it "answers Dynamic[top] where two declared candidates of a `using` could each be the module" do
+    expect(dumps(<<~RUBY)).to eq(["Dynamic[top]", "Dynamic[top]"])
+      module Bar; refine(String) { def center(a, b, c) = :bar }; end
+      module Foo
+        module Bar; refine(String) { def upcase = :inner }; end
+        using Bar
+        Rigor.dump_type("x".upcase)
+        Rigor.dump_type("x".center(1, 2, 3))
+      end
+    RUBY
+  end
+
+  # ADR-121 WD7 (issue #1799). Ruby 4.0.5 prints `42` and `:dm`: an alias of a body's `def` types from that `def`;
+  # a `define_method` has no `def` to type, so `Dynamic[top]`, never String#rjust's signature.
+  it "types an alias from the aliased def and a define_method as Dynamic[top]" do
+    expect(dumps(<<~RUBY)).to eq(["42", "Dynamic[top]"])
+      module M
+        refine(String) do
+          def c3(a, b, c) = 42
+          alias_method :center, :c3
+          define_method(:rjust) { |a, b, c| :dm }
+        end
+      end
+      using M
+      Rigor.dump_type("x".center(1, 2, 3))
+      Rigor.dump_type("x".rjust(1, 2, 3))
+    RUBY
+  end
+
   it "types a refine body's `super` as Dynamic[top] with no finding when another refinement is in effect there" do
     expect(rows(<<~RUBY)).to eq([["dump.type", 6, "dump_type: Dynamic[top]"]])
       module First

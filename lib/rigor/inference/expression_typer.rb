@@ -1955,11 +1955,16 @@ module Rigor
       # A union receiver is decided per member; a `Dynamic` receiver, a class object and a call no refinement wins
       # fall through. A call site no refinement is in effect at answers nil at once and records nothing: its answer
       # cannot change without an edit to its own file.
+      #
+      # ADR-121 WD7 (A2) — inside the span of an activation that puts an opaque module in effect
+      # ({InEffectRefinements.opaque_module?}), any method of any instance may be replaced, so every instance-receiver
+      # call answers `Dynamic[top]`; a class object falls through, as it does below.
       def try_refined_dispatch(node, receiver, arg_types, block_type)
         list = scope.in_effect_refinements(node)
         return nil if list.empty?
 
         InEffectRefinements.record_refinement_names(node.name)
+        return dynamic_top if refined_instance_receiver?(receiver) && opaque_refinement_span?(node, list)
         return nil if scope.discovered_refinements.empty?
 
         refined_indirect_result(node, receiver, list) ||
@@ -2010,11 +2015,29 @@ module Rigor
         end
       end
 
+      # ADR-121 WD7 — a names-wildcard row counts as a refinement of every name.
       def refined_anywhere?(name, list)
+        refinements = scope.discovered_refinements
+        wildcard = Scope::DiscoveryIndex::REFINEMENT_WILDCARD
         return true if list.include?(InEffectRefinements::UNKNOWN) &&
-                       scope.discovered_refinements.any? { |_refined, methods| methods.key?(name) }
+                       refinements.any? { |_refined, methods| methods.key?(name) || methods.key?(wildcard) }
 
-        !RefinedDispatch.targets(scope.discovered_refinements, name, list).nil?
+        !RefinedDispatch.targets(refinements, name, list).nil? ||
+          !RefinedDispatch.targets(refinements, wildcard, list).nil?
+      end
+
+      # ADR-121 WD7 — does the call's lexical list (a plugin-declared module is the plugin's declaration and never
+      # opaque) hold an opaque module? `list` is the full list, which is the lexical one when nothing is declared.
+      def opaque_refinement_span?(node, list)
+        lexical = scope.declared_refinements.empty? ? list : scope.in_effect_refinements(node, InEffectRefinements::EMPTY)
+        InEffectRefinements.opaque_in?(scope, lexical)
+      end
+
+      # Does `receiver` (or a member of a union) have a class the refined arm answers for: an instance, not a class
+      # object or `Dynamic`?
+      def refined_instance_receiver?(receiver)
+        members = receiver.is_a?(Type::Union) ? receiver.members : [receiver]
+        members.any? { |member| !refined_receiver_class_name(member).nil? }
       end
 
       def refined_receiver_result(node, receiver, list, arg_types, block_type)

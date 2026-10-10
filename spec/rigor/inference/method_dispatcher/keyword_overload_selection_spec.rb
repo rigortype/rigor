@@ -35,6 +35,13 @@ RSpec.describe "Keyword arguments in overload selection (#1727)", type: :runner 
         def flag_value: () -> bool
         def joined_flag: (Integer x) -> true
                        | (String x) -> false
+        def maybe_flag: (Integer x) -> true
+                      | (String x) -> nil
+        def joined_number: (Integer x) -> Integer
+                         | (String x) -> nil
+        def visit: (String x, ?mode: Symbol) { (String) -> void } -> void
+                 | (Integer x, ?mode: Symbol) { (Integer) -> void } -> void
+        def optional_flag: (?flag: bool) { (String) -> void } -> void
         def each_row: (headers: true) { (Symbol) -> void } -> void
                     | (?headers: false) { (Array[String]) -> void } -> void
       end
@@ -157,6 +164,15 @@ RSpec.describe "Keyword arguments in overload selection (#1727)", type: :runner 
       p.each_row(headers: [true, nil].sample) { |row| row.join(",") }
     RUBY
     expect(result.diagnostics.select(&:error?).map(&:message)).to eq([])
+  end
+
+  # A faceted positional argument (`Dynamic[Integer]`, the #521 join of `Integer` and `nil`) is read member-wise as
+  # the return path reads it, and a `Dynamic` keyword value's `nil` (which the join carries) is not a member.
+  it "reads a faceted positional argument member-wise and a Dynamic keyword value without its nil" do
+    expect(dumped_types(<<~RUBY)).to eq(%w[Integer String])
+      p.visit(p.joined_number(p.untyped_value), mode: :a) { |value| dump_type(value) }
+      p.optional_flag(flag: p.maybe_flag(p.untyped_value)) { |value| dump_type(value) }
+    RUBY
   end
 
   # A keyword hash no overload takes as keywords is a positional `Hash`, so its untyped values are not the call's

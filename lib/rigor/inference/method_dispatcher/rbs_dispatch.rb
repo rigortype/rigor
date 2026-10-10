@@ -1748,9 +1748,8 @@ module Rigor
             distributions.each do |arg_types|
               # Genuine matches only (`member` true): a member no overload takes must not lend the first-overload
               # fallback to the agreement, which bound `headers: (true | nil)`'s block to the `true` arm.
-              matches = OverloadSelector.select_declared(
-                method_definition, arg_types, selector_self, instance_type, type_vars, true, environment, true, true
-              )
+              matches = keyword_block_matches(method_definition, arg_types, selector_self, instance_type, type_vars,
+                                              environment)
               return [] if matches.empty?
 
               candidates.concat(matches)
@@ -1759,6 +1758,21 @@ module Rigor
               block_params_of(method_type, self_type, instance_type, type_vars, environment)
             end
             answers.uniq.size == 1 && answers.first ? answers.first : []
+          end
+
+          # One distribution's genuine matches. A faceted positional argument (a `Dynamic` with sealed facet members) is
+          # read member-wise as `OverloadSelector.select_candidates` reads it, but every list, the facet's own
+          # fallback included, answers only a genuine match: the first-overload fallback must not count toward the
+          # agreement.
+          def keyword_block_matches(method_definition, arg_types, selector_self, instance_type, type_vars, environment)
+            select = lambda do |list, _member|
+              OverloadSelector.select_declared(
+                method_definition, list, selector_self, instance_type, type_vars, true, environment, true, true
+              )
+            end
+            return select.call(arg_types, true) unless FacetDistribution.faceted?(arg_types)
+
+            FacetDistribution.select(arg_types, method_definition, member_wise: true, environment: environment, &select)
           end
 
           # `RBS::Types::Block#type` is normally an `RBS::Types::Function` carrying the block's parameter

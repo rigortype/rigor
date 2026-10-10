@@ -103,6 +103,36 @@ RSpec.describe "plugins/rigor-ac-library-rb" do
     expect(run_plugin(source: source).diagnostics.map(&:message)).to be_empty
   end
 
+  # Issue #1697 — the library's documented idiom: a top-level `include AcLibraryRb` mixes the module into
+  # `Object`, so its instance methods answer bare top-level calls. They are silent; typing them is #1715's.
+  it "silences a bare top-level call through a top-level include AcLibraryRb, untyped" do
+    source = <<~RUBY
+      require "rigor/testing"
+      require "ac-library-rb/crt"
+      include AcLibraryRb
+
+      Rigor.assert_type("Dynamic[top]", crt([2, 3], [3, 5]))
+      Rigor.assert_type("Dynamic[top]", pow_mod(2, 10, 1000))
+      frobnicate
+    RUBY
+    expect(rules(run_plugin(source: source))).to eq([[7, "call.unresolved-toplevel"]])
+  end
+
+  # Review of #1706: a project method on the receiver's own class outranks the module mixed into Object.
+  it "does not type a project Integer#inv_mod from AcLibraryRb#inv_mod" do
+    source = <<~RUBY
+      require "ac-library-rb/math"
+      include AcLibraryRb
+
+      class Integer
+        def inv_mod(m) = pow(m - 2, m).to_s
+      end
+
+      puts 3.inv_mod(7).upcase
+    RUBY
+    expect(rules(run_plugin(source: source))).to eq([])
+  end
+
   it "reports a misspelled method and a wrong argument, which read as untyped without the plugin" do
     source = <<~RUBY
       uf = AcLibraryRb::DSU.new(4)

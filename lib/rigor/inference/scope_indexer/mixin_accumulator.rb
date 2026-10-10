@@ -47,6 +47,19 @@ module Rigor
           @unpositioned = nil
           @hook_params = nil
           @body_blocks = nil
+          @program = nil
+        end
+
+        # Marks the file's own top-level statements: a receiverless `include` among them is `main.include`,
+        # which mixes into `Object` (issue #1697).
+        def program_body(body)
+          return unless body.is_a?(Prism::StatementsNode)
+
+          @program = Set.new.compare_by_identity.merge(body.body)
+        end
+
+        def program_statement?(node)
+          !@program.nil? && @program.include?(node)
         end
 
         # Marks the statements of a body whose own position is a fact — the calls and declarations in them

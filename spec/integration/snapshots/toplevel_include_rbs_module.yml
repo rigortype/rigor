@@ -1,0 +1,7 @@
+---
+locals:
+  count: Dynamic[top]
+  label: Dynamic[top]
+assertions:
+  '1': Dynamic[top]
+  '2': Dynamic[top]

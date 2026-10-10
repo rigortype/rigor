@@ -47,7 +47,9 @@ module Rigor
 
         # A path outside the boundary's trust policy is refused there and read directly here: the target does
         # not depend on the policy, and the boundary has noted the refusal (ADR-2 accepts that such a read
-        # leaves no row).
+        # leaves no row). Only a root outside every read root reaches it: a `root:` configured elsewhere, or a
+        # path spelled through a symlink (#959). Each extconf glob match is read here, not just listed: the
+        # glob's row records membership only, and this read's row carries an edit.
         def read_text(path, io)
           return File.read(path) if io.nil?
 

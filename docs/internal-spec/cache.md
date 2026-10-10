@@ -831,7 +831,10 @@ full run, so the snapshot can never wedge or stale an analysis.
    only. The run-result slot answers an unchanged run without loading the
    plugin, so it sees such an input only through the plugin's `IoBoundary`
    rows, and the plugin MUST read it through the boundary: `rigor-ffi` does
-   ([#1652](https://github.com/rigortype/rigor/issues/1652)).
+   ([#1652](https://github.com/rigortype/rigor/issues/1652)). `IoBoundary#glob`
+   records a `:names` row, which sees a match appear or disappear but not an
+   edit or a `touch`, so a plugin that depends on a match's content reads it
+   with `#read_file`, whose row carries the edit.
 2. **Per-file digests (drive the decision).** When the fingerprint matches,
    the `Payload` is loaded unconditionally and its per-file content digests
    determine the changed set `ΔF`; the affected closure `ΔF ∪ dependents[ΔF]`

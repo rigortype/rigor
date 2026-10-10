@@ -473,8 +473,8 @@ RSpec.describe Rigor::Inference::MacroBlockSelfType do
         scope: scope_with(env), call_node: build_node, receiver_type: Rigor::Type::Nominal.new("Caller")
       )
 
-      expect(match).to eq(described_class::Match.new(self_type: Rigor::Type::Nominal.new("Ctx"),
-                                                      refinements: %w[SymSyntax]))
+      expected = described_class::Match.new(self_type: Rigor::Type::Nominal.new("Ctx"), refinements: %w[SymSyntax])
+      expect(match).to eq(expected)
     end
 
     it "answers the calling scope's self for a :lexical entry, on a Nominal receiver" do

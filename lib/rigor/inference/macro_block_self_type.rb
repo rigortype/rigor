@@ -59,11 +59,15 @@ module Rigor
         entries.each do |entry|
           next unless entry_matches?(entry, singleton_name, nominal_name, call_node, scope, environment)
 
-          self_type = entry.lexical_self? ? scope.self_type : narrowed_self_type(entry, singleton_name || nominal_name,
-                                                                                 environment)
-          return Match.new(self_type: self_type, refinements: entry.refinements)
+          return entry_match(entry, singleton_name || nominal_name, scope, environment)
         end
         nil
+      end
+
+      # The {Match} a matching entry contributes: a `:lexical` one keeps the calling scope's `self`.
+      def entry_match(entry, receiver_name, scope, environment)
+        self_type = entry.lexical_self? ? scope.self_type : narrowed_self_type(entry, receiver_name, environment)
+        Match.new(self_type: self_type, refinements: entry.refinements)
       end
 
       # The receiver an implicit-self call is matched on: the scope's `self`, or at the file's top level (no

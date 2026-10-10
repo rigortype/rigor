@@ -10039,7 +10039,8 @@ module Rigor
       def unentered_block_narrowing(node, scope)
         registry = scope.environment&.plugin_registry
         if registry && !registry.empty? && !registry.contribution_index.block_entries_for(node.name).empty?
-          receiver_type = node.receiver ? scope.type_of(node.receiver) : MacroBlockSelfType.implicit_receiver_type(scope)
+          receiver_type =
+            node.receiver ? scope.type_of(node.receiver) : MacroBlockSelfType.implicit_receiver_type(scope)
           match = MacroBlockSelfType.match_for(scope: scope, call_node: node, receiver_type: receiver_type)
           return match if match
         end

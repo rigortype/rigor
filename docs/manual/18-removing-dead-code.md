@@ -162,8 +162,9 @@ section held 22 policy classes whose only remaining caller was
 `spec/policies/`. Those 22 were not adjudicated, so treat the section
 as high-signal rather than high-yield; the yield is unmeasured.
 
-"Test code" is decided by path: `spec/` and `test/` anywhere below the project root, `*_spec.rb` and `*_test.rb`, and the
-end-to-end trees `qa/`, `e2e/` and `features/` at the project root. Tooling directories such as
+"Test code" is decided by path, relative to the directory you run `rigor unused` in (run it from the
+project root): `spec/` and `test/` anywhere below it, `*_spec.rb` and `*_test.rb`, and the end-to-end
+trees `qa/`, `e2e/` and `features/` at that root. Tooling directories such as
 `rubocop/`, `keeps/`, `tooling/` and `scripts/` count as production, so a class used only by them is
 rooted rather than listed: deleting it would break the tooling.
 

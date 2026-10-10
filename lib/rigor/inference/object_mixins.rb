@@ -146,6 +146,10 @@ module Rigor
 
       def census_declines?(scope, name)
         census = scope.discovered_global_write_census
+        # Absence is evidence only where the census is the whole project's: a scope no pre-pass seeded (an editor's
+        # per-buffer run, `type-of`, a single-source probe) holds one file's names, so it declines.
+        return true unless scope.discovered_defined_names.include?(GlobalWriteCensus::PROJECT_NAMES)
+
         patched = scope.environment&.project_patched_methods
         pre_eval = patched&.write_census
         return true if GlobalWriteCensus.may_define?(census, scope.discovered_defined_names, name)

@@ -257,6 +257,7 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#extends_block_handled?: a dispatcher over the block-carrying call; it decides which extends-walk arm owns a block (rebound, skipped, or descended) and adds no table entry itself, the arms it calls being the listed producers
     Rigor::Inference::ScopeIndexer#finalize_call_surface_tables: grandfathered
     Rigor::Inference::ScopeIndexer#finalize_def_index: grandfathered
+    Rigor::Inference::ScopeIndexer#finalize_defined_names: merges the files' defined-name Sets into the project's at finalize, only when a top-level include exists and no census marker declines every call, and then marks the census as the whole project's (issue 1715); it records names, not a declaration context
     Rigor::Inference::ScopeIndexer#finalize_project_index: grandfathered
     Rigor::Inference::ScopeIndexer#fold_ancestry_tables: grandfathered
     Rigor::Inference::ScopeIndexer#fold_constant_tables: grandfathered

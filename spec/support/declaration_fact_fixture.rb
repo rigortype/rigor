@@ -41,6 +41,9 @@ module DeclarationFactFixture
 
         def hidden = 1
       end
+
+      # Issue #1715 — a top-level include, so the pre-pass folds `discovered_defined_names`.
+      include Greeting
     RUBY
     "lib/widget.rb" => <<~RUBY
       module Greeting

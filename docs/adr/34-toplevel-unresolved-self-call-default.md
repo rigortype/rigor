@@ -111,6 +111,13 @@ does not resolve against any of:
    `main` (Sinatra's classic style, `Rake::DSL`), a gem's
    refinements, a C extension, or a framework that
    `instance_eval`s the file can still answer the name first.
+   In practice this is for script-style projects such as
+   competitive-programming submissions: one mixin onto a
+   receiver no constant names (`base.extend(M)` in a
+   `self.included` hook), a computed `define_method` name or a
+   string `eval` anywhere in the project turns it off, and so
+   does a scope built without the whole-project pre-pass (an
+   editor's per-buffer run, `rigor type-of`).
    *(Amended 2026-10-10: the include itself was silent after
    [#1383](https://github.com/rigortype/rigor/issues/1383), but
    what it brought in still reported;

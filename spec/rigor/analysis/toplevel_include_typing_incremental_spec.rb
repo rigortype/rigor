@@ -97,6 +97,18 @@ RSpec.describe "typing through a top-level include — incremental re-check (#17
     end
   end
 
+  # The definer is served from its seed bundle on the second run, so the names its bundle carries must fold in.
+  it "keeps a caller untyped when only the caller is edited and the definer comes from the snapshot" do
+    with_project do |config, snapshot|
+      File.write("lib/b.rb", "class Widget\n  attr_reader :helper\nend\n")
+      expect(process_run(config, ["lib"], snapshot)).to eq([])
+
+      File.write("lib/a.rb", "helper.upcase\nx = 1\n")
+      expect(cold_run(config)).to eq([])
+      expect(process_run(config, ["lib"], snapshot)).to eq([])
+    end
+  end
+
   it "re-checks a typed caller when the include chain changes" do
     with_project do |config, snapshot|
       expect(process_run(config, ["lib"], snapshot)).to eq(typed)

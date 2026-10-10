@@ -66,7 +66,10 @@ severity_overrides:
   `[Integer, Integer]`, `pow_mod(2, 10, 1000)` reads `Integer`) when the project defines no method of that name
   anywhere ([#1715](https://github.com/rigortype/rigor/issues/1715)). The same call inside a block, a lambda, a
   method or a class body, beside a same-named method the project defines, or after a top-level `extend`, still
-  reads `Dynamic[top]`.
+  reads `Dynamic[top]`. The typing is meant for script-style solutions: a mixin onto a receiver no constant names
+  (`base.extend(ClassMethods)`), a computed `define_method` name or a string `eval` anywhere in the checked paths
+  turns it off for the whole project, and the editor's per-buffer diagnostics and `rigor type-of` do not apply it
+  (`rigor check` does).
 - In an instance method of a class or module that writes `include AcLibraryRb`, a bare class name
   (`Segtree.new(...)`) resolves to the `AcLibraryRb` class, as Ruby resolves it through the class's ancestors
   ([#1698](https://github.com/rigortype/rigor/issues/1698)). In the class body, a `def self.` method or a

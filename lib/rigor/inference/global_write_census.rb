@@ -53,6 +53,10 @@ module Rigor
       REFINES_ANY = [:refines_any].freeze
       STRING_EVAL = [:string_eval].freeze
       MIXIN_ANY = [:mixin_any].freeze
+      # Issue #1715 — the entry the whole-project pre-pass adds to the merged defined names when it folds them, so
+      # the set says itself that it is the whole program's. No file's own names carry it, and no literal a program
+      # plausibly writes spells it.
+      PROJECT_NAMES = :"\x00rigor:project-names"
 
       # `define_method`-family calls whose first argument names the method they define.
       NAMING_CALLS = %i[define_method define_singleton_method alias_method].to_set.freeze

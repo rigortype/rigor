@@ -27,9 +27,13 @@ module Rigor
     # parameter-typed block params, declared per-verb argument contracts — are ceiling concerns
     # for later slices.
     module MacroBlockSelfType
-      # A matched entry's effect on the block body: the `self_type` it runs with (nil keeps the entry scope's), and
-      # the modules its `Proc#refined` puts in effect (issue #1667).
-      Match = Data.define(:self_type, :refinements)
+      # A matched entry's effect on the block body: the `self_type` it runs with (nil keeps the entry scope's), the
+      # modules its `Proc#refined` puts in effect (issue #1667), and whether that `self` is itself unknown whatever
+      # the receiver: a `:lexical` entry copies the caller's `self`, which inside a block of unknown `self` is the
+      # enclosing method's guess (issue #1717).
+      Match = Data.define(:self_type, :refinements, :self_unknown) do
+        def initialize(self_type:, refinements:, self_unknown: false) = super
+      end
 
       module_function
 
@@ -39,8 +43,9 @@ module Rigor
         match_for(scope: scope, call_node: call_node, receiver_type: receiver_type)&.self_type
       end
 
-      # The block entry `call_node`'s first matching entry contributes, or nil when none matches. A `:lexical`
-      # entry (issue #1667) keeps the caller's `self`, so its `self_type` is the calling scope's.
+      # The block entry `call_node`'s first matching entry contributes, or nil when none matches; a later entry for the
+      # same call, another plugin's included, is not consulted. A `:lexical` entry (issue #1667) keeps the caller's
+      # `self`, so its `self_type` is the calling scope's.
       def match_for(scope:, call_node:, receiver_type:)
         return nil if receiver_type.nil?
 
@@ -64,10 +69,15 @@ module Rigor
         nil
       end
 
-      # The {Match} a matching entry contributes: a `:lexical` one keeps the calling scope's `self`.
+      # The {Match} a matching entry contributes: a `:lexical` one keeps the calling scope's `self`, unknown where the
+      # caller's is.
       def entry_match(entry, receiver_name, scope, environment)
-        self_type = entry.lexical_self? ? scope.self_type : narrowed_self_type(entry, receiver_name, environment)
-        Match.new(self_type: self_type, refinements: entry.refinements)
+        if entry.lexical_self?
+          return Match.new(self_type: scope.self_type, refinements: entry.refinements,
+                           self_unknown: scope.block_self_unknown?)
+        end
+
+        Match.new(self_type: narrowed_self_type(entry, receiver_name, environment), refinements: entry.refinements)
       end
 
       # The receiver an implicit-self call is matched on: the scope's `self`, or at the file's top level (no
@@ -83,7 +93,9 @@ module Rigor
         return block_scope if match.nil?
 
         narrowed = block_scope
-        narrowed = narrowed.with_block_self_type(match.self_type, keeps_unknown: keeps_unknown) if match.self_type
+        if match.self_type
+          narrowed = narrowed.with_block_self_type(match.self_type, keeps_unknown: keeps_unknown || match.self_unknown)
+        end
         narrowed.with_declared_refinements(match.refinements)
       end
 

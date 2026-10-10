@@ -612,8 +612,8 @@ module Rigor
 
     # Issue #1667 (ADR-121 WD5) — this scope with `names` appended to {#declared_refinements}, each once at its first
     # position: the modules a plugin-declared refined block (`block_as_methods:` `refinements:`) runs under. Stamped
-    # at block entry and inherited by every scope derived inside the body, nested blocks included; a `def` or class
-    # body starts from a fresh scope and clears it.
+    # at block entry and inherited by every scope derived inside the body, nested blocks included, and by a `def` or
+    # class body written in it (`StatementEvaluator#build_fresh_body_scope`), as CRuby's cref is.
     def with_declared_refinements(names)
       return self if names.empty?
 

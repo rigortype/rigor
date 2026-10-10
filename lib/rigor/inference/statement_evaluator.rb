@@ -5410,12 +5410,16 @@ module Rigor
         # chain's throwaway intermediate Scopes were a top `Scope#rebuild` source (ADR-44). Local-empty by design; the
         # discovery index is inherited whole by reference (ADR-53 Track A), so a table added to the index can no longer
         # be dropped here by a missed per-field copy.
+        #
+        # Issue #1667 — a plugin-declared refined block's modules carry into a `def` or class body written in it: CRuby
+        # defines the method with the block's cref, and a class body's cref inherits the outer one's refinements.
         Scope.new(
           environment: scope.environment,
           locals: {}.freeze,
           source_path: scope.source_path,
           discovery: scope.discovery,
-          dynamic_origins: scope.dynamic_origins
+          dynamic_origins: scope.dynamic_origins,
+          declared_refinements: scope.declared_refinements
         )
       end
 

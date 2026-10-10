@@ -71,7 +71,7 @@ module Rigor
       end
 
       def shadowed?(scope, refinements, refined, module_name, method_name)
-        suffix = "::#{refined.split("::").last}"
+        suffix = "::#{refined.split('::').last}"
         depth = refined.count(":")
         refinements.any? do |other, methods|
           other.count(":") > depth && other.end_with?(suffix) && methods[method_name]&.include?(module_name) &&

@@ -3119,7 +3119,8 @@ module Rigor
         end
       end
 
-      def infer_user_method_return_unguarded(def_node, receiver, arg_types, self_fold_safe, yield_type, refinements = nil)
+      def infer_user_method_return_unguarded(def_node, receiver, arg_types, self_fold_safe, yield_type,
+                                             refinements = nil)
         yield_type = nil unless yield_type && body_yields?(def_node)
         body_scope = build_user_method_body_scope(def_node, receiver, arg_types,
                                                   self_fold_safe: self_fold_safe)

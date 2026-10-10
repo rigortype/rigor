@@ -1,0 +1,1 @@
+- **[engine]** `call.undefined-method` now reports a misspelt method on a value whose type is a union of one class's literals, alone or beside that class (`0 | Integer`, which `gets.to_i` types, or `1 | 2`), as it already did on a plain `Integer`. ([#1699](https://github.com/rigortype/rigor/issues/1699), [#1719](https://github.com/rigortype/rigor/pull/1719))

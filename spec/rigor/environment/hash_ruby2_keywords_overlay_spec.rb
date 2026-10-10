@@ -20,11 +20,13 @@ RSpec.describe "Hash.ruby2_keywords_hash? and Hash.ruby2_keywords_hash (core ove
     loader.singleton_definition("Hash")&.methods
   end
 
+  def method_type_strings(name)
+    hash_singleton_methods[name].method_types.map(&:to_s)
+  end
+
   it "declares both singleton methods from the core overlay" do
-    expect(hash_singleton_methods&.[](:ruby2_keywords_hash?)&.method_types&.map(&:to_s))
-      .to eq(["(::Hash[untyped, untyped]) -> bool"])
-    expect(hash_singleton_methods&.[](:ruby2_keywords_hash)&.method_types&.map(&:to_s))
-      .to eq(["[K, V] (::Hash[K, V]) -> ::Hash[K, V]"])
+    expect(method_type_strings(:ruby2_keywords_hash?)).to eq(["(::Hash[untyped, untyped]) -> bool"])
+    expect(method_type_strings(:ruby2_keywords_hash)).to eq(["[K, V] (::Hash[K, V]) -> ::Hash[K, V]"])
   end
 
   it "declares them through the overlay file, not a direct def" do
@@ -36,7 +38,7 @@ RSpec.describe "Hash.ruby2_keywords_hash? and Hash.ruby2_keywords_hash (core ove
   end
 
   it "leaves Hash's upstream singleton methods buildable" do
-    expect(hash_singleton_methods&.keys).to include(:new, :[], :try_convert, :ruby2_keywords_hash?, :ruby2_keywords_hash)
+    expect(hash_singleton_methods.keys).to include(:new, :[], :try_convert, :ruby2_keywords_hash?, :ruby2_keywords_hash)
   end
 
   # A direct declaration from elsewhere (a project `sig/`, or a later rbs release) overrides the extended module's
@@ -56,9 +58,8 @@ RSpec.describe "Hash.ruby2_keywords_hash? and Hash.ruby2_keywords_hash (core ove
     end
 
     it "lets the direct signature stand and keeps Hash's other singleton methods" do
-      expect(hash_singleton_methods&.[](:ruby2_keywords_hash?)&.method_types&.map(&:to_s))
-        .to eq(["(untyped) -> true"])
-      expect(hash_singleton_methods&.keys).to include(:try_convert, :ruby2_keywords_hash)
+      expect(method_type_strings(:ruby2_keywords_hash?)).to eq(["(untyped) -> true"])
+      expect(hash_singleton_methods.keys).to include(:try_convert, :ruby2_keywords_hash)
     end
   end
 end

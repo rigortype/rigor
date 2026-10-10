@@ -1075,7 +1075,7 @@ module Rigor
             selector_self = self_type.is_a?(Type::Dynamic) ? self_type.static_facet : self_type
             per_list = distributed_keyword_matches(method_definition, args, selector_self, instance_type, type_vars,
                                                    !block_type.nil?, environment)
-            return per_list if per_list.equal?(NOT_DISTRIBUTED)
+            return NOT_DISTRIBUTED if per_list.equal?(NOT_DISTRIBUTED)
             return Type::Combinator.untyped if per_list.nil?
 
             overloads = per_list.flat_map(&:last).uniq

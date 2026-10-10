@@ -33,7 +33,7 @@ module Rigor
       # ({.rehydrated_nesting}).
       def self.with_run
         previous = Thread.current[MEMO_KEY]
-        Thread.current[MEMO_KEY] = { nodes: {}, indexes: {}, nestings: {}.compare_by_identity, refinements: {} }
+        Thread.current[MEMO_KEY] = { nodes: {}, indexes: {}, nestings: {}.compare_by_identity, refinement_queries: {} }
         yield
       ensure
         Thread.current[MEMO_KEY] = previous
@@ -120,7 +120,7 @@ module Rigor
         memo = Thread.current[MEMO_KEY]
         return build_refinement_query(path, nil) if memo.nil?
 
-        queries = memo[:refinements]
+        queries = memo[:refinement_queries]
         return queries[path] if queries.key?(path)
 
         queries[path] = build_refinement_query(path, memo)

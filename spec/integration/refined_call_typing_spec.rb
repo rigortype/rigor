@@ -65,7 +65,7 @@ RSpec.describe "Typing calls through Ruby refinements (#1664)", type: :runner do
   end
 
   it "lets a subclass's own method beat a refinement of its superclass" do
-    expect(dumps(<<~RUBY)).to eq(%w[1 "refined"])
+    expect(dumps(<<~RUBY)).to eq(["1", %("refined")])
       class Base; def m = "base"; end
       class Child < Base; def m = 1; end
       module RefineBase
@@ -130,7 +130,7 @@ RSpec.describe "Typing calls through Ruby refinements (#1664)", type: :runner do
   end
 
   it "answers Dynamic[top] under a `using` that names no module, for a name some refinement defines" do
-    expect(dumps(<<~RUBY, files: { "sym_syntax.rb" => sym_syntax })).to eq(%w[Dynamic[top] "a"])
+    expect(dumps(<<~RUBY, files: { "sym_syntax.rb" => sym_syntax })).to eq(["Dynamic[top]", %("a")])
       using Module.new { refine(Integer) { def x = 1 } }
       Rigor.dump_type(:a.shout)
       Rigor.dump_type(:a.to_s)

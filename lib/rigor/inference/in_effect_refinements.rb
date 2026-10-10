@@ -6,6 +6,7 @@ require_relative "../source/constant_path"
 require_relative "../source/node_children"
 require_relative "in_effect_refinements/proc_literals"
 require_relative "in_effect_refinements/scope_reads"
+require_relative "in_effect_refinements/refine_defs"
 
 module Rigor
   module Inference
@@ -113,14 +114,14 @@ module Rigor
       # refined class is matched by any name its spelling can denote, as the refinement table records it.
       def refinement_def(module_name, class_name, method_name)
         build
-        @refine_def_nodes.dig(module_name, class_name, method_name)
+        @refine_defs.lookup(module_name, class_name, method_name)
       end
 
       # `{refine-body DefNode => Module.nesting where it is written}` for the defs {#refinement_def} answers, which a
       # body re-typed from another file's parse reads its constants by (`DefNodeResolver.refinement_query`).
       def refine_def_nestings
         build
-        @refine_def_nestings
+        @refine_defs.nestings
       end
 
       # Is this the query over `root`'s tree?
@@ -140,8 +141,7 @@ module Rigor
 
       EMPTY_OFFSET = -1
       EMPTY_SET = Set.new.freeze
-      EMPTY_TABLE = {}.freeze
-      private_constant :EMPTY_OFFSET, :EMPTY_SET, :EMPTY_TABLE
+      private_constant :EMPTY_OFFSET, :EMPTY_SET
 
       def append_activation(list, activation, expand)
         names = activation.names
@@ -176,16 +176,14 @@ module Rigor
         @built = true
         @activations = EMPTY
         @refinement_defs = EMPTY_SET
-        @refine_def_nodes = EMPTY_TABLE
-        @refine_def_nestings = EMPTY_TABLE
+        @refine_defs = RefineDefs::EMPTY
         @chained_refined_calls = nil
         @unresolved_using = false
         return if @root.nil? || !mentions_refinements?
 
         @activations = []
         @refinement_defs = Set.new
-        @refine_def_nodes = {}
-        @refine_def_nestings = {}.compare_by_identity
+        @refine_defs = RefineDefs.new
         @nesting = EMPTY
         location = @root.location
         walk(@root, [], [location.start_offset, location.end_offset], false, nil)
@@ -325,14 +323,8 @@ module Rigor
 
         ScopeIndexer.each_refinement_def(body) do |def_node|
           @refinement_defs << def_node.location.start_offset
-          record_refine_def_node(owner, targets, def_node) if owner
+          @refine_defs.record(owner, targets, def_node, @nesting) if owner
         end
-      end
-
-      def record_refine_def_node(owner, targets, def_node)
-        by_class = (@refine_def_nodes[owner] ||= {})
-        targets.each { |class_name| (by_class[class_name] ||= {})[def_node.name] = def_node }
-        @refine_def_nestings[def_node] = @nesting
       end
 
       def using_call?(node)

@@ -60,7 +60,10 @@ module Rigor
         best_index = -1
         modules.each do |module_name|
           index = list.index(module_name)
-          best, best_index = module_name, index if index && index > best_index
+          next unless index && index > best_index
+
+          best = module_name
+          best_index = index
         end
         best
       end

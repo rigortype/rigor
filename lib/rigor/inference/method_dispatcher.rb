@@ -1583,13 +1583,16 @@ module Rigor
       # method definition, or selected overload does not provide statically declared block
       # parameter types. Callers MUST treat the empty array as "no information"; the binder
       # falls back to `Dynamic[Top]` for every parameter slot in that case.
+      #
+      # `call_node` lets the overload selector read the call's keyword arguments as keywords (#1727, #1737), as
+      # the return path does; without it they are read positionally.
       def expected_block_param_types(receiver_type:, method_name:, arg_types:, environment: nil,
-                                     scope: nil)
+                                     scope: nil, call_node: nil)
         return [] if receiver_type.nil?
 
         context = CallContext.build(
           receiver: receiver_type, method_name: method_name,
-          args: arg_types, environment: environment, scope: scope
+          args: arg_types, environment: environment, scope: scope, call_node: call_node
         )
         iterator_result = IteratorDispatch.block_param_types(context)
         return iterator_result if iterator_result

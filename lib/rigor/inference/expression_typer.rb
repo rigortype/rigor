@@ -4185,7 +4185,8 @@ module Rigor
           method_name: call_node.name,
           arg_types: arg_types,
           environment: scope.environment,
-          scope: scope
+          scope: scope,
+          call_node: call_node
         )
         block_return_for(
           block_arg, expected,
@@ -4294,7 +4295,8 @@ module Rigor
           method_name: call_node.name,
           arg_types: call_arg_types(call_node),
           environment: scope.environment,
-          scope: scope
+          scope: scope,
+          call_node: call_node
         )
       end
 

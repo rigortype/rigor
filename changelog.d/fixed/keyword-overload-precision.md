@@ -1,0 +1,1 @@
+- **[inference]** An untyped keyword argument no longer picks an overload by declaration order, a `mode: untyped` overload no longer beats a typed one, and a block now gets the parameter types of the overload its keywords select (`IO.popen(cmd, "r", err: :out) { |io| }` binds `io` to `IO`). ([#1742](https://github.com/rigortype/rigor/pull/1742))

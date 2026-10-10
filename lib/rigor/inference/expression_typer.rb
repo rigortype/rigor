@@ -40,6 +40,7 @@ require_relative "optimistic_origin"
 require_relative "receiver_alias"
 require_relative "repeated_or_writes"
 require_relative "singleton_object_constant"
+require_relative "refined_dispatch"
 require_relative "stored_block_call"
 require_relative "struct_fold_safety"
 require_relative "unknown_store_widening"
@@ -1907,6 +1908,9 @@ module Rigor
         # asks nothing further of dispatch. Off (the default) this is one integer read.
         Effects::Collector.record_call(node, receiver, scope) if Effects::Collector.active?
 
+        refined = try_refined_dispatch(node, receiver, arg_types, block_type)
+        return refined if refined
+
         literal_send = try_literal_send(node, receiver)
         return literal_send if literal_send
 
@@ -1936,6 +1940,73 @@ module Rigor
         return result if result
 
         dispatch_miss_result(node, receiver, arg_types, block_type)
+      end
+
+      # ADR-121 WD2 (issue #1664) — a call through an in-effect Ruby refinement, typed from the winning refine body
+      # with the call's receiver as `self`, ahead of every tier below: each answers from the method the refinement
+      # replaces (a refined `String#upcase` must not fold, a refined `map` must not fold per element, a top-level
+      # `def` must not bind ahead of a refinement of `Object`, a plugin models the class's own method). An unreadable
+      # body, or a list that may hold any refinement, answers `Dynamic[top]`, never the replaced method's signature.
+      # A union receiver is decided per member; a `Dynamic` receiver, a class object and a call no refinement wins
+      # fall through. A call site no refinement is in effect at answers nil at once and records nothing: its answer
+      # cannot change without an edit to its own file.
+      def try_refined_dispatch(node, receiver, arg_types, block_type)
+        list = scope.in_effect_refinements(node)
+        return nil if list.empty?
+
+        Analysis::DependencyRecorder.read_name(:refinement, node.name) if Analysis::DependencyRecorder.active?
+        return nil if scope.discovered_refinements.empty?
+
+        refined_receiver_result(node, receiver, list, arg_types, block_type)
+      end
+
+      def refined_receiver_result(node, receiver, list, arg_types, block_type)
+        return refined_member_result(node, receiver, list, arg_types, block_type) unless receiver.is_a?(Type::Union)
+
+        answers = receiver.members.map { |member| refined_member_result(node, member, list, arg_types, block_type) }
+        return nil if answers.none?
+
+        members = receiver.members.each_with_index.map do |member, index|
+          answers[index] || call_result_type_for(node, receiver_override: member)
+        end
+        Type::Combinator.union(*members)
+      end
+
+      def refined_member_result(node, receiver, list, arg_types, block_type)
+        class_name = refined_receiver_class_name(receiver)
+        return nil if class_name.nil?
+
+        winner = RefinedDispatch.winner(scope, class_name, node.name, list)
+        return nil if winner.nil?
+        return dynamic_top if winner == RefinedDispatch::UNKNOWN
+
+        refined_body_return(winner, node.name, Type::Combinator.nominal_of(class_name), arg_types, block_type) ||
+          dynamic_top
+      end
+
+      # The winning refine body's inferred return, re-typed with the receiver's class as `self` and the call's
+      # argument types bound as an undeclared method's are; nil when the body is not readable here.
+      def refined_body_return(winner, method_name, self_type, arg_types, block_type)
+        def_node = InEffectRefinements.refinement_def(scope, winner.module_name, winner.refined_class, method_name)
+        return nil if def_node.nil?
+
+        infer_user_method_return(def_node, self_type, arg_types, yield_type: block_type)
+      rescue StandardError
+        nil
+      end
+
+      # The class an instance-side receiver is an instance of, or nil for one a refinement does not answer here: a
+      # class object (refinements of singleton classes are not recorded), `Dynamic`, `top`, or a shape with no class.
+      def refined_receiver_class_name(receiver)
+        case receiver
+        when Type::Nominal, Type::StructInstance, Type::DataInstance then receiver.class_name
+        when Type::Constant then receiver.value.class.name
+        when Type::Tuple then "Array"
+        when Type::HashShape then "Hash"
+        when Type::IntegerRange then "Integer"
+        when Type::FloatRange then "Float"
+        when Type::Refined, Type::Difference then refined_receiver_class_name(receiver.base)
+        end
       end
 
       # The post-dispatch tiers for a call `MethodDispatcher` could not answer, in their historical

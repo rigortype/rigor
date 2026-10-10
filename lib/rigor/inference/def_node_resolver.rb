@@ -33,7 +33,7 @@ module Rigor
       # ({.rehydrated_nesting}).
       def self.with_run
         previous = Thread.current[MEMO_KEY]
-        Thread.current[MEMO_KEY] = { nodes: {}, indexes: {}, nestings: {}.compare_by_identity }
+        Thread.current[MEMO_KEY] = { nodes: {}, indexes: {}, nestings: {}.compare_by_identity, refinements: {} }
         yield
       ensure
         Thread.current[MEMO_KEY] = previous
@@ -112,6 +112,28 @@ module Rigor
         memo[:nestings][node] = nesting
       end
       private_class_method :record_nesting
+
+      # Issue #1664 — the {InEffectRefinements} over `path`'s own parse, once a run, or nil when the file cannot be
+      # read: the typed refined arm reads another file's refine body through it. The bodies' `Module.nesting`
+      # is recorded as a handle's is, so the re-typed body reads its constants where it is written.
+      def self.refinement_query(path)
+        memo = Thread.current[MEMO_KEY]
+        return build_refinement_query(path, nil) if memo.nil?
+
+        queries = memo[:refinements]
+        return queries[path] if queries.key?(path)
+
+        queries[path] = build_refinement_query(path, memo)
+      end
+
+      def self.build_refinement_query(path, memo)
+        query = InEffectRefinements.new(Prism.parse(File.read(path)).value)
+        query.refine_def_nestings.each { |node, nesting| record_nesting(memo, node, nesting) } if memo
+        query
+      rescue StandardError
+        nil
+      end
+      private_class_method :build_refinement_query
 
       # Finds the node for `handle` using a per-file `{node_id => DefNode}` + `{name => DefNode}` index cache.
       def self.locate(handle, index_cache)

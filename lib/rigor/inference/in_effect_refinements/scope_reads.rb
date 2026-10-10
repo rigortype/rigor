@@ -12,9 +12,30 @@ module Rigor
         # {.activated_modules}, then `declared`. A scope no index stamped answers `declared` alone.
         def for_node(scope, node, declared = EMPTY)
           query = scope.discovery.in_effect_refinements
+          return EMPTY if declared.empty? && (query.nil? || query.empty?)
           return query.for_node(node, declared) { |name| activated_modules(scope, name) } if query
 
-          declared.empty? ? EMPTY : declared.uniq.freeze
+          declared.uniq.freeze
+        end
+
+        # Issue #1664 — the `def` a refine body gives `method_name` on `class_name` for the refining module
+        # `module_name`, or nil where none can be read: this file's own refine body first, else one in a file that
+        # declares the module (`Scope#discovered_class_sources`), parsed once a run. A gem refinement, a module a
+        # `Module.new` write names in another file, or an anonymous module answer nil, which the typed arm reads as
+        # an unreadable body (`Dynamic[top]`). The consumer's `refinement:<name>` edge covers an edit to that body
+        # (`Incremental.changed_refinement_names`).
+        def refinement_def(scope, module_name, class_name, method_name)
+          own = scope.discovery.in_effect_refinements&.refinement_def(module_name, class_name, method_name)
+          return own if own
+
+          sources = scope.discovered_class_sources[module_name]
+          return nil if sources.nil?
+
+          sources.each do |path|
+            found = DefNodeResolver.refinement_query(path)&.refinement_def(module_name, class_name, method_name)
+            return found if found
+          end
+          nil
         end
 
         # Issue #1671 — the modules whose refinements `using name` puts in effect, in activation order: the project

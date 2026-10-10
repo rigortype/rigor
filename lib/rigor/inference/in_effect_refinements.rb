@@ -73,6 +73,8 @@ module Rigor
       # The caller vouches that `offset` is in this file; {#for_node} checks.
       def at(offset, declared = EMPTY, &expand)
         build
+        return EMPTY if @activations.empty? && declared.empty?
+
         list = []
         @activations.each do |activation|
           append_activation(list, activation, expand) if activation.covers?(offset)
@@ -100,6 +102,27 @@ module Rigor
         at(offset, &).any? { |name| name == UNKNOWN || modules.include?(name) }
       end
 
+      # Does the file activate no refinement anywhere? A consumer asks first, so a file without one pays no list.
+      def empty?
+        build
+        @activations.empty?
+      end
+
+      # Issue #1664 — the `Prism::DefNode` a `refine class_name do … end` body in this file defines `method_name` with,
+      # for the refining module `module_name`, or nil. The last such `def` wins, as Ruby's method table keeps it. The
+      # refined class is matched by any name its spelling can denote, as the refinement table records it.
+      def refinement_def(module_name, class_name, method_name)
+        build
+        @refine_def_nodes.dig(module_name, class_name, method_name)
+      end
+
+      # `{refine-body DefNode => Module.nesting where it is written}` for the defs {#refinement_def} answers, which a
+      # body re-typed from another file's parse reads its constants by (`DefNodeResolver.refinement_query`).
+      def refine_def_nestings
+        build
+        @refine_def_nestings
+      end
+
       # Is this the query over `root`'s tree?
       def over?(root) = @root.equal?(root)
 
@@ -116,7 +139,9 @@ module Rigor
       private
 
       EMPTY_OFFSET = -1
-      private_constant :EMPTY_OFFSET
+      EMPTY_SET = Set.new.freeze
+      EMPTY_TABLE = {}.freeze
+      private_constant :EMPTY_OFFSET, :EMPTY_SET, :EMPTY_TABLE
 
       def append_activation(list, activation, expand)
         names = activation.names
@@ -149,16 +174,39 @@ module Rigor
         return if @built
 
         @built = true
-        @activations = []
-        @refinement_defs = Set.new
+        @activations = EMPTY
+        @refinement_defs = EMPTY_SET
+        @refine_def_nodes = EMPTY_TABLE
+        @refine_def_nestings = EMPTY_TABLE
         @chained_refined_calls = nil
         @unresolved_using = false
-        return if @root.nil?
+        return if @root.nil? || !mentions_refinements?
 
+        @activations = []
+        @refinement_defs = Set.new
+        @refine_def_nodes = {}
+        @refine_def_nestings = {}.compare_by_identity
+        @nesting = EMPTY
         location = @root.location
         walk(@root, [], [location.start_offset, location.end_offset], false, nil)
         sort_activations
         @activations.freeze
+      end
+
+      # `Module.nesting` inside `node`'s body while the block runs, for the refine-body defs recorded there.
+      def within_nesting(node)
+        outer = @nesting
+        @nesting = Source::ConstantPath.pushed_nesting(outer, node.constant_path) || outer
+        yield
+      ensure
+        @nesting = outer
+      end
+
+      # A file whose text names neither `using` nor `refine` (`refined` among it) holds none of the activations the walk
+      # records, so the scan of the source string spares it the tree walk.
+      def mentions_refinements?
+        text = @root.send(:source).source
+        text.include?("using") || text.include?("refine")
       end
 
       # `body` is the `[start, end]` of the body a `using` here stays in effect to the end of; `owner` is the name of
@@ -167,7 +215,9 @@ module Rigor
         case node
         when Prism::ClassNode, Prism::ModuleNode
           inner = Source::ConstantPath.declaration_prefix(prefix, node.constant_path) || prefix
-          return walk_children(node.body, inner, span_of(node), false, inner.empty? ? nil : inner.join("::"))
+          return within_nesting(node) do
+            walk_children(node.body, inner, span_of(node), false, inner.empty? ? nil : inner.join("::"))
+          end
         when Prism::SingletonClassNode
           walk(node.expression, prefix, body, in_def, owner)
           return walk_children(node.body, prefix, span_of(node), false, nil)
@@ -213,8 +263,8 @@ module Rigor
       end
 
       def record_call(node, prefix, body, in_def, owner)
-        if ScopeIndexer.refine_target(node)
-          record_refine_block(node, owner)
+        if (target = ScopeIndexer.refine_target(node))
+          record_refine_block(node, owner, ScopeIndexer.constant_receiver_candidates(target, prefix))
         elsif using_call?(node) && !in_def
           record_using(node, prefix, body)
         elsif node.name == :refined
@@ -266,14 +316,23 @@ module Rigor
                                        refine_block: false)
       end
 
-      def record_refine_block(node, owner)
+      def record_refine_block(node, owner, targets)
         start, stop = span_of(node.block)
         @activations << Activation.new(order: start, start: start, stop: stop, names: owner && [owner],
                                        expand: false, refine_block: true)
         body = node.block.body
         return if body.nil?
 
-        ScopeIndexer.each_refinement_def(body) { |def_node| @refinement_defs << def_node.location.start_offset }
+        ScopeIndexer.each_refinement_def(body) do |def_node|
+          @refinement_defs << def_node.location.start_offset
+          record_refine_def_node(owner, targets, def_node) if owner
+        end
+      end
+
+      def record_refine_def_node(owner, targets, def_node)
+        by_class = (@refine_def_nodes[owner] ||= {})
+        targets.each { |class_name| (by_class[class_name] ||= {})[def_node.name] = def_node }
+        @refine_def_nestings[def_node] = @nesting
       end
 
       def using_call?(node)

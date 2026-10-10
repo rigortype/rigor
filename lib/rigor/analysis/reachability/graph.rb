@@ -35,13 +35,18 @@ module Rigor
         #   a reopened gem or stdlib class must never be a candidate (WD6). Defaults to "nothing is foreign".
         # @param dynamic_uses — sites where a constant is reached by name at runtime.
         #   A literal-argument site contributes a real reference; a dynamic one taints a namespace (WD4).
-        def initialize(declarations:, references:, root_fqns: [], dynamic_uses: [], foreign: ->(_fqn) { false })
+        # @param shadows — declarations made in files outside the analysed paths. They are never nodes, but a
+        #   reference written in the SAME file resolves to them first, as Ruby would (#1732, see {#resolve_ref}).
+        def initialize(declarations:, references:, root_fqns: [], dynamic_uses: [], shadows: [],
+                       foreign: ->(_fqn) { false })
           @declarations = declarations
           @dynamic_uses = dynamic_uses
           @references = references + literal_dynamic_references(dynamic_uses)
           @root_fqns = root_fqns.to_set
           @foreign = foreign
           @by_fqn = declarations.group_by(&:fqn)
+          @shadows = shadows.group_by(&:path).transform_values { |decls| decls.to_set(&:fqn) }
+          @shadows.default = Set.new.freeze
           @owned = @by_fqn.keys.reject { |fqn| @foreign.call(fqn) }.to_set
           @ancestors = {}
         end
@@ -51,22 +56,31 @@ module Rigor
           production = walk(edges, seeds: production_seeds, roles: %i[production task config])
           reachable = walk(edges, seeds: production_seeds | test_seeds, roles: %i[production task config test])
           unreached = @owned - reachable
-          namespaces = namespace_only(unreached, reachable)
+          # A namespace is excused by a member PRODUCTION reaches. One whose members only tests reach is dead
+          # production code like them, so it joins them under test-only rather than vanishing from every
+          # bucket (#1732).
+          namespaces = namespace_only(unreached, production)
+          test_only = (reachable - production) | namespace_only(unreached - namespaces, reachable)
+          unreached -= namespaces | test_only
+          # A namespace a test names (`Ns::CONST`) while production reaches a declaration under it is live in
+          # production for the same reason an unreached one is not dead (#1732).
+          live_namespaces = namespace_only(test_only, production)
+          test_only -= live_namespaces
           # The data-file demotion applies to BOTH buckets it can speak to, which is what the tier
           # contract says and what the implementation had narrowed (#370). See {#tainted}.
-          test_only = reachable - production
-          undecidable = tainted(unreached - namespaces).merge(tainted(test_only))
-          undecidable = spread_undecidable(edges, undecidable, (unreached - namespaces) | test_only)
-          build_report(edges: edges, reachable: reachable, unreached: unreached, namespaces: namespaces,
-                       test_only: test_only, undecidable: undecidable)
+          undecidable = tainted(unreached).merge(tainted(test_only))
+          undecidable = spread_undecidable(edges, undecidable, unreached | test_only,
+                                           through: namespaces | live_namespaces)
+          build_report(edges:, reachable:, unreached:, namespaces:, test_only:, undecidable:)
         end
 
         private
 
         def build_report(edges:, reachable:, unreached:, namespaces:, test_only:, undecidable:)
           demoted = undecidable.keys.to_set
-          Report.new(declared: @owned.size, reachable: reachable.size,
-                     candidates: rows(unreached - namespaces - demoted),
+          # A test-only namespace counts as reachable, like the members it is listed with.
+          Report.new(declared: @owned.size, reachable: (reachable | test_only).size,
+                     candidates: rows(unreached - demoted),
                      undecidable: undecidable.map { |fqn, reason| undecidable_row(fqn, reason) }.freeze,
                      test_only: rows(test_only - demoted),
                      namespaces: namespaces.size, roots: production_seeds.size, edges: edges.size)
@@ -114,19 +128,31 @@ module Rigor
         # `Sub` reachable through `"Sub#{x}".constantize` left `Base` a DEFINITE candidate, and acting on that row
         # deletes the base of a class that may well be live. Only declarations that would otherwise be
         # reported — unreached or test-only — are moved; the reason names the declaration they hang from.
-        def spread_undecidable(edges, undecidable, reportable)
+        #
+        # The spread passes `through` a declaration hidden as a namespace without listing it: a service hidden
+        # only because something names a constant nested in it (`Svc::Error`) still carries the undecidable
+        # evidence on to what its body names. Stopping there left the next service down under "reachable only
+        # from tests" (#1732).
+        def spread_undecidable(edges, undecidable, reportable, through:)
           return undecidable if undecidable.empty?
 
           out = Hash.new { |h, k| h[k] = [] }
           edges.each { |from, to, _role| out[from] << to }
           result = undecidable.dup
+          passed = Set.new
           queue = undecidable.keys
           until queue.empty?
             from = queue.shift
             out[from].each do |target|
-              next if result.key?(target) || !reportable.include?(target)
+              next if result.key?(target) || passed.include?(target)
 
-              result[target] = "reachable from #{from}, which cannot be decided"
+              if reportable.include?(target)
+                result[target] = "reachable from #{from}, which cannot be decided"
+              elsif through.include?(target)
+                passed << target
+              else
+                next
+              end
               queue << target
             end
           end
@@ -166,18 +192,22 @@ module Rigor
           @test_seeds ||= seeds_from { |ref| source(ref).nil? && ref.role == :test }
         end
 
-        # The node an edge leaves. A declaration-header reference (`class Sub < Base`) is credited to `Sub`
-        # (#1720), but only an owned declaration from `paths:` is a node: the subclass a spec, an initializer
-        # or a support file declares is outside the declaration set, so its own liveness cannot be judged and
-        # an edge leaving it would silently drop the evidence. That reference falls back to the scope it is
-        # written in — the file level for a top-level `class FakeAdapter < Adapter` in a spec, which keeps
-        # `Adapter` test-reachable exactly as before the credit moved. For every other reference `from` is
-        # `nesting` joined already, so the fallback is the identity.
+        # The node an edge leaves: the owned declaration whose code holds the reference, with a declaration-header
+        # reference (`class Sub < Base`) credited to `Sub` (#1720). Only an owned declaration from `paths:` is a
+        # node, though. A class an initializer, `config/application.rb` or a spec helper declares, or a reopened
+        # gem class (WD6), is outside the declaration set, so the walk can never start from it and an edge
+        # leaving it would silently drop the evidence. Falling back to the enclosing nesting (#1724) did not help
+        # either: `module MyApp; class Application` and a spec's `module Outer; class Fake < OBase` fall back to a
+        # module that is never reached itself, or is not a node at all (#1732).
+        #
+        # Such a reference counts as file-level code of its file instead, in that file's role: a spec helper's
+        # reference keeps its target test-reachable, an initializer's keeps it live in production. A class header
+        # and a class body's own statements run when the file loads; a method body is read the same way because
+        # whether it runs is not decidable from a declaration this report does not own, and the other reading
+        # would report live code as dead. What the reference NAMES is still resolved against its own file's
+        # declarations first (see {#resolve_ref}).
         def source(ref)
-          from = ref.from
-          return from if from.nil? || @owned.include?(from)
-
-          ref.nesting.empty? ? nil : ref.nesting.join("::")
+          @owned.include?(ref.from) ? ref.from : nil
         end
 
         def seeds_from
@@ -207,11 +237,18 @@ module Rigor
         # A declaration-header reference never names the declaration it belongs to: `module Api; class User <
         # User; end; end` reads `User` before `Api::User` exists, so Ruby answers `::User`. Every other reference
         # resolves as written, and one that lands on its own declaration is dropped as a self-reference.
+        #
+        # A class its own file declares outside `paths:` shadows a same-named owned one, as Ruby's lookup does:
+        # `LegacyThing` inside a migration's local `class LegacyThing < ActiveRecord::Base` stub names the stub,
+        # not the app's model. The answer is then not an owned node and the reference is dropped. Only the
+        # referring file's own declarations count: a spec support file's stub is loaded with the specs, never
+        # with production, so letting it shadow other files could hide a production reference (#1732).
         def resolve_ref(ref)
-          target = resolve(ref.as_written, ref.nesting, rooted: ref.rooted)
+          local = @shadows[ref.path]
+          target = resolve(ref.as_written, ref.nesting, rooted: ref.rooted, local: local)
           return target unless target && target == ref.from && header?(ref)
 
-          resolve(ref.as_written, ref.nesting, rooted: ref.rooted, exclude: target)
+          resolve(ref.as_written, ref.nesting, rooted: ref.rooted, exclude: target, local: local)
         end
 
         # Only a header reference is credited to something other than the scope it is written in (see
@@ -255,18 +292,18 @@ module Rigor
         # the innermost cresting scope (#354), then the bare name. When `rooted: true`, lexical nesting and
         # ancestors are skipped, answering the top-level declaration directly (#625).
         # `exclude` names a declaration the answer must not be (see {#resolve_ref}).
-        def resolve(as_written, nesting, rooted: false, exclude: nil)
+        def resolve(as_written, nesting, rooted: false, exclude: nil, local: nil)
           if rooted
-            return as_written if declared?(as_written, exclude)
+            return as_written if declared?(as_written, exclude, local)
 
             idx = as_written.rindex("::")
-            return idx ? resolve(as_written[0, idx], nesting, rooted: true, exclude: exclude) : nil
+            return idx ? resolve(as_written[0, idx], nesting, rooted: true, exclude: exclude, local: local) : nil
           end
 
           walker = nesting.dup
           until walker.empty?
             candidate = (walker + [as_written]).join("::")
-            return candidate if declared?(candidate, exclude)
+            return candidate if declared?(candidate, exclude, local)
 
             walker.pop
           end
@@ -274,11 +311,11 @@ module Rigor
           unless nesting.empty?
             ancestor_scopes(nesting.join("::")).each do |ancestor|
               candidate = "#{ancestor}::#{as_written}"
-              return candidate if declared?(candidate, exclude)
+              return candidate if declared?(candidate, exclude, local)
             end
           end
 
-          return as_written if declared?(as_written, exclude)
+          return as_written if declared?(as_written, exclude, local)
 
           # `Scope::DiscoveryIndex::EMPTY` names a constant INSIDE a class, and reading it is a use of that
           # class — but the leaf is not itself a declaration, so the reference would resolve to nothing and
@@ -286,11 +323,11 @@ module Rigor
           # on the first run of this report against Rigor's own `lib`). Peel the trailing segment and retry:
           # a reference to a member is a reference to its owner.
           idx = as_written.rindex("::")
-          idx ? resolve(as_written[0, idx], nesting, exclude: exclude) : nil
+          idx ? resolve(as_written[0, idx], nesting, exclude: exclude, local: local) : nil
         end
 
-        def declared?(fqn, exclude)
-          fqn != exclude && @by_fqn.key?(fqn)
+        def declared?(fqn, exclude, local)
+          fqn != exclude && (@by_fqn.key?(fqn) || local&.include?(fqn))
         end
 
         # Breadth-first over superclass + included modules, mixins first, terminating on a cycle. As-written

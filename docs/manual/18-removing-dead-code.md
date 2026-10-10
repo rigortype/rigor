@@ -145,7 +145,7 @@ Four sections, needing four different decisions:
 | **Reachable only from test code** | Live test, no production caller Rigor can see or suspect | Work these first |
 | **Candidates** | Nothing reachable names it | Adjudicate — most are still live |
 | **Cannot decide** | Something can name it at runtime | Read the reason; do not delete from here |
-| **Namespace-only** | A module wrapping live code | Excluded from candidates; count only |
+| **Namespace-only** | A module wrapping code production reaches | Excluded from candidates; count only |
 
 Work them in that order — which is not the order you *read* the
 summary in, where `roots` comes first because it tells you whether to
@@ -176,10 +176,17 @@ A base class is reachable whenever one of its subclasses is:
 that nothing else names appears together with its subclasses when none
 of them is reachable, and the decision belongs to the whole family
 rather than to one row. When a subclass sits under **Cannot decide**,
-its base moves there too. A subclass declared outside `paths:` — in a
-spec, say — names its base only from the scope around it: at the top
-of a file that keeps the base live, but nested in a module that
-nothing reaches it does not.
+its base moves there too.
+
+A class declared outside `paths:` — `config/application.rb`'s
+`Application`, a class in an initializer, a spec helper — is not
+itself in the report, so what it names counts as named from its file:
+`config.middleware.use MyMw` keeps `MyMw` live, and a fake subclass in
+`spec/support` keeps its base reachable from tests. The same holds for
+a gem class you reopen inside `paths:`. A name the file declares
+itself still means that declaration: a migration's local
+`class LegacyThing < ActiveRecord::Base` stub does not keep the app's
+`LegacyThing` model live.
 
 The 53 false positives in the adjudicated run fell into a few recurring
 shapes, and 28 of them were the first one. Recognising these lets you

@@ -186,7 +186,8 @@ RSpec.describe "plugin contributions to `rigor unused`" do
         report = report_for(dir, files, contribution)
 
         expect(report.candidates.map(&:fqn)).not_to include("Admin::User")
-        expect(report.test_only.map(&:fqn)).to eq(["Admin::User"])
+        # `Admin` wraps nothing production reaches, so it is listed with its member (ADR-102 WD8, #1732).
+        expect(report.test_only.map(&:fqn)).to eq(%w[Admin Admin::User])
       end
     end
 

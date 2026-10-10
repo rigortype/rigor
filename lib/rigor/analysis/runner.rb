@@ -1773,6 +1773,28 @@ module Rigor
         else
           apply_discovery_result(@pre_passes.discover(expansion: expansion))
         end
+        withhold_partial_defined_names(expansion)
+      end
+
+      # Issue #1715 — the pre-pass marks its merged defined names as the whole project's
+      # (`Inference::GlobalWriteCensus::PROJECT_NAMES`), but it folds whatever file set it is handed, and several
+      # modes hand it a subset: editor `buffer:` mode, `run_source`'s in-memory file and ADR-46's `analyze_only`
+      # never widen (see {#project_discovery_expansion}), so `--tmp-file … scripts/a.rb` folds `scripts/a.rb`
+      # alone. A name defined only outside that subset would then read as defined nowhere, and the typing would
+      # adopt a signature Ruby does not call. So the names are kept only when the folded set covers every file the
+      # configured `paths:` expand to; otherwise none are seeded and the typing declines. The check runs only for a
+      # project whose names were merged at all (a top-level include and no census marker).
+      def withhold_partial_defined_names(expansion)
+        names = @project_discovered_defined_names
+        return unless names.include?(Inference::GlobalWriteCensus::PROJECT_NAMES)
+        return if whole_project_files?(expansion.fetch(:files))
+
+        @project_discovered_defined_names = Inference::GlobalWriteCensus::EMPTY
+      end
+
+      def whole_project_files?(folded)
+        covered = folded.to_set { |path| File.absolute_path(path) }
+        expand_paths(@configuration.paths).fetch(:files).all? { |path| covered.include?(File.absolute_path(path)) }
       end
 
       # Issue #684 — the file set the cross-file DISCOVERY pre-pass walks, when that is wider than the set
@@ -1850,7 +1872,8 @@ module Rigor
 
       private :run_project_pre_passes, :adopt_prebuilt_project_scan, :apply_pre_passes_result,
               :apply_discovery_result, :ensure_project_discovery, :force_eager_discovery?,
-              :project_discovery_expansion, :discovery_files, :once_each, :widen_discovery_to_project?
+              :project_discovery_expansion, :discovery_files, :once_each, :widen_discovery_to_project?,
+              :withhold_partial_defined_names, :whole_project_files?
 
       # Ruby versions probed (ascending) to discover the lowest one this Prism build accepts for
       # `version:`. Prism exposes no version list, so the floor is found empirically — only when a

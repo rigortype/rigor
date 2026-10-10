@@ -254,7 +254,6 @@ members:
     - lib/rigor/inference/object_mixins.rb
     copies:
     - lib/rigor/analysis/runner.rb
-    - lib/rigor/protection/discovery_seed.rb
   discovered_header_nestings:
     reads:
     - lib/rigor/analysis/runner.rb

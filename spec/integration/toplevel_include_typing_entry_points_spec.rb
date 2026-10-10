@@ -71,6 +71,35 @@ RSpec.describe "typing through a top-level include from entry points without the
       end
     end
 
+  # Editor mode (`--tmp-file` / `--instead-of`) with a path argument folds discovery over that argument alone, so the
+  # pre-pass sees a subset: the names a subset holds are not evidence that the project defines a name nowhere.
+  describe "editor mode over a subset of paths:" do
+    def editor_check(*paths)
+      File.write(".rigor.yml", "paths:\n  - lib\n  - scripts\n")
+      FileUtils.mkdir_p("scripts")
+      FileUtils.mv("lib/a.rb", "scripts/a.rb") if File.exist?("lib/a.rb")
+      File.write("buffer.rb", File.read("scripts/a.rb"))
+      out = StringIO.new
+      Rigor::CLI.start(["check", "--no-cache", "--tmp-file=buffer.rb", "--instead-of=scripts/a.rb", *paths],
+                       out: out, err: StringIO.new)
+      out.string
+    end
+
+    { "the file" => %w[scripts/a.rb], "its directory" => %w[scripts] }.each do |label, paths|
+      it "leaves the call untyped when the argument is #{label} and another root defines the name" do
+        File.write("lib/b.rb", "def helper = \"x\"\n")
+
+        expect(editor_check(*paths)).not_to include("upcase")
+      end
+    end
+
+    it "types the call in editor mode over the whole project when nothing else defines it" do
+      File.write("lib/b.rb", "x = 1\n")
+
+      expect(editor_check).to include("undefined method `upcase' for Integer")
+    end
+  end
+
   # The same project, run whole, does type it when nothing else defines the name: the declines above are the entry
   # points', not the rule's.
   it "types the call under a whole-project check when no other file defines the name" do

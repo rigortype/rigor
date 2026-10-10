@@ -102,10 +102,13 @@ module Rigor
           def_nodes def_nestings singleton_def_nodes def_sources singleton_def_sources superclasses includes
           extends prepends unpositioned_mixins class_sources
           method_visibilities methods parameter_envelopes data_member_layouts struct_member_layouts
-          deferred_ranges refinements global_write_census defined_names
+          deferred_ranges refinements global_write_census
         ].each do |slot|
           tables[seed_key(slot)] = def_index.fetch(slot)
         end
+        # Issue #1715 — `defined_names` is deliberately left out: the measured file set may be a subset of the
+        # project, and the pre-pass would mark a subset's names as the whole project's, so a scope seeded here
+        # declines to type a bare call through a top-level `include`.
         # ADR-119 WD1 — the pairs travel as one: an unpaired empty table is dropped here, a pair only when both
         # halves are empty (`compact_pairs`), so a non-empty sibling is never stranded by an empty member.
         tables.merge!(def_index.fetch(:siblings))

@@ -21,9 +21,10 @@ class NarrowingTest < Minitest::Test
   end
 
   def test_assert_equal
-    x = some_call
+    x = rand(100)
     assert_equal(42, x)
-    x + 1 # x narrowed to Constant<42> — `+` resolves
+    assert_type("42", x) # x narrowed from Integer to Constant<42>; `==` is not identity, so a Dynamic or
+    # user-class local would keep its type instead
   end
 
   def test_refute_nil

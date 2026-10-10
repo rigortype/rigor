@@ -65,12 +65,17 @@ module Rigor
             fqn == prefix || fqn.start_with?("#{prefix}::")
           end
 
-          # This site with `within` resolved by the block into an absolute `prefix`. A receiver naming no
-          # declaration keeps its written name, so it can taint only a declaration spelled under it.
+          # This site with `within` resolved by the block into an absolute `prefix`. Only a resolution of the
+          # whole written path counts: {Graph#resolve} peels an unknown `Foo::Bar` to `Foo`, which would anchor
+          # the lookup a level too high. A receiver that does not resolve keeps its written name, so it can
+          # taint only a declaration spelled under it.
           def anchored
             return self if within.nil?
 
-            with(prefix: "#{yield(within) || within.as_written}::#{prefix}", within: nil)
+            written = within.as_written
+            resolved = yield(within)
+            whole = resolved && (resolved == written || resolved.end_with?("::#{written}"))
+            with(prefix: "#{whole ? resolved : written}::#{prefix}", within: nil)
           end
         end
 
@@ -137,6 +142,60 @@ module Rigor
                      dynamic_uses: walker.dynamic_uses.freeze)
         end
 
+        # The values a local variable can hold, read off its assignments in one local scope, for a
+        # dynamic-resolution argument built a line before the call (#1734).
+        module LocalValues
+          module_function
+
+          # The assigned value nodes of `name` in `scope`, or nil when there is none or one of the assignments
+          # cannot be read off its node (`+=`, a multiple assignment, `rescue => name`).
+          def values(scope, name)
+            writes = []
+            collect_local_writes(scope, name, writes)
+            return nil if writes.empty? || writes.any? { |write| !VALUE_WRITES.include?(write.class) }
+
+            writes.map(&:value)
+          end
+
+          # The names a block's parameter list binds, block-locals included.
+          def bindings(parameters)
+            out = []
+            collect_block_bindings(parameters, out)
+            out
+          end
+
+          VALUE_WRITES = [Prism::LocalVariableWriteNode, Prism::LocalVariableOrWriteNode,
+                          Prism::LocalVariableAndWriteNode].freeze
+          private_constant :VALUE_WRITES
+
+          LOCAL_WRITES = (VALUE_WRITES + [Prism::LocalVariableOperatorWriteNode, Prism::LocalVariableTargetNode]).freeze
+          private_constant :LOCAL_WRITES
+
+          # Nodes that open a new local-variable scope. A block does not: it shares its method's locals.
+          SCOPE_GATES = [Prism::DefNode, Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode].freeze
+          private_constant :SCOPE_GATES
+
+          def collect_local_writes(node, name, out)
+            node.rigor_each_child do |child|
+              next if SCOPE_GATES.any? { |gate| child.is_a?(gate) }
+
+              out << child if LOCAL_WRITES.any? { |kind| child.is_a?(kind) } && child.name == name
+              collect_local_writes(child, name, out)
+            end
+          end
+
+          BLOCK_BINDINGS = [Prism::RequiredParameterNode, Prism::OptionalParameterNode, Prism::RestParameterNode,
+                            Prism::RequiredKeywordParameterNode, Prism::OptionalKeywordParameterNode,
+                            Prism::KeywordRestParameterNode, Prism::BlockParameterNode,
+                            Prism::BlockLocalVariableNode].freeze
+          private_constant :BLOCK_BINDINGS
+
+          def collect_block_bindings(node, out)
+            out << node.name if BLOCK_BINDINGS.any? { |kind| node.is_a?(kind) } && node.name
+            node.rigor_each_child { |child| collect_block_bindings(child, out) }
+          end
+        end
+
         # Single-pass walker. Tracks `nesting` as the stack of enclosing declaration names.
         class Walker
           attr_reader :declarations, :references, :dynamic_uses
@@ -151,6 +210,8 @@ module Rigor
             @owner = nil
             # The node whose subtree holds the local variables in scope: the file, a method, or a class body.
             @local_scope = nil
+            # Names an enclosing block's parameters or block-locals shadow within @local_scope.
+            @block_params = Set.new.freeze
           end
 
           def walk(node, nesting)
@@ -177,6 +238,8 @@ module Rigor
               record_dynamic_use(node, nesting)
             when Prism::ProgramNode, Prism::DefNode, Prism::SingletonClassNode
               return in_local_scope(node) { node.rigor_each_child { |child| walk(child, nesting) } }
+            when Prism::BlockNode, Prism::LambdaNode
+              return in_block(node) { node.rigor_each_child { |child| walk(child, nesting) } }
             end
 
             node.rigor_each_child { |child| walk(child, nesting) }
@@ -380,42 +443,33 @@ module Rigor
           # The values a dynamic-resolution subject can hold: the subject itself, or for a local variable every
           # value assigned to it in the enclosing local scope. A local with an assignment whose value cannot be
           # read off the node (`+=`, a multiple assignment, `rescue => name`) stays a computed value.
+          #
+          # A name an enclosing block binds as a parameter or block-local (`|name|`, `|x; name|`) is that
+          # block's value, not the method's: reading it through the method's assignments named a literal the
+          # block never sees, and a constant only that literal named was hidden from the report.
           def subjects(subject)
             return [subject] unless subject.is_a?(Prism::LocalVariableReadNode) && @local_scope
+            return [subject] if @block_params.include?(subject.name)
 
-            writes = []
-            collect_local_writes(@local_scope, subject.name, writes)
-            return [subject] if writes.empty? || writes.any? { |write| !VALUE_WRITES.include?(write.class) }
-
-            writes.map(&:value)
-          end
-
-          VALUE_WRITES = [Prism::LocalVariableWriteNode, Prism::LocalVariableOrWriteNode,
-                          Prism::LocalVariableAndWriteNode].freeze
-          private_constant :VALUE_WRITES
-
-          LOCAL_WRITES = (VALUE_WRITES + [Prism::LocalVariableOperatorWriteNode, Prism::LocalVariableTargetNode]).freeze
-          private_constant :LOCAL_WRITES
-
-          # Nodes that open a new local-variable scope. A block does not: it shares its method's locals.
-          SCOPE_GATES = [Prism::DefNode, Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode].freeze
-          private_constant :SCOPE_GATES
-
-          def collect_local_writes(node, name, out)
-            node.rigor_each_child do |child|
-              next if SCOPE_GATES.any? { |gate| child.is_a?(gate) }
-
-              out << child if LOCAL_WRITES.any? { |kind| child.is_a?(kind) } && child.name == name
-              collect_local_writes(child, name, out)
-            end
+            LocalValues.values(@local_scope, subject.name) || [subject]
           end
 
           def in_local_scope(scope)
-            saved = @local_scope
+            saved = [@local_scope, @block_params]
             @local_scope = scope
+            @block_params = Set.new.freeze
             yield
           ensure
-            @local_scope = saved
+            @local_scope, @block_params = saved
+          end
+
+          def in_block(block)
+            saved = @block_params
+            names = block.parameters ? LocalValues.bindings(block.parameters) : []
+            @block_params = (@block_params | names).freeze unless names.empty?
+            yield
+          ensure
+            @block_params = saved
           end
 
           # `[exact name, literal head]` for a dynamic-resolution subject. A literal names its constant exactly;

@@ -372,6 +372,33 @@ RSpec.describe Rigor::Analysis::Reachability do
         expect(report.candidates.map(&:fqn)).to eq(["Ns::Handlers::Other"])
       end
 
+      # `Foo::Bar` declares nothing itself, so resolving it peels to `Foo`; anchoring there would look for
+      # `Foo::V*` and miss the member the call can actually reach.
+      it "anchors at the written receiver when only part of it resolves" do
+        report = report_for({ "lib/a.rb" => "module Foo; end\nclass Foo::Bar::V1; end\n" \
+                                            "Foo::Bar.const_get(\"V\#{ARGV.first}\")\n" })
+        expect(report.undecidable.map(&:fqn)).to eq(["Foo::Bar::V1"])
+      end
+
+      # A block parameter shadows the method's local: the literal assigned outside the block is not what the
+      # block passes, and reading it as a reference hid a dead constant only that literal named.
+      it "reads a name a block parameter or block-local shadows as a computed value" do
+        report = report_for({ "lib/a.rb" => <<~RUBY })
+          class TopLit; end
+          class LocalLit; end
+          module Shadow
+            def self.go(list)
+              name = "TopLit"
+              list.each { |name| const_get(name) }
+              other = "LocalLit"
+              list.each { |x; other| const_get(other) }
+            end
+          end
+          Shadow.go([])
+        RUBY
+        expect(report.candidates.map(&:fqn)).to eq(%w[LocalLit TopLit])
+      end
+
       # A head that does not end in `::` is the start of a name for `constantize` too, which reaches the
       # top level only.
       it "taints every top-level name an interpolated constantize head starts" do

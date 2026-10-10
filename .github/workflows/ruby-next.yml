@@ -6,8 +6,8 @@ name: Ruby next (advisory)
 # fail anyone's pull request. A red run means "file an issue from the summary", not "revert".
 #
 # Weekly rather than per-PR, so it adds no runner time to ordinary pull requests. The `pull_request`
-# trigger is narrowed to edits of this file: a workflow change cannot otherwise be exercised before it
-# reaches master, because `workflow_dispatch` only dispatches workflows the default branch already has.
+# trigger is narrowed to edits of this file, so a change to the workflow runs on its own pull request
+# before it reaches master.
 on:
   schedule:
     # Mondays 03:17 UTC — off the hour, when scheduled runs queue least.
@@ -24,8 +24,9 @@ on:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  # Only a superseded pull_request run is cancelled: on master a manual dispatch and the weekly run
-  # share this group and must not cancel each other.
+  # Only a superseded pull_request run is cancelled in progress: on master a manual dispatch must not
+  # kill the weekly run mid-suite. (A group still holds one queued run, so a second queued dispatch
+  # replaces the first.)
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
@@ -58,6 +59,7 @@ jobs:
       # Pathname::SEPARATOR_PAT`, run 38055522321), and the next Ruby's own Bundler is the one its
       # users will have. BUNDLE_VERSION=system stops that Bundler re-executing the locked version.
       - name: Set up Ruby
+        id: setup
         uses: ruby/setup-ruby@v1
         with:
           ruby-version: ${{ inputs.ruby || 'head' }}
@@ -71,6 +73,8 @@ jobs:
       - name: Relax the Ruby upper bound in this checkout only
         id: relax
         run: |
+          mkdir -p tmp
+          set -o pipefail
           ruby -e '
             major, minor = RUBY_VERSION.split(".").map(&:to_i)
             bound = %(< #{major}.#{minor + 1})
@@ -80,7 +84,7 @@ jobs:
               File.write(path, src.sub(%("< 4.1"), %("#{bound}")))
               puts "#{path}: \"< 4.1\" -> \"#{bound}\""
             end
-          '
+          ' 2>&1 | tee tmp/relax.txt
 
       - name: Install gems
         id: install
@@ -113,6 +117,7 @@ jobs:
       - name: Write job summary
         if: always()
         env:
+          SETUP_OUTCOME: ${{ steps.setup.outcome }}
           RELAX_OUTCOME: ${{ steps.relax.outcome }}
           INSTALL_OUTCOME: ${{ steps.install.outcome }}
           TESTS_OUTCOME: ${{ steps.tests.outcome }}
@@ -123,19 +128,23 @@ jobs:
             echo
             echo "| Check | Outcome |"
             echo "| --- | --- |"
+            echo "| Set up Ruby | ${SETUP_OUTCOME:-not run} |"
             echo "| Relax Ruby bound | ${RELAX_OUTCOME:-not run} |"
             echo "| bundle install | ${INSTALL_OUTCOME:-not run} |"
             echo "| Unit suite | ${TESTS_OUTCOME:-not run} |"
             echo "| rigor check lib | ${CHECK_OUTCOME:-not run} |"
             echo
-            if [ "$INSTALL_OUTCOME" = failure ]; then
-              echo "### bundle install"
-              echo
-              echo '```'
-              tail -n 40 tmp/bundle-install.txt 2>/dev/null || echo "(no output captured)"
-              echo '```'
-              echo
-            fi
+            for step in relax:RELAX_OUTCOME bundle-install:INSTALL_OUTCOME; do
+              log=${step%%:*}; var=${step#*:}
+              if [ "${!var}" = failure ]; then
+                echo "### $log"
+                echo
+                echo '```'
+                tail -n 40 "tmp/$log.txt" 2>/dev/null || echo "(no output captured)"
+                echo '```'
+                echo
+              fi
+            done
             if [ "$TESTS_OUTCOME" = failure ]; then
               if [ -s tmp/rspec.json ]; then
                 files=$(jq -r '
@@ -174,6 +183,17 @@ jobs:
               echo '```'
             fi
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ruby-next-logs
+          path: |
+            tmp/*.txt
+            tmp/rspec.json
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Fail if either check failed
         if: steps.tests.outcome == 'failure' || steps.check.outcome == 'failure'

@@ -100,6 +100,9 @@ module Rigor
         # in `#annotate` raise `invalid byte sequence in US-ASCII`. Ruby source is UTF-8 by convention (the parser's own
         # assumption absent a magic comment).
         source = File.read(file, mode: "r:bom|utf-8")
+        # A byte invalid in UTF-8 (a comment, `__END__` data) makes the line-wise regexps below raise. `?` is one byte
+        # for one byte, so Prism's offsets and the printed columns stay put.
+        source = source.scrub("?") unless source.valid_encoding?
         parse_result = Prism.parse(source, filepath: file, version: configuration.target_ruby)
         return 1 if parse_errors?(parse_result, file)
 

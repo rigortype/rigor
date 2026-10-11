@@ -69,6 +69,9 @@ module Rigor
       def execute(file:, options:)
         configuration = Configuration.load(options.fetch(:config))
         source = File.read(file, encoding: Encoding::UTF_8)
+        # One byte for one byte, so Prism's offsets still address the text; the colouriser and line splitter raise
+        # on a byte that is invalid in UTF-8 (a comment, `__END__` data).
+        source = source.scrub("?") unless source.valid_encoding?
         parse_result = Prism.parse(source, filepath: file, version: configuration.target_ruby)
         return 1 if parse_errors?(parse_result, file)
 

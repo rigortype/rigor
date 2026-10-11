@@ -554,7 +554,7 @@ module Rigor
         line_suppressions = Hash.new { |h, k| h[k] = Set.new }
         file_suppressions = Set.new
         comments.each do |comment|
-          source = comment.location.slice
+          source = comment_text(comment)
           if (match = FILE_SUPPRESSION_PATTERN.match(source))
             absorb_suppression_tokens(match[:rules], file_suppressions)
           elsif (match = LINE_SUPPRESSION_PATTERN.match(source))
@@ -562,6 +562,15 @@ module Rigor
           end
         end
         [line_suppressions, file_suppressions]
+      end
+
+      # The comment's text for the suppression regexps. A comment is not validated by Ruby, so it may hold a
+      # byte that is invalid in the file's encoding, and a regexp raises on such a string; the marker grammar
+      # is ASCII, so scrubbing the bad bytes loses nothing. Positions come from `comment.location`, which is
+      # byte-offset based and untouched.
+      def comment_text(comment)
+        text = comment.location.slice
+        text.valid_encoding? ? text : text.scrub("?")
       end
 
       def absorb_suppression_tokens(raw, target)
@@ -581,7 +590,7 @@ module Rigor
       # that token is known, so acknowledging it never re-fires the rule.
       def suppression_marker_diagnostics(path, comments)
         comments.each_with_object([]) do |comment, diagnostics|
-          source = comment.location.slice
+          source = comment_text(comment)
           if (match = FILE_SUPPRESSION_PATTERN.match(source))
             validate_suppression_tokens(match[:rules], "rigor:disable-file", path, comment, diagnostics)
           elsif (match = LINE_SUPPRESSION_PATTERN.match(source))

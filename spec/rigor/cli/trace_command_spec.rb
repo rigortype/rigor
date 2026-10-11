@@ -37,6 +37,19 @@ RSpec.describe Rigor::CLI::TraceCommand do
     end
   end
 
+  it "replays a file holding an invalid UTF-8 byte in a comment and after __END__" do
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "demo.rb")
+      File.binwrite(path, "# caf\xFF\na = 1\n__END__\n\xFF\xFE\n")
+
+      status, out, err = run_cli("trace", path)
+
+      expect(err).to eq("")
+      expect(status).to eq(0)
+      expect(out).to include("bind     a ← 1")
+    end
+  end
+
   it "dumps the filtered event stream as JSON" do
     with_demo_file do |path|
       status, out, = run_cli("trace", "--format", "json", path)

@@ -315,34 +315,69 @@ refine it, not an inference from the rows. Each walk records:
   `self` of the enclosing body, so it is outside the class body when
   that is a module or an object the scan cannot name, while the body
   of `class << self` itself, which mixes into the singleton class, is
-  not), an `:include`, `:prepend`, `:append_features` or
-  `:prepend_features` Symbol, or an eval, `send` or method-naming
-  call with a String holding one of those words. It is also true
-  when the source `extend`s, outside a class body, on `self` or a
-  constant, a module no gem file declares (or an argument that is no
-  constant): the extended module's methods may call `refine` for the
-  extender (Ruby 4.0.5, `module Dslg; extend Refiner;
-  refines_string :foo; end` refines String for `Dslg`), and a helper
-  a gem file declares is read by the census instead. `extend self`
-  and an extend in a class body are not. A gem is flagged as a whole.
+  not, and a feature call in a class body is `Class`'s undefined
+  method, so it is not either), an `:include`, `:prepend`,
+  `:append_features` or `:prepend_features` Symbol, or an eval,
+  `send` or method-naming call with a String holding one of those
+  words. It is also true for an argument of `extend` (or of an
+  `include` in the body of `class << self` of a module) that is no
+  constant, which cannot be accounted for. A gem is flagged as a
+  whole.
+- `Outcome#bound` — the last segment of every constant the gem
+  writes (an assignment, a path write, an operator write, a multiple
+  assignment, a `const_set` with a literal name) without declaring a
+  class or module by it. The rows stay as the project walk records
+  them; the reader decides, per segment of a key, whether it names a
+  value (see below).
+- `Outcome#declared` — the classes and modules the gem declares.
+- `Outcome#foreign` and `#foreign_targets` — the constants a module
+  context hands the module being defined to, and the refine targets,
+  that no file of the gem declares, each as the candidate names of one
+  spelling. A module context is a module body, a method or `class <<
+  self` of a module, a block of an eval-family call or `Module.new` or
+  of a module context, and an explicit constant receiver anywhere. A
+  constant is handed the module when it is an argument of `extend`
+  or of an `include` / `prepend` in the body of `class << self` of a
+  module (the same `extend` by another spelling), the root of a
+  receiver given `self` or a block (`Plugin.install(self)`,
+  `Registry.configure { … }`), or the receiver of a `send`, an eval,
+  `extend_object` or `define_method` (`Refiner.send(:extend_object,
+  self)`): its methods may call `refine` for the module, or include
+  into it (Ruby 4.0.5, `module Dslg; extend Refiner; refines_string
+  :foo; end` refines String for `Dslg`). One a gem file declares was
+  read, and the census has charged the `refine` in its methods.
 - `Outcome#fully_read?` — `!truncated? && unread.empty? &&
-  !mixes_modules`.
+  !mixes_modules`; the readers add the accounting of `foreign` below.
 
-A refine target a gem's own constant write binds (`K = String;
-refine(K) { … }`) names whatever value the write holds. The project
-reading learns that from the project's constant census, which holds no
-gem's writes, so `Walker.walk` reads every gem file's constant writes
-(an assignment, a path write, an operator write, a multiple
-assignment, a `const_set` with a literal name) and moves a row whose
-key's last segment a gem file writes, and that no gem file declares as
-a class or module, to the wildcard class: the class-unknown row, as
-the project reading gives the same constant.
+A refine key is decided at read time, once, for the project and the
+walked gems alike, and by every segment of it
+(`InEffectRefinements.class_wildcard_key?`): no class declaration or
+RBS knows the key as a whole and some segment is a constant a write
+binds, from the project's constant census or from
+`Index#bound_constant?` (the union of every walked gem's `bound`).
+`K = String; refine(K)`, `Shared::Target = String` in one gem beside
+`refine Shared::Target` in the next, and `Enc = ::Encoding;
+refine(Enc::Converter)` all read as the class-unknown row; a core
+class such as `String` keeps its key whatever a file writes under its
+name. Each segment is a `constant:` dependency of the consumer.
 
-`Builder` keeps one `Index::Reading(gem_name, modules, fully_read)`
-per walked entry beside `#refinements`. `Index#fully_read_module?(name)`
+`Builder` keeps one `Index::Reading` per walked entry beside
+`#refinements` (the module names, `fully_read`, `bound`, `declared`,
+`foreign`, `foreign_targets`). `Index#fully_read_module?(name, loader)`
 is true when some walked gem names `name` and every walked gem that
-names it was read in full, so a second gem that reopens the module
-and was not read in full, or mixes into it, keeps it opaque.
+names it is *live*: its walk was clean (`fully_read?`) and every
+`foreign` constant is accounted for, by the run's RBS loader (a class
+or module Ruby core or stdlib declares; an object constant such as
+`ENV`), or by a live gem that declares it. The live set is the
+largest set of gems in which every member's constants are accounted
+for, so two clean gems that hand each other their modules stay in,
+and a gem whose foreign constant is declared by a gem that mixes
+into its argument is out. A `foreign_target` is also accounted for
+when the RBS knows the class, or when some segment of it is a bound
+constant. A second gem that reopens the module and is not live, or
+mixes into it, keeps it opaque. The walker has no loader (the
+dependency index is built before the environment), so the loader
+arrives with the question, and the verdict is memoised per loader.
 `InEffectRefinements.opaque_module?` asks it as the third source of a
 known module, after the targets-wildcard rows and the project.
 
@@ -356,12 +391,20 @@ Reported limits, not removed:
   end; end` in `fooext` beside `foo` with the `refine`).
 - A module reopened in a file outside the walked roots that no literal
   `require_relative` reaches (a `load`, a `require` through the load
-  path, a path built at run time), in a gem nobody opted in, or in a
-  part of a gem whose walk stopped before it, is unseen, as is a
-  module reopened in a project file outside the analysed paths.
+  path, a path built at run time, an `autoload` with a computed
+  path: `autoload :Ext, File.expand_path("../shim/ext", __dir__)`), in
+  a gem nobody opted in, or in a part of a gem whose walk stopped
+  before it, is unseen, as is a module reopened in a project file
+  outside the analysed paths.
 - A mixin made through an `extend` hook defined in another gem; a
   `class << self` method that includes in a project file (the
   project walk's own gap).
+- A constant that is not a module (`INDEX = { … }`, an alias such as
+  `Parser = RFC3986_Parser`) used in a module context with a block
+  (`INDEX[:a].select { … }`) is a foreign constant: the walker cannot
+  tell a Hash from a module. `extend ActiveSupport::Concern` and any
+  other module Ruby core and stdlib do not declare leave a gem not read
+  in full unless a walked gem read in full declares it.
 
 ## Dispatcher tier (slice 2b-ii)
 

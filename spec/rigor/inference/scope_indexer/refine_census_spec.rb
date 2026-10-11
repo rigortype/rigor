@@ -143,6 +143,54 @@ RSpec.describe Rigor::Inference::ScopeIndexer, ".refine_census" do
       "K ||= String\nmodule M\n  refine(K) { def center(a, b, c) = 1 }\nend\n",
       %i[class_unknown], { any => { center: ["M"] } }
     ],
+    # #1749: the project-wide constant census files a constant written in a `class << self` body under no name a
+    # `refine` argument spells, but a `def` there reads it lexically. Ruby 4.0.5 prints `1` for `M.setup; using M;
+    # "a".yy`.
+    "a target a class << self body binds" => [
+      <<~RUBY, %i[class_unknown], { any => { center: ["M"] } }
+        module M
+          class << self
+            K = String
+            def setup = refine(K) { def center(a, b, c) = 1 }
+          end
+        end
+      RUBY
+    ],
+    "a target a class << self body binds by a multiple assignment and an operator write" => [
+      <<~RUBY, %i[class_unknown] * 4, { any => { center: ["M"], ljust: ["M"], rjust: ["M"], chop: ["M"] } }
+        module M
+          class << self
+            J, K = Symbol, String
+            L += 1
+            P &&= 1
+            def setup
+              refine(J) { def center(a, b, c) = 1 }
+              refine(K) { def ljust(a, b, c) = 1 }
+              refine(L) { def rjust(a, b, c) = 1 }
+              refine(P) { def chop(a, b, c) = 1 }
+            end
+          end
+        end
+      RUBY
+    ],
+    "a target a class << self body binds by a path write" => [
+      <<~RUBY, %i[class_unknown] * 4, { any => { center: ["M"], ljust: ["M"], rjust: ["M"], chop: ["M"] } }
+        module M
+          class << self
+            self::K = String
+            self::L += 1
+            self::P &&= 1
+            self::J, Q = Symbol, Float
+            def setup
+              refine(K) { def center(a, b, c) = 1 }
+              refine(L) { def ljust(a, b, c) = 1 }
+              refine(P) { def rjust(a, b, c) = 1 }
+              refine(J) { def chop(a, b, c) = 1 }
+            end
+          end
+        end
+      RUBY
+    ],
     "a target the file binds by a literal const_set" => [
       "Object.const_set(:K, String)\nmodule M\n  refine(K) { def center(a, b, c) = 1 }\nend\n",
       %i[class_unknown], { any => { center: ["M"] } }

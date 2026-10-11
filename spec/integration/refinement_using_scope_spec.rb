@@ -1759,6 +1759,25 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
       end
     end
 
+    # Ruby 4.0.5 prints `1` for `"a".yy` after `M.setup`, whose target `Foo` a `class << self` body binds. That write is
+    # one no project-wide table sees, so the row is the wildcard class's: `yy` declines, `zz` still reports.
+    it "reads a target a class << self body binds as a class Rigor cannot name, so only the names it defines decline" do
+      write("lib/m.rb", <<~RUBY)
+        module M
+          class << self
+            Foo = String
+            def setup
+              refine(Foo) { def yy = 1 }
+            end
+          end
+        end
+      RUBY
+      write("lib/use.rb", "M.setup\nusing M\n\"a\".yy\n\"a\".zz\n")
+      write("lib/plain.rb", "\"a\".yy\n")
+
+      expect(undefined_rows).to eq([["plain.rb", 1, "yy"], ["use.rb", 4, "zz"]])
+    end
+
     it "answers the same through a warm cache as cold, and with only the consumers re-analysed" do
       shapes.each do |shape, source|
         write_project(source)

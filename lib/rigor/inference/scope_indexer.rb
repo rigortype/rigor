@@ -3430,20 +3430,38 @@ module Rigor
       end
 
       # A6 — the last segments of the constants `root` binds by `||=` (`K ||= String`, `A::K ||= …`) or by a
-      # `const_set` whose name is a literal (`Object.const_set(:K, String)`). Scanned only for a file with a
-      # literal-target `refine`.
+      # `const_set` whose name is a literal (`Object.const_set(:K, String)`), and (issue #1749) by any write in a
+      # `class << …` body: the project-wide constant census files a write there under no name a `refine` argument
+      # spells, but a `def` in that body reads it lexically (`class << self; K = String; def setup = refine(K) {…}`).
+      # Scanned only for a file with a literal-target `refine`.
       def loose_constant_segments(root)
         segments = Set.new
         Source::NodeWalker.each(root) do |node|
           case node
           when Prism::ConstantOrWriteNode then segments << node.name.to_s
           when Prism::ConstantPathOrWriteNode then segments << node.target.name.to_s
+          when Prism::SingletonClassNode then singleton_constant_segments(node.body, segments)
           when Prism::CallNode
             name = node.name == :const_set && node.arguments&.arguments&.first
             segments << name.unescaped if name.is_a?(Prism::SymbolNode) || name.is_a?(Prism::StringNode)
           end
         end
         segments
+      end
+
+      # The last segment of every constant a write, an operator write or a multiple assignment target in `body` binds.
+      def singleton_constant_segments(body, segments)
+        return if body.nil?
+
+        Source::NodeWalker.each(body) do |node|
+          case node
+          when Prism::ConstantWriteNode, Prism::ConstantTargetNode, Prism::ConstantOperatorWriteNode,
+               Prism::ConstantAndWriteNode, Prism::ConstantPathTargetNode
+            segments << node.name.to_s
+          when Prism::ConstantPathWriteNode, Prism::ConstantPathOperatorWriteNode, Prism::ConstantPathAndWriteNode
+            segments << node.target.name.to_s
+          end
+        end
       end
 
       # ADR-121 WD7 — the census gate's view of one parsed file (`root`): `[refinement table, [[start offset,

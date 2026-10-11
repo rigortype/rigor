@@ -15,8 +15,9 @@ module Rigor
       #
       # Every place the walk cannot read makes the whole walk unreadable (nil), where each reader declines: a chain
       # cut at its limit or holding a mixin the tables cannot name, a superclass the tables do not know (`class K <
-      # <expr>`, `K = Class.new(Parent)`, an external superclass RBS does not declare), and a class some constant write
-      # may have made (`Point = Struct.new(:x)`, whose superclass the tables do not record).
+      # <expr>`, `K = Class.new(Parent)`, an external superclass RBS does not declare), a class some constant write
+      # may have made (`Point = Struct.new(:x)`, whose superclass the tables do not record). A singleton level whose
+      # class records an `extend` the chain did not place there is read as `mixed` ({.skipped_extend?}).
       module ClassObject
         EMPTY = [].freeze
         # The classes on every class object's lookup: the instance sides that hold `Class#new`, `Module#name` and
@@ -85,14 +86,37 @@ module Rigor
         def mixin_entries(scope, name, side)
           chain = Scope::ResolutionChain.for(scope, name, side, :methods)
           chain.record(scope) if Analysis::DependencyRecorder.active?
-          return nil if chain.truncated? || chain.wildcard_mixin?
+          return nil if unreadable?(chain)
           return EMPTY if chain.level_count.zero?
 
-          chain.level_entries(0).flat_map do |entry|
+          names = level_names(chain, 0)
+          return nil if side == :singleton && skipped_extend?(scope, name, names)
+
+          names.reject { |entry| entry == name }
+        end
+
+        # The names on level `index` of `chain` (an unnamed entry's candidate names included), the level's own
+        # singleton entry left out.
+        def level_names(chain, index)
+          chain.level_entries(index).flat_map do |entry|
             next entry.candidates if entry.external?
 
-            entry.side == :instance && entry.name != name ? [entry.name] : EMPTY
+            entry.side == :instance ? [entry.name] : EMPTY
           end.uniq
+        end
+
+        # Does `name` record an `extend` that the chain did not place on `name`'s own singleton level (`entries`, its
+        # names or candidate lists)? The chain skips an `extend` of a module already on the lookup, as Ruby does, but
+        # the tables record `class << self; prepend M` (and `singleton_class.prepend(M)`) as an `extend` too, and
+        # Ruby's `prepend` puts the module ahead of the class's own singleton methods again (`class Base3 < Top;
+        # class << self; prepend Ext` with `Top` extending `Ext`). Such a level cannot place that module, so it reads as
+        # `mixed`.
+        def skipped_extend?(scope, name, entries)
+          raws = scope.discovered_extends[name]
+          return false if raws.nil? || raws.empty?
+
+          placed = entries.flat_map { |entry| entry.is_a?(Array) ? entry : [entry] }
+          raws.any? { |raw| scope.ancestor_name_candidates(name, raw).none? { |candidate| placed.include?(candidate) } }
         end
 
         # The project's singleton-side `Scope::ResolutionChain` (`C`'s singleton, its `extend`s' instance chains,
@@ -101,7 +125,7 @@ module Rigor
         def project_levels(scope, class_name)
           chain = Scope::ResolutionChain.for(scope, class_name, :singleton, :methods)
           chain.record(scope) if Analysis::DependencyRecorder.active?
-          return nil if chain.truncated? || chain.wildcard_mixin? || chain.level_count.zero?
+          return nil if unreadable?(chain) || chain.level_count.zero?
 
           out = []
           chain.level_count.times do |index|
@@ -110,11 +134,14 @@ module Rigor
 
             own = SingletonClass.new(level_class)
             every = chain.level_entries(index).map { |entry| level_entry(scope, entry, own) }
-            out << [own, every.grep_v(Array), false, every]
+            out << [own, every.grep_v(Array), skipped_extend?(scope, level_class, every), every]
           end
           tail = implicit_tail(scope, chain.level_classes[chain.level_count - 1])
           tail && out.concat(tail)
         end
+
+        # A chain cut at its limit, or holding a mixin the tables cannot name.
+        def unreadable?(chain) = chain.truncated? || chain.wildcard_mixin?
 
         def level_entry(scope, entry, own)
           return own if !entry.external? && entry.side == :singleton && entry.name == own.of

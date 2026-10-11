@@ -246,12 +246,15 @@ module Rigor
         #
         # A subclass level the walk cannot read (a truncated chain, or a mixin the tables cannot name) hides only
         # modules, so it declines only when some in-effect row names a module. `kind` `:singleton` reads each
-        # subclass's singleton level, whose own singleton class no refinement table key names.
+        # subclass's singleton level, whose own singleton class no refinement table key names, and which cannot place
+        # an `extend` the chain skipped there (`ClassObject.skipped_extend?`: it may be a `prepend` the tables record as
+        # one).
         def subclass_refined?(scope, class_name, raw, kind = :instance)
           each_subclass(scope, class_name) do |subclass|
             chain = Scope::ResolutionChain.for(scope, subclass, kind, :methods)
             chain.record(scope) if Analysis::DependencyRecorder.active?
-            if chain.truncated? || chain.wildcard_mixin? || chain.level_count.zero?
+            if chain.truncated? || chain.wildcard_mixin? || chain.level_count.zero? ||
+               (kind == :singleton && ClassObject.skipped_extend?(scope, subclass, ClassObject.level_names(chain, 0)))
               return true if raw.each_key.any? { |refined| module_name?(scope, refined) }
 
               next

@@ -1749,6 +1749,61 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
         end
       RUBY
     end
+    let(:extended) do
+      <<~RUBY
+        module Ext
+          def z(a) = :ext
+        end
+        class C
+          extend Ext
+        end
+        class Base
+          def self.y(a) = a
+        end
+        class Sub < Base
+          extend Ext
+        end
+        class Top
+          extend Ext
+        end
+        class Base2 < Top
+          def self.y(a) = a
+        end
+        class Sub2 < Base2
+          class << self
+            prepend Ext
+          end
+        end
+        module RE
+          refine(Ext) { def z(a, b, c) = :refined; def y(a, b, c) = :refined }
+        end
+      RUBY
+    end
+    let(:prepended) do
+      <<~RUBY
+        module P
+          def z(a) = :p_own
+        end
+        class D
+          class << self
+            prepend P
+          end
+          def self.z(a) = :d_own
+        end
+        class Top
+          extend P
+        end
+        class Base3 < Top
+          class << self
+            prepend P
+          end
+          def self.z(a) = :base3_own
+        end
+        module RP
+          refine(P) { def z(a, b, c) = :p_refined }
+        end
+      RUBY
+    end
 
     # `[file basename, line, rule]` for every call-check diagnostic in `lib/`, sorted.
     def call_rows(cache_store: nil)
@@ -1834,52 +1889,26 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
     end
 
     # A refinement of a module `C` extends answers `C.z` (Ruby 4.0.5: `:refined`). A value typed as `Base`'s class
-    # object may be `Sub`, which extends `Ext` and answers `:refined`, so `Base.y` declines too.
+    # object may be `Sub`, which extends `Ext` and answers `:refined`, so `Base.y` declines too; so does `Base2.y`,
+    # whose subclass `Sub2` prepends `Ext` to its singleton class again ahead of `Base2.y` (Ruby: `:refined` for
+    # `Sub2.y(1, 2, 3)`), though `Ext` already sits further up `Base2`'s lookup.
     it "declines where a module the class or a subclass extends is refined" do
-      write("lib/ext.rb", <<~RUBY)
-        module Ext
-          def z(a) = :ext
-        end
-        class C
-          extend Ext
-        end
-        class Base
-          def self.y(a) = a
-        end
-        class Sub < Base
-          extend Ext
-        end
-        module RE
-          refine(Ext) { def z(a, b, c) = :refined; def y(a, b, c) = :refined }
-        end
-      RUBY
-      write("lib/use.rb", "using RE\nC.z(1, 2, 3)\nBase.y(1, 2, 3)\n")
-      write("lib/control.rb", "C.z(1, 2, 3)\nBase.y(1, 2, 3)\n")
+      write("lib/ext.rb", extended)
+      write("lib/use.rb", "using RE\nC.z(1, 2, 3)\nBase.y(1, 2, 3)\nBase2.y(1, 2, 3)\n")
+      write("lib/control.rb", "C.z(1, 2, 3)\nBase.y(1, 2, 3)\nBase2.y(1, 2, 3)\n")
 
-      expect(call_rows).to eq(controls([1, 2]))
+      expect(call_rows).to eq(controls([1, 2, 3]))
     end
 
     # The tables record `class << self; prepend P` as an `extend`, so a refined module on `D`'s singleton level may sit
-    # ahead of `D`'s own `def self.z`: Ruby 4.0.5 answers `:p_refined`.
+    # ahead of `D`'s own `def self.z`: Ruby 4.0.5 answers `:p_refined`. `Base3` prepends `P`, which `Top` already
+    # extends, so the chain skips it as an `extend` would be; Ruby puts it ahead of `Base3.z` again (`:p_refined`).
     it "declines where a refined module may be prepended to the singleton class" do
-      write("lib/d.rb", <<~RUBY)
-        module P
-          def z(a) = :p_own
-        end
-        class D
-          class << self
-            prepend P
-          end
-          def self.z(a) = :d_own
-        end
-        module RP
-          refine(P) { def z(a, b, c) = :p_refined }
-        end
-      RUBY
-      write("lib/use.rb", "using RP\nD.z(1, 2, 3)\n")
-      write("lib/control.rb", "D.z(1, 2, 3)\n")
+      write("lib/d.rb", prepended)
+      write("lib/use.rb", "using RP\nD.z(1, 2, 3)\nBase3.z(1, 2, 3)\n")
+      write("lib/control.rb", "D.z(1, 2, 3)\nBase3.z(1, 2, 3)\n")
 
-      expect(call_rows).to eq(controls([1]))
+      expect(call_rows).to eq(controls([1, 2]))
     end
 
     # The declines the instance walk makes, on a class object. Ruby 4.0.5 answers `:gem` (an opaque module from outside

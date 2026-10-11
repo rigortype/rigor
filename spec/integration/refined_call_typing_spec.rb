@@ -274,23 +274,27 @@ RSpec.describe "Typing calls through Ruby refinements (#1664)", type: :runner do
     RUBY
   end
 
-  # Ruby 4.0.5 prints `:refined`, `:own`, `:ext` and `:p_refined`. `D`'s own `def self.z` answers ahead of the module
-  # it extends, but the tables record `class << self; prepend M` as an `extend` (and `E` prepends `P`, whose
-  # refinement answers ahead of `E`'s own method), so with a refined module beside it on the singleton level the arm
-  # cannot tell which comes first and answers `Dynamic[top]`.
+  # Ruby 4.0.5 prints `:refined`, `:own`, `:ext`, `:p_refined` and `:p_refined`. `D`'s own `def self.z` answers ahead
+  # of the module it extends, but the tables record `class << self; prepend M` as an `extend` (and `E` prepends `P`,
+  # whose refinement answers ahead of `E`'s own method), so with a refined module beside it on the singleton level the
+  # arm cannot tell which comes first and answers `Dynamic[top]`. `G` prepends `P`, which `Top` already extends: the
+  # chain skips it as an `extend`, so its lookup cannot be read either.
   it "types a class object's call from a refinement of a module it extends" do
-    expect(dumps(<<~RUBY)).to eq([":refined", "Dynamic[top]", ":ext", "Dynamic[top]"])
+    expect(dumps(<<~RUBY)).to eq([":refined", "Dynamic[top]", ":ext", "Dynamic[top]", "Dynamic[top]"])
       module Ext; def z = :ext; def w = :ext; end
       module P; def z = :p_own; end
       class C; extend Ext; end
       class D; extend Ext; def self.z = :own; end
       class E; class << self; prepend P; end; def self.z = :e_own; end
+      class Top; extend P; end
+      class G < Top; class << self; prepend P; end; def self.z = :g_own; end
       module RE; refine(Ext) { def z = :refined }; refine(P) { def z = :p_refined }; end
       using RE
       Rigor.dump_type(C.z)
       Rigor.dump_type(D.z)
       Rigor.dump_type(C.w)
       Rigor.dump_type(E.z)
+      Rigor.dump_type(G.z)
     RUBY
   end
 
@@ -307,12 +311,13 @@ RSpec.describe "Typing calls through Ruby refinements (#1664)", type: :runner do
 
   # A constant write may have made `Point` (here `Struct.new`, whose superclass no table records and whose singleton
   # class defines `members`), so its lookup cannot be read and a refinement in effect for the name answers
-  # `Dynamic[top]`; a name nothing refines keeps its type. A refinement of a singleton class records class-unknown rows,
-  # which answer `Dynamic[top]` for their names. Ruby 4.0.5 prints `:o`, `[:x]`, `"Point"` and `:s`.
+  # `Dynamic[top]`, never the replaced `Module#name`'s `String`; a name nothing refines keeps its type. A refinement of
+  # a singleton class records class-unknown rows, which answer `Dynamic[top]` for their names. Ruby 4.0.5 prints `:o`,
+  # `[:x]`, `42`, `"Point"` (`Point.to_s`) and `:s`.
   it "answers Dynamic[top] for a class object whose lookup cannot be read, and for a refined singleton class" do
-    expect(dumps(<<~RUBY)).to eq(["Dynamic[top]", "Dynamic[top]", "String", "Dynamic[top]"])
+    expect(dumps(<<~RUBY)).to eq(["Dynamic[top]", "Dynamic[top]", "Dynamic[top]", "String", "Dynamic[top]"])
       module RO; refine(Object) { def oo = :o }; end
-      module RM; refine(Module) { def members = :m }; end
+      module RM; refine(Module) { def members = :m; def name = 42 }; end
       module RSC; refine(Integer.singleton_class) { def sqrt(a) = :s }; end
       Point = Struct.new(:x)
       using RO
@@ -321,6 +326,7 @@ RSpec.describe "Typing calls through Ruby refinements (#1664)", type: :runner do
       Rigor.dump_type(Point.oo)
       Rigor.dump_type(Point.members)
       Rigor.dump_type(Point.name)
+      Rigor.dump_type(Point.to_s)
       Rigor.dump_type(Integer.sqrt(16))
     RUBY
   end

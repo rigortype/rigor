@@ -3841,6 +3841,9 @@ module Rigor
           # still decline. The lexical cref below is unnameable in every case.
           singleton_prefix = singleton_body_prefix(node, in_singleton_class, owner_prefix,
                                                    qualified_prefix)
+          unless node.expression.is_a?(Prism::SelfNode)
+            record_singleton_body_prepends(node, qualified_prefix, methods_acc.at(node))
+          end
           walk_methods_and_def_nodes(node.expression, qualified_prefix, in_singleton_class,
                                      methods_acc, def_nodes_acc, source_path, def_owner_prefix,
                                      singleton_cref: singleton_cref,
@@ -3927,7 +3930,7 @@ module Rigor
           end
           anonymous = record_call_node_methods(node, owner_prefix, in_singleton_class, methods_acc.at(node),
                                                source_path)
-          record_singleton_prepend(node, qualified_prefix, in_singleton_class, methods_acc.at(node))
+          record_singleton_prepend(node, qualified_prefix, methods_acc.at(node))
           # Issue #1120 — a refine body's defs go to the refinement table and nowhere else.
           if (target = methods_acc.refine_target_of(node))
             return record_literal_target_refine(node, target, qualified_prefix, owner_prefix, methods_acc)
@@ -4424,7 +4427,7 @@ module Rigor
           elsif SURFACE_EVAL_CALLS.include?(node.name) || SURFACE_NAMING_CALLS.include?(node.name)
             record_body_rewrite(node, qualified_prefix, tables)
           else
-            record_singleton_prepend(node, qualified_prefix, false, tables)
+            record_singleton_prepend(node, qualified_prefix, tables, self_ok: true)
           end
         end
       end
@@ -4433,21 +4436,33 @@ module Rigor
       # `obj`'s class even when the class already includes it (`prepend` re-inserts it; `extend` would not), so
       # `M`'s refinement answers first for that object. `M` takes {Scope::DiscoveryIndex::ENVELOPE_OBJECT_EXTENDED_MARK},
       # the mark an `extend` in a method body already leaves: an object of any class may carry its instance methods
-      # ahead of its class's own. `in_singleton_class` says the call sits in a `class << …` body.
-      def record_singleton_prepend(node, qualified_prefix, in_singleton_class, tables)
+      # ahead of its class's own. In a class body or at the top level a `singleton_class` of `self` (and a
+      # `class << self` body, which the caller leaves out) is the class object's or `main`'s, not an instance's, so
+      # it counts only in a method body (`self_ok`). `singleton_body` says the call sits in a `class << obj` body.
+      def record_singleton_prepend(node, qualified_prefix, tables, singleton_body: false, self_ok: false)
         return unless node.name == :prepend
 
         receiver = node.receiver
-        singleton = in_singleton_class && (receiver.nil? || receiver.is_a?(Prism::SelfNode))
-        singleton ||= receiver.is_a?(Prism::CallNode) && receiver.name == :singleton_class && receiver.arguments.nil?
+        singleton = singleton_body && (receiver.nil? || receiver.is_a?(Prism::SelfNode))
+        singleton ||= singleton_class_call?(receiver, self_ok)
         record_object_extension(node, qualified_prefix, tables) if singleton
+      end
+
+      def singleton_class_call?(receiver, self_ok)
+        return false unless receiver.is_a?(Prism::CallNode) && receiver.name == :singleton_class
+        return false unless receiver.arguments.nil?
+
+        object = receiver.receiver
+        self_ok || !(object.nil? || object.is_a?(Prism::SelfNode))
       end
 
       def record_singleton_body_prepends(node, qualified_prefix, tables)
         return if node.body.nil?
 
         Source::NodeWalker.each(node.body) do |inner|
-          record_singleton_prepend(inner, qualified_prefix, true, tables) if inner.is_a?(Prism::CallNode)
+          next unless inner.is_a?(Prism::CallNode)
+
+          record_singleton_prepend(inner, qualified_prefix, tables, singleton_body: true, self_ok: true)
         end
       end
 

@@ -290,8 +290,11 @@ module Rigor
           bucket[raw] = @scope.ancestor_name_candidates(owner, raw).find { |name| project_class?(name) }
         end
 
+        # A bucket of class marks alone (issue #1820: `x.singleton_class.prepend(Comparable)`) does not make a name
+        # the project's.
         def project_class?(name)
-          @scope.known_user_class?(name) || @scope.discovered_parameter_envelopes.key?(name)
+          @scope.known_user_class?(name) ||
+            Scope::DiscoveryIndex.declares_surface?(@scope.discovered_parameter_envelopes[name])
         end
 
         # A module's methods reach the receiver as instance methods whichever side the receiver is on.

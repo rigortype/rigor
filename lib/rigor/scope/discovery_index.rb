@@ -236,6 +236,14 @@ module Rigor
       ENVELOPE_OBJECT_EXTENDED_MARK = :"<object-extended>"
       ENVELOPE_REFINED_MARK = :"<refined>"
 
+      # Issue #1820 — whether an envelope bucket says the project declares the name: a per-method entry, or the
+      # {ENVELOPE_MODULE_MARK} a `module` declaration records. A bucket that holds only the other class marks (a
+      # refinement, a dynamic rewrite, an object extend or singleton prepend, a meta-new superclass) is evidence about
+      # a name the project may only mention, such as `Comparable` in `x.singleton_class.prepend(Comparable)`.
+      def self.declares_surface?(bucket)
+        !bucket.nil? && bucket.any? { |key, _| !key.is_a?(Symbol) || key == ENVELOPE_MODULE_MARK }
+      end
+
       # Whether an envelope bucket says the project rewrites the class's method table beyond its literal names: a
       # dynamic rewrite, or a refinement.
       def self.rewritten_surface?(bucket)

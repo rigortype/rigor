@@ -821,6 +821,34 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
         expect(call_rows).to eq(controls(1..2))
       end
 
+      # No refinement here. Ruby 4.0.5 answers `true` for `Bar.new.between?(1, 2)` (Comparable's, ahead of
+      # `Foo#between?`) and raises for `Baz` and `Repo`. A singleton prepend, a `class << self` prepend and an
+      # `extend` naming `Comparable` do not make it a project module with no `between?`, and a `class << self`
+      # prepend of `Finders` in a class body is the class object's, not every object's, so `Repo#find` stays checked;
+      # an empty project module is still the project's.
+      it "keeps the arity rule's mixin reading where a mark names a module the project does not declare" do
+        write("lib/marks.rb", <<~RUBY)
+          x = Object.new
+          x.singleton_class.prepend(Comparable)
+          class Model; class << self; prepend Comparable; end; end
+          class Deco; def self.wrap(o) = o.extend(Comparable); end
+          module Finders; def find(*args) = super; end
+          class Store; def self.find(id) = id; class << self; prepend Finders; end; end
+        RUBY
+        write("lib/use.rb", <<~RUBY)
+          class Foo; def between?(a) = a; end
+          class Bar < Foo; include Comparable; def <=>(other) = 0; end
+          module Helper; end
+          class Baz < Foo; include Helper; end
+          class Repo; def find(id) = id; end
+          Bar.new.between?(1, 2)
+          Baz.new.between?(1, 2)
+          Repo.new.find(1, 2)
+        RUBY
+
+        expect(call_rows).to eq([["use.rb", 7, "call.wrong-arity"], ["use.rb", 8, "call.wrong-arity"]])
+      end
+
       # Ruby 4.0.5 answers `:base`: `Random#seed` runs on `Random::Base`, which RBS declares beside `Random` rather than
       # above it. CRuby registers `Random#seed` only inside `random.c`'s `#if 0` block for RDoc, which the catalogue
       # skips, so nothing proves `Random` defines it.

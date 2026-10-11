@@ -137,10 +137,9 @@ module Rigor
           ExternalAncestorResolution.declared_on_class?(definition, name)
         end
 
-        # A singleton `def` is the class's own unless it is the very node a module the class extends holds, which
-        # the extends fold copied (`SingletonHookDecline.copied_from?`). A singleton name without a node of its own
-        # (`attr_reader` in `class << self`, `define_singleton_method`) counts when the class's envelope table
-        # records it, which the fold never writes.
+        # A singleton `def` is the class's own unless it is the def a module the class extends holds, which the extends
+        # fold copied ({.fold_copy?}). A singleton name without a node of its own (`attr_reader` in `class << self`,
+        # `define_singleton_method`) counts when the class's envelope table records it, which the fold never writes.
         def own_singleton_definer?(scope, name, method_name)
           node = scope.singleton_def_for(name, method_name)
           return true if node && !fold_copy?(scope, name, method_name)
@@ -149,9 +148,25 @@ module Rigor
           node.nil? || scope.parameter_envelopes_of(name).key?([:singleton, method_name.to_sym])
         end
 
+        # Is `name`'s singleton `def` of the name the receiverless instance `def` of the module its `Module.nesting`
+        # starts with, which the extends fold copied? The node is that module's own
+        # (`SingletonHookDecline.copied_from?`), or, where the two tables came from two parses of the file, one with
+        # its location and text, and no site of a singleton `def` of the name is recorded for `name` (the fold copies
+        # nodes, not sites).
         def fold_copy?(scope, name, method_name)
           head = SingletonHookDecline.def_head(scope, name, method_name)
-          !head.nil? && head != name && SingletonHookDecline.copied_from?(scope, head, method_name, name)
+          return false if head.nil? || head == name
+          return true if SingletonHookDecline.copied_from?(scope, head, method_name, name)
+
+          node = scope.singleton_def_for(name, method_name)
+          source = scope.user_def_for(head, method_name)
+          !node.nil? && node.receiver.nil? && !source.nil? && same_def?(node, source) &&
+            scope.discovery.discovered_singleton_def_sources.dig(name, method_name.to_sym).nil?
+        end
+
+        def same_def?(node, other)
+          node.location.start_offset == other.location.start_offset &&
+            node.location.end_offset == other.location.end_offset && node.slice == other.slice
         end
 
         # The typed arm's answer at a singleton level: {Winner}, {UNKNOWN}, nil (the class object's own lookup

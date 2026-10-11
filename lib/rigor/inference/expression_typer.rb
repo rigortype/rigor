@@ -1952,19 +1952,20 @@ module Rigor
       # replaces (a refined `String#upcase` must not fold, a refined `map` must not fold per element, a top-level
       # `def` must not bind ahead of a refinement of `Object`, a plugin models the class's own method). An unreadable
       # body, or a list that may hold any refinement, answers `Dynamic[top]`, never the replaced method's signature.
-      # A union receiver is decided per member; a `Dynamic` receiver, a class object and a call no refinement wins
-      # fall through. A call site no refinement is in effect at answers nil at once and records nothing: its answer
-      # cannot change without an edit to its own file.
+      # A union receiver is decided per member; a `Dynamic` receiver and a call no refinement wins fall through. A
+      # class object walks its own lookup (issue #1752): `refine(Object) { def oo = :o }` types `Integer.oo` as `:o`,
+      # with `Singleton[Integer]` as the body's `self`. A call site no refinement is in effect at answers nil at once
+      # and records nothing: its answer cannot change without an edit to its own file.
       #
       # ADR-121 WD7 (A2) — inside the span of an activation that puts an opaque module in effect
-      # ({InEffectRefinements.opaque_module?}), any method of any instance may be replaced, so every instance-receiver
-      # call answers `Dynamic[top]`; a class object falls through, as it does below.
+      # ({InEffectRefinements.opaque_module?}), any method of any object may be replaced, so every call on an instance
+      # or a class object answers `Dynamic[top]`.
       def try_refined_dispatch(node, receiver, arg_types, block_type)
         list = scope.in_effect_refinements(node)
         return nil if list.empty?
 
         InEffectRefinements.record_refinement_names(node.name)
-        return dynamic_top if refined_instance_receiver?(receiver) && opaque_refinement_span?(node, list)
+        return dynamic_top if refined_receiver?(receiver) && opaque_refinement_span?(node, list)
         return nil if scope.discovered_refinements.empty?
 
         refined_indirect_result(node, receiver, list) ||
@@ -2010,6 +2011,9 @@ module Rigor
       def refined_name_for?(receiver, name, list)
         members = receiver.is_a?(Type::Union) ? receiver.members : [receiver]
         members.any? do |member|
+          next !RefinedDispatch.winner(scope, member.class_name, name, list, kind: :singleton).nil? if
+            member.is_a?(Type::Singleton)
+
           class_name = refined_receiver_class_name(member)
           !class_name.nil? && !RefinedDispatch.winner(scope, class_name, name, list).nil?
         end
@@ -2033,11 +2037,11 @@ module Rigor
         InEffectRefinements.opaque_in?(scope, lexical)
       end
 
-      # Does `receiver` (or a member of a union) have a class the refined arm answers for: an instance, not a class
-      # object or `Dynamic`?
-      def refined_instance_receiver?(receiver)
+      # Does `receiver` (or a member of a union) have a lookup the refined arm answers for: an instance of a class,
+      # or a class object (issue #1752), not `Dynamic`?
+      def refined_receiver?(receiver)
         members = receiver.is_a?(Type::Union) ? receiver.members : [receiver]
-        members.any? { |member| !refined_receiver_class_name(member).nil? }
+        members.any? { |member| member.is_a?(Type::Singleton) || !refined_receiver_class_name(member).nil? }
       end
 
       def refined_receiver_result(node, receiver, list, arg_types, block_type)
@@ -2053,6 +2057,9 @@ module Rigor
       end
 
       def refined_member_result(node, receiver, list, arg_types, block_type)
+        return refined_class_object_result(node, receiver, list, arg_types, block_type) if
+          receiver.is_a?(Type::Singleton)
+
         class_name = refined_receiver_class_name(receiver)
         return nil if class_name.nil?
 
@@ -2062,6 +2069,16 @@ module Rigor
 
         refined_body_return(winner, node.name, Type::Combinator.nominal_of(class_name), arg_types, block_type) ||
           dynamic_top
+      end
+
+      # Issue #1752 — a call on a class object, walked through its singleton levels; the winning refine body is
+      # re-typed with the class object itself as `self`.
+      def refined_class_object_result(node, receiver, list, arg_types, block_type)
+        winner = RefinedDispatch.winner(scope, receiver.class_name, node.name, list, kind: :singleton)
+        return nil if winner.nil?
+        return dynamic_top if winner == RefinedDispatch::UNKNOWN
+
+        refined_body_return(winner, node.name, receiver, arg_types, block_type) || dynamic_top
       end
 
       # The winning refine body's inferred return, re-typed with the receiver's class as `self` and the call's
@@ -2082,8 +2099,9 @@ module Rigor
         nil
       end
 
-      # The class an instance-side receiver is an instance of, or nil for one a refinement does not answer here: a
-      # class object (refinements of singleton classes are not recorded), `Dynamic`, `top`, or a shape with no class.
+      # The class an instance-side receiver is an instance of, or nil for one this instance walk does not answer: a
+      # class object (it walks its own lookup, {#refined_class_object_result}), `Dynamic`, `top`, or a shape with no
+      # class.
       def refined_receiver_class_name(receiver)
         case receiver
         when Type::Nominal, Type::StructInstance, Type::DataInstance then receiver.class_name

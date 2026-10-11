@@ -259,9 +259,10 @@ RSpec.describe "Typing calls through Ruby refinements (#1664)", type: :runner do
   end
 
   # ADR-121 WD7 (critique F2). Ruby 4.0.5 prints `43` and `4`: a module whose refinements Rigor cannot read may replace
-  # any instance method, so every instance call in its `using`'s span answers `Dynamic[top]`, never the replaced
-  # method's signature; a class object falls through.
-  it "answers Dynamic[top] for every instance call under a `using` of a module from outside the analysed paths" do
+  # any method, so every call in its `using`'s span answers `Dynamic[top]`, never the replaced method's signature.
+  # Issue #1752: that includes a call on a class object (a `refine(Integer.singleton_class)` there would replace
+  # `Integer.sqrt`), which fell through before class objects walked their own lookup.
+  it "answers Dynamic[top] for every call under a `using` of a module from outside the analysed paths" do
     result = analyze(
       files: {
         "outside/gemref.rb" => "module GemRef; refine(String) { def center(a, b, c) = 42 }; end\n",
@@ -278,7 +279,7 @@ RSpec.describe "Typing calls through Ruby refinements (#1664)", type: :runner do
     )
     rows = result.diagnostics.map { |d| [d.qualified_rule, d.line, d.message] }
 
-    expect(rows).to eq([["dump.type", 5, "dump_type: Dynamic[top]"], ["dump.type", 6, "dump_type: Integer"]])
+    expect(rows).to eq([["dump.type", 5, "dump_type: Dynamic[top]"], ["dump.type", 6, "dump_type: Dynamic[top]"]])
   end
 
   # ADR-121 WD7 (A2). Ruby 4.0.5 prints `43` and `"S"`: a refinement whose target the walk cannot name makes only the

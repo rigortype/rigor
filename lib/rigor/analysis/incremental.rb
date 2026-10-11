@@ -157,7 +157,7 @@ module Rigor
         return per_file if superclasses.nil? || superclasses.empty?
 
         superclasses.each do |child, parent|
-          edge = [child, parent.to_s].freeze
+          edge = [child, parent.nil? ? "*" : parent.to_s].freeze
           (class_sources[child] || EMPTY_FILES).each { |file| per_file[file] << edge }
         end
         per_file

@@ -227,6 +227,10 @@ module Rigor
       # otherwise distinguishable from an `attr_*` or `define_method`, whose envelope is opaque too, and the
       # refinement own-definer proof must not take a removed method as the one Ruby finds.
       ENVELOPE_REMOVED_KIND = :removed
+      # Issue #1820 — a `K = Class.new(Parent)` constant write: the class's superclass is not in the superclass table
+      # (the meta-new walk does not route `Parent` through ancestor discovery), so a reader that must place `K` in a
+      # hierarchy reads its superclass as unknown, as it reads the `nil` the table records for `class K < <expr>`.
+      ENVELOPE_META_SUPERCLASS_MARK = :"<meta-superclass>"
       ENVELOPE_MODULE_MARK = :"<module>"
       ENVELOPE_DYNAMIC_MARK = :"<dynamic>"
       ENVELOPE_OBJECT_EXTENDED_MARK = :"<object-extended>"

@@ -746,6 +746,31 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
         expect(call_rows).to eq(controls(1..4))
       end
 
+      # Ruby 4.0.5 answers `:kid`, `:cmp`, `:mys4` and `:vkid`: `Kid < Object.const_get(:Base)` and the two
+      # `Class.new(String)` classes are subclasses the superclass table does not record, and `VKid`'s superclass
+      # `VendorBase < Typed` is declared outside the analysed paths. A refined class must be placed by a fully read
+      # chain, and a class whose superclass is unknown may be a subclass of any class.
+      it "declines where a refined class or a subclass has a superclass the tables do not know" do
+        write_class("Typed", "  def center(a) = a\n  def chop(a) = a\n",
+                    "  def center: (untyped) -> untyped\n  def chop: (untyped) -> untyped\n")
+        write("lib/unknown.rb", <<~RUBY)
+          class Kid < Object.const_get(:Typed); end
+          module KidRef; refine(Kid) { def center(a, b, c) = :kid }; end
+          MyS2 = Class.new(String) { prepend Comparable }
+          module CmpRef; refine(Comparable) { def ljust(a, b, c) = :cmp }; end
+          MyS4 = Class.new(String)
+          module S4Ref; refine(MyS4) { def rjust(a, b, c) = :mys4 }; end
+          class VKid < VendorBase; end
+          module VKidRef; refine(VKid) { def chop(a, b, c) = :vkid }; end
+        RUBY
+        write("vendor/v.rb", "class VendorBase < Typed; end\n")
+        calls = "Typed.new.center(1, 2, 3)\n\"x\".ljust(1, 2, 3)\n\"x\".rjust(1, 2, 3)\nTyped.new.chop(1, 2, 3)\n"
+        write("lib/use.rb", "using KidRef\nusing CmpRef\nusing S4Ref\nusing VKidRef\n#{calls}")
+        write("lib/control.rb", calls)
+
+        expect(call_rows).to eq(controls(1..4))
+      end
+
       # `Sub` prepends `N` again ahead of `Host#ljust`, and a String may extend `Ext`, a refined module the receiver's
       # levels do not hold: Ruby 4.0.5 answers `:n` for a `Sub` and `:ext` for an extended String. A refined module a
       # class prepends answers ahead of its own method, `NE` (no methods) as well: `:np`, `:ne`.
@@ -992,6 +1017,21 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
         File.delete("lib/sub.rb")
         expect(incremental_call_rows).to eq([fires, true])
         expect(call_rows).to eq(fires)
+      end
+
+      # A class whose superclass the tables do not know may be a subclass of any class, so a new file declaring one
+      # re-checks the call through `subclass_of:*`. Ruby 4.0.5 answers `:cmp` for a `MyS2` typed as `String`.
+      it "re-checks the `using` file under --incremental when a new file declares a Class.new subclass" do
+        write("lib/rc.rb", "module RC; refine(Comparable) { def ljust(a, b, c) = :cmp }; end\n")
+        write("lib/use.rb", "using RC\n\"x\".ljust(1, 2, 3)\n")
+        fires = [["use.rb", 2, "call.wrong-arity"]]
+
+        expect(incremental_call_rows).to eq([fires, false])
+        write("lib/sub.rb", "MyS2 = Class.new(String) { prepend Comparable }\n")
+        expect(incremental_call_rows).to eq([[], true])
+        expect(call_rows).to eq([])
+        File.delete("lib/sub.rb")
+        expect(incremental_call_rows).to eq([fires, true])
       end
 
       # A subclass level the walk cannot read hides only modules, so a refinement of `Object` keeps the call

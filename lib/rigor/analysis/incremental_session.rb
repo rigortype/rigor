@@ -1089,14 +1089,23 @@ module Rigor
         moved_constants = Incremental.changed_constant_publications(
           changed + removed, @constant_decls, new_constant_decls
         )
-        moved_classes, moved_edges = moved_classes.partition { |entry| entry.is_a?(String) }
         keys = appeared_methods.map { |symbol| negative_key_for(symbol) }
-        keys.concat(moved_classes.map { |klass| "class:#{klass.split('::').last}" })
-        # Issue #1820 — a `[class, superclass]` pair appearing or vanishing moves the parent's subclass set.
-        keys.concat(moved_edges.map { |(_child, parent)| "subclass_of:#{parent.split('::').last}" })
+        keys.concat(class_move_keys(moved_classes))
         keys.concat(moved_constants.map { |name| "constant:#{name.split('::').last}" })
         Incremental.negative_closure(keys, @negative_dependents) | refinement_affected(changed + removed, summary) |
           global_write_reporters
+      end
+
+      # The negative keys a class-declaration diff fires: `class:<last segment>` for a class name, and (issue #1820)
+      # `subclass_of:<last segment of the superclass>` for a `[class, superclass]` pair appearing or vanishing. Any
+      # class declaration moving may move the set of classes whose superclass the tables do not know, which
+      # `subclass_of:*` stands for.
+      def class_move_keys(moved)
+        names, edges = moved.partition { |entry| entry.is_a?(String) }
+        keys = names.map { |klass| "class:#{klass.split('::').last}" }
+        keys.concat(edges.map { |(_child, parent)| "subclass_of:#{parent.split('::').last}" })
+        keys << "subclass_of:*" unless moved.empty?
+        keys
       end
 
       # Issue #1120 — the consumers whose `call.undefined-method` answer read the refinement table for a method

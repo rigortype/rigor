@@ -26,7 +26,7 @@ module Rigor
       #
       # It shares the level walk with the typed arm's {RefinedDispatch.winner} and nothing else: the typer types
       # only from rows the lexical lookup resolves, while a decline must count every row.
-      module OwnMethod
+      module OwnMethod # rubocop:disable Metrics/ModuleLength
         # One candidate definer as `DefinerResolution`'s per-chain answer function reports it, read through the
         # same four readers as the module's own hit (a call site may not name that one).
         DefinerHit = Data.define(:answer, :owner, :index, :side)
@@ -125,9 +125,57 @@ module Rigor
           on_levels = level_names(levels)
           raw.each_key.any? do |refined|
             next object_prepended?(scope, refined) if on_levels.include?(refined)
+            next true if module_name?(scope, refined)
 
-            module_name?(scope, refined) || rbs_subclass?(scope, refined, class_name)
+            declared_class?(scope, refined) && !placed_away?(scope, refined, class_name)
           end
+        end
+
+        # Issue #1820 — can the class `key`, off the receiver's levels, be proven never to sit at or below
+        # `class_name` in an object's ancestry? Only when RBS does not declare it a subclass and its whole instance
+        # chain is read: no cut, no mixin the tables cannot name, no superclass the tables do not know (`class K <
+        # <expr>`, `K = Class.new(Parent)`, a superclass RBS does not declare), and `class_name` nowhere on it.
+        def placed_away?(scope, key, class_name)
+          return false if rbs_subclass?(scope, key, class_name)
+          return rbs_away?(scope, key, class_name) unless project_class?(scope, key)
+
+          chain = Scope::ResolutionChain.for(scope, key, :instance, :methods)
+          chain.record(scope) if Analysis::DependencyRecorder.active?
+          return false if chain.truncated? || chain.wildcard_mixin?
+
+          chain.level_count.times.all? { |index| level_away?(scope, chain, index, class_name) }
+        end
+
+        # A project level is away when it is not `class_name` and its superclass is known; an external superclass
+        # level when RBS declares it and its RBS ancestors do not hold `class_name`.
+        def level_away?(scope, chain, index, class_name)
+          level_class = chain.level_classes[index]
+          return level_class != class_name && !unknown_superclass?(scope, level_class) if level_class
+
+          external = chain.level_entries(index).find(&:external?)
+          name = external&.candidates&.find { |candidate| scope.environment&.class_known?(candidate) }
+          !name.nil? && rbs_away?(scope, name, class_name)
+        end
+
+        def rbs_away?(scope, name, class_name)
+          loader = scope.environment&.rbs_loader
+          ancestors = loader ? loader.ancestor_names_for(name) : EMPTY
+          !ancestors.empty? && !ancestors.include?(class_name)
+        end
+
+        def project_class?(scope, name)
+          scope.discovered_classes.key?(name) || !(scope.discovered_class_sources[name] || EMPTY).empty? ||
+            scope.known_user_class?(name)
+        end
+
+        # A project class whose superclass the tables do not know: `class K < <expr>` (the superclass table records
+        # `nil`) or `K = Class.new(Parent)` (`ENVELOPE_META_SUPERCLASS_MARK`).
+        def unknown_superclass?(scope, name)
+          superclasses = scope.discovered_superclasses
+          return true if superclasses.key?(name) && superclasses[name].nil?
+
+          scope.discovered_parameter_envelopes[name]&.key?(Scope::DiscoveryIndex::ENVELOPE_META_SUPERCLASS_MARK) ||
+            false
         end
 
         # A module some code `prepend`s to an object's singleton class (or `extend`s an object with in a method
@@ -208,10 +256,12 @@ module Rigor
 
         # ADR-46 — every class whose subclasses are enumerated records `subclass_of:<last segment>`, which a class
         # declaration with that superclass appearing or vanishing fires (`IncrementalSession#negative_affected`).
+        # A class whose superclass the tables do not know may be a subclass of any class, so it joins the walk too
+        # (`subclass_of:*`, which any class declaration appearing or vanishing fires).
         def each_subclass(scope, class_name)
           children = children_by_parent(scope)
           record_subclasses_read(class_name)
-          queue = children.fetch(class_name.to_s, []).dup
+          queue = children.fetch(class_name.to_s, []) + unknown_superclass_classes(scope, class_name)
           seen = {}
           until queue.empty?
             subclass = queue.shift
@@ -222,6 +272,14 @@ module Rigor
             yield subclass
             queue.concat(children.fetch(subclass, []))
           end
+        end
+
+        def unknown_superclass_classes(scope, class_name)
+          Analysis::DependencyRecorder.read_name(:subclass_of, "*") if Analysis::DependencyRecorder.active?
+          mark = Scope::DiscoveryIndex::ENVELOPE_META_SUPERCLASS_MARK
+          computed = scope.discovered_superclasses.filter_map { |child, parent| child if parent.nil? }
+          meta = scope.discovered_parameter_envelopes.filter_map { |name, bucket| name if bucket.key?(mark) }
+          (computed + meta).uniq - [class_name.to_s]
         end
 
         def record_subclasses_read(class_name)

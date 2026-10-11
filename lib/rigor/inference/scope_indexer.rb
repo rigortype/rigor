@@ -3858,6 +3858,7 @@ module Rigor
           return
         when Prism::ConstantWriteNode, Prism::ConstantPathWriteNode, Prism::ConstantOrWriteNode,
              Prism::ConstantPathOrWriteNode
+          record_meta_superclass(node, qualified_prefix, def_owner_prefix, methods_acc.at(node))
           if (split = meta_new_block_split(node, qualified_prefix, def_owner_prefix, singleton_cref))
             enclosing, body, body_self = split
             # A meta-new block rebinds only `self` — `Module.nesting` stays lexical — so
@@ -3999,6 +4000,18 @@ module Rigor
       end
 
       # The block form of a meta-new constant write: its members, and the module mark `Module.new` earns.
+      # Issue #1820 — `K = Class.new(Parent)`, with or without a block, names a class whose superclass the superclass
+      # table leaves out; it takes {Scope::DiscoveryIndex::ENVELOPE_META_SUPERCLASS_MARK}.
+      def record_meta_superclass(node, qualified_prefix, self_base, tables)
+        rvalue = meta_new_rvalue(node)
+        return unless class_new_call?(rvalue) && !(rvalue.arguments&.arguments || []).empty?
+
+        child_prefix = meta_new_child_prefix(node, qualified_prefix, self_base)
+        return if child_prefix.nil? || child_prefix.empty?
+
+        record_surface_mark(tables, child_prefix.join("::"), Scope::DiscoveryIndex::ENVELOPE_META_SUPERCLASS_MARK)
+      end
+
       def record_meta_new_facts(rvalue, child_prefix, tables)
         record_meta_members(rvalue, child_prefix, tables)
         # `Module.new(&BODY)`: the body runs on the new module but cannot be read, so its surface is unknown (#1816).

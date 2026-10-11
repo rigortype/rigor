@@ -196,11 +196,15 @@ declaration is opaque.**
   never opaque, and one nothing declares matches no row, so it silences nothing.
 - `call.wrong-arity` and `call.argument-type-mismatch` report under a refinement in effect only where
   the receiver's own definer is proven to answer first (#1740, #1797): a project definer
-  `DefinerResolution` answers `Known` for, or a core method the CRuby catalogue lists on that class and
-  the project has not removed. RBS alone and a definer that may not have run prove nothing, and an
-  in-effect row naming a subclass of the receiver's class, a module the receiver does not hold (or holds
-  but some code prepends to an object's singleton class), or a class no table declares, declines, since a
-  value typed as the class may reach it first.
+  `DefinerResolution` answers `Known` for, or a core method the CRuby catalogue lists on that class
+  (its `rdoc_only` entries left out), and neither for a name the project removes (a `[:removed, name]`
+  envelope entry). RBS alone and a definer that may not have run prove nothing. Every in-effect row the
+  receiver's own levels do not place must be proven unable to answer first, so these decline: a module
+  the receiver does not hold (or holds but some code prepends to an object's singleton class), a class
+  no table declares, and a declared class whose instance chain cannot be read to its end (a cut, a
+  superclass the tables do not know) or holds the receiver's class; a class with an unknown superclass
+  is a possible subclass of every class. A class mark alone (refined, object-extended, meta-superclass)
+  does not make a name the project's for the arity walk (`DiscoveryIndex.declares_surface?`).
 
 Limits it does not remove: a module reopened in a file outside the analysed paths or under
 `exclude:`; an inner `using` candidate declared only outside the analysed paths (or by a

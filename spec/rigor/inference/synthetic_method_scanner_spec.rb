@@ -335,6 +335,24 @@ RSpec.describe Rigor::Inference::SyntheticMethodScanner do
       expect(index.lookup_instance("Address", :audited_at).size).to eq(1)
     end
 
+    # Issue #1816 — `included(&BODY)` hands the hook a block ARGUMENT, whose body is not readable here.
+    it "reads an included hook given a block argument as having no DSL calls" do
+      registry = Rigor::Plugin::Registry.new(plugins: [dry_struct_plugin.new(services: services)])
+      _, paths = write_files(
+        "audited.rb" => <<~RUBY,
+          module Audited
+            extend ActiveSupport::Concern
+            included(&BODY)
+          end
+        RUBY
+        "address.rb" => "class Address < Dry::Struct\n  include Audited\nend\n"
+      )
+      index = described_class.scan(
+        plugin_registry: registry, paths: paths, environment: stub_environment_for
+      )
+      expect(index.lookup_instance("Address", :audited_at)).to be_empty
+    end
+
     it "ignores modules that do not extend ActiveSupport::Concern" do
       registry = Rigor::Plugin::Registry.new(plugins: [dry_struct_plugin.new(services: services)])
       _, paths = write_files(

@@ -5,6 +5,7 @@ require "prism"
 require_relative "../scope"
 require_relative "../type"
 require_relative "../source/alias_names"
+require_relative "../source/literals"
 require_relative "../source/constant_path"
 require_relative "object_mixins"
 require_relative "../source/node_children"
@@ -4000,6 +4001,10 @@ module Rigor
       # The block form of a meta-new constant write: its members, and the module mark `Module.new` earns.
       def record_meta_new_facts(rvalue, child_prefix, tables)
         record_meta_members(rvalue, child_prefix, tables)
+        # `Module.new(&BODY)`: the body runs on the new module but cannot be read, so its surface is unknown (#1816).
+        if rvalue.block.is_a?(Prism::BlockArgumentNode)
+          record_surface_mark(tables, child_prefix.join("::"), Scope::DiscoveryIndex::ENVELOPE_DYNAMIC_MARK)
+        end
         return unless module_new_call?(rvalue)
 
         record_surface_mark(tables, child_prefix.join("::"), Scope::DiscoveryIndex::ENVELOPE_MODULE_MARK)
@@ -4139,7 +4144,9 @@ module Rigor
       # other two. {#meta_new_block_call} owns both unwrappings; every walk asks it, so no spelling can be
       # recognised by one pass and missed by another.
       def meta_new_block_body(node)
-        meta_new_block_call(node)&.block&.body
+        block = meta_new_block_call(node)&.block
+        # A `&BODY` / `&:sym` block ARGUMENT is not a literal block: its body is unreadable here (#1816).
+        block.body if block.is_a?(Prism::BlockNode)
       end
 
       # The class-creating call a constant write's rvalue ultimately is, or nil when the write is not the idiom.
@@ -6390,7 +6397,7 @@ module Rigor
           walk_class_includes(arg, qualified_prefix, current_class, accumulator,
                               singleton_self: singleton_self, singleton_cref: singleton_cref)
         end
-        if (body = call.block&.body)
+        if (body = meta_new_block_body(node))
           walk_class_includes(body, qualified_prefix, meta_owner, accumulator,
                               singleton_cref: body_cref)
         end
@@ -6962,7 +6969,7 @@ module Rigor
                              in_singleton: in_singleton, singleton_self: singleton_self,
                              singleton_cref: singleton_cref)
         end
-        if (body = call.block&.body)
+        if (body = meta_new_block_body(node))
           walk_class_extends(body, qualified_prefix, meta_owner, accumulator,
                              singleton_cref: body_cref)
         end
@@ -7530,9 +7537,7 @@ module Rigor
       end
 
       def visibility_target_name(arg)
-        return arg.unescaped.to_sym if arg.is_a?(Prism::SymbolNode) || arg.is_a?(Prism::StringNode)
-
-        nil
+        Source::Literals.symbol_or_string(arg)
       end
 
       # Registers the alias name in the `discovered_methods` table so `undefined-method` diagnostics are not emitted for
@@ -8025,9 +8030,7 @@ module Rigor
       end
 
       def literal_method_name(node)
-        return nil unless node.is_a?(Prism::SymbolNode) || node.is_a?(Prism::StringNode)
-
-        node.unescaped&.to_sym
+        Source::Literals.symbol_or_string(node)
       end
 
       # Walks every file in `paths` (each path is parsed once with `Prism.parse_file`) and returns the unioned
@@ -10088,7 +10091,7 @@ module Rigor
           record_declarations(part, qualified_prefix, identity_table, discovered,
                               EMPTY_RENAMES, self_prefix, singleton_cref: singleton_cref)
         end
-        if (body = rvalue.block&.body)
+        if (body = rvalue.block.is_a?(Prism::BlockNode) && rvalue.block.body)
           record_declarations(body, qualified_prefix, identity_table, discovered,
                               EMPTY_RENAMES, child_prefix, singleton_cref: singleton_cref)
         end

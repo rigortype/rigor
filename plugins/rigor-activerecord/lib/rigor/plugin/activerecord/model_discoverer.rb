@@ -940,7 +940,7 @@ module Rigor
                     node.name == :define_singleton_method
                 arg0 = node.arguments&.arguments&.first
                 name = Rigor::Source::Literals.symbol_name(arg0) || (arg0.is_a?(Prism::StringNode) ? arg0.unescaped : nil)
-                key = TABLE_NAME_DECORATOR_METHODS[name.to_sym] if name
+                key = TABLE_NAME_DECORATOR_METHODS[Rigor::Source::SymbolName.of(name)] if name
                 if key
                   readers << key
                   decorators[key] = node.block.is_a?(Prism::BlockNode) ? literal_def_value(node.block.body) : { computed: true }

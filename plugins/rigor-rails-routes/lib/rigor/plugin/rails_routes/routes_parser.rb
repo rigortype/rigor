@@ -1184,7 +1184,7 @@ module Rigor
         def load_drawn_routes(node, context)
           return unless context.file_reader
 
-          name = symbol_argument(node, 0) || string_argument(node, 0)&.to_sym
+          name = symbol_argument(node, 0) || Rigor::Source::SymbolName.of(string_argument(node, 0))
           return unless name
 
           sub_contents = context.file_reader.call("#{name}.rb")

@@ -126,10 +126,10 @@ module Rigor
         end
 
         def literal_symbol_or_string(node)
-          case node
-          when Prism::SymbolNode then node.unescaped
-          when Prism::StringNode then node.unescaped
-          end
+          return nil unless node.is_a?(Prism::SymbolNode) || node.is_a?(Prism::StringNode)
+
+          # nil for bytes no Symbol holds: the name is later interned (`PolicyIndex#normalize`), which would raise.
+          Rigor::Source::SymbolName.of(node.unescaped)&.to_s
         end
 
         def constant_receiver_name(node)

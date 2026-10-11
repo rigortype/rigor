@@ -4632,4 +4632,18 @@ RSpec.describe "plugins/rigor-activerecord" do
       expect(reader_type("thing")).to eq(["Dynamic[top]"])
     end
   end
+
+  # Issue #1821 — `"\xff".to_sym` raises EncodingError; a `define_singleton_method` name no Symbol holds is
+  # not looked up.
+  describe "a namespace module with an invalid-byte define_singleton_method name" do
+    it "still discovers the models inside it" do
+      models = {
+        "app/models/application_record.rb" => "class ApplicationRecord\nend\n",
+        "app/models/blog.rb" => "module Blog\n  define_singleton_method(\"\\xff\") { 1 }\nend\n",
+        "app/models/blog/post.rb" => "module Blog\n  class Post < ApplicationRecord\n  end\nend\n"
+      }
+      _result, index = run_ar_with_index("x = 1\n", models: models, schema: "")
+      expect(index.find("Blog::Post")).not_to be_nil
+    end
+  end
 end

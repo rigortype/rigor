@@ -154,8 +154,7 @@ module Rigor
       # answers, so the table and the activations agree.
       def refine_context(node)
         build
-        contexts = @refine_contexts
-        contexts[node.location.start_offset] if !contexts.nil? && member?(node)
+        @refine_contexts[node.location.start_offset] if member?(node)
       end
 
       # Is this the query over `root`'s tree?
@@ -175,7 +174,8 @@ module Rigor
 
       EMPTY_OFFSET = -1
       EMPTY_SET = Set.new.freeze
-      private_constant :EMPTY_OFFSET, :EMPTY_SET
+      NO_CONTEXTS = {}.freeze
+      private_constant :EMPTY_OFFSET, :EMPTY_SET, :NO_CONTEXTS
 
       # A spelling's candidates are alternatives, innermost first; Ruby's lexical lookup finds the innermost one
       # that exists, so it goes last and wins where several are declared. ADR-121 WD7 (A1): every declared candidate
@@ -234,13 +234,14 @@ module Rigor
         @refine_defs = nil
         @chained_refined_calls = nil
         @class_body_refines = nil
-        @refine_contexts = nil
+        @refine_contexts = NO_CONTEXTS
         @unresolved_using = false
         return if @root.nil? || !mentions_refinements?
 
         @activations = []
         @refinement_defs = Set.new
         @refine_defs = RefineDefs.new
+        @refine_contexts = {}
         @nesting = EMPTY
         location = @root.location
         walk(@root, [], [location.start_offset, location.end_offset], false, RefineSelf.top)

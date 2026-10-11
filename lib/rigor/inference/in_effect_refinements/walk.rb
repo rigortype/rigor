@@ -120,7 +120,7 @@ module Rigor
 
         # ADR-121 WD7 — what the census reads back for a `refine`-shaped node.
         def record_refine_context(node, context)
-          (@refine_contexts ||= {})[node.location.start_offset] = context
+          @refine_contexts[node.location.start_offset] = context
         end
 
         def walk_children(node, prefix, body, in_def, context)

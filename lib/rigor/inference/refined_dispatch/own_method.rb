@@ -41,7 +41,7 @@ module Rigor
           raw = raw_targets(scope.discovered_refinements, method_name, list)
           return true if raw.nil?
 
-          record_targets(raw)
+          record_targets(scope, raw)
           return false if raw.any? { |refined| InEffectRefinements.class_wildcard_key?(scope, refined) }
 
           levels = RefinedDispatch.levels(scope, class_name)
@@ -67,12 +67,16 @@ module Rigor
         end
 
         # ADR-46 — a refined class appearing or vanishing (a new subclass declaration, a module turning up where a
-        # spelling named nothing) moves the answer.
-        def record_targets(raw)
+        # spelling named nothing), or an edit to a file declaring one (`class Kid` becoming `class Kid < Base`),
+        # moves the answer.
+        def record_targets(scope, raw)
           return unless Analysis::DependencyRecorder.active?
 
           raw.each do |refined|
-            Analysis::DependencyRecorder.read_last_segment(:class, refined) unless refined == RefinedDispatch.wildcard
+            next if refined == RefinedDispatch.wildcard
+
+            Analysis::DependencyRecorder.read_last_segment(:class, refined)
+            Scope::ResolutionChain.record_class(scope, refined)
           end
         end
 

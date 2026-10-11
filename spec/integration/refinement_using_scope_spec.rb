@@ -727,7 +727,8 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
       end
 
       # Critique F4. `w20_subclasses.rb` prints `[:kid, :typed_kid, :mystr]`: a value typed as `Base`, as `Typed` (its
-      # method declared in `sig/`) or as `String` may be an instance of the refined subclass.
+      # method declared in `sig/`) or as `String` may be an instance of the refined subclass. `w23_rbs_subclass.rb`
+      # prints `:file`: the value `Opener.io` (`-> IO`) answers is a `File`, a subclass RBS declares.
       it "declines where a refinement in effect refines a subclass of the receiver's class" do
         write("lib/base.rb", "class Base; def center(a) = a; end\nclass Kid < Base; end\n" \
                              "module KidRef; refine(Kid) { def center(a, b, c) = :kid }; end\n")
@@ -736,39 +737,58 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
                                   "module TypedRef; refine(TypedKid) { def ljust(a, b, c) = :typed_kid }; end\n")
         write("lib/my_str.rb", "class MyStr < String; end\n" \
                                "module StrRef; refine(MyStr) { def rjust(a, b, c) = :mystr }; end\n")
-        calls = "Base.new.center(1, 2, 3)\nTyped.new.ljust(1, 2, 3)\n\"x\".rjust(1, 2, 3)\n"
-        write("lib/use.rb", "using KidRef\nusing TypedRef\nusing StrRef\n#{calls}")
+        write_class("Opener", "  def self.io = File.new(__FILE__)\n", "  def self.io: () -> IO\n")
+        write("lib/file_ref.rb", "module FileRef; refine(File) { def fsync(a, b, c) = :file }; end\n")
+        calls = "Base.new.center(1, 2, 3)\nTyped.new.ljust(1, 2, 3)\n\"x\".rjust(1, 2, 3)\nOpener.io.fsync(1, 2, 3)\n"
+        write("lib/use.rb", "using KidRef\nusing TypedRef\nusing StrRef\nusing FileRef\n#{calls}")
         write("lib/control.rb", calls)
 
-        expect(call_rows).to eq(controls(1..3))
+        expect(call_rows).to eq(controls(1..4))
       end
 
       # `w21_prepend_extend.rb` prints `[:n, :ext]`: `Sub` prepends `N` again ahead of `Host#ljust`, and a String may
-      # extend `Ext`. A refined module the receiver's levels do not hold may be extended onto any value.
-      it "declines where a subclass prepends a refined module or a value may extend one" do
+      # extend `Ext`, a refined module the receiver's levels do not hold. `w24_prepended_entries.rb` prints
+      # `[:np, :ne]`: a refined module a class prepends answers ahead of its own method, `NE` (no methods) as well.
+      it "declines where a class or its subclass prepends a refined module, or a value may extend one" do
         write("lib/host.rb", <<~RUBY)
           module N; end
           class Host; include N; def ljust(a) = a; end
           class Sub < Host; prepend N; end
           module NRef; refine(N) { def ljust(a, b, c) = :n }; end
+          module Ext; end
+          module ExtRef; refine(Ext) { def chop(a, b, c) = :ext }; end
         RUBY
         write("sig/host.rbs", "module N\nend\nclass Host\n  include N\n  def ljust: (untyped) -> untyped\nend\n")
-        write("lib/ext.rb", "module Ext; end\nmodule ExtRef; refine(Ext) { def chop(a, b, c) = :ext }; end\n")
-        calls = "Host.new.ljust(1, 2, 3)\n\"y\".chop(1, 2, 3)\n"
-        write("lib/use.rb", "using NRef\nusing ExtRef\n#{calls}")
+        write("lib/pre.rb", <<~RUBY)
+          module NP; def x = 1; end
+          module NE; end
+          class Pre; prepend NP; def center(a) = a; end
+          class PreE; prepend NE; def ljust(a) = a; end
+          module NPRef; refine(NP) { def center(a, b, c) = :np }; end
+          module NERef; refine(NE) { def ljust(a, b, c) = :ne }; end
+        RUBY
+        calls = "Host.new.ljust(1, 2, 3)\n\"y\".chop(1, 2, 3)\nPre.new.center(1, 2, 3)\nPreE.new.ljust(1, 2, 3)\n"
+        write("lib/use.rb", "using NRef\nusing ExtRef\nusing NPRef\nusing NERef\n#{calls}")
         write("lib/control.rb", calls)
 
-        expect(call_rows).to eq(controls(1..2))
+        expect(call_rows).to eq(controls(1..4))
       end
 
       # Critique F7. `w13_remove.rb` prints `:refined`: the project removed `String#center`, so the catalogue proves
-      # nothing about it.
-      it "declines where the project removed the method the catalogue lists" do
-        write("lib/removed.rb", "class String; remove_method :center; end\n")
-        write("lib/use.rb", "using ObjCenter\n\"x\".center(1, 2, 3)\n")
-        write("lib/control.rb", "\"x\".center(1, 2, 3)\n")
+      # nothing about it. `w25_removed.rb` prints `[:refined, :refined]`: neither does it for a class whose body
+      # rewrites its table through `send`, nor does a project `def` the class then removes.
+      it "declines where the project removed or rewrote the definer's method" do
+        write("lib/removed.rb", <<~RUBY)
+          class String; remove_method :center; end
+          class Symbol; send(:remove_method, :to_proc); end
+          module ObjProc; refine(Object) { def to_proc(a) = :refined }; end
+        RUBY
+        write_class("Own2", "  def center(a) = a\n  remove_method :center\n", "  def center: (untyped) -> untyped\n")
+        calls = "\"x\".center(1, 2, 3)\n:s.to_proc(1)\nOwn2.new.center(1, 2, 3)\n"
+        write("lib/use.rb", "using ObjCenter\nusing ObjProc\n#{calls}")
+        write("lib/control.rb", calls)
 
-        expect(call_rows).to eq(controls([1]))
+        expect(call_rows).to eq(controls(1..3))
       end
 
       # `w15_mixed.rb` prints `:wide`: a module the project prepends to `String` sits where RBS does not place it.
@@ -829,6 +849,25 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
         expect(incremental_call_rows).to eq([[], true])
         expect(call_rows).to eq([])
         refining.call("")
+        expect(incremental_call_rows).to eq([fires, true])
+        expect(call_rows).to eq(fires)
+      end
+
+      # A refined class turning into a subclass of the receiver's class in its own file re-checks the call. Ruby 4.0.5
+      # raises `ArgumentError` for `Base.new.center(1, 2, 3)` while `Kid` is unrelated (`w03`-style), and a Base value
+      # may be a `Kid` once `Kid < Base` (`w04_subkid.rb`, `:kid`).
+      it "re-checks the `using` file under --incremental when a refined class becomes a subclass" do
+        write("lib/base.rb", "class Base; def center(a) = a; end\n")
+        write("lib/kid.rb", "class Kid; end\n")
+        write("lib/kid_ref.rb", "module KidRef; refine(Kid) { def center(a, b, c) = :kid }; end\n")
+        write("lib/use.rb", "using KidRef\nBase.new.center(1, 2, 3)\n")
+        fires = [["use.rb", 2, "call.wrong-arity"]]
+
+        expect(incremental_call_rows).to eq([fires, false])
+        write("lib/kid.rb", "class Kid < Base; end\n")
+        expect(incremental_call_rows).to eq([[], true])
+        expect(call_rows).to eq([])
+        write("lib/kid.rb", "class Kid; end\n")
         expect(incremental_call_rows).to eq([fires, true])
         expect(call_rows).to eq(fires)
       end

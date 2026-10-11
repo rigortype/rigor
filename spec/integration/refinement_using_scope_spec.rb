@@ -1079,6 +1079,17 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
       )
     end
 
+    # R3-S1: a file may hold bytes its encoding does not, here binary `__END__` data, and the refinement scans read
+    # it as bytes. Ruby 4.0.5 prints `:ext` and `1`, then raises `ArgumentError (given 2, expected 1)` on line 5.
+    it "reads a refining file whose `__END__` data is not valid in its encoding" do
+      write("lib/a.rb", "module Ext\n  refine(String) { def center(a, b, c) = :ext }\nend\nclass Helper\n  " \
+                        "def self.go(a) = a\nend\n__END__\n\x89PNG\xff\xfe binary payload\n")
+      write("lib/b.rb", "require_relative \"a\"\nusing Ext\np \"x\".center(1, 2, 3)\np Helper.go(1)\nHelper.go(1, 2)\n")
+
+      rows = diagnostics.map { |d| [File.basename(d.path.to_s), d.line, d.qualified_rule] }
+      expect(rows).to eq([["b.rb", 5, "call.wrong-arity"]])
+    end
+
     # Critique F5a. Ruby 4.0.5 prints `:via_alias` (`rb/p4_alias_refine.rb`).
     it "declines under a module that refines through an alias of `refine`" do
       write("lib/m.rb", <<~RUBY)

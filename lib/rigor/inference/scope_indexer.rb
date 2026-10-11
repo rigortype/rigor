@@ -3385,10 +3385,11 @@ module Rigor
       def pattern_offsets(root, pattern)
         return NO_OFFSETS if root.nil?
 
-        text = root.send(:source).source
-        return NO_OFFSETS unless pattern.match?(text)
+        # Byte-wise: a file may hold bytes its encoding does not (binary `__END__` data, a stray comment byte), and a
+        # regexp over such a String raises.
+        binary = root.send(:source).source.b
+        return NO_OFFSETS unless pattern.match?(binary)
 
-        binary = text.b
         offsets = []
         position = 0
         while (match = pattern.match(binary, position))

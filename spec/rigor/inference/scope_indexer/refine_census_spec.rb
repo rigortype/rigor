@@ -299,6 +299,14 @@ RSpec.describe Rigor::Inference::ScopeIndexer, ".refine_census" do
       "module M\n  module_eval(\"\\xff refine(String) { def shout = 1 }\")\nend\n",
       %i[literal], { any => { any => ["M"] } }
     ],
+    # R3-S1: binary `__END__` data is not valid in the file's encoding; the text is scanned as bytes, not raised on.
+    "a refine above binary __END__ data" => [
+      "module M\n  refine(String) { def shout = 1 }\nend\n__END__\n\x89PNG\xff\xfe refine\n",
+      %i[recorded], { "M::String" => { shout: ["M"] }, "String" => { shout: ["M"] } }
+    ],
+    "no refine above binary __END__ data" => [
+      "class Helper\n  def self.go(a) = a\nend\n__END__\n\x89PNG\xff\xfe\n", [], {}
+    ],
     "a :refine literal at the top level" => [
       "x = Module.private_method_defined?(:refine)\n",
       %i[literal], { any => { any => [any] } }
@@ -436,7 +444,10 @@ RSpec.describe Rigor::Inference::ScopeIndexer, ".refine_census" do
       "include" => "include Helper",
       "another call on self" => "puts 1",
       "a call on an explicit self" => "self.define_method(name) { 1 }",
-      "a call in a condition" => "def x = 1 if respond_to?(:y)"
+      "a call in a condition" => "def x = 1 if respond_to?(:y)",
+      # Ruby 4.0.5 raises `EncodingError` for a name no Symbol holds.
+      "a define_method name no Symbol holds" => 'define_method("\\xff") { 1 }',
+      "an attr_reader name no Symbol holds" => 'attr_reader "\\xff"'
     }.each do |name, body|
       it "makes the names incomplete for #{name}" do
         expect(rows(body)).to include(wildcard => ["M"])

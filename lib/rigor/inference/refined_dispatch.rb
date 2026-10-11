@@ -25,21 +25,66 @@ module Rigor
       # name on a class the walk reaches: any of them may answer.
       UNKNOWN = :unknown
 
+      NO_TARGETS = {}.freeze
+      private_constant :NO_TARGETS
+
       module_function
+
+      # `Scope::DiscoveryIndex::REFINEMENT_WILDCARD`, read when asked: this file loads before `Scope`.
+      def wildcard = Scope::DiscoveryIndex::REFINEMENT_WILDCARD
 
       # A {Winner}, {UNKNOWN}, or nil when no in-effect refinement answers `method_name` on an instance of
       # `class_name` (the class's own lookup does). `list` is the call site's in-effect refinements.
+      #
+      # ADR-121 WD7 — a row the walk could not read never yields a {Winner}: an in-effect module's row for the name
+      # whose class the walk could not name reaches every receiver, and a names-wildcard row of a level the walk
+      # reaches before a definer may define the name, so both answer {UNKNOWN}. So does a winner whose module shares
+      # its last segment with another listed module (A1): which of a `using`'s declared candidates Ruby finds can
+      # depend on load order.
       def winner(scope, class_name, method_name, list)
-        targets = resolved(scope, targets(scope.discovered_refinements, method_name, list), method_name)
+        refinements = scope.discovered_refinements
+        return UNKNOWN if class_unknown_row?(scope, refinements, method_name, list)
+
+        targets = resolved(scope, targets(refinements, method_name, list), method_name)
+        unread = targets(refinements, wildcard, list)
         unknown = list.include?(InEffectRefinements::UNKNOWN)
-        return nil if targets.nil? && !unknown
+        return nil if targets.nil? && unread.nil? && !unknown
 
         levels = levels(scope, class_name)
         return nil if levels.nil?
-        return UNKNOWN if unknown && unknown_reaches?(scope.discovered_refinements, method_name, levels)
-        return nil if targets.nil?
+        return UNKNOWN if unknown && unknown_reaches?(scope, refinements, method_name, levels)
 
-        walk(scope, levels, method_name, targets)
+        walk_targets(scope, levels, method_name, [targets, unread], list)
+      end
+
+      def walk_targets(scope, levels, method_name, (targets, unread), list)
+        return nil if targets.nil? && unread.nil?
+
+        answer = walk(scope, levels, method_name, targets || NO_TARGETS, unread || NO_TARGETS)
+        answer.is_a?(Winner) && rival_spelling?(answer.module_name, list) ? UNKNOWN : answer
+      end
+
+      # ADR-121 WD7 (A2) — does an in-effect module have a row for `method_name` (or a names-wildcard row) whose
+      # class the walk could not name ({InEffectRefinements.class_wildcard_key?})? It may refine the receiver's class.
+      def class_unknown_row?(scope, refinements, method_name, list)
+        refinements.any? do |refined, methods|
+          rows = [methods[method_name], methods[wildcard]].compact
+          !rows.empty? && rows.any? { |modules| in_effect?(modules, list) } &&
+            InEffectRefinements.class_wildcard_key?(scope, refined)
+        end
+      end
+
+      # Is one of `modules` (a row's refining modules) in `list`? The wildcard module, which the walk could not name,
+      # is any listed module.
+      def in_effect?(modules, list)
+        return list.any? { |name| name != InEffectRefinements::UNKNOWN } if modules.include?(wildcard)
+
+        modules.any? { |name| list.include?(name) }
+      end
+
+      def rival_spelling?(module_name, list)
+        segment = module_name.split("::").last
+        list.any? { |other| other.is_a?(String) && other != module_name && other.split("::").last == segment }
       end
 
       # `{refined class => the latest in-effect module refining method_name for it}`, or nil when none is in effect.
@@ -96,32 +141,60 @@ module Rigor
         best
       end
 
-      def unknown_reaches?(refinements, method_name, levels)
+      # ADR-121 WD7 — a names-wildcard row counts as a row for every name, and a row whose class the walk could not
+      # name reaches every level.
+      def unknown_reaches?(scope, refinements, method_name, levels)
+        unread_class = refinements.any? do |refined, methods|
+          (methods.key?(method_name) || methods.key?(wildcard)) &&
+            InEffectRefinements.class_wildcard_key?(scope, refined)
+        end
+        return true if unread_class
+
         levels.any? do |_level_class, entries|
-          entries.any? { |entry| refinements[entry]&.key?(method_name) }
+          entries.any? do |entry|
+            methods = refinements[entry]
+            !methods.nil? && (methods.key?(method_name) || methods.key?(wildcard))
+          end
         end
       end
 
       # A level the project mixes a module into whose position RBS does not record (`mixed`) is decided by its own
       # refinement first, as any level is; past that, the mixin may define the name, so a refinement further up the
-      # walk may or may not win and the answer is {UNKNOWN}, never the replaced method's.
-      def walk(scope, levels, method_name, targets)
+      # walk may or may not win and the answer is {UNKNOWN}, never the replaced method's. ADR-121 WD7: a level an
+      # in-effect module has a names-wildcard row for (`unread`) may define the name too, so it answers {UNKNOWN}.
+      def walk(scope, levels, method_name, targets, unread)
         levels.each_with_index do |(level_class, entries, mixed), index|
+          return UNKNOWN if level_class && unread.key?(level_class)
+
           refining = level_class && targets[level_class]
           return Winner.new(module_name: refining, refined_class: level_class) if refining
-          return targeted_after?(levels, index, targets) ? UNKNOWN : nil if mixed
+          return targeted_after?(levels, index, targets, unread) ? UNKNOWN : nil if mixed
 
-          entries.each do |entry|
-            refining = entry == level_class ? nil : targets[entry]
-            return Winner.new(module_name: refining, refined_class: entry) if refining
-            return nil if defines?(scope, entry, method_name)
-          end
+          answer = walk_entries(scope, entries, level_class, method_name, targets, unread)
+          return answer unless answer == :continue
         end
         nil
       end
 
-      def targeted_after?(levels, index, targets)
-        levels.drop(index).any? { |_level_class, entries| entries.any? { |entry| targets.key?(entry) } }
+      # A level's prepended modules, its own method and its included modules, in that order: `:continue` when none
+      # answers, so the walk moves on.
+      def walk_entries(scope, entries, level_class, method_name, targets, unread)
+        entries.each do |entry|
+          unless entry == level_class
+            return UNKNOWN if unread.key?(entry)
+
+            refining = targets[entry]
+            return Winner.new(module_name: refining, refined_class: entry) if refining
+          end
+          return nil if defines?(scope, entry, method_name)
+        end
+        :continue
+      end
+
+      def targeted_after?(levels, index, targets, unread)
+        levels.drop(index).any? do |_level_class, entries|
+          entries.any? { |entry| targets.key?(entry) || unread.key?(entry) }
+        end
       end
 
       # `[[level class, [entries in lookup order], mixed], …]` for an instance of `class_name`, or nil when the walk

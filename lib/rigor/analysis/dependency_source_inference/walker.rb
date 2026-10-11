@@ -6,6 +6,7 @@ require_relative "return_type_heuristic"
 require_relative "../../source/constant_path"
 require_relative "../../source/node_children"
 require_relative "../../inference/scope_indexer"
+require_relative "../../inference/refine_census"
 
 module Rigor
   module Analysis
@@ -152,6 +153,7 @@ module Rigor
               return walk_refine_body(node, target, qualified_prefix, in_singleton_class, harvest, budget)
             end
 
+            record_unreadable_target(node, qualified_prefix, in_singleton_class, harvest) if node.name == :refine
             walk_children(node, qualified_prefix, in_singleton_class, harvest, budget)
           else
             walk_children(node, qualified_prefix, in_singleton_class, harvest, budget)
@@ -208,23 +210,36 @@ module Rigor
         # recorded). None reaches the catalogue. A `refine` with no enclosing module, or in a block under
         # `class << self`, names no refining module, so its defs are dropped. Declarations nested in the body still
         # walk under the lexical prefix, as they did before.
+        #
+        # ADR-121 WD7 — the names are what `Inference::RefineCensus.read_body` reads, the project walk's reading, with
+        # a names-wildcard row for a body whose names are incomplete.
         def walk_refine_body(node, target, qualified_prefix, in_singleton_class, harvest, budget)
           body = node.block.body
           return if body.nil?
 
           unless qualified_prefix.empty? || in_singleton_class
-            refining = qualified_prefix.join("::")
             targets = Inference::ScopeIndexer.constant_receiver_candidates(target, qualified_prefix)
-            Inference::ScopeIndexer.each_refinement_def(body) do |def_node|
-              targets.each { |class_name| record_refinement(harvest.refinements, class_name, def_node.name, refining) }
-            end
+            Inference::RefineCensus.record_rows(harvest.refinements, targets, Inference::RefineCensus.read_body(body),
+                                                qualified_prefix.join("::"))
           end
           walk_refine_declarations(body, qualified_prefix, harvest, budget)
         end
 
-        def record_refinement(refinements, class_name, method_name, refining)
-          modules = ((refinements[class_name] ||= {})[method_name] ||= [])
-          modules << refining unless modules.include?(refining)
+        # ADR-121 WD7 — a `refine` with a literal block whose target the walk cannot name (`refine(k)`), recorded as
+        # the project walk records it: the body's names under the wildcard class, plus a names-wildcard row when they
+        # are incomplete. A call on another receiver, with no literal block, where `self` is a class (#1689) or with
+        # no enclosing module records nothing, as {#walk_refine_body} drops a body whose module it cannot name. The
+        # block still walks as it did.
+        def record_unreadable_target(node, qualified_prefix, in_singleton_class, harvest)
+          return if qualified_prefix.empty? || in_singleton_class || !Inference::ScopeIndexer.refine_call?(node)
+
+          harvest.in_effect ||= Inference::InEffectRefinements.new(harvest.root)
+          return if harvest.in_effect.class_body_refine?(node)
+
+          wildcard = Scope::DiscoveryIndex::REFINEMENT_WILDCARD
+          Inference::RefineCensus.record_rows(harvest.refinements, [wildcard],
+                                              Inference::RefineCensus.read_body(node.block.body),
+                                              qualified_prefix.join("::"))
         end
 
         # The class / module declarations inside a refine body, walked as before; nothing else in it is.

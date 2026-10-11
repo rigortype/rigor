@@ -3286,7 +3286,7 @@ module Rigor
       # walk worked out for it ({#refine_context}).
       MethodTables = Struct.new(:existence, :envelopes, :refinements, :certainty, :certain, :possible,
                                 :contested_envelopes, :contested_def_nodes, :root, :in_effect, :census,
-                                :refine_text, :literal_seen, :source_bytes, :loose_constants) do
+                                :refine_text, :literal_seen, :source_bytes, :loose_constants, :block_spans) do
         # {ScopeIndexer.module_refine_target} against this tree's {InEffectRefinements}.
         def refine_target_of(node)
           return nil if ScopeIndexer.refine_target(node).nil?
@@ -3335,6 +3335,15 @@ module Rigor
         def loose_constant?(segment)
           self.loose_constants ||= ScopeIndexer.loose_constant_segments(root)
           loose_constants.include?(segment)
+        end
+
+        # Issue #1820 — does `node` sit inside a block or lambda of this tree? A block's `self` may be an object even in
+        # a class body or at the top level (`s.instance_eval { … }`, a `define_method` block). The spans are found once
+        # per file, on the first ask.
+        def in_block?(node)
+          self.block_spans ||= ScopeIndexer.block_spans(root)
+          offset = node.location.start_offset
+          block_spans.any? { |start, stop| offset >= start && offset < stop }
         end
 
         # Sets {#certain} for the contribution `node` and returns the tables.
@@ -3401,6 +3410,20 @@ module Rigor
       end
 
       # Is one of the ascending `offsets` in `[start, stop)`?
+      # The `[start, end)` byte span of every block and lambda in `root`.
+      def block_spans(root)
+        spans = []
+        return spans if root.nil?
+
+        Source::NodeWalker.each(root) do |node|
+          next unless node.is_a?(Prism::BlockNode) || node.is_a?(Prism::LambdaNode)
+
+          location = node.location
+          spans << [location.start_offset, location.end_offset]
+        end
+        spans
+      end
+
       def offset_in?(offsets, start, stop)
         index = offsets.bsearch_index { |offset| offset >= start }
         !index.nil? && offsets[index] < stop
@@ -3853,6 +3876,10 @@ module Rigor
           # still decline. The lexical cref below is unnameable in every case.
           singleton_prefix = singleton_body_prefix(node, in_singleton_class, owner_prefix,
                                                    qualified_prefix)
+          tables = methods_acc.at(node)
+          if !node.expression.is_a?(Prism::SelfNode) || tables.in_block?(node)
+            record_singleton_body_prepends(node, qualified_prefix, tables)
+          end
           walk_methods_and_def_nodes(node.expression, qualified_prefix, in_singleton_class,
                                      methods_acc, def_nodes_acc, source_path, def_owner_prefix,
                                      singleton_cref: singleton_cref,
@@ -3870,6 +3897,7 @@ module Rigor
           return
         when Prism::ConstantWriteNode, Prism::ConstantPathWriteNode, Prism::ConstantOrWriteNode,
              Prism::ConstantPathOrWriteNode
+          record_meta_superclass(node, qualified_prefix, def_owner_prefix, methods_acc.at(node))
           if (split = meta_new_block_split(node, qualified_prefix, def_owner_prefix, singleton_cref))
             enclosing, body, body_self = split
             # A meta-new block rebinds only `self` — `Module.nesting` stays lexical — so
@@ -3938,6 +3966,9 @@ module Rigor
           end
           anonymous = record_call_node_methods(node, owner_prefix, in_singleton_class, methods_acc.at(node),
                                                source_path)
+          tables = methods_acc.at(node)
+          record_singleton_prepend(node, qualified_prefix, tables,
+                                   self_ok: node.name == :prepend && tables.in_block?(node))
           # Issue #1120 — a refine body's defs go to the refinement table and nowhere else.
           if (target = methods_acc.refine_target_of(node))
             return record_literal_target_refine(node, target, qualified_prefix, owner_prefix, methods_acc)
@@ -4010,6 +4041,18 @@ module Rigor
       end
 
       # The block form of a meta-new constant write: its members, and the module mark `Module.new` earns.
+      # Issue #1820 — `K = Class.new(Parent)`, with or without a block, names a class whose superclass the superclass
+      # table leaves out; it takes {Scope::DiscoveryIndex::ENVELOPE_META_SUPERCLASS_MARK}.
+      def record_meta_superclass(node, qualified_prefix, self_base, tables)
+        rvalue = meta_new_rvalue(node)
+        return unless class_new_call?(rvalue) && !(rvalue.arguments&.arguments || []).empty?
+
+        child_prefix = meta_new_child_prefix(node, qualified_prefix, self_base)
+        return if child_prefix.nil? || child_prefix.empty?
+
+        record_surface_mark(tables, child_prefix.join("::"), Scope::DiscoveryIndex::ENVELOPE_META_SUPERCLASS_MARK)
+      end
+
       def record_meta_new_facts(rvalue, child_prefix, tables)
         record_meta_members(rvalue, child_prefix, tables)
         # `Module.new(&BODY)`: the body runs on the new module but cannot be read, so its surface is unknown (#1816).
@@ -4411,13 +4454,54 @@ module Rigor
         return if def_node.body.nil?
 
         Source::NodeWalker.each(def_node.body) do |node|
+          if node.is_a?(Prism::SingletonClassNode)
+            record_singleton_body_prepends(node, qualified_prefix, tables)
+            next
+          end
           next unless node.is_a?(Prism::CallNode)
 
           if node.name == :extend
             record_object_extension(node, qualified_prefix, tables)
           elsif SURFACE_EVAL_CALLS.include?(node.name) || SURFACE_NAMING_CALLS.include?(node.name)
             record_body_rewrite(node, qualified_prefix, tables)
+          else
+            record_singleton_prepend(node, qualified_prefix, tables, self_ok: true)
           end
+        end
+      end
+
+      # Issue #1820 — `obj.singleton_class.prepend(M)`, or `prepend M` in a `class << obj` body, puts `M` ahead of
+      # `obj`'s class even when the class already includes it (`prepend` re-inserts it; `extend` would not), so
+      # `M`'s refinement answers first for that object. `M` takes {Scope::DiscoveryIndex::ENVELOPE_OBJECT_EXTENDED_MARK},
+      # the mark an `extend` in a method body already leaves: an object of any class may carry its instance methods
+      # ahead of its class's own. A `singleton_class` of `self` (and a `class << self` body, which the caller leaves
+      # out) written directly in a class or module body or at the top level is the class object's or `main`'s, not an
+      # instance's; in a method body or any block (`self_ok`), where `self` may be an object, it counts.
+      # `singleton_body` says the call sits in a `class << obj` body.
+      def record_singleton_prepend(node, qualified_prefix, tables, singleton_body: false, self_ok: false)
+        return unless node.name == :prepend
+
+        receiver = node.receiver
+        singleton = singleton_body && (receiver.nil? || receiver.is_a?(Prism::SelfNode))
+        singleton ||= singleton_class_call?(receiver, self_ok)
+        record_object_extension(node, qualified_prefix, tables) if singleton
+      end
+
+      def singleton_class_call?(receiver, self_ok)
+        return false unless receiver.is_a?(Prism::CallNode) && receiver.name == :singleton_class
+        return false unless receiver.arguments.nil?
+
+        object = receiver.receiver
+        self_ok || !(object.nil? || object.is_a?(Prism::SelfNode))
+      end
+
+      def record_singleton_body_prepends(node, qualified_prefix, tables)
+        return if node.body.nil?
+
+        Source::NodeWalker.each(node.body) do |inner|
+          next unless inner.is_a?(Prism::CallNode)
+
+          record_singleton_prepend(inner, qualified_prefix, tables, singleton_body: true, self_ok: true)
         end
       end
 
@@ -7548,8 +7632,22 @@ module Rigor
         class_name = qualified_prefix.join("::")
         undef_node.names.each do |name|
           method_name = literal_method_name(name)
-          record_method_envelope_opaque(tables, class_name, method_name) if method_name
+          next unless method_name
+
+          record_method_envelope_opaque(tables, class_name, method_name)
+          record_removed_name(tables, class_name, method_name)
         end
+      end
+
+      REMOVING_CALLS = %i[remove_method undef_method].to_set.freeze
+      private_constant :REMOVING_CALLS
+
+      # Issue #1820 — `undef f`, `remove_method :f` or `undef_method :f` on the class, as its own entry beside the
+      # opaque envelopes: an `attr_*` or `define_method` records an opaque envelope too, so only this says the name
+      # is gone.
+      def record_removed_name(tables, class_name, method_name)
+        record_envelope(tables.envelopes, class_name, [Scope::DiscoveryIndex::ENVELOPE_REMOVED_KIND, method_name],
+                        Source::ParameterEnvelope::OPAQUE)
       end
 
       # Both kinds, and the envelope table only: the evidence says something rewrites the name, not which
@@ -7621,11 +7719,18 @@ module Rigor
           # Issue #1689 — a `refine` where `self` is a class is the class's own method, and refines nothing.
           record_refinement(node, qualified_prefix, tables) unless tables.class_body_refine?(node)
         elsif !NAME_NEUTRAL_MACROS.include?(node.name)
-          (node.arguments&.arguments || []).each do |argument|
-            # `memoize def f(a)` wraps the def it is handed exactly as `memoize :f` does.
-            method_name = argument.is_a?(Prism::DefNode) ? argument.name : literal_method_name(argument)
-            record_method_envelope_opaque(tables, class_name, method_name) if method_name
-          end
+          record_named_arguments_opaque(node, class_name, tables)
+        end
+      end
+
+      def record_named_arguments_opaque(node, class_name, tables)
+        (node.arguments&.arguments || []).each do |argument|
+          # `memoize def f(a)` wraps the def it is handed exactly as `memoize :f` does.
+          method_name = argument.is_a?(Prism::DefNode) ? argument.name : literal_method_name(argument)
+          next unless method_name
+
+          record_method_envelope_opaque(tables, class_name, method_name)
+          record_removed_name(tables, class_name, method_name) if REMOVING_CALLS.include?(node.name)
         end
       end
 

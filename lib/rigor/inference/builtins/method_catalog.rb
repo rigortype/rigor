@@ -48,6 +48,9 @@ module Rigor
           new(path: File.join(DATA_ROOT, "#{topic}.yml"), mutating_selectors: mutating_selectors)
         end
 
+        # Every catalogue file under {DATA_ROOT}, in a stable order.
+        def self.topic_paths = Dir[File.join(DATA_ROOT, "*.yml")]
+
         def initialize(path:, mutating_selectors: {})
           @path = path
           @mutating_selectors = mutating_selectors.transform_values(&:freeze).freeze

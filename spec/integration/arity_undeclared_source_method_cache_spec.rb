@@ -142,6 +142,18 @@ RSpec.describe "call.wrong-arity on an undeclared source method through the cach
       expect(incremental_rows).to eq([[], true])
     end
 
+    # Issue #1820 — a subclass recording a different envelope makes the call decline (a value typed as `A` may be a
+    # `Kid`), and its file names nothing the caller read: the parent's subclass edge re-checks it.
+    it "re-checks a caller when another file declares a subclass with a different envelope" do
+      write_project
+      write("lib/wrap.rb", "class Unrelated\nend\n")
+      expect(incremental_rows).to eq([firing, false])
+
+      write("lib/wrap.rb", "class Kid < A\n  def f(a, b) = a\nend\n")
+      expect(incremental_rows).to eq([[], true])
+      expect(arity_rows(full_run(nil))).to eq([])
+    end
+
     it "re-checks the caller when another file wraps the method, matching a full run" do
       write_project
       root = File.join(Dir.pwd, ".rigor", "cache")

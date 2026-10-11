@@ -371,6 +371,7 @@ class CInitParser
     # registration) do not leak unbalanced parens into `join_continuations`'s state machine. Line numbers MUST be
     # preserved — we replace comment characters with spaces and keep newlines intact rather than collapsing the file.
     @lines = strip_block_comments(File.read(path, encoding: "UTF-8")).each_line.to_a
+    @disabled = disabled_lines(@lines)
   end
 
   def parse
@@ -487,6 +488,41 @@ class CInitParser
     out
   end
 
+  # The line numbers of every `#if 0 … #endif` region (nested conditionals counted, an `#else` / `#elif` of the region
+  # itself ending it). CRuby keeps registrations there for RDoc only: `random.c`'s `#if 0 /* for RDoc: it can't
+  # handle unnamed base class */` block registers `Random#seed`, `#rand`, `#bytes` and `#initialize`, which run on
+  # `Random::Base`. A definition in such a region is recorded with `rdoc_only: true`, so the fold catalogue keeps
+  # its entry while a reader asking which class CRuby defines a method on (`CRubyDefiners`) can leave it out.
+  def disabled_lines(lines)
+    disabled = Set.new
+    depth = 0
+    lines.each_with_index do |line, index|
+      if depth.zero?
+        next unless line.match?(/\A\s*#\s*if\s+0\b/)
+
+        depth = 1
+      else
+        depth = disabled_depth(line, depth)
+      end
+      disabled << (index + 1)
+    end
+    disabled
+  end
+
+  def disabled_depth(line, depth)
+    case line[/\A\s*#\s*(if|ifdef|ifndef|elif|else|endif)\b/, 1]
+    when "if", "ifdef", "ifndef" then depth + 1
+    when "endif" then depth - 1
+    when "elif", "else" then depth == 1 ? 0 : depth
+    else depth
+    end
+  end
+
+  def rdoc_only(record, lineno)
+    record["rdoc_only"] = true if @disabled.include?(lineno)
+    record
+  end
+
   def loc(lineno)
     "#{@relative_path}:#{lineno}"
   end
@@ -496,7 +532,8 @@ class CInitParser
 
     var, name, parent_var = m.captures
     var_to_class[var] = name
-    classes[name] = { "parent" => var_to_class.fetch(parent_var, parent_var), "defined_at" => loc(lineno) }
+    classes[name] = rdoc_only({ "parent" => var_to_class.fetch(parent_var, parent_var), "defined_at" => loc(lineno) },
+                              lineno)
     true
   end
 
@@ -527,11 +564,11 @@ class CInitParser
     return false unless (m = line.match(DEFINE_METHOD_RE))
 
     klass_var, selector, cfunc, arity = m.captures
-    methods << {
-      "class" => var_to_class.fetch(klass_var, klass_var),
-      "selector" => selector, "kind" => "instance",
-      "cfunc" => cfunc, "arity" => Integer(arity), "defined_at" => loc(lineno)
-    }
+    methods << rdoc_only({
+                           "class" => var_to_class.fetch(klass_var, klass_var),
+                           "selector" => selector, "kind" => "instance",
+                           "cfunc" => cfunc, "arity" => Integer(arity), "defined_at" => loc(lineno)
+                         }, lineno)
     true
   end
 
@@ -539,11 +576,11 @@ class CInitParser
     return false unless (m = line.match(DEFINE_SINGLETON_RE))
 
     klass_var, selector, cfunc, arity = m.captures
-    methods << {
-      "class" => var_to_class.fetch(klass_var, klass_var),
-      "selector" => selector, "kind" => "singleton",
-      "cfunc" => cfunc, "arity" => Integer(arity), "defined_at" => loc(lineno)
-    }
+    methods << rdoc_only({
+                           "class" => var_to_class.fetch(klass_var, klass_var),
+                           "selector" => selector, "kind" => "singleton",
+                           "cfunc" => cfunc, "arity" => Integer(arity), "defined_at" => loc(lineno)
+                         }, lineno)
     true
   end
 
@@ -1179,6 +1216,7 @@ class CatalogBuilder # rubocop:disable Metrics/ClassLength
         "includes" => [], "constants" => {}, "aliases" => {},
         "instance_methods" => {}, "singleton_methods" => {}, "undefined" => []
       }
+      classes[name]["rdoc_only"] = true if info["rdoc_only"]
     end
     classes
   end
@@ -1194,6 +1232,7 @@ class CatalogBuilder # rubocop:disable Metrics/ClassLength
       }
       apply_c_classification(record, entry["cfunc"])
       apply_rbs(record, entry["class"], entry["selector"], entry["kind"])
+      record["rdoc_only"] = true if entry["rdoc_only"]
       bucket[entry["selector"]] = record
     end
 

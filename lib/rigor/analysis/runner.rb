@@ -642,11 +642,16 @@ module Rigor
       # detect a class that *appeared* in an edit so a subclass whose ancestor was previously undefined
       # (and so recorded a negative class edge) is re-checked. Inverts the project class-source attribution
       # (class → declaring files).
+      #
+      # Issue #1820 — each file's set also holds a `[class, superclass as written]` pair for every class it declares
+      # with a superclass, so a subclass appearing or vanishing re-checks the consumers that enumerated the parent's
+      # subclasses (`subclass_of:<last segment>`).
       def class_declarations
         result = Hash.new { |hash, key| hash[key] = Set.new }
         @project_discovered_class_sources.each do |class_name, files|
           files.each { |file| result[file] << class_name }
         end
+        Incremental.add_superclass_edges(result, @project_discovered_class_sources, @project_discovered_superclasses)
         result.transform_values(&:freeze).freeze
       end
 

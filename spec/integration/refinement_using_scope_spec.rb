@@ -611,6 +611,567 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
       expect(cold).to eq([["plain.rb", 1, "call.argument-type-mismatch"]])
       expect(warm).to eq(cold)
     end
+
+    # Issue #1740 — Ruby finds a method the receiver's class (or a nearer ancestor) defines before it consults an
+    # ancestor's refinement, so the argument checks report there, and only where Rigor can prove that definer and
+    # that no refinement in effect may answer first. Every reported line raises on Ruby 4.0.5; every silent line
+    # under a `using` returns the refinement's answer there, and its control line (no `using`) reports.
+    describe "of an ancestor (#1740)" do
+      let(:ancestors) do
+        <<~RUBY
+          module ObjCenter; refine(Object) { def center(a, b, c) = a }; end
+          module KernCenter; refine(Kernel) { def center(a, b, c) = a }; end
+          module ObjIndex; refine(Object) { def [](other) = other }; end
+          module NumDigits; refine(Numeric) { def digits(a, b, c) = a; def floor(a, b, c) = a }; end
+          module NumQuo; refine(Numeric) { def quo(a, b, c) = a }; end
+          module CmpClamp; refine(Comparable) { def clamp(a, b, c) = a }; end
+          module IOPath; refine(IO) { def to_path(a, b, c) = 1 }; end
+          module ObjOld; refine(Object) { def &(a, b) = :ref; def taint(a, b) = :ref }; end
+        RUBY
+      end
+
+      before { write("lib/ancestors.rb", ancestors) }
+
+      def write_class(name, body, signature)
+        write("lib/#{name.downcase}.rb", "class #{name}\n#{body}end\n")
+        write("sig/#{name.downcase}.rbs", "class #{name}\n#{signature}end\n")
+      end
+
+      def controls(lines) = lines.map { |line| ["control.rb", line, "call.wrong-arity"] }
+
+      # `String#center`, `Symbol#[]`, `Integer#digits`, `Integer#floor` and `Own#center` answer: the CRuby catalogue
+      # proves the core definers, `Own`'s certain `def` its own.
+      it "keeps checking a method the receiver's class defines itself" do
+        write_class("Own", "  def center(width) = width\n", "  def center: (Integer) -> Integer\n")
+        write("lib/object.rb", "using ObjCenter\n\"x\".center(1, 2, 3)\nOwn.new.center(1, 2, 3)\n")
+        write("lib/kernel.rb", "using KernCenter\n\"x\".center(1, 2, 3)\n")
+        write("lib/index.rb", "using ObjIndex\n:authors[:age]\n")
+        write("lib/numeric.rb", "using NumDigits\n1.digits(1, 2, 3)\n1.floor(1, 2, 3)\n")
+
+        expect(call_rows).to eq(
+          [["index.rb", 2, "call.argument-type-mismatch"], ["kernel.rb", 2, "call.wrong-arity"],
+           ["numeric.rb", 2, "call.wrong-arity"], ["numeric.rb", 3, "call.wrong-arity"],
+           ["object.rb", 2, "call.wrong-arity"], ["object.rb", 3, "call.wrong-arity"]]
+        )
+      end
+
+      # `Comparable#clamp` is the owner. Core RBS declares `Integer#quo`, `File#to_path`, `Process::Status#&` and
+      # `Pathname#taint`, but CRuby defines the first two on `Numeric` and `IO` and the last two nowhere.
+      it "declines where the catalogue does not prove the definer below the refinement" do
+        write_class("Probe", "  def self.status = Process::Status.allocate\n  def self.path = Pathname.new(\"x\")\n",
+                    "  def self.status: () -> Process::Status\n  def self.path: () -> Pathname\n")
+        calls = "\"a\".clamp(1, 2, 3)\n1.quo(1, 2, 3)\nFile.new(__FILE__).to_path(1, 2, 3)\n" \
+                "Probe.status.&(1, 2)\nProbe.path.taint(1, 2)\n"
+        write("lib/use.rb", "using CmpClamp\nusing NumQuo\nusing IOPath\nusing ObjOld\n#{calls}")
+        write("lib/control.rb", calls)
+
+        expect(call_rows).to eq(controls(1..5))
+      end
+
+      # `GemRef` lives outside the analysed paths, and so does the `B` that `A` includes. Each refines `String#center`
+      # (Ruby prints `:gem`, `:b`), so the opaque module keeps the decline.
+      it "declines while an in-effect module is opaque" do
+        write("vendor/gem_ref.rb", "module GemRef; refine(String) { def center(a, b, c) = :gem }; end\n")
+        write("vendor/b.rb", "module B; refine(String) { def center(a, b, c) = :b }; end\n")
+        write("lib/mixer.rb", "module A\n  include B\n  refine(Integer) { def x = 1 }\nend\n")
+        write("lib/gem_use.rb", "using ObjCenter\nusing GemRef\n\"s\".center(1, 2, 3)\n")
+        write("lib/mixer_use.rb", "using ObjCenter\nusing A\n\"x\".center(1, 2, 3)\n")
+
+        expect(call_rows).to eq([])
+      end
+
+      # Ruby prints `:alias_method`, `:dm` and `:imported`: each refine body defines `String#center` other than by
+      # `def`, which the table records as the name or as a names-wildcard.
+      it "declines while an in-effect refine body defines the name other than by `def`" do
+        write("lib/str_refs.rb", <<~RUBY)
+          module StrAlias; refine(String) { def c3(a, b, c) = :alias_method; alias_method :center, :c3 }; end
+          module StrDefine; refine(String) { def other = 1; define_method(:center) { |a, b, c| :dm } }; end
+          module Helper; def center(a, b, c) = :imported; end
+          module StrImport; refine(String) { import_methods Helper; def shout = upcase }; end
+        RUBY
+        %w[Alias Define Import].each do |kind|
+          write("lib/#{kind.downcase}_use.rb", "using ObjCenter\nusing Str#{kind}\n\"x\".center(1, 2, 3)\n")
+        end
+
+        expect(call_rows).to eq([])
+      end
+
+      # Issue #1797. On Ruby 4.0.5 `Inc#bar` answers ahead of the refinement of the module `Inc` includes, and a
+      # refinement of another name on `Base` leaves `Kid#center` answering, with and without a `using`: each raises.
+      # `RK` refines `Kid` itself and answers (`1`).
+      it "keeps checking a class's own method ahead of a refined module or superclass" do
+        write("lib/inc.rb", "module N; end\nclass Inc\n  def bar(a) = a\n  include N\nend\n" \
+                            "module M; refine(N) { def bar(a, b, c) = :n }; end\n")
+        write("lib/kid.rb", "class Base; def other = 0; end\nmodule RB; refine(Base) { def other = 1 }; end\n" \
+                            "class Kid < Base; def center(a) = a; end\n" \
+                            "module RK; refine(Kid) { def center(a, b, c) = 1 }; end\n")
+        write("lib/inc_use.rb", "using M\nInc.new.bar(1, 2, 3)\n")
+        write("lib/plain.rb", "Kid.new.center(1, 2, 3)\n")
+        write("lib/base_use.rb", "using RB\nKid.new.center(1, 2, 3)\n")
+        write("lib/kid_use.rb", "using RK\nKid.new.center(1, 2, 3)\n")
+
+        expect(call_rows).to eq(
+          [["base_use.rb", 2, "call.wrong-arity"], ["inc_use.rb", 2, "call.wrong-arity"],
+           ["plain.rb", 1, "call.wrong-arity"]]
+        )
+      end
+
+      # Critique F3. Ruby 4.0.5 answers `:refined` for each call: with the variable unset no definer runs, and
+      # `Object`'s refinement answers. A definer that may not have run proves nothing, however it defines.
+      it "declines over a definer that may not have run" do
+        body = <<~RUBY.gsub(/^/, "  ")
+          if ENV["RIGOR_PROBE_X"]
+            def center(a) = a
+            attr_reader :ljust
+            define_method(:rjust) { |a| a }
+          end
+        RUBY
+        signature = "  def center: (untyped) -> untyped\n  def ljust: () -> untyped\n  def rjust: (untyped) -> void\n"
+        write_class("Own", body, signature)
+        write("lib/ro.rb", "module RO\n  refine(Object) { def center(a, b, c) = 1; def ljust(a, b, c) = 1; " \
+                           "def rjust(a, b, c) = 1 }\nend\n")
+        calls = "Own.new.center(1, 2, 3)\nOwn.new.ljust(1, 2, 3)\nOwn.new.rjust(1, 2, 3)\n"
+        write("lib/use.rb", "using RO\n#{calls}")
+        write("lib/control.rb", calls)
+
+        expect(call_rows).to eq(controls(1..3))
+      end
+
+      # Critique F4. A value typed as `Base`, as `Typed` (its method declared in `sig/`) or as `String` may be an
+      # instance of the refined subclass, and the value `Opener.io` (`-> IO`) answers is a `File`, a subclass RBS
+      # declares: for such a value Ruby 4.0.5 answers `:kid`, `:typed_kid`, `:mystr` and `:file`.
+      it "declines where a refinement in effect refines a subclass of the receiver's class" do
+        write("lib/base.rb", "class Base; def center(a) = a; end\nclass Kid < Base; end\n" \
+                             "module KidRef; refine(Kid) { def center(a, b, c) = :kid }; end\n")
+        write_class("Typed", "  def ljust(a) = a\n", "  def ljust: (untyped) -> untyped\n")
+        write("lib/typed_kid.rb", "class TypedKid < Typed; end\n" \
+                                  "module TypedRef; refine(TypedKid) { def ljust(a, b, c) = :typed_kid }; end\n")
+        write("lib/my_str.rb", "class MyStr < String; end\n" \
+                               "module StrRef; refine(MyStr) { def rjust(a, b, c) = :mystr }; end\n")
+        write_class("Opener", "  def self.io = File.new(__FILE__)\n", "  def self.io: () -> IO\n")
+        write("lib/file_ref.rb", "module FileRef; refine(File) { def fsync(a, b, c) = :file }; end\n")
+        calls = "Base.new.center(1, 2, 3)\nTyped.new.ljust(1, 2, 3)\n\"x\".rjust(1, 2, 3)\nOpener.io.fsync(1, 2, 3)\n"
+        write("lib/use.rb", "using KidRef\nusing TypedRef\nusing StrRef\nusing FileRef\n#{calls}")
+        write("lib/control.rb", calls)
+
+        expect(call_rows).to eq(controls(1..4))
+      end
+
+      # Ruby 4.0.5 answers `:kid`, `:cmp`, `:mys4` and `:vkid`: `Kid < Object.const_get(:Base)` and the two
+      # `Class.new(String)` classes are subclasses the superclass table does not record, and `VKid`'s superclass
+      # `VendorBase < Typed` is declared outside the analysed paths. A refined class must be placed by a fully read
+      # chain, and a class whose superclass is unknown may be a subclass of any class.
+      it "declines where a refined class or a subclass has a superclass the tables do not know" do
+        write_class("Typed", "  def center(a) = a\n  def chop(a) = a\n",
+                    "  def center: (untyped) -> untyped\n  def chop: (untyped) -> untyped\n")
+        write("lib/unknown.rb", <<~RUBY)
+          class Kid < Object.const_get(:Typed); end
+          module KidRef; refine(Kid) { def center(a, b, c) = :kid }; end
+          MyS2 = Class.new(String) { prepend Comparable }
+          module CmpRef; refine(Comparable) { def ljust(a, b, c) = :cmp }; end
+          MyS4 = Class.new(String)
+          module S4Ref; refine(MyS4) { def rjust(a, b, c) = :mys4 }; end
+          class VKid < VendorBase; end
+          module VKidRef; refine(VKid) { def chop(a, b, c) = :vkid }; end
+        RUBY
+        write("vendor/v.rb", "class VendorBase < Typed; end\n")
+        calls = "Typed.new.center(1, 2, 3)\n\"x\".ljust(1, 2, 3)\n\"x\".rjust(1, 2, 3)\nTyped.new.chop(1, 2, 3)\n"
+        write("lib/use.rb", "using KidRef\nusing CmpRef\nusing S4Ref\nusing VKidRef\n#{calls}")
+        write("lib/control.rb", calls)
+
+        expect(call_rows).to eq(controls(1..4))
+      end
+
+      # `Sub` prepends `N` again ahead of `Host#ljust`, and a String may extend `Ext`, a refined module the receiver's
+      # levels do not hold: Ruby 4.0.5 answers `:n` for a `Sub` and `:ext` for an extended String. A refined module a
+      # class prepends answers ahead of its own method, `NE` (no methods) as well: `:np`, `:ne`.
+      it "declines where a class or its subclass prepends a refined module, or a value may extend one" do
+        write("lib/host.rb", <<~RUBY)
+          module N; end
+          class Host; include N; def ljust(a) = a; end
+          class Sub < Host; prepend N; end
+          module NRef; refine(N) { def ljust(a, b, c) = :n }; end
+          module Ext; end
+          module ExtRef; refine(Ext) { def chop(a, b, c) = :ext }; end
+        RUBY
+        write("sig/host.rbs", "module N\nend\nclass Host\n  include N\n  def ljust: (untyped) -> untyped\nend\n")
+        write("lib/pre.rb", <<~RUBY)
+          module NP; def x = 1; end
+          module NE; end
+          class Pre; prepend NP; def center(a) = a; end
+          class PreE; prepend NE; def ljust(a) = a; end
+          module NPRef; refine(NP) { def center(a, b, c) = :np }; end
+          module NERef; refine(NE) { def ljust(a, b, c) = :ne }; end
+        RUBY
+        calls = "Host.new.ljust(1, 2, 3)\n\"y\".chop(1, 2, 3)\nPre.new.center(1, 2, 3)\nPreE.new.ljust(1, 2, 3)\n"
+        write("lib/use.rb", "using NRef\nusing ExtRef\nusing NPRef\nusing NERef\n#{calls}")
+        write("lib/control.rb", calls)
+
+        expect(call_rows).to eq(controls(1..4))
+      end
+
+      # Ruby 4.0.5 answers `:cmp` and `:kernel`: a `prepend` onto an object's singleton class puts the module ahead of
+      # the object's class even though the class already includes it, so its refinement answers first.
+      it "declines where code prepends a refined module the class holds to an object's singleton class" do
+        write("lib/prepends.rb", <<~RUBY)
+          module RC; refine(Comparable) { def ljust(a, b, c) = :cmp }; end
+          s = +"x"
+          s.singleton_class.prepend(Comparable)
+          class Wrap
+            def self.loud(obj)
+              class << obj
+                prepend Kernel
+              end
+              obj
+            end
+          end
+        RUBY
+        write("lib/use.rb", "using RC\nusing KernCenter\n\"x\".ljust(1, 2, 3)\n\"x\".center(1, 2, 3)\n")
+        write("lib/control.rb", "\"x\".ljust(1, 2, 3)\n\"x\".center(1, 2, 3)\n")
+
+        expect(call_rows).to eq(controls(1..2))
+      end
+
+      # No refinement here. Ruby 4.0.5 answers `true` for `Bar.new.between?(1, 2)` (Comparable's, ahead of
+      # `Foo#between?`) and raises for `Baz` and `Repo`. A singleton prepend, a `class << self` prepend and an
+      # `extend` naming `Comparable` do not make it a project module with no `between?`, and a `class << self`
+      # prepend of `Finders` in a class body is the class object's, not every object's, so `Repo#find` stays checked;
+      # an empty project module is still the project's.
+      it "keeps the arity rule's mixin reading where a mark names a module the project does not declare" do
+        write("lib/marks.rb", <<~RUBY)
+          x = Object.new
+          x.singleton_class.prepend(Comparable)
+          class Model; class << self; prepend Comparable; end; end
+          class Deco; def self.wrap(o) = o.extend(Comparable); end
+          module Finders; def find(*args) = super; end
+          class Store; def self.find(id) = id; class << self; prepend Finders; end; end
+        RUBY
+        write("lib/use.rb", <<~RUBY)
+          class Foo; def between?(a) = a; end
+          class Bar < Foo; include Comparable; def <=>(other) = 0; end
+          module Helper; end
+          class Baz < Foo; include Helper; end
+          class Repo; def find(id) = id; end
+          Bar.new.between?(1, 2)
+          Baz.new.between?(1, 2)
+          Repo.new.find(1, 2)
+        RUBY
+
+        expect(call_rows).to eq([["use.rb", 7, "call.wrong-arity"], ["use.rb", 8, "call.wrong-arity"]])
+      end
+
+      # No refinement here. Ruby 4.0.5 answers `[1, 2]` for the first three calls: a module the project rewrites
+      # dynamically (a computed `define_method` in a `module_eval` or `class_eval` block, an `include` of a
+      # non-constant), whether core or vendored with a signature, may define the name ahead of `Base#foo`, so the
+      # arity rule keeps it on the chain. `HostQ` includes an untouched vendored module and raises.
+      it "keeps a module the project rewrites dynamically on the arity rule's chain" do
+        write("vendor/m.rb", "module M; end\nmodule N; end\nmodule Loud; def foo(*a) = a; end\nmodule Quiet; end\n")
+        write("sig/m.rbs", "module M\nend\nmodule N\nend\nmodule Quiet\nend\n")
+        write("lib/use.rb", <<~RUBY)
+          Comparable.module_eval { define_method(["ze", "ta"].join) { |*a| a } }
+          M.class_eval { define_method(["f", "oo"].join) { |*a| a } }
+          N.include(Object.const_get(:Loud))
+          class Base; def zeta(a) = a; def foo(a) = a; end
+          class Host < Base; include Comparable; end
+          class HostM < Base; include M; end
+          class HostN < Base; include N; end
+          class HostQ < Base; include Quiet; end
+          Host.new.zeta(1, 2)
+          HostM.new.foo(1, 2)
+          HostN.new.foo(1, 2)
+          HostQ.new.foo(1, 2)
+        RUBY
+
+        expect(call_rows).to eq([["use.rb", 12, "call.wrong-arity"]])
+      end
+
+      # Ruby 4.0.5 answers `:cmp` for each: a block's `self` may be an object even at the top level or in a class
+      # body, so a `singleton_class.prepend` or a `class << self` prepend inside `instance_eval`, `instance_exec` or a
+      # `define_method` block puts `Comparable` ahead of the object's class.
+      {
+        "an instance_eval block" => "s = +\"x\"\ns.instance_eval { singleton_class.prepend(Comparable) }\n",
+        "a class << self in an instance_exec block" =>
+          "s = +\"x\"\ns.instance_exec do\n  class << self\n    prepend Comparable\n  end\nend\n",
+        "a define_method block" =>
+          "class Loud < String\n  define_method(:louden) { singleton_class.prepend(Comparable); self }\nend\n"
+      }.each do |shape, source|
+        it "declines where #{shape} prepends a refined module the class holds" do
+          write("lib/prepends.rb", "module RC; refine(Comparable) { def center(a, b, c) = :cmp }; end\n#{source}")
+          write("lib/use.rb", "using RC\n\"y\".center(1, 2, 3)\n")
+          write("lib/control.rb", "\"y\".center(1, 2, 3)\n")
+
+          expect(call_rows).to eq(controls([1]))
+        end
+      end
+
+      # Ruby 4.0.5 raises for `Repo.new.find(1, 2)`: a `singleton_class.prepend` on `self` written directly in a class
+      # body prepends to the class object, not to every object, so `Repo#find` stays checked.
+      it "keeps checking where a class body prepends a module to its own singleton class" do
+        write("lib/store.rb", <<~RUBY)
+          module Finders; def find(*args) = super; end
+          class Store
+            def self.find(id) = id
+            singleton_class.prepend(Finders)
+            self.singleton_class.prepend(Finders)
+          end
+        RUBY
+        write("lib/use.rb", "class Repo; def find(id) = id; end\nRepo.new.find(1, 2)\n")
+
+        expect(call_rows).to eq([["use.rb", 2, "call.wrong-arity"]])
+      end
+
+      # Ruby 4.0.5 answers `:base`: `Random#seed` runs on `Random::Base`, which RBS declares beside `Random` rather than
+      # above it. CRuby registers `Random#seed` only inside `random.c`'s `#if 0` block for RDoc, which the catalogue
+      # skips, so nothing proves `Random` defines it.
+      it "declines where CRuby registers the method on the class only for RDoc" do
+        write("lib/seed.rb", <<~RUBY)
+          module RObj; refine(Object) { def seed(a, b, c) = :obj }; end
+          module RBase; refine(Random::Base) { def seed(a, b, c) = :base }; end
+        RUBY
+        write("lib/use.rb", "using RObj\nusing RBase\nRandom.new.seed(1, 2, 3)\n")
+        write("lib/control.rb", "Random.new.seed(1, 2, 3)\n")
+
+        expect(call_rows).to eq(controls([1]))
+      end
+
+      # Ruby 4.0.5 answers `:bar`: a constant is looked up through the refining module's ancestors before the top
+      # level, so `refine(Bar)` in `R`, which includes `Foo`, refines `Foo::Bar` even though a top-level `Bar` exists.
+      it "declines where the refining module's ancestors hold the refined class" do
+        write("lib/foo.rb", <<~RUBY)
+          class Bar; end
+          module Foo
+            class Bar < Object
+              def center(a) = a
+            end
+          end
+          module R
+            include Foo
+            refine(Bar) { def center(a, b, c) = :bar }
+          end
+        RUBY
+        write("lib/use.rb", "using ObjCenter\nusing R\nFoo::Bar.new.center(1, 2, 3)\n")
+        write("lib/control.rb", "using ObjCenter\nFoo::Bar.new.center(1, 2, 3)\n")
+
+        expect(call_rows).to eq([["control.rb", 2, "call.wrong-arity"]])
+      end
+
+      # Ruby 4.0.5 answers `:bar` and `:vendor`: `refine(Bar)` in a module that includes `Foo` resolves `Bar` through
+      # the module's ancestors to `Foo::Bar`, which the table records under `R::Bar` and `Bar` only, and `VendorStr <
+      # String` is declared outside the analysed paths. A refined class no table declares by any spelling cannot be
+      # placed in the receiver's hierarchy.
+      it "declines under a refinement of a class no table declares" do
+        write("lib/foo.rb", <<~RUBY)
+          module Foo
+            class Bar < Object
+              def center(a) = a
+            end
+          end
+          module R
+            include Foo
+            refine(Bar) { def center(a, b, c) = :bar }
+          end
+          module ObjRjust; refine(Object) { def rjust(a, b, c) = a }; end
+        RUBY
+        write("vendor/v.rb", "class VendorStr < String; end\n")
+        write("lib/vendor_ref.rb", "module RV; refine(VendorStr) { def rjust(a, b, c) = :vendor }; end\n")
+        write("sig/show.rbs", "class Show\n  def self.call: (String) -> untyped\nend\n")
+        write_class("Plain", "  def self.call(s) = s.rjust(1, 2, 3)\n", "  def self.call: (String) -> untyped\n")
+        write("lib/use.rb", "using ObjCenter\nusing R\nusing ObjRjust\nusing RV\nFoo::Bar.new.center(1, 2, 3)\n" \
+                            "class Show\n  def self.call(s) = s.rjust(1, 2, 3)\nend\n")
+        write("lib/control.rb", "using ObjCenter\nFoo::Bar.new.center(1, 2, 3)\n")
+
+        expect(call_rows).to eq([["control.rb", 2, "call.wrong-arity"], ["plain.rb", 2, "call.wrong-arity"]])
+      end
+
+      # Critique F7. Ruby 4.0.5 answers `:refined` for each: the project removed `String#center`, so the catalogue
+      # proves nothing about it; nor for a class whose body rewrites its table through `send`; nor does a project
+      # `def` or `attr_reader` the class then removes.
+      it "declines where the project removed or rewrote the definer's method" do
+        write("lib/removed.rb", <<~RUBY)
+          class String; remove_method :center; end
+          class Symbol; send(:remove_method, :to_proc); end
+          module ObjProc; refine(Object) { def to_proc(a) = :refined }; end
+        RUBY
+        write_class("Own2", "  def center(a) = a\n  remove_method :center\n", "  def center: (untyped) -> untyped\n")
+        write_class("Own3", "  attr_reader :center\n  remove_method :center\n", "  def center: () -> untyped\n")
+        calls = "\"x\".center(1, 2, 3)\n:s.to_proc(1)\nOwn2.new.center(1, 2, 3)\nOwn3.new.center(1, 2, 3)\n"
+        write("lib/use.rb", "using ObjCenter\nusing ObjProc\n#{calls}")
+        write("lib/control.rb", calls)
+
+        expect(call_rows).to eq(controls(1..4))
+      end
+
+      # Ruby 4.0.5 answers `:wide`: a module the project prepends to `String` sits where RBS does not place it.
+      it "declines past a level the project mixes into" do
+        write("lib/wide.rb", "module Wide; end\nclass String; prepend Wide; end\n" \
+                             "module RW; refine(Wide) { def center(a, b, c) = :wide }; end\n")
+        write("lib/use.rb", "using ObjCenter\nusing RW\n\"x\".center(1, 2, 3)\n")
+        write("lib/control.rb", "\"x\".center(1, 2, 3)\n")
+
+        expect(call_rows).to eq(controls([1]))
+      end
+
+      # Ruby 4.0.5 answers `:str`: a `using` whose argument is not a constant may put any module in effect.
+      it "declines under a `using` whose argument is not a constant" do
+        write("lib/str_ref.rb", "module StrRef; refine(String) { def center(a, b, c) = :str }; end\n")
+        write("lib/use.rb", "using ObjCenter\nusing Object.const_get(:StrRef)\n\"x\".center(1, 2, 3)\n")
+        write("lib/control.rb", "\"x\".center(1, 2, 3)\n")
+
+        expect(call_rows).to eq(controls([1]))
+      end
+
+      # Ruby 4.0.5 answers `:anon`: the refine body of a `using Module.new { … }` runs on a module no constant names.
+      it "declines under a `using Module.new { … }`" do
+        write("lib/use.rb", <<~RUBY)
+          using ObjCenter
+          using Module.new { refine(String) { def center(a, b, c) = :anon } }
+          "x".center(1, 2, 3)
+        RUBY
+
+        expect(call_rows).to eq([])
+      end
+
+      # Round 3 of #1793's review. Ruby 4.0.5 answers `:each_target` and `:alias_target`: a target the walk cannot
+      # name may be `String`, whichever definer `ObjCenter` would leave first. Requiring `round3.rb` before
+      # `by_shadow_string.rb` answers `:shadow`, the other order raises: `refine(String)` names `::String` while
+      # `ByShadow::String` is not loaded yet, so the raw table's every spelling counts, not the one the typed arm
+      # resolves.
+      it "declines under a refinement whose target the walk cannot name or pin" do
+        write("lib/round3.rb", <<~RUBY)
+          K = String
+          module ObjLjust; refine(Object) { def ljust(a, b, c) = a; def rjust(a, b, c) = a }; end
+          module ByEach; [String].each { |k| refine(k) { def center(a, b, c) = :each_target } }; end
+          module ByAlias; refine(K) { def ljust(a, b, c) = :alias_target }; end
+          module ByShadow; refine(String) { def rjust(a, b, c) = :shadow }; end
+        RUBY
+        write("lib/by_shadow_string.rb", "module ByShadow; class String; end; end\n")
+        write("lib/use.rb", "using ObjCenter\nusing ObjLjust\nusing ByEach\nusing ByAlias\nusing ByShadow\n" \
+                            "\"x\".center(1, 2, 3)\n\"x\".ljust(1, 2, 3)\n\"x\".rjust(1, 2, 3)\n")
+
+        expect(call_rows).to eq([])
+      end
+
+      it "answers a report and a decline the same through a warm cache as cold" do
+        write("lib/use.rb", "using ObjCenter\nusing CmpClamp\n\"x\".center(1, 2, 3)\n\"a\".clamp(1, 2, 3)\n")
+        root = File.join(Dir.pwd, ".rigor", "cache")
+
+        cold = call_rows(cache_store: Rigor::Cache::Store.new(root: root))
+        warm = call_rows(cache_store: Rigor::Cache::Store.new(root: root))
+
+        expect(cold).to eq([["use.rb", 3, "call.wrong-arity"]])
+        expect(warm).to eq(cold)
+      end
+
+      # A names-wildcard row appearing in the refining file may define `String#center`, so the reported call turns
+      # silent on the re-check, and back when the row goes (`refinement:*`).
+      it "re-checks the `using` file under --incremental when a refine body gains and loses an `import_methods`" do
+        write("lib/helper.rb", "module Helper; def center(a, b, c) = 1; end\n")
+        refining = lambda do |extra|
+          write("lib/extra.rb", "module Extra\n  refine(String) do\n    def shout = 1\n#{extra}  end\nend\n")
+        end
+        refining.call("")
+        write("lib/use.rb", "using ObjCenter\nusing Extra\n\"x\".center(1, 2, 3)\n")
+        fires = [["use.rb", 3, "call.wrong-arity"]]
+
+        expect(incremental_call_rows).to eq([fires, false])
+        refining.call("    import_methods Helper\n")
+        expect(incremental_call_rows).to eq([[], true])
+        expect(call_rows).to eq([])
+        refining.call("")
+        expect(incremental_call_rows).to eq([fires, true])
+        expect(call_rows).to eq(fires)
+      end
+
+      # A refined class turning into a subclass of the receiver's class in its own file re-checks the call. Ruby 4.0.5
+      # raises `ArgumentError` for `Base.new.center(1, 2, 3)` while `Kid` is unrelated, and a value typed as `Base`
+      # may be a `Kid`, answering `:kid`, once `Kid < Base`.
+      it "re-checks the `using` file under --incremental when a refined class becomes a subclass" do
+        write("lib/base.rb", "class Base; def center(a) = a; end\n")
+        write("lib/kid.rb", "class Kid; end\n")
+        write("lib/kid_ref.rb", "module KidRef; refine(Kid) { def center(a, b, c) = :kid }; end\n")
+        write("lib/use.rb", "using KidRef\nBase.new.center(1, 2, 3)\n")
+        fires = [["use.rb", 2, "call.wrong-arity"]]
+
+        expect(incremental_call_rows).to eq([fires, false])
+        write("lib/kid.rb", "class Kid < Base; end\n")
+        expect(incremental_call_rows).to eq([[], true])
+        expect(call_rows).to eq([])
+        write("lib/kid.rb", "class Kid; end\n")
+        expect(incremental_call_rows).to eq([fires, true])
+        expect(call_rows).to eq(fires)
+      end
+
+      # A new subclass moves the receiver class's subclass set, which no declaration the call read names. Ruby 4.0.5
+      # raises for `"x".ljust(1, 2, 3)` until `Sub < String` prepends `Comparable` again, and then answers `:cmp` for
+      # a value typed as `String` that is a `Sub`.
+      it "re-checks the `using` file under --incremental when a new file declares a subclass" do
+        write("lib/rc.rb", "module RC; refine(Comparable) { def ljust(a, b, c) = :cmp }; end\n")
+        write("lib/use.rb", "using RC\n\"x\".ljust(1, 2, 3)\n")
+        fires = [["use.rb", 2, "call.wrong-arity"]]
+
+        expect(incremental_call_rows).to eq([fires, false])
+        write("lib/sub.rb", "class Sub < String; prepend Comparable; end\n")
+        expect(incremental_call_rows).to eq([[], true])
+        expect(call_rows).to eq([])
+        File.delete("lib/sub.rb")
+        expect(incremental_call_rows).to eq([fires, true])
+        expect(call_rows).to eq(fires)
+      end
+
+      # A class whose superclass the tables do not know may be a subclass of any class, so a new file declaring one
+      # re-checks the call through `subclass_of:*`. Ruby 4.0.5 answers `:cmp` for a `MyS2` typed as `String`.
+      it "re-checks the `using` file under --incremental when a new file declares a Class.new subclass" do
+        write("lib/rc.rb", "module RC; refine(Comparable) { def ljust(a, b, c) = :cmp }; end\n")
+        write("lib/use.rb", "using RC\n\"x\".ljust(1, 2, 3)\n")
+        fires = [["use.rb", 2, "call.wrong-arity"]]
+
+        expect(incremental_call_rows).to eq([fires, false])
+        write("lib/sub.rb", "MyS2 = Class.new(String) { prepend Comparable }\n")
+        expect(incremental_call_rows).to eq([[], true])
+        expect(call_rows).to eq([])
+        File.delete("lib/sub.rb")
+        expect(incremental_call_rows).to eq([fires, true])
+      end
+
+      # A subclass level the walk cannot read hides only modules, so a refinement of `Object` keeps the call
+      # checked: with `module Mixin; end`, Ruby 4.0.5 raises for both calls.
+      it "keeps checking past a subclass whose mixins the walk cannot read when no module is refined" do
+        write_class("Base", "  def center(a) = a\n", "  def center: (untyped) -> untyped\n")
+        write("lib/kid.rb", "class Kid < Base\n  include(Object.const_get(:Mixin))\nend\n" \
+                            "class MyStr < String\n  include(Object.const_get(:Mixin))\nend\n")
+        write("lib/use.rb", "using ObjCenter\nBase.new.center(1, 2, 3)\n\"x\".center(1, 2, 3)\n")
+
+        expect(call_rows).to eq([["use.rb", 2, "call.wrong-arity"], ["use.rb", 3, "call.wrong-arity"]])
+      end
+
+      # The declining side of the example above: Ruby 4.0.5 answers `:kid` when the subclass whose mixins the walk
+      # cannot read is itself refined, for a value typed as `Base`. Adding the unreadable mixin to a refined subclass
+      # keeps the decline under --incremental.
+      it "declines where a refined subclass's mixins cannot be read, cold and after an edit" do
+        write_class("Base", "  def center(a) = a\n", "  def center: (untyped) -> untyped\n")
+        write("lib/mixin.rb", "module Mixin; end\nmodule RK; refine(Kid) { def center(a, b, c) = :kid }; end\n")
+        write("lib/kid.rb", "class Kid < Base; end\n")
+        write("lib/use.rb", "using ObjCenter\nusing RK\nBase.new.center(1, 2, 3)\n")
+
+        expect(incremental_call_rows).to eq([[], false])
+        write("lib/kid.rb", "class Kid < Base\n  include(Object.const_get(:Mixin))\nend\n")
+        expect(incremental_call_rows).to eq([[], true])
+        expect(call_rows).to eq([])
+      end
+
+      def incremental_call_rows
+        root = File.join(Dir.pwd, ".rigor", "cache")
+        snapshot = Rigor::Cache::IncrementalSnapshot.new(root: root)
+        fingerprint = Rigor::Cache::IncrementalSnapshot.fingerprint(configuration: configuration, roots: %w[lib])
+        session = Rigor::Analysis::IncrementalSession.new(
+          configuration: configuration, paths: %w[lib], cache_store: Rigor::Cache::Store.new(root: root)
+        )
+        found, warm = guarded_run_incremental(session, snapshot: snapshot, fingerprint: fingerprint)
+        rows = found.select { |d| %w[call.argument-type-mismatch call.wrong-arity].include?(d.qualified_rule) }
+                    .map { |d| [File.basename(d.path.to_s), d.line, d.qualified_rule] }.sort
+        [rows, warm]
+      end
+    end
   end
 
   # ADR-121 WD7 — the refinement table records what it could not read, and a module whose refinements Rigor cannot
@@ -903,11 +1464,13 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
       end
 
       # A6: `refine(K)` keeps a normal row; once a file binds `K` to a value, the row's class is the wildcard. Ruby
-      # 4.0.5 prints `:alias_target` for `K = String; refine(K) { … }` (`refine_census_spec.rb`).
+      # 4.0.5 prints `:alias_target` for `K = String; refine(K) { … }` (`refine_census_spec.rb`). The visibility
+      # decline shows it: a row under a class nothing declares matches no receiver there. (The argument checks
+      # decline under such a row either way, since the class may be a subclass of the receiver's, #1820.)
       it "re-checks the `using` file when a new file binds the constant a `refine` targets" do
-        write("lib/m.rb", "module M\n  refine(K) { def center(a, b, c) = 1 }\nend\n")
-        write("lib/u.rb", "using M\n\"a\".center(1, 2, 3)\n")
-        expect(incremental_rows).to eq([center_fires, false])
+        write("lib/m.rb", "module M\n  refine(K) { def shout = 1 }\nend\n")
+        write("lib/u.rb", "using M\n\"a\".shout\n")
+        expect(incremental_rows).to eq([[["u.rb", 2, "call.undefined-method"]], false])
 
         write("lib/k.rb", "K = String\n")
         expect(incremental_rows).to eq([[], true])

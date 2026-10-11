@@ -150,6 +150,22 @@ module Rigor
         entries
       end
 
+      # Issue #1820 — adds to `per_file` (`{path => Set}`) a frozen `[class, superclass as written]` pair in each file
+      # that declares a class with a superclass, so {changed_class_declarations} reports a subclass edge appearing or
+      # vanishing beside the class names.
+      def add_superclass_edges(per_file, class_sources, superclasses)
+        return per_file if superclasses.nil? || superclasses.empty?
+
+        superclasses.each do |child, parent|
+          edge = [child, parent.nil? ? "*" : parent.to_s].freeze
+          (class_sources[child] || EMPTY_FILES).each { |file| per_file[file] << edge }
+        end
+        per_file
+      end
+
+      EMPTY_FILES = [].freeze
+      private_constant :EMPTY_FILES
+
       # Issue #639 — the SYMMETRIC reading of {appeared_classes}: the names whose declaration in a file
       # appeared OR VANISHED. Appearance alone answered the miss side, which was the only side recording a
       # `class:` edge; a bare reference that RESOLVED now records one too, and what invalidates it is the

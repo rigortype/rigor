@@ -46,6 +46,7 @@ members:
     - lib/rigor/inference/object_mixins.rb
     - lib/rigor/inference/pre_eval_constants.rb
     - lib/rigor/inference/refined_dispatch.rb
+    - lib/rigor/inference/refined_dispatch/own_method.rb
     - lib/rigor/inference/singleton_hook_decline.rb
     - lib/rigor/protection/discovery_seed.rb
     - lib/rigor/reflection.rb
@@ -309,6 +310,7 @@ members:
     - lib/rigor/analysis/incremental_session.rb
     - lib/rigor/analysis/runner.rb
     - lib/rigor/inference/in_effect_refinements/scope_reads.rb
+    - lib/rigor/inference/refined_dispatch/own_method.rb
     - lib/rigor/inference/singleton_hook_decline.rb
     - lib/rigor/scope/resolution_chain.rb
     copies:

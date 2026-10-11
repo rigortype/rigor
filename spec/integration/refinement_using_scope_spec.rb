@@ -774,6 +774,34 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
         expect(call_rows).to eq(controls(1..4))
       end
 
+      # Ruby 4.0.5 answers `:bar` and `:vendor`: `refine(Bar)` in a module that includes `Foo` resolves `Bar` through
+      # the module's ancestors to `Foo::Bar`, which the table records under `R::Bar` and `Bar` only, and `VendorStr <
+      # String` is declared outside the analysed paths. A refined class no table declares by any spelling cannot be
+      # placed in the receiver's hierarchy.
+      it "declines under a refinement of a class no table declares" do
+        write("lib/foo.rb", <<~RUBY)
+          module Foo
+            class Bar < Object
+              def center(a) = a
+            end
+          end
+          module R
+            include Foo
+            refine(Bar) { def center(a, b, c) = :bar }
+          end
+          module ObjRjust; refine(Object) { def rjust(a, b, c) = a }; end
+        RUBY
+        write("vendor/v.rb", "class VendorStr < String; end\n")
+        write("lib/vendor_ref.rb", "module RV; refine(VendorStr) { def rjust(a, b, c) = :vendor }; end\n")
+        write("sig/show.rbs", "class Show\n  def self.call: (String) -> untyped\nend\n")
+        write_class("Plain", "  def self.call(s) = s.rjust(1, 2, 3)\n", "  def self.call: (String) -> untyped\n")
+        write("lib/use.rb", "using ObjCenter\nusing R\nusing ObjRjust\nusing RV\nFoo::Bar.new.center(1, 2, 3)\n" \
+                            "class Show\n  def self.call(s) = s.rjust(1, 2, 3)\nend\n")
+        write("lib/control.rb", "using ObjCenter\nFoo::Bar.new.center(1, 2, 3)\n")
+
+        expect(call_rows).to eq([["control.rb", 2, "call.wrong-arity"], ["plain.rb", 2, "call.wrong-arity"]])
+      end
+
       # Critique F7. Ruby 4.0.5 answers `:refined` for each: the project removed `String#center`, so the catalogue
       # proves nothing about it; nor for a class whose body rewrites its table through `send`; nor does a project
       # `def` the class then removes.
@@ -1196,11 +1224,13 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
       end
 
       # A6: `refine(K)` keeps a normal row; once a file binds `K` to a value, the row's class is the wildcard. Ruby
-      # 4.0.5 prints `:alias_target` for `K = String; refine(K) { … }` (`refine_census_spec.rb`).
+      # 4.0.5 prints `:alias_target` for `K = String; refine(K) { … }` (`refine_census_spec.rb`). The visibility
+      # decline shows it: a row under a class nothing declares matches no receiver there. (The argument checks
+      # decline under such a row either way, since the class may be a subclass of the receiver's, #1820.)
       it "re-checks the `using` file when a new file binds the constant a `refine` targets" do
-        write("lib/m.rb", "module M\n  refine(K) { def center(a, b, c) = 1 }\nend\n")
-        write("lib/u.rb", "using M\n\"a\".center(1, 2, 3)\n")
-        expect(incremental_rows).to eq([center_fires, false])
+        write("lib/m.rb", "module M\n  refine(K) { def shout = 1 }\nend\n")
+        write("lib/u.rb", "using M\n\"a\".shout\n")
+        expect(incremental_rows).to eq([[["u.rb", 2, "call.undefined-method"]], false])
 
         write("lib/k.rb", "K = String\n")
         expect(incremental_rows).to eq([[], true])

@@ -30,7 +30,8 @@ module Rigor
         # One candidate definer as `DefinerResolution`'s per-chain answer function reports it, read through the
         # same four readers as the module's own hit (a call site may not name that one).
         DefinerHit = Data.define(:answer, :owner, :index, :side)
-        private_constant :DefinerHit
+        EMPTY = [].freeze
+        private_constant :DefinerHit, :EMPTY
 
         module_function
 
@@ -42,7 +43,7 @@ module Rigor
           return true if raw.nil?
 
           record_targets(scope, raw)
-          return false if raw.any? { |refined| InEffectRefinements.class_wildcard_key?(scope, refined) }
+          return false if raw.each_key.any? { |refined| InEffectRefinements.class_wildcard_key?(scope, refined) }
 
           levels = RefinedDispatch.levels(scope, class_name)
           return false if levels.nil?
@@ -51,19 +52,23 @@ module Rigor
           shadowing_definer?(scope, class_name, levels, method_name, raw)
         end
 
-        # Every refined-class key with a row for `method_name` or a names-wildcard row whose refining modules `list`
-        # puts in effect, by every spelling the table records, or nil when there is none.
+        # `{refined-class key => [its in-effect refining modules]}` for every key with a row for `method_name` or a
+        # names-wildcard row that `list` puts in effect, by every spelling the table records, or nil when there is
+        # none.
         def raw_targets(refinements, method_name, list)
           out = nil
           refinements.each do |refined, methods|
-            rows = methods[method_name]
-            unread = methods[RefinedDispatch.wildcard]
-            next unless (rows && RefinedDispatch.in_effect?(rows, list)) ||
-                        (unread && RefinedDispatch.in_effect?(unread, list))
-
-            (out ||= Set.new) << refined
+            modules = in_effect_modules(methods[method_name], list) |
+                      in_effect_modules(methods[RefinedDispatch.wildcard], list)
+            (out ||= {})[refined] = modules unless modules.empty?
           end
           out
+        end
+
+        def in_effect_modules(rows, list)
+          return EMPTY if rows.nil?
+
+          rows.select { |name| RefinedDispatch.in_effect?([name], list) }
         end
 
         # ADR-46 — a refined class appearing or vanishing (a new subclass declaration, a module turning up where a
@@ -72,7 +77,7 @@ module Rigor
         def record_targets(scope, raw)
           return unless Analysis::DependencyRecorder.active?
 
-          raw.each do |refined|
+          raw.each_key do |refined|
             next if refined == RefinedDispatch.wildcard
 
             Analysis::DependencyRecorder.read_last_segment(:class, refined)
@@ -86,14 +91,35 @@ module Rigor
         # a subclass; a module not on the levels, which `obj.extend` or a subclass's mixin can put ahead of the
         # definer.
         def refined_off_levels?(scope, class_name, levels, raw)
-          return true if subclass_refined?(scope, class_name, raw)
+          return true if unplaced_target?(scope, raw) || subclass_refined?(scope, class_name, raw)
 
           on_levels = level_names(levels)
-          raw.any? do |refined|
+          raw.each_key.any? do |refined|
             next false if on_levels.include?(refined)
 
             module_name?(scope, refined) || rbs_subclass?(scope, refined, class_name)
           end
+        end
+
+        # Is some in-effect row under a class no table declares by any spelling of it (the keys sharing its last
+        # segment that the same refining module refines)? Ruby resolved that `refine` argument to some class, through
+        # a lookup the table did not follow (the refining module's own ancestors: `module R; include Foo;
+        # refine(Bar)` refines `Foo::Bar`) or to a class outside the analysed paths (a vendored `VendorStr <
+        # String`), and Rigor cannot place it in the receiver's hierarchy.
+        def unplaced_target?(scope, raw)
+          raw.any? do |refined, modules|
+            segment = refined.split("::").last
+            modules.any? do |module_name|
+              raw.none? do |other, others|
+                others.include?(module_name) && other.split("::").last == segment && declared_class?(scope, other)
+              end
+            end
+          end
+        end
+
+        def declared_class?(scope, name)
+          scope.discovered_classes.key?(name) || !(scope.discovered_class_sources[name] || EMPTY).empty? ||
+            scope.known_user_class?(name) || scope.environment&.class_known?(name) || false
         end
 
         def level_names(levels)

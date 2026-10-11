@@ -39,19 +39,60 @@ module Rigor
 
         # RBS's singleton ancestry: each singleton class a level of its own, `mixed` where the project extends it at
         # a position RBS does not record, and each instance side (a declared `extend`, `Class`, `Module`, …) a level
-        # read as the instance walk reads one. `from` drops the leading singleton classes a project level already
+        # `mixed` where the project mixes into it. `from` drops the leading singleton classes a project level already
         # holds.
         def rbs_levels(scope, class_name, from: 0)
           loader = scope.environment&.rbs_loader
           pairs = loader ? loader.singleton_ancestors_for(class_name) : EMPTY
           return nil if pairs.empty?
 
-          pairs.drop(from).map do |kind, name|
-            next [name, [name], RefinedDispatch.project_mixin?(scope, name)] if kind == :instance
+          readable(pairs.drop(from).map do |kind, name|
+            kind == :instance ? instance_level(scope, name) : singleton_level(scope, name)
+          end)
+        end
 
-            own = SingletonClass.new(name)
-            [own, [own], singleton_mixin?(scope, name)]
-          end
+        # RBS's instance ancestry of `class_name` (`Module`'s, for a module object's tail), each a level.
+        def rbs_instance_levels(scope, class_name)
+          loader = scope.environment&.rbs_loader
+          names = loader ? loader.ancestor_names_for(class_name) : EMPTY
+          return nil if names.empty?
+
+          readable(names.map { |name| instance_level(scope, name) })
+        end
+
+        def readable(levels) = levels.include?(nil) ? nil : levels
+
+        # A `mixed` level carries the modules the project mixes in beside its own entry, so a refinement of one of them
+        # makes the walk past the level {UNKNOWN} (`RefinedDispatch.targeted_after?`) and `call.undefined-method`'s
+        # reach holds it. Nil when that mixin chain cannot be read.
+        def instance_level(scope, name)
+          return [name, [name], false] unless RefinedDispatch.project_mixin?(scope, name)
+
+          mixins = mixin_entries(scope, name, :instance)
+          mixins && [name, [name, *mixins], true]
+        end
+
+        def singleton_level(scope, name)
+          own = SingletonClass.new(name)
+          return [own, [own], false] unless singleton_mixin?(scope, name)
+
+          mixins = mixin_entries(scope, name, :singleton)
+          mixins && [own, [own, *mixins], true]
+        end
+
+        # The names of the modules on `name`'s own level of its project chain on `side`, an unnamed entry's candidate
+        # names included, or nil when the chain is cut or holds a mixin the tables cannot name.
+        def mixin_entries(scope, name, side)
+          chain = Scope::ResolutionChain.for(scope, name, side, :methods)
+          chain.record(scope) if Analysis::DependencyRecorder.active?
+          return nil if chain.truncated? || chain.wildcard_mixin?
+          return EMPTY if chain.level_count.zero?
+
+          chain.level_entries(0).flat_map do |entry|
+            next entry.candidates if entry.external?
+
+            entry.side == :instance && entry.name != name ? [entry.name] : EMPTY
+          end.uniq
         end
 
         # The project's singleton-side `Scope::ResolutionChain` (`C`'s singleton, its `extend`s' instance chains,
@@ -96,7 +137,7 @@ module Rigor
         # record as unknown, and one a constant write may have given the class (a class only a constant write names
         # carries no superclass entry, and a reopening keeps the superclass that write made).
         def implicit_tail(scope, name)
-          return RefinedDispatch.rbs_levels(scope, "Module") if module?(scope, name)
+          return rbs_instance_levels(scope, "Module") if module?(scope, name)
           return nil if unknown_superclass?(scope, name)
           return rbs_levels(scope, name, from: 1) if scope.environment&.class_known?(name)
 
@@ -197,18 +238,16 @@ module Rigor
         end
 
         # Every class and module whose refinements a call on the class object `class_name` may reach, for
-        # `call.undefined-method`'s decline: each name on the levels (an unnamed entry's candidates included), the
-        # RBS ancestry of a module an extend names that the project does not declare, and the modules the project
-        # mixes into a `mixed` level. Nil when the walk, or a `mixed` level's own chain, cannot be read.
+        # `call.undefined-method`'s decline: each name on the levels (an unnamed entry's candidates and a `mixed`
+        # level's project mixins included), and the RBS ancestry of a module an extend names that the project does
+        # not declare. Nil when the walk cannot be read.
         def reach(scope, class_name)
           levels = levels(scope, class_name)
           return nil if levels.nil?
 
           names = Set.new
-          levels.each do |level_class, entries, mixed, every|
+          levels.each do |_level_class, entries, _mixed, every|
             (every || entries).each { |entry| add_reach(scope, names, entry) }
-            next unless mixed
-            return nil unless mixins_added?(scope, names, level_class)
           end
           names
         end
@@ -222,21 +261,6 @@ module Rigor
 
           loader = scope.environment&.rbs_loader
           names.merge(loader.ancestor_names_for(entry)) if loader
-        end
-
-        # The modules the project mixes into a `mixed` level's class, from its own chain on the level's side.
-        def mixins_added?(scope, names, level_class)
-          name, side = level_class.is_a?(SingletonClass) ? [level_class.of, :singleton] : [level_class, :instance]
-          chain = Scope::ResolutionChain.for(scope, name, side, :methods)
-          chain.record(scope) if Analysis::DependencyRecorder.active?
-          return false if chain.truncated? || chain.wildcard_mixin?
-
-          chain.entries.each do |entry|
-            next names.merge(entry.candidates) if entry.external?
-
-            names << entry.name if entry.side == :instance
-          end
-          true
         end
 
         # Can a refined-class key sit on some class object's lookup the walk could not read? Every class object

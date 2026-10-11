@@ -1738,7 +1738,16 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
   describe "a refinement reaching a class object (#1752)" do
     let(:call_rules) { %w[call.undefined-method call.wrong-arity call.argument-type-mismatch] }
     let(:object_sqrt) do
-      "module RS\n  refine(Object) { def sqrt(a, b) = :o; def own(a, b, c) = :o; def members(a, b, c) = :o }\nend\n"
+      <<~RUBY
+        module RS
+          refine(Object) do
+            def sqrt(a, b) = :o
+            def own(a, b, c) = :o
+            def members(a, b, c) = :o
+            def escape(a, b) = :o
+          end
+        end
+      RUBY
     end
 
     # `[file basename, line, rule]` for every call-check diagnostic in `lib/`, sorted.
@@ -1773,33 +1782,43 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
       expect(call_rows).to eq([["plain.rb", 1, "call.undefined-method"], ["use.rb", 1, "call.undefined-method"]])
     end
 
-    # Ruby 4.0.5 answers each call but `Comparable.cc`: a module object is a `Module`, not a `Class`.
+    # Ruby 4.0.5 answers each call but `Comparable.cc`: a module object is a `Module`, not a `Class`. `String.ll`
+    # answers `5` through `Loud`, which the project extends `String` with.
     it "reaches a class object through Module, Class, Kernel and BasicObject, and a module object not through Class" do
       write("lib/rm.rb", <<~RUBY)
+        module Loud; end
+        class String
+          extend Loud
+        end
         module RM
           refine(Module) { def mm = 1 }
           refine(Class) { def cc = 2 }
           refine(Kernel) { def kk = 3 }
           refine(BasicObject) { def bo = 4 }
+          refine(Loud) { def ll = 5 }
         end
       RUBY
       write("lib/use.rb", "using RM\nString.mm\nString.cc\nString.kk\nString.bo\nComparable.mm\nComparable.kk\n" \
-                          "Comparable.cc\n")
+                          "String.ll\nComparable.cc\n")
+      write("lib/control.rb", "String.ll\n")
 
-      expect(call_rows).to eq([["use.rb", 8, "call.undefined-method"]])
+      expect(call_rows).to eq([["control.rb", 1, "call.undefined-method"], ["use.rb", 9, "call.undefined-method"]])
     end
 
     # `Integer.sqrt` is CRuby's own singleton method of `Integer` (the catalogue proves it), and `Own.own` a certain
     # `class << self` def, which `Kid` inherits: each answers ahead of the refinement of `Object`, and Ruby 4.0.5 raises
-    # `ArgumentError`, or `TypeError` for `Integer.sqrt(nil)`.
+    # `ArgumentError`, or `TypeError` for `Integer.sqrt(nil)`. A refinement of `Kid`'s instances does not reach the
+    # class object `Kid`, nor `Own` through its subclass's singleton level.
     it "checks a class object's own singleton method ahead of a refinement of Object" do
       write("lib/rs.rb", object_sqrt)
-      write("lib/own.rb", "class Own\n  class << self\n    def own(a) = a\n  end\nend\nclass Kid < Own; end\n")
-      write("lib/use.rb", "using RS\nInteger.sqrt(1, 2)\nInteger.sqrt(nil)\nOwn.own(1, 2, 3)\nKid.own(1, 2, 3)\n")
+      write("lib/own.rb", "class Own\n  class << self\n    def own(a) = a\n  end\nend\nclass Kid < Own; end\n" \
+                          "module RK\n  refine(Kid) { def own(a, b, c) = :kid }\nend\n")
+      write("lib/use.rb", "using RS\nusing RK\nInteger.sqrt(1, 2)\nInteger.sqrt(nil)\nOwn.own(1, 2, 3)\n" \
+                          "Kid.own(1, 2, 3)\n")
 
       expect(call_rows).to eq(
-        [["use.rb", 2, "call.wrong-arity"], ["use.rb", 3, "call.argument-type-mismatch"],
-         ["use.rb", 4, "call.wrong-arity"], ["use.rb", 5, "call.wrong-arity"]]
+        [["use.rb", 3, "call.wrong-arity"], ["use.rb", 4, "call.argument-type-mismatch"],
+         ["use.rb", 5, "call.wrong-arity"], ["use.rb", 6, "call.wrong-arity"]]
       )
     end
 
@@ -1840,10 +1859,33 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
       expect(call_rows).to eq(controls([1, 2]))
     end
 
+    # The tables record `class << self; prepend P` as an `extend`, so a refined module on `D`'s singleton level may sit
+    # ahead of `D`'s own `def self.z`: Ruby 4.0.5 answers `:p_refined`.
+    it "declines where a refined module may be prepended to the singleton class" do
+      write("lib/d.rb", <<~RUBY)
+        module P
+          def z(a) = :p_own
+        end
+        class D
+          class << self
+            prepend P
+          end
+          def self.z(a) = :d_own
+        end
+        module RP
+          refine(P) { def z(a, b, c) = :p_refined }
+        end
+      RUBY
+      write("lib/use.rb", "using RP\nD.z(1, 2, 3)\n")
+      write("lib/control.rb", "D.z(1, 2, 3)\n")
+
+      expect(call_rows).to eq(controls([1]))
+    end
+
     # The declines the instance walk makes, on a class object. Ruby 4.0.5 answers `:gem` (an opaque module from outside
     # the analysed paths refining `Integer.singleton_class`), `:anon` (a `using` that names no module), `:loose` (`Kid`
     # extended at runtime with a refined module off its lookup), `:vendor` (a refined module no table declares,
-    # extended from outside the analysed paths), `:o` (`Integer.sqrt` removed from the singleton class) and `:o`
+    # extended from outside the analysed paths), `:o` (`Regexp.escape` removed from the singleton class) and `:o`
     # (`Struct.members`, which CRuby registers only for RDoc).
     it "declines what the instance walk declines" do
       write("lib/rs.rb", object_sqrt)
@@ -1852,16 +1894,16 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
       write("vendor/vendor_ext.rb", "module VendorExt; end\nKid.extend(VendorExt)\nKid.extend(Loose)\n")
       write("lib/loose.rb", "module Loose; end\nmodule RL\n  refine(Loose) { def own(a, b, c) = :loose }\nend\n")
       write("lib/vendored.rb", "module RV\n  refine(VendorExt) { def own(a, b, c) = :vendor }\nend\n")
-      write("lib/removed.rb", "class << Float\n  remove_method :sqrt\nend\n")
+      write("lib/removed.rb", "class << Regexp\n  remove_method :escape\nend\n")
       write("lib/gem_use.rb", "using RS\nusing GemRef\nInteger.sqrt(1, 2)\n")
       write("lib/anon_use.rb", "using Module.new { refine(Integer.singleton_class) { def sqrt(a, b) = :anon } }\n" \
                                "Integer.sqrt(1, 2)\n")
       write("lib/loose_use.rb", "using RL\nKid.own(1, 2, 3)\n")
       write("lib/vendored_use.rb", "using RV\nKid.own(1, 2, 3)\n")
-      write("lib/removed_use.rb", "using RS\nFloat.sqrt(1, 2)\nStruct.members(1, 2, 3)\n")
-      write("lib/control.rb", "Integer.sqrt(1, 2)\nKid.own(1, 2, 3)\nStruct.members(1, 2, 3)\n")
+      write("lib/removed_use.rb", "using RS\nRegexp.escape(1, 2)\nStruct.members(1, 2, 3)\n")
+      write("lib/control.rb", "Integer.sqrt(1, 2)\nKid.own(1, 2, 3)\nRegexp.escape(1, 2)\nStruct.members(1, 2, 3)\n")
 
-      expect(call_rows).to eq(controls([1, 2, 3]))
+      expect(call_rows).to eq(controls([1, 2, 3, 4]))
     end
 
     it "answers a report and a decline the same through a warm cache as cold" do

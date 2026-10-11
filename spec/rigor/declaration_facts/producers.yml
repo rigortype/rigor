@@ -39,8 +39,11 @@ lib/rigor/analysis/check_rules/source_arity.rb:
   producers:
     Rigor::Analysis::CheckRules::SourceArity#public_at?: grandfathered
 lib/rigor/analysis/dependency_source_inference/walker.rb:
-  computes: the method catalog of an opt-in gem's source roots, per class and side, and its refine bodies' refinements
+  computes: the method catalog of an opt-in gem's source roots, per class and side, its refine bodies' refinements, and whether its source may mix a module into a module
   producers:
+    Rigor::Analysis::DependencySourceInference::Walker: MIXIN_CALLS and MIXIN_SYMBOLS name the calls and symbols that may mix a module into a module, for the gem-wide mixin flag of #1814; the flag records no declaration
+    Rigor::Analysis::DependencySourceInference::Walker#mixin_call?: reads one call as a mixin site for that flag (#1814); it names no class and records no declaration fact
+    Rigor::Analysis::DependencySourceInference::Walker#mixin_site?: tracks only whether `self` is a class, to tell an include that mixes into a class (which `using` rejects) from one that may mix into a module (#1814); it names no class and records no declaration fact
     Rigor::Analysis::DependencySourceInference::Walker#walk_node: grandfathered
     Rigor::Analysis::DependencySourceInference::Walker#walk_refine_declarations: a dispatcher over a refine body; it hands each nested class or module back to walk_node under the prefix it was given and derives no declaration context itself
 lib/rigor/analysis/reachability/scan.rb:

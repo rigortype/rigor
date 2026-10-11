@@ -42,18 +42,35 @@ module Rigor
         # [refining modules]}}`, the shape `Inference::ScopeIndexer` builds for project files. A refine-body `def`
         # goes there and never into `catalog`: it is not a method of the refining module, and of the refined class
         # only after `using`.
-        class Outcome < Data.define(:catalog, :truncated, :refinements)
-          def initialize(catalog:, truncated:, refinements: {}.freeze)
+        #
+        # Issue #1814 — what the walk read, for the question "has every file that could refine module M been read?".
+        # `modules` is every class and module the gem's files declare, as the project walk names them
+        # (`ScopeIndexer.collect_class_decls`), and every module its refinement rows name. `unread` holds the
+        # gem-relative path of each file the walk could not read in full (it did not parse, could not be read, or
+        # the census raised on it), or the gem directory when the walk itself raised; none is reported to the user,
+        # whose diagnostic stream is the project's. `mixes_modules` is true when the source may change which modules
+        # a module includes or prepends ({Walker.module_mixin_site?}), which `using` activates along with the module.
+        class Outcome < Data.define(:catalog, :truncated, :refinements, :modules, :unread, :mixes_modules)
+          def initialize(catalog:, truncated:, refinements: {}.freeze, modules: Set.new.freeze, unread: [].freeze,
+                         mixes_modules: false)
             super
           end
 
           def truncated? = truncated
+
+          # Issue #1814 — a module this gem declares is fully read when the budget did not stop the walk, every `.rb`
+          # file under the accepted roots was read, and no mixin site can have given the module an ancestor the walk
+          # did not see. (A module another gem also declares is judged on every gem that does:
+          # {Index#fully_read_module?}.)
+          def fully_read? = !truncated && unread.empty? && !mixes_modules
         end
 
-        # The walk's two accumulators. The budget counts `catalog` only, but stops the whole walk: a refine body
-        # reached after it trips is not recorded. `root` is the file being walked and `in_effect` its
-        # {Inference::InEffectRefinements}, built the first time a `refine`-shaped call asks (issue #1689).
-        Harvest = Struct.new(:catalog, :refinements, :root, :in_effect) do
+        # The walk's accumulators. The budget counts `catalog` only, but stops the whole walk: a refine body reached
+        # after it trips is not recorded. `root` is the file being walked and `in_effect` its
+        # {Inference::InEffectRefinements}, built the first time a `refine`-shaped call asks (issue #1689). Issue
+        # #1814 — `modules`, `unread` and `mixes` are {Outcome}'s coverage facts, and `gem_dir` makes `unread` paths
+        # gem-relative.
+        Harvest = Struct.new(:catalog, :refinements, :root, :in_effect, :gem_dir, :modules, :unread, :mixes) do
           # {Inference::ScopeIndexer.module_refine_target} against this file's in-effect refinements.
           def refine_target_of(node)
             return nil if Inference::ScopeIndexer.refine_target(node).nil?
@@ -78,6 +95,12 @@ module Rigor
         # Production code MUST pass an integer.
         UNBOUNDED = Float::INFINITY
 
+        # Issue #1814 — what {.module_mixin_site?} reads.
+        MIXIN_CALLS = Set[:include, :prepend].freeze
+        MIXIN_SYMBOLS = Set["include", "prepend", "append_features", "prepend_features"].freeze
+        MIXIN_WORD = /\b(?:include|prepend|append_features|prepend_features)\b/
+        private_constant :MIXIN_CALLS, :MIXIN_SYMBOLS, :MIXIN_WORD
+
         module_function
 
         # @param gem_dir — absolute path to the gem's installation directory.
@@ -90,7 +113,7 @@ module Rigor
         #   the budget was reached. Methods of identical name on the same class with different kinds (rare;
         #   private API mostly) carry the kind that wins the per-class first walk.
         def walk(gem_dir:, roots:, budget: UNBOUNDED)
-          harvest = Harvest.new({}, {})
+          harvest = Harvest.new({}, {}, nil, nil, gem_dir.to_s, Set.new, [], false)
           truncated = false
           accepted_roots(roots).each do |root|
             break if truncated
@@ -98,7 +121,9 @@ module Rigor
             truncated = walk_root(File.join(gem_dir.to_s, root), harvest, budget)
           end
           Outcome.new(catalog: harvest.catalog.freeze, truncated: truncated,
-                      refinements: Inference::ScopeIndexer.freeze_refinements(harvest.refinements))
+                      refinements: Inference::ScopeIndexer.freeze_refinements(harvest.refinements),
+                      modules: (harvest.modules | refining_modules(harvest.refinements)).freeze,
+                      unread: harvest.unread.freeze, mixes_modules: harvest.mixes)
         end
 
         # Drops hard-excluded entries before any filesystem walk happens. Reasoning: we never want a gem's
@@ -113,25 +138,110 @@ module Rigor
         def walk_root(root_dir, harvest, budget) # rubocop:disable Naming/PredicateMethod
           return false unless File.directory?(root_dir)
 
-          Dir.glob(File.join(root_dir, "**", "*.rb")).each do |path|
+          files = Dir.glob(File.join(root_dir, "**", "*.rb"))
+          unwalked_paths(root_dir, files).each { |path| harvest.unread << relative_path(path, harvest) }
+          files.each do |path|
             harvest_file(path, harvest, budget)
             return true if harvest.catalog.size >= budget
           end
           false
         end
 
+        # Issue #1814 — what `require` reaches under `root_dir` and the `**` glob does not enter: a dot file or
+        # directory (`lib/.vendor/x.rb`) and a symlinked directory (`lib/compat -> ../shim`; Ruby 4.0.5 lists the link,
+        # never what it holds). Their files may declare or refine a module, so the gem is not read in full.
+        def unwalked_paths(root_dir, walked)
+          dotted = Dir.glob(File.join(root_dir, "**", "*.rb"), File::FNM_DOTMATCH) - walked
+          directories = Dir.glob(File.join(root_dir, "**", "*/"), File::FNM_DOTMATCH)
+          dotted + directories.map { |dir| dir.chomp(File::SEPARATOR) }.select { |dir| File.symlink?(dir) }
+        end
+
+        # Issue #1814 — a file that does not parse, cannot be read, or raises under the census is recorded in
+        # `harvest.unread`: it may have declared or refined anything, so the gem is not fully read. The user-facing
+        # diagnostic stream is reserved for the project source; opt-in gem source MUST NOT pollute it with parse errors
+        # the user cannot fix, so the signal is {Outcome#unread}, which only {Index#fully_read_module?} reads.
         def harvest_file(path, harvest, budget)
           parse_result = Prism.parse_file(path)
-          return unless parse_result.errors.empty?
+          return harvest.unread << relative_path(path, harvest) unless parse_result.errors.empty?
 
           harvest.root = parse_result.value
           harvest.in_effect = nil
+          record_coverage(parse_result.value, harvest)
+          record_refinements(parse_result.value, harvest)
           walk_node(parse_result.value, [], false, harvest, budget)
         rescue StandardError
-          # Gem source we can't parse / read silently degrades to "no contribution from this file". The
-          # user-facing diagnostic stream is reserved for the project source; opt-in gem source MUST NOT
-          # pollute it with parse errors the user cannot fix.
-          nil
+          harvest.unread << relative_path(path, harvest)
+        end
+
+        def relative_path(path, harvest) = path.delete_prefix(harvest.gem_dir).delete_prefix(File::SEPARATOR)
+
+        # Issue #1814 — the classes and modules the file declares, as the project's `discovered_classes` names them, and
+        # whether it holds a mixin site.
+        def record_coverage(root, harvest)
+          declared = {}
+          Inference::ScopeIndexer.collect_class_decls(root, [], declared)
+          harvest.modules.merge(declared.keys)
+          harvest.mixes ||= module_mixin_site?(root)
+        end
+
+        # ADR-121 WD7 (issue #1814) — the refinement table the file contributes, read by the census the project walk
+        # runs ({Inference::ScopeIndexer.refinement_table}): the `refine` bodies, the computed targets, the `refine`
+        # inside a method, the `:refine` literals, and the wildcard rows each leaves.
+        def record_refinements(root, harvest)
+          harvest.refinements = Inference::ScopeIndexer.merge_refinement_tables(
+            harvest.refinements, Inference::ScopeIndexer.refinement_table(root)
+          )
+        end
+
+        # The modules the rows of `table` name as refining, without the wildcard (a module the walk cannot name) and the
+        # top level's `""` (where Ruby raises).
+        def refining_modules(table)
+          wildcard = Scope::DiscoveryIndex::REFINEMENT_WILDCARD
+          table.each_value.flat_map { |methods| methods.each_value.flat_map(&:itself) }.to_set - [wildcard, ""]
+        end
+
+        # Issue #1814 — can this file change which modules a module includes or prepends? `using M` puts in effect the
+        # refinements of every module `M` includes or prepends (CRuby's `using_module_recursive` walks the module's
+        # ancestors; Ruby 4.0.5 prints `:inc` for `module Inc; refine(String) { def foo = :inc }; end; module M; include
+        # Inc; end; using M; "x".foo`), and the gem table has no mixin edges. So the file counts when it calls `include`
+        # or `prepend` on an explicit receiver, or on `self` outside a class body (a class's own `include` mixes into a
+        # class, which `using` rejects; a block may run under any `self`, so it does not keep the class), when it
+        # holds an `:include`, `:prepend`, `:append_features` or `:prepend_features` Symbol (`send(:include, X)`,
+        # `method(:include)`), or an eval, `send` or method-naming call with a String that holds one of those words.
+        def module_mixin_site?(root)
+          return false unless MIXIN_WORD.match?(root.send(:source).source.b)
+
+          mixin_site?(root, false)
+        end
+
+        def mixin_site?(node, in_class)
+          case node
+          when Prism::ClassNode, Prism::SingletonClassNode then in_class = true
+          # A block may run under any `self` (`Module.new { include X }`, `M.module_eval { include X }`).
+          when Prism::ModuleNode, Prism::BlockNode, Prism::LambdaNode then in_class = false
+          when Prism::SymbolNode then return MIXIN_SYMBOLS.include?(node.unescaped)
+          when Prism::CallNode then return true if mixin_call?(node, in_class)
+          end
+          node.rigor_each_child { |child| return true if mixin_site?(child, in_class) }
+          false
+        end
+
+        def mixin_call?(node, in_class)
+          return !in_class || !Inference::RefineCensus.self_call?(node) if MIXIN_CALLS.include?(node.name)
+
+          Inference::RefineCensus.string_literal_call?(node) && (node.arguments&.arguments || []).any? do |argument|
+            mixin_string?(argument)
+          end
+        end
+
+        # As {Inference::RefineCensus.refine_string?}: a String literal (or a heredoc's literal part) holding a mixin
+        # word, read as bytes.
+        def mixin_string?(node)
+          case node
+          when Prism::StringNode then MIXIN_WORD.match?(node.unescaped.b)
+          when Prism::InterpolatedStringNode then node.parts.any? { |part| mixin_string?(part) }
+          else false
+          end
         end
 
         # Walks a Prism subtree, accumulating method definitions under their qualified class name. Mirrors
@@ -149,11 +259,8 @@ module Rigor
           when Prism::DefNode
             record_def_node(node, qualified_prefix, in_singleton_class, harvest, budget)
           when Prism::CallNode
-            if (target = harvest.refine_target_of(node))
-              return walk_refine_body(node, target, qualified_prefix, in_singleton_class, harvest, budget)
-            end
+            return walk_refine_body(node, qualified_prefix, harvest, budget) if harvest.refine_target_of(node)
 
-            record_unreadable_target(node, qualified_prefix, in_singleton_class, harvest) if node.name == :refine
             walk_children(node, qualified_prefix, in_singleton_class, harvest, budget)
           else
             walk_children(node, qualified_prefix, in_singleton_class, harvest, budget)
@@ -203,43 +310,15 @@ module Rigor
           harvest.catalog[key] = CatalogEntry.new(kind: kind, return_type: return_type)
         end
 
-        # Issue #1672 — `refine X do … end`, the shape {Inference::ScopeIndexer.module_refine_target} accepts (not
-        # one whose `self` is a class: that is the class's own method and walks as any other call, issue #1689). The
-        # body's instance `def`s are refinements of X by the enclosing module, recorded the way the project walk
-        # records them (`ScopeIndexer#record_refinement_defs`: X resolved lexically, every name it can denote
-        # recorded). None reaches the catalogue. A `refine` with no enclosing module, or in a block under
-        # `class << self`, names no refining module, so its defs are dropped. Declarations nested in the body still
-        # walk under the lexical prefix, as they did before.
-        #
-        # ADR-121 WD7 — the names are what `Inference::RefineCensus.read_body` reads, the project walk's reading, with
-        # a names-wildcard row for a body whose names are incomplete.
-        def walk_refine_body(node, target, qualified_prefix, in_singleton_class, harvest, budget)
+        # Issue #1672 — `refine X do … end`, the shape {Inference::ScopeIndexer.module_refine_target} accepts (not one
+        # whose `self` is a class: that is the class's own method and walks as any other call, issue #1689). The body's
+        # instance `def`s are refinements of X by the enclosing module, and none reaches the catalogue. The refinement
+        # table is not built here: {.record_refinements} runs the project walk's census over the whole file, which reads
+        # this body and every other `refine`-shaped node (ADR-121 WD7, issue #1814). Declarations nested in the body
+        # still walk under the lexical prefix, as they did before.
+        def walk_refine_body(node, qualified_prefix, harvest, budget)
           body = node.block.body
-          return if body.nil?
-
-          unless qualified_prefix.empty? || in_singleton_class
-            targets = Inference::ScopeIndexer.constant_receiver_candidates(target, qualified_prefix)
-            Inference::RefineCensus.record_rows(harvest.refinements, targets, Inference::RefineCensus.read_body(body),
-                                                qualified_prefix.join("::"))
-          end
-          walk_refine_declarations(body, qualified_prefix, harvest, budget)
-        end
-
-        # ADR-121 WD7 — a `refine` with a literal block whose target the walk cannot name (`refine(k)`), recorded as
-        # the project walk records it: the body's names under the wildcard class, plus a names-wildcard row when they
-        # are incomplete. A call on another receiver, with no literal block, where `self` is a class (#1689) or with
-        # no enclosing module records nothing, as {#walk_refine_body} drops a body whose module it cannot name. The
-        # block still walks as it did.
-        def record_unreadable_target(node, qualified_prefix, in_singleton_class, harvest)
-          return if qualified_prefix.empty? || in_singleton_class || !Inference::ScopeIndexer.refine_call?(node)
-
-          harvest.in_effect ||= Inference::InEffectRefinements.new(harvest.root)
-          return if harvest.in_effect.class_body_refine?(node)
-
-          wildcard = Scope::DiscoveryIndex::REFINEMENT_WILDCARD
-          Inference::RefineCensus.record_rows(harvest.refinements, [wildcard],
-                                              Inference::RefineCensus.read_body(node.block.body),
-                                              qualified_prefix.join("::"))
+          walk_refine_declarations(body, qualified_prefix, harvest, budget) unless body.nil?
         end
 
         # The class / module declarations inside a refine body, walked as before; nothing else in it is.

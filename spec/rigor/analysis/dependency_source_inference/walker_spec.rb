@@ -330,11 +330,159 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::Walker do
         expect(outcome.refinements).to eq({ "Shouty::String" => rows, "String" => rows })
       end
 
-      it "records nothing for a `refine` with no enclosing module" do
+      # Ruby 4.0.5 raises `NoMethodError` for a top-level `refine`, so no `using` can ever activate it. The census
+      # the project walk runs records it under the module name `""` (ADR-121 WD7), which no `using` names; the gem
+      # walk reads the file through the same census (#1814), so the row is the same one.
+      it "records a `refine` with no enclosing module under a module no `using` can name" do
         outcome = walk_source("refine(::String) { def shout = nil }\n")
 
         expect(outcome.catalog).to eq({})
-        expect(outcome.refinements).to eq({})
+        expect(outcome.refinements).to eq({ "String" => { shout: [""] } })
+        expect(outcome.modules).to eq(Set.new)
+      end
+    end
+
+    # Issue #1814 — what the walk read, for "has every file that could refine this module been read?".
+    describe "coverage" do
+      def walk_files(files, budget = described_class::UNBOUNDED)
+        with_fake_gem do |gem_dir|
+          files.each do |relative, source|
+            FileUtils.mkdir_p(File.dirname(File.join(gem_dir, relative)))
+            File.write(File.join(gem_dir, relative), source)
+          end
+          return walker.walk(gem_dir: gem_dir, roots: %w[lib], budget: budget)
+        end
+      end
+
+      it "reads a gem in full, and names the classes and modules its files declare" do
+        outcome = walk_files(
+          "lib/a.rb" => "module Shouty\n  refine(String) { def shout = 1 }\n  class Helper; end\nend\n",
+          "lib/b.rb" => "module Other\n  def self.x = 1\nend\n"
+        )
+
+        expect(outcome.fully_read?).to be(true)
+        expect(outcome.unread).to eq([])
+        expect(outcome.truncated?).to be(false)
+        expect(outcome.mixes_modules).to be(false)
+        expect(outcome.modules).to eq(Set["Shouty", "Shouty::Helper", "Other"])
+      end
+
+      it "names a module only a refinement row names, and a module a Module.new write declares" do
+        outcome = walk_files(
+          "lib/a.rb" => "Ext = Module.new do\n  refine(String) { def shout = 1 }\nend\n",
+          "lib/b.rb" => "module L\n  M.module_eval { refine(String) { def other = 1 } }\nend\n"
+        )
+
+        expect(outcome.modules).to include("Ext", "L", "L::M", "M")
+      end
+
+      # A file that does not parse may have declared or refined anything. The signal is the gem-relative path in
+      # `unread`; the existing example above keeps the walk's other facts for the files that did parse.
+      it "records a file that fails to parse as unread, and the gem as not fully read" do
+        outcome = walk_files(
+          "lib/good.rb" => "module Good\n  refine(String) { def ok = 1 }\nend\n",
+          "lib/deep/broken.rb" => "def broken\n"
+        )
+
+        expect(outcome.unread).to eq(["lib/deep/broken.rb"])
+        expect(outcome.fully_read?).to be(false)
+        expect(outcome.refinements).to eq({ "Good::String" => { ok: ["Good"] }, "String" => { ok: ["Good"] } })
+      end
+
+      it "records a file it cannot read as unread" do
+        with_fake_gem do |gem_dir|
+          File.write(File.join(gem_dir, "lib", "good.rb"), "module Good; end\n")
+          File.symlink("/nonexistent/target.rb", File.join(gem_dir, "lib", "dangling.rb"))
+
+          outcome = walker.walk(gem_dir: gem_dir, roots: %w[lib])
+
+          expect(outcome.unread).to eq(["lib/dangling.rb"])
+          expect(outcome.fully_read?).to be(false)
+        end
+      end
+
+      # Ruby 4.0.5: `Dir.glob("lib/**/*.rb")` lists neither `lib/.vendor/x.rb` nor `lib/compat/y.rb` for a symlink
+      # `lib/compat -> ../shim`, though `require` loads both. Their files may declare or refine a module.
+      it "records a dot directory's files and a symlinked directory as unread" do
+        with_fake_gem do |gem_dir|
+          File.write(File.join(gem_dir, "lib", "good.rb"), "module Good; end\n")
+          FileUtils.mkdir_p([File.join(gem_dir, "lib", ".vendor"), File.join(gem_dir, "shim")])
+          File.write(File.join(gem_dir, "lib", ".vendor", "x.rb"), "module Hidden; end\n")
+          File.write(File.join(gem_dir, "shim", "y.rb"), "module Linked; end\n")
+          File.symlink("../shim", File.join(gem_dir, "lib", "compat"))
+
+          outcome = walker.walk(gem_dir: gem_dir, roots: %w[lib])
+
+          expect(outcome.unread).to contain_exactly("lib/.vendor/x.rb", "lib/compat")
+          expect(outcome.fully_read?).to be(false)
+          expect(outcome.modules).to eq(Set["Good"])
+        end
+      end
+
+      it "records the census raising on a file as unread" do
+        allow(Rigor::Inference::ScopeIndexer).to receive(:refinement_table).and_raise(StandardError, "boom")
+
+        outcome = walk_files("lib/a.rb" => "module A\n  refine(String) { def x = 1 }\nend\n")
+
+        expect(outcome.unread).to eq(["lib/a.rb"])
+        expect(outcome.fully_read?).to be(false)
+      end
+
+      it "is not fully read once the budget truncated the walk" do
+        outcome = walk_files({ "lib/a.rb" => "module A\n  def a; end\n  def b; end\n  def c; end\nend\n" }, 2)
+
+        expect(outcome.truncated?).to be(true)
+        expect(outcome.fully_read?).to be(false)
+        expect(walk_files({ "lib/a.rb" => "module A\n  def a; end\nend\n" }, 2).fully_read?).to be(true)
+      end
+
+      # Ruby 4.0.5: `module Inc; refine(String) { def foo = :inc }; end; module M; include Inc; end; using M;
+      # "x".foo` prints `:inc`, so `using M` puts in effect the refinements of what `M` includes or prepends.
+      {
+        "an include in a module body" => "module M\n  include Inc\nend\n",
+        "a prepend in a module body" => "module M\n  prepend Inc\nend\n",
+        "an include through self" => "module M\n  self.include Inc\nend\n",
+        "an include in a method of a module" => "module M\n  def self.setup = include(Inc)\nend\n",
+        "an include on a constant" => "M.include(Inc)\n",
+        "a prepend on a constant" => "M.prepend(Inc)\n",
+        "an include on an argument" => "class Hooks\n  def self.included(base) = base.include(Inc)\nend\n",
+        "an include in a block under a class" => "class C\n  K = Module.new { include Inc }\nend\n",
+        "an include at the top level" => "include Inc\n",
+        "a send of :include" => "M.send(:include, Inc)\n",
+        "a method(:prepend) read" => "m = M.method(:prepend)\n",
+        "an eval string with an include" => "M.module_eval(\"include Inc\")\n",
+        "an eval heredoc with a prepend" => "M.module_eval(<<~RUBY)\n  prepend Inc\nRUBY\n"
+      }.each do |name, source|
+        it "marks #{name} as a mixin site" do
+          expect(walk_files("lib/m.rb" => source).mixes_modules).to be(true)
+        end
+      end
+
+      # The control for each of the above: the shapes that must stay clean.
+      {
+        "an include in a class body" => "class C\n  include Comparable\nend\n",
+        "an include in a class's method" => "class C\n  def self.use(mod) = include(mod)\nend\n",
+        "an include in class << self" => "module M\n  class << self\n    include Inc\n  end\nend\n",
+        "an extend self" => "module M\n  extend self\nend\n",
+        "include? on a list" => "module M\n  def x(list) = list.include?(1)\nend\n",
+        "a name that merely contains the word" => "module M\n  def includes = 1\nend\n",
+        "an unrelated send" => "M.send(:name)\n"
+      }.each do |name, source|
+        it "does not mark #{name} as a mixin site" do
+          expect(walk_files("lib/m.rb" => source).mixes_modules).to be(false)
+        end
+      end
+
+      # The census the project walk runs reaches a gem file: a refine in a method and a `:refine` literal leave the
+      # wildcard rows a project module would carry (see walker_walk_census_parity_spec for the full set of shapes).
+      it "records the wildcard rows of a refine in a method and of a :refine literal" do
+        wildcard = Rigor::Scope::DiscoveryIndex::REFINEMENT_WILDCARD
+        outcome = walk_files(
+          "lib/a.rb" => "module A\n  def self.setup = refine(String) { def x = 1 }\nend\n",
+          "lib/b.rb" => "module B\n  send(:refine, Integer) { def y = 1 }\nend\n"
+        )
+
+        expect(outcome.refinements).to eq({ wildcard => { wildcard => %w[A B] } })
       end
     end
   end

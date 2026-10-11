@@ -18,8 +18,9 @@ module Rigor
       # `class << self` body that is the module, though a `refine` call there runs on the singleton class); and
       # `instance` / `singleton`, for a method defined there on the instance / singleton side. Each is a module name,
       # the names a constant's spelling can denote (an Array, innermost first, for a module only another file may
-      # declare), the wildcard (a module the walk cannot name), {CLASS}, {MAIN} or {ANONYMOUS}. `deferred` is true
-      # inside a method body (a `def`, a `define_method` block), where a `refine` runs only once the method is called.
+      # declare), the wildcard (a module the walk cannot name), {CLASS}, {MAIN}, {ANONYMOUS} or {REFINEMENT}.
+      # `deferred` is true inside a method body (a `def`, a `define_method` block), where a `refine` runs only once the
+      # method is called.
       # `own_method` is true inside a singleton `def` of a module the walk names ({.def_body}), and in the blocks that
       # keep its `self`: `here` is then that module itself, so a `refine X do … end` written there refines X for it
       # once the method is called, and the census records its rows where it would otherwise charge a wildcard.
@@ -31,6 +32,10 @@ module Rigor
       MAIN = :main
       # A module a bare `Module.new { … }` creates, which the census names by its position.
       ANONYMOUS = :anonymous
+      # The refinement a `refine` block creates, where a method defined on its singleton side (`def self.x`, a
+      # `define_singleton_method` block, a `class << self` body) runs. `using` rejects a refinement with `TypeError`,
+      # so a `refine` there reaches no `using` span and the census charges it to nothing.
+      REFINEMENT = :refinement
 
       # Core iteration methods: the Enumerable protocol never rebinds `self` in their block.
       CORE_ITERATORS = Set[
@@ -159,14 +164,17 @@ module Rigor
       def method_block?(node) = METHOD_BLOCK_CALLS.include?(node.name) && RefineCensus.self_call?(node)
 
       # The block of a `refine` call: a `refine` written in it (a nested one) is charged where the call is, but `self`
-      # is the refinement, so a method defined in it is defined on a module the walk cannot name, not on the module
-      # around.
+      # is the refinement, so a method defined in it is defined on something the walk cannot name: a singleton method
+      # on the refinement itself ({REFINEMENT}), an instance method on an instance of the refined class (the
+      # wildcard), not on the module around.
       def refinement_body(parent)
-        parent.with(instance: refinement_side(parent.instance), singleton: refinement_side(parent.singleton),
+        parent.with(instance: refinement_side(parent.instance), singleton: refinement_singleton(parent.singleton),
                     own_method: false)
       end
 
       def refinement_side(side) = side.is_a?(String) || side.is_a?(Array) ? wildcard : side
+
+      def refinement_singleton(side) = named_module?(side) || side.is_a?(Array) || side == ANONYMOUS ? REFINEMENT : side
 
       def meta_new_body(node)
         ScopeIndexer.module_new_call?(node) ? module_body(ANONYMOUS) : class_body(false)

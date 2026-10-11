@@ -1778,6 +1778,23 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
       expect(undefined_rows).to eq([["plain.rb", 1, "yy"], ["use.rb", 4, "zz"]])
     end
 
+    # Ruby 4.0.5: `R = M.refinements.first; R.h` runs, and `using R` raises `TypeError`, so a `refine` in a singleton
+    # method of a refine body reaches no `using` span. `1.ii` raises `NoMethodError` even under `using M`, and the
+    # unrelated `using P` still reports `"a".qq`.
+    it "charges a refine in a singleton method of a refine body to nothing, so an unrelated module stays known" do
+      write("lib/m.rb", <<~RUBY)
+        module M
+          refine(String) do
+            def yy = 1
+            def self.h = refine(Integer) { def ii = 1 }
+          end
+        end
+      RUBY
+      write("lib/p.rb", "module P\n  refine(String) { def pp = 1 }\nend\nusing P\n\"a\".qq\n")
+
+      expect(undefined_rows).to eq([["p.rb", 5, "qq"]])
+    end
+
     it "answers the same through a warm cache as cold, and with only the consumers re-analysed" do
       shapes.each do |shape, source|
         write_project(source)

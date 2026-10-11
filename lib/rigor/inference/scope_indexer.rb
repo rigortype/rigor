@@ -3669,9 +3669,10 @@ module Rigor
         return unless node.name == :refine
 
         context = tables.refine_context(node)
+        nested = refine_body || context.here == RefineSelf::REFINEMENT
         outcome, charged =
           if tables.class_body_refine?(node) || context.here == RefineSelf::CLASS then :dsl
-          elsif refine_body && RefineCensus.self_call?(node) then :nested
+          elsif nested && RefineCensus.self_call?(node) then :nested
           elsif !RefineCensus.self_call?(node) || node.block.nil? || context.here == RefineSelf::MAIN then :raises
           else
             owners = RefineSelf.charged_modules(context)
@@ -3703,6 +3704,7 @@ module Rigor
         target = RefineCensus.literal_target(call)
         context = tables.refine_context(literal)
         return tables.account(literal, :data) if target == :self && context.literal == RefineSelf::CLASS
+        return tables.account(literal, :nested) if target == :self && context.literal == RefineSelf::REFINEMENT
 
         owners = literal_owners(call, target, RefineSelf.charged_modules(context, literal: true), qualified_prefix)
         owners.each { |owner| record_targets_wildcard(tables, owner) }
@@ -3731,6 +3733,7 @@ module Rigor
         tables.see_literal(node)
         context = tables.refine_context(node)
         return tables.account(node, :data) if context.literal == RefineSelf::CLASS
+        return tables.account(node, :nested) if context.literal == RefineSelf::REFINEMENT
 
         owners = RefineSelf.charged_modules(context, literal: true)
         owners.each { |owner| record_targets_wildcard(tables, owner) }

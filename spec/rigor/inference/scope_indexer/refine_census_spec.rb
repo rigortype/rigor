@@ -265,10 +265,68 @@ RSpec.describe Rigor::Inference::ScopeIndexer, ".refine_census" do
     "a refine in a def self.x of a Module subclass" => [
       "class MyMod < Module\n  def self.setup = refine(String) { def shout = 1 }\nend\n", %i[dsl], {}
     ],
-    # A method defined in a refine body belongs to the refinement, whichever module the body is written in.
+    # A singleton method defined in a refine body belongs to the refinement, whichever module the body is written in.
+    # Ruby 4.0.5 runs the `refine` there on the `Refinement`, which `using` rejects with `TypeError`, so it can reach no
+    # `using` span and is charged to nothing; `1.twice` raises `NoMethodError` even under `using M`.
     "a refine in a def self.x in a refine body" => [
-      "module M\n  refine(String) do\n    def self.setup = refine(Integer) { def twice = 1 }\n  end\nend\n",
-      %i[recorded targets_wildcard], { any => { any => [any] } }
+      <<~RUBY, %i[recorded nested], {}
+        module M
+          refine(String) do
+            def self.setup = refine(Integer) { def twice = 1 }
+          end
+        end
+      RUBY
+    ],
+    # `define_singleton_method` is a call on the refinement the body reader cannot follow, so the body's names are
+    # incomplete (and `twice`, a `def` at any depth, is over-recorded, as for a nested refine).
+    "a refine in a define_singleton_method block in a refine body" => [
+      <<~RUBY, %i[recorded nested], { "M::String" => { any => ["M"], twice: ["M"] }, "String" => { any => ["M"], twice: ["M"] } }
+        module M
+          refine(String) do
+            define_singleton_method(:setup) { refine(Integer) { def twice = 1 } }
+          end
+        end
+      RUBY
+    ],
+    "a refine in a def in a class << self body in a refine body" => [
+      <<~RUBY, %i[recorded nested], {}
+        module M
+          refine(String) do
+            class << self
+              def setup = refine(Integer) { def twice = 1 }
+            end
+          end
+        end
+      RUBY
+    ],
+    "a :refine literal in a def self.x in a refine body" => [
+      <<~RUBY, %i[recorded nested nested nested], {}
+        module M
+          refine(String) do
+            def self.setup = send(:refine, Integer) { def twice = 1 }
+            def self.other = alias_method(:my_refine, :refine)
+            def self.third = [:refine]
+          end
+        end
+      RUBY
+    ],
+    # The refine block's own module is several names (an eval on a constant in `module L`) or the walk's name for a bare
+    # `Module.new`; its singleton methods are still the refinement's.
+    "a refine in a def self.x in a refine body of an eval block on a constant" => [
+      <<~RUBY, %i[recorded nested], {}
+        module L
+          M.module_eval do
+            refine(String) { def self.setup = refine(Integer) { def twice = 1 } }
+          end
+        end
+      RUBY
+    ],
+    "a refine in a def self.x in a refine body of a bare Module.new block" => [
+      <<~RUBY, %i[recorded nested], {}
+        Module.new do
+          refine(String) { def self.setup = refine(Integer) { def twice = 1 } }
+        end
+      RUBY
     ],
     "a wrapper passing its block through" => [
       "module M\n  def self.my_refine(k, &b) = refine(k, &b)\n  my_refine(String) { def shout = 1 }\nend\n",

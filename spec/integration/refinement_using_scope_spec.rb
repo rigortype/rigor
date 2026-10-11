@@ -808,16 +808,20 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
       end
 
       # Round 3 of #1793's review. `w17_round3.rb` prints `[:each_target, :alias_target]`: a target the walk cannot
-      # name may be `String`, whichever definer `ObjCenter` would leave first.
-      it "declines under a refinement whose target the walk cannot name" do
+      # name may be `String`, whichever definer `ObjCenter` would leave first. `w27/use.rb` prints `:shadow` and
+      # `w27/use_other_order.rb` raises: `refine(String)` names `::String` while `ByShadow::String` is not loaded
+      # yet, so the raw table's every spelling counts, not the one the typed arm resolves.
+      it "declines under a refinement whose target the walk cannot name or pin" do
         write("lib/round3.rb", <<~RUBY)
           K = String
-          module ObjLjust; refine(Object) { def ljust(a, b, c) = a }; end
+          module ObjLjust; refine(Object) { def ljust(a, b, c) = a; def rjust(a, b, c) = a }; end
           module ByEach; [String].each { |k| refine(k) { def center(a, b, c) = :each_target } }; end
           module ByAlias; refine(K) { def ljust(a, b, c) = :alias_target }; end
+          module ByShadow; refine(String) { def rjust(a, b, c) = :shadow }; end
         RUBY
-        write("lib/use.rb", "using ObjCenter\nusing ObjLjust\nusing ByEach\nusing ByAlias\n" \
-                            "\"x\".center(1, 2, 3)\n\"x\".ljust(1, 2, 3)\n")
+        write("lib/by_shadow_string.rb", "module ByShadow; class String; end; end\n")
+        write("lib/use.rb", "using ObjCenter\nusing ObjLjust\nusing ByEach\nusing ByAlias\nusing ByShadow\n" \
+                            "\"x\".center(1, 2, 3)\n\"x\".ljust(1, 2, 3)\n\"x\".rjust(1, 2, 3)\n")
 
         expect(call_rows).to eq([])
       end

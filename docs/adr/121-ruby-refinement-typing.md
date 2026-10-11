@@ -5,7 +5,7 @@ knowledge).** Landed under #1670: the redefined-method decline (#1685), the incl
 gem refine bodies (#1686), the query (#1729), the typed arm (#1747), and for Ruby 4.1's
 `Proc#refined` the signature (#1711), refined literals (#1738) and the `BlockAsMethod` field (#1744).
 WD7 closes #1796 and #1799. Open: the carry-overs under Consequences, #1669, and gem modules that
-gem source inference could make known. The normative rules are in
+gem source inference could make known (#1814). The normative rules are in
 `docs/internal-spec/inference-engine.md` § "Ruby refinements".
 
 Grounding: the design session of 2026-10-09 on #1664 and #1667, probes on master `54da094f0` and
@@ -158,9 +158,12 @@ declaration is opaque.**
   `{"*" => {name => [M]}}` (`refine(k)`, `refine(self)`, or a target a project constant write binds),
   and a targets-wildcard `{"*" => {"*" => [M]}}` (a `refine` in a method or a `define_method` body, or
   reached through a `:refine` literal such as `send(:refine, …)` or `alias_method :r, :refine`). As a
-  module, `"*"` is one the walk cannot name: a `refine` in a module's instance method runs on whatever
-  module extends it, and one in a block may run under any `self` (a block at the top level, or one a DSL
-  `module_eval`s), unless the block's call keeps `self` (a call on a literal). In a plain class's methods
+  module, `"*"` is one the walk cannot name. One function (`RefineSelf`) answers what `self` a `refine` at
+  each node runs on, and the in-effect walk and the census both read its answer: a module's instance
+  method runs on whatever module extends it; a block, in a module body or a method body alike, may run
+  under any `self` (a block at the top level, one a DSL `module_eval`s, `tap`, `loop`), unless its call
+  keeps `self` (a call on a literal, or a core iteration method such as `each` or `map` on a constant,
+  local, ivar or literal); a `*_eval` on a constant runs on that constant. In a plain class's methods
   `refine` is the class's own method, as #1689 reads one in a class body. `alias`, `alias_method`,
   `define_method` and `attr_*` names in a refine body are recorded, and a later definer of a name
   replaces an earlier `def` of it. A census spec checks that every `refine`-shaped node ends in exactly
@@ -174,8 +177,11 @@ declaration is opaque.**
   finds can depend on load order; undeclared candidates leave, and a spelling with no declared
   candidate enters alone, opaque. An included module the project does not declare enters the list
   unless it is core or stdlib.
-- The checks decline every call, whatever the receiver, where an opaque module is in effect; the
-  union-receiver arm and `call.unresolved-toplevel` ask the same predicate.
+- Where an opaque module is in effect, these checks decline, whatever the receiver:
+  `call.undefined-method` (its union-receiver arm included), `call.unresolved-toplevel`,
+  `call.wrong-arity`, `call.argument-type-mismatch`, `call.possible-nil-receiver`,
+  `def.method-visibility-mismatch` and `flow.always-raises`. `call.raise-non-exception` (which judges
+  the argument) and `call.self-undefined-method` (off in every shipped profile) do not ask.
 - The typed arm answers `Dynamic[top]` for every instance-receiver call in the span of an activation
   that puts an opaque module in effect; a class object falls through until singleton-side levels land.
   WD3's rule that the unknown marker answers `Dynamic` only where some refinement defines the name is

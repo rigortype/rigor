@@ -47,8 +47,8 @@ define *behaviour*.
   the rules are `docs/internal-spec/inference-engine.md` § "Ruby refinements".
 - **opaque refining module** — a module in an in-effect list whose refinements Rigor cannot all read:
   one the project does not declare (a gem's, one required from outside the analysed paths) unless it is
-  core or stdlib, or one a targets-wildcard lists. Under it every call check declines and every
-  instance call types as `Dynamic[top]`. _Avoid_: "unknown module", which reads as the unknown marker a
+  core or stdlib, or one a targets-wildcard lists. Under it the call checks that judge a receiver's
+  method table decline (the ADR lists them) and every instance call types as `Dynamic[top]`. _Avoid_: "unknown module", which reads as the unknown marker a
   non-constant `using` contributes.
 - **folding** — evaluating an expression to a value-precise carrier at analysis time
   (`[1,2].first → Constant[1]`).

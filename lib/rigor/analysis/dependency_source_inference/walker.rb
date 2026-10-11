@@ -52,12 +52,19 @@ module Rigor
         # holds the gem-relative path of each file the walk could not read in full (it did not parse, could not be
         # read, or the census raised on it), or the gem directory when the walk itself raised; none is reported to the
         # user, whose diagnostic stream is the project's. `mixes_modules` is true when the source may change which
-        # modules a module includes or prepends ({MixinScan}), which `using` activates along with the module, or
-        # extends a module no gem file declares, whose methods may call `refine` on the extender. `bound` holds the
-        # last segment of every constant the gem writes without declaring a class or module by it.
-        class Outcome < Data.define(:catalog, :truncated, :refinements, :modules, :unread, :mixes_modules, :bound)
-          def initialize(catalog:, truncated:, refinements: {}.freeze, modules: Set.new.freeze, unread: [].freeze,
-                         mixes_modules: false, bound: Set.new.freeze)
+        # modules a module includes or prepends ({MixinScan}), which `using` activates along with the module, or hands
+        # the module to code it cannot read through an argument that is no constant. `bound` holds the last segment of
+        # every constant the gem writes without declaring a class or module by it, `declared` every class and module
+        # it declares, `foreign` the constants a module context hands the module to that no gem file declares, and
+        # `foreign_targets` the refine targets that none does (each as the candidate names of one spelling): the
+        # reader accounts for those against core, stdlib and the other walked gems.
+        class Outcome < Data.define(:catalog, :truncated, :refinements, :modules, :unread, :mixes_modules, :bound,
+                                    :declared, :foreign, :foreign_targets)
+          def initialize( # rubocop:disable Metrics/ParameterLists
+            catalog:, truncated:, refinements: {}.freeze, modules: Set.new.freeze, unread: [].freeze,
+            mixes_modules: false, bound: Set.new.freeze, declared: Set.new.freeze, foreign: [].freeze,
+            foreign_targets: [].freeze
+          )
             super
           end
 
@@ -77,7 +84,7 @@ module Rigor
         # name ({MixinScan#targets}), `writes` the constants its files write ({MixinScan#writes}), and `gem_dir` makes
         # `unread` paths gem-relative.
         Harvest = Struct.new(:catalog, :refinements, :root, :in_effect, :gem_dir, :modules, :unread, :mixes,
-                             :targets, :extends, :root_dirs, :writes) do
+                             :targets, :foreign, :root_dirs, :writes, :foreign_targets) do
           # {Inference::ScopeIndexer.module_refine_target} against this file's in-effect refinements.
           def refine_target_of(node)
             return nil if Inference::ScopeIndexer.refine_target(node).nil?
@@ -115,19 +122,25 @@ module Rigor
         #   private API mostly) carry the kind that wins the per-class first walk.
         def walk(gem_dir:, roots:, budget: UNBOUNDED)
           root_dirs = accepted_roots(roots).map { |root| File.join(gem_dir.to_s, root) }
-          harvest = Harvest.new({}, {}, nil, nil, gem_dir.to_s, Set.new, [], false, Set.new, [], root_dirs, [])
+          harvest = Harvest.new({}, {}, nil, nil, gem_dir.to_s, Set.new, [], false, Set.new, [], root_dirs, [], [])
           truncated = false
           root_dirs.each do |root_dir|
             break if truncated
 
             truncated = walk_root(root_dir, harvest, budget)
           end
+          outcome_of(harvest, truncated)
+        end
+
+        # The walk's {Outcome}: the catalogue and refinement table, and the facts the readers ask about coverage.
+        def outcome_of(harvest, truncated)
           refinements = Inference::ScopeIndexer.freeze_refinements(harvest.refinements)
-          Outcome.new(catalog: harvest.catalog.freeze, truncated: truncated,
-                      refinements: refinements,
+          Outcome.new(catalog: harvest.catalog.freeze, truncated: truncated, refinements: refinements,
                       modules: (harvest.modules | harvest.targets | refining_modules(refinements)).freeze,
-                      unread: harvest.unread.freeze, mixes_modules: harvest.mixes || undeclared_extend?(harvest),
-                      bound: bound_constants(harvest).freeze)
+                      unread: harvest.unread.freeze, mixes_modules: harvest.mixes,
+                      bound: bound_constants(harvest).freeze, declared: harvest.modules.dup.freeze,
+                      foreign: undeclared(harvest.foreign, harvest),
+                      foreign_targets: undeclared(harvest.foreign_targets, harvest))
         end
 
         # Drops hard-excluded entries before any filesystem walk happens. Reasoning: we never want a gem's
@@ -189,7 +202,8 @@ module Rigor
           scan = MixinScan.scan(root)
           harvest.mixes ||= scan.site
           harvest.targets.merge(scan.targets)
-          harvest.extends.concat(scan.extends)
+          harvest.foreign.concat(scan.foreign)
+          harvest.foreign_targets.concat(scan.foreign_targets)
           harvest.writes.concat(scan.writes)
         end
 
@@ -240,10 +254,11 @@ module Rigor
           end
         end
 
-        # Issue #1814 — does a file `extend` a module no gem file declares ({MixinScan#extends})? Its methods may call
-        # `refine` for the extender; one the gem declares is read by the census, which charges that `refine`.
-        def undeclared_extend?(harvest)
-          harvest.extends.any? { |names| names.nil? || names.none? { |name| harvest.modules.include?(name) } }
+        # Issue #1814 — the constants a module context hands the module being defined to ({MixinScan#foreign}), less
+        # the ones a gem file declares, whose `refine` calls the census has read. What remains is accounted for at read
+        # time, against Ruby core and stdlib and the other walked gems ({Index#fully_read_module?}).
+        def undeclared(lists, harvest)
+          lists.uniq.reject { |names| names.any? { |name| harvest.modules.include?(name) } }.freeze
         end
 
         # The modules the rows of `table` name as refining, without the wildcard (a module the walk cannot name) and the

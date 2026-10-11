@@ -12,15 +12,22 @@ module Rigor
       # entries.
       class Index
         # Issue #1814 — what one walked gem's walk read: the classes and modules it names ({Walker::Outcome#modules})
-        # and whether it read all of them ({Walker::Outcome#fully_read?}). Held beside {#refinements}.
-        #
-        # Issue #1814 — `bound` is the last segment of every constant the gem writes without declaring a class or
-        # module by it ({Walker::Outcome#bound}).
-        Reading = Data.define(:gem_name, :modules, :fully_read, :bound) do
-          def initialize(gem_name:, modules:, fully_read:, bound: Set.new.freeze)
+        # and whether it read all of them ({Walker::Outcome#fully_read?}). Held beside {#refinements}. `bound` is the
+        # last segment of every constant the gem writes without declaring a class or module by it
+        # ({Walker::Outcome#bound}); `declared` the classes and modules it declares; `foreign` and `foreign_targets` the
+        # constants a module context hands the module being defined to, and the refine targets, that no file of the
+        # gem declares ({Walker::Outcome#foreign}), which {#fully_read_module?} accounts for.
+        Reading = Data.define(:gem_name, :modules, :fully_read, :bound, :declared, :foreign, :foreign_targets) do
+          def initialize(gem_name:, modules:, fully_read:, bound: Set.new.freeze, declared: Set.new.freeze,
+                         foreign: [].freeze, foreign_targets: [].freeze)
             super
           end
         end
+
+        # Object constants Ruby core defines, which no refinement can come from.
+        CORE_OBJECT_CONSTANTS = Set["ENV", "ARGV", "ARGF", "STDIN", "STDOUT", "STDERR", "DATA", "TOPLEVEL_BINDING",
+                                    "RUBY_VERSION", "RUBY_PLATFORM", "RUBY_ENGINE", "RUBY_PATCHLEVEL"].freeze
+        private_constant :CORE_OBJECT_CONSTANTS
 
         attr_reader :resolved_gems, :unresolvable, :method_catalog, :budget_exceeded,
                     :class_to_gem, :budget_overrun_strategy, :gem_modes, :refinements, :readings
@@ -61,7 +68,9 @@ module Rigor
           @gem_modes = gem_modes.freeze
           @refinements = Inference::ScopeIndexer.freeze_refinements(refinements)
           @readings = readings.freeze
-          @fully_read_modules = fully_read_modules_of(readings).freeze
+          @namers = namers_of(readings).freeze
+          # The verdict per RBS loader, memoised; an index with no reading never asks, and stays Ractor-shareable.
+          @live = readings.empty? ? {}.freeze : {}.compare_by_identity
           @bound_constants = readings.flat_map { |reading| reading.bound.to_a }.to_set.freeze
           freeze
         end
@@ -77,16 +86,13 @@ module Rigor
         end
         private :normalize_catalog
 
-        def fully_read_modules_of(readings)
-          named = Set.new
-          spoiled = Set.new
-          readings.each do |reading|
-            named.merge(reading.modules)
-            spoiled.merge(reading.modules) unless reading.fully_read
+        # `module name => the readings that name it`.
+        def namers_of(readings)
+          readings.each_with_object({}) do |reading, namers|
+            reading.modules.each { |name| (namers[name] ||= []) << reading }
           end
-          named - spoiled
         end
-        private :fully_read_modules_of
+        private :namers_of
 
         # @return the gem that owns `class_name` (first-write-wins); `nil` when the class isn't
         #   in any opt-in gem's catalog.
@@ -95,12 +101,61 @@ module Rigor
         end
 
         # Issue #1814 — has every file that could refine `module_name` been read? True when a walked gem names it and
-        # every walked gem that names it was read in full: a gem that was truncated, had an unreadable file or may mix a
-        # module into a module could have refined it where the walk did not look. A module nothing walked names is not
-        # fully read, however the RBS or the project describe it.
-        def fully_read_module?(module_name)
-          @fully_read_modules.include?(module_name)
+        # every walked gem that names it was read in full: a gem that was truncated, had an unreadable file, may mix a
+        # module into a module, or hands the module it defines to a constant it cannot account for could have refined it
+        # where the walk did not look. A module nothing walked names is not fully read, however the RBS or the project
+        # describe it. `loader` is the run's RBS loader: a constant it knows as core or stdlib is accounted for.
+        def fully_read_module?(module_name, loader = nil)
+          readers = @namers[module_name]
+          return false if readers.nil?
+
+          live = live_readings(loader)
+          readers.all? { |reading| live.include?(reading) }
         end
+
+        # The readings that count as read in full for `loader`: the ones whose walk was clean and whose every foreign
+        # constant is accounted for, by core or stdlib, or by a gem that is itself in the set (a constant a read-in-full
+        # gem declares was read; one an unread gem declares was not). The set is the largest one in which every member's
+        # constants are accounted for, so two clean gems that hand each other their modules stay in.
+        def live_readings(loader)
+          @live[loader] ||= begin
+            live = @readings.select(&:fully_read).to_set.compare_by_identity
+            loop do
+              dropped = live.reject { |reading| accounted?(reading, live, loader) }
+              break if dropped.empty?
+
+              live.subtract(dropped)
+            end
+            live
+          end
+        end
+        private :live_readings
+
+        def accounted?(reading, live, loader)
+          reading.foreign.all? { |names| known?(names, live, loader) } &&
+            reading.foreign_targets.all? { |names| known_target?(names, live, loader) }
+        end
+        private :accounted?
+
+        def known?(names, live, loader)
+          names.any? { |name| CORE_OBJECT_CONSTANTS.include?(name) || loader&.core_or_stdlib_class?(name) } ||
+            live.any? { |reading| names.any? { |name| reading.declared.include?(name) } }
+        end
+        private :known?
+
+        # A refine target is also accounted for by any class the run's RBS knows (the row matches that class's
+        # receivers by name, as for a project class), and by a key the reader treats as class-unknown.
+        def known_target?(names, live, loader)
+          known?(names, live, loader) || names.any? { |name| loader&.class_known?(name) } || class_unknown?(names)
+        end
+        private :known_target?
+
+        # A refine key the reader treats as class-unknown ({Inference::InEffectRefinements.class_wildcard_key?}):
+        # some segment is a constant a walked gem writes.
+        def class_unknown?(names)
+          names.any? { |name| name.split("::").any? { |segment| @bound_constants.include?(segment) } }
+        end
+        private :class_unknown?
 
         # Issue #1814 — does a walked gem write a constant named `segment` without declaring a class or module by it?
         # A refine key with such a segment may name any value (`Target = String; refine(Shared::Target)`), which the

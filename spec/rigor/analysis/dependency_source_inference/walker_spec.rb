@@ -606,26 +606,75 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::Walker do
         expect(other.modules).to eq(Set.new)
       end
 
-      # Round-1 review of #1828 — a module `extend`ed into a module may call `refine` for the extender. Ruby 4.0.5
-      # prints `:ok` for `"x".foo` after `using Dslg` with `module Refiner; def refines_string(name) = refine(String)
-      # { define_method(name) { :ok } }; end; module Dslg; extend Refiner; refines_string :foo; end`. A helper the gem
-      # declares is read by the census, so only an extended module no gem file declares leaves the gem not read in
-      # full.
+      # Round-2 review of #1828 — a module context hands the module being defined to a constant it cannot account for.
+      # Ruby 4.0.5 prints `:ok` for `"x".foo` after `using Dslg` with `module Refiner; def refines_string(name) =
+      # refine(String) { define_method(name) { :ok } }; end` and `module Dslg; extend Refiner; refines_string :foo;
+      # end`,
+      # and the same for `class << self; include Refiner; end`, `Refiner.send(:extend_object, self)`, and a foreign
+      # `Plugin.install(self)` that includes into its argument. The walker lists each such constant (every candidate
+      # spelling) unless one of its own files declares it; the reader accounts for the rest against core, stdlib and
+      # the other walked gems (`Index#fully_read_module?`).
       {
-        "an extend of a constant the gem does not declare" => "module Dslg\n  extend Refiner\nend\n",
-        "an extend of a constant path" => "module Dslg\n  extend Gem::Refiner\nend\n",
-        "an extend of an expression" => "module Dslg\n  extend(*HELPERS)\nend\n",
+        "an extend of a constant the gem does not declare" =>
+          ["module Dslg\n  extend Refiner\nend\n", [%w[Dslg::Refiner Refiner]]],
+        "an extend of a constant path" =>
+          ["module Dslg\n  extend Gem::Refiner\nend\n", [%w[Dslg::Gem::Refiner Gem::Refiner]]],
         "an extend of one declared and one undeclared module" =>
-          "module Helper; end\nmodule Dslg\n  extend Helper, Refiner\nend\n",
-        "an explicit extend on a constant" => "Dslg.extend(Refiner)\n",
-        "an extend in a block" => "Module.new do\n  extend Refiner\nend\n",
-        "an extend in a method of a module" => "module Dslg\n  def self.setup = extend(Refiner)\nend\n"
-      }.each do |name, source|
-        it "reads #{name} as not read in full" do
-          expect(walk_files("lib/m.rb" => source).fully_read?).to be(false)
+          ["module Helper; end\nmodule Dslg\n  extend Helper, Refiner\nend\n", [%w[Dslg::Refiner Refiner]]],
+        "an explicit extend on a constant" => ["Dslg.extend(Refiner)\n", [%w[Refiner]]],
+        "an extend in a Module.new block" => ["Module.new do\n  extend Refiner\nend\n", [%w[Refiner]]],
+        "an extend in a method of a module" =>
+          ["module Dslg\n  def self.setup = extend(Refiner)\nend\n", [%w[Dslg::Refiner Refiner]]],
+        "an include in the body of class << self of a module" =>
+          ["module Scr\n  class << self\n    include Refiner\n  end\nend\n", [%w[Scr::Refiner Refiner]]],
+        "a prepend in the body of class << self of a module" =>
+          ["module Scr\n  class << self\n    prepend Refiner\n  end\nend\n", [%w[Scr::Refiner Refiner]]],
+        "a call on a constant that passes self" =>
+          ["module Shouty\n  Plugin.install(self)\nend\n", [%w[Shouty::Plugin Plugin]]],
+        "a call on a constant that passes self as a keyword" =>
+          ["module Shouty\n  Plugin.install(into: self)\nend\n", [%w[Shouty::Plugin Plugin]]],
+        "a call on a constant path chain that passes self" =>
+          ["module Shouty\n  Plugin::Installer.new.install(self)\nend\n",
+           [%w[Shouty::Plugin::Installer Plugin::Installer]]],
+        "a call on a constant that takes a block" =>
+          ["module Shouty\n  Registry.configure { |c| c.name = 1 }\nend\n", [%w[Shouty::Registry Registry]]],
+        "a send on a constant" =>
+          ["module Eog\n  Refiner.send(:extend_object, self)\nend\n", [%w[Eog::Refiner Refiner]]],
+        "a send on a constant that hands over nothing else" =>
+          ["module Eog\n  Refiner.send(:install, 1)\nend\n", [%w[Eog::Refiner Refiner]]],
+        "a public_send on a constant" => ["module Eog\n  Refiner.public_send(:install)\nend\n",
+                                          [%w[Eog::Refiner Refiner]]],
+        "an extend_object on a constant" =>
+          ["module Eog\n  Refiner.extend_object(Other)\nend\n", [%w[Eog::Refiner Refiner]]],
+        "a define_method on a constant" =>
+          ["module Eog\n  Refiner.define_method(:x, other)\nend\n", [%w[Eog::Refiner Refiner]]],
+        "a module_eval on a constant" => ["module Eog\n  Refiner.module_eval(\"1\")\nend\n",
+                                          [%w[Eog::Refiner Refiner]]],
+        "a call in a method of a module" =>
+          ["module Shouty\n  def self.setup = Plugin.install(self)\nend\n", [%w[Shouty::Plugin Plugin]]]
+      }.each do |name, (source, foreign)|
+        it "lists the constant of #{name} as foreign" do
+          expect(walk_files("lib/m.rb" => source).foreign).to eq(foreign)
         end
       end
 
+      it "reads an extend of an expression as not read in full, with no constant to account for" do
+        outcome = walk_files("lib/m.rb" => "module Dslg\n  extend(*HELPERS)\nend\n")
+
+        expect([outcome.mixes_modules, outcome.foreign]).to eq([true, []])
+      end
+
+      it "lists a refine target no gem file declares, and not one the gem declares or reopens" do
+        foreign = walk_files("lib/m.rb" => "module M\n  refine(ActiveRecord::Base) { def x = 1 }\nend\n")
+        declared = walk_files("lib/m.rb" => "module M\n  class Point; end\n  refine(Point) { def x = 1 }\nend\n")
+        reopened = walk_files("lib/m.rb" => "class String; end\nmodule M\n  refine(String) { def x = 1 }\nend\n")
+
+        expect(foreign.foreign_targets).to eq([%w[M::ActiveRecord::Base ActiveRecord::Base]])
+        expect([declared.foreign_targets, reopened.foreign_targets]).to eq([[], []])
+      end
+
+      # The controls: a constant the gem declares (in this file or another), `self`, a class body, the top level, a
+      # receiver that is no constant, and a call that hands over nothing.
       {
         "an extend of a module the gem declares" => {
           "lib/m.rb" => "module Helper; end\nmodule Dslg\n  extend Helper\nend\n"
@@ -635,10 +684,26 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::Walker do
         },
         "an extend self" => { "lib/m.rb" => "module Dslg\n  extend self\nend\n" },
         "an extend in a class body" => { "lib/m.rb" => "class Base\n  extend Forwardable\nend\n" },
-        "an extend on a variable" => { "lib/m.rb" => "def self.included(base) = base.extend(ClassMethods)\n" }
+        "an extend on a variable" => { "lib/m.rb" => "def self.included(base) = base.extend(ClassMethods)\n" },
+        "a hand-off in a class body" => { "lib/m.rb" => "class Base\n  Plugin.install(self)\nend\n" },
+        "a hand-off at the top level" => { "lib/m.rb" => "Plugin.install(self)\n" },
+        "a hand-off to a variable" => {
+          "lib/m.rb" => "module M\n  def self.setup(registry) = registry.install(self)\nend\n"
+        },
+        "a call on a constant that hands over nothing" => {
+          "lib/m.rb" => "module M\n  VALUE = Config.fetch(:a)\nend\n"
+        },
+        "a hand-off to a constant the gem declares" => {
+          "lib/m.rb" => "module Plugin; end\nmodule M\n  Plugin.install(self)\nend\n"
+        },
+        "an include in the body of class << self of a class" => {
+          "lib/m.rb" => "class C\n  class << self\n    include Refiner\n  end\nend\n"
+        }
       }.each do |name, files|
-        it "reads #{name} as read in full" do
-          expect(walk_files(files).fully_read?).to be(true)
+        it "lists nothing for #{name}" do
+          outcome = walk_files(files)
+
+          expect([outcome.foreign, outcome.foreign_targets]).to eq([[], []])
         end
       end
 

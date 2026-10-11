@@ -61,8 +61,10 @@ module Rigor
             walked = builder.walker_outcome_for(resolved, budget)
             @catalog.merge!(walked.catalog)
             @refinements = Inference::ScopeIndexer.merge_refinement_tables(@refinements, walked.refinements)
-            @readings << Index::Reading.new(gem_name: resolved.gem_name, modules: walked.modules,
-                                            fully_read: walked.fully_read?, bound: walked.bound)
+            @readings << Index::Reading.new(
+              gem_name: resolved.gem_name, modules: walked.modules, fully_read: walked.fully_read?, bound: walked.bound,
+              declared: walked.declared, foreign: walked.foreign, foreign_targets: walked.foreign_targets
+            )
             builder.record_class_to_gem(walked.catalog, resolved.gem_name, @class_to_gem)
             @budget_exceeded << resolved.gem_name if walked.truncated?
           end

@@ -100,7 +100,9 @@ module Rigor
         # (CRuby ships no refinements), or an opted-in gem declares it and the gem source walker read every file that
         # could refine it (`DependencySourceInference::Index#fully_read_module?`, issue #1814). Anything else is opaque:
         # a gem's module the walk did not finish (truncated by the budget, an unparseable file, a mixin it cannot
-        # read), a gem nobody opted in, a module required from outside the analysed paths, or one only an
+        # read, a module context that hands the module to a constant nothing accounts for: core and stdlib through the
+        # run's RBS loader, and the walked gems that were read in full), a gem nobody opted in, a module required from
+        # outside the analysed paths, or one only an
         # `Object.const_set` makes. A targets-wildcard row (`{"*" => {"*" => [...]}}`) that lists the module or the
         # wildcard, which some unreadable `refine` wrote, makes it opaque whatever its source, and that check runs
         # first. Every reader that declines on an opaque module asks this, and nothing else.
@@ -235,7 +237,7 @@ module Rigor
         # Issue #1814 — did the gem source walker read every file that could refine `name`? Existence is
         # {.gem_module?}; this is the stronger fact, recorded when the walk finished.
         def fully_read_gem_module?(scope, name)
-          scope.environment&.dependency_source_index&.fully_read_module?(name) || false
+          scope.environment&.dependency_source_index&.fully_read_module?(name, scope.environment.rbs_loader) || false
         end
 
         # A module an opted-in gem's source declares: one its catalogue files a method under, or one its refinement

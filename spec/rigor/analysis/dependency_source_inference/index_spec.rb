@@ -204,6 +204,76 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::Index do
       expect(both.fully_read_module?("Shared")).to be(true)
     end
 
+    # Round-2 review of #1828 — a gem whose module context hands the module to a constant no file of the gem declares
+    # (`Reading#foreign`, `#foreign_targets`) is read in full only when that constant is accounted for: Ruby core or
+    # stdlib, by the run's RBS loader, or a constant a walked gem that is itself read in full declares.
+    describe "foreign constants" do
+      def gem_reading(name, modules, fully_read: true, **facts)
+        described_class::Reading.new(gem_name: name, modules: Set.new(modules), fully_read: fully_read, **facts)
+      end
+
+      let(:loader) do
+        Class.new do
+          def core_or_stdlib_class?(name) = %w[Comparable Forwardable].include?(name)
+          def class_known?(name) = %w[Comparable Forwardable Gem::Sig].include?(name)
+        end.new
+      end
+
+      it "accounts for a core or stdlib constant through the loader, and for Ruby's object constants without one" do
+        core = gem_reading("a", %w[A], foreign: [%w[A::Comparable Comparable]])
+        env = gem_reading("b", %w[B], foreign: [%w[B::ENV ENV]])
+        index = described_class.new(readings: [core, env])
+
+        expect([index.fully_read_module?("A", loader), index.fully_read_module?("A"), index.fully_read_module?("B")])
+          .to eq([true, false, true])
+      end
+
+      it "accounts for a constant a walked gem read in full declares, and not for one an unread gem declares" do
+        installer = gem_reading("shoutg", %w[Shouty], foreign: [%w[Shouty::Plugin Plugin]])
+        clean = gem_reading("pluging", %w[Plugin], declared: Set["Plugin"])
+        mixing = gem_reading("pluging", %w[Plugin], fully_read: false, declared: Set["Plugin"])
+
+        expect(described_class.new(readings: [installer, clean]).fully_read_module?("Shouty")).to be(true)
+        expect(described_class.new(readings: [installer, mixing]).fully_read_module?("Shouty")).to be(false)
+        expect(described_class.new(readings: [installer]).fully_read_module?("Shouty")).to be(false)
+      end
+
+      it "follows a chain of gems to its end, and keeps two clean gems that account for each other" do
+        first = gem_reading("a", %w[A], foreign: [%w[B]], declared: Set["A"])
+        second = gem_reading("b", %w[B], foreign: [%w[C]], declared: Set["B"])
+        third = gem_reading("c", %w[C], fully_read: false, declared: Set["C"])
+        cyclic = gem_reading("d", %w[D], foreign: [%w[E]], declared: Set["D"])
+        mutual = gem_reading("e", %w[E], foreign: [%w[D]], declared: Set["E"])
+        index = described_class.new(readings: [first, second, third, cyclic, mutual])
+
+        expect(%w[A B C D E].map { |name| index.fully_read_module?(name) }).to eq([false, false, false, true, true])
+      end
+
+      it "accounts for a refine target through a walked gem's bound constant, and not otherwise" do
+        target = [%w[M::Shared::Target Shared::Target]]
+        refiner = gem_reading("brefg", %w[M], foreign_targets: target)
+        shared = gem_reading("sharedg", %w[Shared], bound: Set["Target"])
+
+        expect(described_class.new(readings: [refiner, shared]).fully_read_module?("M")).to be(true)
+        expect(described_class.new(readings: [refiner]).fully_read_module?("M")).to be(false)
+      end
+
+      it "accounts for a refine target the run's RBS knows as a class, though no walked gem declares it" do
+        refiner = gem_reading("sigg", %w[M], foreign_targets: [%w[M::Gem::Sig Gem::Sig]])
+        index = described_class.new(readings: [refiner])
+
+        expect([index.fully_read_module?("M", loader), index.fully_read_module?("M")]).to eq([true, false])
+      end
+
+      it "spoils a module another gem names through the gem that is not accounted for" do
+        base = gem_reading("base", %w[Shared])
+        ext = gem_reading("ext", %w[Shared Other], foreign: [%w[Refiner]])
+
+        expect(described_class.new(readings: [base]).fully_read_module?("Shared")).to be(true)
+        expect(described_class.new(readings: [base, ext]).fully_read_module?("Shared")).to be(false)
+      end
+    end
+
     # Round-2 review of #1828 — the constants walked gems write, unioned across gems, by last segment.
     it "unions the constants the walked gems bind" do
       first = described_class::Reading.new(gem_name: "a", modules: Set.new, fully_read: true, bound: Set["Target"])

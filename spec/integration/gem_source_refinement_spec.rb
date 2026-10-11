@@ -242,6 +242,71 @@ RSpec.describe "Gem source inference over `refine` bodies (#1672)" do
       expect(undefined_rows(gems: %w[pig])).to eq([["app.rb", 3, "nope"]])
     end
 
+    # Round-2 review of #1828 — a module context hands the module to a constant the gem cannot account for. Ruby
+    # 4.0.5 prints `:ok` for `"x".foo` in the first five shapes (a helper's method calls `refine` for the module it
+    # runs on, or a foreign method includes into its argument). A constant Ruby core or stdlib declares, and one the
+    # gem declares, hand it nothing the walk cannot read.
+    {
+      "extends a module it does not declare" => ["  extend Refiner\n", false],
+      "includes a module in the body of class << self" => ["  class << self\n    include Refiner\n  end\n", false],
+      "extends in a method" => ["  def self.setup = extend(Refiner)\n", false],
+      "sends extend_object to a foreign constant" => ["  Refiner.send(:extend_object, self)\n", false],
+      "passes itself to a foreign constant" => ["  Plugin.install(self)\n", false],
+      "gives a foreign constant a block" => ["  Registry.configure { |c| c.name = 1 }\n", false],
+      "refines a class no walked gem declares" => ["  refine(ActiveRecord::Base) { def aliased = 1 }\n", false],
+      "extends a core module" => ["  extend Comparable\n", true],
+      "extends a stdlib module" => ["  extend Forwardable\n", true],
+      "includes a core module in the body of class << self" =>
+        ["  class << self\n    include Comparable\n  end\n", true],
+      "calls core constants with a block and with itself" =>
+        ["  Thread.new { 1 }\n  ENV.fetch('X') { 1 }\n  Kernel.send(:format, self)\n", true],
+      "refines a core class and a stdlib class" =>
+        ["  refine(Integer) { def double = self * 2 }\n  refine(Struct) { def pairs = 1 }\n", true]
+    }.each_with_index do |(name, (snippet, known)), index|
+      it "#{known ? 'stays known' : 'stays opaque'} when the gem #{name}" do
+        write_gem("gx#{index}",
+                  "lib/gx#{index}.rb" => "module Gx#{index}\n  refine(String) { def shout = upcase }\n#{snippet}end\n")
+
+        expected = known ? reads + [["other.rb", 3, "nope"]] : reads
+        expect(rows_for("gx#{index}", "Gx#{index}")).to eq(expected)
+      end
+    end
+
+    def shoutg_source = "module Shoutg\n  refine(String) { def shout = upcase }\n  Plugin.install(self)\nend\n"
+
+    # `Plugin.install(self)` is accounted for only by a walked gem read in full that declares `Plugin`: the second gem
+    # below includes into its argument through an explicit receiver, so it is not, and the first stays opaque. Ruby
+    # 4.0.5 prints `["X", :inc]` for `"x".shout, "x".foo` after `using Shouty`.
+    it "stays opaque when the foreign constant is declared by a gem that is not read in full" do
+      write_gem("shoutg", "lib/shoutg.rb" => shoutg_source)
+      write_gem("pluging", "lib/pluging.rb" => "module PluginInc\n  refine(String) { def foo = :inc }\nend\n" \
+                                               "module Plugin\n  def self.install(mod) = mod.include(PluginInc)\nend\n")
+      write("lib/app.rb", "using Shouty\n\"hi\".shout\n\"hi\".nope\n")
+      write("lib/other.rb", "using Shoutg\n\"hi\".shout\n\"hi\".foo\n\"hi\".nope\n")
+
+      expect(undefined_rows(gems: %w[shouty shoutg pluging])).to eq(reads)
+    end
+
+    it "stays known when the foreign constant is declared by a gem read in full" do
+      write_gem("shoutg", "lib/shoutg.rb" => shoutg_source)
+      write_gem("pluging", "lib/pluging.rb" => "module Plugin\n  def self.install(mod) = mod.name\nend\n")
+      write("lib/app.rb", "using Shouty\n\"hi\".shout\n\"hi\".nope\n")
+      write("lib/other.rb", "using Shoutg\n\"hi\".shout\n\"hi\".foo\n\"hi\".nope\n")
+
+      expect(undefined_rows(gems: %w[shouty shoutg pluging])).to eq(
+        reads + [["other.rb", 3, "foo"], ["other.rb", 4, "nope"]]
+      )
+    end
+
+    # Two gems that reopen one module, both read in full, leave it known; Ruby 4.0.5 defines `shout` and `whisper2`.
+    it "stays known when two gems read in full reopen a module" do
+      write_gem("ga", "lib/ga.rb" => "module Shared\n  refine(String) { def shout = upcase }\nend\n")
+      write_gem("gb", "lib/gb.rb" => "module Shared\n  refine(String) { def whisper2 = downcase }\nend\n")
+      write("lib/other.rb", "using Shared\n\"hi\".shout\n\"hi\".whisper2\n\"hi\".nope\n")
+
+      expect(undefined_rows(gems: %w[ga gb])).to eq([["other.rb", 4, "nope"]])
+    end
+
     # Round-1 review of #1828, on Ruby 4.0.5 both print `:inc`: a method defined under `class << self` of a module runs
     # with the module as `self`, and an implicit-self `append_features(mod)` mixes into `mod`.
     it "stays opaque when a method under class << self includes, or a module calls append_features" do

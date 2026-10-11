@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "builtins/cruby_definers"
+
 module Rigor
   module Inference
     # ADR-121 WD2 (issue #1664) — which in-effect refinement, if any, answers a call on an instance of a class. The

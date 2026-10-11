@@ -503,7 +503,22 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::Walker do
         "a send of :include" => "M.send(:include, Inc)\n",
         "a method(:prepend) read" => "m = M.method(:prepend)\n",
         "an eval string with an include" => "M.module_eval(\"include Inc\")\n",
-        "an eval heredoc with a prepend" => "M.module_eval(<<~RUBY)\n  prepend Inc\nRUBY\n"
+        "an eval heredoc with a prepend" => "M.module_eval(<<~RUBY)\n  prepend Inc\nRUBY\n",
+        # Round-1 review of #1828 — a method defined under `class << self` runs with the `self` of the enclosing body.
+        # Ruby 4.0.5 prints `:inc` for `module Scg; class << self; def enable! = include(ScgInc); end; enable!; end`.
+        "an include in a method defined under class << self of a module" =>
+          "module M\n  class << self\n    def enable! = include(Inc)\n  end\nend\n",
+        "an include in a method defined under class << expr" =>
+          "module M\n  class << obj\n    def enable! = include(Inc)\n  end\nend\n",
+        "an include in a method defined under class << expr inside a class" =>
+          "class C\n  class << obj\n    def enable! = include(Inc)\n  end\nend\n",
+        "an include in a method of a module under class << self inside a block" =>
+          "Module.new do\n  class << self\n    def enable! = include(Inc)\n  end\nend\n",
+        # Ruby 4.0.5 prints `:inc` for `module AfgInc; def self.mix_into(mod) = append_features(mod); end; module Afg;
+        # AfgInc.mix_into(self); end`.
+        "an implicit append_features in a method of a module" =>
+          "module M\n  def self.mix_into(mod) = append_features(mod)\nend\n",
+        "an implicit prepend_features in a module body" => "module M\n  prepend_features(Inc)\nend\n"
       }.each do |name, source|
         it "marks #{name} as a mixin site" do
           expect(walk_files("lib/m.rb" => source).mixes_modules).to be(true)
@@ -516,6 +531,9 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::Walker do
         "an include in a class's method" => "class C\n  def self.use(mod) = include(mod)\nend\n",
         "an include in class << self" => "module M\n  class << self\n    include Inc\n  end\nend\n",
         "an extend self" => "module M\n  extend self\nend\n",
+        "an include in a method defined under class << self of a class" =>
+          "class C\n  class << self\n    def use(mod) = include(mod)\n  end\nend\n",
+        "an append_features in a class's method" => "class C\n  def self.use(mod) = append_features(mod)\nend\n",
         "include? on a list" => "module M\n  def x(list) = list.include?(1)\nend\n",
         "a name that merely contains the word" => "module M\n  def includes = 1\nend\n",
         "an unrelated send" => "M.send(:name)\n"

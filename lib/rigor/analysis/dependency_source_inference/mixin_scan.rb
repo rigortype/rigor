@@ -32,16 +32,18 @@ module Rigor
         MIXIN_WORD = /\b(?:include|prepend|append_features|prepend_features)\b/
         private_constant :MIXIN_CALLS, :FEATURE_CALLS, :MIXIN_SYMBOLS, :MIXIN_WORD
 
-        # `prefix` is the lexical nesting, `in_class` whether `self` is a class here, and `eval_targets` the candidate
-        # names of the constant a `*_eval` call whose block this is runs on.
-        Scope = Struct.new(:prefix, :in_class, :eval_targets)
+        # `prefix` is the lexical nesting, `in_class` whether `self` is a class here, `def_in_class` whether it is in a
+        # method defined here (a method in `class << self` runs on the object whose singleton it is, not on the
+        # singleton class), and `eval_targets` the candidate names of the constant a `*_eval` call whose block this is
+        # runs on.
+        Scope = Struct.new(:prefix, :in_class, :def_in_class, :eval_targets)
         private_constant :Scope
 
         attr_reader :site, :targets
 
         def self.scan(root)
           scan = new
-          scan.send(:walk, root, Scope.new([], false, [])) if MIXIN_WORD.match?(root.send(:source).source.b)
+          scan.send(:walk, root, Scope.new([], false, false, [])) if MIXIN_WORD.match?(root.send(:source).source.b)
           scan
         end
 
@@ -55,9 +57,11 @@ module Rigor
         def walk(node, scope)
           case node
           when Prism::ClassNode, Prism::ModuleNode then scope = enter(node, scope)
-          when Prism::SingletonClassNode then scope = Scope.new(scope.prefix, true, [])
+          when Prism::SingletonClassNode then scope = singleton(node, scope)
+          when Prism::DefNode then scope = Scope.new(scope.prefix, scope.def_in_class, scope.def_in_class, [])
           # A block may run under any `self` (`Module.new { include X }`, `M.module_eval { include X }`).
-          when Prism::BlockNode, Prism::LambdaNode then scope = Scope.new(scope.prefix, false, scope.eval_targets)
+          when Prism::BlockNode, Prism::LambdaNode
+            scope = Scope.new(scope.prefix, false, false, scope.eval_targets)
           when Prism::SymbolNode then return @site ||= MIXIN_SYMBOLS.include?(node.unescaped)
           when Prism::CallNode then return walk_call(node, scope)
           end
@@ -66,12 +70,20 @@ module Rigor
 
         def enter(node, scope)
           prefix = Source::ConstantPath.declaration_prefix(scope.prefix, node.constant_path) || scope.prefix
-          Scope.new(prefix, node.is_a?(Prism::ClassNode), [])
+          Scope.new(prefix, node.is_a?(Prism::ClassNode), node.is_a?(Prism::ClassNode), [])
+        end
+
+        # The body of `class << self` mixes into the singleton class, which `using` never reads; a method defined there
+        # runs with the `self` of the enclosing body, so a module's does not keep the class (`def enable! =
+        # include(Inc)` under `class << self` in a module mixes into the module). `class << expr` is an object the
+        # scan cannot name.
+        def singleton(node, scope)
+          Scope.new(scope.prefix, true, node.expression.is_a?(Prism::SelfNode) && scope.in_class, [])
         end
 
         def walk_call(node, scope)
           inspect_call(node, scope)
-          block_scope = Scope.new(scope.prefix, scope.in_class, eval_targets_of(node, scope))
+          block_scope = Scope.new(scope.prefix, scope.in_class, scope.def_in_class, eval_targets_of(node, scope))
           node.rigor_each_child { |child| walk(child, child.equal?(node.block) ? block_scope : scope) }
         end
 

@@ -242,6 +242,30 @@ RSpec.describe "Gem source inference over `refine` bodies (#1672)" do
       expect(undefined_rows(gems: %w[pig])).to eq([["app.rb", 3, "nope"]])
     end
 
+    # Round-1 review of #1828, on Ruby 4.0.5 both print `:inc`: a method defined under `class << self` of a module runs
+    # with the module as `self`, and an implicit-self `append_features(mod)` mixes into `mod`.
+    it "stays opaque when a method under class << self includes, or a module calls append_features" do
+      write_gem("scg", "lib/scg.rb" => "module ScgInc\n  refine(String) { def foo = :inc }\nend\nmodule Scg\n  " \
+                                       "class << self\n    def enable! = include(ScgInc)\n  end\n  enable!\nend\n")
+      write_gem("afg", "lib/afg.rb" => "module AfgInc\n  refine(String) { def foo = :inc }\n  " \
+                                       "def self.mix_into(mod) = append_features(mod)\nend\n" \
+                                       "module Afg\n  AfgInc.mix_into(self)\nend\n")
+      write("lib/app.rb", "using Shouty\n\"hi\".shout\n\"hi\".nope\n")
+      write("lib/other.rb", "using Scg\n\"hi\".foo\n\"hi\".nope\n")
+      write("lib/another.rb", "using Afg\n\"hi\".foo\n\"hi\".nope\n")
+
+      expect(undefined_rows(gems: %w[shouty scg afg])).to eq(reads)
+    end
+
+    # The control: a bare `include` in the body of `class << self` mixes into the singleton class, which `using` never
+    # reads, so the gem stays known.
+    it "stays known when only the body of class << self includes" do
+      write_gem("sgclean", "lib/sg_clean.rb" => "module SgClean\n  refine(String) { def shout = upcase }\n  " \
+                                                "class << self\n    include Comparable\n  end\nend\n")
+
+      expect(rows_for("sgclean", "SgClean")).to eq(reads + [["other.rb", 3, "nope"]])
+    end
+
     # A class's own `include` mixes into a class, which `using` rejects, so it does not make the gem opaque.
     it "stays known when only a class includes a module" do
       write_gem("classmix", "lib/class_mix.rb" => <<~RUBY)

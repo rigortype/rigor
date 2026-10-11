@@ -204,6 +204,17 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::Index do
       expect(both.fully_read_module?("Shared")).to be(true)
     end
 
+    # Round-2 review of #1828 — the constants walked gems write, unioned across gems, by last segment.
+    it "unions the constants the walked gems bind" do
+      first = described_class::Reading.new(gem_name: "a", modules: Set.new, fully_read: true, bound: Set["Target"])
+      second = described_class::Reading.new(gem_name: "b", modules: Set.new, fully_read: false, bound: Set["Enc"])
+      index = described_class.new(readings: [first, second])
+
+      expect(%w[Target Enc Other].map { |segment| index.bound_constant?(segment) }).to eq([true, true, false])
+      expect(described_class::EMPTY.bound_constant?("Target")).to be(false)
+      expect(reading("c", %w[C], fully_read: true).bound).to eq(Set.new)
+    end
+
     it "keeps the readings beside the refinement table" do
       readings = [reading("a", %w[A], fully_read: true)]
       index = described_class.new(refinements: { "String" => { shout: ["A"] } }, readings: readings)

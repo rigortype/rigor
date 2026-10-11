@@ -26,6 +26,9 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::Walker, ".walk" do
 
   fixtures = {
     "a literal target and block" => ["module M\n  refine(String) { def shout = 1 }\nend\n", :rows],
+    "a project constant alias as the target" => [
+      "K = String\nmodule M\n  refine(K) { def center(a, b, c) = 1 }\nend\n", :rows
+    ],
     "a non-literal target in a block" => [
       "module M\n  [String, Symbol].each { |k| refine(k) { def center(a, b, c) = 1 } }\nend\n", :rows
     ],
@@ -111,16 +114,6 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::Walker, ".walk" do
         expect(gem_table(source)).to eq(table)
         expectation == :rows ? expect(table).not_to(be_empty) : expect(table).to(be_empty)
       end
-    end
-
-    # The one difference (round-1 review of #1828): the project walk keeps a constant alias target's normal rows and the
-    # reader resolves them at read time from the project's constant census (`class_wildcard_key?`), which holds no gem's
-    # writes. The gem walker therefore moves them to the class-unknown row, the outcome that reading gives.
-    it "reads a constant alias target as the class-unknown row the project reading gives" do
-      source = "K = String\nmodule M\n  refine(K) { def center(a, b, c) = 1 }\nend\n"
-
-      expect(project_table(source)).to eq({ "M::K" => { center: ["M"] }, "K" => { center: ["M"] } })
-      expect(gem_table(source)).to eq({ Rigor::Scope::DiscoveryIndex::REFINEMENT_WILDCARD => { center: ["M"] } })
     end
 
     # The project folds its files' tables with `merge_refinement_tables`; the gem walk folds the same way.

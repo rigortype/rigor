@@ -523,6 +523,43 @@ RSpec.describe Rigor::Inference::InEffectRefinements do
       end
     end
 
+    # Round-2 review of #1828 — a refined-class key is class-unknown when any segment of it is a constant a write binds
+    # (`Enc = ::Encoding; refine(Enc::Converter)`, `Shared::Target = String` in another gem), and no class or RBS knows
+    # the whole key. A core class keeps its key whatever a file writes under its name.
+    describe "a refined-class key" do
+      let(:index_class) { Rigor::Analysis::DependencySourceInference::Index }
+
+      def gem_key_scope(bound)
+        reading = index_class::Reading.new(gem_name: "g", modules: Set.new, fully_read: true, bound: Set.new(bound))
+        environment = Rigor::Environment.for_project(dependency_source_index: index_class.new(readings: [reading]))
+        scope_at_last("module Plain; end\n:probe\n", default_scope: Rigor::Scope.empty(environment: environment)).first
+      end
+
+      it "is class-unknown when any segment is a gem's bound constant, and is not for a segment nothing binds" do
+        scope = gem_key_scope(%w[Enc Target])
+        keys = %w[Enc::Converter Pag::Enc::Converter Shared::Target Target Pag::Other Other::Plain]
+
+        expect(keys.map { |key| described_class.class_wildcard_key?(scope, key) })
+          .to eq([true, true, true, true, false, false])
+      end
+
+      it "is class-unknown for the wildcard, and never moves a core class a write names" do
+        scope = gem_key_scope(%w[String Comparable])
+        wildcard = Rigor::Scope::DiscoveryIndex::REFINEMENT_WILDCARD
+
+        keys = [wildcard, "String", "Comparable", "Integer"]
+
+        expect(keys.map { |key| described_class.class_wildcard_key?(scope, key) }).to eq([true, false, false, false])
+      end
+
+      it "is not class-unknown for a project with no gem index" do
+        scope, = scope_at_last("module Plain; end\n:probe\n")
+
+        expect(%w[Enc::Converter Shared::Target].map { |key| described_class.class_wildcard_key?(scope, key) })
+          .to eq([false, false])
+      end
+    end
+
     # Ruby 4.0.5: `def self.setup = refine(String) { … }` refines for `M`; `def setup` there refines for whichever
     # module extends `M` and calls it, so the walk cannot name the module and every module may be the one.
     it "treats a module with an unreadable refine as opaque, and every module under an unattributable one" do

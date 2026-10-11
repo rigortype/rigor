@@ -51,6 +51,17 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
       .sort
   end
 
+  # Round-2 review of #1828: a project constant that aliases a namespace names the class refined, whichever segment of
+  # the target it is. Ruby 4.0.5 prints `1` for `Encoding::Converter.new("UTF-8", "EUC-JP").shout` after `using Pag`.
+  describe "a refine target with an aliased prefix" do
+    it "declines the refined name on any receiver, and keeps reporting a name no row defines" do
+      write("lib/pag.rb", "module Pag\n  Enc = ::Encoding\n  refine(Enc::Converter) { def shout = 1 }\nend\n")
+      write("lib/app.rb", "using Pag\nEncoding::Converter.new('UTF-8', 'EUC-JP').shout\n\"a\".nope\n")
+
+      expect(undefined_rows).to eq([["app.rb", 3, "nope"]])
+    end
+  end
+
   describe "a refinement" do
     it "resolves after a top-level `using` in the same file, and reports before it" do
       write("lib/shout.rb", <<~RUBY)
@@ -899,6 +910,19 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
         expect(incremental_rows).to eq([center_fires, false])
 
         write("lib/k.rb", "K = String\n")
+        expect(incremental_rows).to eq([[], true])
+        expect(call_rows).to eq([])
+      end
+
+      # Round-2 review of #1828: the key `Enc::Converter` is class-unknown when any segment is a bound name, so a new
+      # file binding the prefix `Enc` re-checks the consumer. Ruby 4.0.5 prints `1` for `Encoding::Converter.new("UTF-8",
+      # "EUC-JP").shout` after `module Pag; Enc = ::Encoding; refine(Enc::Converter) { def shout = 1 }; end; using Pag`.
+      it "re-checks the `using` file when a new file binds a prefix of the constant a `refine` targets" do
+        write("lib/m.rb", "module M\n  refine(Enc::Converter) { def center(a, b, c) = 1 }\nend\n")
+        write("lib/u.rb", "using M\n\"a\".center(1, 2, 3)\n")
+        expect(incremental_rows).to eq([center_fires, false])
+
+        write("lib/k.rb", "Enc = ::Encoding\n")
         expect(incremental_rows).to eq([[], true])
         expect(call_rows).to eq([])
       end

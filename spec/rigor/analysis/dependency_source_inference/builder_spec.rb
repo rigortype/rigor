@@ -127,7 +127,7 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::Builder do
       stub_resolved_for("alpha", method_catalog: {}, modules: Set["Alpha"])
       stub_resolved_for("beta", method_catalog: {}, modules: Set["Beta"], truncated: true)
       stub_resolved_for("gamma", method_catalog: {}, modules: Set["Gamma"], unread: ["lib/gamma/broken.rb"])
-      stub_resolved_for("delta", method_catalog: {}, modules: Set["Delta"], mixes_modules: true)
+      stub_resolved_for("delta", method_catalog: {}, modules: Set["Delta"], mixes_modules: true, bound: Set["K"])
 
       index = described_class.build(
         dependencies({ "gem" => "alpha" }, { "gem" => "beta" }, { "gem" => "gamma" }, { "gem" => "delta" })
@@ -138,6 +138,7 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::Builder do
                 ["delta", ["Delta"], false]])
       expect(%w[Alpha Beta Gamma Delta].map { |name| index.fully_read_module?(name) })
         .to eq([true, false, false, false])
+      expect(index.bound_constant?("K")).to be(true)
     end
 
     it "marks a gem whose walk raised as not read" do

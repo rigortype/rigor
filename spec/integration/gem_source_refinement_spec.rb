@@ -386,6 +386,47 @@ RSpec.describe "Gem source inference over `refine` bodies (#1672)" do
       end
     end
 
+    # Round-2 review of #1828 — the alias lives in another opted-in gem, and a prefix of the target is the alias. Ruby
+    # 4.0.5 prints "X" for `"x".shout` after `module Shared; Target = String; end` and `refine Shared::Target`, and 1
+    # for `Encoding::Converter.new("UTF-8", "EUC-JP").shout` after `Enc = ::Encoding; refine(Enc::Converter)`.
+    it "reads a target another opted-in gem's constant write binds as unknown" do
+      write_gem("sharedg", "lib/sharedg.rb" => "module Shared\n  Target = String\nend\n")
+      write_gem("brefg", "lib/brefg.rb" => "module BRef\n  refine(Shared::Target) { def shout = upcase }\nend\n")
+      write("lib/app.rb", "using BRef\n\"x\".shout\n\"x\".nope\n")
+
+      expect(undefined_rows(gems: %w[sharedg brefg])).to eq([["app.rb", 3, "nope"]])
+    end
+
+    it "reads a target with a prefix a constant write binds as unknown" do
+      write_gem("pag",
+                "lib/pag.rb" => "module Pag\n  Enc = ::Encoding\n  refine(Enc::Converter) { def shout = 1 }\nend\n")
+      write("lib/app.rb", "using Pag\nEncoding::Converter.new('UTF-8', 'EUC-JP').shout\n\"x\".nope\n")
+
+      expect(undefined_rows(gems: %w[pag])).to eq([["app.rb", 3, "nope"]])
+    end
+
+    # The controls: a class the gem declares by a constant write (`Struct.new`, `Data.define`, `Class.new`) is no bound
+    # name, and a write that is no class (`DelegateClass(Array)`) is, so its refine reads as unknown. Either way the
+    # module stays known and `"x".nope` reports.
+    it "keeps a gem module known whatever kind of constant its refine targets are" do
+      write_gem("clg", "lib/clg.rb" => <<~RUBY)
+        require 'delegate'
+        module Clg
+          Point = Struct.new(:x)
+          Pair = Data.define(:a)
+          Wrap = DelegateClass(Array)
+          Sub = Class.new(StandardError)
+          refine(Point) { def px = x }
+          refine(Pair) { def pa = a }
+          refine(Wrap) { def pw = 1 }
+          refine(Sub) { def ps = 2 }
+        end
+      RUBY
+      write("lib/app.rb", "using Clg\n\"x\".nope\n")
+
+      expect(undefined_rows(gems: %w[clg])).to eq([["app.rb", 2, "nope"]])
+    end
+
     # The control: a target nothing in the gem binds keeps its normal row, which matches the refined class only.
     it "keeps the row of a target no constant write binds" do
       write_gem("plainref", "lib/plain_ref.rb" => "module PlainRef\n  refine(String) { def plain = 1 }\nend\n")

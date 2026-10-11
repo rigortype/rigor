@@ -13,7 +13,14 @@ module Rigor
       class Index
         # Issue #1814 — what one walked gem's walk read: the classes and modules it names ({Walker::Outcome#modules})
         # and whether it read all of them ({Walker::Outcome#fully_read?}). Held beside {#refinements}.
-        Reading = Data.define(:gem_name, :modules, :fully_read)
+        #
+        # Issue #1814 — `bound` is the last segment of every constant the gem writes without declaring a class or
+        # module by it ({Walker::Outcome#bound}).
+        Reading = Data.define(:gem_name, :modules, :fully_read, :bound) do
+          def initialize(gem_name:, modules:, fully_read:, bound: Set.new.freeze)
+            super
+          end
+        end
 
         attr_reader :resolved_gems, :unresolvable, :method_catalog, :budget_exceeded,
                     :class_to_gem, :budget_overrun_strategy, :gem_modes, :refinements, :readings
@@ -55,6 +62,7 @@ module Rigor
           @refinements = Inference::ScopeIndexer.freeze_refinements(refinements)
           @readings = readings.freeze
           @fully_read_modules = fully_read_modules_of(readings).freeze
+          @bound_constants = readings.flat_map { |reading| reading.bound.to_a }.to_set.freeze
           freeze
         end
 
@@ -92,6 +100,13 @@ module Rigor
         # fully read, however the RBS or the project describe it.
         def fully_read_module?(module_name)
           @fully_read_modules.include?(module_name)
+        end
+
+        # Issue #1814 — does a walked gem write a constant named `segment` without declaring a class or module by it?
+        # A refine key with such a segment may name any value (`Target = String; refine(Shared::Target)`), which the
+        # walker cannot resolve and the reader decides ({Inference::InEffectRefinements.class_wildcard_key?}).
+        def bound_constant?(segment)
+          @bound_constants.include?(segment)
         end
 
         # ADR-10 slice 5c — per-class mode lookup. Chains `class_to_gem` + `gem_modes`; returns `nil` when

@@ -31,15 +31,26 @@ module Rigor
       # Refiner; refines_string; end`, then `using Dslg` refines String on Ruby 4.0.5), so the walker reads the
       # extender as not read in full unless the gem declares the extended module, whose `refine` the census then sees.
       # `extend self` and an `extend` in a class body, which cannot be `using`'d, are not listed.
+      #
+      # {#writes} lists the constants the file writes, as `[qualified name or nil, last segment]` pairs: an assignment,
+      # a path write, an operator write, a multiple assignment, a `const_set` with a literal name. The qualified name
+      # is nil where the lexical position does not give one.
       class MixinScan
         MIXIN_CALLS = Set[:include, :prepend].freeze
         # The calls whose argument, not receiver, is the module mixed into.
         FEATURE_CALLS = Set[:append_features, :prepend_features].freeze
         MIXIN_SYMBOLS = Set["include", "prepend", "append_features", "prepend_features"].freeze
         MIXIN_WORD = /\b(?:include|prepend|append_features|prepend_features)\b/
-        # A file without one of these words has nothing to scan.
-        SCAN_WORD = /\b(?:include|prepend|append_features|prepend_features|extend)\b/
-        private_constant :MIXIN_CALLS, :FEATURE_CALLS, :MIXIN_SYMBOLS, :MIXIN_WORD, :SCAN_WORD
+        # The constant-write nodes whose target is a bare name, and the ones whose target is a path.
+        BARE_WRITES = [
+          Prism::ConstantWriteNode, Prism::ConstantOrWriteNode, Prism::ConstantAndWriteNode,
+          Prism::ConstantOperatorWriteNode, Prism::ConstantTargetNode
+        ].freeze
+        PATH_WRITES = [
+          Prism::ConstantPathWriteNode, Prism::ConstantPathOrWriteNode, Prism::ConstantPathAndWriteNode,
+          Prism::ConstantPathOperatorWriteNode
+        ].freeze
+        private_constant :MIXIN_CALLS, :FEATURE_CALLS, :MIXIN_SYMBOLS, :MIXIN_WORD, :BARE_WRITES, :PATH_WRITES
 
         # `prefix` is the lexical nesting, `in_class` whether `self` is a class here, `def_in_class` whether it is in a
         # method defined here (a method in `class << self` runs on the object whose singleton it is, not on the
@@ -48,11 +59,11 @@ module Rigor
         Scope = Struct.new(:prefix, :in_class, :def_in_class, :eval_targets)
         private_constant :Scope
 
-        attr_reader :site, :targets, :extends
+        attr_reader :site, :targets, :extends, :writes
 
         def self.scan(root)
           scan = new
-          scan.send(:walk, root, Scope.new([], false, false, [])) if SCAN_WORD.match?(root.send(:source).source.b)
+          scan.send(:walk, root, Scope.new([], false, false, []))
           scan
         end
 
@@ -60,6 +71,7 @@ module Rigor
           @site = false
           @targets = Set.new
           @extends = []
+          @writes = []
         end
 
         private
@@ -74,6 +86,7 @@ module Rigor
             scope = Scope.new(scope.prefix, false, false, scope.eval_targets)
           when Prism::SymbolNode then return @site ||= MIXIN_SYMBOLS.include?(node.unescaped)
           when Prism::CallNode then return walk_call(node, scope)
+          when *BARE_WRITES, *PATH_WRITES, Prism::ConstantPathTargetNode then note_write(node, scope)
           end
           node.rigor_each_child { |child| walk(child, scope) }
         end
@@ -99,7 +112,21 @@ module Rigor
           node.rigor_each_child { |child| walk(child, block && child.equal?(block) ? block_scope : scope) }
         end
 
+        # A bare name is qualified by the lexical prefix; a path write is not (its owner is a value).
+        def note_write(node, scope)
+          @writes << write_entry(node, scope)
+        end
+
+        def write_entry(node, scope)
+          case node
+          when *BARE_WRITES then [(scope.prefix + [node.name.to_s]).join("::"), node.name.to_s]
+          when *PATH_WRITES then [nil, node.target.name.to_s]
+          else [nil, node.name.to_s]
+          end
+        end
+
         def inspect_call(node, scope)
+          note_const_set(node)
           if MIXIN_CALLS.include?(node.name) || FEATURE_CALLS.include?(node.name)
             inspect_mixin_call(node, scope)
           elsif node.name == :extend
@@ -108,6 +135,11 @@ module Rigor
             @site = true
             note_receiver(node, scope)
           end
+        end
+
+        def note_const_set(node)
+          name = node.name == :const_set && node.arguments&.arguments&.first
+          @writes << [nil, name.unescaped] if name.is_a?(Prism::SymbolNode) || name.is_a?(Prism::StringNode)
         end
 
         # `extend X` on `self` or on a constant, outside a class body.

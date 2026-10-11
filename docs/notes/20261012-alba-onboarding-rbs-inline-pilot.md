@@ -314,3 +314,50 @@ way B のパイロット後、`lib/alba/type.rb` 以外の**小〜中サイズ 9
 - 局所的な型付けが可能なファイル（`association`, `conditional_attribute`, `layout`, `type`）は 1〜4 行の最小限の差分のみを適用。
 - 差分は **6ファイル80行** に圧縮され、Steep (`No type error detected. 🫖`)、Rigor (0 errors)、テスト (281 runs / 0 failures) すべてグリーンを維持した。
 手書き RBS を持つ既存ライブラリに対するシグネチャ改善は、この「最小差分原則」を徹底することで初めて upstream に受け入れ可能な品質となる。
+
+---
+
+## 10. PR #576 レビュー対応と戻り値ユニオン・ダウンストリーム型推論の考察（主発見 7）
+
+Alba への RBS 改善 PR（[#576](https://github.com/okuramasafumi/alba/pull/576)）に対する CodeRabbit レビューの検証と、戻り値ユニオン（Union Return）の扱い、およびダウンストリーム（`rigor-alba`）での型推論モデルの役割分担を記録する。
+
+### 10a. PR レビュー指摘の採否と検証
+
+| 指摘内容 | 判定 | 理由・検証結果 |
+| :--- | :---: | :--- |
+| **`serializable_hash_for_collection` の戻り値に `Hash[root_key_type, generic_hash]` を追加** | **採用** | `collection_key` 設定時、各要素のシリアライズ結果（`generic_hash`）を値に持つ Hash を返すため。旧手書き sig の `Hash[root_key_type, Array[generic_hash]]` は実際にはこのメソッドから返されない（`as_json` で root key が付与された場合の型）ため除去し、`(Array[generic_hash] \| Hash[root_key_type, generic_hash])` の 2 値ユニオンへ修正（`serializable_hash_type` も同期）。コミット `f378cc6` で適用。 |
+| **`_ClassContext` / `ClassMethods` の `name` を `String?` に変更** | **見送り** | `Alba.resource_class` による匿名クラスでは `name` が `nil` を返しうるが、`lib/alba/resource.rb:420-426` (`nesting`) において `if name.nil? ... else name.rpartition ... end` と実装されている。Steep はローカル変数への退避（`n = name`）がないメソッド呼出結果のフローナローイングをサポートしないため、`else` 節でも `name` が `(String \| nil)` のままとなり `Ruby::NoMethod: Type (::String \| nil) does not have method rpartition` が発生する。Ruby コードを変更せずに Steep 適合を維持するため `-> String` を維持。 |
+
+### 10b. 戻り値ユニオン（Union Return）の不可避性と RBS の表現限界
+
+型システムの観点から「戻り値ユニオンは呼び出し側に型分岐を強いるため慎重になるべき」という原則があるが、Alba の RBS 単体では戻り値ユニオンの回避が不可能である:
+
+1. **条件型の不在**: RBS には TypeScript のような条件型（`T extends U ? X : Y`）が存在しない。
+2. **引数なしメソッドにおけるオーバーロードの限界**: RBS のメソッドオーバーロード（`def m: (A) -> X | (B) -> Y`）は引数の型差分に基づいて解決される。`serializable_hash_for_collection` は引数を取らない（`() -> ...`）ため、オーバーロードによる戻り値の分岐は構文上不可能。
+3. **実行時状態に基づく動的分岐**: 戻り値は引数ではなくインスタンス変数 `@_collection_key` の有無で分岐する:
+   - `@_collection_key` あり: `@object.to_h { ... }`（`Hash[root_key_type, generic_hash]`）
+   - `@_collection_key` なし: `@object.map { ... }`（`Array[generic_hash]`）
+
+このため、ライブラリが提供する汎用 RBS シグネチャとしては、両者を合流させた `(Array[generic_hash] | Hash[root_key_type, generic_hash])` が唯一正確な表現となる。
+
+### 10c. `rigor-alba` によるダウンストリーム向けフローセンシティブ推論
+
+ライブラリ単体の静的 RBS では戻り値ユニオンが不可避である一方、Alba を利用するアプリケーションコード（ダウンストリーム）では、各リソースクラスで `collection_key` が設定されているかどうかは静的に決定されていることが多い:
+
+```ruby
+class UserResource
+  include Alba::Resource
+  collection_key :users # 静的に宣言されている
+end
+
+# 呼び出し側:
+result = UserResource.new(users).serializable_hash # 実際には常に Hash
+```
+
+アプリケーション側で戻り値が `(Array[...] | Hash[...])` のままだと、利用側コードで毎回 `is_a?(Hash)` のような無用な型ガードを要求される課題が生じる。
+
+ここで **`rigor-alba` プラグイン**の責務が明確になる:
+- **ライブラリ同梱の `sig/`**: 言語仕様（RBS）の範囲内で最大の正確性を持つユニオン型を提供する。
+- **`rigor-alba` プラグイン**: アプリケーション内のリソース定義 DSL（`collection_key` の有無）を静的解析し、対象リソースの `serializable_hash` / `serializable_hash_for_collection` の戻り値を `Array[generic_hash]` または `Hash[Symbol, generic_hash]` に**単一特化（narrowing / specialization）**して推論する。
+
+この役割分担により、ライブラリ側の RBS 規約を破ることなく、ダウンストリームの型安全性と開発者体験（DX）を最大化できる。

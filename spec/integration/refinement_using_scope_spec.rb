@@ -1795,6 +1795,31 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
       expect(undefined_rows).to eq([["p.rb", 5, "qq"]])
     end
 
+    # The same on Ruby 4.0.5 (`1.jj` and `1.kk` raise `NoMethodError`) for an eval on `self` in that method, and for a
+    # refine body written in a module's own singleton method.
+    it "charges those written through an eval on self or in a singleton method to nothing too" do
+      write("lib/m_eval.rb", <<~RUBY)
+        module ME
+          refine(String) do
+            def self.h = module_eval { refine(Integer) { def jj = 1 } }
+          end
+        end
+      RUBY
+      write("lib/m_setup.rb", <<~RUBY)
+        module MS
+          def self.setup
+            refine(String) do
+              def yy = 1
+              def self.h = refine(Integer) { def kk = 1 }
+            end
+          end
+        end
+      RUBY
+      write("lib/p.rb", "module P\n  refine(String) { def pp = 1 }\nend\nusing P\n\"a\".qq\n")
+
+      expect(undefined_rows).to eq([["p.rb", 5, "qq"]])
+    end
+
     # Ruby 4.0.5 prints `1` for `x` with the body alone and `"s"` once `M.setup`, which replaces `yy`, is there. The
     # typed call is `1`, so `x.upcase` is reported, until a file adds the setup; a warm cache serves what cold does.
     it "re-types the consumer when another file adds the setup that replaces a module-body def, warm as cold" do

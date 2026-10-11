@@ -165,16 +165,18 @@ module Rigor
 
       # The block of a `refine` call: a `refine` written in it (a nested one) is charged where the call is, but `self`
       # is the refinement, so a method defined in it is defined on something the walk cannot name: a singleton method
-      # on the refinement itself ({REFINEMENT}), an instance method on an instance of the refined class (the
-      # wildcard), not on the module around.
+      # on the refinement itself ({REFINEMENT}, whichever the method the `refine` call sits in, as long as the module it
+      # refines for is one), an instance method on an instance of the refined class (the wildcard), not on the module
+      # around.
       def refinement_body(parent)
-        parent.with(instance: refinement_side(parent.instance), singleton: refinement_singleton(parent.singleton),
-                    own_method: false)
+        singleton = module_here?(parent.here) ? REFINEMENT : parent.singleton
+        parent.with(instance: refinement_side(parent.instance), singleton: singleton, own_method: false)
       end
 
       def refinement_side(side) = side.is_a?(String) || side.is_a?(Array) ? wildcard : side
 
-      def refinement_singleton(side) = named_module?(side) || side.is_a?(Array) || side == ANONYMOUS ? REFINEMENT : side
+      # Is `here` a module a `refine` there refines for (so its block is a refinement's body), or the refinement itself?
+      def module_here?(here) = named_module?(here) || here.is_a?(Array) || here == ANONYMOUS || here == REFINEMENT
 
       def meta_new_body(node)
         ScopeIndexer.module_new_call?(node) ? module_body(ANONYMOUS) : class_body(false)
@@ -269,7 +271,7 @@ module Rigor
         here = RefineCensus.self_call?(node) ? parent.here : eval_names
         here = here.first if here.is_a?(Array) && here.size == 1
         return context(CLASS, CLASS, CLASS, deferred: parent.deferred) if here == CLASS
-        return unknown unless here.is_a?(String) || here.is_a?(Array) || here == ANONYMOUS
+        return unknown unless here.is_a?(String) || here.is_a?(Array) || here == ANONYMOUS || here == REFINEMENT
         return unknown if here == wildcard
 
         instance = INSTANCE_EVAL_CALLS.include?(node.name) ? here : wildcard

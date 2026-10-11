@@ -312,6 +312,38 @@ RSpec.describe Rigor::Inference::ScopeIndexer, ".refine_census" do
     ],
     # The refine block's own module is several names (an eval on a constant in `module L`) or the walk's name for a bare
     # `Module.new`; its singleton methods are still the refinement's.
+    # Ruby 4.0.5 runs both on the `Refinement` too (`using` rejects it, `1.ii` and `1.jj` raise `NoMethodError`): an
+    # eval on `self` in the refinement's singleton method, and a refine body written in a module's own singleton method.
+    "a refine in an eval block on self in a singleton method of a refine body" => [
+      <<~RUBY, %i[recorded nested], {}
+        module M
+          refine(String) do
+            def self.h = module_eval { refine(Integer) { def ii = 1 } }
+          end
+        end
+      RUBY
+    ],
+    "a refine in a singleton method of a refine body written in a module's singleton method" => [
+      <<~RUBY, %i[recorded nested], { "M::String" => { yy: ["M"] }, "String" => { yy: ["M"] } }
+        module M
+          def self.setup
+            refine(String) do
+              def yy = 1
+              def self.h = refine(Integer) { def ii = 1 }
+            end
+          end
+        end
+      RUBY
+    ],
+    "a refine in a singleton method of a refine body nested in a refinement's singleton method" => [
+      <<~RUBY, %i[recorded nested nested], {}
+        module M
+          refine(String) do
+            def self.h = refine(Integer) { def self.k = refine(Float) { def ff = 1 } }
+          end
+        end
+      RUBY
+    ],
     "a refine in a def self.x in a refine body of an eval block on a constant" => [
       <<~RUBY, %i[recorded nested], {}
         module L

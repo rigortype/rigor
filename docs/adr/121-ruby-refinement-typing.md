@@ -4,9 +4,9 @@ Status: **Accepted, 2026-10-09; implemented 2026-10-10; amended 2026-10-11 (WD7,
 knowledge).** Landed under #1670: the redefined-method decline (#1685), the include expansion (#1684),
 gem refine bodies (#1686), the query (#1729), the typed arm (#1747), and for Ruby 4.1's
 `Proc#refined` the signature (#1711), refined literals (#1738) and the `BlockAsMethod` field (#1744).
-WD7 closes #1796 and #1799, and with the own-definer proof #1740 and #1797's refinement cases. Open:
-the carry-overs under Consequences, #1669, and gem modules that gem source inference could make known
-(#1814). The normative rules are in `docs/internal-spec/inference-engine.md` § "Ruby refinements".
+WD7 closes #1796 and #1799, with the own-definer proof #1740 and #1797's refinement cases, and with the gem
+walker's coverage fact #1814. Open: the carry-overs under Consequences and #1669. The normative rules are in
+`docs/internal-spec/inference-engine.md` § "Ruby refinements".
 
 Grounding: the design session of 2026-10-09 on #1664 and #1667, probes on master `54da094f0` and
 `7baff7b1f` (listed in #1670), CRuby `334b4ffa7f`'s `doc/syntax/refinements.rdoc` and
@@ -171,11 +171,35 @@ declaration is opaque.**
   `define_method` and `attr_*` names in a refine body are recorded, and a later definer of a name
   replaces an earlier `def` of it. A census spec checks that every `refine`-shaped node ends in exactly
   one outcome.
-- A module is opaque when the project does not declare it and it is not a core or stdlib module (the
-  core and standard-library signatures the rbs gem ships declare no refinements), or when a
-  targets-wildcard row lists it or `"*"`. A gem's module is
-  opaque even when gem source inference read it, until that inference can show it saw every file
-  declaring it.
+- A module is known from one of three sources, and opaque otherwise: the project declares it; it is a
+  core or stdlib module (the core and standard-library signatures the rbs gem ships declare no
+  refinements); or an opted-in gem declares it and the gem source walker read it in full (#1814). A
+  targets-wildcard row that lists it or `"*"` makes a module opaque whatever its source, and that check
+  runs first. The walker reads every file of a gem through the census the project walk runs, so a gem
+  module's rows carry the wildcards a project module's would, and it records, per walked gem, the
+  modules it names and whether it read the gem in full: the catalogue budget did not stop it, every
+  `.rb` file under the accepted roots (and every file a literal `require_relative` reaches) parsed, the
+  source holds no mixin site (an `include`, `prepend`, `append_features` or `prepend_features` it cannot
+  tie to a class, which `using` would also activate and the gem table has no edge for; a `def` under
+  `class << self` runs with the `self` of the enclosing body, so it is outside the class body when that
+  is a module), and every constant a module context hands the module to is accounted for. A module
+  context hands the module to a constant when it `extend`s it (or `include`s it in the body of
+  `class << self`), passes `self` or a block to it (`Plugin.install(self)`), sends it `extend_object`,
+  an eval or `define_method`, or refines it: the constant's methods may call `refine` for, or include
+  into, the module being defined. A constant is accounted for when a gem file declares it (the census has
+  read its `refine`), when Ruby core or stdlib declares it (the reader asks the run's RBS loader, which
+  the walker does not have), or when a walked gem that is itself read in full declares it; a refine
+  target is also accounted for when the RBS knows the class or a segment of it is a constant a walked
+  gem writes. A module is read in full only when every gem that names it was, and a gem names the
+  modules its mixin calls mix into by a constant, so a second gem's `Shouty.include(GembInc)` spoils
+  `Shouty`. The condition is a recorded fact, not an inference from the rows: a truncated walk, a file
+  that does not parse, a gem that mixes a module into a module, or one that hands its module to a
+  constant nothing accounts for leaves its modules opaque, which is #1811's reading of a gem module.
+- A refine key is decided at read time, once, for the project and every walked gem, by every segment of
+  it: a key no class or RBS declaration knows as a whole is class-unknown when any segment is a constant
+  a write binds (`K = String; refine(K)`, `Shared::Target = String` in another gem, `Enc = ::Encoding;
+  refine(Enc::Converter)`), from the project's constant census or from the constants the walked gems
+  write without declaring a class or module. A core or declared class keeps its key.
 - Every declared candidate of a `using`'s spelling stays in the list, because which one Ruby's lookup
   finds can depend on load order; undeclared candidates leave, and a spelling with no declared
   candidate enters alone, opaque. An included module the project does not declare enters the list
@@ -211,7 +235,24 @@ Limits it does not remove: a module reopened in a file outside the analysed path
 `const_set`), which is dropped, so its refinements are unseen (treating every undeclared inner
 candidate as opaque would blanket every nested `using`); a module declared or reopened inside an eval
 string; a refine target bound by `||=` or `const_set` only in another file; and
-`TOPLEVEL_BINDING.eval("using N")`, which activates `N` to the end of the file.
+`TOPLEVEL_BINDING.eval("using N")`, which activates `N` to the end of the file. For a gem: a module
+reopened in a gem nobody opted in, in a file outside the walked roots (`spec/`, `test/` and `bin/` are
+never walked; a literal `require_relative` to one is recorded, a `load`, a `require` through the load
+path, a computed path and an `autoload` with one are not), or in a part of a gem whose walk stopped
+before it and that names no module the gem names elsewhere; an opted-in gem that reopens the namespace
+of a declaring gem nobody opted in, which the opted-in gem then names; a mixin made through an `extend`
+hook in another gem; and a gem edited in place without a version change, which the version in the
+cache identity does not see. A directory `**` does not enter (a dot directory, a symlinked one) leaves
+the gem not read in full. The precision cost: a constant that is no module used in a module context
+with a block (`INDEX[:a].select { … }`), and `extend ActiveSupport::Concern` or any module Ruby core and
+stdlib do not declare, leave a gem not read in full unless a walked gem read in full declares it.
 
-Consequence: under a `using` of a gem's module every instance call in the span is unchecked and
-`Dynamic` until gem modules can be known, a cost the survey corpus puts at a handful of files.
+Consequence: under a `using` of a gem's module that the walker did not read in full, every instance
+call in the span is unchecked and `Dynamic`. Under one it did, the checks and the types come back,
+except where the refine body's names or its refined class are unknown (`Rainbow`'s
+`define_method(name)` makes every `String` name `Dynamic`; its other receivers are checked again). A
+gem's refine body is still not inferred, so a call it replaces answers `Dynamic[top]` (WD3).
+The gem half of the table reaches every file's checks and no analysed file records it, so the run's
+cache key and the incremental snapshot's fingerprint carry the `(name, version, mode)` row of each
+opted-in gem that resolves (ADR-10 slice 3): a `bundle update` is also covered by the lockfile digest,
+a project with no lockfile by these rows.

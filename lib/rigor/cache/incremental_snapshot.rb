@@ -271,6 +271,7 @@ module Rigor
           "sig:#{digest_signature_paths(project_sig_roots(configuration))}",
           "pre_eval:#{digest_pre_eval(configuration.pre_eval)}"
         ]
+        parts.concat(dependency_source_parts(configuration))
         identity = EngineSource.process_identity
         parts << "engine-source:#{identity}" if identity
         # Issue #1700 — the gated vendored signatures the run's source activates. A file that gains or drops a
@@ -295,6 +296,17 @@ module Rigor
         # read and no nil-keyed blob is written for the next equally-unidentifiable run to match against.
         nil
       end
+
+      # ADR-10 slice 3, issue #1814 — the walked gems' versions: their refinement table and which modules they read in
+      # full reach every file's checks, and the lockfile digest above does not cover a project with none. No part for a
+      # project that lists no gem, so its fingerprint is what it was.
+      def self.dependency_source_parts(configuration)
+        rows = Analysis::RunCacheKey.dependency_source_entries(configuration).map do |row|
+          [row.gem_name, row.gem_version, row.mode]
+        end
+        rows.empty? ? [] : ["dependency-source:#{rows.sort.inspect}"]
+      end
+      private_class_method :dependency_source_parts
 
       def self.digest_file_if_present(path)
         path = path&.to_s

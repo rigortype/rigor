@@ -6,6 +6,9 @@
 # of the refining module M. Before the fix the walker filed it as `M#shout` and the project's refinement table
 # never learnt `String#shout`, so `using M; "hi".shout` reported `call.undefined-method`.
 #
+# Issue #1814 — a gem module whose source the walker read in full is known on the same terms as a project module, and
+# one it could not read in full stays opaque.
+#
 # Every expectation below is the answer CRuby gives for the same source: a silent line runs, a reported line
 # raises `NoMethodError`.
 
@@ -13,7 +16,9 @@ require "spec_helper"
 require "fileutils"
 require "tmpdir"
 
+require "rigor/analysis/incremental_session"
 require "rigor/analysis/runner"
+require "rigor/cache/incremental_snapshot"
 require "rigor/cache/store"
 require "rigor/configuration"
 
@@ -34,11 +39,9 @@ RSpec.describe "Gem source inference over `refine` bodies (#1672)" do
         def whisper = "psst"
       end
     RUBY
-    spec = instance_double(Gem::Specification, version: Gem::Version.new("1.0.0"), full_gem_path: gem_dir)
     allow(Rigor::Analysis::DependencySourceInference::GemResolver)
       .to receive(:locate_gem_spec).and_call_original
-    allow(Rigor::Analysis::DependencySourceInference::GemResolver)
-      .to receive(:locate_gem_spec).with("shouty").and_return(spec)
+    stub_gem("shouty", "1.0.0")
   end
 
   def write(relative, contents)
@@ -46,27 +49,47 @@ RSpec.describe "Gem source inference over `refine` bodies (#1672)" do
     File.write(relative, contents)
   end
 
-  def configuration(workers: 0)
+  # Makes `name` resolve to `vendor/<name>`, at `version`, as the bundle would.
+  def stub_gem(name, version)
+    spec = instance_double(Gem::Specification, version: Gem::Version.new(version),
+                                               full_gem_path: File.join(Dir.pwd, "vendor", name))
+    allow(Rigor::Analysis::DependencySourceInference::GemResolver)
+      .to receive(:locate_gem_spec).with(name).and_return(spec)
+  end
+
+  # Writes `vendor/<name>/<relative>` for each pair, and resolves `name`.
+  def write_gem(name, files, version = "1.0.0")
+    files.each { |relative, contents| write("vendor/#{name}/#{relative}", contents) }
+    stub_gem(name, version)
+  end
+
+  def configuration(workers: 0, gems: %w[shouty], budget: nil)
+    dependencies = { "source_inference" => gems.map { |name| { "gem" => name, "mode" => "when_missing" } } }
+    dependencies["budget_per_gem"] = budget if budget
     Rigor::Configuration.new(
-      Rigor::Configuration::DEFAULTS.merge(
-        "paths" => %w[lib], "workers" => workers,
-        "dependencies" => { "source_inference" => [{ "gem" => "shouty", "mode" => "when_missing" }] }
-      )
+      Rigor::Configuration::DEFAULTS.merge("paths" => %w[lib], "workers" => workers, "dependencies" => dependencies)
     )
   end
 
-  # `[file basename, line, method name]` for every `call.undefined-method`, sorted.
-  def undefined_rows(cache_store: nil, workers: 0)
-    runner = Rigor::Analysis::Runner.new(configuration: configuration(workers: workers), cache_store: cache_store)
+  def diagnostics(cache_store: nil, workers: 0, **)
+    runner = Rigor::Analysis::Runner.new(configuration: configuration(workers: workers, **),
+                                         cache_store: cache_store)
     guarded_run(runner, %w[lib]).diagnostics
-                                .select { |d| d.qualified_rule == "call.undefined-method" }
-                                .map { |d| [File.basename(d.path.to_s), d.line, d.method_name.to_s] }
-                                .sort
   end
 
-  # ADR-121 WD7 — a module the project does not declare is opaque, a walked gem's included, so `"hi".nope` after
-  # `using Shouty` declines too (it reported before). Flip the `nope` row back when gem modules whose source the walker
-  # read become known (#1814).
+  def undefined_rows_of(found)
+    found.select { |d| d.qualified_rule == "call.undefined-method" }
+         .map { |d| [File.basename(d.path.to_s), d.line, d.method_name.to_s] }.sort
+  end
+
+  # `[file basename, line, method name]` for every `call.undefined-method`, sorted.
+  def undefined_rows(cache_store: nil, workers: 0, **)
+    undefined_rows_of(diagnostics(cache_store: cache_store, workers: workers, **))
+  end
+
+  # ADR-121 WD7, issue #1814 — `Shouty` is a gem module the walker read in full (every file under its `lib/`, no
+  # mixin, no unreadable file, nothing truncated), so it is known on the same terms as a project module: the `using`
+  # does not decline `"hi".nope`, which reported before #1811 made every gem module opaque.
   it "resolves a gem refinement after `using`, and reports it before" do
     write("lib/app.rb", <<~RUBY)
       "early".shout
@@ -75,7 +98,7 @@ RSpec.describe "Gem source inference over `refine` bodies (#1672)" do
       "hi".nope
     RUBY
 
-    expect(undefined_rows).to eq([["app.rb", 1, "shout"]])
+    expect(undefined_rows).to eq([["app.rb", 1, "shout"], ["app.rb", 4, "nope"]])
   end
 
   # Under a `using` that names no module, a name some refinement defines declines and any other name reports, so the
@@ -111,8 +134,8 @@ RSpec.describe "Gem source inference over `refine` bodies (#1672)" do
     expect(index.refinements).to include("String" => { shout: ["Shouty"] })
   end
 
-  # `unknown.rb` keeps the gem table observable now that `using Shouty` makes `app.rb` opaque (flip `app.rb`'s `nope`
-  # row back with the example above).
+  # `app.rb` reports `nope` once `Shouty` is known (#1814); `unknown.rb` keeps the gem table observable where the
+  # `using` names no module, which declines the gem-refined name and reports any other.
   it "seeds a file re-analysed on a warm run with the gem refinements" do
     write("lib/app.rb", <<~RUBY)
       using Shouty
@@ -127,7 +150,7 @@ RSpec.describe "Gem source inference over `refine` bodies (#1672)" do
 
     warm = undefined_rows(cache_store: Rigor::Cache::Store.new(root: root))
 
-    expect(cold).to eq([["unknown.rb", 3, "nope"]])
+    expect(cold).to eq([["app.rb", 3, "nope"], ["unknown.rb", 3, "nope"]])
     expect(warm).to eq(cold)
   end
 
@@ -140,6 +163,453 @@ RSpec.describe "Gem source inference over `refine` bodies (#1672)" do
     write("lib/other.rb", "\"x\".shout\n")
     write("lib/unknown.rb", "using Module.new { }\n\"hi\".shout\n\"hi\".nope\n")
 
-    expect(undefined_rows(workers: 2)).to eq([["other.rb", 1, "shout"], ["unknown.rb", 3, "nope"]])
+    expect(undefined_rows(workers: 2))
+      .to eq([["app.rb", 3, "nope"], ["other.rb", 1, "shout"], ["unknown.rb", 3, "nope"]])
+  end
+
+  # ADR-121 WD7, issue #1814 — which gem modules are known. A module is known when every file that could refine it was
+  # read; each example below pairs a gem that stays opaque with `shouty`, the control that must report in the same run.
+  describe "a gem module the walker did not read in full" do
+    let(:reads) { [["app.rb", 3, "nope"]] }
+    let(:refining) { "module %<name>s\n  refine(String) { def shout = upcase }\nend\n" }
+
+    # `lib/app.rb` uses `Shouty` (the control) and `lib/other.rb` the module under test, with the same `nope` call.
+    def rows_for(gem_name, module_name, **)
+      write("lib/app.rb", "using Shouty\n\"hi\".shout\n\"hi\".nope\n")
+      write("lib/other.rb", "using #{module_name}\n\"hi\".shout\n\"hi\".nope\n")
+      undefined_rows(gems: ["shouty", gem_name], **)
+    end
+
+    # The catalogue budget stops the walk (Outcome#truncated), so a file past it could have reopened the module.
+    it "stays opaque when the budget truncated its walk" do
+      filler = (1..1300).map { |index| "  def m#{index}; end\n" }.join
+      write_gem("bigshout", "lib/big.rb" => format(refining, name: "BigShout"),
+                            "lib/zz_filler.rb" => "class Filler\n#{filler}end\n")
+
+      expect(rows_for("bigshout", "BigShout", budget: 1250)).to eq(reads)
+      expect(rows_for("bigshout", "BigShout")).to eq(reads + [["other.rb", 3, "nope"]])
+    end
+
+    # A file that does not parse may have declared or refined anything: Walker drops it, and says so in `unread`.
+    it "stays opaque when one of its files does not parse" do
+      write_gem("brokenshout", "lib/broken_shout.rb" => format(refining, name: "BrokenShout"))
+
+      expect(rows_for("brokenshout", "BrokenShout")).to eq(reads + [["other.rb", 3, "nope"]])
+
+      write("vendor/brokenshout/lib/unterminated.rb", "def broken\n")
+      expect(rows_for("brokenshout", "BrokenShout")).to eq(reads)
+    end
+
+    # Ruby 4.0.5 prints `:inc` for `"x".foo` after `using M` with `module M; include Inc; end`: `using` activates the
+    # refinements of every module the used module includes, and the gem table has no mixin edges.
+    it "stays opaque when the gem mixes a module into a module, and does not report the included module's names" do
+      write_gem("mixshout", "lib/mix_shout.rb" => <<~RUBY)
+        module Inc
+          refine(String) { def foo = :inc }
+        end
+        module MixShout
+          include Inc
+        end
+      RUBY
+      write("lib/app.rb", "using Shouty\n\"hi\".shout\n\"hi\".nope\n")
+      write("lib/other.rb", "using MixShout\n\"hi\".foo\n\"hi\".nope\n")
+
+      expect(undefined_rows(gems: %w[shouty mixshout])).to eq(reads)
+    end
+
+    # Round-1 review of #1828 — a second gem mixes into the first gem's module through an explicit receiver, which names
+    # nothing the second gem declares. Ruby 4.0.5 prints `["X", :inc]` for `"x".shout, "x".foo` after `using Shouty`.
+    it "stays opaque when another gem mixes into it through an explicit receiver" do
+      write_gem("gema", "lib/gema.rb" => format(refining, name: "Gema"))
+      write_gem("gemb", "lib/gemb.rb" => "module GembInc\n  refine(String) { def foo = :inc }\nend\n" \
+                                         "Gema.include(GembInc)\n")
+      write("lib/app.rb", "using Shouty\n\"hi\".shout\n\"hi\".nope\n")
+      write("lib/other.rb", "using Gema\n\"hi\".shout\n\"hi\".foo\n\"hi\".nope\n")
+
+      expect(undefined_rows(gems: %w[shouty gema gemb])).to eq(reads)
+      expect(undefined_rows(gems: %w[shouty gema])).to eq(
+        reads + [["other.rb", 3, "foo"], ["other.rb", 4, "nope"]]
+      )
+    end
+
+    # The project-side twin stays as it was: the project file that mixes into the gem module declares it, so the
+    # project's include table puts the mixed module in the list and `foo` is known.
+    it "keeps a gem module known when a project file mixes into it" do
+      write_gem("pig", "lib/pig.rb" => "module Pig\n  def self.version = 1\nend\n")
+      write("lib/inc.rb", "module ProjInc\n  refine(String) { def foo = :inc }\nend\nPig.include(ProjInc)\n")
+      write("lib/app.rb", "using Pig\n\"hi\".foo\n\"hi\".nope\n")
+
+      expect(undefined_rows(gems: %w[pig])).to eq([["app.rb", 3, "nope"]])
+    end
+
+    # Round-2 review of #1828 — a module context hands the module to a constant the gem cannot account for. Ruby
+    # 4.0.5 prints `:ok` for `"x".foo` in the first five shapes (a helper's method calls `refine` for the module it
+    # runs on, or a foreign method includes into its argument). A constant Ruby core or stdlib declares, and one the
+    # gem declares, hand it nothing the walk cannot read.
+    {
+      "extends a module it does not declare" => ["  extend Refiner\n", false],
+      "includes a module in the body of class << self" => ["  class << self\n    include Refiner\n  end\n", false],
+      "extends in a method" => ["  def self.setup = extend(Refiner)\n", false],
+      "sends extend_object to a foreign constant" => ["  Refiner.send(:extend_object, self)\n", false],
+      "passes itself to a foreign constant" => ["  Plugin.install(self)\n", false],
+      "gives a foreign constant a block" => ["  Registry.configure { |c| c.name = 1 }\n", false],
+      "refines a class no walked gem declares" => ["  refine(ActiveRecord::Base) { def aliased = 1 }\n", false],
+      "extends a core module" => ["  extend Comparable\n", true],
+      "extends a stdlib module" => ["  extend Forwardable\n", true],
+      "includes a core module in the body of class << self" =>
+        ["  class << self\n    include Comparable\n  end\n", true],
+      "calls core constants with a block and with itself" =>
+        ["  Thread.new { 1 }\n  ENV.fetch('X') { 1 }\n  Kernel.send(:format, self)\n", true],
+      "refines a core class and a stdlib class" =>
+        ["  refine(Integer) { def double = self * 2 }\n  refine(Struct) { def pairs = 1 }\n", true]
+    }.each_with_index do |(name, (snippet, known)), index|
+      it "#{known ? 'stays known' : 'stays opaque'} when the gem #{name}" do
+        write_gem("gx#{index}",
+                  "lib/gx#{index}.rb" => "module Gx#{index}\n  refine(String) { def shout = upcase }\n#{snippet}end\n")
+
+        expected = known ? reads + [["other.rb", 3, "nope"]] : reads
+        expect(rows_for("gx#{index}", "Gx#{index}")).to eq(expected)
+      end
+    end
+
+    def shoutg_source = "module Shoutg\n  refine(String) { def shout = upcase }\n  Plugin.install(self)\nend\n"
+
+    # `Plugin.install(self)` is accounted for only by a walked gem read in full that declares `Plugin`: the second gem
+    # below includes into its argument through an explicit receiver, so it is not, and the first stays opaque. Ruby
+    # 4.0.5 prints `["X", :inc]` for `"x".shout, "x".foo` after `using Shouty`.
+    it "stays opaque when the foreign constant is declared by a gem that is not read in full" do
+      write_gem("shoutg", "lib/shoutg.rb" => shoutg_source)
+      write_gem("pluging", "lib/pluging.rb" => "module PluginInc\n  refine(String) { def foo = :inc }\nend\n" \
+                                               "module Plugin\n  def self.install(mod) = mod.include(PluginInc)\nend\n")
+      write("lib/app.rb", "using Shouty\n\"hi\".shout\n\"hi\".nope\n")
+      write("lib/other.rb", "using Shoutg\n\"hi\".shout\n\"hi\".foo\n\"hi\".nope\n")
+
+      expect(undefined_rows(gems: %w[shouty shoutg pluging])).to eq(reads)
+    end
+
+    it "stays known when the foreign constant is declared by a gem read in full" do
+      write_gem("shoutg", "lib/shoutg.rb" => shoutg_source)
+      write_gem("pluging", "lib/pluging.rb" => "module Plugin\n  def self.install(mod) = mod.name\nend\n")
+      write("lib/app.rb", "using Shouty\n\"hi\".shout\n\"hi\".nope\n")
+      write("lib/other.rb", "using Shoutg\n\"hi\".shout\n\"hi\".foo\n\"hi\".nope\n")
+
+      expect(undefined_rows(gems: %w[shouty shoutg pluging])).to eq(
+        reads + [["other.rb", 3, "foo"], ["other.rb", 4, "nope"]]
+      )
+    end
+
+    # Two gems that reopen one module, both read in full, leave it known; Ruby 4.0.5 defines `shout` and `whisper2`.
+    it "stays known when two gems read in full reopen a module" do
+      write_gem("ga", "lib/ga.rb" => "module Shared\n  refine(String) { def shout = upcase }\nend\n")
+      write_gem("gb", "lib/gb.rb" => "module Shared\n  refine(String) { def whisper2 = downcase }\nend\n")
+      write("lib/other.rb", "using Shared\n\"hi\".shout\n\"hi\".whisper2\n\"hi\".nope\n")
+
+      expect(undefined_rows(gems: %w[ga gb])).to eq([["other.rb", 4, "nope"]])
+    end
+
+    # Round-1 review of #1828, on Ruby 4.0.5 both print `:inc`: a method defined under `class << self` of a module runs
+    # with the module as `self`, and an implicit-self `append_features(mod)` mixes into `mod`.
+    it "stays opaque when a method under class << self includes, or a module calls append_features" do
+      write_gem("scg", "lib/scg.rb" => "module ScgInc\n  refine(String) { def foo = :inc }\nend\nmodule Scg\n  " \
+                                       "class << self\n    def enable! = include(ScgInc)\n  end\n  enable!\nend\n")
+      write_gem("afg", "lib/afg.rb" => "module AfgInc\n  refine(String) { def foo = :inc }\n  " \
+                                       "def self.mix_into(mod) = append_features(mod)\nend\n" \
+                                       "module Afg\n  AfgInc.mix_into(self)\nend\n")
+      write("lib/app.rb", "using Shouty\n\"hi\".shout\n\"hi\".nope\n")
+      write("lib/other.rb", "using Scg\n\"hi\".foo\n\"hi\".nope\n")
+      write("lib/another.rb", "using Afg\n\"hi\".foo\n\"hi\".nope\n")
+
+      expect(undefined_rows(gems: %w[shouty scg afg])).to eq(reads)
+    end
+
+    # Round-1 review of #1828 — Ruby 4.0.5 prints `:ok`: the helper's `refine` runs for the module that extends it. The
+    # helper lives in a gem nobody opted in, so the census never sees it; a helper the gem declares is read.
+    it "stays opaque when the gem extends a module it does not declare, and known when it declares the helper" do
+      write_gem("dslg", "lib/dslg.rb" => "module Dslg\n  extend Refiner\n  refines_string :foo\nend\n")
+      write_gem("selfhelp", "lib/self_help.rb" => "module Helpers\n  def hi = 1\nend\nmodule SelfHelp\n  " \
+                                                  "extend Helpers\n  extend self\n  " \
+                                                  "refine(String) { def shout = upcase }\nend\n")
+      write("lib/app.rb", "using Shouty\n\"hi\".shout\n\"hi\".nope\n")
+      write("lib/other.rb", "using Dslg\n\"hi\".foo\n\"hi\".nope\n")
+      write("lib/another.rb", "using SelfHelp\n\"hi\".shout\n\"hi\".nope\n")
+
+      expect(undefined_rows(gems: %w[shouty dslg selfhelp])).to eq(
+        [["another.rb", 3, "nope"], ["app.rb", 3, "nope"]]
+      )
+    end
+
+    # Round-1 review of #1828 — the gem loads a shim outside its `lib/` by a literal `require_relative`; Ruby 4.0.5
+    # prints 2 for `"x".bb`, which the walk of `lib/` alone never sees.
+    it "stays opaque when the gem requires a file outside its walked roots" do
+      write_gem("olg", "lib/olg.rb" => "module Olg\n  refine(String) { def aa = 1 }\nend\n" \
+                                       "require_relative '../shim/olg_more'\n",
+                       "shim/olg_more.rb" => "module Olg\n  refine(String) { def bb = 2 }\nend\n")
+      write("lib/app.rb", "using Shouty\n\"hi\".shout\n\"hi\".nope\n")
+      write("lib/other.rb", "using Olg\n\"hi\".bb\n\"hi\".nope\n")
+
+      expect(undefined_rows(gems: %w[shouty olg])).to eq(reads)
+    end
+
+    # The control: a bare `include` in the body of `class << self` mixes into the singleton class, which `using` never
+    # reads, so the gem stays known.
+    it "stays known when only the body of class << self includes" do
+      write_gem("sgclean", "lib/sg_clean.rb" => "module SgClean\n  refine(String) { def shout = upcase }\n  " \
+                                                "class << self\n    include Comparable\n  end\nend\n")
+
+      expect(rows_for("sgclean", "SgClean")).to eq(reads + [["other.rb", 3, "nope"]])
+    end
+
+    # A class's own `include` mixes into a class, which `using` rejects, so it does not make the gem opaque.
+    it "stays known when only a class includes a module" do
+      write_gem("classmix", "lib/class_mix.rb" => <<~RUBY)
+        module ClassMix
+          refine(String) { def shout = upcase }
+        end
+        class Presenter
+          include Comparable
+        end
+      RUBY
+
+      expect(rows_for("classmix", "ClassMix")).to eq(reads + [["other.rb", 3, "nope"]])
+    end
+
+    # A targets-wildcard row (a `refine` in a method of the module) makes it opaque however fully it was read; the
+    # wildcard check runs before the gem source does.
+    it "stays opaque when a refine in a method leaves a targets-wildcard row" do
+      write_gem("wildshout", "lib/wild_shout.rb" => <<~RUBY)
+        module WildShout
+          refine(String) { def shout = upcase }
+          def self.setup = refine(Integer) { def succ2 = 1 }
+        end
+      RUBY
+
+      expect(rows_for("wildshout", "WildShout")).to eq(reads)
+    end
+
+    # Two gems reopening one module: the module is fully read only when both were.
+    it "stays opaque when another gem reopens the module and was not read in full" do
+      write_gem("sharedshout", "lib/shared_shout.rb" => format(refining, name: "SharedShout"))
+      write_gem("sharedext", "lib/shared_ext.rb" => "module SharedShout\n  def ext = 1\nend\n",
+                             "lib/broken.rb" => "def broken\n")
+      write("lib/app.rb", "using Shouty\n\"hi\".shout\n\"hi\".nope\n")
+      write("lib/other.rb", "using SharedShout\n\"hi\".shout\n\"hi\".nope\n")
+
+      expect(undefined_rows(gems: %w[shouty sharedshout sharedext])).to eq(reads)
+      expect(undefined_rows(gems: %w[shouty sharedshout])).to eq(reads + [["other.rb", 3, "nope"]])
+    end
+
+    # A gem that refines a module through an eval on its constant (`Base.module_eval { refine … }`) names the module
+    # without declaring it, so the module is judged on that gem too.
+    it "stays opaque when another gem refines it through an eval on its constant and was not read in full" do
+      write_gem("evalbase", "lib/eval_base.rb" => "module EvalBase\n  def base = 1\nend\n")
+      write_gem("evalext", "lib/eval_ext.rb" => "EvalBase.module_eval { refine(String) { def shout = upcase } }\n",
+                           "lib/broken.rb" => "def broken\n")
+      write("lib/app.rb", "using Shouty\n\"hi\".shout\n\"hi\".nope\n")
+      write("lib/other.rb", "using EvalBase\n\"hi\".shout\n\"hi\".nope\n")
+
+      expect(undefined_rows(gems: %w[shouty evalbase evalext])).to eq(reads)
+      expect(undefined_rows(gems: %w[shouty evalbase]))
+        .to eq(reads + [["other.rb", 2, "shout"], ["other.rb", 3, "nope"]])
+    end
+  end
+
+  # Round-1 review of #1828 — `K = String; refine(K) { … }` in a gem names String, which the project reading learns from
+  # the project's constant census at read time and that census holds no gem's writes, so the walker rewrites such a key
+  # to the class-unknown row. Ruby 4.0.5 prints "HI!" for `"hi".shout`, "LONG" for `"x".length.upcase`, and raises
+  # `NoMethodError` for `"hi".nope`.
+  describe "a gem refine target the gem's own constant write binds" do
+    it "declines the refined name on any receiver, and keeps reporting a name no row defines" do
+      write_gem("kgem", "lib/kgem.rb" => "module KGem\n  K = String\n  refine(K) { def shout = 1 }\nend\n")
+      write("lib/app.rb", "using KGem\n\"hi\".shout\n\"hi\".nope\n")
+
+      expect(undefined_rows(gems: %w[kgem])).to eq([["app.rb", 3, "nope"]])
+    end
+
+    it "types a call the refinement replaces as Dynamic[top], and reports no call on its result" do
+      write_gem("ktg", "lib/ktg.rb" => "module Ktg\n  Target = String\n  refine(Target) { def length = 'long' }\nend\n")
+      write("lib/app.rb", "using Ktg\nRigor.dump_type(\"x\".length)\n\"x\".length.upcase\n")
+
+      found = diagnostics(gems: %w[ktg])
+      expect(found.select { |d| d.qualified_rule == "dump.type" }.map(&:message)).to eq(["dump_type: Dynamic[top]"])
+      expect(undefined_rows_of(found)).to eq([])
+    end
+
+    # The constant may be written in another file of the gem, by `||=`, by a path write or by `const_set`.
+    {
+      "another file" => ["Q = String\n", "Q"],
+      "an operator write" => ["Q ||= String\n", "Q"],
+      "a path write" => ["module Wrap; end\nWrap::Q = String\n", "Q"],
+      "a multiple assignment" => ["Q, R = String, Symbol\n", "Q"],
+      "a const_set with a literal name" => ["Object.const_set(:Q, String)\n", "Q"]
+    }.each do |name, (binding, target)|
+      it "reads a target bound by #{name} as unknown" do
+        write_gem("aliasgem", "lib/a_binding.rb" => binding,
+                              "lib/b_alias.rb" => "module AliasGem\n  refine(#{target}) { def aliased = 1 }\nend\n")
+        write("lib/app.rb", "using AliasGem\n\"hi\".aliased\n\"hi\".nope\n")
+
+        expect(undefined_rows(gems: %w[aliasgem])).to eq([["app.rb", 3, "nope"]])
+      end
+    end
+
+    # Round-2 review of #1828 — the alias lives in another opted-in gem, and a prefix of the target is the alias. Ruby
+    # 4.0.5 prints "X" for `"x".shout` after `module Shared; Target = String; end` and `refine Shared::Target`, and 1
+    # for `Encoding::Converter.new("UTF-8", "EUC-JP").shout` after `Enc = ::Encoding; refine(Enc::Converter)`.
+    it "reads a target another opted-in gem's constant write binds as unknown" do
+      write_gem("sharedg", "lib/sharedg.rb" => "module Shared\n  Target = String\nend\n")
+      write_gem("brefg", "lib/brefg.rb" => "module BRef\n  refine(Shared::Target) { def shout = upcase }\nend\n")
+      write("lib/app.rb", "using BRef\n\"x\".shout\n\"x\".nope\n")
+
+      expect(undefined_rows(gems: %w[sharedg brefg])).to eq([["app.rb", 3, "nope"]])
+    end
+
+    it "reads a target with a prefix a constant write binds as unknown" do
+      write_gem("pag",
+                "lib/pag.rb" => "module Pag\n  Enc = ::Encoding\n  refine(Enc::Converter) { def shout = 1 }\nend\n")
+      write("lib/app.rb", "using Pag\nEncoding::Converter.new('UTF-8', 'EUC-JP').shout\n\"x\".nope\n")
+
+      expect(undefined_rows(gems: %w[pag])).to eq([["app.rb", 3, "nope"]])
+    end
+
+    # The controls: a class the gem declares by a constant write (`Struct.new`, `Data.define`, `Class.new`) is no bound
+    # name, and a write that is no class (`DelegateClass(Array)`) is, so its refine reads as unknown. Either way the
+    # module stays known and `"x".nope` reports.
+    it "keeps a gem module known whatever kind of constant its refine targets are" do
+      write_gem("clg", "lib/clg.rb" => <<~RUBY)
+        require 'delegate'
+        module Clg
+          Point = Struct.new(:x)
+          Pair = Data.define(:a)
+          Wrap = DelegateClass(Array)
+          Sub = Class.new(StandardError)
+          refine(Point) { def px = x }
+          refine(Pair) { def pa = a }
+          refine(Wrap) { def pw = 1 }
+          refine(Sub) { def ps = 2 }
+        end
+      RUBY
+      write("lib/app.rb", "using Clg\n\"x\".nope\n")
+
+      expect(undefined_rows(gems: %w[clg])).to eq([["app.rb", 2, "nope"]])
+    end
+
+    # The control: a target nothing in the gem binds keeps its normal row, which matches the refined class only.
+    it "keeps the row of a target no constant write binds" do
+      write_gem("plainref", "lib/plain_ref.rb" => "module PlainRef\n  refine(String) { def plain = 1 }\nend\n")
+      write("lib/app.rb", "using PlainRef\n1.plain\n\"hi\".plain\n")
+
+      expect(undefined_rows(gems: %w[plainref])).to eq([["app.rb", 2, "plain"]])
+    end
+  end
+
+  # ADR-121 WD7 — `import_methods` leaves the refined class's names unknown and its targets known, so the decline is
+  # for String receivers, not for the whole span.
+  it "declines the names of a refined class only, when a gem refine body imports methods" do
+    write_gem("importshout", "lib/import_shout.rb" => <<~RUBY)
+      module Helpers
+        def whisper = "psst"
+      end
+      module ImportShout
+        refine String do
+          import_methods Helpers
+        end
+      end
+    RUBY
+    write("lib/app.rb", "using ImportShout\n\"hi\".whisper\n\"hi\".nope\n1.nope\n")
+
+    expect(undefined_rows(gems: %w[importshout])).to eq([["app.rb", 4, "nope"]])
+  end
+
+  # ADR-121 WD3 — a gem's refine body is not inferred, so a call it replaces answers `Dynamic[top]`, never the
+  # signature it replaces; every other call under the `using` keeps its type.
+  it "types a call a gem refinement replaces as Dynamic[top], and every other call as before" do
+    write_gem("centershout", "lib/center_shout.rb" => <<~RUBY)
+      module CenterShout
+        refine(String) { def center(width) = :refined }
+      end
+    RUBY
+    write("lib/app.rb", <<~RUBY)
+      Rigor.dump_type("hi".center(5))
+      using CenterShout
+      Rigor.dump_type("hi".center(5))
+      Rigor.dump_type("hi".upcase)
+      Rigor.dump_type(1.succ)
+    RUBY
+
+    dumped = diagnostics(gems: %w[centershout]).select { |d| d.qualified_rule == "dump.type" }
+    expect(dumped.map(&:message)).to eq(['dump_type: " hi  "', "dump_type: Dynamic[top]", 'dump_type: "HI"',
+                                         "dump_type: 2"])
+  end
+
+  # ADR-10 slice 3, issue #1814 — the gem half of the refinement table is no analysed file's, so no per-file diff
+  # (`Incremental.changed_refinement_names`) sees a gem bump change it, and `app.rb` below never changes. The run's
+  # cache identity must: the lockfile digest covers a `bundle update`, and the `(name, version, mode)` rows of the
+  # walked gems cover a project with no lockfile.
+  describe "a gem bump between two warm runs" do
+    def bump(version, refine_body)
+      write("vendor/shouty/lib/shouty.rb", "module Shouty\n  refine String do\n#{refine_body}  end\nend\n")
+      stub_gem("shouty", version)
+    end
+
+    def lockfile(version) = write("Gemfile.lock", "GEM\n  specs:\n    shouty (#{version})\n")
+
+    def cached_rows = undefined_rows(cache_store: Rigor::Cache::Store.new(root: File.join(Dir.pwd, ".rigor-cache")))
+
+    def incremental_rows
+      root = File.join(Dir.pwd, ".rigor-cache")
+      snapshot = Rigor::Cache::IncrementalSnapshot.new(root: root)
+      fingerprint = Rigor::Cache::IncrementalSnapshot.fingerprint(configuration: configuration, roots: %w[lib])
+      session = Rigor::Analysis::IncrementalSession.new(
+        configuration: configuration, paths: %w[lib], cache_store: Rigor::Cache::Store.new(root: root)
+      )
+      found, warm = guarded_run_incremental(session, snapshot: snapshot, fingerprint: fingerprint)
+      [undefined_rows_of(found), warm]
+    end
+
+    before do
+      bump("1.0.0", "    def shout = upcase\n")
+      write("lib/app.rb", "using Shouty\n\"hi\".shout\n\"hi\".yell\n")
+    end
+
+    [true, false].each do |locked|
+      suffix = locked ? "with a lockfile" : "with no lockfile"
+
+      it "re-checks the `using` file when a refined def is renamed, #{suffix}" do
+        lockfile("1.0.0") if locked
+        expect(cached_rows).to eq([["app.rb", 3, "yell"]])
+
+        bump("1.1.0", "    def yell = upcase\n")
+        lockfile("1.1.0") if locked
+
+        expect(cached_rows).to eq([["app.rb", 2, "shout"]])
+        expect(undefined_rows).to eq([["app.rb", 2, "shout"]])
+      end
+
+      it "re-checks the `using` file when a refine body gains an import_methods, #{suffix}" do
+        lockfile("1.0.0") if locked
+        expect(cached_rows).to eq([["app.rb", 3, "yell"]])
+
+        bump("1.1.0", "    def shout = upcase\n    import_methods Kernel\n")
+        lockfile("1.1.0") if locked
+
+        expect(cached_rows).to eq([])
+        expect(undefined_rows).to eq([])
+      end
+
+      it "re-checks the `using` file under --incremental, #{suffix}" do
+        lockfile("1.0.0") if locked
+        expect(incremental_rows).to eq([[["app.rb", 3, "yell"]], false])
+
+        bump("1.1.0", "    def yell = upcase\n")
+        lockfile("1.1.0") if locked
+
+        expect(incremental_rows).to eq([[["app.rb", 2, "shout"]], false])
+      end
+    end
+
+    # The control: nothing changed, so the run is served from the snapshot and the identity did not move.
+    it "keeps serving an unchanged gem from the snapshot" do
+      expect(incremental_rows).to eq([[["app.rb", 3, "yell"]], false])
+      expect(incremental_rows).to eq([[["app.rb", 3, "yell"]], true])
+    end
   end
 end

@@ -432,9 +432,9 @@ RSpec.describe Rigor::Inference::InEffectRefinements do
 
   # ADR-121 WD7 — which modules a `using` puts in the list, and which of them the readers treat as opaque.
   describe "declared candidates and opaque modules" do
-    def scope_at_last(source)
+    def scope_at_last(source, default_scope: Rigor::Scope.empty)
       root = Prism.parse(source).value
-      index = Rigor::Inference::ScopeIndexer.index(root, default_scope: Rigor::Scope.empty)
+      index = Rigor::Inference::ScopeIndexer.index(root, default_scope: default_scope)
       call = root.compact_child_nodes.first.body.last
       call = call.body.body.last while call.is_a?(Prism::ModuleNode)
       [index[call], call, root]
@@ -483,6 +483,81 @@ RSpec.describe Rigor::Inference::InEffectRefinements do
 
       expect(%w[Ext Plain Comparable Kernel GemRef Made].map { |name| described_class.opaque_module?(scope, name) })
         .to eq([false, false, false, false, true, true])
+    end
+
+    # Issue #1814 — the third source of a known module: an opted-in gem's, when the gem source walker read every file
+    # that could refine it. A gem module it did not read in full (truncated, an unreadable file, a mixin) stays opaque,
+    # and so does one a targets-wildcard row lists, whichever gem names it.
+    describe "a gem module" do
+      let(:index_class) { Rigor::Analysis::DependencySourceInference::Index }
+
+      def reading(gem_name, modules, fully_read)
+        index_class::Reading.new(gem_name: gem_name, modules: Set.new(modules), fully_read: fully_read)
+      end
+
+      def gem_scope(readings, refinements: {})
+        environment = Rigor::Environment.for_project(
+          dependency_source_index: index_class.new(readings: readings, refinements: refinements)
+        )
+        base = Rigor::Scope.empty(environment: environment)
+        seeded = base.with_discovery(base.discovery.with(discovered_refinements: refinements))
+        scope_at_last("module Plain; end\n:probe\n", default_scope: seeded).first
+      end
+
+      it "is known when the walker read it in full, and opaque when it did not or nothing walked names it" do
+        scope = gem_scope([reading("fine", %w[Fine], true), reading("cut", %w[Cut], false)])
+
+        expect(%w[Fine Cut Missing Plain Comparable].map { |name| described_class.opaque_module?(scope, name) })
+          .to eq([false, true, true, false, false])
+      end
+
+      it "is opaque when a targets-wildcard row lists it, however fully the walker read it" do
+        wildcard = Rigor::Scope::DiscoveryIndex::REFINEMENT_WILDCARD
+        readings = [reading("fine", %w[Fine Other], true)]
+
+        listed = gem_scope(readings, refinements: { wildcard => { wildcard => ["Fine"] } })
+        unattributable = gem_scope(readings, refinements: { wildcard => { wildcard => [wildcard] } })
+
+        expect(%w[Fine Other].map { |name| described_class.opaque_module?(listed, name) }).to eq([true, false])
+        expect(%w[Fine Other].map { |name| described_class.opaque_module?(unattributable, name) }).to eq([true, true])
+      end
+    end
+
+    # Round-2 review of #1828 — a refined-class key is class-unknown when any segment of it is a constant a write binds
+    # (`Enc = ::Encoding; refine(Enc::Converter)`, `Shared::Target = String` in another gem), and no class or RBS knows
+    # the whole key. A core class keeps its key whatever a file writes under its name.
+    describe "a refined-class key" do
+      let(:index_class) { Rigor::Analysis::DependencySourceInference::Index }
+
+      def gem_key_scope(bound)
+        reading = index_class::Reading.new(gem_name: "g", modules: Set.new, fully_read: true, bound: Set.new(bound))
+        environment = Rigor::Environment.for_project(dependency_source_index: index_class.new(readings: [reading]))
+        scope_at_last("module Plain; end\n:probe\n", default_scope: Rigor::Scope.empty(environment: environment)).first
+      end
+
+      it "is class-unknown when any segment is a gem's bound constant, and is not for a segment nothing binds" do
+        scope = gem_key_scope(%w[Enc Target])
+        keys = %w[Enc::Converter Pag::Enc::Converter Shared::Target Target Pag::Other Other::Plain]
+
+        expect(keys.map { |key| described_class.class_wildcard_key?(scope, key) })
+          .to eq([true, true, true, true, false, false])
+      end
+
+      it "is class-unknown for the wildcard, and never moves a core class a write names" do
+        scope = gem_key_scope(%w[String Comparable])
+        wildcard = Rigor::Scope::DiscoveryIndex::REFINEMENT_WILDCARD
+
+        keys = [wildcard, "String", "Comparable", "Integer"]
+
+        expect(keys.map { |key| described_class.class_wildcard_key?(scope, key) }).to eq([true, false, false, false])
+      end
+
+      it "is not class-unknown for a project with no gem index" do
+        scope, = scope_at_last("module Plain; end\n:probe\n")
+
+        expect(%w[Enc::Converter Shared::Target].map { |key| described_class.class_wildcard_key?(scope, key) })
+          .to eq([false, false])
+      end
     end
 
     # Ruby 4.0.5: `def self.setup = refine(String) { … }` refines for `M`; `def setup` there refines for whichever

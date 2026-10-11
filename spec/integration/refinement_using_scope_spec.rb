@@ -1838,7 +1838,7 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
                                            .sort
     end
 
-    def incremental_call_rows
+    def incremental_call_rows(rules = call_rules)
       root = File.join(Dir.pwd, ".rigor", "cache")
       snapshot = Rigor::Cache::IncrementalSnapshot.new(root: root)
       fingerprint = Rigor::Cache::IncrementalSnapshot.fingerprint(configuration: configuration, roots: %w[lib])
@@ -1846,8 +1846,9 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
         configuration: configuration, paths: %w[lib], cache_store: Rigor::Cache::Store.new(root: root)
       )
       found, warm = guarded_run_incremental(session, snapshot: snapshot, fingerprint: fingerprint)
-      rows = found.select { |d| call_rules.include?(d.qualified_rule) }
-                  .map { |d| [File.basename(d.path.to_s), d.line, d.qualified_rule] }.sort
+      label = rules == call_rules ? :qualified_rule : :message
+      rows = found.select { |d| rules.include?(d.qualified_rule) }
+                  .map { |d| [File.basename(d.path.to_s), d.line, d.public_send(label)] }.sort
       [rows, warm]
     end
 
@@ -1988,6 +1989,20 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
       File.delete("lib/rx.rb")
       expect(incremental_call_rows).to eq([fires, true])
       expect(call_rows).to eq(fires)
+    end
+
+    # `Base` has no methods, so `K`'s singleton chain holds it as an external entry and the walk cannot be read; a new
+    # file giving `Base` a singleton `oo` types `K.oo` as `1` on the re-check (Ruby 4.0.5: `1`, and `:o` without it).
+    it "re-types the `using` file under --incremental when a new file gives a method-less superclass a method" do
+      write("lib/k.rb", "class Base; end\nclass K < Base; end\nmodule RO\n  refine(Object) { def oo = :o }\nend\n")
+      write("lib/use.rb", "using RO\nRigor.dump_type(K.oo)\n")
+      dynamic = [[["use.rb", 2, "dump_type: Dynamic[top]"]], false]
+
+      expect(incremental_call_rows(%w[dump.type])).to eq(dynamic)
+      write("lib/base2.rb", "class Base\n  def self.oo = 1\nend\n")
+      expect(incremental_call_rows(%w[dump.type])).to eq([[["use.rb", 2, "dump_type: 1"]], true])
+      File.delete("lib/base2.rb")
+      expect(incremental_call_rows(%w[dump.type])).to eq([dynamic.first, true])
     end
 
     # A new file reopening the `using`'d module to refine `Object#oo` silences the class object's call on the re-check,

@@ -163,8 +163,15 @@ module Rigor
         end
 
         # An external superclass stands for its whole singleton ancestry, which RBS gives when it declares the class.
+        #
+        # ADR-46 — a project superclass with no methods is not admitted by the `:methods` resolver, so it is external
+        # here and the walk is unreadable; each candidate's `class:` edge lets a new file that gives it a method (and so
+        # a project entry) re-check the consumer.
         def splice_external(scope, out, entries)
           external = entries.find(&:external?)
+          if Analysis::DependencyRecorder.active?
+            external&.candidates&.each { |candidate| Analysis::DependencyRecorder.read_last_segment(:class, candidate) }
+          end
           name = external&.candidates&.find { |candidate| scope.environment&.class_known?(candidate) }
           tail = name && rbs_levels(scope, name)
           tail && out.concat(tail)

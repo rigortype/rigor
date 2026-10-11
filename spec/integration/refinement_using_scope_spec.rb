@@ -685,6 +685,26 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
         expect(call_rows).to eq([])
       end
 
+      # Issue #1797. `w02_inc.rb`: `Inc#bar` answers ahead of the refinement of the module `Inc` includes. `w03_kid.rb`:
+      # a refinement of another name on `Base` leaves `Kid#center` checked with and without a `using`; `RK` refines
+      # `Kid` itself and answers (`1`).
+      it "keeps checking a class's own method ahead of a refined module or superclass" do
+        write("lib/inc.rb", "module N; end\nclass Inc\n  def bar(a) = a\n  include N\nend\n" \
+                            "module M; refine(N) { def bar(a, b, c) = :n }; end\n")
+        write("lib/kid.rb", "class Base; def other = 0; end\nmodule RB; refine(Base) { def other = 1 }; end\n" \
+                            "class Kid < Base; def center(a) = a; end\n" \
+                            "module RK; refine(Kid) { def center(a, b, c) = 1 }; end\n")
+        write("lib/inc_use.rb", "using M\nInc.new.bar(1, 2, 3)\n")
+        write("lib/plain.rb", "Kid.new.center(1, 2, 3)\n")
+        write("lib/base_use.rb", "using RB\nKid.new.center(1, 2, 3)\n")
+        write("lib/kid_use.rb", "using RK\nKid.new.center(1, 2, 3)\n")
+
+        expect(call_rows).to eq(
+          [["base_use.rb", 2, "call.wrong-arity"], ["inc_use.rb", 2, "call.wrong-arity"],
+           ["plain.rb", 1, "call.wrong-arity"]]
+        )
+      end
+
       # Critique F3. `w12_possible.rb` prints `[:refined, :refined, :refined]`: with the variable unset no definer
       # runs, and `Object`'s refinement answers. A definer that may not have run proves nothing, however it defines.
       it "declines over a definer that may not have run" do
@@ -706,19 +726,21 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
         expect(call_rows).to eq(controls(1..3))
       end
 
-      # Critique F4. `w20_subclasses.rb` prints `:typed_kid` and `:mystr` for these: a value typed as `Typed` (its
+      # Critique F4. `w20_subclasses.rb` prints `[:kid, :typed_kid, :mystr]`: a value typed as `Base`, as `Typed` (its
       # method declared in `sig/`) or as `String` may be an instance of the refined subclass.
       it "declines where a refinement in effect refines a subclass of the receiver's class" do
+        write("lib/base.rb", "class Base; def center(a) = a; end\nclass Kid < Base; end\n" \
+                             "module KidRef; refine(Kid) { def center(a, b, c) = :kid }; end\n")
         write_class("Typed", "  def ljust(a) = a\n", "  def ljust: (untyped) -> untyped\n")
         write("lib/typed_kid.rb", "class TypedKid < Typed; end\n" \
                                   "module TypedRef; refine(TypedKid) { def ljust(a, b, c) = :typed_kid }; end\n")
         write("lib/my_str.rb", "class MyStr < String; end\n" \
                                "module StrRef; refine(MyStr) { def rjust(a, b, c) = :mystr }; end\n")
-        calls = "Typed.new.ljust(1, 2, 3)\n\"x\".rjust(1, 2, 3)\n"
-        write("lib/use.rb", "using TypedRef\nusing StrRef\n#{calls}")
+        calls = "Base.new.center(1, 2, 3)\nTyped.new.ljust(1, 2, 3)\n\"x\".rjust(1, 2, 3)\n"
+        write("lib/use.rb", "using KidRef\nusing TypedRef\nusing StrRef\n#{calls}")
         write("lib/control.rb", calls)
 
-        expect(call_rows).to eq(controls(1..2))
+        expect(call_rows).to eq(controls(1..3))
       end
 
       # `w21_prepend_extend.rb` prints `[:n, :ext]`: `Sub` prepends `N` again ahead of `Host#ljust`, and a String may

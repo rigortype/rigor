@@ -219,7 +219,9 @@ module Rigor
       # - {ENVELOPE_REFINED_MARK}: a `refine` block refines the class, which redefines its methods wherever a `using`
       #   is in effect. Issue #1367 splits it from {ENVELOPE_DYNAMIC_MARK}, which it used to share: an implicit
       #   conversion (`to_str`, `to_int`) ignores a refinement, so the `global.*` rules must tell the two apart.
-      #   Every reader that asks whether a surface is rewritten reads both ({.rewritten_surface?}).
+      #   The readers that ask whether a surface is rewritten read both ({.rewritten_surface?}), except
+      #   `call.wrong-arity`'s source envelope (`CheckRules::SourceArity`), which leaves a refinement to the per-call
+      #   decline that knows the name and the `using` (issue #1797).
       ENVELOPE_MODULE_MARK = :"<module>"
       ENVELOPE_DYNAMIC_MARK = :"<dynamic>"
       ENVELOPE_OBJECT_EXTENDED_MARK = :"<object-extended>"

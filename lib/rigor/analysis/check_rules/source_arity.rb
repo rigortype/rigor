@@ -306,8 +306,13 @@ module Rigor
             level.externals.all? { |candidates| external_mixin_lacks_method?(candidates) }
         end
 
+        # Issue #1797 — a class whose body rewrites its method table in a way no literal names. A `refine` of the
+        # class (`ENVELOPE_REFINED_MARK`) is not one here: whether a refinement answers a call is decided per call
+        # site, name and `using` by `CheckRules#refined_redefinition_in_effect?`, which also declines where a
+        # refinement of a subclass of the receiver's class may answer. Counting the mark silenced every name on
+        # every subclass of a refined class, with or without a `using`.
         def dynamic_surface?(class_name)
-          Scope::DiscoveryIndex.rewritten_surface?(@scope.parameter_envelopes_of(class_name))
+          @scope.parameter_envelopes_of(class_name).key?(Scope::DiscoveryIndex::ENVELOPE_DYNAMIC_MARK)
         end
 
         def project_patched?(class_name)

@@ -268,7 +268,8 @@ file":
 
 - Files Prism cannot parse.
 - Files that raise during `Prism.parse_file`, or during the census.
-- Files outside the gem's listed `roots:`.
+- Files outside the gem's listed `roots:` (a literal `require_relative`
+  to one is recorded; see "Coverage").
 
 Gem source we cannot walk MUST NOT pollute the user-facing
 diagnostic stream — the user did not author the file and cannot
@@ -286,37 +287,81 @@ refine it, not an inference from the rows. Each walk records:
 
 - `Outcome#modules` — the classes and modules the gem's files
   declare, as the project walk names them
-  (`ScopeIndexer.collect_class_decls`), and every module its
+  (`ScopeIndexer.collect_class_decls`), every module its
   refinement rows name (a `Base.module_eval { refine … }` in a
-  file that does not declare `Base`), without the wildcard and the
-  top level's `""`.
+  file that does not declare `Base`), and every module its mixin
+  calls name by a constant (`MixinScan#targets`: the receiver of an
+  explicit `include`, `prepend`, `send(:include, …)` or eval, the
+  argument of an `append_features` / `prepend_features`, by every
+  spelling the lexical position can denote), without the wildcard
+  and the top level's `""`. A mixin call accompanies a mixin site,
+  so such a name can spoil a module another gem declares and never
+  makes one read in full.
 - `Outcome#unread` — the gem-relative path of each file that did not
-  parse, could not be read, or raised under the census; the gem
-  directory when the walk itself raised (`Builder`).
+  parse, could not be read, or raised under the census; of a dot
+  file or directory and a symlinked directory the `**` glob does
+  not enter; of a file a literal `require_relative` reaches that no
+  accepted root holds; the gem directory when the walk itself
+  raised (`Builder`). A `load`, a `require` through the load path
+  and a path built at run time are not read.
 - `Outcome#mixes_modules` — whether the source may change which
   modules a module includes or prepends, which `using` also
   activates (CRuby's `using_module_recursive` walks the module's
-  ancestors) and the gem table has no edge for: a call to `include`
-  or `prepend` on an explicit receiver, or on `self` outside a class
-  body (a block does not keep the class), an `:include`, `:prepend`,
-  `:append_features` or `:prepend_features` Symbol, or an eval,
-  `send` or method-naming call with a String holding one of those
-  words. A gem is flagged as a whole.
+  ancestors) and the gem table has no edge for
+  (`DependencySourceInference::MixinScan`): a call to `include`,
+  `prepend`, `append_features` or `prepend_features` on an explicit
+  receiver, or on `self` outside a class body (a block does not
+  keep the class; a `def` under `class << self` runs with the
+  `self` of the enclosing body, so it is outside the class body when
+  that is a module or an object the scan cannot name, while the body
+  of `class << self` itself, which mixes into the singleton class, is
+  not), an `:include`, `:prepend`, `:append_features` or
+  `:prepend_features` Symbol, or an eval, `send` or method-naming
+  call with a String holding one of those words. It is also true
+  when the source `extend`s, outside a class body, on `self` or a
+  constant, a module no gem file declares (or an argument that is no
+  constant): the extended module's methods may call `refine` for the
+  extender (Ruby 4.0.5, `module Dslg; extend Refiner;
+  refines_string :foo; end` refines String for `Dslg`), and a helper
+  a gem file declares is read by the census instead. `extend self`
+  and an extend in a class body are not. A gem is flagged as a whole.
 - `Outcome#fully_read?` — `!truncated? && unread.empty? &&
   !mixes_modules`.
+
+A refine target a gem's own constant write binds (`K = String;
+refine(K) { … }`) names whatever value the write holds. The project
+reading learns that from the project's constant census, which holds no
+gem's writes, so `Walker.walk` reads every gem file's constant writes
+(an assignment, a path write, an operator write, a multiple
+assignment, a `const_set` with a literal name) and moves a row whose
+key's last segment a gem file writes, and that no gem file declares as
+a class or module, to the wildcard class: the class-unknown row, as
+the project reading gives the same constant.
 
 `Builder` keeps one `Index::Reading(gem_name, modules, fully_read)`
 per walked entry beside `#refinements`. `Index#fully_read_module?(name)`
 is true when some walked gem names `name` and every walked gem that
 names it was read in full, so a second gem that reopens the module
-and was not read in full keeps it opaque.
+and was not read in full, or mixes into it, keeps it opaque.
 `InEffectRefinements.opaque_module?` asks it as the third source of a
 known module, after the targets-wildcard rows and the project.
 
-A module reopened in a gem nobody opted in, in a file outside the
-walked roots, or in a part of a gem whose walk stopped before it is
-unseen, as is a module reopened in a project file outside the
-analysed paths.
+Reported limits, not removed:
+
+- A declaring gem that is not opted in while an opted-in gem reopens
+  its namespace: the opted-in gem names `Foo::Refinements`, is read in
+  full, and the module counts as read in full though the file that
+  declares its `refine` bodies, in the gem nobody opted in, was never
+  walked (`module Foo; module Refinements; def self.ext_version; end;
+  end; end` in `fooext` beside `foo` with the `refine`).
+- A module reopened in a file outside the walked roots that no literal
+  `require_relative` reaches (a `load`, a `require` through the load
+  path, a path built at run time), in a gem nobody opted in, or in a
+  part of a gem whose walk stopped before it, is unseen, as is a
+  module reopened in a project file outside the analysed paths.
+- A mixin made through an `extend` hook defined in another gem; a
+  `class << self` method that includes in a project file (the
+  project walk's own gap).
 
 ## Dispatcher tier (slice 2b-ii)
 

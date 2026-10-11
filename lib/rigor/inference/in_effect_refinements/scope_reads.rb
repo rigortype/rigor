@@ -107,7 +107,8 @@ module Rigor
         #
         # ADR-46 — the answer moves when a file declares or stops declaring the module (`class:<last segment>`) or
         # when a targets-wildcard row appears or vanishes (`refinement:*`). The gem half is a function of the run's
-        # gem sources, which the run's cache identity covers (the lockfile's digest).
+        # gem sources, which the run's cache identity covers by the opted-in gems' `(name, version, mode)` rows
+        # (`RunCacheKey.dependency_source_entries`), the `Gemfile.lock` digest covering a `bundle update` as well.
         def opaque_module?(scope, name)
           if Analysis::DependencyRecorder.active?
             Analysis::DependencyRecorder.read_last_segment(:class, name)

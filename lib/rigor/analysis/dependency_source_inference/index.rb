@@ -117,14 +117,7 @@ module Rigor
         # surfaces them as `dynamic.dependency-source.gem-not-found` diagnostics. Resolved-but-disabled
         # entries are also absent: the {Builder} skips them before resolution, so they never reach the index.
         def cache_descriptor
-          dependencies = @resolved_gems.map do |resolved|
-            Cache::Descriptor::DependencyEntry.new(
-              gem_name: resolved.gem_name,
-              gem_version: resolved.version,
-              mode: resolved.mode
-            )
-          end
-          Cache::Descriptor.new(dependencies: dependencies)
+          Cache::Descriptor.new(dependencies: @resolved_gems.map(&:dependency_entry))
         end
       end
 

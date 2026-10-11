@@ -162,12 +162,13 @@ declaration is opaque.**
   each node runs on, and the in-effect walk and the census both read its answer: a module's instance
   method runs on whatever module extends it; a block, in a module body or a method body alike, may run
   under any `self` (a block at the top level, one a DSL `module_eval`s, `tap`, `loop`), unless its call
-  keeps `self` (a call on a literal, or a core iteration method such as `each` or `map` on a constant,
-  local, ivar or literal); a `*_eval` on a constant runs on that constant. In a plain class's methods
-  `refine` is the class's own method, as #1689 reads one in a class body. `alias`, `alias_method`,
-  `define_method` and `attr_*` names in a refine body are recorded, and a later definer of a name
-  replaces an earlier `def` of it. A census spec checks that every `refine`-shaped node ends in exactly
-  one outcome.
+  keeps `self` (a core iteration method such as `each` or `map` on a receiver whose value is a literal
+  in this file: a literal, or a constant, local or ivar every binding of which there is a literal); a
+  `*_eval` on a constant runs on that constant, under every name its spelling can denote. In a plain
+  class's methods `refine` is the class's own method, as #1689 reads one in a class body. `alias`,
+  `alias_method`, `define_method` and `attr_*` names in a refine body are recorded, and a later definer
+  of a name replaces an earlier `def` of it. A census spec checks that every `refine`-shaped node ends
+  in exactly one outcome.
 - A module is opaque when the project does not declare it and it is not a core or stdlib module (the
   core and standard-library signatures the rbs gem ships declare no refinements), or when a
   targets-wildcard row lists it or `"*"`. A gem's module is

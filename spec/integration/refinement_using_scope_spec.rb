@@ -1345,8 +1345,8 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
     end
 
     # R3-S3: `M.module_eval { … }` in `module L` runs on `L::M` once a file declares it, so the walk charges every name
-    # `M` can denote there. Ruby 4.0.5 prints `:lm` twice, under `using L::M` in each file, and raises
-    # `ArgumentError (given 3, expected 1..2)` in `plain.rb`.
+    # `M` can denote there; the body may be either one's, so it types from neither. Ruby 4.0.5 prints `:lm` twice,
+    # under `using L::M` in each file, and raises `ArgumentError (given 3, expected 1..2)` in `plain.rb`.
     it "declines under a module an eval block's constant receiver names in another file" do
       write("lib/lm.rb", "module L\n  module M; end\nend\n")
       write("lib/setup.rb", "require_relative \"lm\"\nmodule L\n  " \
@@ -1357,7 +1357,9 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
 
       rows = diagnostics.map { |d| [File.basename(d.path.to_s), d.line, d.qualified_rule, d.message] }.sort
       arity = "wrong number of arguments to `center' on String (given 3, expected 1..2)"
-      expect(rows).to eq([["plain.rb", 1, "call.wrong-arity", arity], ["setup.rb", 6, "dump.type", "dump_type: :lm"]])
+      expect(rows).to eq(
+        [["plain.rb", 1, "call.wrong-arity", arity], ["setup.rb", 6, "dump.type", "dump_type: Dynamic[top]"]]
+      )
     end
 
     # The union receiver rule and `call.unresolved-toplevel` ask the refinement predicate too. Ruby 4.0.5 prints `:int`

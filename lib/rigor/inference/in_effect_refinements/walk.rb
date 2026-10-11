@@ -240,9 +240,10 @@ module Rigor
           return if owners.nil? || targets.empty?
 
           # ADR-121 WD7 (issue #1799) — a `def`, and an alias of a `def` the body wrote earlier; a later definer with no
-          # body (`define_method`, `attr_*`, `undef`) clears the name, which then types as `Dynamic[top]`.
+          # body (`define_method`, `attr_*`, `undef`) clears the name, which then types as `Dynamic[top]`. Ruby runs a
+          # body charged to several names (an eval on a constant) on one of them only, so each gets the name bodiless.
           RefineCensus.read_body(body).defs.each do |name, def_node|
-            owners.each { |owner| @refine_defs.record(owner, targets, name, def_node, @nesting) }
+            owners.each { |owner| @refine_defs.record(owner, targets, name, (def_node if owners.size == 1), @nesting) }
           end
         end
 

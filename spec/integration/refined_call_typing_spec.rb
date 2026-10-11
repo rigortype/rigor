@@ -370,6 +370,43 @@ RSpec.describe "Typing calls through Ruby refinements (#1664)", type: :runner do
     RUBY
   end
 
+  # ADR-121 WD7. `M.module_eval { refine … }` inside `module L` runs on one module, `L::M` here, but the walk charges
+  # every name `M` can denote there, so the body may be the top-level `M`'s or not and types from neither. Ruby 4.0.5
+  # prints `"  X  "`: the refinement is `L::M`'s, and under `using M` the call is String#center.
+  it "answers Dynamic[top] with no finding for a body an eval on a constant may have run on another module" do
+    expect(rows(<<~RUBY)).to eq([["dump.type", 10, "dump_type: Dynamic[top]"]])
+      module M
+        refine(Integer) { def twice = self * 2 }
+      end
+      module L
+        module M; end
+        M.module_eval { refine(String) { def center(width) = 42 } }
+      end
+      using M
+      p "x".center(5).upcase
+      Rigor.dump_type("x".center(5))
+    RUBY
+  end
+
+  # The same body may replace an earlier `def` of either name: Ruby 4.0.5 prints `42` twice, the eval on `N` running on
+  # the `L::N` this file declares and the one on `M` on the top-level `M`, so neither earlier `def` answers.
+  it "answers Dynamic[top] where an eval body on a constant may replace an earlier def under any of its names" do
+    expect(dumps(<<~RUBY)).to eq(["Dynamic[top]", "Dynamic[top]"])
+      module M
+        refine(String) { def center(width) = :top }
+      end
+      module L
+        module N; refine(String) { def ljust(width) = :inner }; end
+        N.module_eval { refine(String) { def ljust(width) = 42 } }
+        M.module_eval { refine(String) { def center(width) = 42 } }
+      end
+      using L::N
+      Rigor.dump_type("x".ljust(5))
+      using M
+      Rigor.dump_type("x".center(5))
+    RUBY
+  end
+
   # ADR-121 WD7 (issue #1799). Ruby 4.0.5 prints `42` and `:dm`: an alias of a body's `def` types from that `def`;
   # a `define_method` has no `def` to type, so `Dynamic[top]`, never String#rjust's signature.
   it "types an alias from the aliased def and a define_method as Dynamic[top]" do

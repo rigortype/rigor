@@ -93,8 +93,10 @@ module Rigor
 
         def walk_call(node, scope)
           inspect_call(node, scope)
-          block_scope = Scope.new(scope.prefix, scope.in_class, scope.def_in_class, eval_targets_of(node, scope))
-          node.rigor_each_child { |child| walk(child, child.equal?(node.block) ? block_scope : scope) }
+          block = node.block
+          block_scope = block && Scope.new(scope.prefix, scope.in_class, scope.def_in_class,
+                                           eval_targets_of(node, scope))
+          node.rigor_each_child { |child| walk(child, block && child.equal?(block) ? block_scope : scope) }
         end
 
         def inspect_call(node, scope)

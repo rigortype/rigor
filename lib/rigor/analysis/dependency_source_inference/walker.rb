@@ -245,32 +245,35 @@ module Rigor
         # name whose last segment a gem file writes (`K = …`, `A::K = …`, `K ||= …`, `K, L = …`, `const_set(:K, …)`),
         # and that no gem file declares as a class or module, is moved to the wildcard class: the class-unknown row the
         # project reading gives the same constant. The body's names decline on every receiver, and a call a row
-        # replaces types `Dynamic[top]`. The writes of every file are needed, so the files are read again; a gem with
-        # no refinement row reads none.
+        # replaces types `Dynamic[top]`. The writes of every file are needed, so a file whose text names such a
+        # segment is read again; a gem whose rows all sit under the wildcard class or a class it declares reads none.
         def rewrite_aliased_targets(harvest)
           table = harvest.refinements
-          return table if table.empty?
-
-          bound = bound_constant_segments(harvest.files)
           wildcard = Scope::DiscoveryIndex::REFINEMENT_WILDCARD
+          named = table.keys.reject { |class_name| class_name == wildcard || harvest.modules.include?(class_name) }
+          return table if named.empty?
+
+          bound = bound_constant_segments(harvest.files, named.to_set { |class_name| class_name.split("::").last })
           table.inject({}) do |out, (class_name, methods)|
-            aliased = class_name != wildcard && !harvest.modules.include?(class_name) &&
-                      bound.include?(class_name.split("::").last)
+            aliased = named.include?(class_name) && bound.include?(class_name.split("::").last)
             Inference::ScopeIndexer.merge_refinement_tables(out, { (aliased ? wildcard : class_name) => methods })
           end
         end
 
-        # The last segments of the constants the `files` write by any form (an assignment, a path write, an operator
-        # write, a multiple assignment, a `const_set` with a literal name).
-        def bound_constant_segments(files)
+        # Which of the `wanted` last segments the `files` write as a constant, by any form (an assignment, a path
+        # write, an operator write, a multiple assignment, a `const_set` with a literal name). A file whose text names
+        # none of them is not parsed again.
+        def bound_constant_segments(files, wanted)
+          pattern = /\b(?:#{wanted.map { |segment| Regexp.escape(segment) }.join('|')})\b/
           segments = Set.new
           files.each do |path|
+            next unless pattern.match?(File.binread(path))
+
             Source::NodeWalker.each(Prism.parse_file(path).value) { |node| segments << bound_segment(node) }
           rescue StandardError
             next # the file is already in `unread`
           end
-          segments.delete(nil)
-          segments
+          segments & wanted
         end
 
         def bound_segment(node)

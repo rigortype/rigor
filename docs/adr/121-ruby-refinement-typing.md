@@ -198,8 +198,9 @@ declaration is opaque.**
   the receiver's own definer is proven to answer first (#1740, #1797): a project definer
   `DefinerResolution` answers `Known` for, or a core method the CRuby catalogue lists on that class and
   the project has not removed. RBS alone and a definer that may not have run prove nothing, and an
-  in-effect row naming a subclass of the receiver's class, or a module the receiver does not hold,
-  declines, since a value typed as the class may reach it first.
+  in-effect row naming a subclass of the receiver's class, a module the receiver does not hold (or holds
+  but some code prepends to an object's singleton class), or a class no table declares, declines, since a
+  value typed as the class may reach it first.
 
 Limits it does not remove: a module reopened in a file outside the analysed paths or under
 `exclude:`; an inner `using` candidate declared only outside the analysed paths (or by a

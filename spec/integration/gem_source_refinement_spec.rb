@@ -217,6 +217,31 @@ RSpec.describe "Gem source inference over `refine` bodies (#1672)" do
       expect(undefined_rows(gems: %w[shouty mixshout])).to eq(reads)
     end
 
+    # Round-1 review of #1828 — a second gem mixes into the first gem's module through an explicit receiver, which names
+    # nothing the second gem declares. Ruby 4.0.5 prints `["X", :inc]` for `"x".shout, "x".foo` after `using Shouty`.
+    it "stays opaque when another gem mixes into it through an explicit receiver" do
+      write_gem("gema", "lib/gema.rb" => format(refining, name: "Gema"))
+      write_gem("gemb", "lib/gemb.rb" => "module GembInc\n  refine(String) { def foo = :inc }\nend\n" \
+                                         "Gema.include(GembInc)\n")
+      write("lib/app.rb", "using Shouty\n\"hi\".shout\n\"hi\".nope\n")
+      write("lib/other.rb", "using Gema\n\"hi\".shout\n\"hi\".foo\n\"hi\".nope\n")
+
+      expect(undefined_rows(gems: %w[shouty gema gemb])).to eq(reads)
+      expect(undefined_rows(gems: %w[shouty gema])).to eq(
+        reads + [["other.rb", 3, "foo"], ["other.rb", 4, "nope"]]
+      )
+    end
+
+    # The project-side twin stays as it was: the project file that mixes into the gem module declares it, so the
+    # project's include table puts the mixed module in the list and `foo` is known.
+    it "keeps a gem module known when a project file mixes into it" do
+      write_gem("pig", "lib/pig.rb" => "module Pig\n  def self.version = 1\nend\n")
+      write("lib/inc.rb", "module ProjInc\n  refine(String) { def foo = :inc }\nend\nPig.include(ProjInc)\n")
+      write("lib/app.rb", "using Pig\n\"hi\".foo\n\"hi\".nope\n")
+
+      expect(undefined_rows(gems: %w[pig])).to eq([["app.rb", 3, "nope"]])
+    end
+
     # A class's own `include` mixes into a class, which `using` rejects, so it does not make the gem opaque.
     it "stays known when only a class includes a module" do
       write_gem("classmix", "lib/class_mix.rb" => <<~RUBY)

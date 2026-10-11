@@ -525,6 +525,43 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::Walker do
         end
       end
 
+      # Round-1 review of #1828 — a gem that mixes into a module it does not declare names that module, so the module
+      # is not read in full whichever gem declared it. Ruby 4.0.5 prints `["X", :inc]` for `"x".shout, "x".foo` after
+      # `using Shouty` with `Shouty.include(GembInc)` in a second gem.
+      {
+        "an include on a constant" => ["Shouty.include(GembInc)\n", %w[Shouty]],
+        "a prepend on a constant path" => ["Gem::Shouty.prepend(GembInc)\n", %w[Gem::Shouty]],
+        "an include under a module, by every spelling" => ["module Outer\n  Shouty.include(GembInc)\nend\n",
+                                                           %w[Outer Outer::Shouty Shouty]],
+        "a send of :include" => ["Shouty.send(:include, GembInc)\n", %w[Shouty]],
+        "a public_send of :prepend" => ["Shouty.public_send(:prepend, GembInc)\n", %w[Shouty]],
+        "an eval string" => ["Shouty.module_eval(\"include GembInc\")\n", %w[Shouty]],
+        "an include in an eval block" => ["Shouty.module_eval { include GembInc }\n", %w[Shouty]],
+        "an include in a block inside an eval block" => ["Shouty.class_eval { [1].each { include GembInc } }\n",
+                                                         %w[Shouty]],
+        "an append_features argument" => ["GembInc.append_features(Shouty)\n", %w[Shouty]],
+        "a prepend_features argument under a module" => ["module Outer\n  Inc.prepend_features(Shouty)\nend\n",
+                                                         %w[Outer Outer::Shouty Shouty]]
+      }.each do |name, (source, named)|
+        it "names the module #{name} mixes into" do
+          outcome = walk_files("lib/m.rb" => source)
+
+          expect(outcome.mixes_modules).to be(true)
+          expect(outcome.modules.to_a).to match_array(named)
+        end
+      end
+
+      # The controls: a receiver that is no constant names nothing, and a call that is not a mixin names no module.
+      it "names no module for an include on a variable, and none for a call that is not a mixin" do
+        mixed = walk_files("lib/m.rb" => "def self.included(base) = base.include(GembInc)\n")
+        other = walk_files("lib/m.rb" => "Shouty.include?(GembInc)\nShouty.module_eval { def x = 1 }\n")
+
+        expect(mixed.mixes_modules).to be(true)
+        expect(mixed.modules).to eq(Set.new)
+        expect(other.mixes_modules).to be(false)
+        expect(other.modules).to eq(Set.new)
+      end
+
       # The census the project walk runs reaches a gem file: a refine in a method and a `:refine` literal leave the
       # wildcard rows a project module would carry (see walker_walk_census_parity_spec for the full set of shapes).
       it "records the wildcard rows of a refine in a method and of a :refine literal" do

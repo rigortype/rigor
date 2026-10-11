@@ -2,6 +2,7 @@
 
 require "prism"
 
+require_relative "mixin_scan"
 require_relative "return_type_heuristic"
 require_relative "../../source/constant_path"
 require_relative "../../source/node_children"
@@ -26,7 +27,7 @@ module Rigor
       # Hard exclusions are NOT user-configurable, per ADR-10 § "Hard exclusions": top-level `spec/`,
       # `test/`, `bin/`, plus any non-`.rb` source. C extensions fall out automatically because the walker
       # only loads `.rb` files.
-      module Walker # rubocop:disable Metrics/ModuleLength
+      module Walker
         # Top-level directories that MUST NOT participate in gem-source inference even when the user lists
         # them under `roots:`. The check is case-insensitive against the first segment of `roots:`; nested
         # `spec/` / `test/` directories deeper inside `lib/` are NOT filtered (a few gems legitimately ship
@@ -46,11 +47,12 @@ module Rigor
         #
         # Issue #1814 — what the walk read, for the question "has every file that could refine module M been read?".
         # `modules` is every class and module the gem's files declare, as the project walk names them
-        # (`ScopeIndexer.collect_class_decls`), and every module its refinement rows name. `unread` holds the
-        # gem-relative path of each file the walk could not read in full (it did not parse, could not be read, or
-        # the census raised on it), or the gem directory when the walk itself raised; none is reported to the user,
-        # whose diagnostic stream is the project's. `mixes_modules` is true when the source may change which modules
-        # a module includes or prepends ({Walker.module_mixin_site?}), which `using` activates along with the module.
+        # (`ScopeIndexer.collect_class_decls`), every module its refinement rows name, and every module its mixin calls
+        # name by a constant ({MixinScan#targets}), so a gem that mixes into another gem's module spoils it. `unread`
+        # holds the gem-relative path of each file the walk could not read in full (it did not parse, could not be
+        # read, or the census raised on it), or the gem directory when the walk itself raised; none is reported to the
+        # user, whose diagnostic stream is the project's. `mixes_modules` is true when the source may change which
+        # modules a module includes or prepends ({MixinScan}), which `using` activates along with the module.
         class Outcome < Data.define(:catalog, :truncated, :refinements, :modules, :unread, :mixes_modules)
           def initialize(catalog:, truncated:, refinements: {}.freeze, modules: Set.new.freeze, unread: [].freeze,
                          mixes_modules: false)
@@ -69,9 +71,11 @@ module Rigor
         # The walk's accumulators. The budget counts `catalog` only, but stops the whole walk: a refine body reached
         # after it trips is not recorded. `root` is the file being walked and `in_effect` its
         # {Inference::InEffectRefinements}, built the first time a `refine`-shaped call asks (issue #1689). Issue
-        # #1814 — `modules`, `unread` and `mixes` are {Outcome}'s coverage facts, `gem_dir` makes `unread` paths
-        # gem-relative, and `files` holds the parsed files, which the constant-alias rewrite reads again.
-        Harvest = Struct.new(:catalog, :refinements, :root, :in_effect, :gem_dir, :modules, :unread, :mixes, :files) do
+        # #1814 — `modules`, `unread` and `mixes` are {Outcome}'s coverage facts, `targets` the modules its mixin calls
+        # name ({MixinScan#targets}), `gem_dir` makes `unread` paths gem-relative, and `files` holds the parsed files,
+        # which the constant-alias rewrite reads again.
+        Harvest = Struct.new(:catalog, :refinements, :root, :in_effect, :gem_dir, :modules, :unread, :mixes, :files,
+                             :targets) do
           # {Inference::ScopeIndexer.module_refine_target} against this file's in-effect refinements.
           def refine_target_of(node)
             return nil if Inference::ScopeIndexer.refine_target(node).nil?
@@ -96,12 +100,6 @@ module Rigor
         # Production code MUST pass an integer.
         UNBOUNDED = Float::INFINITY
 
-        # Issue #1814 — what {.module_mixin_site?} reads.
-        MIXIN_CALLS = Set[:include, :prepend].freeze
-        MIXIN_SYMBOLS = Set["include", "prepend", "append_features", "prepend_features"].freeze
-        MIXIN_WORD = /\b(?:include|prepend|append_features|prepend_features)\b/
-        private_constant :MIXIN_CALLS, :MIXIN_SYMBOLS, :MIXIN_WORD
-
         # The constant-write nodes whose target is a bare name, and the ones whose target is a path.
         CONSTANT_WRITES = [
           Prism::ConstantWriteNode, Prism::ConstantOrWriteNode, Prism::ConstantAndWriteNode,
@@ -125,7 +123,7 @@ module Rigor
         #   the budget was reached. Methods of identical name on the same class with different kinds (rare;
         #   private API mostly) carry the kind that wins the per-class first walk.
         def walk(gem_dir:, roots:, budget: UNBOUNDED)
-          harvest = Harvest.new({}, {}, nil, nil, gem_dir.to_s, Set.new, [], false, [])
+          harvest = Harvest.new({}, {}, nil, nil, gem_dir.to_s, Set.new, [], false, [], Set.new)
           truncated = false
           accepted_roots(roots).each do |root|
             break if truncated
@@ -135,7 +133,7 @@ module Rigor
           refinements = Inference::ScopeIndexer.freeze_refinements(rewrite_aliased_targets(harvest))
           Outcome.new(catalog: harvest.catalog.freeze, truncated: truncated,
                       refinements: refinements,
-                      modules: (harvest.modules | refining_modules(refinements)).freeze,
+                      modules: (harvest.modules | harvest.targets | refining_modules(refinements)).freeze,
                       unread: harvest.unread.freeze, mixes_modules: harvest.mixes)
         end
 
@@ -195,7 +193,9 @@ module Rigor
           declared = {}
           Inference::ScopeIndexer.collect_class_decls(root, [], declared)
           harvest.modules.merge(declared.keys)
-          harvest.mixes ||= module_mixin_site?(root)
+          scan = MixinScan.scan(root)
+          harvest.mixes ||= scan.site
+          harvest.targets.merge(scan.targets)
         end
 
         # ADR-121 WD7 (issue #1814) — the refinement table the file contributes, read by the census the project walk
@@ -259,50 +259,6 @@ module Rigor
         def refining_modules(table)
           wildcard = Scope::DiscoveryIndex::REFINEMENT_WILDCARD
           table.each_value.flat_map { |methods| methods.each_value.flat_map(&:itself) }.to_set - [wildcard, ""]
-        end
-
-        # Issue #1814 — can this file change which modules a module includes or prepends? `using M` puts in effect the
-        # refinements of every module `M` includes or prepends (CRuby's `using_module_recursive` walks the module's
-        # ancestors; Ruby 4.0.5 prints `:inc` for `module Inc; refine(String) { def foo = :inc }; end; module M; include
-        # Inc; end; using M; "x".foo`), and the gem table has no mixin edges. So the file counts when it calls `include`
-        # or `prepend` on an explicit receiver, or on `self` outside a class body (a class's own `include` mixes into a
-        # class, which `using` rejects; a block may run under any `self`, so it does not keep the class), when it
-        # holds an `:include`, `:prepend`, `:append_features` or `:prepend_features` Symbol (`send(:include, X)`,
-        # `method(:include)`), or an eval, `send` or method-naming call with a String that holds one of those words.
-        def module_mixin_site?(root)
-          return false unless MIXIN_WORD.match?(root.send(:source).source.b)
-
-          mixin_site?(root, false)
-        end
-
-        def mixin_site?(node, in_class)
-          case node
-          when Prism::ClassNode, Prism::SingletonClassNode then in_class = true
-          # A block may run under any `self` (`Module.new { include X }`, `M.module_eval { include X }`).
-          when Prism::ModuleNode, Prism::BlockNode, Prism::LambdaNode then in_class = false
-          when Prism::SymbolNode then return MIXIN_SYMBOLS.include?(node.unescaped)
-          when Prism::CallNode then return true if mixin_call?(node, in_class)
-          end
-          node.rigor_each_child { |child| return true if mixin_site?(child, in_class) }
-          false
-        end
-
-        def mixin_call?(node, in_class)
-          return !in_class || !Inference::RefineCensus.self_call?(node) if MIXIN_CALLS.include?(node.name)
-
-          Inference::RefineCensus.string_literal_call?(node) && (node.arguments&.arguments || []).any? do |argument|
-            mixin_string?(argument)
-          end
-        end
-
-        # As {Inference::RefineCensus.refine_string?}: a String literal (or a heredoc's literal part) holding a mixin
-        # word, read as bytes.
-        def mixin_string?(node)
-          case node
-          when Prism::StringNode then MIXIN_WORD.match?(node.unescaped.b)
-          when Prism::InterpolatedStringNode then node.parts.any? { |part| mixin_string?(part) }
-          else false
-          end
         end
 
         # Walks a Prism subtree, accumulating method definitions under their qualified class name. Mirrors

@@ -38,12 +38,16 @@ lib/rigor/analysis/check_rules/source_arity.rb:
   computes: whether a source-inferred method is public at a call site
   producers:
     Rigor::Analysis::CheckRules::SourceArity#public_at?: grandfathered
+lib/rigor/analysis/dependency_source_inference/mixin_scan.rb:
+  computes: whether a gem file may mix a module into a module, and the modules it names as the target of a mixin
+  producers:
+    Rigor::Analysis::DependencySourceInference::MixinScan: MIXIN_CALLS and MIXIN_SYMBOLS name the calls and symbols that may mix a module into a module, for the gem-wide mixin flag of #1814; the flag records no declaration
+    Rigor::Analysis::DependencySourceInference::MixinScan#enter: opens a class or module body to track whether `self` is a class and the lexical nesting that spells a mixin target's candidate names (#1814); it records no declaration fact
+    Rigor::Analysis::DependencySourceInference::MixinScan#inspect_call: reads one call as a mixin site for that flag (#1814); it names no class and records no declaration fact
+    Rigor::Analysis::DependencySourceInference::MixinScan#walk: tracks whether `self` is a class, to tell an include that mixes into a class (which `using` rejects) from one that may mix into a module (#1814); it records no declaration fact
 lib/rigor/analysis/dependency_source_inference/walker.rb:
   computes: the method catalog of an opt-in gem's source roots, per class and side, its refine bodies' refinements, and whether its source may mix a module into a module
   producers:
-    Rigor::Analysis::DependencySourceInference::Walker: MIXIN_CALLS and MIXIN_SYMBOLS name the calls and symbols that may mix a module into a module, for the gem-wide mixin flag of #1814; the flag records no declaration
-    Rigor::Analysis::DependencySourceInference::Walker#mixin_call?: reads one call as a mixin site for that flag (#1814); it names no class and records no declaration fact
-    Rigor::Analysis::DependencySourceInference::Walker#mixin_site?: tracks only whether `self` is a class, to tell an include that mixes into a class (which `using` rejects) from one that may mix into a module (#1814); it names no class and records no declaration fact
     Rigor::Analysis::DependencySourceInference::Walker#walk_node: grandfathered
     Rigor::Analysis::DependencySourceInference::Walker#walk_refine_declarations: a dispatcher over a refine body; it hands each nested class or module back to walk_node under the prefix it was given and derives no declaration context itself
 lib/rigor/analysis/reachability/scan.rb:

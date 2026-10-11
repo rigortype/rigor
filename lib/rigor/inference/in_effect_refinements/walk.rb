@@ -66,7 +66,7 @@ module Rigor
             walk_children(node.body, prefix, span_of(node), false,
                           RefineSelf.singleton_class_body(context, node.expression.is_a?(Prism::SelfNode)))
           when Prism::DefNode
-            method_context = def_context(node, context)
+            method_context = RefineSelf.def_body(context, node.receiver)
             walk_children(node.parameters, prefix, body, true, method_context)
             walk_children(node.body, prefix, body, true, method_context)
           else
@@ -83,23 +83,6 @@ module Rigor
                                (superclass.is_a?(Prism::ConstantPathNode) && superclass.parent.nil?)) &&
                               superclass.name == :Module
           RefineSelf.class_body(module_superclass)
-        end
-
-        # A `def` on no receiver is an instance method, `def self.x` (or `def M.x` inside `module M`) a singleton one;
-        # one on any other object is defined on something the walk cannot name.
-        def def_context(node, context)
-          receiver = node.receiver
-          return RefineSelf.method_body(context, false) if receiver.nil?
-          return RefineSelf.method_body(context, true) if lexical_self_receiver?(receiver, context)
-
-          RefineSelf.unknown.with(deferred: true)
-        end
-
-        def lexical_self_receiver?(receiver, context)
-          return true if receiver.is_a?(Prism::SelfNode)
-
-          here = context.here
-          receiver.is_a?(Prism::ConstantReadNode) && here.is_a?(String) && here.split("::").last == receiver.name.to_s
         end
 
         # A block-carrying call: its receiver and arguments walk where the call is, its block under
@@ -172,11 +155,11 @@ module Rigor
           if context.here == RefineSelf::CLASS && ScopeIndexer.refine_call?(node)
             record_class_body_refine(node)
           elsif (target = ScopeIndexer.refine_target(node))
-            record_refine_block(node, owners, ScopeIndexer.constant_receiver_candidates(target, prefix))
+            record_refine_block(node, owners, ScopeIndexer.constant_receiver_candidates(target, prefix), context)
           elsif ScopeIndexer.refine_call?(node)
             # ADR-121 WD7 — a target the walk cannot name (`refine(k)`): the block is still a refine body, in effect
             # inside itself, with no class to file its defs under.
-            record_refine_block(node, owners, EMPTY)
+            record_refine_block(node, owners, EMPTY, context)
           elsif using_call?(node) && !in_def
             record_using(node, prefix, body)
           elsif node.name == :refined
@@ -228,8 +211,9 @@ module Rigor
                                          refine_block: false)
         end
 
-        # `owners` are the refining module's names (several where its spelling can denote several), or nil.
-        def record_refine_block(node, owners, targets)
+        # `owners` are the refining module's names (several where its spelling can denote several), or nil; `context`
+        # is the `RefineSelf::Context` the `refine` call runs in.
+        def record_refine_block(node, owners, targets, context)
           start, stop = span_of(node.block)
           @activations << Activation.new(order: start, start: start, stop: stop, names: owners, expand: false,
                                          refine_block: true)
@@ -240,10 +224,12 @@ module Rigor
           return if owners.nil? || targets.empty?
 
           # ADR-121 WD7 (issue #1799) — a `def`, and an alias of a `def` the body wrote earlier; a later definer with no
-          # body (`define_method`, `attr_*`, `undef`) clears the name, which then types as `Dynamic[top]`. Ruby runs a
-          # body charged to several names (an eval on a constant) on one of them only, so each gets the name bodiless.
+          # body (`define_method`, `attr_*`, `undef`) clears the name, which then types as `Dynamic[top]`. A `refine`
+          # that runs inside a method (issue #1749) creates its refinement only when the method runs, after or before a
+          # `using` and over or under a module-body `def` of the name, an order no walk can decide: no body of its names
+          # is kept, and no later `def` of one replaces that ({RefineDefs#record}).
           RefineCensus.read_body(body).defs.each do |name, def_node|
-            owners.each { |owner| @refine_defs.record(owner, targets, name, (def_node if owners.size == 1), @nesting) }
+            @refine_defs.record(owners, targets, name, def_node, @nesting, created: context.deferred)
           end
         end
 

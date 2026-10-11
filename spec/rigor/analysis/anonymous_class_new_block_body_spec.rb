@@ -364,6 +364,41 @@ RSpec.describe "anonymous Class.new block body" do
         .to contain_exactly(["call.undefined-method", a_string_including("not_a_string_method_qq")])
     end
 
+    # Issue #1749 — a refine written in a module's singleton method (`def self.setup`, or a `def` in `class << self`)
+    # is entered the same way: the block's own `self.target` is not checked against the refined class, a def's
+    # self call is.
+    {
+      "a def self.x" => <<~RUBY,
+        module Shouting
+          def self.setup
+            refine(String) do
+              self.target
+              def shout = self.not_a_string_method_qq
+            end
+          end
+        end
+      RUBY
+      "a def in class << self" => <<~RUBY
+        module Shouting
+          class << self
+            def setup
+              refine(String) do
+                self.target
+                def shout = self.not_a_string_method_qq
+              end
+            end
+          end
+        end
+      RUBY
+    }.each do |shape, source|
+      it "still checks a refine def's self calls against the refined class in a module's singleton method (#{shape})" do
+        diagnostics = diagnostics_for(source)
+
+        expect(diagnostics.map { |d| [d.rule, d.message] })
+          .to contain_exactly(["call.undefined-method", a_string_including("not_a_string_method_qq")])
+      end
+    end
+
     # Issue #1763 — the `class << self` body itself, not only a `def` in it, runs on the refinement module's
     # singleton class.
     it "does not check a class << self body's self calls against the refined class" do

@@ -30,12 +30,13 @@ module Rigor
     #   The caller's expansion block puts `M`'s included modules ahead of `M` and its prepended modules after it
     #   (issue #1671), as CRuby activates them.
     # - **A `refine X do … end` block**, over the block: its own refining module, after the enclosing `using`s.
-    #   The module is named where the block's `self` is: the innermost `module` / `class` body, or the constant a
-    #   `M = Module.new do … end` write names. Anywhere else (another block, a `def`, `class << …`, the top
-    #   level) the module is not named, and the block contributes {UNKNOWN}. Where the `refine`'s `self` is known to
-    #   be a class — directly in a `class` or `class << …` body, or in the block of a `Class.new` / `Struct.new` /
-    #   `Data.define` call — it is not `Module#refine` (`Class` undefines it), so it activates nothing and its block
-    #   is an ordinary one (issue #1689; {#class_body_refine?}).
+    #   The module is named where the block's `self` is: the innermost `module` / `class` body, the constant a
+    #   `M = Module.new do … end` write names, or a module's own singleton method (`def self.x`, a `def` in its
+    #   `class << self`, issue #1749), where `self` is the module once the method is called. Anywhere else (another
+    #   block, an instance `def`, `class << …`, the top level) the module is not named, and the block contributes
+    #   {UNKNOWN}. Where the `refine`'s `self` is known to be a class — directly in a `class` or `class << …` body,
+    #   or in the block of a `Class.new` / `Struct.new` / `Data.define` call — it is not `Module#refine` (`Class`
+    #   undefines it), so it activates nothing and its block is an ordinary one (issue #1689; {#class_body_refine?}).
     # - **A `using` whose argument is not a constant** (`using Module.new { … }`) names no module. It contributes
     #   {UNKNOWN} throughout its file, which is broader than Ruby's scoping and the declining direction.
     # - **Block sources** (ADR-121 WD1's third and fourth). A Proc literal that is directly the receiver of

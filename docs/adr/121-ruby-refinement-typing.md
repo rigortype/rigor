@@ -157,7 +157,11 @@ declaration is opaque.**
   `{X => {"*" => [M]}}` (the body may define names the walk cannot spell), a class-unknown row
   `{"*" => {name => [M]}}` (`refine(k)`, `refine(self)`, or a target a project constant write binds),
   and a targets-wildcard `{"*" => {"*" => [M]}}` (a `refine` in a method or a `define_method` body, or
-  reached through a `:refine` literal such as `send(:refine, …)` or `alias_method :r, :refine`). As a
+  reached through a `:refine` literal such as `send(:refine, …)` or `alias_method :r, :refine`; a
+  canonical `refine X do … end` in a module's own singleton method, which runs on the module, records
+  the module's rows instead, #1749, and only the names: a refinement a method creates exists once the
+  method has run, so it never supplies a body to type a call from, whatever a module-body `def` of the
+  name says). As a
   module, `"*"` is one the walk cannot name. One function (`RefineSelf`) answers what `self` a `refine` at
   each node runs on, and the in-effect walk and the census both read its answer: a module's instance
   method runs on whatever module extends it; a block, in a module body or a method body alike, may run

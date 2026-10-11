@@ -1375,7 +1375,7 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
     it "carries each wildcard row kind across files and through a warm run" do
       write("lib/nw.rb", "module NW\n  refine(String) { import_methods Helper }\nend\n")
       write("lib/cu.rb", "module CU\n  [String].each { |k| refine(k) { def ljust(a, b, c) = 1 } }\nend\n")
-      write("lib/bu.rb", "module BU\n  def self.setup = refine(String) { def x = 1 }\nend\n")
+      write("lib/bu.rb", "module BU\n  def self.setup(k) = refine(k) { def x = 1 }\nend\n")
       write("lib/u1.rb", "using NW\n\"x\".center(1, 2, 3)\n1.succ(2)\n")
       write("lib/u2.rb", "using CU\n\"x\".ljust(1, 2, 3)\n\"x\".rjust(1, 2, 3)\n")
       write("lib/u3.rb", "using BU\n\"x\".nope\n:s.nope\n")
@@ -1727,6 +1727,146 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
       RUBY
 
       expect(call_rows).to eq([])
+    end
+  end
+
+  # Issue #1749. Ruby 4.0.5 prints `1` for `"a".yy` after `M.setup` under `using M`, for a `refine` in `def self.setup`
+  # and in a `def` written in `class << self`; the same line with no `using` and `"a".zz` raise `NoMethodError`. A
+  # `refine` in a module's instance method refines for whichever module calls it, and a class has no `refine` (`Class`
+  # undefines it), so `class C; def self.setup = refine(String) { … }; end; C.setup` raises `NoMethodError`.
+  describe "a refine in a module's singleton method (#1749)" do
+    let(:shapes) do
+      {
+        "def self.setup" => "module M\n  def self.setup\n    refine(String) { def yy = 1 }\n  end\nend\n",
+        "a def in class << self" =>
+          "module M\n  class << self\n    def setup\n      refine(String) { def yy = 1 }\n    end\n  end\nend\n"
+      }
+    end
+    let(:expected) { [["other.rb", 3, "yy"], ["plain.rb", 1, "yy"], ["use.rb", 4, "zz"]] }
+
+    def write_project(source)
+      write("lib/m.rb", source)
+      write("lib/use.rb", "M.setup\nusing M\n\"a\".yy\n\"a\".zz\n")
+      write("lib/plain.rb", "\"a\".yy\n")
+      write("lib/other.rb", "module P; end\nusing P\n\"a\".yy\n")
+    end
+
+    it "reads the module's refinement: its method is known, any other name and any other module still report" do
+      shapes.each do |shape, source|
+        write_project(source)
+
+        expect(undefined_rows).to eq(expected), shape
+      end
+    end
+
+    # Ruby 4.0.5 prints `1` for `"a".yy` after `M.setup`, whose target `Foo` a `class << self` body binds. That write is
+    # one no project-wide table sees, so the row is the wildcard class's: `yy` declines, `zz` still reports.
+    it "reads a target a class << self body binds as a class Rigor cannot name, so only the names it defines decline" do
+      write("lib/m.rb", <<~RUBY)
+        module M
+          class << self
+            Foo = String
+            def setup
+              refine(Foo) { def yy = 1 }
+            end
+          end
+        end
+      RUBY
+      write("lib/use.rb", "M.setup\nusing M\n\"a\".yy\n\"a\".zz\n")
+      write("lib/plain.rb", "\"a\".yy\n")
+
+      expect(undefined_rows).to eq([["plain.rb", 1, "yy"], ["use.rb", 4, "zz"]])
+    end
+
+    # Ruby 4.0.5: `R = M.refinements.first; R.h` runs, and `using R` raises `TypeError`, so a `refine` in a singleton
+    # method of a refine body reaches no `using` span. `1.ii` raises `NoMethodError` even under `using M`, and the
+    # unrelated `using P` still reports `"a".qq`.
+    it "charges a refine in a singleton method of a refine body to nothing, so an unrelated module stays known" do
+      write("lib/m.rb", <<~RUBY)
+        module M
+          refine(String) do
+            def yy = 1
+            def self.h = refine(Integer) { def ii = 1 }
+          end
+        end
+      RUBY
+      write("lib/p.rb", "module P\n  refine(String) { def pp = 1 }\nend\nusing P\n\"a\".qq\n")
+
+      expect(undefined_rows).to eq([["p.rb", 5, "qq"]])
+    end
+
+    # The same on Ruby 4.0.5 (`1.jj` and `1.kk` raise `NoMethodError`) for an eval on `self` in that method, and for a
+    # refine body written in a module's own singleton method.
+    it "charges those written through an eval on self or in a singleton method to nothing too" do
+      write("lib/m_eval.rb", <<~RUBY)
+        module ME
+          refine(String) do
+            def self.h = module_eval { refine(Integer) { def jj = 1 } }
+          end
+        end
+      RUBY
+      write("lib/m_setup.rb", <<~RUBY)
+        module MS
+          def self.setup
+            refine(String) do
+              def yy = 1
+              def self.h = refine(Integer) { def kk = 1 }
+            end
+          end
+        end
+      RUBY
+      write("lib/p.rb", "module P\n  refine(String) { def pp = 1 }\nend\nusing P\n\"a\".qq\n")
+
+      expect(undefined_rows).to eq([["p.rb", 5, "qq"]])
+    end
+
+    # Ruby 4.0.5 prints `1` for `x` with the body alone and `"s"` once `M.setup`, which replaces `yy`, is there. The
+    # typed call is `1`, so `x.upcase` is reported, until a file adds the setup; a warm cache serves what cold does.
+    it "re-types the consumer when another file adds the setup that replaces a module-body def, warm as cold" do
+      write("lib/a_body.rb", "module M\n  refine(String) { def yy = 1 }\nend\n")
+      write("lib/use.rb", "M.setup\nusing M\nx = \"a\".yy\nx.upcase\n")
+      root = File.join(Dir.pwd, ".rigor", "cache-add-setup")
+      store = -> { Rigor::Cache::Store.new(root: root) }
+
+      expect(undefined_rows(cache_store: store.call)).to eq([["use.rb", 4, "upcase"]])
+      expect(undefined_rows(cache_store: store.call)).to eq([["use.rb", 4, "upcase"]])
+
+      write("lib/b_setup.rb", "module M\n  def self.setup = refine(String) { def yy = \"s\" }\nend\n")
+
+      expect(undefined_rows(cache_store: store.call)).to eq([])
+      expect(undefined_rows(cache_store: store.call)).to eq([])
+
+      FileUtils.rm("lib/b_setup.rb")
+
+      expect(undefined_rows(cache_store: store.call)).to eq([["use.rb", 4, "upcase"]])
+    end
+
+    it "answers the same through a warm cache as cold, and with only the consumers re-analysed" do
+      shapes.each do |shape, source|
+        write_project(source)
+        use_source = File.read("lib/use.rb")
+        root = File.join(Dir.pwd, ".rigor", "cache-#{shapes.keys.index(shape)}")
+        store = -> { Rigor::Cache::Store.new(root: root) }
+
+        expect(undefined_rows(cache_store: store.call)).to eq(expected), shape
+        expect(undefined_rows(cache_store: store.call)).to eq(expected), shape
+        File.write("lib/use.rb", "#{use_source}nil\n")
+        expect(undefined_rows(cache_store: store.call)).to eq(expected), shape
+      end
+    end
+
+    it "keeps the unreadable cases unreadable: an instance method's refine opaques every module, a class's none" do
+      write("lib/h.rb", "module H\n  def setup = refine(String) { def yy = 1 }\nend\n")
+      write("lib/n.rb", "module N\n  extend H\n  setup\nend\nusing N\n\"a\".zz\n")
+      write("lib/p.rb", "module P; end\nusing P\n\"a\".zz\n\"a\".yy\n")
+      write("lib/plain.rb", "\"a\".zz\n")
+
+      expect(undefined_rows).to eq([["plain.rb", 1, "zz"]])
+
+      FileUtils.rm("lib/h.rb")
+      write("lib/c.rb", "class C\n  def self.setup = refine(String) { def yy = 1 }\nend\n")
+
+      expect(undefined_rows).to eq([["n.rb", 6, "zz"], ["p.rb", 3, "zz"], ["p.rb", 4, "yy"], ["plain.rb", 1, "zz"]])
     end
   end
 

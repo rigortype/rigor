@@ -863,29 +863,23 @@ module Rigor
 
         # Is a refinement of `call_node`'s method name into `class_name` (or an ancestor) in effect at the call?
         # Issue #1120 asks it for a method the class lacks. The two argument rules ask
-        # {#refined_redefinition_in_effect?} instead (issue #1740), and this only for a class-object receiver.
-        # Typing the call from the refine body is #1664.
-        # A refinement answers instance-side receivers only: a refined singleton (`refine X.singleton_class`) names
-        # no constant target, so nothing records it. Issue #1673 — the answer is derived from the file's in-effect
-        # refinements ({Inference::InEffectRefinements}), the list the typer reads, with each `using` expanded
-        # through its module's includes (issue #1671).
+        # {#refined_redefinition_in_effect?} instead (issue #1740). Typing the call from the refine body is #1664.
+        # Issue #1752 — a class-object receiver (`kind` `:singleton`) is reached by a refinement of any class or module
+        # on its lookup: `Class`, `Module`, `Object`, `Kernel`, `BasicObject`, or a module it extends. A refined
+        # singleton class (`refine X.singleton_class`) names no constant target, so its rows are class-unknown, which
+        # reach every receiver. Issue #1673 — the answer is derived from the file's in-effect refinements
+        # ({Inference::InEffectRefinements}), the list the typer reads, with each `using` expanded through its
+        # module's includes (issue #1671).
         #
         # ADR-121 WD7 — a module in effect whose refinements Rigor cannot read
         # ({Inference::InEffectRefinements.opaque_module?}: a gem's, one from outside the analysed paths, one with an
         # unreadable `refine`) may refine any class, a class object's included, so the call declines whatever its
-        # receiver. Issue #1796; both argument rules ask this predicate too.
+        # receiver. Issue #1796.
         def refined_method_in_effect?(class_name, call_node, scope, kind, lexical_sites)
           return false if lexical_sites.nil?
           return true if opaque_refinement_in_effect?(call_node, scope, lexical_sites)
 
-          modules =
-            if kind == :instance
-              Inference::InEffectRefinements.refining_modules(scope, class_name, call_node.name)
-            else
-              # ADR-121 WD7 — a row whose class the walk could not name (`refine(k)` with `k` a singleton class)
-              # reaches a class object too.
-              Inference::InEffectRefinements.class_unknown_refining_modules(scope, call_node.name)
-            end
+          modules = Inference::InEffectRefinements.refining_modules(scope, class_name, call_node.name, kind)
           !modules.nil? &&
             lexical_sites.refinements.refinement_active?(call_node.location.start_offset, modules,
                                                          scope.declared_refinements) do |name|
@@ -2195,7 +2189,8 @@ module Rigor
         # ADR-121 WD7 — a refinement in effect (or one Rigor cannot read) may define the name on one arm's class.
         def refined_on_some_arm?(members, call_node, scope, lexical_sites)
           members.any? do |member|
-            refined_method_in_effect?(concrete_class_name(member), call_node, scope, :instance, lexical_sites)
+            kind = member.is_a?(Type::Singleton) ? :singleton : :instance
+            refined_method_in_effect?(concrete_class_name(member), call_node, scope, kind, lexical_sites)
           end
         end
 

@@ -138,35 +138,26 @@ module Rigor
         # define any name), and a row whose class the walk could not name ({.class_wildcard_key?}), which reaches
         # every receiver.
         #
+        # Issue #1752 — `kind: :singleton` asks for the class object `class_name`: a refinement of any class or module
+        # on its lookup reaches it (`Class`, `Module`, `Object`, `Kernel`, `BasicObject`, a module it or a superclass
+        # extends; {RefinedDispatch::ClassObject.reach}). Where that lookup cannot be read, every row counts whose class
+        # a class object may reach ({RefinedDispatch::ClassObject.reachable?}).
+        #
         # ADR-46 — the answer is a function of every refinement of this name in the project, so the consumer
         # depends on the name whichever way it answers; a refine body edited in another file must re-check it
         # (`IncrementalSession#refinement_affected`). It also depends on the wildcard rows (`refinement:*`).
-        def refining_modules(scope, class_name, method_name)
+        def refining_modules(scope, class_name, method_name, kind = :instance)
           record_refinement_names(method_name)
           refinements = scope.discovered_refinements
           return nil if refinements.empty?
 
+          reaches = receiver_reach(scope, class_name, kind)
           modules = nil
           refinements.each do |refined, methods|
             names = methods[method_name]
             unread = methods[WILDCARD]
             next if names.nil? && unread.nil?
-            next unless refined_receiver_class?(scope, class_name, refined) || class_wildcard_key?(scope, refined)
-
-            modules = (modules || []).concat(names || EMPTY, unread || EMPTY)
-          end
-          modules
-        end
-
-        # ADR-121 WD7 — {.refining_modules} for a receiver the class rows do not reach (a class object): only the rows
-        # whose class the walk could not name ({.class_wildcard_key?}), for the name or as a names-wildcard.
-        def class_unknown_refining_modules(scope, method_name)
-          record_refinement_names(method_name)
-          modules = nil
-          scope.discovered_refinements.each do |refined, methods|
-            names = methods[method_name]
-            unread = methods[WILDCARD]
-            next if (names.nil? && unread.nil?) || !class_wildcard_key?(scope, refined)
+            next unless reaches.call(refined) || class_wildcard_key?(scope, refined)
 
             modules = (modules || []).concat(names || EMPTY, unread || EMPTY)
           end
@@ -226,6 +217,19 @@ module Rigor
 
           scope.discovered_refinements.each_value.any? do |methods|
             methods.each_value.any? { |modules| modules.include?(name) }
+          end
+        end
+
+        # Does a row keyed on a refined class reach the receiver? A class object's lookup is read once, on the first
+        # row that asks.
+        def receiver_reach(scope, class_name, kind)
+          return ->(refined) { refined_receiver_class?(scope, class_name, refined) } unless kind == :singleton
+
+          reach = nil
+          lambda do |refined|
+            reach ||= [RefinedDispatch::ClassObject.reach(scope, class_name)]
+            names = reach.first
+            names.nil? ? RefinedDispatch::ClassObject.reachable?(scope, refined) : names.include?(refined)
           end
         end
 

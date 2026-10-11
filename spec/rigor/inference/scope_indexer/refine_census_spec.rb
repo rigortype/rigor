@@ -60,7 +60,7 @@ RSpec.describe Rigor::Inference::ScopeIndexer, ".refine_census" do
               when Prism::InterpolatedStringNode then argument.parts.grep(Prism::StringNode).map(&:unescaped)
               else []
               end
-      texts.any? { |text| text.match?(/\brefine\b/) }
+      texts.any? { |text| text.b.match?(/\brefine\b/) }
     end
   end
 
@@ -293,6 +293,11 @@ RSpec.describe Rigor::Inference::ScopeIndexer, ".refine_census" do
       "module Ext\n  def self.install; module_eval(<<~RUBY); end\n    refine(String) { def center(a, b, c) = 1 }\n  " \
       "RUBY\nend\n",
       %i[literal], { any => { any => ["Ext"] } }
+    ],
+    # A literal whose bytes are not valid in its encoding is read as bytes, not raised on.
+    "an eval string whose bytes are not valid in its encoding" => [
+      "module M\n  module_eval(\"\\xff refine(String) { def shout = 1 }\")\nend\n",
+      %i[literal], { any => { any => ["M"] } }
     ],
     "a :refine literal at the top level" => [
       "x = Module.private_method_defined?(:refine)\n",

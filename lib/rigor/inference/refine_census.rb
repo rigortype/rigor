@@ -90,7 +90,8 @@ module Rigor
       # method name.
       def refine_string?(node)
         case node
-        when Prism::StringNode then REFINE_WORD.match?(node.unescaped)
+        # As bytes: a literal whose bytes are not valid in its encoding (`"\xff …"`) must not raise.
+        when Prism::StringNode then REFINE_WORD.match?(node.unescaped.b)
         when Prism::InterpolatedStringNode then node.parts.any? { |part| refine_string?(part) }
         else false
         end

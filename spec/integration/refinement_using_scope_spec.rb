@@ -1040,6 +1040,22 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
       end
     end
 
+    # R3-S3: `M.module_eval { … }` in `module L` runs on `L::M` once a file declares it, so the walk charges every name
+    # `M` can denote there. Ruby 4.0.5 prints `:lm` twice, under `using L::M` in each file, and raises
+    # `ArgumentError (given 3, expected 1..2)` in `plain.rb`.
+    it "declines under a module an eval block's constant receiver names in another file" do
+      write("lib/lm.rb", "module L\n  module M; end\nend\n")
+      write("lib/setup.rb", "require_relative \"lm\"\nmodule L\n  " \
+                            "M.module_eval { refine(String) { def center(a, b, c) = :lm } }\nend\n" \
+                            "using L::M\nRigor.dump_type(\"x\".center(1, 2, 3))\n")
+      write("lib/u.rb", "require_relative \"setup\"\nusing L::M\np \"x\".center(1, 2, 3)\n")
+      write("lib/plain.rb", "\"x\".center(1, 2, 3)\n")
+
+      rows = diagnostics.map { |d| [File.basename(d.path.to_s), d.line, d.qualified_rule, d.message] }.sort
+      arity = "wrong number of arguments to `center' on String (given 3, expected 1..2)"
+      expect(rows).to eq([["plain.rb", 1, "call.wrong-arity", arity], ["setup.rb", 6, "dump.type", "dump_type: :lm"]])
+    end
+
     # The union receiver rule and `call.unresolved-toplevel` ask the refinement predicate too. Ruby 4.0.5 prints `:int`
     # and `1` under a `using` of the module (read from outside the analysed paths or from the project alike), and
     # raises `NoMethodError` for both calls in `plain.rb`.

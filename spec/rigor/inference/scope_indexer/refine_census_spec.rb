@@ -87,22 +87,24 @@ RSpec.describe Rigor::Inference::ScopeIndexer, ".refine_census" do
     when :data then "data the walk charges" unless context.literal == census::CLASS
     when :recorded, :targets_wildcard, :class_unknown then activation_problem(query, node, context, charged)
     when :literal
-      expected = census.charged_module(context, literal: true)
-      return nil if charged.is_a?(Array) || charged == expected
+      expected = census.charged_modules(context, literal: true)
+      return nil if (charged.is_a?(Array) && charged.first == :receiver) || Array(charged) == expected
 
       "literal charged #{charged.inspect}, walk says #{expected.inspect}"
     end
   end
 
+  # `charged` is one module or, where a constant's spelling can denote several, every name.
   def activation_problem(query, node, context, charged)
-    expected = Rigor::Inference::RefineSelf.charged_module(context)
-    named = !charged.empty? && !charged.start_with?("#<")
-    return "charged #{charged.inspect}, walk says #{expected.inspect}" if named && charged != expected
+    expected = Rigor::Inference::RefineSelf.charged_modules(context)
+    owners = Array(charged)
+    named = owners.none? { |owner| owner.empty? || owner.start_with?("#<") }
+    return "charged #{charged.inspect}, walk says #{expected.inspect}" if named && owners != expected
     return nil unless node.block.is_a?(Prism::BlockNode)
 
     inside = query.at(node.block.location.start_offset + 1)
-    want = charged == wildcard ? Rigor::Inference::InEffectRefinements::UNKNOWN : charged
-    "refine block activates #{inside.inspect}, census charged #{charged.inspect}" if named && !inside.include?(want)
+    wants = owners.map { |owner| owner == wildcard ? Rigor::Inference::InEffectRefinements::UNKNOWN : owner }
+    "refine block activates #{inside.inspect}, census charged #{charged.inspect}" if named && !(wants - inside).empty?
   end
 
   any = Rigor::Scope::DiscoveryIndex::REFINEMENT_WILDCARD
@@ -215,7 +217,7 @@ RSpec.describe Rigor::Inference::ScopeIndexer, ".refine_census" do
     ],
     "a refine in an eval block on a constant inside a def self.x" => [
       "module Installer\n  def self.install = Ext.module_eval { refine(String) { def center(a, b, c) = 1 } }\nend\n",
-      %i[targets_wildcard], { any => { any => ["Ext"] } }
+      %i[targets_wildcard], { any => { any => ["Installer::Ext", "Ext"] } }
     ],
     "a refine in an instance_exec block on a parameter inside a def self.x" => [
       "module Installer\n  def self.install(mod) = mod.instance_exec { refine(String) { def center(a, b, c) = 1 } }\n" \
@@ -240,7 +242,7 @@ RSpec.describe Rigor::Inference::ScopeIndexer, ".refine_census" do
       %i[class_unknown], { any => { center: ["M"] } }
     ],
     # R3-S2: a core iteration method keeps `self` only on a receiver whose value is a literal in this file. Ruby
-    # 4.0.5 prints `:local_lit`, `:ivar_lit` and `:rebound` (`probes-pr-a/r3/s2_literal_bound.rb`), and `:config_each`,
+    # 4.0.5 prints `:local_lit`, `:ivar_lit` and `:rebound` for the first two, `M`'s and `Ext`'s, and `:config_each`,
     # `:local_each`, `:array_configure` and `:times` for the four shapes after them, each refining for `Ext`.
     "a refine in a core iterator's block on a local and an ivar bound to literals" => [
       "module M\n  targets = [String]\n  targets.each { |k| refine(k) { def center(a, b, c) = 1 } }\n  " \
@@ -252,8 +254,9 @@ RSpec.describe Rigor::Inference::ScopeIndexer, ".refine_census" do
       "runner = Runner.new\n  end\nend\n",
       %i[targets_wildcard], { any => { any => [any] } }
     ],
-    # Ruby 4.0.5 prints `:param`, `:multi`, `:const_set` and `:path_write`, each refining for `Ext`, and
-    # `[true, false]` for where `class << self` puts its constant (`probes-pr-a/r3/s2_other_bindings.rb`).
+    # Ruby 4.0.5 prints `:param`, `:multi`, `:const_set` and `:path_write`, each refining for `Ext` through a
+    # `Runner#each` that runs `Ext.module_eval(&blk)`, and `[true, false]` for where `class << self` puts its constant
+    # (`singleton_class.const_defined?(:TARGETS, false)`, then `const_defined?(:TARGETS, false)`).
     "a refine in a core iterator's block on a parameter of a literal-bound local's name" => [
       "module P\n  targets = [String]\n  " \
       "def self.setup(targets) = targets.each { refine(String) { def center(a, b, c) = 1 } }\nend\n",
@@ -311,9 +314,31 @@ RSpec.describe Rigor::Inference::ScopeIndexer, ".refine_census" do
       "module M\n  instance_eval { refine(String) { def shout = 1 } }\nend\n",
       %i[recorded], { "M::String" => { shout: ["M"] }, "String" => { shout: ["M"] } }
     ],
+    # R3-S3: an eval's constant receiver is charged under every name its spelling can denote, as another file may
+    # declare the inner one (Ruby 4.0.5 refines for `L::M` where another file declares it: the integration example
+    # "declines under a module an eval block's constant receiver names in another file").
     "a block-form module_eval charges its receiver" => [
       "module L\n  M.module_eval { refine(String) { def shout = 1 } }\nend\n",
-      %i[recorded], { "L::String" => { shout: ["M"] }, "String" => { shout: ["M"] } }
+      %i[recorded], { "L::String" => { shout: ["L::M", "M"] }, "String" => { shout: ["L::M", "M"] } }
+    ],
+    # Every other charge in such a block takes every name too. With `module L; module M; end; end` loaded, Ruby 4.0.5
+    # prints `:dsm` (after `L::M.setup`), `:each_target`, `:send` and `:alias` for these under `using L::M`.
+    "a refine in a define_singleton_method block of an eval block on a constant" => [
+      "module L\n  M.module_eval { define_singleton_method(:setup) { refine(String) { def center(a, b, c) = 1 } } }\n" \
+      "end\n",
+      %i[targets_wildcard], { any => { any => ["L::M", "M"] } }
+    ],
+    "a refine with a computed target in an eval block on a constant" => [
+      "module L\n  M.module_eval { [String].each { |k| refine(k) { def ljust(a, b, c) = 1 } } }\nend\n",
+      %i[class_unknown], { any => { ljust: ["L::M", "M"] } }
+    ],
+    "send(:refine, …) in an eval block on a constant" => [
+      "module L\n  M.module_eval { send(:refine, String) { def rjust(a, b, c) = 1 } }\nend\n",
+      %i[literal], { any => { any => ["L::M", "M"] } }
+    ],
+    "alias my_refine refine in class << self of an eval block on a constant" => [
+      "module L\n  M.module_eval do\n    class << self\n      alias my_refine refine\n    end\n  end\nend\n",
+      %i[literal], { any => { any => ["L::M", "M"] } }
     ],
     "a string-form module_eval" => [
       "module L\n  M.module_eval(\"refine(String) { def shout = 1 }\")\nend\n",

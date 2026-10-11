@@ -3280,12 +3280,12 @@ module Rigor
       # walk accounts for ({ScopeIndexer.refine_census}); `refine_text` memoises the byte offsets of the `refine`
       # words in the file's text, so a file with none skips every census scan and a `def` with none is not scanned;
       # `literal_seen` holds the offsets of the refine literals a call's arguments already accounted for;
-      # `loose_constants` memoises
+      # `source_bytes` memoises the file's text as bytes; `loose_constants` memoises
       # {ScopeIndexer.loose_constant_segments}. The module a `refine`-shaped node is charged to is what the in-effect
       # walk worked out for it ({#refine_context}).
       MethodTables = Struct.new(:existence, :envelopes, :refinements, :certainty, :certain, :possible,
                                 :contested_envelopes, :contested_def_nodes, :root, :in_effect, :census,
-                                :refine_text, :literal_seen, :loose_constants) do
+                                :refine_text, :literal_seen, :source_bytes, :loose_constants) do
         # {ScopeIndexer.module_refine_target} against this tree's {InEffectRefinements}.
         def refine_target_of(node)
           return nil if ScopeIndexer.refine_target(node).nil?
@@ -3302,11 +3302,15 @@ module Rigor
         # `refined` or `refinement` pays nothing for it.
         def mentions_refine? = !refine_offsets.empty?
 
-        # Does the text in `[start, stop)` name `refine` as a word? A `def` that does not is not scanned.
+        # Does the text in `[start, stop)` name `refine` as a word, or open a heredoc whose body (which follows the
+        # line, and so may end after `stop`) could? A `def` that does neither is not scanned.
         def refine_in?(start, stop)
           offsets = refine_offsets
           index = offsets.bsearch_index { |offset| offset >= start }
-          !index.nil? && offsets[index] < stop
+          return true if !index.nil? && offsets[index] < stop
+
+          heredoc = (self.source_bytes ||= root.send(:source).source.b).index("<<", start)
+          !heredoc.nil? && heredoc < stop
         end
 
         # ADR-121 WD7 — the `self` the `refine`-shaped `node` runs on, as the in-effect walk worked it out

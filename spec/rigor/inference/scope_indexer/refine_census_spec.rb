@@ -282,6 +282,18 @@ RSpec.describe Rigor::Inference::ScopeIndexer, ".refine_census" do
       "module M\n  class << self\n    define_method(:my_refine, Module.instance_method(:refine))\n  end\nend\n",
       %i[literal], { any => { any => ["M"] } }
     ],
+    # R2-S1: a heredoc's body follows its line, so it can end after an endless `def` (or a `def … end` on one line)
+    # that opens it. Ruby 4.0.5 prints `:heredoc_def` and `:heredoc_one_line` for these, each refining for `Ext`.
+    "a refine heredoc an endless def evals" => [
+      "module Ext\n  def self.install = module_eval(<<~RUBY)\n    refine(String) { def center(a, b, c) = 1 }\n  " \
+      "RUBY\nend\n",
+      %i[literal], { any => { any => ["Ext"] } }
+    ],
+    "a refine heredoc a one-line def evals" => [
+      "module Ext\n  def self.install; module_eval(<<~RUBY); end\n    refine(String) { def center(a, b, c) = 1 }\n  " \
+      "RUBY\nend\n",
+      %i[literal], { any => { any => ["Ext"] } }
+    ],
     "a :refine literal at the top level" => [
       "x = Module.private_method_defined?(:refine)\n",
       %i[literal], { any => { any => [any] } }

@@ -103,8 +103,17 @@ module Rigor
         def walk_block_call(node, prefix, body, in_def, context)
           walk(node.receiver, prefix, body, in_def, context) if node.receiver
           walk_children(node.arguments, prefix, body, in_def, context)
-          block_context = RefineSelf.block(context, node, eval_receiver_name(node, prefix, context))
+          block_context = RefineSelf.block(context, node, eval_receiver_name(node, prefix, context)) do |receiver|
+            literal_bound?(receiver, prefix)
+          end
           walk_children(node.block, prefix, body, in_def || RefineSelf.method_block?(node), block_context)
+        end
+
+        # Does every binding of the constant, local or instance variable `receiver` in this file give it a literal
+        # (`RefineSelf.literal_bindings`, worked out once per file)?
+        def literal_bound?(receiver, prefix)
+          key = RefineSelf.binding_key(receiver, prefix)
+          !key.nil? && (@literal_bindings ||= RefineSelf.literal_bindings(@root)).include?(key)
         end
 
         # The module a `*_eval` / `*_exec` call's constant receiver names, resolved as the method walk resolves it

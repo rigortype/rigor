@@ -986,10 +986,10 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
       end
     end
 
-    # R2: a core iterator's block on a constant keeps `self`, and a literal's block or a `define_method` block in a
-    # plain class's method keeps the class, so none of these makes an unrelated `using` opaque. Ruby 4.0.5 prints
-    # `:each_const` for `M`'s `center` under `using M`, `[:show, :show]`, `[10, 20]` and `2`, and raises
-    # `NoMethodError` for each `"x".nope`.
+    # R2: a core iterator's block on a constant this file binds to a literal keeps `self`, and a core iterator's block
+    # on a literal or a `define_method` block in a plain class's method keeps the class, so none of these makes an
+    # unrelated `using` opaque. Ruby 4.0.5 prints `:each_const` for `M`'s `center` under `using M`, `[:show, :show]`,
+    # `[10, 20]` and `2`, and raises `NoMethodError` for each `"x".nope`.
     it "keeps an unrelated `using` checked and typed where an iterator or a plain class's blocks name refine" do
       write("lib/m.rb", "module M\n  TARGETS = [String, Symbol].freeze\n  " \
                         "TARGETS.each { |k| refine(k) { def center(a, b, c) = :each_const } }\nend\n")
@@ -1009,6 +1009,35 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
       expect(rows).to eq(
         [["query.rb", 4, "call.undefined-method"], ["u.rb", 5, "dump.type"], ["u.rb", 6, "call.undefined-method"]]
       )
+    end
+
+    # R3-S2: a core iteration method keeps `self` only on a receiver whose value is a literal in this file; a project
+    # method of that name on any other receiver, or another name on a literal, may run the block under any `self`.
+    # Ruby 4.0.5 prints `:config_each`, `:local_each`, `:array_configure` and `:times` under `using Ext`, one per
+    # shape, and raises `ArgumentError (given 3, expected 1..2)` in `plain.rb`.
+    {
+      "a module's own `each`" =>
+        "module Config\n  def self.each(&blk) = Ext.module_eval(&blk)\nend\nmodule Setup\n  " \
+        "Config.each { refine(String) { def center(a, b, c) = :config_each } }\nend\n",
+      "a local holding a project object" =>
+        "module Setup\n  runner = Runner.new(Ext)\n  " \
+        "runner.each { refine(String) { def center(a, b, c) = :local_each } }\nend\n",
+      "another method on a literal" =>
+        "class Array\n  def configure(&blk) = Ext.module_eval(&blk)\nend\nmodule Setup\n  " \
+        "[1].configure { refine(String) { def center(a, b, c) = :array_configure } }\nend\n",
+      "a module's own `times`" =>
+        "module Count\n  def self.times(&blk) = Ext.module_eval(&blk)\nend\nmodule Setup\n  " \
+        "Count.times { refine(String) { def center(a, b, c) = :times } }\nend\n"
+    }.each do |shape, setup|
+      it "declines under a module the block of #{shape} may refine for" do
+        write("lib/ext.rb", "module Ext; end\nclass Runner\n  def initialize(mod) = @mod = mod\n  " \
+                            "def each(&blk) = @mod.module_eval(&blk)\nend\n")
+        write("lib/setup.rb", setup)
+        write("lib/use.rb", "using Ext\np \"x\".center(1, 2, 3)\n")
+        write("lib/plain.rb", "\"x\".center(1, 2, 3)\n")
+
+        expect(call_rows).to eq([["plain.rb", 1, "call.wrong-arity"]])
+      end
     end
 
     # The union receiver rule and `call.unresolved-toplevel` ask the refinement predicate too. Ruby 4.0.5 prints `:int`

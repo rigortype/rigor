@@ -232,11 +232,70 @@ RSpec.describe Rigor::Inference::ScopeIndexer, ".refine_census" do
       "def self.install = refine(String) { def center(a, b, c) = 1 }\n  end\nend\n",
       %i[targets_wildcard], { any => { any => [any] } }
     ],
-    # R2-M1: a core iteration method on a constant never rebinds `self`, so the rows stay `M`'s.
+    # R2-M1: a core iteration method on a constant this file binds to a literal never rebinds `self`, so the rows
+    # stay `M`'s.
     "a refine in a core iterator's block on a constant" => [
       "module M\n  TARGETS = [String, Symbol].freeze\n  " \
       "TARGETS.each { |k| refine(k) { def center(a, b, c) = 1 } }\nend\n",
       %i[class_unknown], { any => { center: ["M"] } }
+    ],
+    # R3-S2: a core iteration method keeps `self` only on a receiver whose value is a literal in this file. Ruby
+    # 4.0.5 prints `:local_lit`, `:ivar_lit` and `:rebound` (`probes-pr-a/r3/s2_literal_bound.rb`), and `:config_each`,
+    # `:local_each`, `:array_configure` and `:times` for the four shapes after them, each refining for `Ext`.
+    "a refine in a core iterator's block on a local and an ivar bound to literals" => [
+      "module M\n  targets = [String]\n  targets.each { |k| refine(k) { def center(a, b, c) = 1 } }\n  " \
+      "@targets = [String]\n  @targets.each { |k| refine(k) { def ljust(a, b, c) = 1 } }\nend\n",
+      %i[class_unknown class_unknown], { any => { center: ["M"], ljust: ["M"] } }
+    ],
+    "a refine in a core iterator's block on a local the file binds to another value" => [
+      "module N\n  runner = [1]\n  2.times do |i|\n    runner.each { refine(String) { def chop(a, b, c) = 1 } }\n    " \
+      "runner = Runner.new\n  end\nend\n",
+      %i[targets_wildcard], { any => { any => [any] } }
+    ],
+    # Ruby 4.0.5 prints `:param`, `:multi`, `:const_set` and `:path_write`, each refining for `Ext`, and
+    # `[true, false]` for where `class << self` puts its constant (`probes-pr-a/r3/s2_other_bindings.rb`).
+    "a refine in a core iterator's block on a parameter of a literal-bound local's name" => [
+      "module P\n  targets = [String]\n  " \
+      "def self.setup(targets) = targets.each { refine(String) { def center(a, b, c) = 1 } }\nend\n",
+      %i[targets_wildcard], { any => { any => [any] } }
+    ],
+    "a refine in a core iterator's block on a constant a multiple assignment rebinds" => [
+      "module Q\n  TARGETS = [String]\n  TARGETS, = [Runner.new]\n  " \
+      "TARGETS.each { refine(String) { def ljust(a, b, c) = 1 } }\nend\n",
+      %i[targets_wildcard], { any => { any => [any] } }
+    ],
+    "a refine in a core iterator's block on a constant a const_set rebinds" => [
+      "module Q\n  TARGETS = [String]\n  const_set(:TARGETS, Runner.new)\n  " \
+      "TARGETS.each { refine(String) { def rjust(a, b, c) = 1 } }\nend\n",
+      %i[targets_wildcard], { any => { any => [any] } }
+    ],
+    "a refine in a core iterator's block on a constant a path write rebinds" => [
+      "module Q\n  TARGETS = [String]\n  Q::TARGETS = Runner.new\n  " \
+      "TARGETS.each { refine(String) { def chop(a, b, c) = 1 } }\nend\n",
+      %i[targets_wildcard], { any => { any => [any] } }
+    ],
+    "a refine in a core iterator's block on a constant only class << self binds" => [
+      "module S\n  class << self\n    TARGETS = [String]\n  end\n  " \
+      "TARGETS.each { refine(String) { def rjust(a, b, c) = 1 } }\nend\n",
+      %i[targets_wildcard], { any => { any => [any] } }
+    ],
+    "a refine in a core iterator's block on a module a project method defines it for" => [
+      "module Config\n  def self.each(&blk) = Ext.module_eval(&blk)\nend\nmodule Setup\n  " \
+      "Config.each { refine(String) { def center(a, b, c) = 1 } }\nend\n",
+      %i[targets_wildcard], { any => { any => [any] } }
+    ],
+    "a refine in a core iterator's block on a local holding a project object" => [
+      "module Setup\n  runner = Runner.new(Ext)\n  runner.each { refine(String) { def center(a, b, c) = 1 } }\nend\n",
+      %i[targets_wildcard], { any => { any => [any] } }
+    ],
+    "a refine in another method's block on a literal" => [
+      "module Setup\n  [1].configure { refine(String) { def center(a, b, c) = 1 } }\nend\n",
+      %i[targets_wildcard], { any => { any => [any] } }
+    ],
+    "a refine in a core iterator's block on a module with no literal write" => [
+      "module Count\n  def self.times(&blk) = Ext.module_eval(&blk)\nend\nmodule Setup\n  " \
+      "Count.times { refine(String) { def center(a, b, c) = 1 } }\nend\n",
+      %i[targets_wildcard], { any => { any => [any] } }
     ],
     # R2-M2: a block on a literal inside a plain class's method keeps the class: data, and the class's own `refine`
     # (Ruby 4.0.5 prints `[:show, :show]`, `[10, 20]` and `2`).

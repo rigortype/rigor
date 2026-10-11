@@ -896,8 +896,8 @@ module Rigor
         #
         # A call with nothing in effect is checked. Otherwise it reports only from positive knowledge: the list
         # carries no unknown marker and no opaque module, and {Inference::RefinedDispatch::OwnMethod} proves the
-        # receiver's own definer answers first. A class-object receiver keeps {#refined_method_in_effect?}'s
-        # answer: its singleton-side levels are not walked yet.
+        # receiver's own definer answers first. Issue #1752 — a class-object receiver (`kind` `:singleton`) walks its
+        # singleton levels: `Integer.sqrt(1, 2)` under `refine Object do def sqrt(a, b)` runs `Integer.sqrt` and raises.
         def refined_redefinition_in_effect?(class_name, call_node, scope, kind, lexical_sites)
           return false if lexical_sites.nil?
 
@@ -905,9 +905,8 @@ module Rigor
           return false if list.empty?
           return true if list.include?(Inference::InEffectRefinements::UNKNOWN)
           return true if opaque_refinement_in_effect?(call_node, scope, lexical_sites)
-          return refined_method_in_effect?(class_name, call_node, scope, kind, lexical_sites) unless kind == :instance
 
-          !Inference::RefinedDispatch::OwnMethod.answers?(scope, class_name, call_node.name, list)
+          !Inference::RefinedDispatch::OwnMethod.answers?(scope, class_name, call_node.name, list, kind: kind)
         end
 
         # The in-effect list at the call as the typer reads it: the lexical activations, each `using` expanded,

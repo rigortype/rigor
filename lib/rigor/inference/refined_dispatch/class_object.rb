@@ -120,7 +120,7 @@ module Rigor
         # Does the project mix a module into `name`'s singleton class, at a position RBS does not record?
         def singleton_mixin?(scope, name)
           Analysis::DependencyRecorder.read_last_segment(:class, name) if Analysis::DependencyRecorder.active?
-          return true unless (scope.discovered_extends[name] || EMPTY).empty?
+          return true if scope.discovered_extends.key?(name)
 
           scope.discovered_classes.key?(name) &&
             Scope::ResolutionChain.for(scope, name, :singleton, :methods).wildcard_mixin?

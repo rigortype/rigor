@@ -16,6 +16,9 @@ module Rigor
       # (`Integer#quo` and `File#to_path`, whose CRuby owners are `Numeric` and `IO`), and declares a few CRuby no
       # longer defines (`Process::Status#&`). A class no catalogue covers answers false, as does a method its
       # catalogue does not list: the caller reads both as "not proven". The catalogue is one CRuby snapshot.
+      #
+      # Issue #1752 — the singleton side reads the catalogue's `singleton_methods` (each `rb_define_singleton_method`
+      # on the class), the record that `Integer.sqrt` is CRuby's own method of `Integer`'s singleton class.
       module CRubyDefiners
         module_function
 
@@ -25,7 +28,15 @@ module Rigor
           !names.nil? && names.include?(method_name.to_s)
         end
 
-        def build_index
+        # Does the catalogue prove CRuby defines `method_name` on `class_name`'s singleton class itself?
+        def singleton_defines?(class_name, method_name)
+          names = SINGLETON_INDEX[class_name.to_s.delete_prefix("::")]
+          !names.nil? && names.include?(method_name.to_s)
+        end
+
+        # `{class name => Set[method name]}` from each catalogued class's instance methods and aliases, or from its
+        # `singleton_methods` when `side` is `:singleton`.
+        def build_index(side = :instance)
           index = Hash.new { |hash, key| hash[key] = Set.new }
           MethodCatalog.topic_paths.each do |path|
             data = YAML.safe_load_file(path, permitted_classes: [Symbol])
@@ -35,14 +46,19 @@ module Rigor
             classes.each do |name, klass|
               next if klass["rdoc_only"]
 
-              names = index[name]
-              names.merge(defined_names(klass["instance_methods"]))
-              names.merge(defined_names(klass["aliases"]))
+              merge_names(index[name], klass, side)
             end
           end
           Ractor.make_shareable(index.to_h { |name, names| [name, names.freeze] })
         rescue Psych::SyntaxError, SystemCallError
           Ractor.make_shareable({})
+        end
+
+        def merge_names(names, klass, side)
+          return names.merge(defined_names(klass["singleton_methods"])) if side == :singleton
+
+          names.merge(defined_names(klass["instance_methods"]))
+          names.merge(defined_names(klass["aliases"]))
         end
 
         # The names of `entries` CRuby defines at runtime: one the catalogue marks `rdoc_only` was registered only for
@@ -54,7 +70,8 @@ module Rigor
         end
 
         INDEX = build_index
-        private_constant :INDEX
+        SINGLETON_INDEX = build_index(:singleton)
+        private_constant :INDEX, :SINGLETON_INDEX
       end
     end
   end

@@ -7560,8 +7560,22 @@ module Rigor
         class_name = qualified_prefix.join("::")
         undef_node.names.each do |name|
           method_name = literal_method_name(name)
-          record_method_envelope_opaque(tables, class_name, method_name) if method_name
+          next unless method_name
+
+          record_method_envelope_opaque(tables, class_name, method_name)
+          record_removed_name(tables, class_name, method_name)
         end
+      end
+
+      REMOVING_CALLS = %i[remove_method undef_method].to_set.freeze
+      private_constant :REMOVING_CALLS
+
+      # Issue #1820 — `undef f`, `remove_method :f` or `undef_method :f` on the class, as its own entry beside the
+      # opaque envelopes: an `attr_*` or `define_method` records an opaque envelope too, so only this says the name
+      # is gone.
+      def record_removed_name(tables, class_name, method_name)
+        record_envelope(tables.envelopes, class_name, [Scope::DiscoveryIndex::ENVELOPE_REMOVED_KIND, method_name],
+                        Source::ParameterEnvelope::OPAQUE)
       end
 
       # Both kinds, and the envelope table only: the evidence says something rewrites the name, not which
@@ -7633,11 +7647,18 @@ module Rigor
           # Issue #1689 — a `refine` where `self` is a class is the class's own method, and refines nothing.
           record_refinement(node, qualified_prefix, tables) unless tables.class_body_refine?(node)
         elsif !NAME_NEUTRAL_MACROS.include?(node.name)
-          (node.arguments&.arguments || []).each do |argument|
-            # `memoize def f(a)` wraps the def it is handed exactly as `memoize :f` does.
-            method_name = argument.is_a?(Prism::DefNode) ? argument.name : literal_method_name(argument)
-            record_method_envelope_opaque(tables, class_name, method_name) if method_name
-          end
+          record_named_arguments_opaque(node, class_name, tables)
+        end
+      end
+
+      def record_named_arguments_opaque(node, class_name, tables)
+        (node.arguments&.arguments || []).each do |argument|
+          # `memoize def f(a)` wraps the def it is handed exactly as `memoize :f` does.
+          method_name = argument.is_a?(Prism::DefNode) ? argument.name : literal_method_name(argument)
+          next unless method_name
+
+          record_method_envelope_opaque(tables, class_name, method_name)
+          record_removed_name(tables, class_name, method_name) if REMOVING_CALLS.include?(node.name)
         end
       end
 

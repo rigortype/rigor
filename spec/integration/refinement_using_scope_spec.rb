@@ -840,7 +840,7 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
 
       # Critique F7. Ruby 4.0.5 answers `:refined` for each: the project removed `String#center`, so the catalogue
       # proves nothing about it; nor for a class whose body rewrites its table through `send`; nor does a project
-      # `def` the class then removes.
+      # `def` or `attr_reader` the class then removes.
       it "declines where the project removed or rewrote the definer's method" do
         write("lib/removed.rb", <<~RUBY)
           class String; remove_method :center; end
@@ -848,11 +848,12 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
           module ObjProc; refine(Object) { def to_proc(a) = :refined }; end
         RUBY
         write_class("Own2", "  def center(a) = a\n  remove_method :center\n", "  def center: (untyped) -> untyped\n")
-        calls = "\"x\".center(1, 2, 3)\n:s.to_proc(1)\nOwn2.new.center(1, 2, 3)\n"
+        write_class("Own3", "  attr_reader :center\n  remove_method :center\n", "  def center: () -> untyped\n")
+        calls = "\"x\".center(1, 2, 3)\n:s.to_proc(1)\nOwn2.new.center(1, 2, 3)\nOwn3.new.center(1, 2, 3)\n"
         write("lib/use.rb", "using ObjCenter\nusing ObjProc\n#{calls}")
         write("lib/control.rb", calls)
 
-        expect(call_rows).to eq(controls(1..3))
+        expect(call_rows).to eq(controls(1..4))
       end
 
       # Ruby 4.0.5 answers `:wide`: a module the project prepends to `String` sits where RBS does not place it.

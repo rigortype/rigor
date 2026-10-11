@@ -243,7 +243,8 @@ module Rigor
 
         # Is Ruby known to find `method_name` on `entry`, the first definer the walk reached for an instance of
         # `class_name`? Neither proof stands on a class that rewrites its method table in a way no literal names
-        # (`ENVELOPE_DYNAMIC_MARK`).
+        # (`ENVELOPE_DYNAMIC_MARK`), nor for a name the project removes from it with a literal `undef`,
+        # `remove_method` or `undef_method` anywhere (`ENVELOPE_REMOVED_KIND`), whatever defined it.
         #
         # - A project `def`, `attr_*` or `define_method` (ADR-119 A7): `DefinerResolution` must answer `Known` with
         #   `entry` as the owner, on the receiver's chain, so a definer that may not have run (a `def` under `if`,
@@ -262,6 +263,7 @@ module Rigor
           Analysis::DependencyRecorder.read_last_segment(:class, entry) if Analysis::DependencyRecorder.active?
           bucket = scope.parameter_envelopes_of(entry)
           return false if bucket.key?(Scope::DiscoveryIndex::ENVELOPE_DYNAMIC_MARK)
+          return false if bucket.key?([Scope::DiscoveryIndex::ENVELOPE_REMOVED_KIND, method_name.to_sym])
 
           opaque = Source::ParameterEnvelope.opaque?(bucket[[:instance, method_name.to_sym]])
           return true if project_definer?(scope, class_name, entry, method_name, opaque)
@@ -269,8 +271,9 @@ module Rigor
           !opaque && Builtins::CRubyDefiners.defines?(entry, method_name)
         end
 
-        # A `def` counts while its envelope is its own; an `attr_*` or `define_method` always records an opaque one,
-        # so for those the existence table and the certainty read are the whole proof.
+        # A `def` counts while its envelope is its own (an alias or a wrapping macro makes it opaque); an `attr_*` or
+        # `define_method` always records an opaque one, so for those the existence table and the certainty read are
+        # the proof, beside the removal check above.
         def project_definer?(scope, class_name, entry, method_name, opaque)
           if scope.user_def_for(entry, method_name)
             return false if opaque

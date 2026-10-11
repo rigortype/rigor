@@ -222,6 +222,11 @@ module Rigor
       #   The readers that ask whether a surface is rewritten read both ({.rewritten_surface?}), except
       #   `call.wrong-arity`'s source envelope (`CheckRules::SourceArity`), which leaves a refinement to the per-call
       #   decline that knows the name and the `using` (issue #1797).
+      # Issue #1820 — the kind of a `[ENVELOPE_REMOVED_KIND, method_name]` bucket entry: the project removes the name
+      # from the class with a literal `undef`, `remove_method` or `undef_method`, whichever side. A removal is not
+      # otherwise distinguishable from an `attr_*` or `define_method`, whose envelope is opaque too, and the
+      # refinement own-definer proof must not take a removed method as the one Ruby finds.
+      ENVELOPE_REMOVED_KIND = :removed
       ENVELOPE_MODULE_MARK = :"<module>"
       ENVELOPE_DYNAMIC_MARK = :"<dynamic>"
       ENVELOPE_OBJECT_EXTENDED_MARK = :"<object-extended>"

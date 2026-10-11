@@ -18,6 +18,7 @@ require "spec_helper"
 require "fileutils"
 require "tmpdir"
 
+require "rigor/analysis/incremental_run_slot"
 require "rigor/analysis/incremental_session"
 require "rigor/analysis/runner"
 require "rigor/cache/incremental_snapshot"
@@ -289,6 +290,23 @@ RSpec.describe "Gem source inference over `refine` bodies (#1672)" do
 
         expect(incremental_rows).to eq([[["app.rb", 2, "shout"]], false])
       end
+    end
+
+    # The CLI asks the engine-free probe (`IncrementalRunSlot.serve`) before it loads the engine, and the slot's key
+    # carries the gems' rows as the plain key does (the round-1 review of #1838 found it dropped them).
+    it "declines the engine-free --incremental probe after the bump, with no lockfile" do
+      root = File.join(Dir.pwd, ".rigor-cache")
+      serve = lambda do
+        Rigor::Analysis::IncrementalRunSlot.serve(configuration: configuration, cache_root: root, paths: %w[lib])
+      end
+      expect(incremental_rows).to eq([[["app.rb", 3, "yell"]], false])
+      expect(serve.call).not_to be_nil
+
+      bump("1.1.0", "    def yell = upcase\n")
+
+      expect(serve.call).to be_nil
+      expect(incremental_rows).to eq([[["app.rb", 2, "shout"]], false])
+      expect(undefined_rows_of(serve.call.result.diagnostics)).to eq([["app.rb", 2, "shout"]])
     end
 
     # The control: nothing changed, so the run is served from the snapshot and the identity did not move.

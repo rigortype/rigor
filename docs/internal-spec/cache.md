@@ -1246,7 +1246,8 @@ and `rigor check --incremental` serves a null run from it before loading the eng
 guarantee, is [ADR-45](../adr/45-unchanged-project-fast-path.md) WD2; this is the contract.
 
 - **Key.** `RunCacheKey.descriptor` exactly as the ADR-87 WD4 probe builds it —
-  `RunCacheKey.libraries_config_entries`, no `template-units` slot, `explain: false` —
+  `RunCacheKey.libraries_config_entries`, no `template-units` slot, `explain: false`, its
+  `dependencies:` rows for the opted-in gems included (#1814) —
   over the session's analysed-path set, plus an `incremental.roots` config entry over the
   analysis roots, normalised to absolute paths and sorted (`IncrementalRunSlot::Target`,
   `.normalize_roots`). The producer id and the roots entry each keep it apart from
@@ -1299,7 +1300,8 @@ guarantee, is [ADR-45](../adr/45-unchanged-project-fast-path.md) WD2; this is th
   written only when, at write time, nothing the guard watches moved: every lockfile the
   key or the fingerprint may read (`bundler.lockfile`, `rbs_collection.lockfile`,
   `Gemfile.lock`, `rbs_collection.lock.yaml`), one present at the mark still there with
-  its change time before it and one absent still absent; the analysed files' rows, the
+  its change time before it and one absent still absent; every opted-in gem still resolving
+  to the `(name, version, mode)` it did at the mark (#1814); the analysed files' rows, the
   `derived` rows and the chain's `baseline`, carried or taken; and the chain's `pinned`.
   No path a content row names, no directory a glob row lists and no file a `:stat` glob
   matches may have a change time at or after the mark. An existence row for a path the

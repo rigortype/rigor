@@ -210,6 +210,26 @@ RSpec.describe Rigor::Analysis::IncrementalRunSlot do
       expect_declined_then_recovered(configuration("severity_profile" => "strict"))
     end
 
+    # Issue #1814 — the opted-in gems' `(name, version, mode)` rows are in the slot's key, as in the plain probe's, so
+    # a bump with no lockfile declines the engine-free probe; the lockfile digest alone never saw it.
+    it "declines for a bumped opted-in gem, with no lockfile" do
+      resolver = Rigor::Analysis::DependencySourceInference::GemResolver
+      write("vendor/shouty/lib/shouty.rb", "module Shouty\n  def self.loud = 1\nend\n")
+      resolve = lambda do |version|
+        spec = instance_double(Gem::Specification, version: Gem::Version.new(version),
+                                                   full_gem_path: File.join(Dir.pwd, "vendor", "shouty"))
+        allow(resolver).to receive(:locate_gem_spec).and_call_original
+        allow(resolver).to receive(:locate_gem_spec).with("shouty").and_return(spec)
+      end
+      config = configuration("dependencies" => { "source_inference" => [{ "gem" => "shouty" }] })
+      resolve.call("1.0.0")
+      incremental_run(config)
+      expect(served(config)).not_to be_nil
+
+      resolve.call("1.1.0")
+      expect_declined_then_recovered(config)
+    end
+
     it "declines for an analysis root that appears after the run reported it missing" do
       config = configuration("paths" => %w[lib extra])
       incremental_run(config)

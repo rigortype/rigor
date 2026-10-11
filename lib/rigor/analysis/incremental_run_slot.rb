@@ -84,7 +84,9 @@ module Rigor
         return nil if base.nil?
 
         roots = RunCacheKey.config_entry("incremental.roots", normalize_roots(target.roots).sort.join("\n"))
-        Cache::Descriptor.new(gems: base.gems, configs: base.configs + [roots])
+        # Issue #1814 — the opted-in gems' `(name, version, mode)` rows travel with the key, as they do in the plain
+        # probe's: the gem's walked source reaches every file's answer and no analysed file records it.
+        Cache::Descriptor.new(gems: base.gems, dependencies: base.dependencies, configs: base.configs + [roots])
       end
 
       # The roots as absolute paths, which the KEY holds sorted: `lib`, `./lib` and `lib/` are one root there. A

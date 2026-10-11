@@ -81,6 +81,21 @@ RSpec.describe Rigor::Analysis::IncrementalRunSlot::WriteGuard do
     expect(guard.admits?(rows_for("lib/a.rb"))).to be(false)
   end
 
+  # Issue #1814 — the opted-in gems' resolved versions are in the slot's key, which is computed when the run ends; a
+  # version that moved after the mark would key the old run's answer by the new version.
+  it "refuses the write when an opted-in gem's resolved version moved after the mark" do
+    resolver = Rigor::Analysis::DependencySourceInference::GemResolver
+    row = lambda do |version|
+      [Rigor::Cache::Descriptor::DependencyEntry.new(gem_name: "shouty", gem_version: version, mode: :when_missing)]
+    end
+    allow(resolver).to receive(:dependency_entries).and_return(row.call("1.0.0"))
+    guard = start
+    expect(guard.admits?(rows_for("lib/a.rb"))).to be(true)
+
+    allow(resolver).to receive(:dependency_entries).and_return(row.call("1.1.0"))
+    expect(guard.admits?(rows_for("lib/a.rb"))).to be(false)
+  end
+
   # The guard must watch the lockfile the run reads. A `~/` lockfile setting is the home directory's, not a
   # directory called `~` under the working directory.
   context "with `~/` lockfile settings" do

@@ -21,6 +21,9 @@ require_relative "../environment/default_libraries"
 # lockfile paths without loading `rigor/environment` or the RBS machinery.
 require_relative "../environment/lockfile_resolver"
 require_relative "../environment/rbs_collection_discovery"
+# A leaf file (it loads only the cache descriptor), unlike `dependency_source_inference`, whose walker loads the
+# inference engine the boot-slimming probe exists to avoid.
+require_relative "dependency_source_inference/gem_resolver"
 require_relative "shadow_harness"
 
 module Rigor
@@ -93,6 +96,7 @@ module Rigor
       def descriptor(configuration:, files:, explain:, rbs_config_entries:, template_units_digest: nil)
         Cache::Descriptor.new(
           gems: [Cache::RbsDescriptor.rbs_gem_entry],
+          dependencies: dependency_source_entries(configuration),
           configs: rbs_config_entries + engine_source_entries + lockfile_entries(configuration) +
                    template_unit_entries(template_units_digest) + shadow_harness_entries + [
                      config_entry("configuration", Marshal.dump(configuration.to_h)),
@@ -149,6 +153,14 @@ module Rigor
       def lockfile_entries(configuration)
         bundler, collection = resolved_lockfile_paths(configuration)
         [lockfile_entry("bundler.lockfile", bundler), lockfile_entry("rbs_collection.lockfile", collection)]
+      end
+
+      # ADR-10 slice 3, issue #1814 — the `dependencies.source_inference` gems' `(name, version, mode)` rows, which the
+      # walker's output depends on and no lockfile digest covers when the project has none or the gem sits beside the
+      # bundle. Shared by this key and by {Cache::IncrementalSnapshot.fingerprint}, as the lockfiles are. A project
+      # that lists no gem adds no row, so its key is what it was.
+      def dependency_source_entries(configuration)
+        DependencySourceInference::GemResolver.dependency_entries(configuration.dependencies)
       end
 
       # The one resolution of the two dependency lockfiles — `[bundler, rbs_collection]`, each a Pathname or nil

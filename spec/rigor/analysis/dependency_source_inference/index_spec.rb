@@ -117,6 +117,20 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::Index do
     end
   end
 
+  # Issue #1814 — the names the walked gems bind by a constant write without declaring a class or module, unioned
+  # across gems, and the last segments of the writes whose owner the walk could not spell; the reader asks for each
+  # prefix of a refine key at read time.
+  describe "#bound_constant?" do
+    it "answers a name a gem binds, or a segment it binds under an owner it could not spell" do
+      index = described_class.new(bound_constants: Set["Shared::Target", "Pag::Enc"], bound_segments: Set["K"])
+
+      names = %w[Shared::Target Pag::Enc Target Enc K Any::K Other]
+      expect(names.map { |name| index.bound_constant?(name) }).to eq([true, true, false, false, true, true, false])
+      expect([index.bound_constants, index.bound_segments]).to all(be_frozen)
+      expect(described_class::EMPTY.bound_constant?("Shared::Target")).to be(false)
+    end
+  end
+
   describe "#cache_descriptor" do
     let(:resolver) { Rigor::Analysis::DependencySourceInference::GemResolver }
 

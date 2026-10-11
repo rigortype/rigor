@@ -193,18 +193,37 @@ module Rigor
         end
 
         # ADR-121 WD7 — is the refined-class key `refined` a class the walk could not name: the wildcard, or (A6) a
-        # name no class declaration or RBS knows that a project constant write binds (`K = String; refine(K)`), whose
-        # value is the class refined. A constant nothing binds (a gem's class with no RBS) keeps a normal row, which
-        # matches no receiver.
+        # name no class declaration or RBS knows, of which some segment is a constant a write binds: a project
+        # constant write (`K = String; refine(K)`), by the last segment the project's census keys writes on, or one an
+        # opted-in gem's files make (`DependencySourceInference::Index#bound_constant?`, issue #1814), by the name the
+        # write binds, asked for each prefix of the key (`Shared::Target` for `module Shared; Target = String; end` in
+        # a gem; `Pag::Enc` for the gem's own `module Pag; Enc = ::Encoding; refine(Enc::Converter)`), so a gem
+        # constant that merely shares a core class's name (`Names::String`) moves no sibling key (`Ext::String`).
+        # Every segment counts, not only the last, so a prefix alias (`Enc = ::Encoding; refine(Enc::Converter)`,
+        # #1815) reads the same way. A key that is a core or declared class never moves, whatever a file writes under
+        # its name. A constant nothing binds (a gem's class with no RBS) keeps a normal row, which matches no receiver.
+        # Each segment is a `constant:` dependency, so a file that starts or stops binding any of them re-checks the
+        # consumer.
         def class_wildcard_key?(scope, refined)
           return true if refined == WILDCARD
           return false if scope.discovered_classes.key?(refined) || scope.environment&.class_known?(refined)
 
+          segments = refined.split("::").reject(&:empty?)
           if Analysis::DependencyRecorder.active?
-            Analysis::DependencyRecorder.read_last_segment(:constant, refined)
             Analysis::DependencyRecorder.read_last_segment(:class, refined)
+            segments.each { |segment| Analysis::DependencyRecorder.read_last_segment(:constant, segment) }
           end
-          !scope.bound_constant_names(refined).empty?
+          segments.any? { |segment| !scope.bound_constant_names(segment).empty? } || gem_bound_key?(scope, segments)
+        end
+
+        # The gem half of {.class_wildcard_key?}: does an opted-in gem bind some prefix of the key (issue #1814)? A
+        # leading `Object::` spells the top level (`Object::Shared::Target` is `Shared::Target`), so it is dropped.
+        def gem_bound_key?(scope, segments)
+          index = scope.environment&.dependency_source_index
+          return false if index.nil? || !index.binds_constants?
+
+          segments = segments.drop_while { |segment| segment == "Object" }
+          segments.each_index.any? { |i| index.bound_constant?(segments[0..i].join("::")) }
         end
 
         private

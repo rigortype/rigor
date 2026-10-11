@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "../../cache/descriptor"
+
 module Rigor
   module Analysis
     module DependencySourceInference
@@ -18,6 +20,11 @@ module Rigor
         class Resolved < Data.define(:gem_name, :version, :gem_dir, :mode, :roots)
           def descriptor_key
             [gem_name, version, mode].freeze
+          end
+
+          # ADR-10 slice 3 — this gem's row of a cache descriptor: its name, resolved version and mode.
+          def dependency_entry
+            Cache::Descriptor::DependencyEntry.new(gem_name: gem_name, gem_version: version, mode: mode)
           end
         end
 
@@ -41,6 +48,20 @@ module Rigor
             mode: entry.mode,
             roots: entry.roots
           )
+        end
+
+        # Issue #1814 — the {Resolved#dependency_entry} of each non-disabled `dependencies.source_inference` entry that
+        # resolves, in configuration order, without walking any gem. The run-result cache key and the incremental
+        # snapshot's fingerprint are built before analysis from inputs that are cheap to read, and a gem's walked
+        # source (its method catalogue, its refinement table, the constants it binds) is an input of the run that no
+        # analysed file records; a `Gemfile.lock` digest covers a `bundle update` and nothing else, so a project with no
+        # lockfile, or a gem installed beside the bundle, would replay the diagnostics of the gem's previous version.
+        # Unresolvable entries have no version to key on and add nothing: the gem appearing later adds its row.
+        def dependency_entries(dependencies)
+          dependencies.source_inference.reject(&:disabled?).filter_map do |entry|
+            resolved = resolve(entry)
+            resolved.dependency_entry if resolved.is_a?(Resolved)
+          end
         end
 
         # Locator. `Gem.loaded_specs` reflects the bundle (cheap lookup, no filesystem walk); `find_by_name` is

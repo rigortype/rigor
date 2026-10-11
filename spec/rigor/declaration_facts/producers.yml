@@ -192,6 +192,11 @@ lib/rigor/inference/refine_census.rb:
     Rigor::Inference::RefineCensus: VISIBILITY_CALLS names the calls a refine body may make on the refinement without defining a name (`private`, `public`, `protected`, `module_function`, `private_constant`); it reads which calls define nothing and derives no owner or side
     Rigor::Inference::RefineCensus#defines_nothing?: answers whether a call on the refinement is a visibility call or `Refinement#target`, which define no name; the refining module and the refined class are the caller's, so it derives no declaration context
     Rigor::Inference::RefineCensus#scan_body: stops at a nested def, class, module or singleton class, which run on something other than the refinement; it collects names and derives no declaration context
+lib/rigor/inference/refine_self.rb:
+  computes: the constants, locals and instance variables a file binds only to literals, for whether a core iterator's block keeps self (ADR-121 WD7)
+  producers:
+    Rigor::Inference::RefineSelf#collect_bindings: hands a class, module or singleton class to collect_declaration_bindings and descends; it keys constant writes by the lexical prefix ConstantPath.declaration_prefix spells, as ScopeIndexer.constant_receiver_candidates spells a read, and decides no declaration context
+    Rigor::Inference::RefineSelf#collect_declaration_bindings: pushes the prefix ConstantPath.declaration_prefix spells for a class or module body, and one no read names for a class << body, whose constants are the singleton class's; it walks the superclass expression in the outer prefix and decides no declaration context
 lib/rigor/inference/scope_indexer.rb:
   computes: the per-file and project discovery tables (methods, def nodes, visibilities, mixins, constants, ranges)
   producers:

@@ -144,7 +144,8 @@ RSpec.describe Rigor::Inference::InEffectRefinements do
 
       expect(refinements.at(":named")).to eq(%w[Outer::Named])
       expect(refinements.at(":blocked")).to eq([unknown])
-      # ADR-121 WD7 — a call on a literal never rebinds `self` in its block, so the module is still `Outer`.
+      # ADR-121 WD7 — a core iteration method on a literal never rebinds `self` in its block, so the module is still
+      # `Outer`.
       expect(refinements.at(":literal_receiver")).to eq(%w[Outer])
       # Issue #1689 — a `Struct.new` block's `self` is a class, so its `refine` is not `Module#refine`.
       expect(refinements.at(":struct")).to eq([])
@@ -195,7 +196,8 @@ RSpec.describe Rigor::Inference::InEffectRefinements do
         expect(%w[:in_class :in_singleton :class_new :anonymous :data].map { |marker| at.at(marker) }).to all(eq([]))
         # A block may run under another `self`, so a `refine` in one stays a refine block of an unnamed module.
         expect(at.at(":in_block")).to eq([unknown])
-        # ADR-121 WD7 — a call on a literal keeps `self`, the class, so its block's `refine` is the class's own too.
+        # ADR-121 WD7 — a core iteration method on a literal keeps `self`, the class, so its block's `refine` is the
+        # class's own too.
         expect(at.at(":literal_block")).to eq([])
         expect(at.at(":in_module")).to eq(%w[Shout])
       end

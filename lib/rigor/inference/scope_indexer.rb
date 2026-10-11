@@ -3385,10 +3385,11 @@ module Rigor
       def pattern_offsets(root, pattern)
         return NO_OFFSETS if root.nil?
 
-        text = root.send(:source).source
-        return NO_OFFSETS unless pattern.match?(text)
+        # Byte-wise: a file may hold bytes its encoding does not (binary `__END__` data, a stray comment byte), and a
+        # regexp over such a String raises.
+        binary = root.send(:source).source.b
+        return NO_OFFSETS unless pattern.match?(binary)
 
-        binary = text.b
         offsets = []
         position = 0
         while (match = pattern.match(binary, position))
@@ -3497,15 +3498,20 @@ module Rigor
       # the write holds, so its names go under the wildcard class, as a computed target's do.
       def record_refinement_defs(node, target, qualified_prefix, refining, tables)
         loose = tables.loose_constant?(target.name.to_s)
-        tables.account(node, loose ? :class_unknown : :recorded, refining)
+        tables.account(node, loose ? :class_unknown : :recorded, census_charge(refining))
         body = node.block.body
         return if body.nil?
 
         targets = loose ? [REFINEMENT_WILDCARD] : constant_receiver_candidates(target, qualified_prefix)
-        tables.refinements = RefineCensus.record_rows(tables.refinements, targets, RefineCensus.read_body(body),
-                                                      refining)
+        reading = RefineCensus.read_body(body)
+        refining.each do |owner|
+          tables.refinements = RefineCensus.record_rows(tables.refinements, targets, reading, owner)
+        end
         census_scan(body, qualified_prefix, tables, refine_body: true) if tables.mentions_refine?
       end
+
+      # What the census records as charged for `owners`: the one module, or every name.
+      def census_charge(owners) = owners.size == 1 ? owners.first : owners
 
       # ADR-121 WD7 — a literal-target `refine X do … end` the module-body walk reaches, charged where the in-effect
       # walk says it runs ({MethodTables#refine_context}): rows for the module it names (the walk's own name for an
@@ -3514,20 +3520,25 @@ module Rigor
       def record_literal_target_refine(node, target, qualified_prefix, owner_prefix, tables)
         context = tables.refine_context(node)
         here = context.here
-        return record_refinement_defs(node, target, qualified_prefix, "", tables) if here == RefineSelf::MAIN
+        return record_refinement_defs(node, target, qualified_prefix, [""], tables) if here == RefineSelf::MAIN
         if context.deferred || here == REFINEMENT_WILDCARD
-          return record_deferred_refine(node, RefineSelf.charged_module(context), qualified_prefix, tables)
+          return record_deferred_refine(node, RefineSelf.charged_modules(context), qualified_prefix, tables)
         end
 
-        refining = here == RefineSelf::ANONYMOUS ? owner_prefix.join("::") : here
-        record_refinement_defs(node, target, qualified_prefix, refining, tables)
+        record_refinement_defs(node, target, qualified_prefix, census_owners(context, owner_prefix), tables)
       end
 
-      # ADR-121 WD7 — a targets-wildcard for `owner`, as a `refine` in a `def` records. The body is not walked any
-      # further, so the census scans it here.
-      def record_deferred_refine(node, owner, qualified_prefix, tables)
-        tables.account(node, :targets_wildcard, owner)
-        record_targets_wildcard(tables, owner)
+      # The modules a `refine` charged to `context` refines for; an anonymous `Module.new` block's is named by its
+      # position (`owner_prefix`).
+      def census_owners(context, owner_prefix)
+        context.here == RefineSelf::ANONYMOUS ? [owner_prefix.join("::")] : RefineSelf.charged_modules(context)
+      end
+
+      # ADR-121 WD7 — a targets-wildcard for each of `owners`, as a `refine` in a `def` records. The body is not walked
+      # any further, so the census scans it here.
+      def record_deferred_refine(node, owners, qualified_prefix, tables)
+        tables.account(node, :targets_wildcard, census_charge(owners))
+        owners.each { |owner| record_targets_wildcard(tables, owner) }
         body = node.block.body
         census_scan(body, qualified_prefix, tables, refine_body: true) if body && tables.mentions_refine?
       end
@@ -3547,13 +3558,13 @@ module Rigor
                 context.here == RefineSelf::MAIN
             :raises
           elsif context.deferred || context.here == REFINEMENT_WILDCARD
-            owner = RefineSelf.charged_module(context)
-            record_targets_wildcard(tables, owner)
-            [:targets_wildcard, owner]
+            owners = RefineSelf.charged_modules(context)
+            owners.each { |owner| record_targets_wildcard(tables, owner) }
+            [:targets_wildcard, census_charge(owners)]
           else
-            owner = context.here == RefineSelf::ANONYMOUS ? owner_prefix.join("::") : context.here
-            record_unreadable_target(node, owner, tables)
-            [:class_unknown, owner]
+            owners = census_owners(context, owner_prefix)
+            owners.each { |owner| record_unreadable_target(node, owner, tables) }
+            [:class_unknown, census_charge(owners)]
           end
         tables.account(node, outcome, charged)
       end
@@ -3594,9 +3605,9 @@ module Rigor
           elsif refine_body && RefineCensus.self_call?(node) then :nested
           elsif !RefineCensus.self_call?(node) || node.block.nil? || context.here == RefineSelf::MAIN then :raises
           else
-            owner = RefineSelf.charged_module(context)
-            record_targets_wildcard(tables, owner)
-            [:targets_wildcard, owner]
+            owners = RefineSelf.charged_modules(context)
+            owners.each { |owner| record_targets_wildcard(tables, owner) }
+            [:targets_wildcard, census_charge(owners)]
           end
         tables.account(node, outcome, charged)
       end
@@ -3624,14 +3635,14 @@ module Rigor
         context = tables.refine_context(literal)
         return tables.account(literal, :data) if target == :self && context.literal == RefineSelf::CLASS
 
-        owners = literal_owners(call, target, RefineSelf.charged_module(context, literal: true), qualified_prefix)
+        owners = literal_owners(call, target, RefineSelf.charged_modules(context, literal: true), qualified_prefix)
         owners.each { |owner| record_targets_wildcard(tables, owner) }
-        tables.account(literal, :literal, target == :self ? owners.first : [:receiver, owners])
+        tables.account(literal, :literal, target == :self ? census_charge(owners) : [:receiver, owners])
       end
 
-      def literal_owners(call, target, self_module, qualified_prefix)
+      def literal_owners(call, target, self_modules, qualified_prefix)
         case target
-        when :self then [self_module]
+        when :self then self_modules
         when :unknown then [REFINEMENT_WILDCARD]
         else
           receiver = call.receiver
@@ -3652,9 +3663,9 @@ module Rigor
         context = tables.refine_context(node)
         return tables.account(node, :data) if context.literal == RefineSelf::CLASS
 
-        owner = RefineSelf.charged_module(context, literal: true)
-        record_targets_wildcard(tables, owner)
-        tables.account(node, :literal, owner)
+        owners = RefineSelf.charged_modules(context, literal: true)
+        owners.each { |owner| record_targets_wildcard(tables, owner) }
+        tables.account(node, :literal, census_charge(owners))
       end
 
       # The instance `def`s a refine body defines on the refined class: nested declarations open their own

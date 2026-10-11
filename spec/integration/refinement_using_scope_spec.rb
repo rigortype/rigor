@@ -1290,10 +1290,10 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
       end
     end
 
-    # R2: a core iterator's block on a constant keeps `self`, and a literal's block or a `define_method` block in a
-    # plain class's method keeps the class, so none of these makes an unrelated `using` opaque. Ruby 4.0.5 prints
-    # `:each_const` for `M`'s `center` under `using M`, `[:show, :show]`, `[10, 20]` and `2`, and raises
-    # `NoMethodError` for each `"x".nope`.
+    # R2: a core iterator's block on a constant this file binds to a literal keeps `self`, and a core iterator's block
+    # on a literal or a `define_method` block in a plain class's method keeps the class, so none of these makes an
+    # unrelated `using` opaque. Ruby 4.0.5 prints `:each_const` for `M`'s `center` under `using M`, `[:show, :show]`,
+    # `[10, 20]` and `2`, and raises `NoMethodError` for each `"x".nope`.
     it "keeps an unrelated `using` checked and typed where an iterator or a plain class's blocks name refine" do
       write("lib/m.rb", "module M\n  TARGETS = [String, Symbol].freeze\n  " \
                         "TARGETS.each { |k| refine(k) { def center(a, b, c) = :each_const } }\nend\n")
@@ -1313,6 +1313,51 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
       expect(rows).to eq(
         [["query.rb", 4, "call.undefined-method"], ["u.rb", 5, "dump.type"], ["u.rb", 6, "call.undefined-method"]]
       )
+    end
+
+    # R3-S2: a core iteration method keeps `self` only on a receiver whose value is a literal in this file; a project
+    # method of that name on any other receiver, or another name on a literal, may run the block under any `self`.
+    # Ruby 4.0.5 prints `:config_each`, `:local_each`, `:array_configure` and `:times` under `using Ext`, one per
+    # shape, and raises `ArgumentError (given 3, expected 1..2)` in `plain.rb`.
+    {
+      "a module's own `each`" =>
+        "module Config\n  def self.each(&blk) = Ext.module_eval(&blk)\nend\nmodule Setup\n  " \
+        "Config.each { refine(String) { def center(a, b, c) = :config_each } }\nend\n",
+      "a local holding a project object" =>
+        "module Setup\n  runner = Runner.new(Ext)\n  " \
+        "runner.each { refine(String) { def center(a, b, c) = :local_each } }\nend\n",
+      "another method on a literal" =>
+        "class Array\n  def configure(&blk) = Ext.module_eval(&blk)\nend\nmodule Setup\n  " \
+        "[1].configure { refine(String) { def center(a, b, c) = :array_configure } }\nend\n",
+      "a module's own `times`" =>
+        "module Count\n  def self.times(&blk) = Ext.module_eval(&blk)\nend\nmodule Setup\n  " \
+        "Count.times { refine(String) { def center(a, b, c) = :times } }\nend\n"
+    }.each do |shape, setup|
+      it "declines under a module the block of #{shape} may refine for" do
+        write("lib/ext.rb", "module Ext; end\nclass Runner\n  def initialize(mod) = @mod = mod\n  " \
+                            "def each(&blk) = @mod.module_eval(&blk)\nend\n")
+        write("lib/setup.rb", setup)
+        write("lib/use.rb", "using Ext\np \"x\".center(1, 2, 3)\n")
+        write("lib/plain.rb", "\"x\".center(1, 2, 3)\n")
+
+        expect(call_rows).to eq([["plain.rb", 1, "call.wrong-arity"]])
+      end
+    end
+
+    # R3-S3: `M.module_eval { … }` in `module L` runs on `L::M` once a file declares it, so the walk charges every name
+    # `M` can denote there. Ruby 4.0.5 prints `:lm` twice, under `using L::M` in each file, and raises
+    # `ArgumentError (given 3, expected 1..2)` in `plain.rb`.
+    it "declines under a module an eval block's constant receiver names in another file" do
+      write("lib/lm.rb", "module L\n  module M; end\nend\n")
+      write("lib/setup.rb", "require_relative \"lm\"\nmodule L\n  " \
+                            "M.module_eval { refine(String) { def center(a, b, c) = :lm } }\nend\n" \
+                            "using L::M\nRigor.dump_type(\"x\".center(1, 2, 3))\n")
+      write("lib/u.rb", "require_relative \"setup\"\nusing L::M\np \"x\".center(1, 2, 3)\n")
+      write("lib/plain.rb", "\"x\".center(1, 2, 3)\n")
+
+      rows = diagnostics.map { |d| [File.basename(d.path.to_s), d.line, d.qualified_rule, d.message] }.sort
+      arity = "wrong number of arguments to `center' on String (given 3, expected 1..2)"
+      expect(rows).to eq([["plain.rb", 1, "call.wrong-arity", arity], ["setup.rb", 6, "dump.type", "dump_type: :lm"]])
     end
 
     # The union receiver rule and `call.unresolved-toplevel` ask the refinement predicate too. Ruby 4.0.5 prints `:int`
@@ -1360,9 +1405,22 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
       )
     end
 
+    # R3-M1: a parameter's default runs in the method's body, so a `:refine` default in a plain class's method is data
+    # and makes no `using` opaque. Ruby 4.0.5 prints `:refine` and `"X"`, and raises `NoMethodError` for `"x".nope`.
+    it "keeps checks and types where a plain class's parameter defaults name refine" do
+      write("lib/search.rb", "class Search\n  def initialize(mode = :refine) = @mode = mode\n  " \
+                             "def self.build(kind = :refine) = new(kind)\nend\np Search.build\n")
+      write("lib/u.rb", "module Shout\n  refine(String) { def shout = :s }\nend\nusing Shout\n" \
+                        "Rigor.dump_type(\"x\".upcase)\n\"x\".nope\n")
+
+      rows = diagnostics.map { |d| [File.basename(d.path.to_s), d.line, d.qualified_rule] }.sort
+      expect(rows).to eq([["u.rb", 5, "dump.type"], ["u.rb", 6, "call.undefined-method"]])
+    end
+
     # R2-S3: `call.possible-nil-receiver`, `def.method-visibility-mismatch` and `flow.always-raises` ask the refinement
-    # predicate too. Ruby 4.0.5 prints `:nil_up`, `:public_secret` and `:no_raise` under a `using` of the module (read
-    # from outside the analysed paths or from the project alike), and raises for each call in `plain.rb`.
+    # predicate too. Each file run with `lib/foo.rb` required first (`ruby -r ./lib/foo.rb lib/opaque.rb`), Ruby 4.0.5
+    # prints `:nil_up`, `:public_secret` and `:no_raise` under a `using` of the module (read from outside the analysed
+    # paths or from the project alike), and raises for each call in `plain.rb`, each run after its first line.
     it "declines a nil receiver's, a private method's and a zero division's report a refinement in effect may answer" do
       write("lib/foo.rb", "class Foo\n  private\n\n  def secret = 1\nend\n")
       refinement = "refine(NilClass) { def upcase = :nil_up }\n  refine(Foo) { def secret = :public_secret }\n  " \
@@ -1381,6 +1439,17 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
         [["plain.rb", 2, "call.possible-nil-receiver"], ["plain.rb", 3, "def.method-visibility-mismatch"],
          ["plain.rb", 4, "flow.always-raises"]]
       )
+    end
+
+    # R3-S1: a file may hold bytes its encoding does not, here binary `__END__` data, and the refinement scans read
+    # it as bytes. Ruby 4.0.5 prints `:ext` and `1`, then raises `ArgumentError (given 2, expected 1)` on line 5.
+    it "reads a refining file whose `__END__` data is not valid in its encoding" do
+      write("lib/a.rb", "module Ext\n  refine(String) { def center(a, b, c) = :ext }\nend\nclass Helper\n  " \
+                        "def self.go(a) = a\nend\n__END__\n\x89PNG\xff\xfe binary payload\n")
+      write("lib/b.rb", "require_relative \"a\"\nusing Ext\np \"x\".center(1, 2, 3)\np Helper.go(1)\nHelper.go(1, 2)\n")
+
+      rows = diagnostics.map { |d| [File.basename(d.path.to_s), d.line, d.qualified_rule] }
+      expect(rows).to eq([["b.rb", 5, "call.wrong-arity"]])
     end
 
     # Critique F5a. Ruby 4.0.5 prints `:via_alias` (`rb/p4_alias_refine.rb`).

@@ -55,6 +55,8 @@ module Rigor
         def walked_body?(node, prefix, body, in_def, context)
           case node
           when Prism::ClassNode, Prism::ModuleNode
+            # A superclass expression runs where the `class` keyword is, a parameter's default in the method's body.
+            walk(node.superclass, prefix, body, in_def, context) if node.is_a?(Prism::ClassNode) && node.superclass
             inner = Source::ConstantPath.declaration_prefix(prefix, node.constant_path) || prefix
             within_nesting(node) do
               walk_children(node.body, inner, span_of(node), false, declaration_context(node, inner))
@@ -64,7 +66,9 @@ module Rigor
             walk_children(node.body, prefix, span_of(node), false,
                           RefineSelf.singleton_class_body(context, node.expression.is_a?(Prism::SelfNode)))
           when Prism::DefNode
-            walk_children(node.body, prefix, body, true, def_context(node, context))
+            method_context = def_context(node, context)
+            walk_children(node.parameters, prefix, body, true, method_context)
+            walk_children(node.body, prefix, body, true, method_context)
           else
             return false
           end
@@ -103,19 +107,29 @@ module Rigor
         def walk_block_call(node, prefix, body, in_def, context)
           walk(node.receiver, prefix, body, in_def, context) if node.receiver
           walk_children(node.arguments, prefix, body, in_def, context)
-          block_context = RefineSelf.block(context, node, eval_receiver_name(node, prefix, context))
+          eval_names = RefineSelf.eval_receiver_names(node, prefix, context)
+          block_context = RefineSelf.block(context, node, eval_names) do |receiver|
+            literal_bound?(receiver, prefix, node.block)
+          end
           walk_children(node.block, prefix, body, in_def || RefineSelf.method_block?(node), block_context)
         end
 
-        # The module a `*_eval` / `*_exec` call's constant receiver names, resolved as the method walk resolves it
-        # (`ScopeIndexer.eval_receiver_prefix`), or nil.
-        def eval_receiver_name(node, prefix, context)
-          return nil unless RefineCensus::SELF_EVAL_CALLS.include?(node.name) && !RefineCensus.self_call?(node)
+        # Does every binding of the constant, local or instance variable `receiver` in this file give it a literal
+        # (`RefineSelf.literal_bindings`, worked out once per file)? Asked only for a `block` whose text names `refine`
+        # or opens a heredoc: no other block can hold a `refine`-shaped node, so its context is never read, and the
+        # unnamed module it then runs on is the declining answer anyway.
+        def literal_bound?(receiver, prefix, block)
+          return false unless refine_text_in?(block)
 
-          here = context.here
-          self_prefix = here.is_a?(String) && here != RefineCensus.wildcard ? here.split("::") : []
-          resolved = ScopeIndexer.eval_receiver_prefix(node, self_prefix, prefix, unnameable_self: self_prefix.empty?)
-          resolved.join("::") unless resolved.nil? || resolved.empty?
+          key = RefineSelf.binding_key(receiver, prefix)
+          !key.nil? && (@literal_bindings ||= RefineSelf.literal_bindings(@root)).include?(key)
+        end
+
+        # The census's cost gate (`MethodTables#refine_in?`) over `node`'s text: a `refine` word or a heredoc opener.
+        def refine_text_in?(node)
+          location = node.location
+          (@refine_offsets ||= [ScopeIndexer.refine_word_offsets(@root), ScopeIndexer.heredoc_offsets(@root)])
+            .any? { |offsets| ScopeIndexer.offset_in?(offsets, location.start_offset, location.end_offset) }
         end
 
         # ADR-121 WD7 — what the census reads back for a `refine`-shaped node.
@@ -153,16 +167,16 @@ module Rigor
         def record_call(node, prefix, body, in_def, context)
           record_refine_string_contexts(node, context)
           record_refine_context(node, context) if node.name == :refine
-          owner = RefineSelf.charged_module(context)
-          owner = nil if owner == RefineCensus.wildcard
+          owners = RefineSelf.charged_modules(context)
+          owners = nil if owners.include?(RefineCensus.wildcard)
           if context.here == RefineSelf::CLASS && ScopeIndexer.refine_call?(node)
             record_class_body_refine(node)
           elsif (target = ScopeIndexer.refine_target(node))
-            record_refine_block(node, owner, ScopeIndexer.constant_receiver_candidates(target, prefix))
+            record_refine_block(node, owners, ScopeIndexer.constant_receiver_candidates(target, prefix))
           elsif ScopeIndexer.refine_call?(node)
             # ADR-121 WD7 — a target the walk cannot name (`refine(k)`): the block is still a refine body, in effect
             # inside itself, with no class to file its defs under.
-            record_refine_block(node, owner, EMPTY)
+            record_refine_block(node, owners, EMPTY)
           elsif using_call?(node) && !in_def
             record_using(node, prefix, body)
           elsif node.name == :refined
@@ -214,20 +228,21 @@ module Rigor
                                          refine_block: false)
         end
 
-        def record_refine_block(node, owner, targets)
+        # `owners` are the refining module's names (several where its spelling can denote several), or nil.
+        def record_refine_block(node, owners, targets)
           start, stop = span_of(node.block)
-          @activations << Activation.new(order: start, start: start, stop: stop, names: owner && [owner],
-                                         expand: false, refine_block: true)
+          @activations << Activation.new(order: start, start: start, stop: stop, names: owners, expand: false,
+                                         refine_block: true)
           body = node.block.body
           return if body.nil?
 
           ScopeIndexer.each_refinement_def(body) { |def_node| @refinement_defs << def_node.location.start_offset }
-          return if owner.nil? || targets.empty?
+          return if owners.nil? || targets.empty?
 
           # ADR-121 WD7 (issue #1799) — a `def`, and an alias of a `def` the body wrote earlier; a later definer with no
           # body (`define_method`, `attr_*`, `undef`) clears the name, which then types as `Dynamic[top]`.
           RefineCensus.read_body(body).defs.each do |name, def_node|
-            @refine_defs.record(owner, targets, name, def_node, @nesting)
+            owners.each { |owner| @refine_defs.record(owner, targets, name, def_node, @nesting) }
           end
         end
 

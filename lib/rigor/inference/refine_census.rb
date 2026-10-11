@@ -177,11 +177,8 @@ module Rigor
 
       def record_undef(node, reading, latest)
         node.names.each do |name|
-          if name.is_a?(Prism::SymbolNode)
-            record_bodiless(name.unescaped.to_sym, reading, latest)
-          else
-            reading.complete = false
-          end
+          symbol = literal_name(name)
+          symbol ? record_bodiless(symbol, reading, latest) : reading.complete = false
         end
       end
 
@@ -229,8 +226,13 @@ module Rigor
           argument.is_a?(Prism::CallNode)
       end
 
+      # A literal's name, or nil for none and for bytes no Symbol holds: `define_method("\xff")` raises
+      # EncodingError on Ruby 4.0.5, so the body is not read.
       def literal_name(node)
-        node.unescaped&.to_sym if node.is_a?(Prism::SymbolNode) || node.is_a?(Prism::StringNode)
+        return nil unless node.is_a?(Prism::SymbolNode) || node.is_a?(Prism::StringNode)
+
+        name = node.unescaped
+        name.to_sym if name&.valid_encoding?
       end
     end
   end

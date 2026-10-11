@@ -20,7 +20,10 @@ module Rigor
       # the names a constant's spelling can denote (an Array, innermost first, for a module only another file may
       # declare), the wildcard (a module the walk cannot name), {CLASS}, {MAIN} or {ANONYMOUS}. `deferred` is true
       # inside a method body (a `def`, a `define_method` block), where a `refine` runs only once the method is called.
-      Context = Data.define(:here, :literal, :instance, :singleton, :deferred)
+      # `own_method` is true inside a singleton `def` of a module the walk names ({.def_body}), and in the blocks that
+      # keep its `self`: `here` is then that module itself, so a `refine X do … end` written there refines X for it
+      # once the method is called, and the census records its rows where it would otherwise charge a wildcard.
+      Context = Data.define(:here, :literal, :instance, :singleton, :deferred, :own_method)
       # A plain class, or an instance of one: `Class` undefines `refine`, so a `refine` there is the class's own
       # method (#1689) and a `:refine` literal is data.
       CLASS = :class
@@ -72,8 +75,9 @@ module Rigor
       # A body whose `self` the walk cannot name.
       def unknown = context(wildcard, wildcard, wildcard)
 
-      def context(here, instance, singleton, deferred: false, literal: here)
-        Context.new(here: here, literal: literal, instance: instance, singleton: singleton, deferred: deferred)
+      def context(here, instance, singleton, deferred: false, literal: here, own_method: false)
+        Context.new(here: here, literal: literal, instance: instance, singleton: singleton, deferred: deferred,
+                    own_method: own_method)
       end
 
       # A `module` body (or a `Module.new` block) of the module `name` (nil when the walk cannot name it, or
@@ -102,6 +106,23 @@ module Rigor
         context(singleton ? parent.singleton : parent.instance, wildcard, wildcard, deferred: true)
       end
 
+      # A `def` body, as {.method_body} gives it, and `own_method` where the method is a singleton method of a module
+      # the walk names: `def self.x`, or a `def` written in that module's `class << self` (`parent.instance` is the
+      # module there). `self` is then the module itself, whichever way the method is called, so a `refine` in it
+      # refines for that module; Ruby runs the same `refine` on whatever module extends the owner for an instance
+      # `def`, whose `parent.instance` is the wildcard. `spelled_self` is false for a `def` whose receiver is a
+      # constant (`def M.x`), which names the module by its last segment only.
+      def def_body(parent, singleton, spelled_self: true)
+        context = method_body(parent, singleton)
+        return context unless spelled_self && named_module?(context.here)
+
+        context.with(own_method: true)
+      end
+
+      # A module name the walk can charge a `refine` to: not the wildcard, {CLASS}, {MAIN} or {ANONYMOUS}, and not the
+      # several names a constant's spelling can denote.
+      def named_module?(here) = here.is_a?(String) && here != wildcard
+
       # The context inside the block of `node` (a block-carrying call, or a lambda) written in `parent`. `eval_names`
       # are the modules a `*_eval` / `*_exec` call's constant receiver may name ({.eval_receiver_names}), or nil; the
       # given block answers whether a constant, local or instance variable receiver holds a literal ({.keeps_self?}).
@@ -113,7 +134,7 @@ module Rigor
       # top level may run under any `self`.
       def block(parent, node, eval_names, &)
         return unknown if node.is_a?(Prism::LambdaNode)
-        return parent if node.name == :refine
+        return refinement_body(parent) if node.name == :refine
         return eval_body(parent, node, eval_names) if RefineCensus::SELF_EVAL_CALLS.include?(node.name)
         return meta_new_body(node) if ScopeIndexer.meta_new_constant_rvalue?(node)
         return unknown if parent.here == MAIN
@@ -124,6 +145,16 @@ module Rigor
       end
 
       def method_block?(node) = METHOD_BLOCK_CALLS.include?(node.name) && RefineCensus.self_call?(node)
+
+      # The block of a `refine` call: a `refine` written in it (a nested one) is charged where the call is, but `self`
+      # is the refinement, so a method defined in it is defined on a module the walk cannot name, not on the module
+      # around.
+      def refinement_body(parent)
+        parent.with(instance: refinement_side(parent.instance), singleton: refinement_side(parent.singleton),
+                    own_method: false)
+      end
+
+      def refinement_side(side) = side.is_a?(String) || side.is_a?(Array) ? wildcard : side
 
       def meta_new_body(node)
         ScopeIndexer.module_new_call?(node) ? module_body(ANONYMOUS) : class_body(false)

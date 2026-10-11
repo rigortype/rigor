@@ -86,13 +86,15 @@ module Rigor
         end
 
         # A `def` on no receiver is an instance method, `def self.x` (or `def M.x` inside `module M`) a singleton one;
-        # one on any other object is defined on something the walk cannot name.
+        # one on any other object is defined on something the walk cannot name. A singleton method of a module the
+        # walk names (`def self.x`, a `def` in its `class << self`) runs on that module itself
+        # ({RefineSelf.def_body}), so a `refine` in it activates and records for that module.
         def def_context(node, context)
           receiver = node.receiver
-          return RefineSelf.method_body(context, false) if receiver.nil?
-          return RefineSelf.method_body(context, true) if lexical_self_receiver?(receiver, context)
+          return RefineSelf.def_body(context, false) if receiver.nil?
+          return RefineSelf.unknown.with(deferred: true) unless lexical_self_receiver?(receiver, context)
 
-          RefineSelf.unknown.with(deferred: true)
+          RefineSelf.def_body(context, true, spelled_self: receiver.is_a?(Prism::SelfNode))
         end
 
         def lexical_self_receiver?(receiver, context)

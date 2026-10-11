@@ -3612,11 +3612,38 @@ module Rigor
         when Prism::DefNode, Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode
           refine_body = false
         when Prism::CallNode
+          if (target = own_method_refine_target(node, tables))
+            return record_own_method_refine(node, target, qualified_prefix, tables)
+          end
+
           census_call(node, qualified_prefix, tables, refine_body)
         when Prism::SymbolNode
           census_symbol(node, tables)
         end
         node.rigor_each_child { |child| census_scan(child, qualified_prefix, tables, refine_body: refine_body) }
+      end
+
+      # ADR-121 WD7 (issue #1749) — the target of a canonical `refine X do … end` ({#refine_target}) in a module's own
+      # singleton method (`def self.x`, a `def` in the module's `class << self`, or a block there that keeps `self`),
+      # else nil. `self` is the module itself there, so the call refines X for it once the method is called. Anything
+      # else in a method body (an instance `def`, a `define_method` or `define_singleton_method` block, a computed
+      # target, a block that may rebind `self`) charges a targets-wildcard in {#census_call}, and a `refine` in a refine
+      # body is nested there, whichever method it sits in: its context ({RefineSelf.refinement_body}) is not an
+      # own method's.
+      def own_method_refine_target(node, tables)
+        return nil if node.name != :refine
+
+        target = tables.refine_target_of(node)
+        target if target && tables.refine_context(node).own_method
+      end
+
+      # Records `node` as the refine of its module, as a `refine` in the module body is recorded, with the refined
+      # class marked as that one is ({#record_refinement}). The call's block is scanned here, so {#census_scan} does
+      # not descend into it.
+      def record_own_method_refine(node, target, qualified_prefix, tables)
+        record_refinement(node, qualified_prefix, tables)
+        owners = RefineSelf.charged_modules(tables.refine_context(node))
+        record_refinement_defs(node, target, qualified_prefix, owners, tables)
       end
 
       def census_call(node, qualified_prefix, tables, refine_body)

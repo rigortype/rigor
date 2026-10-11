@@ -485,15 +485,31 @@ RSpec.describe Rigor::Inference::InEffectRefinements do
         .to eq([false, false, false, false, true, true])
     end
 
-    # Ruby 4.0.5: `def self.setup = refine(String) { … }` refines for `M`; `def setup` there refines for whichever
+    # Ruby 4.0.5: `def self.setup(k) = refine(k) { … }` refines for `M`; `def setup` there refines for whichever
     # module extends `M` and calls it, so the walk cannot name the module and every module may be the one.
     it "treats a module with an unreadable refine as opaque, and every module under an unattributable one" do
       tail = "\nend\nmodule P; end\n:probe\n"
-      self_setup, = scope_at_last("module M\n  def self.setup = refine(String) { def x = 1 }#{tail}")
+      self_setup, = scope_at_last("module M\n  def self.setup(k) = refine(k) { def x = 1 }#{tail}")
       instance_setup, = scope_at_last("module M\n  def setup = refine(String) { def x = 1 }#{tail}")
 
       expect(%w[M P].map { |name| described_class.opaque_module?(self_setup, name) }).to eq([true, false])
       expect(%w[M P].map { |name| described_class.opaque_module?(instance_setup, name) }).to eq([true, true])
+    end
+
+    # Ruby 4.0.5: `M.setup; using M; "a".yy` answers `1` for `def self.setup` and for a `def` in `class << self`
+    # (#1749), so the table holds the module's rows and it is no more opaque than a module whose body says `refine`.
+    it "keeps a module known whose singleton method refines a class it names" do
+      tail = "\nend\nmodule P; end\n:probe\n"
+      sources = {
+        "def self.setup" => "module M\n  def self.setup = refine(String) { def x = 1 }#{tail}",
+        "class << self" => "module M\n  class << self\n    def setup = refine(String) { def x = 1 }\n  end#{tail}"
+      }
+
+      sources.each do |shape, source|
+        scope, = scope_at_last(source)
+
+        expect(%w[M P].map { |name| described_class.opaque_module?(scope, name) }).to eq([false, false]), shape
+      end
     end
 
     it "gives the check rules' list and the typer's list the same entries" do

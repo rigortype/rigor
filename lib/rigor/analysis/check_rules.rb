@@ -317,9 +317,9 @@ module Rigor
           nil_receiver_diagnostic(path, node, scope_index, lexical_sites),
           dump_type_diagnostic(path, node, scope_index),
           assert_type_diagnostic(path, node, scope_index),
-          always_raises_diagnostic(path, node, scope_index),
+          always_raises_diagnostic(path, node, scope_index, lexical_sites),
           raise_non_exception_diagnostic(path, node, scope_index),
-          visibility_mismatch_diagnostic(path, node, scope_index)
+          visibility_mismatch_diagnostic(path, node, scope_index, lexical_sites)
         ].compact
       end
 
@@ -1985,12 +1985,20 @@ module Rigor
           return nil unless Rigor::Reflection.rbs_class_known?("NilClass", scope: scope)
 
           return nil unless nil_bearing_union_witnesses?(receiver_type, call_node.name, scope)
-          # Issue #1703 — a `nil` that only a `key?` guard on the same receiver and key rules out. Asked last: it
-          # re-walks the file once with guards on, and only to withhold this report.
-          return nil if Inference::KeyPresenceGuard.withholds_nil?(call_node, receiver_type, lexical_sites&.root,
-                                                                   scope_index)
+          return nil if nil_receiver_withheld?(call_node, receiver_type, scope, scope_index, lexical_sites)
 
           build_nil_receiver_diagnostic(path, call_node)
+        end
+
+        # The declines `call.possible-nil-receiver` asks only once a report would fire.
+        def nil_receiver_withheld?(call_node, receiver_type, scope, scope_index, lexical_sites)
+          # Issue #1703 — a `nil` that only a `key?` guard on the same receiver and key rules out. It re-walks the file
+          # once with guards on, and only to withhold this report.
+          return true if Inference::KeyPresenceGuard.withholds_nil?(call_node, receiver_type, lexical_sites&.root,
+                                                                    scope_index)
+
+          # ADR-121 WD7 — a refinement of `NilClass` (or one Rigor cannot read) in effect may define the name.
+          refined_method_in_effect?("NilClass", call_node, scope, :instance, lexical_sites)
         end
 
         # The receiver-type half of the rule, factored out of the node-shape
@@ -2313,8 +2321,12 @@ module Rigor
         INTEGER_RAISING_OPERATORS = %i[/ % div modulo divmod].freeze
         private_constant :INTEGER_RAISING_OPERATORS
 
-        def always_raises_diagnostic(path, call_node, scope_index)
+        def always_raises_diagnostic(path, call_node, scope_index, lexical_sites = nil)
           return nil unless integer_zero_division?(call_node, scope_index)
+
+          # ADR-121 WD7 — a refinement of `Integer`'s operator (or one Rigor cannot read) in effect may not raise.
+          scope = scope_index[call_node]
+          return nil if refined_method_in_effect?("Integer", call_node, scope, :instance, lexical_sites)
 
           build_always_raises_diagnostic(path, call_node)
         end
@@ -2798,7 +2810,7 @@ module Rigor
         # - Issue #1568 — a module the class PREPENDS sits ahead of it in Ruby's order, so a definition there
         #   is what the call reaches; the class's own private `def` answers only when nothing prepended
         #   defines the name ({#reached_definer_visibility}).
-        def visibility_mismatch_diagnostic(path, call_node, scope_index)
+        def visibility_mismatch_diagnostic(path, call_node, scope_index, lexical_sites = nil)
           return nil unless explicit_non_self_receiver?(call_node.receiver)
 
           scope = scope_index[call_node]
@@ -2817,6 +2829,8 @@ module Rigor
           reached = reached_definer_visibility(scope, receiver_type.class_name, call_node.name)
           return nil if reached == :undecided
           return nil unless reached.nil? || reached == :private
+          # ADR-121 WD7 — a refinement in effect (or one Rigor cannot read) may redefine the method, public.
+          return nil if refined_method_in_effect?(receiver_type.class_name, call_node, scope, :instance, lexical_sites)
 
           build_visibility_mismatch_diagnostic(path, call_node, receiver_type)
         end

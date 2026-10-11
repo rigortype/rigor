@@ -1056,6 +1056,29 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
       )
     end
 
+    # R2-S3: `call.possible-nil-receiver`, `def.method-visibility-mismatch` and `flow.always-raises` ask the refinement
+    # predicate too. Ruby 4.0.5 prints `:nil_up`, `:public_secret` and `:no_raise` under a `using` of the module (read
+    # from outside the analysed paths or from the project alike), and raises for each call in `plain.rb`.
+    it "declines a nil receiver's, a private method's and a zero division's report a refinement in effect may answer" do
+      write("lib/foo.rb", "class Foo\n  private\n\n  def secret = 1\nend\n")
+      refinement = "refine(NilClass) { def upcase = :nil_up }\n  refine(Foo) { def secret = :public_secret }\n  " \
+                   "refine(Integer) { def /(other) = :no_raise }\n"
+      calls = "x = ARGV.empty? ? nil : \"a\"\np x.upcase\np Foo.new.secret\np 1 / 0\n"
+      write("outside/gemref.rb", "module GemRef\n  #{refinement}end\n")
+      write("lib/opaque.rb", "$LOAD_PATH.unshift(File.join(__dir__, \"..\", \"outside\"))\nrequire \"gemref\"\n" \
+                             "using GemRef\n#{calls}")
+      write("lib/readable.rb", "module R\n  #{refinement}end\nusing R\n#{calls}")
+      write("lib/plain.rb", calls)
+
+      rules = %w[call.possible-nil-receiver def.method-visibility-mismatch flow.always-raises]
+      rows = diagnostics.select { |d| rules.include?(d.qualified_rule) }
+                        .map { |d| [File.basename(d.path.to_s), d.line, d.qualified_rule] }.sort
+      expect(rows).to eq(
+        [["plain.rb", 2, "call.possible-nil-receiver"], ["plain.rb", 3, "def.method-visibility-mismatch"],
+         ["plain.rb", 4, "flow.always-raises"]]
+      )
+    end
+
     # Critique F5a. Ruby 4.0.5 prints `:via_alias` (`rb/p4_alias_refine.rb`).
     it "declines under a module that refines through an alias of `refine`" do
       write("lib/m.rb", <<~RUBY)

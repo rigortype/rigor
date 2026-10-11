@@ -130,8 +130,11 @@ RSpec.describe Rigor::Inference::InEffectRefinements do
           Named = Module.new do
             refine(String) { :named }
           end
-          [1].each do
+          configure do
             refine(String) { :blocked }
+          end
+          [1].each do
+            refine(String) { :literal_receiver }
           end
           Shape = Struct.new(:a) do
             refine(String) { :struct }
@@ -141,6 +144,8 @@ RSpec.describe Rigor::Inference::InEffectRefinements do
 
       expect(refinements.at(":named")).to eq(%w[Outer::Named])
       expect(refinements.at(":blocked")).to eq([unknown])
+      # ADR-121 WD7 — a call on a literal never rebinds `self` in its block, so the module is still `Outer`.
+      expect(refinements.at(":literal_receiver")).to eq(%w[Outer])
       # Issue #1689 — a `Struct.new` block's `self` is a class, so its `refine` is not `Module#refine`.
       expect(refinements.at(":struct")).to eq([])
     end
@@ -155,8 +160,11 @@ RSpec.describe Rigor::Inference::InEffectRefinements do
             class << self
               refine(String) { :in_singleton }
             end
-            [1].each do
+            configure do
               refine(String) { :in_block }
+            end
+            [1].each do
+              refine(String) { :literal_block }
             end
           end
           Made = Class.new do
@@ -187,6 +195,8 @@ RSpec.describe Rigor::Inference::InEffectRefinements do
         expect(%w[:in_class :in_singleton :class_new :anonymous :data].map { |marker| at.at(marker) }).to all(eq([]))
         # A block may run under another `self`, so a `refine` in one stays a refine block of an unnamed module.
         expect(at.at(":in_block")).to eq([unknown])
+        # ADR-121 WD7 — a call on a literal keeps `self`, the class, so its block's `refine` is the class's own too.
+        expect(at.at(":literal_block")).to eq([])
         expect(at.at(":in_module")).to eq(%w[Shout])
       end
 
@@ -194,8 +204,8 @@ RSpec.describe Rigor::Inference::InEffectRefinements do
         answers = calls.to_h { |call| [call.block.body.body.first.slice[/:\w+/], refinements.class_body_refine?(call)] }
 
         expect(answers).to eq(
-          ":in_class" => true, ":in_singleton" => true, ":in_block" => false, ":class_new" => true,
-          ":anonymous" => true, ":data" => true, ":in_module" => false
+          ":in_class" => true, ":in_singleton" => true, ":in_block" => false, ":literal_block" => true,
+          ":class_new" => true, ":anonymous" => true, ":data" => true, ":in_module" => false
         )
         expect(refinements.refinement_def?(calls.first.block.body.body.first)).to be(false)
       end
@@ -415,6 +425,94 @@ RSpec.describe Rigor::Inference::InEffectRefinements do
       call = root.statements.body.last.body.body.last
 
       expect(index[call].in_effect_refinements(call).last).to eq("Box::Inner")
+    end
+  end
+
+  # ADR-121 WD7 — which modules a `using` puts in the list, and which of them the readers treat as opaque.
+  describe "declared candidates and opaque modules" do
+    def scope_at_last(source)
+      root = Prism.parse(source).value
+      index = Rigor::Inference::ScopeIndexer.index(root, default_scope: Rigor::Scope.empty)
+      call = root.compact_child_nodes.first.body.last
+      call = call.body.body.last while call.is_a?(Prism::ModuleNode)
+      [index[call], call, root]
+    end
+
+    # Critique F1, on Ruby 4.0.5: with a top-level `Bar` refining `String#center` and a `Foo::Bar` declared in another
+    # file, `module Foo; using Bar; "x".center(1, 2, 3); end` prints `:bar` when `foo.rb` is required first and raises
+    # `ArgumentError` when `foo_bar.rb` is, so which `Bar` the `using` names is not a fact and both stay listed.
+    it "keeps every declared candidate, drops undeclared ones, and lets an undeclared spelling enter alone" do
+      scope, call, = scope_at_last(<<~RUBY)
+        module Ext; refine(String) { def shout = 1 }; end
+        module Bar; refine(String) { def w = 1 }; end
+        module Foo
+          module Bar; refine(String) { def w = 2 }; end
+          using Ext
+          using Bar
+          using GemRef
+          "x".w
+        end
+      RUBY
+
+      expect(scope.in_effect_refinements(call)).to eq(%w[Ext Bar Foo::Bar GemRef])
+    end
+
+    it "drops a core module a `using`'d module includes, and lists any other module it includes but no file declares" do
+      scope, call, = scope_at_last(<<~RUBY)
+        module A
+          include Comparable
+          include Helpers
+          refine(String) { def shout = 1 }
+        end
+        using A
+        "x".shout
+      RUBY
+
+      expect(scope.in_effect_refinements(call)).to eq(%w[Helpers A])
+    end
+
+    it "treats a module no file declares as opaque, and a project or core module as not" do
+      scope, = scope_at_last(<<~RUBY)
+        module Ext; refine(String) { def shout = 1 }; end
+        module Plain; end
+        Object.const_set(:Made, Module.new)
+        :probe
+      RUBY
+
+      expect(%w[Ext Plain Comparable Kernel GemRef Made].map { |name| described_class.opaque_module?(scope, name) })
+        .to eq([false, false, false, false, true, true])
+    end
+
+    # Ruby 4.0.5: `def self.setup = refine(String) { … }` refines for `M`; `def setup` there refines for whichever
+    # module extends `M` and calls it, so the walk cannot name the module and every module may be the one.
+    it "treats a module with an unreadable refine as opaque, and every module under an unattributable one" do
+      tail = "\nend\nmodule P; end\n:probe\n"
+      self_setup, = scope_at_last("module M\n  def self.setup = refine(String) { def x = 1 }#{tail}")
+      instance_setup, = scope_at_last("module M\n  def setup = refine(String) { def x = 1 }#{tail}")
+
+      expect(%w[M P].map { |name| described_class.opaque_module?(self_setup, name) }).to eq([true, false])
+      expect(%w[M P].map { |name| described_class.opaque_module?(instance_setup, name) }).to eq([true, true])
+    end
+
+    it "gives the check rules' list and the typer's list the same entries" do
+      scope, call, root = scope_at_last(<<~RUBY)
+        module Bar; include Helpers; refine(String) { def w = 1 }; end
+        module Foo
+          module Bar; refine(String) { def w = 2 }; end
+          using Bar
+          using GemRef
+          "x".w
+        end
+      RUBY
+      stamped = scope.discovery.in_effect_refinements
+      offset = call.location.start_offset
+      own = Rigor::Analysis::CheckRules::LexicalMethodSites.new(root).refinements
+      shared = Rigor::Analysis::CheckRules::LexicalMethodSites.new(root, stamped).refinements
+
+      typer = scope.in_effect_refinements(call, described_class::EMPTY)
+      expect(typer).to eq(%w[Helpers Bar Foo::Bar GemRef])
+      expect(described_class.lexical_list(scope, own, offset)).to eq(typer)
+      expect(described_class.lexical_list(scope, shared, offset)).to eq(typer)
     end
   end
 end

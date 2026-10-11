@@ -300,7 +300,9 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::Walker do
         expect(outcome.refinements).to eq({})
       end
 
-      it "walks a computed `refine` target generically, as before" do
+      # ADR-121 WD7 — the block still walks generically, as before; its names now also go under the wildcard class,
+      # as the project walk records them, because the class it refines cannot be named.
+      it "walks a computed `refine` target generically, and records its names under the wildcard class" do
         outcome = walk_source(<<~RUBY)
           module Shouty
             refine(target_class) { def shout = nil }
@@ -308,7 +310,24 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::Walker do
         RUBY
 
         expect(outcome.catalog.keys).to eq([["Shouty", :shout]])
-        expect(outcome.refinements).to eq({})
+        wildcard = Rigor::Scope::DiscoveryIndex::REFINEMENT_WILDCARD
+        expect(outcome.refinements).to eq({ wildcard => { shout: ["Shouty"] } })
+      end
+
+      it "records a names-wildcard row for a gem refine body it cannot fully read, as the project walk does" do
+        outcome = walk_source(<<~RUBY)
+          module Shouty
+            refine String do
+              def shout = nil
+              alias_method :yell, :shout
+              import_methods Helpers
+            end
+          end
+        RUBY
+
+        wildcard = Rigor::Scope::DiscoveryIndex::REFINEMENT_WILDCARD
+        rows = { shout: ["Shouty"], yell: ["Shouty"], wildcard => ["Shouty"] }
+        expect(outcome.refinements).to eq({ "Shouty::String" => rows, "String" => rows })
       end
 
       it "records nothing for a `refine` with no enclosing module" do

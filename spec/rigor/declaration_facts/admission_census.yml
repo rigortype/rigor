@@ -39,6 +39,7 @@ members:
     - lib/rigor/analysis/check_rules/source_arity.rb
     - lib/rigor/analysis/runner.rb
     - lib/rigor/analysis/template_units.rb
+    - lib/rigor/inference/in_effect_refinements/scope_reads.rb
     - lib/rigor/inference/last_line/implicit_self.rb
     - lib/rigor/inference/method_dispatcher/singleton_mixin_dispatch.rb
     - lib/rigor/inference/narrowing.rb

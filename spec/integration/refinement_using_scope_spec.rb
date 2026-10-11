@@ -493,10 +493,16 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
         expect(undefined_rows).to eq([])
       end
 
-      # `Helpers` is declared by no file on the first run, so it sits on `C`'s chain as an external entry.
+      # `Helpers` is declared by no file on the first run, so it sits on `C`'s chain as an external entry. ADR-121 WD7:
+      # such a module may refine anything (it reported before), so the first run is silent; a new file declaring
+      # `Helpers` with no refinement makes it known, and `shout` reports again.
       it "re-checks the `using` file under --incremental when a new file declares an included module" do
         write_project("  include Helpers\n")
-        expect(incremental_rows(%w[lib])).to eq([shout_fires, false])
+        expect(incremental_rows(%w[lib])).to eq([[], false])
+
+        write("lib/helpers.rb", "module Helpers\nend\n")
+        expect(incremental_rows(%w[lib])).to eq([shout_fires, true])
+        expect(undefined_rows).to eq(shout_fires)
 
         write("lib/helpers.rb", "module Helpers\n  include A\nend\n")
         expect(incremental_rows(%w[lib])).to eq([[], true])
@@ -593,6 +599,500 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
 
       expect(cold).to eq([["plain.rb", 1, "call.argument-type-mismatch"]])
       expect(warm).to eq(cold)
+    end
+  end
+
+  # ADR-121 WD7 — the refinement table records what it could not read, and a module whose refinements Rigor cannot
+  # read is opaque, so a decline follows from a row or from a module no file declares, never from a missing row. Every
+  # reported line raises on Ruby 4.0.5. A silent line runs there, or sits under an opaque module, whose refinements
+  # Rigor cannot read and which may therefore refine it (the decline is the possibility, not Ruby's answer for the
+  # fixture's own module).
+  describe "a refinement Rigor cannot read (ADR-121 WD7)" do
+    let(:call_rules) { %w[call.undefined-method call.wrong-arity call.argument-type-mismatch] }
+
+    # Issue #1799: one refining module per definer shape.
+    let(:definer_shapes) do
+      <<~RUBY
+        module Helper; def chop(a, b, c) = :im; end
+        module ByAliasMethod
+          refine(String) do
+            def c3(a, b, c) = :alias_method
+            alias_method :center, :c3
+          end
+        end
+        module ByAlias
+          refine(String) do
+            def c3(a, b, c) = :alias
+            alias center c3
+          end
+        end
+        module ByDefineMethod
+          refine(String) { define_method(:center) { |a, b, c| :dm } }
+        end
+        module ByImport
+          refine(String) { import_methods Helper }
+        end
+        module ByComputedName
+          name = :center
+          refine(String) { define_method(name) { |a, b, c| :computed } }
+        end
+      RUBY
+    end
+
+    # `[file basename, line, rule]` for every call-check diagnostic in `lib/`, sorted.
+    def call_rows
+      diagnostics.select { |d| call_rules.include?(d.qualified_rule) }
+                 .map { |d| [File.basename(d.path.to_s), d.line, d.qualified_rule] }
+                 .sort
+    end
+
+    # Issue #1796. Ruby 4.0.5 prints `:gem`; `b.rb`, with no `using`, raises `ArgumentError (given 3, expected 1..2)`.
+    it "declines every call under a `using` of a module required from outside the analysed paths" do
+      write("outside/gemref.rb", "module GemRef; refine(String) { def center(a, b, c) = :gem }; end\n")
+      write("lib/a.rb", <<~RUBY)
+        $LOAD_PATH.unshift(File.join(__dir__, "..", "outside"))
+        require "gemref"
+        using GemRef
+        p "s".center(1, 2, 3)
+        p "s".nope_anything
+        p :sym.center(1, 2, 3)
+        p Integer.oo
+      RUBY
+      write("lib/b.rb", "p \"s\".center(1, 2, 3)\n")
+
+      expect(call_rows).to eq([["b.rb", 1, "call.wrong-arity"]])
+    end
+
+    # Issue #1799, one refining module per shape so no row masks another. Ruby 4.0.5 prints `:alias_method`,
+    # `:alias`, `:dm`, `:im` and `:computed` for the five refined calls, and raises `ArgumentError` for each
+    # `ljust(1, 2, 3)` / `succ(2)` control and for `center(1, 2, 3)` with no `using`.
+    it "declines a name a refine body defines by alias, alias_method, define_method or import_methods" do
+      write("lib/ext.rb", definer_shapes)
+      %w[ByAliasMethod ByAlias ByDefineMethod].each do |mod|
+        write("lib/#{mod.downcase}.rb", "using #{mod}\n\"x\".center(1, 2, 3)\n\"x\".ljust(1, 2, 3)\n")
+      end
+      write("lib/byimport.rb", "using ByImport\n\"x\".chop(1, 2, 3)\n1.succ(2)\n")
+      write("lib/bycomputedname.rb", "using ByComputedName\n\"x\".center(1, 2, 3)\n1.succ(2)\n")
+      write("lib/plain.rb", "\"x\".center(1, 2, 3)\n")
+
+      expect(call_rows).to eq(
+        [["byalias.rb", 3, "call.wrong-arity"], ["byaliasmethod.rb", 3, "call.wrong-arity"],
+         ["bycomputedname.rb", 3, "call.wrong-arity"], ["bydefinemethod.rb", 3, "call.wrong-arity"],
+         ["byimport.rb", 3, "call.wrong-arity"], ["plain.rb", 1, "call.wrong-arity"]]
+      )
+    end
+
+    # Round 3 of #1793's review. Ruby 4.0.5 prints `:each_target` and `:alias_target` (`refine_census_spec.rb`).
+    it "declines a refined name whose target the walk cannot name, on any receiver" do
+      write("lib/ext.rb", <<~RUBY)
+        K = String
+        module ByEach
+          [String].each { |k| refine(k) { def center(a, b, c) = :each_target } }
+        end
+        module ByAlias
+          refine(K) { def ljust(a, b, c) = :alias_target }
+        end
+      RUBY
+      write("lib/use.rb", <<~RUBY)
+        using ByEach
+        using ByAlias
+        "x".center(1, 2, 3)
+        "x".ljust(1, 2, 3)
+        "x".rjust(1, 2, 3)
+      RUBY
+
+      expect(call_rows).to eq([["use.rb", 5, "call.wrong-arity"]])
+    end
+
+    # A6. Ruby 4.0.5 prints `:or_assign` and `:const_set_target`.
+    it "declines a refined name whose target the file binds by ||= or a literal const_set" do
+      write("lib/ext.rb", <<~RUBY)
+        K ||= String
+        Object.const_set(:L, String)
+        module ByOrAssign
+          refine(K) { def center(a, b, c) = :or_assign }
+        end
+        module ByConstSet
+          refine(L) { def ljust(a, b, c) = :const_set_target }
+        end
+      RUBY
+      write("lib/use.rb", "using ByOrAssign\nusing ByConstSet\n\"x\".center(1, 2, 3)\n\"x\".ljust(1, 2, 3)\n" \
+                          "\"x\".rjust(1, 2, 3)\n")
+
+      expect(call_rows).to eq([["use.rb", 5, "call.wrong-arity"]])
+    end
+
+    # Ruby 4.0.5 prints `:c`: a refine block is in effect inside itself whatever its target, and its class-unknown row
+    # reaches the String receiver there.
+    it "is in effect inside its own refine block whose target the walk cannot name" do
+      write("lib/m.rb", <<~RUBY)
+        module M
+          [String].each do |k|
+            refine(k) do
+              def center(a, b, c) = :c
+              def twice = "x".center(1, 2, 3)
+            end
+          end
+        end
+        "x".center(1, 2, 3)
+      RUBY
+
+      expect(call_rows).to eq([["m.rb", 9, "call.wrong-arity"]])
+    end
+
+    # Ruby 4.0.5 raises `NoMethodError` for `String.make` before the `using`, prints `:made` after it, and raises for
+    # `String.nope`: a class-unknown row reaches a class object, for its own names only.
+    it "declines a class object's call a refinement whose target the walk cannot name defines" do
+      write("lib/m.rb", <<~RUBY)
+        module M
+          [String.singleton_class].each { |k| refine(k) { def make = :made } }
+        end
+        String.make
+        using M
+        String.make
+        String.nope
+      RUBY
+
+      expect(call_rows).to eq([["m.rb", 4, "call.undefined-method"], ["m.rb", 7, "call.undefined-method"]])
+    end
+
+    # Round 2 of #1793's review. Ruby 4.0.5 prints `:vendored`.
+    it "declines under a `using` of a module that includes a module declared outside the analysed paths" do
+      write("vendor/b.rb", "module B; refine(String) { def center(a, b, c) = :vendored }; end\n")
+      write("lib/a.rb", <<~RUBY)
+        require_relative "../vendor/b"
+        module A
+          include B
+        end
+        using A
+        p "s".center(1, 2, 3)
+      RUBY
+
+      expect(call_rows).to eq([])
+    end
+
+    # Ruby 4.0.5 prints `:ext` and raises `NoMethodError` for both `nope` calls.
+    it "keeps checking under a `using` of a project module from a nested body, and of one that refines nothing" do
+      write("lib/ext.rb", "module Ext; refine(String) { def shout = :ext }; end\nmodule Helpers; def helper = 1; end\n")
+      write("lib/use.rb", <<~RUBY)
+        module Outer
+          using Ext
+          "x".shout
+          "x".nope
+        end
+        using Helpers
+        "x".nope
+        "x".center(1, 2, 3)
+      RUBY
+
+      expect(call_rows).to eq(
+        [["use.rb", 4, "call.undefined-method"], ["use.rb", 7, "call.undefined-method"],
+         ["use.rb", 8, "call.wrong-arity"]]
+      )
+    end
+
+    # Critique F1. `rb/p6load`: requiring `foo.rb` first prints `:bar`; requiring `foo_bar.rb` first raises
+    # `ArgumentError`. Which `Bar` the `using` names depends on load order, so both stay listed.
+    it "keeps both declared candidates of a `using` listed" do
+      write("lib/bar.rb", "module Bar; refine(String) { def center(a, b, c) = :bar; def shout = :bar }; end\n")
+      write("lib/foo_bar.rb", "module Foo; module Bar; refine(String) { def upcase = :inner }; end; end\n")
+      write("lib/foo.rb", <<~RUBY)
+        require_relative "bar"
+        module Foo
+          using Bar
+          "x".center(1, 2, 3)
+          "x".shout
+          "x".nope
+        end
+      RUBY
+
+      expect(call_rows).to eq([["foo.rb", 6, "call.undefined-method"]])
+    end
+
+    # Each row kind rides the cross-file pre-pass and the seed bundle: the consumers answer the same cold, warm, and
+    # warm with only the consumers re-analysed (their refining files served from their seed bundles).
+    it "carries each wildcard row kind across files and through a warm run" do
+      write("lib/nw.rb", "module NW\n  refine(String) { import_methods Helper }\nend\n")
+      write("lib/cu.rb", "module CU\n  [String].each { |k| refine(k) { def ljust(a, b, c) = 1 } }\nend\n")
+      write("lib/bu.rb", "module BU\n  def self.setup = refine(String) { def x = 1 }\nend\n")
+      write("lib/u1.rb", "using NW\n\"x\".center(1, 2, 3)\n1.succ(2)\n")
+      write("lib/u2.rb", "using CU\n\"x\".ljust(1, 2, 3)\n\"x\".rjust(1, 2, 3)\n")
+      write("lib/u3.rb", "using BU\n\"x\".nope\n:s.nope\n")
+      write("lib/plain.rb", "\"x\".nope\n")
+      expected = [["plain.rb", 1, "call.undefined-method"], ["u1.rb", 3, "call.wrong-arity"],
+                  ["u2.rb", 3, "call.wrong-arity"]]
+      store = -> { Rigor::Cache::Store.new(root: File.join(Dir.pwd, ".rigor", "cache")) }
+      rows = lambda do
+        diagnostics(cache_store: store.call).select { |d| call_rules.include?(d.qualified_rule) }
+                                            .map { |d| [File.basename(d.path.to_s), d.line, d.qualified_rule] }.sort
+      end
+
+      expect(rows.call).to eq(expected)
+      expect(rows.call).to eq(expected)
+      %w[u1 u2 u3].each { |name| File.write("lib/#{name}.rb", "#{File.read("lib/#{name}.rb")}nil\n") }
+      expect(rows.call).to eq(expected)
+    end
+
+    describe "edited between runs" do
+      def incremental_rows
+        root = File.join(Dir.pwd, ".rigor", "cache")
+        snapshot = Rigor::Cache::IncrementalSnapshot.new(root: root)
+        fingerprint = Rigor::Cache::IncrementalSnapshot.fingerprint(configuration: configuration, roots: %w[lib])
+        session = Rigor::Analysis::IncrementalSession.new(
+          configuration: configuration, paths: %w[lib], cache_store: Rigor::Cache::Store.new(root: root)
+        )
+        found, warm = guarded_run_incremental(session, snapshot: snapshot, fingerprint: fingerprint)
+        rows = found.select { |d| call_rules.include?(d.qualified_rule) }
+                    .map { |d| [File.basename(d.path.to_s), d.line, d.qualified_rule] }.sort
+        [rows, warm]
+      end
+
+      def cached_rows
+        diagnostics(cache_store: Rigor::Cache::Store.new(root: File.join(Dir.pwd, ".rigor", "cache-cold-warm")))
+          .select { |d| call_rules.include?(d.qualified_rule) }
+          .map { |d| [File.basename(d.path.to_s), d.line, d.qualified_rule] }.sort
+      end
+
+      let(:center_fires) { [["u.rb", 2, "call.wrong-arity"]] }
+
+      def write_refinement(extra = "")
+        write("lib/r.rb", "module Shout\n  refine String do\n    def shout = upcase\n#{extra}  end\nend\n")
+      end
+
+      # A names-wildcard row appearing re-checks the consumer through `refinement:*` (A5).
+      it "re-checks the `using` file when a refine body gains and loses an `import_methods`" do
+        write_refinement
+        write("lib/u.rb", "using Shout\n\"a\".center(1, 2, 3)\n")
+        expect(incremental_rows).to eq([center_fires, false])
+        expect(cached_rows).to eq(center_fires)
+
+        write_refinement("    import_methods Helper\n")
+        expect(incremental_rows).to eq([[], true])
+        expect(cached_rows).to eq([])
+        expect(call_rows).to eq([])
+
+        write_refinement
+        expect(incremental_rows).to eq([center_fires, true])
+        expect(cached_rows).to eq(center_fires)
+      end
+
+      # A3 + A5: the new file declares no module and names no class the consumer read; only the `:refine` literal's
+      # targets-wildcard row ties it to the consumer. Ruby 4.0.5 runs `M.send(:refine, String) { … }`
+      # (`refine_census_spec.rb`).
+      it "re-checks the `using` file when a new file refines its module through `send(:refine, …)`" do
+        write("lib/m.rb", "module M\n  refine(String) { def shout = 1 }\nend\n")
+        write("lib/u.rb", "using M\n\"a\".center(1, 2, 3)\n")
+        expect(incremental_rows).to eq([center_fires, false])
+        expect(cached_rows).to eq(center_fires)
+
+        write("lib/m_ext.rb", "M.send(:refine, String) { def center(a, b, c) = 1 }\n")
+        expect(incremental_rows).to eq([[], true])
+        expect(cached_rows).to eq([])
+        expect(call_rows).to eq([])
+      end
+
+      # A6: `refine(K)` keeps a normal row; once a file binds `K` to a value, the row's class is the wildcard. Ruby
+      # 4.0.5 prints `:alias_target` for `K = String; refine(K) { … }` (`refine_census_spec.rb`).
+      it "re-checks the `using` file when a new file binds the constant a `refine` targets" do
+        write("lib/m.rb", "module M\n  refine(K) { def center(a, b, c) = 1 }\nend\n")
+        write("lib/u.rb", "using M\n\"a\".center(1, 2, 3)\n")
+        expect(incremental_rows).to eq([center_fires, false])
+
+        write("lib/k.rb", "K = String\n")
+        expect(incremental_rows).to eq([[], true])
+        expect(call_rows).to eq([])
+      end
+
+      # The `using`'s only candidate is declared by no file, so it is opaque; a new file declaring it with no
+      # refinement makes it known, and the call reports. Ruby 4.0.5 raises `ArgumentError` for that program.
+      it "re-checks the `using` file when a new file declares the module its `using` names" do
+        write("lib/u.rb", "using GemRef\n\"a\".center(1, 2, 3)\n")
+        expect(incremental_rows).to eq([[], false])
+        expect(cached_rows).to eq([])
+
+        write("lib/gemref.rb", "module GemRef\nend\n")
+        expect(incremental_rows).to eq([center_fires, true])
+        expect(cached_rows).to eq(center_fires)
+        expect(call_rows).to eq(center_fires)
+      end
+    end
+
+    # A `refine` whose `self` is rebound when it runs. Ruby 4.0.5 prints `:dm_extend`, `:top_block` and
+    # `:other_module`: a `define_method` body runs on the module that extends its owner, a top-level block an eval
+    # runs refines for the eval's receiver, and so does a block a DSL in another module's body runs. `plain.rb`, with
+    # no `using`, raises `ArgumentError`.
+    {
+      "a define_method body" => {
+        "lib/m.rb" => "module Helper\n  define_method(:setup) do\n    " \
+                      "refine(String) { def center(a, b, c) = :dm_extend }\n  end\nend\n" \
+                      "module N; extend Helper; setup; end\n",
+        "lib/use.rb" => "using N\n\"x\".center(1, 2, 3)\n"
+      },
+      "a top-level block an eval runs" => {
+        "lib/ext.rb" => "module Ext\n  def self.define(&blk) = module_eval(&blk)\nend\n",
+        "lib/setup.rb" => "Ext.define do\n  refine(String) { def center(a, b, c) = :top_block }\nend\n",
+        "lib/use.rb" => "using Ext\n\"x\".center(1, 2, 3)\n"
+      },
+      "a block another module's DSL runs" => {
+        "lib/registry.rb" => "module Registry\n  def self.refining(mod, &blk) = mod.module_eval(&blk)\nend\n",
+        "lib/m.rb" => "module Ext; end\nmodule Setup\n  Registry.refining(Ext) do\n    " \
+                      "refine(String) { def center(a, b, c) = :other_module }\n  end\nend\n",
+        "lib/use.rb" => "using Ext\n\"x\".center(1, 2, 3)\n"
+      }
+    }.each do |shape, files|
+      it "declines under a `using` of a module refined in #{shape}" do
+        files.each { |path, source| write(path, source) }
+        write("lib/plain.rb", "\"x\".center(1, 2, 3)\n")
+
+        expect(call_rows).to eq([["plain.rb", 1, "call.wrong-arity"]])
+      end
+    end
+
+    # R2: inside a method body a block follows the same rule as in a module body. Ruby 4.0.5 prints `:installed`,
+    # `:class_installed`, `:in_def_dsl`, `:const_eval`, `:iexec`, `:dsm_eval`, `:nested_dsm` and `:nested_def`: each
+    # `refine` refines for `Ext`, not the module or class its method is written in.
+    {
+      "an eval block on a parameter in a def self.x" =>
+        "module Installer\n  def self.install(mod) = mod.module_eval { refine(String) { def center(a, b, c) = 1 } }\n" \
+        "end\nInstaller.install(Ext)\n",
+      "an eval block on a parameter in a class's def self.x" =>
+        "class Installer\n  def self.install(mod) = mod.module_eval { refine(String) { def center(a, b, c) = 1 } }\n" \
+        "end\nInstaller.install(Ext)\n",
+      "a DSL block in a def self.x" =>
+        "module Registry\n  def self.refining(mod, &blk) = mod.module_eval(&blk)\nend\nmodule Setup\n  " \
+        "def self.run = Registry.refining(Ext) { refine(String) { def center(a, b, c) = 1 } }\nend\nSetup.run\n",
+      "an eval block on a constant in a def self.x" =>
+        "module Installer\n  def self.install = Ext.module_eval { refine(String) { def center(a, b, c) = 1 } }\nend\n" \
+        "Installer.install\n",
+      "an instance_exec block on a parameter in a def self.x" =>
+        "module Installer\n  def self.install(mod) = mod.instance_exec do\n    " \
+        "refine(String) { def center(a, b, c) = 1 }\n  end\nend\nInstaller.install(Ext)\n",
+      "a define_singleton_method block in a DSL block" =>
+        "module Registry\n  def self.refining(mod, &blk) = mod.module_eval(&blk)\nend\nmodule Setup\n  " \
+        "Registry.refining(Ext) do\n    define_singleton_method(:install) do\n      " \
+        "refine(String) { def center(a, b, c) = 1 }\n    end\n  end\nend\nExt.install\n",
+      "a def self.x in a DSL block" =>
+        "module Registry\n  def self.refining(mod, &blk) = mod.module_eval(&blk)\nend\nmodule Setup\n  " \
+        "Registry.refining(Ext) do\n    def self.install = refine(String) { def center(a, b, c) = 1 }\n  end\nend\n" \
+        "Ext.install\n"
+    }.each do |shape, setup|
+      it "declines under a `using` of a module a method refines through #{shape}" do
+        write("lib/ext.rb", "module Ext; end\n")
+        write("lib/setup.rb", setup)
+        write("lib/use.rb", "using Ext\n\"x\".center(1, 2, 3)\n")
+        write("lib/plain.rb", "\"x\".center(1, 2, 3)\n")
+
+        expect(call_rows).to eq([["plain.rb", 1, "call.wrong-arity"]])
+      end
+    end
+
+    # R2: a core iterator's block on a constant keeps `self`, and a literal's block or a `define_method` block in a
+    # plain class's method keeps the class, so none of these makes an unrelated `using` opaque. Ruby 4.0.5 prints
+    # `:each_const` for `M`'s `center` under `using M`, `[:show, :show]`, `[10, 20]` and `2`, and raises
+    # `NoMethodError` for each `"x".nope`.
+    it "keeps an unrelated `using` checked and typed where an iterator or a plain class's blocks name refine" do
+      write("lib/m.rb", "module M\n  TARGETS = [String, Symbol].freeze\n  " \
+                        "TARGETS.each { |k| refine(k) { def center(a, b, c) = :each_const } }\nend\n")
+      write("lib/controller.rb",
+            "class Controller\n  def actions = %w[a b].map { |a| a == \"x\" ? :refine : :show }\nend\n")
+      write("lib/query.rb", <<~RUBY)
+        class Query
+          def refine(n) = yield(n)
+          def all = [1, 2].map { |n| refine(n) { |q| q * 10 } }
+          define_method(:one) { refine(1) { |q| "x".nope } }
+        end
+      RUBY
+      write("lib/u.rb", "module Shout\n  refine(String) { def shout = :s }\nend\nusing Shout\n" \
+                        "Rigor.dump_type(\"x\".upcase)\n\"x\".nope\n")
+
+      rows = diagnostics.map { |d| [File.basename(d.path.to_s), d.line, d.qualified_rule] }.sort
+      expect(rows).to eq(
+        [["query.rb", 4, "call.undefined-method"], ["u.rb", 5, "dump.type"], ["u.rb", 6, "call.undefined-method"]]
+      )
+    end
+
+    # The union receiver rule and `call.unresolved-toplevel` ask the refinement predicate too. Ruby 4.0.5 prints `:int`
+    # and `1` under a `using` of the module (read from outside the analysed paths or from the project alike), and
+    # raises `NoMethodError` for both calls in `plain.rb`.
+    it "declines a union receiver's call and an implicit-self top-level call a refinement in effect may define" do
+      refinement = "refine(Integer) { def shout = :int }\n  refine(Symbol) { def shout = :sym }\n  " \
+                   "refine(Object) { def helper(x) = x }\n"
+      calls = "x = ARGV.empty? ? 1 : :a\np x.shout\np helper(1)\n"
+      write("outside/gemref.rb", "module GemRef\n  #{refinement}end\n")
+      write("lib/opaque.rb", "$LOAD_PATH.unshift(File.join(__dir__, \"..\", \"outside\"))\nrequire \"gemref\"\n" \
+                             "using GemRef\n#{calls}")
+      write("lib/readable.rb", "module R\n  #{refinement}end\nusing R\n#{calls}")
+      write("lib/plain.rb", calls)
+
+      rows = diagnostics.select { |d| %w[call.undefined-method call.unresolved-toplevel].include?(d.qualified_rule) }
+                        .map { |d| [File.basename(d.path.to_s), d.line, d.qualified_rule] }.sort
+      expect(rows).to eq([["plain.rb", 2, "call.undefined-method"], ["plain.rb", 3, "call.unresolved-toplevel"]])
+    end
+
+    # M3. In a plain class's method a `:refine` Symbol is data and a `refine` call is the class's own method: Ruby
+    # 4.0.5 runs `Query#refine`'s block with no refinement in effect (`"x".nope` raises there) and prints `"X"`.
+    it "keeps checks and types where a plain class's method names refine" do
+      write("lib/c.rb", "class Controller\n  def action_name = :refine\nend\n")
+      write("lib/q.rb", <<~RUBY)
+        class Query
+          def refine(extra) = yield(extra)
+          def narrowed
+            refine(1) do |q|
+              Rigor.dump_type("x".upcase)
+              "x".nope
+            end
+          end
+        end
+      RUBY
+      write("lib/u.rb", "module Shout\n  refine(String) { def shout = :s }\nend\nusing Shout\n" \
+                        "Rigor.dump_type(\"x\".upcase)\n\"x\".center(1, 2, 3)\n")
+
+      rows = diagnostics.map { |d| [File.basename(d.path.to_s), d.line, d.qualified_rule, d.message] }.sort
+      expect(rows).to eq(
+        [["q.rb", 5, "dump.type", %(dump_type: "X")],
+         ["q.rb", 6, "call.undefined-method", "undefined method `nope' for \"x\""],
+         ["u.rb", 5, "dump.type", %(dump_type: "X")],
+         ["u.rb", 6, "call.wrong-arity", "wrong number of arguments to `center' on String (given 3, expected 1..2)"]]
+      )
+    end
+
+    # R2-S3: `call.possible-nil-receiver`, `def.method-visibility-mismatch` and `flow.always-raises` ask the refinement
+    # predicate too. Ruby 4.0.5 prints `:nil_up`, `:public_secret` and `:no_raise` under a `using` of the module (read
+    # from outside the analysed paths or from the project alike), and raises for each call in `plain.rb`.
+    it "declines a nil receiver's, a private method's and a zero division's report a refinement in effect may answer" do
+      write("lib/foo.rb", "class Foo\n  private\n\n  def secret = 1\nend\n")
+      refinement = "refine(NilClass) { def upcase = :nil_up }\n  refine(Foo) { def secret = :public_secret }\n  " \
+                   "refine(Integer) { def /(other) = :no_raise }\n"
+      calls = "x = ARGV.empty? ? nil : \"a\"\np x.upcase\np Foo.new.secret\np 1 / 0\n"
+      write("outside/gemref.rb", "module GemRef\n  #{refinement}end\n")
+      write("lib/opaque.rb", "$LOAD_PATH.unshift(File.join(__dir__, \"..\", \"outside\"))\nrequire \"gemref\"\n" \
+                             "using GemRef\n#{calls}")
+      write("lib/readable.rb", "module R\n  #{refinement}end\nusing R\n#{calls}")
+      write("lib/plain.rb", calls)
+
+      rules = %w[call.possible-nil-receiver def.method-visibility-mismatch flow.always-raises]
+      rows = diagnostics.select { |d| rules.include?(d.qualified_rule) }
+                        .map { |d| [File.basename(d.path.to_s), d.line, d.qualified_rule] }.sort
+      expect(rows).to eq(
+        [["plain.rb", 2, "call.possible-nil-receiver"], ["plain.rb", 3, "def.method-visibility-mismatch"],
+         ["plain.rb", 4, "flow.always-raises"]]
+      )
+    end
+
+    # Critique F5a. Ruby 4.0.5 prints `:via_alias` (`rb/p4_alias_refine.rb`).
+    it "declines under a module that refines through an alias of `refine`" do
+      write("lib/m.rb", <<~RUBY)
+        module M
+          class << self
+            alias_method :my_refine, :refine
+          end
+          my_refine(String) { def shout = :via_alias }
+        end
+        using M
+        "s".shout
+      RUBY
+
+      expect(call_rows).to eq([])
     end
   end
 

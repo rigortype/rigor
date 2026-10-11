@@ -1,10 +1,12 @@
 # ADR-121 — Typing calls through Ruby refinements, and `Proc#refined`
 
-Status: **Accepted, 2026-10-09; implemented 2026-10-10.** Landed under #1670: the redefined-method
-decline (#1685), the include expansion (#1684), gem refine bodies (#1686), the query (#1729), the
-typed arm (#1747), and for Ruby 4.1's `Proc#refined` the signature (#1711), refined literals (#1738)
-and the `BlockAsMethod` field (#1744). Open: the carry-overs under Consequences and #1669. The
-normative rules are in `docs/internal-spec/inference-engine.md` § "Ruby refinements".
+Status: **Accepted, 2026-10-09; implemented 2026-10-10; amended 2026-10-11 (WD7, positive
+knowledge).** Landed under #1670: the redefined-method decline (#1685), the include expansion (#1684),
+gem refine bodies (#1686), the query (#1729), the typed arm (#1747), and for Ruby 4.1's
+`Proc#refined` the signature (#1711), refined literals (#1738) and the `BlockAsMethod` field (#1744).
+WD7 closes #1796 and #1799. Open: the carry-overs under Consequences, #1669, and gem modules that
+gem source inference could make known (#1814). The normative rules are in
+`docs/internal-spec/inference-engine.md` § "Ruby refinements".
 
 Grounding: the design session of 2026-10-09 on #1664 and #1667, probes on master `54da094f0` and
 `7baff7b1f` (listed in #1670), CRuby `334b4ffa7f`'s `doc/syntax/refinements.rdoc` and
@@ -139,3 +141,63 @@ analysis-cache identity (`lib/rigor/bleeding_edge.rb`), which costs more than th
 ADR-5 (robustness: `Dynamic` over a wrong answer) is the criterion's root. ADR-16 Tier A owns
 `BlockAsMethod`, which WD5 extends. ADR-110's overriding-def dispatch is the precedent for WD2's slot.
 ADR-50 WD2 defines the bleeding-edge overlay WD6 declines.
+
+## Amendment (2026-10-11) — WD7: decided from positive knowledge
+
+Three review rounds of #1793 (#1740) each found a refinement Rigor did not see: a `using` of a module
+whose bodies live outside the analysed paths, an `alias_method`, `define_method` or `import_methods`
+in a refine body, a computed `refine(k)` target, a refining module included from `vendor/`. Every miss
+came from one premise: a missing row was read as "refines nothing".
+
+**Criterion: a decline follows from a row, never from the absence of one. A module with no project
+declaration is opaque.**
+
+- The refinement table records what the walk could not read, with one wildcard
+  (`Scope::DiscoveryIndex::REFINEMENT_WILDCARD`, `"*"`) on two independent axes: a names-wildcard
+  `{X => {"*" => [M]}}` (the body may define names the walk cannot spell), a class-unknown row
+  `{"*" => {name => [M]}}` (`refine(k)`, `refine(self)`, or a target a project constant write binds),
+  and a targets-wildcard `{"*" => {"*" => [M]}}` (a `refine` in a method or a `define_method` body, or
+  reached through a `:refine` literal such as `send(:refine, …)` or `alias_method :r, :refine`). As a
+  module, `"*"` is one the walk cannot name. One function (`RefineSelf`) answers what `self` a `refine` at
+  each node runs on, and the in-effect walk and the census both read its answer: a module's instance
+  method runs on whatever module extends it; a block, in a module body or a method body alike, may run
+  under any `self` (a block at the top level, one a DSL `module_eval`s, `tap`, `loop`), unless its call
+  keeps `self` (a call on a literal, or a core iteration method such as `each` or `map` on a constant,
+  local, ivar or literal); a `*_eval` on a constant runs on that constant. In a plain class's methods
+  `refine` is the class's own method, as #1689 reads one in a class body. `alias`, `alias_method`,
+  `define_method` and `attr_*` names in a refine body are recorded, and a later definer of a name
+  replaces an earlier `def` of it. A census spec checks that every `refine`-shaped node ends in exactly
+  one outcome.
+- A module is opaque when the project does not declare it and it is not a core or stdlib module (the
+  core and standard-library signatures the rbs gem ships declare no refinements), or when a
+  targets-wildcard row lists it or `"*"`. A gem's module is
+  opaque even when gem source inference read it, until that inference can show it saw every file
+  declaring it.
+- Every declared candidate of a `using`'s spelling stays in the list, because which one Ruby's lookup
+  finds can depend on load order; undeclared candidates leave, and a spelling with no declared
+  candidate enters alone, opaque. An included module the project does not declare enters the list
+  unless it is core or stdlib.
+- Where an opaque module is in effect, these checks decline, whatever the receiver:
+  `call.undefined-method` (its union-receiver arm included), `call.unresolved-toplevel`,
+  `call.wrong-arity`, `call.argument-type-mismatch`, `call.possible-nil-receiver`,
+  `def.method-visibility-mismatch` and `flow.always-raises`. `call.raise-non-exception` (which judges
+  the argument) and `call.self-undefined-method` (off in every shipped profile) do not ask.
+- The typed arm answers `Dynamic[top]` for every instance-receiver call in the span of an activation
+  that puts an opaque module in effect; a class object falls through until singleton-side levels land.
+  WD3's rule that the unknown marker answers `Dynamic` only where some refinement defines the name is
+  not extended to opaque modules: their rows cannot be read, so every name may be replaced. Wildcard
+  rows never yield a winner: a class-unknown row answers `Dynamic` for its names on every instance, a
+  names-wildcard row of a level reached before a definer answers `Dynamic`, and so does a winner whose
+  module shares its last segment with another listed module.
+- A plugin-declared module (WD5) is the plugin's declaration, not code Rigor failed to read: it is
+  never opaque, and one nothing declares matches no row, so it silences nothing.
+
+Limits it does not remove: a module reopened in a file outside the analysed paths or under
+`exclude:`; an inner `using` candidate declared only outside the analysed paths (or by a
+`const_set`), which is dropped, so its refinements are unseen (treating every undeclared inner
+candidate as opaque would blanket every nested `using`); a module declared or reopened inside an eval
+string; a refine target bound by `||=` or `const_set` only in another file; and
+`TOPLEVEL_BINDING.eval("using N")`, which activates `N` to the end of the file.
+
+Consequence: under a `using` of a gem's module every instance call in the span is unchecked and
+`Dynamic` until gem modules can be known, a cost the survey corpus puts at a handful of files.

@@ -311,15 +311,15 @@ module Rigor
       def call_node_diagnostics(path, node, scope_index, eval_ranges = nil, lexical_sites = nil)
         [
           undefined_method_diagnostic(path, node, scope_index, lexical_sites),
-          unresolved_toplevel_diagnostic(path, node, scope_index, eval_ranges),
+          unresolved_toplevel_diagnostic(path, node, scope_index, eval_ranges, lexical_sites),
           wrong_arity_diagnostic(path, node, scope_index, lexical_sites),
           argument_type_diagnostic(path, node, scope_index, lexical_sites),
           nil_receiver_diagnostic(path, node, scope_index, lexical_sites),
           dump_type_diagnostic(path, node, scope_index),
           assert_type_diagnostic(path, node, scope_index),
-          always_raises_diagnostic(path, node, scope_index),
+          always_raises_diagnostic(path, node, scope_index, lexical_sites),
           raise_non_exception_diagnostic(path, node, scope_index),
-          visibility_mismatch_diagnostic(path, node, scope_index)
+          visibility_mismatch_diagnostic(path, node, scope_index, lexical_sites)
         ].compact
       end
 
@@ -769,7 +769,9 @@ module Rigor
           # below cannot reason about it, but the call is still definitely
           # undefined when EVERY arm lacks the method — see
           # `union_undefined_method_diagnostic`.
-          return union_undefined_method_diagnostic(path, call_node, receiver_type, scope) if class_name.nil?
+          if class_name.nil?
+            return union_undefined_method_diagnostic(path, call_node, receiver_type, scope, lexical_sites)
+          end
 
           # ADR-26 — a plugin may declare a class "open": one
           # known to respond beyond its RBS-declared method
@@ -858,15 +860,38 @@ module Rigor
         # no constant target, so nothing records it. Issue #1673 — the answer is derived from the file's in-effect
         # refinements ({Inference::InEffectRefinements}), the list the typer reads, with each `using` expanded
         # through its module's includes (issue #1671).
+        #
+        # ADR-121 WD7 — a module in effect whose refinements Rigor cannot read
+        # ({Inference::InEffectRefinements.opaque_module?}: a gem's, one from outside the analysed paths, one with an
+        # unreadable `refine`) may refine any class, a class object's included, so the call declines whatever its
+        # receiver. Issue #1796; both argument rules ask this predicate too.
         def refined_method_in_effect?(class_name, call_node, scope, kind, lexical_sites)
-          return false if lexical_sites.nil? || kind != :instance
+          return false if lexical_sites.nil?
+          return true if opaque_refinement_in_effect?(call_node, scope, lexical_sites)
 
-          modules = Inference::InEffectRefinements.refining_modules(scope, class_name, call_node.name)
+          modules =
+            if kind == :instance
+              Inference::InEffectRefinements.refining_modules(scope, class_name, call_node.name)
+            else
+              # ADR-121 WD7 — a row whose class the walk could not name (`refine(k)` with `k` a singleton class)
+              # reaches a class object too.
+              Inference::InEffectRefinements.class_unknown_refining_modules(scope, call_node.name)
+            end
           !modules.nil? &&
             lexical_sites.refinements.refinement_active?(call_node.location.start_offset, modules,
                                                          scope.declared_refinements) do |name|
               Inference::InEffectRefinements.activated_modules(scope, name)
             end
+        end
+
+        # ADR-121 WD7 — does the call's in-effect list (its lexical activations, each `using` expanded; a
+        # plugin-declared module is the plugin's declaration and never opaque) hold an opaque module?
+        def opaque_refinement_in_effect?(call_node, scope, lexical_sites)
+          query = lexical_sites.refinements
+          return false if query.empty?
+
+          list = Inference::InEffectRefinements.lexical_list(scope, query, call_node.location.start_offset)
+          Inference::InEffectRefinements.opaque_in?(scope, list)
         end
 
         # The probes that run only once every cheaper answer has come back "absent", kept together
@@ -1075,7 +1100,7 @@ module Rigor
         # Authored severity is `:warning`; the severity profile
         # remaps it (`strict` → `:error`, `balanced` →
         # `:warning`, `lenient` → `:off` / suppressed).
-        def unresolved_toplevel_diagnostic(path, call_node, scope_index, eval_ranges = nil)
+        def unresolved_toplevel_diagnostic(path, call_node, scope_index, eval_ranges = nil, lexical_sites = nil)
           return nil unless call_node.receiver.nil?
 
           scope = scope_index[call_node]
@@ -1093,6 +1118,8 @@ module Rigor
           # body is morally a class body, so ADR-34 stays silent there — including on a genuinely
           # undefined name inside the block. Ranges are computed once per file.
           return nil if call_inside_receiver_eval_ranges?(eval_ranges, call_node)
+          # ADR-121 WD7 — a refinement of `Object` (or one Rigor cannot read) in effect here may define the name.
+          return nil if refined_method_in_effect?("Object", call_node, scope, :instance, lexical_sites)
 
           build_unresolved_toplevel_diagnostic(path, call_node)
         end
@@ -1958,12 +1985,20 @@ module Rigor
           return nil unless Rigor::Reflection.rbs_class_known?("NilClass", scope: scope)
 
           return nil unless nil_bearing_union_witnesses?(receiver_type, call_node.name, scope)
-          # Issue #1703 — a `nil` that only a `key?` guard on the same receiver and key rules out. Asked last: it
-          # re-walks the file once with guards on, and only to withhold this report.
-          return nil if Inference::KeyPresenceGuard.withholds_nil?(call_node, receiver_type, lexical_sites&.root,
-                                                                   scope_index)
+          return nil if nil_receiver_withheld?(call_node, receiver_type, scope, scope_index, lexical_sites)
 
           build_nil_receiver_diagnostic(path, call_node)
+        end
+
+        # The declines `call.possible-nil-receiver` asks only once a report would fire.
+        def nil_receiver_withheld?(call_node, receiver_type, scope, scope_index, lexical_sites)
+          # Issue #1703 — a `nil` that only a `key?` guard on the same receiver and key rules out. It re-walks the file
+          # once with guards on, and only to withhold this report.
+          return true if Inference::KeyPresenceGuard.withholds_nil?(call_node, receiver_type, lexical_sites&.root,
+                                                                    scope_index)
+
+          # ADR-121 WD7 — a refinement of `NilClass` (or one Rigor cannot read) in effect may define the name.
+          refined_method_in_effect?("NilClass", call_node, scope, :instance, lexical_sites)
         end
 
         # The receiver-type half of the rule, factored out of the node-shape
@@ -2086,7 +2121,7 @@ module Rigor
         # `possible-nil-receiver` rule, safe-navigation, and ADR-58
         # declaration-sourced nil. Slice 1 handles pure non-nil unions
         # (e.g. `String | Symbol`).
-        def union_undefined_method_diagnostic(path, call_node, receiver_type, scope)
+        def union_undefined_method_diagnostic(path, call_node, receiver_type, scope, lexical_sites = nil)
           return nil unless receiver_type.is_a?(Type::Union)
           return nil if call_node.safe_navigation?
 
@@ -2108,8 +2143,16 @@ module Rigor
           # `.pack`). Require at least two distinct arm classes.
           return nil if members.map { |member| concrete_class_name(member) }.uniq.size < 2
           return nil if members.any? { |member| method_present_anywhere?(member, call_node.name, scope) }
+          return nil if refined_on_some_arm?(members, call_node, scope, lexical_sites)
 
           build_undefined_method_diagnostic(path, call_node, receiver_type)
+        end
+
+        # ADR-121 WD7 — a refinement in effect (or one Rigor cannot read) may define the name on one arm's class.
+        def refined_on_some_arm?(members, call_node, scope, lexical_sites)
+          members.any? do |member|
+            refined_method_in_effect?(concrete_class_name(member), call_node, scope, :instance, lexical_sites)
+          end
         end
 
         # Issue #1699 — a union of one class's literals, alone or beside that class's plain nominal
@@ -2278,8 +2321,12 @@ module Rigor
         INTEGER_RAISING_OPERATORS = %i[/ % div modulo divmod].freeze
         private_constant :INTEGER_RAISING_OPERATORS
 
-        def always_raises_diagnostic(path, call_node, scope_index)
+        def always_raises_diagnostic(path, call_node, scope_index, lexical_sites = nil)
           return nil unless integer_zero_division?(call_node, scope_index)
+
+          # ADR-121 WD7 — a refinement of `Integer`'s operator (or one Rigor cannot read) in effect may not raise.
+          scope = scope_index[call_node]
+          return nil if refined_method_in_effect?("Integer", call_node, scope, :instance, lexical_sites)
 
           build_always_raises_diagnostic(path, call_node)
         end
@@ -2763,7 +2810,7 @@ module Rigor
         # - Issue #1568 — a module the class PREPENDS sits ahead of it in Ruby's order, so a definition there
         #   is what the call reaches; the class's own private `def` answers only when nothing prepended
         #   defines the name ({#reached_definer_visibility}).
-        def visibility_mismatch_diagnostic(path, call_node, scope_index)
+        def visibility_mismatch_diagnostic(path, call_node, scope_index, lexical_sites = nil)
           return nil unless explicit_non_self_receiver?(call_node.receiver)
 
           scope = scope_index[call_node]
@@ -2782,6 +2829,8 @@ module Rigor
           reached = reached_definer_visibility(scope, receiver_type.class_name, call_node.name)
           return nil if reached == :undecided
           return nil unless reached.nil? || reached == :private
+          # ADR-121 WD7 — a refinement in effect (or one Rigor cannot read) may redefine the method, public.
+          return nil if refined_method_in_effect?(receiver_type.class_name, call_node, scope, :instance, lexical_sites)
 
           build_visibility_mismatch_diagnostic(path, call_node, receiver_type)
         end

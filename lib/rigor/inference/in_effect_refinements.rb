@@ -4,6 +4,8 @@ require "prism"
 
 require_relative "../source/constant_path"
 require_relative "../source/node_children"
+require_relative "refine_census"
+require_relative "refine_self"
 require_relative "in_effect_refinements/proc_literals"
 require_relative "in_effect_refinements/scope_reads"
 require_relative "in_effect_refinements/refine_defs"
@@ -55,6 +57,9 @@ module Rigor
       # that carries it answers "any refinement may be in effect"; its position carries no meaning.
       UNKNOWN = :unknown_refinement
       EMPTY = [].freeze
+      # ADR-121 WD7 (A1) — what a caller's expansion block answers for a name nothing declares: such a candidate of a
+      # `using`'s spelling is not the module Ruby's lookup finds, so it leaves the list. Never itself a list entry.
+      UNDECLARED = :undeclared_module
 
       # One activation: in effect over `[start, stop)`, ordered by `order`. `names` is the module names (several
       # when a lexical spelling can denote several), or nil for {UNKNOWN}; `expand` says whether the caller's
@@ -117,7 +122,8 @@ module Rigor
 
       # Issue #1664 — the `Prism::DefNode` a `refine class_name do … end` body in this file defines `method_name` with,
       # for the refining module `module_name`, or nil. The last such `def` wins, as Ruby's method table keeps it. The
-      # refined class is matched by any name its spelling can denote, as the refinement table records it.
+      # refined class is matched by any name its spelling can denote, as the refinement table records it. A name whose
+      # last definer has no body answers `RefineDefs::BODILESS` (ADR-121 WD7).
       def refinement_def(module_name, class_name, method_name)
         build
         @refine_defs&.lookup(module_name, class_name, method_name)
@@ -142,6 +148,15 @@ module Rigor
         !offsets.nil? && member?(call_node) && offsets.include?(call_node.block.location.start_offset)
       end
 
+      # ADR-121 WD7 — the `RefineSelf::Context` of the `self` the `refine`-shaped `node` (a `refine` call, a `:refine`
+      # literal, a String naming `refine` passed to an eval, `send` or method-naming call) runs on, as this walk worked
+      # it out, or nil for a node it did not record (another file's, or no such node). The census charges what this
+      # answers, so the table and the activations agree.
+      def refine_context(node)
+        build
+        @refine_contexts[node.location.start_offset] if member?(node)
+      end
+
       # Is this the query over `root`'s tree?
       def over?(root) = @root.equal?(root)
 
@@ -159,22 +174,44 @@ module Rigor
 
       EMPTY_OFFSET = -1
       EMPTY_SET = Set.new.freeze
-      private_constant :EMPTY_OFFSET, :EMPTY_SET
+      NO_CONTEXTS = {}.freeze
+      private_constant :EMPTY_OFFSET, :EMPTY_SET, :NO_CONTEXTS
 
+      # A spelling's candidates are alternatives, innermost first; Ruby's lexical lookup finds the innermost one
+      # that exists, so it goes last and wins where several are declared. ADR-121 WD7 (A1): every declared candidate
+      # stays, because which one Ruby finds can depend on load order; one nothing declares
+      # ({UNDECLARED}) leaves; and when none is declared, the spelling enters alone, a module no table declares,
+      # which the readers treat as opaque (`using` of a gem's module, issue #1796).
       def append_activation(list, activation, expand)
         names = activation.names
         if names.nil?
           list << UNKNOWN unless list.include?(UNKNOWN)
           return
         end
+        unless activation.expand && expand
+          names.reverse_each { |name| list << name unless list.include?(name) }
+          return
+        end
 
-        # A spelling's candidates are alternatives, innermost first; Ruby's lexical lookup finds the innermost one
-        # that exists, so it goes last and wins where several are declared.
-        names.reverse_each { |name| append_expanded(list, name, activation.expand && expand) }
+        declared = false
+        names.reverse_each do |name|
+          expanded = expand.call(name)
+          next if expanded == UNDECLARED
+
+          declared = true
+          append_entries(list, expanded)
+        end
+        list << names.last unless declared || list.include?(names.last)
       end
 
+      # A block source's declared module (#1667), listed as declared. One nothing declares refines nothing Rigor can
+      # see, so it matches no row; the readers never treat a declared module as opaque.
       def append_expanded(list, name, expand)
         expanded = expand ? expand.call(name) : [name]
+        append_entries(list, expanded == UNDECLARED ? [name] : expanded)
+      end
+
+      def append_entries(list, expanded)
         if expanded.nil?
           list << UNKNOWN unless list.include?(UNKNOWN)
         else
@@ -197,15 +234,17 @@ module Rigor
         @refine_defs = nil
         @chained_refined_calls = nil
         @class_body_refines = nil
+        @refine_contexts = NO_CONTEXTS
         @unresolved_using = false
         return if @root.nil? || !mentions_refinements?
 
         @activations = []
         @refinement_defs = Set.new
         @refine_defs = RefineDefs.new
+        @refine_contexts = {}
         @nesting = EMPTY
         location = @root.location
-        walk(@root, [], [location.start_offset, location.end_offset], false, nil, false)
+        walk(@root, [], [location.start_offset, location.end_offset], false, RefineSelf.top)
         sort_activations
         @activations.freeze
       end

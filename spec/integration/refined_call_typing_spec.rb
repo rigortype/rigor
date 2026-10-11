@@ -19,6 +19,48 @@ RSpec.describe "Typing calls through Ruby refinements (#1664)", type: :runner do
     RUBY
   end
 
+  let(:later_definers) do
+    <<~RUBY
+      module DM
+        refine(String) do
+          def center(a) = 1
+          define_method(:center) { |a| "dm" }
+        end
+      end
+      module AM
+        refine(Symbol) do
+          def center(a) = 1
+          alias_method :center, :to_s
+        end
+      end
+      module AL
+        refine(Integer) do
+          def c3 = 1
+          define_method(:c3) { "s" }
+          alias center c3
+        end
+      end
+      module AT
+        refine(Float) do
+          def center = 1
+          attr_reader :center
+        end
+      end
+      using DM
+      using AM
+      using AL
+      using AT
+      p "x".center(1).upcase
+      p :x.center.upcase
+      p 1.center.upcase
+      p 1.5.center.inspect
+      Rigor.dump_type("x".center(1))
+      Rigor.dump_type(:x.center)
+      Rigor.dump_type(1.center)
+      Rigor.dump_type(1.5.center)
+    RUBY
+  end
+
   # `[rule, line, message]` for every diagnostic in `app.rb`.
   def rows(source, files: {})
     result = analyze(files: files.merge("app.rb" => source))
@@ -214,6 +256,142 @@ RSpec.describe "Typing calls through Ruby refinements (#1664)", type: :runner do
       Rigor.dump_type(:a.shout)
       Rigor.dump_type(:a.to_s)
     RUBY
+  end
+
+  # ADR-121 WD7 (critique F2). Ruby 4.0.5 prints `43` and `4`: a module whose refinements Rigor cannot read may replace
+  # any instance method, so every instance call in its `using`'s span answers `Dynamic[top]`, never the replaced
+  # method's signature; a class object falls through.
+  it "answers Dynamic[top] for every instance call under a `using` of a module from outside the analysed paths" do
+    result = analyze(
+      files: {
+        "outside/gemref.rb" => "module GemRef; refine(String) { def center(a, b, c) = 42 }; end\n",
+        "lib/app.rb" => <<~RUBY
+          $LOAD_PATH.unshift(File.join(__dir__, "..", "outside"))
+          require "gemref"
+          using GemRef
+          p "s".center(1, 2, 3).succ.times { |i| i }
+          Rigor.dump_type("s".center(1, 2, 3))
+          Rigor.dump_type(Integer.sqrt(16))
+        RUBY
+      },
+      config: { "paths" => ["lib"] }
+    )
+    rows = result.diagnostics.map { |d| [d.qualified_rule, d.line, d.message] }
+
+    expect(rows).to eq([["dump.type", 5, "dump_type: Dynamic[top]"], ["dump.type", 6, "dump_type: Integer"]])
+  end
+
+  # ADR-121 WD7 (A2). Ruby 4.0.5 prints `43` and `"S"`: a refinement whose target the walk cannot name makes only the
+  # names it defines `Dynamic[top]`, on any instance.
+  it "answers Dynamic[top] for a name refined on a class the walk cannot name, and nothing else" do
+    expect(rows(<<~RUBY)).to eq([["dump.type", 6, "dump_type: Dynamic[top]"], ["dump.type", 7, %(dump_type: "S")]])
+      module M
+        [String, Symbol].each { |k| refine(k) { def center(a, b, c) = 42 } }
+      end
+      using M
+      p "s".center(1, 2, 3).succ.times { |i| i }
+      Rigor.dump_type(:s.center(1, 2, 3))
+      Rigor.dump_type("s".upcase)
+    RUBY
+  end
+
+  # ADR-121 WD7. Ruby 4.0.5 prints `:b`, `"S"` and `2`: `import_methods` may define any name on String.
+  it "answers Dynamic[top] on a class a refine body may define any name on, and keeps other classes typed" do
+    expect(dumps(<<~RUBY)).to eq(["Dynamic[top]", "Dynamic[top]", "2"])
+      module H; def b = :b; end
+      module M
+        refine(String) do
+          def a = 1
+          import_methods H
+        end
+      end
+      using M
+      Rigor.dump_type("s".b)
+      Rigor.dump_type("s".upcase)
+      Rigor.dump_type(1.succ)
+    RUBY
+  end
+
+  # ADR-121 WD7. Ruby 4.0.5 prints `"dm"`: `app.rb` requires `other.rb` first, so its `define_method` replaces the other
+  # file's `def`. The own file's bodiless definer ends the search for a body.
+  it "answers Dynamic[top] where the call's own file redefines a refined name without a body" do
+    other = "module M\n  refine(String) { def center(a) = 1 }\nend\n"
+    expect(dumps(<<~RUBY, files: { "other.rb" => other })).to eq(["Dynamic[top]"])
+      require_relative "other"
+      module M
+        refine(String) { define_method(:center) { |a| "dm" } }
+      end
+      using M
+      Rigor.dump_type("x".center(1))
+    RUBY
+  end
+
+  # ADR-121 WD7. Ruby 4.0.5 prints `42`: the refinement of the included `Greet` imports `H#hi`, which wins over
+  # `Greet#hi` where `Greet` sits in `Foo`'s lookup.
+  it "answers Dynamic[top] where an included module a refine body may define any name on sits" do
+    expect(dumps(<<~RUBY)).to eq(["Dynamic[top]"])
+      module H; def hi = 42; end
+      module Greet; def hi = "hi"; end
+      class Foo; include Greet; end
+      module M
+        refine(Greet) { import_methods H }
+      end
+      using M
+      Rigor.dump_type(Foo.new.hi)
+    RUBY
+  end
+
+  # ADR-121 WD7. Ruby 4.0.5 prints `42`: past `String`, whose project mixin RBS does not order, the refinement of
+  # `Object` imports `H#itself`, which wins over `Kernel#itself`.
+  it "answers Dynamic[top] past a mixed level when a later level's refine body may define any name" do
+    expect(dumps(<<~RUBY)).to eq(["Dynamic[top]"])
+      module H; def itself = 42; end
+      module Loud; end
+      class String; include Loud; end
+      module RO
+        refine(Object) { import_methods H }
+      end
+      using RO
+      Rigor.dump_type("a".itself)
+    RUBY
+  end
+
+  # ADR-121 WD7 (A1). In this file Ruby 4.0.5 prints `:inner` and raises `ArgumentError`, but with `Foo::Bar` declared
+  # in a file required after this one the top-level `Bar` wins (critique F1), so neither call is typed from a body.
+  it "answers Dynamic[top] where two declared candidates of a `using` could each be the module" do
+    expect(dumps(<<~RUBY)).to eq(["Dynamic[top]", "Dynamic[top]"])
+      module Bar; refine(String) { def center(a, b, c) = :bar }; end
+      module Foo
+        module Bar; refine(String) { def upcase = :inner }; end
+        using Bar
+        Rigor.dump_type("x".upcase)
+        Rigor.dump_type("x".center(1, 2, 3))
+      end
+    RUBY
+  end
+
+  # ADR-121 WD7 (issue #1799). Ruby 4.0.5 prints `42` and `:dm`: an alias of a body's `def` types from that `def`;
+  # a `define_method` has no `def` to type, so `Dynamic[top]`, never String#rjust's signature.
+  it "types an alias from the aliased def and a define_method as Dynamic[top]" do
+    expect(dumps(<<~RUBY)).to eq(["42", "Dynamic[top]"])
+      module M
+        refine(String) do
+          def c3(a, b, c) = 42
+          alias_method :center, :c3
+          define_method(:rjust) { |a, b, c| :dm }
+        end
+      end
+      using M
+      Rigor.dump_type("x".center(1, 2, 3))
+      Rigor.dump_type("x".rjust(1, 2, 3))
+    RUBY
+  end
+
+  # ADR-121 WD7 — a later definer replaces an earlier `def` of the name. Ruby 4.0.5 prints `"DM"`, `"X"`, `"S"` and
+  # `"nil"`: the `define_method`, the alias of `Symbol#to_s`, the alias of a `define_method` and the `attr_reader`
+  # are what runs, and none has a `def` to type.
+  it "answers Dynamic[top] for a name a later definer with no def replaced" do
+    expect(rows(later_definers)).to eq(Array.new(4) { |i| ["dump.type", 34 + i, "dump_type: Dynamic[top]"] })
   end
 
   it "types a refine body's `super` as Dynamic[top] with no finding when another refinement is in effect there" do

@@ -273,6 +273,18 @@ RSpec.describe "Gem source inference over `refine` bodies (#1672)" do
       )
     end
 
+    # Round-1 review of #1828 — the gem loads a shim outside its `lib/` by a literal `require_relative`; Ruby 4.0.5
+    # prints 2 for `"x".bb`, which the walk of `lib/` alone never sees.
+    it "stays opaque when the gem requires a file outside its walked roots" do
+      write_gem("olg", "lib/olg.rb" => "module Olg\n  refine(String) { def aa = 1 }\nend\n" \
+                                       "require_relative '../shim/olg_more'\n",
+                       "shim/olg_more.rb" => "module Olg\n  refine(String) { def bb = 2 }\nend\n")
+      write("lib/app.rb", "using Shouty\n\"hi\".shout\n\"hi\".nope\n")
+      write("lib/other.rb", "using Olg\n\"hi\".bb\n\"hi\".nope\n")
+
+      expect(undefined_rows(gems: %w[shouty olg])).to eq(reads)
+    end
+
     # The control: a bare `include` in the body of `class << self` mixes into the singleton class, which `using` never
     # reads, so the gem stays known.
     it "stays known when only the body of class << self includes" do

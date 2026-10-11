@@ -453,6 +453,45 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::Walker do
         end
       end
 
+      # Round-1 review of #1828 — `require_relative "../shim/olg_more"` loads a file no walked root holds (Ruby 4.0.5
+      # prints 2 for `"x".bb` after `using Olg`, the second `refine` living in the shim).
+      describe "a require_relative with a literal path" do
+        def walk_gem(files)
+          with_fake_gem do |gem_dir|
+            files.each do |relative, source|
+              FileUtils.mkdir_p(File.dirname(File.join(gem_dir, relative)))
+              File.write(File.join(gem_dir, relative), source)
+            end
+            return walker.walk(gem_dir: gem_dir, roots: %w[lib])
+          end
+        end
+
+        it "records a file outside every walked root as unread" do
+          outcome = walk_gem("lib/olg.rb" => "module Olg; end\nrequire_relative '../shim/olg_more'\n",
+                             "shim/olg_more.rb" => "module Olg; end\n")
+
+          expect(outcome.unread).to eq(["shim/olg_more.rb"])
+          expect(outcome.fully_read?).to be(false)
+        end
+
+        it "records a path spelled with its extension" do
+          outcome = walk_gem("lib/a.rb" => "require_relative '../shim/b.rb'\n",
+                             "shim/b.rb" => "module B; end\n")
+
+          expect(outcome.unread).to eq(["shim/b.rb"])
+        end
+
+        # The controls: a file under a walked root, a file that does not exist, a `load`, and a computed path.
+        it "reads a file under a walked root, a missing file, a load and a computed path as read in full" do
+          outcome = walk_gem("lib/a.rb" => "require_relative 'a/b'\nrequire_relative 'missing'\nload '../shim/c.rb'\n" \
+                                           "require_relative File.join('..', 'shim', 'c')\n",
+                             "lib/a/b.rb" => "module B; end\n", "shim/c.rb" => "module C; end\n")
+
+          expect(outcome.unread).to eq([])
+          expect(outcome.fully_read?).to be(true)
+        end
+      end
+
       # Ruby 4.0.5: `Dir.glob("lib/**/*.rb")` lists neither `lib/.vendor/x.rb` nor `lib/compat/y.rb` for a symlink
       # `lib/compat -> ../shim`, though `require` loads both. Their files may declare or refine a module.
       it "records a dot directory's files and a symlinked directory as unread" do

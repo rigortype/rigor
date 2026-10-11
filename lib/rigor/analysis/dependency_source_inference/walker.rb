@@ -27,7 +27,7 @@ module Rigor
       # Hard exclusions are NOT user-configurable, per ADR-10 § "Hard exclusions": top-level `spec/`,
       # `test/`, `bin/`, plus any non-`.rb` source. C extensions fall out automatically because the walker
       # only loads `.rb` files.
-      module Walker
+      module Walker # rubocop:disable Metrics/ModuleLength
         # Top-level directories that MUST NOT participate in gem-source inference even when the user lists
         # them under `roots:`. The check is case-insensitive against the first segment of `roots:`; nested
         # `spec/` / `test/` directories deeper inside `lib/` are NOT filtered (a few gems legitimately ship
@@ -76,7 +76,7 @@ module Rigor
         # name ({MixinScan#targets}), `gem_dir` makes `unread` paths gem-relative, and `files` holds the parsed files,
         # which the constant-alias rewrite reads again.
         Harvest = Struct.new(:catalog, :refinements, :root, :in_effect, :gem_dir, :modules, :unread, :mixes, :files,
-                             :targets, :extends) do
+                             :targets, :extends, :root_dirs) do
           # {Inference::ScopeIndexer.module_refine_target} against this file's in-effect refinements.
           def refine_target_of(node)
             return nil if Inference::ScopeIndexer.refine_target(node).nil?
@@ -124,12 +124,13 @@ module Rigor
         #   the budget was reached. Methods of identical name on the same class with different kinds (rare;
         #   private API mostly) carry the kind that wins the per-class first walk.
         def walk(gem_dir:, roots:, budget: UNBOUNDED)
-          harvest = Harvest.new({}, {}, nil, nil, gem_dir.to_s, Set.new, [], false, [], Set.new, [])
+          root_dirs = accepted_roots(roots).map { |root| File.join(gem_dir.to_s, root) }
+          harvest = Harvest.new({}, {}, nil, nil, gem_dir.to_s, Set.new, [], false, [], Set.new, [], root_dirs)
           truncated = false
-          accepted_roots(roots).each do |root|
+          root_dirs.each do |root_dir|
             break if truncated
 
-            truncated = walk_root(File.join(gem_dir.to_s, root), harvest, budget)
+            truncated = walk_root(root_dir, harvest, budget)
           end
           refinements = Inference::ScopeIndexer.freeze_refinements(rewrite_aliased_targets(harvest))
           Outcome.new(catalog: harvest.catalog.freeze, truncated: truncated,
@@ -180,6 +181,7 @@ module Rigor
           harvest.in_effect = nil
           harvest.files << path
           record_coverage(parse_result.value, harvest)
+          record_outside_requires(parse_result.value, path, harvest)
           record_refinements(parse_result.value, harvest)
           walk_node(parse_result.value, [], false, harvest, budget)
         rescue StandardError
@@ -198,6 +200,34 @@ module Rigor
           harvest.mixes ||= scan.site
           harvest.targets.merge(scan.targets)
           harvest.extends.concat(scan.extends)
+        end
+
+        # Issue #1814 — a `require_relative` with a literal path to a gem file that no walked root holds (`lib/olg.rb`
+        # reaching `../shim/olg_more.rb`) loads code the walk never reads, which may declare or refine a module. It is
+        # recorded as unread. A `load`, or a path built at run time, is not read.
+        def record_outside_requires(root, path, harvest)
+          return unless root.send(:source).source.b.include?("require_relative")
+
+          Source::NodeWalker.each(root) do |node|
+            target = relative_require_target(node, path)
+            next if target.nil? || inside_roots?(target, harvest)
+
+            harvest.unread << relative_path(target, harvest)
+          end
+        end
+
+        def inside_roots?(target, harvest)
+          harvest.root_dirs.any? { |dir| target.start_with?("#{File.expand_path(dir)}#{File::SEPARATOR}") }
+        end
+
+        def relative_require_target(node, path)
+          return unless node.is_a?(Prism::CallNode) && node.name == :require_relative && node.receiver.nil?
+
+          argument = node.arguments&.arguments&.first
+          return unless argument.is_a?(Prism::StringNode)
+
+          base = File.expand_path(argument.unescaped, File.dirname(path))
+          [base, "#{base}.rb"].find { |candidate| File.file?(candidate) }
         end
 
         # ADR-121 WD7 (issue #1814) — the refinement table the file contributes, read by the census the project walk

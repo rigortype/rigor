@@ -224,14 +224,12 @@ module Rigor
           return if owners.nil? || targets.empty?
 
           # ADR-121 WD7 (issue #1799) — a `def`, and an alias of a `def` the body wrote earlier; a later definer with no
-          # body (`define_method`, `attr_*`, `undef`) clears the name, which then types as `Dynamic[top]`. Ruby runs a
-          # body charged to several names (an eval on a constant) on one of them only, so each gets the name bodiless.
-          # So does a `refine` that runs inside a method (issue #1749): `using` fixes a module's refined classes when it
-          # runs, so what the method creates later is in effect only for a `using` after the call, an order this walk
-          # cannot decide, and no call is typed from its body.
+          # body (`define_method`, `attr_*`, `undef`) clears the name, which then types as `Dynamic[top]`. A `refine`
+          # that runs inside a method (issue #1749) creates its refinement only when the method runs, after or before a
+          # `using` and over or under a module-body `def` of the name, an order no walk can decide: no body of its names
+          # is kept, and no later `def` of one replaces that ({RefineDefs#record}).
           RefineCensus.read_body(body).defs.each do |name, def_node|
-            def_node = nil if context.deferred || owners.size > 1
-            owners.each { |owner| @refine_defs.record(owner, targets, name, def_node, @nesting) }
+            @refine_defs.record(owners, targets, name, def_node, @nesting, created: context.deferred)
           end
         end
 

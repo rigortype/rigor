@@ -11,6 +11,12 @@ module Rigor
         # `undef`): the search for a body ends there, so the typed arm answers `Dynamic[top]` rather than another
         # file's `def`.
         BODILESS = :bodiless
+        # Issue #1749 — what {#lookup} answers for a name a `refine` that runs inside a method defines. The refinement
+        # exists only once the method has run, replacing whatever a refine body in the module wrote for the name (or
+        # adding nothing, if it never runs), and `using` sees it only if it runs first; a `def` of the name in a
+        # module-body refine, in this file or another, cannot say which one answers. So the name is never typed from
+        # any body, and unlike {BODILESS} a later record does not replace it.
+        CREATED = :created
 
         attr_reader :nestings
 
@@ -19,11 +25,21 @@ module Rigor
           @nestings = {}.compare_by_identity
         end
 
-        # `name` is the method `def_node` answers for: its own name, or an alias's (ADR-121 WD7). A nil `def_node` is a
-        # later definer with no body (`define_method`, `attr_*`, `undef`), which replaces the earlier `def`.
-        def record(owner, targets, name, def_node, nesting)
-          by_class = (@nodes[owner] ||= {})
-          targets.each { |class_name| (by_class[class_name] ||= {})[name] = def_node || BODILESS }
+        # `owners` are the refining modules (several where an eval on a constant may run on any of its names), each
+        # filed under every class of `targets`. `name` is the method `def_node` answers for: its own name, or an
+        # alias's (ADR-121 WD7). A nil `def_node` is a later definer with no body (`define_method`, `attr_*`, `undef`),
+        # which replaces the earlier `def`. Ruby runs a body charged to several owners on one of them only, so each
+        # gets the name bodiless. `created` is true for a `refine` that runs inside a method ({CREATED}), which
+        # keeps no body and which nothing replaces.
+        def record(owners, targets, name, def_node, nesting, created: false)
+          def_node = nil if created || owners.size > 1
+          owners.each do |owner|
+            by_class = (@nodes[owner] ||= {})
+            targets.each do |class_name|
+              by_name = (by_class[class_name] ||= {})
+              by_name[name] = created ? CREATED : (def_node || BODILESS) unless by_name[name] == CREATED
+            end
+          end
           @nestings[def_node] = nesting if def_node
         end
 

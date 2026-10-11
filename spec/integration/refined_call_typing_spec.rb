@@ -173,6 +173,53 @@ RSpec.describe "Typing calls through Ruby refinements (#1664)", type: :runner do
     end
   end
 
+  # Issue #1749. A module-body `def` of the same name cannot say which refinement answers: `M.setup` runs after the
+  # module body, replaces `yy`, and Ruby 4.0.5 prints `"s"` and `S` for each of these. The name a method creates is
+  # never typed from any body, whichever file holds the body and whichever the source order; a body alone is typed
+  # (`1`, the examples above).
+  setup_method = <<~RUBY
+    module M
+      def self.setup = refine(String) { def yy = "s" }
+    end
+  RUBY
+  body = <<~RUBY
+    module M
+      refine(String) { def yy = 1 }
+    end
+  RUBY
+  consumer = <<~RUBY
+    M.setup
+    using M
+    x = "a".yy
+    Rigor.dump_type(x)
+    puts x.upcase
+  RUBY
+  {
+    "a module-body def after it in the file" => [<<~RUBY, {}],
+      module M
+        def self.setup = refine(String) { def yy = "s" }
+        refine(String) { def yy = 1 }
+      end
+      #{consumer}
+    RUBY
+    "a module-body def before it in the file" => [<<~RUBY, {}],
+      module M
+        refine(String) { def yy = 1 }
+        def self.setup = refine(String) { def yy = "s" }
+      end
+      #{consumer}
+    RUBY
+    "a module-body def in a file searched first" => [consumer, { "a_body.rb" => body, "b_setup.rb" => setup_method }],
+    "a module-body def in a file searched last" => [consumer, { "a_setup.rb" => setup_method, "b_body.rb" => body }],
+    "a module-body def in the consumer's file" => ["#{body}#{consumer}", { "m.rb" => setup_method }],
+    "the setup in the consumer's file" => ["#{setup_method}#{consumer}", { "m.rb" => body }]
+  }.each do |shape, (source, files)|
+    it "types no call from a name a method creates, whatever else defines it (#{shape})" do
+      expect(rows(source, files: files).map { |rule, _line, message| [rule, message] })
+        .to eq([["dump.type", "dump_type: Dynamic[top]"]])
+    end
+  end
+
   it "does not fold a refined core method, and answers the later of two `using`s" do
     expect(dumps(<<~RUBY)).to eq(%w[non-negative-int :up])
       module Sized

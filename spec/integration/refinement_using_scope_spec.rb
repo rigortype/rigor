@@ -1795,6 +1795,27 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
       expect(undefined_rows).to eq([["p.rb", 5, "qq"]])
     end
 
+    # Ruby 4.0.5 prints `1` for `x` with the body alone and `"s"` once `M.setup`, which replaces `yy`, is there. The
+    # typed call is `1`, so `x.upcase` is reported, until a file adds the setup; a warm cache serves what cold does.
+    it "re-types the consumer when another file adds the setup that replaces a module-body def, warm as cold" do
+      write("lib/a_body.rb", "module M\n  refine(String) { def yy = 1 }\nend\n")
+      write("lib/use.rb", "M.setup\nusing M\nx = \"a\".yy\nx.upcase\n")
+      root = File.join(Dir.pwd, ".rigor", "cache-add-setup")
+      store = -> { Rigor::Cache::Store.new(root: root) }
+
+      expect(undefined_rows(cache_store: store.call)).to eq([["use.rb", 4, "upcase"]])
+      expect(undefined_rows(cache_store: store.call)).to eq([["use.rb", 4, "upcase"]])
+
+      write("lib/b_setup.rb", "module M\n  def self.setup = refine(String) { def yy = \"s\" }\nend\n")
+
+      expect(undefined_rows(cache_store: store.call)).to eq([])
+      expect(undefined_rows(cache_store: store.call)).to eq([])
+
+      FileUtils.rm("lib/b_setup.rb")
+
+      expect(undefined_rows(cache_store: store.call)).to eq([["use.rb", 4, "upcase"]])
+    end
+
     it "answers the same through a warm cache as cold, and with only the consumers re-analysed" do
       shapes.each do |shape, source|
         write_project(source)

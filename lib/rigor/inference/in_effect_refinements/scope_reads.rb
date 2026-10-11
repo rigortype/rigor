@@ -29,7 +29,10 @@ module Rigor
         # `module_name`, or nil where none can be read: this file's own refine body first, else one in a file that
         # declares the module (`Scope#discovered_class_sources`), parsed once a run. A gem refinement, a module a
         # `Module.new` write names in another file, or an anonymous module answer nil, which the typed arm reads as
-        # an unreadable body (`Dynamic[top]`). The consumer's `refinement:<name>` edge covers an edit to that body
+        # an unreadable body (`Dynamic[top]`). Issue #1749 — so does a name a `refine` that runs inside a method
+        # defines, in this file or in any file that declares the module: the refinement is created when the method
+        # runs, which can replace a module-body `def` of the name wherever it is written, so no body of the name is
+        # read. The consumer's `refinement:<name>` edge covers an edit to that body
         # (`Incremental.changed_refinement_names`).
         def refinement_def(scope, module_name, class_name, method_name)
           refinement_def_with_query(scope, module_name, class_name, method_name).first
@@ -39,17 +42,24 @@ module Rigor
         # found in, or nil for this file's own body (or none): the typed arm re-types a foreign body under that file's
         # in-effect refinements.
         def refinement_def_with_query(scope, module_name, class_name, method_name)
-          own = scope.discovery.in_effect_refinements&.refinement_def(module_name, class_name, method_name)
-          return NO_DEF if own == RefineDefs::BODILESS
-          return [own, nil] if own
-
-          (scope.discovered_class_sources[module_name] || EMPTY).each do |path|
-            query = DefNodeResolver.refinement_query(path)
+          chosen = nil
+          each_declaring_query(scope, module_name) do |query, foreign|
             found = query&.refinement_def(module_name, class_name, method_name)
+            return NO_DEF if found == RefineDefs::CREATED
+            next if found.nil? || chosen
             return NO_DEF if found == RefineDefs::BODILESS
-            return [found, query] if found
+
+            chosen = [found, (query if foreign)]
           end
-          NO_DEF
+          chosen || NO_DEF
+        end
+
+        # This file's query, then one per file that declares `module_name`.
+        def each_declaring_query(scope, module_name)
+          yield scope.discovery.in_effect_refinements, false
+          (scope.discovered_class_sources[module_name] || EMPTY).each do |path|
+            yield DefNodeResolver.refinement_query(path), true
+          end
         end
 
         NO_DEF = [nil, nil].freeze

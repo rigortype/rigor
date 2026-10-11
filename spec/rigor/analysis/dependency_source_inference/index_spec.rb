@@ -117,6 +117,18 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::Index do
     end
   end
 
+  # Issue #1814 — the constants the walked gems write without declaring a class or module by them, unioned across
+  # gems, by last segment; the reader decides a refine key with such a segment at read time.
+  describe "#bound_constant?" do
+    it "unions the constants the walked gems bind" do
+      index = described_class.new(bound_constants: Set["Target", "Enc"])
+
+      expect(%w[Target Enc Other].map { |segment| index.bound_constant?(segment) }).to eq([true, true, false])
+      expect(index.bound_constants).to be_frozen
+      expect(described_class::EMPTY.bound_constant?("Target")).to be(false)
+    end
+  end
+
   describe "#cache_descriptor" do
     let(:resolver) { Rigor::Analysis::DependencySourceInference::GemResolver }
 

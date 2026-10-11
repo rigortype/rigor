@@ -193,18 +193,26 @@ module Rigor
         end
 
         # ADR-121 WD7 — is the refined-class key `refined` a class the walk could not name: the wildcard, or (A6) a
-        # name no class declaration or RBS knows that a project constant write binds (`K = String; refine(K)`), whose
-        # value is the class refined. A constant nothing binds (a gem's class with no RBS) keeps a normal row, which
-        # matches no receiver.
+        # name no class declaration or RBS knows, of which some segment is a constant a write binds: a project
+        # constant write (`K = String; refine(K)`) or one an opted-in gem's files make
+        # (`DependencySourceInference::Index#bound_constant?`, issue #1814), whose value is the class refined. Every
+        # segment counts, not only the last, so a prefix alias (`Enc = ::Encoding; refine(Enc::Converter)`, #1815)
+        # reads the same way, and a gem's write beside another module's refine (`Shared::Target = String` in a gem,
+        # `refine Shared::Target` in the project or in a second gem) is seen. A key that is a core or declared class
+        # never moves, whatever a file writes under its name. A constant nothing binds (a gem's class with no RBS)
+        # keeps a normal row, which matches no receiver. Each segment is a `constant:` dependency, so a file that
+        # starts or stops binding any of them re-checks the consumer.
         def class_wildcard_key?(scope, refined)
           return true if refined == WILDCARD
           return false if scope.discovered_classes.key?(refined) || scope.environment&.class_known?(refined)
 
+          segments = refined.split("::").reject(&:empty?)
           if Analysis::DependencyRecorder.active?
-            Analysis::DependencyRecorder.read_last_segment(:constant, refined)
             Analysis::DependencyRecorder.read_last_segment(:class, refined)
+            segments.each { |segment| Analysis::DependencyRecorder.read_last_segment(:constant, segment) }
           end
-          !scope.bound_constant_names(refined).empty?
+          index = scope.environment&.dependency_source_index
+          segments.any? { |segment| !scope.bound_constant_names(segment).empty? || index&.bound_constant?(segment) }
         end
 
         private

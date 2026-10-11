@@ -6,6 +6,11 @@
 # of the refining module M. Before the fix the walker filed it as `M#shout` and the project's refinement table
 # never learnt `String#shout`, so `using M; "hi".shout` reported `call.undefined-method`.
 #
+# Issue #1814 — a gem's refining module stays opaque (#1811), so where a gem's rows are the observable the `using`
+# names no module: that declines the names some row defines and reports every other. The gem walker reads a gem's
+# `refine` calls through the census the project walk runs, and a refine key is decided at read time, per segment,
+# from the project's constant census and the constants the opted-in gems write.
+#
 # Every expectation below is the answer CRuby gives for the same source: a silent line runs, a reported line
 # raises `NoMethodError`.
 
@@ -34,11 +39,9 @@ RSpec.describe "Gem source inference over `refine` bodies (#1672)" do
         def whisper = "psst"
       end
     RUBY
-    spec = instance_double(Gem::Specification, version: Gem::Version.new("1.0.0"), full_gem_path: gem_dir)
     allow(Rigor::Analysis::DependencySourceInference::GemResolver)
       .to receive(:locate_gem_spec).and_call_original
-    allow(Rigor::Analysis::DependencySourceInference::GemResolver)
-      .to receive(:locate_gem_spec).with("shouty").and_return(spec)
+    stub_gem("shouty", "1.0.0")
   end
 
   def write(relative, contents)
@@ -46,22 +49,39 @@ RSpec.describe "Gem source inference over `refine` bodies (#1672)" do
     File.write(relative, contents)
   end
 
-  def configuration(workers: 0)
+  # Makes `name` resolve to `vendor/<name>`, at `version`, as the bundle would.
+  def stub_gem(name, version)
+    spec = instance_double(Gem::Specification, version: Gem::Version.new(version),
+                                               full_gem_path: File.join(Dir.pwd, "vendor", name))
+    allow(Rigor::Analysis::DependencySourceInference::GemResolver)
+      .to receive(:locate_gem_spec).with(name).and_return(spec)
+  end
+
+  # Writes `vendor/<name>/<relative>` for each pair, and resolves `name`.
+  def write_gem(name, files, version = "1.0.0")
+    files.each { |relative, contents| write("vendor/#{name}/#{relative}", contents) }
+    stub_gem(name, version)
+  end
+
+  def configuration(workers: 0, gems: %w[shouty])
     Rigor::Configuration.new(
       Rigor::Configuration::DEFAULTS.merge(
         "paths" => %w[lib], "workers" => workers,
-        "dependencies" => { "source_inference" => [{ "gem" => "shouty", "mode" => "when_missing" }] }
+        "dependencies" => { "source_inference" => gems.map { |name| { "gem" => name, "mode" => "when_missing" } } }
       )
     )
   end
 
+  def undefined_rows_of(found)
+    found.select { |d| d.qualified_rule == "call.undefined-method" }
+         .map { |d| [File.basename(d.path.to_s), d.line, d.method_name.to_s] }.sort
+  end
+
   # `[file basename, line, method name]` for every `call.undefined-method`, sorted.
-  def undefined_rows(cache_store: nil, workers: 0)
-    runner = Rigor::Analysis::Runner.new(configuration: configuration(workers: workers), cache_store: cache_store)
-    guarded_run(runner, %w[lib]).diagnostics
-                                .select { |d| d.qualified_rule == "call.undefined-method" }
-                                .map { |d| [File.basename(d.path.to_s), d.line, d.method_name.to_s] }
-                                .sort
+  def undefined_rows(cache_store: nil, workers: 0, gems: %w[shouty])
+    runner = Rigor::Analysis::Runner.new(configuration: configuration(workers: workers, gems: gems),
+                                         cache_store: cache_store)
+    undefined_rows_of(guarded_run(runner, %w[lib]).diagnostics)
   end
 
   # ADR-121 WD7 — a module the project does not declare is opaque, a walked gem's included, so `"hi".nope` after
@@ -141,5 +161,64 @@ RSpec.describe "Gem source inference over `refine` bodies (#1672)" do
     write("lib/unknown.rb", "using Module.new { }\n\"hi\".shout\n\"hi\".nope\n")
 
     expect(undefined_rows(workers: 2)).to eq([["other.rb", 1, "shout"], ["unknown.rb", 3, "nope"]])
+  end
+
+  # Issue #1814 (#1815 item 5) — a refine key is decided at read time, per segment, from the project's constant census
+  # and the constants the opted-in gems write without declaring a class or module by them: a key with a bound segment
+  # names whatever value the write holds, so its names decline on every receiver (a class-unknown row), where a
+  # normal row keyed by a name no class declares matched no receiver and reported the refined call on correct code.
+  describe "a refine target a constant write binds" do
+    # Ruby 4.0.5 prints "X" for `"x".shout` after `module Shared; Target = String; end` (a gem) and
+    # `module BRef; refine(Shared::Target) { def shout = upcase }; end; using BRef` (the project).
+    it "reads a project refine of a target an opted-in gem's constant write binds as class-unknown" do
+      write_gem("sharedg", "lib/sharedg.rb" => "module Shared\n  Target = String\nend\n")
+      write("lib/bref.rb", "module BRef\n  refine(Shared::Target) { def shout = upcase }\nend\n")
+      write("lib/app.rb", "using BRef\n\"x\".shout\n\"x\".nope\n")
+
+      expect(undefined_rows(gems: %w[sharedg])).to eq([["app.rb", 3, "nope"]])
+    end
+
+    it "reads a gem refine of a target another opted-in gem's constant write binds the same way" do
+      write_gem("sharedg", "lib/sharedg.rb" => "module Shared\n  Target = String\nend\n")
+      write_gem("brefg", "lib/brefg.rb" => "module BRef\n  refine(Shared::Target) { def shout = upcase }\nend\n")
+      write("lib/app.rb", "using Module.new { }\n\"x\".shout\n\"x\".nope\n")
+
+      expect(undefined_rows(gems: %w[sharedg brefg])).to eq([["app.rb", 3, "nope"]])
+    end
+
+    # Ruby 4.0.5 prints 1 for `Encoding::Converter.new("UTF-8", "EUC-JP").shout` after `Enc = ::Encoding;
+    # refine(Enc::Converter) { def shout = 1 }` (#1815 item 5).
+    it "reads a target with a prefix a gem's constant write binds as class-unknown" do
+      write_gem("pag",
+                "lib/pag.rb" => "module Pag\n  Enc = ::Encoding\n  refine(Enc::Converter) { def shout = 1 }\nend\n")
+      write("lib/app.rb", "using Module.new { }\nEncoding::Converter.new('UTF-8', 'EUC-JP').shout\n\"x\".nope\n")
+
+      expect(undefined_rows(gems: %w[pag])).to eq([["app.rb", 3, "nope"]])
+    end
+
+    # The controls: a class the gem declares by a constant write (`Struct.new`, `Data.define`, `Class.new`) is no
+    # bound name, so its refine keeps a normal row that matches no String receiver and the call reports; a write that
+    # is no class (`DelegateClass(Array)`) is bound, so `"x".pw` declines; a target no write binds keeps its row.
+    it "keeps the row of a class a gem declares by a write, and of a target nothing binds" do
+      write_gem("clg", "lib/clg.rb" => <<~RUBY)
+        require 'delegate'
+        module Clg
+          Point = Struct.new(:x)
+          Pair = Data.define(:a)
+          Wrap = DelegateClass(Array)
+          Sub = Class.new(StandardError)
+          refine(Point) { def px = x }
+          refine(Pair) { def pa = a }
+          refine(Wrap) { def pw = 1 }
+          refine(Sub) { def ps = 2 }
+          refine(Symbol) { def plain = 1 }
+        end
+      RUBY
+      write("lib/app.rb", "using Module.new { }\n\"x\".px\n\"x\".pa\n\"x\".pw\n\"x\".ps\n\"x\".plain\n\"x\".nope\n")
+
+      expect(undefined_rows(gems: %w[clg]))
+        .to eq([["app.rb", 2, "px"], ["app.rb", 3, "pa"], ["app.rb", 5, "ps"], ["app.rb", 6, "plain"],
+                ["app.rb", 7, "nope"]])
+    end
   end
 end

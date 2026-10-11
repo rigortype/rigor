@@ -12,7 +12,7 @@ module Rigor
       # entries.
       class Index
         attr_reader :resolved_gems, :unresolvable, :method_catalog, :budget_exceeded,
-                    :class_to_gem, :budget_overrun_strategy, :gem_modes, :refinements
+                    :class_to_gem, :budget_overrun_strategy, :gem_modes, :refinements, :bound_constants
 
         # @param method_catalog — => Symbol}] the flat
         #   `(class_name, method_name) → :instance | :singleton` table produced by {Walker.walk}, aggregated
@@ -34,10 +34,15 @@ module Rigor
         # @param refinements — issue #1672: the opt-in gems' `refine X do … end` bodies, `{refined class =>
         #   {method => [refining modules]}}` ({Walker::Outcome#refinements}). The runner merges it into the
         #   project's `discovered_refinements` seed, so `using M` for a gem's `M` reaches the check rules.
+        # @param bound_constants — issue #1814: the last segment of every constant the opt-in gems' files write
+        #   without declaring a class or module by it ({Walker::Outcome#bound}), unioned across the walked gems. A
+        #   refine key with such a segment may name any value (`Target = String` in one gem, `refine Shared::Target`
+        #   in the project or in the next gem), which the reader decides at read time
+        #   ({Inference::InEffectRefinements.class_wildcard_key?}) through {#bound_constant?}.
         def initialize( # rubocop:disable Metrics/ParameterLists
           resolved_gems: [], unresolvable: [], method_catalog: {},
           budget_exceeded: [], class_to_gem: {},
-          budget_overrun_strategy: :walker_cap, gem_modes: {}, refinements: {}
+          budget_overrun_strategy: :walker_cap, gem_modes: {}, refinements: {}, bound_constants: Set.new
         )
           @resolved_gems = resolved_gems.freeze
           @unresolvable = unresolvable.freeze
@@ -47,6 +52,7 @@ module Rigor
           @budget_overrun_strategy = budget_overrun_strategy
           @gem_modes = gem_modes.freeze
           @refinements = Inference::ScopeIndexer.freeze_refinements(refinements)
+          @bound_constants = bound_constants.to_set.freeze
           freeze
         end
 
@@ -65,6 +71,13 @@ module Rigor
         #   in any opt-in gem's catalog.
         def gem_for(class_name)
           @class_to_gem[class_name]
+        end
+
+        # Issue #1814 — does a walked gem write a constant whose last segment is `segment` without declaring a class
+        # or module by it? A refine key with such a segment may name any value (`Target = String; refine(Shared::Target)`),
+        # which the walker cannot resolve and the reader decides ({Inference::InEffectRefinements.class_wildcard_key?}).
+        def bound_constant?(segment)
+          @bound_constants.include?(segment)
         end
 
         # ADR-10 slice 5c — per-class mode lookup. Chains `class_to_gem` + `gem_modes`; returns `nil` when

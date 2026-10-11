@@ -103,6 +103,16 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::Builder do
       )
     end
 
+    # Issue #1814 — each gem's bound constants reach the Index as one set, by last segment.
+    it "unions each gem's bound constants into the Index" do
+      stub_resolved_for("alpha", method_catalog: {}, bound: Set["Target"])
+      stub_resolved_for("beta", method_catalog: {}, bound: Set["Enc"])
+
+      index = described_class.build(dependencies({ "gem" => "alpha" }, { "gem" => "beta" }))
+
+      expect(%w[Target Enc Other].map { |segment| index.bound_constant?(segment) }).to eq([true, true, false])
+    end
+
     it "degrades a gem to no contributions when the Walker raises (per-gem isolation)" do
       resolver = Rigor::Analysis::DependencySourceInference::GemResolver
       walker = Rigor::Analysis::DependencySourceInference::Walker
@@ -122,7 +132,7 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::Builder do
       expect(index.budget_exceeded).to eq([])
     end
 
-    def stub_resolved_for(gem_name, method_catalog:, truncated: false)
+    def stub_resolved_for(gem_name, method_catalog:, truncated: false, bound: Set.new)
       gem_dir = "/fake/#{gem_name}"
       resolver = Rigor::Analysis::DependencySourceInference::GemResolver
       walker = Rigor::Analysis::DependencySourceInference::Walker
@@ -134,7 +144,7 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::Builder do
       )
       # The Index normalizes legacy bare-Symbol catalog values (`=> :instance`) into `CatalogEntry(kind:)` at
       # construction, so spec stubs may pass either shape. We keep the helper's API on bare Symbols for legibility.
-      outcome = walker::Outcome.new(catalog: method_catalog, truncated: truncated)
+      outcome = walker::Outcome.new(catalog: method_catalog, truncated: truncated, bound: bound)
       allow(walker).to receive(:walk).with(
         gem_dir: gem_dir, roots: %w[lib], budget: anything
       ).and_return(outcome)

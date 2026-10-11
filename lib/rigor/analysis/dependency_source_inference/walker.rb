@@ -43,18 +43,25 @@ module Rigor
         # only after `using`. ADR-121 WD7 (issue #1814) — the table is the one the project walk's census records for
         # the same source ({Inference::ScopeIndexer.refinement_table}), file by file, so it carries the wildcard rows
         # a project module's would.
-        class Outcome < Data.define(:catalog, :truncated, :refinements)
-          def initialize(catalog:, truncated:, refinements: {}.freeze)
+        #
+        # Issue #1814 — `bound` is the last segment of every constant the gem's files write (an assignment, a path
+        # write, an operator write, a multiple assignment, a `const_set` with a literal name) without declaring a class
+        # or module by it ({.collect_bound_constants}). A refine key with such a segment may name any value
+        # (`Target = String; refine(Target)`), which the walker cannot resolve: the rows stay as the census records
+        # them, {Index#bound_constant?} unions the segments across the walked gems, and the reader decides the key at
+        # read time ({Inference::InEffectRefinements.class_wildcard_key?}), as it does for the project's own writes.
+        class Outcome < Data.define(:catalog, :truncated, :refinements, :bound)
+          def initialize(catalog:, truncated:, refinements: {}.freeze, bound: Set.new.freeze)
             super
           end
 
           def truncated? = truncated
         end
 
-        # The walk's two accumulators. The budget counts `catalog` only, but stops the whole walk: a refine body
-        # reached after it trips is not recorded. `root` is the file being walked and `in_effect` its
-        # {Inference::InEffectRefinements}, built the first time a `refine`-shaped call asks (issue #1689).
-        Harvest = Struct.new(:catalog, :refinements, :root, :in_effect) do
+        # The walk's accumulators. The budget counts `catalog` only, but stops the whole walk: a file reached after it
+        # trips is not read. `root` is the file being walked and `in_effect` its {Inference::InEffectRefinements}, built
+        # the first time a `refine`-shaped call asks (issue #1689). Issue #1814 — `bound` is {Outcome#bound}.
+        Harvest = Struct.new(:catalog, :refinements, :root, :in_effect, :bound) do
           # {Inference::ScopeIndexer.module_refine_target} against this file's in-effect refinements.
           def refine_target_of(node)
             return nil if Inference::ScopeIndexer.refine_target(node).nil?
@@ -91,7 +98,7 @@ module Rigor
         #   the budget was reached. Methods of identical name on the same class with different kinds (rare;
         #   private API mostly) carry the kind that wins the per-class first walk.
         def walk(gem_dir:, roots:, budget: UNBOUNDED)
-          harvest = Harvest.new({}, {})
+          harvest = Harvest.new({}, {}, nil, nil, Set.new)
           truncated = false
           accepted_roots(roots).each do |root|
             break if truncated
@@ -99,7 +106,8 @@ module Rigor
             truncated = walk_root(File.join(gem_dir.to_s, root), harvest, budget)
           end
           Outcome.new(catalog: harvest.catalog.freeze, truncated: truncated,
-                      refinements: Inference::ScopeIndexer.freeze_refinements(harvest.refinements))
+                      refinements: Inference::ScopeIndexer.freeze_refinements(harvest.refinements),
+                      bound: harvest.bound.freeze)
         end
 
         # Drops hard-excluded entries before any filesystem walk happens. Reasoning: we never want a gem's
@@ -128,6 +136,7 @@ module Rigor
           harvest.root = parse_result.value
           harvest.in_effect = nil
           record_refinements(parse_result.value, harvest)
+          collect_bound_constants(parse_result.value, harvest.bound)
           walk_node(parse_result.value, [], false, harvest, budget)
         rescue StandardError
           # Gem source we can't parse / read silently degrades to "no contribution from this file". The
@@ -144,6 +153,41 @@ module Rigor
           harvest.refinements = Inference::ScopeIndexer.merge_refinement_tables(
             harvest.refinements, Inference::ScopeIndexer.refinement_table(root)
           )
+        end
+
+        # Issue #1814 — the last segment of every constant the file writes without declaring a class or module by it:
+        # an assignment, a path write (`Wrap::K = …`), an `||=` / `&&=` / operator write, a multiple-assignment target,
+        # a `const_set` with a literal name on any receiver. A write whose value is one of the class-creating shapes the
+        # project walk registers as a declaration (`Class.new`, `Module.new`, `Struct.new`, `Data.define`, a `.freeze`
+        # tail or a `K = K || …` guard stripped: {Inference::ScopeIndexer.meta_new_rvalue}) declares a class, so
+        # `Point = Struct.new(:x); refine(Point)` keeps a normal row. One pass over the tree; the rows are not touched.
+        def collect_bound_constants(node, bound)
+          return unless node.is_a?(Prism::Node)
+
+          case node
+          when Prism::ConstantWriteNode, Prism::ConstantOrWriteNode, Prism::ConstantAndWriteNode,
+               Prism::ConstantOperatorWriteNode
+            bound << node.name.to_s unless declares_class?(node)
+          when Prism::ConstantPathWriteNode, Prism::ConstantPathOrWriteNode, Prism::ConstantPathAndWriteNode,
+               Prism::ConstantPathOperatorWriteNode
+            bound << node.target.name.to_s unless declares_class?(node)
+          when Prism::ConstantTargetNode, Prism::ConstantPathTargetNode then bound << node.name.to_s
+          when Prism::CallNode then note_const_set(node, bound)
+          end
+          node.rigor_each_child { |child| collect_bound_constants(child, bound) }
+        end
+
+        def declares_class?(write)
+          rvalue = Inference::ScopeIndexer.meta_new_rvalue(write)
+          !rvalue.nil? && Inference::ScopeIndexer.meta_new_constant_rvalue?(rvalue)
+        end
+
+        # `const_set(:K, …)` / `const_set("K", …)` with a literal name, on any receiver.
+        def note_const_set(node, bound)
+          return unless node.name == :const_set
+
+          name = node.arguments&.arguments&.first
+          bound << name.unescaped if name.is_a?(Prism::SymbolNode) || name.is_a?(Prism::StringNode)
         end
 
         # Walks a Prism subtree, accumulating method definitions under their qualified class name. Mirrors

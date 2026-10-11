@@ -3704,7 +3704,7 @@ module Rigor
       # The block form of a meta-new constant write: its members, and the module mark `Module.new` earns.
       def record_meta_new_facts(rvalue, child_prefix, tables)
         record_meta_members(rvalue, child_prefix, tables)
-        # `Module.new(&BODY)`: the body runs against the new module but cannot be read, so its surface is unknown (#1816).
+        # `Module.new(&BODY)`: the body runs on the new module but cannot be read, so its surface is unknown (#1816).
         if rvalue.block.is_a?(Prism::BlockArgumentNode)
           record_surface_mark(tables, child_prefix.join("::"), Scope::DiscoveryIndex::ENVELOPE_DYNAMIC_MARK)
         end

@@ -849,6 +849,31 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
         expect(call_rows).to eq([["use.rb", 7, "call.wrong-arity"], ["use.rb", 8, "call.wrong-arity"]])
       end
 
+      # No refinement here. Ruby 4.0.5 answers `[1, 2]` for the first three calls: a module the project rewrites
+      # dynamically (a computed `define_method` in a `module_eval` or `class_eval` block, an `include` of a
+      # non-constant), whether core or vendored with a signature, may define the name ahead of `Base#foo`, so the
+      # arity rule keeps it on the chain. `HostQ` includes an untouched vendored module and raises.
+      it "keeps a module the project rewrites dynamically on the arity rule's chain" do
+        write("vendor/m.rb", "module M; end\nmodule N; end\nmodule Loud; def foo(*a) = a; end\nmodule Quiet; end\n")
+        write("sig/m.rbs", "module M\nend\nmodule N\nend\nmodule Quiet\nend\n")
+        write("lib/use.rb", <<~RUBY)
+          Comparable.module_eval { define_method(["ze", "ta"].join) { |*a| a } }
+          M.class_eval { define_method(["f", "oo"].join) { |*a| a } }
+          N.include(Object.const_get(:Loud))
+          class Base; def zeta(a) = a; def foo(a) = a; end
+          class Host < Base; include Comparable; end
+          class HostM < Base; include M; end
+          class HostN < Base; include N; end
+          class HostQ < Base; include Quiet; end
+          Host.new.zeta(1, 2)
+          HostM.new.foo(1, 2)
+          HostN.new.foo(1, 2)
+          HostQ.new.foo(1, 2)
+        RUBY
+
+        expect(call_rows).to eq([["use.rb", 12, "call.wrong-arity"]])
+      end
+
       # Ruby 4.0.5 answers `:base`: `Random#seed` runs on `Random::Base`, which RBS declares beside `Random` rather than
       # above it. CRuby registers `Random#seed` only inside `random.c`'s `#if 0` block for RDoc, which the catalogue
       # skips, so nothing proves `Random` defines it.

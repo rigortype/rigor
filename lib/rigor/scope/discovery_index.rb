@@ -236,12 +236,17 @@ module Rigor
       ENVELOPE_OBJECT_EXTENDED_MARK = :"<object-extended>"
       ENVELOPE_REFINED_MARK = :"<refined>"
 
-      # Issue #1820 — whether an envelope bucket says the project declares the name: a per-method entry, or the
-      # {ENVELOPE_MODULE_MARK} a `module` declaration records. A bucket that holds only the other class marks (a
-      # refinement, a dynamic rewrite, an object extend or singleton prepend, a meta-new superclass) is evidence about
-      # a name the project may only mention, such as `Comparable` in `x.singleton_class.prepend(Comparable)`.
+      # Issue #1820 — whether an envelope bucket says the project declares, or rewrites, the name's method table: a
+      # per-method entry, the {ENVELOPE_MODULE_MARK} a `module` declaration records, or the {ENVELOPE_DYNAMIC_MARK}
+      # (`Comparable.module_eval { define_method(computed) }` gives a module a method no table names, so a reader
+      # must keep it on its chain rather than read RBS's surface for it). A bucket that holds only the refined,
+      # object-extended or meta-superclass marks is evidence about a name the project may only mention, such as
+      # `Comparable` in `x.singleton_class.prepend(Comparable)`.
+      DECLARING_MARKS = [ENVELOPE_MODULE_MARK, ENVELOPE_DYNAMIC_MARK].freeze
+      private_constant :DECLARING_MARKS
+
       def self.declares_surface?(bucket)
-        !bucket.nil? && bucket.any? { |key, _| !key.is_a?(Symbol) || key == ENVELOPE_MODULE_MARK }
+        !bucket.nil? && bucket.any? { |key, _| !key.is_a?(Symbol) || DECLARING_MARKS.include?(key) }
       end
 
       # Whether an envelope bucket says the project rewrites the class's method table beyond its literal names: a

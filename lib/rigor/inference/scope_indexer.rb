@@ -3479,6 +3479,18 @@ module Rigor
         [refinements, census]
       end
 
+      # ADR-121 WD7 (issue #1814) — the refinement table one parsed file contributes: the census of
+      # {#build_methods_and_def_nodes}, whose fourth table is the project walk's own (`seed_discovered_methods` and
+      # `walk_def_contributions` take it from the same call), run for a caller that wants nothing else. The gem source
+      # walker reads a gem file this way, so a gem module's rows carry the wildcards a project module's would
+      # (`walker_walk_census_parity_spec.rb`, beside the walker's specs, holds the two to one table). A file whose text
+      # never names `refine` as a word records no row, so it is not walked.
+      def refinement_table(root)
+        return EMPTY_REFINEMENTS if refine_word_offsets(root).empty?
+
+        build_methods_and_def_nodes(root)[3]
+      end
+
       # Issue #1120 — a refinement table, deep-frozen; the shared empty table when nothing was recorded.
       def freeze_refinements(table)
         return EMPTY_REFINEMENTS if table.nil? || table.empty?

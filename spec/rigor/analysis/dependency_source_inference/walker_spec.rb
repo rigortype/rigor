@@ -330,11 +330,34 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::Walker do
         expect(outcome.refinements).to eq({ "Shouty::String" => rows, "String" => rows })
       end
 
-      it "records nothing for a `refine` with no enclosing module" do
+      # Ruby 4.0.5 raises `NoMethodError` for a top-level `refine`, so no `using` can ever activate it. The census
+      # the project walk runs records it under the module name `""` (ADR-121 WD7), which no `using` names; the gem
+      # walk reads the file through the same census (#1814), so the row is the same one.
+      it "records a `refine` with no enclosing module under a module no `using` can name" do
         outcome = walk_source("refine(::String) { def shout = nil }\n")
 
         expect(outcome.catalog).to eq({})
-        expect(outcome.refinements).to eq({})
+        expect(outcome.refinements).to eq({ "String" => { shout: [""] } })
+      end
+
+      # The census the project walk runs reaches a gem file: a refine in a method and a `:refine` literal leave the
+      # rows a project module would carry, whatever the census decides for each (a targets-wildcard today; #1835 may
+      # charge the singleton method's to the module), and the folded table is the project walk's for the same sources
+      # (see walker_walk_census_parity_spec for the full set of shapes).
+      it "records the rows the project walk records for a refine in a method and a :refine literal" do
+        wildcard = Rigor::Scope::DiscoveryIndex::REFINEMENT_WILDCARD
+        sources = ["module A\n  def self.setup = refine(String) { def x = 1 }\nend\n",
+                   "module B\n  send(:refine, Integer) { def y = 1 }\nend\n"]
+        project = sources.map { |source| Rigor::Inference::ScopeIndexer.refinement_table(Prism.parse(source).value) }
+                         .reduce { |left, right| Rigor::Inference::ScopeIndexer.merge_refinement_tables(left, right) }
+        with_fake_gem do |gem_dir|
+          sources.each_with_index { |source, i| File.write(File.join(gem_dir, "lib", "f#{i}.rb"), source) }
+
+          outcome = walker.walk(gem_dir: gem_dir, roots: %w[lib])
+
+          expect(outcome.refinements).to eq(project)
+          expect(outcome.refinements.dig(wildcard, wildcard)).to include("B")
+        end
       end
     end
   end

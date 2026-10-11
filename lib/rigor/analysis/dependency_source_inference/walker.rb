@@ -6,7 +6,6 @@ require_relative "return_type_heuristic"
 require_relative "../../source/constant_path"
 require_relative "../../source/node_children"
 require_relative "../../inference/scope_indexer"
-require_relative "../../inference/refine_census"
 
 module Rigor
   module Analysis
@@ -41,7 +40,9 @@ module Rigor
         # Issue #1672 — `refinements` is the gem's `refine X do … end` table, `{refined class => {method =>
         # [refining modules]}}`, the shape `Inference::ScopeIndexer` builds for project files. A refine-body `def`
         # goes there and never into `catalog`: it is not a method of the refining module, and of the refined class
-        # only after `using`.
+        # only after `using`. ADR-121 WD7 (issue #1814) — the table is the one the project walk's census records for
+        # the same source ({Inference::ScopeIndexer.refinement_table}), file by file, so it carries the wildcard rows
+        # a project module's would.
         class Outcome < Data.define(:catalog, :truncated, :refinements)
           def initialize(catalog:, truncated:, refinements: {}.freeze)
             super
@@ -126,12 +127,23 @@ module Rigor
 
           harvest.root = parse_result.value
           harvest.in_effect = nil
+          record_refinements(parse_result.value, harvest)
           walk_node(parse_result.value, [], false, harvest, budget)
         rescue StandardError
           # Gem source we can't parse / read silently degrades to "no contribution from this file". The
           # user-facing diagnostic stream is reserved for the project source; opt-in gem source MUST NOT
           # pollute it with parse errors the user cannot fix.
           nil
+        end
+
+        # ADR-121 WD7 (issue #1814) — the refinement table the file contributes, read by the census the project walk
+        # runs ({Inference::ScopeIndexer.refinement_table}): the `refine` bodies, the computed targets, the `refine`
+        # inside a method, the `:refine` literals, and the wildcard rows each leaves, folded as the project folds its
+        # files' tables (`merge_refinement_tables`). The walker's own descent below records no row.
+        def record_refinements(root, harvest)
+          harvest.refinements = Inference::ScopeIndexer.merge_refinement_tables(
+            harvest.refinements, Inference::ScopeIndexer.refinement_table(root)
+          )
         end
 
         # Walks a Prism subtree, accumulating method definitions under their qualified class name. Mirrors
@@ -149,11 +161,8 @@ module Rigor
           when Prism::DefNode
             record_def_node(node, qualified_prefix, in_singleton_class, harvest, budget)
           when Prism::CallNode
-            if (target = harvest.refine_target_of(node))
-              return walk_refine_body(node, target, qualified_prefix, in_singleton_class, harvest, budget)
-            end
+            return walk_refine_body(node, qualified_prefix, harvest, budget) if harvest.refine_target_of(node)
 
-            record_unreadable_target(node, qualified_prefix, in_singleton_class, harvest) if node.name == :refine
             walk_children(node, qualified_prefix, in_singleton_class, harvest, budget)
           else
             walk_children(node, qualified_prefix, in_singleton_class, harvest, budget)
@@ -203,43 +212,15 @@ module Rigor
           harvest.catalog[key] = CatalogEntry.new(kind: kind, return_type: return_type)
         end
 
-        # Issue #1672 — `refine X do … end`, the shape {Inference::ScopeIndexer.module_refine_target} accepts (not
-        # one whose `self` is a class: that is the class's own method and walks as any other call, issue #1689). The
-        # body's instance `def`s are refinements of X by the enclosing module, recorded the way the project walk
-        # records them (`ScopeIndexer#record_refinement_defs`: X resolved lexically, every name it can denote
-        # recorded). None reaches the catalogue. A `refine` with no enclosing module, or in a block under
-        # `class << self`, names no refining module, so its defs are dropped. Declarations nested in the body still
-        # walk under the lexical prefix, as they did before.
-        #
-        # ADR-121 WD7 — the names are what `Inference::RefineCensus.read_body` reads, the project walk's reading, with
-        # a names-wildcard row for a body whose names are incomplete.
-        def walk_refine_body(node, target, qualified_prefix, in_singleton_class, harvest, budget)
+        # Issue #1672 — `refine X do … end`, the shape {Inference::ScopeIndexer.module_refine_target} accepts (not one
+        # whose `self` is a class: that is the class's own method and walks as any other call, issue #1689). The body's
+        # instance `def`s are refinements of X by the enclosing module, and none reaches the catalogue. The refinement
+        # table is not built here: {.record_refinements} runs the project walk's census over the whole file, which reads
+        # this body and every other `refine`-shaped node (ADR-121 WD7, issue #1814). Declarations nested in the body
+        # still walk under the lexical prefix, as they did before.
+        def walk_refine_body(node, qualified_prefix, harvest, budget)
           body = node.block.body
-          return if body.nil?
-
-          unless qualified_prefix.empty? || in_singleton_class
-            targets = Inference::ScopeIndexer.constant_receiver_candidates(target, qualified_prefix)
-            Inference::RefineCensus.record_rows(harvest.refinements, targets, Inference::RefineCensus.read_body(body),
-                                                qualified_prefix.join("::"))
-          end
-          walk_refine_declarations(body, qualified_prefix, harvest, budget)
-        end
-
-        # ADR-121 WD7 — a `refine` with a literal block whose target the walk cannot name (`refine(k)`), recorded as
-        # the project walk records it: the body's names under the wildcard class, plus a names-wildcard row when they
-        # are incomplete. A call on another receiver, with no literal block, where `self` is a class (#1689) or with
-        # no enclosing module records nothing, as {#walk_refine_body} drops a body whose module it cannot name. The
-        # block still walks as it did.
-        def record_unreadable_target(node, qualified_prefix, in_singleton_class, harvest)
-          return if qualified_prefix.empty? || in_singleton_class || !Inference::ScopeIndexer.refine_call?(node)
-
-          harvest.in_effect ||= Inference::InEffectRefinements.new(harvest.root)
-          return if harvest.in_effect.class_body_refine?(node)
-
-          wildcard = Scope::DiscoveryIndex::REFINEMENT_WILDCARD
-          Inference::RefineCensus.record_rows(harvest.refinements, [wildcard],
-                                              Inference::RefineCensus.read_body(node.block.body),
-                                              qualified_prefix.join("::"))
+          walk_refine_declarations(body, qualified_prefix, harvest, budget) unless body.nil?
         end
 
         # The class / module declarations inside a refine body, walked as before; nothing else in it is.

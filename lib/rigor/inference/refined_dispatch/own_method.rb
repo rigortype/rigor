@@ -42,6 +42,8 @@ module Rigor
           raw = raw_targets(scope.discovered_refinements, method_name, list)
           return true if raw.nil?
 
+          add_ancestor_spellings(scope, raw)
+
           record_targets(scope, raw)
           return false if raw.each_key.any? { |refined| InEffectRefinements.class_wildcard_key?(scope, refined) }
 
@@ -63,6 +65,33 @@ module Rigor
             (out ||= {})[refined] = modules unless modules.empty?
           end
           out
+        end
+
+        # Ruby looks a constant up through the refining module's ancestors before the top level, so `refine(Bar)` in
+        # a module that includes `Foo` refines `Foo::Bar` when `Foo` holds one; the table records the lexical
+        # spellings only (`R::Bar`, `Bar`). Each declared `<ancestor>::<last segment>` joins the raw targets for the
+        # same refining module: over-adding only declines.
+        def add_ancestor_spellings(scope, raw)
+          raw.to_a.each do |refined, modules|
+            segment = refined.split("::").last
+            modules.each do |module_name|
+              ancestor_modules(scope, module_name).each do |ancestor|
+                spelling = "#{ancestor}::#{segment}"
+                next unless declared_class?(scope, spelling)
+
+                raw[spelling] = (raw[spelling] || EMPTY) | [module_name]
+              end
+            end
+          end
+        end
+
+        # The modules `module_name` includes or prepends, transitively (`InEffectRefinements.activated_modules`, which
+        # records the chain's edges), itself left out.
+        def ancestor_modules(scope, module_name)
+          return EMPTY if module_name == RefinedDispatch.wildcard
+
+          ancestors = InEffectRefinements.activated_modules(scope, module_name)
+          ancestors.is_a?(Array) ? ancestors - [module_name] : EMPTY
         end
 
         def in_effect_modules(rows, list)

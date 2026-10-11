@@ -810,6 +810,27 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
         expect(call_rows).to eq(controls([1]))
       end
 
+      # Ruby 4.0.5 answers `:bar`: a constant is looked up through the refining module's ancestors before the top
+      # level, so `refine(Bar)` in `R`, which includes `Foo`, refines `Foo::Bar` even though a top-level `Bar` exists.
+      it "declines where the refining module's ancestors hold the refined class" do
+        write("lib/foo.rb", <<~RUBY)
+          class Bar; end
+          module Foo
+            class Bar < Object
+              def center(a) = a
+            end
+          end
+          module R
+            include Foo
+            refine(Bar) { def center(a, b, c) = :bar }
+          end
+        RUBY
+        write("lib/use.rb", "using ObjCenter\nusing R\nFoo::Bar.new.center(1, 2, 3)\n")
+        write("lib/control.rb", "using ObjCenter\nFoo::Bar.new.center(1, 2, 3)\n")
+
+        expect(call_rows).to eq([["control.rb", 2, "call.wrong-arity"]])
+      end
+
       # Ruby 4.0.5 answers `:bar` and `:vendor`: `refine(Bar)` in a module that includes `Foo` resolves `Bar` through
       # the module's ancestors to `Foo::Bar`, which the table records under `R::Bar` and `Bar` only, and `VendorStr <
       # String` is declared outside the analysed paths. A refined class no table declares by any spelling cannot be

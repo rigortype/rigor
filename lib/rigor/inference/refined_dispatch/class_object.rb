@@ -30,7 +30,9 @@ module Rigor
         # `[[level class, entries, mixed, every entry], …]` in {RefinedDispatch.levels}' shape for the class object
         # `class_name`, or nil when the walk cannot be read. A singleton level's class is a {SingletonClass}.
         def levels(scope, class_name)
-          return rbs_levels(scope, class_name) if scope.environment&.class_known?(class_name)
+          environment = scope.environment
+          return nil if environment.nil?
+          return rbs_levels(scope, class_name) if environment.class_known?(class_name)
 
           project_levels(scope, class_name)
         end

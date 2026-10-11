@@ -1481,9 +1481,9 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
       # file binding the prefix `Enc` re-checks the consumer. Ruby 4.0.5 prints `1` for `Encoding::Converter.new("UTF-8",
       # "EUC-JP").shout` after `module Pag; Enc = ::Encoding; refine(Enc::Converter) { def shout = 1 }; end; using Pag`.
       it "re-checks the `using` file when a new file binds a prefix of the constant a `refine` targets" do
-        write("lib/m.rb", "module M\n  refine(Enc::Converter) { def center(a, b, c) = 1 }\nend\n")
-        write("lib/u.rb", "using M\n\"a\".center(1, 2, 3)\n")
-        expect(incremental_rows).to eq([center_fires, false])
+        write("lib/m.rb", "module M\n  refine(Enc::Converter) { def shout = 1 }\nend\n")
+        write("lib/u.rb", "using M\n\"a\".shout\n")
+        expect(incremental_rows).to eq([[["u.rb", 2, "call.undefined-method"]], false])
 
         write("lib/k.rb", "Enc = ::Encoding\n")
         expect(incremental_rows).to eq([[], true])

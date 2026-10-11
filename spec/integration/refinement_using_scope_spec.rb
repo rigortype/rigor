@@ -1114,8 +1114,9 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
     end
 
     # R2-S3: `call.possible-nil-receiver`, `def.method-visibility-mismatch` and `flow.always-raises` ask the refinement
-    # predicate too. Ruby 4.0.5 prints `:nil_up`, `:public_secret` and `:no_raise` under a `using` of the module (read
-    # from outside the analysed paths or from the project alike), and raises for each call in `plain.rb`.
+    # predicate too. Each file run with `lib/foo.rb` required first (`ruby -r ./lib/foo.rb lib/opaque.rb`), Ruby 4.0.5
+    # prints `:nil_up`, `:public_secret` and `:no_raise` under a `using` of the module (read from outside the analysed
+    # paths or from the project alike), and raises for each call in `plain.rb`, each run after its first line.
     it "declines a nil receiver's, a private method's and a zero division's report a refinement in effect may answer" do
       write("lib/foo.rb", "class Foo\n  private\n\n  def secret = 1\nend\n")
       refinement = "refine(NilClass) { def upcase = :nil_up }\n  refine(Foo) { def secret = :public_secret }\n  " \

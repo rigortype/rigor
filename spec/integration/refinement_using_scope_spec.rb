@@ -1730,6 +1730,170 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
     end
   end
 
+  # Issue #1752 — a class object is an `Object`, so Ruby applies a refinement of `Object`, `Module`, `Class`, `Kernel`
+  # or `BasicObject`, or of a module the class extends, to a call on it: its lookup is its singleton class with the
+  # modules it extends, each superclass's, then `Class` (a class only), `Module`, `Object`, `Kernel` and `BasicObject`.
+  # Every reported line raises on Ruby 4.0.5; every silent line under a `using` returns the refinement's answer there,
+  # and its control line (no `using`) reports.
+  describe "a refinement reaching a class object (#1752)" do
+    let(:call_rules) { %w[call.undefined-method call.wrong-arity call.argument-type-mismatch] }
+    let(:object_sqrt) do
+      "module RS\n  refine(Object) { def sqrt(a, b) = :o; def own(a, b, c) = :o; def members(a, b, c) = :o }\nend\n"
+    end
+
+    # `[file basename, line, rule]` for every call-check diagnostic in `lib/`, sorted.
+    def call_rows(cache_store: nil)
+      diagnostics(cache_store: cache_store).select { |d| call_rules.include?(d.qualified_rule) }
+                                           .map { |d| [File.basename(d.path.to_s), d.line, d.qualified_rule] }
+                                           .sort
+    end
+
+    def incremental_call_rows
+      root = File.join(Dir.pwd, ".rigor", "cache")
+      snapshot = Rigor::Cache::IncrementalSnapshot.new(root: root)
+      fingerprint = Rigor::Cache::IncrementalSnapshot.fingerprint(configuration: configuration, roots: %w[lib])
+      session = Rigor::Analysis::IncrementalSession.new(
+        configuration: configuration, paths: %w[lib], cache_store: Rigor::Cache::Store.new(root: root)
+      )
+      found, warm = guarded_run_incremental(session, snapshot: snapshot, fingerprint: fingerprint)
+      rows = found.select { |d| call_rules.include?(d.qualified_rule) }
+                  .map { |d| [File.basename(d.path.to_s), d.line, d.qualified_rule] }.sort
+      [rows, warm]
+    end
+
+    def controls(lines, rule = "call.wrong-arity") = lines.map { |line| ["control.rb", line, rule] }
+
+    # The issue's program. Ruby 4.0.5 raises `NoMethodError` for the call ahead of the `using` and answers `:o` after
+    # it, on a module object too.
+    it "declines a class object's method a refinement of Object defines, after the `using` only" do
+      write("lib/ro.rb", "module RO\n  refine(Object) { def oo = :o }\nend\n")
+      write("lib/use.rb", "Integer.oo\nusing RO\nInteger.oo\nComparable.oo\n")
+      write("lib/plain.rb", "Integer.oo\n")
+
+      expect(call_rows).to eq([["plain.rb", 1, "call.undefined-method"], ["use.rb", 1, "call.undefined-method"]])
+    end
+
+    # Ruby 4.0.5 answers each call but `Comparable.cc`: a module object is a `Module`, not a `Class`.
+    it "reaches a class object through Module, Class, Kernel and BasicObject, and a module object not through Class" do
+      write("lib/rm.rb", <<~RUBY)
+        module RM
+          refine(Module) { def mm = 1 }
+          refine(Class) { def cc = 2 }
+          refine(Kernel) { def kk = 3 }
+          refine(BasicObject) { def bo = 4 }
+        end
+      RUBY
+      write("lib/use.rb", "using RM\nString.mm\nString.cc\nString.kk\nString.bo\nComparable.mm\nComparable.kk\n" \
+                          "Comparable.cc\n")
+
+      expect(call_rows).to eq([["use.rb", 8, "call.undefined-method"]])
+    end
+
+    # `Integer.sqrt` is CRuby's own singleton method of `Integer` (the catalogue proves it), and `Own.own` a certain
+    # `class << self` def, which `Kid` inherits: each answers ahead of the refinement of `Object`, and Ruby 4.0.5 raises
+    # `ArgumentError`, or `TypeError` for `Integer.sqrt(nil)`.
+    it "checks a class object's own singleton method ahead of a refinement of Object" do
+      write("lib/rs.rb", object_sqrt)
+      write("lib/own.rb", "class Own\n  class << self\n    def own(a) = a\n  end\nend\nclass Kid < Own; end\n")
+      write("lib/use.rb", "using RS\nInteger.sqrt(1, 2)\nInteger.sqrt(nil)\nOwn.own(1, 2, 3)\nKid.own(1, 2, 3)\n")
+
+      expect(call_rows).to eq(
+        [["use.rb", 2, "call.wrong-arity"], ["use.rb", 3, "call.argument-type-mismatch"],
+         ["use.rb", 4, "call.wrong-arity"], ["use.rb", 5, "call.wrong-arity"]]
+      )
+    end
+
+    # Ruby 4.0.5 answers `:o`: with the variable unset no `def self.own` runs, and the refinement answers.
+    it "declines over a singleton definer that may not have run" do
+      write("lib/rs.rb", object_sqrt)
+      write("lib/own2.rb", "class Own2\n  if ENV[\"RIGOR_PROBE_X\"]\n    def self.own(a) = a\n  end\nend\n")
+      write("sig/own2.rbs", "class Own2\n  def self.own: (untyped) -> untyped\nend\n")
+      write("lib/use.rb", "using RS\nOwn2.own(1, 2, 3)\n")
+      write("lib/control.rb", "Own2.own(1, 2, 3)\n")
+
+      expect(call_rows).to eq(controls([1]))
+    end
+
+    # A refinement of a module `C` extends answers `C.z` (Ruby 4.0.5: `:refined`). A value typed as `Base`'s class
+    # object may be `Sub`, which extends `Ext` and answers `:refined`, so `Base.y` declines too.
+    it "declines where a module the class or a subclass extends is refined" do
+      write("lib/ext.rb", <<~RUBY)
+        module Ext
+          def z(a) = :ext
+        end
+        class C
+          extend Ext
+        end
+        class Base
+          def self.y(a) = a
+        end
+        class Sub < Base
+          extend Ext
+        end
+        module RE
+          refine(Ext) { def z(a, b, c) = :refined; def y(a, b, c) = :refined }
+        end
+      RUBY
+      write("lib/use.rb", "using RE\nC.z(1, 2, 3)\nBase.y(1, 2, 3)\n")
+      write("lib/control.rb", "C.z(1, 2, 3)\nBase.y(1, 2, 3)\n")
+
+      expect(call_rows).to eq(controls([1, 2]))
+    end
+
+    # The declines the instance walk makes, on a class object. Ruby 4.0.5 answers `:gem` (an opaque module from outside
+    # the analysed paths refining `Integer.singleton_class`), `:anon` (a `using` that names no module), `:loose` (`Kid`
+    # extended at runtime with a refined module off its lookup), `:vendor` (a refined module no table declares,
+    # extended from outside the analysed paths), `:o` (`Integer.sqrt` removed from the singleton class) and `:o`
+    # (`Struct.members`, which CRuby registers only for RDoc).
+    it "declines what the instance walk declines" do
+      write("lib/rs.rb", object_sqrt)
+      write("lib/own.rb", "class Own\n  def self.own(a) = a\nend\nclass Kid < Own; end\n")
+      write("vendor/gem_ref.rb", "module GemRef\n  refine(Integer.singleton_class) { def sqrt(a, b) = :gem }\nend\n")
+      write("vendor/vendor_ext.rb", "module VendorExt; end\nKid.extend(VendorExt)\nKid.extend(Loose)\n")
+      write("lib/loose.rb", "module Loose; end\nmodule RL\n  refine(Loose) { def own(a, b, c) = :loose }\nend\n")
+      write("lib/vendored.rb", "module RV\n  refine(VendorExt) { def own(a, b, c) = :vendor }\nend\n")
+      write("lib/removed.rb", "class << Float\n  remove_method :sqrt\nend\n")
+      write("lib/gem_use.rb", "using RS\nusing GemRef\nInteger.sqrt(1, 2)\n")
+      write("lib/anon_use.rb", "using Module.new { refine(Integer.singleton_class) { def sqrt(a, b) = :anon } }\n" \
+                               "Integer.sqrt(1, 2)\n")
+      write("lib/loose_use.rb", "using RL\nKid.own(1, 2, 3)\n")
+      write("lib/vendored_use.rb", "using RV\nKid.own(1, 2, 3)\n")
+      write("lib/removed_use.rb", "using RS\nFloat.sqrt(1, 2)\nStruct.members(1, 2, 3)\n")
+      write("lib/control.rb", "Integer.sqrt(1, 2)\nKid.own(1, 2, 3)\nStruct.members(1, 2, 3)\n")
+
+      expect(call_rows).to eq(controls([1, 2, 3]))
+    end
+
+    it "answers a report and a decline the same through a warm cache as cold" do
+      write("lib/ro.rb", "module RO\n  refine(Object) { def oo = :o }\nend\n")
+      write("lib/rs.rb", object_sqrt)
+      write("lib/use.rb", "using RO\nusing RS\nInteger.oo\nInteger.nope\nInteger.sqrt(1, 2)\nComparable.own(1, 2, 3)\n")
+      root = File.join(Dir.pwd, ".rigor", "cache")
+
+      cold = call_rows(cache_store: Rigor::Cache::Store.new(root: root))
+      warm = call_rows(cache_store: Rigor::Cache::Store.new(root: root))
+
+      expect(cold).to eq([["use.rb", 4, "call.undefined-method"], ["use.rb", 5, "call.wrong-arity"]])
+      expect(warm).to eq(cold)
+    end
+
+    # A new file reopening the `using`'d module to refine `Object#oo` silences the class object's call on the re-check,
+    # and its removal brings the report back (`refinement:oo`).
+    it "re-checks the `using` file under --incremental when another file refines Object for the name" do
+      write("lib/ro.rb", "module RO\n  refine(Object) { def other = 1 }\nend\n")
+      write("lib/use.rb", "using RO\nInteger.oo\n")
+      fires = [["use.rb", 2, "call.undefined-method"]]
+
+      expect(incremental_call_rows).to eq([fires, false])
+      write("lib/ro_oo.rb", "module RO\n  refine(Object) { def oo = :o }\nend\n")
+      expect(incremental_call_rows).to eq([[], true])
+      expect(call_rows).to eq([])
+      File.delete("lib/ro_oo.rb")
+      expect(incremental_call_rows).to eq([fires, true])
+      expect(call_rows).to eq(fires)
+    end
+  end
+
   describe "a singleton def on a local" do
     it "declines for that local's method in the same scope and nowhere else" do
       write("lib/locals.rb", <<~RUBY)

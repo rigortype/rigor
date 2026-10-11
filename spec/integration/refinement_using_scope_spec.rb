@@ -792,19 +792,34 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
       end
 
       # `w15_mixed.rb` prints `:wide`: a module the project prepends to `String` sits where RBS does not place it.
-      # `w14_unknown.rb` prints `:anon`: a `using` of a module no constant names may refine anything.
-      it "declines past a level the project mixes into and under a `using` Rigor cannot name" do
+      it "declines past a level the project mixes into" do
         write("lib/wide.rb", "module Wide; end\nclass String; prepend Wide; end\n" \
                              "module RW; refine(Wide) { def center(a, b, c) = :wide }; end\n")
-        write("lib/mixed_use.rb", "using ObjCenter\nusing RW\n\"x\".center(1, 2, 3)\n")
-        write("lib/anon_use.rb", <<~RUBY)
+        write("lib/use.rb", "using ObjCenter\nusing RW\n\"x\".center(1, 2, 3)\n")
+        write("lib/control.rb", "\"x\".center(1, 2, 3)\n")
+
+        expect(call_rows).to eq(controls([1]))
+      end
+
+      # `w28_const_get_using.rb` prints `:str`: a `using` whose argument is not a constant may put any module in effect.
+      it "declines under a `using` whose argument is not a constant" do
+        write("lib/str_ref.rb", "module StrRef; refine(String) { def center(a, b, c) = :str }; end\n")
+        write("lib/use.rb", "using ObjCenter\nusing Object.const_get(:StrRef)\n\"x\".center(1, 2, 3)\n")
+        write("lib/control.rb", "\"x\".center(1, 2, 3)\n")
+
+        expect(call_rows).to eq(controls([1]))
+      end
+
+      # `w14_unknown.rb` prints `:anon`: the refine body of a `using Module.new { … }` runs on a module no constant
+      # names.
+      it "declines under a `using Module.new { … }`" do
+        write("lib/use.rb", <<~RUBY)
           using ObjCenter
           using Module.new { refine(String) { def center(a, b, c) = :anon } }
           "x".center(1, 2, 3)
         RUBY
-        write("lib/control.rb", "\"x\".center(1, 2, 3)\n")
 
-        expect(call_rows).to eq(controls([1]))
+        expect(call_rows).to eq([])
       end
 
       # Round 3 of #1793's review. `w17_round3.rb` prints `[:each_target, :alias_target]`: a target the walk cannot

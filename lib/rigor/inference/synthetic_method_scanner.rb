@@ -333,7 +333,8 @@ module Rigor
 
       def collect_included_do_calls(body)
         body.body.flat_map do |stmt|
-          next [] unless stmt.is_a?(Prism::CallNode) && stmt.receiver.nil? && stmt.name == :included && stmt.block
+          included_do = stmt.is_a?(Prism::CallNode) && stmt.receiver.nil? && stmt.name == :included
+          next [] unless included_do && stmt.block.is_a?(Prism::BlockNode)
 
           block_body = stmt.block.body
           next [] unless block_body.respond_to?(:body)

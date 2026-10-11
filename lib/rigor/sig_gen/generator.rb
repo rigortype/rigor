@@ -695,7 +695,8 @@ module Rigor
         return nil unless node.value.is_a?(Prism::CallNode)
         return nil unless @meta_layouts.key?((prefix + [node.name.to_s]).join("::"))
 
-        node.value.block&.body
+        block = node.value.block
+        block.body if block.is_a?(Prism::BlockNode)
       end
 
       # Module / class bodies are walked through the `walk_statements` path so `module_function` (no-args)

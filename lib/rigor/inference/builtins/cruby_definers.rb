@@ -8,10 +8,13 @@ module Rigor
     module Builtins
       # Issue #1740 — which instance methods CRuby itself defines on a core class or module, read from the offline
       # catalogues under `data/builtins/ruby_core/` (`tool/extract_builtin_catalog.rb` records each `rb_define_method`
-      # and prelude `def` on the class it names, aliases included). RBS is not that record: core RBS redeclares some
-      # inherited methods on a subclass (`Integer#quo` and `File#to_path`, whose CRuby owners are `Numeric` and `IO`),
-      # and declares a few CRuby no longer defines (`Process::Status#&`). A class no catalogue covers answers false,
-      # as does a method its catalogue does not list: the caller reads both as "not proven".
+      # and prelude `def` of an `Init_*` function on the class it names, aliases included, and skips the `#if 0`
+      # blocks CRuby keeps for RDoc: `random.c`'s registers `Random#seed`, which runs on `Random::Base`).
+      # `spec/rigor/inference/builtins/c_ruby_definers_spec.rb` checks every listed method the running Ruby has
+      # against its runtime owner. RBS is not that record: core RBS redeclares some inherited methods on a subclass
+      # (`Integer#quo` and `File#to_path`, whose CRuby owners are `Numeric` and `IO`), and declares a few CRuby no
+      # longer defines (`Process::Status#&`). A class no catalogue covers answers false, as does a method its
+      # catalogue does not list: the caller reads both as "not proven". The catalogue is one CRuby snapshot.
       module CRubyDefiners
         module_function
 

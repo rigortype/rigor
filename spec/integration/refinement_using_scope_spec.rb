@@ -774,6 +774,20 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
         expect(call_rows).to eq(controls(1..4))
       end
 
+      # Ruby 4.0.5 answers `:base`: `Random#seed` runs on `Random::Base`, which RBS declares beside `Random` rather than
+      # above it. CRuby registers `Random#seed` only inside `random.c`'s `#if 0` block for RDoc, which the catalogue
+      # skips, so nothing proves `Random` defines it.
+      it "declines where CRuby registers the method on the class only for RDoc" do
+        write("lib/seed.rb", <<~RUBY)
+          module RObj; refine(Object) { def seed(a, b, c) = :obj }; end
+          module RBase; refine(Random::Base) { def seed(a, b, c) = :base }; end
+        RUBY
+        write("lib/use.rb", "using RObj\nusing RBase\nRandom.new.seed(1, 2, 3)\n")
+        write("lib/control.rb", "Random.new.seed(1, 2, 3)\n")
+
+        expect(call_rows).to eq(controls([1]))
+      end
+
       # Ruby 4.0.5 answers `:bar` and `:vendor`: `refine(Bar)` in a module that includes `Foo` resolves `Bar` through
       # the module's ancestors to `Foo::Bar`, which the table records under `R::Bar` and `Bar` only, and `VendorStr <
       # String` is declared outside the analysed paths. A refined class no table declares by any spelling cannot be

@@ -370,7 +370,7 @@ class CInitParser
     # Pre-strip block comments from the source so multi-line `/* ... */` rdoc blocks (very common right above a class
     # registration) do not leak unbalanced parens into `join_continuations`'s state machine. Line numbers MUST be
     # preserved — we replace comment characters with spaces and keep newlines intact rather than collapsing the file.
-    @lines = strip_block_comments(File.read(path, encoding: "UTF-8")).each_line.to_a
+    @lines = strip_disabled_regions(strip_block_comments(File.read(path, encoding: "UTF-8"))).each_line.to_a
   end
 
   def parse
@@ -485,6 +485,33 @@ class CInitParser
       end
     end
     out
+  end
+
+  # Blanks every line of an `#if 0 … #endif` region (nested conditionals counted, an `#else` / `#elif` of the region
+  # itself ending it), keeping the newlines so line numbers hold. CRuby keeps registrations there for RDoc only:
+  # `random.c`'s `#if 0 /* for RDoc: it can't handle unnamed base class */` block defines `Random#seed`, `#rand`,
+  # `#bytes` and `#initialize`, which run on `Random::Base`, so recording them put them on the wrong class.
+  def strip_disabled_regions(text)
+    depth = 0
+    text.each_line.map do |line|
+      if depth.zero?
+        next line unless line.match?(/\A\s*#\s*if\s+0\b/)
+
+        depth = 1
+      else
+        depth = disabled_depth(line, depth)
+      end
+      line.end_with?("\n") ? "\n" : ""
+    end.join
+  end
+
+  def disabled_depth(line, depth)
+    case line[/\A\s*#\s*(if|ifdef|ifndef|elif|else|endif)\b/, 1]
+    when "if", "ifdef", "ifndef" then depth + 1
+    when "endif" then depth - 1
+    when "elif", "else" then depth == 1 ? 0 : depth
+    else depth
+    end
   end
 
   def loc(lineno)

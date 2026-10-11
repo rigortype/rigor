@@ -49,48 +49,6 @@ classes:
         rbs:
         - "(untyped arg0) -> bool"
         rbs_at: references/rbs/core/random.rbs:71
-      initialize:
-        source: c
-        cfunc: random_init
-        arity: -1
-        defined_at: references/ruby/random.c:1878
-        c_body_at: references/ruby/random.c:413
-        c_effects:
-        - mutate
-        - dispatch
-        - raises
-        purity: mutates_self
-        rbs:
-        - "(?Integer seed) -> void"
-        rbs_at: references/rbs/core/random.rbs:36
-      rand:
-        source: c
-        cfunc: random_rand
-        arity: -1
-        defined_at: references/ruby/random.c:1879
-        c_body_at: references/ruby/random.c:1574
-        c_effects: []
-        purity: leaf
-      bytes:
-        source: c
-        cfunc: random_bytes
-        arity: 1
-        defined_at: references/ruby/random.c:1880
-        c_body_at: references/ruby/random.c:1302
-        c_effects:
-        - dispatch
-        purity: dispatch
-      seed:
-        source: c
-        cfunc: random_get_seed
-        arity: 0
-        defined_at: references/ruby/random.c:1881
-        c_body_at: references/ruby/random.c:822
-        c_effects: []
-        purity: leaf
-        rbs:
-        - "() -> Integer"
-        rbs_at: references/rbs/core/random.rbs:172
     singleton_methods:
       srand:
         source: c

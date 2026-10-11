@@ -600,6 +600,197 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
       expect(cold).to eq([["plain.rb", 1, "call.argument-type-mismatch"]])
       expect(warm).to eq(cold)
     end
+
+    # Issue #1740 — Ruby finds a method the receiver's class (or a nearer ancestor) defines before it consults an
+    # ancestor's refinement, so the argument checks report there, and only where Rigor can prove that definer and
+    # that no refinement in effect may answer first. Every reported line raises on Ruby 4.0.5; every silent line
+    # under a `using` returns the refinement's answer there, and its control line (no `using`) reports.
+    describe "of an ancestor (#1740)" do
+      let(:ancestors) do
+        <<~RUBY
+          module ObjCenter; refine(Object) { def center(a, b, c) = a }; end
+          module KernCenter; refine(Kernel) { def center(a, b, c) = a }; end
+          module ObjIndex; refine(Object) { def [](other) = other }; end
+          module NumDigits; refine(Numeric) { def digits(a, b, c) = a; def floor(a, b, c) = a }; end
+          module NumQuo; refine(Numeric) { def quo(a, b, c) = a }; end
+          module CmpClamp; refine(Comparable) { def clamp(a, b, c) = a }; end
+          module IOPath; refine(IO) { def to_path(a, b, c) = 1 }; end
+          module ObjOld; refine(Object) { def &(a, b) = :ref; def taint(a, b) = :ref }; end
+        RUBY
+      end
+
+      before { write("lib/ancestors.rb", ancestors) }
+
+      def write_class(name, body, signature)
+        write("lib/#{name.downcase}.rb", "class #{name}\n#{body}end\n")
+        write("sig/#{name.downcase}.rbs", "class #{name}\n#{signature}end\n")
+      end
+
+      def controls(lines) = lines.map { |line| ["control.rb", line, "call.wrong-arity"] }
+
+      # `String#center`, `Symbol#[]`, `Integer#digits`, `Integer#floor` and `Own#center` answer: the CRuby catalogue
+      # proves the core definers, `Own`'s certain `def` its own.
+      it "keeps checking a method the receiver's class defines itself" do
+        write_class("Own", "  def center(width) = width\n", "  def center: (Integer) -> Integer\n")
+        write("lib/object.rb", "using ObjCenter\n\"x\".center(1, 2, 3)\nOwn.new.center(1, 2, 3)\n")
+        write("lib/kernel.rb", "using KernCenter\n\"x\".center(1, 2, 3)\n")
+        write("lib/index.rb", "using ObjIndex\n:authors[:age]\n")
+        write("lib/numeric.rb", "using NumDigits\n1.digits(1, 2, 3)\n1.floor(1, 2, 3)\n")
+
+        expect(call_rows).to eq(
+          [["index.rb", 2, "call.argument-type-mismatch"], ["kernel.rb", 2, "call.wrong-arity"],
+           ["numeric.rb", 2, "call.wrong-arity"], ["numeric.rb", 3, "call.wrong-arity"],
+           ["object.rb", 2, "call.wrong-arity"], ["object.rb", 3, "call.wrong-arity"]]
+        )
+      end
+
+      # `Comparable#clamp` is the owner. Core RBS declares `Integer#quo`, `File#to_path`, `Process::Status#&` and
+      # `Pathname#taint`, but CRuby defines the first two on `Numeric` and `IO` and the last two nowhere.
+      it "declines where the catalogue does not prove the definer below the refinement" do
+        write_class("Probe", "  def self.status = Process::Status.allocate\n  def self.path = Pathname.new(\"x\")\n",
+                    "  def self.status: () -> Process::Status\n  def self.path: () -> Pathname\n")
+        calls = "\"a\".clamp(1, 2, 3)\n1.quo(1, 2, 3)\nFile.new(__FILE__).to_path(1, 2, 3)\n" \
+                "Probe.status.&(1, 2)\nProbe.path.taint(1, 2)\n"
+        write("lib/use.rb", "using CmpClamp\nusing NumQuo\nusing IOPath\nusing ObjOld\n#{calls}")
+        write("lib/control.rb", calls)
+
+        expect(call_rows).to eq(controls(1..5))
+      end
+
+      # `GemRef` lives outside the analysed paths, and so does the `B` that `A` includes. Each refines `String#center`
+      # (Ruby prints `:gem`, `:b`), so the opaque module keeps the decline.
+      it "declines while an in-effect module is opaque" do
+        write("vendor/gem_ref.rb", "module GemRef; refine(String) { def center(a, b, c) = :gem }; end\n")
+        write("vendor/b.rb", "module B; refine(String) { def center(a, b, c) = :b }; end\n")
+        write("lib/mixer.rb", "module A\n  include B\n  refine(Integer) { def x = 1 }\nend\n")
+        write("lib/gem_use.rb", "using ObjCenter\nusing GemRef\n\"s\".center(1, 2, 3)\n")
+        write("lib/mixer_use.rb", "using ObjCenter\nusing A\n\"x\".center(1, 2, 3)\n")
+
+        expect(call_rows).to eq([])
+      end
+
+      # Ruby prints `:alias_method`, `:dm` and `:imported`: each refine body defines `String#center` other than by
+      # `def`, which the table records as the name or as a names-wildcard.
+      it "declines while an in-effect refine body defines the name other than by `def`" do
+        write("lib/str_refs.rb", <<~RUBY)
+          module StrAlias; refine(String) { def c3(a, b, c) = :alias_method; alias_method :center, :c3 }; end
+          module StrDefine; refine(String) { def other = 1; define_method(:center) { |a, b, c| :dm } }; end
+          module Helper; def center(a, b, c) = :imported; end
+          module StrImport; refine(String) { import_methods Helper; def shout = upcase }; end
+        RUBY
+        %w[Alias Define Import].each do |kind|
+          write("lib/#{kind.downcase}_use.rb", "using ObjCenter\nusing Str#{kind}\n\"x\".center(1, 2, 3)\n")
+        end
+
+        expect(call_rows).to eq([])
+      end
+
+      # Critique F3. `w12_possible.rb` prints `[:refined, :refined, :refined]`: with the variable unset no definer
+      # runs, and `Object`'s refinement answers. A definer that may not have run proves nothing, however it defines.
+      it "declines over a definer that may not have run" do
+        body = <<~RUBY.gsub(/^/, "  ")
+          if ENV["RIGOR_PROBE_X"]
+            def center(a) = a
+            attr_reader :ljust
+            define_method(:rjust) { |a| a }
+          end
+        RUBY
+        signature = "  def center: (untyped) -> untyped\n  def ljust: () -> untyped\n  def rjust: (untyped) -> void\n"
+        write_class("Own", body, signature)
+        write("lib/ro.rb", "module RO\n  refine(Object) { def center(a, b, c) = 1; def ljust(a, b, c) = 1; " \
+                           "def rjust(a, b, c) = 1 }\nend\n")
+        calls = "Own.new.center(1, 2, 3)\nOwn.new.ljust(1, 2, 3)\nOwn.new.rjust(1, 2, 3)\n"
+        write("lib/use.rb", "using RO\n#{calls}")
+        write("lib/control.rb", calls)
+
+        expect(call_rows).to eq(controls(1..3))
+      end
+
+      # Critique F7. `w13_remove.rb` prints `:refined`: the project removed `String#center`, so the catalogue proves
+      # nothing about it.
+      it "declines where the project removed the method the catalogue lists" do
+        write("lib/removed.rb", "class String; remove_method :center; end\n")
+        write("lib/use.rb", "using ObjCenter\n\"x\".center(1, 2, 3)\n")
+        write("lib/control.rb", "\"x\".center(1, 2, 3)\n")
+
+        expect(call_rows).to eq(controls([1]))
+      end
+
+      # `w15_mixed.rb` prints `:wide`: a module the project prepends to `String` sits where RBS does not place it.
+      # `w14_unknown.rb` prints `:anon`: a `using` of a module no constant names may refine anything.
+      it "declines past a level the project mixes into and under a `using` Rigor cannot name" do
+        write("lib/wide.rb", "module Wide; end\nclass String; prepend Wide; end\n" \
+                             "module RW; refine(Wide) { def center(a, b, c) = :wide }; end\n")
+        write("lib/mixed_use.rb", "using ObjCenter\nusing RW\n\"x\".center(1, 2, 3)\n")
+        write("lib/anon_use.rb", <<~RUBY)
+          using ObjCenter
+          using Module.new { refine(String) { def center(a, b, c) = :anon } }
+          "x".center(1, 2, 3)
+        RUBY
+        write("lib/control.rb", "\"x\".center(1, 2, 3)\n")
+
+        expect(call_rows).to eq(controls([1]))
+      end
+
+      # Round 3 of #1793's review. `w17_round3.rb` prints `[:each_target, :alias_target]`: a target the walk cannot
+      # name may be `String`, whichever definer `ObjCenter` would leave first.
+      it "declines under a refinement whose target the walk cannot name" do
+        write("lib/round3.rb", <<~RUBY)
+          K = String
+          module ObjLjust; refine(Object) { def ljust(a, b, c) = a }; end
+          module ByEach; [String].each { |k| refine(k) { def center(a, b, c) = :each_target } }; end
+          module ByAlias; refine(K) { def ljust(a, b, c) = :alias_target }; end
+        RUBY
+        write("lib/use.rb", "using ObjCenter\nusing ObjLjust\nusing ByEach\nusing ByAlias\n" \
+                            "\"x\".center(1, 2, 3)\n\"x\".ljust(1, 2, 3)\n")
+
+        expect(call_rows).to eq([])
+      end
+
+      it "answers a report and a decline the same through a warm cache as cold" do
+        write("lib/use.rb", "using ObjCenter\nusing CmpClamp\n\"x\".center(1, 2, 3)\n\"a\".clamp(1, 2, 3)\n")
+        root = File.join(Dir.pwd, ".rigor", "cache")
+
+        cold = call_rows(cache_store: Rigor::Cache::Store.new(root: root))
+        warm = call_rows(cache_store: Rigor::Cache::Store.new(root: root))
+
+        expect(cold).to eq([["use.rb", 3, "call.wrong-arity"]])
+        expect(warm).to eq(cold)
+      end
+
+      # A names-wildcard row appearing in the refining file may define `String#center`, so the reported call turns
+      # silent on the re-check, and back when the row goes (`refinement:*`).
+      it "re-checks the `using` file under --incremental when a refine body gains and loses an `import_methods`" do
+        write("lib/helper.rb", "module Helper; def center(a, b, c) = 1; end\n")
+        refining = lambda do |extra|
+          write("lib/extra.rb", "module Extra\n  refine(String) do\n    def shout = 1\n#{extra}  end\nend\n")
+        end
+        refining.call("")
+        write("lib/use.rb", "using ObjCenter\nusing Extra\n\"x\".center(1, 2, 3)\n")
+        fires = [["use.rb", 3, "call.wrong-arity"]]
+
+        expect(incremental_call_rows).to eq([fires, false])
+        refining.call("    import_methods Helper\n")
+        expect(incremental_call_rows).to eq([[], true])
+        expect(call_rows).to eq([])
+        refining.call("")
+        expect(incremental_call_rows).to eq([fires, true])
+        expect(call_rows).to eq(fires)
+      end
+
+      def incremental_call_rows
+        root = File.join(Dir.pwd, ".rigor", "cache")
+        snapshot = Rigor::Cache::IncrementalSnapshot.new(root: root)
+        fingerprint = Rigor::Cache::IncrementalSnapshot.fingerprint(configuration: configuration, roots: %w[lib])
+        session = Rigor::Analysis::IncrementalSession.new(
+          configuration: configuration, paths: %w[lib], cache_store: Rigor::Cache::Store.new(root: root)
+        )
+        found, warm = guarded_run_incremental(session, snapshot: snapshot, fingerprint: fingerprint)
+        rows = found.select { |d| %w[call.argument-type-mismatch call.wrong-arity].include?(d.qualified_rule) }
+                    .map { |d| [File.basename(d.path.to_s), d.line, d.qualified_rule] }.sort
+        [rows, warm]
+      end
+    end
   end
 
   # ADR-121 WD7 — the refinement table records what it could not read, and a module whose refinements Rigor cannot

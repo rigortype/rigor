@@ -874,6 +874,41 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
         expect(call_rows).to eq([["use.rb", 12, "call.wrong-arity"]])
       end
 
+      # Ruby 4.0.5 answers `:cmp` for each: a block's `self` may be an object even at the top level or in a class
+      # body, so a `singleton_class.prepend` or a `class << self` prepend inside `instance_eval`, `instance_exec` or a
+      # `define_method` block puts `Comparable` ahead of the object's class.
+      {
+        "an instance_eval block" => "s = +\"x\"\ns.instance_eval { singleton_class.prepend(Comparable) }\n",
+        "a class << self in an instance_exec block" =>
+          "s = +\"x\"\ns.instance_exec do\n  class << self\n    prepend Comparable\n  end\nend\n",
+        "a define_method block" =>
+          "class Loud < String\n  define_method(:louden) { singleton_class.prepend(Comparable); self }\nend\n"
+      }.each do |shape, source|
+        it "declines where #{shape} prepends a refined module the class holds" do
+          write("lib/prepends.rb", "module RC; refine(Comparable) { def center(a, b, c) = :cmp }; end\n#{source}")
+          write("lib/use.rb", "using RC\n\"y\".center(1, 2, 3)\n")
+          write("lib/control.rb", "\"y\".center(1, 2, 3)\n")
+
+          expect(call_rows).to eq(controls([1]))
+        end
+      end
+
+      # Ruby 4.0.5 raises for `Repo.new.find(1, 2)`: a `singleton_class.prepend` on `self` written directly in a class
+      # body prepends to the class object, not to every object, so `Repo#find` stays checked.
+      it "keeps checking where a class body prepends a module to its own singleton class" do
+        write("lib/store.rb", <<~RUBY)
+          module Finders; def find(*args) = super; end
+          class Store
+            def self.find(id) = id
+            singleton_class.prepend(Finders)
+            self.singleton_class.prepend(Finders)
+          end
+        RUBY
+        write("lib/use.rb", "class Repo; def find(id) = id; end\nRepo.new.find(1, 2)\n")
+
+        expect(call_rows).to eq([["use.rb", 2, "call.wrong-arity"]])
+      end
+
       # Ruby 4.0.5 answers `:base`: `Random#seed` runs on `Random::Base`, which RBS declares beside `Random` rather than
       # above it. CRuby registers `Random#seed` only inside `random.c`'s `#if 0` block for RDoc, which the catalogue
       # skips, so nothing proves `Random` defines it.

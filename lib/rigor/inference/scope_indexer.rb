@@ -3286,7 +3286,7 @@ module Rigor
       # walk worked out for it ({#refine_context}).
       MethodTables = Struct.new(:existence, :envelopes, :refinements, :certainty, :certain, :possible,
                                 :contested_envelopes, :contested_def_nodes, :root, :in_effect, :census,
-                                :refine_text, :literal_seen, :source_bytes, :loose_constants) do
+                                :refine_text, :literal_seen, :source_bytes, :loose_constants, :block_spans) do
         # {ScopeIndexer.module_refine_target} against this tree's {InEffectRefinements}.
         def refine_target_of(node)
           return nil if ScopeIndexer.refine_target(node).nil?
@@ -3335,6 +3335,15 @@ module Rigor
         def loose_constant?(segment)
           self.loose_constants ||= ScopeIndexer.loose_constant_segments(root)
           loose_constants.include?(segment)
+        end
+
+        # Issue #1820 — does `node` sit inside a block or lambda of this tree? A block's `self` may be an object even in
+        # a class body or at the top level (`s.instance_eval { … }`, a `define_method` block). The spans are found once
+        # per file, on the first ask.
+        def in_block?(node)
+          self.block_spans ||= ScopeIndexer.block_spans(root)
+          offset = node.location.start_offset
+          block_spans.any? { |start, stop| offset >= start && offset < stop }
         end
 
         # Sets {#certain} for the contribution `node` and returns the tables.
@@ -3401,6 +3410,20 @@ module Rigor
       end
 
       # Is one of the ascending `offsets` in `[start, stop)`?
+      # The `[start, end)` byte span of every block and lambda in `root`.
+      def block_spans(root)
+        spans = []
+        return spans if root.nil?
+
+        Source::NodeWalker.each(root) do |node|
+          next unless node.is_a?(Prism::BlockNode) || node.is_a?(Prism::LambdaNode)
+
+          location = node.location
+          spans << [location.start_offset, location.end_offset]
+        end
+        spans
+      end
+
       def offset_in?(offsets, start, stop)
         index = offsets.bsearch_index { |offset| offset >= start }
         !index.nil? && offsets[index] < stop
@@ -3841,8 +3864,9 @@ module Rigor
           # still decline. The lexical cref below is unnameable in every case.
           singleton_prefix = singleton_body_prefix(node, in_singleton_class, owner_prefix,
                                                    qualified_prefix)
-          unless node.expression.is_a?(Prism::SelfNode)
-            record_singleton_body_prepends(node, qualified_prefix, methods_acc.at(node))
+          tables = methods_acc.at(node)
+          if !node.expression.is_a?(Prism::SelfNode) || tables.in_block?(node)
+            record_singleton_body_prepends(node, qualified_prefix, tables)
           end
           walk_methods_and_def_nodes(node.expression, qualified_prefix, in_singleton_class,
                                      methods_acc, def_nodes_acc, source_path, def_owner_prefix,
@@ -3930,7 +3954,9 @@ module Rigor
           end
           anonymous = record_call_node_methods(node, owner_prefix, in_singleton_class, methods_acc.at(node),
                                                source_path)
-          record_singleton_prepend(node, qualified_prefix, methods_acc.at(node))
+          tables = methods_acc.at(node)
+          record_singleton_prepend(node, qualified_prefix, tables,
+                                   self_ok: node.name == :prepend && tables.in_block?(node))
           # Issue #1120 — a refine body's defs go to the refinement table and nowhere else.
           if (target = methods_acc.refine_target_of(node))
             return record_literal_target_refine(node, target, qualified_prefix, owner_prefix, methods_acc)
@@ -4436,9 +4462,10 @@ module Rigor
       # `obj`'s class even when the class already includes it (`prepend` re-inserts it; `extend` would not), so
       # `M`'s refinement answers first for that object. `M` takes {Scope::DiscoveryIndex::ENVELOPE_OBJECT_EXTENDED_MARK},
       # the mark an `extend` in a method body already leaves: an object of any class may carry its instance methods
-      # ahead of its class's own. In a class body or at the top level a `singleton_class` of `self` (and a
-      # `class << self` body, which the caller leaves out) is the class object's or `main`'s, not an instance's, so
-      # it counts only in a method body (`self_ok`). `singleton_body` says the call sits in a `class << obj` body.
+      # ahead of its class's own. A `singleton_class` of `self` (and a `class << self` body, which the caller leaves
+      # out) written directly in a class or module body or at the top level is the class object's or `main`'s, not an
+      # instance's; in a method body or any block (`self_ok`), where `self` may be an object, it counts.
+      # `singleton_body` says the call sits in a `class << obj` body.
       def record_singleton_prepend(node, qualified_prefix, tables, singleton_body: false, self_ok: false)
         return unless node.name == :prepend
 

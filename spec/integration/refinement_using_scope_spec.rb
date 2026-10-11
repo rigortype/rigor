@@ -706,6 +706,39 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
         expect(call_rows).to eq(controls(1..3))
       end
 
+      # Critique F4. `w20_subclasses.rb` prints `:typed_kid` and `:mystr` for these: a value typed as `Typed` (its
+      # method declared in `sig/`) or as `String` may be an instance of the refined subclass.
+      it "declines where a refinement in effect refines a subclass of the receiver's class" do
+        write_class("Typed", "  def ljust(a) = a\n", "  def ljust: (untyped) -> untyped\n")
+        write("lib/typed_kid.rb", "class TypedKid < Typed; end\n" \
+                                  "module TypedRef; refine(TypedKid) { def ljust(a, b, c) = :typed_kid }; end\n")
+        write("lib/my_str.rb", "class MyStr < String; end\n" \
+                               "module StrRef; refine(MyStr) { def rjust(a, b, c) = :mystr }; end\n")
+        calls = "Typed.new.ljust(1, 2, 3)\n\"x\".rjust(1, 2, 3)\n"
+        write("lib/use.rb", "using TypedRef\nusing StrRef\n#{calls}")
+        write("lib/control.rb", calls)
+
+        expect(call_rows).to eq(controls(1..2))
+      end
+
+      # `w21_prepend_extend.rb` prints `[:n, :ext]`: `Sub` prepends `N` again ahead of `Host#ljust`, and a String may
+      # extend `Ext`. A refined module the receiver's levels do not hold may be extended onto any value.
+      it "declines where a subclass prepends a refined module or a value may extend one" do
+        write("lib/host.rb", <<~RUBY)
+          module N; end
+          class Host; include N; def ljust(a) = a; end
+          class Sub < Host; prepend N; end
+          module NRef; refine(N) { def ljust(a, b, c) = :n }; end
+        RUBY
+        write("sig/host.rbs", "module N\nend\nclass Host\n  include N\n  def ljust: (untyped) -> untyped\nend\n")
+        write("lib/ext.rb", "module Ext; end\nmodule ExtRef; refine(Ext) { def chop(a, b, c) = :ext }; end\n")
+        calls = "Host.new.ljust(1, 2, 3)\n\"y\".chop(1, 2, 3)\n"
+        write("lib/use.rb", "using NRef\nusing ExtRef\n#{calls}")
+        write("lib/control.rb", calls)
+
+        expect(call_rows).to eq(controls(1..2))
+      end
+
       # Critique F7. `w13_remove.rb` prints `:refined`: the project removed `String#center`, so the catalogue proves
       # nothing about it.
       it "declines where the project removed the method the catalogue lists" do

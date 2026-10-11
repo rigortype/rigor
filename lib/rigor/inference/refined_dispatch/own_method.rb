@@ -17,7 +17,9 @@ module Rigor
       # - it reads the RAW refinement table, every name a `refine` argument's spelling can denote and the wildcard
       #   rows included, never {RefinedDispatch.resolved}'s typing subset: a decline needs only that a row may
       #   denote a class on the walk;
-      # - no in-effect row may name a class the walk cannot name;
+      # - no in-effect row may name a class the walk cannot name, a project subclass of the receiver's class (a
+      #   value typed as the class may be one), or a module the receiver's levels do not hold (`obj.extend(M)`,
+      #   or a subclass's mixin);
       # - walking {RefinedDispatch.levels} from the most derived, the first level or entry that is refined or
       #   defines the name must define it, with no `mixed` level (a project mixin RBS does not place) before it;
       # - that definer must be proven ({.proven_definer?}): RBS alone is not proof.
@@ -44,6 +46,7 @@ module Rigor
 
           levels = RefinedDispatch.levels(scope, class_name)
           return false if levels.nil?
+          return false if refined_off_levels?(scope, class_name, levels, raw)
 
           shadowing_definer?(scope, class_name, levels, method_name, raw)
         end
@@ -63,14 +66,97 @@ module Rigor
           out
         end
 
-        # ADR-46 — a refined class appearing or vanishing (a module turning up where a spelling named nothing)
-        # moves the answer.
+        # ADR-46 — a refined class appearing or vanishing (a new subclass declaration, a module turning up where a
+        # spelling named nothing) moves the answer.
         def record_targets(raw)
           return unless Analysis::DependencyRecorder.active?
 
           raw.each do |refined|
             Analysis::DependencyRecorder.read_last_segment(:class, refined) unless refined == RefinedDispatch.wildcard
           end
+        end
+
+        # A refined class the receiver's levels do not show, but which a value typed as the receiver's class may
+        # still reach (critique F4): a project subclass of the class, or one whose own level mixes in a refined
+        # module (a module already on the class's levels is prepended again by `prepend`); a class RBS declares as
+        # a subclass; a module not on the levels, which `obj.extend` or a subclass's mixin can put ahead of the
+        # definer.
+        def refined_off_levels?(scope, class_name, levels, raw)
+          return true if subclass_refined?(scope, class_name, raw)
+
+          on_levels = level_names(levels)
+          raw.any? do |refined|
+            next false if on_levels.include?(refined)
+
+            module_name?(scope, refined) || rbs_subclass?(scope, refined, class_name)
+          end
+        end
+
+        def level_names(levels)
+          names = Set.new
+          levels.each do |level_class, entries, _mixed, every|
+            names << level_class if level_class
+            (every || entries).each { |entry| entry.is_a?(Array) ? names.merge(entry) : names << entry }
+          end
+          names
+        end
+
+        def module_name?(scope, name)
+          bucket = scope.discovered_parameter_envelopes[name]
+          return true if bucket&.key?(Scope::DiscoveryIndex::ENVELOPE_MODULE_MARK)
+
+          scope.environment&.rbs_module?(name) || false
+        end
+
+        def rbs_subclass?(scope, refined, class_name)
+          environment = scope.environment
+          !environment.nil? && environment.class_known?(refined) &&
+            environment.class_ordering(refined, class_name) == :subclass
+        end
+
+        # Does a project subclass of `class_name` (the `discovered_superclasses` walk `SourceArity` makes, its
+        # parents resolved to any class the project or RBS knows, so a subclass of a core class counts) carry a
+        # refined entry on its own level, or a level the walk cannot read?
+        def subclass_refined?(scope, class_name, raw)
+          each_subclass(scope, class_name) do |subclass|
+            chain = Scope::ResolutionChain.for(scope, subclass, :instance, :methods)
+            chain.record(scope) if Analysis::DependencyRecorder.active?
+            return true if chain.truncated? || chain.wildcard_mixin? || chain.level_count.zero?
+            return true if chain.level_entries(0).any? { |entry| refined_entry?(entry, raw) }
+          end
+          false
+        end
+
+        def refined_entry?(entry, raw)
+          return entry.candidates.any? { |candidate| raw.include?(candidate) } if entry.external?
+
+          raw.include?(entry.name)
+        end
+
+        def each_subclass(scope, class_name)
+          children = children_by_parent(scope)
+          queue = children.fetch(class_name.to_s, []).dup
+          seen = {}
+          until queue.empty?
+            subclass = queue.shift
+            next if seen[subclass]
+
+            seen[subclass] = true
+            yield subclass
+            queue.concat(children.fetch(subclass, []))
+          end
+        end
+
+        def children_by_parent(scope)
+          scope.discovered_superclasses.each_with_object({}) do |(child, raw_parent), children|
+            parent = scope.ancestor_name_candidates(child, raw_parent).find { |name| known_class?(scope, name) }
+            (children[parent] ||= []) << child if parent
+          end
+        end
+
+        def known_class?(scope, name)
+          scope.known_user_class?(name) || scope.discovered_parameter_envelopes.key?(name) ||
+            scope.environment&.class_known?(name) || false
         end
 
         # Walks the levels from the most derived: true when the first level or entry that a raw target names or

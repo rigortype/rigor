@@ -5,6 +5,7 @@ require "prism"
 require_relative "../scope"
 require_relative "../type"
 require_relative "../source/alias_names"
+require_relative "../source/literals"
 require_relative "../source/constant_path"
 require_relative "object_mixins"
 require_relative "../source/node_children"
@@ -7501,9 +7502,7 @@ module Rigor
       end
 
       def visibility_target_name(arg)
-        return arg.unescaped.to_sym if arg.is_a?(Prism::SymbolNode) || arg.is_a?(Prism::StringNode)
-
-        nil
+        Source::Literals.symbol_or_string(arg)
       end
 
       # Registers the alias name in the `discovered_methods` table so `undefined-method` diagnostics are not emitted for
@@ -7975,11 +7974,7 @@ module Rigor
       end
 
       def literal_method_name(node)
-        return nil unless node.is_a?(Prism::SymbolNode) || node.is_a?(Prism::StringNode)
-
-        # nil for bytes no Symbol holds: `to_sym` would raise EncodingError (#1821).
-        name = node.unescaped
-        name.to_sym if name&.valid_encoding?
+        Source::Literals.symbol_or_string(node)
       end
 
       # Walks every file in `paths` (each path is parsed once with `Prism.parse_file`) and returns the unioned

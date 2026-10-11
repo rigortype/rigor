@@ -54,4 +54,21 @@ RSpec.describe Rigor::Source::AliasNames, type: :runner do
     source = %(class Foo\n  memoize "\\xff"\n  def x = 1\nend\nFoo.new.x\n)
     expect { analyze(source) }.not_to raise_error
   end
+
+  # `valid_encoding?` is the test, not `ascii_only?`: a name valid in its own encoding is a real Symbol.
+  describe "a name that is valid in a non-UTF-8 source encoding" do
+    def first_statement(source) = Prism.parse(source.b).value.statements.body.first
+
+    it "is still read from a binary source" do
+      node = first_statement("# encoding: binary\nalias_method \"\\xff\", :x\n")
+      expect(described_class.alias_method_call_names(node)).to eq([String.new("\xff", encoding: "binary").to_sym, :x])
+    end
+
+    it "is still read from a Shift_JIS source" do
+      node = first_statement("# encoding: Shift_JIS\nalias_method \"\\x82\\xa0\", :x\n")
+      expect(described_class.alias_method_call_names(node)).to eq(
+        [String.new("\x82\xA0", encoding: "Shift_JIS").to_sym, :x]
+      )
+    end
+  end
 end

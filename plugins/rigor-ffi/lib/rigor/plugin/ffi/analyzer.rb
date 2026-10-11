@@ -13,7 +13,7 @@ module Rigor
           when Prism::SymbolNode
             node.unescaped.to_sym
           when Prism::StringNode
-            node.unescaped.to_sym
+            Rigor::Source::Literals.to_symbol(node.unescaped)
           when Prism::CallNode
             extract_symbol(node.receiver) if node.name == :to_sym && node.receiver
           end
@@ -24,7 +24,7 @@ module Rigor
           when Prism::SymbolNode
             node.unescaped.to_sym
           when Prism::StringNode
-            node.unescaped.to_sym
+            Rigor::Source::Literals.to_symbol(node.unescaped)
           when Prism::ConstantReadNode, Prism::ConstantPathNode
             node.slice.to_sym
           when Prism::CallNode

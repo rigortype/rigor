@@ -237,7 +237,7 @@ module Rigor
             key_node = element.key
             case key_node
             when Prism::SymbolNode then key_node.unescaped.to_sym
-            when Prism::StringNode then key_node.unescaped.to_sym
+            when Prism::StringNode then Rigor::Source::Literals.to_symbol(key_node.unescaped)
             end
           end
         end

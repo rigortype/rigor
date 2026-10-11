@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "prism"
+require_relative "literals"
 
 module Rigor
   module Source
@@ -38,19 +39,13 @@ module Rigor
       end
 
       def symbol_name(node)
-        node.is_a?(Prism::SymbolNode) ? name_symbol(node.unescaped) : nil
+        node.is_a?(Prism::SymbolNode) ? Literals.to_symbol(node.unescaped) : nil
       end
 
       def literal_name(node)
         return nil unless node.is_a?(Prism::SymbolNode) || node.is_a?(Prism::StringNode)
 
-        name_symbol(node.unescaped)
-      end
-
-      # nil for bytes no Symbol holds: `to_sym` on `"\xff"` raises EncodingError, so the name reads as a computed one
-      # (#1821).
-      def name_symbol(text)
-        text.to_sym if text&.valid_encoding?
+        Literals.to_symbol(node.unescaped)
       end
     end
   end

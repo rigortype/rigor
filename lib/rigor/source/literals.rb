@@ -29,12 +29,20 @@ module Rigor
     module Literals
       module_function
 
+      # The Symbol `text` names, or `nil` when no Symbol can hold its bytes. `"\xff".to_sym` raises EncodingError, and a
+      # String literal may carry any bytes (a Symbol literal with invalid bytes is a syntax error, so no file with one
+      # is analysed), so every reader of a literal name goes through here: such a name reads as nil, the answer a
+      # computed name already gets (#1821).
+      def to_symbol(text)
+        text.to_sym if text&.valid_encoding?
+      end
+
       # The Symbol a literal `Prism::SymbolNode` / `Prism::StringNode` names, or `nil` for any other node
       # (including `nil`).
       def symbol_or_string(node)
         return nil unless node.is_a?(Prism::SymbolNode) || node.is_a?(Prism::StringNode)
 
-        node.unescaped.to_sym
+        to_symbol(node.unescaped)
       end
 
       # The String a literal `Prism::SymbolNode` / `Prism::StringNode` names, or `nil` for any other node
@@ -53,7 +61,7 @@ module Rigor
       def symbol(node)
         return nil unless node.is_a?(Prism::SymbolNode)
 
-        node.unescaped.to_sym
+        to_symbol(node.unescaped)
       end
 
       # The String a literal `Prism::SymbolNode` names, or `nil` for any other node (including a

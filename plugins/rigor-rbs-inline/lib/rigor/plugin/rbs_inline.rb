@@ -516,8 +516,8 @@ module Rigor
 
         def scrub_stray_comment_bytes(source, prism_result)
           broken = prism_result.comments.reject { |comment| comment.location.slice.valid_encoding? }
-          return [source, prism_result] if broken.empty?
-          return [source, prism_result] if broken.any? { |comment| STRAY_COMMENT_SAFE.match?(comment.location.slice.scrub) }
+          annotation_like = broken.any? { |comment| STRAY_COMMENT_SAFE.match?(comment.location.slice.scrub) }
+          return [source, prism_result] if broken.empty? || annotation_like
 
           bytes = source.b
           broken.sort_by { |comment| -comment.location.start_offset }.each do |comment|

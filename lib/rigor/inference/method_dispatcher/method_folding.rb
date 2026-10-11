@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require_relative "../../source/literals"
+require_relative "../../source/symbol_name"
 require_relative "../../type"
 
 module Rigor
@@ -95,7 +95,7 @@ module Rigor
 
           case arg.value
           when Symbol then arg.value
-          when String then Source::Literals.to_symbol(arg.value)
+          when String then Source::SymbolName.of(arg.value)
           end
         end
       end

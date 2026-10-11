@@ -267,6 +267,45 @@ RSpec.describe "diagnostic suppression", type: :runner do
     end
   end
 
+  # Ruby does not validate a comment or the data after `__END__`, so a byte that is invalid in UTF-8 (a latin-1
+  # `caf\xE9`, a binary blob) reaches the suppression-marker regexps raw. `analyze` raises on the internal
+  # analyzer error that used to produce, and the diagnostic below proves the file was still analysed (#1818).
+  describe "a file holding a byte that is invalid in UTF-8" do
+    it "analyses a file with the byte in a comment" do
+      source = "# caf\xFF\nclass A\n  def go(a) = a\nend\nA.new.go(1, 2)\n"
+
+      expect(source).not_to be_valid_encoding
+      expect(analyze(source).diagnostics.map(&:rule)).to include("call.wrong-arity")
+    end
+
+    it "still honours a suppression comment above binary `__END__` data" do
+      source = "\"x\".no_method # rigor:disable call.undefined-method\n\"y\".no_method\n\n__END__\n\xFF\xFE binary\n"
+
+      expect(source).not_to be_valid_encoding
+      diagnostics = analyze(source).diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(diagnostics.map(&:line)).to eq([2])
+    end
+
+    # The parse-failure path runs `ErbTemplateDetector` over the raw source, which must not raise either.
+    it "reports the parse error, not an internal error, when the file also fails to parse" do
+      source = "# caf\xFF\ndef (\n"
+
+      expect(analyze(source).diagnostics.map(&:message)).to include(a_string_matching(/expected/))
+    end
+
+    it "reports the parse error for an invalid byte inside a string literal" do
+      source = "s = \"caf\xFF\"\n"
+
+      expect(analyze(source).diagnostics.map(&:message)).to include(a_string_matching(/invalid multibyte/))
+    end
+
+    it "reads the marker out of a comment that itself holds the byte" do
+      source = "\"x\".no_method # rigor:disable call.undefined-method caf\xFF\n"
+
+      expect(analyze(source).diagnostics.map(&:rule)).not_to include("call.undefined-method")
+    end
+  end
+
   # `filter_suppressed` refuses to drop a `rule == nil` diagnostic: a parse failure is not something an
   # author may silence away, so even the broadest marker leaves it standing.
   it "never suppresses a rule-less diagnostic" do

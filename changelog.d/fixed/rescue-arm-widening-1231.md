@@ -1,0 +1,1 @@
+- **[inference]** A `rescue` arm or `ensure` clause no longer reads a variable the `begin` body writes as if the body never ran, which reported `conn.size` as `undefined method 'size' for nil` after `conn = nil; begin; conn = open_conn; …; rescue` and `unless done` in `ensure` as always truthy; such a variable now reads as untyped inside the clause. (PR_LINK)

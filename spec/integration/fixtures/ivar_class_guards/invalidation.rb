@@ -5,6 +5,9 @@ require "stringio"
 # project defines may rebind it, on `self` or on another object that holds `self`, and so may `instance_variable_set`,
 # `send`, a lambda or a helper's block run later, and a write that a rescue clause or a loop's next pass reads after.
 #
+# Issue #1231 — a rescue clause reads an instance variable the `begin` body writes as `Dynamic`, which reports nothing,
+# so the read in `dropped_by_write_before_rescue` stays quiet although it raises.
+#
 # Each reported read comes after code that may set `@io` back to `STDOUT`. Where that code does (`reset`, the
 # reflective calls, the write), the read raises NoMethodError under Ruby 4.0.5 when `@io` held a `StringIO` at the
 # guard; `with_retry` does not, and its block is reported because a helper's body is not read.
@@ -71,7 +74,7 @@ class Holder
       @io = STDOUT
       Integer("x")
     rescue ArgumentError
-      @io.string # FIRES-1446 call.undefined-method
+      @io.string # QUIET-1446
     end
   end
 

@@ -1045,6 +1045,21 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
         expect(call_rows).to eq([["use.rb", 2, "call.wrong-arity"], ["use.rb", 3, "call.wrong-arity"]])
       end
 
+      # The declining side of the example above: Ruby 4.0.5 answers `:kid` when the subclass whose mixins the walk
+      # cannot read is itself refined, for a value typed as `Base`. Adding the unreadable mixin to a refined subclass
+      # keeps the decline under --incremental.
+      it "declines where a refined subclass's mixins cannot be read, cold and after an edit" do
+        write_class("Base", "  def center(a) = a\n", "  def center: (untyped) -> untyped\n")
+        write("lib/mixin.rb", "module Mixin; end\nmodule RK; refine(Kid) { def center(a, b, c) = :kid }; end\n")
+        write("lib/kid.rb", "class Kid < Base; end\n")
+        write("lib/use.rb", "using ObjCenter\nusing RK\nBase.new.center(1, 2, 3)\n")
+
+        expect(incremental_call_rows).to eq([[], false])
+        write("lib/kid.rb", "class Kid < Base\n  include(Object.const_get(:Mixin))\nend\n")
+        expect(incremental_call_rows).to eq([[], true])
+        expect(call_rows).to eq([])
+      end
+
       def incremental_call_rows
         root = File.join(Dir.pwd, ".rigor", "cache")
         snapshot = Rigor::Cache::IncrementalSnapshot.new(root: root)

@@ -96,6 +96,15 @@ RSpec.describe Rigor::Analysis::IncrementalRunSlot::WriteGuard do
     expect(guard.admits?(rows_for("lib/a.rb"))).to be(false)
   end
 
+  it "takes no mark when the opted-in gems cannot be resolved at the mark" do
+    resolver = Rigor::Analysis::DependencySourceInference::GemResolver
+    fingerprint = Rigor::Cache::IncrementalSnapshot.fingerprint(configuration: configuration, roots: ["lib"])
+    allow(resolver).to receive(:dependency_entries).and_raise(StandardError, "boom")
+
+    expect(described_class.start(configuration: configuration, roots: ["lib"], cache_root: cache_root,
+                                 fingerprint: fingerprint)).to be_nil
+  end
+
   # The guard must watch the lockfile the run reads. A `~/` lockfile setting is the home directory's, not a
   # directory called `~` under the working directory.
   context "with `~/` lockfile settings" do

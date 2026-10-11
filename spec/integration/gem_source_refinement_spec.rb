@@ -212,6 +212,38 @@ RSpec.describe "Gem source inference over `refine` bodies (#1672)" do
         .to eq([["app.rb", 2, "shout"], ["app.rb", 3, "nope"], ["app.rb", 4, "shout"]])
     end
 
+    # Round-2 review of #1838 — the owner a write binds under is not always the lexical one: a nested compact header
+    # opens whichever `Shared` Ruby finds, and `Box::K = …` inside a module that includes `Lib` binds `Lib::Box::K`.
+    # Ruby 4.0.5 prints "X" for `"x".shout` and `"x".yell`; a name the walk cannot spell matches by its segment.
+    it "reads a target bound under a nested compact header, or through a path on an included module, as unknown" do
+      write_gem("nestg", "lib/nestg.rb" => <<~RUBY)
+        module W
+          module Shared::Inner
+            Target = String
+          end
+        end
+        module Shared; end
+      RUBY
+      write_gem("incg", "lib/incg.rb" => <<~RUBY)
+        module Lib
+          module Box; end
+        end
+        module Holder
+          include Lib
+          Box::K = String
+        end
+      RUBY
+      write("lib/bref.rb", <<~RUBY)
+        module BRef
+          refine(Shared::Inner::Target) { def shout = upcase }
+          refine(Lib::Box::K) { def yell = upcase }
+        end
+      RUBY
+      write("lib/app.rb", "using BRef\n\"x\".shout\n\"x\".yell\n\"x\".nope\n")
+
+      expect(undefined_rows(gems: %w[nestg incg])).to eq([["app.rb", 4, "nope"]])
+    end
+
     # The controls: a class the gem declares by a constant write (`Struct.new`, `Data.define`, `Class.new`) is no
     # bound name, so its refine keeps a normal row that matches no String receiver and the call reports; a write that
     # is no class (`DelegateClass(Array)`) is bound, so `"x".pw` declines; a target no write binds keeps its row.

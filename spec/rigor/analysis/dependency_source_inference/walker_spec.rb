@@ -353,23 +353,61 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::Walker do
           expect(elsewhere.bound_segments).to eq(Set.new)
         end
 
-        it "binds a path write under every name its base can denote, and a rooted or self path once" do
-          outcome = outcome_of(
-            "a.rb" => "module M\n  Wrap::K = String\n  Wrap::L, N = String, Symbol\n  ::Top::P = 1\n  self::Q = 1\n" \
-                      "end\n"
-          )
+        # Round-2 review of #1838: `Wrap::K` may bind under an included module's `Wrap`, `self::K` in a block under
+        # the block's `self`, and `foo::Bar::K` under a value, none of which the walk can spell; only a rooted path is
+        # a name.
+        it "binds a rooted path write by name, and any other path write by its segment alone" do
+          outcome = outcome_of("a.rb" => <<~RUBY)
+            module M
+              Wrap::K = String
+              Wrap::L, N = String, Symbol
+              ::Top::P = 1
+              self::Q = 1
+              foo::Bar::R = 1
+              ::S = 1
+            end
+          RUBY
 
-          expect(outcome.bound).to eq(Set["M::Wrap::K", "Wrap::K", "M::Wrap::L", "Wrap::L", "M::N", "Top::P", "M::Q"])
-          expect(outcome.bound_segments).to eq(Set.new)
+          expect(outcome.bound).to eq(Set["M::N", "Top::P", "S"])
+          expect(outcome.bound_segments).to eq(Set["K", "L", "Q", "R"])
         end
 
-        it "records a const_set with a literal name, and a path on a base no constant spells, by last segment" do
-          outcome = outcome_of(
-            "a.rb" => "module M\n  Object.const_set(:K, String)\n  const_set('L', String)\n  klass::R = 1\nend\n"
-          )
+        it "records a const_set with a literal name by its segment, unless its value creates a class" do
+          outcome = outcome_of("a.rb" => <<~RUBY)
+            module M
+              Object.const_set(:K, String)
+              const_set('L', String)
+              const_set(:Pt, Struct.new(:x))
+              const_set(:V, Class.new)
+            end
+          RUBY
 
-          expect(outcome.bound_segments).to eq(Set["K", "L", "R"])
+          expect(outcome.bound_segments).to eq(Set["K", "L"])
           expect(outcome.bound).to eq(Set.new)
+        end
+
+        # Ruby opens `W::Shared::Inner` or `::Shared::Inner`, whichever `Shared` it finds, and a block keeps the lexical
+        # scope it is written in (`Ext.module_eval { K = String }` assigns `M::K`); a `class << self` body binds on the
+        # singleton, which no key spells.
+        it "binds a write under a nested compact header under every name it can denote, in a block lexically, and " \
+           "under class << self by its segment" do
+          outcome = outcome_of("a.rb" => <<~RUBY)
+            module W
+              module Shared::Inner
+                Target = String
+              end
+              Ext.module_eval { K = String }
+              Module.new do
+                L = String
+              end
+              class << self
+                Solo = String
+              end
+            end
+          RUBY
+
+          expect(outcome.bound).to eq(Set["W::Shared::Inner::Target", "Shared::Inner::Target", "W::K", "W::L"])
+          expect(outcome.bound_segments).to eq(Set["Solo"])
         end
 
         it "leaves the rows as the project walk records them" do

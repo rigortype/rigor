@@ -246,24 +246,28 @@ in this gem, another opted-in gem or the project) names whatever
 value the write holds, which the walker cannot resolve. The rows
 stay as the census records them (`K` and `M::K`); the walk's pass
 over each file also collects the names its constant writes bind
-(an assignment, a path write, an operator write, a multiple
-assignment) without declaring a class or module (`Point =
+(an assignment, an operator write, a multiple assignment, a rooted
+path write) without declaring a class or module (`Point =
 Struct.new(:x)` declares one, through the project walk's own
 `meta_new_rvalue` reading). A bare write binds its name under the
 lexical nesting of the `class` / `module` headers around it
-(`Shared::Target` for `module Shared; Target = String; end`); a path
-write binds it under every name its base can denote there
-(`M::Wrap::K` and `Wrap::K` inside `module M`). `Walker::Outcome#bound`
-holds those names, `#bound_segments` the last segment of a write
-whose owner the walk cannot spell (a `const_set` with a literal
-name, a path on a base no constant spells), and
-`Index#bound_constant?(name)` unions both across the walked gems:
+(`Shared::Target` for `module Shared; Target = String; end`), which
+a block does not change, under every name a nested compact header
+can denote (`module W; module Shared::Inner` opens `W::Shared::Inner`
+or `Shared::Inner`). `Walker::Outcome#bound` holds those names,
+`#bound_segments` the last segment of a write whose owner the walk
+cannot spell (a path write that is not rooted, since `Wrap::K = …`
+may bind under an included module's `Wrap` and `self::K = …` in a
+block under the block's `self`; a write under `class << …`; a
+`const_set` with a literal name, unless its value creates a class),
+and `Index#bound_constant?(name)` unions both across the walked gems:
 true for a name a gem binds, or for a name whose last segment a gem
 binds under an owner it could not spell. The reader decides the key
 at read time (`InEffectRefinements.class_wildcard_key?`, ADR-121
 WD7): a key no class or RBS knows as a whole is class-unknown when
 any segment of it is a constant the project's census binds, or when
-any prefix of it is a name a walked gem binds, so `module Shared;
+any prefix of it (a leading `Object::` dropped) is a name a walked
+gem binds, so `module Shared;
 Target = String; end` in one gem beside `refine(Shared::Target)` in
 the project or in another gem, and a prefix alias (`Enc =
 ::Encoding; refine(Enc::Converter)`), decline the body's names on
@@ -292,7 +296,8 @@ carry that row since issue #1814), as the catalog's contributions
 are, so editing a gem's refine body without a version bump is not
 seen until that file is re-analysed. The catalog stops at the
 per-gem budget, and a file the walk does not reach because the
-budget tripped contributes no row. Per ADR-121 WD3 the
+budget tripped contributes no row and no bound constant. Per ADR-121
+WD3 the
 gem's refine bodies are not inferred: a refined call into one
 types as `Dynamic[top]` (today through the unresolved-method
 fallback; the refined dispatch arm, #1664, keeps that answer).

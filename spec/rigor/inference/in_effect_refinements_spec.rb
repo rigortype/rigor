@@ -621,11 +621,11 @@ RSpec.describe Rigor::Inference::InEffectRefinements do
 
       it "is class-unknown when a gem binds a prefix of it, or a segment of it under an owner it cannot spell" do
         scope = gem_key_scope(%w[Pag::Enc Shared::Target], %w[Loose])
-        keys = %w[Pag::Enc::Converter Enc::Converter Shared::Target Target Loose::Thing Any::Loose Pag::Other
-                  Other::Plain]
+        keys = %w[Pag::Enc::Converter Enc::Converter Shared::Target Object::Shared::Target Target Loose::Thing
+                  Any::Loose Pag::Other Other::Plain]
 
         expect(keys.map { |key| described_class.class_wildcard_key?(scope, key) })
-          .to eq([true, false, true, false, true, true, false, false])
+          .to eq([true, false, true, true, false, true, true, false, false])
       end
 
       # Round-1 review of #1838: a gem constant that merely shares a core class's name (`Names::String`) binds nothing a

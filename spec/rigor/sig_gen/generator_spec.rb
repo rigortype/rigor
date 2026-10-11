@@ -513,6 +513,21 @@ RSpec.describe Rigor::SigGen::Generator do
       expect(candidates.first.class_superclasses["Point"]).to eq("::Struct[untyped]")
     end
 
+    # Issue #1816 — a block ARGUMENT is not a literal body; the shell is still declared, with its members.
+    it "declares a Struct shell whose factory call takes a block argument" do
+      candidates = run_for("BODY = proc { }\nPoint = Struct.new(:x, keyword_init: true, &BODY)\n")
+
+      expect(rbs_for(candidates, "Point")).to include("def x: () -> untyped")
+      expect(candidates.first.class_superclasses["Point"]).to eq("::Struct[untyped]")
+    end
+
+    it "declares a Data shell whose factory call takes a block argument" do
+      candidates = run_for("BODY = proc { }\nmodule Outer\n  Shell = Data.define(:a, &BODY)\nend\n")
+
+      expect(rbs_for(candidates, "Outer::Shell")).to include("def a: () -> untyped")
+      expect(candidates.first.class_superclasses["Outer::Shell"]).to eq("::Data")
+    end
+
     it "drops the positional constructor form under keyword_init: true" do
       candidates = run_for("Point = Struct.new(:x, keyword_init: true)\n")
 

@@ -2293,6 +2293,30 @@ RSpec.describe Rigor::CLI do
       expect(out).to include("#=> 3")
     end
 
+    # A comment and the data after `__END__` are not validated by Ruby, so a byte that is invalid in UTF-8 reaches the
+    # line-wise regexps (`ANNOTATION_PATTERN`); the command must still annotate the code around it.
+    it "annotates a file holding an invalid UTF-8 byte in a comment and after __END__" do
+      path = write_fixture("a.rb", "# caf\xFF\na = 1\n__END__\n\xFF\xFE\n".b)
+
+      status, out, err = run_cli("annotate", "--no-color", path)
+
+      expect(err).to eq("")
+      expect(status).to eq(0)
+      expect(out).to include("a = 1").and include("#=> 1")
+    end
+
+    # The trail byte of `"\x83\x5C"` is a backslash; scrubbing the source before Prism would let it escape the closing
+    # quote. Prism must read the original bytes, honouring the magic comment.
+    it "parses a Shift_JIS magic-comment file from its original bytes" do
+      path = write_fixture("a.rb", "# -*- coding: shift_jis -*-\ns = \"\x83\x5C\"\nt = 1\n".b)
+
+      status, out, err = run_cli("annotate", "--no-color", path)
+
+      expect(err).to eq("")
+      expect(status).to eq(0)
+      expect(out).to include("t = 1").and include("#=> 1")
+    end
+
     it "reports the last expression of a multi-statement line" do
       path = write_fixture("a.rb", "1; 2; 3\n")
 

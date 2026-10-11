@@ -366,7 +366,7 @@ module Rigor
       end
 
       def snippet(loc)
-        text = loc.slice.gsub(/\s+/, " ")
+        text = loc.slice.scrub.gsub(/\s+/, " ")
         text.length > 30 ? "#{text[0, 27]}..." : text
       end
     end

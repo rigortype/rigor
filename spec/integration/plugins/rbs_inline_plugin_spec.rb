@@ -574,6 +574,47 @@ RSpec.describe "plugins/rigor-rbs-inline" do
     end
   end
 
+  # A comment is not validated by Ruby, so a stray invalid byte in an ordinary one must not read as broken inline
+  # RBS (#1818); a byte inside an annotation-shaped comment is still the WD6 fail-soft case.
+  describe "an invalid UTF-8 byte in a comment" do
+    def failed_notices(source)
+      run_plugin(source: source).diagnostics.select { |d| d.qualified_rule == "source-rbs-synthesis-failed" }
+    end
+
+    it "raises no synthesis-failed notice for a file with no inline RBS" do
+      source = "# caf\xFF\nclass Demo\n  def x(a) = a\nend\n"
+
+      expect(source).not_to be_valid_encoding
+      expect(failed_notices(source)).to be_empty
+    end
+
+    it "still synthesises the annotations of a file whose other comment holds the byte" do
+      source = "# rbs_inline: enabled\n# caf\xFF\nclass Demo\n  #: () -> Integer\n  def x = 1\nend\n"
+
+      expect(failed_notices(source)).to be_empty
+    end
+
+    it "repairs an RDoc directive comment that holds the byte, spaced or not" do
+      ["# :nodoc: caf\xFF", "#:nodoc: caf\xFF"].each do |comment|
+        source = "class Demo\n  def x(a) = a #{comment}\nend\n"
+
+        expect(failed_notices(source)).to be_empty
+      end
+    end
+
+    it "keeps the fail-soft notice when the byte sits in a `#[` comment" do
+      source = "# rbs_inline: enabled\nclass Demo\n  def x(a) = a #[ caf\xFF\nend\n"
+
+      expect(failed_notices(source).size).to eq(1)
+    end
+
+    it "keeps the fail-soft notice when the byte sits in an annotation comment" do
+      source = "# rbs_inline: enabled\nclass Demo\n  # @rbs a: caf\xFF\n  def x(a) = a\nend\n"
+
+      expect(failed_notices(source).size).to eq(1)
+    end
+  end
+
   # ADR-32 WD12. The two inline-RBS dialects spell `module-self` differently, and the gem's response to the
   # other spelling is to build the annotation and then contribute nothing from it — invisible without a report,
   # since the annotation comment is echoed into the synthesised RBS either way.

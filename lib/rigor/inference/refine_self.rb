@@ -225,8 +225,8 @@ module Rigor
         context(here, instance, here, deferred: parent.deferred)
       end
 
-      # The modules a `*_eval` / `*_exec` call `node` written in `context` at the lexical `prefix` runs its block on,
-      # when its receiver is a constant: every name the constant's spelling can denote, innermost first, as another
+      # The modules a `*_eval` / `*_exec` call `node` written in `context` at the lexical `prefix` may run its block
+      # on, when its receiver is a constant: every name the constant's spelling can denote, innermost first, as another
       # file may declare any of them (`M.module_eval { … }` in `module L` runs on `L::M` where some file declares it);
       # a `self::`-anchored one as the method walk resolves it (`ScopeIndexer.eval_receiver_prefix`). Else nil.
       def eval_receiver_names(node, prefix, context)

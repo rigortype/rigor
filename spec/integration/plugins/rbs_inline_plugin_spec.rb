@@ -594,6 +594,20 @@ RSpec.describe "plugins/rigor-rbs-inline" do
       expect(failed_notices(source)).to be_empty
     end
 
+    it "repairs an RDoc directive comment that holds the byte, spaced or not" do
+      ["# :nodoc: caf\xFF", "#:nodoc: caf\xFF"].each do |comment|
+        source = "class Demo\n  def x(a) = a #{comment}\nend\n"
+
+        expect(failed_notices(source)).to be_empty
+      end
+    end
+
+    it "keeps the fail-soft notice when the byte sits in a `#[` comment" do
+      source = "# rbs_inline: enabled\nclass Demo\n  def x(a) = a #[ caf\xFF\nend\n"
+
+      expect(failed_notices(source).size).to eq(1)
+    end
+
     it "keeps the fail-soft notice when the byte sits in an annotation comment" do
       source = "# rbs_inline: enabled\nclass Demo\n  # @rbs a: caf\xFF\n  def x(a) = a\nend\n"
 

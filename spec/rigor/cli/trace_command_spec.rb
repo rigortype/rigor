@@ -62,6 +62,21 @@ RSpec.describe Rigor::CLI::TraceCommand do
     end
   end
 
+  # Prism's columns are byte columns, so the text the renderer slices must keep every byte in place: a multi-byte
+  # invalid run (`\xE3\x81`, a truncated character) is scrubbed to one `?` per byte, not one `?` per run.
+  it "highlights the right range after a multi-byte invalid run earlier on the line" do
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "demo.rb")
+      File.binwrite(path, "r = /caf\xE3\x81/; yy = 1 + 2\n")
+
+      status, out, err = run_cli("trace", path)
+
+      expect(err).to eq("")
+      expect(status).to eq(0)
+      expect(out).to include("\e[7m1 + 2\e[0m")
+    end
+  end
+
   it "dumps the filtered event stream as JSON" do
     with_demo_file do |path|
       status, out, = run_cli("trace", "--format", "json", path)

@@ -508,21 +508,28 @@ module Rigor
         # A comment is not validated by Ruby, so a byte that is invalid in UTF-8 can sit in an ordinary one
         # (`# caf\xFF`), and upstream's annotation grammar raises on it — which {#call}'s rescue would report as a
         # `source-rbs-synthesis-failed` notice about "the inline-RBS comment grammar" for a file that has none.
-        # Such a comment is repaired in place (the bad bytes become `?`) and the file re-parsed. A comment that
-        # LOOKS like inline RBS (`#:`, `# @rbs`, `# |`) is left alone, so a genuinely corrupt annotation still
-        # reaches the WD6 fail-soft path.
-        STRAY_COMMENT_SAFE = /\A#\s*(?:@rbs|[:|])/
-        private_constant :STRAY_COMMENT_SAFE
+        # Such a comment is repaired in place (each bad byte becomes one `?`, so every offset stays identical) and
+        # the file re-parsed. A comment upstream would read as an annotation — exactly `#:`, `#[` and `#\s*@rbs`
+        # (rbs-inline `annotation_parser.rb`) — is left alone, so a genuinely corrupt annotation still reaches the
+        # WD6 fail-soft path. An RDoc directive (`#:nodoc:`) is not an annotation: {#neutralize_rdoc_directives}
+        # rewrites it, so it is repaired like any other comment.
+        STRAY_COMMENT_ANNOTATION = /\A#(?::|\[|\s*@rbs\b)/
+        private_constant :STRAY_COMMENT_ANNOTATION
 
         def scrub_stray_comment_bytes(source, prism_result)
+          return [source, prism_result] if source.valid_encoding?
+
           broken = prism_result.comments.reject { |comment| comment.location.slice.valid_encoding? }
-          annotation_like = broken.any? { |comment| STRAY_COMMENT_SAFE.match?(comment.location.slice.scrub) }
+          annotation_like = broken.any? do |comment|
+            text = comment.location.slice.scrub
+            STRAY_COMMENT_ANNOTATION.match?(text) && !RDOC_DIRECTIVE_COMMENT.match?(text)
+          end
           return [source, prism_result] if broken.empty? || annotation_like
 
           bytes = source.b
           broken.sort_by { |comment| -comment.location.start_offset }.each do |comment|
             location = comment.location
-            bytes[location.start_offset, location.length] = location.slice.scrub("?").b
+            bytes[location.start_offset, location.length] = location.slice.scrub { |run| "?" * run.bytesize }.b
           end
           repaired = bytes.force_encoding(source.encoding)
           [repaired, ::Prism.parse(repaired)]

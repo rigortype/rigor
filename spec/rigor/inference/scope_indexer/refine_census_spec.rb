@@ -598,6 +598,50 @@ RSpec.describe Rigor::Inference::ScopeIndexer, ".refine_census" do
       "def self.setup = refine(String) { def x = 1 }\nend\n",
       %i[dsl dsl], {}
     ],
+    # #1749: a `def self.x` (or a `def` in `instance_eval`) written in an eval block is the receiver's own singleton
+    # method. Ruby 4.0.5 prints `1` and `2` for `Ext.setup; Ext.setup2; using Ext` after the first shape, and for
+    # `M.setup; M.setup2; using M` after the second (the block runs on the top-level `M`, as `L::M` does not exist); a
+    # constant that several names denote (`M` in `module L`) is charged to each, so a wildcard.
+    "a refine in a singleton method defined in an eval block on a constant" => [
+      <<~RUBY, %i[recorded recorded], { "String" => { yy: ["Ext"] }, "Symbol" => { ww: ["Ext"] } }
+        Ext.module_eval do
+          def self.setup = refine(String) { def yy = 1 }
+        end
+        Ext.instance_eval do
+          def setup2 = refine(Symbol) { def ww = 1 }
+        end
+      RUBY
+    ],
+    "a refine in a singleton method defined in an eval block on a constant several names denote" => [
+      <<~RUBY, %i[targets_wildcard targets_wildcard], { any => { any => ["L::M", "M"] } }
+        module L
+          M.module_eval do
+            def self.setup = refine(String) { def yy = 1 }
+          end
+          M.instance_eval do
+            def setup2 = refine(String) { def ww = 1 }
+          end
+        end
+      RUBY
+    ],
+    # An instance method of a refine body runs on an instance of the refined class, whatever the eval around names.
+    "a refine in an instance def in a refine body of an instance_eval block on a constant" => [
+      <<~RUBY, %i[recorded targets_wildcard], { "String" => { shout: ["Ext"] }, any => { any => [any] } }
+        Ext.instance_eval do
+          refine(String) { def shout = refine(Integer) { def twice = 1 } }
+        end
+      RUBY
+    ],
+    "a refine in an instance def in a refine body of an instance_eval block on a constant several names denote" => [
+      <<~RUBY, %i[recorded targets_wildcard],
+        module L
+          M.instance_eval do
+            refine(String) { def shout = refine(Integer) { def twice = 1 } }
+          end
+        end
+      RUBY
+      { "L::String" => { shout: ["L::M", "M"] }, "String" => { shout: ["L::M", "M"] }, any => { any => [any] } }
+    ],
     "a refine in a Module subclass's instance method" => [
       "class MyMod < Module\n  def setup = refine(String) { def shout = 1 }\nend\n",
       %i[targets_wildcard], { any => { any => [any] } }

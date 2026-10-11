@@ -3466,9 +3466,11 @@ module Rigor
 
       # ADR-121 WD7 — the census gate's view of one parsed file (`root`): `[refinement table, [[start offset,
       # outcome], …]]`, one pair for every `refine`-shaped node the method walk accounted for. The outcomes are
-      # `:recorded` (a literal target and block, its names recorded), `:class_unknown` (a block whose target the walk
-      # cannot name), `:targets_wildcard` (a `refine` in a `def`, charged to its module), `:literal` (A3's `:refine`
-      # / eval-string literal), `:nested` (a `refine` in a refine body), `:dsl` (where `self` is a class, #1689) and
+      # `:recorded` (a literal target and block, its names recorded; also one in a module's own singleton method,
+      # #1749), `:class_unknown` (a block whose target the walk cannot name), `:targets_wildcard` (a `refine` that
+      # runs once a method is called, other than a module's own singleton method's, or in a block that may rebind
+      # `self`, charged to its module or the wildcard), `:literal` (A3's `:refine` / eval-string literal), `:nested` (a
+      # `refine` in a refine body, or in a singleton method of one), `:dsl` (where `self` is a class, #1689) and
       # `:raises` (no block, a Proc as the block, another receiver, or a computed target where `self` is `main`), and
       # `:data` (a `:refine` literal where `self` is a plain class or one of its instances).
       def refine_census(root)
@@ -3576,8 +3578,9 @@ module Rigor
         context.here == RefineSelf::ANONYMOUS ? [owner_prefix.join("::")] : RefineSelf.charged_modules(context)
       end
 
-      # ADR-121 WD7 — a targets-wildcard for each of `owners`, as a `refine` in a `def` records. The body is not walked
-      # any further, so the census scans it here.
+      # ADR-121 WD7 — a targets-wildcard for each of `owners`, as a `refine` that runs once a method is called records
+      # (an instance `def`, a `define_method` or `define_singleton_method` block; a module's own singleton method
+      # records rows instead, #1749). The body is not walked any further, so the census scans it here.
       def record_deferred_refine(node, owners, qualified_prefix, tables)
         tables.account(node, :targets_wildcard, census_charge(owners))
         owners.each { |owner| record_targets_wildcard(tables, owner) }

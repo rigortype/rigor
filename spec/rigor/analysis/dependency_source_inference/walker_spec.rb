@@ -333,6 +333,58 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::Walker do
       # Ruby 4.0.5 raises `NoMethodError` for a top-level `refine`, so no `using` can ever activate it. The census
       # the project walk runs records it under the module name `""` (ADR-121 WD7), which no `using` names; the gem
       # walk reads the file through the same census (#1814), so the row is the same one.
+      # Round-1 review of #1828 — a key a gem file's constant write binds, that no gem file declares, is the
+      # class-unknown row; the project reading learns that from its constant census, which holds no gem's writes.
+      describe "a target a constant write binds" do
+        let(:wildcard) { Rigor::Scope::DiscoveryIndex::REFINEMENT_WILDCARD }
+
+        def rows_of(files)
+          with_fake_gem do |gem_dir|
+            files.each { |name, source| File.write(File.join(gem_dir, "lib", name), source) }
+            return walker.walk(gem_dir: gem_dir, roots: %w[lib]).refinements
+          end
+        end
+
+        it "moves the rows of a constant alias, from this file or another, to the wildcard class" do
+          alias_in_file = rows_of("a.rb" => "module M\n  K = String\n  refine(K) { def shout = 1 }\nend\n")
+          alias_elsewhere = rows_of("a.rb" => "module M\n  refine(K) { def shout = 1 }\nend\n",
+                                    "b.rb" => "K = String\n")
+
+          expect(alias_in_file).to eq({ wildcard => { shout: ["M"] } })
+          expect(alias_elsewhere).to eq(alias_in_file)
+        end
+
+        it "moves a names-wildcard row with it, which leaves the module a targets-wildcard row" do
+          rows = rows_of("a.rb" => "module M\n  K = String\n  refine(K) { import_methods Helper }\nend\n")
+
+          expect(rows).to eq({ wildcard => { wildcard => ["M"] } })
+        end
+
+        it "reads every form of constant write, and a const_set with a literal name" do
+          forms = ["K = String", "K ||= String", "K &&= String", "K += 1", "Wrap::K = String", "K, L = String, Symbol",
+                   "Wrap::K, L = String, Symbol", "Object.const_set(:K, String)", "const_set('K', String)"]
+          tables = forms.map do |form|
+            rows_of("a.rb" => "module M\n  #{form}\n  refine(K) { def shout = 1 }\nend\n")
+          end
+
+          expect(tables).to all(eq({ wildcard => { shout: ["M"] } }))
+        end
+
+        # The controls: a class the gem declares, a target nothing binds, and a write of another name.
+        it "keeps the rows of a class the gem declares, of an unbound target and of another name's write" do
+          declared = rows_of("a.rb" => "module M\n  class K; end\n  refine(K) { def shout = 1 }\nend\n")
+          declared_by_write = rows_of("a.rb" => "module M\n  K = Class.new\n  refine(K) { def shout = 1 }\nend\n")
+          unbound = rows_of("a.rb" => "module M\n  refine(String) { def shout = 1 }\nend\n")
+          other = rows_of("a.rb" => "module M\n  L = String\n  refine(String) { def shout = 1 }\nend\n")
+
+          expect(declared).to eq({ "M::K" => { shout: ["M"] }, "K" => { shout: ["M"] } })
+          # `K = Class.new` declares `M::K`, but the bare spelling `K` is still a name a write binds, as the project
+          # reading takes it.
+          expect(declared_by_write).to eq({ "M::K" => { shout: ["M"] }, wildcard => { shout: ["M"] } })
+          expect([unbound, other]).to all(eq({ "M::String" => { shout: ["M"] }, "String" => { shout: ["M"] } }))
+        end
+      end
+
       it "records a `refine` with no enclosing module under a module no `using` can name" do
         outcome = walk_source("refine(::String) { def shout = nil }\n")
 

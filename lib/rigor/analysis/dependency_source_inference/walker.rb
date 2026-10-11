@@ -5,6 +5,7 @@ require "prism"
 require_relative "return_type_heuristic"
 require_relative "../../source/constant_path"
 require_relative "../../source/node_children"
+require_relative "../../source/node_walker"
 require_relative "../../inference/scope_indexer"
 require_relative "../../inference/refine_census"
 
@@ -25,7 +26,7 @@ module Rigor
       # Hard exclusions are NOT user-configurable, per ADR-10 § "Hard exclusions": top-level `spec/`,
       # `test/`, `bin/`, plus any non-`.rb` source. C extensions fall out automatically because the walker
       # only loads `.rb` files.
-      module Walker
+      module Walker # rubocop:disable Metrics/ModuleLength
         # Top-level directories that MUST NOT participate in gem-source inference even when the user lists
         # them under `roots:`. The check is case-insensitive against the first segment of `roots:`; nested
         # `spec/` / `test/` directories deeper inside `lib/` are NOT filtered (a few gems legitimately ship
@@ -68,9 +69,9 @@ module Rigor
         # The walk's accumulators. The budget counts `catalog` only, but stops the whole walk: a refine body reached
         # after it trips is not recorded. `root` is the file being walked and `in_effect` its
         # {Inference::InEffectRefinements}, built the first time a `refine`-shaped call asks (issue #1689). Issue
-        # #1814 — `modules`, `unread` and `mixes` are {Outcome}'s coverage facts, and `gem_dir` makes `unread` paths
-        # gem-relative.
-        Harvest = Struct.new(:catalog, :refinements, :root, :in_effect, :gem_dir, :modules, :unread, :mixes) do
+        # #1814 — `modules`, `unread` and `mixes` are {Outcome}'s coverage facts, `gem_dir` makes `unread` paths
+        # gem-relative, and `files` holds the parsed files, which the constant-alias rewrite reads again.
+        Harvest = Struct.new(:catalog, :refinements, :root, :in_effect, :gem_dir, :modules, :unread, :mixes, :files) do
           # {Inference::ScopeIndexer.module_refine_target} against this file's in-effect refinements.
           def refine_target_of(node)
             return nil if Inference::ScopeIndexer.refine_target(node).nil?
@@ -101,6 +102,17 @@ module Rigor
         MIXIN_WORD = /\b(?:include|prepend|append_features|prepend_features)\b/
         private_constant :MIXIN_CALLS, :MIXIN_SYMBOLS, :MIXIN_WORD
 
+        # The constant-write nodes whose target is a bare name, and the ones whose target is a path.
+        CONSTANT_WRITES = [
+          Prism::ConstantWriteNode, Prism::ConstantOrWriteNode, Prism::ConstantAndWriteNode,
+          Prism::ConstantOperatorWriteNode, Prism::ConstantTargetNode
+        ].freeze
+        CONSTANT_PATH_WRITES = [
+          Prism::ConstantPathWriteNode, Prism::ConstantPathOrWriteNode, Prism::ConstantPathAndWriteNode,
+          Prism::ConstantPathOperatorWriteNode
+        ].freeze
+        private_constant :CONSTANT_WRITES, :CONSTANT_PATH_WRITES
+
         module_function
 
         # @param gem_dir — absolute path to the gem's installation directory.
@@ -113,16 +125,17 @@ module Rigor
         #   the budget was reached. Methods of identical name on the same class with different kinds (rare;
         #   private API mostly) carry the kind that wins the per-class first walk.
         def walk(gem_dir:, roots:, budget: UNBOUNDED)
-          harvest = Harvest.new({}, {}, nil, nil, gem_dir.to_s, Set.new, [], false)
+          harvest = Harvest.new({}, {}, nil, nil, gem_dir.to_s, Set.new, [], false, [])
           truncated = false
           accepted_roots(roots).each do |root|
             break if truncated
 
             truncated = walk_root(File.join(gem_dir.to_s, root), harvest, budget)
           end
+          refinements = Inference::ScopeIndexer.freeze_refinements(rewrite_aliased_targets(harvest))
           Outcome.new(catalog: harvest.catalog.freeze, truncated: truncated,
-                      refinements: Inference::ScopeIndexer.freeze_refinements(harvest.refinements),
-                      modules: (harvest.modules | refining_modules(harvest.refinements)).freeze,
+                      refinements: refinements,
+                      modules: (harvest.modules | refining_modules(refinements)).freeze,
                       unread: harvest.unread.freeze, mixes_modules: harvest.mixes)
         end
 
@@ -166,6 +179,7 @@ module Rigor
 
           harvest.root = parse_result.value
           harvest.in_effect = nil
+          harvest.files << path
           record_coverage(parse_result.value, harvest)
           record_refinements(parse_result.value, harvest)
           walk_node(parse_result.value, [], false, harvest, budget)
@@ -191,6 +205,53 @@ module Rigor
           harvest.refinements = Inference::ScopeIndexer.merge_refinement_tables(
             harvest.refinements, Inference::ScopeIndexer.refinement_table(root)
           )
+        end
+
+        # Issue #1814 — a refine target a gem's own constant write binds (`K = String; refine(K) { … }`) names whatever
+        # value the write holds, which the walker cannot resolve: the project reading learns it at read time, from the
+        # project's constant census (`Scope#bound_constant_names`), which holds no gem's writes. So a row keyed by a
+        # name whose last segment a gem file writes (`K = …`, `A::K = …`, `K ||= …`, `K, L = …`, `const_set(:K, …)`),
+        # and that no gem file declares as a class or module, is moved to the wildcard class: the class-unknown row the
+        # project reading gives the same constant. The body's names decline on every receiver, and a call a row
+        # replaces types `Dynamic[top]`. The writes of every file are needed, so the files are read again; a gem with
+        # no refinement row reads none.
+        def rewrite_aliased_targets(harvest)
+          table = harvest.refinements
+          return table if table.empty?
+
+          bound = bound_constant_segments(harvest.files)
+          wildcard = Scope::DiscoveryIndex::REFINEMENT_WILDCARD
+          table.inject({}) do |out, (class_name, methods)|
+            aliased = class_name != wildcard && !harvest.modules.include?(class_name) &&
+                      bound.include?(class_name.split("::").last)
+            Inference::ScopeIndexer.merge_refinement_tables(out, { (aliased ? wildcard : class_name) => methods })
+          end
+        end
+
+        # The last segments of the constants the `files` write by any form (an assignment, a path write, an operator
+        # write, a multiple assignment, a `const_set` with a literal name).
+        def bound_constant_segments(files)
+          segments = Set.new
+          files.each do |path|
+            Source::NodeWalker.each(Prism.parse_file(path).value) { |node| segments << bound_segment(node) }
+          rescue StandardError
+            next # the file is already in `unread`
+          end
+          segments.delete(nil)
+          segments
+        end
+
+        def bound_segment(node)
+          case node
+          when *CONSTANT_WRITES, Prism::ConstantPathTargetNode then node.name.to_s
+          when *CONSTANT_PATH_WRITES then node.target.name.to_s
+          when Prism::CallNode then const_set_name(node)
+          end
+        end
+
+        def const_set_name(call)
+          name = call.name == :const_set && call.arguments&.arguments&.first
+          name.unescaped if name.is_a?(Prism::SymbolNode) || name.is_a?(Prism::StringNode)
         end
 
         # The modules the rows of `table` name as refining, without the wildcard (a module the walk cannot name) and the

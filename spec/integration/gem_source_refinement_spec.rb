@@ -271,6 +271,53 @@ RSpec.describe "Gem source inference over `refine` bodies (#1672)" do
     end
   end
 
+  # Round-1 review of #1828 — `K = String; refine(K) { … }` in a gem names String, which the project reading learns from
+  # the project's constant census at read time and that census holds no gem's writes, so the walker rewrites such a key
+  # to the class-unknown row. Ruby 4.0.5 prints "HI!" for `"hi".shout`, "LONG" for `"x".length.upcase`, and raises
+  # `NoMethodError` for `"hi".nope`.
+  describe "a gem refine target the gem's own constant write binds" do
+    it "declines the refined name on any receiver, and keeps reporting a name no row defines" do
+      write_gem("kgem", "lib/kgem.rb" => "module KGem\n  K = String\n  refine(K) { def shout = 1 }\nend\n")
+      write("lib/app.rb", "using KGem\n\"hi\".shout\n\"hi\".nope\n")
+
+      expect(undefined_rows(gems: %w[kgem])).to eq([["app.rb", 3, "nope"]])
+    end
+
+    it "types a call the refinement replaces as Dynamic[top], and reports no call on its result" do
+      write_gem("ktg", "lib/ktg.rb" => "module Ktg\n  Target = String\n  refine(Target) { def length = 'long' }\nend\n")
+      write("lib/app.rb", "using Ktg\nRigor.dump_type(\"x\".length)\n\"x\".length.upcase\n")
+
+      found = diagnostics(gems: %w[ktg])
+      expect(found.select { |d| d.qualified_rule == "dump.type" }.map(&:message)).to eq(["dump_type: Dynamic[top]"])
+      expect(undefined_rows_of(found)).to eq([])
+    end
+
+    # The constant may be written in another file of the gem, by `||=`, by a path write or by `const_set`.
+    {
+      "another file" => ["Q = String\n", "Q"],
+      "an operator write" => ["Q ||= String\n", "Q"],
+      "a path write" => ["module Wrap; end\nWrap::Q = String\n", "Q"],
+      "a multiple assignment" => ["Q, R = String, Symbol\n", "Q"],
+      "a const_set with a literal name" => ["Object.const_set(:Q, String)\n", "Q"]
+    }.each do |name, (binding, target)|
+      it "reads a target bound by #{name} as unknown" do
+        write_gem("aliasgem", "lib/a_binding.rb" => binding,
+                              "lib/b_alias.rb" => "module AliasGem\n  refine(#{target}) { def aliased = 1 }\nend\n")
+        write("lib/app.rb", "using AliasGem\n\"hi\".aliased\n\"hi\".nope\n")
+
+        expect(undefined_rows(gems: %w[aliasgem])).to eq([["app.rb", 3, "nope"]])
+      end
+    end
+
+    # The control: a target nothing in the gem binds keeps its normal row, which matches the refined class only.
+    it "keeps the row of a target no constant write binds" do
+      write_gem("plainref", "lib/plain_ref.rb" => "module PlainRef\n  refine(String) { def plain = 1 }\nend\n")
+      write("lib/app.rb", "using PlainRef\n1.plain\n\"hi\".plain\n")
+
+      expect(undefined_rows(gems: %w[plainref])).to eq([["app.rb", 2, "plain"]])
+    end
+  end
+
   # ADR-121 WD7 — `import_methods` leaves the refined class's names unknown and its targets known, so the decline is
   # for String receivers, not for the whole span.
   it "declines the names of a refined class only, when a gem refine body imports methods" do

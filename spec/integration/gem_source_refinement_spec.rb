@@ -16,7 +16,9 @@ require "spec_helper"
 require "fileutils"
 require "tmpdir"
 
+require "rigor/analysis/incremental_session"
 require "rigor/analysis/runner"
+require "rigor/cache/incremental_snapshot"
 require "rigor/cache/store"
 require "rigor/configuration"
 
@@ -306,5 +308,78 @@ RSpec.describe "Gem source inference over `refine` bodies (#1672)" do
     dumped = diagnostics(gems: %w[centershout]).select { |d| d.qualified_rule == "dump.type" }
     expect(dumped.map(&:message)).to eq(['dump_type: " hi  "', "dump_type: Dynamic[top]", 'dump_type: "HI"',
                                          "dump_type: 2"])
+  end
+
+  # ADR-10 slice 3, issue #1814 — the gem half of the refinement table is no analysed file's, so no per-file diff
+  # (`Incremental.changed_refinement_names`) sees a gem bump change it, and `app.rb` below never changes. The run's
+  # cache identity must: the lockfile digest covers a `bundle update`, and the `(name, version, mode)` rows of the
+  # walked gems cover a project with no lockfile.
+  describe "a gem bump between two warm runs" do
+    def bump(version, refine_body)
+      write("vendor/shouty/lib/shouty.rb", "module Shouty\n  refine String do\n#{refine_body}  end\nend\n")
+      stub_gem("shouty", version)
+    end
+
+    def lockfile(version) = write("Gemfile.lock", "GEM\n  specs:\n    shouty (#{version})\n")
+
+    def cached_rows = undefined_rows(cache_store: Rigor::Cache::Store.new(root: File.join(Dir.pwd, ".rigor-cache")))
+
+    def incremental_rows
+      root = File.join(Dir.pwd, ".rigor-cache")
+      snapshot = Rigor::Cache::IncrementalSnapshot.new(root: root)
+      fingerprint = Rigor::Cache::IncrementalSnapshot.fingerprint(configuration: configuration, roots: %w[lib])
+      session = Rigor::Analysis::IncrementalSession.new(
+        configuration: configuration, paths: %w[lib], cache_store: Rigor::Cache::Store.new(root: root)
+      )
+      found, warm = guarded_run_incremental(session, snapshot: snapshot, fingerprint: fingerprint)
+      [undefined_rows_of(found), warm]
+    end
+
+    before do
+      bump("1.0.0", "    def shout = upcase\n")
+      write("lib/app.rb", "using Shouty\n\"hi\".shout\n\"hi\".yell\n")
+    end
+
+    [true, false].each do |locked|
+      suffix = locked ? "with a lockfile" : "with no lockfile"
+
+      it "re-checks the `using` file when a refined def is renamed, #{suffix}" do
+        lockfile("1.0.0") if locked
+        expect(cached_rows).to eq([["app.rb", 3, "yell"]])
+
+        bump("1.1.0", "    def yell = upcase\n")
+        lockfile("1.1.0") if locked
+
+        expect(cached_rows).to eq([["app.rb", 2, "shout"]])
+        expect(undefined_rows).to eq([["app.rb", 2, "shout"]])
+      end
+
+      it "re-checks the `using` file when a refine body gains an import_methods, #{suffix}" do
+        lockfile("1.0.0") if locked
+        expect(cached_rows).to eq([["app.rb", 3, "yell"]])
+
+        bump("1.1.0", "    def shout = upcase\n    import_methods Kernel\n")
+        lockfile("1.1.0") if locked
+
+        expect(cached_rows).to eq([])
+        expect(undefined_rows).to eq([])
+      end
+
+      it "re-checks the `using` file under --incremental, #{suffix}" do
+        lockfile("1.0.0") if locked
+        expect(incremental_rows).to eq([[["app.rb", 3, "yell"]], false])
+
+        bump("1.1.0", "    def yell = upcase\n")
+        lockfile("1.1.0") if locked
+
+        expect(incremental_rows).to eq([[["app.rb", 2, "shout"]], false])
+      end
+    end
+
+    # The control: nothing changed, so the run is served from the snapshot and the identity did not move.
+    it "keeps serving an unchanged gem from the snapshot" do
+      expect(incremental_rows).to eq([[["app.rb", 3, "yell"]], false])
+      expect(incremental_rows).to eq([[["app.rb", 3, "yell"]], true])
+    end
   end
 end

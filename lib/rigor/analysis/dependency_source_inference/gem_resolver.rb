@@ -50,6 +50,21 @@ module Rigor
           )
         end
 
+        # Issue #1814 — the {Resolved#dependency_entry} of each non-disabled `dependencies.source_inference` entry that
+        # resolves, in configuration order, without walking any gem. The run-result cache key and the incremental
+        # snapshot's fingerprint are built before analysis from inputs that are cheap to read, and a gem's walked
+        # source (its method catalogue, its refinement table, which modules it read in full) is an input of the
+        # run that no analysed file records; a `Gemfile.lock` digest covers a `bundle update` and nothing else, so a
+        # project with no lockfile, or a gem installed beside the bundle, would replay the diagnostics of the gem's
+        # previous version. Unresolvable entries have no version to key on and add nothing: the gem appearing later
+        # adds its row.
+        def dependency_entries(dependencies)
+          dependencies.source_inference.reject(&:disabled?).filter_map do |entry|
+            resolved = resolve(entry)
+            resolved.dependency_entry if resolved.is_a?(Resolved)
+          end
+        end
+
         # Locator. `Gem.loaded_specs` reflects the bundle (cheap lookup, no filesystem walk); `find_by_name` is
         # the broader fallback for gems present on the gem path but not yet `require`'d. `Gem::MissingSpecError`
         # is a `LoadError` subclass, so the rescue covers both missing-spec and load-error signals.

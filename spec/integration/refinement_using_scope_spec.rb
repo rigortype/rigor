@@ -966,6 +966,33 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
       expect(rows).to eq([["plain.rb", 2, "call.undefined-method"], ["plain.rb", 3, "call.unresolved-toplevel"]])
     end
 
+    # M3. In a plain class's method a `:refine` Symbol is data and a `refine` call is the class's own method: Ruby
+    # 4.0.5 runs `Query#refine`'s block with no refinement in effect (`"x".nope` raises there) and prints `"X"`.
+    it "keeps checks and types where a plain class's method names refine" do
+      write("lib/c.rb", "class Controller\n  def action_name = :refine\nend\n")
+      write("lib/q.rb", <<~RUBY)
+        class Query
+          def refine(extra) = yield(extra)
+          def narrowed
+            refine(1) do |q|
+              Rigor.dump_type("x".upcase)
+              "x".nope
+            end
+          end
+        end
+      RUBY
+      write("lib/u.rb", "module Shout\n  refine(String) { def shout = :s }\nend\nusing Shout\n" \
+                        "Rigor.dump_type(\"x\".upcase)\n\"x\".center(1, 2, 3)\n")
+
+      rows = diagnostics.map { |d| [File.basename(d.path.to_s), d.line, d.qualified_rule, d.message] }.sort
+      expect(rows).to eq(
+        [["q.rb", 5, "dump.type", %(dump_type: "X")],
+         ["q.rb", 6, "call.undefined-method", "undefined method `nope' for \"x\""],
+         ["u.rb", 5, "dump.type", %(dump_type: "X")],
+         ["u.rb", 6, "call.wrong-arity", "wrong number of arguments to `center' on String (given 3, expected 1..2)"]]
+      )
+    end
+
     # Critique F5a. Ruby 4.0.5 prints `:via_alias` (`rb/p4_alias_refine.rb`).
     it "declines under a module that refines through an alias of `refine`" do
       write("lib/m.rb", <<~RUBY)

@@ -207,6 +207,23 @@ RSpec.describe Rigor::Inference::ScopeIndexer, ".refine_census" do
       "Module.new do\n  refine(String) { def other = 1 }\nend\n",
       %i[recorded recorded], { "String" => { whisper: ["#<Module:1:6>"], other: ["#<Module:2:0>"] } }
     ],
+    # M3, Ruby 4.0.5: in a plain class's method `self` is an instance of the class (or the class), which has no
+    # `Module#refine`: `class C; def self.setup = refine(String) { … }; end; C.setup` raises `NoMethodError`, a
+    # `Query#refine` the class defines runs its own block, and a `:refine` Symbol there is data. A `Module`
+    # subclass's instance method runs on a module: `class MyMod < Module; def setup = refine(String) { … }; end`
+    # refines for the `MyMod` instance that calls it.
+    "a :refine Symbol in a plain class's method" => [
+      "class Controller\n  def action_name = :refine\nend\n", %i[data], {}
+    ],
+    "a refine in a plain class's methods" => [
+      "class Query\n  def refine(extra) = yield(extra)\n  def narrowed = refine(1) { |q| q }\n  " \
+      "def self.setup = refine(String) { def x = 1 }\nend\n",
+      %i[dsl dsl], {}
+    ],
+    "a refine in a Module subclass's instance method" => [
+      "class MyMod < Module\n  def setup = refine(String) { def shout = 1 }\nend\n",
+      %i[targets_wildcard], { any => { any => [any] } }
+    ],
     "a refine in a class body" => [
       "class C\n  refine(String) { def label = 1 }\nend\n", %i[dsl], {}
     ],

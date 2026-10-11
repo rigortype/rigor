@@ -3381,7 +3381,8 @@ module Rigor
       # `:recorded` (a literal target and block, its names recorded), `:class_unknown` (a block whose target the walk
       # cannot name), `:targets_wildcard` (a `refine` in a `def`, charged to its module), `:literal` (A3's `:refine`
       # / eval-string literal), `:nested` (a `refine` in a refine body), `:dsl` (where `self` is a class, #1689) and
-      # `:raises` (no block, a Proc as the block, another receiver, or a computed target where `self` is `main`).
+      # `:raises` (no block, a Proc as the block, another receiver, or a computed target where `self` is `main`), and
+      # `:data` (a `:refine` literal where `self` is a plain class or one of its instances).
       def refine_census(root)
         census = []
         refinements = build_methods_and_def_nodes(root, census: census)[3]
@@ -3628,10 +3629,18 @@ module Rigor
         arguments.each do |argument|
           next unless RefineCensus.refine_symbol?(argument) || (strings && RefineCensus.refine_string?(argument))
 
-          literal_owners(node, self_module, qualified_prefix).each { |owner| record_targets_wildcard(tables, owner) }
           tables.see_literal(argument)
+          next tables.account(argument, :data) if class_literal?(node, argument, tables)
+
+          literal_owners(node, self_module, qualified_prefix).each { |owner| record_targets_wildcard(tables, owner) }
           tables.account(argument, :literal)
         end
+      end
+
+      # M3 — a literal charged to `self` where `self` is a plain class or one of its instances
+      # ({InEffectRefinements#class_literal?}) names the class's own `refine`, or nothing: data.
+      def class_literal?(call, literal, tables)
+        RefineCensus.literal_target(call) == :self && tables.in_effect_query.class_literal?(literal)
       end
 
       def literal_owners(call, self_module, qualified_prefix)
@@ -3651,6 +3660,7 @@ module Rigor
       # for code the walk cannot follow, run on `owner`.
       def census_symbol(node, owner, tables)
         return unless RefineCensus.refine_symbol?(node) && !tables.literal_seen?(node)
+        return tables.account(node, :data) if tables.in_effect_query.class_literal?(node)
 
         record_targets_wildcard(tables, owner)
         tables.account(node, :literal)

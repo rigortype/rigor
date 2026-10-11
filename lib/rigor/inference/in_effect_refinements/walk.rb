@@ -8,6 +8,9 @@ module Rigor
       # The one walk of a file that records its activations, its refine-body `def`s and the `def`s a refine body
       # defines on its refined class ({InEffectRefinements} describes what each source contributes).
       module Walk
+        METHOD_BLOCK_CALLS = %i[define_method define_singleton_method].freeze
+        private_constant :METHOD_BLOCK_CALLS
+
         private
 
         # `Module.nesting` inside `node`'s body while the block runs, for the refine-body defs recorded there.
@@ -27,21 +30,17 @@ module Rigor
         end
 
         # `body` is the `[start, end]` of the body a `using` here stays in effect to the end of; `owner` is the name of
-        # the module `self` is here, or nil where this walk cannot name it; `class_self` is true where `self` is known
-        # to be a class (issue #1689). A block or a `def` may run under another `self`, so both reset it.
+        # the module `self` is here, or nil where this walk cannot name it; `class_self` is truthy where `self` is known
+        # not to be a module that `refine` refines for (issue #1689): `true` in a plain class's body and methods (and a
+        # `Class.new` block), `:module_class` in the body of a class whose superclass is `Module` (its instances are
+        # modules), and `:module_singleton` in a module's `class << self` body (whose methods run on the module). A
+        # block may run under another `self`, so it resets it; a `def` takes {#method_class_self}.
         def walk(node, prefix, body, in_def, owner, class_self)
+          return if walked_body?(node, prefix, body, in_def, owner, class_self)
+
           case node
-          when Prism::ClassNode, Prism::ModuleNode
-            inner = Source::ConstantPath.declaration_prefix(prefix, node.constant_path) || prefix
-            return within_nesting(node) do
-              walk_children(node.body, inner, span_of(node), false, inner.empty? ? nil : inner.join("::"),
-                            node.is_a?(Prism::ClassNode))
-            end
-          when Prism::SingletonClassNode
-            walk(node.expression, prefix, body, in_def, owner, class_self)
-            return walk_children(node.body, prefix, span_of(node), false, nil, true)
-          when Prism::DefNode
-            return walk_children(node.body, prefix, body, true, nil, false)
+          when Prism::SymbolNode
+            record_class_literal(node) if class_self == true && RefineCensus.refine_symbol?(node)
           when Prism::ConstantWriteNode, Prism::ConstantPathWriteNode, Prism::ConstantOrWriteNode,
                Prism::ConstantPathOrWriteNode
             return if walked_meta_new_write?(node, prefix, body, in_def, owner, class_self)
@@ -49,12 +48,71 @@ module Rigor
             return walk_children(node, prefix, body, in_def, nil, false)
           when Prism::CallNode
             return if walked_class_new_call?(node, prefix, body, in_def, owner, class_self)
+            return if walked_method_block?(node, prefix, body, owner, class_self)
 
             record_call(node, prefix, body, in_def, owner, class_self)
           end
 
           walk_children(node, prefix, body, in_def, owner, class_self)
         end
+
+        # A `class` / `module` / `class << …` body or a `def` body, each with a `self` of its own.
+        def walked_body?(node, prefix, body, in_def, owner, class_self)
+          case node
+          when Prism::ClassNode, Prism::ModuleNode
+            inner = Source::ConstantPath.declaration_prefix(prefix, node.constant_path) || prefix
+            within_nesting(node) do
+              walk_children(node.body, inner, span_of(node), false, inner.empty? ? nil : inner.join("::"),
+                            declaration_class_self(node))
+            end
+          when Prism::SingletonClassNode
+            walk(node.expression, prefix, body, in_def, owner, class_self)
+            walk_children(node.body, prefix, span_of(node), false, nil, class_self ? true : :module_singleton)
+          when Prism::DefNode
+            walk_children(node.body, prefix, body, true, nil, method_class_self(class_self, !node.receiver.nil?))
+          else
+            return false
+          end
+          true
+        end
+
+        # ADR-121 WD7 — `true` for a plain class's body, `:module_class` for one whose superclass is `Module`, false
+        # for a module's.
+        def declaration_class_self(node)
+          return false unless node.is_a?(Prism::ClassNode)
+
+          superclass = node.superclass
+          module_superclass = (superclass.is_a?(Prism::ConstantReadNode) ||
+                               (superclass.is_a?(Prism::ConstantPathNode) && superclass.parent.nil?)) &&
+                              superclass.name == :Module
+          module_superclass ? :module_class : true
+        end
+
+        # ADR-121 WD7 (M3) — the `class_self` of a method body written where `class_self` holds: a plain class's
+        # methods, and a `Module` subclass's singleton methods, run on an object that is not a module, so a `refine`
+        # there is the class's own method (true); a module's methods, its `class << self` methods and a `Module`
+        # subclass's instance methods run on a module (false).
+        def method_class_self(class_self, singleton)
+          class_self == true || (class_self == :module_class && singleton)
+        end
+
+        # A `define_method` / `define_singleton_method` block is a method body (`using` raises in it), walked with the
+        # `class_self` a `def` there would take.
+        def walked_method_block?(node, prefix, body, owner, class_self)
+          block = node.block
+          return false unless block.is_a?(Prism::BlockNode) && METHOD_BLOCK_CALLS.include?(node.name) &&
+                              RefineCensus.self_call?(node)
+
+          walk(node.receiver, prefix, body, false, owner, class_self) if node.receiver
+          walk_children(node.arguments, prefix, body, false, owner, class_self)
+          walk_children(block, prefix, body, true, nil,
+                        method_class_self(class_self, node.name == :define_singleton_method))
+          true
+        end
+
+        # ADR-121 WD7 (M3) — a `:refine` literal, or a String naming it in an eval, `send` or method-naming call, where
+        # `self` is a plain class or one of its instances: data, not `Module#refine`.
+        def record_class_literal(node) = (@class_literals ||= Set.new) << node.location.start_offset
 
         def walk_children(node, prefix, body, in_def, owner, class_self)
           return if node.nil?
@@ -98,6 +156,7 @@ module Rigor
         end
 
         def record_call(node, prefix, body, in_def, owner, class_self)
+          record_class_string_literals(node) if class_self == true
           if class_self && ScopeIndexer.refine_call?(node)
             record_class_body_refine(node)
           elsif (target = ScopeIndexer.refine_target(node))
@@ -175,6 +234,14 @@ module Rigor
         end
 
         def record_class_body_refine(node) = (@class_body_refines ||= Set.new) << node.block.location.start_offset
+
+        def record_class_string_literals(node)
+          return unless RefineCensus.string_literal_call?(node)
+
+          node.arguments&.arguments&.each do |argument|
+            record_class_literal(argument) if RefineCensus.refine_string?(argument)
+          end
+        end
 
         def using_call?(node)
           node.name == :using && (node.receiver.nil? || node.receiver.is_a?(Prism::SelfNode)) &&

@@ -146,6 +146,15 @@ module Rigor
         !offsets.nil? && member?(call_node) && offsets.include?(call_node.block.location.start_offset)
       end
 
+      # ADR-121 WD7 (M3) — is `node` a `:refine` literal (or a String naming `refine` passed to an eval, `send` or
+      # method-naming call) written where `self` is a plain class or one of its instances? There it names the class's
+      # own `refine`, or nothing, never `Module#refine`.
+      def class_literal?(node)
+        build
+        literals = @class_literals
+        !literals.nil? && member?(node) && literals.include?(node.location.start_offset)
+      end
+
       # Is this the query over `root`'s tree?
       def over?(root) = @root.equal?(root)
 
@@ -222,6 +231,7 @@ module Rigor
         @refine_defs = nil
         @chained_refined_calls = nil
         @class_body_refines = nil
+        @class_literals = nil
         @unresolved_using = false
         return if @root.nil? || !mentions_refinements?
 

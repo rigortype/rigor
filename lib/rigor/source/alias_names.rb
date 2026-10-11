@@ -47,7 +47,7 @@ module Rigor
         name_symbol(node.unescaped)
       end
 
-      # nil for bytes no Symbol holds: `to_sym` on `"\xff"` raises EncodingError, and such a name reads as a computed one
+      # nil for bytes no Symbol holds: `to_sym` on `"\xff"` raises EncodingError, so the name reads as a computed one
       # (#1821).
       def name_symbol(text)
         text.to_sym if text&.valid_encoding?

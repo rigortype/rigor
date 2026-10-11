@@ -4633,7 +4633,8 @@ RSpec.describe "plugins/rigor-activerecord" do
     end
   end
 
-  # Issue #1821 — `"\xff".to_sym` raises EncodingError; a `define_singleton_method` name no Symbol holds is not looked up.
+  # Issue #1821 — `"\xff".to_sym` raises EncodingError; a `define_singleton_method` name no Symbol holds is
+  # not looked up.
   describe "a namespace module with an invalid-byte define_singleton_method name" do
     it "still discovers the models inside it" do
       models = {

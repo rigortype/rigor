@@ -44,14 +44,15 @@ module Rigor
         # the same source ({Inference::ScopeIndexer.refinement_table}), file by file, so it carries the wildcard rows
         # a project module's would.
         #
-        # Issue #1814 — `bound` is every name the gem's files bind by a constant write (an assignment, a path write, an
-        # operator write, a multiple assignment) without declaring a class or module by it, spelled under the lexical
-        # nesting the write sits in (`Shared::Target` for `module Shared; Target = String; end`); `bound_segments` is
-        # the last segment of each write whose owner the walk cannot spell (a `const_set` with a literal name, a path
-        # on a base no constant spells) ({.collect_bound_constants}). A refine key one of these binds
-        # (`refine(Shared::Target)` anywhere) may name any value, which the walker cannot resolve: the rows stay as the
-        # census records them, {Index#bound_constant?} unions the names across the walked gems, and the reader decides
-        # the key at read time, by each prefix of it ({Inference::InEffectRefinements.class_wildcard_key?}).
+        # Issue #1814 — `bound` is every name the gem's files bind by a constant write (an assignment, an operator
+        # write, a multiple assignment, a rooted path write) without declaring a class or module by it, spelled under
+        # the lexical nesting the write sits in (`Shared::Target` for `module Shared; Target = String; end`);
+        # `bound_segments` is the last segment of each write whose owner the walk cannot spell (a path write that is
+        # not rooted, a write under `class << …`, a `const_set` with a literal name) ({.collect_bound_constants}). A
+        # refine key one of these binds (`refine(Shared::Target)` anywhere) may name any value, which the walker cannot
+        # resolve: the rows stay as the census records them, {Index#bound_constant?} unions the names across the walked
+        # gems, and the reader decides the key at read time, by each prefix of it
+        # ({Inference::InEffectRefinements.class_wildcard_key?}).
         class Outcome < Data.define(:catalog, :truncated, :refinements, :bound, :bound_segments)
           def initialize(catalog:, truncated:, refinements: {}.freeze, bound: Set.new.freeze,
                          bound_segments: Set.new.freeze)
@@ -140,7 +141,7 @@ module Rigor
           harvest.root = parse_result.value
           harvest.in_effect = nil
           record_refinements(parse_result.value, path, harvest)
-          collect_bound_constants(parse_result.value, [], harvest)
+          collect_bound_constants(parse_result.value, [[]], harvest)
           walk_node(parse_result.value, [], false, harvest, budget)
         rescue StandardError
           # Gem source we can't parse / read silently degrades to "no contribution from this file". The
@@ -159,34 +160,38 @@ module Rigor
           )
         end
 
-        # Issue #1814 — the names the file binds by a constant write without declaring a class or module by them. A bare
-        # write (`K = …`, `K ||= …`, `K += …`, a multiple-assignment target) binds the name under the lexical nesting of
-        # the `class` / `module` headers around it, as the walker's own descent qualifies a `def`; a path write
-        # (`Wrap::K = …`) binds it under every name its base can denote there (`M::Wrap::K` and `Wrap::K` inside
-        # `module M`; `Wrap::K` alone when rooted; the nesting itself for `self::K`). A write whose value is one of the
-        # class-creating shapes the project walk registers as a declaration (`Class.new`, `Module.new`, `Struct.new`,
-        # `Data.define`, a `.freeze` tail or a `K = K || …` guard stripped: {Inference::ScopeIndexer.meta_new_rvalue})
-        # declares a class, so `Point = Struct.new(:x); refine(Point)` keeps a normal row. A `const_set` with a literal
-        # name (whatever its receiver: `Object.const_set(:K, …)` binds `::K`) and a path on a base no constant spells
-        # (`klass::K = …`) bind a name whose owner the walk cannot spell; those are recorded by their last segment,
-        # which matches that segment of any key. One pass over the tree; the rows are not touched.
-        def collect_bound_constants(node, prefix, harvest)
+        # Issue #1814 — the names the file binds by a constant write without declaring a class or module by them, or
+        # the last segment alone where the walk cannot spell the owner Ruby binds. A bare write (`K = …`, `K ||= …`,
+        # `K += …`, a multiple-assignment target) binds the name under the lexical nesting of the `class` / `module`
+        # headers around it, which a block does not change (a `Module.new do … end` or `module_eval { … }` body assigns
+        # a constant in the lexical scope around it); `prefixes` holds every nesting the headers can denote, since a
+        # nested compact header opens whichever module Ruby finds (`module W; module Shared::Inner` is
+        # `W::Shared::Inner` or `Shared::Inner`), as the census spells a refine target. A write whose value is one of
+        # the class-creating shapes the project walk registers as a declaration (`Class.new`, `Module.new`,
+        # `Struct.new`, `Data.define`, a `.freeze` tail or a `K = K || …` guard stripped:
+        # {Inference::ScopeIndexer.meta_new_rvalue}) declares a class, so `Point = Struct.new(:x); refine(Point)` keeps
+        # a normal row. Where the owner cannot be spelled the segment alone is recorded, which matches that segment of
+        # any key: a write under `class << …` (the singleton's), a path write that is not rooted (`Wrap::K = …` may
+        # bind under an included module's `Wrap`; `self::K = …` in a block binds under the block's `self`), and a
+        # `const_set` with a literal name (`Object.const_set(:K, …)` binds `::K`). A rooted path (`::Shared::K = …`)
+        # binds that name. One pass over the tree; the rows are not touched.
+        def collect_bound_constants(node, prefixes, harvest)
           return unless node.is_a?(Prism::Node)
 
           case node
-          when Prism::ClassNode, Prism::ModuleNode
-            prefix = Source::ConstantPath.declaration_prefix(prefix, node.constant_path) || prefix
+          when Prism::ClassNode, Prism::ModuleNode then prefixes = header_prefixes(node.constant_path, prefixes)
+          when Prism::SingletonClassNode then prefixes = nil
           when Prism::ConstantWriteNode, Prism::ConstantOrWriteNode, Prism::ConstantAndWriteNode,
                Prism::ConstantOperatorWriteNode
-            harvest.bound << (prefix + [node.name.to_s]).join("::") unless declares_class?(node)
-          when Prism::ConstantTargetNode then harvest.bound << (prefix + [node.name.to_s]).join("::")
+            note_bare_write(node.name.to_s, prefixes, harvest) unless declares_class?(node)
+          when Prism::ConstantTargetNode then note_bare_write(node.name.to_s, prefixes, harvest)
           when Prism::ConstantPathWriteNode, Prism::ConstantPathOrWriteNode, Prism::ConstantPathAndWriteNode,
                Prism::ConstantPathOperatorWriteNode
-            note_path_write(node.target, prefix, harvest) unless declares_class?(node)
-          when Prism::ConstantPathTargetNode then note_path_write(node, prefix, harvest)
+            note_path_write(node.target, harvest) unless declares_class?(node)
+          when Prism::ConstantPathTargetNode then note_path_write(node, harvest)
           when Prism::CallNode then note_const_set(node, harvest)
           end
-          node.rigor_each_child { |child| collect_bound_constants(child, prefix, harvest) }
+          node.rigor_each_child { |child| collect_bound_constants(child, prefixes, harvest) }
         end
 
         def declares_class?(write)
@@ -194,38 +199,53 @@ module Rigor
           !rvalue.nil? && Inference::ScopeIndexer.meta_new_constant_rvalue?(rvalue)
         end
 
-        # `Wrap::K = …`, `Wrap::K, L = …`: `K` under each owner the base can denote, or by its segment alone when the
-        # base is no constant.
-        def note_path_write(path, prefix, harvest)
+        # The nestings a `class` / `module` body may sit in, given the ones its header is written in: a bare header
+        # opens a module under each; a compact header (`module Shared::Inner`) opens `Inner` under every name its base
+        # can denote there ({Inference::ScopeIndexer.constant_receiver_candidates}); a rooted header resets them. nil,
+        # the unspellable owner, for a header no constant spells or one under `class << …`.
+        def header_prefixes(constant_path, prefixes)
+          return nil if prefixes.nil? || Source::ConstantPath.qualified_name_or_nil(constant_path).nil?
+          return [Source::ConstantPath.qualified_name_or_nil(constant_path).split("::")] if rooted_path?(constant_path)
+
+          name = constant_path.name.to_s
+          return prefixes.map { |prefix| prefix + [name] } if constant_path.is_a?(Prism::ConstantReadNode)
+
+          prefixes.flat_map do |prefix|
+            Inference::ScopeIndexer.constant_receiver_candidates(constant_path.parent, prefix)
+                                   .map { |owner| owner.split("::") + [name] }
+          end.uniq
+        end
+
+        # `::K`, `::A::K`, as a path or a multiple-assignment target: the leftmost segment has no parent.
+        def rooted_path?(path)
+          path.respond_to?(:parent) && (path.parent.nil? || Source::ConstantPath.rooted?(path.parent))
+        end
+
+        def note_bare_write(name, prefixes, harvest)
+          return harvest.bound_segments << name if prefixes.nil?
+
+          prefixes.each { |prefix| harvest.bound << (prefix + [name]).join("::") }
+        end
+
+        # A path write binds its name where its base resolves, which the walk can spell only for a rooted base.
+        def note_path_write(path, harvest)
           name = path.name.to_s
-          owners = owner_candidates(path.parent, prefix)
-          return harvest.bound_segments << name if owners.nil?
+          return harvest.bound_segments << name unless rooted_path?(path)
 
-          owners.each { |owner| harvest.bound << (owner.empty? ? name : "#{owner}::#{name}") }
+          owner = path.parent && Source::ConstantPath.qualified_name_or_nil(path.parent)
+          harvest.bound << (owner ? "#{owner}::#{name}" : name)
         end
 
-        # The names a path's base can denote where it is written: the top level for a rooted path (`::K`), the lexical
-        # nesting for `self::K`, every name a constant can denote for a constant base, nil for anything else.
-        def owner_candidates(base, prefix)
-          case base
-          when nil then [""]
-          when Prism::SelfNode then [prefix.join("::")]
-          when Prism::ConstantReadNode, Prism::ConstantPathNode
-            candidates = if Source::ConstantPath.rooted?(base)
-                           [Source::ConstantPath.qualified_name_or_nil(base)].compact
-                         else
-                           Inference::ScopeIndexer.constant_receiver_candidates(base, prefix)
-                         end
-            candidates.empty? ? nil : candidates
-          end
-        end
-
-        # `const_set(:K, …)` / `const_set("K", …)` with a literal name, on any receiver: the owner is a value.
+        # `const_set(:K, value)` / `const_set("K", value)` with a literal name, on any receiver: the owner is a value.
+        # A class-creating value declares a class, as a write of one does.
         def note_const_set(node, harvest)
           return unless node.name == :const_set
 
-          name = node.arguments&.arguments&.first
-          harvest.bound_segments << name.unescaped if name.is_a?(Prism::SymbolNode) || name.is_a?(Prism::StringNode)
+          name, value = node.arguments&.arguments
+          return unless name.is_a?(Prism::SymbolNode) || name.is_a?(Prism::StringNode)
+          return if value && Inference::ScopeIndexer.meta_new_constant_rvalue?(value)
+
+          harvest.bound_segments << name.unescaped
         end
 
         # Walks a Prism subtree, accumulating method definitions under their qualified class name. Mirrors

@@ -88,6 +88,12 @@ module Rigor
           @bound_constants.include?(name) || @bound_segments.include?(name.split("::").last)
         end
 
+        # Does any walked gem bind a constant at all? False for a project that opts in no gem, so a reader asks nothing
+        # per key.
+        def binds_constants?
+          !(@bound_constants.empty? && @bound_segments.empty?)
+        end
+
         # ADR-10 slice 5c — per-class mode lookup. Chains `class_to_gem` + `gem_modes`; returns `nil` when
         # the class isn't owned by any opt-in gem in this run.
         def mode_for(class_name)

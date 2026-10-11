@@ -81,14 +81,19 @@ module Rigor
           presence = (lockfiles + named.map { |path| File.absolute_path(path.to_s) }).to_h do |path|
             [path, File.exist?(path)]
           end
+          rows = dependency_rows(configuration)
+          return nil if rows.nil?
+
           new(started_ns: started_ns, device: device, lockfiles: lockfiles, presence: presence,
-              stamp_dir: stamp_dir(cache_root), configuration: configuration,
-              dependency_rows: dependency_rows(configuration))
+              stamp_dir: stamp_dir(cache_root), configuration: configuration, dependency_rows: rows)
         end
 
-        # Issue #1814 — the opted-in gems' `(name, version, mode)` rows as the key carries them.
+        # Issue #1814 — the opted-in gems' `(name, version, mode)` rows as the key carries them; nil when they cannot
+        # be resolved, which takes no mark (the key could not be computed either).
         def self.dependency_rows(configuration)
           DependencySourceInference::GemResolver.dependency_entries(configuration.dependencies)
+        rescue StandardError
+          nil
         end
         private_class_method :dependency_rows
 

@@ -216,11 +216,13 @@ module Rigor
           segments.any? { |segment| !scope.bound_constant_names(segment).empty? } || gem_bound_key?(scope, segments)
         end
 
-        # The gem half of {.class_wildcard_key?}: does an opted-in gem bind some prefix of the key (issue #1814)?
+        # The gem half of {.class_wildcard_key?}: does an opted-in gem bind some prefix of the key (issue #1814)? A
+        # leading `Object::` spells the top level (`Object::Shared::Target` is `Shared::Target`), so it is dropped.
         def gem_bound_key?(scope, segments)
           index = scope.environment&.dependency_source_index
-          return false if index.nil?
+          return false if index.nil? || !index.binds_constants?
 
+          segments = segments.drop_while { |segment| segment == "Object" }
           segments.each_index.any? { |i| index.bound_constant?(segments[0..i].join("::")) }
         end
 

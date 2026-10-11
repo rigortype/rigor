@@ -31,6 +31,45 @@ classes:
         source: c
         defined_at: references/ruby/proc.c:4580
     instance_methods:
+      call:
+        source: c
+        cfunc: proc_call
+        arity: -1
+        defined_at: references/ruby/proc.c:4568
+        c_body_at: references/ruby/proc.c:1104
+        c_effects: []
+        purity: leaf
+        rbs:
+        - "(?) -> untyped"
+        rbs_at: references/rbs/core/proc.rbs:624
+        rdoc_only: true
+      "[]":
+        source: c
+        cfunc: proc_call
+        arity: -1
+        defined_at: references/ruby/proc.c:4569
+        c_body_at: references/ruby/proc.c:1104
+        c_effects: []
+        purity: leaf
+        rdoc_only: true
+      "===":
+        source: c
+        cfunc: proc_call
+        arity: -1
+        defined_at: references/ruby/proc.c:4570
+        c_body_at: references/ruby/proc.c:1104
+        c_effects: []
+        purity: leaf
+        rdoc_only: true
+      yield:
+        source: c
+        cfunc: proc_call
+        arity: -1
+        defined_at: references/ruby/proc.c:4571
+        c_body_at: references/ruby/proc.c:1104
+        c_effects: []
+        purity: leaf
+        rdoc_only: true
       to_proc:
         source: c
         cfunc: proc_to_proc

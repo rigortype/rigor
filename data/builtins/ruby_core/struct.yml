@@ -292,6 +292,30 @@ classes:
         - "(Symbol field1, *interned fields, ?keyword_init: boolish?) ?{ (singleton(Struct))
           [self: singleton(Struct)] -> void } -> untyped"
         rbs_at: references/rbs/core/struct.rbs:238
+      keyword_init?:
+        source: c
+        cfunc: rb_struct_s_keyword_init_p
+        arity: 0
+        defined_at: references/ruby/struct.c:2251
+        c_body_at: references/ruby/struct.c:62
+        c_effects: []
+        purity: leaf
+        rbs:
+        - "() -> bool?"
+        rbs_at: references/rbs/core/struct.rbs:267
+        rdoc_only: true
+      members:
+        source: c
+        cfunc: rb_struct_s_members_m
+        arity: 0
+        defined_at: references/ruby/struct.c:2252
+        c_body_at: references/ruby/struct.c:207
+        c_effects: []
+        purity: leaf
+        rbs:
+        - "() -> Array[Symbol]"
+        rbs_at: references/rbs/core/struct.rbs:250
+        rdoc_only: true
     undefined: []
   Data:
     parent: Object
@@ -411,5 +435,14 @@ classes:
         - block
         - raises
         purity: block_dependent
+      members:
+        source: c
+        cfunc: rb_data_s_members_m
+        arity: 0
+        defined_at: references/ruby/struct.c:2291
+        c_body_at: references/ruby/struct.c:207
+        c_effects: []
+        purity: leaf
+        rdoc_only: true
     undefined:
     - new

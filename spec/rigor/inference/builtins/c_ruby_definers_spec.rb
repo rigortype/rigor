@@ -27,22 +27,26 @@ RSpec.describe Rigor::Inference::Builtins::CRubyDefiners do
   # Each listed method the running Ruby has is owned by the class the catalogue names, so `refine` of an ancestor
   # cannot answer ahead of it. A method the running Ruby lacks is skipped: `Date#fill`, `#nth_kday?`, `#inspect_raw`
   # and `#marshal_dump_old` exist only in a debug build of `date_core.c`.
-  # (`fatal` is a catalogued class name that is no constant.)
+  # (`fatal` is a catalogued class name that is no constant; an `rdoc_only` entry is CRuby's RDoc-only registration.)
   it "lists only methods the running Ruby owns on the class it names" do
     require "date"
     misowned = Rigor::Inference::Builtins::MethodCatalog.topic_paths.flat_map do |path|
       classes = YAML.safe_load_file(path, permitted_classes: [Symbol])["classes"] || {}
       classes.flat_map do |name, klass|
         owner = runtime_module(name)
-        next [] if owner.nil?
+        next [] if owner.nil? || klass["rdoc_only"]
 
-        ((klass["instance_methods"] || {}).keys + (klass["aliases"] || {}).keys).filter_map do |method|
+        listed_names(klass["instance_methods"]).concat(listed_names(klass["aliases"])).filter_map do |method|
           found = owned_method(owner, method)
           "#{name}##{method} (#{found.owner})" if found && found.owner != owner
         end
       end
     end
     expect(misowned).to eq([])
+  end
+
+  def listed_names(entries)
+    (entries || {}).filter_map { |method, entry| method unless entry.is_a?(Hash) && entry["rdoc_only"] }
   end
 
   def runtime_module(name)

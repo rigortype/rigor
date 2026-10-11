@@ -119,8 +119,10 @@ Signature changes update the matching
 | `Rigor::Analysis::DependencySourceInference::Index#budget_exceeded` | Analysis | Slice 4 |
 | `Rigor::Analysis::DependencySourceInference::Builder.build` | Analysis | Slice 2a |
 | `Rigor::Analysis::DependencySourceInference::Walker.walk(budget:)` | Analysis | Slice 2b-i / 4 |
-| `Rigor::Analysis::DependencySourceInference::Walker::Outcome` Data shape | Analysis | Slice 4 / #1672 (`refinements`) |
+| `Rigor::Analysis::DependencySourceInference::Walker::Outcome` Data shape | Analysis | Slice 4 / #1672 (`refinements`) / #1814 (`modules`, `unread`, `mixes_modules`, `#fully_read?`) |
 | `Rigor::Analysis::DependencySourceInference::Index#refinements` | Analysis | #1672 |
+| `Rigor::Analysis::DependencySourceInference::Index#readings` / `#fully_read_module?` | Analysis | #1814 |
+| `Rigor::Analysis::DependencySourceInference::GemResolver.dependency_entries` | Analysis | #1814 |
 | `Rigor::Environment#dependency_source_index` | Environment | Slice 2b-ii |
 | `Rigor::Cache::Descriptor::DependencyEntry` | Cache | Slice 3 |
 | `Rigor::Cache::Descriptor#dependencies` slot | Cache | Slice 3 |
@@ -167,6 +169,9 @@ gem).
 - `#refinements` — the gems' `refine` bodies (issue #1672; see
   "Refine bodies" below), frozen
   `Hash{refined_class => Hash{method_name => Array<refining_module>}}`.
+- `#readings` and `#fully_read_module?(name)` — what each walked
+  gem's walk read, and whether every file that could refine a
+  module has been read (issue #1814; see "Coverage" below).
 - `#empty?` — true when no resolved gems were registered.
 - `#cache_descriptor` — frozen
   [`Cache::Descriptor`](cache.md) with one `DependencyEntry`
@@ -223,6 +228,21 @@ block under `class << self`, names no refining module and
 records nothing. A computed target (`refine(klass) { … }`)
 names no class to key, so its body walks as any other block.
 
+Since issue #1814 the table is not built from the walker's own
+descent: `Walker.walk` reads each file through
+`Inference::ScopeIndexer.refinement_table`, the refinement table
+of the project walk's census (`build_methods_and_def_nodes`), and
+unions the per-file tables as the project fold does. A computed
+target records its names under the wildcard class, a body whose
+names are incomplete a names-wildcard row, a `refine` inside a
+method or a `:refine` literal a targets-wildcard row for the module
+it runs on (ADR-121 WD7), exactly as in a project file; the walker's
+descent only keeps a refine body's `def`s out of the catalog. A
+`refine` with no enclosing module is therefore recorded under the
+module name `""`, which no `using` names, as the project walk records
+it. `walker_walk_census_parity_spec.rb` holds the two walks to one
+table for the same source.
+
 `Builder` unions every gem's table into `Index#refinements`, and
 the runner unions that into the project's
 `discovered_refinements` seed (the table issue #1120's
@@ -233,10 +253,12 @@ them elsewhere. The index is rebuilt by the pre-passes every
 run takes, so a file re-analysed on a warm run is seeded the
 same table a cold run seeds. An unchanged file's cached result
 is keyed on the gem's name, version and mode (see "Cache slice"),
-as the catalog's contributions are, so editing a gem's refine
-body without a version bump is not seen until that file is
-re-analysed. Refine bodies the walker reaches after the
-per-gem budget trips are not recorded. Per ADR-121 WD3 the
+as the catalog's contributions are (the run-result key and the
+incremental snapshot's fingerprint carry that row since issue
+#1814), so editing a gem's refine body without a version bump is not
+seen until that file is re-analysed. The catalog stops at the
+per-gem budget; the refinement table is read from every file the
+walk reaches. Per ADR-121 WD3 the
 gem's refine bodies are not inferred: a refined call into one
 types as `Dynamic[top]` (today through the unresolved-method
 fallback; the refined dispatch arm, #1664, keeps that answer).
@@ -245,12 +267,56 @@ Per-file errors silently degrade to "no contribution from this
 file":
 
 - Files Prism cannot parse.
-- Files that raise during `Prism.parse_file`.
+- Files that raise during `Prism.parse_file`, or during the census.
 - Files outside the gem's listed `roots:`.
 
 Gem source we cannot walk MUST NOT pollute the user-facing
 diagnostic stream — the user did not author the file and cannot
-fix it.
+fix it. A file the walk could not read is nevertheless recorded
+(`Walker::Outcome#unread`, a gem-relative path), because what it
+declared or refined is unknown (see "Coverage").
+
+### Coverage (issue #1814)
+
+A gem module whose `refine` bodies were all read is *known* on the
+same terms as a project module (ADR-121 WD7), so a `using` of it no
+longer declines every check and types its span `Dynamic[top]`. That
+needs a recorded fact that the walk read every file that could
+refine it, not an inference from the rows. Each walk records:
+
+- `Outcome#modules` — the classes and modules the gem's files
+  declare, as the project walk names them
+  (`ScopeIndexer.collect_class_decls`), and every module its
+  refinement rows name (a `Base.module_eval { refine … }` in a
+  file that does not declare `Base`), without the wildcard and the
+  top level's `""`.
+- `Outcome#unread` — the gem-relative path of each file that did not
+  parse, could not be read, or raised under the census; the gem
+  directory when the walk itself raised (`Builder`).
+- `Outcome#mixes_modules` — whether the source may change which
+  modules a module includes or prepends, which `using` also
+  activates (CRuby's `using_module_recursive` walks the module's
+  ancestors) and the gem table has no edge for: a call to `include`
+  or `prepend` on an explicit receiver, or on `self` outside a class
+  body (a block does not keep the class), an `:include`, `:prepend`,
+  `:append_features` or `:prepend_features` Symbol, or an eval,
+  `send` or method-naming call with a String holding one of those
+  words. A gem is flagged as a whole.
+- `Outcome#fully_read?` — `!truncated? && unread.empty? &&
+  !mixes_modules`.
+
+`Builder` keeps one `Index::Reading(gem_name, modules, fully_read)`
+per walked entry beside `#refinements`. `Index#fully_read_module?(name)`
+is true when some walked gem names `name` and every walked gem that
+names it was read in full, so a second gem that reopens the module
+and was not read in full keeps it opaque.
+`InEffectRefinements.opaque_module?` asks it as the third source of a
+known module, after the targets-wildcard rows and the project.
+
+A module reopened in a gem nobody opted in, in a file outside the
+walked roots, or in a part of a gem whose walk stopped before it is
+unseen, as is a module reopened in a project file outside the
+analysed paths.
 
 ## Dispatcher tier (slice 2b-ii)
 
@@ -396,6 +462,19 @@ The slice 3 envelope lands the **primitive** for per-gem-version
 invalidation. Cache producers that route ADR-10 inferences
 through `Store#fetch_or_compute` are queued for slice 4
 alongside the per-gem budget machinery.
+
+Issue #1814 wires it into the two identities a warm run is gated
+on. The gem half of the refinement table (and which modules the
+walker read in full) reaches every file's checks and no analysed file
+records it, so `GemResolver.dependency_entries(dependencies)` lifts
+each non-disabled entry that resolves into its `DependencyEntry`
+without walking the gem, and `Analysis::RunCacheKey.descriptor` carries
+the rows in its `dependencies:` slot while `IncrementalSnapshot.fingerprint`
+hashes them as a `dependency-source` part. A `bundle update` was
+already covered by the lockfile digest; these rows cover a project with
+no lockfile, or a gem installed beside the bundle. A project that lists
+no gem adds no row, so its key and fingerprint are what they were. An
+edit to a gem's files that leaves its version alone is still not seen.
 
 ## Diagnostic family
 

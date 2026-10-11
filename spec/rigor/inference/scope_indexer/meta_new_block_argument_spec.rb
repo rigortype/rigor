@@ -26,7 +26,7 @@ RSpec.describe "meta-new write with a block argument (#1816)", type: :runner do
       expect { analyze(source) }.not_to raise_error
 
       tables = Rigor::Inference::ScopeIndexer.build_methods_and_def_nodes(Prism.parse(source).value)
-      expect(tables.fetch(2).fetch("Ext", {})).to(include(dynamic_mark)) unless write.include?("||=")
+      expect(tables.fetch(2).fetch("Ext", {})).to include(dynamic_mark)
     end
   end
 
@@ -37,5 +37,29 @@ RSpec.describe "meta-new write with a block argument (#1816)", type: :runner do
       Ext.hello
     RUBY
     expect(undefined_methods(source)).to be_empty
+  end
+
+  # The user-visible effect of the dynamic mark: `$stdout = 1` raises at run time unless `Integer` can answer `write`,
+  # and a module mixed in from an unreadable body might supply it. A literal empty body cannot, so it still reports.
+  describe "a module mixed into Integer" do
+    def global_write_rows(prelude)
+      source = "#{prelude}\nclass Integer; include Ext; end\n$stdout = 1\n"
+      analyze(source).diagnostics.select { |d| d.qualified_rule == "global.write-type-mismatch" }
+    end
+
+    {
+      "a plain write" => "Ext = Module.new(&EXTERNAL_BODY)",
+      "an or-write" => "Ext ||= Module.new(&EXTERNAL_BODY)",
+      "a frozen write" => "Ext = Module.new(&EXTERNAL_BODY).freeze",
+      "a path write" => "module Outer; end\nOuter::Ext = Module.new(&EXTERNAL_BODY)\nExt = Outer::Ext"
+    }.each do |label, prelude|
+      it "may answer `write` through #{label} whose body is a block argument" do
+        expect(global_write_rows(prelude)).to be_empty
+      end
+    end
+
+    it "still reports when the body is a literal empty block" do
+      expect(global_write_rows("Ext = Module.new { }").size).to eq(1)
+    end
   end
 end

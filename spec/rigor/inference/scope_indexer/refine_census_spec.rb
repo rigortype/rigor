@@ -630,17 +630,46 @@ RSpec.describe Rigor::Inference::ScopeIndexer, ".refine_census" do
       "def self.setup = refine(String) { def x = 1 }\nend\n",
       %i[dsl dsl], {}
     ],
-    # #1749: a `def self.x` (or a `def` in `instance_eval`) written in an eval block is the receiver's own singleton
-    # method. Ruby 4.0.5 prints `1` and `2` for `Ext.setup; Ext.setup2; using Ext` after the first shape, and for
-    # `M.setup; M.setup2; using M` after the second (the block runs on the top-level `M`, as `L::M` does not exist); a
-    # constant that several names denote (`M` in `module L`) is charged to each, so a wildcard.
+    # #1749: a `def self.x` (or a `def` in `instance_eval`) written in an eval block on a constant is the receiver's own
+    # singleton method. Ruby 4.0.5 prints `1` and `2` for `Ext.setup; Ext.setup2; using Ext` after the first shape, and
+    # for `M.setup; M.setup2; using M` after the second (the block runs on the top-level `M`, as `L::M` does not exist).
+    # The eval's file need not declare the module, and the lookup of a refine body consults the files that do, so the
+    # record that the method creates the names could go unseen: they keep the targets-wildcard, charged to the receiver
+    # (a constant that several names denote, `M` in `module L`, is charged to each).
     "a refine in a singleton method defined in an eval block on a constant" => [
-      <<~RUBY, %i[recorded recorded], { "String" => { yy: ["Ext"] }, "Symbol" => { ww: ["Ext"] } }
+      <<~RUBY, %i[targets_wildcard targets_wildcard], { any => { any => ["Ext"] } }
         Ext.module_eval do
           def self.setup = refine(String) { def yy = 1 }
         end
         Ext.instance_eval do
           def setup2 = refine(Symbol) { def ww = 1 }
+        end
+      RUBY
+    ],
+    "a refine in a singleton method defined in a class << self body of an eval block on a constant" => [
+      <<~RUBY, %i[targets_wildcard], { any => { any => ["Ext"] } }
+        Ext.module_eval do
+          class << self
+            def setup = refine(String) { def yy = 1 }
+          end
+        end
+      RUBY
+    ],
+    "a refine in a singleton method defined in an eval block on self in an eval block on a constant" => [
+      <<~RUBY, %i[targets_wildcard], { any => { any => ["Ext"] } }
+        Ext.module_eval do
+          module_eval do
+            def self.setup = refine(String) { def yy = 1 }
+          end
+        end
+      RUBY
+    ],
+    "a refine in a singleton method defined in an eval block on self in a module" => [
+      <<~RUBY, %i[recorded], { "M::String" => { yy: ["M"] }, "String" => { yy: ["M"] } }
+        module M
+          module_eval do
+            def self.setup = refine(String) { def yy = 1 }
+          end
         end
       RUBY
     ],

@@ -24,7 +24,9 @@ module Rigor
       # `own_method` is true inside a singleton `def` of a module the walk names ({.def_body}), and in the blocks that
       # keep its `self`: `here` is then that module itself, so a `refine X do … end` written there refines X for it
       # once the method is called, and the census records its rows where it would otherwise charge a wildcard.
-      Context = Data.define(:here, :literal, :instance, :singleton, :deferred, :own_method)
+      # `remote` is true in the body of an eval on a constant (`M.module_eval { … }`, and a `class << self` there),
+      # whose file need not declare the module it runs on: a singleton method defined there is not `own_method`.
+      Context = Data.define(:here, :literal, :instance, :singleton, :deferred, :own_method, :remote)
       # A plain class, or an instance of one: `Class` undefines `refine`, so a `refine` there is the class's own
       # method (#1689) and a `:refine` literal is data.
       CLASS = :class
@@ -80,9 +82,9 @@ module Rigor
       # A body whose `self` the walk cannot name.
       def unknown = context(wildcard, wildcard, wildcard)
 
-      def context(here, instance, singleton, deferred: false, literal: here, own_method: false)
+      def context(here, instance, singleton, deferred: false, literal: here, own_method: false, remote: false)
         Context.new(here: here, literal: literal, instance: instance, singleton: singleton, deferred: deferred,
-                    own_method: own_method)
+                    own_method: own_method, remote: remote)
       end
 
       # A `module` body (or a `Module.new` block) of the module `name` (nil when the walk cannot name it, or
@@ -102,7 +104,7 @@ module Rigor
       # other expression on an object the walk cannot name.
       def singleton_class_body(parent, of_self)
         runs_on = of_self ? parent.singleton : wildcard
-        context(CLASS, runs_on, CLASS, literal: runs_on)
+        context(CLASS, runs_on, CLASS, literal: runs_on, remote: of_self && parent.remote)
       end
 
       # A method body defined in `parent` on the instance or singleton side: `self` is what that side runs on, and a
@@ -118,16 +120,19 @@ module Rigor
       # (`parent.instance` is the module there). `self` is then the module itself, whichever way the method is called,
       # so a `refine` in it refines for that module; for an instance `def`, whose `parent.instance` is the wildcard,
       # Ruby runs it on whatever module extends the owner. `def M.x` is not marked, as the constant names the module by
-      # its last segment only.
+      # its last segment only, and neither is a method an eval on a constant defines (`remote`): its file need not
+      # declare the module, so the lookup of a refine body, which consults the files that do, would not see it.
       def def_body(parent, receiver)
-        return mark_own_method(method_body(parent, false)) if receiver.nil?
+        return mark_own_method(method_body(parent, false), parent) if receiver.nil?
         return unknown.with(deferred: true) unless lexical_self_receiver?(receiver, parent)
 
         context = method_body(parent, true)
-        receiver.is_a?(Prism::SelfNode) ? mark_own_method(context) : context
+        receiver.is_a?(Prism::SelfNode) ? mark_own_method(context, parent) : context
       end
 
-      def mark_own_method(context) = named_module?(context.here) ? context.with(own_method: true) : context
+      def mark_own_method(context, parent)
+        named_module?(context.here) && !parent.remote ? context.with(own_method: true) : context
+      end
 
       def lexical_self_receiver?(receiver, context)
         return true if receiver.is_a?(Prism::SelfNode)
@@ -275,7 +280,8 @@ module Rigor
         return unknown if here == wildcard
 
         instance = INSTANCE_EVAL_CALLS.include?(node.name) ? here : wildcard
-        context(here, instance, here, deferred: parent.deferred)
+        remote = parent.remote || !RefineCensus.self_call?(node)
+        context(here, instance, here, deferred: parent.deferred, remote: remote)
       end
 
       # The modules a `*_eval` / `*_exec` call `node` written in `context` at the lexical `prefix` may run its block

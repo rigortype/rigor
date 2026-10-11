@@ -212,7 +212,25 @@ RSpec.describe "Typing calls through Ruby refinements (#1664)", type: :runner do
     "a module-body def in a file searched first" => [consumer, { "a_body.rb" => body, "b_setup.rb" => setup_method }],
     "a module-body def in a file searched last" => [consumer, { "a_setup.rb" => setup_method, "b_body.rb" => body }],
     "a module-body def in the consumer's file" => ["#{body}#{consumer}", { "m.rb" => setup_method }],
-    "the setup in the consumer's file" => ["#{setup_method}#{consumer}", { "m.rb" => body }]
+    "the setup in the consumer's file" => ["#{setup_method}#{consumer}", { "m.rb" => body }],
+    # The file that hosts an eval on the constant need not declare the module, so the lookup of a refine body, which
+    # consults the files that do, never sees a record there: the names the method creates stay a targets-wildcard.
+    "a setup an eval on the constant defines, in a file that does not declare it" => [consumer, {
+      "m.rb" => body,
+      "host.rb" => <<~RUBY
+        M.module_eval do
+          def self.setup = refine(String) { def yy = "s" }
+        end
+      RUBY
+    }],
+    "a setup an instance_eval on the constant defines, in a file that does not declare it" => [consumer, {
+      "m.rb" => body,
+      "host.rb" => <<~RUBY
+        M.instance_eval do
+          def setup = refine(String) { def yy = "s" }
+        end
+      RUBY
+    }]
   }
 
   # Issue #1749. The same holds for an eval on a constant that several names denote (`M` in `module L`): it runs on one

@@ -61,6 +61,18 @@ RSpec.describe "FFI plugin family" do
       expect(fact.return_type).to eq(:int)
     end
 
+    # Issue #1821 — `"\xff".to_sym` raises EncodingError; a name no Symbol holds reads as no binding.
+    it "reads an attach_function name with invalid bytes as no binding" do
+      call_node = Prism.parse("attach_function \"\\xff\", [], :int").value.statements.body.first
+      expect(Rigor::Plugin::FFI::Analyzer.extract_function_binding(call_node, method_name: :attach_function)).to be_nil
+    end
+
+    it "reads an attach_function return type with invalid bytes as the default return" do
+      call_node = Prism.parse("attach_function :foo, [], \"\\xff\"").value.statements.body.first
+      fact = Rigor::Plugin::FFI::Analyzer.extract_attach_function(call_node)
+      expect(fact.return_type).to eq(:void)
+    end
+
     it "supports callbacks in discovery and typing" do
       callbacks = { my_cb: { params: [:int], return_type: :void } }
       ret_type = Rigor::Plugin::FFI::Types.return_type_for(:my_cb, callbacks: callbacks)

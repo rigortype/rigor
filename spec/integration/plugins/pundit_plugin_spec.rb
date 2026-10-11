@@ -68,6 +68,16 @@ RSpec.describe "plugins/rigor-pundit" do
 
   let(:plugin_class) { Rigor::Plugin::Pundit }
 
+  # Issue #1821 — an action name no Symbol can hold (`PolicyIndex#normalize` interns it) is not looked up, instead of
+  # raising out of the plugin and losing the file's other diagnostics.
+  describe "an action name with invalid bytes" do
+    it "raises no plugin runtime error and still reports the other call sites" do
+      result = run_plugin(source: "authorize(Post, \"\\xff\")\nauthorize(Post, :update)\n", files: DEFAULT_POLICIES)
+      expect(result.diagnostics.map(&:rule)).not_to include("runtime-error")
+      expect(plugin_diagnostics(result).map(&:rule)).to include("policy-call")
+    end
+  end
+
   describe "recognised authorize calls" do
     it "emits a `policy-call` info diagnostic for `authorize(SomeClass, :action)`" do
       result = run_plugin(

@@ -935,6 +935,15 @@ RSpec.describe "plugins/rigor-actionpack" do
       end
     end
 
+    # Issue #1821 — `"\xff".to_sym` raises EncodingError; a filter name no Symbol holds is skipped.
+    it "skips a filter name with invalid bytes and still traces the readable one" do
+      controller = "class UsersController\n  before_action \"\\xff\", :authenticate!\n  def authenticate!; end\nend\n"
+      with_controllers(controllers: { "users_controller.rb" => controller }) do |result|
+        expect(result.diagnostics.map(&:rule)).not_to include("runtime-error")
+        expect(actionpack_diagnostics(result).map(&:rule)).to include("filter-call")
+      end
+    end
+
     it "fires `unknown-filter-method` with a did-you-mean for a typo'd filter name" do
       with_controllers(controllers: {
                          "users_controller.rb" => <<~RUBY

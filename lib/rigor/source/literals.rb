@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "prism"
+require_relative "symbol_name"
 
 module Rigor
   module Source
@@ -34,7 +35,7 @@ module Rigor
       def symbol_or_string(node)
         return nil unless node.is_a?(Prism::SymbolNode) || node.is_a?(Prism::StringNode)
 
-        node.unescaped.to_sym
+        SymbolName.of(node.unescaped)
       end
 
       # The String a literal `Prism::SymbolNode` / `Prism::StringNode` names, or `nil` for any other node
@@ -53,7 +54,7 @@ module Rigor
       def symbol(node)
         return nil unless node.is_a?(Prism::SymbolNode)
 
-        node.unescaped.to_sym
+        SymbolName.of(node.unescaped)
       end
 
       # The String a literal `Prism::SymbolNode` names, or `nil` for any other node (including a

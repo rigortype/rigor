@@ -540,4 +540,13 @@ RSpec.describe "plugins/rigor-rails-i18n" do
       expect(info).not_to be_nil
     end
   end
+
+  # Issue #1821 — `"\xff".to_sym` raises EncodingError; an option key no Symbol holds is not collected.
+  describe "an options hash with an invalid-byte String key" do
+    it "collects only the keys a Symbol can hold" do
+      call_node = Prism.parse("t(\"x\", \"\\xff\" => 1, ok: 2)").value.statements.body.first
+      options = Rigor::Plugin::RailsI18n::Analyzer.options_hash(call_node)
+      expect(options.fetch(:all_keys)).to eq(Set[:ok])
+    end
+  end
 end

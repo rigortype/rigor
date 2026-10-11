@@ -1763,4 +1763,13 @@ RSpec.describe "plugins/rigor-rails-routes" do
       expect(plugin_class.manifest.produces).to include(:reachability_roots)
     end
   end
+
+  # Issue #1821 — `"\xff".to_sym` raises EncodingError; a routing-partial name no Symbol holds is not loaded.
+  describe "a draw call with an invalid-byte partial name" do
+    it "parses without raising and keeps the other routes" do
+      contents = "Rails.application.routes.draw do\n  draw \"\\xff\"\n  get \"/login\", to: \"sessions#new\"\nend\n"
+      result = Rigor::Plugin::RailsRoutes::RoutesParser.parse(contents, file_reader: ->(_path) {})
+      expect(result).not_to be_nil
+    end
+  end
 end

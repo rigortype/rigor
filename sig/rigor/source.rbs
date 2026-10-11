@@ -21,6 +21,10 @@ module Rigor
       def self?.symbol_arg: (untyped? call_node, Integer index) -> Symbol?
     end
 
+    module SymbolName
+      def self?.of: (String? text) -> Symbol?
+    end
+
     module NodeWalker
       def self?.each: (untyped root) { (untyped) -> void } -> nil
                     | (untyped root) -> Enumerator[untyped, nil]

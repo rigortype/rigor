@@ -586,9 +586,12 @@ RSpec.describe "String mutation widening", type: :runner do
     # An oracle that needs no list of names: every public String method is called on a frozen receiver under a handful
     # of argument shapes, and the ones that raise `FrozenError` are the receiver mutators. A mutator Ruby adds without a
     # `!` (as 3.4 added `append_as_bytes`) shows up here unprompted. The invalid-byte receiver is for `scrub!`, which
-    # checks for frozenness only when it has something to replace.
+    # checks for frozenness only when it has something to replace. The `"ab"` shape is a String of the receivers' byte
+    # length: Ruby 4.1's bit operations (#1691) take a same-length String, so without it a probe of them stops at an
+    # argument-length error before it reaches the frozen check. The shape is harmless on 4.0, where those names are
+    # absent.
     it "lists exactly the methods that refuse a frozen receiver" do
-      argument_shapes = [[], ["a"], [0], %w[a b], [0, "a"], [0, 1], [0, 1, "a"], [:nfd]]
+      argument_shapes = [[], ["a"], [0], %w[a b], [0, "a"], [0, 1], [0, 1, "a"], [:nfd], ["ab"]]
       refusing = CoreMethods.public_instance_methods(String).select do |name|
         ["ab", "a\xFF"].any? do |receiver|
           argument_shapes.any? do |arguments|

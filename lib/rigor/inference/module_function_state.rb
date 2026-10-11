@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "prism"
+require_relative "../source/literals"
 require_relative "../source/node_children"
 
 module Rigor
@@ -204,7 +205,7 @@ module Rigor
 
       # The Symbol a `:name` or `"name"` literal argument names, or nil.
       def symbol_argument_name(arg)
-        arg.unescaped.to_sym if arg.is_a?(Prism::SymbolNode) || arg.is_a?(Prism::StringNode)
+        Source::Literals.symbol_or_string(arg)
       end
 
       private_class_method :prescan_call, :prescan_eval_call, :symbol_argument_name

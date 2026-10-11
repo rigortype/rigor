@@ -309,8 +309,9 @@ module Rigor
           args
         end
 
+        # The name is interned later (`filter_name.to_sym`), so a name no Symbol can hold reads as nil.
         def literal_symbol_or_string(node)
-          Rigor::Source::Literals.symbol_or_string_name(node)
+          Rigor::Source::Literals.symbol_or_string(node)&.to_s
         end
 
         def filter_lookup_violation(call_node, arg_node, filter_name, methods, spell_checker, ambiguous_filters:)

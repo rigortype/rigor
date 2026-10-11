@@ -948,6 +948,69 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
       end
     end
 
+    # R2: inside a method body a block follows the same rule as in a module body. Ruby 4.0.5 prints `:installed`,
+    # `:class_installed`, `:in_def_dsl`, `:const_eval`, `:iexec`, `:dsm_eval`, `:nested_dsm` and `:nested_def`: each
+    # `refine` refines for `Ext`, not the module or class its method is written in.
+    {
+      "an eval block on a parameter in a def self.x" =>
+        "module Installer\n  def self.install(mod) = mod.module_eval { refine(String) { def center(a, b, c) = 1 } }\n" \
+        "end\nInstaller.install(Ext)\n",
+      "an eval block on a parameter in a class's def self.x" =>
+        "class Installer\n  def self.install(mod) = mod.module_eval { refine(String) { def center(a, b, c) = 1 } }\n" \
+        "end\nInstaller.install(Ext)\n",
+      "a DSL block in a def self.x" =>
+        "module Registry\n  def self.refining(mod, &blk) = mod.module_eval(&blk)\nend\nmodule Setup\n  " \
+        "def self.run = Registry.refining(Ext) { refine(String) { def center(a, b, c) = 1 } }\nend\nSetup.run\n",
+      "an eval block on a constant in a def self.x" =>
+        "module Installer\n  def self.install = Ext.module_eval { refine(String) { def center(a, b, c) = 1 } }\nend\n" \
+        "Installer.install\n",
+      "an instance_exec block on a parameter in a def self.x" =>
+        "module Installer\n  def self.install(mod) = mod.instance_exec do\n    " \
+        "refine(String) { def center(a, b, c) = 1 }\n  end\nend\nInstaller.install(Ext)\n",
+      "a define_singleton_method block in a DSL block" =>
+        "module Registry\n  def self.refining(mod, &blk) = mod.module_eval(&blk)\nend\nmodule Setup\n  " \
+        "Registry.refining(Ext) do\n    define_singleton_method(:install) do\n      " \
+        "refine(String) { def center(a, b, c) = 1 }\n    end\n  end\nend\nExt.install\n",
+      "a def self.x in a DSL block" =>
+        "module Registry\n  def self.refining(mod, &blk) = mod.module_eval(&blk)\nend\nmodule Setup\n  " \
+        "Registry.refining(Ext) do\n    def self.install = refine(String) { def center(a, b, c) = 1 }\n  end\nend\n" \
+        "Ext.install\n"
+    }.each do |shape, setup|
+      it "declines under a `using` of a module a method refines through #{shape}" do
+        write("lib/ext.rb", "module Ext; end\n")
+        write("lib/setup.rb", setup)
+        write("lib/use.rb", "using Ext\n\"x\".center(1, 2, 3)\n")
+        write("lib/plain.rb", "\"x\".center(1, 2, 3)\n")
+
+        expect(call_rows).to eq([["plain.rb", 1, "call.wrong-arity"]])
+      end
+    end
+
+    # R2: a core iterator's block on a constant keeps `self`, and a literal's block or a `define_method` block in a
+    # plain class's method keeps the class, so none of these makes an unrelated `using` opaque. Ruby 4.0.5 prints
+    # `:each_const` for `M`'s `center` under `using M`, `[:show, :show]`, `[10, 20]` and `2`, and raises
+    # `NoMethodError` for each `"x".nope`.
+    it "keeps an unrelated `using` checked and typed where an iterator or a plain class's blocks name refine" do
+      write("lib/m.rb", "module M\n  TARGETS = [String, Symbol].freeze\n  " \
+                        "TARGETS.each { |k| refine(k) { def center(a, b, c) = :each_const } }\nend\n")
+      write("lib/controller.rb",
+            "class Controller\n  def actions = %w[a b].map { |a| a == \"x\" ? :refine : :show }\nend\n")
+      write("lib/query.rb", <<~RUBY)
+        class Query
+          def refine(n) = yield(n)
+          def all = [1, 2].map { |n| refine(n) { |q| q * 10 } }
+          define_method(:one) { refine(1) { |q| "x".nope } }
+        end
+      RUBY
+      write("lib/u.rb", "module Shout\n  refine(String) { def shout = :s }\nend\nusing Shout\n" \
+                        "Rigor.dump_type(\"x\".upcase)\n\"x\".nope\n")
+
+      rows = diagnostics.map { |d| [File.basename(d.path.to_s), d.line, d.qualified_rule] }.sort
+      expect(rows).to eq(
+        [["query.rb", 4, "call.undefined-method"], ["u.rb", 5, "dump.type"], ["u.rb", 6, "call.undefined-method"]]
+      )
+    end
+
     # The union receiver rule and `call.unresolved-toplevel` ask the refinement predicate too. Ruby 4.0.5 prints `:int`
     # and `1` under a `using` of the module (read from outside the analysed paths or from the project alike), and
     # raises `NoMethodError` for both calls in `plain.rb`.

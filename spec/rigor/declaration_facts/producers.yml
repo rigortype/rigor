@@ -119,7 +119,7 @@ lib/rigor/inference/guard_rebinding.rb:
 lib/rigor/inference/in_effect_refinements/walk.rb:
   computes: the lexical prefix a using's constant and a refine block's own module resolve in, the body a using stays in effect to the end of, and the Module.nesting a refine-body def is written in
   producers:
-    Rigor::Inference::InEffectRefinements::Walk#declaration_class_self: reads whether a class header's written superclass is `Module`, which decides whether its instance methods run on a module (ADR-121 WD7); it decides no declaration context
+    Rigor::Inference::InEffectRefinements::Walk#declaration_context: picks RefineSelf's module or class body context for a declaration the walk already named, reading only whether a class header's written superclass is `Module` (its instance methods then run on modules, ADR-121 WD7); it decides no declaration context
     Rigor::Inference::InEffectRefinements::Walk#walked_body?: the declaration and def arms of the walk moved from Walk#walk (#1673), itself moved from the grandfathered LexicalMethodSites#walk; the prefix only spells a using's candidate names, as ScopeIndexer.constant_receiver_candidates does for the refinement table, and the nesting is ConstantPath.pushed_nesting's, so it decides no declaration
 lib/rigor/inference/jump_targets.rb:
   computes: the break and next nodes that target a construct

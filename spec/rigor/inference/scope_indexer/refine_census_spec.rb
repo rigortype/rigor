@@ -64,6 +64,47 @@ RSpec.describe Rigor::Inference::ScopeIndexer, ".refine_census" do
     end
   end
 
+  def refine_shaped_nodes(node, out = [])
+    case node
+    when Prism::CallNode
+      out << node if node.name == :refine
+      out.concat(refine_string_arguments(node))
+    when Prism::SymbolNode
+      out << node if node.unescaped == "refine"
+    end
+    node.compact_child_nodes.each { |child| refine_shaped_nodes(child, out) }
+    out
+  end
+
+  # Nil when the census's outcome for `node` agrees with what the in-effect walk did with it, else what differs.
+  def parity_problem(query, node, outcome, charged)
+    context = query.refine_context(node)
+    return "no context recorded" if context.nil?
+
+    census = Rigor::Inference::RefineSelf
+    case outcome
+    when :dsl then "a DSL the walk activates" unless context.here == census::CLASS
+    when :data then "data the walk charges" unless context.literal == census::CLASS
+    when :recorded, :targets_wildcard, :class_unknown then activation_problem(query, node, context, charged)
+    when :literal
+      expected = census.charged_module(context, literal: true)
+      return nil if charged.is_a?(Array) || charged == expected
+
+      "literal charged #{charged.inspect}, walk says #{expected.inspect}"
+    end
+  end
+
+  def activation_problem(query, node, context, charged)
+    expected = Rigor::Inference::RefineSelf.charged_module(context)
+    named = !charged.empty? && !charged.start_with?("#<")
+    return "charged #{charged.inspect}, walk says #{expected.inspect}" if named && charged != expected
+    return nil unless node.block.is_a?(Prism::BlockNode)
+
+    inside = query.at(node.block.location.start_offset + 1)
+    want = charged == wildcard ? Rigor::Inference::InEffectRefinements::UNKNOWN : charged
+    "refine block activates #{inside.inspect}, census charged #{charged.inspect}" if named && !inside.include?(want)
+  end
+
   any = Rigor::Scope::DiscoveryIndex::REFINEMENT_WILDCARD
 
   # name => [source, outcomes in source order, the exact refinement table]
@@ -154,6 +195,58 @@ RSpec.describe Rigor::Inference::ScopeIndexer, ".refine_census" do
     "a refine in a lambda" => [
       "module M\n  BODY = -> { refine(String) { def center(a, b, c) = 1 } }\nend\n",
       %i[targets_wildcard], { any => { any => [any] } }
+    ],
+    # R2: inside a method body a block follows the same rule as in a module body. Ruby 4.0.5 prints `:installed`,
+    # `:class_installed`, `:in_def_dsl`, `:const_eval`, `:iexec`, `:nested_dsm` and `:nested_def` for these refines,
+    # each refining for `Ext`, not the module or class the method is written in.
+    "a refine in an eval block on a parameter inside a def self.x" => [
+      "module Installer\n  def self.install(mod) = mod.module_eval { refine(String) { def center(a, b, c) = 1 } }\n" \
+      "end\n",
+      %i[targets_wildcard], { any => { any => [any] } }
+    ],
+    "a refine in an eval block on a parameter inside a class's def self.x" => [
+      "class Installer\n  def self.install(mod) = mod.module_eval { refine(String) { def center(a, b, c) = 1 } }\n" \
+      "end\n",
+      %i[targets_wildcard], { any => { any => [any] } }
+    ],
+    "a refine in a DSL block inside a def self.x" => [
+      "module Setup\n  def self.run = Registry.refining(Ext) { refine(String) { def center(a, b, c) = 1 } }\nend\n",
+      %i[targets_wildcard], { any => { any => [any] } }
+    ],
+    "a refine in an eval block on a constant inside a def self.x" => [
+      "module Installer\n  def self.install = Ext.module_eval { refine(String) { def center(a, b, c) = 1 } }\nend\n",
+      %i[targets_wildcard], { any => { any => ["Ext"] } }
+    ],
+    "a refine in an instance_exec block on a parameter inside a def self.x" => [
+      "module Installer\n  def self.install(mod) = mod.instance_exec { refine(String) { def center(a, b, c) = 1 } }\n" \
+      "end\n",
+      %i[targets_wildcard], { any => { any => [any] } }
+    ],
+    "a refine in a define_singleton_method block inside a DSL block" => [
+      "module Setup\n  Registry.refining(Ext) do\n    define_singleton_method(:install) do\n      " \
+      "refine(String) { def center(a, b, c) = 1 }\n    end\n  end\nend\n",
+      %i[targets_wildcard], { any => { any => [any] } }
+    ],
+    "a refine in a def self.x inside a DSL block" => [
+      "module Setup\n  Registry.refining(Ext) do\n    " \
+      "def self.install = refine(String) { def center(a, b, c) = 1 }\n  end\nend\n",
+      %i[targets_wildcard], { any => { any => [any] } }
+    ],
+    # R2-M1: a core iteration method on a constant never rebinds `self`, so the rows stay `M`'s.
+    "a refine in a core iterator's block on a constant" => [
+      "module M\n  TARGETS = [String, Symbol].freeze\n  " \
+      "TARGETS.each { |k| refine(k) { def center(a, b, c) = 1 } }\nend\n",
+      %i[class_unknown], { any => { center: ["M"] } }
+    ],
+    # R2-M2: a block on a literal inside a plain class's method keeps the class: data, and the class's own `refine`
+    # (Ruby 4.0.5 prints `[:show, :show]`, `[10, 20]` and `2`).
+    "a :refine Symbol in a literal's block inside a plain class's method" => [
+      "class Controller\n  def actions = %w[a b].map { |a| a == \"x\" ? :refine : :show }\nend\n", %i[data], {}
+    ],
+    "a refine call in a literal's block and a define_method block of a plain class" => [
+      "class Query\n  def refine(n) = yield(n)\n  def all = [1, 2].map { |n| refine(n) { |q| q * 10 } }\n  " \
+      "define_method(:one) { refine(1) { |q| q + 1 } }\nend\n",
+      %i[dsl dsl], {}
     ],
     "a refine in an implicit instance_eval block" => [
       "module M\n  instance_eval { refine(String) { def shout = 1 } }\nend\n",
@@ -258,17 +351,26 @@ RSpec.describe Rigor::Inference::ScopeIndexer, ".refine_census" do
     ]
   }
 
-  # Each fixture's outcomes and table, and the census invariant: the nodes counted independently are exactly the
-  # nodes the walk accounted for, each once.
+  # Each fixture's outcomes and table; the census invariant (the nodes counted independently are exactly the nodes the
+  # walk accounted for, each once); and R2's parity: the module-body walk, the method-body census scan and the
+  # in-effect walk charge every `refine`-shaped node where one function (`RefineCensus`'s contexts, worked out by the
+  # in-effect walk) says it runs, so they agree on the module charged and on activation against DSL.
   fixtures.each do |name, (source, outcomes, table)|
     it "accounts for #{name}" do
       recorded, accounted = census(source)
       offsets = accounted.map(&:first)
+      root = Prism.parse(source).value
+      query = Rigor::Inference::InEffectRefinements.new(root)
+      nodes = refine_shaped_nodes(root).to_h { |node| [node.location.start_offset, node] }
 
-      expect(accounted.map(&:last)).to eq(outcomes)
+      expect(accounted.map { |entry| entry[1] }).to eq(outcomes)
       expect(recorded).to eq(table)
-      expect(offsets.sort).to eq(refine_shaped_offsets(Prism.parse(source).value).sort)
+      expect(offsets.sort).to eq(refine_shaped_offsets(root).sort)
       expect(offsets.uniq.size).to eq(offsets.size)
+      problems = accounted.filter_map do |offset, outcome, charged|
+        parity_problem(query, nodes.fetch(offset), outcome, charged)
+      end
+      expect(problems).to eq([])
     end
   end
 

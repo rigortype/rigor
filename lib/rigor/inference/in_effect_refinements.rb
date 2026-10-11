@@ -5,6 +5,7 @@ require "prism"
 require_relative "../source/constant_path"
 require_relative "../source/node_children"
 require_relative "refine_census"
+require_relative "refine_self"
 require_relative "in_effect_refinements/proc_literals"
 require_relative "in_effect_refinements/scope_reads"
 require_relative "in_effect_refinements/refine_defs"
@@ -146,13 +147,14 @@ module Rigor
         !offsets.nil? && member?(call_node) && offsets.include?(call_node.block.location.start_offset)
       end
 
-      # ADR-121 WD7 (M3) — is `node` a `:refine` literal (or a String naming `refine` passed to an eval, `send` or
-      # method-naming call) written where `self` is a plain class or one of its instances? There it names the class's
-      # own `refine`, or nothing, never `Module#refine`.
-      def class_literal?(node)
+      # ADR-121 WD7 — the `RefineSelf::Context` of the `self` the `refine`-shaped `node` (a `refine` call, a `:refine`
+      # literal, a String naming `refine` passed to an eval, `send` or method-naming call) runs on, as this walk worked
+      # it out, or nil for a node it did not record (another file's, or no such node). The census charges what this
+      # answers, so the table and the activations agree.
+      def refine_context(node)
         build
-        literals = @class_literals
-        !literals.nil? && member?(node) && literals.include?(node.location.start_offset)
+        contexts = @refine_contexts
+        contexts[node.location.start_offset] if !contexts.nil? && member?(node)
       end
 
       # Is this the query over `root`'s tree?
@@ -231,7 +233,7 @@ module Rigor
         @refine_defs = nil
         @chained_refined_calls = nil
         @class_body_refines = nil
-        @class_literals = nil
+        @refine_contexts = nil
         @unresolved_using = false
         return if @root.nil? || !mentions_refinements?
 
@@ -240,7 +242,7 @@ module Rigor
         @refine_defs = RefineDefs.new
         @nesting = EMPTY
         location = @root.location
-        walk(@root, [], [location.start_offset, location.end_offset], false, nil, false)
+        walk(@root, [], [location.start_offset, location.end_offset], false, RefineSelf.top)
         sort_activations
         @activations.freeze
       end

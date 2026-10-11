@@ -130,8 +130,11 @@ RSpec.describe Rigor::Inference::InEffectRefinements do
           Named = Module.new do
             refine(String) { :named }
           end
-          [1].each do
+          configure do
             refine(String) { :blocked }
+          end
+          [1].each do
+            refine(String) { :literal_receiver }
           end
           Shape = Struct.new(:a) do
             refine(String) { :struct }
@@ -141,6 +144,8 @@ RSpec.describe Rigor::Inference::InEffectRefinements do
 
       expect(refinements.at(":named")).to eq(%w[Outer::Named])
       expect(refinements.at(":blocked")).to eq([unknown])
+      # ADR-121 WD7 — a call on a literal never rebinds `self` in its block, so the module is still `Outer`.
+      expect(refinements.at(":literal_receiver")).to eq(%w[Outer])
       # Issue #1689 — a `Struct.new` block's `self` is a class, so its `refine` is not `Module#refine`.
       expect(refinements.at(":struct")).to eq([])
     end
@@ -155,8 +160,11 @@ RSpec.describe Rigor::Inference::InEffectRefinements do
             class << self
               refine(String) { :in_singleton }
             end
-            [1].each do
+            configure do
               refine(String) { :in_block }
+            end
+            [1].each do
+              refine(String) { :literal_block }
             end
           end
           Made = Class.new do
@@ -187,6 +195,8 @@ RSpec.describe Rigor::Inference::InEffectRefinements do
         expect(%w[:in_class :in_singleton :class_new :anonymous :data].map { |marker| at.at(marker) }).to all(eq([]))
         # A block may run under another `self`, so a `refine` in one stays a refine block of an unnamed module.
         expect(at.at(":in_block")).to eq([unknown])
+        # ADR-121 WD7 — a call on a literal keeps `self`, the class, so its block's `refine` is the class's own too.
+        expect(at.at(":literal_block")).to eq([])
         expect(at.at(":in_module")).to eq(%w[Shout])
       end
 
@@ -194,8 +204,8 @@ RSpec.describe Rigor::Inference::InEffectRefinements do
         answers = calls.to_h { |call| [call.block.body.body.first.slice[/:\w+/], refinements.class_body_refine?(call)] }
 
         expect(answers).to eq(
-          ":in_class" => true, ":in_singleton" => true, ":in_block" => false, ":class_new" => true,
-          ":anonymous" => true, ":data" => true, ":in_module" => false
+          ":in_class" => true, ":in_singleton" => true, ":in_block" => false, ":literal_block" => true,
+          ":class_new" => true, ":anonymous" => true, ":data" => true, ":in_module" => false
         )
         expect(refinements.refinement_def?(calls.first.block.body.body.first)).to be(false)
       end

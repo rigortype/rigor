@@ -43,6 +43,7 @@ module Rigor
             @budget_exceeded = []
             @gem_modes = {}
             @refinements = {}
+            @readings = []
           end
 
           def absorb(outcome, budget, builder)
@@ -60,6 +61,8 @@ module Rigor
             walked = builder.walker_outcome_for(resolved, budget)
             @catalog.merge!(walked.catalog)
             @refinements = Inference::ScopeIndexer.merge_refinement_tables(@refinements, walked.refinements)
+            @readings << Index::Reading.new(gem_name: resolved.gem_name, modules: walked.modules,
+                                            fully_read: walked.fully_read?)
             builder.record_class_to_gem(walked.catalog, resolved.gem_name, @class_to_gem)
             @budget_exceeded << resolved.gem_name if walked.truncated?
           end
@@ -70,7 +73,7 @@ module Rigor
               method_catalog: @catalog, budget_exceeded: @budget_exceeded,
               class_to_gem: @class_to_gem,
               budget_overrun_strategy: dependencies.budget_overrun_strategy,
-              gem_modes: @gem_modes, refinements: @refinements
+              gem_modes: @gem_modes, refinements: @refinements, readings: @readings
             )
           end
         end
@@ -88,11 +91,12 @@ module Rigor
 
         # Per-resolved-gem walk. Isolated so a single gem's filesystem error / parse failure cannot abort the
         # build; the walker swallows its own per-file errors, and a top-level raise here degrades the gem to
-        # "no contributions" without touching the rest of the run.
+        # "no contributions" without touching the rest of the run. Issue #1814 — and to "not read": the gem
+        # directory is the unread path, so none of its modules is fully read.
         def walker_outcome_for(resolved, budget)
           Walker.walk(gem_dir: resolved.gem_dir, roots: resolved.roots, budget: budget)
         rescue StandardError
-          Walker::Outcome.new(catalog: {}.freeze, truncated: false)
+          Walker::Outcome.new(catalog: {}.freeze, truncated: false, unread: [resolved.gem_dir.to_s].freeze)
         end
       end
     end

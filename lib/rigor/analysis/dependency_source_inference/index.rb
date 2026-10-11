@@ -11,8 +11,12 @@ module Rigor
       # The method table is fully populated by {Walker} at build time; {#contribution_for} returns live
       # entries.
       class Index
+        # Issue #1814 — what one walked gem's walk read: the classes and modules it names ({Walker::Outcome#modules})
+        # and whether it read all of them ({Walker::Outcome#fully_read?}). Held beside {#refinements}.
+        Reading = Data.define(:gem_name, :modules, :fully_read)
+
         attr_reader :resolved_gems, :unresolvable, :method_catalog, :budget_exceeded,
-                    :class_to_gem, :budget_overrun_strategy, :gem_modes, :refinements
+                    :class_to_gem, :budget_overrun_strategy, :gem_modes, :refinements, :readings
 
         # @param method_catalog — => Symbol}] the flat
         #   `(class_name, method_name) → :instance | :singleton` table produced by {Walker.walk}, aggregated
@@ -34,10 +38,12 @@ module Rigor
         # @param refinements — issue #1672: the opt-in gems' `refine X do … end` bodies, `{refined class =>
         #   {method => [refining modules]}}` ({Walker::Outcome#refinements}). The runner merges it into the
         #   project's `discovered_refinements` seed, so `using M` for a gem's `M` reaches the check rules.
+        # @param readings — issue #1814: one {Reading} per walked entry, what its walk read. {#fully_read_module?}
+        #   answers from it, and `InEffectRefinements.opaque_module?` asks that.
         def initialize( # rubocop:disable Metrics/ParameterLists
           resolved_gems: [], unresolvable: [], method_catalog: {},
           budget_exceeded: [], class_to_gem: {},
-          budget_overrun_strategy: :walker_cap, gem_modes: {}, refinements: {}
+          budget_overrun_strategy: :walker_cap, gem_modes: {}, refinements: {}, readings: []
         )
           @resolved_gems = resolved_gems.freeze
           @unresolvable = unresolvable.freeze
@@ -47,6 +53,8 @@ module Rigor
           @budget_overrun_strategy = budget_overrun_strategy
           @gem_modes = gem_modes.freeze
           @refinements = Inference::ScopeIndexer.freeze_refinements(refinements)
+          @readings = readings.freeze
+          @fully_read_modules = fully_read_modules_of(readings).freeze
           freeze
         end
 
@@ -61,10 +69,29 @@ module Rigor
         end
         private :normalize_catalog
 
+        def fully_read_modules_of(readings)
+          named = Set.new
+          spoiled = Set.new
+          readings.each do |reading|
+            named.merge(reading.modules)
+            spoiled.merge(reading.modules) unless reading.fully_read
+          end
+          named - spoiled
+        end
+        private :fully_read_modules_of
+
         # @return the gem that owns `class_name` (first-write-wins); `nil` when the class isn't
         #   in any opt-in gem's catalog.
         def gem_for(class_name)
           @class_to_gem[class_name]
+        end
+
+        # Issue #1814 — has every file that could refine `module_name` been read? True when a walked gem names it and
+        # every walked gem that names it was read in full: a gem that was truncated, had an unreadable file or may mix a
+        # module into a module could have refined it where the walk did not look. A module nothing walked names is not
+        # fully read, however the RBS or the project describe it.
+        def fully_read_module?(module_name)
+          @fully_read_modules.include?(module_name)
         end
 
         # ADR-10 slice 5c — per-class mode lookup. Chains `class_to_gem` + `gem_modes`; returns `nil` when
@@ -104,14 +131,7 @@ module Rigor
         # surfaces them as `dynamic.dependency-source.gem-not-found` diagnostics. Resolved-but-disabled
         # entries are also absent: the {Builder} skips them before resolution, so they never reach the index.
         def cache_descriptor
-          dependencies = @resolved_gems.map do |resolved|
-            Cache::Descriptor::DependencyEntry.new(
-              gem_name: resolved.gem_name,
-              gem_version: resolved.version,
-              mode: resolved.mode
-            )
-          end
-          Cache::Descriptor.new(dependencies: dependencies)
+          Cache::Descriptor.new(dependencies: @resolved_gems.map(&:dependency_entry))
         end
       end
 

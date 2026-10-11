@@ -95,15 +95,19 @@ module Rigor
           modules.include?(name) ? modules : modules << name
         end
 
-        # ADR-121 WD7 (A4) — can Rigor not read every refinement of `name`, a module in an in-effect list? True when
-        # the project does not declare it (a gem's module, a module required from outside the analysed paths, or
-        # one only an `Object.const_set` makes), unless it is a core or stdlib module, which refines nothing; and
-        # true when a targets-wildcard row (`{"*" => {"*" => [...]}}`) lists it or the wildcard, which some unreadable
-        # `refine` wrote. Every reader that declines on an opaque module asks this, and nothing else. Gem modules
-        # stay opaque even when the gem source walker read them.
+        # ADR-121 WD7 (A4) — can Rigor not read every refinement of `name`, a module in an in-effect list? A module is
+        # known, and so not opaque, from one of three sources: the project declares it, it is a core or stdlib module
+        # (CRuby ships no refinements), or an opted-in gem declares it and the gem source walker read every file that
+        # could refine it (`DependencySourceInference::Index#fully_read_module?`, issue #1814). Anything else is opaque:
+        # a gem's module the walk did not finish (truncated by the budget, an unparseable file, a mixin it cannot
+        # read), a gem nobody opted in, a module required from outside the analysed paths, or one only an
+        # `Object.const_set` makes. A targets-wildcard row (`{"*" => {"*" => [...]}}`) that lists the module or the
+        # wildcard, which some unreadable `refine` wrote, makes it opaque whatever its source, and that check runs
+        # first. Every reader that declines on an opaque module asks this, and nothing else.
         #
         # ADR-46 — the answer moves when a file declares or stops declaring the module (`class:<last segment>`) or
-        # when a targets-wildcard row appears or vanishes (`refinement:*`).
+        # when a targets-wildcard row appears or vanishes (`refinement:*`). The gem half is a function of the run's
+        # gem sources, which the run's cache identity covers (the lockfile's digest).
         def opaque_module?(scope, name)
           if Analysis::DependencyRecorder.active?
             Analysis::DependencyRecorder.read_last_segment(:class, name)
@@ -112,6 +116,7 @@ module Rigor
           unread = scope.discovered_refinements.dig(WILDCARD, WILDCARD)
           return true if unread && (unread.include?(name) || unread.include?(WILDCARD))
           return false if project_module?(scope, name)
+          return false if fully_read_gem_module?(scope, name)
 
           !core_or_stdlib_module?(scope, name)
         end
@@ -217,6 +222,12 @@ module Rigor
 
         def core_or_stdlib_module?(scope, name)
           scope.environment&.rbs_loader&.core_or_stdlib_class?(name) || false
+        end
+
+        # Issue #1814 — did the gem source walker read every file that could refine `name`? Existence is
+        # {.gem_module?}; this is the stronger fact, recorded when the walk finished.
+        def fully_read_gem_module?(scope, name)
+          scope.environment&.dependency_source_index&.fully_read_module?(name) || false
         end
 
         # A module an opted-in gem's source declares: one its catalogue files a method under, or one its refinement

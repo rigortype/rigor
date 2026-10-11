@@ -122,7 +122,39 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::Builder do
       expect(index.budget_exceeded).to eq([])
     end
 
-    def stub_resolved_for(gem_name, method_catalog:, truncated: false)
+    # Issue #1814 — one reading per walked entry, so two entries for one gem cannot overwrite each other.
+    it "records what each gem's walk read, and a gem whose walk raised as read in full by no module" do
+      stub_resolved_for("alpha", method_catalog: {}, modules: Set["Alpha"])
+      stub_resolved_for("beta", method_catalog: {}, modules: Set["Beta"], truncated: true)
+      stub_resolved_for("gamma", method_catalog: {}, modules: Set["Gamma"], unread: ["lib/gamma/broken.rb"])
+      stub_resolved_for("delta", method_catalog: {}, modules: Set["Delta"], mixes_modules: true)
+
+      index = described_class.build(
+        dependencies({ "gem" => "alpha" }, { "gem" => "beta" }, { "gem" => "gamma" }, { "gem" => "delta" })
+      )
+
+      expect(index.readings.map { |reading| [reading.gem_name, reading.modules.to_a, reading.fully_read] })
+        .to eq([["alpha", ["Alpha"], true], ["beta", ["Beta"], false], ["gamma", ["Gamma"], false],
+                ["delta", ["Delta"], false]])
+      expect(%w[Alpha Beta Gamma Delta].map { |name| index.fully_read_module?(name) })
+        .to eq([true, false, false, false])
+    end
+
+    it "marks a gem whose walk raised as not read" do
+      resolver = Rigor::Analysis::DependencySourceInference::GemResolver
+      walker = Rigor::Analysis::DependencySourceInference::Walker
+      allow(resolver).to receive(:resolve).with(have_attributes(gem: "alpha")).and_return(
+        resolver::Resolved.new(gem_name: "alpha", version: "1.0.0", gem_dir: "/fake/alpha", mode: :when_missing,
+                               roots: %w[lib])
+      )
+      allow(walker).to receive(:walk).and_raise(StandardError, "boom")
+
+      index = described_class.build(dependencies({ "gem" => "alpha" }))
+
+      expect(index.readings.map(&:fully_read)).to eq([false])
+    end
+
+    def stub_resolved_for(gem_name, method_catalog:, truncated: false, **coverage)
       gem_dir = "/fake/#{gem_name}"
       resolver = Rigor::Analysis::DependencySourceInference::GemResolver
       walker = Rigor::Analysis::DependencySourceInference::Walker
@@ -134,7 +166,7 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::Builder do
       )
       # The Index normalizes legacy bare-Symbol catalog values (`=> :instance`) into `CatalogEntry(kind:)` at
       # construction, so spec stubs may pass either shape. We keep the helper's API on bare Symbols for legibility.
-      outcome = walker::Outcome.new(catalog: method_catalog, truncated: truncated)
+      outcome = walker::Outcome.new(catalog: method_catalog, truncated: truncated, **coverage)
       allow(walker).to receive(:walk).with(
         gem_dir: gem_dir, roots: %w[lib], budget: anything
       ).and_return(outcome)

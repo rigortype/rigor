@@ -169,4 +169,47 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::Index do
       expect(index.cache_descriptor.dependencies).to eq([])
     end
   end
+
+  # Issue #1814 — what each walked gem's walk read, and the one question the readers ask: has every file that could
+  # refine this module been read?
+  describe "#fully_read_module?" do
+    def reading(gem_name, modules, fully_read:)
+      described_class::Reading.new(gem_name: gem_name, modules: Set.new(modules), fully_read: fully_read)
+    end
+
+    it "is true for a module a gem named and read in full, and false for one nothing walked names" do
+      index = described_class.new(readings: [reading("rainbow", %w[Rainbow Rainbow::Presenter], fully_read: true)])
+
+      expect(index.fully_read_module?("Rainbow")).to be(true)
+      expect(index.fully_read_module?("Rainbow::Presenter")).to be(true)
+      expect(index.fully_read_module?("Other")).to be(false)
+      expect(described_class::EMPTY.fully_read_module?("Rainbow")).to be(false)
+    end
+
+    it "is false for a module a gem named and did not read in full" do
+      index = described_class.new(readings: [reading("cut", %w[Cut], fully_read: false)])
+
+      expect(index.fully_read_module?("Cut")).to be(false)
+    end
+
+    it "is false for a module any gem that names it did not read in full, and true when each did" do
+      whole = reading("base", %w[Shared Only], fully_read: true)
+      cut = reading("ext", %w[Shared], fully_read: false)
+      whole_ext = reading("ext", %w[Shared], fully_read: true)
+
+      mixed = described_class.new(readings: [whole, cut])
+      both = described_class.new(readings: [whole, whole_ext])
+
+      expect([mixed.fully_read_module?("Shared"), mixed.fully_read_module?("Only")]).to eq([false, true])
+      expect(both.fully_read_module?("Shared")).to be(true)
+    end
+
+    it "keeps the readings beside the refinement table" do
+      readings = [reading("a", %w[A], fully_read: true)]
+      index = described_class.new(refinements: { "String" => { shout: ["A"] } }, readings: readings)
+
+      expect(index.readings).to eq(readings)
+      expect(index.refinements).to eq("String" => { shout: ["A"] })
+    end
+  end
 end

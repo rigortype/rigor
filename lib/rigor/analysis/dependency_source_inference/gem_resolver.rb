@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "../../cache/descriptor"
+
 module Rigor
   module Analysis
     module DependencySourceInference
@@ -18,6 +20,11 @@ module Rigor
         class Resolved < Data.define(:gem_name, :version, :gem_dir, :mode, :roots)
           def descriptor_key
             [gem_name, version, mode].freeze
+          end
+
+          # ADR-10 slice 3 — this gem's row of a cache descriptor: its name, resolved version and mode.
+          def dependency_entry
+            Cache::Descriptor::DependencyEntry.new(gem_name: gem_name, gem_version: version, mode: mode)
           end
         end
 

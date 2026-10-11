@@ -108,15 +108,28 @@ module Rigor
           walk(node.receiver, prefix, body, in_def, context) if node.receiver
           walk_children(node.arguments, prefix, body, in_def, context)
           eval_names = RefineSelf.eval_receiver_names(node, prefix, context)
-          block_context = RefineSelf.block(context, node, eval_names) { |receiver| literal_bound?(receiver, prefix) }
+          block_context = RefineSelf.block(context, node, eval_names) do |receiver|
+            literal_bound?(receiver, prefix, node.block)
+          end
           walk_children(node.block, prefix, body, in_def || RefineSelf.method_block?(node), block_context)
         end
 
         # Does every binding of the constant, local or instance variable `receiver` in this file give it a literal
-        # (`RefineSelf.literal_bindings`, worked out once per file)?
-        def literal_bound?(receiver, prefix)
+        # (`RefineSelf.literal_bindings`, worked out once per file)? Asked only for a `block` whose text names `refine`
+        # or opens a heredoc: no other block can hold a `refine`-shaped node, so its context is never read, and the
+        # unnamed module it then runs on is the declining answer anyway.
+        def literal_bound?(receiver, prefix, block)
+          return false unless refine_text_in?(block)
+
           key = RefineSelf.binding_key(receiver, prefix)
           !key.nil? && (@literal_bindings ||= RefineSelf.literal_bindings(@root)).include?(key)
+        end
+
+        # The census's cost gate (`MethodTables#refine_in?`) over `node`'s text: a `refine` word or a heredoc opener.
+        def refine_text_in?(node)
+          location = node.location
+          (@refine_offsets ||= [ScopeIndexer.refine_word_offsets(@root), ScopeIndexer.heredoc_offsets(@root)])
+            .any? { |offsets| ScopeIndexer.offset_in?(offsets, location.start_offset, location.end_offset) }
         end
 
         # ADR-121 WD7 — what the census reads back for a `refine`-shaped node.

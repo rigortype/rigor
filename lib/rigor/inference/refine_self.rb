@@ -174,7 +174,7 @@ module Rigor
         when *VARIABLE_BINDINGS then other << node.name if node.name
         else collect_constant_binding(node, prefix, literal, other, spoiled)
         end
-        node.compact_child_nodes.each { |child| collect_bindings(child, prefix, literal, other, spoiled) }
+        node.rigor_each_child { |child| collect_bindings(child, prefix, literal, other, spoiled) }
       end
 
       def collect_constant_binding(node, prefix, literal, other, spoiled)

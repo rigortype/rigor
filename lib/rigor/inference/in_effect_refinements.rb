@@ -236,6 +236,7 @@ module Rigor
         @class_body_refines = nil
         @refine_contexts = NO_CONTEXTS
         @literal_bindings = nil
+        @refine_offsets = nil
         @unresolved_using = false
         return if @root.nil? || !mentions_refinements?
 

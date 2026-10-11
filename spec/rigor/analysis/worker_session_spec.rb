@@ -26,6 +26,39 @@ require "rigor/plugin"
 #   pool drains.
 RSpec.describe Rigor::Analysis::WorkerSession do
   describe "equivalence with Runner#analyze_file (no plugins)" do
+    # Issue #1231 — both check paths build their index with `widen_clauses: true`, so a rescue arm reads the body's
+    # write of `conn` untyped. Either path dropping the flag reports `undefined method 'size' for nil` here.
+    it "widens a rescue arm over the begin body's writes on both paths" do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, "code.rb")
+        File.write(path, <<~RUBY)
+          class Conn
+            def size = 0
+          end
+
+          def check(s)
+            conn = nil
+            begin
+              conn = Conn.new
+              Integer(s)
+            rescue ArgumentError
+              conn.size
+            end
+          end
+        RUBY
+        configuration = Rigor::Configuration.new("paths" => [path])
+
+        runner_diags = Dir.chdir(dir) do
+          guarded_run(Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil)).diagnostics
+        end
+        session = Dir.chdir(dir) { described_class.new(configuration: configuration, cache_store: nil) }
+        session_diags = Dir.chdir(dir) { guarded_session_analyze(session, path) }
+
+        expect(diag_keys(runner_diags)).to eq([])
+        expect(diag_keys(session_diags)).to eq([])
+      end
+    end
+
     it "produces the same per-file diagnostics for a clean file" do
       Dir.mktmpdir do |dir|
         path = File.join(dir, "code.rb")

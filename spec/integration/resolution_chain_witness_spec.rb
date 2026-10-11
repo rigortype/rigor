@@ -797,10 +797,11 @@ RSpec.describe "Scope::ResolutionChain against Ruby's own resolution" do
       end
     end
 
-    # A module that both prepends and includes the same module is recorded as a plain prepend. Ruby's `C`
-    # is `[C, M1, M0, M1, M3]` and reads `X` from `M0`; the chain would read `M3` (`[C, M1, M3, M0]`). The
-    # indexer names the module's instance side unpositioned when one module is written to both tables, so
-    # the chain is unsettled and every reader answers master's.
+    # A module that both prepends and includes the same module is recorded as a plain prepend. Ruby 4.0's
+    # `C` is `[C, M1, M0, M1, M3]` and reads `X` from `M0`; Ruby 4.1 builds this shape differently and
+    # reads `M3` (#1785), as the chain would (`[C, M1, M3, M0]`). The indexer names the module's instance
+    # side unpositioned when one module is written to both tables, so the chain is unsettled and every
+    # reader answers master's on either version.
     it "settles to master where a module both prepends and includes the same module" do
       source = <<~RUBY
         module M0; X = :M0; end
@@ -814,7 +815,8 @@ RSpec.describe "Scope::ResolutionChain against Ruby's own resolution" do
       Dir.mktmpdir("rigor-chain-witness-") do |dir|
         path = File.join(dir, "fixture.rb")
         File.write(path, source)
-        expect(ruby_answers(path, { constants: ["C::X"] }).fetch("constants:C::X")).to eq("M0")
+        ruby_answer = Gem::Version.new(RUBY_VERSION) >= Gem::Version.new("4.1") ? "M3" : "M0"
+        expect(ruby_answers(path, { constants: ["C::X"] }).fetch("constants:C::X")).to eq(ruby_answer)
         scope = rigor_scope(source)
         chain = chain_of(scope, "C", :instance, :constants)
         expect(chain).to be_unsettled

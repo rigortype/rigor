@@ -235,9 +235,10 @@ RSpec.describe "Typing calls through Ruby refinements (#1664)", type: :runner do
 
   # Issue #1752. A class object is an `Object`, so its lookup (its singleton class, each superclass's, then `Class`,
   # `Module`, `Object`, `Kernel` and `BasicObject`) reaches these refinements. Ruby 4.0.5 prints `:o`, `1`, `"c"`,
-  # `3.0`, `[1]`, `1` and `"Integer"`: the refine body runs with the class object as `self`.
+  # `3.0`, `[1]`, `1` and `"Integer"`: the refine body runs with the class object as `self`. `Mod.cc` raises
+  # `NoMethodError` (a module object is not a `Class`), so the arm leaves it to the module's own lookup.
   it "types a class object's call from a refinement of Object, Module, Class, Kernel or BasicObject" do
-    expect(dumps(<<~RUBY)).to eq([":o", "1", %("c"), "3.0", "[1]", "1", "String"])
+    expect(dumps(<<~RUBY)).to eq([":o", "1", %("c"), "3.0", "[1]", "1", "String", "Dynamic[top]"])
       module R
         refine(Object) { def oo = :o }
         refine(Module) { def mm = 1; def label = name }
@@ -255,6 +256,7 @@ RSpec.describe "Typing calls through Ruby refinements (#1664)", type: :runner do
       Rigor.dump_type(Mod.bo)
       Rigor.dump_type(Comparable.mm)
       Rigor.dump_type(Integer.label)
+      Rigor.dump_type(Mod.cc)
     RUBY
   end
 

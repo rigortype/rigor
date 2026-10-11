@@ -1,8 +1,8 @@
 {
-  "calibrated": true,
+  "calibrated": false,
   "calibrated_at": "2026-10-11T12:07:19Z",
   "calibrated_on": "ubuntu-latest (GitHub Actions), Ruby 4.0.7, rbs 4.2.0, release-gate-frozen-corpus @ run 38137945622",
-  "corpus": "v0.4.1",
+  "corpus": "v0.4.2",
   "note": "Linux CI measurements of the v0.4.2 engine (release candidate branch release/0.4.2) over the frozen corpus v0.4.1: the tree at that tag, unpacked with git archive (#1507). Recalibrated on the same v0.4.1 corpus on user's ruling for v0.4.2 release prep: allocations rose +2.4% (from 41,410,841 to 42,410,830) due to ADR-121 Ruby refinement typing support (in-effect walk, refine census and gem source walk), Ruby 4.1 core signatures and overlay, and tightened overload selection (keyword and splat discrimination, return join). Sampling rule (#987): each gate run takes 2 reps per target, EACH IN A FRESH PROCESS, and records the LOWER of the reps for wall_s and peak_rss_kb while allocations and diagnostics are taken from the first rep unreduced.",
   "reps": 2,
   "targets": {

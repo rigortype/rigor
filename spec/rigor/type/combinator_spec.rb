@@ -220,6 +220,24 @@ RSpec.describe Rigor::Type::Combinator do
       expect(described_class.union(int, described_class.top)).to equal(described_class.top)
     end
 
+    # Issue #1794 — the Rigor-private element of `Enumerator::ArithmeticSequence`.
+    describe "arithmetic sequences" do
+      def seq(*args) = described_class.nominal_of("Enumerator::ArithmeticSequence", type_args: args)
+      def integer = described_class.nominal_of("Integer")
+
+      it "lets the plain sequence absorb one that carries an element" do
+        expect(described_class.union(seq(integer), seq)).to eq(seq)
+        expect(described_class.union(seq, seq(integer), str)).to eq(described_class.union(seq, str))
+      end
+
+      it "joins two element-carrying sequences over the union of their elements" do
+        dynamic = described_class.dynamic(described_class.nominal_of("Numeric"))
+        expect(described_class.union(seq(integer), str, seq(dynamic)))
+          .to eq(described_class.union(seq(described_class.union(integer, dynamic)), str))
+        expect(described_class.union(seq(integer), seq(integer))).to eq(seq(integer))
+      end
+    end
+
     it "deduplicates structurally equal members" do
       a = described_class.constant_of(1)
       b = described_class.constant_of(1)

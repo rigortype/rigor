@@ -40,10 +40,11 @@ RSpec.describe "rigor check --incremental over rigor-ffi target detection" do
     JSON.parse(json).fetch("diagnostics").map { |diagnostic| diagnostic.fetch("rule") }
   end
 
-  def write_project
+  def write_project(extra_config = "")
     FileUtils.mkdir_p("deps")
     File.write(".rigor.yml",
-               "paths:\n  - .\nbundler:\n  lockfile: deps/my.lock\nplugins:\n  - gem: rigor-ffi\n    id: ffi\n")
+               "paths:\n  - .\nbundler:\n  lockfile: deps/my.lock\nplugins:\n  - gem: rigor-ffi\n    id: ffi\n" \
+               "#{extra_config}")
     File.write("deps/my.lock", "GEM\n  specs:\n")
     File.write("Gemfile.lock", "GEM\n  specs:\n    ffi (1.17.0)\n")
     File.write("a.rb", "module L\n  extend FFI::Library\n  callback :cb, [:int], :void\nend\n")
@@ -85,5 +86,89 @@ RSpec.describe "rigor check --incremental over rigor-ffi target detection" do
     File.write("b.rb", "class B\n  def x = 2\nend\n")
 
     expect(check("--incremental")[1]).to include("--incremental warm")
+  end
+
+  # Issue #1652 — with no source edit, the run-result slot answers before the engine or the plugin loads, so it
+  # sees a target flip only through the rows of the reads the target was detected from, which the plugin makes
+  # through its IoBoundary.
+  context "with no source edit between runs" do
+    def prime(*flags, config: "")
+      write_project(config)
+      check(*flags)
+      check(*flags)
+    end
+
+    it "reports the ffx diagnostics once ./Gemfile.lock gains ffx" do
+      prime("--incremental")
+      File.write("Gemfile.lock", "GEM\n  specs:\n    ffi (1.17.0)\n    ffx (1.0.0)\n")
+      out, = check("--incremental")
+
+      expect(rules(out)).to include("ffx.unsupported-callback")
+      expect(rules(out)).to eq(rules(check("--no-cache").first))
+    end
+
+    # `ext/` is excluded from analysis, or the new extconf.rb would be a new analysed file: another path set,
+    # which no slot is keyed by.
+    it "reports them once an extconf.rb in a new ext/ subdirectory calls FFX.create_makefile" do
+      FileUtils.mkdir_p("ext/old")
+      File.write("ext/old/extconf.rb", "require \"mkmf\"\ncreate_makefile(\"old\")\n")
+      prime("--incremental", config: "exclude:\n  - \"**/ext/**\"\n")
+      FileUtils.mkdir_p("ext/x")
+      File.write("ext/x/extconf.rb", "require \"mkmf\"\nFFX.create_makefile(\"x\")\n")
+      out, = check("--incremental")
+
+      expect(rules(out)).to include("ffx.unsupported-callback")
+      expect(rules(out)).to eq(rules(check("--no-cache").first))
+    end
+
+    # The extconf.rb glob records which files match, not their stat tuples: a touch (a checkout, a restored CI
+    # cache) leaves both caches serving, and an edit reaches them through the read_file row of the match.
+    context "with an extconf.rb that does not call FFX.create_makefile" do
+      def prime_both
+        FileUtils.mkdir_p("ext/old")
+        File.write("ext/old/extconf.rb", "require \"mkmf\"\ncreate_makefile(\"old\")\n")
+        prime("--incremental", config: "exclude:\n  - \"**/ext/**\"\n")
+        check
+        check
+      end
+
+      it "keeps serving both run-result caches when the extconf.rb is only touched" do
+        prime_both
+        File.utime(Time.now + 120, Time.now + 120, "ext/old/extconf.rb")
+        allow(Rigor::Analysis::IncrementalSession).to receive(:new).and_call_original
+        allow(Rigor::Analysis::Runner).to receive(:new).and_call_original
+
+        expect(check("--incremental")[1]).to include("--incremental warm")
+        expect(Rigor::Analysis::IncrementalSession).not_to have_received(:new)
+        check
+        expect(Rigor::Analysis::Runner).not_to have_received(:new)
+      end
+
+      it "drops both once the extconf.rb's content flips to FFX.create_makefile" do
+        prime_both
+        File.write("ext/old/extconf.rb", "require \"mkmf\"\nFFX.create_makefile(\"old\")\n")
+
+        expect(rules(check("--incremental").first)).to include("ffx.unsupported-callback")
+        expect(rules(check.first)).to include("ffx.unsupported-callback")
+      end
+    end
+
+    it "is still served from the slot, with no analysis, while the target's inputs are unchanged" do
+      prime("--incremental")
+      allow(Rigor::Analysis::IncrementalSession).to receive(:new).and_call_original
+      out, err = check("--incremental")
+
+      expect(err).to include("--incremental warm")
+      expect(Rigor::Analysis::IncrementalSession).not_to have_received(:new)
+      expect(rules(out)).to eq(rules(check("--no-cache").first))
+    end
+
+    it "reports them from a plain cached run too once ./Gemfile.lock gains ffx" do
+      prime
+      File.write("Gemfile.lock", "GEM\n  specs:\n    ffi (1.17.0)\n    ffx (1.0.0)\n")
+      out, = check
+
+      expect(rules(out)).to include("ffx.unsupported-callback")
+    end
   end
 end

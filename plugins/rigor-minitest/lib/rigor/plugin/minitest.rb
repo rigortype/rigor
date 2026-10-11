@@ -61,12 +61,14 @@ module Rigor
       # ADR-37 slice 2 — emits `post_return_facts` for every recognised assertion, method-gated by the
       # engine. The engine routes `:local`-kind facts through `StatementEvaluator#apply_local_post_return_fact`.
       narrowing_facts methods: AssertionAnalyzer::SUPPORTED_METHODS do |call_node, scope|
-        AssertionAnalyzer.contribution_for(call_node, environment: scope&.environment)&.post_return_facts
+        AssertionAnalyzer.contribution_for(call_node, scope: scope)&.post_return_facts
       end
 
-      # ADR-88 WD1 — the narrowing facts this plugin contributes are derived purely from each assertion call's
-      # own AST at its call site (`assert_kind_of(String, x)` ⇒ `x` is `String` on the continuation); there is
-      # no cross-file catalog a cached diagnostic could depend on. A change to a file's assertions changes that
+      # ADR-88 WD1 — the narrowing facts this plugin contributes are derived from each assertion call's own AST
+      # at its call site (`assert_kind_of(String, x)` ⇒ `x` is `String` on the continuation) and, for
+      # `assert_equal` / `must_equal`, from the local's current type in the call's scope, which the engine
+      # derives and already tracks as a dependency; there is no cross-file catalog of the plugin's own that a
+      # cached diagnostic could depend on. A change to a file's assertions changes that
       # file's own content (re-analysed by the incremental graph already). A stable sentinel declares "no
       # cross-file fact surface", keeping the plugin incremental-capable (a contributing plugin with NO
       # fact / producer / hook makes the incremental snapshot un-reusable every run); `--verify-incremental`

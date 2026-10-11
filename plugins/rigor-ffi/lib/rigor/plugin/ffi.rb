@@ -127,21 +127,22 @@ module Rigor
 
       def init(_services)
         root = config["root"] || Dir.pwd
-        @target = TargetDetector.detect(root: root, config: config)
+        @target = TargetDetector.detect(root: root, config: config, io: io_boundary)
         @exceptions = config["exceptions"] || []
       end
 
       def prepare(_services)
         root = config["root"] || Dir.pwd
-        @target = TargetDetector.detect(root: root, config: config)
+        @target = TargetDetector.detect(root: root, config: config, io: io_boundary)
         @exceptions = config["exceptions"] || []
       end
 
       # ADR-88 channel (c) — the detected `:ffx` / `:ffi` target decides whether the `plugin.ffi.ffx.unsupported-*`
-      # rules fire, and {TargetDetector} reads `<root>/Gemfile.lock` and `ext/**/extconf.rb` directly, not the
-      # lockfile `bundler.lockfile:` resolves to — so neither the `--incremental` snapshot's gem-set digest nor an
-      # edit to an analysed file covers a change in them. Declaring the target makes a flip send the warm
-      # snapshot cold. Everything else this plugin contributes is per-file or comes from the `ffi_catalog`
+      # rules fire, and {TargetDetector} reads `<root>/Gemfile.lock` and `ext/**/extconf.rb`, not the lockfile
+      # `bundler.lockfile:` resolves to — so neither the `--incremental` snapshot's gem-set digest nor an edit to
+      # an analysed file covers a change in them. Declaring the target makes a flip send the warm snapshot cold.
+      # The run-result caches never load the plugin to ask; they see the flip through the boundary rows of those
+      # reads (#1652). Everything else this plugin contributes is per-file or comes from the `ffi_catalog`
       # producer (channel b).
       def incremental_state_fingerprint
         "target:#{@target || :ffi}"

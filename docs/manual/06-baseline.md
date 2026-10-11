@@ -77,6 +77,8 @@ a diagnostic another layer has already suppressed.
 | `rigor baseline drift` | Show how buckets have moved — `--only=over` for buckets that grew, `reducible` for ones you have already improved past, `cleared` for empty ones. |
 | `rigor baseline prune` | Drop buckets that match nothing any more. `--dry-run` previews. |
 
+`generate` and `regenerate` analyse with your loaded configuration unchanged except that `baseline:` is off, so options such as `bleeding_edge`, `target_ruby` or `severity_overrides` shape the recorded set exactly as they shape `rigor check`.
+
 `generate` and `regenerate` take `--match-mode=rule` (the
 default — one bucket per file × rule) or `--match-mode=message`
 (a bucket per distinct message: more precise, more churn).

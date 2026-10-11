@@ -4,6 +4,9 @@ class Rigor::Plugin::IoBoundary
   def file?: (untyped) -> bool
   def directory?: (untyped) -> bool
   def list_directory: (untyped) -> Array[String]
+  # Records a `:names` glob row (membership only); a caller needing a match's content `read_file`s it. A `..`
+  # segment, a brace or a backslash in `pattern` raises `AccessDeniedError`.
+  def glob: (untyped root, untyped pattern) -> Array[String]
   # sig-gen gap: #1156 — the generator pins the empty-summary literal (`count: 0, first_path: nil`); the
   # record's fields are the running count and the first refused path, nil when nothing was refused.
   def refusal_summary: () -> { count: Integer, first_path: String?, nearest_root: String? }?

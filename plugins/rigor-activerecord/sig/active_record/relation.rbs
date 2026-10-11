@@ -292,7 +292,9 @@ module ActiveRecord
     # loses its `io.db.write`. So a single argument stays `Elem`. A
     # splat and a `**` hash each count as one argument, so `find(*ids)`
     # is `Elem`, while `find(id, *ids)` and `find(*args, **opts)` are
-    # Arrays even when the splat or the hash turns out empty.
+    # Arrays even when the splat or the hash turns out empty. The engine
+    # reads a splat as any number of arguments (#1801), so the plugin
+    # answers a splat call by this count (`relation_splat_find_return_type`).
     #
     # With a block `find` is `Enumerable#find` (`return super if
     # block_given?`), so the id overloads do not apply: no argument

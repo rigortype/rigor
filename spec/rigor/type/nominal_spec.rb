@@ -55,6 +55,13 @@ RSpec.describe Rigor::Type::Nominal do
       arr = described_class.new("Array", [int])
       expect(arr.erase_to_rbs).to eq("Array[Integer]")
     end
+
+    # Issue #1794 — RBS declares the sequence without a type parameter, so the element Rigor carries erases away.
+    it "erases the Rigor-private element argument of an arithmetic sequence" do
+      seq = described_class.new("Enumerator::ArithmeticSequence", [described_class.new("Integer")])
+      expect(seq.erase_to_rbs).to eq("Enumerator::ArithmeticSequence")
+      expect(seq.describe).to eq("Enumerator::ArithmeticSequence[Integer]")
+    end
   end
 
   describe "capability predicates" do

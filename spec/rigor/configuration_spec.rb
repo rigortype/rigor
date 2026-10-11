@@ -1277,4 +1277,43 @@ RSpec.describe Rigor::Configuration do
       end
     end
   end
+
+  # #1777 — `rigor baseline generate` analyses with this, so it must differ from the loaded configuration in
+  # `baseline` alone. Compared by instance variable rather than by a key list: a field a future key adds is
+  # covered the moment `#initialize` assigns it, which is the point.
+  describe "#without_baseline" do
+    let(:loaded) do
+      described_class.new(
+        { "target_ruby" => "4.1", "baseline" => ".rigor-baseline.yml", "parameter_inference" => true,
+          "bleeding_edge" => ["use-of-void-value"], "fold_platform_specific_paths" => false,
+          "plugins_isolation" => "process", "dependencies" => { "include" => [] },
+          "bundler" => { "auto_detect" => false }, "rbs_collection" => { "auto_detect" => false },
+          "effects" => {}, "severity_overrides" => { "call.undefined-method" => "info" },
+          "cache" => { "path" => "tmp/cache" } },
+        true, true
+      )
+    end
+
+    it "clears baseline_path" do
+      expect(loaded.baseline_path).not_to be_nil
+      expect(loaded.without_baseline.baseline_path).to be_nil
+    end
+
+    it "carries every other field, including the explicitness of target_ruby" do
+      copy = loaded.without_baseline
+      carried = loaded.instance_variables - [:@baseline_path]
+
+      expect(copy.instance_variables.sort).to eq(loaded.instance_variables.sort)
+      carried.each do |ivar|
+        expect(copy.instance_variable_get(ivar)).to eq(loaded.instance_variable_get(ivar)), "#{ivar} was not carried"
+      end
+      expect(copy.target_ruby_explicit?).to be(true)
+      expect(copy).to be_frozen
+    end
+
+    it "returns the receiver when no baseline is configured" do
+      bare = described_class.new
+      expect(bare.without_baseline).to equal(bare)
+    end
+  end
 end

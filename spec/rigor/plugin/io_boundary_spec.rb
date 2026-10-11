@@ -235,6 +235,73 @@ RSpec.describe Rigor::Plugin::IoBoundary do
     end
   end
 
+  describe "#glob (#1652)" do
+    let(:old_extconf) { File.join(tmpdir, "ext/a/extconf.rb") }
+
+    before do
+      FileUtils.mkdir_p(File.join(tmpdir, "ext/a"))
+      File.write(old_extconf, "a")
+    end
+
+    it "returns the matches and records one :names glob row" do
+      expect(boundary.glob(tmpdir, "ext/**/extconf.rb")).to eq([old_extconf])
+      globs = boundary.cache_descriptor.globs
+      expect(globs.map { |row| [row.root, row.pattern, row.mode] })
+        .to eq([[File.absolute_path(tmpdir), "ext/**/extconf.rb", :names]])
+      expect(boundary.cache_descriptor.fresh?).to be(true)
+    end
+
+    it "reads stale once a match appears in a new subdirectory" do
+      boundary.glob(tmpdir, "ext/**/extconf.rb")
+      FileUtils.mkdir_p(File.join(tmpdir, "ext/b/deep"))
+      File.write(File.join(tmpdir, "ext/b/deep/extconf.rb"), "b")
+
+      expect(boundary.cache_descriptor.fresh?).to be(false)
+    end
+
+    it "reads stale once a match disappears" do
+      boundary.glob(tmpdir, "ext/**/extconf.rb")
+      File.delete(old_extconf)
+
+      expect(boundary.cache_descriptor.fresh?).to be(false)
+    end
+
+    # The content is the caller's #read_file row's to carry; a stat row here would miss on every checkout.
+    it "stays fresh when a match is touched or rewritten in place" do
+      boundary.glob(tmpdir, "ext/**/extconf.rb")
+      File.utime(Time.now + 60, Time.now + 60, old_extconf)
+      File.write(old_extconf, "changed")
+
+      expect(boundary.cache_descriptor.fresh?).to be(true)
+    end
+
+    it "keeps #list_directory's :stat listing row" do
+      boundary.list_directory(File.join(tmpdir, "ext/a"))
+
+      expect(boundary.cache_descriptor.globs.map(&:mode)).to eq([:stat])
+    end
+
+    it "refuses a pattern that can reach `..` and records nothing" do
+      expect { boundary.glob(File.join(tmpdir, "ext"), "../*") }
+        .to raise_error(Rigor::Plugin::AccessDeniedError) { |e| expect(e.reason).to eq(:read_outside_scope) }
+      expect { boundary.glob(tmpdir, "ext/**/../../*") }.to raise_error(Rigor::Plugin::AccessDeniedError)
+      ["{..,x}/*", ".\\./*", ".{.,}/*", "x/{../..}/*"].each do |pattern|
+        expect { boundary.glob(File.join(tmpdir, "ext"), pattern) }.to raise_error(Rigor::Plugin::AccessDeniedError)
+      end
+      expect(boundary.cache_descriptor.globs).to be_empty
+    end
+
+    it "answers truthfully outside the trusted-read scope and records nothing there" do
+      outside = Dir.mktmpdir("rigor-io-boundary-outside-")
+      File.write(File.join(outside, "x.rb"), "")
+
+      expect(boundary.glob(outside, "*.rb")).to eq([File.join(outside, "x.rb")])
+      expect(boundary.cache_descriptor.globs).to be_empty
+    ensure
+      FileUtils.rm_rf(outside)
+    end
+  end
+
   describe "#open_url" do
     it "denies every URL while the network policy is :disabled" do
       expect { boundary.open_url("https://example.invalid/api") }.to raise_error(

@@ -44,18 +44,36 @@ their `refute_*` equivalents.
 | --- | --- |
 | `assert_kind_of(T, x)` / `assert_instance_of(T, x)` | narrow to `T` |
 | `assert_nil(x)` | narrow to `Constant<nil>` |
-| `assert_equal(literal, x)` | narrow to `Constant<literal>` |
+| `assert_equal(literal, x)` | meet with `Constant<literal>` (see below) |
 | `assert_match(regex, x)` | narrow to `String` |
 | `refute_kind_of` / `refute_instance_of` (+ `assert_not_*`) | narrow away from `T` |
 | `refute_nil(x)` / `assert_not_nil(x)` | narrow away from nil |
-| `refute_equal(literal, x)` / `assert_not_equal(...)` | narrow away from `Constant<literal>` |
+| `refute_equal(literal, x)` / `assert_not_equal(...)` | unchanged |
 | `_(x).must_be_kind_of(T)` / `must_be_a(T)` / `must_be_instance_of(T)` / `must_be_an_instance_of(T)` | narrow to `T` |
 | `_(x).must_be_nil` | narrow to `Constant<nil>` |
-| `_(x).must_equal(literal)` | narrow to `Constant<literal>` |
+| `_(x).must_equal(literal)` | meet with `Constant<literal>` (see below) |
 | `_(x).must_match(regex)` | narrow to `String` |
 | `_(x).wont_be_kind_of(T)` / `wont_be_instance_of(T)` | narrow away from `T` |
 | `_(x).wont_be_nil` | narrow away from nil |
-| `_(x).wont_equal(literal)` | narrow away from `Constant<literal>` |
+| `_(x).wont_equal(literal)` | unchanged |
+
+### Equality is not identity
+
+`assert_equal(literal, x)` and `_(x).must_equal(literal)` pass when
+`literal == x`, and `==` can hold across classes: `1 == 1.0`,
+`1 == 1r`, and a class with its own `==` (a `ModInt` that compares
+`to_i`) passes `assert_equal 9, m`. The assertion therefore never
+replaces `x`'s type:
+
+- a `nil`, `true`, `false`, or Symbol literal has identity `==`, so `x`
+  narrows to that literal whatever its type was;
+- an Integer, Float, or String literal narrows `x` only when every
+  member of `x`'s type is already of the literal's class (or a `nil`,
+  boolean, or Symbol the literal cannot equal). After
+  `x = rand(10); assert_equal 9, x`, `x` is `9`;
+- otherwise — `x` is `Dynamic`, of a user class, or of another numeric
+  class (`assert_equal 9.0, x` with an Integer `x`), or the literal is
+  `0.0`, which `-0.0` also equals — `x` keeps its type.
 
 ## No diagnostics, no config
 

@@ -828,8 +828,13 @@ full run, so the snapshot can never wedge or stale an analysis.
    A plugin that reads a dependency file on its own, such as `rigor-ffi` reading
    `./Gemfile.lock` for its `:ffx` / `:ffi` target, covers it through the
    `incremental_state_fingerprint` hook instead. That covers the snapshot gate
-   only: a change to such an input with no source edit is still served from the
-   run-result slot ([#1652](https://github.com/rigortype/rigor/issues/1652)).
+   only. The run-result slot answers an unchanged run without loading the
+   plugin, so it sees such an input only through the plugin's `IoBoundary`
+   rows, and the plugin MUST read it through the boundary: `rigor-ffi` does
+   ([#1652](https://github.com/rigortype/rigor/issues/1652)). `IoBoundary#glob`
+   records a `:names` row, which sees a match appear or disappear but not an
+   edit or a `touch`, so a plugin that depends on a match's content reads it
+   with `#read_file`, whose row carries the edit.
 2. **Per-file digests (drive the decision).** When the fingerprint matches,
    the `Payload` is loaded unconditionally and its per-file content digests
    determine the changed set `ΔF`; the affected closure `ΔF ∪ dependents[ΔF]`

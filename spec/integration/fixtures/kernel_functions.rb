@@ -24,9 +24,11 @@ assert_type("[1, 2]", p(1, 2))
 assert_type("nil", p)
 assert_type("nil", pp)
 
-# A splatted argument list has no static arity — the fold declines to the RBS envelope.
+# A splatted argument list has no static arity — the fold declines to the RBS envelope, where every overload
+# some count of the splat's elements reaches joins (#1801): `()`'s `nil`, `[T] (T)`'s untyped `T` and the
+# `Array[untyped]` of two or more.
 xs = [1, 2]
-assert_type("Dynamic[top]", p(*xs))
+assert_type("Dynamic[Array[Dynamic[top]] | Dynamic[top] | nil]", p(*xs))
 
 # --- composed with scalar-key Hash-literal shapes (branch-interaction probe) --
 # The p/pp identity must pass a scalar-key HashShape through verbatim, including the

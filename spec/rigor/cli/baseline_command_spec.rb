@@ -110,6 +110,36 @@ RSpec.describe Rigor::CLI::BaselineCommand do
     end
   end
 
+  # Issue #1777 — the generating run is the loaded configuration with only `baseline` disabled, so a key that
+  # changes the diagnostic set (here a `bleeding_edge` feature) reaches the baseline instead of reverting to its
+  # default and reporting as new on the next `rigor check`.
+  describe "generate with a non-default diagnostic-set key" do
+    it "baselines a bleeding_edge-only finding, and the next check reports it as baselined" do
+      FileUtils.mkdir_p(File.join(tmpdir, "lib"))
+      FileUtils.mkdir_p(File.join(tmpdir, "sig"))
+      File.write(File.join(tmpdir, "sig", "void_box.rbs"), "class VoidBox\n  def log: (String) -> void\nend\n")
+      File.write(File.join(tmpdir, "lib", "demo.rb"), "l = VoidBox.new\nassigned = l.log(\"x\")\nputs assigned\n")
+      File.write(File.join(tmpdir, ".rigor.yml"), <<~YAML)
+        paths:
+          - lib
+        signature_paths:
+          - sig
+        bleeding_edge:
+          - use-of-void-value
+        baseline: .rigor-baseline.yml
+      YAML
+
+      status, = run_cli("baseline", "generate", cwd: tmpdir)
+      expect(status).to eq(0)
+      rules = YAML.safe_load_file(File.join(tmpdir, ".rigor-baseline.yml"))["ignored"].map { |row| row["rule"] }
+      expect(rules).to include("static.value-use.void")
+
+      _status, out, err = run_cli("check", cwd: tmpdir)
+      expect(out).not_to include("static.value-use.void")
+      expect(err).to include("silenced by baseline")
+    end
+  end
+
   describe "rigor check --baseline" do
     let(:diagnostic_source) do
       # Deliberate undefined-method on a well-typed receiver (Integer) so rigor fires `call.undefined-method` reliably.

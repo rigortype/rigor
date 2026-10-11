@@ -312,6 +312,36 @@ RSpec.describe "Typing calls through Ruby refinements (#1664)", type: :runner do
     RUBY
   end
 
+  # ADR-121 WD7. Ruby 4.0.5 prints `42`: the refinement of the included `Greet` imports `H#hi`, which wins over
+  # `Greet#hi` where `Greet` sits in `Foo`'s lookup.
+  it "answers Dynamic[top] where an included module a refine body may define any name on sits" do
+    expect(dumps(<<~RUBY)).to eq(["Dynamic[top]"])
+      module H; def hi = 42; end
+      module Greet; def hi = "hi"; end
+      class Foo; include Greet; end
+      module M
+        refine(Greet) { import_methods H }
+      end
+      using M
+      Rigor.dump_type(Foo.new.hi)
+    RUBY
+  end
+
+  # ADR-121 WD7. Ruby 4.0.5 prints `42`: past `String`, whose project mixin RBS does not order, the refinement of
+  # `Object` imports `H#itself`, which wins over `Kernel#itself`.
+  it "answers Dynamic[top] past a mixed level when a later level's refine body may define any name" do
+    expect(dumps(<<~RUBY)).to eq(["Dynamic[top]"])
+      module H; def itself = 42; end
+      module Loud; end
+      class String; include Loud; end
+      module RO
+        refine(Object) { import_methods H }
+      end
+      using RO
+      Rigor.dump_type("a".itself)
+    RUBY
+  end
+
   # ADR-121 WD7 (A1). In this file Ruby 4.0.5 prints `:inner` and raises `ArgumentError`, but with `Foo::Bar` declared
   # in a file required after this one the top-level `Bar` wins (critique F1), so neither call is typed from a body.
   it "answers Dynamic[top] where two declared candidates of a `using` could each be the module" do

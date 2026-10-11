@@ -157,6 +157,16 @@ RSpec.describe "Plugin-declared refined blocks (#1667)" do
     expect(result[:errors]).to eq([[3, "call.undefined-method"]])
   end
 
+  # ADR-121 WD7 — the typer reads the same exemption: a declared module nothing declares does not make the block's
+  # instance calls `Dynamic[top]`.
+  it "keeps the block's calls typed under a declared module nothing declares" do
+    result = run_analysis(<<~RUBY, plugin_class(entry(refinements: ["NoSuchSyntax"])))
+      build { dump_type(:a.to_s) }
+    RUBY
+
+    expect(result).to eq(errors: [], types: [%("a")])
+  end
+
   # `self_type: :lexical` — `block.refined(M).call` runs the block where it was written, with the caller's `self`.
   it "keeps the caller's self for a `:lexical` entry" do
     lexical = entry(method_names: [:run_lexical], self_type: :lexical)

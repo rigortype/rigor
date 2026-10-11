@@ -1606,3 +1606,4 @@ classes:
         purity: leaf
     singleton_methods: {}
     undefined: []
+    rdoc_only: true

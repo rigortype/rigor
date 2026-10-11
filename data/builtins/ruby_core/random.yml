@@ -63,6 +63,7 @@ classes:
         rbs:
         - "(?Integer seed) -> void"
         rbs_at: references/rbs/core/random.rbs:36
+        rdoc_only: true
       rand:
         source: c
         cfunc: random_rand
@@ -71,6 +72,7 @@ classes:
         c_body_at: references/ruby/random.c:1574
         c_effects: []
         purity: leaf
+        rdoc_only: true
       bytes:
         source: c
         cfunc: random_bytes
@@ -80,6 +82,7 @@ classes:
         c_effects:
         - dispatch
         purity: dispatch
+        rdoc_only: true
       seed:
         source: c
         cfunc: random_get_seed
@@ -91,6 +94,7 @@ classes:
         rbs:
         - "() -> Integer"
         rbs_at: references/rbs/core/random.rbs:172
+        rdoc_only: true
     singleton_methods:
       srand:
         source: c

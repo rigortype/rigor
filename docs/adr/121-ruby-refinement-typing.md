@@ -4,9 +4,9 @@ Status: **Accepted, 2026-10-09; implemented 2026-10-10; amended 2026-10-11 (WD7,
 knowledge).** Landed under #1670: the redefined-method decline (#1685), the include expansion (#1684),
 gem refine bodies (#1686), the query (#1729), the typed arm (#1747), and for Ruby 4.1's
 `Proc#refined` the signature (#1711), refined literals (#1738) and the `BlockAsMethod` field (#1744).
-WD7 closes #1796 and #1799. Open: the carry-overs under Consequences, #1669, and gem modules that
-gem source inference could make known (#1814). The normative rules are in
-`docs/internal-spec/inference-engine.md` § "Ruby refinements".
+WD7 closes #1796 and #1799, and with the own-definer proof #1740 and #1797's refinement cases. Open:
+the carry-overs under Consequences, #1669, and gem modules that gem source inference could make known
+(#1814). The normative rules are in `docs/internal-spec/inference-engine.md` § "Ruby refinements".
 
 Grounding: the design session of 2026-10-09 on #1664 and #1667, probes on master `54da094f0` and
 `7baff7b1f` (listed in #1670), CRuby `334b4ffa7f`'s `doc/syntax/refinements.rdoc` and
@@ -194,6 +194,17 @@ declaration is opaque.**
   module shares its last segment with another listed module.
 - A plugin-declared module (WD5) is the plugin's declaration, not code Rigor failed to read: it is
   never opaque, and one nothing declares matches no row, so it silences nothing.
+- `call.wrong-arity` and `call.argument-type-mismatch` report under a refinement in effect only where
+  the receiver's own definer is proven to answer first (#1740, #1797): a project definer
+  `DefinerResolution` answers `Known` for, or a core method the CRuby catalogue lists on that class
+  (its `rdoc_only` entries left out), and neither for a name the project removes (a `[:removed, name]`
+  envelope entry). RBS alone and a definer that may not have run prove nothing. Every in-effect row the
+  receiver's own levels do not place must be proven unable to answer first, so these decline: a module
+  the receiver does not hold (or holds but some code prepends to an object's singleton class), a class
+  no table declares, and a declared class whose instance chain cannot be read to its end (a cut, a
+  superclass the tables do not know) or holds the receiver's class; a class with an unknown superclass
+  is a possible subclass of every class. A class mark alone (refined, object-extended, meta-superclass)
+  does not make a name the project's for the arity walk (`DiscoveryIndex.declares_surface?`).
 
 Limits it does not remove: a module reopened in a file outside the analysed paths or under
 `exclude:`; an inner `using` candidate declared only outside the analysed paths (or by a

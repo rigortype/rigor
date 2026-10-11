@@ -290,8 +290,11 @@ module Rigor
           bucket[raw] = @scope.ancestor_name_candidates(owner, raw).find { |name| project_class?(name) }
         end
 
+        # A bucket of class marks alone (issue #1820: `x.singleton_class.prepend(Comparable)`) does not make a name
+        # the project's.
         def project_class?(name)
-          @scope.known_user_class?(name) || @scope.discovered_parameter_envelopes.key?(name)
+          @scope.known_user_class?(name) ||
+            Scope::DiscoveryIndex.declares_surface?(@scope.discovered_parameter_envelopes[name])
         end
 
         # A module's methods reach the receiver as instance methods whichever side the receiver is on.
@@ -306,8 +309,13 @@ module Rigor
             level.externals.all? { |candidates| external_mixin_lacks_method?(candidates) }
         end
 
+        # Issue #1797 — a class whose body rewrites its method table in a way no literal names. A `refine` of the
+        # class (`ENVELOPE_REFINED_MARK`) is not one here: whether a refinement answers a call is decided per call
+        # site, name and `using` by `CheckRules#refined_redefinition_in_effect?`, which also declines where a
+        # refinement of a subclass of the receiver's class may answer. Counting the mark silenced every name on
+        # every subclass of a refined class, with or without a `using`.
         def dynamic_surface?(class_name)
-          Scope::DiscoveryIndex.rewritten_surface?(@scope.parameter_envelopes_of(class_name))
+          @scope.parameter_envelopes_of(class_name).key?(Scope::DiscoveryIndex::ENVELOPE_DYNAMIC_MARK)
         end
 
         def project_patched?(class_name)
@@ -401,8 +409,12 @@ module Rigor
 
         def first_level(class_name) = chain_levels(arity_chain(class_name)).first.first
 
+        # ADR-46 — every class whose subclasses are enumerated records `subclass_of:<last segment>`, which a class
+        # declaration with that superclass appearing or vanishing fires (issue #1820): a new subclass with a
+        # different envelope re-checks the call.
         def each_subclass(class_name)
           children = children_by_parent
+          record_subclasses_read(class_name)
           queue = children.fetch(class_name.to_s, []).dup
           seen = {}
           until queue.empty?
@@ -410,9 +422,16 @@ module Rigor
             next if seen[subclass]
 
             seen[subclass] = true
+            record_subclasses_read(subclass)
             yield subclass
             queue.concat(children.fetch(subclass, []))
           end
+        end
+
+        def record_subclasses_read(class_name)
+          return unless Analysis::DependencyRecorder.active?
+
+          Analysis::DependencyRecorder.read_last_segment(:subclass_of, class_name.to_s)
         end
 
         def children_by_parent

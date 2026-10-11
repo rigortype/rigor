@@ -219,11 +219,35 @@ module Rigor
       # - {ENVELOPE_REFINED_MARK}: a `refine` block refines the class, which redefines its methods wherever a `using`
       #   is in effect. Issue #1367 splits it from {ENVELOPE_DYNAMIC_MARK}, which it used to share: an implicit
       #   conversion (`to_str`, `to_int`) ignores a refinement, so the `global.*` rules must tell the two apart.
-      #   Every reader that asks whether a surface is rewritten reads both ({.rewritten_surface?}).
+      #   The readers that ask whether a surface is rewritten read both ({.rewritten_surface?}), except
+      #   `call.wrong-arity`'s source envelope (`CheckRules::SourceArity`), which leaves a refinement to the per-call
+      #   decline that knows the name and the `using` (issue #1797).
+      # Issue #1820 — the kind of a `[ENVELOPE_REMOVED_KIND, method_name]` bucket entry: the project removes the name
+      # from the class with a literal `undef`, `remove_method` or `undef_method`, whichever side. A removal is not
+      # otherwise distinguishable from an `attr_*` or `define_method`, whose envelope is opaque too, and the
+      # refinement own-definer proof must not take a removed method as the one Ruby finds.
+      ENVELOPE_REMOVED_KIND = :removed
+      # Issue #1820 — a `K = Class.new(Parent)` constant write: the class's superclass is not in the superclass table
+      # (the meta-new walk does not route `Parent` through ancestor discovery), so a reader that must place `K` in a
+      # hierarchy reads its superclass as unknown, as it reads the `nil` the table records for `class K < <expr>`.
+      ENVELOPE_META_SUPERCLASS_MARK = :"<meta-superclass>"
       ENVELOPE_MODULE_MARK = :"<module>"
       ENVELOPE_DYNAMIC_MARK = :"<dynamic>"
       ENVELOPE_OBJECT_EXTENDED_MARK = :"<object-extended>"
       ENVELOPE_REFINED_MARK = :"<refined>"
+
+      # Issue #1820 — whether an envelope bucket says the project declares, or rewrites, the name's method table: a
+      # per-method entry, the {ENVELOPE_MODULE_MARK} a `module` declaration records, or the {ENVELOPE_DYNAMIC_MARK}
+      # (`Comparable.module_eval { define_method(computed) }` gives a module a method no table names, so a reader
+      # must keep it on its chain rather than read RBS's surface for it). A bucket that holds only the refined,
+      # object-extended or meta-superclass marks is evidence about a name the project may only mention, such as
+      # `Comparable` in `x.singleton_class.prepend(Comparable)`.
+      DECLARING_MARKS = [ENVELOPE_MODULE_MARK, ENVELOPE_DYNAMIC_MARK].freeze
+      private_constant :DECLARING_MARKS
+
+      def self.declares_surface?(bucket)
+        !bucket.nil? && bucket.any? { |key, _| !key.is_a?(Symbol) || DECLARING_MARKS.include?(key) }
+      end
 
       # Whether an envelope bucket says the project rewrites the class's method table beyond its literal names: a
       # dynamic rewrite, or a refinement.

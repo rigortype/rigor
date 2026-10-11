@@ -303,6 +303,7 @@ classes:
         rbs:
         - "() -> bool?"
         rbs_at: references/rbs/core/struct.rbs:267
+        rdoc_only: true
       members:
         source: c
         cfunc: rb_struct_s_members_m
@@ -314,6 +315,7 @@ classes:
         rbs:
         - "() -> Array[Symbol]"
         rbs_at: references/rbs/core/struct.rbs:250
+        rdoc_only: true
     undefined: []
   Data:
     parent: Object
@@ -441,5 +443,6 @@ classes:
         c_body_at: references/ruby/struct.c:207
         c_effects: []
         purity: leaf
+        rdoc_only: true
     undefined:
     - new

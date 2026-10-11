@@ -528,7 +528,8 @@ module Rigor
             @discovery.discovered_superclasses.key?(name) || @discovery.discovered_includes.key?(name) ||
               @discovery.discovered_classes.key?(name)
           when :arity
-            @scope.known_user_class?(name) || @discovery.discovered_parameter_envelopes.key?(name)
+            @scope.known_user_class?(name) ||
+              DiscoveryIndex.declares_surface?(@discovery.discovered_parameter_envelopes[name])
           else
             @scope.known_user_class?(name)
           end

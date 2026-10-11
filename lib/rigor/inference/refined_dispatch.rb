@@ -17,6 +17,9 @@ module Rigor
     # declaration on that class itself, or a project `def`, `attr_*` or `define_method` of it. Core RBS sometimes
     # redeclares an inherited method on a subclass, which stops the walk there: a known imprecision, in the
     # declining direction.
+    #
+    # Issue #1740 — {OwnMethod} shares {.levels} with the walk below and asks the opposite question for the two
+    # argument checks: does the receiver's own method answer ahead of every refinement in effect?
     module RefinedDispatch
       # The refinement that answers: `module_name` refines `refined_class` (a class or module on the walk).
       Winner = Data.define(:module_name, :refined_class)
@@ -197,9 +200,11 @@ module Rigor
         end
       end
 
-      # `[[level class, [entries in lookup order], mixed], …]` for an instance of `class_name`, or nil when the walk
-      # cannot
-      # be trusted: a chain cut at its limit, or one that records a mixin the tables cannot name.
+      # `[[level class, [entries in lookup order], mixed, every entry], …]` for an instance of `class_name`, or nil
+      # when the walk cannot be trusted: a chain cut at its limit, or one that records a mixin the tables cannot
+      # name. `every entry` (project levels only) is the level's entries in lookup order with each one that
+      # neither the project's resolver nor RBS can name kept as its candidate names (an Array) where `entries`
+      # leaves it out: the typer never reads it, and {OwnMethod} declines where a refinement may name one.
       def levels(scope, class_name)
         environment = scope.environment
         return rbs_levels(scope, class_name) if environment&.class_known?(class_name)
@@ -232,13 +237,16 @@ module Rigor
         out = []
         chain.level_count.times do |index|
           level_class = chain.level_classes[index]
-          names = chain.level_entries(index).filter_map { |entry| entry_name(scope, entry) }
-          next out << [level_class, names] if level_class
+          every = chain.level_entries(index).map { |entry| entry_name(scope, entry) || unnamed(entry) }
+          names = every.grep(String)
+          next out << [level_class, names, false, every] if level_class
 
           names.each { |name| out.concat(rbs_levels(scope, name)) }
         end
         out
       end
+
+      def unnamed(entry) = entry.candidates.empty? ? [entry.raw.to_s] : entry.candidates
 
       def entry_name(scope, entry)
         return entry.name unless entry.external?
@@ -260,3 +268,5 @@ module Rigor
     end
   end
 end
+
+require_relative "refined_dispatch/own_method"

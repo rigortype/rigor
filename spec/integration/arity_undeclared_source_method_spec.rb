@@ -306,9 +306,13 @@ RSpec.describe "call.wrong-arity on a source-defined method with no declaration 
       expect(messages("lib/a.rb" => "#{control}#{decorator}#{call}")).to eq([])
     end
 
+    # Issue #1797 — under its `using` the refinement answers (Ruby 4.0.5 returns `[1, 2]`). With no `using` in effect
+    # it answers nothing and `A#f` raises, so that call stays checked.
     it "when a refinement redefines the name" do
       refinement = "module Loosen\n  refine A do\n    def f(*args) = args\n  end\nend\n"
-      expect(messages("lib/a.rb" => "#{control}#{refinement}#{call}")).to eq([])
+      expect(messages("lib/a.rb" => "#{control}#{refinement}using Loosen\n#{call}")).to eq([])
+      expect(messages("lib/a.rb" => "#{control}#{refinement}#{call}"))
+        .to eq(["wrong number of arguments to `f' on A (given 2, expected 1)"])
     end
 
     it "when a pre_eval: file patches the name (ADR-17)" do

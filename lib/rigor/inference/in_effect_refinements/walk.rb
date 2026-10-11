@@ -155,11 +155,11 @@ module Rigor
           if context.here == RefineSelf::CLASS && ScopeIndexer.refine_call?(node)
             record_class_body_refine(node)
           elsif (target = ScopeIndexer.refine_target(node))
-            record_refine_block(node, owners, ScopeIndexer.constant_receiver_candidates(target, prefix))
+            record_refine_block(node, owners, ScopeIndexer.constant_receiver_candidates(target, prefix), context)
           elsif ScopeIndexer.refine_call?(node)
             # ADR-121 WD7 — a target the walk cannot name (`refine(k)`): the block is still a refine body, in effect
             # inside itself, with no class to file its defs under.
-            record_refine_block(node, owners, EMPTY)
+            record_refine_block(node, owners, EMPTY, context)
           elsif using_call?(node) && !in_def
             record_using(node, prefix, body)
           elsif node.name == :refined
@@ -211,8 +211,9 @@ module Rigor
                                          refine_block: false)
         end
 
-        # `owners` are the refining module's names (several where its spelling can denote several), or nil.
-        def record_refine_block(node, owners, targets)
+        # `owners` are the refining module's names (several where its spelling can denote several), or nil; `context`
+        # is the `RefineSelf::Context` the `refine` call runs in.
+        def record_refine_block(node, owners, targets, context)
           start, stop = span_of(node.block)
           @activations << Activation.new(order: start, start: start, stop: stop, names: owners, expand: false,
                                          refine_block: true)
@@ -225,8 +226,12 @@ module Rigor
           # ADR-121 WD7 (issue #1799) — a `def`, and an alias of a `def` the body wrote earlier; a later definer with no
           # body (`define_method`, `attr_*`, `undef`) clears the name, which then types as `Dynamic[top]`. Ruby runs a
           # body charged to several names (an eval on a constant) on one of them only, so each gets the name bodiless.
+          # So does a `refine` that runs inside a method (issue #1749): `using` fixes a module's refined classes when it
+          # runs, so what the method creates later is in effect only for a `using` after the call, an order this walk
+          # cannot decide, and no call is typed from its body.
           RefineCensus.read_body(body).defs.each do |name, def_node|
-            owners.each { |owner| @refine_defs.record(owner, targets, name, (def_node if owners.size == 1), @nesting) }
+            def_node = nil if context.deferred || owners.size > 1
+            owners.each { |owner| @refine_defs.record(owner, targets, name, def_node, @nesting) }
           end
         end
 

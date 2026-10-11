@@ -195,11 +195,18 @@ RSpec.describe Rigor::Inference::InEffectRefinements do
         expect(at.at(":in_class_method")).to eq([])
       end
 
-      it "records the block's defs for the module, as a refine in its body does" do
-        expect(refinements.refinement_def("Shout", "String", :yy)).to be_a(Prism::DefNode)
-        expect(refinements.refinement_def("Shout", "Symbol", :zz)).to be_a(Prism::DefNode)
+      # `using` fixes a module's refined classes when it runs, so a refinement a method creates is in effect only for a
+      # `using` after the call, an order this walk cannot decide: the names are recorded for the module without a body,
+      # where a refine in the module's body keeps its `def`.
+      it "records the block's names for the module without a body, where a refine in its body keeps the def" do
+        bodiless = described_class::RefineDefs::BODILESS
+        in_body = described_class.new(Prism.parse("module Shout\n  refine(String) { def yy = 1 }\nend\n").value)
+
+        expect(refinements.refinement_def("Shout", "String", :yy)).to be(bodiless)
+        expect(refinements.refinement_def("Shout", "Symbol", :zz)).to be(bodiless)
         expect(refinements.refinement_def("Other", "String", :yy)).to be_nil
         expect(refinements.refinement_def("Widget", "String", :yy)).to be_nil
+        expect(in_body.refinement_def("Shout", "String", :yy)).to be_a(Prism::DefNode)
       end
     end
 

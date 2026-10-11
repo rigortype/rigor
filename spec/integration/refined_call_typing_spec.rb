@@ -91,25 +91,85 @@ RSpec.describe "Typing calls through Ruby refinements (#1664)", type: :runner do
     RUBY
   end
 
-  # Issue #1749. Ruby 4.0.5 prints `1`, `3` and `"abc"` for each shape: the singleton method runs on the module, so its
-  # `refine` is the module's. The block is entered as `String`'s class body, so an implicit-self `size` and `self` in a
-  # `def` there are a `String`'s.
+  # Issue #1749. Ruby 4.0.5 prints `1` for `"abc".yy` after `M.setup; using M`, but `using` fixes a module's refined
+  # classes when it runs, so what a method creates after it is not in effect there (below). The walk records the
+  # refine's names and types no call from its body; the block is still entered as `String`'s class body, so `size` and
+  # `self` in a `def` there are a `String`'s.
   {
-    "def self.setup" => "def self.setup\n    refine(String) { def yy = 1; def zz = size; def me = self }\n  end\n",
-    "a def in class << self" =>
-      "class << self\n    def setup\n      refine(String) { def yy = 1; def zz = size; def me = self }\n    " \
-      "end\n  end\n"
-  }.each do |shape, method|
-    it "types a refine written in a module's singleton method from its body (#{shape})" do
-      expect(dumps(<<~RUBY)).to eq(%w[1 non-negative-int String])
-        module M
-          #{method}end
-        M.setup
-        using M
-        Rigor.dump_type("abc".yy)
-        Rigor.dump_type("abc".zz)
-        Rigor.dump_type("abc".me)
-      RUBY
+    "def self.setup" => <<~RUBY,
+      module M
+        def self.setup
+          refine(String) do
+            def yy = 1
+            def zz = Rigor.dump_type(size)
+            def me = Rigor.dump_type(self)
+          end
+        end
+      end
+    RUBY
+    "a def in class << self" => <<~RUBY
+      module M
+        class << self
+          def setup
+            refine(String) do
+              def yy = 1
+              def zz = Rigor.dump_type(size)
+              def me = Rigor.dump_type(self)
+            end
+          end
+        end
+      end
+    RUBY
+  }.each do |shape, definition|
+    it "enters a refine written in a module's singleton method as String's class body (#{shape})" do
+      expect(dumps("#{definition}M.setup\nusing M\nRigor.dump_type(\"abc\".yy)\n"))
+        .to eq(%w[non-negative-int String Dynamic[top]])
+    end
+  end
+
+  # Issue #1749. Ruby 4.0.5 prints `"s"` and `S` for each: `using` runs before the method that creates the refinement
+  # (or the method never runs), so `"a".yy` is `String#yy`. The rows stay for the visibility decline; no call is typed
+  # from the body, and the argument rules decline.
+  {
+    "a using before the call" => <<~RUBY,
+      class String; def yy = "s"; end
+      module M
+        def self.setup = refine(String) { def yy = 1 }
+      end
+      using M
+      M.setup
+      x = "a".yy
+      Rigor.dump_type(x)
+      puts x.upcase
+    RUBY
+    "a call that never runs" => <<~RUBY,
+      class String; def yy = "s"; end
+      module M
+        def self.setup
+          refine(String) { def yy = 1 }
+        end
+      end
+      M.setup if ENV["NEVER_SET"]
+      using M
+      x = "a".yy
+      Rigor.dump_type(x)
+      puts x.upcase
+    RUBY
+    "a refined name with an argument" => <<~RUBY
+      class String; def yy(a) = "s\#{a}"; end
+      module M
+        def self.setup = refine(String) { def yy = 1 }
+      end
+      using M
+      M.setup
+      x = "a".yy(1)
+      Rigor.dump_type(x)
+      puts x.upcase
+    RUBY
+  }.each do |shape, source|
+    it "types no call from a refine a method creates after the using (#{shape})" do
+      expect(rows(source).map { |rule, _line, message| [rule, message] })
+        .to eq([["dump.type", "dump_type: Dynamic[top]"]])
     end
   end
 

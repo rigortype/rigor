@@ -4,6 +4,7 @@ require "fileutils"
 require "securerandom"
 
 require_relative "../incremental_run_slot"
+require_relative "../dependency_source_inference/gem_resolver"
 require_relative "../../cache/file_digest"
 require_relative "../../cache/incremental_snapshot"
 
@@ -61,7 +62,9 @@ module Rigor
         # signature file under the configured or auto-detected `sig/` roots, or a `pre_eval:` file, changed in
         # between would leave the snapshot the run restores keyed by one tree
         # and the run reading another. From the stamp on, the lockfiles are the guard's to watch ({#admits?}), which
-        # is also what lets the slot's key, whose only file inputs they are, be computed when the run ends.
+        # is also what lets the slot's key, whose only file inputs they are, be computed when the run ends. The
+        # opted-in gems' resolved versions, the key's one input that is neither a file nor the configuration (issue
+        # #1814), are read at the mark and watched the same way.
         #
         # The mark also records which of the paths an existence row can name are present: the lockfiles, the
         # analysis roots, the `pre_eval:` entries and the signature roots.
@@ -78,9 +81,21 @@ module Rigor
           presence = (lockfiles + named.map { |path| File.absolute_path(path.to_s) }).to_h do |path|
             [path, File.exist?(path)]
           end
+          rows = dependency_rows(configuration)
+          return nil if rows.nil?
+
           new(started_ns: started_ns, device: device, lockfiles: lockfiles, presence: presence,
-              stamp_dir: stamp_dir(cache_root))
+              stamp_dir: stamp_dir(cache_root), configuration: configuration, dependency_rows: rows)
         end
+
+        # Issue #1814 — the opted-in gems' `(name, version, mode)` rows as the key carries them; nil when they cannot
+        # be resolved, which takes no mark (the key could not be computed either).
+        def self.dependency_rows(configuration)
+          DependencySourceInference::GemResolver.dependency_entries(configuration.dependencies)
+        rescue StandardError
+          nil
+        end
+        private_class_method :dependency_rows
 
         # The mark: the change time and device of the first stamp whose change time is later than that of a
         # stamp taken before it, on the same device; nil when none is written within {TICK_WAIT_LIMIT}.
@@ -143,17 +158,21 @@ module Rigor
         end
         private_class_method :lockfile_paths
 
-        def initialize(started_ns:, device:, lockfiles:, presence: {}, stamp_dir: nil)
+        def initialize(started_ns:, device:, lockfiles:, presence: {}, stamp_dir: nil, configuration: nil,
+                       dependency_rows: [])
           @stamp_dir = stamp_dir
           @started_ns = started_ns
           @device = device
           @lockfiles = lockfiles
           @presence = presence
+          @configuration = configuration
+          @dependency_rows = dependency_rows
         end
 
         # True when nothing the guard watches moved since the mark:
         #
-        # - no lockfile the key or the fingerprint digests was written, created or removed;
+        # - no lockfile the key or the fingerprint digests was written, created or removed, and no opted-in gem
+        #   resolves to another version than at the mark (issue #1814);
         # - no file `rows` or `pinned` names changed. A content row's file changed if its change time moved. An
         #   existence row asks only whether its path is there, so a path the mark recorded changed if it came or
         #   went, and an editor's lock file created and removed beside it, which moves its directory's change
@@ -174,7 +193,7 @@ module Rigor
         # @param rows — a {Cache::Descriptor} of the rows the key does not pin
         # @param pinned — a {Cache::Descriptor} of the rows it does
         def admits?(rows, pinned: Cache::Descriptor.new)
-          !clock_stepped_back? && @lockfiles.none? { |path| lockfile_changed?(path) } &&
+          !clock_stepped_back? && @lockfiles.none? { |path| lockfile_changed?(path) } && dependency_rows_unchanged? &&
             files_unchanged?(rows.files, strict: true) && globs_unchanged?(rows.globs, strict: true) &&
             files_unchanged?(pinned.files, strict: false) && globs_unchanged?(pinned.globs, strict: false)
         rescue StandardError
@@ -195,6 +214,12 @@ module Rigor
         end
 
         private
+
+        # Issue #1814 — the opted-in gems resolve to the versions they did at the mark. A guard built without a
+        # configuration (the specs' bare constructor) watches none.
+        def dependency_rows_unchanged?
+          @configuration.nil? || self.class.send(:dependency_rows, @configuration) == @dependency_rows
+        end
 
         # One more stamp: a change time earlier than the mark means the clock stepped back since it was taken, so
         # a save since then may carry a change time the guard reads as before it. A stamp that cannot be written,

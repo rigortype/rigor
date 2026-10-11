@@ -133,6 +133,186 @@ RSpec.describe "Typing calls through Ruby refinements (#1664)", type: :runner do
     RUBY
   end
 
+  # Issue #1749. Ruby 4.0.5 prints `1` for `"abc".yy` after `M.setup; using M`, but `using` fixes a module's refined
+  # classes when it runs, so what a method creates after it is not in effect there (below). The walk records the
+  # refine's names and types no call from its body; the block is still entered as `String`'s class body, so `size` and
+  # `self` in a `def` there are a `String`'s.
+  {
+    "def self.setup" => <<~RUBY,
+      module M
+        def self.setup
+          refine(String) do
+            def yy = 1
+            def zz = Rigor.dump_type(size)
+            def me = Rigor.dump_type(self)
+          end
+        end
+      end
+    RUBY
+    "a def in class << self" => <<~RUBY
+      module M
+        class << self
+          def setup
+            refine(String) do
+              def yy = 1
+              def zz = Rigor.dump_type(size)
+              def me = Rigor.dump_type(self)
+            end
+          end
+        end
+      end
+    RUBY
+  }.each do |shape, definition|
+    it "enters a refine written in a module's singleton method as String's class body (#{shape})" do
+      expect(dumps("#{definition}M.setup\nusing M\nRigor.dump_type(\"abc\".yy)\n"))
+        .to eq(%w[non-negative-int String Dynamic[top]])
+    end
+  end
+
+  # Issue #1749. Ruby 4.0.5 prints `"s"` and `S` for each: `using` runs before the method that creates the refinement
+  # (or the method never runs), so `"a".yy` is `String#yy`. The rows stay for the visibility decline; no call is typed
+  # from the body, and the argument rules decline.
+  {
+    "a using before the call" => <<~RUBY,
+      class String; def yy = "s"; end
+      module M
+        def self.setup = refine(String) { def yy = 1 }
+      end
+      using M
+      M.setup
+      x = "a".yy
+      Rigor.dump_type(x)
+      puts x.upcase
+    RUBY
+    "a call that never runs" => <<~RUBY,
+      class String; def yy = "s"; end
+      module M
+        def self.setup
+          refine(String) { def yy = 1 }
+        end
+      end
+      M.setup if ENV["NEVER_SET"]
+      using M
+      x = "a".yy
+      Rigor.dump_type(x)
+      puts x.upcase
+    RUBY
+    "a refined name with an argument" => <<~RUBY
+      class String; def yy(a) = "s\#{a}"; end
+      module M
+        def self.setup = refine(String) { def yy = 1 }
+      end
+      using M
+      M.setup
+      x = "a".yy(1)
+      Rigor.dump_type(x)
+      puts x.upcase
+    RUBY
+  }.each do |shape, source|
+    it "types no call from a refine a method creates after the using (#{shape})" do
+      expect(rows(source).map { |rule, _line, message| [rule, message] })
+        .to eq([["dump.type", "dump_type: Dynamic[top]"]])
+    end
+  end
+
+  # Issue #1749. A module-body `def` of the same name cannot say which refinement answers: `M.setup` runs after the
+  # module body, replaces `yy`, and Ruby 4.0.5 prints `"s"` and `S` for each of these. The name a method creates is
+  # never typed from any body, whichever file holds the body and whichever the source order; a body alone is typed
+  # (`1`, the examples above).
+  setup_method = <<~RUBY
+    module M
+      def self.setup = refine(String) { def yy = "s" }
+    end
+  RUBY
+  body = <<~RUBY
+    module M
+      refine(String) { def yy = 1 }
+    end
+  RUBY
+  consumer = <<~RUBY
+    M.setup
+    using M
+    x = "a".yy
+    Rigor.dump_type(x)
+    puts x.upcase
+  RUBY
+  method_shapes = {
+    "a module-body def after it in the file" => [<<~RUBY, {}],
+      module M
+        def self.setup = refine(String) { def yy = "s" }
+        refine(String) { def yy = 1 }
+      end
+      #{consumer}
+    RUBY
+    "a module-body def before it in the file" => [<<~RUBY, {}],
+      module M
+        refine(String) { def yy = 1 }
+        def self.setup = refine(String) { def yy = "s" }
+      end
+      #{consumer}
+    RUBY
+    "a module-body def in a file searched first" => [consumer, { "a_body.rb" => body, "b_setup.rb" => setup_method }],
+    "a module-body def in a file searched last" => [consumer, { "a_setup.rb" => setup_method, "b_body.rb" => body }],
+    "a module-body def in the consumer's file" => ["#{body}#{consumer}", { "m.rb" => setup_method }],
+    "the setup in the consumer's file" => ["#{setup_method}#{consumer}", { "m.rb" => body }],
+    # The file that hosts an eval on the constant need not declare the module, so the lookup of a refine body, which
+    # consults the files that do, never sees a record there: the names the method creates stay a targets-wildcard.
+    "a setup an eval on the constant defines, in a file that does not declare it" => [consumer, {
+      "m.rb" => body,
+      "host.rb" => <<~RUBY
+        M.module_eval do
+          def self.setup = refine(String) { def yy = "s" }
+        end
+      RUBY
+    }],
+    "a setup an instance_eval on the constant defines, in a file that does not declare it" => [consumer, {
+      "m.rb" => body,
+      "host.rb" => <<~RUBY
+        M.instance_eval do
+          def setup = refine(String) { def yy = "s" }
+        end
+      RUBY
+    }]
+  }
+
+  # Issue #1749. The same holds for an eval on a constant that several names denote (`M` in `module L`): it runs on one
+  # of them, which another file decides, and replaces or is replaced by a module-body `def` of the name. Ruby 4.0.5
+  # prints `"s"` and `S` when the eval runs after the body and `1` when it runs first, in one file and across files, so
+  # no body of the name is typed in either order.
+  center_body = <<~RUBY
+    module M
+      refine(String) { def center = 1 }
+    end
+  RUBY
+  center_eval = <<~RUBY
+    module M; end
+    module L
+      M.module_eval { refine(String) { def center = "s" } }
+    end
+  RUBY
+  center_use = <<~RUBY
+    using M
+    x = "x".center
+    Rigor.dump_type(x)
+    puts x.upcase
+  RUBY
+  eval_shapes = {
+    "an eval after the module-body def in the file" => ["#{center_body}#{center_eval}#{center_use}", {}],
+    "an eval before the module-body def in the file" => ["#{center_eval}#{center_body}#{center_use}", {}],
+    "an eval in a file searched after the body's" =>
+      [center_use, { "a_body.rb" => center_body, "b_eval.rb" => center_eval }],
+    "an eval in a file searched before the body's" =>
+      [center_use, { "a_eval.rb" => center_eval, "b_body.rb" => center_body }],
+    "an eval in the consumer's file" => ["#{center_eval}#{center_use}", { "m.rb" => center_body }]
+  }
+
+  method_shapes.merge(eval_shapes).each do |shape, (source, files)|
+    it "types no call from a name whose refinement the walk cannot attribute (#{shape})" do
+      expect(rows(source, files: files).map { |rule, _line, message| [rule, message] })
+        .to eq([["dump.type", "dump_type: Dynamic[top]"]])
+    end
+  end
+
   it "does not fold a refined core method, and answers the later of two `using`s" do
     expect(dumps(<<~RUBY)).to eq(%w[non-negative-int :up])
       module Sized

@@ -3430,14 +3430,17 @@ module Rigor
       end
 
       # A6 — the last segments of the constants `root` binds by `||=` (`K ||= String`, `A::K ||= …`) or by a
-      # `const_set` whose name is a literal (`Object.const_set(:K, String)`). Scanned only for a file with a
-      # literal-target `refine`.
+      # `const_set` whose name is a literal (`Object.const_set(:K, String)`), and (issue #1749) by any write in a
+      # `class << …` body: the project-wide constant census files a write there under no name a `refine` argument
+      # spells, but a `def` in that body reads it lexically (`class << self; K = String; def setup = refine(K) {…}`).
+      # Scanned only for a file with a literal-target `refine`.
       def loose_constant_segments(root)
         segments = Set.new
         Source::NodeWalker.each(root) do |node|
           case node
           when Prism::ConstantOrWriteNode then segments << node.name.to_s
           when Prism::ConstantPathOrWriteNode then segments << node.target.name.to_s
+          when Prism::SingletonClassNode then singleton_constant_segments(node.body, segments)
           when Prism::CallNode
             name = node.name == :const_set && node.arguments&.arguments&.first
             segments << name.unescaped if name.is_a?(Prism::SymbolNode) || name.is_a?(Prism::StringNode)
@@ -3446,17 +3449,47 @@ module Rigor
         segments
       end
 
+      # The last segment of every constant a write, an operator write or a multiple assignment target in `body` binds.
+      def singleton_constant_segments(body, segments)
+        return if body.nil?
+
+        Source::NodeWalker.each(body) do |node|
+          case node
+          when Prism::ConstantWriteNode, Prism::ConstantTargetNode, Prism::ConstantOperatorWriteNode,
+               Prism::ConstantAndWriteNode, Prism::ConstantPathTargetNode
+            segments << node.name.to_s
+          when Prism::ConstantPathWriteNode, Prism::ConstantPathOperatorWriteNode, Prism::ConstantPathAndWriteNode
+            segments << node.target.name.to_s
+          end
+        end
+      end
+
       # ADR-121 WD7 — the census gate's view of one parsed file (`root`): `[refinement table, [[start offset,
       # outcome], …]]`, one pair for every `refine`-shaped node the method walk accounted for. The outcomes are
-      # `:recorded` (a literal target and block, its names recorded), `:class_unknown` (a block whose target the walk
-      # cannot name), `:targets_wildcard` (a `refine` in a `def`, charged to its module), `:literal` (A3's `:refine`
-      # / eval-string literal), `:nested` (a `refine` in a refine body), `:dsl` (where `self` is a class, #1689) and
+      # `:recorded` (a literal target and block, its names recorded; also one in a module's own singleton method,
+      # #1749), `:class_unknown` (a block whose target the walk cannot name), `:targets_wildcard` (a `refine` that
+      # runs once a method is called, other than a module's own singleton method's, or in a block that may rebind
+      # `self`, charged to its module or the wildcard), `:literal` (A3's `:refine` / eval-string literal), `:nested` (a
+      # `refine` in a refine body, or in a singleton method of one), `:dsl` (where `self` is a class, #1689) and
       # `:raises` (no block, a Proc as the block, another receiver, or a computed target where `self` is `main`), and
       # `:data` (a `:refine` literal where `self` is a plain class or one of its instances).
       def refine_census(root)
         census = []
         refinements = build_methods_and_def_nodes(root, census: census)[3]
         [refinements, census]
+      end
+
+      # ADR-121 WD7 (issue #1814) — the refinement table one parsed file contributes: the census of
+      # {#build_methods_and_def_nodes}, whose fourth table is the project walk's own (`seed_discovered_methods` and
+      # `walk_def_contributions` take it from the same call), run for a caller that wants nothing else. The gem source
+      # walker reads a gem file this way, so a gem module's rows carry the wildcards a project module's would
+      # (`walker_walk_census_parity_spec.rb`, beside the walker's specs, holds the two to one table). A file whose text
+      # never names `refine` as a word records no row, so it is not walked. `source_path` names an anonymous module's
+      # row (`#<Module:<path>:L:C>`) as the project walk does, so two files' bare `Module.new` blocks never share one.
+      def refinement_table(root, source_path = nil)
+        return EMPTY_REFINEMENTS if refine_word_offsets(root).empty?
+
+        build_methods_and_def_nodes(root, source_path)[3]
       end
 
       # Issue #1120 — a refinement table, deep-frozen; the shared empty table when nothing was recorded.
@@ -3558,8 +3591,9 @@ module Rigor
         context.here == RefineSelf::ANONYMOUS ? [owner_prefix.join("::")] : RefineSelf.charged_modules(context)
       end
 
-      # ADR-121 WD7 — a targets-wildcard for each of `owners`, as a `refine` in a `def` records. The body is not walked
-      # any further, so the census scans it here.
+      # ADR-121 WD7 — a targets-wildcard for each of `owners`, as a `refine` that runs once a method is called records
+      # (an instance `def`, a `define_method` or `define_singleton_method` block; a module's own singleton method
+      # records rows instead, #1749). The body is not walked any further, so the census scans it here.
       def record_deferred_refine(node, owners, qualified_prefix, tables)
         tables.account(node, :targets_wildcard, census_charge(owners))
         owners.each { |owner| record_targets_wildcard(tables, owner) }
@@ -3612,6 +3646,10 @@ module Rigor
         when Prism::DefNode, Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode
           refine_body = false
         when Prism::CallNode
+          if (target = own_method_refine_target(node, tables))
+            return record_own_method_refine(node, target, qualified_prefix, tables)
+          end
+
           census_call(node, qualified_prefix, tables, refine_body)
         when Prism::SymbolNode
           census_symbol(node, tables)
@@ -3619,14 +3657,38 @@ module Rigor
         node.rigor_each_child { |child| census_scan(child, qualified_prefix, tables, refine_body: refine_body) }
       end
 
+      # ADR-121 WD7 (issue #1749) — the target of a canonical `refine X do … end` ({#refine_target}) in a module's own
+      # singleton method (`def self.x`, a `def` in the module's `class << self`, or a block there that keeps `self`),
+      # else nil. `self` is the module itself there, so the call refines X for it once the method is called. Anything
+      # else in a method body (an instance `def`, a `define_method` or `define_singleton_method` block, a computed
+      # target, a block that may rebind `self`) charges a targets-wildcard in {#census_call}, and a `refine` in a refine
+      # body is nested there, whichever method it sits in: its context ({RefineSelf.refinement_body}) is not an
+      # own method's.
+      def own_method_refine_target(node, tables)
+        return nil if node.name != :refine
+
+        target = tables.refine_target_of(node)
+        target if target && tables.refine_context(node).own_method
+      end
+
+      # Records `node` as the refine of its module, as a `refine` in the module body is recorded, with the refined
+      # class marked as that one is ({#record_refinement}). The call's block is scanned here, so {#census_scan} does
+      # not descend into it.
+      def record_own_method_refine(node, target, qualified_prefix, tables)
+        record_refinement(node, qualified_prefix, tables)
+        owners = RefineSelf.charged_modules(tables.refine_context(node))
+        record_refinement_defs(node, target, qualified_prefix, owners, tables)
+      end
+
       def census_call(node, qualified_prefix, tables, refine_body)
         census_literal_arguments(node, qualified_prefix, tables)
         return unless node.name == :refine
 
         context = tables.refine_context(node)
+        nested = refine_body || context.here == RefineSelf::REFINEMENT
         outcome, charged =
           if tables.class_body_refine?(node) || context.here == RefineSelf::CLASS then :dsl
-          elsif refine_body && RefineCensus.self_call?(node) then :nested
+          elsif nested && RefineCensus.self_call?(node) then :nested
           elsif !RefineCensus.self_call?(node) || node.block.nil? || context.here == RefineSelf::MAIN then :raises
           else
             owners = RefineSelf.charged_modules(context)
@@ -3658,6 +3720,7 @@ module Rigor
         target = RefineCensus.literal_target(call)
         context = tables.refine_context(literal)
         return tables.account(literal, :data) if target == :self && context.literal == RefineSelf::CLASS
+        return tables.account(literal, :nested) if target == :self && context.literal == RefineSelf::REFINEMENT
 
         owners = literal_owners(call, target, RefineSelf.charged_modules(context, literal: true), qualified_prefix)
         owners.each { |owner| record_targets_wildcard(tables, owner) }
@@ -3686,6 +3749,7 @@ module Rigor
         tables.see_literal(node)
         context = tables.refine_context(node)
         return tables.account(node, :data) if context.literal == RefineSelf::CLASS
+        return tables.account(node, :nested) if context.literal == RefineSelf::REFINEMENT
 
         owners = RefineSelf.charged_modules(context, literal: true)
         owners.each { |owner| record_targets_wildcard(tables, owner) }

@@ -39,8 +39,9 @@ lib/rigor/analysis/check_rules/source_arity.rb:
   producers:
     Rigor::Analysis::CheckRules::SourceArity#public_at?: grandfathered
 lib/rigor/analysis/dependency_source_inference/walker.rb:
-  computes: the method catalog of an opt-in gem's source roots, per class and side, and its refine bodies' refinements
+  computes: the method catalog of an opt-in gem's source roots, per class and side, its refine bodies' refinements, and the constants its files bind
   producers:
+    Rigor::Analysis::DependencySourceInference::Walker#collect_bound_constants: qualifies a constant write by the lexical nesting of the class and module headers around it, as walk_node qualifies a def, so a refine key is matched by the name the write binds rather than by its last segment (#1814); it records no declaration fact
     Rigor::Analysis::DependencySourceInference::Walker#walk_node: grandfathered
     Rigor::Analysis::DependencySourceInference::Walker#walk_refine_declarations: a dispatcher over a refine body; it hands each nested class or module back to walk_node under the prefix it was given and derives no declaration context itself
 lib/rigor/analysis/reachability/scan.rb:
@@ -290,6 +291,7 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#gather_ivar_writes: grandfathered
     Rigor::Inference::ScopeIndexer#instance_mixin_recorded?: writes one instance-side mixin call into the include/prepend accumulator under the owner the walk passes in; it computes no declaration context
     Rigor::Inference::ScopeIndexer#ivar_write_targets: grandfathered
+    Rigor::Inference::ScopeIndexer#loose_constant_segments: A6 (#1749), the last segments of the constants a file binds by `||=`, a literal `const_set` or any write in a `class << …` body, for whether a `refine` target names a class the constant census cannot; it reads each singleton class body only for the constants it writes and decides no declaration context
     Rigor::Inference::ScopeIndexer#merge_and_fold_extends: grandfathered
     Rigor::Inference::ScopeIndexer#merge_class_keyed_index_tables: grandfathered
     Rigor::Inference::ScopeIndexer#merge_constant_literal_tables: grandfathered
@@ -366,6 +368,7 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#record_singleton_prepend: names the module a `singleton_class.prepend` on an object, or a `prepend` in a `class << obj` body, puts ahead of an object's class (#1820), and marks it as the object-extend recorder does; it reads only whether the call sits in a singleton-class body and whether its object may be an instance, which the walk passes in, and decides no owner or side
     Rigor::Inference::ScopeIndexer#record_struct_member_layout: grandfathered
     Rigor::Inference::ScopeIndexer#seed_operator_only_ivars!: grandfathered
+    Rigor::Inference::ScopeIndexer#singleton_constant_segments: collects the last segment of every constant write in a `class << …` body for loose_constant_segments; the segments are names a `refine` target is matched against, and it decides no declaration context
     Rigor::Inference::ScopeIndexer#singleton_mixin_recorded?: writes one singleton-side mixin call under the owner the walk passes in; it computes no declaration context
     Rigor::Inference::ScopeIndexer#strip_possible_singleton: ADR-119 WD1, a certain extend copy makes the singleton name certain, so this removes the singleton half of the name's possible kind; it adds no fact
     Rigor::Inference::ScopeIndexer#subtract_sibling_methods!: rewrites only the possible_discovered_methods sibling in the finalize pass, dropping the names a def declares; it derives no declaration context

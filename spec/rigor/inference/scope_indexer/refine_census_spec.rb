@@ -15,6 +15,15 @@ require "spec_helper"
 #   `alias my_refine refine` there, each refine for the module named in the row.
 # - `module Helper; def setup = refine(String) { … }; end; module N; extend Helper; setup; end; using N` refines
 #   for `N`: a `refine` in an instance method runs on whatever module calls it, so it is charged to the wildcard.
+# - `module M; def self.setup = refine(String) { def yy = 1 }; end; M.setup; using M; "a".yy` answers `1`, as does a
+#   `def` in `class << self`, `def M.setup`, and the same in a module nested in a class: a singleton method of a module
+#   runs on the module itself (#1749), so the census records its rows. Without the `M.setup` call `"a".yy` raises
+#   `NoMethodError`, and a module that extends `M` does not inherit `M.setup`. `[1].each { refine(String) { … } }`,
+#   `tap { … }` and an implicit-self `module_eval { … }` in the method each refine for `M` too, but only the first
+#   keeps `self` where the walk can tell, so the others stay a targets-wildcard.
+# - A `def self.x` in a refine body defines a method of the refinement, not of the module around it:
+#   `module M; refine(String) { def self.setup = refine(Integer) { def twice = 1 } }; end` has no `M.setup`, and
+#   calling the refinement's own `setup` refines nothing under `using M` (`1.twice` raises `NoMethodError`).
 # - `refine(String)` with no block raises `ArgumentError: no block given`; `M.refine(String) { }` raises
 #   `NoMethodError: private method 'refine' called for module M`; `refine` at the top level raises `NoMethodError`
 #   for `main`; `refine(String, &blk)` raises `can't pass a Proc as a block to Module#refine`; a `refine` in a
@@ -134,6 +143,54 @@ RSpec.describe Rigor::Inference::ScopeIndexer, ".refine_census" do
       "K ||= String\nmodule M\n  refine(K) { def center(a, b, c) = 1 }\nend\n",
       %i[class_unknown], { any => { center: ["M"] } }
     ],
+    # #1749: the project-wide constant census files a constant written in a `class << self` body under no name a
+    # `refine` argument spells, but a `def` there reads it lexically. Ruby 4.0.5 prints `1` for `M.setup; using M;
+    # "a".yy`.
+    "a target a class << self body binds" => [
+      <<~RUBY, %i[class_unknown], { any => { center: ["M"] } }
+        module M
+          class << self
+            K = String
+            def setup = refine(K) { def center(a, b, c) = 1 }
+          end
+        end
+      RUBY
+    ],
+    "a target a class << self body binds by a multiple assignment and an operator write" => [
+      <<~RUBY, %i[class_unknown] * 4, { any => { center: ["M"], ljust: ["M"], rjust: ["M"], chop: ["M"] } }
+        module M
+          class << self
+            J, K = Symbol, String
+            L += 1
+            P &&= 1
+            def setup
+              refine(J) { def center(a, b, c) = 1 }
+              refine(K) { def ljust(a, b, c) = 1 }
+              refine(L) { def rjust(a, b, c) = 1 }
+              refine(P) { def chop(a, b, c) = 1 }
+            end
+          end
+        end
+      RUBY
+    ],
+    "a target a class << self body binds by a path write" => [
+      <<~RUBY, %i[class_unknown] * 4, { any => { center: ["M"], ljust: ["M"], rjust: ["M"], chop: ["M"] } }
+        module M
+          class << self
+            self::K = String
+            self::L += 1
+            self::P &&= 1
+            self::J, Q = Symbol, Float
+            def setup
+              refine(K) { def center(a, b, c) = 1 }
+              refine(L) { def ljust(a, b, c) = 1 }
+              refine(P) { def rjust(a, b, c) = 1 }
+              refine(J) { def chop(a, b, c) = 1 }
+            end
+          end
+        end
+      RUBY
+    ],
     "a target the file binds by a literal const_set" => [
       "Object.const_set(:K, String)\nmodule M\n  refine(K) { def center(a, b, c) = 1 }\nend\n",
       %i[class_unknown], { any => { center: ["M"] } }
@@ -155,13 +212,153 @@ RSpec.describe Rigor::Inference::ScopeIndexer, ".refine_census" do
       "module Helper\n  def setup = refine(String) { def shout = 1 }\nend\n",
       %i[targets_wildcard], { any => { any => [any] } }
     ],
+    # #1749: a module's singleton method runs on the module, so its rows are recorded as a `refine` in the body's are.
     "a refine in a def self.x" => [
       "module M\n  def self.setup\n    refine(String) { def shout = 1 }\n  end\nend\n",
-      %i[targets_wildcard], { any => { any => ["M"] } }
+      %i[recorded], { "M::String" => { shout: ["M"] }, "String" => { shout: ["M"] } }
     ],
     "a refine in a def in class << self" => [
       "module M\n  class << self\n    def setup = refine(String) { def shout = 1 }\n  end\nend\n",
+      %i[recorded], { "M::String" => { shout: ["M"] }, "String" => { shout: ["M"] } }
+    ],
+    "a refine in a def self.x of a module nested in a class" => [
+      "class C\n  module M\n    def self.setup = refine(String) { def shout = 1 }\n  end\nend\n",
+      %i[recorded],
+      { "C::M::String" => { shout: ["C::M"] }, "C::String" => { shout: ["C::M"] }, "String" => { shout: ["C::M"] } }
+    ],
+    "a refine in a core iterator's block inside a def self.x" => [
+      "module M\n  def self.setup = [1].each { refine(String) { def shout = 1 } }\nend\n",
+      %i[recorded], { "M::String" => { shout: ["M"] }, "String" => { shout: ["M"] } }
+    ],
+    "a refine with names it cannot read in a def self.x" => [
+      "module M\n  def self.setup = refine(String) { import_methods Helper }\nend\n",
+      %i[recorded], { "M::String" => { any => ["M"] }, "String" => { any => ["M"] } }
+    ],
+    "a nested refine in a refine in a def self.x" => [
+      "module M\n  def self.setup\n    refine(String) do\n      refine(Integer) { def twice = 1 }\n      " \
+      "def shout = 1\n    end\n  end\nend\n",
+      %i[recorded nested],
+      { "M::String" => { twice: ["M"], shout: ["M"], any => ["M"] },
+        "String" => { twice: ["M"], shout: ["M"], any => ["M"] } }
+    ],
+    # The rest of a singleton method's `refine`s keep the targets-wildcard: a target the walk cannot name, a receiver
+    # spelled by its constant (the name matches by its last segment only), a block that may rebind `self`, an eval
+    # (the walk charges what the eval names), and a `define_singleton_method` block. Each refines for `M` on Ruby
+    # 4.0.5 once the method runs, so `M` is opaque and nothing else is.
+    "a refine with a computed target in a def self.x" => [
+      "module M\n  def self.setup(k) = refine(k) { def shout = 1 }\nend\n",
       %i[targets_wildcard], { any => { any => ["M"] } }
+    ],
+    "a refine in a def M.x" => [
+      "module M\n  def M.setup = refine(String) { def shout = 1 }\nend\n",
+      %i[targets_wildcard], { any => { any => ["M"] } }
+    ],
+    "a refine in a block that may rebind self inside a def self.x" => [
+      "module M\n  def self.setup = tap { refine(String) { def shout = 1 } }\nend\n",
+      %i[targets_wildcard], { any => { any => [any] } }
+    ],
+    "a refine in an implicit module_eval block inside a def self.x" => [
+      "module M\n  def self.setup = module_eval { refine(String) { def shout = 1 } }\nend\n",
+      %i[targets_wildcard], { any => { any => ["M"] } }
+    ],
+    # A `Module` subclass's singleton method runs on the class, which has no `refine` (#1689), as a plain class's does.
+    "a refine in a def self.x of a Module subclass" => [
+      "class MyMod < Module\n  def self.setup = refine(String) { def shout = 1 }\nend\n", %i[dsl], {}
+    ],
+    # A singleton method defined in a refine body belongs to the refinement, whichever module the body is written in.
+    # Ruby 4.0.5 runs the `refine` there on the `Refinement`, which `using` rejects with `TypeError`, so it can reach no
+    # `using` span and is charged to nothing; `1.twice` raises `NoMethodError` even under `using M`.
+    "a refine in a def self.x in a refine body" => [
+      <<~RUBY, %i[recorded nested], {}
+        module M
+          refine(String) do
+            def self.setup = refine(Integer) { def twice = 1 }
+          end
+        end
+      RUBY
+    ],
+    # `define_singleton_method` is a call on the refinement the body reader cannot follow, so the body's names are
+    # incomplete (and `twice`, a `def` at any depth, is over-recorded, as for a nested refine).
+    "a refine in a define_singleton_method block in a refine body" => [
+      <<~RUBY, %i[recorded nested], { "M::String" => { any => ["M"], twice: ["M"] }, "String" => { any => ["M"], twice: ["M"] } }
+        module M
+          refine(String) do
+            define_singleton_method(:setup) { refine(Integer) { def twice = 1 } }
+          end
+        end
+      RUBY
+    ],
+    "a refine in a def in a class << self body in a refine body" => [
+      <<~RUBY, %i[recorded nested], {}
+        module M
+          refine(String) do
+            class << self
+              def setup = refine(Integer) { def twice = 1 }
+            end
+          end
+        end
+      RUBY
+    ],
+    "a :refine literal in a def self.x in a refine body" => [
+      <<~RUBY, %i[recorded nested nested nested], {}
+        module M
+          refine(String) do
+            def self.setup = send(:refine, Integer) { def twice = 1 }
+            def self.other = alias_method(:my_refine, :refine)
+            def self.third = [:refine]
+          end
+        end
+      RUBY
+    ],
+    # The refine block's own module is several names (an eval on a constant in `module L`) or the walk's name for a bare
+    # `Module.new`; its singleton methods are still the refinement's.
+    # Ruby 4.0.5 runs both on the `Refinement` too (`using` rejects it, `1.ii` and `1.jj` raise `NoMethodError`): an
+    # eval on `self` in the refinement's singleton method, and a refine body written in a module's own singleton method.
+    "a refine in an eval block on self in a singleton method of a refine body" => [
+      <<~RUBY, %i[recorded nested], {}
+        module M
+          refine(String) do
+            def self.h = module_eval { refine(Integer) { def ii = 1 } }
+          end
+        end
+      RUBY
+    ],
+    "a refine in a singleton method of a refine body written in a module's singleton method" => [
+      <<~RUBY, %i[recorded nested], { "M::String" => { yy: ["M"] }, "String" => { yy: ["M"] } }
+        module M
+          def self.setup
+            refine(String) do
+              def yy = 1
+              def self.h = refine(Integer) { def ii = 1 }
+            end
+          end
+        end
+      RUBY
+    ],
+    "a refine in a singleton method of a refine body nested in a refinement's singleton method" => [
+      <<~RUBY, %i[recorded nested nested], {}
+        module M
+          refine(String) do
+            def self.h = refine(Integer) { def self.k = refine(Float) { def ff = 1 } }
+          end
+        end
+      RUBY
+    ],
+    "a refine in a def self.x in a refine body of an eval block on a constant" => [
+      <<~RUBY, %i[recorded nested], {}
+        module L
+          M.module_eval do
+            refine(String) { def self.setup = refine(Integer) { def twice = 1 } }
+          end
+        end
+      RUBY
+    ],
+    "a refine in a def self.x in a refine body of a bare Module.new block" => [
+      <<~RUBY, %i[recorded nested], {}
+        Module.new do
+          refine(String) { def self.setup = refine(Integer) { def twice = 1 } }
+        end
+      RUBY
     ],
     "a wrapper passing its block through" => [
       "module M\n  def self.my_refine(k, &b) = refine(k, &b)\n  my_refine(String) { def shout = 1 }\nend\n",
@@ -432,6 +629,79 @@ RSpec.describe Rigor::Inference::ScopeIndexer, ".refine_census" do
       "class Query\n  def refine(extra) = yield(extra)\n  def narrowed = refine(1) { |q| q }\n  " \
       "def self.setup = refine(String) { def x = 1 }\nend\n",
       %i[dsl dsl], {}
+    ],
+    # #1749: a `def self.x` (or a `def` in `instance_eval`) written in an eval block on a constant is the receiver's own
+    # singleton method. Ruby 4.0.5 prints `1` and `2` for `Ext.setup; Ext.setup2; using Ext` after the first shape, and
+    # for `M.setup; M.setup2; using M` after the second (the block runs on the top-level `M`, as `L::M` does not exist).
+    # The eval's file need not declare the module, and the lookup of a refine body consults the files that do, so the
+    # record that the method creates the names could go unseen: they keep the targets-wildcard, charged to the receiver
+    # (a constant that several names denote, `M` in `module L`, is charged to each).
+    "a refine in a singleton method defined in an eval block on a constant" => [
+      <<~RUBY, %i[targets_wildcard targets_wildcard], { any => { any => ["Ext"] } }
+        Ext.module_eval do
+          def self.setup = refine(String) { def yy = 1 }
+        end
+        Ext.instance_eval do
+          def setup2 = refine(Symbol) { def ww = 1 }
+        end
+      RUBY
+    ],
+    "a refine in a singleton method defined in a class << self body of an eval block on a constant" => [
+      <<~RUBY, %i[targets_wildcard], { any => { any => ["Ext"] } }
+        Ext.module_eval do
+          class << self
+            def setup = refine(String) { def yy = 1 }
+          end
+        end
+      RUBY
+    ],
+    "a refine in a singleton method defined in an eval block on self in an eval block on a constant" => [
+      <<~RUBY, %i[targets_wildcard], { any => { any => ["Ext"] } }
+        Ext.module_eval do
+          module_eval do
+            def self.setup = refine(String) { def yy = 1 }
+          end
+        end
+      RUBY
+    ],
+    "a refine in a singleton method defined in an eval block on self in a module" => [
+      <<~RUBY, %i[recorded], { "M::String" => { yy: ["M"] }, "String" => { yy: ["M"] } }
+        module M
+          module_eval do
+            def self.setup = refine(String) { def yy = 1 }
+          end
+        end
+      RUBY
+    ],
+    "a refine in a singleton method defined in an eval block on a constant several names denote" => [
+      <<~RUBY, %i[targets_wildcard targets_wildcard], { any => { any => ["L::M", "M"] } }
+        module L
+          M.module_eval do
+            def self.setup = refine(String) { def yy = 1 }
+          end
+          M.instance_eval do
+            def setup2 = refine(String) { def ww = 1 }
+          end
+        end
+      RUBY
+    ],
+    # An instance method of a refine body runs on an instance of the refined class, whatever the eval around names.
+    "a refine in an instance def in a refine body of an instance_eval block on a constant" => [
+      <<~RUBY, %i[recorded targets_wildcard], { "String" => { shout: ["Ext"] }, any => { any => [any] } }
+        Ext.instance_eval do
+          refine(String) { def shout = refine(Integer) { def twice = 1 } }
+        end
+      RUBY
+    ],
+    "a refine in an instance def in a refine body of an instance_eval block on a constant several names denote" => [
+      <<~RUBY, %i[recorded targets_wildcard],
+        module L
+          M.instance_eval do
+            refine(String) { def shout = refine(Integer) { def twice = 1 } }
+          end
+        end
+      RUBY
+      { "L::String" => { shout: ["L::M", "M"] }, "String" => { shout: ["L::M", "M"] }, any => { any => [any] } }
     ],
     "a refine in a Module subclass's instance method" => [
       "class MyMod < Module\n  def setup = refine(String) { def shout = 1 }\nend\n",

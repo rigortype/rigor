@@ -551,6 +551,21 @@ resolvers are leaf files, so the probe reaches them without loading
 lockfiles (§ Two-level gating above); this states the rule the other
 computed-value caches are held to as well.
 
+A cache keyed on the analyzer's output also keys on the **opted-in gems'
+versions** ([#1814](https://github.com/rigortype/rigor/issues/1814),
+`dependencies.source_inference`, ADR-10 slice 3). The walked gem sources
+(their method catalogue, their refinement table, the constants they bind)
+reach every file's checks and no analysed file records them, and a
+lockfile digest covers a `bundle update` but not a project without a
+lockfile. `Analysis::RunCacheKey.descriptor` carries one `DependencyEntry`
+`(name, version, mode)` per non-disabled entry that resolves, in its
+`dependencies:` slot, built by
+`DependencySourceInference::GemResolver.dependency_entries` (a leaf file,
+no walk, so the boot-slim probe reaches it); a project that lists no gem
+adds no row. `IncrementalSnapshot.fingerprint` hashes the same rows as a
+`dependency-source` part under the same rule. A gem edited in place with no
+version change is not seen.
+
 One residual is deliberate rather than closed: a gem installed or removed
 **under the bundle root without a lockfile change** is half-covered. The
 discovered `sig/*.rbs` files are recorded dependencies, so a removal
@@ -805,7 +820,9 @@ full run, so the snapshot can never wedge or stale an analysis.
    analysis **roots** (not the expanded file list — so adding/removing a
    file under a root does not drop the snapshot), the **resolved** dependency
    lockfiles (`bundler.lockfile:` / `rbs_collection.lockfile:`, else
-   auto-detected `./Gemfile.lock` / `./rbs_collection.lock.yaml`), the project's RBS (the `signature_paths` roots,
+   auto-detected `./Gemfile.lock` / `./rbs_collection.lock.yaml`), the `(name, version, mode)` of each opted-in
+   `dependencies.source_inference` gem that resolves (no part for a project that lists none; #1814), the project's RBS
+   (the `signature_paths` roots,
    or the auto-detected `<root>/sig` when `signature_paths` is nil — the
    contents of its `.rbs` files), and the **contents** of every `pre_eval:`
    file (its path is in the configuration; a file outside the analysed paths
@@ -1229,7 +1246,8 @@ and `rigor check --incremental` serves a null run from it before loading the eng
 guarantee, is [ADR-45](../adr/45-unchanged-project-fast-path.md) WD2; this is the contract.
 
 - **Key.** `RunCacheKey.descriptor` exactly as the ADR-87 WD4 probe builds it —
-  `RunCacheKey.libraries_config_entries`, no `template-units` slot, `explain: false` —
+  `RunCacheKey.libraries_config_entries`, no `template-units` slot, `explain: false`, its
+  `dependencies:` rows for the opted-in gems included (#1814) —
   over the session's analysed-path set, plus an `incremental.roots` config entry over the
   analysis roots, normalised to absolute paths and sorted (`IncrementalRunSlot::Target`,
   `.normalize_roots`). The producer id and the roots entry each keep it apart from
@@ -1282,7 +1300,8 @@ guarantee, is [ADR-45](../adr/45-unchanged-project-fast-path.md) WD2; this is th
   written only when, at write time, nothing the guard watches moved: every lockfile the
   key or the fingerprint may read (`bundler.lockfile`, `rbs_collection.lockfile`,
   `Gemfile.lock`, `rbs_collection.lock.yaml`), one present at the mark still there with
-  its change time before it and one absent still absent; the analysed files' rows, the
+  its change time before it and one absent still absent; every opted-in gem still resolving
+  to the `(name, version, mode)` it did at the mark (#1814); the analysed files' rows, the
   `derived` rows and the chain's `baseline`, carried or taken; and the chain's `pinned`.
   No path a content row names, no directory a glob row lists and no file a `:stat` glob
   matches may have a change time at or after the mark. An existence row for a path the

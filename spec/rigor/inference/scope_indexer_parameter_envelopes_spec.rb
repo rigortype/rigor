@@ -90,6 +90,29 @@ RSpec.describe "ScopeIndexer parameter envelopes (#992)" do
     expect(table.fetch("C")).to eq(%i[instance f] => [0, 0, false])
   end
 
+  # Issue #1749 — a `refine X do … end` in a module's singleton method refines X for the module, so X is marked refined
+  # (every name its spelling can denote) as one in the module's body marks it; a computed target and an instance method
+  # name no class, and a plain class's method has no `refine` (#1689).
+  it "marks the class a refine in a module's singleton method refines, as one in the module body does" do
+    refined = Rigor::Scope::DiscoveryIndex::ENVELOPE_REFINED_MARK
+    from_body = envelopes("module M\n  refine(String) { def a = 1 }\nend\n")
+    from_def = envelopes("module M\n  def self.setup = refine(String) { def a = 1 }\nend\n")
+    from_singleton = envelopes("module M\n  class << self\n    def setup = refine(String) { def a = 1 }\n  end\nend\n")
+
+    marks = from_body.slice("M::String", "String")
+
+    expect(marks).to eq("M::String" => { refined => opaque }, "String" => { refined => opaque })
+    expect(from_def.slice("M::String", "String")).to eq(marks)
+    expect(from_singleton.slice("M::String", "String")).to eq(marks)
+    [
+      "module M; def self.setup(k) = refine(k) { def a = 1 }; end",
+      "module M; def setup = refine(String) { def a = 1 }; end",
+      "class C; def self.setup = refine(String) { def a = 1 }; end"
+    ].each do |source|
+      expect(envelopes(source).keys).not_to include("String"), source
+    end
+  end
+
   it "adds the project-wide key only on a whole-project pass" do
     Dir.mktmpdir do |dir|
       path = File.join(dir, "a.rb")

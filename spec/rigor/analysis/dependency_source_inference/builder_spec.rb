@@ -103,6 +103,17 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::Builder do
       )
     end
 
+    # Issue #1814 — each gem's bound names and owner-unknown segments reach the Index as one set each.
+    it "unions each gem's bound constants into the Index" do
+      stub_resolved_for("alpha", method_catalog: {}, bound: Set["Shared::Target"])
+      stub_resolved_for("beta", method_catalog: {}, bound: Set["Pag::Enc"], bound_segments: Set["K"])
+
+      index = described_class.build(dependencies({ "gem" => "alpha" }, { "gem" => "beta" }))
+
+      expect(%w[Shared::Target Pag::Enc Any::K Target].map { |name| index.bound_constant?(name) })
+        .to eq([true, true, true, false])
+    end
+
     it "degrades a gem to no contributions when the Walker raises (per-gem isolation)" do
       resolver = Rigor::Analysis::DependencySourceInference::GemResolver
       walker = Rigor::Analysis::DependencySourceInference::Walker
@@ -122,7 +133,7 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::Builder do
       expect(index.budget_exceeded).to eq([])
     end
 
-    def stub_resolved_for(gem_name, method_catalog:, truncated: false)
+    def stub_resolved_for(gem_name, method_catalog:, truncated: false, bound: Set.new, bound_segments: Set.new)
       gem_dir = "/fake/#{gem_name}"
       resolver = Rigor::Analysis::DependencySourceInference::GemResolver
       walker = Rigor::Analysis::DependencySourceInference::Walker
@@ -134,7 +145,8 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::Builder do
       )
       # The Index normalizes legacy bare-Symbol catalog values (`=> :instance`) into `CatalogEntry(kind:)` at
       # construction, so spec stubs may pass either shape. We keep the helper's API on bare Symbols for legibility.
-      outcome = walker::Outcome.new(catalog: method_catalog, truncated: truncated)
+      outcome = walker::Outcome.new(catalog: method_catalog, truncated: truncated, bound: bound,
+                                    bound_segments: bound_segments)
       allow(walker).to receive(:walk).with(
         gem_dir: gem_dir, roots: %w[lib], budget: anything
       ).and_return(outcome)

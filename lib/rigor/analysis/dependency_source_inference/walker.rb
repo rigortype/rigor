@@ -6,7 +6,6 @@ require_relative "return_type_heuristic"
 require_relative "../../source/constant_path"
 require_relative "../../source/node_children"
 require_relative "../../inference/scope_indexer"
-require_relative "../../inference/refine_census"
 
 module Rigor
   module Analysis
@@ -41,19 +40,33 @@ module Rigor
         # Issue #1672 — `refinements` is the gem's `refine X do … end` table, `{refined class => {method =>
         # [refining modules]}}`, the shape `Inference::ScopeIndexer` builds for project files. A refine-body `def`
         # goes there and never into `catalog`: it is not a method of the refining module, and of the refined class
-        # only after `using`.
-        class Outcome < Data.define(:catalog, :truncated, :refinements)
-          def initialize(catalog:, truncated:, refinements: {}.freeze)
+        # only after `using`. ADR-121 WD7 (issue #1814) — the table is the one the project walk's census records for
+        # the same source ({Inference::ScopeIndexer.refinement_table}), file by file, so it carries the wildcard rows
+        # a project module's would.
+        #
+        # Issue #1814 — `bound` is every name the gem's files bind by a constant write (an assignment, an operator
+        # write, a multiple assignment, a rooted path write) without declaring a class or module by it, spelled under
+        # the lexical nesting the write sits in (`Shared::Target` for `module Shared; Target = String; end`);
+        # `bound_segments` is the last segment of each write whose owner the walk cannot spell (a path write that is
+        # not rooted, a write under `class << …`, a `const_set` with a literal name) ({.collect_bound_constants}). A
+        # refine key one of these binds (`refine(Shared::Target)` anywhere) may name any value, which the walker cannot
+        # resolve: the rows stay as the census records them, {Index#bound_constant?} unions the names across the walked
+        # gems, and the reader decides the key at read time, by each prefix of it
+        # ({Inference::InEffectRefinements.class_wildcard_key?}).
+        class Outcome < Data.define(:catalog, :truncated, :refinements, :bound, :bound_segments)
+          def initialize(catalog:, truncated:, refinements: {}.freeze, bound: Set.new.freeze,
+                         bound_segments: Set.new.freeze)
             super
           end
 
           def truncated? = truncated
         end
 
-        # The walk's two accumulators. The budget counts `catalog` only, but stops the whole walk: a refine body
-        # reached after it trips is not recorded. `root` is the file being walked and `in_effect` its
-        # {Inference::InEffectRefinements}, built the first time a `refine`-shaped call asks (issue #1689).
-        Harvest = Struct.new(:catalog, :refinements, :root, :in_effect) do
+        # The walk's accumulators. The budget counts `catalog` only, but stops the whole walk: a file reached after it
+        # trips is not read. `root` is the file being walked and `in_effect` its {Inference::InEffectRefinements}, built
+        # the first time a `refine`-shaped call asks (issue #1689). Issue #1814 — `bound` and `bound_segments` are
+        # {Outcome}'s.
+        Harvest = Struct.new(:catalog, :refinements, :root, :in_effect, :bound, :bound_segments) do
           # {Inference::ScopeIndexer.module_refine_target} against this file's in-effect refinements.
           def refine_target_of(node)
             return nil if Inference::ScopeIndexer.refine_target(node).nil?
@@ -90,7 +103,7 @@ module Rigor
         #   the budget was reached. Methods of identical name on the same class with different kinds (rare;
         #   private API mostly) carry the kind that wins the per-class first walk.
         def walk(gem_dir:, roots:, budget: UNBOUNDED)
-          harvest = Harvest.new({}, {})
+          harvest = Harvest.new({}, {}, nil, nil, Set.new, Set.new)
           truncated = false
           accepted_roots(roots).each do |root|
             break if truncated
@@ -98,7 +111,8 @@ module Rigor
             truncated = walk_root(File.join(gem_dir.to_s, root), harvest, budget)
           end
           Outcome.new(catalog: harvest.catalog.freeze, truncated: truncated,
-                      refinements: Inference::ScopeIndexer.freeze_refinements(harvest.refinements))
+                      refinements: Inference::ScopeIndexer.freeze_refinements(harvest.refinements),
+                      bound: harvest.bound.freeze, bound_segments: harvest.bound_segments.freeze)
         end
 
         # Drops hard-excluded entries before any filesystem walk happens. Reasoning: we never want a gem's
@@ -126,12 +140,112 @@ module Rigor
 
           harvest.root = parse_result.value
           harvest.in_effect = nil
+          record_refinements(parse_result.value, path, harvest)
+          collect_bound_constants(parse_result.value, [[]], harvest)
           walk_node(parse_result.value, [], false, harvest, budget)
         rescue StandardError
           # Gem source we can't parse / read silently degrades to "no contribution from this file". The
           # user-facing diagnostic stream is reserved for the project source; opt-in gem source MUST NOT
           # pollute it with parse errors the user cannot fix.
           nil
+        end
+
+        # ADR-121 WD7 (issue #1814) — the refinement table the file contributes, read by the census the project walk
+        # runs ({Inference::ScopeIndexer.refinement_table}): the `refine` bodies, the computed targets, the `refine`
+        # inside a method, the `:refine` literals, and the wildcard rows each leaves, folded as the project folds its
+        # files' tables (`merge_refinement_tables`). The walker's own descent below records no row.
+        def record_refinements(root, path, harvest)
+          harvest.refinements = Inference::ScopeIndexer.merge_refinement_tables(
+            harvest.refinements, Inference::ScopeIndexer.refinement_table(root, path)
+          )
+        end
+
+        # Issue #1814 — the names the file binds by a constant write without declaring a class or module by them, or
+        # the last segment alone where the walk cannot spell the owner Ruby binds. A bare write (`K = …`, `K ||= …`,
+        # `K += …`, a multiple-assignment target) binds the name under the lexical nesting of the `class` / `module`
+        # headers around it, which a block does not change (a `Module.new do … end` or `module_eval { … }` body assigns
+        # a constant in the lexical scope around it); `prefixes` holds every nesting the headers can denote, since a
+        # nested compact header opens whichever module Ruby finds (`module W; module Shared::Inner` is
+        # `W::Shared::Inner` or `Shared::Inner`), as the census spells a refine target. A write whose value is one of
+        # the class-creating shapes the project walk registers as a declaration (`Class.new`, `Module.new`,
+        # `Struct.new`, `Data.define`, a `.freeze` tail or a `K = K || …` guard stripped:
+        # {Inference::ScopeIndexer.meta_new_rvalue}) declares a class, so `Point = Struct.new(:x); refine(Point)` keeps
+        # a normal row. Where the owner cannot be spelled the segment alone is recorded, which matches that segment of
+        # any key: a write under `class << …` (the singleton's), a path write that is not rooted (`Wrap::K = …` may
+        # bind under an included module's `Wrap`; `self::K = …` in a block binds under the block's `self`), and a
+        # `const_set` with a literal name (`Object.const_set(:K, …)` binds `::K`). A rooted path (`::Shared::K = …`)
+        # binds that name. One pass over the tree; the rows are not touched.
+        def collect_bound_constants(node, prefixes, harvest)
+          return unless node.is_a?(Prism::Node)
+
+          case node
+          when Prism::ClassNode, Prism::ModuleNode then prefixes = header_prefixes(node.constant_path, prefixes)
+          when Prism::SingletonClassNode then prefixes = nil
+          when Prism::ConstantWriteNode, Prism::ConstantOrWriteNode, Prism::ConstantAndWriteNode,
+               Prism::ConstantOperatorWriteNode
+            note_bare_write(node.name.to_s, prefixes, harvest) unless declares_class?(node)
+          when Prism::ConstantTargetNode then note_bare_write(node.name.to_s, prefixes, harvest)
+          when Prism::ConstantPathWriteNode, Prism::ConstantPathOrWriteNode, Prism::ConstantPathAndWriteNode,
+               Prism::ConstantPathOperatorWriteNode
+            note_path_write(node.target, harvest) unless declares_class?(node)
+          when Prism::ConstantPathTargetNode then note_path_write(node, harvest)
+          when Prism::CallNode then note_const_set(node, harvest)
+          end
+          node.rigor_each_child { |child| collect_bound_constants(child, prefixes, harvest) }
+        end
+
+        def declares_class?(write)
+          rvalue = Inference::ScopeIndexer.meta_new_rvalue(write)
+          !rvalue.nil? && Inference::ScopeIndexer.meta_new_constant_rvalue?(rvalue)
+        end
+
+        # The nestings a `class` / `module` body may sit in, given the ones its header is written in: a bare header
+        # opens a module under each; a compact header (`module Shared::Inner`) opens `Inner` under every name its base
+        # can denote there ({Inference::ScopeIndexer.constant_receiver_candidates}); a rooted header resets them. nil,
+        # the unspellable owner, for a header no constant spells or one under `class << …`.
+        def header_prefixes(constant_path, prefixes)
+          return nil if prefixes.nil? || Source::ConstantPath.qualified_name_or_nil(constant_path).nil?
+          return [Source::ConstantPath.qualified_name_or_nil(constant_path).split("::")] if rooted_path?(constant_path)
+
+          name = constant_path.name.to_s
+          return prefixes.map { |prefix| prefix + [name] } if constant_path.is_a?(Prism::ConstantReadNode)
+
+          prefixes.flat_map do |prefix|
+            Inference::ScopeIndexer.constant_receiver_candidates(constant_path.parent, prefix)
+                                   .map { |owner| owner.split("::") + [name] }
+          end.uniq
+        end
+
+        # `::K`, `::A::K`, as a path or a multiple-assignment target: the leftmost segment has no parent.
+        def rooted_path?(path)
+          path.respond_to?(:parent) && (path.parent.nil? || Source::ConstantPath.rooted?(path.parent))
+        end
+
+        def note_bare_write(name, prefixes, harvest)
+          return harvest.bound_segments << name if prefixes.nil?
+
+          prefixes.each { |prefix| harvest.bound << (prefix + [name]).join("::") }
+        end
+
+        # A path write binds its name where its base resolves, which the walk can spell only for a rooted base.
+        def note_path_write(path, harvest)
+          name = path.name.to_s
+          return harvest.bound_segments << name unless rooted_path?(path)
+
+          owner = path.parent && Source::ConstantPath.qualified_name_or_nil(path.parent)
+          harvest.bound << (owner ? "#{owner}::#{name}" : name)
+        end
+
+        # `const_set(:K, value)` / `const_set("K", value)` with a literal name, on any receiver: the owner is a value.
+        # A class-creating value declares a class, as a write of one does.
+        def note_const_set(node, harvest)
+          return unless node.name == :const_set
+
+          name, value = node.arguments&.arguments
+          return unless name.is_a?(Prism::SymbolNode) || name.is_a?(Prism::StringNode)
+          return if value && Inference::ScopeIndexer.meta_new_constant_rvalue?(value)
+
+          harvest.bound_segments << name.unescaped
         end
 
         # Walks a Prism subtree, accumulating method definitions under their qualified class name. Mirrors
@@ -149,11 +263,8 @@ module Rigor
           when Prism::DefNode
             record_def_node(node, qualified_prefix, in_singleton_class, harvest, budget)
           when Prism::CallNode
-            if (target = harvest.refine_target_of(node))
-              return walk_refine_body(node, target, qualified_prefix, in_singleton_class, harvest, budget)
-            end
+            return walk_refine_body(node, qualified_prefix, harvest, budget) if harvest.refine_target_of(node)
 
-            record_unreadable_target(node, qualified_prefix, in_singleton_class, harvest) if node.name == :refine
             walk_children(node, qualified_prefix, in_singleton_class, harvest, budget)
           else
             walk_children(node, qualified_prefix, in_singleton_class, harvest, budget)
@@ -203,43 +314,15 @@ module Rigor
           harvest.catalog[key] = CatalogEntry.new(kind: kind, return_type: return_type)
         end
 
-        # Issue #1672 — `refine X do … end`, the shape {Inference::ScopeIndexer.module_refine_target} accepts (not
-        # one whose `self` is a class: that is the class's own method and walks as any other call, issue #1689). The
-        # body's instance `def`s are refinements of X by the enclosing module, recorded the way the project walk
-        # records them (`ScopeIndexer#record_refinement_defs`: X resolved lexically, every name it can denote
-        # recorded). None reaches the catalogue. A `refine` with no enclosing module, or in a block under
-        # `class << self`, names no refining module, so its defs are dropped. Declarations nested in the body still
-        # walk under the lexical prefix, as they did before.
-        #
-        # ADR-121 WD7 — the names are what `Inference::RefineCensus.read_body` reads, the project walk's reading, with
-        # a names-wildcard row for a body whose names are incomplete.
-        def walk_refine_body(node, target, qualified_prefix, in_singleton_class, harvest, budget)
+        # Issue #1672 — `refine X do … end`, the shape {Inference::ScopeIndexer.module_refine_target} accepts (not one
+        # whose `self` is a class: that is the class's own method and walks as any other call, issue #1689). The body's
+        # instance `def`s are refinements of X by the enclosing module, and none reaches the catalogue. The refinement
+        # table is not built here: {.record_refinements} runs the project walk's census over the whole file, which reads
+        # this body and every other `refine`-shaped node (ADR-121 WD7, issue #1814). Declarations nested in the body
+        # still walk under the lexical prefix, as they did before.
+        def walk_refine_body(node, qualified_prefix, harvest, budget)
           body = node.block.body
-          return if body.nil?
-
-          unless qualified_prefix.empty? || in_singleton_class
-            targets = Inference::ScopeIndexer.constant_receiver_candidates(target, qualified_prefix)
-            Inference::RefineCensus.record_rows(harvest.refinements, targets, Inference::RefineCensus.read_body(body),
-                                                qualified_prefix.join("::"))
-          end
-          walk_refine_declarations(body, qualified_prefix, harvest, budget)
-        end
-
-        # ADR-121 WD7 — a `refine` with a literal block whose target the walk cannot name (`refine(k)`), recorded as
-        # the project walk records it: the body's names under the wildcard class, plus a names-wildcard row when they
-        # are incomplete. A call on another receiver, with no literal block, where `self` is a class (#1689) or with
-        # no enclosing module records nothing, as {#walk_refine_body} drops a body whose module it cannot name. The
-        # block still walks as it did.
-        def record_unreadable_target(node, qualified_prefix, in_singleton_class, harvest)
-          return if qualified_prefix.empty? || in_singleton_class || !Inference::ScopeIndexer.refine_call?(node)
-
-          harvest.in_effect ||= Inference::InEffectRefinements.new(harvest.root)
-          return if harvest.in_effect.class_body_refine?(node)
-
-          wildcard = Scope::DiscoveryIndex::REFINEMENT_WILDCARD
-          Inference::RefineCensus.record_rows(harvest.refinements, [wildcard],
-                                              Inference::RefineCensus.read_body(node.block.body),
-                                              qualified_prefix.join("::"))
+          walk_refine_declarations(body, qualified_prefix, harvest, budget) unless body.nil?
         end
 
         # The class / module declarations inside a refine body, walked as before; nothing else in it is.

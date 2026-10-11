@@ -43,6 +43,8 @@ module Rigor
             @budget_exceeded = []
             @gem_modes = {}
             @refinements = {}
+            @bound_constants = Set.new
+            @bound_segments = Set.new
           end
 
           def absorb(outcome, budget, builder)
@@ -60,6 +62,8 @@ module Rigor
             walked = builder.walker_outcome_for(resolved, budget)
             @catalog.merge!(walked.catalog)
             @refinements = Inference::ScopeIndexer.merge_refinement_tables(@refinements, walked.refinements)
+            @bound_constants.merge(walked.bound)
+            @bound_segments.merge(walked.bound_segments)
             builder.record_class_to_gem(walked.catalog, resolved.gem_name, @class_to_gem)
             @budget_exceeded << resolved.gem_name if walked.truncated?
           end
@@ -70,7 +74,8 @@ module Rigor
               method_catalog: @catalog, budget_exceeded: @budget_exceeded,
               class_to_gem: @class_to_gem,
               budget_overrun_strategy: dependencies.budget_overrun_strategy,
-              gem_modes: @gem_modes, refinements: @refinements
+              gem_modes: @gem_modes, refinements: @refinements, bound_constants: @bound_constants,
+              bound_segments: @bound_segments
             )
           end
         end

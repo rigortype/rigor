@@ -283,3 +283,34 @@ way B のパイロット後、`lib/alba/type.rb` 以外の**小〜中サイズ 9
    upstream で確認する価値（メソッドのみ precedence があり ivar に無い、という非対称性の文書化）。
 7. **`class << self` 内 attr cast の誤生成**（§7a）— rbs-inline 側の報告候補（`self.@*` / 
    `def self.*` へのスコープ解決）。
+
+---
+
+## 9. 残存 `-> untyped` の体系的考察と `-> void` 判定規範 — 決定論的生成・SKILL 経験則への反映（主発見 6）
+
+2026-10-12 の差分最小化リファクタリングにおいて、手書き `sig/` プロジェクトに残る `-> untyped` を網羅的に精査した。
+「どこまでを型付けし、どこを `-> void` に倒し、どこを意図的に `-> untyped` のまま残すべきか」の境界線が完全に言語化されたため、Rigor の決定論的生成エンジン（`sig-gen` / `sig-refine`、ADR-122）およびエージェント向け SKILL（`rigor-sig-refine`）の経験則として記録する。
+
+### 9a. 3 つの残存 `-> untyped` 分類
+
+| 分類 | 代表例 | 理由と意味論 | `-> void` 化の可否 |
+| :--- | :--- | :--- | :---: |
+| **分類 1: ユーザーの任意ドメインデータ / 属性値** | `Resource#object`, `Layout#object`<br>`Association#object_from`<br>`fetch_attribute*`<br>`ConditionalAttribute#second_object`<br>`Type#convert`, `TypedAttribute#value`<br>`Resource#__send__` | ユーザーがシリアライズ対象として渡す PORO / ActiveRecord / Hash や、評価された属性値そのもの。非ジェネリックなライブラリ設計において必然的に `untyped`（または `top`）となる。呼び出し側がこの戻り値を受け取って JSON ハッシュに格納するため値を返さなければならない。 | ❌ **絶対不可**<br>（戻り値が使われるため、`void` にすると `void-value-used` 違反となる） |
+| **分類 2: コールバック・属性定義ブロック引数** | `attribute` / `assign_attributes_with_types` の `?{ (untyped) -> untyped }`<br>`type attribute = ... ^(...) -> untyped`<br>`type instance_proc = ... -> untyped` | `attribute :name do \|u\| ... end` のブロック戻り値。ブロックの評価結果を Alba が受け取ってシリアライズ値とするため、ブロックの戻り値は「任意の型を許容する」という意味の `-> untyped` でなければならない。 | ❌ **絶対不可**<br>（ブロック戻り値を `-> void` にすると「呼び出し側が結果を捨てる」契約になり偽となる） |
+| **分類 3: Steep の型推論制約・偽陽性回避のエスケープ弁** | `Alba.resolved_default_superclass` (実態は `Class`)<br>`Resource#transform_key` (実態は `Symbol \| String`)<br>`Resource#dup` / `transform_keys!` (実態は `self`) | 実装上は具体的な型を返すが、型をつけると Steep が偽陽性を報告する箇所:<br>・`Object.const_get` の戻り値が Steep で `Class` にナローイングされない（`MethodBodyTypeMismatch`）<br>・`key_type` が `nil` を含むため、キー変換メソッドに型をつけると `hash[key]` で `nil` キー警告が出る（`ArgumentTypeMismatch`）<br>・`dup.class_eval` 内のブロックコンテキストで `self` が特異メソッドを認識しない（`NoMethod`） | ❌ **不可**<br>（ダウンストリームの Steep 検証をグリーンに維持するための意図的境界） |
+
+### 9b. `-> void` に置き換えるべき厳密な判定規範
+
+`-> untyped` を `-> void` に置き換えるのは、以下の条件を満たす場合に限られる:
+1. **呼び出し側が戻り値を破棄する**: 式として戻り値が代入・消費されず、純粋に副作用目的で呼ばれる。
+2. **フックメソッド**: `included`, `extended`, `inherited` 等の言語仕様上のフック（戻り値は Ruby 処理系によって捨てられる）。
+3. **セッターメソッド**: `def name=(val)` 構文。Ruby では構文上 `obj.name = x` は常に `x` を評価するため、メソッド本体の末尾式（内部の代入や `reset_transform_keys` などの副作用ヘルパー呼出）の戻り値型が漏れないよう `void` に正規化する（ADR-122 WD3）。
+4. **コマンドメソッド**: 登録、初期化、エラーハンドリング、可視性変更など（`reset!`, `register_default_types`, `set_key_and_attribute_body_from`, `handle_error`, `private`）。
+
+### 9c. 差分最小化（Minimal Diff）原則の実践成果
+
+パイロット一括移行時に発生した 12ファイル479行の差分を、本知見に基づいて見直した:
+- 実質的な型改善がない 6 ファイル（`constants`, `default_inflector`, `deprecation`, `nested_attribute`, `typed_attribute`, `version`）は完全に HEAD へリバート。
+- 局所的な型付けが可能なファイル（`association`, `conditional_attribute`, `layout`, `type`）は 1〜4 行の最小限の差分のみを適用。
+- 差分は **6ファイル80行** に圧縮され、Steep (`No type error detected. 🫖`)、Rigor (0 errors)、テスト (281 runs / 0 failures) すべてグリーンを維持した。
+手書き RBS を持つ既存ライブラリに対するシグネチャ改善は、この「最小差分原則」を徹底することで初めて upstream に受け入れ可能な品質となる。

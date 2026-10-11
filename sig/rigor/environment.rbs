@@ -80,6 +80,7 @@ module Rigor
       def class_ordering: (String | Symbol lhs, String | Symbol rhs) -> ordering
       def ancestor_names_for: (String | Symbol class_name) -> Array[String]
       def singleton_extended_module_names: (String | Symbol class_name) -> Array[String]
+      def singleton_ancestors_for: (String | Symbol class_name) -> Array[[:singleton | :instance, String]]
       def constant_type: (String name) -> Type::t?
       def constant_names: () -> Array[String]
       def each_known_class_name: () { (String name) -> void } -> void

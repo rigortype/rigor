@@ -2321,6 +2321,39 @@ module Rigor
         [].freeze
       end
 
+      # Issue #1752 — the lookup of `class_name`'s class object as RBS declares it, the singleton twin of
+      # {#ancestor_names_for}: `[:singleton, name]` for each singleton class on it (`C`'s, then each superclass's)
+      # and `[:instance, name]` for each module or class whose instance methods it reaches (the declared `extend`s,
+      # then `Class`, `Module`, `Object`, `Kernel` and `BasicObject` for a class, `Module` onwards for a module), in
+      # lookup order. A refinement of `Object` or `Module` answers a call on a class object through the second kind.
+      #
+      # Marked as an internal demand, as {#ancestor_names_for} is (issue #696). Memoised per name: the environment is
+      # immutable for the loader's lifetime.
+      #
+      # @return `::`-stripped pairs, or `[]` for an unknown class and on any RBS build error.
+      def singleton_ancestors_for(class_name)
+        key = class_name.to_s.delete_prefix("::")
+        memo = (@state[:singleton_ancestors] ||= {})
+        return memo[key] if memo.key?(key)
+
+        memo[key] = build_singleton_ancestors(key)
+      end
+
+      def build_singleton_ancestors(key)
+        during_internal_demand do
+          definition = singleton_definition(key)
+          next [].freeze if definition.nil?
+
+          definition.ancestors.ancestors.map do |ancestor|
+            kind = ancestor.is_a?(::RBS::Definition::Ancestor::Singleton) ? :singleton : :instance
+            [kind, ancestor.name.to_s.delete_prefix("::")].freeze
+          end.uniq.freeze
+        end
+      rescue ::RBS::BaseError, StandardError
+        [].freeze
+      end
+      private :build_singleton_ancestors
+
       # @return the class method on `class_name`. For example,
       #   `singleton_method(class_name: "Integer", method_name: :sqrt)` returns the definition for
       #   `Integer.sqrt`, while `singleton_method(class_name: "Foo", method_name: :new)` returns Class#new

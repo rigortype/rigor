@@ -89,6 +89,14 @@ array. Line queries add `line_enumerations` metadata with the
 shown and total expression counts. An exact position is the same
 query the editor integration answers on hover.
 
+Inside a `rescue` or `ensure` clause, `type-of` and hover can
+disagree with `rigor check`. `check` reads a variable that the
+`begin` body assigns as untyped there, because the clause may run
+after the body raised partway through. `type-of` shows the value
+the variable had before the `begin`. In
+`conn = nil; begin; conn = open_conn; work; rescue; conn.close; end`,
+`type-of` reports `conn` as `nil` and `check` reports nothing.
+
 ## `rigor trace` — watch the inference happen
 
 Where `annotate` and `type-of` show the *answer*, `rigor trace

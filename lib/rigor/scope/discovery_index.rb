@@ -238,6 +238,14 @@ module Rigor
       # present. Not a constant character, so no class can be named it.
       ENVELOPE_PROJECT_WIDE = "<project-wide>"
 
+      # ADR-121 WD7 (issues #1796, #1799) — the wildcard of `discovered_refinements`, standing for what the walk could
+      # not read. As a refined-class key it is a class the walk cannot name (`refine(k)`, `refine(self)`); as a method
+      # key, names a refine body defines that the walk cannot enumerate (`import_methods`, a computed
+      # `define_method`); as a refining module, a module the walk cannot name (a `refine` in an instance method,
+      # which any module extending it may run). `{"*" => {"*" => [M]}}` makes `M` opaque: some `refine` of `M` is
+      # unreadable. No constant can be named `*`, and method keys are Symbols, so neither axis collides.
+      REFINEMENT_WILDCARD = "*"
+
       # The shared all-empty index `Scope.empty` (and every scope that never sees a seeding pass) points at — one
       # allocation per process.
       EMPTY = new(

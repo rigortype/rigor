@@ -7682,7 +7682,9 @@ module Rigor
       def literal_method_name(node)
         return nil unless node.is_a?(Prism::SymbolNode) || node.is_a?(Prism::StringNode)
 
-        node.unescaped&.to_sym
+        # nil for bytes no Symbol holds: `to_sym` would raise EncodingError (#1821).
+        name = node.unescaped
+        name.to_sym if name&.valid_encoding?
       end
 
       # Walks every file in `paths` (each path is parsed once with `Prism.parse_file`) and returns the unioned

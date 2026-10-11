@@ -46,6 +46,7 @@ members:
     - lib/rigor/inference/object_mixins.rb
     - lib/rigor/inference/pre_eval_constants.rb
     - lib/rigor/inference/refined_dispatch.rb
+    - lib/rigor/inference/refined_dispatch/class_object.rb
     - lib/rigor/inference/refined_dispatch/own_method.rb
     - lib/rigor/inference/singleton_hook_decline.rb
     - lib/rigor/protection/discovery_seed.rb
@@ -171,6 +172,7 @@ members:
     reads:
     - lib/rigor/analysis/incremental_session.rb
     - lib/rigor/analysis/runner.rb
+    - lib/rigor/inference/refined_dispatch/class_object.rb
     copies:
     - lib/rigor/analysis/runner.rb
     - lib/rigor/protection/discovery_seed.rb
@@ -196,6 +198,7 @@ members:
     - lib/rigor/analysis/check_rules/source_arity.rb
     - lib/rigor/analysis/runner.rb
     - lib/rigor/inference/definer_resolution.rb
+    - lib/rigor/inference/refined_dispatch/class_object.rb
     - lib/rigor/inference/refined_dispatch/own_method.rb
     - lib/rigor/scope/resolution_chain.rb
     copies:
@@ -209,6 +212,8 @@ members:
       - paired_copy
       lib/rigor/inference/definer_resolution.rb:
       - consults_contested
+      lib/rigor/inference/refined_dispatch/class_object.rb:
+      - existence
       lib/rigor/inference/refined_dispatch/own_method.rb:
       - existence
       lib/rigor/scope/resolution_chain.rb:
@@ -226,6 +231,7 @@ members:
     - lib/rigor/inference/last_line/implicit_self.rb
     - lib/rigor/inference/macro_block_self_type.rb
     - lib/rigor/inference/method_dispatcher/rbs_dispatch.rb
+    - lib/rigor/inference/refined_dispatch/class_object.rb
     - lib/rigor/inference/refined_dispatch/own_method.rb
     - lib/rigor/reflection/constant_ancestors.rb
     - lib/rigor/scope/resolution_chain.rb
@@ -290,6 +296,7 @@ members:
     - lib/rigor/inference/last_line/implicit_self.rb
     - lib/rigor/inference/macro_block_self_type.rb
     - lib/rigor/inference/method_dispatcher/rbs_dispatch.rb
+    - lib/rigor/inference/refined_dispatch/class_object.rb
     - lib/rigor/inference/singleton_hook_decline.rb
     - lib/rigor/scope/resolution_chain.rb
     - lib/rigor/scope/resolution_chain/relevance.rb

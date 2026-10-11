@@ -1101,6 +1101,18 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
       )
     end
 
+    # R3-M1: a parameter's default runs in the method's body, so a `:refine` default in a plain class's method is data
+    # and makes no `using` opaque. Ruby 4.0.5 prints `:refine` and `"X"`, and raises `NoMethodError` for `"x".nope`.
+    it "keeps checks and types where a plain class's parameter defaults name refine" do
+      write("lib/search.rb", "class Search\n  def initialize(mode = :refine) = @mode = mode\n  " \
+                             "def self.build(kind = :refine) = new(kind)\nend\np Search.build\n")
+      write("lib/u.rb", "module Shout\n  refine(String) { def shout = :s }\nend\nusing Shout\n" \
+                        "Rigor.dump_type(\"x\".upcase)\n\"x\".nope\n")
+
+      rows = diagnostics.map { |d| [File.basename(d.path.to_s), d.line, d.qualified_rule] }.sort
+      expect(rows).to eq([["u.rb", 5, "dump.type"], ["u.rb", 6, "call.undefined-method"]])
+    end
+
     # R2-S3: `call.possible-nil-receiver`, `def.method-visibility-mismatch` and `flow.always-raises` ask the refinement
     # predicate too. Ruby 4.0.5 prints `:nil_up`, `:public_secret` and `:no_raise` under a `using` of the module (read
     # from outside the analysed paths or from the project alike), and raises for each call in `plain.rb`.

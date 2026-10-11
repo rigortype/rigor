@@ -417,6 +417,17 @@ RSpec.describe Rigor::Inference::ScopeIndexer, ".refine_census" do
     "a :refine Symbol in a plain class's method" => [
       "class Controller\n  def action_name = :refine\nend\n", %i[data], {}
     ],
+    # R3-M1: a parameter's default runs in the method's body, a superclass expression where `class` is. Ruby 4.0.5
+    # prints `:refine` for `Search.build`'s `@mode`, `M::Base` for `M::C.superclass` and `:refine` for `M.dflt`.
+    "a :refine default in a plain class's method parameters" => [
+      "class Search\n  def initialize(mode = :refine) = @mode = mode\n  " \
+      "def self.build(kind = :refine) = new(kind)\nend\n",
+      %i[data data], {}
+    ],
+    "a :refine literal in a superclass expression and a module's method parameter" => [
+      "module M\n  class C < Base.with(:refine)\n  end\n  def self.dflt(m = :refine) = m\nend\n",
+      %i[literal literal], { any => { any => ["M"] } }
+    ],
     "a refine in a plain class's methods" => [
       "class Query\n  def refine(extra) = yield(extra)\n  def narrowed = refine(1) { |q| q }\n  " \
       "def self.setup = refine(String) { def x = 1 }\nend\n",

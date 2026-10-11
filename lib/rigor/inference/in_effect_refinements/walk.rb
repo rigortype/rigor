@@ -55,6 +55,8 @@ module Rigor
         def walked_body?(node, prefix, body, in_def, context)
           case node
           when Prism::ClassNode, Prism::ModuleNode
+            # A superclass expression runs where the `class` keyword is, a parameter's default in the method's body.
+            walk(node.superclass, prefix, body, in_def, context) if node.is_a?(Prism::ClassNode) && node.superclass
             inner = Source::ConstantPath.declaration_prefix(prefix, node.constant_path) || prefix
             within_nesting(node) do
               walk_children(node.body, inner, span_of(node), false, declaration_context(node, inner))
@@ -64,7 +66,9 @@ module Rigor
             walk_children(node.body, prefix, span_of(node), false,
                           RefineSelf.singleton_class_body(context, node.expression.is_a?(Prism::SelfNode)))
           when Prism::DefNode
-            walk_children(node.body, prefix, body, true, def_context(node, context))
+            method_context = def_context(node, context)
+            walk_children(node.parameters, prefix, body, true, method_context)
+            walk_children(node.body, prefix, body, true, method_context)
           else
             return false
           end

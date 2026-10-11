@@ -188,22 +188,36 @@ module Rigor
       # refinement first, as any level is; past that, the mixin may define the name, so a refinement further up the
       # walk may or may not win and the answer is {UNKNOWN}, never the replaced method's. ADR-121 WD7: a level an
       # in-effect module has a names-wildcard row for (`unread`) may define the name too, so it answers {UNKNOWN}.
+      #
+      # Issue #1752 — on a class object's walk a singleton level that only an entry no table names may answer
+      # (`:continue_unsure`) makes a refinement reached past it {UNKNOWN}: that entry may define the name.
       def walk(scope, levels, method_name, targets, unread)
-        levels.each_with_index do |(level_class, entries, mixed), index|
-          return UNKNOWN if level_class && unread.key?(level_class)
+        unsure = false
+        levels.each_index do |index|
+          answer = level_answer(scope, levels, index, method_name, [targets, unread])
+          next unsure = true if answer == :continue_unsure
+          next if answer == :continue
 
-          refining = level_class && targets[level_class]
-          return Winner.new(module_name: refining, refined_class: level_class) if refining
-          return targeted_after?(levels, index, targets, unread) ? UNKNOWN : nil if mixed
-
-          answer = walk_level(scope, entries, level_class, method_name, [targets, unread])
-          return answer unless answer == :continue
+          return unsure && answer.is_a?(Winner) ? UNKNOWN : answer
         end
         nil
       end
 
-      def walk_level(scope, entries, level_class, method_name, (targets, unread))
-        return ClassObject.walk_level(scope, entries, method_name, targets, unread) if level_class.is_a?(SingletonClass)
+      def level_answer(scope, levels, index, method_name, (targets, unread))
+        level_class, entries, mixed, every = levels[index]
+        return UNKNOWN if level_class && unread.key?(level_class)
+
+        refining = level_class && targets[level_class]
+        return Winner.new(module_name: refining, refined_class: level_class) if refining
+        return targeted_after?(levels, index, targets, unread) ? UNKNOWN : nil if mixed
+
+        walk_level(scope, [entries, every], level_class, method_name, [targets, unread])
+      end
+
+      def walk_level(scope, (entries, every), level_class, method_name, (targets, unread))
+        if level_class.is_a?(SingletonClass)
+          return ClassObject.walk_level(scope, every || entries, method_name, targets, unread)
+        end
 
         walk_entries(scope, entries, level_class, method_name, targets, unread)
       end

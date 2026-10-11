@@ -74,6 +74,8 @@ module Rigor
         end
 
         def singleton_level(scope, name)
+          return nil if instance_unreadable?(scope, name)
+
           own = SingletonClass.new(name)
           return [own, [own], false] unless singleton_mixin?(scope, name)
 
@@ -131,6 +133,7 @@ module Rigor
           chain.level_count.times do |index|
             level_class = chain.level_classes[index]
             return splice_external(scope, out, chain.level_entries(index)) if level_class.nil?
+            return nil if instance_unreadable?(scope, level_class)
 
             own = SingletonClass.new(level_class)
             every = chain.level_entries(index).map { |entry| level_entry(scope, entry, own) }
@@ -142,6 +145,15 @@ module Rigor
 
         # A chain cut at its limit, or holding a mixin the tables cannot name.
         def unreadable?(chain) = chain.truncated? || chain.wildcard_mixin?
+
+        # Is `name`'s instance chain unreadable? A mixin the tables cannot name there includes the one an
+        # `included` hook makes (`base.extend(ClassMethods)`, `base.singleton_class.include(CM)`), which installs
+        # singleton methods on `name` that its singleton chain never records.
+        def instance_unreadable?(scope, name)
+          chain = Scope::ResolutionChain.for(scope, name, :instance, :methods)
+          chain.record(scope) if Analysis::DependencyRecorder.active?
+          unreadable?(chain)
+        end
 
         def level_entry(scope, entry, own)
           return own if !entry.external? && entry.side == :singleton && entry.name == own.of
@@ -192,8 +204,7 @@ module Rigor
           Analysis::DependencyRecorder.read_last_segment(:class, name) if Analysis::DependencyRecorder.active?
           return true if scope.discovered_extends.key?(name)
 
-          scope.discovered_classes.key?(name) &&
-            Scope::ResolutionChain.for(scope, name, :singleton, :methods).wildcard_mixin?
+          Scope::ResolutionChain.for(scope, name, :singleton, :methods).wildcard_mixin?
         end
 
         # Does the singleton class of `name` define `method_name` itself: a singleton method the project writes in
@@ -208,8 +219,10 @@ module Rigor
         end
 
         # A singleton `def` is the class's own unless it is the def a module the class extends holds, which the extends
-        # fold copied ({.fold_copy?}). A singleton name without a node of its own (`attr_reader` in `class << self`,
-        # `define_singleton_method`) counts when the class's envelope table records it, which the fold never writes.
+        # fold copied ({.fold_copy?}). A singleton name without a node of its own (`attr_reader` or `define_method` in
+        # `class << self`) counts when the existence table holds it and the class's envelope table records it, which
+        # the fold never writes. A `define_singleton_method` in the body records only the opaque envelope entry, so it
+        # is no definer here; the typed arm reads that entry as a rewritten singleton name ({.rewritten?}).
         def own_singleton_definer?(scope, name, method_name)
           node = scope.singleton_def_for(name, method_name)
           return true if node && !fold_copy?(scope, name, method_name)
@@ -239,29 +252,52 @@ module Rigor
             node.location.end_offset == other.location.end_offset && node.slice == other.slice
         end
 
-        # The typed arm's answer at a singleton level: {Winner}, {UNKNOWN}, nil (the class object's own lookup
-        # answers) or `:continue`. The tables record `class << self; prepend M` (and `singleton_class.prepend(M)`) as
+        # The typed arm's answer at a singleton level (`entries` is every entry, an unnamed one kept as its candidate
+        # names): {Winner}, {UNKNOWN}, nil (the class object's own lookup answers), `:continue`, or `:continue_unsure`
+        # when only an unnamed entry may answer, so a refinement the walk reaches later is {UNKNOWN}
+        # (`RefinedDispatch.walk`). The tables record `class << self; prepend M` (and `singleton_class.prepend(M)`) as
         # an `extend`, so a module on the level may sit ahead of the singleton class or of another module: one entry
         # that answers decides, several that answer decide only when none of them is refined.
         def walk_level(scope, entries, method_name, targets, unread)
           answers = entries.filter_map { |entry| entry_answer(scope, entry, method_name, targets, unread) }
           return :continue if answers.empty?
-          return answers.first.answer if answers.size == 1
 
-          answers.all? { |answer| answer.answer.nil? } ? nil : UNKNOWN
+          known = answers.reject { |answer| answer == UNNAMED }
+          return :continue_unsure if known.empty?
+          return known.first.answer if answers.size == 1
+
+          known.all? { |answer| answer.answer.nil? } ? nil : UNKNOWN
         end
 
         Answer = Data.define(:answer)
-        private_constant :Answer
+        # An entry no table names (an `extend` of a module from outside the analysed paths): it may define the name.
+        UNNAMED = Answer.new(:unnamed)
+        private_constant :Answer, :UNNAMED
 
         def entry_answer(scope, entry, method_name, targets, unread)
-          unless entry.is_a?(SingletonClass)
+          if entry.is_a?(Array)
+            refined = entry.any? { |candidate| targets.key?(candidate) || unread.key?(candidate) }
+            return refined ? Answer.new(UNKNOWN) : UNNAMED
+          end
+
+          if entry.is_a?(SingletonClass)
+            return Answer.new(UNKNOWN) if rewritten?(scope, entry.of, method_name)
+          else
             return Answer.new(UNKNOWN) if unread.key?(entry)
 
             refining = targets[entry]
             return Answer.new(Winner.new(module_name: refining, refined_class: entry)) if refining
           end
           Answer.new(nil) if RefinedDispatch.defines?(scope, entry, method_name)
+        end
+
+        # Does the project rewrite `name`'s singleton methods in a way the walk cannot read: the class's dynamic mark
+        # (a `class_eval`, a computed definer, a `send`), or an opaque envelope entry for the singleton name (a
+        # `define_singleton_method`, a `def Const.x` written outside `name`'s body, an alias or a wrapping macro)?
+        def rewritten?(scope, name, method_name)
+          bucket = scope.parameter_envelopes_of(name)
+          bucket.key?(Scope::DiscoveryIndex::ENVELOPE_DYNAMIC_MARK) ||
+            Source::ParameterEnvelope.opaque?(bucket[[:singleton, method_name.to_sym]])
         end
 
         # Every class and module whose refinements a call on the class object `class_name` may reach, for

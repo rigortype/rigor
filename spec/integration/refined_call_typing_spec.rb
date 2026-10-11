@@ -61,6 +61,48 @@ RSpec.describe "Typing calls through Ruby refinements (#1664)", type: :runner do
     RUBY
   end
 
+  let(:singleton_rewrites) do
+    <<~RUBY
+      module RO
+        refine(Object) { def x = :o }
+      end
+      class W1
+        define_singleton_method(:x) { 1 }
+      end
+      class W2; end
+      def W2.x = 2
+      class W3
+        singleton_class.class_eval { def x = 3 }
+      end
+      class W4
+        singleton_class.send(:define_method, :x) { 4 }
+      end
+      class W5; end
+      W5.define_singleton_method(:x) { 5 }
+      module M6; def x = 6; end
+      module M7; def x = 7; end
+      module M8; def x = 8; end
+      class W6; end
+      W6.singleton_class.prepend(M6)
+      class W7; end
+      W7.singleton_class.include(M7)
+      class W8; end
+      W8.singleton_class.send(:include, M8)
+      module M9; def x = 9; end
+      Integer.singleton_class.prepend(M9)
+      using RO
+      Rigor.dump_type(W1.x)
+      Rigor.dump_type(W2.x)
+      Rigor.dump_type(W3.x)
+      Rigor.dump_type(W4.x)
+      Rigor.dump_type(W5.x)
+      Rigor.dump_type(W6.x)
+      Rigor.dump_type(W7.x)
+      Rigor.dump_type(W8.x)
+      Rigor.dump_type(Integer.x)
+    RUBY
+  end
+
   # `[rule, line, message]` for every diagnostic in `app.rb`.
   def rows(source, files: {})
     result = analyze(files: files.merge("app.rb" => source))
@@ -349,6 +391,70 @@ RSpec.describe "Typing calls through Ruby refinements (#1664)", type: :runner do
       Rigor.dump_type(String.ll)
       Rigor.dump_type(Integer.mm)
     RUBY
+  end
+
+  # An `included` hook's `base.extend` or `base.singleton_class.include` installs class methods the singleton chain
+  # never records, so the walk cannot read `User`'s, `K2`'s or the reopened `String`'s lookup. Ruby 4.0.5 prints
+  # `  users  `, `"users"`, `2` and `"strings"`: the hook's methods answer ahead of the refinement of `Object`, so no
+  # `center` is reported on its `Symbol`.
+  it "answers Dynamic[top] where an included hook may install the class object's method" do
+    dynamic = "dump_type: Dynamic[top]"
+    expect(rows(<<~RUBY)).to eq([["dump.type", 19, dynamic], ["dump.type", 20, dynamic], ["dump.type", 21, dynamic]])
+      module Naming
+        refine(Object) { def table_name = to_s.downcase.to_sym; def cm2 = :o }
+      end
+      module Persistence
+        def self.included(base) = base.extend(ClassMethods)
+        module ClassMethods
+          def table_name = "\#{name.downcase}s"
+        end
+      end
+      module Concern2
+        def self.included(base) = base.singleton_class.include(CM2)
+        module CM2; def cm2 = 2; end
+      end
+      class User; include Persistence; end
+      class K2; include Concern2; end
+      class String; include Persistence; end
+      using Naming
+      puts User.table_name.center(9)
+      Rigor.dump_type(User.table_name)
+      Rigor.dump_type(K2.cm2)
+      Rigor.dump_type(String.table_name)
+    RUBY
+  end
+
+  # Each class rewrites its singleton methods in a way the walk cannot read: a `define_singleton_method` in the body,
+  # a `def W2.x` outside it, `singleton_class.class_eval`, `singleton_class.send(:define_method, ...)`, a top-level
+  # `define_singleton_method`, and a module prepended or included into the singleton class (directly or through
+  # `send`), a core class's included. Ruby 4.0.5 prints `1` to `9`, the class's own methods, never the refinement's
+  # `:o`.
+  it "answers Dynamic[top] where the project rewrites the class object's singleton methods" do
+    expect(dumps(singleton_rewrites)).to eq(["Dynamic[top]"] * 9)
+  end
+
+  # `GemHelpers` lives outside the analysed paths, so the walk cannot tell whether it defines `d1` ahead of the
+  # refinement of `Object`. Ruby 4.0.5 prints `2`: `GemHelpers#d1` answers, so `+` is not reported on `:o`.
+  it "answers Dynamic[top] past a module from outside the analysed paths a class extends" do
+    result = analyze(
+      files: {
+        "outside/gem.rb" => "module GemHelpers; def d1 = 1; end\n",
+        "lib/app.rb" => <<~RUBY
+          require_relative "../outside/gem"
+          module RO
+            refine(Object) { def d1 = :o }
+          end
+          class K; extend GemHelpers; end
+          using RO
+          puts K.d1 + 1
+          Rigor.dump_type(K.d1)
+        RUBY
+      },
+      config: { "paths" => ["lib"] }
+    )
+    rows = result.diagnostics.map { |d| [d.qualified_rule, d.line, d.message] }
+
+    expect(rows).to eq([["dump.type", 8, "dump_type: Dynamic[top]"]])
   end
 
   it "answers Dynamic[top] for a refined name reached through send, &:name and respond_to?, with no finding" do

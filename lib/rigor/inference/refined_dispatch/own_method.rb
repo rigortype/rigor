@@ -254,7 +254,7 @@ module Rigor
             chain = Scope::ResolutionChain.for(scope, subclass, kind, :methods)
             chain.record(scope) if Analysis::DependencyRecorder.active?
             if chain.truncated? || chain.wildcard_mixin? || chain.level_count.zero? ||
-               (kind == :singleton && ClassObject.skipped_extend?(scope, subclass, ClassObject.level_names(chain, 0)))
+               (kind == :singleton && singleton_level_unreadable?(scope, subclass, chain))
               return true if raw.each_key.any? { |refined| module_name?(scope, refined) }
 
               next
@@ -262,6 +262,13 @@ module Rigor
             return true if chain.level_entries(0).any? { |entry| refined_entry?(entry, raw) }
           end
           false
+        end
+
+        # A subclass's singleton level is unreadable where it records an `extend` the chain skipped, or where its
+        # instance chain holds a mixin the tables cannot name, which an `included` hook can use to extend it.
+        def singleton_level_unreadable?(scope, subclass, chain)
+          ClassObject.skipped_extend?(scope, subclass, ClassObject.level_names(chain, 0)) ||
+            ClassObject.instance_unreadable?(scope, subclass)
         end
 
         def refined_entry?(entry, raw)
@@ -438,9 +445,10 @@ module Rigor
         end
 
         # The first project entry at or after `from` that defines `method_name` on its side, by a `def` or by another
-        # definer the existence table records (`attr_*`, `define_method`; `define_singleton_method` or an `attr_*` in
-        # `class << self` on a singleton entry). A singleton name the extends fold copied is asked past by
-        # `DefinerResolution` itself, so the module that wrote it answers at its own position.
+        # definer the existence table records (`attr_*`, `define_method`; an `attr_*` or `define_method` in
+        # `class << self` on a singleton entry, while a body's `define_singleton_method` records no existence entry
+        # and proves nothing). A singleton name the extends fold copied is asked past by `DefinerResolution` itself,
+        # so the module that wrote it answers at its own position.
         def definer_answer(scope, method_name)
           lambda do |chain, from|
             index = from - 1

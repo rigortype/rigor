@@ -3926,6 +3926,7 @@ module Rigor
           if methods_acc.mentions_refine? && methods_acc.refine_in?(location.start_offset, location.end_offset)
             node.rigor_each_child { |child| census_scan(child, qualified_prefix, methods_acc) }
           end
+          record_foreign_singleton_def(node, qualified_prefix, owner_prefix, methods_acc.at(node))
           unless def_owner_prefix&.empty? || defs_singleton == :unnameable ||
                  (singleton_cref && owner_prefix.empty?)
             singleton_def = in_singleton_class || defs_singleton
@@ -7096,6 +7097,7 @@ module Rigor
         return record_module_function(node, current_class, accumulator, in_singleton) if node.name == :module_function
 
         taint_opaque_eval(node, current_class, accumulator)
+        return if singleton_class_rewrite_tainted?(node, qualified_prefix, current_class, accumulator)
 
         kind, _arguments, via_send = mixin_call_view(node)
         return if kind.nil?
@@ -7106,6 +7108,33 @@ module Rigor
         return if !via_send && singleton_mixin_recorded?(node, kind, current_class, accumulator, in_singleton)
 
         effects.each { |owner, side| accumulator.taint(owner, side) }
+      end
+
+      # Issue #1752 — a call that rewrites a singleton class reached through `singleton_class` (`singleton_class.
+      # class_eval { def x }`, `singleton_class.send(:define_method, :x)`, `Const.singleton_class.prepend(M)`,
+      # `Const.singleton_class.send(:include, M)`) puts methods or modules on that singleton class that no edge
+      # records, so its singleton side is unpositioned: the owner is the enclosing class for a bare or `self.`
+      # receiver, else the constant. True when it tainted.
+      def singleton_class_rewrite_tainted?(node, qualified_prefix, current_class, accumulator)
+        receiver = node.receiver
+        return false unless receiver.is_a?(Prism::CallNode) && receiver.name == :singleton_class &&
+                            receiver.arguments.nil? && surface_rewriting_call?(node)
+
+        owner = singleton_class_owner(node, receiver.receiver, qualified_prefix, current_class)
+        return false if owner.nil?
+
+        accumulator.taint(owner, :extend)
+        true
+      end
+
+      def singleton_class_owner(node, object, qualified_prefix, current_class)
+        return current_class if object.nil? || object.is_a?(Prism::SelfNode)
+
+        rendered = Source::ConstantPath.qualified_name_or_nil(object)
+        return nil if rendered.nil?
+        return rendered if Source::ConstantPath.rooted?(object) || qualified_prefix.empty?
+
+        eval_constant_receiver_prefix(node, object, rendered, qualified_prefix).join("::")
       end
 
       # The bare `module_function` toggle: the module extends itself. A direct statement only.
@@ -7694,6 +7723,20 @@ module Rigor
           constant_receiver_candidates(receiver, qualified_prefix).each do |name|
             record_surface_mark(tables, name, Scope::DiscoveryIndex::ENVELOPE_DYNAMIC_MARK)
           end
+        end
+      end
+
+      # Issue #1752 — `def Const.x` whose receiver is not the lexical `self` (written at the top level or in another
+      # class's body) defines `Const`'s singleton method, which no table files under `Const`: its singleton name's
+      # envelope turns opaque, the evidence the refinement typer reads as a rewritten singleton name.
+      def record_foreign_singleton_def(node, qualified_prefix, owner_prefix, tables)
+        receiver = node.receiver
+        return unless receiver.is_a?(Prism::ConstantReadNode) || receiver.is_a?(Prism::ConstantPathNode)
+        return if def_receiver_targets_lexical_self?(receiver, owner_prefix)
+
+        constant_receiver_candidates(receiver, qualified_prefix).each do |name|
+          record_envelope(tables.envelopes, name, [:singleton, node.name], Source::ParameterEnvelope::OPAQUE)
+          contest_envelope(tables, name, [:singleton, node.name]) unless tables.certain
         end
       end
 

@@ -102,7 +102,8 @@ module Rigor
         source = File.read(file, mode: "r:bom|utf-8")
         # Prism parses the ORIGINAL bytes, so a `# -*- coding: -*-` file is read in its own encoding. Only the text the
         # line-wise regexps below see is scrubbed: a byte invalid in UTF-8 (a comment, `__END__` data, a non-UTF-8
-        # file) would make them raise. Scrubbing is byte-for-byte (`?` per bad byte), so Prism's line and byte-column positions still address it.
+        # file) would make them raise.
+        # Scrubbing is byte-for-byte (`?` per bad byte), so Prism's positions still address it.
         parse_result = Prism.parse(source, filepath: file, version: configuration.target_ruby)
         source = source.scrub { |bytes| "?" * bytes.bytesize } unless source.valid_encoding?
         return 1 if parse_errors?(parse_result, file)

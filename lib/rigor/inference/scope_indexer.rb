@@ -3925,6 +3925,7 @@ module Rigor
           end
           anonymous = record_call_node_methods(node, owner_prefix, in_singleton_class, methods_acc.at(node),
                                                source_path)
+          record_singleton_prepend(node, qualified_prefix, in_singleton_class, methods_acc.at(node))
           # Issue #1120 — a refine body's defs go to the refinement table and nowhere else.
           if (target = methods_acc.refine_target_of(node))
             return record_literal_target_refine(node, target, qualified_prefix, owner_prefix, methods_acc)
@@ -4392,13 +4393,41 @@ module Rigor
         return if def_node.body.nil?
 
         Source::NodeWalker.each(def_node.body) do |node|
+          if node.is_a?(Prism::SingletonClassNode)
+            record_singleton_body_prepends(node, qualified_prefix, tables)
+            next
+          end
           next unless node.is_a?(Prism::CallNode)
 
           if node.name == :extend
             record_object_extension(node, qualified_prefix, tables)
           elsif SURFACE_EVAL_CALLS.include?(node.name) || SURFACE_NAMING_CALLS.include?(node.name)
             record_body_rewrite(node, qualified_prefix, tables)
+          else
+            record_singleton_prepend(node, qualified_prefix, false, tables)
           end
+        end
+      end
+
+      # Issue #1820 — `obj.singleton_class.prepend(M)`, or `prepend M` in a `class << obj` body, puts `M` ahead of
+      # `obj`'s class even when the class already includes it (`prepend` re-inserts it; `extend` would not), so
+      # `M`'s refinement answers first for that object. `M` takes {Scope::DiscoveryIndex::ENVELOPE_OBJECT_EXTENDED_MARK},
+      # the mark an `extend` in a method body already leaves: an object of any class may carry its instance methods
+      # ahead of its class's own. `in_singleton_class` says the call sits in a `class << …` body.
+      def record_singleton_prepend(node, qualified_prefix, in_singleton_class, tables)
+        return unless node.name == :prepend
+
+        receiver = node.receiver
+        singleton = in_singleton_class && (receiver.nil? || receiver.is_a?(Prism::SelfNode))
+        singleton ||= receiver.is_a?(Prism::CallNode) && receiver.name == :singleton_class && receiver.arguments.nil?
+        record_object_extension(node, qualified_prefix, tables) if singleton
+      end
+
+      def record_singleton_body_prepends(node, qualified_prefix, tables)
+        return if node.body.nil?
+
+        Source::NodeWalker.each(node.body) do |inner|
+          record_singleton_prepend(inner, qualified_prefix, true, tables) if inner.is_a?(Prism::CallNode)
         end
       end
 

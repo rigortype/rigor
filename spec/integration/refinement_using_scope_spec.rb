@@ -774,6 +774,28 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
         expect(call_rows).to eq(controls(1..4))
       end
 
+      # Ruby 4.0.5 answers `:cmp` and `:kernel`: a `prepend` onto an object's singleton class puts the module ahead of
+      # the object's class even though the class already includes it, so its refinement answers first.
+      it "declines where code prepends a refined module the class holds to an object's singleton class" do
+        write("lib/prepends.rb", <<~RUBY)
+          module RC; refine(Comparable) { def ljust(a, b, c) = :cmp }; end
+          s = +"x"
+          s.singleton_class.prepend(Comparable)
+          class Wrap
+            def self.loud(obj)
+              class << obj
+                prepend Kernel
+              end
+              obj
+            end
+          end
+        RUBY
+        write("lib/use.rb", "using RC\nusing KernCenter\n\"x\".ljust(1, 2, 3)\n\"x\".center(1, 2, 3)\n")
+        write("lib/control.rb", "\"x\".ljust(1, 2, 3)\n\"x\".center(1, 2, 3)\n")
+
+        expect(call_rows).to eq(controls(1..2))
+      end
+
       # Ruby 4.0.5 answers `:base`: `Random#seed` runs on `Random::Base`, which RBS declares beside `Random` rather than
       # above it. CRuby registers `Random#seed` only inside `random.c`'s `#if 0` block for RDoc, which the catalogue
       # skips, so nothing proves `Random` defines it.

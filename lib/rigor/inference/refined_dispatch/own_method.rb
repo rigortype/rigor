@@ -89,16 +89,23 @@ module Rigor
         # still reach (critique F4): a project subclass of the class, or one whose own level mixes in a refined
         # module (a module already on the class's levels is prepended again by `prepend`); a class RBS declares as
         # a subclass; a module not on the levels, which `obj.extend` or a subclass's mixin can put ahead of the
-        # definer.
+        # definer; and a module on the levels that some code prepends to an object's singleton class.
         def refined_off_levels?(scope, class_name, levels, raw)
           return true if unplaced_target?(scope, raw) || subclass_refined?(scope, class_name, raw)
 
           on_levels = level_names(levels)
           raw.each_key.any? do |refined|
-            next false if on_levels.include?(refined)
+            next object_prepended?(scope, refined) if on_levels.include?(refined)
 
             module_name?(scope, refined) || rbs_subclass?(scope, refined, class_name)
           end
+        end
+
+        # A module some code `prepend`s to an object's singleton class (or `extend`s an object with in a method
+        # body), which puts it ahead of the object's class even where the class already includes it.
+        def object_prepended?(scope, name)
+          scope.discovered_parameter_envelopes[name]&.key?(Scope::DiscoveryIndex::ENVELOPE_OBJECT_EXTENDED_MARK) ||
+            false
         end
 
         # Is some in-effect row under a class no table declares by any spelling of it (the keys sharing its last

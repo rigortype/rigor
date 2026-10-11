@@ -312,6 +312,20 @@ RSpec.describe "Typing calls through Ruby refinements (#1664)", type: :runner do
     RUBY
   end
 
+  # ADR-121 WD7. Ruby 4.0.5 prints `"dm"`: `app.rb` requires `other.rb` first, so its `define_method` replaces the other
+  # file's `def`. The own file's bodiless definer ends the search for a body.
+  it "answers Dynamic[top] where the call's own file redefines a refined name without a body" do
+    other = "module M\n  refine(String) { def center(a) = 1 }\nend\n"
+    expect(dumps(<<~RUBY, files: { "other.rb" => other })).to eq(["Dynamic[top]"])
+      require_relative "other"
+      module M
+        refine(String) { define_method(:center) { |a| "dm" } }
+      end
+      using M
+      Rigor.dump_type("x".center(1))
+    RUBY
+  end
+
   # ADR-121 WD7. Ruby 4.0.5 prints `42`: the refinement of the included `Greet` imports `H#hi`, which wins over
   # `Greet#hi` where `Greet` sits in `Foo`'s lookup.
   it "answers Dynamic[top] where an included module a refine body may define any name on sits" do

@@ -40,11 +40,13 @@ module Rigor
         # in-effect refinements.
         def refinement_def_with_query(scope, module_name, class_name, method_name)
           own = scope.discovery.in_effect_refinements&.refinement_def(module_name, class_name, method_name)
+          return NO_DEF if own == RefineDefs::BODILESS
           return [own, nil] if own
 
           (scope.discovered_class_sources[module_name] || EMPTY).each do |path|
             query = DefNodeResolver.refinement_query(path)
             found = query&.refinement_def(module_name, class_name, method_name)
+            return NO_DEF if found == RefineDefs::BODILESS
             return [found, query] if found
           end
           NO_DEF

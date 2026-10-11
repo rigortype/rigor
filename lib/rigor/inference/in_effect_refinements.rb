@@ -122,7 +122,8 @@ module Rigor
 
       # Issue #1664 — the `Prism::DefNode` a `refine class_name do … end` body in this file defines `method_name` with,
       # for the refining module `module_name`, or nil. The last such `def` wins, as Ruby's method table keeps it. The
-      # refined class is matched by any name its spelling can denote, as the refinement table records it.
+      # refined class is matched by any name its spelling can denote, as the refinement table records it. A name whose
+      # last definer has no body answers `RefineDefs::BODILESS` (ADR-121 WD7).
       def refinement_def(module_name, class_name, method_name)
         build
         @refine_defs&.lookup(module_name, class_name, method_name)

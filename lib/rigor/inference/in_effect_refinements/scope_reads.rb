@@ -71,9 +71,9 @@ module Rigor
         #
         # ADR-121 WD7 — {UNDECLARED} when nothing declares `name` ({.declared_module?}), which drops it from a
         # `using`'s candidates (A1). A chain entry the project does not declare is dropped when it is a core or
-        # stdlib module, which refines nothing (CRuby ships no refinements); any other enters by its spelling, which
-        # {.opaque_module?} then rejects, so a module included from a gem or from a file outside the analysed paths
-        # may refine anything.
+        # stdlib module (the core and standard-library signatures the rbs gem ships declare no refinements); any
+        # other enters by its spelling, which {.opaque_module?} then rejects, so a module included from a gem or from
+        # a file outside the analysed paths may refine anything.
         #
         # ADR-46 — the answer reads include edges declared in other files, so it depends on every file that
         # declares a module on the chain, and on the existence of each one's name: a new file reopening `name`, or

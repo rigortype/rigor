@@ -66,7 +66,7 @@ RSpec.describe "Gem source inference over `refine` bodies (#1672)" do
 
   # ADR-121 WD7 — a module the project does not declare is opaque, a walked gem's included, so `"hi".nope` after
   # `using Shouty` declines too (it reported before). Flip the `nope` row back when gem modules whose source the walker
-  # read become known (the gem-refinement-transparency follow-up of #1796).
+  # read become known (#1814).
   it "resolves a gem refinement after `using`, and reports it before" do
     write("lib/app.rb", <<~RUBY)
       "early".shout

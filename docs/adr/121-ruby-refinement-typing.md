@@ -156,20 +156,26 @@ declaration is opaque.**
   (`Scope::DiscoveryIndex::REFINEMENT_WILDCARD`, `"*"`) on two independent axes: a names-wildcard
   `{X => {"*" => [M]}}` (the body may define names the walk cannot spell), a class-unknown row
   `{"*" => {name => [M]}}` (`refine(k)`, `refine(self)`, or a target a project constant write binds),
-  and a targets-wildcard `{"*" => {"*" => [M]}}` (a `refine` in a method, or reached through a
-  `:refine` literal such as `send(:refine, …)` or `alias_method :r, :refine`). As a module, `"*"` is
-  one the walk cannot name: a `refine` in an instance method runs on whatever module extends its
-  owner. `alias`, `alias_method`, `define_method` and `attr_*` names in a refine body are recorded. A
-  census spec checks that every `refine`-shaped node ends in exactly one outcome.
-- A module is opaque when the project does not declare it and it is not a core or stdlib module
-  (CRuby ships no refinements), or when a targets-wildcard row lists it or `"*"`. A gem's module is
+  and a targets-wildcard `{"*" => {"*" => [M]}}` (a `refine` in a method or a `define_method` body, or
+  reached through a `:refine` literal such as `send(:refine, …)` or `alias_method :r, :refine`). As a
+  module, `"*"` is one the walk cannot name: a `refine` in a module's instance method runs on whatever
+  module extends it, and one in a block may run under any `self` (a block at the top level, or one a DSL
+  `module_eval`s), unless the block's call keeps `self` (a call on a literal). In a plain class's methods
+  `refine` is the class's own method, as #1689 reads one in a class body. `alias`, `alias_method`,
+  `define_method` and `attr_*` names in a refine body are recorded, and a later definer of a name
+  replaces an earlier `def` of it. A census spec checks that every `refine`-shaped node ends in exactly
+  one outcome.
+- A module is opaque when the project does not declare it and it is not a core or stdlib module (the
+  core and standard-library signatures the rbs gem ships declare no refinements), or when a
+  targets-wildcard row lists it or `"*"`. A gem's module is
   opaque even when gem source inference read it, until that inference can show it saw every file
   declaring it.
 - Every declared candidate of a `using`'s spelling stays in the list, because which one Ruby's lookup
   finds can depend on load order; undeclared candidates leave, and a spelling with no declared
   candidate enters alone, opaque. An included module the project does not declare enters the list
   unless it is core or stdlib.
-- The checks decline every call, whatever the receiver, where an opaque module is in effect.
+- The checks decline every call, whatever the receiver, where an opaque module is in effect; the
+  union-receiver arm and `call.unresolved-toplevel` ask the same predicate.
 - The typed arm answers `Dynamic[top]` for every instance-receiver call in the span of an activation
   that puts an opaque module in effect; a class object falls through until singleton-side levels land.
   WD3's rule that the unknown marker answers `Dynamic` only where some refinement defines the name is
@@ -181,7 +187,10 @@ declaration is opaque.**
   never opaque, and one nothing declares matches no row, so it silences nothing.
 
 Limits it does not remove: a module reopened in a file outside the analysed paths or under
-`exclude:`, a module declared or reopened inside an eval string, and
+`exclude:`; an inner `using` candidate declared only outside the analysed paths (or by a
+`const_set`), which is dropped, so its refinements are unseen (treating every undeclared inner
+candidate as opaque would blanket every nested `using`); a module declared or reopened inside an eval
+string; a refine target bound by `||=` or `const_set` only in another file; and
 `TOPLEVEL_BINDING.eval("using N")`, which activates `N` to the end of the file.
 
 Consequence: under a `using` of a gem's module every instance call in the span is unchecked and

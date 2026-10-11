@@ -580,6 +580,42 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::Walker do
         expect(other.modules).to eq(Set.new)
       end
 
+      # Round-1 review of #1828 — a module `extend`ed into a module may call `refine` for the extender. Ruby 4.0.5
+      # prints `:ok` for `"x".foo` after `using Dslg` with `module Refiner; def refines_string(name) = refine(String)
+      # { define_method(name) { :ok } }; end; module Dslg; extend Refiner; refines_string :foo; end`. A helper the gem
+      # declares is read by the census, so only an extended module no gem file declares leaves the gem not read in
+      # full.
+      {
+        "an extend of a constant the gem does not declare" => "module Dslg\n  extend Refiner\nend\n",
+        "an extend of a constant path" => "module Dslg\n  extend Gem::Refiner\nend\n",
+        "an extend of an expression" => "module Dslg\n  extend(*HELPERS)\nend\n",
+        "an extend of one declared and one undeclared module" =>
+          "module Helper; end\nmodule Dslg\n  extend Helper, Refiner\nend\n",
+        "an explicit extend on a constant" => "Dslg.extend(Refiner)\n",
+        "an extend in a block" => "Module.new do\n  extend Refiner\nend\n",
+        "an extend in a method of a module" => "module Dslg\n  def self.setup = extend(Refiner)\nend\n"
+      }.each do |name, source|
+        it "reads #{name} as not read in full" do
+          expect(walk_files("lib/m.rb" => source).fully_read?).to be(false)
+        end
+      end
+
+      {
+        "an extend of a module the gem declares" => {
+          "lib/m.rb" => "module Helper; end\nmodule Dslg\n  extend Helper\nend\n"
+        },
+        "an extend of a module another file of the gem declares" => {
+          "lib/m.rb" => "module Dslg\n  extend Helper\nend\n", "lib/helper.rb" => "module Helper; end\n"
+        },
+        "an extend self" => { "lib/m.rb" => "module Dslg\n  extend self\nend\n" },
+        "an extend in a class body" => { "lib/m.rb" => "class Base\n  extend Forwardable\nend\n" },
+        "an extend on a variable" => { "lib/m.rb" => "def self.included(base) = base.extend(ClassMethods)\n" }
+      }.each do |name, files|
+        it "reads #{name} as read in full" do
+          expect(walk_files(files).fully_read?).to be(true)
+        end
+      end
+
       # The census the project walk runs reaches a gem file: a refine in a method and a `:refine` literal leave the
       # wildcard rows a project module would carry (see walker_walk_census_parity_spec for the full set of shapes).
       it "records the wildcard rows of a refine in a method and of a :refine literal" do

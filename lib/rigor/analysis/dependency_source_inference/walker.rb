@@ -52,7 +52,8 @@ module Rigor
         # holds the gem-relative path of each file the walk could not read in full (it did not parse, could not be
         # read, or the census raised on it), or the gem directory when the walk itself raised; none is reported to the
         # user, whose diagnostic stream is the project's. `mixes_modules` is true when the source may change which
-        # modules a module includes or prepends ({MixinScan}), which `using` activates along with the module.
+        # modules a module includes or prepends ({MixinScan}), which `using` activates along with the module, or
+        # extends a module no gem file declares, whose methods may call `refine` on the extender.
         class Outcome < Data.define(:catalog, :truncated, :refinements, :modules, :unread, :mixes_modules)
           def initialize(catalog:, truncated:, refinements: {}.freeze, modules: Set.new.freeze, unread: [].freeze,
                          mixes_modules: false)
@@ -75,7 +76,7 @@ module Rigor
         # name ({MixinScan#targets}), `gem_dir` makes `unread` paths gem-relative, and `files` holds the parsed files,
         # which the constant-alias rewrite reads again.
         Harvest = Struct.new(:catalog, :refinements, :root, :in_effect, :gem_dir, :modules, :unread, :mixes, :files,
-                             :targets) do
+                             :targets, :extends) do
           # {Inference::ScopeIndexer.module_refine_target} against this file's in-effect refinements.
           def refine_target_of(node)
             return nil if Inference::ScopeIndexer.refine_target(node).nil?
@@ -123,7 +124,7 @@ module Rigor
         #   the budget was reached. Methods of identical name on the same class with different kinds (rare;
         #   private API mostly) carry the kind that wins the per-class first walk.
         def walk(gem_dir:, roots:, budget: UNBOUNDED)
-          harvest = Harvest.new({}, {}, nil, nil, gem_dir.to_s, Set.new, [], false, [], Set.new)
+          harvest = Harvest.new({}, {}, nil, nil, gem_dir.to_s, Set.new, [], false, [], Set.new, [])
           truncated = false
           accepted_roots(roots).each do |root|
             break if truncated
@@ -134,7 +135,7 @@ module Rigor
           Outcome.new(catalog: harvest.catalog.freeze, truncated: truncated,
                       refinements: refinements,
                       modules: (harvest.modules | harvest.targets | refining_modules(refinements)).freeze,
-                      unread: harvest.unread.freeze, mixes_modules: harvest.mixes)
+                      unread: harvest.unread.freeze, mixes_modules: harvest.mixes || undeclared_extend?(harvest))
         end
 
         # Drops hard-excluded entries before any filesystem walk happens. Reasoning: we never want a gem's
@@ -196,6 +197,7 @@ module Rigor
           scan = MixinScan.scan(root)
           harvest.mixes ||= scan.site
           harvest.targets.merge(scan.targets)
+          harvest.extends.concat(scan.extends)
         end
 
         # ADR-121 WD7 (issue #1814) — the refinement table the file contributes, read by the census the project walk
@@ -252,6 +254,12 @@ module Rigor
         def const_set_name(call)
           name = call.name == :const_set && call.arguments&.arguments&.first
           name.unescaped if name.is_a?(Prism::SymbolNode) || name.is_a?(Prism::StringNode)
+        end
+
+        # Issue #1814 — does a file `extend` a module no gem file declares ({MixinScan#extends})? Its methods may call
+        # `refine` for the extender; one the gem declares is read by the census, which charges that `refine`.
+        def undeclared_extend?(harvest)
+          harvest.extends.any? { |names| names.nil? || names.none? { |name| harvest.modules.include?(name) } }
         end
 
         # The modules the rows of `table` name as refining, without the wildcard (a module the walk cannot name) and the

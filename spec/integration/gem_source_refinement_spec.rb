@@ -257,6 +257,22 @@ RSpec.describe "Gem source inference over `refine` bodies (#1672)" do
       expect(undefined_rows(gems: %w[shouty scg afg])).to eq(reads)
     end
 
+    # Round-1 review of #1828 — Ruby 4.0.5 prints `:ok`: the helper's `refine` runs for the module that extends it. The
+    # helper lives in a gem nobody opted in, so the census never sees it; a helper the gem declares is read.
+    it "stays opaque when the gem extends a module it does not declare, and known when it declares the helper" do
+      write_gem("dslg", "lib/dslg.rb" => "module Dslg\n  extend Refiner\n  refines_string :foo\nend\n")
+      write_gem("selfhelp", "lib/self_help.rb" => "module Helpers\n  def hi = 1\nend\nmodule SelfHelp\n  " \
+                                                  "extend Helpers\n  extend self\n  " \
+                                                  "refine(String) { def shout = upcase }\nend\n")
+      write("lib/app.rb", "using Shouty\n\"hi\".shout\n\"hi\".nope\n")
+      write("lib/other.rb", "using Dslg\n\"hi\".foo\n\"hi\".nope\n")
+      write("lib/another.rb", "using SelfHelp\n\"hi\".shout\n\"hi\".nope\n")
+
+      expect(undefined_rows(gems: %w[shouty dslg selfhelp])).to eq(
+        [["another.rb", 3, "nope"], ["app.rb", 3, "nope"]]
+      )
+    end
+
     # The control: a bare `include` in the body of `class << self` mixes into the singleton class, which `using` never
     # reads, so the gem stays known.
     it "stays known when only the body of class << self includes" do

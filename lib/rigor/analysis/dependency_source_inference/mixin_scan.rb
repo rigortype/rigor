@@ -24,13 +24,22 @@ module Rigor
       # `prepend_features`, by every spelling the lexical position can denote. A gem that mixes into a module another
       # gem declares is not read in full, and the module it mixes into is not either, whichever gem declared it
       # ({Index#fully_read_module?}).
+      #
+      # {#extends} lists the modules the file `extend`s outside a class body: each entry holds the candidate names of a
+      # constant argument, or nil for an argument that is no constant. A module `extend`ed into a module may call
+      # `refine` on the extender (`module Refiner; def refines_string = refine(String) { … }; end; module Dslg; extend
+      # Refiner; refines_string; end`, then `using Dslg` refines String on Ruby 4.0.5), so the walker reads the
+      # extender as not read in full unless the gem declares the extended module, whose `refine` the census then sees.
+      # `extend self` and an `extend` in a class body, which cannot be `using`'d, are not listed.
       class MixinScan
         MIXIN_CALLS = Set[:include, :prepend].freeze
         # The calls whose argument, not receiver, is the module mixed into.
         FEATURE_CALLS = Set[:append_features, :prepend_features].freeze
         MIXIN_SYMBOLS = Set["include", "prepend", "append_features", "prepend_features"].freeze
         MIXIN_WORD = /\b(?:include|prepend|append_features|prepend_features)\b/
-        private_constant :MIXIN_CALLS, :FEATURE_CALLS, :MIXIN_SYMBOLS, :MIXIN_WORD
+        # A file without one of these words has nothing to scan.
+        SCAN_WORD = /\b(?:include|prepend|append_features|prepend_features|extend)\b/
+        private_constant :MIXIN_CALLS, :FEATURE_CALLS, :MIXIN_SYMBOLS, :MIXIN_WORD, :SCAN_WORD
 
         # `prefix` is the lexical nesting, `in_class` whether `self` is a class here, `def_in_class` whether it is in a
         # method defined here (a method in `class << self` runs on the object whose singleton it is, not on the
@@ -39,17 +48,18 @@ module Rigor
         Scope = Struct.new(:prefix, :in_class, :def_in_class, :eval_targets)
         private_constant :Scope
 
-        attr_reader :site, :targets
+        attr_reader :site, :targets, :extends
 
         def self.scan(root)
           scan = new
-          scan.send(:walk, root, Scope.new([], false, false, [])) if MIXIN_WORD.match?(root.send(:source).source.b)
+          scan.send(:walk, root, Scope.new([], false, false, [])) if SCAN_WORD.match?(root.send(:source).source.b)
           scan
         end
 
         def initialize
           @site = false
           @targets = Set.new
+          @extends = []
         end
 
         private
@@ -90,9 +100,20 @@ module Rigor
         def inspect_call(node, scope)
           if MIXIN_CALLS.include?(node.name) || FEATURE_CALLS.include?(node.name)
             inspect_mixin_call(node, scope)
+          elsif node.name == :extend
+            note_extend(node, scope)
           elsif Inference::RefineCensus.string_literal_call?(node) && mixin_argument?(node)
             @site = true
             note_receiver(node, scope)
+          end
+        end
+
+        # `extend X` on `self` or on a constant, outside a class body.
+        def note_extend(node, scope)
+          return if scope.in_class || !(Inference::RefineCensus.self_call?(node) || constant?(node.receiver))
+
+          (node.arguments&.arguments || []).each do |argument|
+            @extends << (constant?(argument) ? candidates(argument, scope) : nil) unless argument.is_a?(Prism::SelfNode)
           end
         end
 

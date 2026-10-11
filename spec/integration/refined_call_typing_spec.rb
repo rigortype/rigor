@@ -194,7 +194,7 @@ RSpec.describe "Typing calls through Ruby refinements (#1664)", type: :runner do
     Rigor.dump_type(x)
     puts x.upcase
   RUBY
-  {
+  method_shapes = {
     "a module-body def after it in the file" => [<<~RUBY, {}],
       module M
         def self.setup = refine(String) { def yy = "s" }
@@ -213,8 +213,41 @@ RSpec.describe "Typing calls through Ruby refinements (#1664)", type: :runner do
     "a module-body def in a file searched last" => [consumer, { "a_setup.rb" => setup_method, "b_body.rb" => body }],
     "a module-body def in the consumer's file" => ["#{body}#{consumer}", { "m.rb" => setup_method }],
     "the setup in the consumer's file" => ["#{setup_method}#{consumer}", { "m.rb" => body }]
-  }.each do |shape, (source, files)|
-    it "types no call from a name a method creates, whatever else defines it (#{shape})" do
+  }
+
+  # Issue #1749. The same holds for an eval on a constant that several names denote (`M` in `module L`): it runs on one
+  # of them, which another file decides, and replaces or is replaced by a module-body `def` of the name. Ruby 4.0.5
+  # prints `"s"` and `S` when the eval runs after the body and `1` when it runs first, in one file and across files, so
+  # no body of the name is typed in either order.
+  center_body = <<~RUBY
+    module M
+      refine(String) { def center = 1 }
+    end
+  RUBY
+  center_eval = <<~RUBY
+    module M; end
+    module L
+      M.module_eval { refine(String) { def center = "s" } }
+    end
+  RUBY
+  center_use = <<~RUBY
+    using M
+    x = "x".center
+    Rigor.dump_type(x)
+    puts x.upcase
+  RUBY
+  eval_shapes = {
+    "an eval after the module-body def in the file" => ["#{center_body}#{center_eval}#{center_use}", {}],
+    "an eval before the module-body def in the file" => ["#{center_eval}#{center_body}#{center_use}", {}],
+    "an eval in a file searched after the body's" =>
+      [center_use, { "a_body.rb" => center_body, "b_eval.rb" => center_eval }],
+    "an eval in a file searched before the body's" =>
+      [center_use, { "a_eval.rb" => center_eval, "b_body.rb" => center_body }],
+    "an eval in the consumer's file" => ["#{center_eval}#{center_use}", { "m.rb" => center_body }]
+  }
+
+  method_shapes.merge(eval_shapes).each do |shape, (source, files)|
+    it "types no call from a name whose refinement the walk cannot attribute (#{shape})" do
       expect(rows(source, files: files).map { |rule, _line, message| [rule, message] })
         .to eq([["dump.type", "dump_type: Dynamic[top]"]])
     end

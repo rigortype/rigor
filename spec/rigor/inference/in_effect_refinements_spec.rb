@@ -196,11 +196,11 @@ RSpec.describe Rigor::Inference::InEffectRefinements do
       end
 
       # `using` fixes a module's refined classes when it runs, so a refinement a method creates is in effect only for a
-      # `using` after the call, an order this walk cannot decide: the names are recorded for the module as created and
+      # `using` after the call, an order this walk cannot decide: the names are recorded for the module as undecided and
       # without a body, where a refine in the module's body keeps its `def`. A module-body `def` of the same name,
       # before or after it, does not replace the record (`M.setup` runs after the module body and replaces `yy`).
-      it "records the block's names for the module as created, which a module-body def does not replace" do
-        created = described_class::RefineDefs::CREATED
+      it "records the block's names for the module as undecided, which a module-body def does not replace" do
+        undecided = described_class::RefineDefs::UNDECIDED
         in_body = described_class.new(Prism.parse("module Shout\n  refine(String) { def yy = 1 }\nend\n").value)
         before = described_class.new(Prism.parse(<<~RUBY).value)
           module Shout
@@ -215,12 +215,13 @@ RSpec.describe Rigor::Inference::InEffectRefinements do
           end
         RUBY
 
-        expect(refinements.refinement_def("Shout", "String", :yy)).to be(created)
-        expect(refinements.refinement_def("Shout", "Symbol", :zz)).to be(created)
+        expect(refinements.refinement_def("Shout", "String", :yy)).to be(undecided)
+        expect(refinements.refinement_def("Shout", "Symbol", :zz)).to be(undecided)
         expect(refinements.refinement_def("Other", "String", :yy)).to be_nil
         expect(refinements.refinement_def("Widget", "String", :yy)).to be_nil
         expect(in_body.refinement_def("Shout", "String", :yy)).to be_a(Prism::DefNode)
-        expect([before, after].map { |query| query.refinement_def("Shout", "String", :yy) }).to eq([created, created])
+        expect([before, after].map { |query| query.refinement_def("Shout", "String", :yy) })
+          .to eq([undecided, undecided])
       end
     end
 

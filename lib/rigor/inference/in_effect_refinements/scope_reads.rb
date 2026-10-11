@@ -29,11 +29,11 @@ module Rigor
         # `module_name`, or nil where none can be read: this file's own refine body first, else one in a file that
         # declares the module (`Scope#discovered_class_sources`), parsed once a run. A gem refinement, a module a
         # `Module.new` write names in another file, or an anonymous module answer nil, which the typed arm reads as
-        # an unreadable body (`Dynamic[top]`). Issue #1749 — so does a name a `refine` that runs inside a method
-        # defines, in this file or in any file that declares the module: the refinement is created when the method
-        # runs, which can replace a module-body `def` of the name wherever it is written, so no body of the name is
-        # read. The consumer's `refinement:<name>` edge covers an edit to that body
-        # (`Incremental.changed_refinement_names`).
+        # an unreadable body (`Dynamic[top]`). Issue #1749 — so does a name {RefineDefs::UNDECIDED} in this file or in
+        # any file that declares the module (a `refine` that runs inside a method, or an eval on a constant that
+        # several names denote): which refinement answers depends on an order and a module the walk cannot decide, and
+        # it can replace a module-body `def` of the name wherever it is written, so no body of the name is read. The
+        # consumer's `refinement:<name>` edge covers an edit to that body (`Incremental.changed_refinement_names`).
         def refinement_def(scope, module_name, class_name, method_name)
           refinement_def_with_query(scope, module_name, class_name, method_name).first
         end
@@ -45,7 +45,7 @@ module Rigor
           chosen = nil
           each_declaring_query(scope, module_name) do |query, foreign|
             found = query&.refinement_def(module_name, class_name, method_name)
-            return NO_DEF if found == RefineDefs::CREATED
+            return NO_DEF if found == RefineDefs::UNDECIDED
             next if found.nil? || chosen
             return NO_DEF if found == RefineDefs::BODILESS
 

@@ -214,6 +214,46 @@ def rescue_after_inner_ensure_reset
   end
 end
 
+# The arm of a `begin` a `retry` targets is not widened: the retry edge
+# already carries every scope the body raises from.
+def rescue_retried_counter
+  tries = 0
+  begin
+    tries += 1
+    Probe.flaky
+  rescue ArgumentError
+    assert_type("Integer", tries)
+    retry if tries < 3
+  end
+end
+
+# A `next` out of a widened `ensure` leaves with the plain binding.
+def ensure_next_in_loop(items)
+  items.map do |item|
+    seen = nil
+    begin
+      seen = item
+      Integer(item)
+    ensure
+      next seen if seen
+    end
+  end
+end
+
+# The one way the widening reports where the entry binding did not: a
+# widened variable narrows as any untyped value does, so testing it with
+# both `is_a?` and `nil?` leaves `nil` beside `Conn` for the next call.
+def rescue_widened_narrowing
+  x = Conn.new
+  begin
+    x = open_conn
+    work
+  rescue
+    if x.is_a?(Conn) then x.close elsif x.nil? then puts "nil" end
+    x.size # WIDENED-NIL
+  end
+end
+
 # --- Controls: an arm the body writes nothing for reads the entry
 # value, and still reports. ---
 

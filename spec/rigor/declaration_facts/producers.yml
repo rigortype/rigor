@@ -490,6 +490,7 @@ lib/rigor/inference/statement_evaluator.rb:
   computes: the scope a class, module or class << self body is evaluated in
   producers:
     Rigor::Inference::StatementEvaluator: grandfathered
+    Rigor::Inference::StatementEvaluator#collect_clause_names: stops a search for the local and instance variable names a begin body writes or a rescue or ensure clause mentions at a nested def, class, module or singleton class (#1231); it derives no declaration context
     Rigor::Inference::StatementEvaluator#eval_class_body: grandfathered
     Rigor::Inference::StatementEvaluator#evaluate: grandfathered
     Rigor::Inference::StatementEvaluator#forget_last_line_first?: grandfathered

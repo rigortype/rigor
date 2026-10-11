@@ -9,3 +9,4 @@ assertions:
   '6': 'true'
   '7': '1'
   '8': Dynamic[top]
+  '9': Integer

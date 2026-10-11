@@ -2591,7 +2591,7 @@ module Rigor
         # the rule is active or `record_self_calls:` opted in.
         index = nil
         self_call_record = with_self_call_recording(path) do
-          index = Inference::ScopeIndexer.index(parse_result.value, default_scope: scope)
+          index = Inference::ScopeIndexer.index(parse_result.value, default_scope: scope, widen_clauses: true)
         end
         self_call_misses = self_call_record ? self_call_record.calls : []
         diagnostics = rule_and_plugin_diagnostics(path, parse_result, scope, index, self_call_misses)

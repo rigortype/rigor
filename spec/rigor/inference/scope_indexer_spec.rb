@@ -18,6 +18,49 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
   end
 
   describe ".index" do
+    # Issue #1231 — only the check path asks for the rescue/ensure clause widening. Parameter inference and sig-gen
+    # read the index too, and an untyped argument in an arm would otherwise reach the callee's inferred parameter.
+    describe "widen_clauses:" do
+      let(:source) do
+        <<~RUBY
+          conn = nil
+          begin
+            conn = 1
+            work
+          rescue
+            conn
+          ensure
+            conn
+          end
+        RUBY
+      end
+
+      def clause_reads(widen_clauses)
+        program = parse(source)
+        idx = described_class.index(program, default_scope: default_scope, widen_clauses: widen_clauses)
+        reads = []
+        collect_reads(program, reads)
+        reads.map { |read| idx[read].local(:conn) }
+      end
+
+      def collect_reads(node, reads)
+        reads << node if node.is_a?(Prism::LocalVariableReadNode)
+        node.compact_child_nodes.each { |child| collect_reads(child, reads) }
+      end
+
+      it "records the clauses' widened entries when set" do
+        expect(clause_reads(true)).to eq([Rigor::Type::Combinator.untyped] * 2)
+      end
+
+      it "records the clauses' plain entries by default" do
+        expect(clause_reads(false)).to eq(
+          [Rigor::Type::Combinator.constant_of(nil), Rigor::Type::Combinator.union(
+            Rigor::Type::Combinator.constant_of(1), Rigor::Type::Combinator.constant_of(nil)
+          )]
+        )
+      end
+    end
+
     it "returns an identity-comparing Hash whose default is default_scope" do
       _, idx = index_for("1")
       expect(idx).to be_a(Hash)

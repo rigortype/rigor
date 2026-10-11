@@ -278,11 +278,15 @@ module Rigor
       #   a declined `class self::X`, a parse-error header), where `class_context` is empty without the code
       #   being at the top level. A `def` (or `class << self`) there runs under an untyped `self` instead of
       #   the top level's nil one, so its implicit-self calls answer `Dynamic` and no top-level rule fires.
+      # @param widen_clauses — issue #1231: when true (and a recorder is installed), a rescue or `ensure` clause
+      #   records its per-node entry scopes under {#widen_clause_entry}'s widening. The check path sets it; every
+      #   other reader of the index (parameter inference, sig-gen, the scanners) keeps the clause's plain entry.
       def initialize(scope:, tracer: nil, on_enter: nil, class_context: [].freeze, # rubocop:disable Metrics/ParameterLists
                      lexical_nesting: EMPTY_NESTING, converged_loop_recording: false, next_scope_sink: nil,
                      operand_scope: nil, in_operand: false, operand_recorder: nil, operand_types: nil,
-                     opaque_class: false)
+                     opaque_class: false, widen_clauses: false)
         @scope = scope
+        @widen_clauses = widen_clauses
         @opaque_class = opaque_class
         @tracer = tracer
         @on_enter = on_enter
@@ -1478,7 +1482,7 @@ module Rigor
         entry = edge ? forget_guard_if_rebinds(LastLine.forget_if_set(scope, node), node) : scope
         primary_type, primary_scope = eval_begin_primary_under(node, entry, edge: edge)
         rescue_chain = collect_rescue_chain_results(node.rescue_clause, rescue_entry_scope(node, entry),
-                                                    edge: edge, writes: edge ? nil : rescue_writes(node))
+                                                    edge: edge, writes: rescue_writes(node, edge))
 
         # B2.1 — retry-edge widening. When a `retry` in the rescue chain targets this `begin`, control re-enters the
         # primary body carrying every rebind made before the retry: the arm's (`rescue; tries += 1; retry; end`), and
@@ -1519,13 +1523,15 @@ module Rigor
       # for the next call to report. A name written inside a nested `ensure` clause, which also runs on the way out of
       # a raise, is covered by the same floor.
       #
-      # The names the clauses of `node` read from: the primary body's for a rescue clause.
-      def rescue_writes(node)
-        clause_writes([node.statements])
+      # The names the clauses of `node` read from: the primary body's for a rescue clause, none under a retry `edge`.
+      def rescue_writes(node, edge)
+        clause_writes([node.statements]) if node.rescue_clause && edge.nil? && widening_recorded?
       end
 
       # For the `ensure` clause: the writes of the body, its `else` and every rescue clause.
       def ensure_writes(node)
+        return nil unless widening_recorded?
+
         sources = [node.statements, node.else_clause]
         current = node.rescue_clause
         while current
@@ -1573,7 +1579,7 @@ module Rigor
       # `clause_scope` with each name of `writes` that `statements` mentions, and `clause_scope` binds, rebound to
       # `Dynamic[top]`, or nil when none changes.
       def widen_clause_entry(clause_scope, statements, writes)
-        return nil if writes.nil? || statements.nil?
+        return nil if writes.nil? || statements.nil? || !widening_recorded?
 
         names = collect_clause_names(statements, CLAUSE_MENTION_NODES, writes, nil)
         return nil if names.nil?
@@ -1585,6 +1591,13 @@ module Rigor
           current.nil? || current == untyped ? acc : rebind_variable(acc, kind, name, untyped)
         end
         widened.equal?(clause_scope) ? nil : widened
+      end
+
+      # Whether a widened pass would record anything: only the check path asks for one ({#initialize}'s
+      # `widen_clauses`), and a pass nothing records is skipped, so a nested clause inside an unrecorded pass is
+      # evaluated once.
+      def widening_recorded?
+        @widen_clauses && !(@on_enter.nil? && @operand_recorder.nil?)
       end
 
       # `[type, scope]` of a rescue or `ensure` clause entered with `clause_scope`. When {#widen_clause_entry} widens
@@ -5787,6 +5800,7 @@ module Rigor
           class_context: class_context,
           lexical_nesting: lexical_nesting,
           converged_loop_recording: @converged_loop_recording,
+          widen_clauses: @widen_clauses,
           next_scope_sink: next_scope_sink,
           operand_scope: operand_scope,
           in_operand: in_operand,

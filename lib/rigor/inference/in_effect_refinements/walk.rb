@@ -66,7 +66,7 @@ module Rigor
             walk_children(node.body, prefix, span_of(node), false,
                           RefineSelf.singleton_class_body(context, node.expression.is_a?(Prism::SelfNode)))
           when Prism::DefNode
-            method_context = def_context(node, context)
+            method_context = RefineSelf.def_body(context, node.receiver)
             walk_children(node.parameters, prefix, body, true, method_context)
             walk_children(node.body, prefix, body, true, method_context)
           else
@@ -83,25 +83,6 @@ module Rigor
                                (superclass.is_a?(Prism::ConstantPathNode) && superclass.parent.nil?)) &&
                               superclass.name == :Module
           RefineSelf.class_body(module_superclass)
-        end
-
-        # A `def` on no receiver is an instance method, `def self.x` (or `def M.x` inside `module M`) a singleton one;
-        # one on any other object is defined on something the walk cannot name. A singleton method of a module the
-        # walk names (`def self.x`, a `def` in its `class << self`) runs on that module itself
-        # ({RefineSelf.def_body}), so a `refine` in it activates and records for that module.
-        def def_context(node, context)
-          receiver = node.receiver
-          return RefineSelf.def_body(context, false) if receiver.nil?
-          return RefineSelf.unknown.with(deferred: true) unless lexical_self_receiver?(receiver, context)
-
-          RefineSelf.def_body(context, true, spelled_self: receiver.is_a?(Prism::SelfNode))
-        end
-
-        def lexical_self_receiver?(receiver, context)
-          return true if receiver.is_a?(Prism::SelfNode)
-
-          here = context.here
-          receiver.is_a?(Prism::ConstantReadNode) && here.is_a?(String) && here.split("::").last == receiver.name.to_s
         end
 
         # A block-carrying call: its receiver and arguments walk where the call is, its block under

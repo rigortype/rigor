@@ -156,6 +156,21 @@ module Rigor
           modules
         end
 
+        # ADR-121 WD7 — {.refining_modules} for a receiver the class rows do not reach (a class object): only the rows
+        # whose class the walk could not name ({.class_wildcard_key?}), for the name or as a names-wildcard.
+        def class_unknown_refining_modules(scope, method_name)
+          record_refinement_names(method_name)
+          modules = nil
+          scope.discovered_refinements.each do |refined, methods|
+            names = methods[method_name]
+            unread = methods[WILDCARD]
+            next if (names.nil? && unread.nil?) || !class_wildcard_key?(scope, refined)
+
+            modules = (modules || []).concat(names || EMPTY, unread || EMPTY)
+          end
+          modules
+        end
+
         # ADR-121 WD7 (A5) — the name edges a consumer of the refinement table records: the method's, and the
         # wildcard's, so a wildcard row appearing or vanishing in another file re-checks it.
         def record_refinement_names(method_name)

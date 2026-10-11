@@ -740,6 +740,22 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
       expect(call_rows).to eq([["m.rb", 9, "call.wrong-arity"]])
     end
 
+    # Ruby 4.0.5 raises `NoMethodError` for `String.make` before the `using`, prints `:made` after it, and raises for
+    # `String.nope`: a class-unknown row reaches a class object, for its own names only.
+    it "declines a class object's call a refinement whose target the walk cannot name defines" do
+      write("lib/m.rb", <<~RUBY)
+        module M
+          [String.singleton_class].each { |k| refine(k) { def make = :made } }
+        end
+        String.make
+        using M
+        String.make
+        String.nope
+      RUBY
+
+      expect(call_rows).to eq([["m.rb", 4, "call.undefined-method"], ["m.rb", 7, "call.undefined-method"]])
+    end
+
     # Round 2 of #1793's review. Ruby 4.0.5 prints `:vendored`.
     it "declines under a `using` of a module that includes a module declared outside the analysed paths" do
       write("vendor/b.rb", "module B; refine(String) { def center(a, b, c) = :vendored }; end\n")

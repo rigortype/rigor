@@ -868,9 +868,15 @@ module Rigor
         def refined_method_in_effect?(class_name, call_node, scope, kind, lexical_sites)
           return false if lexical_sites.nil?
           return true if opaque_refinement_in_effect?(call_node, scope, lexical_sites)
-          return false if kind != :instance
 
-          modules = Inference::InEffectRefinements.refining_modules(scope, class_name, call_node.name)
+          modules =
+            if kind == :instance
+              Inference::InEffectRefinements.refining_modules(scope, class_name, call_node.name)
+            else
+              # ADR-121 WD7 — a row whose class the walk could not name (`refine(k)` with `k` a singleton class)
+              # reaches a class object too.
+              Inference::InEffectRefinements.class_unknown_refining_modules(scope, call_node.name)
+            end
           !modules.nil? &&
             lexical_sites.refinements.refinement_active?(call_node.location.start_offset, modules,
                                                          scope.declared_refinements) do |name|

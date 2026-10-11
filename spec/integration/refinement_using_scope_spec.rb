@@ -1974,6 +1974,22 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
       expect(warm).to eq(cold)
     end
 
+    # A new file that only opens `class << Regexp` to remove `escape` lets the refinement of `Object` answer, so the
+    # report goes on the re-check and comes back when the file goes (Ruby 4.0.5: `:o`, then `ArgumentError`).
+    it "re-checks the `using` file under --incremental when a new file removes the class object's method" do
+      write("lib/rs.rb", object_sqrt)
+      write("lib/use.rb", "using RS\nRegexp.escape(1, 2)\n")
+      fires = [["use.rb", 2, "call.wrong-arity"]]
+
+      expect(incremental_call_rows).to eq([fires, false])
+      write("lib/rx.rb", "class << Regexp\n  remove_method :escape\nend\n")
+      expect(incremental_call_rows).to eq([[], true])
+      expect(call_rows).to eq([])
+      File.delete("lib/rx.rb")
+      expect(incremental_call_rows).to eq([fires, true])
+      expect(call_rows).to eq(fires)
+    end
+
     # A new file reopening the `using`'d module to refine `Object#oo` silences the class object's call on the re-check,
     # and its removal brings the report back (`refinement:oo`).
     it "re-checks the `using` file under --incremental when another file refines Object for the name" do

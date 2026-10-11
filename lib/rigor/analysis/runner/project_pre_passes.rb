@@ -59,7 +59,7 @@ module Rigor
           :unpositioned_mixins, :discovered_class_sources, :constant_values, :constant_sources, :constant_writes,
           :discovered_method_visibilities, :discovered_methods, :discovered_parameter_envelopes, :data_member_layouts,
           :struct_member_layouts, :discovered_deferred_ranges, :discovered_refinements, :siblings,
-          :discovered_global_write_census
+          :discovered_global_write_census, :singleton_class_sources
         )
 
         # Internal: drives every EAGER project-wide pre-pass — the ones whose products feed the RBS
@@ -175,6 +175,8 @@ module Rigor
             # object's `extend`s reach `Narrowing` from a sibling file the way its `include`s already do.
             discovered_extends: def_index.fetch(:extends), unpositioned_mixins: def_index.fetch(:unpositioned_mixins),
             discovered_class_sources: def_index.fetch(:class_sources),
+            # Issue #1752 — the files opening `class << Const`, for the class-declaration diff alone.
+            singleton_class_sources: def_index.fetch(:singleton_class_sources, {}),
             # Issue #644 — the cross-file value-constant publication table and its write attribution.
             constant_values: def_index.fetch(:constant_values), constant_sources: def_index.fetch(:constant_sources),
             constant_writes: def_index.fetch(:constant_writes),

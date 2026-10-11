@@ -4730,6 +4730,31 @@ module Rigor
         acc[:deferred_ranges][path] = build_deferred_ranges(root)
         record_class_sources(acc[:class_sources], path, root, superclasses, includes, file_def_nodes,
                              acc[:compact_headers])
+        record_singleton_class_sources(acc[:singleton_class_sources], path, root)
+      end
+
+      # `{name => Set[path]}` for a bundle's name list (a bundle written before the list existed has none).
+      def bundle_path_sets(names, path) = (names || []).to_h { |name| [name, Set[path]] }
+
+      # Issue #1752 — the constants a `class << Const` body opens in this file. Such a body records facts about
+      # `Const`'s singleton class (a `remove_method`, a `def`) without declaring `Const`, so it stays out of
+      # `class_sources` (whose readers take a name there as one the project declares) and joins only the per-file
+      # class-declaration sets the incremental `class:` edges diff (`Runner#class_declarations`).
+      def record_singleton_class_sources(sources, path, root)
+        collect_singleton_class_targets(root, []) { |name| (sources[name] ||= Set.new) << path }
+      end
+
+      def collect_singleton_class_targets(node, lexical_prefix, &)
+        case node
+        when Prism::ClassNode, Prism::ModuleNode
+          prefix = Source::ConstantPath.declaration_prefix(lexical_prefix, node.constant_path)
+          node.body && prefix && collect_singleton_class_targets(node.body, prefix, &)
+          return
+        when Prism::SingletonClassNode
+          rendered = singleton_receiver_constant_name(node.expression)
+          yield eval_constant_receiver_prefix(node, node.expression, rendered, lexical_prefix).join("::") if rendered
+        end
+        node.rigor_each_child { |child| collect_singleton_class_targets(child, lexical_prefix, &) }
       end
 
       def build_deferred_ranges(root)
@@ -8847,6 +8872,9 @@ module Rigor
         merge_header_nestings(acc[:header_nestings], file_index[:header_nestings] || {})
         fold_mixin_lists(acc, file_index)
         file_index[:class_sources].each { |cn, files| (acc[:class_sources][cn] ||= Set.new).merge(files) }
+        (file_index[:singleton_class_sources] || {}).each do |cn, files|
+          (acc[:singleton_class_sources][cn] ||= Set.new).merge(files)
+        end
         # Issue #722 residue 2 — a pre-#722 seed bundle carries no candidates; the SCHEMA bump makes such a
         # blob a cold rebuild, but default so any in-flight fold stays total.
         acc[:compact_headers].merge!(file_index[:compact_headers] || {})
@@ -8935,6 +8963,7 @@ module Rigor
           # data, so the bundle stays Marshal-clean and a warm file joins the envelopes its cold walk records.
           parameter_envelopes: file_index[:parameter_envelopes],
           class_source_names: file_index[:class_sources].keys,
+          singleton_class_source_names: (file_index[:singleton_class_sources] || {}).keys,
           # Issue #722 residue 2 — plain data, so the bundle stays Marshal-clean and a warm incremental file
           # re-anchors its compact headers the way a cold walk of it does.
           compact_headers: file_index[:compact_headers],
@@ -8959,7 +8988,7 @@ module Rigor
       # ADR-85 WD2 — reconstitutes a cached bundle into a single-file index {#fold_file_index} folds: the
       # def-node triples become {DefHandle}s bound to this file's `path`, and the class-source names become a
       # `{name => Set[path]}` table (the shape `accumulate_project_index` produces).
-      def bundle_to_file_index(bundle, path) # rubocop:disable Metrics/CyclomaticComplexity,Metrics/PerceivedComplexity -- one read per bundle slot
+      def bundle_to_file_index(bundle, path) # rubocop:disable Metrics/AbcSize -- one read per bundle slot
         {
           def_nodes: bundle_defs_to_handles(bundle[:def_nodes], path),
           singleton_def_nodes: bundle_defs_to_handles(bundle[:singleton_def_nodes], path),
@@ -8980,7 +9009,8 @@ module Rigor
           method_visibilities: bundle[:method_visibilities],
           methods: bundle[:methods],
           parameter_envelopes: bundle[:parameter_envelopes] || {},
-          class_sources: bundle[:class_source_names].to_h { |name| [name, Set[path]] },
+          class_sources: bundle_path_sets(bundle[:class_source_names], path),
+          singleton_class_sources: bundle_path_sets(bundle[:singleton_class_source_names], path),
           compact_headers: bundle[:compact_headers] || {},
           # Issue #644 — a pre-#644 bundle carries no census; the SCHEMA bump makes such a blob a cold
           # rebuild, but default so any in-flight fold stays total.
@@ -9030,7 +9060,7 @@ module Rigor
           method_visibilities: {},
           methods: {},
           deferred_ranges: {},
-          parameter_envelopes: {}, class_sources: {},
+          parameter_envelopes: {}, class_sources: {}, singleton_class_sources: {},
           # Issue #722 residue 2 — compact-header re-anchor candidates, adjudicated in {#finalize_def_index}.
           compact_headers: {},
           constant_writes: {},

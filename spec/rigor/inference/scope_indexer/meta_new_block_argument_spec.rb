@@ -42,20 +42,30 @@ RSpec.describe "meta-new write with a block argument (#1816)", type: :runner do
   # The user-visible effect of the dynamic mark: `$stdout = 1` raises at run time unless `Integer` can answer `write`,
   # and a module mixed in from an unreadable body might supply it. A literal empty body cannot, so it still reports.
   describe "a module mixed into Integer" do
-    def global_write_rows(prelude)
-      source = "#{prelude}\nclass Integer; include Ext; end\n$stdout = 1\n"
+    def global_write_rows(prelude, included: "Ext")
+      source = "#{prelude}\nclass Integer; include #{included}; end\n$stdout = 1\n"
       analyze(source).diagnostics.select { |d| d.qualified_rule == "global.write-type-mismatch" }
     end
 
     {
       "a plain write" => "Ext = Module.new(&EXTERNAL_BODY)",
       "an or-write" => "Ext ||= Module.new(&EXTERNAL_BODY)",
-      "a frozen write" => "Ext = Module.new(&EXTERNAL_BODY).freeze",
-      "a path write" => "module Outer; end\nOuter::Ext = Module.new(&EXTERNAL_BODY)\nExt = Outer::Ext"
+      "a frozen write" => "Ext = Module.new(&EXTERNAL_BODY).freeze"
     }.each do |label, prelude|
       it "may answer `write` through #{label} whose body is a block argument" do
         expect(global_write_rows(prelude)).to be_empty
       end
+    end
+
+    # The path is included directly: rebinding it to a bare `Ext` would silence the rule on its own.
+    it "may answer `write` through a path write whose body is a block argument" do
+      prelude = "module Outer; end\nOuter::Ext = Module.new(&EXTERNAL_BODY)"
+      expect(global_write_rows(prelude, included: "Outer::Ext")).to be_empty
+    end
+
+    it "still reports a path write whose body is a literal empty block" do
+      prelude = "module Outer; end\nOuter::Ext = Module.new { }"
+      expect(global_write_rows(prelude, included: "Outer::Ext").size).to eq(1)
     end
 
     it "still reports when the body is a literal empty block" do

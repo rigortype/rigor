@@ -50,6 +50,18 @@ RSpec.describe Rigor::CLI::TraceCommand do
     end
   end
 
+  it "parses a Shift_JIS magic-comment file from its original bytes" do
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "demo.rb")
+      File.binwrite(path, "# -*- coding: shift_jis -*-\ns = \"\x83\x5C\"\nt = 1\n")
+
+      status, _out, err = run_cli("trace", path)
+
+      expect(err).to eq("")
+      expect(status).to eq(0)
+    end
+  end
+
   it "dumps the filtered event stream as JSON" do
     with_demo_file do |path|
       status, out, = run_cli("trace", "--format", "json", path)

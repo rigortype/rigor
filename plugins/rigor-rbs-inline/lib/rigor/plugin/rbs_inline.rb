@@ -123,6 +123,7 @@ module Rigor
           return nil if source.empty?
 
           result = ::Prism.parse(source)
+          source, result = scrub_stray_comment_bytes(source, result)
           _, result = neutralize_rdoc_directives(source, result)
           return nil if !@require_magic_comment && !annotated?(result)
 
@@ -502,6 +503,29 @@ module Rigor
               "(`name: T`, `return: T`, `module-self T`, …), or rename the tag so it does not start with " \
               "`@rbs`, to avoid this notice."
           end
+        end
+
+        # A comment is not validated by Ruby, so a byte that is invalid in UTF-8 can sit in an ordinary one
+        # (`# caf\xFF`), and upstream's annotation grammar raises on it — which {#call}'s rescue would report as a
+        # `source-rbs-synthesis-failed` notice about "the inline-RBS comment grammar" for a file that has none.
+        # Such a comment is repaired in place (the bad bytes become `?`) and the file re-parsed. A comment that
+        # LOOKS like inline RBS (`#:`, `# @rbs`, `# |`) is left alone, so a genuinely corrupt annotation still
+        # reaches the WD6 fail-soft path.
+        STRAY_COMMENT_SAFE = /\A#\s*(?:@rbs|[:|])/
+        private_constant :STRAY_COMMENT_SAFE
+
+        def scrub_stray_comment_bytes(source, prism_result)
+          broken = prism_result.comments.reject { |comment| comment.location.slice.valid_encoding? }
+          return [source, prism_result] if broken.empty?
+          return [source, prism_result] if broken.any? { |comment| STRAY_COMMENT_SAFE.match?(comment.location.slice.scrub) }
+
+          bytes = source.b
+          broken.sort_by { |comment| -comment.location.start_offset }.each do |comment|
+            location = comment.location
+            bytes[location.start_offset, location.length] = location.slice.scrub("?").b
+          end
+          repaired = bytes.force_encoding(source.encoding)
+          [repaired, ::Prism.parse(repaired)]
         end
 
         # Rewrite every RDoc directive comment to its spaced spelling (`#:nodoc:` -> `# :nodoc:`) so

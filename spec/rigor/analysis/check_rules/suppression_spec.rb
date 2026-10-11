@@ -286,6 +286,19 @@ RSpec.describe "diagnostic suppression", type: :runner do
       expect(diagnostics.map(&:line)).to eq([2])
     end
 
+    # The parse-failure path runs `ErbTemplateDetector` over the raw source, which must not raise either.
+    it "reports the parse error, not an internal error, when the file also fails to parse" do
+      source = "# caf\xFF\ndef (\n"
+
+      expect(analyze(source).diagnostics.map(&:message)).to include(a_string_matching(/expected/))
+    end
+
+    it "reports the parse error for an invalid byte inside a string literal" do
+      source = "s = \"caf\xFF\"\n"
+
+      expect(analyze(source).diagnostics.map(&:message)).to include(a_string_matching(/invalid multibyte/))
+    end
+
     it "reads the marker out of a comment that itself holds the byte" do
       source = "\"x\".no_method # rigor:disable call.undefined-method caf\xFF\n"
 

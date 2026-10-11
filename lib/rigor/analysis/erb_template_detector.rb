@@ -25,7 +25,8 @@ module Rigor
         source = parse_result.source.source
         return false unless source.is_a?(String) && !source.empty?
 
-        ERB_CLOSING_MARKER.match?(source)
+        # The marker is ASCII; match bytes so an invalid byte elsewhere in the file cannot raise.
+        ERB_CLOSING_MARKER.match?(source.b)
       end
     end
   end

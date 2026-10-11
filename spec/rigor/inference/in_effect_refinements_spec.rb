@@ -151,6 +151,58 @@ RSpec.describe Rigor::Inference::InEffectRefinements do
       expect(refinements.at(":struct")).to eq([])
     end
 
+    # Issue #1749. Ruby 4.0.5 prints `1` for `M.setup; using M; "a".yy` with `def self.setup` or a `def` in
+    # `class << self` (the singleton method runs on `M`), and `1` through `M.extend(M)` and `M.setup` for an instance
+    # method (it runs on whichever module calls it). It raises `NoMethodError` for `refine` in a class's methods.
+    context "when it is written in a method" do
+      let(:source) do
+        <<~RUBY
+          module Shout
+            def self.setup = refine(String) { def yy = :in_def_self }
+            class << self
+              def setup_singleton = refine(Symbol) { def zz = :in_class_self }
+            end
+            def instance = refine(String) { :in_instance }
+            def self.computed(k) = refine(k) { :computed }
+            def self.nested = refine(String) { refine(Integer) { :nested } }
+            refine(Float) do
+              def self.defined_on_the_refinement = refine(Integer) { :on_refinement }
+            end
+          end
+          class Widget
+            def self.setup = refine(String) { :in_class_method }
+          end
+        RUBY
+      end
+      let(:root) { Prism.parse(source).value }
+      let(:refinements) { described_class.new(root) }
+      let(:at) { InEffectRefinementsAtMarker.new(refinements, source) }
+
+      it "has the module in effect inside a module's singleton method, and the unknown marker in an instance method" do
+        expect(at.at(":in_def_self")).to eq(%w[Shout])
+        expect(at.at(":in_class_self")).to eq(%w[Shout])
+        expect(at.at(":computed")).to eq(%w[Shout])
+        expect(at.at(":in_instance")).to eq([unknown])
+      end
+
+      it "charges a nested refine to the module, and a method of a refine body to a module it cannot name" do
+        expect(at.at(":nested")).to eq(%w[Shout])
+        # Inside the `refine(Float)` block its own module is in effect; the nested `refine` adds a module nothing names.
+        expect(at.at(":on_refinement")).to eq(["Shout", unknown])
+      end
+
+      it "treats a class's singleton method as the class's own refine, which activates nothing" do
+        expect(at.at(":in_class_method")).to eq([])
+      end
+
+      it "records the block's defs for the module, as a refine in its body does" do
+        expect(refinements.refinement_def("Shout", "String", :yy)).to be_a(Prism::DefNode)
+        expect(refinements.refinement_def("Shout", "Symbol", :zz)).to be_a(Prism::DefNode)
+        expect(refinements.refinement_def("Other", "String", :yy)).to be_nil
+        expect(refinements.refinement_def("Widget", "String", :yy)).to be_nil
+      end
+    end
+
     # Issue #1689 — `Class` undefines `refine`, so where `self` is known to be a class the call is the class's own
     # method: it activates nothing, and its defs are not refinement defs.
     context "when `self` is known to be a class" do

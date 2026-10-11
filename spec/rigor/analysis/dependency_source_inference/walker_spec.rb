@@ -650,6 +650,11 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::Walker do
           ["module Eog\n  Refiner.define_method(:x, other)\nend\n", [%w[Eog::Refiner Refiner]]],
         "a module_eval on a constant" => ["module Eog\n  Refiner.module_eval(\"1\")\nend\n",
                                           [%w[Eog::Refiner Refiner]]],
+        "a hand-off in the body of class << self of a module" =>
+          ["module Shouty\n  class << self\n    Plugin.install(self)\n  end\nend\n", [%w[Shouty::Plugin Plugin]]],
+        "a hand-off in a method defined under class << self of a module" =>
+          ["module Shouty\n  class << self\n    def setup = Plugin.install(self)\n  end\nend\n",
+           [%w[Shouty::Plugin Plugin]]],
         "a call in a method of a module" =>
           ["module Shouty\n  def self.setup = Plugin.install(self)\nend\n", [%w[Shouty::Plugin Plugin]]]
       }.each do |name, (source, foreign)|
@@ -698,6 +703,9 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::Walker do
         },
         "an include in the body of class << self of a class" => {
           "lib/m.rb" => "class C\n  class << self\n    include Refiner\n  end\nend\n"
+        },
+        "a hand-off in the body of class << self of a class" => {
+          "lib/m.rb" => "class C\n  class << self\n    Plugin.install(self)\n  end\nend\n"
         }
       }.each do |name, files|
         it "lists nothing for #{name}" do

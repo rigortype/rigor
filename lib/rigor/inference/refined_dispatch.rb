@@ -20,6 +20,10 @@ module Rigor
     #
     # Issue #1740 — {OwnMethod} shares {.levels} with the walk below and asks the opposite question for the two
     # argument checks: does the receiver's own method answer ahead of every refinement in effect?
+    #
+    # Issue #1752 — a class object is walked through its own lookup ({ClassObject}): its singleton class and each
+    # superclass's, then `Class`, `Module`, `Object`, `Kernel` and `BasicObject`, so a refinement of `Object` answers
+    # `Integer.oo` while `Integer.sqrt` keeps answering ahead of one.
     module RefinedDispatch
       # The refinement that answers: `module_name` refines `refined_class` (a class or module on the walk).
       Winner = Data.define(:module_name, :refined_class)

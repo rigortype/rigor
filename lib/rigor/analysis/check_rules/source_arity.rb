@@ -406,8 +406,12 @@ module Rigor
 
         def first_level(class_name) = chain_levels(arity_chain(class_name)).first.first
 
+        # ADR-46 — every class whose subclasses are enumerated records `subclass_of:<last segment>`, which a class
+        # declaration with that superclass appearing or vanishing fires (issue #1820): a new subclass with a
+        # different envelope re-checks the call.
         def each_subclass(class_name)
           children = children_by_parent
+          record_subclasses_read(class_name)
           queue = children.fetch(class_name.to_s, []).dup
           seen = {}
           until queue.empty?
@@ -415,9 +419,16 @@ module Rigor
             next if seen[subclass]
 
             seen[subclass] = true
+            record_subclasses_read(subclass)
             yield subclass
             queue.concat(children.fetch(subclass, []))
           end
+        end
+
+        def record_subclasses_read(class_name)
+          return unless Analysis::DependencyRecorder.active?
+
+          Analysis::DependencyRecorder.read_last_segment(:subclass_of, class_name.to_s)
         end
 
         def children_by_parent

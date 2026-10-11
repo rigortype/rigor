@@ -1089,8 +1089,11 @@ module Rigor
         moved_constants = Incremental.changed_constant_publications(
           changed + removed, @constant_decls, new_constant_decls
         )
+        moved_classes, moved_edges = moved_classes.partition { |entry| entry.is_a?(String) }
         keys = appeared_methods.map { |symbol| negative_key_for(symbol) }
         keys.concat(moved_classes.map { |klass| "class:#{klass.split('::').last}" })
+        # Issue #1820 — a `[class, superclass]` pair appearing or vanishing moves the parent's subclass set.
+        keys.concat(moved_edges.map { |(_child, parent)| "subclass_of:#{parent.split('::').last}" })
         keys.concat(moved_constants.map { |name| "constant:#{name.split('::').last}" })
         Incremental.negative_closure(keys, @negative_dependents) | refinement_affected(changed + removed, summary) |
           global_write_reporters
@@ -1118,6 +1121,7 @@ module Rigor
         index[:class_sources].each do |class_name, files|
           files.each { |file| result[file] << class_name }
         end
+        Incremental.add_superclass_edges(result, index[:class_sources], index[:superclasses])
         result.transform_values(&:freeze).freeze
       end
 

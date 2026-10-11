@@ -955,6 +955,34 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
         expect(call_rows).to eq(fires)
       end
 
+      # A new subclass moves the receiver class's subclass set, which no declaration the call read names. Ruby 4.0.5
+      # raises for `"x".ljust(1, 2, 3)` until `Sub < String` prepends `Comparable` again, and then answers `:cmp` for
+      # a value typed as `String` that is a `Sub`.
+      it "re-checks the `using` file under --incremental when a new file declares a subclass" do
+        write("lib/rc.rb", "module RC; refine(Comparable) { def ljust(a, b, c) = :cmp }; end\n")
+        write("lib/use.rb", "using RC\n\"x\".ljust(1, 2, 3)\n")
+        fires = [["use.rb", 2, "call.wrong-arity"]]
+
+        expect(incremental_call_rows).to eq([fires, false])
+        write("lib/sub.rb", "class Sub < String; prepend Comparable; end\n")
+        expect(incremental_call_rows).to eq([[], true])
+        expect(call_rows).to eq([])
+        File.delete("lib/sub.rb")
+        expect(incremental_call_rows).to eq([fires, true])
+        expect(call_rows).to eq(fires)
+      end
+
+      # A subclass level the walk cannot read hides only modules, so a refinement of `Object` keeps the call
+      # checked: with `module Mixin; end`, Ruby 4.0.5 raises for both calls.
+      it "keeps checking past a subclass whose mixins the walk cannot read when no module is refined" do
+        write_class("Base", "  def center(a) = a\n", "  def center: (untyped) -> untyped\n")
+        write("lib/kid.rb", "class Kid < Base\n  include(Object.const_get(:Mixin))\nend\n" \
+                            "class MyStr < String\n  include(Object.const_get(:Mixin))\nend\n")
+        write("lib/use.rb", "using ObjCenter\nBase.new.center(1, 2, 3)\n\"x\".center(1, 2, 3)\n")
+
+        expect(call_rows).to eq([["use.rb", 2, "call.wrong-arity"], ["use.rb", 3, "call.wrong-arity"]])
+      end
+
       def incremental_call_rows
         root = File.join(Dir.pwd, ".rigor", "cache")
         snapshot = Rigor::Cache::IncrementalSnapshot.new(root: root)

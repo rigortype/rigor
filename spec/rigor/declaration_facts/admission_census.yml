@@ -220,6 +220,7 @@ members:
     - lib/rigor/analysis/check_rules.rb
     - lib/rigor/analysis/check_rules/shadowed_rescue_collector.rb
     - lib/rigor/analysis/check_rules/source_arity.rb
+    - lib/rigor/analysis/incremental_session.rb
     - lib/rigor/analysis/runner.rb
     - lib/rigor/analysis/worker_session.rb
     - lib/rigor/inference/last_line/implicit_self.rb

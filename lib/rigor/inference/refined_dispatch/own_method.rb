@@ -154,11 +154,18 @@ module Rigor
         # Does a project subclass of `class_name` (the `discovered_superclasses` walk `SourceArity` makes, its
         # parents resolved to any class the project or RBS knows, so a subclass of a core class counts) carry a
         # refined entry on its own level, or a level the walk cannot read?
+        #
+        # A subclass level the walk cannot read (a truncated chain, or a mixin the tables cannot name) hides only
+        # modules, so it declines only when some in-effect row names a module.
         def subclass_refined?(scope, class_name, raw)
           each_subclass(scope, class_name) do |subclass|
             chain = Scope::ResolutionChain.for(scope, subclass, :instance, :methods)
             chain.record(scope) if Analysis::DependencyRecorder.active?
-            return true if chain.truncated? || chain.wildcard_mixin? || chain.level_count.zero?
+            if chain.truncated? || chain.wildcard_mixin? || chain.level_count.zero?
+              return true if raw.each_key.any? { |refined| module_name?(scope, refined) }
+
+              next
+            end
             return true if chain.level_entries(0).any? { |entry| refined_entry?(entry, raw) }
           end
           false
@@ -170,8 +177,11 @@ module Rigor
           raw.include?(entry.name)
         end
 
+        # ADR-46 — every class whose subclasses are enumerated records `subclass_of:<last segment>`, which a class
+        # declaration with that superclass appearing or vanishing fires (`IncrementalSession#negative_affected`).
         def each_subclass(scope, class_name)
           children = children_by_parent(scope)
+          record_subclasses_read(class_name)
           queue = children.fetch(class_name.to_s, []).dup
           seen = {}
           until queue.empty?
@@ -179,9 +189,16 @@ module Rigor
             next if seen[subclass]
 
             seen[subclass] = true
+            record_subclasses_read(subclass)
             yield subclass
             queue.concat(children.fetch(subclass, []))
           end
+        end
+
+        def record_subclasses_read(class_name)
+          return unless Analysis::DependencyRecorder.active?
+
+          Analysis::DependencyRecorder.read_last_segment(:subclass_of, class_name.to_s)
         end
 
         def children_by_parent(scope)

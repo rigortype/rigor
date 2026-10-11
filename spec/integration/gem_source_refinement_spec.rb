@@ -199,6 +199,19 @@ RSpec.describe "Gem source inference over `refine` bodies (#1672)" do
       expect(undefined_rows(gems: %w[pag])).to eq([["app.rb", 3, "nope"]])
     end
 
+    # Round-1 review of #1838 — a gem constant that merely shares a core class's name (`rbs`'s `RBS::BuiltinNames`
+    # writes `String`, `Array`, …) binds `Names::String`, not the `Ext::String` spelling a project `refine String`
+    # inside `module Ext` also records, so the project refinement keeps its normal rows. Ruby 4.0.5 raises
+    # `NoMethodError` for each reported call.
+    it "does not move a project refinement's sibling key for a gem constant named like a core class" do
+      write_gem("namesg", "lib/namesg.rb" => "module Names\n  String = :s\n  Array = :a\nend\n")
+      write("lib/ext.rb", "module Ext\n  refine(String) { def shout = upcase }\nend\n")
+      write("lib/app.rb", "using Ext\n1.shout\n\"x\".shout.nope\n[1].shout\n")
+
+      expect(undefined_rows(gems: %w[namesg]))
+        .to eq([["app.rb", 2, "shout"], ["app.rb", 3, "nope"], ["app.rb", 4, "shout"]])
+    end
+
     # The controls: a class the gem declares by a constant write (`Struct.new`, `Data.define`, `Class.new`) is no
     # bound name, so its refine keeps a normal row that matches no String receiver and the call reports; a write that
     # is no class (`DelegateClass(Array)`) is bound, so `"x".pw` declines; a target no write binds keeps its row.

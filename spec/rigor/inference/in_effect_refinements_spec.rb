@@ -613,26 +613,30 @@ RSpec.describe Rigor::Inference::InEffectRefinements do
     describe "a refined-class key" do
       let(:index_class) { Rigor::Analysis::DependencySourceInference::Index }
 
-      def gem_key_scope(bound)
-        index = index_class.new(bound_constants: Set.new(bound))
+      def gem_key_scope(bound, segments = [])
+        index = index_class.new(bound_constants: Set.new(bound), bound_segments: Set.new(segments))
         environment = Rigor::Environment.for_project(dependency_source_index: index)
         scope_at_last("module Plain; end\n:probe\n", default_scope: Rigor::Scope.empty(environment: environment)).first
       end
 
-      it "is class-unknown when any segment is a gem's bound constant, and is not for a segment nothing binds" do
-        scope = gem_key_scope(%w[Enc Target])
-        keys = %w[Enc::Converter Pag::Enc::Converter Shared::Target Target Pag::Other Other::Plain]
+      it "is class-unknown when a gem binds a prefix of it, or a segment of it under an owner it cannot spell" do
+        scope = gem_key_scope(%w[Pag::Enc Shared::Target], %w[Loose])
+        keys = %w[Pag::Enc::Converter Enc::Converter Shared::Target Target Loose::Thing Any::Loose Pag::Other
+                  Other::Plain]
 
         expect(keys.map { |key| described_class.class_wildcard_key?(scope, key) })
-          .to eq([true, true, true, true, false, false])
+          .to eq([true, false, true, false, true, true, false, false])
       end
 
-      it "is class-unknown for the wildcard, and never moves a core class a write names" do
-        scope = gem_key_scope(%w[String Comparable])
+      # Round-1 review of #1838: a gem constant that merely shares a core class's name (`Names::String`) binds nothing a
+      # sibling spelling of `refine String` (`Ext::String`) could denote.
+      it "is class-unknown for the wildcard, and never moves a core class a write names, nor its sibling spelling" do
+        scope = gem_key_scope(%w[Names::String String Comparable])
         wildcard = Rigor::Scope::DiscoveryIndex::REFINEMENT_WILDCARD
-        keys = [wildcard, "String", "Comparable", "Integer"]
+        keys = [wildcard, "String", "Comparable", "Integer", "Ext::String"]
 
-        expect(keys.map { |key| described_class.class_wildcard_key?(scope, key) }).to eq([true, false, false, false])
+        expect(keys.map { |key| described_class.class_wildcard_key?(scope, key) })
+          .to eq([true, false, false, false, false])
       end
 
       it "is not class-unknown for a project with no gem index" do

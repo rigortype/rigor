@@ -184,8 +184,9 @@ declaration is opaque.**
   of it: a key no class or RBS declaration knows as a whole is class-unknown when any segment is a
   constant a write binds (`K = String; refine(K)`, `Enc = ::Encoding; refine(Enc::Converter)`,
   `Shared::Target = String` in an opted-in gem), from the project's constant census or from the
-  constants the walked gems write without declaring a class or module (#1814, #1815). A core or
-  declared class keeps its key. The gem source walker reads every file of a gem through the census
+  constants the walked gems write without declaring a class or module, a gem's matched by the name
+  the write binds against each prefix of the key (#1814, #1815). A core or declared class keeps its
+  key. The gem source walker reads every file of a gem through the census
   the project walk runs, so a gem module's rows carry the wildcards a project module's would, and the
   run's cache key and the incremental snapshot's fingerprint carry the `(name, version, mode)` row of
   each opted-in gem that resolves (ADR-10 slice 3), so a project with no lockfile re-checks after a

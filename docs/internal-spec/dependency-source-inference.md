@@ -245,21 +245,34 @@ A refine target a constant write binds (`K = String; refine(K)`,
 in this gem, another opted-in gem or the project) names whatever
 value the write holds, which the walker cannot resolve. The rows
 stay as the census records them (`K` and `M::K`); the walk's pass
-over each file also collects the constants it writes (an
-assignment, a path write, an operator write, a multiple
-assignment, a `const_set` with a literal name) and does not
-declare as a class or module (`Point = Struct.new(:x)` declares
-one), `Walker::Outcome#bound` holds their last segments, and
-`Index#bound_constant?` unions them across the walked gems. The
-reader decides the key at read time, per segment
-(`InEffectRefinements.class_wildcard_key?`, ADR-121 WD7): a key no
-class or RBS knows as a whole is class-unknown when any segment is
-a constant the project's census or a walked gem binds, so
-`module Shared; Target = String; end` in one gem beside
-`refine(Shared::Target)` in the project or in another gem, and a
-prefix alias (`Enc = ::Encoding; refine(Enc::Converter)`), decline
-the body's names on every receiver instead of keeping a row no
-receiver matches (#1815 item 5). The gem's own module stays opaque
+over each file also collects the names its constant writes bind
+(an assignment, a path write, an operator write, a multiple
+assignment) without declaring a class or module (`Point =
+Struct.new(:x)` declares one, through the project walk's own
+`meta_new_rvalue` reading). A bare write binds its name under the
+lexical nesting of the `class` / `module` headers around it
+(`Shared::Target` for `module Shared; Target = String; end`); a path
+write binds it under every name its base can denote there
+(`M::Wrap::K` and `Wrap::K` inside `module M`). `Walker::Outcome#bound`
+holds those names, `#bound_segments` the last segment of a write
+whose owner the walk cannot spell (a `const_set` with a literal
+name, a path on a base no constant spells), and
+`Index#bound_constant?(name)` unions both across the walked gems:
+true for a name a gem binds, or for a name whose last segment a gem
+binds under an owner it could not spell. The reader decides the key
+at read time (`InEffectRefinements.class_wildcard_key?`, ADR-121
+WD7): a key no class or RBS knows as a whole is class-unknown when
+any segment of it is a constant the project's census binds, or when
+any prefix of it is a name a walked gem binds, so `module Shared;
+Target = String; end` in one gem beside `refine(Shared::Target)` in
+the project or in another gem, and a prefix alias (`Enc =
+::Encoding; refine(Enc::Converter)`), decline the body's names on
+every receiver instead of keeping a row no receiver matches (#1815
+item 5). Matching a gem's write by the name it binds, not by its
+last segment, keeps a gem constant that merely shares a core class's
+name (`RBS::BuiltinNames` writes `String`, `Array`, …) from moving
+the sibling spelling (`Ext::String`) a project `refine String`
+inside `module Ext` also records. The gem's own module stays opaque
 (#1811), so under a `using` of it the span declines either way;
 the rows reach a project module's `using` and a `using` that names
 no module.

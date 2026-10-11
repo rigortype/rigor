@@ -12,7 +12,8 @@ module Rigor
       # entries.
       class Index
         attr_reader :resolved_gems, :unresolvable, :method_catalog, :budget_exceeded,
-                    :class_to_gem, :budget_overrun_strategy, :gem_modes, :refinements, :bound_constants
+                    :class_to_gem, :budget_overrun_strategy, :gem_modes, :refinements, :bound_constants,
+                    :bound_segments
 
         # @param method_catalog — => Symbol}] the flat
         #   `(class_name, method_name) → :instance | :singleton` table produced by {Walker.walk}, aggregated
@@ -34,15 +35,18 @@ module Rigor
         # @param refinements — issue #1672: the opt-in gems' `refine X do … end` bodies, `{refined class =>
         #   {method => [refining modules]}}` ({Walker::Outcome#refinements}). The runner merges it into the
         #   project's `discovered_refinements` seed, so `using M` for a gem's `M` reaches the check rules.
-        # @param bound_constants — issue #1814: the last segment of every constant the opt-in gems' files write
-        #   without declaring a class or module by it ({Walker::Outcome#bound}), unioned across the walked gems. A
-        #   refine key with such a segment may name any value (`Target = String` in one gem, `refine Shared::Target`
-        #   in the project or in the next gem), which the reader decides at read time
+        # @param bound_constants — issue #1814: every name the opt-in gems' files bind by a constant write without
+        #   declaring a class or module by it ({Walker::Outcome#bound}: `Shared::Target` for `module Shared; Target =
+        #   String; end`), unioned across the walked gems. A refine key one of them binds may name any value
+        #   (`refine Shared::Target` in the project or in the next gem), which the reader decides at read time
         #   ({Inference::InEffectRefinements.class_wildcard_key?}) through {#bound_constant?}.
+        # @param bound_segments — the last segment of each such write whose owner the walk cannot spell
+        #   ({Walker::Outcome#bound_segments}: a `const_set`), which matches that segment of any key.
         def initialize( # rubocop:disable Metrics/ParameterLists
           resolved_gems: [], unresolvable: [], method_catalog: {},
           budget_exceeded: [], class_to_gem: {},
-          budget_overrun_strategy: :walker_cap, gem_modes: {}, refinements: {}, bound_constants: Set.new
+          budget_overrun_strategy: :walker_cap, gem_modes: {}, refinements: {}, bound_constants: Set.new,
+          bound_segments: Set.new
         )
           @resolved_gems = resolved_gems.freeze
           @unresolvable = unresolvable.freeze
@@ -53,6 +57,7 @@ module Rigor
           @gem_modes = gem_modes.freeze
           @refinements = Inference::ScopeIndexer.freeze_refinements(refinements)
           @bound_constants = bound_constants.to_set.freeze
+          @bound_segments = bound_segments.to_set.freeze
           freeze
         end
 
@@ -73,11 +78,14 @@ module Rigor
           @class_to_gem[class_name]
         end
 
-        # Issue #1814 — does a walked gem write a constant whose last segment is `segment` without declaring a class
-        # or module by it? A refine key with such a segment may name any value (`Target = String; refine(Shared::Target)`),
-        # which the walker cannot resolve and the reader decides ({Inference::InEffectRefinements.class_wildcard_key?}).
-        def bound_constant?(segment)
-          @bound_constants.include?(segment)
+        # Issue #1814 — does a walked gem bind `name` (a refine key, or a prefix of one: `Shared::Target`, `Pag::Enc`)
+        # by a constant write that declares no class or module, or bind a constant of `name`'s last segment under an
+        # owner the walk could not spell? Such a key may name any value (`module Shared; Target = String; end` then
+        # `refine(Shared::Target)`), which the walker cannot resolve and the reader decides
+        # ({Inference::InEffectRefinements.class_wildcard_key?}). A gem constant that merely shares a core class's name
+        # (`Names::String`) binds nothing a sibling spelling of `refine String` (`Ext::String`) could denote.
+        def bound_constant?(name)
+          @bound_constants.include?(name) || @bound_segments.include?(name.split("::").last)
         end
 
         # ADR-10 slice 5c — per-class mode lookup. Chains `class_to_gem` + `gem_modes`; returns `nil` when

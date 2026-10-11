@@ -3484,11 +3484,12 @@ module Rigor
       # `walk_def_contributions` take it from the same call), run for a caller that wants nothing else. The gem source
       # walker reads a gem file this way, so a gem module's rows carry the wildcards a project module's would
       # (`walker_walk_census_parity_spec.rb`, beside the walker's specs, holds the two to one table). A file whose text
-      # never names `refine` as a word records no row, so it is not walked.
-      def refinement_table(root)
+      # never names `refine` as a word records no row, so it is not walked. `source_path` names an anonymous module's
+      # row (`#<Module:<path>:L:C>`) as the project walk does, so two files' bare `Module.new` blocks never share one.
+      def refinement_table(root, source_path = nil)
         return EMPTY_REFINEMENTS if refine_word_offsets(root).empty?
 
-        build_methods_and_def_nodes(root)[3]
+        build_methods_and_def_nodes(root, source_path)[3]
       end
 
       # Issue #1120 — a refinement table, deep-frozen; the shared empty table when nothing was recorded.

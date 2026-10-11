@@ -12,15 +12,22 @@ require "rigor/analysis/dependency_source_inference"
 # the two walks must produce the same table. A fixture that records nothing in both would pass vacuously, so every one
 # but the DSL and data shapes (`:empty`) must record a row.
 RSpec.describe Rigor::Analysis::DependencySourceInference::Walker, ".walk" do
-  def project_table(source)
-    Rigor::Inference::ScopeIndexer.build_methods_and_def_nodes(Prism.parse(source).value).fetch(3)
+  # The project walk's table for one file at `path`, as `seed_discovered_methods` builds it: with the path, which names
+  # an anonymous `Module.new`'s row (`#<Module:<path>:L:C>`).
+  def project_table(path)
+    Rigor::Inference::ScopeIndexer.build_methods_and_def_nodes(Prism.parse_file(path).value, path).fetch(3)
   end
 
-  def gem_table(*sources)
+  # `[the project fold over the files, the gem walk's table]` for `sources` written to one gem's `lib/`.
+  def tables(*sources)
     Dir.mktmpdir("parity-gem-") do |dir|
       FileUtils.mkdir_p(File.join(dir, "lib"))
-      sources.each_with_index { |source, index| File.write(File.join(dir, "lib", "f#{index}.rb"), source) }
-      return described_class.walk(gem_dir: dir, roots: %w[lib]).refinements
+      paths = sources.each_with_index.map do |source, index|
+        File.join(dir, "lib", "f#{index}.rb").tap { |path| File.write(path, source) }
+      end
+      project = paths.map { |path| project_table(path) }
+                     .reduce { |left, right| Rigor::Inference::ScopeIndexer.merge_refinement_tables(left, right) }
+      return [project, described_class.walk(gem_dir: dir, roots: %w[lib]).refinements]
     end
   end
 
@@ -109,10 +116,10 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::Walker, ".walk" do
   describe "census parity with the project walk" do
     fixtures.each do |name, (source, expectation)|
       it "reads #{name} as the project walk does" do
-        table = project_table(source)
+        project, gem = tables(source)
 
-        expect(gem_table(source)).to eq(table)
-        expectation == :rows ? expect(table).not_to(be_empty) : expect(table).to(be_empty)
+        expect(gem).to eq(project)
+        expectation == :rows ? expect(project).not_to(be_empty) : expect(project).to(be_empty)
       end
     end
 
@@ -121,10 +128,19 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::Walker, ".walk" do
       first = "module A\n  refine(String) { def shout = 1 }\nend\n"
       second = "module B\n  refine(String) { def shout = 2; def other = 3 }\n  " \
                "def self.setup = refine(Integer) { }\nend\n"
-      folded = Rigor::Inference::ScopeIndexer.merge_refinement_tables(project_table(first), project_table(second))
+      project, gem = tables(first, second)
 
-      expect(gem_table(first, second)).to eq(folded)
-      expect(folded.dig("String", :shout)).to eq(%w[A B])
+      expect(gem).to eq(project)
+      expect(project.dig("String", :shout)).to eq(%w[A B])
+    end
+
+    # Two files' bare `Module.new` blocks at the same line and column are two modules, named by their file.
+    it "names an anonymous module's row by its file, as the project walk does" do
+      source = "Module.new do\n  refine(String) { def shout = 1 }\nend\n"
+      project, gem = tables(source, source)
+
+      expect(gem).to eq(project)
+      expect(gem.fetch("String").fetch(:shout).size).to eq(2)
     end
   end
 end

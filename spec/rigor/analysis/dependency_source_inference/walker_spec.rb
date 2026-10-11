@@ -330,10 +330,10 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::Walker do
         expect(outcome.refinements).to eq({ "Shouty::String" => rows, "String" => rows })
       end
 
-      # Issue #1814 — a constant a gem file writes without declaring a class or module by it is recorded as bound
-      # (`Outcome#bound`, by last segment) and the rows stay as the project walk records them: the reader decides, per
-      # segment of the key, at read time ({Rigor::Inference::InEffectRefinements.class_wildcard_key?}), once for the
-      # project's own writes and every walked gem's.
+      # Issue #1814 — a constant a gem file writes without declaring a class or module by it is recorded as bound, by
+      # the name the write binds (`Outcome#bound`), or by its last segment alone when the walk cannot spell the owner
+      # (`Outcome#bound_segments`); the rows stay as the project walk records them, and the reader decides each prefix
+      # of a key at read time ({Rigor::Inference::InEffectRefinements.class_wildcard_key?}).
       describe "a constant a gem file writes" do
         def outcome_of(files)
           with_fake_gem do |gem_dir|
@@ -342,32 +342,52 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::Walker do
           end
         end
 
-        it "is bound by every form of write, and a const_set with a literal name, in this file or another" do
-          forms = ["K = String", "K ||= String", "K &&= String", "K += 1", "Wrap::K = String", "K, L = String, Symbol",
-                   "Wrap::K, L = String, Symbol", "Object.const_set(:K, String)", "const_set('K', String)"]
+        it "binds the name under its lexical nesting, by every form of bare write, in this file or another" do
+          forms = ["K = String", "K ||= String", "K &&= String", "K += 1", "K, L = String, Symbol"]
           bound = forms.map { |form| outcome_of("a.rb" => "module M\n  #{form}\nend\n").bound }
           elsewhere = outcome_of("a.rb" => "module M\n  refine(K) { def shout = 1 }\nend\n", "b.rb" => "K = String\n")
 
-          expect(bound.map(&:to_a)).to all(include("K"))
+          expect(bound.map(&:to_a)).to all(include("M::K"))
           expect(elsewhere.bound).to eq(Set["K"])
           expect(elsewhere.bound).to be_frozen
+          expect(elsewhere.bound_segments).to eq(Set.new)
+        end
+
+        it "binds a path write under every name its base can denote, and a rooted or self path once" do
+          outcome = outcome_of(
+            "a.rb" => "module M\n  Wrap::K = String\n  Wrap::L, N = String, Symbol\n  ::Top::P = 1\n  self::Q = 1\n" \
+                      "end\n"
+          )
+
+          expect(outcome.bound).to eq(Set["M::Wrap::K", "Wrap::K", "M::Wrap::L", "Wrap::L", "M::N", "Top::P", "M::Q"])
+          expect(outcome.bound_segments).to eq(Set.new)
+        end
+
+        it "records a const_set with a literal name, and a path on a base no constant spells, by last segment" do
+          outcome = outcome_of(
+            "a.rb" => "module M\n  Object.const_set(:K, String)\n  const_set('L', String)\n  klass::R = 1\nend\n"
+          )
+
+          expect(outcome.bound_segments).to eq(Set["K", "L", "R"])
+          expect(outcome.bound).to eq(Set.new)
         end
 
         it "leaves the rows as the project walk records them" do
           outcome = outcome_of("a.rb" => "module M\n  K = String\n  refine(K) { def shout = 1 }\nend\n")
 
           expect(outcome.refinements).to eq({ "M::K" => { shout: ["M"] }, "K" => { shout: ["M"] } })
-          expect(outcome.bound).to eq(Set["K"])
+          expect(outcome.bound).to eq(Set["M::K"])
         end
 
         # The controls: a class or module the gem declares is no bound name, nor is a name nothing writes.
         it "is not bound when the gem declares a class or module by the write, or writes another name" do
-          declared = ["K = Class.new", "K = Struct.new(:a)", "K = Data.define(:a)", "K = Module.new", "class K; end"]
+          declared = ["K = Class.new", "K = Struct.new(:a)", "K = Data.define(:a)", "K = Module.new", "class K; end",
+                      "K = Struct.new(:a) do\n  def x = 1\nend.freeze", "K = K || Class.new(StandardError)"]
           bound = declared.map { |form| outcome_of("a.rb" => "module M\n  #{form}\nend\n").bound }
           other = outcome_of("a.rb" => "module M\n  L = String\n  refine(String) { def shout = 1 }\nend\n")
 
           expect(bound).to all(eq(Set.new))
-          expect(other.bound).to eq(Set["L"])
+          expect(other.bound).to eq(Set["M::L"])
         end
       end
 

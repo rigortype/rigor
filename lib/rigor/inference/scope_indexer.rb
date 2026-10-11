@@ -3276,11 +3276,12 @@ module Rigor
       # `refine`-shaped call asks {#refine_target_of}, so a file without one never builds it.
       #
       # ADR-121 WD7 — `census`, when an Array, collects `[start offset, outcome]` for every `refine`-shaped node the
-      # walk accounts for ({ScopeIndexer.refine_census}); `refine_text` memoises whether the file's text names
-      # `refine` at all, so a file that does not skips every census scan; `literal_seen` holds the offsets of the
-      # refine literals a call's arguments already accounted for; `refine_self` is `[owner prefix, module]` while the
-      # walk is inside a block whose `self` it cannot keep ({ScopeIndexer.block_refine_self}): a `refine` there under
-      # that owner prefix is charged to `module` instead.
+      # walk accounts for ({ScopeIndexer.refine_census}); `refine_text` memoises the byte offsets of the `refine`
+      # words in the file's text, so a file with none skips every census scan and a `def` with none is not scanned;
+      # `literal_seen` holds the offsets of the refine literals a call's arguments already accounted for;
+      # `refine_self` is `[owner prefix, module]` while the walk is inside a block whose `self` it cannot keep
+      # ({ScopeIndexer.block_refine_self}): a `refine` there under that owner prefix is charged to `module` instead;
+      # `loose_constants` memoises {ScopeIndexer.loose_constant_segments}.
       MethodTables = Struct.new(:existence, :envelopes, :refinements, :certainty, :certain, :possible,
                                 :contested_envelopes, :contested_def_nodes, :root, :in_effect, :census,
                                 :refine_text, :literal_seen, :refine_self, :loose_constants) do
@@ -3296,10 +3297,20 @@ module Rigor
 
         def in_effect_query = (self.in_effect ||= InEffectRefinements.new(root))
 
-        # Does the walked file's text name `refine`? Every census scan asks first.
-        def mentions_refine?
-          self.refine_text = root.nil? || root.send(:source).source.include?("refine") if refine_text.nil?
-          refine_text
+        # Does the walked file's text name `refine` as a word? Every census scan asks first, so a file that only says
+        # `refined` or `refinement` pays nothing for it.
+        def mentions_refine? = !refine_offsets.empty?
+
+        # Does the text in `[start, stop)` name `refine` as a word? A `def` that does not is not scanned.
+        def refine_in?(start, stop)
+          offsets = refine_offsets
+          index = offsets.bsearch_index { |offset| offset >= start }
+          !index.nil? && offsets[index] < stop
+        end
+
+        # The byte offsets of each `refine` word in the file's text, ascending.
+        def refine_offsets
+          self.refine_text ||= ScopeIndexer.refine_word_offsets(root)
         end
 
         # Records that the walk accounted for the `refine`-shaped `node` with `outcome`, when a census is taken.
@@ -3357,7 +3368,29 @@ module Rigor
 
       EMPTY_REFINEMENTS = {}.freeze
       REFINEMENT_WILDCARD = Scope::DiscoveryIndex::REFINEMENT_WILDCARD
-      private_constant :EMPTY_REFINEMENTS, :REFINEMENT_WILDCARD
+      REFINE_WORD = /\brefine\b/
+      private_constant :EMPTY_REFINEMENTS, :REFINEMENT_WILDCARD, :REFINE_WORD
+
+      NO_OFFSETS = [].freeze
+      private_constant :NO_OFFSETS
+
+      # The byte offsets of the `refine` words in `root`'s text (none for no tree), which `MethodTables#refine_in?`
+      # matches node offsets against.
+      def refine_word_offsets(root)
+        return NO_OFFSETS if root.nil?
+
+        text = root.send(:source).source
+        return NO_OFFSETS unless REFINE_WORD.match?(text)
+
+        binary = text.b
+        offsets = []
+        position = 0
+        while (match = REFINE_WORD.match(binary, position))
+          offsets << match.begin(0)
+          position = match.end(0)
+        end
+        offsets.freeze
+      end
 
       # A6 — the last segments of the constants `root` binds by `||=` (`K ||= String`, `A::K ||= …`) or by a
       # `const_set` whose name is a literal (`Object.const_set(:K, String)`). Scanned only for a file with a
@@ -3891,7 +3924,8 @@ module Rigor
           # receiver, a singleton nothing names) or any ownerless prefix under an unnameable
           # cref — is NOT top level; `record_def_node` would file the def under `<toplevel>`
           # where an implicit-self call could find a method Ruby never installed there.
-          if methods_acc.mentions_refine?
+          location = node.location
+          if methods_acc.mentions_refine? && methods_acc.refine_in?(location.start_offset, location.end_offset)
             census_def(node, owner_prefix, in_singleton_class || defs_singleton, def_owner_prefix, qualified_prefix,
                        methods_acc)
           end

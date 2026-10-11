@@ -91,6 +91,28 @@ RSpec.describe "Typing calls through Ruby refinements (#1664)", type: :runner do
     RUBY
   end
 
+  # Issue #1749. Ruby 4.0.5 prints `1`, `3` and `"abc"` for each shape: the singleton method runs on the module, so its
+  # `refine` is the module's. The block is entered as `String`'s class body, so an implicit-self `size` and `self` in a
+  # `def` there are a `String`'s.
+  {
+    "def self.setup" => "def self.setup\n    refine(String) { def yy = 1; def zz = size; def me = self }\n  end\n",
+    "a def in class << self" =>
+      "class << self\n    def setup\n      refine(String) { def yy = 1; def zz = size; def me = self }\n    " \
+      "end\n  end\n"
+  }.each do |shape, method|
+    it "types a refine written in a module's singleton method from its body (#{shape})" do
+      expect(dumps(<<~RUBY)).to eq(%w[1 non-negative-int String])
+        module M
+          #{method}end
+        M.setup
+        using M
+        Rigor.dump_type("abc".yy)
+        Rigor.dump_type("abc".zz)
+        Rigor.dump_type("abc".me)
+      RUBY
+    end
+  end
+
   it "does not fold a refined core method, and answers the later of two `using`s" do
     expect(dumps(<<~RUBY)).to eq(%w[non-negative-int :up])
       module Sized

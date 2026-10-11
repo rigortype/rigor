@@ -3280,7 +3280,7 @@ module Rigor
       # walk accounts for ({ScopeIndexer.refine_census}); `refine_text` memoises the byte offsets of the `refine`
       # words in the file's text, so a file with none skips every census scan and a `def` with none is not scanned;
       # `literal_seen` holds the offsets of the refine literals a call's arguments already accounted for;
-      # `source_bytes` memoises the file's text as bytes; `loose_constants` memoises
+      # `source_bytes` memoises the byte offsets of the file's heredoc openers; `loose_constants` memoises
       # {ScopeIndexer.loose_constant_segments}. The module a `refine`-shaped node is charged to is what the in-effect
       # walk worked out for it ({#refine_context}).
       MethodTables = Struct.new(:existence, :envelopes, :refinements, :certainty, :certain, :possible,
@@ -3305,12 +3305,8 @@ module Rigor
         # Does the text in `[start, stop)` name `refine` as a word, or open a heredoc whose body (which follows the
         # line, and so may end after `stop`) could? A `def` that does neither is not scanned.
         def refine_in?(start, stop)
-          offsets = refine_offsets
-          index = offsets.bsearch_index { |offset| offset >= start }
-          return true if !index.nil? && offsets[index] < stop
-
-          heredoc = (self.source_bytes ||= root.send(:source).source.b).index("<<", start)
-          !heredoc.nil? && heredoc < stop
+          ScopeIndexer.offset_in?(refine_offsets, start, stop) ||
+            ScopeIndexer.offset_in?(self.source_bytes ||= ScopeIndexer.heredoc_offsets(root), start, stop)
         end
 
         # ADR-121 WD7 — the `self` the `refine`-shaped `node` runs on, as the in-effect walk worked it out
@@ -3372,27 +3368,40 @@ module Rigor
       EMPTY_REFINEMENTS = {}.freeze
       REFINEMENT_WILDCARD = Scope::DiscoveryIndex::REFINEMENT_WILDCARD
       REFINE_WORD = /\brefine\b/
-      private_constant :EMPTY_REFINEMENTS, :REFINEMENT_WILDCARD, :REFINE_WORD
+      HEREDOC_OPENER = /<<[~-]?["'`A-Za-z_]/
+      private_constant :EMPTY_REFINEMENTS, :REFINEMENT_WILDCARD, :REFINE_WORD, :HEREDOC_OPENER
 
       NO_OFFSETS = [].freeze
       private_constant :NO_OFFSETS
 
       # The byte offsets of the `refine` words in `root`'s text (none for no tree), which `MethodTables#refine_in?`
       # matches node offsets against.
-      def refine_word_offsets(root)
+      def refine_word_offsets(root) = pattern_offsets(root, REFINE_WORD)
+
+      # The byte offsets of the heredoc openers (`<<~ID`, `<<-ID`, `<<ID`, `<<"ID"`) in `root`'s text: a heredoc's body
+      # follows its line, so it may end after the `def` that opens it.
+      def heredoc_offsets(root) = pattern_offsets(root, HEREDOC_OPENER)
+
+      def pattern_offsets(root, pattern)
         return NO_OFFSETS if root.nil?
 
         text = root.send(:source).source
-        return NO_OFFSETS unless REFINE_WORD.match?(text)
+        return NO_OFFSETS unless pattern.match?(text)
 
         binary = text.b
         offsets = []
         position = 0
-        while (match = REFINE_WORD.match(binary, position))
+        while (match = pattern.match(binary, position))
           offsets << match.begin(0)
           position = match.end(0)
         end
         offsets.freeze
+      end
+
+      # Is one of the ascending `offsets` in `[start, stop)`?
+      def offset_in?(offsets, start, stop)
+        index = offsets.bsearch_index { |offset| offset >= start }
+        !index.nil? && offsets[index] < stop
       end
 
       # A6 — the last segments of the constants `root` binds by `||=` (`K ||= String`, `A::K ||= …`) or by a

@@ -134,7 +134,9 @@
 
           # rigortype's runtime dependencies, resolved from
           # nix/Gemfile + nix/gemset.nix. Regenerate after a
-          # dependency change with `cd nix && bundle lock && bundix`.
+          # dependency change with `cd nix && bundle update && bundix`
+          # — `bundle lock` keeps the pinned versions and would leave
+          # the package behind the root Gemfile.lock.
           rigorDeps = pkgs.bundlerEnv {
             name = "rigortype-deps";
             inherit ruby;

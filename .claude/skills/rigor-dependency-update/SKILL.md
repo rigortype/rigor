@@ -18,7 +18,9 @@ usually means both, but they are different kinds of change and belong in
 1. **Bundled gems** — `Gemfile.lock`. The **runtime-affecting** layer:
    the analyzer's own dependencies (`prism`, `rbs`,
    `language_server-protocol`) plus dev tooling (`rubocop`, `rspec`,
-   `binpacker`, …). Managed with `bundle update`.
+   `binpacker`, …). Managed with `bundle update`. A bump to one of the
+   runtime gems must also be mirrored into the Nix package's own lock
+   (see "The Nix package lock").
 2. **Nix Flake dev environment** — `flake.lock`. The **development**
    layer: the pinned `nixpkgs-unstable` revision that provisions the dev
    shell (make, git base, bundix, the Ruby build inputs). Managed with
@@ -58,6 +60,23 @@ Two judgment calls the resolver makes for you, worth confirming:
 Commit subject: `Update bundled gems to their latest in-range versions`.
 Body: list the bumps, note no range change, note any major deliberately
 held by a transitive cap.
+
+## The Nix package lock (`nix/`)
+
+The Nix package (`packages.default` in `flake.nix`, ADR-27's Nix channel)
+installs the runtime gems from `nix/Gemfile` into `nix/Gemfile.lock` +
+`nix/gemset.nix`, not from `Gemfile.lock`. They resolve independently, so
+a runtime-gem bump must be mirrored into them:
+
+```sh
+nix develop --command bash -c 'cd nix && bundle update && bundix'
+```
+
+`bundle lock` is **not** enough — it keeps the pinned versions and only
+fills gaps. Regenerate whenever a runtime gem moves or the gemspec gains
+or drops one (mirror the `gem` line in `nix/Gemfile` too). Fold the result
+into the Layer 1 commit: the two locks move together, and
+`spec/docs/nix_lockfile_sync_spec.rb` fails on either alone.
 
 ## Layer 2 — Nix Flake dev environment (`nix flake update`)
 
@@ -129,7 +148,8 @@ nix develop --command git diff --check
 `make verify` (test + lint + `check` + `check-plugins`) must be green under
 the **new** toolchain and **freshly-compiled** gems — it is the proof both
 layers are healthy together. Only `Gemfile.lock` and `flake.lock` should be
-in `git status` (`vendor/bundle` stays untracked).
+in `git status` (`vendor/bundle` stays untracked); `nix/Gemfile.lock` and
+`nix/gemset.nix` join them when a runtime gem moved.
 
 ## Record the perf-gate shift
 
@@ -175,6 +195,8 @@ APPROVE cannot exist on a one-developer repository, so it is not the trigger).
 - Branch cut; one PR carrying one commit per layer.
 - `bundle update` (not a hand-edit); `git diff Gemfile.lock` is
   version-only; no gemspec range change; held-back majors left alone.
+- A runtime-gem bump: `nix/Gemfile.lock` + `nix/gemset.nix` regenerated
+  with `cd nix && bundle update && bundix` (not `bundle lock`).
 - `nix flake update`; only `flake.lock` moved; Ruby / git / waza in-flake
   pins untouched.
 - `rm -rf vendor/bundle && bundle install` **after** the Flake update.

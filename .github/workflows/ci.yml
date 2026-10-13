@@ -66,10 +66,11 @@ jobs:
         run: |
           # `nix` gates the Nix package build below: the paths whose change
           # can move the package's gem resolution or its derivation, plus
-          # this file, which holds the job. Kept separate from `code`
-          # because the build compiles Ruby, so it should not run on every
-          # code PR.
-          nix_inputs='^(nix/|flake\.nix$|flake\.lock$|\.github/workflows/ci\.yml$)'
+          # this file, which holds the job, and `lib/rigor/version.rb`,
+          # which `flake.nix` reads when it evaluates. Kept separate from
+          # `code` because the build is unrelated to most PRs and compiles
+          # Ruby cold, so it should not run on every code PR.
+          nix_inputs='^(nix/|flake\.nix$|flake\.lock$|\.github/workflows/ci\.yml$|lib/rigor/version\.rb$)'
           if [ "${{ github.event_name }}" != "pull_request" ]; then
             echo "Non-PR event — running the full suite."
             echo "code=true" >> "$GITHUB_OUTPUT"
@@ -92,7 +93,7 @@ jobs:
             echo "Markdown-only PR — skipping the code suite."
             echo "code=false" >> "$GITHUB_OUTPUT"
           fi
-          if printf '%s\n' "$changed" | grep -qE "$nix_inputs"; then
+          if grep -qE "$nix_inputs" <<<"$changed"; then
             echo "Nix package inputs changed — building the package."
             echo "nix=true" >> "$GITHUB_OUTPUT"
           else
@@ -878,12 +879,12 @@ jobs:
   # `flake.lock` and this workflow file — the package's gem resolution,
   # its derivation, and the job itself. `lib/`, `exe/`, `data/` and `sig/`
   # are copied into the package too, but the suite covers them and gating
-  # on them would run this build on nearly every PR.
+  # on all of `lib/` would run this build on nearly every PR.
   #
-  # Cold this compiles Ruby 4.0 from source (~3m30s measured, run
-  # 38459884419); the store cache makes later runs cheaper. It is gated
-  # because it is unrelated to most PRs, not because it is prohibitive —
-  # it is shorter than a test shard and adds no wall time when it runs.
+  # Cold this compiles Ruby 4.0 from source (5m14s in run 38463001705,
+  # 4m43s of it the build); a warm store cache makes a rerun much
+  # cheaper. It is gated because it is unrelated to most PRs, not because
+  # it is prohibitive. Master pushes run it too, as a post-merge check.
   nix-package:
     name: Nix package
     needs: changes
@@ -912,12 +913,16 @@ jobs:
 
       # `--version` alone loads no runtime gem, so it proves very little.
       # `check` loads the core RBS from the packaged `rbs`, and `nix run`
-      # evaluates `apps.rigor`, the documented `nix run` entry point.
+      # evaluates `apps.rigor`, the documented `nix run` entry point. Run
+      # it from an empty directory so the result reflects the package, not
+      # this repository's own sig/ and config (and so #1853, the package
+      # shipping no plugins/, cannot fail this job).
       - name: Smoke-test the packaged binary
         run: |
           ./result/bin/rigor --version
-          printf 'x = 1\nputs x\n' > /tmp/rigor-smoke.rb
-          nix run .#rigor -- check --no-cache --fail-on=error /tmp/rigor-smoke.rb
+          d=$(mktemp -d)
+          printf 'x = 1\nputs x\n' > "$d/smoke.rb"
+          (cd "$d" && nix run "$GITHUB_WORKSPACE#rigor" -- check --no-cache --fail-on=error smoke.rb)
 
   # ── Fan-in: single required-check target for branch protection ───
   # Configure branch protection to require only "CI required" rather
@@ -954,7 +959,8 @@ jobs:
             failed=1
           fi
           # A gated job that was skipped (the code jobs on a Markdown-only
-          # PR, Docs check on a code PR) is acceptable;
+          # PR, Docs check on a code PR, Nix package when no package input
+          # changed) is acceptable;
           # only an outright failure or cancellation blocks the merge.
           for job_result in "$TIMING_CACHE_RESULT" "$TEST_RESULT" "$SHARD_COVERAGE_RESULT" "$EXCLUDED_SPECS_RESULT" "$RBS_COMPAT_RESULT" "$LINT_RESULT" "$DOCS_CHECK_RESULT" "$SELF_CHECK_RESULT" "$SELF_CHECK_DIFF_RESULT" "$SELF_CHECK_BLEEDING_EDGE_RESULT" "$ACCEPTANCE_GATES_RESULT" "$ARITY_DIFFERENTIAL_RESULT" "$NIX_PACKAGE_RESULT"; do
             if [[ "$job_result" != "success" && "$job_result" != "skipped" ]]; then

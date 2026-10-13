@@ -19,6 +19,7 @@ require "spec_helper"
 require "bundler"
 
 NIX_LOCK_REPO_ROOT = File.expand_path("../..", __dir__)
+NIX_LOCK_NIX_GEMFILE = File.join(NIX_LOCK_REPO_ROOT, "nix", "Gemfile")
 NIX_LOCK_NIX_GEMFILE_LOCK = File.join(NIX_LOCK_REPO_ROOT, "nix", "Gemfile.lock")
 NIX_LOCK_GEMSET_NIX = File.join(NIX_LOCK_REPO_ROOT, "nix", "gemset.nix")
 NIX_LOCK_REGENERATE = "Regenerate with `cd nix && bundle update && bundix` and commit the changed files."
@@ -57,6 +58,8 @@ RSpec.describe "nix/ package lockfile sync (#1849)" do
       nix/Gemfile.lock disagrees with Gemfile.lock:
         #{drift.join("\n  ")}
       #{NIX_LOCK_REGENERATE}
+      If the root lock is held back by a dev-only constraint on a runtime gem, give nix/Gemfile the
+      same bound so both sides resolve the same version.
     MESSAGE
   end
 
@@ -76,12 +79,23 @@ RSpec.describe "nix/ package lockfile sync (#1849)" do
   it "mirrors the gemspec's runtime dependencies in nix/Gemfile" do
     gemspec = Gem::Specification.load(File.join(NIX_LOCK_REPO_ROOT, "rigortype.gemspec"))
     runtime = gemspec.dependencies.select { |dep| dep.type == :runtime }.map(&:name).sort
-    declared = Bundler::LockfileParser.new(File.read(NIX_LOCK_NIX_GEMFILE_LOCK)).dependencies.keys.sort
+    declared = File.read(NIX_LOCK_NIX_GEMFILE).scan(/^gem "([^"]+)"/).flatten.sort
 
     expect(declared).to eq(runtime), <<~MESSAGE
-      nix/Gemfile must list exactly the gemspec's runtime dependencies.
+      nix/Gemfile must `gem` exactly the gemspec's runtime dependencies.
         nix/Gemfile: #{declared.inspect}
         gemspec:     #{runtime.inspect}
+    MESSAGE
+  end
+
+  it "keeps nix/Gemfile.lock's dependencies in step with nix/Gemfile" do
+    declared = File.read(NIX_LOCK_NIX_GEMFILE).scan(/^gem "([^"]+)"/).flatten.sort
+    locked = Bundler::LockfileParser.new(File.read(NIX_LOCK_NIX_GEMFILE_LOCK)).dependencies.keys.sort
+
+    expect(locked).to eq(declared), <<~MESSAGE
+      nix/Gemfile.lock was not regenerated after a nix/Gemfile change:
+        nix/Gemfile:      #{declared.inspect}
+        nix/Gemfile.lock: #{locked.inspect}
     MESSAGE
   end
 end

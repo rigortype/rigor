@@ -50,6 +50,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       code: ${{ steps.detect.outputs.code }}
+      nix: ${{ steps.detect.outputs.nix }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -63,14 +64,23 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
+          # `nix` gates the Nix package build below: the paths whose change
+          # can move the package's gem resolution or its derivation, plus
+          # this file, which holds the job, and `lib/rigor/version.rb`,
+          # which `flake.nix` reads when it evaluates. Kept separate from
+          # `code` because the build is unrelated to most PRs and compiles
+          # Ruby cold, so it should not run on every code PR.
+          nix_inputs='^(nix/|flake\.nix$|flake\.lock$|\.github/workflows/ci\.yml$|lib/rigor/version\.rb$)'
           if [ "${{ github.event_name }}" != "pull_request" ]; then
             echo "Non-PR event — running the full suite."
             echo "code=true" >> "$GITHUB_OUTPUT"
+            echo "nix=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           if ! changed=$(git diff --name-only "$BASE_SHA...$HEAD_SHA"); then
             echo "diff failed — failing safe to the full suite."
             echo "code=true" >> "$GITHUB_OUTPUT"
+            echo "nix=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           echo "Changed files:"
@@ -82,6 +92,13 @@ jobs:
           else
             echo "Markdown-only PR — skipping the code suite."
             echo "code=false" >> "$GITHUB_OUTPUT"
+          fi
+          if grep -qE "$nix_inputs" <<<"$changed"; then
+            echo "Nix package inputs changed — building the package."
+            echo "nix=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No Nix package input changed — skipping the package build."
+            echo "nix=false" >> "$GITHUB_OUTPUT"
           fi
 
   # ── 0a. The timing file every shard partitions ──────────────────
@@ -847,13 +864,73 @@ jobs:
             --rule call.wrong-arity --adjudication "$fixtures/arity_adjudication.yml" \
             --require-rows-in "$fixtures/survivors/:7" --summary "$GITHUB_STEP_SUMMARY"
 
+  # ── Nix package (ADR-27's Nix channel) ──────────────────────────
+  # Build the packaged `rigor` from `flake.nix` + `nix/Gemfile.lock` +
+  # `nix/gemset.nix`. Nothing else in CI builds it, so a `gemset.nix`
+  # whose version `spec/docs/nix_lockfile_sync_spec.rb` accepts but whose
+  # `sha256` went stale passes the suite and only fails for a user
+  # running `nix profile install`; `nix build` fetches each gem by its
+  # pinned hash, so it is the check that holds them.
+  #
+  # Gated on the `changes` job's `nix` output rather than a workflow-level
+  # path filter: a job that reports `skipped` is accepted by the
+  # `required` fan-in, while a filtered workflow never reports at all and
+  # would hang a required check. The gate is `nix/`, `flake.nix`,
+  # `flake.lock` and this workflow file — the package's gem resolution,
+  # its derivation, and the job itself. `lib/`, `exe/`, `data/` and `sig/`
+  # are copied into the package too, but the suite covers them and gating
+  # on all of `lib/` would run this build on nearly every PR.
+  #
+  # Cold this compiles Ruby 4.0 from source (5m14s in run 38463001705,
+  # 4m43s of it the build); a warm store cache makes a rerun much
+  # cheaper. It is gated because it is unrelated to most PRs, not because
+  # it is prohibitive. Master pushes run it too, as a post-merge check.
+  nix-package:
+    name: Nix package
+    needs: changes
+    if: needs.changes.outputs.nix == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          submodules: false
+          persist-credentials: false
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+
+      # Keyed on the derivation's inputs, so a hash or resolution change
+      # misses and a stale `sha256` can never be served from the cache.
+      - name: Cache the Nix store
+        uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.nix', 'flake.lock', 'nix/Gemfile.lock', 'nix/gemset.nix') }}
+
+      - name: Build the package
+        run: nix build .#rigor -L
+
+      # `--version` alone loads no runtime gem, so it proves very little.
+      # `check` loads the core RBS from the packaged `rbs`, and `nix run`
+      # evaluates `apps.rigor`, the documented `nix run` entry point. Run
+      # it from an empty directory so the result reflects the package, not
+      # this repository's own sig/ and config (and so #1853, the package
+      # shipping no plugins/, cannot fail this job).
+      - name: Smoke-test the packaged binary
+        run: |
+          ./result/bin/rigor --version
+          d=$(mktemp -d)
+          printf 'x = 1\nputs x\n' > "$d/smoke.rb"
+          (cd "$d" && nix run "$GITHUB_WORKSPACE#rigor" -- check --no-cache --fail-on=error smoke.rb)
+
   # ── Fan-in: single required-check target for branch protection ───
   # Configure branch protection to require only "CI required" rather
   # than each individual job. New jobs added above are automatically
   # gated without touching protection rules.
   required:
     name: CI required
-    needs: [changes, timing-cache, test, shard-coverage, excluded-specs, rbs-compat, lint, docs-check, self-check, self-check-diff, self-check-bleeding-edge, acceptance-gates, arity-differential]
+    needs: [changes, timing-cache, test, shard-coverage, excluded-specs, rbs-compat, lint, docs-check, self-check, self-check-diff, self-check-bleeding-edge, acceptance-gates, arity-differential, nix-package]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -872,6 +949,7 @@ jobs:
           SELF_CHECK_BLEEDING_EDGE_RESULT: ${{ needs.self-check-bleeding-edge.result }}
           ACCEPTANCE_GATES_RESULT: ${{ needs.acceptance-gates.result }}
           ARITY_DIFFERENTIAL_RESULT: ${{ needs.arity-differential.result }}
+          NIX_PACKAGE_RESULT: ${{ needs.nix-package.result }}
         run: |
           failed=0
           # Change detection must always succeed — it is what decides
@@ -881,9 +959,10 @@ jobs:
             failed=1
           fi
           # A gated job that was skipped (the code jobs on a Markdown-only
-          # PR, Docs check on a code PR) is acceptable;
+          # PR, Docs check on a code PR, Nix package when no package input
+          # changed) is acceptable;
           # only an outright failure or cancellation blocks the merge.
-          for job_result in "$TIMING_CACHE_RESULT" "$TEST_RESULT" "$SHARD_COVERAGE_RESULT" "$EXCLUDED_SPECS_RESULT" "$RBS_COMPAT_RESULT" "$LINT_RESULT" "$DOCS_CHECK_RESULT" "$SELF_CHECK_RESULT" "$SELF_CHECK_DIFF_RESULT" "$SELF_CHECK_BLEEDING_EDGE_RESULT" "$ACCEPTANCE_GATES_RESULT" "$ARITY_DIFFERENTIAL_RESULT"; do
+          for job_result in "$TIMING_CACHE_RESULT" "$TEST_RESULT" "$SHARD_COVERAGE_RESULT" "$EXCLUDED_SPECS_RESULT" "$RBS_COMPAT_RESULT" "$LINT_RESULT" "$DOCS_CHECK_RESULT" "$SELF_CHECK_RESULT" "$SELF_CHECK_DIFF_RESULT" "$SELF_CHECK_BLEEDING_EDGE_RESULT" "$ACCEPTANCE_GATES_RESULT" "$ARITY_DIFFERENTIAL_RESULT" "$NIX_PACKAGE_RESULT"; do
             if [[ "$job_result" != "success" && "$job_result" != "skipped" ]]; then
               echo "A required job did not succeed (result: $job_result)"
               failed=1

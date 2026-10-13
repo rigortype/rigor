@@ -39,3 +39,33 @@ contract.
 The normative reasons are [ADR-107](../adr/107-checked-types-and-typeless-comments.md),
 [ADR-108](../adr/108-type-provenance-for-agents.md), and
 [ADR-14](../adr/14-rbs-sig-generation.md).
+
+## Tighten the gate with the fix
+
+The pattern to copy is the alba maintainer's Steep ratchet
+([`03b37e7`](https://github.com/okuramasafumi/alba/commit/03b37e75ee12b9a28e00341143449778bf2241d0),
+[`5883637`](https://github.com/okuramasafumi/alba/commit/5883637),
+[`bf06036`](https://github.com/okuramasafumi/alba/commit/bf06036)). The `Module#name` thread in
+[alba#576](https://github.com/okuramasafumi/alba/pull/576) shows two traps that sit next to it.
+
+- **Remove a downgrade in the commit that makes the code pass it.** alba's Steepfile listed six
+  diagnostics at `:information`. `03b37e7` removed `BlockTypeMismatch` and fixed what it exposed; the other
+  two commits removed `UnexpectedSuper` and `UnexpectedKeywordArgument` outright, because nothing was left
+  to fix. One diagnostic per commit, three left. Do not add a downgrade to land a change, and do not drop
+  one without fixing the sites it was hiding.
+- **Fix the signature before the call site.** `03b37e7` gave blocks their `[self: …]` types and named each
+  proc contract once (`metadata_proc`, `instance_proc?` in place of a bare `Proc?`, `converter` and
+  `check`). Only three source lines kept a `# steep:ignore`, each on the one expression the signature
+  cannot express, and a type assertion moved to the line that introduces the value.
+- **Do not widen a signature to fit the checker.** In alba#576 `_ClassContext#name` stayed `-> String`
+  although an anonymous class returns `nil`: the change was signature-only, and `String?` made Steep reject
+  `nesting`, which does not narrow a second `name` call (`n = name` would). The maintainer's answer was to
+  keep the type honest and change the code. A signature-only scope is a reason to stop and say so, not to
+  state a wider type.
+- **A core `-> String` with `%a{implicitly-returns-nil}` hides a nil from every checker.** The nil that
+  raises in alba is elsewhere: `resource_name` calls `self.class.name.end_with?`, and `self.class` is
+  declared `Class`, whose core `name` is `-> String` plus that annotation, so `Alba.serialize(obj) {
+  root_key!; … }` raises `NoMethodError` and neither Steep nor Rigor reports it. `RbsDispatch` reads past
+  the annotation on purpose ([inference-engine.md](../internal-spec/inference-engine.md), "nil-free for a
+  lookup that can miss"). Guard such a call in code and check the producing call sites; do not rely on the
+  type.

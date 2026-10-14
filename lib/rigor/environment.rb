@@ -444,8 +444,8 @@ module Rigor
       end
 
       # The `:missing` classification (locked gems with no RBS through any resolution path), computed once
-      # and consumed twice: as `[gem_name, version]` pairs for the ADR-82 WD9 constant-ownership index, and
-      # as the eligible-gem set for the ADR-72 overlay resolution. Returns `[pairs, overlay_paths]`.
+      # and consumed twice: as `[gem_name, version, variants]` entries for the ADR-82 WD9 constant-ownership
+      # index, and as the eligible-gem set for the ADR-72 overlay resolution. Returns `[entries, overlay_paths]`.
       def missing_gems_and_overlay_paths(locked:, default_libraries:, bundle_sig_paths:,
                                          rbs_collection_paths:, plugin_registry:, signature_paths: [],
                                          bundle_root: nil)
@@ -458,7 +458,7 @@ module Rigor
           missing_gem_names: rows.map(&:gem_name), plugin_registry: plugin_registry,
           signature_paths: signature_paths
         )
-        [rows.map { |row| [row.gem_name, row.version] }, overlays]
+        [index_entries(rows, locked), overlays]
       end
 
       # Issue #530 — a project with no `Gemfile.lock` still has gems on disk, and before this it handed the
@@ -472,7 +472,14 @@ module Rigor
         return [[], []] if installed.empty?
 
         rows = missing_rows(installed, default_libraries, bundle_sig_paths, rbs_collection_paths)
-        [rows.map { |row| [row.gem_name, row.version] }, []]
+        [index_entries(rows, installed), []]
+      end
+
+      # The constant-ownership index's input: each `:missing` row with every `[version, platform]` variant its
+      # gem was locked (or found installed) under, because Bundler installs the variant matching the host —
+      # `commonmarker-2.10.0-arm64-darwin/` under a lockfile whose representative is the `ruby` one (#1844).
+      def index_entries(rows, gems)
+        rows.map { |row| [row.gem_name, row.version, gems[row.gem_name]&.variants] }
       end
 
       def missing_rows(gems, default_libraries, bundle_sig_paths, rbs_collection_paths)

@@ -571,4 +571,27 @@ RSpec.describe Rigor::CLI::SkillCommand do
       expect(out).to include("rigor skill <name>")
     end
   end
+
+  # #1860: under a C/POSIX locale the process default external encoding is US-ASCII. `--full` inlines the SKILL.md body
+  # and each references/*.md, which carry non-ASCII text (em-dashes); each must be read as UTF-8 explicitly.
+  describe "--full under a US-ASCII default external encoding (#1860)" do
+    around do |example|
+      previous = Encoding.default_external
+      begin
+        Encoding.default_external = Encoding::US_ASCII
+        example.run
+      ensure
+        Encoding.default_external = previous
+      end
+    end
+
+    it "inlines the SKILL.md and references with non-ASCII text and exits 0" do
+      expect(Encoding.default_external).to eq(Encoding::US_ASCII)
+
+      status, out, err = run(%w[--full rigor-doctor])
+      expect(err).to eq("")
+      expect(status).to eq(0)
+      expect(out).to include("# 01 \u2014 The checks")
+    end
+  end
 end

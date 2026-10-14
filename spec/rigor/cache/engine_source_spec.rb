@@ -93,6 +93,26 @@ RSpec.describe Rigor::Cache::EngineSource do
       end
     end
 
+    it "moves on an edit to an engine-owned .rbs overlay or a bundled plugin's sig/" do
+      Dir.mktmpdir("rigor-engine-source-") do |dir|
+        root = write_engine(File.join(dir, "checkout"), "# v1\n")
+        overlay = File.join(root, "data", "core_overlay", "string.rbs")
+        plugin_sig = File.join(root, "plugins", "rigor-x", "sig", "x.rbs")
+        [overlay, plugin_sig].each do |path|
+          FileUtils.mkdir_p(File.dirname(path))
+          File.write(path, "class String\n  def a: () -> Integer\nend\n")
+        end
+        before = described_class.identity(root)
+
+        File.write(overlay, "class String\n  def b: () -> Integer\nend\n")
+        after_overlay = described_class.identity(root)
+        expect(after_overlay).not_to eq(before)
+
+        File.write(plugin_sig, "class X\nend\n")
+        expect(described_class.identity(root)).not_to eq(after_overlay)
+      end
+    end
+
     it "moves the run-key config entry on a data/builtins edit" do
       Dir.mktmpdir("rigor-engine-source-") do |dir|
         root = write_engine(File.join(dir, "checkout"), "# v1\n")

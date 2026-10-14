@@ -465,14 +465,17 @@ on its own behalf.
 - **Mutable** — anything else (a checkout, a `bundle add rigor, github:`
   clone, a `path:` gem). The caller adds an `engine-source` config entry
   holding a SHA-256 over every `.rb` under the gem root's `lib/` and
-  `plugins/` and every `.yml` under `data/builtins/` and `data/effects/`
-  (the catalogues the analysis loads at runtime), each contributing its
-  **root-relative path** and its **content**. The `.rbs` trees under
-  `data/` are not in this digest: `RbsDescriptor` already digests them,
-  and tooling-only trees such as `data/oss-sweep/` are not engine input. Content, not a stat tuple: a stat tuple is barred from a
-  cache KEY (see `FileEntry`), and a path-relative content digest is what
-  makes the key survive a re-clone or a fresh CI checkout of the same
-  commit.
+  `plugins/`, every `.yml` under `data/builtins/` and `data/effects/`,
+  every `.rbs` under `data/`, and every `.rbs` under `plugins/*/sig/`,
+  each contributing its **root-relative path** and its **content**.
+  The `.rbs` files are digested by `RbsDescriptor` too, but only the
+  run-result and env caches read that; the `--incremental` snapshot
+  fingerprint and `Protection::MutationCache` key on `signature_paths`
+  plus this slot alone. Tooling-only trees such as `data/oss-sweep/` are
+  not engine input. Content, not a stat tuple: a stat tuple is barred
+  from a cache KEY (see `FileEntry`), and a path-relative content digest
+  is what makes the key survive a re-clone or a fresh CI checkout of the
+  same commit.
 
 A mutable tree whose source cannot be read raises
 `EngineSource::Unavailable`, which every caller turns into "no cache for

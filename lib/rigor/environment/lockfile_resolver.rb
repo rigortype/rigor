@@ -180,19 +180,11 @@ module Rigor
           # {BundleSigDiscovery}'s `bundler/gems/` walk.
           # A multi-platform lockfile repeats the name once per platform; fold the repeats into `variants`
           # instead of letting the last one overwrite the rest (#1844).
-          name = spec.name.to_s
-          version = spec.version.to_s
-          git_source = spec.source.is_a?(Bundler::Source::Git)
-          h[name] = if (prior = h[name])
-                      # Keep a `ruby` representative once seen; otherwise the last variant wins, as before.
-                      keep_prior = prior.platform == "ruby"
-                      prior.with(variants: [*prior.variants, [version, platform]],
-                                 version: keep_prior ? prior.version : version,
-                                 platform: keep_prior ? prior.platform : platform,
-                                 git_source: prior.git_source || git_source)
-                    else
-                      LockedGem.new(name: name, version: version, platform: platform, git_source: git_source)
-                    end
+          entry = LockedGem.new(
+            name: spec.name, version: spec.version.to_s, platform: platform,
+            git_source: spec.source.is_a?(Bundler::Source::Git)
+          )
+          h[entry.name] = (prior = h[entry.name]) ? merge_variant(prior, entry) : entry
         end
         locked.freeze
       rescue ::Ractor::IsolationError => e
@@ -203,6 +195,18 @@ module Rigor
         EMPTY
       end
       private_class_method :do_parse
+
+      # Folds a further platform variant of an already-parsed name into it. The representative keeps a `ruby`
+      # variant once seen; otherwise the last variant wins, as it did before variants were kept.
+      def self.merge_variant(prior, entry)
+        rep = prior.platform == "ruby" ? prior : entry
+        prior.with(
+          variants: [*prior.variants, [entry.version, entry.platform]],
+          version: rep.version, platform: rep.platform,
+          git_source: prior.git_source || entry.git_source
+        )
+      end
+      private_class_method :merge_variant
 
       # #1064 — Bundler's lockfile parser reads RubyGems module state a non-main Ractor may not touch, so the
       # parse raises `Ractor::IsolationError` there whatever the lockfile says. That is an engine constraint, not

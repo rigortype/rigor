@@ -1,0 +1,1 @@
+- **[cache]** A source checkout's run cache now keys on the builtin and effect catalogues under `data/`, so a catalogue-only edit no longer replays the previous engine's diagnostics from a warm cache. ([#1865](https://github.com/rigortype/rigor/pull/1865))

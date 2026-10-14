@@ -102,10 +102,14 @@ RSpec.describe "existence probes over a contested resolution chain" do
     expect(Rigor::Inference::ErrorInfo.send(:own_case_equality?, "S", scope)).to be(true)
   end
 
-  it "keeps the struct `.with` guard seeing a hand-written `with`" do
-    receiver = Rigor::Type::StructInstance.new({ a: Rigor::Type::Combinator.untyped }, "C")
-    materialization = Rigor::Inference::MethodDispatcher::StructMaterialization
-    expect(materialization.send(:hand_written_with?, receiver, scope)).to be(true)
+  # #1335: `hand_written_with?` was removed with the Struct#with fold, and it was this probe's only caller on the
+  # `with` name. The contested-chain existence answer it relied on is kept pinned through the same probe API and
+  # through CheckRules, which asks it on the same name.
+  it "keeps the ancestor-walk probe finding a hand-written `with` on a contested chain" do
+    node, owner = scope.user_def_through_ancestors("C", :with)
+    expect([owner, node.nil?]).to eq(["M", false])
+    rules = Rigor::Analysis::CheckRules
+    expect(rules.send(:project_defines_method?, scope, "C", :with, :instance)).to be(true)
   end
 
   it "keeps the active_model_serializers plugin's project-definition probe answering defined" do

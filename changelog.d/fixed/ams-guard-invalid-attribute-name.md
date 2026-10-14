@@ -1,0 +1,1 @@
+- **[plugins/rigor-active-model-serializers]** A serializer class written in several files is read as one class, so a sibling file whose attribute name cannot be a Symbol no longer hides the valid file's attributes from the `object` reader typing ([#1864](https://github.com/rigortype/rigor/pull/1864)).

@@ -29,7 +29,7 @@ module Rigor
       #    `StructInstance`, the member map built from the call's arguments (positional or keyword per the
       #    class's `keyword_init`). A form / arity mismatch degrades to `Dynamic[top]` rather than a wrong
       #    member map. `.members` on the class folds.
-      # 3. member reads + `[]` / `to_h` / `deconstruct` / `deconstruct_keys` / `members` / `with` on a
+      # 3. member reads + `[]` / `to_h` / `deconstruct` / `deconstruct_keys` / `members` on a
       #    *fresh* `StructInstance` -> the precise projected type; member *setters* (`s.x = v`) return the
       #    assigned value type. Unhandled / stored-receiver calls return nil so the pipeline projects the
       #    instance to its nominal through RbsDispatch.
@@ -38,8 +38,9 @@ module Rigor
       module StructFolding
         module_function
 
-        # The `[]` / `to_h` / `deconstruct` / `members` / `with` projections
+        # The `[]` / `to_h` / `deconstruct` / `members` projections
         # and the reader-redefinition guard are shared with {DataFolding}.
+        # `Struct` has no `#with` (issue #1335): that projection stays on {DataFolding} only.
         extend MemberShapeProjection
 
         # Issue #595 / #525 — the shared materialisation test; see {StructMaterialization}.
@@ -239,10 +240,6 @@ module Rigor
           when :deconstruct then instance_deconstruct(instance)
           when :deconstruct_keys then instance_deconstruct_keys(instance, args)
           when :members then instance_members(instance)
-          when :with
-            instance_with(instance, args) do |members, class_name|
-              Type::Combinator.struct_instance_of(members: members, class_name: class_name)
-            end
           end
         end
 

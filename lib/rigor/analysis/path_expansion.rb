@@ -32,10 +32,27 @@ module Rigor
 
       # `exclude_patterns` are matched with `File.fnmatch?` WITHOUT `FNM_PATHNAME`, so `**`/`*` span separators
       # (the patterns behave like substring globs) — the exact semantics the Runner's directory glob applies.
+      #
+      # A file is tested under every spelling of the same path (#1576): as given, relative to the working
+      # directory (the project root, where `.rigor.yml` is discovered), and absolute. `.rigor.yml`'s `paths:`
+      # load as absolute, an argument may be spelled relatively, and a pattern written against either must
+      # exclude the same files.
       def reject_excluded(file_list, exclude_patterns)
         return file_list if exclude_patterns.empty?
 
-        file_list.reject { |path| exclude_patterns.any? { |pattern| File.fnmatch?(pattern, path) } }
+        root = Dir.pwd
+        file_list.reject do |path|
+          spellings = path_spellings(path, root)
+          exclude_patterns.any? { |pattern| spellings.any? { |spelling| File.fnmatch?(pattern, spelling) } }
+        end
+      end
+
+      def path_spellings(path, root)
+        absolute = File.absolute_path(path, root)
+        spellings = [path, absolute]
+        prefix = root.end_with?("/") ? root : "#{root}/"
+        spellings << absolute.delete_prefix(prefix) if absolute.start_with?(prefix)
+        spellings.uniq
       end
     end
   end

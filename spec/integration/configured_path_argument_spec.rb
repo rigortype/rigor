@@ -44,13 +44,10 @@ RSpec.describe "a path argument that names a configured path (#1556)" do
     expect(undefined_rows(%w[lib/c.rb lib/d.rb])).to eq(["d.rb:3"])
   end
 
-  # `exclude:` matches a path as spelled, and the configured `lib` loads absolute, so a relative pattern excludes
-  # `lib/gen` from the argument's expansion and not from the configured one. The run still widens discovery over
-  # the configured spelling and finds the method `lib/gen` defines.
-  #
-  # flip this when #1576 is fixed: once a relative `exclude:` pattern applies to the configured absolute paths,
-  # the configured spelling excludes `lib/gen` as well, and this example pins behaviour that no longer exists.
-  it "discovers a method defined only in a file the argument's spelling excludes" do
+  # `exclude:` applies to a path whichever way it is spelled (#1576): the configured `lib` loads absolute and the
+  # argument is relative, and a relative pattern excludes `lib/gen` from both. The excluded file is not read for
+  # discovery either, so the method it defines stays undefined under both spellings.
+  it "treats a file the exclude pattern names as absent under either spelling" do
     File.write(".rigor.yml", "paths:\n  - lib\nexclude:\n  - \"lib/gen/**\"\n")
     FileUtils.mkdir_p("lib/gen")
     FileUtils.mkdir_p("sig")
@@ -58,7 +55,45 @@ RSpec.describe "a path argument that names a configured path (#1556)" do
     File.write("lib/widget.rb", "class Widget\n  def initialize; end\n  def name = \"w\"\nend\n")
     File.write("lib/user.rb", "class User\n  def go\n    Widget.new.extra\n  end\nend\n")
     File.write("lib/gen/widget_ext.rb", "class Widget\n  def extra = 1\nend\n")
-    expect(undefined_rows(%w[lib])).to eq(["b.rb:3"])
+    expect(undefined_rows(nil)).to eq(["b.rb:3", "user.rb:3"])
+    expect(undefined_rows(%w[lib])).to eq(["b.rb:3", "user.rb:3"])
+  end
+
+  # Issue #1576 — the reported symptom: a file under an excluded directory is not reported.
+  describe "a relative `exclude:` pattern" do
+    def reported_files(paths)
+      runner = Rigor::Analysis::Runner.new(configuration: Rigor::Configuration.load(".rigor.yml"), cache_store: nil)
+      guarded_run(runner, paths).diagnostics.map { |d| File.basename(d.path) }.uniq.sort
+    end
+
+    before do
+      FileUtils.mkdir_p("lib/gen")
+      File.write("lib/gen/x.rb", "x = nil\nx.upcase\n")
+      File.write("lib/gen2.rb", "y = nil\ny.upcase\n")
+    end
+
+    it "excludes the same files for configured paths and for `rigor check lib`" do
+      File.write(".rigor.yml", "paths:\n  - lib\nexclude:\n  - \"lib/gen/**\"\n")
+      expect(reported_files(nil)).to include("gen2.rb")
+      expect(reported_files(nil)).not_to include("x.rb")
+      expect(reported_files(%w[lib])).to eq(reported_files(nil))
+    end
+
+    it "keeps an absolute pattern working for both spellings" do
+      File.write(".rigor.yml", "paths:\n  - lib\nexclude:\n  - \"#{File.join(Dir.pwd, 'lib/gen/**')}\"\n")
+      expect(reported_files(nil)).not_to include("x.rb")
+      expect(reported_files(%w[lib])).not_to include("x.rb")
+    end
+
+    it "does not exclude a file the pattern does not name" do
+      File.write(".rigor.yml", "paths:\n  - lib\nexclude:\n  - \"lib/gen/**\"\n")
+      expect(reported_files(nil)).to include("gen2.rb")
+      expect(reported_files(%w[lib/gen2.rb])).to include("gen2.rb")
+    end
+
+    it "reports the file when no pattern names it" do
+      expect(reported_files(nil)).to include("x.rb")
+    end
   end
 
   # Path arguments that overlap each other analyse a file twice. The widened discovery set holds it once, so it is

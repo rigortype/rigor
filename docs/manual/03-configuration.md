@@ -64,7 +64,7 @@ cache:
 | --- | --- | --- | --- |
 | `target_ruby` | String | `"4.0"` | The lowest Ruby version *your* project runs on — `"X.Y"`, `"X.Y.Z"`, or `"latest"`. Independent of the Ruby Rigor itself runs on. Every value selects the syntax Rigor parses. A version you set explicitly also turns on the Ruby-deprecation rules for that version ([`call.deprecated-ruby2-keywords`](04-diagnostics.md#rule-call-deprecated-ruby2-keywords) from `"4.1"`); the default and `"latest"` never do, which is why `rigor init` writes the key commented out. |
 | `paths` | Array | `["lib"]` | Directories or files to analyse. |
-| `exclude` | Array | `[]` | Glob patterns to skip. `vendor/bundle`, `.bundle`, and `node_modules` are always excluded. |
+| `exclude` | Array | `[]` | Glob patterns to skip, matched against a file's path relative to the directory `rigor` runs from (where `.rigor.yml` is found) or its absolute path, so a pattern excludes the same files whether the path came from `paths:` or from a command-line argument. `vendor/bundle`, `.bundle`, and `node_modules` are always excluded. |
 | `test_paths` | Array | `nil` | The project's test roots: the directories (or files) holding its tests. Relative entries resolve against the config file's directory. Unset auto-detects whichever of `spec/` and `test/` exist; `[]` declares none. `rigor sig-gen --params=observed` reads call sites there to type parameters, and names on stderr a declared root that does not exist. Test roots are not analysed unless `paths:` also lists them, and changing them invalidates no cache. |
 | `includes` | Array | `[]` | Other config files to layer underneath this one. |
 | `fold_platform_specific_paths` | Boolean | `false` | Resolve Ruby-version-conditional load paths when discovering sources. |

@@ -107,11 +107,13 @@ module Rigor
         return nil if receiver_type.nil?
 
         # Issue #1393 — a `nil` count on `min` / `max` / `min_by` / `max_by` is the no-count call.
-        nil_count = OptionalCount.split(receiver_type, method_name, arg_types)
+        nil_count = OptionalCount.split(receiver_type, method_name, arg_types, block: !block_type.nil?)
         if nil_count
           return resolve_nil_count(nil_count.first, receiver_type: receiver_type, method_name: method_name,
                                                     block_type: block_type, environment: environment,
-                                                    call_node: call_node, scope: scope)
+                                                    call_node: call_node, scope: scope,
+                                                    plugin_typed_sink: plugin_typed_sink,
+                                                    skip_project_patched: skip_project_patched)
         end
 
         # Build the call context once and thread it — unchanged — through every tier
@@ -299,14 +301,16 @@ module Rigor
 
       # The `nil` part of an optional count dispatches as the no-argument call, the rest as written; a count
       # that is both answers the union of the two, or declines when either declines. See {OptionalCount}.
-      def resolve_nil_count(rest, receiver_type:, method_name:, block_type:, environment:, call_node:, scope:)
-        common = { receiver_type: receiver_type, method_name: method_name, block_type: block_type,
-                   environment: environment, call_node: call_node, scope: scope }
-        without = resolve(arg_types: [], **common)
-        return without if rest.nil? || without.nil?
+      def resolve_nil_count(rest, **common)
+        return resolve(arg_types: [], **common) if rest.nil?
 
+        # The counted leg runs first: a leg's plugin answer records on the scope (or buffers in the sink, #1101),
+        # and a declining counted leg must not leave the no-argument leg's record behind for a call that answers nil.
         counted = resolve(arg_types: [rest], **common)
-        counted && Type::Combinator.union(without, counted)
+        return nil if counted.nil?
+
+        without = resolve(arg_types: [], **common)
+        without && Type::Combinator.union(without, counted)
       end
 
       # ADR-100 WD4 — records the transitive `-> void` provenance when the called method is a

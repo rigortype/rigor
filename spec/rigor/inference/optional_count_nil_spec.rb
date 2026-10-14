@@ -64,4 +64,14 @@ RSpec.describe "min / max / min_by / max_by with a nil count", type: :runner do
       dump_type([1, 2].min_by(nil))
     RUBY
   end
+
+  # Blockless `Range#min` / `#max` raise `TypeError` for a `nil` count in Ruby 4.0, so the rewrite leaves them to
+  # the RBS answer; the same call typed through the no-count form (`Integer[1..2]`) would be a wrong type.
+  it "does not read a nil count as no count on a blockless Range#min" do
+    expect(dumped_types("dump_type((1..2).min(nil))")).to eq(["Dynamic[top]?"])
+  end
+
+  it "still reads a nil count as no count for Range#min_by" do
+    expect(dumped_types("dump_type((1..2).min_by(nil) { |s| s })")).to eq(["Integer[1..2]"])
+  end
 end

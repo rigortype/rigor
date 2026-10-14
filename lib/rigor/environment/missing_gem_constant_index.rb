@@ -37,8 +37,8 @@ module Rigor
     module MissingGemConstantIndex
       module_function
 
-      # @param gems — `[gem_name, version]` pairs (the `:missing` rows of
-      #   {RbsCoverageReport}).
+      # @param gems — `[gem_name, version, variants]` entries (the `:missing` rows of {RbsCoverageReport},
+      #   with the gem's `LockedGem#variants`); `variants` may be omitted or nil, meaning the `ruby` one.
       # @param bundle_path — the target's resolved bundler install root, or nil.
       # @param spec_resolver — `(name, version) -> String?` fallback dir resolver. Injectable for
       #   specs; the default is the RubyGems-metadata lookup (no code load).
@@ -49,8 +49,9 @@ module Rigor
         bundle_dirs = bundle_gem_dirs(bundle_path)
         git_dirs = git_gem_dirs(bundle_path)
         index = {}
-        gems.each do |gem_name, version|
-          dir = bundle_dirs["#{gem_name}-#{version}"] || git_dirs[gem_name] || spec_resolver.call(gem_name, version)
+        gems.each do |gem_name, version, variants|
+          dir = bundle_dir(bundle_dirs, gem_name, version, variants) ||
+                git_dirs[gem_name] || spec_resolver.call(gem_name, version)
           next unless dir
 
           entry_files(dir, gem_name).each do |file|
@@ -62,9 +63,8 @@ module Rigor
 
       # `{"<name>-<version>" => gem_dir}` for the target's bundle, or `{}` when no bundle is resolvable. The
       # glob covers the RUBYGEMS-sourced layout only, `<bundle>/ruby/X.Y.Z/gems/<name>-<version>/`; the
-      # git-sourced layout is {.git_gem_dirs}'s. Keyed on the dir basename so a platform-tagged variant
-      # (`ffi-1.17.4-aarch64-linux-gnu`) simply doesn't match a `<name>-<version>` lookup — those gems ship
-      # native code, not the pure-Ruby constants this indexes.
+      # git-sourced layout is {.git_gem_dirs}'s. Keyed on the dir basename, which {.bundle_dir} reconstructs
+      # per locked variant.
       def bundle_gem_dirs(bundle_path)
         return {} if bundle_path.nil?
 
@@ -74,6 +74,21 @@ module Rigor
         Dir.glob(base.join("ruby", "*", "gems", "*")).each_with_object({}) do |dir, acc|
           acc[File.basename(dir)] ||= dir
         end
+      end
+
+      # The installed directory of one of the gem's locked variants: `<name>-<version>` for the `ruby` one,
+      # `<name>-<version>-<platform>` for a platform-tagged one. Bundler installs only the variant matching
+      # the host, and a multi-platform lockfile's representative is usually the `ruby` one, so every variant
+      # is tried. A platform-tagged gem is not a native-only gem: the commonmarker, nokogiri and sqlite3 builds
+      # each ship `lib/<name>.rb` declaring the gem's top-level namespace, exactly as the `ruby` build does.
+      def bundle_dir(bundle_dirs, gem_name, version, variants)
+        [[version, "ruby"], *variants].each do |variant_version, platform|
+          basename = "#{gem_name}-#{variant_version}"
+          basename = "#{basename}-#{platform}" unless platform == "ruby"
+          dir = bundle_dirs[basename]
+          return dir if dir
+        end
+        nil
       end
 
       # Issue #763 — `{gem_name => gem_dir}` for the target's GIT-sourced gems,

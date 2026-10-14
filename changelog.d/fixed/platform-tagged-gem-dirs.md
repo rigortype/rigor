@@ -1,0 +1,1 @@
+- **[coverage]** A gem installed as a platform build (`commonmarker-2.10.0-arm64-darwin`) now owns its constants in `coverage --protection`: reads into it reported as an engine gap instead of add-RBS, because the missing-gem index looked the install directory up without its platform tag. ([#1855](https://github.com/rigortype/rigor/pull/1855))

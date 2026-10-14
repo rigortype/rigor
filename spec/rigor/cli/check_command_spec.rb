@@ -129,9 +129,10 @@ RSpec.describe Rigor::CLI::CheckCommand do
   end
 
   # #1529 — `--no-stats` must build no RunStats: the summary is never printed, and on macOS the RSS probe forks
-  # `ps`. The ordinary path already threads `collect_stats: false` through CheckRunnerFactory, and these examples
-  # pin that. The `--incremental` path is not covered here: its session's internal runners must keep collecting
-  # the chain snapshots (see IncrementalSession#start_chain), which the stats gate also controls.
+  # `ps`. The ordinary path already threads `collect_stats: false` through CheckRunnerFactory, and the first
+  # examples pin that. The `--incremental` examples pin the lazy read: the session's internal runners still
+  # collect (their chain snapshots, see IncrementalSession#start_chain), but nothing prints their summary, so
+  # the RSS reader is never called. The `--coverage` example pins the read's position: it runs before the scan.
   describe "--no-stats" do
     before { require "rigor/analysis/run_stats" }
 
@@ -155,6 +156,27 @@ RSpec.describe Rigor::CLI::CheckCommand do
       expect(Rigor::Analysis::RunStats).to have_received(:peak_rss_bytes).at_least(:once)
       expect(err).to include("RBS classes available")
       expect(err).to include("Memory peak:")
+    end
+
+    # Issue #1529 — the peak is read straight after the analysis, so a `--coverage` scan (a second pass over the
+    # same files) cannot inflate the figure the summary reports.
+    it "reads the peak RSS before the --coverage scan runs" do
+      File.write("clean.rb", "x = 1\n")
+      require "rigor/cli/coverage_scan"
+      events = []
+      allow(Rigor::Analysis::RunStats).to receive(:peak_rss_bytes).and_wrap_original do |original|
+        events << :rss
+        original.call
+      end
+      allow(Rigor::CLI::CoverageScan).to receive(:precision_report).and_wrap_original do |original, **kwargs|
+        events << :coverage
+        original.call(**kwargs)
+      end
+
+      run(["--no-cache", "--no-ci-detect", "--coverage", "clean.rb"])
+
+      expect(events).to include(:rss, :coverage)
+      expect(events.index(:rss)).to be < events.index(:coverage)
     end
 
     # Issue #1529 — the RSS reader is lazy, so a run that prints no summary never reads it. The incremental

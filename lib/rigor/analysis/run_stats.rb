@@ -59,10 +59,11 @@ module Rigor
         freeze
       end
 
-      # The peak RSS in bytes, read once on first call and memoised (nil when no route answers). On Linux this is the
-      # kernel's VmHWM high-water mark, so a read at print time is never below the run-end value. On macOS it is
-      # `ps`'s current RSS, so the reading moves by however much the process shrank between the run's end and the
-      # summary: a few milliseconds, the cache eviction and output rendering in between.
+      # The peak RSS in bytes, read once on first call and memoised (nil when no route answers). The check command
+      # forces the first call straight after the analysis (#1529), before `--coverage` or any output, so the figure
+      # covers the analysis alone. On Linux it is the kernel's VmHWM high-water mark, so a later read is never below
+      # the run-end value. On macOS it is `ps`'s current RSS, so the reading is the process as it stood at that
+      # first call, not a high-water mark.
       def peak_rss_bytes
         @peak_rss_memo.fetch(:value) { @peak_rss_memo[:value] = @peak_rss_probe.call }
       end

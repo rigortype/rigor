@@ -92,11 +92,10 @@ module Rigor
       attr_reader rbs_attribution_available: bool
 
       CACHED_SENTINEL: String
-      CURRENT_PROCESS_PEAK_RSS: Proc
+      CURRENT_PROCESS_PEAK_RSS: ^() -> Integer?
 
-      # authored: #1529 lazy RSS read — the value is whatever the injected `peak_rss_probe` returns, an untyped call sig-gen cannot follow.
+      # authored: #1529 memoised lazy read; its type enters only through the deliberate `peak_rss_probe:` initialize parameter.
       def peak_rss_bytes: () -> Integer?
-      # authored: #1529 the unchanged `/proc` / `ps` reader; the lazy probe in CURRENT_PROCESS_PEAK_RSS calls it, and the instance reader above shares its name.
       def self.peak_rss_bytes: () -> Integer?
       def self.partition_classes: (class_decl_paths: Hash[String, String], signature_paths: Array[untyped]) -> [Integer, Integer]
       def self.attribution_available?: (class_decl_paths: Hash[String, String]) -> bool

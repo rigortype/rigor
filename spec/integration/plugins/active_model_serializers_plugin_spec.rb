@@ -554,7 +554,7 @@ RSpec.describe "plugins/rigor-active-model-serializers" do
                              "app/serializers/rest/a_broken_serializer.rb" => broken,
                              "app/serializers/rest/account_serializer.rb" => valid
                            })
-      expect(types.join).to include("Account")
+      expect(types).to eq(["dump_type: Account"])
     end
 
     it "resolves the valid file's attributes when the broken file is scanned last" do
@@ -562,7 +562,21 @@ RSpec.describe "plugins/rigor-active-model-serializers" do
                              "app/serializers/rest/account_serializer.rb" => valid,
                              "app/serializers/rest/z_broken_serializer.rb" => broken
                            })
-      expect(types.join).to include("Account")
+      expect(types).to eq(["dump_type: Account"])
+    end
+
+    # Ruby raises a TypeError when one class is named under two superclasses, so no reading of it is right:
+    # `object` stays undecided, rather than being typed by the superclass of whichever file was kept.
+    it "declines a class whose files name different superclasses" do
+      types = dumped_types(files: {
+                             "app/serializers/rest/account_serializer.rb" => valid,
+                             "app/serializers/rest/z_oj_serializer.rb" => <<~SRC
+                               class REST::AccountSerializer < Oj::Serializer
+                                 attributes :username
+                               end
+                             SRC
+                           })
+      expect(types).to eq(["dump_type: Dynamic[top]"])
     end
 
     it "answers false, without raising, for a name no Symbol can hold" do

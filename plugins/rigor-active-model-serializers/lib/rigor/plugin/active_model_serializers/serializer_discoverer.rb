@@ -82,11 +82,16 @@ module Rigor
         # fixed point rather than recursing keeps a cyclic `class A < B; class B < A` source — which Ruby
         # rejects but a static parse can still be handed — from recursing forever.
         def close_over_roots(candidates)
-          by_name = candidates.group_by(&:class_name).transform_values { |group| merge_reopened(group) }
+          groups = candidates.group_by(&:class_name)
+          # Files that name different superclasses for one class are a TypeError in Ruby, so no ancestry
+          # reading of that class is correct. It is declined outright, and so is everything beneath it.
+          conflicted = groups.filter_map { |name, group| name if group.map(&:superclass_name).uniq.size > 1 }.to_set
+          by_name = groups.except(*conflicted).transform_values { |group| merge_reopened(group) }
           reached = @base_classes.to_set
           loop do
             grown = candidates.select do |entry|
-              !reached.include?(entry.class_name) && reached.include?(entry.superclass_name)
+              !conflicted.include?(entry.class_name) && !reached.include?(entry.class_name) &&
+                reached.include?(entry.superclass_name)
             end
             break if grown.empty?
 
@@ -95,9 +100,10 @@ module Rigor
           reached.filter_map { |name| by_name[name] }
         end
 
-        # A class written in more than one file (`class REST::AccountSerializer` reopened, or two files
-        # naming the same class) is one class to Ruby, so its names are the union of every file's. Keeping
-        # only the last file's entry let a sibling that declared nothing usable shadow the valid one.
+        # A class declared in several files that each name its superclass is one class to Ruby, so its names
+        # are the union of every file's. Keeping only the last file's entry let a sibling that declared nothing
+        # usable shadow the valid one. The `own_method_names` union assumes every reopening file is loaded; a
+        # file Zeitwerk shadows is not modelled. A superclass-less reopening is not a candidate (see visit_class).
         def merge_reopened(entries)
           return entries.first if entries.size == 1
 

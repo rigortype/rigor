@@ -573,7 +573,9 @@ RSpec.describe Rigor::CLI::SkillCommand do
   end
 
   # #1860: under a C/POSIX locale the process default external encoding is US-ASCII. `--full` inlines the SKILL.md body
-  # and each references/*.md, which carry non-ASCII text (em-dashes); each must be read as UTF-8 explicitly.
+  # and each references/*.md, which carry non-ASCII text (em-dashes). This pins that they are read and emitted as UTF-8
+  # under that default. It does not show a CLI crash: the output buffer's encoding (a US-ASCII-tagged StringIO in this
+  # spec) is what raises Encoding::CompatibilityError without the explicit read, not `rigor skill` itself.
   describe "--full under a US-ASCII default external encoding (#1860)" do
     around do |example|
       previous = Encoding.default_external

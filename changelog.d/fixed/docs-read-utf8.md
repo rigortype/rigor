@@ -1,1 +1,1 @@
-- **[cli]** `rigor docs` and `rigor skill` no longer crash with `invalid byte sequence in US-ASCII` when the locale is not UTF-8 (for example with `LANG` unset); the bundled pages are read as UTF-8. ([#1873](https://github.com/rigortype/rigor/pull/1873))
+- **[cli]** `rigor docs <page>` no longer crashes with `invalid byte sequence in US-ASCII` when the locale is not UTF-8. ([#1873](https://github.com/rigortype/rigor/pull/1873))

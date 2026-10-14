@@ -1,0 +1,1 @@
+- **[cli]** `rigor check --incremental --explain` now prints the `--explain` fallback rows instead of silently dropping them, and the incremental snapshot is kept apart per flag. ([#1863](https://github.com/rigortype/rigor/pull/1863))

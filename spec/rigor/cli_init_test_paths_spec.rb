@@ -93,10 +93,13 @@ RSpec.describe Rigor::CLI do
     end
   end
 
+  # The symlink target sits three levels below the project, so the lexical answer (`../lib`, from the spelling the
+  # user typed) differs from the physical one (`../../../lib`). Pointing it at the same depth as the link would let
+  # an always-realpath implementation pass too.
   it "keeps a relative --path lexical: a symlinked config dir still loads its paths back" do
     project, = project_behind_symlink
-    FileUtils.mkdir_p(File.join(project, "config"))
-    File.symlink(File.join(project, "config"), File.join(project, "linkdir"))
+    FileUtils.mkdir_p(File.join(project, "a", "b", "cfg"))
+    File.symlink(File.join(project, "a", "b", "cfg"), File.join(project, "linkdir"))
 
     Dir.chdir(project) do
       config = init_config("linkdir/l.yml")

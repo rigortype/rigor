@@ -112,7 +112,8 @@ module Rigor
       # Every file is consulted every run — an unchanged one contributes its cached scan, so the
       # whole-project completeness the `--incremental` refusal protects is unaffected.
       def scan(paths, configuration, cache)
-        declaration_files = Analysis::PathExpansion.ruby_files(paths, configuration.exclude_patterns).to_set
+        declaration_files = Analysis::PathExpansion.ruby_files(paths, configuration.exclude_patterns,
+                                                               base: configuration.exclude_base).to_set
         declarations = []
         shadows = []
         references = []
@@ -136,7 +137,8 @@ module Rigor
       def reference_files(_paths, configuration)
         relative = Analysis::Reachability::ProjectFiles.own(Dir.glob(REFERENCE_GLOB, base: Dir.pwd), Dir.pwd)
         absolute = relative.map { |rel| File.absolute_path(rel) }
-        Analysis::PathExpansion.reject_excluded(absolute, configuration.exclude_patterns).to_set
+        Analysis::PathExpansion.reject_excluded(absolute, configuration.exclude_patterns,
+                                                base: configuration.exclude_base).to_set
       end
 
       def read_and_scan(file, configuration)

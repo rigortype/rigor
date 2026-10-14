@@ -1804,10 +1804,8 @@ module Rigor
       # the pre-pass then saw two writers for every constant a file declares and withheld its publication (#644),
       # and every file was a discovered-not-analysed dependency of the run's cache entry.
       #
-      # The widening decision itself still compares the paths as spelled. `exclude:` patterns match a path as it
-      # is spelled, so until #1576 is fixed the configured absolute `lib` can discover files the argument `lib`
-      # excludes (a relative `lib/gen/**` pattern never matches `/abs/lib/gen/x.rb`), and treating the two as the
-      # same root would drop those files from discovery.
+      # The widening decision itself compares the paths as spelled. `exclude:` patterns apply to both spellings
+      # alike (#1576), so the configured absolute `lib` and the argument `lib` exclude the same files.
       def project_discovery_expansion(paths, expansion)
         return nil unless widen_discovery_to_project?(paths)
 
@@ -2176,7 +2174,8 @@ module Rigor
         bad = []
         Array(paths).each do |path|
           if File.directory?(path)
-            files.concat(PathExpansion.directory_files(path, @configuration.exclude_patterns))
+            files.concat(PathExpansion.directory_files(path, @configuration.exclude_patterns,
+                                                       base: @configuration.exclude_base))
           # Editor-mode bypass: the buffer's logical path is treated as a real `.rb` file regardless of
           # on-disk presence — `parse_source` reads bytes from the buffer's physical path. Common case: LSP
           # client editing a brand-new file.

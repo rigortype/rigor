@@ -203,11 +203,7 @@
             # (`ENGINE_ROOT/plugins`). A plugin's own tree requires its
             # files by bare feature name (`require "rigor/plugin/…"`), so
             # every `plugins/*/lib` goes on the wrapper's load path, the
-            # way `spec.require_paths` puts them on the gem's. The
-            # wrapper also defaults a UTF-8 locale, as the dev shell
-            # does: the docs are UTF-8, and under a C locale Ruby reads
-            # them as US-ASCII and `rigor docs` fails on the first
-            # non-ASCII byte.
+            # way `spec.require_paths` puts them on the gem's.
             installPhase = ''
               runHook preInstall
               mkdir -p $out/share/rigor $out/bin
@@ -218,9 +214,7 @@
               done
               makeWrapper ${rigorDeps.wrappedRuby}/bin/ruby $out/bin/rigor \
                 --add-flags "$out/share/rigor/exe/rigor" \
-                --prefix RUBYLIB : "$pluginLoadPath" \
-                --set-default LANG C.UTF-8 \
-                --set-default LC_ALL C.UTF-8
+                --prefix RUBYLIB : "$pluginLoadPath"
               runHook postInstall
             '';
 

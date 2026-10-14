@@ -813,7 +813,7 @@ full run, so the snapshot can never wedge or stale an analysis.
 
 ### Two-level gating
 
-1. **Global fingerprint (gates the load).** `IncrementalSnapshot.fingerprint(configuration:, roots:)`
+1. **Global fingerprint (gates the load).** `IncrementalSnapshot.fingerprint(configuration:, roots:, explain:)`
    is a SHA-256 over the engine version + `SCHEMA`, the configuration hash
    (`configuration.to_h`, which omits the keys that change no diagnostic —
    `effects:`, below, and `test_paths:`, which only `sig-gen` reads), the
@@ -828,7 +828,11 @@ full run, so the snapshot can never wedge or stale an analysis.
    file (its path is in the configuration; a file outside the analysed paths
    would otherwise leave the snapshot stale) — but **not** the analyzed source
    contents. A missing `pre_eval:` file digests as absent, so creating one also
-   drops the snapshot. A mismatch drops the snapshot.
+   drops the snapshot. A run under `--explain` adds an `explain:true` part (none
+   otherwise, so a plain run's fingerprint is unchanged): the per-file cache
+   holds the `:info` fallback rows, so a snapshot primed without the flag must
+   not serve a run with it, nor the reverse ([#1533](https://github.com/rigortype/rigor/issues/1533)).
+   A mismatch drops the snapshot.
 
    The lockfile paths are resolved by `Analysis::RunCacheKey.resolved_lockfile_paths`
    — the same call that builds the ADR-45 run-result key's `bundler.lockfile` /
@@ -1329,7 +1333,8 @@ guarantee, is [ADR-45](../adr/45-unchanged-project-fast-path.md) WD2; this is th
   - Native Windows takes no mark: `File::Stat#ctime` is the creation time there.
   - A network or FUSE filesystem (NFS with its attribute cache, virtiofs, gRPC-FUSE, sshfs) may
     report a change time from before a save; nothing detects that.
-- **Not written** for an editor buffer, a pool run, a project with effect collection
+- **Not written** for an editor buffer, a pool run, an `--explain` run (the key has no
+  explain slot), a project with effect collection
   on, a run with an opaque plugin, a run in which a boundary row changed during the
   per-file loop without being credited to a file, or a run after which the session holds no content digest for some analysed file
   — the #1536 source-RBS gate forgets the digest of a file saved after the closure was

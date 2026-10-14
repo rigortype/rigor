@@ -1056,6 +1056,21 @@ RSpec.describe Rigor::Analysis::IncrementalRunSlot do
     expect(served(config)).to be_nil
   end
 
+  it "writes no slot, and takes no write mark, for an --explain run" do
+    write_project
+    session = Rigor::Analysis::IncrementalSession.new(
+      configuration: configuration, cache_store: Rigor::Cache::Store.new(root: cache_root), explain: true
+    )
+    expect(session.send(:start_slot_guard, "fingerprint")).to be_nil
+    session.instance_variable_set(:@last_runner, Object.new)
+    expect(session.send(:run_slot_writable?)).to be(false)
+    plain = Rigor::Analysis::IncrementalSession.new(
+      configuration: configuration, cache_store: Rigor::Cache::Store.new(root: cache_root)
+    )
+    plain.instance_variable_set(:@last_runner, Object.new)
+    expect(plain.send(:run_slot_writable?)).to be(true)
+  end
+
   # Two things keep them apart, each enough alone: the producer id, and the roots entry the plain key does not
   # carry. The plain run must neither read nor replace the incremental entry, nor the reverse.
   it "keeps the plain and the incremental slots apart" do

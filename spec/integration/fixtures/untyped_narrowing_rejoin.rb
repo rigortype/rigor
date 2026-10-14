@@ -156,13 +156,13 @@ def nil_written_in_an_arm(s, c)
   x + "a" # GENUINE-NIL
 end
 
-# --- Known limitation (#1840-follow-up): a nil the program writes, then
+# --- Known limitation (#1876): a nil the program writes, then
 # stripped by a `nil?` edge before the narrowing that re-joins. The `elsif`
 # merge's entry is the `nil?` test's falsey edge, exactly `Dynamic[top]`,
 # so it re-joins to that, and the outer join leaves `Dynamic[top] | nil`,
 # which the possible-nil gate declines as it declines `x = nil if c; x + "a"`.
 # The base reported here only through the `String` arm. Flip this to
-# a reporting control when #1840-follow-up is fixed. ---
+# a reporting control when #1876 is fixed. ---
 
 def nil_written_then_stripped(s, c)
   x = Marshal.load(s)

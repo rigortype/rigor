@@ -39,6 +39,7 @@ require_relative "method_dispatcher/kernel_dispatch"
 require_relative "method_dispatcher/universal_object_dispatch"
 require_relative "method_dispatcher/singleton_mixin_dispatch"
 require_relative "method_dispatcher/method_folding"
+require_relative "method_dispatcher/optional_count"
 
 module Rigor
   module Inference
@@ -104,6 +105,14 @@ module Rigor
                   block_type: nil, environment: nil,
                   call_node: nil, scope: nil, plugin_typed_sink: nil, skip_project_patched: false)
         return nil if receiver_type.nil?
+
+        # Issue #1393 — a `nil` count on `min` / `max` / `min_by` / `max_by` is the no-count call.
+        nil_count = OptionalCount.split(receiver_type, method_name, arg_types)
+        if nil_count
+          return resolve_nil_count(nil_count.first, receiver_type: receiver_type, method_name: method_name,
+                                                    block_type: block_type, environment: environment,
+                                                    call_node: call_node, scope: scope)
+        end
 
         # Build the call context once and thread it — unchanged — through every tier
         # (`_DispatchTier#try_dispatch`). The dispatcher's own private fallback tiers still read
@@ -286,6 +295,18 @@ module Rigor
         # members WOULD each resolve still lands `Dynamic[top]`. Retry per projected member through
         # this same chain. See {#try_composite_receiver} for the projection rule and why it sits here.
         try_composite_receiver(context)
+      end
+
+      # The `nil` part of an optional count dispatches as the no-argument call, the rest as written; a count
+      # that is both answers the union of the two, or declines when either declines. See {OptionalCount}.
+      def resolve_nil_count(rest, receiver_type:, method_name:, block_type:, environment:, call_node:, scope:)
+        common = { receiver_type: receiver_type, method_name: method_name, block_type: block_type,
+                   environment: environment, call_node: call_node, scope: scope }
+        without = resolve(arg_types: [], **common)
+        return without if rest.nil? || without.nil?
+
+        counted = resolve(arg_types: [rest], **common)
+        counted && Type::Combinator.union(without, counted)
       end
 
       # ADR-100 WD4 — records the transitive `-> void` provenance when the called method is a

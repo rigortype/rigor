@@ -30,13 +30,23 @@ module Rigor
       # dependency that moved from a `git:` source to a released version without a `bundle clean`, so its
       # git-installed directory is still sitting there under the OLD source's name). Defaults `false` so
       # existing callers that construct a `LockedGem` without an opinion stay conservative.
-      LockedGem = Data.define(:name, :version, :platform, :git_source) do
-        def initialize(name:, version:, platform:, git_source: false)
+      #
+      # `variants` is every `[version, platform]` pair the lockfile locks under this name, in lockfile order;
+      # `version` / `platform` are the first of them. A multi-platform lockfile (`bundle lock --add-platform`)
+      # lists one spec per platform — `ffi (1.17.4)`, `ffi (1.17.4-arm64-darwin)`, … — and Bundler installs
+      # whichever matches the host, so {BundleSigDiscovery} must admit all of them (#1844). Defaults to the
+      # single `[version, platform]` pair.
+      LockedGem = Data.define(:name, :version, :platform, :git_source, :variants) do
+        def initialize(name:, version:, platform:, git_source: false, variants: nil)
+          version = -version.to_s
+          platform = -platform.to_s
+          variants = (variants || [[version, platform]]).map { |v, p| [-v.to_s, -p.to_s].freeze }.uniq.freeze
           super(
             name: -name.to_s,
-            version: -version.to_s,
-            platform: -platform.to_s,
-            git_source: git_source ? true : false
+            version: version,
+            platform: platform,
+            git_source: git_source ? true : false,
+            variants: variants
           )
         end
       end
@@ -162,10 +172,17 @@ module Rigor
           # `#source` is the `Bundler::Source::*` this spec resolved from — `Git` for a `GIT` lockfile
           # stanza, `Rubygems` for a `GEM` one, `Path`/`Gemspec` for `path:`. Only `Git` sources land under
           # {BundleSigDiscovery}'s `bundler/gems/` walk.
-          h[spec.name.to_s] = LockedGem.new(
-            name: spec.name, version: spec.version.to_s, platform: platform,
-            git_source: spec.source.is_a?(Bundler::Source::Git)
-          )
+          # A multi-platform lockfile repeats the name once per platform; fold the repeats into `variants`
+          # instead of letting the last one overwrite the rest (#1844).
+          name = spec.name.to_s
+          version = spec.version.to_s
+          git_source = spec.source.is_a?(Bundler::Source::Git)
+          h[name] = if (prior = h[name])
+                      prior.with(variants: [*prior.variants, [version, platform]].uniq.freeze,
+                                 git_source: prior.git_source || git_source)
+                    else
+                      LockedGem.new(name: name, version: version, platform: platform, git_source: git_source)
+                    end
         end
         locked.freeze
       rescue ::Ractor::IsolationError => e

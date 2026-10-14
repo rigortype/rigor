@@ -190,6 +190,37 @@ RSpec.describe Rigor::Environment::LockfileResolver do
       expect(ffi.platform).to be_a(String)
       expect(ffi.platform).not_to be_empty
     end
+
+    # #1844 — each platform variant of a name used to overwrite the previous one, so the result named only the
+    # last-listed platform and the host's own `<name>-<version>-<platform>` install was filtered out of discovery.
+    it "keeps every locked platform variant of a name" do
+      path = write_lockfile(<<~LOCKFILE)
+        GEM
+          remote: https://rubygems.org/
+          specs:
+            ffi (1.17.4)
+            ffi (1.17.4-aarch64-linux-gnu)
+            ffi (1.17.4-arm64-darwin)
+            ffi (1.17.4-x86_64-linux-gnu)
+
+        PLATFORMS
+          aarch64-linux-gnu
+          arm64-darwin
+          ruby
+          x86_64-linux-gnu
+
+        DEPENDENCIES
+          ffi
+
+        BUNDLED WITH
+           2.5.3
+      LOCKFILE
+      ffi = described_class.locked_gems(lockfile_path: path, project_root: tmpdir, auto_detect: false).fetch("ffi")
+      expect(ffi.variants).to contain_exactly(
+        ["1.17.4", "ruby"], ["1.17.4", "aarch64-linux-gnu"], ["1.17.4", "arm64-darwin"], ["1.17.4", "x86_64-linux-gnu"]
+      )
+      expect(Ractor.shareable?(ffi)).to be(true)
+    end
   end
 
   describe ".locked_gems with a GIT-sourced entry (issue #611)" do

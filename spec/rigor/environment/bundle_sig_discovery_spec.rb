@@ -254,6 +254,27 @@ RSpec.describe Rigor::Environment::BundleSigDiscovery do
       expect(result.first.parent.basename.to_s).to eq("ffi-1.17.4-aarch64-linux-gnu")
     end
 
+    # #1844 — a multi-platform lockfile locks one variant per platform; the host's install must pass the filter
+    # whichever variant the lockfile lists last, and a version the lockfile does not lock must still be dropped.
+    it "admits the installed variant of a multi-platform lock and drops an unlocked version" do
+      bundle = File.join(tmpdir, "bundle")
+      %w[ffi-1.17.4-arm64-darwin ffi-1.16.0-arm64-darwin].each do |dir|
+        sig_dir = File.join(bundle, "ruby", "4.0.0", "gems", dir, "sig")
+        FileUtils.mkdir_p(sig_dir)
+        File.write(File.join(sig_dir, "ffi.rbs"), "module Ffi_Stub end\n")
+      end
+      locked = {
+        "ffi" => locked_gem_klass.new(
+          name: "ffi", version: "1.17.4", platform: "ruby",
+          variants: [%w[1.17.4 ruby], %w[1.17.4 arm64-darwin], %w[1.17.4 x86_64-linux-gnu]]
+        )
+      }
+      result = described_class.discover(
+        bundle_path: bundle, project_root: tmpdir, auto_detect: false, locked_gems: locked
+      )
+      expect(result.map { |d| d.parent.basename.to_s }).to eq(["ffi-1.17.4-arm64-darwin"])
+    end
+
     it "falls back to the pre-Layer-3 behaviour when locked_gems is nil" do
       bundle = File.join(tmpdir, "bundle")
       make_bundle_layout(bundle, ["random_gem", "1.0", "4.0.0"])

@@ -377,7 +377,7 @@ module Rigor
       # Parse a SKILL.md's leading `---`-delimited YAML frontmatter. Returns {} on any missing or malformed block so the
       # catalogue degrades to a name-only entry rather than raising.
       def frontmatter(path)
-        text = File.read(path)
+        text = File.read(path, encoding: Encoding::UTF_8)
         return {} unless text.start_with?("---\n")
 
         closing = text.index("\n---\n", 4)

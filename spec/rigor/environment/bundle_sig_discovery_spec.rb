@@ -256,6 +256,7 @@ RSpec.describe Rigor::Environment::BundleSigDiscovery do
 
     # #1844 — a multi-platform lockfile locks one variant per platform; the host's install must pass the filter
     # whichever variant the lockfile lists last, and a version the lockfile does not lock must still be dropped.
+    # The lockfile goes through the real parser, with the installed platform neither first nor last.
     it "admits the installed variant of a multi-platform lock and drops an unlocked version" do
       bundle = File.join(tmpdir, "bundle")
       %w[ffi-1.17.4-arm64-darwin ffi-1.16.0-arm64-darwin].each do |dir|
@@ -263,12 +264,29 @@ RSpec.describe Rigor::Environment::BundleSigDiscovery do
         FileUtils.mkdir_p(sig_dir)
         File.write(File.join(sig_dir, "ffi.rbs"), "module Ffi_Stub end\n")
       end
-      locked = {
-        "ffi" => locked_gem_klass.new(
-          name: "ffi", version: "1.17.4", platform: "ruby",
-          variants: [%w[1.17.4 ruby], %w[1.17.4 arm64-darwin], %w[1.17.4 x86_64-linux-gnu]]
-        )
-      }
+      lockfile = File.join(tmpdir, "Gemfile.lock")
+      File.write(lockfile, <<~LOCKFILE)
+        GEM
+          remote: https://rubygems.org/
+          specs:
+            ffi (1.17.4-aarch64-linux-gnu)
+            ffi (1.17.4-arm64-darwin)
+            ffi (1.17.4-x86_64-linux-gnu)
+
+        PLATFORMS
+          aarch64-linux-gnu
+          arm64-darwin
+          x86_64-linux-gnu
+
+        DEPENDENCIES
+          ffi
+
+        BUNDLED WITH
+           2.5.3
+      LOCKFILE
+      locked = Rigor::Environment::LockfileResolver.locked_gems(
+        lockfile_path: lockfile, project_root: tmpdir, auto_detect: false
+      )
       result = described_class.discover(
         bundle_path: bundle, project_root: tmpdir, auto_detect: false, locked_gems: locked
       )

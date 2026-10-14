@@ -219,7 +219,38 @@ RSpec.describe Rigor::Environment::LockfileResolver do
       expect(ffi.variants).to contain_exactly(
         ["1.17.4", "ruby"], ["1.17.4", "aarch64-linux-gnu"], ["1.17.4", "arm64-darwin"], ["1.17.4", "x86_64-linux-gnu"]
       )
+      expect([ffi.version, ffi.platform]).to eq(%w[1.17.4 ruby])
       expect(Ractor.shareable?(ffi)).to be(true)
+    end
+
+    it "picks the last variant as the representative when no ruby variant is locked" do
+      path = write_lockfile(<<~LOCKFILE)
+        GEM
+          remote: https://rubygems.org/
+          specs:
+            nokogiri (1.16.0-arm64-darwin)
+            nokogiri (1.16.0-x86_64-linux-gnu)
+
+        PLATFORMS
+          arm64-darwin
+          x86_64-linux-gnu
+
+        DEPENDENCIES
+          nokogiri
+
+        BUNDLED WITH
+           2.5.3
+      LOCKFILE
+      nokogiri = described_class.locked_gems(lockfile_path: path, project_root: tmpdir, auto_detect: false)
+                                .fetch("nokogiri")
+      expect(nokogiri.variants).to contain_exactly(%w[1.16.0 arm64-darwin], %w[1.16.0 x86_64-linux-gnu])
+      expect(nokogiri.variants).to include([nokogiri.version, nokogiri.platform])
+    end
+
+    it "rejects a representative that is not one of the variants" do
+      expect do
+        described_class::LockedGem.new(name: "ffi", version: "1", platform: "ruby", variants: [%w[2 ruby]])
+      end.to raise_error(ArgumentError, /not one of its variants/)
     end
   end
 

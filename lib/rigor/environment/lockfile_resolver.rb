@@ -31,16 +31,22 @@ module Rigor
       # git-installed directory is still sitting there under the OLD source's name). Defaults `false` so
       # existing callers that construct a `LockedGem` without an opinion stay conservative.
       #
-      # `variants` is every `[version, platform]` pair the lockfile locks under this name, in lockfile order;
-      # `version` / `platform` are the first of them. A multi-platform lockfile (`bundle lock --add-platform`)
-      # lists one spec per platform — `ffi (1.17.4)`, `ffi (1.17.4-arm64-darwin)`, … — and Bundler installs
-      # whichever matches the host, so {BundleSigDiscovery} must admit all of them (#1844). Defaults to the
-      # single `[version, platform]` pair.
+      # `variants` is every `[version, platform]` pair the lockfile locks under this name, in Bundler's parsed
+      # order. A multi-platform lockfile (`bundle lock --add-platform`) lists one spec per platform — `ffi
+      # (1.17.4)`, `ffi (1.17.4-arm64-darwin)`, … — and Bundler installs whichever matches the host, so
+      # {BundleSigDiscovery} must admit all of them (#1844). `version` / `platform` name one representative
+      # variant for the readers that want a single version (coverage report, doctor): the `ruby` one when the
+      # lockfile has it, otherwise the last parsed. Defaults to the single `[version, platform]` pair, and the
+      # pair must be one of `variants`.
       LockedGem = Data.define(:name, :version, :platform, :git_source, :variants) do
         def initialize(name:, version:, platform:, git_source: false, variants: nil)
           version = -version.to_s
           platform = -platform.to_s
           variants = (variants || [[version, platform]]).map { |v, p| [-v.to_s, -p.to_s].freeze }.uniq.freeze
+          unless variants.include?([version, platform])
+            raise ArgumentError, "LockedGem #{name}: [#{version}, #{platform}] is not one of its variants"
+          end
+
           super(
             name: -name.to_s,
             version: version,
@@ -178,7 +184,11 @@ module Rigor
           version = spec.version.to_s
           git_source = spec.source.is_a?(Bundler::Source::Git)
           h[name] = if (prior = h[name])
-                      prior.with(variants: [*prior.variants, [version, platform]].uniq.freeze,
+                      # Keep a `ruby` representative once seen; otherwise the last variant wins, as before.
+                      keep_prior = prior.platform == "ruby"
+                      prior.with(variants: [*prior.variants, [version, platform]],
+                                 version: keep_prior ? prior.version : version,
+                                 platform: keep_prior ? prior.platform : platform,
                                  git_source: prior.git_source || git_source)
                     else
                       LockedGem.new(name: name, version: version, platform: platform, git_source: git_source)

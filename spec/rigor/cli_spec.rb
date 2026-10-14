@@ -317,7 +317,7 @@ RSpec.describe Rigor::CLI do
     context "with --explain (#1533)" do
       def explain_project(dir)
         File.write(File.join(dir, ".rigor.yml"),
-                   "severity_profile: balanced\ncache_path: #{File.join(dir, '.cache')}\n")
+                   "severity_profile: balanced\ncache:\n  path: #{File.join(dir, '.cache')}\n")
         # `BEGIN { ... }` is a node the engine does not recognise: a stable explain-row trigger.
         File.write(File.join(dir, "a.rb"), "BEGIN { 1 }\n")
         ["check", "--no-stats", "--config", File.join(dir, ".rigor.yml"), dir]

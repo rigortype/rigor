@@ -445,7 +445,8 @@ validates in its baseline part, or when no chain could be carried; it is
 not built here.
 
 **What is neither written nor served.** No slot is written for an editor
-buffer (never persisted), a pool run, effect collection (its `effects:`
+buffer (never persisted), a pool run, an `--explain` run (the key has no
+explain slot), effect collection (its `effects:`
 block is outside the key, and its envelope rows are #428's decline), an
 opaque plugin, whose next full-path run is cold rather than the warm run
 the probe stands in for, or a run after which the session holds no digest

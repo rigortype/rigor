@@ -129,7 +129,7 @@ The criterion, reusable for any cache that would become a default route:
   would leave those users with no snapshot at all.
 - **WD4 — One tail.** The default miss path, the plain slot hit, the incremental path and the
   incremental slot hit end in one tail. That tail writes the `config_warnings` block, CI-native
-  annotations, the `--baseline-strict` verdict and `--explain` output (#1533). Eviction runs on the
+  annotations, the `--baseline-strict` verdict and `--explain` output (honoured since #1533). Eviction runs on the
   miss paths, the default miss and the full incremental path. A slot hit defers it, as today, so a
   null run pays for no walk of the store.
   - Only a run that built the environment prints the run stats block and trace appendices: a

@@ -711,6 +711,7 @@ module Rigor
         return nil if fingerprint.nil? || @cache_store.nil? || @cache_store.read_only? || !@buffer.nil?
         # Known before the run: none of these can be written afterwards, so the stamp and the recomputed
         # fingerprint would be spent for nothing.
+        # `WriteGuard.start` would also refuse (it recomputes the fingerprint without `explain:`); say so here.
         return nil unless @workers.zero? && !@configuration.effects_enabled? && !@explain
 
         IncrementalRunSlot::WriteGuard.start(

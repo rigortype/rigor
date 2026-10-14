@@ -1333,7 +1333,8 @@ guarantee, is [ADR-45](../adr/45-unchanged-project-fast-path.md) WD2; this is th
   - Native Windows takes no mark: `File::Stat#ctime` is the creation time there.
   - A network or FUSE filesystem (NFS with its attribute cache, virtiofs, gRPC-FUSE, sshfs) may
     report a change time from before a save; nothing detects that.
-- **Not written** for an editor buffer, a pool run, a project with effect collection
+- **Not written** for an editor buffer, a pool run, an `--explain` run (the key has no
+  explain slot), a project with effect collection
   on, a run with an opaque plugin, a run in which a boundary row changed during the
   per-file loop without being credited to a file, or a run after which the session holds no content digest for some analysed file
   — the #1536 source-RBS gate forgets the digest of a file saved after the closure was

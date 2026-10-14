@@ -1,0 +1,1 @@
+- **[rigor check]** `--no-stats` and `--incremental` rechecks no longer fork `ps` on macOS to read a peak-RSS figure that is never printed; the RSS is now read only when the summary is shown. ([#1871](https://github.com/rigortype/rigor/pull/1871))

@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "rigor/source/node_children"
+require "rigor/source/symbol_name"
 
 require "prism"
 
@@ -81,7 +82,7 @@ module Rigor
         # fixed point rather than recursing keeps a cyclic `class A < B; class B < A` source — which Ruby
         # rejects but a static parse can still be handed — from recursing forever.
         def close_over_roots(candidates)
-          by_name = candidates.to_h { |entry| [entry.class_name, entry] }
+          by_name = candidates.group_by(&:class_name).transform_values { |group| merge_reopened(group) }
           reached = @base_classes.to_set
           loop do
             grown = candidates.select do |entry|
@@ -92,6 +93,20 @@ module Rigor
             grown.each { |entry| reached << entry.class_name }
           end
           reached.filter_map { |name| by_name[name] }
+        end
+
+        # A class written in more than one file (`class REST::AccountSerializer` reopened, or two files
+        # naming the same class) is one class to Ruby, so its names are the union of every file's. Keeping
+        # only the last file's entry let a sibling that declared nothing usable shadow the valid one.
+        def merge_reopened(entries)
+          return entries.first if entries.size == 1
+
+          first = entries.first
+          first.with(
+            declared_names: entries.flat_map(&:declared_names).uniq.sort.freeze,
+            object_reads: entries.flat_map(&:object_reads).uniq.sort.freeze,
+            own_method_names: entries.flat_map(&:own_method_names).uniq.sort.freeze
+          )
         end
 
         def read_safely(path)
@@ -180,9 +195,14 @@ module Rigor
             receiver.arguments.nil?
         end
 
+        # A name whose bytes no Symbol can hold (`attributes :"\xff"` in a file that does not parse cleanly)
+        # is dropped here, so it never reaches the index or the `project_defines?` lookup that would raise.
+        # The file's other names are kept: a recoverable syntax error elsewhere in it does not void them.
         def symbol_arguments(node)
           (node.arguments&.arguments || []).filter_map do |argument|
-            argument.unescaped if argument.is_a?(Prism::SymbolNode)
+            next unless argument.is_a?(Prism::SymbolNode)
+
+            Rigor::Source::SymbolName.of(argument.unescaped)&.to_s
           end
         end
 

@@ -526,6 +526,55 @@ RSpec.describe "plugins/rigor-active-model-serializers" do
     end
   end
 
+  # A sibling file whose `attributes :"\xff"` names a byte sequence no Symbol can hold (#1831). The name must
+  # not reach `project_defines?` (it would raise EncodingError there), and the valid file declaring the same
+  # serializer class must still resolve its attributes whichever file the scan reads last.
+  describe "a broken sibling declaring the same serializer" do
+    let(:valid) do
+      <<~SRC
+        class REST::AccountSerializer < ActiveModel::Serializer
+          attributes :username
+
+          def probe
+            Rigor.dump_type(object)
+          end
+        end
+      SRC
+    end
+    let(:broken) do
+      <<~'SRC'
+        class REST::AccountSerializer < ActiveModel::Serializer
+          attributes :"\xff"
+        end
+      SRC
+    end
+
+    it "resolves the valid file's attributes when the broken file is scanned first" do
+      types = dumped_types(files: {
+                             "app/serializers/rest/a_broken_serializer.rb" => broken,
+                             "app/serializers/rest/account_serializer.rb" => valid
+                           })
+      expect(types.join).to include("Account")
+    end
+
+    it "resolves the valid file's attributes when the broken file is scanned last" do
+      types = dumped_types(files: {
+                             "app/serializers/rest/account_serializer.rb" => valid,
+                             "app/serializers/rest/z_broken_serializer.rb" => broken
+                           })
+      expect(types.join).to include("Account")
+    end
+
+    it "answers false, without raising, for a name no Symbol can hold" do
+      plugin = plugin_class.allocate
+      scope = Object.new
+      def scope.user_def_through_ancestors(*) = nil
+      invalid = "\xff".dup.force_encoding(Encoding::UTF_8)
+
+      expect(plugin.send(:project_defines?, "REST::AccountSerializer", invalid, scope)).to be(false)
+    end
+  end
+
   describe "the underivable case emits nothing" do
     it "emits no diagnostic of its own, on either arm" do
       analyze(files: {

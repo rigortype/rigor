@@ -813,7 +813,7 @@ full run, so the snapshot can never wedge or stale an analysis.
 
 ### Two-level gating
 
-1. **Global fingerprint (gates the load).** `IncrementalSnapshot.fingerprint(configuration:, roots:)`
+1. **Global fingerprint (gates the load).** `IncrementalSnapshot.fingerprint(configuration:, roots:, explain:)`
    is a SHA-256 over the engine version + `SCHEMA`, the configuration hash
    (`configuration.to_h`, which omits the keys that change no diagnostic —
    `effects:`, below, and `test_paths:`, which only `sig-gen` reads), the
@@ -828,7 +828,11 @@ full run, so the snapshot can never wedge or stale an analysis.
    file (its path is in the configuration; a file outside the analysed paths
    would otherwise leave the snapshot stale) — but **not** the analyzed source
    contents. A missing `pre_eval:` file digests as absent, so creating one also
-   drops the snapshot. A mismatch drops the snapshot.
+   drops the snapshot. A run under `--explain` adds an `explain:true` part (none
+   otherwise, so a plain run's fingerprint is unchanged): the per-file cache
+   holds the `:info` fallback rows, so a snapshot primed without the flag must
+   not serve a run with it, nor the reverse ([#1533](https://github.com/rigortype/rigor/issues/1533)).
+   A mismatch drops the snapshot.
 
    The lockfile paths are resolved by `Analysis::RunCacheKey.resolved_lockfile_paths`
    — the same call that builds the ADR-45 run-result key's `bundler.lockfile` /

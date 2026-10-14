@@ -455,8 +455,8 @@ its readers were computed from. The slot does not depend on that gate's
 closure decision otherwise, so a run under an untrusted gate is written. The CLI asks the probe only for a plain
 `--incremental`: not `--no-cache`, `--verify-incremental`, a worker pool,
 `--coverage`, `--cache-stats`, a `RIGOR_*_TRACE` probe, or `--explain`,
-which the session does not honour yet (#1533) and so writes no slot keyed
-by. A hit prints the incremental tail
+for which the session writes no slot (#1533: the slot key has no `explain`
+slot, so an `--explain` answer would be served to a plain run). A hit prints the incremental tail
 (`CheckCommand#write_incremental_result`), not the ordinary check's.
 
 `Runner#run_result_cacheable?` still excludes recording and subset runs,

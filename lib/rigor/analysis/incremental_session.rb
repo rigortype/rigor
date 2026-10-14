@@ -68,8 +68,8 @@ module Rigor
       #   `--verify-incremental` gate use) keeps the sequential recording path bit-for-bit unchanged. The fork
       #   pool records each worker's cross-file reads and marshals them back (PoolCoordinator), so the
       #   dependency graph a pooled recheck rebuilds equals the sequential one.
-      def initialize(configuration:, paths: nil, environment: nil, cache_store: nil, plugin_requirer: nil,
-                     workers: 0, buffer: nil)
+      def initialize(configuration:, paths: nil, environment: nil, cache_store: nil, plugin_requirer: nil, # rubocop:disable Metrics/ParameterLists,Metrics/AbcSize,Metrics/MethodLength
+                     workers: 0, buffer: nil, explain: false)
         @configuration = configuration
         @paths = paths
         # Editor mode option B (#146) — the in-flight buffer, threaded into every internal Runner so the
@@ -81,6 +81,7 @@ module Rigor
         @cache_store = cache_store
         @plugin_requirer = plugin_requirer
         @workers = workers
+        @explain = explain # #1533: threaded into every Runner; keys the snapshot, and no slot is written
         # ADR-85 WD2 — per-file discovery seed bundles keyed by logical path. A cold baseline builds them; a
         # warm recheck folds them (re-walking only changed files) and refreshes the set. Ride the snapshot.
         @seed_bundles = {}
@@ -710,7 +711,7 @@ module Rigor
         return nil if fingerprint.nil? || @cache_store.nil? || @cache_store.read_only? || !@buffer.nil?
         # Known before the run: none of these can be written afterwards, so the stamp and the recomputed
         # fingerprint would be spent for nothing.
-        return nil unless @workers.zero? && !@configuration.effects_enabled?
+        return nil unless @workers.zero? && !@configuration.effects_enabled? && !@explain
 
         IncrementalRunSlot::WriteGuard.start(
           configuration: @configuration, roots: @paths || @configuration.paths, cache_root: @cache_store.root,
@@ -724,7 +725,7 @@ module Rigor
       # cold, not the warm run the probe stands in for.
       def run_slot_writable?
         !@cache_store.nil? && !@cache_store.read_only? && @buffer.nil? && @workers.zero? &&
-          !@configuration.effects_enabled? && @opaque_plugin_ids.empty? && !@last_runner.nil?
+          !@configuration.effects_enabled? && !@explain && @opaque_plugin_ids.empty? && !@last_runner.nil?
       end
 
       def start_chain(rows)
@@ -1269,7 +1270,7 @@ module Rigor
         Runner.new(
           configuration: @configuration, cache_store: @cache_store, environment: @environment,
           plugin_requirer: @plugin_requirer, seed_bundles: @seed_bundles, collect_seed_bundles: true,
-          workers: @workers, buffer: @buffer, **
+          workers: @workers, buffer: @buffer, explain: @explain, **
         )
       end
 

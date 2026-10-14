@@ -180,9 +180,9 @@ module Rigor
       # A plain `--incremental` run the session would answer as a warm recheck and write a slot for. Every other
       # shape declines, and the full path handles it exactly as before: an editor buffer (never saved), `--no-cache`
       # (no store to hold a slot), `--verify-incremental`, a worker pool (the session writes no slot for one: a
-      # worker's plugin reads never reach the process that records them), and `--explain`, which the session
-      # ignores today (#1533) — the slot is keyed without it, so the probe declines rather than answer for a flag
-      # its writer never saw. The rest mirror the plain probe: `--coverage`, `--cache-stats` and the
+      # worker's plugin reads never reach the process that records them), and `--explain` (#1533: the session
+      # writes no slot for it — the slot key has no explain slot — so the probe declines rather than answer for a
+      # flag its writer never saw). The rest mirror the plain probe: `--coverage`, `--cache-stats` and the
       # `RIGOR_*_TRACE` probes each want the full path's own output.
       def incremental_run_hit_eligible?(configuration, options, buffer)
         options.fetch(:incremental) && buffer.nil? &&
@@ -288,7 +288,8 @@ module Rigor
                         nil
                       else
                         Cache::IncrementalSnapshot.fingerprint(
-                          configuration: configuration, roots: paths || configuration.paths
+                          configuration: configuration, roots: paths || configuration.paths,
+                          explain: options.fetch(:explain)
                         )
                       end
         snapshot = Cache::IncrementalSnapshot.new(root: cache_root)
@@ -300,7 +301,7 @@ module Rigor
           # (CLI `--workers` > `RIGOR_RACTOR_WORKERS` > `parallel.workers:` > 0) so the recheck's closure
           # re-analysis parallelises; the fork pool marshals dependency records back so the graph is sound.
           workers: CheckRunnerFactory.resolve_workers(options, configuration),
-          buffer: buffer
+          buffer: buffer, explain: options.fetch(:explain)
         )
 
         return run_editor_mode_option_b(session, snapshot, fingerprint, configuration, options) if buffer

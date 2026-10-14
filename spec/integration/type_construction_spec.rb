@@ -525,6 +525,14 @@ RSpec.describe "Rigor type construction (integration)" do
       expect(expected.size).to eq(3)
       expect(reported.map { |d| [d.line, d.rule.to_s] }).to match_array(expected)
     end
+
+    # The known limitation (#1840-follow-up): a written nil a `nil?` edge stripped before the re-joining
+    # merge is silent. Pinned so a fix flips the marker to `# GENUINE-NIL` deliberately.
+    it "pins the nil-first `elsif` limitation as silent" do
+      silent = marked_lines(harness, "# KNOWN-SILENT")
+      expect(silent.size).to eq(1)
+      expect(harness.diagnostics.map(&:line)).not_to include(*silent)
+    end
   end
 
   describe "fixtures/is_a_lexical_resolution.rb — `is_a?(C)` honours lexical-scope constant lookup" do

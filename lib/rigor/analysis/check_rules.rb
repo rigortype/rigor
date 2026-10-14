@@ -2097,7 +2097,8 @@ module Rigor
         # a merge re-joining the narrowed edges of one untyped local, which
         # binds it back to `Dynamic[top]` (issue #1840,
         # `Inference::UntypedRejoin`); it still does when the program writes
-        # the `nil` (`x = nil if c`) or the arms are not a narrowing of one
+        # the `nil` (`x = nil if c`) and no `nil?` edge strips it before the
+        # re-joining merge, or when the arms are not a narrowing of one
         # untyped value.
         def union_has_nameable_non_nil_arm?(union, scope)
           union.members.any? do |m|

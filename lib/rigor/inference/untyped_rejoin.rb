@@ -23,7 +23,9 @@ module Rigor
     # - The write test keeps a nil the program puts there: `x = nil if c` writes `x`, so the join stays
     #   `Dynamic[top] | nil` and still reports. It is syntactic, over every local-write form under the arms
     #   (a pattern capture and a block's write to the outer local included), so a doubtful arm keeps today's
-    #   join.
+    #   join. It does not see a written nil that a `nil?` edge stripped before the merge (`x = nil if c; if
+    #   x.nil? … elsif x.is_a?(String) … end`): that merge's entry is exactly `Dynamic[top]`, and the outer
+    #   join's `Dynamic[top] | nil` is one the possible-nil gate declines anyway (#1840-follow-up).
     # - The `Dynamic`-member test keeps a narrowing whose surviving arms no longer cover the untyped value:
     #   `case x when String then … when Integer then … else raise end` leaves `Integer | String`, which is
     #   what `x` is past it.

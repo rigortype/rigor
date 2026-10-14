@@ -71,6 +71,43 @@ def loop_narrowing(s, n)
   x + "a"
 end
 
+# Each loop body below leaves the `String` and `nil` edges on its `next`
+# arms, so only the loop's own re-join collapses them.
+def until_narrowing(s, n)
+  x = Marshal.load(s)
+  until n <= 0
+    n -= 1
+    next if x.is_a?(String)
+    next if x.nil?
+  end
+  assert_type("Dynamic[top]", x)
+  x + "a"
+end
+
+def for_narrowing(s)
+  x = Marshal.load(s)
+  for i in [1, 2]
+    next if x.is_a?(String)
+    next if x.nil?
+
+    puts i
+  end
+  assert_type("Dynamic[top]", x)
+  x + "a"
+end
+
+# The `||` merge re-joins the `nil` edge its right operand left; the
+# `case` after it would otherwise keep `String` beside that `nil`.
+def or_narrowing(s)
+  x = Marshal.load(s)
+  x.is_a?(String) || (x.nil? || raise("neither"))
+  case x
+  when String then puts "s"
+  end
+  assert_type("Dynamic[top]", x)
+  x + "a"
+end
+
 # The pre-branch binding is not `Dynamic[top]` alone, but the inner
 # `elsif` merge re-joins the untyped edge the `is_a?` test left.
 class Conn
@@ -117,4 +154,24 @@ def nil_written_in_an_arm(s, c)
   end
   assert_type("Dynamic[top] | String | nil", x)
   x + "a" # GENUINE-NIL
+end
+
+# --- Known limitation (#1840-follow-up): a nil the program writes, then
+# stripped by a `nil?` edge before the narrowing that re-joins. The `elsif`
+# merge's entry is the `nil?` test's falsey edge, exactly `Dynamic[top]`,
+# so it re-joins to that, and the outer join leaves `Dynamic[top] | nil`,
+# which the possible-nil gate declines as it declines `x = nil if c; x + "a"`.
+# The base reported here only through the `String` arm. Flip this to
+# a reporting control when #1840-follow-up is fixed. ---
+
+def nil_written_then_stripped(s, c)
+  x = Marshal.load(s)
+  x = nil if c
+  if x.nil?
+    puts "n"
+  elsif x.is_a?(String)
+    puts "s"
+  end
+  assert_type("Dynamic[top]?", x)
+  x + "a" # KNOWN-SILENT
 end

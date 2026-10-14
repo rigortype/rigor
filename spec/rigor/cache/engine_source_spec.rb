@@ -67,6 +67,48 @@ RSpec.describe Rigor::Cache::EngineSource do
       end
     end
 
+    # Issue #1492 — the builtin and effect catalogues are engine inputs the analysis reads, so a
+    # catalogue-only edit must move the key; a tooling-only data tree must not.
+    it "moves on an edit to an engine data catalogue and ignores tooling-only data" do
+      Dir.mktmpdir("rigor-engine-source-") do |dir|
+        root = write_engine(File.join(dir, "checkout"), "# v1\n")
+        catalogue = File.join(root, "data", "builtins", "ruby_core", "array.yml")
+        effects = File.join(root, "data", "effects", "core.yml")
+        tooling = File.join(root, "data", "oss-sweep", "mastodon-rigor.yml")
+        [catalogue, effects, tooling].each do |path|
+          FileUtils.mkdir_p(File.dirname(path))
+          File.write(path, "a: 1\n")
+        end
+        before = described_class.identity(root)
+
+        File.write(tooling, "a: 2\n")
+        expect(described_class.identity(root)).to eq(before)
+
+        File.write(catalogue, "a: 2\n")
+        after_catalogue = described_class.identity(root)
+        expect(after_catalogue).not_to eq(before)
+
+        File.write(effects, "a: 2\n")
+        expect(described_class.identity(root)).not_to eq(after_catalogue)
+      end
+    end
+
+    it "moves the run-key config entry on a data/builtins edit" do
+      Dir.mktmpdir("rigor-engine-source-") do |dir|
+        root = write_engine(File.join(dir, "checkout"), "# v1\n")
+        catalogue = File.join(root, "data", "builtins", "ruby_core", "array.yml")
+        FileUtils.mkdir_p(File.dirname(catalogue))
+        File.write(catalogue, "a: 1\n")
+        allow(described_class).to receive(:root).and_return(root)
+        before = described_class.key_config_entries
+        described_class.reset_process_identity!
+
+        File.write(catalogue, "a: 2\n")
+
+        expect(described_class.key_config_entries).not_to eq(before)
+      end
+    end
+
     it "sees a NEW engine file and a deleted one, not only an edit to a known one" do
       Dir.mktmpdir("rigor-engine-source-") do |dir|
         root = write_engine(File.join(dir, "checkout"), "# v1\n")

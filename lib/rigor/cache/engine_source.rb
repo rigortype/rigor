@@ -59,6 +59,15 @@ module Rigor
       # `apps/` and `tool/` are not loaded by an analysis and stay out.
       SOURCE_DIRECTORIES = %w[lib plugins].freeze
 
+      # Engine DATA the analysis reads at runtime as YAML, relative to the gem root (issue #1492): the
+      # builtin method catalogues (`Inference::Builtins::MethodCatalog::DATA_ROOT`) and the effect
+      # catalogues (`Effects::Catalog` / `Effects::Registry`). A catalogue-only edit moves diagnostics as
+      # surely as a `lib/` edit, yet no other key slot sees it. The `.rbs` trees under `data/`
+      # (`vendored_gem_sigs`, `core_overlay`, `capability_roles`, `gem_overlay`) are deliberately NOT here:
+      # `RbsDescriptor` already digests them into the run's dependency descriptor. Tooling-only trees
+      # (`data/oss-sweep`) are not read by an analysis and stay out.
+      DATA_DIRECTORIES = %w[data/builtins data/effects].freeze
+
       # The one directory whose absence means "this is not an engine tree". `plugins/` may legitimately be
       # missing (a slimmed install contributes nothing); a missing `lib/` would silently shrink the digest
       # to whatever else happened to be there, which is exactly the weakening this module forbids.
@@ -153,8 +162,9 @@ module Rigor
         !File.exist?(File.join(root, ".git"))
       end
 
-      # A SHA-256 over every engine `.rb` file: its ROOT-RELATIVE path (so the digest survives moving or
-      # re-cloning the checkout) followed by its bytes, in sorted path order.
+      # A SHA-256 over every engine `.rb` file and {DATA_DIRECTORIES} `.yml` file: its ROOT-RELATIVE
+      # path (so the digest survives moving or re-cloning the checkout) followed by its bytes, in sorted path
+      # order.
       #
       # The walk itself is not memoised — {.process_identity} is where a production caller gets the
       # once-per-process value, and this stays the computation so a spec can point it at another tree.
@@ -178,12 +188,17 @@ module Rigor
         raise Unavailable, "engine source under #{root} could not be read: #{e.message}"
       end
 
-      # Sorted absolute paths of every engine `.rb` file, across the directories that exist.
+      # Sorted absolute paths of every engine `.rb` file and every engine-data `.yml` file, across the
+      # directories that exist.
       def source_files(root)
-        SOURCE_DIRECTORIES.flat_map do |relative|
+        (glob_files(root, SOURCE_DIRECTORIES, "*.rb") + glob_files(root, DATA_DIRECTORIES, "*.yml")).sort
+      end
+
+      def glob_files(root, directories, pattern)
+        directories.flat_map do |relative|
           directory = File.join(root, relative)
-          File.directory?(directory) ? Dir.glob(File.join(directory, "**", "*.rb")) : []
-        end.sort
+          File.directory?(directory) ? Dir.glob(File.join(directory, "**", pattern)) : []
+        end
       end
     end
   end

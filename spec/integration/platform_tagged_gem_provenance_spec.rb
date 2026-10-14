@@ -20,7 +20,7 @@ RSpec.describe "gem provenance through a platform-tagged install directory" do
   # A gem with no `sig/`, installed only as its platform build. The entry file is real because the index
   # establishes ownership by reading it.
   def write_project
-    entry = File.join("vendor", "bundle", "ruby", "4.0.0", "gems", "nativegem-1.0.0-arm64-darwin", "lib", "nativegem.rb")
+    entry = File.join("vendor/bundle/ruby/4.0.0/gems/nativegem-1.0.0-arm64-darwin", "lib", "nativegem.rb")
     FileUtils.mkdir_p(File.dirname(entry))
     File.write(entry, "module Nativegem\n  class Document\n  end\nend\n")
     FileUtils.mkdir_p("lib")

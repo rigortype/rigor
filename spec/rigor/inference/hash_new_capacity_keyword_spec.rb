@@ -51,4 +51,21 @@ RSpec.describe "Hash.new with the capacity: keyword", type: :runner do
       dump_type(Hash.new { |h, k| h[k] = [] })
     RUBY
   end
+
+  # A literal send dispatches `new` with the outer call node, whose arguments lead with the selector symbol.
+  it "reads the keyword hash through a literal send" do
+    expect(reported_rules(<<~RUBY)).to be_empty
+      h = Hash.send(:new, capacity: 1)
+      h[:k].foo
+      g = Hash.public_send(:new, capacity: 1)
+      g[:k].foo
+    RUBY
+  end
+
+  # `Hash.send(:new, { a: 1 }).default #=> {a: 1}`: the braced argument is still the default through a send.
+  it "keeps a braced default through a literal send" do
+    expect(dumped_types(<<~RUBY)).to eq(["Hash[Dynamic[top], { a: 1 }]"])
+      dump_type(Hash.send(:new, { a: 1 }))
+    RUBY
+  end
 end

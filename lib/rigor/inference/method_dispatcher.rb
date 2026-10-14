@@ -11,6 +11,7 @@ require_relative "dynamic_origin"
 require_relative "flow_tracer"
 require_relative "void_tail_summary"
 require_relative "method_dispatcher/call_context"
+require_relative "method_dispatcher/argument_nodes"
 require_relative "method_dispatcher/constant_folding"
 require_relative "method_dispatcher/literal_string_folding"
 require_relative "method_dispatcher/shape_dispatch"
@@ -1452,8 +1453,8 @@ module Rigor
       def hash_new_lift(class_name, arg_types, call_node = nil)
         return nil unless class_name == "Hash"
 
-        arg_types = arg_types[0...-1] if keyword_hash_last?(call_node, arg_types)
-        return nil unless arg_types.size == 1
+        arg_types = hash_new_positionals(arg_types, call_node)
+        return nil unless arg_types&.size == 1
 
         default = arg_types.first
         return nil if default.nil?
@@ -1462,14 +1463,21 @@ module Rigor
         Type::Combinator.nominal_of("Hash", type_args: [Type::Combinator.untyped, value])
       end
 
-      # Whether `arg_types`' last entry is the call's brace-less keyword hash. As in the RBS tier's
-      # overload selection, only the AST tells it from a braced positional hash, and a call whose
-      # node's arguments are not exactly `arg_types` answers false.
-      def keyword_hash_last?(call_node, arg_types)
-        return false if arg_types.empty? || !call_node.respond_to?(:arguments)
+      # `Hash.new`'s positional argument types: `arg_types` without a trailing brace-less keyword hash. A literal
+      # send (`Hash.send(:new, capacity: 1)`) dispatches with the outer call node, whose arguments are the
+      # selector symbol followed by `arg_types`' own, and is read through that offset. When the node's arguments
+      # correspond otherwise, a sole hash argument may be the keyword hash, so the answer is nil (decline) and the
+      # bare `Hash` stands; any other argument cannot be a keyword hash and is kept.
+      def hash_new_positionals(arg_types, call_node)
+        return arg_types[0...-1] if ArgumentNodes.keyword_hash_last?(call_node, arg_types)
 
-        arguments = call_node.arguments&.arguments
-        !arguments.nil? && arguments.size == arg_types.size && arguments.last.is_a?(Prism::KeywordHashNode)
+        arguments = call_node.respond_to?(:arguments) ? call_node.arguments&.arguments : nil
+        return arg_types if arguments.nil? || arguments.size == arg_types.size
+        if arguments.size == arg_types.size + 1 && arguments.first.is_a?(Prism::SymbolNode)
+          return arguments.last.is_a?(Prism::KeywordHashNode) ? arg_types[0...-1] : arg_types
+        end
+
+        arg_types.last.is_a?(Type::HashShape) ? nil : arg_types
       end
 
       # `Range.new(b, e)` / `Range.new(b, e, excl)` — folds to `Constant[Range]` when both

@@ -918,8 +918,11 @@ jobs:
       # this repository's own sig/ and config. `skill --list` and
       # `docs --list` prove the bundled docs/ and skills/ trees made it
       # into the derivation (#1853). The `.rigor.yml` names
-      # `rigor-minitest`, a plugin with no gem dependency beyond the
-      # engine, so a missing `plugins/*/lib` on the load path fails here.
+      # `rigor-minitest` and `rigor-sassc`: minitest is loaded by the
+      # bundled-plugin loader from its own path, while sassc requires
+      # `rigor-ffi` by bare name, so it loads only when the wrapper's
+      # RUBYLIB puts every `plugins/*/lib` on the load path. Dropping
+      # RUBYLIB fails this step (#1853).
       - name: Smoke-test the packaged binary
         run: |
           ./result/bin/rigor --version
@@ -927,7 +930,7 @@ jobs:
           ./result/bin/rigor docs --list
           d=$(mktemp -d)
           printf 'x = 1\nputs x\n' > "$d/smoke.rb"
-          printf 'plugins:\n  - rigor-minitest\n' > "$d/.rigor.yml"
+          printf 'plugins:\n  - rigor-minitest\n  - rigor-sassc\n' > "$d/.rigor.yml"
           (cd "$d" && nix run "$GITHUB_WORKSPACE#rigor" -- check --no-cache --fail-on=error smoke.rb)
           (cd "$d" && nix run "$GITHUB_WORKSPACE#rigor" -- plugins | grep -q 'All configured plugins loaded successfully')
 

@@ -118,15 +118,19 @@ module Rigor
       # `{name => LockedGem}` → set of canonical bundler gem directory basenames. Pure-Ruby gems install as
       # `<name>-<version>`; platform-specific gems install as `<name>-<version>-<platform>` (e.g.
       # `ffi-1.17.4-aarch64-linux-gnu`). Lockfile platform `"ruby"` is the pure-Ruby case; any other value is
-      # treated as a platform tag.
+      # treated as a platform tag. Every locked variant contributes a directory (#1844): the set only selects
+      # among directories that are actually installed, so admitting another platform's name costs nothing,
+      # while dropping the host's would discard its `sig/`.
       def self.expected_gem_dirs(locked_gems)
         locked_gems.each_value.with_object(Set.new) do |locked, set|
-          base = "#{locked.name}-#{locked.version}"
-          set << if locked.platform == "ruby" || locked.platform.empty?
-                   base
-                 else
-                   "#{base}-#{locked.platform}"
-                 end
+          locked.variants.each do |version, platform|
+            base = "#{locked.name}-#{version}"
+            set << if platform == "ruby" || platform.empty?
+                     base
+                   else
+                     "#{base}-#{platform}"
+                   end
+          end
         end
       end
       private_class_method :expected_gem_dirs

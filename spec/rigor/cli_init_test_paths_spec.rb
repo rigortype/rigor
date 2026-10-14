@@ -38,6 +38,25 @@ RSpec.describe Rigor::CLI do
     expect(Rigor::Configuration.load("config/rigor.yml").test_paths).to eq([File.expand_path("spec")])
   end
 
+  # #1399 — `paths:` is cwd-relative in the default settings, so it is rewritten against the config file's directory
+  # the same way `test_paths:` is. Without this, `config/rigor.yml` says `paths: [lib]` and loads back as `config/lib`.
+  it "writes paths: relative to a config file written elsewhere, so it loads back to the project's lib/" do
+    FileUtils.mkdir_p(%w[lib config])
+
+    config = init_config("config/rigor.yml")
+
+    expect(config["paths"]).to eq(["../lib"])
+    expect(Rigor::Configuration.load("config/rigor.yml").paths).to eq([File.expand_path("lib")])
+  end
+
+  it "keeps paths: [lib] for the default config at the project root" do
+    FileUtils.mkdir_p("lib")
+
+    config = init_config
+
+    expect(config["paths"]).to eq(["lib"])
+  end
+
   it "leaves test_paths: unset (auto-detect) when there is no test directory yet" do
     config = init_config
 

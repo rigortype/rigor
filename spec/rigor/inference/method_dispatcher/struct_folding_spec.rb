@@ -675,12 +675,6 @@ RSpec.describe "Struct.new value folding", type: :runner do
         expect(dumped_types("#{line_def}dump_type(Line.new(\"a\", 2).outer)")).to eq(["\"A\""])
       end
 
-      # #1335: was "folds off a `.with` copy". `Struct#with` is not a Struct method, so the fresh copy is
-      # built with `.new` instead; the grant is the same.
-      it "folds off a fresh copy (was a `.with` copy, #1335)" do
-        expect(dumped_types("#{line_def}dump_type(Line.new(\"b\", 2).shout)")).to eq(["\"B\""])
-      end
-
       it "folds each call site against ITS OWN carrier, not a shared answer" do
         types = dumped_types(<<~RUBY)
           #{line_def}
@@ -811,8 +805,9 @@ RSpec.describe "Struct.new value folding", type: :runner do
       end
 
       it "declines a `.with` copy taken off a stale-derived receiver" do
-        # The composed shape: `.with` IS a materialisation, but its receiver is not, so the copy it
-        # produces carries the stale map. Refusing the prefix kills the composition at its root.
+        # The composed shape: the copy off a stale receiver must never read as fresh. Since #1335 `.with` is
+        # never a materialisation (`Struct` has no `#with`), so this declines at the `.with` link itself; the
+        # pin stays so no future materialisation of `.with` can reopen the composition.
         expect(dumped_types(<<~RUBY)).to eq(["Dynamic[top]"])
           #{builder_def}
           x = Line.new("a", 2)
@@ -822,8 +817,9 @@ RSpec.describe "Struct.new value folding", type: :runner do
       end
 
       it "declines a block-def method call off that same stale-derived receiver" do
-        # The slice-5 grant fires off `.with`'s carrier, so the same prefix leaked into whole method
-        # bodies: this folded `"A"` against a runtime `"Z"` with the grant's own arm behaving correctly.
+        # The slice-5 grant fired off `.with`'s carrier, so the same prefix once leaked into whole method
+        # bodies and folded `"A"` against a runtime `"Z"`. `.with` is no longer a materialisation (#1335), so
+        # this now declines at the `.with` link; the pin stays as the composed-shape regression.
         expect(dumped_types(<<~RUBY)).to eq(["Dynamic[top]"])
           #{builder_def}
           x = Line.new("a", 2)
@@ -840,13 +836,6 @@ RSpec.describe "Struct.new value folding", type: :runner do
 
       it "folds a read off `[]`" do
         expect(dumped_types("#{builder_def}dump_type(Line[\"d\", 2].text)")).to eq(["\"d\""])
-      end
-
-      # #1335: was "folds a read off a `.with` copy". `Struct#with` is not a Struct method, so the second
-      # materialisation is built with `.new`.
-      it "folds a read off a second materialisation (was a `.with` copy, #1335)" do
-        source = "#{builder_def}dump_type(Line.new(\"f\", 2).text)"
-        expect(dumped_types(source)).to eq(["\"f\""])
       end
 
       it "folds a projection off a materialisation" do
@@ -1117,6 +1106,17 @@ RSpec.describe "Struct.new value folding", type: :runner do
       RUBY
 
       expect(types).to eq(["5"])
+    end
+
+    # The side effect of dropping the arm: a Struct subclass that defines its own `with` used to get the
+    # member-updated `L2(text: "q")` from the fold; now the user method answers.
+    it "lets a Struct subclass's own #with answer (was the member-updated instance, #1335)" do
+      expect(dumped_types(<<~RUBY)).to eq(["42"])
+        class L2 < Struct.new(:text)
+          def with(**) = 42
+        end
+        dump_type(L2.new("a").with(text: "q"))
+      RUBY
     end
 
     it "keeps the Data#with fold" do

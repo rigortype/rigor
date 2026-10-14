@@ -2453,7 +2453,7 @@ module Rigor
         return every_definer_raises_type(raising, receiver, call_node, arg_types, block_type) if def_node.nil?
 
         result = infer_user_method_return(def_node, receiver, arg_types,
-                                          self_fold_safe: fold_safe_call_receiver?(call_node, receiver),
+                                          self_fold_safe: fold_safe_call_receiver?(call_node),
                                           yield_type: block_type)
         return result if result.nil?
 
@@ -2488,11 +2488,11 @@ module Rigor
       # This is only a property of the receiver expression; whether the grant is actually issued also needs
       # a `StructInstance` carrier and a body that survives the self-use scan, both decided in
       # {#build_user_method_body_scope}.
-      def fold_safe_call_receiver?(call_node, receiver)
+      def fold_safe_call_receiver?(call_node)
         return false if call_node.nil?
 
         case call_node.receiver
-        when Prism::CallNode then materialization_call?(call_node.receiver, receiver)
+        when Prism::CallNode then materialization_call?(call_node.receiver)
         when Prism::LocalVariableReadNode then scope.struct_fold_safe?(call_node.receiver.name)
         when nil, Prism::SelfNode then scope.struct_fold_safe?(:self)
         else false
@@ -2502,10 +2502,10 @@ module Rigor
       # Issue #595 — the materialisation test lives ONCE, in
       # [`struct_materialization.rb`](method_dispatcher/struct_materialization.rb), because the direct
       # member-read gate ({MethodDispatcher::StructFolding}`#fresh_receiver?`) needs the identical answer;
-      # see {MethodDispatcher::StructMaterialization.materialization_call?}. It resolves its own `.with`
-      # guard through `Scope`, so neither consumer supplies a lookup and neither can answer differently.
-      def materialization_call?(node, receiver)
-        MethodDispatcher::StructMaterialization.materialization_call?(node, receiver, scope)
+      # see {MethodDispatcher::StructMaterialization.materialization_call?}. A `.with` call is never one
+      # (`Struct` has no `#with`, #1335), so the test needs no lookup from either consumer.
+      def materialization_call?(node)
+        MethodDispatcher::StructMaterialization.materialization_call?(node, scope)
       end
 
       # Module-singleton call resolution (ADR-57 follow-up) — resolves `Foo.<name>` on a `Singleton[Foo]`
@@ -2674,7 +2674,7 @@ module Rigor
       def every_definer_raises_type(defs, receiver, call_node, arg_types, block_type)
         return nil if defs.nil?
 
-        self_fold_safe = fold_safe_call_receiver?(call_node, receiver)
+        self_fold_safe = fold_safe_call_receiver?(call_node)
         defs.each do |def_node|
           result = infer_user_method_return(def_node, receiver, arg_types,
                                             self_fold_safe: self_fold_safe, yield_type: block_type)

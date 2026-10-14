@@ -329,7 +329,7 @@ module Rigor
           node = context.call_node
           return false if node.nil?
 
-          materialization_call?(node.receiver, context.receiver, context.scope)
+          materialization_call?(node.receiver, context.scope)
         end
 
         # ADR-48 slice 4 — precise mutated-member re-typing. After a `local.member = v` setter on a

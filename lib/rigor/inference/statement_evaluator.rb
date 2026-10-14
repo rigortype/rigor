@@ -5956,8 +5956,7 @@ module Rigor
       # it is frozen, and the dispatcher already projects it (see `DataFolding`).
       def struct_instance_projection(subject_type, method_name, scope, subject_node)
         return nil unless subject_type.is_a?(Type::StructInstance)
-        return nil unless MethodDispatcher::StructMaterialization.materialization_call?(subject_node, subject_type,
-                                                                                        scope)
+        return nil unless MethodDispatcher::StructMaterialization.materialization_call?(subject_node, scope)
 
         case method_name
         when :deconstruct then Type::Combinator.tuple_of(*subject_type.members.values)

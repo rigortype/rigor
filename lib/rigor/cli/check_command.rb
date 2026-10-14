@@ -72,6 +72,7 @@ module Rigor
         )
         runner = invocation.runner
         raw_result = invocation.result
+        settle_run_stats(raw_result.stats)
         result = apply_baseline_filter(raw_result, configuration, options)
 
         coverage = compute_coverage(runner, configuration, options)
@@ -268,7 +269,8 @@ module Rigor
         # cache-serving path.
         subset = analyzed.each_with_index.select { |_, index| index.even? }.map(&:first)
         incremental = normalize_diagnostics(session.reanalyze_subset(subset))
-        full = normalize_diagnostics(verify_full_diagnostics(configuration, paths))
+        full = normalize_diagnostics(verify_full_diagnostics(configuration, paths,
+                                                             collect_stats: options.fetch(:stats)))
 
         report_verify_incremental(incremental, full, subset_size: subset.size, total: analyzed.size,
                                                      format: options.fetch(:format))
@@ -399,8 +401,8 @@ module Rigor
         side_output(format).puts("  plugin fact surface: #{status}")
       end
 
-      def verify_full_diagnostics(configuration, paths)
-        runner = Analysis::Runner.new(configuration: configuration, cache_store: nil)
+      def verify_full_diagnostics(configuration, paths, collect_stats: true)
+        runner = Analysis::Runner.new(configuration: configuration, cache_store: nil, collect_stats: collect_stats)
         (paths ? runner.run(paths) : runner.run).diagnostics
       end
 
@@ -724,6 +726,13 @@ module Rigor
         else
           out.puts("Cache already empty: #{cache_root}")
         end
+      end
+
+      # Issue #1529 — reads the run's peak RSS straight after the analysis, before coverage or any output, so the
+      # figure the summary prints (and the JSON `stats` block carries) covers the analysis alone. A nil `stats`
+      # (`--no-stats`, or a run served from a cache) reads nothing.
+      def settle_run_stats(stats)
+        stats&.peak_rss_bytes
       end
 
       # Emits the {Analysis::RunStats} summary to STDERR so it doesn't interleave with the diagnostic stream (text or

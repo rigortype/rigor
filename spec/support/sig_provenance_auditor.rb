@@ -42,9 +42,9 @@
 #
 # == What the classifier can and cannot see
 #
-# `sig-gen` enumerates `def`s; `sig/` declares methods. The join is (class, method) with the
-# instance / singleton kinds treated as interchangeable, because `def self?.x` in RBS and
-# `module_function` in Ruby disagree about which kind a module function is. Everything else that
+# `sig-gen` enumerates `def`s; `sig/` declares methods. The join is (class, method, kind), except that an RBS
+# `self?` declaration (`def self?.x`) joins either kind, because `def self?.x` in RBS and `module_function` in
+# Ruby disagree about which kind a module function is. Everything else that
 # separates the two — a method reached through a mixin or a superclass, a member `Data.define`
 # generates, a `def` in a class `sig-gen` cannot name — is residue by construction rather than a bug:
 # the point of counting it is that it should shrink.
@@ -182,13 +182,24 @@ class SigProvenanceAuditor
 
     private
 
+    # Keyed on the candidate's kind as well as its name, so a declaration joins the candidate for its own kind:
+    # an instance `def` no longer shadows a singleton candidate of the same name (or the reverse).
     def index_candidates(candidates)
       candidates.each_with_object({}) do |candidate, acc|
         next if candidate.class_name.nil?
 
-        key = [candidate.class_name.delete_prefix("::"), candidate.method_name.to_s]
+        key = [candidate.class_name.delete_prefix("::"), candidate.method_name.to_s, candidate.kind]
         acc[key] ||= candidate
       end
+    end
+
+    # The candidate a declaration joins. The RBS kind `self?` (`def self?.x`, `:singleton_instance`) names both
+    # kinds at once, so only it falls back to the other kind's candidate; every other declaration joins its own.
+    def candidate_for(decl, index)
+      exact = index[[decl.class_name, decl.method_name, decl.kind == :singleton ? :singleton : :instance]]
+      return exact if exact || decl.kind != :singleton_instance
+
+      index[[decl.class_name, decl.method_name, :singleton]] || index[[decl.class_name, decl.method_name, :instance]]
     end
 
     # `SigSourceIndex`'s vocabulary, mapped onto the audit's. Kept as a table so a new tier there is
@@ -200,7 +211,7 @@ class SigProvenanceAuditor
     def classify_one(decl, index, sources)
       return Row.new(declaration: decl, classification: NON_METHOD) if decl.kind.nil?
 
-      candidate = index[[decl.class_name, decl.method_name]]
+      candidate = candidate_for(decl, index)
       return classify_unattributed(decl, sources) if candidate.nil?
 
       case candidate.classification

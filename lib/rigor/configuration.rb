@@ -757,7 +757,7 @@ module Rigor
     # directory). {Configuration.load} sets it to the loaded config file's directory.
     def with_exclude_base(dir)
       copy = dup
-      copy.instance_variable_set(:@base_dir, dir && File.absolute_path(dir))
+      copy.instance_variable_set(:@base_dir, dir && File.absolute_path(dir).freeze)
       copy.freeze
     end
 

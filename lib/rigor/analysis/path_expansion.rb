@@ -27,54 +27,51 @@ module Rigor
       end
 
       def directory_files(dir, exclude_patterns, base: Dir.pwd)
-        reject_excluded(Dir.glob(File.join(dir, RUBY_GLOB)), exclude_patterns, base: base, root: dir)
+        reject_excluded(Dir.glob(File.join(dir, RUBY_GLOB)), exclude_patterns, base: base)
       end
 
       # `exclude_patterns` are matched with `File.fnmatch?` WITHOUT `FNM_PATHNAME`, so `**`/`*` span separators
       # (the patterns behave like substring globs) — the exact semantics the Runner's directory glob applies.
       #
-      # #1576 — a RELATIVE pattern is matched only against the file's path relative to `base` (the config file's
-      # directory, or the working directory with no config), so the same file is excluded whether `paths:`
-      # (absolute) or an argument (relative) named it, and a segment of the tree ABOVE `base` is never visible to
-      # it. The pattern is also tried against `/<relative>`, because without `FNM_PATHNAME` the unanchored
-      # `**/tmp/**` needs a leading `/` to match a top-level `tmp/x.rb`. A file outside `base` is matched by
-      # absolute patterns only, unless it came from a directory argument (`root:`), which then serves as its base.
-      # An ABSOLUTE pattern is matched only against the absolute path. Both the base and the file go through
-      # `realpath` so a symlinked spelling (macOS `/tmp` vs `/private/tmp`) cannot make the relative spelling
-      # vanish; absolute patterns also see the logical absolute spelling.
-      def reject_excluded(file_list, exclude_patterns, base: Dir.pwd, root: nil)
+      # #1576 — a RELATIVE pattern (a leading `./` is ignored) is matched against the file's path relative to
+      # `base` (the config file's directory, or the working directory with no config), so the same file is
+      # excluded whether `paths:` (absolute) or an argument (relative) named it. A file outside `base` comes out
+      # as `../…`, which never shows a directory name above `base`: `**/tmp/**` cannot exclude a project merely
+      # located under a `tmp/`, while `**/vendor/bundle/**` still reaches `../other/vendor/bundle/x.rb`. The
+      # pattern is also tried against `/<relative>`, because without `FNM_PATHNAME` the unanchored `**/tmp/**`
+      # needs a leading `/` to match a top-level `tmp/x.rb` (and `*` never matches a leading `.`, as in
+      # `../other`). The LOGICAL spelling (the path as given, against
+      # the logical base) is tried first, then the realpath spelling, so a symlinked `lib` or a symlinked
+      # working directory (macOS `/tmp` vs `/private/tmp`) matches whichever way a pattern was written.
+      # An ABSOLUTE pattern is matched only against the absolute path (logical, then real).
+      def reject_excluded(file_list, exclude_patterns, base: Dir.pwd)
         return file_list if exclude_patterns.empty?
 
         absolute_patterns, relative_patterns = exclude_patterns.partition { |pattern| pattern.start_with?("/") }
-        bases = [real_directory(base)]
-        bases << real_directory(root) if root
-        real_dirs = {}
-        file_list.reject do |path|
-          excluded?(path, absolute_patterns, relative_patterns, bases, real_dirs)
-        end
+        relative_patterns = relative_patterns.map { |pattern| pattern.sub(%r{\A(?:\./+)+}, "") }
+        context = { base: File.absolute_path(base), real_base: nil, real_dirs: {} }
+        file_list.reject { |path| excluded?(path, absolute_patterns, relative_patterns, context) }
       end
 
-      # `bases` is the project base, then (for a directory expansion) the directory argument itself: a directory
-      # outside the project base is still matched relative to itself, never to anything above it.
-      def excluded?(path, absolute_patterns, relative_patterns, bases, real_dirs)
+      def excluded?(path, absolute_patterns, relative_patterns, context)
         logical = File.absolute_path(path)
-        real = real_file(logical, real_dirs)
-        return true if absolute_patterns.any? { |pattern| [logical, real].any? { |s| File.fnmatch?(pattern, s) } }
+        return true if matches_relative?(relative_patterns, relative_path(logical, context.fetch(:base)))
+        return true if absolute_patterns.any? { |pattern| File.fnmatch?(pattern, logical) }
+        return false unless (relative_patterns + absolute_patterns).any?
 
-        relative = relative_to_first(real, bases)
-        return false unless relative
-
-        relative_patterns.any? do |pattern|
-          File.fnmatch?(pattern, relative) || File.fnmatch?(pattern, "/#{relative}")
-        end
+        real = real_file(logical, context.fetch(:real_dirs))
+        real_base = (context[:real_base] ||= real_directory(context.fetch(:base)))
+        matches_relative?(relative_patterns, relative_path(real, real_base)) ||
+          absolute_patterns.any? { |pattern| File.fnmatch?(pattern, real) }
       end
 
-      def relative_to_first(real, bases)
-        bases.each do |base|
-          prefix = base.end_with?("/") ? base : "#{base}/"
-          return real.delete_prefix(prefix) if real.start_with?(prefix)
-        end
-        nil
+      def relative_path(absolute, base)
+        Pathname.new(absolute).relative_path_from(Pathname.new(base)).to_s
+      end
+
+      def matches_relative?(patterns, relative)
+        candidates = [relative, "/#{relative}"]
+        patterns.any? { |pattern| candidates.any? { |candidate| File.fnmatch?(pattern, candidate) } }
       end
 
       def real_directory(dir)

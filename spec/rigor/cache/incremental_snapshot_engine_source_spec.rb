@@ -68,6 +68,38 @@ RSpec.describe "incremental snapshot invalidation on an engine-source edit" do
     end
   end
 
+  # Issue #1492 — the snapshot fingerprint keys on `signature_paths` plus the engine-source slot alone, so
+  # an engine-owned data edit must reach it through that slot.
+  it "moves the fingerprint on an engine data edit (builtin catalogue and core overlay)" do
+    Dir.mktmpdir("rigor-engine-source-incremental-") do |dir|
+      lib = write_project(dir)
+      engine = write_engine(dir, "# v1\n")
+      catalogue = File.join(engine, "data", "builtins", "ruby_core", "array.yml")
+      overlay = File.join(engine, "data", "core_overlay", "string.rbs")
+      [catalogue, overlay].each do |path|
+        FileUtils.mkdir_p(File.dirname(path))
+        File.write(path, "a: 1\n")
+      end
+      fingerprint = lambda do
+        Rigor::Cache::EngineSource.reset_process_identity!
+        Dir.chdir(dir) do
+          Rigor::Cache::IncrementalSnapshot.fingerprint(
+            configuration: Rigor::Configuration.new("paths" => [lib]), roots: [lib]
+          )
+        end
+      end
+      before = fingerprint.call
+      expect(fingerprint.call).to eq(before)
+
+      File.write(catalogue, "a: 2\n")
+      after_catalogue = fingerprint.call
+      expect(after_catalogue).not_to eq(before)
+
+      File.write(overlay, "a: 2\n")
+      expect(fingerprint.call).not_to eq(after_catalogue)
+    end
+  end
+
   it "RECHECKS COLD after an engine-source edit, instead of replaying the stale diagnostics warm" do
     Dir.mktmpdir("rigor-engine-source-incremental-") do |dir|
       lib = write_project(dir)

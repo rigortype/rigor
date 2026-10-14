@@ -59,6 +59,19 @@ module Rigor
       # `apps/` and `tool/` are not loaded by an analysis and stay out.
       SOURCE_DIRECTORIES = %w[lib plugins].freeze
 
+      # Engine DATA the analysis reads at runtime, relative to the gem root (issue #1492). A data edit moves
+      # diagnostics as surely as a `lib/` edit, yet the caches that key only on `signature_paths` plus this
+      # digest (the `--incremental` snapshot fingerprint, `Protection::MutationCache`) see nothing else.
+      #
+      # - YAML: `data/builtins` (`MethodCatalog::DATA_ROOT`) and `data/effects` (`Effects::Catalog`,
+      #   `Effects::Registry`).
+      # - RBS: every `.rbs` under `data/` (`core_overlay`, `vendored_gem_sigs`, `capability_roles`,
+      #   `gem_overlay`) plus each bundled plugin's `plugins/*/sig`. `RbsDescriptor` digests the same files
+      #   into the run-result and env caches, but those are the only two consumers that do.
+      #
+      # Tooling-only trees (`data/oss-sweep`) are not read by an analysis and stay out.
+      DATA_GLOBS = %w[data/builtins/**/*.yml data/effects/**/*.yml data/**/*.rbs plugins/*/sig/**/*.rbs].freeze
+
       # The one directory whose absence means "this is not an engine tree". `plugins/` may legitimately be
       # missing (a slimmed install contributes nothing); a missing `lib/` would silently shrink the digest
       # to whatever else happened to be there, which is exactly the weakening this module forbids.
@@ -153,8 +166,9 @@ module Rigor
         !File.exist?(File.join(root, ".git"))
       end
 
-      # A SHA-256 over every engine `.rb` file: its ROOT-RELATIVE path (so the digest survives moving or
-      # re-cloning the checkout) followed by its bytes, in sorted path order.
+      # A SHA-256 over every engine `.rb` file and {DATA_GLOBS} data file: its ROOT-RELATIVE
+      # path (so the digest survives moving or re-cloning the checkout) followed by its bytes, in sorted path
+      # order.
       #
       # The walk itself is not memoised — {.process_identity} is where a production caller gets the
       # once-per-process value, and this stays the computation so a spec can point it at another tree.
@@ -178,12 +192,12 @@ module Rigor
         raise Unavailable, "engine source under #{root} could not be read: #{e.message}"
       end
 
-      # Sorted absolute paths of every engine `.rb` file, across the directories that exist.
+      # Sorted, de-duplicated absolute paths of every engine `.rb` file and {DATA_GLOBS} data file, across
+      # the directories that exist. `plugins/*/sig/**/*.rbs` overlaps nothing else but is de-duplicated anyway.
       def source_files(root)
-        SOURCE_DIRECTORIES.flat_map do |relative|
-          directory = File.join(root, relative)
-          File.directory?(directory) ? Dir.glob(File.join(directory, "**", "*.rb")) : []
-        end.sort
+        sources = SOURCE_DIRECTORIES.flat_map { |relative| Dir.glob(File.join(root, relative, "**", "*.rb")) }
+        data = DATA_GLOBS.flat_map { |pattern| Dir.glob(File.join(root, pattern)) }
+        (sources + data).uniq.sort
       end
     end
   end

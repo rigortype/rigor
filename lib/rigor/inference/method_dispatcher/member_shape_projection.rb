@@ -12,9 +12,9 @@ module Rigor
       # The member-shape projections shared by {DataFolding} and {StructFolding}. A `DataInstance` and a
       # `StructInstance` expose the same surface — an ordered `members` map, `member_names`, and a
       # `class_name` — so the value projections off that surface (`[]` / `to_h` / `deconstruct` /
-      # `deconstruct_keys` / `members` / `with`) and the reader-redefinition guard are identical between the
-      # two folders. Only `#with`'s carrier constructor differs (`data_instance_of` vs
-      # `struct_instance_of`), so it takes a block that builds the new instance from the merged member map.
+      # `deconstruct_keys` / `members`) and the reader-redefinition guard are identical between the two
+      # folders. `#with` is a projection of `Data` only (`Struct` has no `#with`, #1335); it takes a block that
+      # builds the new instance from the merged member map, so the carrier constructor stays with the caller.
       #
       # Both folders `extend` this module so the projections resolve as their own module functions
       # (matching their `module_function` style).

@@ -314,6 +314,59 @@ RSpec.describe Rigor::CLI do
       end
     end
 
+    context "with --explain (#1533)" do
+      def explain_project(dir)
+        File.write(File.join(dir, ".rigor.yml"),
+                   "severity_profile: balanced\ncache:\n  path: #{File.join(dir, '.cache')}\n")
+        # `BEGIN { ... }` is a node the engine does not recognise: a stable explain-row trigger.
+        File.write(File.join(dir, "a.rb"), "BEGIN { 1 }\n")
+        ["check", "--no-stats", "--config", File.join(dir, ".rigor.yml"), dir]
+      end
+
+      it "prints the explain rows a plain --explain run prints" do
+        Dir.mktmpdir do |dir|
+          base = explain_project(dir)
+          plain = run_cli(*base, "--explain")[1]
+          expect(plain).to include("fail-soft fallback")
+
+          _status, out, err = run_cli(*base, "--incremental", "--explain")
+          expect(err).to include("--incremental cold")
+          expect(out).to eq(plain)
+          # Warm: the snapshot written WITH the flag serves the same rows again.
+          _status, out, err = run_cli(*base, "--incremental", "--explain")
+          expect(err).to include("--incremental warm")
+          expect(out).to eq(plain)
+        end
+      end
+
+      it "does not serve a snapshot primed without --explain to a run with it" do
+        Dir.mktmpdir do |dir|
+          base = explain_project(dir)
+          _status, out, = run_cli(*base, "--incremental")
+          expect(out).not_to include("fail-soft fallback")
+
+          _status, out, err = run_cli(*base, "--incremental", "--explain")
+          expect(err).to include("--incremental cold")
+          expect(out).to include("fail-soft fallback")
+        end
+      end
+
+      it "does not serve explain rows to a later run without the flag" do
+        Dir.mktmpdir do |dir|
+          base = explain_project(dir)
+          run_cli(*base, "--incremental", "--explain")
+          run_cli(*base, "--incremental", "--explain")
+
+          _status, out, err = run_cli(*base, "--incremental")
+          expect(err).to include("--incremental cold")
+          expect(out).not_to include("fail-soft fallback")
+          _status, out, err = run_cli(*base, "--incremental")
+          expect(err).to include("--incremental warm")
+          expect(out).not_to include("fail-soft fallback")
+        end
+      end
+    end
+
     it "does not reuse the snapshot when only a bundler.lockfile: at a non-default path changes" do
       Dir.mktmpdir do |dir|
         Dir.chdir(dir) do

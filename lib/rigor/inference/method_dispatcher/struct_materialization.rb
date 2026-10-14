@@ -34,18 +34,20 @@ module Rigor
         # Issue #595 / #525 — the ONE materialisation test. Both places that must answer "was this receiver
         # expression's struct newly built?" go through it: this module's direct member-read gate above, and
         # `ExpressionTyper`'s caller-side `:self`-grant arm. They had forked answers once (the grant arm was
-        # tightened for #591 while this one still trusted any chained call), which is exactly how the
-        # composed `x.dup_self.with(indent: 9).shout` shape survived — a correctly whitelisted `.with` fold
-        # firing off a receiver the other gate should never have called fresh.
+        # tightened for #591 while this one still trusted any chained call), so both consumers must share this
+        # one answer. A `.with` call is never a materialisation: the composed `x.dup_self.with(indent: 9)`
+        # shape once slipped through as one, and `Struct#with` no longer exists to fold (#1335).
         #
         # @param node — the receiver EXPRESSION.
-        # @param receiver — the carrier the expression produced.
-        def materialization_call?(node, receiver, scope)
+        # @param scope — the scope the factory and ancestor lookups resolve against.
+        def materialization_call?(node, scope)
           return false unless node.is_a?(Prism::CallNode)
 
           case node.name
           when :new, :[] then struct_class_expression?(node.receiver, scope)
-          when :with then !hand_written_with?(receiver, scope)
+          # `Struct` has no `#with` (#1335), so a `.with` call is never a materialisation here; `Data#with` is
+          # a frozen copy and needs no freshness gate.
+          when :with then false
           else fresh_factory_call?(node, scope)
           end
         end
@@ -125,26 +127,6 @@ module Rigor
           found = false
           node.rigor_each_child { |child| found ||= early_return?(child, budget) }
           found
-        end
-
-        # `.with` copies the receiver into a new instance — unless the struct wrote its own, which is free to
-        # return `self` and would reopen the very hole above.
-        #
-        # An ANONYMOUS carrier cannot have one: a `StructInstance` with no class name came from a blockless
-        # `Struct.new(…)` (the block form defers in {fold_struct_new} before any instance exists), and a
-        # blockless factory defines nothing but the generated accessors. So it is the NAMED carriers that
-        # need the lookup — and a named one with no scope to ask refuses, since unproven is not fresh.
-        def hand_written_with?(receiver, scope)
-          return true unless receiver.is_a?(Type::StructInstance)
-
-          class_name = receiver.class_name
-          return false if class_name.nil?
-          return true if scope.nil?
-
-          # The ANCESTOR walk, not the own-class table: a `with` contributed by an included module is just as
-          # free to return `self`. Both consumers reach the identical answer because there is one lookup here
-          # rather than a parameter each of them supplies (#598 review).
-          !scope.user_def_through_ancestors(class_name, :with).first.nil?
         end
 
         # An expression naming the struct class itself. All three definition forms ADR-48 supports qualify,

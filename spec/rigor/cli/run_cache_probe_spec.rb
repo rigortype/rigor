@@ -185,7 +185,7 @@ RSpec.describe "ADR-87 WD4 run-cache hit probe (subprocess)" do
       expect(check_run("--incremental")[1]).to eq(0)
     end
 
-    it "declines under --explain, which the session does not honour (#1533)" do
+    it "declines under --explain, for which the session writes no slot (#1533)" do
       write_project
       check_run("--incremental")
       expect(check_run("--incremental", "--explain")[1]).to be > 0

@@ -1,0 +1,1 @@
+- **[rigor check]** On macOS, `--incremental` runs forked `ps` to read a peak-RSS figure they never print, and the `--verify-incremental` oracle did the same under `--no-stats`; the figure is now read only when a run summary is shown. Ordinary `--no-stats` runs already did not fork. ([#1871](https://github.com/rigortype/rigor/pull/1871))

@@ -128,7 +128,7 @@ module Rigor
 
         @out.puts(render_print_header(skill))
         @out.puts
-        @out.write(File.read(skill.fetch(:path)))
+        @out.write(File.read(skill.fetch(:path), encoding: Encoding::UTF_8))
         0
       end
 
@@ -145,14 +145,14 @@ module Rigor
 
         @out.puts(render_print_header(skill))
         @out.puts
-        @out.write(File.read(skill.fetch(:path)))
+        @out.write(File.read(skill.fetch(:path), encoding: Encoding::UTF_8))
 
         reference_files(skill).each do |ref|
           @out.puts
           @out.puts
           @out.puts("<!-- ===== references/#{File.basename(ref)} (bundled with rigortype #{Rigor::VERSION}) ===== -->")
           @out.puts
-          @out.write(File.read(ref))
+          @out.write(File.read(ref, encoding: Encoding::UTF_8))
         end
         0
       end

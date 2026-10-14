@@ -66,6 +66,8 @@ RSpec.describe Rigor::Environment::InstalledGemSet do
     it "declines a tail RubyGems does not recognise as a platform rather than guessing where the name ends" do
       expect(described_class.split_install_dirname("bar-1.0-weird-tag")).to be_nil
       expect(described_class.split_install_dirname("no-version")).to be_nil
+      # `current` is the host-platform alias, not a platform a gem is installed under.
+      expect(described_class.split_install_dirname("foo-1.0-current")).to be_nil
     end
   end
 

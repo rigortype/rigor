@@ -97,7 +97,7 @@ module Rigor
       # for the overlay, instead of aborting the run outright (see {#hkt_registry}).
       @hkt_scan_failure = FailureSlot.new
       @constant_type_cache = ConstantTypeCacheHolder.new
-      # ADR-82 WD9 — `[gem_name, version]` pairs for the locked gems with no resolvable RBS. The
+      # ADR-82 WD9 — `[gem_name, version, variants]` entries for the locked gems with no resolvable RBS. The
       # root-constant ownership index over them is built lazily (first unresolved constant read) so runs
       # whose constants all resolve never pay the entry-file scan.
       @missing_rbs_gems = missing_rbs_gems.freeze

@@ -96,6 +96,8 @@ module Rigor
         basename.scan(/-(\d[^-]*)(?=-.)/) { cuts << Regexp.last_match }
         cuts.reverse_each do |match|
           platform = match.post_match.delete_prefix("-")
+          # `current` makes `Gem::Platform.new` read the host's platform, which a non-main Ractor may not touch.
+          next if platform == "current"
           return [match.pre_match, match[1], platform] unless Gem::Platform.new(platform).os == "unknown"
         end
         nil

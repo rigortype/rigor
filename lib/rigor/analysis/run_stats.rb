@@ -24,18 +24,31 @@ module Rigor
     # `class_decl_paths` (a frozen `Hash<String, String>` populated once per environment by the RBS loader;
     # ~1000-2000 entries × one `String#start_with?`).
     class RunStats
-      attr_reader :wall_seconds, :peak_rss_bytes,
+      attr_reader :wall_seconds,
                   :target_files,
                   :rbs_classes_total, :rbs_classes_project_sig, :rbs_classes_bundled,
                   :gem_walk_classes, :gem_walk_gems, :rbs_attribution_available
 
-      def initialize(wall_seconds:, peak_rss_bytes:, # rubocop:disable Metrics/ParameterLists
+      # The live probe a run's summary uses: reads this process's RSS when first asked. The probe is a constant
+      # lambda, so the RunStats it rides on never captures the Runner (and its analysis state) through `Result`.
+      CURRENT_PROCESS_PEAK_RSS = Ractor.make_shareable(-> { RunStats.peak_rss_bytes })
+
+      # Issue #1529 — the peak RSS is read on the first {#peak_rss_bytes} call, not when the summary is built. A run
+      # that prints no summary (`--incremental` recheck, `--no-stats`) therefore never forks `ps` or reads `/proc`.
+      # The read stays in this process: the summary is built and printed by the process that ran the analysis.
+      #
+      # @param peak_rss_bytes — a value to report directly (specs, or a caller that already read it). Ignored when
+      #   `peak_rss_probe:` is given.
+      # @param peak_rss_probe — a zero-argument callable returning the RSS in bytes, called at most once, lazily.
+      def initialize(wall_seconds:, # rubocop:disable Metrics/ParameterLists
                      target_files:,
                      rbs_classes_total:, rbs_classes_project_sig:, rbs_classes_bundled:,
                      gem_walk_classes:, gem_walk_gems:,
-                     rbs_attribution_available: true)
+                     rbs_attribution_available: true, peak_rss_bytes: nil, peak_rss_probe: nil)
         @wall_seconds = wall_seconds
-        @peak_rss_bytes = peak_rss_bytes
+        @peak_rss_probe = peak_rss_probe || -> { peak_rss_bytes }
+        # A frozen RunStats cannot memoise into an ivar, so the first read lands in this (unfrozen) Hash.
+        @peak_rss_memo = {}
         @target_files = target_files
         @rbs_classes_total = rbs_classes_total
         @rbs_classes_project_sig = rbs_classes_project_sig
@@ -44,6 +57,14 @@ module Rigor
         @gem_walk_gems = gem_walk_gems
         @rbs_attribution_available = rbs_attribution_available
         freeze
+      end
+
+      # The peak RSS in bytes, read once on first call and memoised (nil when no route answers). On Linux this is the
+      # kernel's VmHWM high-water mark, so a read at print time is never below the run-end value. On macOS it is
+      # `ps`'s current RSS, so the reading moves by however much the process shrank between the run's end and the
+      # summary: a few milliseconds, the cache eviction and output rendering in between.
+      def peak_rss_bytes
+        @peak_rss_memo.fetch(:value) { @peak_rss_memo[:value] = @peak_rss_probe.call }
       end
 
       # Reports the process's resident set size in bytes. Source ordering: `/proc/self/status` (Linux — reads
@@ -146,7 +167,7 @@ module Rigor
         end
         out.puts("#{prefix}Process")
         out.puts("#{prefix}  Wall time:   #{Kernel.format('%.2fs', @wall_seconds)}")
-        out.puts("#{prefix}  Memory peak: #{format_bytes(@peak_rss_bytes)}")
+        out.puts("#{prefix}  Memory peak: #{format_bytes(peak_rss_bytes)}")
       end
 
       def to_h
@@ -159,7 +180,7 @@ module Rigor
           gem_walk_classes: @gem_walk_classes,
           gem_walk_gems: @gem_walk_gems,
           wall_seconds: @wall_seconds,
-          peak_rss_bytes: @peak_rss_bytes
+          peak_rss_bytes: peak_rss_bytes
         }
       end
 

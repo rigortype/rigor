@@ -207,4 +207,45 @@ RSpec.describe Rigor::Analysis::RunStats do
       )
     end
   end
+
+  # Issue #1529 — the peak RSS is a lazy, memoised read. Building the summary must not read it; the first
+  # `peak_rss_bytes` (or any summary/`to_h` consumer) reads it once, in the process that asks.
+  describe "lazy peak RSS" do
+    def build(probe)
+      described_class.new(
+        wall_seconds: 1.0, peak_rss_probe: probe, target_files: 3,
+        rbs_classes_total: 100, rbs_classes_project_sig: 5, rbs_classes_bundled: 95,
+        gem_walk_classes: 10, gem_walk_gems: 1
+      )
+    end
+
+    it "does not call the probe at construction" do
+      probe = instance_double(Proc, call: 2048)
+      build(probe)
+      expect(probe).not_to have_received(:call)
+    end
+
+    it "calls the probe once, on first read, and memoises the value" do
+      probe = instance_double(Proc, call: 2048)
+      stats = build(probe)
+      expect(stats.peak_rss_bytes).to eq(2048)
+      expect(stats.peak_rss_bytes).to eq(2048)
+      expect(probe).to have_received(:call).once
+    end
+
+    it "memoises a nil reading without calling the probe again" do
+      probe = instance_double(Proc, call: nil)
+      stats = build(probe)
+      expect(stats.peak_rss_bytes).to be_nil
+      expect(stats.peak_rss_bytes).to be_nil
+      expect(probe).to have_received(:call).once
+    end
+
+    it "is read by Result#to_h, the JSON stats consumer" do
+      probe = instance_double(Proc, call: 4096)
+      result = Rigor::Analysis::Result.new(diagnostics: [], stats: build(probe))
+      expect(probe).not_to have_received(:call)
+      expect(result.to_h.fetch("stats")).to include(peak_rss_bytes: 4096)
+    end
+  end
 end

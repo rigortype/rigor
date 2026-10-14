@@ -268,7 +268,8 @@ module Rigor
         # cache-serving path.
         subset = analyzed.each_with_index.select { |_, index| index.even? }.map(&:first)
         incremental = normalize_diagnostics(session.reanalyze_subset(subset))
-        full = normalize_diagnostics(verify_full_diagnostics(configuration, paths))
+        full = normalize_diagnostics(verify_full_diagnostics(configuration, paths,
+                                                             collect_stats: options.fetch(:stats)))
 
         report_verify_incremental(incremental, full, subset_size: subset.size, total: analyzed.size,
                                                      format: options.fetch(:format))
@@ -398,8 +399,8 @@ module Rigor
         side_output(format).puts("  plugin fact surface: #{status}")
       end
 
-      def verify_full_diagnostics(configuration, paths)
-        runner = Analysis::Runner.new(configuration: configuration, cache_store: nil)
+      def verify_full_diagnostics(configuration, paths, collect_stats: true)
+        runner = Analysis::Runner.new(configuration: configuration, cache_store: nil, collect_stats: collect_stats)
         (paths ? runner.run(paths) : runner.run).diagnostics
       end
 

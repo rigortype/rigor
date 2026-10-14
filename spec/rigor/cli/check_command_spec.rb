@@ -128,6 +128,87 @@ RSpec.describe Rigor::CLI::CheckCommand do
     expect(warm_out).to include("No diagnostics")
   end
 
+  # #1529 — `--no-stats` must build no RunStats: the summary is never printed, and on macOS the RSS probe forks
+  # `ps`. The ordinary path already threads `collect_stats: false` through CheckRunnerFactory, and these examples
+  # pin that. The `--incremental` path is not covered here: its session's internal runners must keep collecting
+  # the chain snapshots (see IncrementalSession#start_chain), which the stats gate also controls.
+  describe "--no-stats" do
+    before { require "rigor/analysis/run_stats" }
+
+    it "builds no RunStats on an ordinary run and prints no summary" do
+      File.write("clean.rb", "x = 1\n")
+      allow(Rigor::Analysis::RunStats).to receive(:peak_rss_bytes).and_call_original
+
+      status, _out, err = run(["--no-cache", "--no-ci-detect", "--no-stats", "clean.rb"])
+
+      expect(status).to eq(0)
+      expect(Rigor::Analysis::RunStats).not_to have_received(:peak_rss_bytes)
+      expect(err).not_to include("RBS classes available")
+    end
+
+    it "still builds RunStats and prints the summary by default" do
+      File.write("clean.rb", "x = 1\n")
+      allow(Rigor::Analysis::RunStats).to receive(:peak_rss_bytes).and_call_original
+
+      _status, _out, err = run(["--no-cache", "--no-ci-detect", "clean.rb"])
+
+      expect(Rigor::Analysis::RunStats).to have_received(:peak_rss_bytes).at_least(:once)
+      expect(err).to include("RBS classes available")
+      expect(err).to include("Memory peak:")
+    end
+
+    # Issue #1529 — the RSS reader is lazy, so a run that prints no summary never reads it. The incremental
+    # session's internal runners build a RunStats they never print, and the chain snapshots they need are
+    # collected regardless of the flag, so the reader must stay uncalled on cold and warm runs alike.
+    it "never reads the RSS on an --incremental run, cold or warm, with or without --no-stats" do
+      File.write("clean.rb", "x = 1\n")
+      File.write("clean_quiet.rb", "x = 1\n")
+      %i[peak_rss_bytes read_rss_via_ps read_vmhwm_from_proc].each do |reader|
+        allow(Rigor::Analysis::RunStats).to receive(reader).and_call_original
+      end
+
+      # Each variant gets its own root, so its snapshot starts cold and its second run is the warm one.
+      variants = [["--no-ci-detect", "--incremental", "clean.rb"],
+                  ["--no-ci-detect", "--no-stats", "--incremental", "clean_quiet.rb"]]
+      variants.each do |variant|
+        cold_status, _out, cold_err = run(variant.dup)
+        warm_status, _out, warm_err = run(variant.dup)
+
+        expect(cold_status).to eq(0)
+        expect(warm_status).to eq(0)
+        expect(cold_err).to include("--incremental cold")
+        expect(warm_err).to include("--incremental warm")
+      end
+
+      expect(Rigor::Analysis::RunStats).not_to have_received(:peak_rss_bytes)
+      expect(Rigor::Analysis::RunStats).not_to have_received(:read_rss_via_ps)
+      expect(Rigor::Analysis::RunStats).not_to have_received(:read_vmhwm_from_proc)
+    end
+
+    it "does not crash on any output format and emits no stats key in --format json" do
+      File.write("bad.rb", "x = \"hello\"\nx.no_such_method_here\n")
+
+      %w[text json sarif github gitlab checkstyle junit teamcity].each do |format|
+        status, out, err = run(["--no-cache", "--no-ci-detect", "--no-stats", "--format=#{format}", "bad.rb"])
+
+        expect(status).to eq(1), "format=#{format} exited #{status}; stderr: #{err}"
+        expect(err).not_to include("RBS classes available")
+        expect(JSON.parse(out)).not_to have_key("stats") if format == "json"
+      end
+    end
+
+    it "serves a repeat ordinary run from the run cache without a crash" do
+      File.write("clean.rb", "x = 1\n")
+
+      first_status, = run(["--no-ci-detect", "--no-stats", "--format=json", "clean.rb"])
+      second_status, second_out, = run(["--no-ci-detect", "--no-stats", "--format=json", "clean.rb"])
+
+      expect(first_status).to eq(0)
+      expect(second_status).to eq(0)
+      expect(JSON.parse(second_out)).to include("success" => true)
+    end
+  end
+
   # #146 — editor mode option B. `--incremental` plus a buffer used to ignore the buffer entirely and analyse
   # the file on disk: a wrong answer, not a missing feature. It now analyses the whole project with the buffer
   # substituted, and declines to single-file scope when there is no snapshot to reuse.

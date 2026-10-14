@@ -2093,7 +2093,12 @@ module Rigor
         # arm restores the polarity without touching the shared helper:
         # `String | nil` keeps firing, and so does `Dynamic | String | nil` —
         # the nameless arm stays permissive inside the all-arms check, which is
-        # only about the arms' method surface.
+        # only about the arms' method surface. That union no longer arises from
+        # a merge re-joining the narrowed edges of one untyped local, which
+        # binds it back to `Dynamic[top]` (issue #1840,
+        # `Inference::UntypedRejoin`); it still does when the program writes
+        # the `nil` (`x = nil if c`) or the arms are not a narrowing of one
+        # untyped value.
         def union_has_nameable_non_nil_arm?(union, scope)
           union.members.any? do |m|
             next false if nil_member?(m)

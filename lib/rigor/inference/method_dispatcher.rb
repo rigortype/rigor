@@ -1170,7 +1170,7 @@ module Rigor
         set_lift = set_new_lift(receiver_type.class_name, arg_types)
         return set_lift if set_lift
 
-        hash_lift = hash_new_lift(receiver_type.class_name, arg_types)
+        hash_lift = hash_new_lift(receiver_type.class_name, arg_types, context&.call_node)
         return hash_lift if hash_lift
 
         regexp_lift = regexp_new_lift(receiver_type.class_name, arg_types)
@@ -1445,8 +1445,14 @@ module Rigor
       # form (`Hash.new { |h, k| … }`) keep the bare `Nominal[Hash]` answer — the block's value
       # type is not available at this `:new` dispatch site, and conservatively leaving the read
       # as today's behaviour is precision-additive.
-      def hash_new_lift(class_name, arg_types)
+      #
+      # Issue #1812 — a brace-less keyword hash is `Hash#initialize`'s `capacity:` keyword, not the
+      # default (`Hash.new(capacity: 10).default` is `nil`), so it is dropped before counting the
+      # positionals. A braced hash (`Hash.new({ capacity: 10 })`) is a positional and stays the default.
+      def hash_new_lift(class_name, arg_types, call_node = nil)
         return nil unless class_name == "Hash"
+
+        arg_types = arg_types[0...-1] if keyword_hash_last?(call_node, arg_types)
         return nil unless arg_types.size == 1
 
         default = arg_types.first
@@ -1454,6 +1460,16 @@ module Rigor
 
         value = Type::Combinator.widen_value_pinned(default)
         Type::Combinator.nominal_of("Hash", type_args: [Type::Combinator.untyped, value])
+      end
+
+      # Whether `arg_types`' last entry is the call's brace-less keyword hash. As in the RBS tier's
+      # overload selection, only the AST tells it from a braced positional hash, and a call whose
+      # node's arguments are not exactly `arg_types` answers false.
+      def keyword_hash_last?(call_node, arg_types)
+        return false if arg_types.empty? || !call_node.respond_to?(:arguments)
+
+        arguments = call_node.arguments&.arguments
+        !arguments.nil? && arguments.size == arg_types.size && arguments.last.is_a?(Prism::KeywordHashNode)
       end
 
       # `Range.new(b, e)` / `Range.new(b, e, excl)` — folds to `Constant[Range]` when both

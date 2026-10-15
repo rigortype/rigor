@@ -284,9 +284,12 @@ RSpec.describe Rigor::CLI do
   # order passed. The order is compared too and reported as its own failure. The reordering is injected by wrapping
   # the incremental result: a real recheck lists its rows in the full run's order today.
   describe "check --verify-incremental diagnostic order" do
+    # Two files, each with diagnostics: the gate's even-index subset re-analyzes the first and serves the second from
+    # the cache, so the comparison covers both the subset path and the cache-served path.
     def write_multi_diagnostic_project(dir)
       File.write(File.join(dir, ".rigor.yml"), "severity_profile: balanced\n")
       File.write(File.join(dir, "a.rb"), "x = \"hello\"\nx.no_such_method_here\nx.also_missing_here\n")
+      File.write(File.join(dir, "b.rb"), "y = 2\ny.other_missing_here\n")
     end
 
     # Every session the gate builds answers `reanalyze_subset` through the block, which sees the rows the real
@@ -312,6 +315,7 @@ RSpec.describe Rigor::CLI do
 
         expect(err).not_to include("different order")
         expect(out).to include("--verify-incremental OK")
+        expect(out).to include("1/2 files re-analyzed, rest from cache")
         expect(status).to eq(0)
       end
     end
@@ -346,6 +350,50 @@ RSpec.describe Rigor::CLI do
         expect(err).to include("--verify-incremental FAILED — same set, different order.")
         expect(err).to include("first divergence at index 0")
         expect(err).not_to include("incremental and full diagnostics differ")
+      end
+    end
+
+    # A duplicated row is a multiplicity difference: the set report, with the extra copy on the incremental side, never
+    # a 0/0 report and never the order report.
+    it "reports a duplicated row as a set mismatch with its multiplicity" do
+      Dir.mktmpdir do |dir|
+        write_multi_diagnostic_project(dir)
+        wrap_reanalyze_subset { |diagnostics| diagnostics + diagnostics.first(1) }
+
+        status, _out, err = run_cli(
+          "check", "--verify-incremental", "--no-stats",
+          "--config", File.join(dir, ".rigor.yml"), dir
+        )
+
+        expect(status).to eq(1)
+        expect(err).to include("--verify-incremental FAILED — incremental and full diagnostics differ.")
+        expect(err).to include("incremental-only: 1, full-only: 0")
+        expect(err).not_to include("different order")
+      end
+    end
+
+    # Rows that tie on path, line, column, rule and message but differ in severity are not the same row: the set
+    # report names one row on each side rather than printing 0/0.
+    it "reports a tie that differs in severity as a set mismatch, not a 0/0 one" do
+      Dir.mktmpdir do |dir|
+        write_multi_diagnostic_project(dir)
+        wrap_reanalyze_subset do |diagnostics|
+          first = diagnostics.first.to_h
+          severity = first["severity"] == "info" ? "warning" : "info"
+          tied = Object.new
+          tied.define_singleton_method(:to_h) { first.merge("severity" => severity) }
+          [tied, *diagnostics.drop(1)]
+        end
+
+        status, _out, err = run_cli(
+          "check", "--verify-incremental", "--no-stats",
+          "--config", File.join(dir, ".rigor.yml"), dir
+        )
+
+        expect(status).to eq(1)
+        expect(err).to include("--verify-incremental FAILED — incremental and full diagnostics differ.")
+        expect(err).to include("incremental-only: 1, full-only: 1")
+        expect(err).not_to include("different order")
       end
     end
   end

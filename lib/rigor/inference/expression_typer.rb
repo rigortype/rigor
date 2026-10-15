@@ -3902,7 +3902,7 @@ module Rigor
         # allocated a fresh frozen Scope per field, run per user-method-call inference (ADR-44). The
         # discovery index is inherited whole by reference (ADR-53 Track A); the hand-copied per-field list
         # this replaces had silently dropped `data_member_layouts` and `discovered_method_visibilities`.
-        body_scope = Scope.new(
+        Scope.new(
           environment: scope.environment,
           locals: locals.freeze,
           self_type: receiver,
@@ -3920,7 +3920,6 @@ module Rigor
           # Issue #1358 — the callee runs in a frame of its own ({Scope#with_match_frame}).
           match_frame: MatchRebinding::Frame.new(def_node.body, def_node.parameters)
         )
-        body_scope.with_repeated_or_writes(RepeatedOrWrites.straight_line_sites(def_node.body, body_scope))
       end
 
       # Issue #681 / #707 — the ONE place in `lib/` that answers "what `Module.nesting` was recorded for this

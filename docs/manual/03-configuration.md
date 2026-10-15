@@ -138,7 +138,8 @@ against `plugins:` only when every entry's plugin ID is known without
 loading it — an explicit `id:`, or a bundled plugin's gem name minus
 `rigor-`; one third-party gem listed without `id:` turns that check
 off. A token under `rbs_extended.…`, `rbs.…` or `dynamic.…` is left
-alone. The same findings appear in the
+alone, other than the reserved run-level rows (`rbs.coverage.…`,
+`dynamic.dependency-source.…`), which are flagged. The same findings appear in the
 `--format=json` payload under `config_warnings` (each tagged with a
 `kind`), so CI can assert on them.
 

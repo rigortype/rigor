@@ -288,7 +288,8 @@ suppressible like any other rule.
 
 **In-source, whole file.** `# rigor:disable-file <rules>`
 anywhere in a file suppresses those rules for every line;
-`# rigor:disable-file all` silences the file. Convention is to
+`# rigor:disable-file all` silences every built-in rule in the file
+(a plugin's diagnostics need their qualified ID, as above). Convention is to
 put it near the top — typically on a generated file, a fixture,
 or a vendored snippet — but every comment in the file is
 scanned, so any placement works.

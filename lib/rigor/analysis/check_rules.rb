@@ -469,7 +469,7 @@ module Rigor
       # - **File-level** (v0.1.2): `# rigor:disable-file <rule1>,
       #   <rule2>` anywhere in the file suppresses the matching
       #   diagnostic for every line. `# rigor:disable-file all`
-      #   suppresses every rule across the file. Convention is
+      #   suppresses every built-in rule across the file. Convention is
       #   to put the comment near the top, but Rigor accepts it
       #   anywhere — the comment scope is "this file" regardless
       #   of position.
@@ -477,7 +477,8 @@ module Rigor
       #   on the same line as the offending expression
       #   suppresses the matching diagnostic for that line
       #   only. `# rigor:disable all` on a line suppresses
-      #   every rule on that line.
+      #   every built-in rule on that line. A plugin's rows are
+      #   not passed here; see {.filter_plugin_suppressed}.
       #
       # Both in-source forms are recognised only when the
       # marker is the FIRST thing in the comment, so a

@@ -216,8 +216,9 @@ module Rigor
 
       # Issue #1953 — whether a suppression token set drops a plugin's own row. Such a row answers only to its
       # qualified id: the exact `plugin.<id>.<rule>` (its `qualified_rule`) or the whole plugin's `plugin.<id>`
-      # (its `source_family`). Both compare whole strings against the row's own fields, so a plugin id that holds
-      # a dot never lets one plugin's token reach another's rows. A bare rule and `all` do not reach these rows:
+      # (its `source_family`). Both compare whole strings against the row's own fields, so `plugin.<id>` never
+      # reaches a plugin whose id merely starts with `<id>.`. Ids and rules may both hold dots, so plugin `a` with
+      # rule `b.c` and plugin `a.b` with rule `c` share `plugin.a.b.c`, and that exact token drops both. A bare rule and `all` do not reach these rows:
       # many plugins share a bare rule (`load-error`, `unknown-column`), and a bare match would hide another
       # plugin's findings. Every other row (built-in, `plugin_loader`, `plugin_trust`) answers false.
       def self.plugin_row_disabled?(diagnostic, tokens)

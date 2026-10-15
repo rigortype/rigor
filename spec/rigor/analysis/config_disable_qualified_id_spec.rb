@@ -143,9 +143,11 @@ RSpec.describe "qualified ids in `disable:` and suppression markers" do
         end
 
         expect(rows_for.call([])).to include("plugin.rails-i18n.load-error", "plugin_loader.load-error")
-        rows = rows_for.call(["plugin.rails-i18n.load-error"])
-        expect(rows).not_to include("plugin.rails-i18n.load-error")
-        expect(rows).to include("plugin_loader.load-error")
+        %w[plugin.rails-i18n.load-error plugin.rails-i18n].each do |token|
+          rows = rows_for.call([token])
+          expect(rows).not_to include("plugin.rails-i18n.load-error")
+          expect(rows).to include("plugin_loader.load-error")
+        end
       end
     end
   end

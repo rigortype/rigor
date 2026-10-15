@@ -206,7 +206,7 @@ module Rigor
         "is not a recognized rule id; the suppression has no effect"
       elsif !non_check_engine_token?(token)
         "is not a recognized rule id; the suppression has no effect " \
-          "(a plugin's rule is written `plugin.<id>.<rule>`)"
+          "(if this is a plugin's rule, write it as `plugin.<id>.<rule>`)"
       end
     end
     private_class_method :disable_token_problem

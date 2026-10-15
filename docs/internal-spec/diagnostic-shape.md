@@ -99,9 +99,13 @@ MUST be:
 Suppression keys on it for a plugin's row only: a `plugin.<id>` row
 answers to a `disable:` or `# rigor:disable` token equal to its
 `qualified_rule` or to its `source_family`, never to its bare `rule`
-(`CheckRules.plugin_row_disabled?`). A built-in row is matched by its
+(`CheckRules.plugin_row_disabled?`). Since both manifest ids and rules
+may contain dots, two plugins can share a `qualified_rule` (plugin `a`
+with rule `b.c`, plugin `a.b` with rule `c`), and one exact token then
+drops both rows. A built-in row is matched by its
 `rule`, which for the `:builtin` family is the same string. The other
-non-default families (`plugin_loader`, `rbs_extended`) are not matched
+non-default families (`plugin_loader`, `rbs_extended`,
+`generated.<provider>`) are not matched
 by `qualified_rule`; the reach of each is
 [diagnostic-policy.md](../type-specification/diagnostic-policy.md)
 § "Token resolution".

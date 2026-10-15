@@ -130,6 +130,16 @@ RSpec.describe Rigor::Cache::Descriptor do
       expect(composed.files.first.comparator).to eq(:digest)
     end
 
+    it "ranks :kind above :exists and below :mtime" do
+      kind = described_class::FileEntry.kind(path: "lib")
+      present = described_class::FileEntry.present(path: "lib")
+      mtime = described_class::FileEntry.new(path: "lib", comparator: :mtime, value: "1")
+      pick = ->(*rows) { described_class.compose(*rows.map { |row| described_class.new(files: [row]) }).files }
+
+      expect(pick.call(present, kind)).to eq([kind])
+      expect(pick.call(kind, mtime)).to eq([mtime])
+    end
+
     it "raises a Conflict on disagreeing values under the stricter comparator" do
       other = described_class::FileEntry.new(path: "a.rb", comparator: :digest, value: "different")
       a = described_class.new(files: [file_a_digest])

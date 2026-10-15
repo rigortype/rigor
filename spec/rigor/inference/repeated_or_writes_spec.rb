@@ -208,5 +208,11 @@ RSpec.describe Rigor::Inference::RepeatedOrWrites do
       marks, sites = straight("f = ->(x) { x ? (cache[:k] ||= :e) : (cache[:k] ||= :f) }")
       expect(marks).to eq([sites.last])
     end
+
+    it "walks a body whose source is not valid UTF-8 instead of raising" do
+      source = (+"x = 1 # \xFF\ncache[:k] ||= 1 if cond\n(cache[:k] ||= 2)\n").force_encoding(Encoding::UTF_8)
+      marks, sites = straight(source)
+      expect([source.valid_encoding?, marks]).to eq([false, [sites.last]])
+    end
   end
 end

@@ -84,6 +84,41 @@ the root lock, give `nix/Gemfile` the same bound. A held-back major (the
 case above) is the same shape: widening the gemspec range also widens
 `nix/Gemfile`'s bound, and then needs this regeneration.
 
+## When the bump moves `rbs`
+
+The gemspec admits `rbs >= 3.0, < 5.0`, and `make verify` proves only the
+version in `Gemfile.lock`. CI's `rbs-compat` job runs the other line, but
+only over `spec/rigor/environment`, so an inference spec whose answer
+depends on the RBS line (a core overload that differs between 3.x and
+4.x) runs on one end only. Before pushing, run the touched specs under
+the other end with a scratch bundle outside the tree, mirroring the
+job's `Gemfile.rbs-compat` (`gem "rigortype", path: "<worktree>"`, rspec,
+and the `rbs` pin):
+
+```sh
+nix develop --command bash -c 'BUNDLE_GEMFILE=<scratch>/Gemfile \
+  BUNDLE_PATH=<worktree>/vendor/bundle BUNDLE_APP_CONFIG=<scratch>/.bundle \
+  bundle install && BUNDLE_GEMFILE=<scratch>/Gemfile \
+  BUNDLE_PATH=<worktree>/vendor/bundle BUNDLE_APP_CONFIG=<scratch>/.bundle \
+  bundle exec rspec <specs> < /dev/null'
+```
+
+A spec never hard-codes a value from one side of the range; it reads
+the installed version through a helper, as
+`spec/support/rbs_core_type_params.rb` does.
+
+Re-audit `lib/rigor/cache/rbs_environment_marshal_patch.rb` on every
+`rbs` bump; a green CI run does not cover it:
+
+- Every hook installs behind `unless method_defined?(:_dump)`. An `rbs`
+  that ships its own `_dump` while still memoising `@hash` makes the
+  patch silently inert, so check the guard, not only the memoisation.
+- `grep -rn '@hash'` over the new `rbs`'s `lib/`: a hit outside the
+  type-name and namespace sites the patch names is a new carrier.
+- Invalid UTF-8 handed to `RBS::Parser` raises a bare `ArgumentError`.
+  Every externally fed parse site, including a new one, needs the
+  pre-guard `Environment::RbsLoader.invalid_encoding?` provides.
+
 ## Layer 2 — Nix Flake dev environment (`nix flake update`)
 
 ```sh
@@ -216,6 +251,8 @@ APPROVE cannot exist on a one-developer repository, so it is not the trigger).
 - Every Layer 1 bump: `nix/Gemfile.lock` + `nix/gemset.nix` regenerated
   with `cd nix && bundle update && bundix` (not plain `bundle lock`), in
   the Layer 1 commit.
+- An `rbs` bump: touched specs run under the other end of the range;
+  the marshal patch re-audited.
 - `nix flake update`; only `flake.lock` moved; Ruby / git / waza in-flake
   pins untouched.
 - `rm -rf vendor/bundle && bundle install` **after** the Flake update.

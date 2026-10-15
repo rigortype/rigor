@@ -266,8 +266,11 @@ assertions:
   '258': MatchSubStr
   '259': String
   '260': String?
-  '261': String?
+  '261': nil
   '262': String?
   '263': String?
-  '264': String
-  '265': String
+  '264': String?
+  '265': String?
+  '266': String?
+  '267': String
+  '268': String

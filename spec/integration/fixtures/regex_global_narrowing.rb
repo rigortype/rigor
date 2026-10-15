@@ -2329,6 +2329,33 @@ def match_safe_navigation_edges(raw)
   end
 end
 
+# `!~` reads a project String subclass as a String too: `String#=~` clears `$~` on a failed match, so its no-match
+# edge binds `$1` to nil (Ruby: nil for `not_match_string_subclass("ab")`).
+def not_match_string_subclass(raw)
+  "ab" =~ /(a)/
+  s = MatchSubStr.new(raw)
+  assert_type("nil", $1) if s !~ /(z)/
+end
+
+# A `=~` a module gives the receiver's class binds `$~` in that method's frame too, so neither edge holds (Ruby:
+# "a" for `$1` on both arms of `match_mixin_receiver("q")`).
+module MatchOwnOperator
+  def =~(_other) = [0, nil].sample
+end
+
+class MatchMixinStr < String
+  include MatchOwnOperator
+end
+
+def match_mixin_receiver(raw)
+  "ab" =~ /(a)/
+  if MatchMixinStr.new(raw) =~ /(z)/
+    assert_type("String?", $1)
+  else
+    assert_type("String?", $1)
+  end
+end
+
 # A String subclass that defines its own `=~` binds `$~` in that method's frame, so neither edge holds (Ruby:
 # NoMethodError on nil for `match_custom_string_subclass("a")` whenever that `=~` answers 0).
 class MatchCustomStr < String

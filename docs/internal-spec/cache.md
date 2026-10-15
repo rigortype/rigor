@@ -921,13 +921,27 @@ still depart from a full run's, in two known cases:
   a full run lists it after the rows of the file whose analysis produced it.
   The cache cannot tell which file produced it either, so a recheck that
   re-analyses only one of the two files can list the row twice or drop it.
+  This departs whenever such a row exists, not only when it is served: the
+  interleave uses the row as a place marker at the target file's rank, so
+  served rows from files in between are spliced before it.
 - **A served path the run no longer lists.** A file deleted between the
   session's listing and the narrowed run's own expansion has no place in the
   analysis order; its rows are kept and listed after every other file's.
 
-`--verify-incremental` compares sorted sets and does not check the order;
-`spec/rigor/analysis/incremental_session_spec.rb` does, row for row, against
-a full run.
+`--verify-incremental` compares the rows as multisets, then the order
+(#1542). A recheck whose rows differ in multiplicity fails with the set
+report. One whose rows agree as a multiset but list in another order fails
+with a "same set, different order" report that names the first index where
+the two lists diverge. Rows are compared in full (every field the row
+carries), so a tie on path, line, column, rule and message is not mistaken
+for a match.
+
+Case 1 therefore fails the gate as an order mismatch or a set mismatch,
+depending on the partition: a recheck that reproduces the duplicate or the
+drop fails on order only, and one that does not fails on the set. Case 2
+always fails as a set mismatch, before and after the order check. Both are
+pinned by `spec/rigor/analysis/incremental_session_spec.rb`, which also
+checks the order row for row against a full run.
 
 ### Editor mode (`--tmp-file` / `--instead-of`)
 

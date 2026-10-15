@@ -269,9 +269,8 @@ module Rigor
         # Every other file forms the re-analyzed subset, so the run exercises BOTH the subset-analysis path and the
         # cache-serving path.
         subset = analyzed.each_with_index.select { |_, index| index.even? }.map(&:first)
-        incremental = normalize_diagnostics(session.reanalyze_subset(subset))
-        full = normalize_diagnostics(verify_full_diagnostics(configuration, paths,
-                                                             collect_stats: options.fetch(:stats)))
+        incremental = session.reanalyze_subset(subset).map(&:to_h)
+        full = verify_full_diagnostics(configuration, paths, collect_stats: options.fetch(:stats)).map(&:to_h)
 
         report_verify_incremental(incremental, full, subset_size: subset.size, total: analyzed.size,
                                                      format: options.fetch(:format))
@@ -461,31 +460,65 @@ module Rigor
         (paths ? runner.run(paths) : runner.run).diagnostics
       end
 
-      def normalize_diagnostics(diagnostics)
-        diagnostics.map(&:to_h).sort_by do |hash|
-          [hash["path"].to_s, hash["line"].to_i, hash["column"].to_i, hash["rule"].to_s, hash["message"].to_s]
-        end
-      end
-
+      # Issue #1542 — the rows are compared as a multiset over every field each row carries, so two rows that tie on
+      # the sort key but differ in severity, or a duplicated row, are a set mismatch and never a silent 0/0. Only when
+      # the multisets agree is the order compared, and an order mismatch is reported as its own failure, with the first
+      # index at which the two lists diverge, so a set regression and an order regression stay distinguishable.
+      #
       # The OK line follows the same rule as the other side outputs (#493) — stdout under `text`, stderr
       # under a machine format. The FAILED branch below has always gone to stderr: it is a failure
       # report, and a run that produced one has no valid document to protect anyway.
       def report_verify_incremental(incremental, full, subset_size:, total:, format: "text")
-        if incremental == full
-          side_output(format).puts("rigor: --verify-incremental OK — incremental " \
-                                   "(#{subset_size}/#{total} files re-analyzed, rest from cache) " \
-                                   "matches full (#{full.size} diagnostics)")
-          return 0
-        end
+        return report_verify_set_mismatch(incremental, full) unless incremental.tally == full.tally
+        return report_verify_order_mismatch(incremental, full) unless incremental == full
 
-        only_incremental = incremental - full
-        only_full = full - incremental
+        side_output(format).puts("rigor: --verify-incremental OK — incremental " \
+                                 "(#{subset_size}/#{total} files re-analyzed, rest from cache) " \
+                                 "matches full (#{full.size} diagnostics)")
+        0
+      end
+
+      # The rows one side has more of than the other, counted by multiplicity: [x, x, y] against [x, y, y] has one
+      # extra x on the left and one extra y on the right.
+      def multiset_difference(left, right)
+        budget = right.tally
+        left.reject do |row|
+          next false unless budget.fetch(row, 0).positive?
+
+          budget[row] -= 1
+          true
+        end
+      end
+
+      def report_verify_set_mismatch(incremental, full)
+        only_incremental = multiset_difference(incremental, full)
+        only_full = multiset_difference(full, incremental)
         @err.puts("rigor: --verify-incremental FAILED — incremental and full diagnostics differ.")
         @err.puts("  incremental-only: #{only_incremental.size}, full-only: #{only_full.size}")
         (only_incremental + only_full).first(10).each do |hash|
-          @err.puts("    #{hash['path']}:#{hash['line']}:#{hash['column']}: [#{hash['rule']}] #{hash['message']}")
+          @err.puts("    #{diagnostic_location(hash)}")
         end
         1
+      end
+
+      def report_verify_order_mismatch(incremental, full)
+        index = (0...incremental.size).find { |i| incremental[i] != full[i] }
+        @err.puts("rigor: --verify-incremental FAILED — same set, different order.")
+        @err.puts("  incremental and full report the same #{full.size} diagnostics in a different order; " \
+                  "first divergence at index #{index}:")
+        @err.puts("    incremental: #{diagnostic_location(incremental[index])}")
+        @err.puts("    full:        #{diagnostic_location(full[index])}")
+        1
+      end
+
+      # Severity, source family and the optional fields a row may carry, so two rows that differ only in one of them
+      # never print as the same line.
+      def diagnostic_location(hash)
+        extra = %w[receiver_type method_name project_definition_site].filter_map do |key|
+          " #{key}=#{hash[key]}" if hash.key?(key)
+        end
+        "#{hash['path']}:#{hash['line']}:#{hash['column']}: #{hash['severity']} [#{hash['rule']}] " \
+          "(#{hash['source_family']}) #{hash['message']}#{extra.join}"
       end
 
       # ADR-22 slice 5 — the `--baseline-strict` CI gate. When the flag is set, ANY baseline drift fails the run — not

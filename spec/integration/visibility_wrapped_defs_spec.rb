@@ -109,6 +109,48 @@ RSpec.describe "visibility lints over wrapped defs and attrs (#1911, #1819, #163
     RUBY
   end
 
+  # Ruby: a bare `public` under a condition leaves `ut` public where it runs, which the walk cannot tell.
+  it "is quiet on an attr after an uncertain toggle" do
+    expect(rules(<<~RUBY)).to eq([])
+      class UncertainToggle
+        private
+        public if RUBY_VERSION > "3"
+        attr_reader :ut
+      end
+
+      UncertainToggle.new.ut
+    RUBY
+  end
+
+  # Ruby: each call succeeds (`nil`, the attr reader): a factory block no constant names is the anonymous class's
+  # body, and its `private`, attrs and defs do not reach the enclosing class.
+  {
+    "a local" => "klass = Class.new do\n    private\n    attr_reader :m\n  end",
+    "an ivar" => "@k = Struct.new(:z) do\n    private attr_reader :m\n  end",
+    "an argument" => "[].push(Class.new do\n    private def m = 2\n  end)",
+    "a bare Data.define" => "Data.define(:z) do\n    private def m = 2\n  end",
+    "a bare Module.new" => "Module.new do\n    private\n    def m = 2\n  end",
+    "a bare Class.new" => "Class.new do\n    private\n    def m = 2\n  end"
+  }.each do |label, factory|
+    it "is quiet on a member of the enclosing class redefined in a factory block assigned to #{label}" do
+      expect(rules("class Host\n  def m = 1\n  attr_reader :m\n  #{factory}\nend\n\nHost.new.m\n")).to eq([])
+    end
+  end
+
+  # Ruby: `private(*[])` makes nothing private, so `name` is the public def and `no_such` is undefined on "s". The
+  # splat contests `name`'s visibility, which must not make the call's typing decline.
+  it "still types a call whose visibility slot a splat contests" do
+    undefined = analyze(<<~RUBY).diagnostics.select { |d| d.rule == "call.undefined-method" }.map(&:line)
+      class Named
+        def name = "s"
+        private(*[])
+      end
+
+      Named.new.name.no_such
+    RUBY
+    expect(undefined).to eq([6])
+  end
+
   it "reads each file's running default for a class reopened in another file" do
     files = {
       "a.rb" => "class R\n  private\n\n  def a = 1\nend\n",

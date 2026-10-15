@@ -7779,11 +7779,19 @@ module Rigor
                                                                   defs_singleton: defs_singleton)
             return current_visibility
           end
+          if AnonymousMetaClass.block_form_receiver(node)
+            walk_anonymous_meta_visibilities(node, qualified_prefix, in_singleton_class, current_visibility,
+                                             accumulator, def_owner_prefix, singleton_cref: singleton_cref,
+                                                                            defs_singleton: defs_singleton)
+            return current_visibility
+          end
           if (parts = visibility_call_parts(node))
             accumulator.toggles += 1 if visibility_toggle_arguments?(parts.last)
             # The visibility table is instance-side only — `private :x` inside `class <<`
             # (or a receiver-eval body that re-evaluates a singleton self) marks the
-            # SINGLETON method, which this table cannot express.
+            # SINGLETON method, which this table cannot express. The `owner_prefix` check is a
+            # guard: an ownerless body (the top level, an anonymous factory block) records nothing,
+            # and its calls walk as any other call.
             if !in_singleton_class && !owner_prefix.empty? && VISIBILITY_MODIFIERS.include?(parts.first)
               return apply_visibility_call(node, *parts, owner_prefix, current_visibility, accumulator,
                                            defs_singleton: defs_singleton) do |argument|
@@ -7846,6 +7854,23 @@ module Rigor
         accumulator.body do
           walk_method_visibilities(node.body, qualified_prefix, true, :public, accumulator,
                                    singleton_prefix, singleton_cref: true)
+        end
+      end
+
+      # A `Class.new` / `Module.new` / `Struct.new` / `Data.define` block no constant write names
+      # ({#meta_new_block_split} takes the named ones): `klass = Class.new do … end`, `@k = Struct.new(:a) do … end`,
+      # `register(Class.new do … end)` or a bare `Data.define(:a) do … end`. Its body is the anonymous class's, so
+      # it walks as a fresh body with no owner and records nothing for the enclosing class; the receiver and the
+      # arguments are walked where they stand.
+      def walk_anonymous_meta_visibilities(node, qualified_prefix, in_singleton_class, current_visibility,
+                                           accumulator, def_owner_prefix, singleton_cref:, defs_singleton:)
+        [node.receiver, *node.arguments&.arguments].each do |part|
+          walk_method_visibilities(part, qualified_prefix, in_singleton_class, current_visibility, accumulator,
+                                   def_owner_prefix, singleton_cref: singleton_cref, defs_singleton: defs_singleton)
+        end
+        accumulator.body do
+          walk_method_visibilities(node.block.body, qualified_prefix, false, :public, accumulator,
+                                   EMPTY_PREFIX, singleton_cref: singleton_cref)
         end
       end
 

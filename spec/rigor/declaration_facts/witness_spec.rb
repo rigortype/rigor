@@ -142,8 +142,19 @@ RSpec.describe "Declaration-fact witness" do
 
       expect(tables.contested_discovered_method_visibilities).to eq(
         Set[["EmptySplatToggle", :a], ["SplatNames", :zz], ["SplatNames", :a], ["SingletonWrapped", :x],
-            ["ConditionalWrapped", :x], ["NestedWrapped", :x]]
+            ["ConditionalWrapped", :x], ["NestedWrapped", :x], ["UncertainToggle", :ut]]
       )
+    end
+
+    it "records nothing for the enclosing class from a factory block no constant names" do
+      path = fixture("anonymous_factory_visibility")
+      tables, = DeclarationWitness.rigor_tables(path)
+
+      expect(violations("anonymous_factory_visibility", relations: %i[visibilities])).to eq([])
+      expect(tables.discovered_method_visibilities.slice("LocalFactory", "IvarFactory", "ArgumentFactory",
+                                                         "BareFactories"))
+        .to eq("LocalFactory" => { c: :public }, "IvarFactory" => { d: :public },
+               "ArgumentFactory" => { e: :public }, "BareFactories" => { f: :public, g: :public, h: :public })
     end
   end
 

@@ -395,6 +395,7 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#unentered_meta_class_body_entry: records the class-body self of a value-position Class.new / Module.new / Struct.new / Data.define block in the per-node scope table (#1696), under the name AnonymousMetaClass.name_for gives; it records which scope a node is typed under, not what a declaration is
     Rigor::Inference::ScopeIndexer#visibility_call_parts: ADR-119 WD3 and #1633, names the `private` / `protected` / `public` / `module_function` call the visibility walk applies (receiverless, on `self`, or sent with a literal name; a block ignored) and its arguments; it reads a call's shape and decides no owner or side
     Rigor::Inference::ScopeIndexer#walk_anonymous_meta_block: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_anonymous_meta_visibilities: PR 1981, the visibility walk's arm for a factory block no constant names (AnonymousMetaClass.block_form_receiver); it walks the body as a fresh ownerless body starting public, so it records nothing for the enclosing class and derives no owner
     Rigor::Inference::ScopeIndexer#walk_class_cvars: grandfathered
     Rigor::Inference::ScopeIndexer#walk_class_extends: grandfathered
     Rigor::Inference::ScopeIndexer#walk_class_includes: grandfathered

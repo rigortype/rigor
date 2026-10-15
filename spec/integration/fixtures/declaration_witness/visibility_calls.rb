@@ -104,3 +104,10 @@ class NestedWrapped
   private memoize def x = 1
   def y = 1
 end
+
+class UncertainToggle
+  private
+
+  public if RUBY_VERSION > "3"
+  attr_reader :ut
+end

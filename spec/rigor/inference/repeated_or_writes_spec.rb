@@ -173,5 +173,13 @@ RSpec.describe Rigor::Inference::RepeatedOrWrites do
       marks, sites = straight("while cond do k ? (cache[:k] ||= :e) : (cache[:k] ||= :f) end")
       expect(marks).to eq([sites.last])
     end
+
+    it "lets the root's kind decide only for the root's own slots and its own removers" do
+      key, key_sites = straight("c = {}\nc[:a][\"k\"] = 1 if cond\n(c[:a][:k] ||= 2)")
+      inner, inner_sites = straight("c = {}\nc[:a].delete(:x) if cond\n(c[:a][:b][:k] ||= 2)")
+      root, = straight("c = {}\nc.delete(:x) if cond\n(c[:a][:k] ||= 2)")
+      untyped, untyped_sites = straight("cache.delete(:x) if cond\n(cache[:a][:k] ||= 2)")
+      expect([key, inner, root, untyped]).to eq([key_sites, inner_sites, [], untyped_sites])
+    end
   end
 end

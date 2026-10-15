@@ -1100,7 +1100,13 @@ RSpec.describe Rigor::CLI::CheckCommand do
 
     def write_project(disable)
       FileUtils.mkdir_p(%w[app/models db spec])
-      File.write("db/schema.rb", "ActiveRecord::Schema.define do\n  create_table :users do |t|\n    t.string :name\n  end\nend\n")
+      File.write("db/schema.rb", <<~RUBY)
+        ActiveRecord::Schema.define do
+          create_table :users do |t|
+            t.string :name
+          end
+        end
+      RUBY
       File.write("app/models/user.rb", "class User < ApplicationRecord\nend\n")
       File.write("spec/user_spec.rb", <<~RUBY)
         RSpec.describe User do

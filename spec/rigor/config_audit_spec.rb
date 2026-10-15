@@ -173,7 +173,8 @@ RSpec.describe Rigor::ConfigAudit do
 
     it "flags a run-level row the policy keeps on `severity_overrides:`, by any spelling" do
       tokens = %w[plugin_loader.load-error plugin_loader load-error runtime-error pool-degraded
-                  plugin_trust.read-refused rbs.coverage.missing-gem rbs.coverage dynamic.dependency-source.gem-not-found]
+                  plugin_trust.read-refused rbs.coverage.missing-gem rbs.coverage
+                  dynamic.dependency-source.gem-not-found]
       warnings = disabled_warnings("disable" => tokens)
 
       expect(warnings.map { |w| w.fields.fetch("token") }).to eq(tokens)
@@ -197,7 +198,7 @@ RSpec.describe Rigor::ConfigAudit do
     end
 
     it "does NOT flag any qualified token while a third-party gem's id is unknown without loading it" do
-      config = { "plugins" => ["rigor-rails-i18n", "acme-rigor-1953"], "disable" => ["plugin.whatever.rule"] }
+      config = { "plugins" => %w[rigor-rails-i18n acme-rigor-1953], "disable" => ["plugin.whatever.rule"] }
       expect(flagged_tokens(config)).to be_empty
     end
   end

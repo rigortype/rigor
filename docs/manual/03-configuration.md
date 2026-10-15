@@ -136,7 +136,7 @@ statically and may resolve at run time. The same findings appear in the
 
 | Key | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `disable` | Array | `[]` | Rule IDs or families to suppress project-wide; `all` suppresses every rule the list reaches (not a plugin's own `plugin.<id>.*` rows). See [Diagnostics](04-diagnostics.md). |
+| `disable` | Array | `[]` | Rule IDs or families to suppress project-wide; `all` suppresses every built-in check rule (not the run-level `.rigor.yml` rows or a plugin's own `plugin.<id>.*` rows). See [Diagnostics](04-diagnostics.md). |
 | `severity_profile` | String | `"balanced"` | `lenient`, `balanced`, or `strict` — see [Diagnostics](04-diagnostics.md). |
 | `severity_overrides` | Hash | `{}` | Per-rule / per-family severity, e.g. `{ call: warning, flow.always-truthy-condition: off }`. |
 | `baseline` | String / `false` | `nil` | Path to a `.rigor-baseline.yml`, or `false` to disable an inherited one. See [Baselines](06-baseline.md). |

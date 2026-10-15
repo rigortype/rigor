@@ -4,10 +4,11 @@ require "fileutils"
 require "tmpdir"
 require "rigor/analysis/runner"
 
-# Issue #1895 — the `.rigor.yml` `disable:` list reaches the run-level rows (plugin load / prepare, ADR-10
-# dependency-source, `rbs.coverage.*`), which are assembled outside any per-file suppression filter, and the
-# `all` sentinel in that list drops every rule-bearing row. The match is the per-file one: the token expansion of
-# {Rigor::Analysis::CheckRules.expand_rule_tokens} against the diagnostic's `rule`.
+# Issue #1895 — what the `.rigor.yml` `disable:` list reaches. `disable: [all]` drops every built-in check-rule row,
+# including one no per-file filter sees (the `effect.annotations-unchecked` residual). The run-level rows outside
+# the check-rule catalogue (the plugin loader, ADR-10 dependency-source, `rbs.coverage.*`) and a plugin's own
+# `plugin.<id>.*` rows are not reached, by their id or by `all`: the diagnostic policy keeps them on
+# `severity_overrides:` (diagnostic-policy.md, the `rbs.coverage.*` row), and whether that should change is open.
 RSpec.describe "config `disable:` over run-level rows" do
   before { Rigor::Plugin.unregister! }
   after { Rigor::Plugin.unregister! }
@@ -54,15 +55,22 @@ RSpec.describe "config `disable:` over run-level rows" do
   end
   let(:missing_plugin) { { "plugins" => ["rigor-no-such-plugin-1895"] } }
   let(:missing_gem) { { "dependencies" => { "source_inference" => [{ "gem" => "no-such-gem-1895" }] } } }
+  let(:run_level_rows) do
+    ["plugin_loader.load-error", "dynamic.dependency-source.gem-not-found", "rbs.coverage.missing-gem"]
+  end
 
   # Runs a sequential, uncached check of `a.rb` (holding `source`) with `extra` merged into the configuration and
   # returns the diagnostics the run kept. `plugin` is what every `plugins:` entry loads; without one, the entry
-  # fails to load.
-  def run_diagnostics(extra = {}, plugin: nil, source: "x = 1\n")
+  # fails to load. `annotated_sig` adds a signature carrying an effect annotation and no `effects:` block.
+  def run_diagnostics(extra = {}, plugin: nil, source: "x = 1\n", annotated_sig: false)
     Dir.mktmpdir("rigor-1895-") do |dir|
       Dir.chdir(dir) do
         File.write("a.rb", source)
         File.write("Gemfile.lock", lockfile)
+        if annotated_sig
+          FileUtils.mkdir_p("sig")
+          File.write("sig/widget.rbs", "class Widget\n  %a{pure}\n  def price: () -> Integer\nend\n")
+        end
         config = Rigor::Configuration.new(
           Rigor::Configuration::DEFAULTS.merge(
             "paths" => ["a.rb"], "bundler" => { "lockfile" => "Gemfile.lock", "auto_detect" => true }
@@ -85,36 +93,39 @@ RSpec.describe "config `disable:` over run-level rows" do
   end
 
   it "emits every run-level row when nothing disables it" do
-    rows = run_rows(missing_plugin.merge(missing_gem))
-    expect(rows).to include("plugin_loader.load-error", "dynamic.dependency-source.gem-not-found",
-                            "rbs.coverage.missing-gem")
+    expect(run_rows(missing_plugin.merge(missing_gem))).to include(*run_level_rows)
   end
 
-  it "drops the plugin load-error row under its rule id" do
-    rows = run_rows(missing_plugin.merge("disable" => ["load-error"]))
-    expect(rows).not_to include("plugin_loader.load-error")
-  end
+  it "keeps each run-level row outside the check-rule catalogue when `disable:` names it" do
+    names = ["load-error", "dynamic.dependency-source.gem-not-found", "rbs.coverage.missing-gem"]
+    expect(run_rows(missing_plugin.merge(missing_gem).merge("disable" => names))).to include(*run_level_rows)
 
-  it "drops the plugin prepare row under its rule id" do
     plugins = { "plugins" => ["rigor-prepare-bomb"] }
-    expect(run_rows(plugins, plugin: raising_prepare_plugin)).to include("plugin_loader.runtime-error")
     expect(run_rows(plugins.merge("disable" => ["runtime-error"]), plugin: raising_prepare_plugin))
-      .not_to include("plugin_loader.runtime-error")
+      .to include("plugin_loader.runtime-error")
   end
 
-  # Round-1 review of #1948 — a `plugin.<id>` row is not reached by the `disable:` list, by its bare rule id or by
-  # `all`, as before #1895: the bare-id match would let a built-in token hide every plugin's same-named rule.
-  it "leaves a plugin's own row alone under its bare rule id and under `all`" do
+  it "drops every check-rule row under `disable: [all]` and keeps the run-level, plugin and rule-less rows" do
+    extra = missing_plugin.merge(missing_gem).merge("paths" => ["a.rb", "ghost.rb"])
+    source = "x = 1\nx.no_such_method_1895\n"
+    expect(run_rows(extra, source: source, annotated_sig: true))
+      .to include("call.undefined-method", "effect.annotations-unchecked")
+
+    kept = run_diagnostics(extra.merge("disable" => ["all"]), source: source, annotated_sig: true)
+    rows = kept.map(&:qualified_rule)
+    expect(rows).not_to include("call.undefined-method", "effect.annotations-unchecked")
+    expect(rows).to include(*run_level_rows)
+    # The path-error row for `ghost.rb` carries no rule and stays: a nil-rule row is never suppressed.
+    expect(kept.select { |d| d.rule.nil? }.map(&:path)).to eq(["ghost.rb"])
+
     plugins = { "plugins" => ["rigor-emitter"] }
-    expect(run_rows(plugins.merge("disable" => ["saw-file"]), plugin: emitting_plugin))
+    expect(run_rows(plugins.merge("disable" => ["all", "saw-file"]), plugin: emitting_plugin))
       .to include("plugin.emitter-1895.saw-file")
-    expect(run_rows(plugins.merge("disable" => ["all"]), plugin: emitting_plugin))
-      .to eq(["plugin.emitter-1895.saw-file"])
   end
 
-  # The collision the review found: `rigor-rails-i18n` reports an unparsable locale file as its own `load-error`,
-  # which `disable: [load-error]` must not hide while it drops the plugin loader's row.
-  it "drops the loader's load-error row but keeps rails-i18n's own load-error row" do
+  # The collision the round-1 review of #1948 found: `rigor-rails-i18n` reports an unparsable locale file as its
+  # own `load-error`, which `disable: [load-error]` must not hide; the loader's row is not reached either.
+  it "keeps both the loader's and rails-i18n's load-error rows under `disable: [load-error]`" do
     Dir.mktmpdir("rigor-1895-i18n-") do |dir|
       Dir.chdir(dir) do
         File.write("a.rb", "x = 1\n")
@@ -122,42 +133,14 @@ RSpec.describe "config `disable:` over run-level rows" do
         File.write("config/locales/en.yml", "en:\n  foo: [\n")
         config = Rigor::Configuration.new(
           Rigor::Configuration::DEFAULTS.merge(
-            "paths" => ["a.rb"], "plugins" => %w[rigor-rails-i18n rigor-no-such-plugin-1895],
+            "paths" => ["a.rb"], "plugins" => ["rigor-rails-i18n", "rigor-no-such-plugin-1895"],
             "disable" => ["load-error"]
           )
         )
         runner = Rigor::Analysis::Runner.new(configuration: config, cache_store: nil)
         rows = guarded_run(runner).diagnostics.map(&:qualified_rule)
-        expect(rows).to include("plugin.rails-i18n.load-error")
-        expect(rows).not_to include("plugin_loader.load-error")
+        expect(rows).to include("plugin.rails-i18n.load-error", "plugin_loader.load-error")
       end
     end
-  end
-
-  it "drops the dependency-source row under its canonical id" do
-    rows = run_rows(missing_gem.merge("disable" => ["dynamic.dependency-source.gem-not-found"]))
-    expect(rows).not_to include("dynamic.dependency-source.gem-not-found")
-  end
-
-  it "drops the rbs.coverage row under its canonical id" do
-    expect(run_rows({ "disable" => ["rbs.coverage.missing-gem"] })).not_to include("rbs.coverage.missing-gem")
-  end
-
-  it "leaves the rows a non-matching entry does not name" do
-    rows = run_rows(missing_plugin.merge(missing_gem).merge("disable" => ["call.undefined-method"]))
-    expect(rows).to include("plugin_loader.load-error", "dynamic.dependency-source.gem-not-found",
-                            "rbs.coverage.missing-gem")
-  end
-
-  it "drops every rule-bearing row, per-file and run-level, under `disable: [all]`" do
-    extra = missing_plugin.merge("paths" => ["a.rb", "ghost.rb"])
-    source = "x = 1\nx.no_such_method_1895\n"
-    expect(run_rows(extra, source: source))
-      .to include("call.undefined-method", "plugin_loader.load-error", "rbs.coverage.missing-gem")
-
-    kept = run_diagnostics(extra.merge("disable" => ["all"]), source: source)
-    # The path-error row for `ghost.rb` carries no rule and stays: a nil-rule row is never suppressed.
-    expect(kept.map(&:qualified_rule)).to eq([nil])
-    expect(kept.first.path).to eq("ghost.rb")
   end
 end

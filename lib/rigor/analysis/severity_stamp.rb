@@ -11,11 +11,12 @@ module Rigor
     # profile is the final filter.
     #
     # Issue #1895 — the `.rigor.yml` `disable:` list is applied here too, ahead of the profile, with the same
-    # token expansion and match per-file analysis uses ({CheckRules.config_disabled?}). Per-file rows were
-    # already filtered where they were produced; the run-level rows (plugin load / prepare, dependency-source,
-    # `rbs.coverage.*`, pool-degraded, ...) are assembled outside any per-file filter, and this is the one
-    # stamp every run shape (sequential, pool, `--incremental`, a warm cache hit) passes its stream through. Rows a
-    # plugin emits under its own `plugin.<id>` family are left alone, as they were before (see {.plugin_row?}).
+    # token expansion and match per-file analysis uses ({CheckRules.config_disabled?}), but only to a built-in
+    # check-rule row (see {.check_rule_row?}): the rows the diagnostic policy already says `disable:` reaches. Most
+    # are filtered where they were produced; this catches the ones that are not (the `effect.annotations-unchecked`
+    # residual under `disable: [all]`) on every run shape (sequential, pool, `--incremental`, a warm cache hit).
+    # The run-level rows outside the check-rule catalogue (`rbs.coverage.*`, `dynamic.dependency-source.*`, the
+    # plugin loader, `plugin_trust.*`, `plugin.<id>.*`) keep answering to `severity_overrides:` only.
     #
     # Extracted (ADR-87 WD4) so the miss path ({Runner::DiagnosticAggregator}) and the boot-slimming hit path
     # ({RunCacheProbe}, which never loads the aggregator) apply the IDENTICAL final filter — a warm HIT's
@@ -23,20 +24,22 @@ module Rigor
     module SeverityStamp
       module_function
 
+      CHECK_RULES = CheckRules::ALL_RULES.to_set.freeze
+      private_constant :CHECK_RULES
+
       def apply(diagnostics, configuration)
         disabled = CheckRules.expand_rule_tokens(configuration.disabled_rules)
         diagnostics.filter_map do |diagnostic|
-          next nil if !plugin_row?(diagnostic) && CheckRules.config_disabled?(diagnostic.rule, disabled)
+          next nil if check_rule_row?(diagnostic) && CheckRules.config_disabled?(diagnostic.rule, disabled)
 
           stamp(diagnostic, configuration)
         end
       end
 
-      # A row a plugin emitted under its own `plugin.<id>` family. The `disable:` list does not reach it: its id is
-      # public as `plugin.<id>.<rule>` (ADR-2), and the bare-id match would let a built-in token such as `load-error`
-      # hide every plugin's same-named rule. Matching it by its qualified id is not supported yet.
-      def plugin_row?(diagnostic)
-        diagnostic.source_family.to_s.start_with?("plugin.")
+      # A built-in check-rule row: its id is in the CheckRules catalogue and no plugin emitted it. Only these answer
+      # to `disable:` here; whether the other rule-bearing rows should (and by bare or qualified id) is open.
+      def check_rule_row?(diagnostic)
+        diagnostic.source_family == Diagnostic::DEFAULT_SOURCE_FAMILY && CHECK_RULES.include?(diagnostic.rule)
       end
 
       def stamp(diagnostic, configuration)

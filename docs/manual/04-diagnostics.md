@@ -300,17 +300,16 @@ disable:
   - flow.dead-assignment
 ```
 
-The list also reaches the run-level rows reported at
+`disable: [all]` turns off every built-in check rule, including
+`effect.annotations-unchecked`, which is reported at a signature
+file. The list does not reach the run-level rows reported at
 `.rigor.yml` — a plugin that failed to load or raised in
 `prepare`, a `dependencies.source_inference:` gem that did not
-resolve, the `rbs.coverage.*` notices. Those match by their
-bare ID: `disable: [load-error]` drops the plugin loader's
-`plugin_loader.load-error` row. A row a plugin reports under
-its own `plugin.<id>.<rule>` ID is not affected by `disable:`,
-and the fully qualified spellings (`plugin_loader.load-error`,
-`plugin.<id>.<rule>`) are not matched yet. `disable: [all]`
-turns off every rule the list reaches; a path or parse error,
-which has no rule ID, is still reported.
+resolve, the `rbs.coverage.*` notices — nor a plugin's own
+`plugin.<id>.<rule>` rows. Fully qualified spellings
+(`plugin_loader.load-error`, `plugin.<id>.<rule>`) are not
+matched. A path or parse error, which has no rule ID, is always
+reported.
 
 For a *known backlog* you want to keep visible but not fail
 on, prefer a [baseline](06-baseline.md) over a blanket

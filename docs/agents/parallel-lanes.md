@@ -50,8 +50,9 @@ reshaping code, and lanes that collided or started on a premise master had alrea
    per contribution-flow.md step 3, including the "Engine allocations (advisory)" summary. Send each
    fix back to the lane that wrote the change with SendMessage, so it keeps its context; route a
    severe fix in intricate logic to the strongest model instead. Delta rounds go to the same
-   reviewer with SendMessage and follow contribution-flow.md steps 4–5: three rounds at most; a
-   severe finding in round 3 goes to the user.
+   reviewer with SendMessage and follow contribution-flow.md steps 4–5: three rounds, then a narrow
+   severe finding lands through one fix-only delta check and a non-converging design goes to the
+   user.
 7. **Land in order.** Before merging, fetch, merge `origin/master` into a detached copy of the
    branch, and rerun the spec files the PR touched; a clean textual merge can still break a sibling's
    spec. Check `mergeable` before waiting on CI: a `CONFLICTING` PR starts no run, so send it back to

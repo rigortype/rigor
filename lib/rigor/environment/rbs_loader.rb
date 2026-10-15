@@ -66,6 +66,15 @@ module Rigor
       QUARANTINE_WARN_LIMIT = 10
 
       class << self
+        # Issue #1902 — the fixed total order that picks ONE detail tuple for a class out of several: its two
+        # sides in {#report_definition_build_failure}, or a fresh and a replayed record in
+        # {Analysis::Runner::PoolCoordinator}. Content-only (the tuple carries no side), so both places choose
+        # the same tuple from the same candidates, whatever order those candidates arrived in.
+        def definition_build_detail_order(detail)
+          _, error_class, member, buffers, unresolved = detail
+          [error_class.to_s, member.to_s, Array(buffers).map(&:to_s), Array(unresolved).map(&:to_s)]
+        end
+
         def default
           @default ||= new.freeze
         end
@@ -2914,15 +2923,6 @@ module Rigor
         details = ((@state[:definition_build_details] ||= {})[key] ||= [])
         details << [key, error.class.name.to_s, definition_build_member(error),
                     definition_build_conflict_buffers(error), unresolved_type_name_detail(error)].freeze
-      end
-
-      # Issue #1902 — the fixed total order that picks ONE detail tuple for a class out of several: its two
-      # sides here, or a fresh and a replayed record in {Analysis::Runner::PoolCoordinator}. Content-only (the
-      # tuple carries no side), so both places choose the same tuple from the same candidates, whatever
-      # order those candidates arrived in.
-      def self.definition_build_detail_order(detail)
-        _, error_class, member, buffers, unresolved = detail
-        [error_class.to_s, member.to_s, Array(buffers).map(&:to_s), Array(unresolved).map(&:to_s)]
       end
 
       # Issue #997 — the `RBS::NoTypeFoundError` twin of {#definition_build_member}: `nil` for every other

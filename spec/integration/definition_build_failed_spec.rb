@@ -247,9 +247,14 @@ RSpec.describe "definition build failed reporting" do
   # candidates the same in each.
   it "names the same failure for a two-sided class with and without the pool's pre-warm" do
     FileUtils.mkdir_p("sig")
-    File.write(File.join("sig", "berry.rbs"),
-               "class Berry\n  def self.s: () -> Integer\n  def self.s: () -> Integer\n" \
-               "  def i: () -> Integer\n  def i: () -> Integer\nend\n")
+    File.write(File.join("sig", "berry.rbs"), <<~RBS)
+      class Berry
+        def self.s: () -> Integer
+        def self.s: () -> Integer
+        def i: () -> Integer
+        def i: () -> Integer
+      end
+    RBS
     File.write("app.rb", "Berry.s\n")
 
     nocache = build_failed_diagnostics(run(config)).map(&:message)

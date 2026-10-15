@@ -623,7 +623,8 @@ module Rigor
         def build_rbs_definition_build_failed_diagnostic(failures)
           failures = failures.sort_by { |failure| failure.first.to_s }
           sample_size = 5
-          files = failures.flat_map { |failure| Array(failure[3]) }.map { |name| relative_signature_path(name) }.uniq.sort
+          files = failures.flat_map { |failure| Array(failure[3]) }
+                          .map { |name| relative_signature_path(name) }.uniq.sort
           Diagnostic.new(
             path: ".rigor.yml",
             line: 1,

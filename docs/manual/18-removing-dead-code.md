@@ -116,8 +116,9 @@ gap in coverage rather than a finding about your code.
 rigor unused --entry-point='lib/cli.rb' --entry-point='lib/workers/**/*.rb'
 ```
 
-Repeatable. Each glob is matched against every declaration's path, and
-roots every declaration in a matching file.
+Repeatable. Each glob is matched against every declaration's path as
+written, relative to the project root, and relative to the directory
+you run in, and roots every declaration in a matching file.
 
 **File-level references**, free. Code that runs on load — an
 initializer naming a class, a `.rake` task — roots what it names. This

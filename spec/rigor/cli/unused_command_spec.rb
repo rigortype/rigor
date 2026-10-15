@@ -200,6 +200,34 @@ RSpec.describe Rigor::CLI::UnusedCommand do
       end
     end
 
+    # Round 3 of #1888: a cwd-relative entry point, and the role of a file read only from the working directory.
+    it "matches an entry point relative to the working directory in a subdirectory run" do
+      Dir.mktmpdir do |dir|
+        write_file(dir, ".rigor.yml", "paths:\n  - pkg/lib\n")
+        write_file(dir, "pkg/lib/entry.rb", "class Entry\n  def go = Worker.new\nend\n")
+        write_file(dir, "pkg/lib/worker.rb", "class Worker\nend\n")
+        write_file(dir, "pkg/lib/lonely.rb", "class Lonely\nend\n")
+        backdate(dir)
+
+        _, report, = run_in(File.join(dir, "pkg"), "--config=../.rigor.yml", "--entry-point=lib/entry.rb")
+
+        expect(report["candidates"].map { |row| row["name"] }).to eq(["Lonely"])
+      end
+    end
+
+    it "reads a working-directory file outside the root by its path below the working directory" do
+      Dir.mktmpdir do |dir|
+        write_file(dir, "proj/.rigor.yml", "paths:\n  - lib\n")
+        write_file(dir, "proj/lib/a.rb", "class A\nend\n")
+        write_file(dir, "spec/tool/use.rb", "A.new\n")
+        backdate(dir)
+
+        _, report, = run_in(File.join(dir, "spec/tool"), "--config=#{dir}/proj/.rigor.yml")
+
+        expect(rows(report)).to eq("declared" => 1, "candidates" => [], "test_only" => [])
+      end
+    end
+
     it "scans each file once when the project is reached through a symlink" do
       Dir.mktmpdir do |dir|
         project = File.join(dir, "proj")

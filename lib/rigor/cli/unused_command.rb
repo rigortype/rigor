@@ -70,9 +70,11 @@ module Rigor
 
       # A scan's role and the spelling it records depend on the root and the working directory (#1760).
       # The working directory matters only to a relative path argument, whose spelling is what a cached scan
-      # records; keying on it otherwise would reset a shared cache whenever two runs differ in directory.
+      # records, and to a file read from it outside the root, whose role it decides ({#role_path}); keying on
+      # it otherwise would reset a shared cache whenever two runs differ in directory.
       def open_scan_cache(configuration)
-        spelled = @argv.any? { |path| !File.absolute_path?(path) } ? ":#{canonical(Dir.pwd)}" : ""
+        cwd_matters = corpus_dirs.size > 1 || @argv.any? { |path| !File.absolute_path?(path) }
+        spelled = cwd_matters ? ":#{canonical(Dir.pwd)}" : ""
         Analysis::Reachability::ScanCache.open(configuration.cache_path, target_ruby: configuration.target_ruby,
                                                                          root: "#{@root}#{spelled}")
       end
@@ -175,8 +177,8 @@ module Rigor
       # Widening the *declaration* set the same way would cancel the gain (measured: +1 / −3 / +2 candidates,
       # ADR-102 WD2), which is exactly why the two corpora are separated rather than both widened.
       #
-      # The project is the directory of the config file in use, or the working directory without one,
-      # realpath'd (#1760): running from a subdirectory or through a symlinked spelling reads the same project.
+      # The files are read from every {#corpus_dirs} entry (#1760): running from a subdirectory or through a
+      # symlinked spelling reads the same project.
       def reference_files(_paths, configuration)
         absolute = project_files(REFERENCE_GLOB)
         Analysis::PathExpansion.reject_excluded(absolute, configuration.exclude_patterns,
@@ -189,7 +191,7 @@ module Rigor
       def read_and_scan(file, real, configuration)
         Analysis::Reachability::Scan.call(path: file, source: File.read(file),
                                           target_ruby: configuration.target_ruby,
-                                          role_path: relative_to_root(real))
+                                          role_path: role_path(real))
       rescue SystemCallError
         nil
       end
@@ -207,6 +209,16 @@ module Rigor
         File.absolute_path(path)
       end
 
+      # A file the working directory's glob found outside the root takes its role from its path below the
+      # working directory, as it did when the working directory was the only root; any other file from its
+      # path relative to the root.
+      def role_path(real)
+        cwd = canonical(Dir.pwd)
+        return real.delete_prefix("#{cwd.chomp('/')}/") if !inside?(real, @root) && inside?(real, cwd)
+
+        relative_to_root(real)
+      end
+
       def relative_to_root(real)
         prefix = "#{@root.chomp('/')}/"
         return real.delete_prefix(prefix) if real.start_with?(prefix)
@@ -216,7 +228,8 @@ module Rigor
         real
       end
 
-      # A glob is matched against the declaration's path AND its path relative to the project root (#1760):
+      # A glob is matched against the declaration's path, its path relative to the project root (#1760), and
+      # its path relative to the working directory:
       # `configuration.paths` are expanded to absolute, so a user-written `--entry-point=lib/entry.rb` would
       # otherwise never match anything and silently produce a root set of zero.
       # A constant named only from the project's own `sig/` is referenced — the #345 probe reported exactly this
@@ -282,8 +295,10 @@ module Rigor
         return [] if globs.empty?
 
         matcher = Analysis::Reachability::ProjectFiles.method(:entry_point_match?)
+        cwd = canonical(Dir.pwd)
         declarations.filter_map do |d|
-          spellings = [d.path, relative_to_root(canonical(d.path))]
+          real = canonical(d.path)
+          spellings = [d.path, relative_to_root(real), real.delete_prefix("#{cwd.chomp('/')}/")]
           d.fqn if globs.any? { |g| spellings.any? { |path| matcher.call(g, path) } }
         end
       end

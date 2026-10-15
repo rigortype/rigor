@@ -24,15 +24,16 @@ RSpec.describe "matcher narrowing" do
     # x is now Constant<nil>; downstream `.foo` would fire.
   end
 
-  it "narrows to Constant<42> through eq(42)" do
-    x = some_thing
+  it "narrows an Integer to Constant<42> through eq(42)" do
+    x = rand(100)
     expect(x).to eq(42)
-    x + 1        # x narrowed to Constant<42> — `+` still resolves
+    x + 1 # x narrowed from Integer to Constant<42>. `==` is x's own method, so a Dynamic or
+    # user-class local would keep its type instead
   end
 
-  it "narrows to Constant<\"hi\"> through eq(\"hi\")" do
-    x = some_thing
+  it "narrows a String to Constant<\"hi\"> through eq(\"hi\")" do
+    x = String(some_thing)
     expect(x).to eq("hi")
-    x.upcase     # x narrowed to "hi" Constant — `.upcase` resolves
+    x.upcase # x narrowed from String to the "hi" Constant — `.upcase` resolves
   end
 end

@@ -86,7 +86,7 @@ module Rigor
       # ADR-37 slice 2 — matcher narrowing (`expect(x).to be_a(T)` → `post_return_facts` on `x`),
       # method-gated by the engine on the expectation verbs.
       narrowing_facts methods: %i[to not_to to_not] do |call_node, scope|
-        MatcherAnalyzer.contribution_for(call_node, environment: scope&.environment)&.post_return_facts
+        MatcherAnalyzer.contribution_for(call_node, scope: scope)&.post_return_facts
       end
 
       # ADR-52 slice 5a — binds local reads in `it` / spec bodies to their `let(:name) { ... }` block's
@@ -98,9 +98,10 @@ module Rigor
         let_binding_return_type(call_node, scope)
       end
 
-      # ADR-88 WD1 — both contributions are per-file: the matcher narrowing facts come from the call's own AST,
-      # and the `let`-binding return types come from each spec file's OWN `describe`/`let` structure (`let` is
-      # file-scoped). A spec file's edit changes its own content (re-analysed already). The one cross-file input
+      # ADR-88 WD1 — both contributions are per-file: the matcher narrowing facts come from the call's own AST
+      # and, for `eq` / `eql`, from the local's current type and the scope's project discovery (whether the
+      # project defines `==` / `eql?` on a core class); the `let`-binding return types come from each spec
+      # file's OWN `describe`/`let` structure (`let` is file-scoped). A spec file's edit changes its own content (re-analysed already). The one cross-file input
       # — the optional factorybot `:factory_index` fact this plugin consumes — is itself an ADR-9 publication
       # captured in the incremental fact-surface digest via factorybot's own channel, so it need not appear
       # here. A stable sentinel declares "no OWN cross-file fact surface", keeping the plugin

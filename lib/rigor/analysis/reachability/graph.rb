@@ -5,6 +5,121 @@ require_relative "scan"
 module Rigor
   module Analysis
     module Reachability
+      # ADR-102 WD4 — how {Graph} reads a `constantize` / `const_get` site: a literal name becomes a reference
+      # looked up where Ruby looks it up, and an interpolated one on a known receiver is anchored there.
+      module DynamicLookup
+        private
+
+        # A literal-argument `"Foo::Bar".constantize` names its constant exactly, so it is a REFERENCE, not an
+        # unknown. Keeping this distinct from {Graph#tainted} is what stops the tier being a blanket namespace
+        # poison — Rigor knows the argument's shape, and a type-free indexer does not.
+        #
+        # A literal `const_get` on a known receiver is looked up where Ruby looks it up (#1761): the receiver,
+        # then its ancestors unless the call passes `inherit = false`, then the top level unless it does. A
+        # receiver holding the name is the answer — resolving it anywhere else too would make a dead same-named
+        # constant reachable; past the receiver see {#literal_targets}. A receiver that does not resolve as a
+        # whole is unknown — `Outer::Missing` peeled to `Outer` may alias anything, and `const_get` never
+        # searches `Outer` — so it falls back to the top level as an unknown receiver does.
+        #
+        # The reference carries the referring file's role (WD8): a spec's `const_get("Foo")` keeps `Foo`
+        # test-reachable, as its written `Foo` would, rather than making it live in production.
+        def literal_dynamic_references(dynamic_uses)
+          dynamic_uses.flat_map do |use|
+            next [] if use.name.nil?
+
+            name = use.name.delete_prefix("::")
+            targets = use.within ? literal_targets(use, name) : [nil]
+            targets.map do |target|
+              Scan::Reference.new(as_written: target || name, nesting: [].freeze, from: nil,
+                                  role: use.role, path: use.path, line: use.line,
+                                  rooted: !target.nil? || use.name.start_with?("::"))
+            end
+          end
+        end
+
+        # The declarations a literal `name` can name when looked up from `use.within`, a member's owner peeled
+        # as {#resolve} peels it; nil stands for the top level. The receiver declaring it is the answer. Past
+        # the receiver the walk only approximates Ruby: an ancestor named as written may resolve elsewhere
+        # (`class Api::Thing < Base` inherits `::Base`, not `Api::Base`), so every scope an ancestor could be
+        # that declares the name is kept, and the top level with them. Keeping a dead constant reachable is
+        # the cheaper mistake than listing a live one. A receiver that does not resolve is the top level; with
+        # `inherit = false` a resolved receiver that does not declare the name is nothing (Ruby raises
+        # `NameError` there).
+        def literal_targets(use, name)
+          receiver = use.receiver { |ref| resolve_ref(ref) }
+          return [nil] if receiver.nil?
+
+          local = @shadows[use.path]
+          own = declared_member(receiver, name, local)
+          return [own] if own
+          return [] unless use.inherit
+
+          plausible_ancestors(receiver).filter_map { |scope| declared_member(scope, name, local) }.uniq + [nil]
+        end
+
+        # `scope::name`, or the longest declared prefix of it, when one is declared.
+        def declared_member(scope, name, local)
+          segments = name.split("::")
+          segments.length.downto(1) do |count|
+            candidate = "#{scope}::#{segments.first(count).join('::')}"
+            return candidate if declared?(candidate, nil, local)
+          end
+          nil
+        end
+
+        # Every declaration an ancestor of `fqn` could be: each as-written superclass or mixin resolved at
+        # every enclosing scope that declares it, not only the innermost, and transitively.
+        def plausible_ancestors(fqn)
+          (@plausible_ancestors ||= {})[fqn] ||= plausible_ancestor_walk(fqn)
+        end
+
+        def plausible_ancestor_walk(fqn)
+          seen = Set[fqn]
+          queue = [fqn]
+          out = []
+          until queue.empty?
+            current = queue.shift
+            @by_fqn.fetch(current, []).each do |decl|
+              (decl.includes + [decl.superclass]).compact.each do |raw|
+                plausible_resolutions(current, raw).each do |resolved|
+                  next if seen.include?(resolved)
+
+                  seen << resolved
+                  out << resolved
+                  queue << resolved
+                end
+              end
+            end
+          end
+          out.freeze
+        end
+
+        def plausible_resolutions(subclass_fqn, raw)
+          segments = subclass_fqn.split("::")
+          (segments.length - 1).downto(0).filter_map do |i|
+            candidate = (segments[0, i] + [raw]).join("::")
+            candidate if candidate != subclass_fqn && @by_fqn.key?(candidate)
+          end
+        end
+
+        # The namespaces a `const_get` on `anchors` searches before the top level: the receiver, then, with the
+        # default `inherit = true`, every scope its superclass chain and mixins could be (#1761) — a taint is
+        # safe to over-reach.
+        def receiver_scopes(use, anchors)
+          return anchors unless use.inherit
+
+          anchors.flat_map { |anchor| [anchor, *plausible_ancestors(anchor)] }.uniq
+        end
+
+        # An interpolated site on a known receiver, with the receiver resolved into absolute `prefix`es.
+        def anchored(use)
+          return [use] if use.within.nil? || use.prefix.nil?
+
+          anchors = use.anchors { |ref| resolve_ref(ref) }
+          receiver_scopes(use, anchors).map { |scope| use.with(prefix: "#{scope}::#{use.prefix}", within: nil) }
+        end
+      end
+
       # ADR-102 — the cross-file half: resolves every as-written reference to a declaration, then marks from the
       # root set. Pure data; no engine coupling, so `rigor check`'s diagnostic stream is untouched by
       # construction rather than by a gate (WD1).
@@ -15,6 +130,8 @@ module Rigor
       # believe in. The two walks are separate implementations (this one is name-level and needs no types), so
       # `spec/rigor/analysis/reachability/graph_spec.rb` pins them to the same answers on shared fixtures.
       class Graph
+        include DynamicLookup
+
         Candidate = Data.define(:fqn, :path, :line)
 
         # `test_only` is its own list, not a flag on `candidates`: a candidate is by definition unreachable, so
@@ -40,7 +157,6 @@ module Rigor
         def initialize(declarations:, references:, root_fqns: [], dynamic_uses: [], shadows: [],
                        foreign: ->(_fqn) { false })
           @declarations = declarations
-          @references = references + literal_dynamic_references(dynamic_uses)
           @root_fqns = root_fqns.to_set
           @foreign = foreign
           @by_fqn = declarations.group_by(&:fqn)
@@ -48,8 +164,9 @@ module Rigor
           @shadows.default = Set.new.freeze
           @owned = @by_fqn.keys.reject { |fqn| @foreign.call(fqn) }.to_set
           @ancestors = {}
+          @references = references + literal_dynamic_references(dynamic_uses)
           # `Foo.const_get("V#{k}")` bounds its reach by `Foo`, a reference like any other (#1734).
-          @dynamic_uses = dynamic_uses.flat_map { |use| use.anchored { |ref| resolve_ref(ref) } }
+          @dynamic_uses = dynamic_uses.flat_map { |use| anchored(use) }
         end
 
         def report
@@ -85,19 +202,6 @@ module Rigor
                      undecidable: undecidable.map { |fqn, reason| undecidable_row(fqn, reason) }.freeze,
                      test_only: rows(test_only - demoted),
                      namespaces: namespaces.size, roots: production_seeds.size, edges: edges.size)
-        end
-
-        # A literal-argument `"Foo::Bar".constantize` names its constant exactly, so it is a REFERENCE, not an
-        # unknown. Keeping this distinct from the taint below is what stops the tier being a blanket namespace
-        # poison — Rigor knows the argument's shape, and a type-free indexer does not.
-        def literal_dynamic_references(dynamic_uses)
-          dynamic_uses.filter_map do |use|
-            next if use.name.nil?
-
-            Scan::Reference.new(as_written: use.name.sub(/\A::/, ""), nesting: [].freeze, from: nil,
-                                role: :production, path: use.path, line: use.line,
-                                rooted: use.name.start_with?("::"))
-          end
         end
 
         # `{fqn => reason}` for every declaration in `fqns` a dynamic site could still be naming. A site with a

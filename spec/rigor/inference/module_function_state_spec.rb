@@ -3,11 +3,11 @@
 require "spec_helper"
 require "prism"
 
-# The `module_function` probes P1–P13 from the #1507 declaration-fact review, each a single declaration.
-# Ruby 4.0.5's answer is in each example's comment. The examples pin what each reader answers TODAY, which
-# `Rigor::Inference::ModuleFunctionState` reproduces for all four of them: the singleton def-node table,
-# the deferred ranges, the extends table and sig-gen. Where today's answer contradicts Ruby and a fix is
-# planned, the example says what to flip.
+# The `module_function` probes P1–P13 from the #1507 declaration-fact review, each a single declaration,
+# and P21–P38 for the named form's snapshot (#1550). Ruby 4.0.5's answer is in each example's comment.
+# The examples pin what each reader answers TODAY, which `Rigor::Inference::ModuleFunctionState`
+# reproduces for all four of them: the singleton def-node table, the deferred ranges, the extends table
+# and sig-gen. Where today's answer contradicts Ruby and a fix is planned, the example says what to flip.
 module ModuleFunctionStateProbes
   SOURCES = {
     "P1" => <<~RUBY,
@@ -156,9 +156,163 @@ module ModuleFunctionStateProbes
   }.freeze
 end
 
+# P21–P38: the named form's snapshot (#1550).
+module ModuleFunctionSnapshotProbes
+  SOURCES = {
+    "P21" => <<~RUBY,
+      module P21
+        def a; 1; end
+        def b; 2; end
+        module_function :a, :b
+        def a; 3; end
+        def b; 4; end
+      end
+    RUBY
+    "P22" => <<~RUBY,
+      module P22
+        def x; 2; end
+        def a; 1; end
+        alias_method :a, :x
+        module_function :a
+      end
+    RUBY
+    "P23" => <<~RUBY,
+      module P23
+        def a; 1; end
+        define_method(:a) { 2 }
+        module_function :a
+      end
+    RUBY
+    "P24" => <<~RUBY,
+      module P24
+        def a; 1; end
+        if true
+          def a; 2; end
+        end
+        module_function :a
+      end
+    RUBY
+    "P25" => <<~RUBY,
+      module P25
+        def a; 1; end
+        [:a].each { |n| define_method(n) { 2 } }
+        module_function :a
+      end
+    RUBY
+    "P26" => <<~RUBY,
+      module P26
+        def a; 1; end
+        alias_method :b, :a
+        def self.a; 2; end
+        Module.new.define_method(:a) { 3 }
+        module Inner
+          def a; 3; end
+        end
+        module_function :a
+      end
+    RUBY
+    "P27" => <<~RUBY,
+      module P27
+        def x; 2; end
+        def a; 1; end
+        alias a x
+        module_function :a
+      end
+    RUBY
+    "P28" => <<~RUBY,
+      module P28
+        def a; 1; end
+        attr_accessor :a
+        module_function :a
+      end
+    RUBY
+    "P29" => <<~RUBY,
+      module P29
+        def a; 1; end
+        undef a
+        module_function :a
+      end
+    RUBY
+    "P30" => <<~RUBY,
+      module P30
+        def a=(v); 1; end
+        attr_writer :a
+        module_function :a=
+      end
+    RUBY
+    "P31" => <<~RUBY,
+      module P31
+        def a; 1; end
+        def x; 2; end
+        self.alias_method :a, :x
+        module_function :a
+      end
+    RUBY
+    "P32" => <<~RUBY,
+      module P32
+        def a; 1; end
+        class << self
+          define_method(:a) { 3 }
+          def a; 4; end
+        end
+        module_function :a
+      end
+    RUBY
+    "P33" => <<~RUBY,
+      module P33
+        def a; 1; end
+        if true
+          def self.a; 2; end
+        end
+        module_function :a
+      end
+    RUBY
+    "P34" => <<~RUBY,
+      module P34
+        def a; 1; end
+        attr_reader :a
+        module_function :a
+      end
+    RUBY
+    "P35" => <<~RUBY,
+      module P35
+        def a; 1; end
+        remove_method :a
+        module_function :a
+      end
+    RUBY
+    "P36" => <<~RUBY,
+      module P36
+        def a; 1; end
+        undef_method :a
+        module_function :a
+      end
+    RUBY
+    "P37" => <<~RUBY,
+      module P37
+        def a; 1; end
+        attr :a
+        module_function :a
+      end
+    RUBY
+    "P38" => <<~RUBY
+      module P38
+        def a; 1; end
+        def x; 2; end
+        alias :"\#{:a}" x
+        module_function :a
+      end
+    RUBY
+  }.freeze
+end
+
 RSpec.describe Rigor::Inference::ModuleFunctionState do
+  def probe_source(probe)
+    ModuleFunctionStateProbes::SOURCES[probe] || ModuleFunctionSnapshotProbes::SOURCES.fetch(probe)
+  end
+
   def root_of(probe)
-    Prism.parse(ModuleFunctionStateProbes::SOURCES.fetch(probe)).value
+    Prism.parse(probe_source(probe)).value
   end
 
   def body_of(probe)
@@ -170,7 +324,7 @@ RSpec.describe Rigor::Inference::ModuleFunctionState do
   end
 
   def line_of(probe, offset)
-    ModuleFunctionStateProbes::SOURCES.fetch(probe)[0, offset].count("\n") + 1
+    probe_source(probe)[0, offset].count("\n") + 1
   end
 
   # `"name@line" => toggle on` for each direct def, and `"copy name" => "name@line"` for each def a named
@@ -251,7 +405,7 @@ RSpec.describe Rigor::Inference::ModuleFunctionState do
 
   describe "a bare call followed by a bare visibility call" do
     # Ruby: `public` ends the module_function mode, so `x` is a public instance method and `P1.x` raises.
-    # Every reader keeps the toggle on. Flip this when the reset semantics are fixed (#1550, "Related findings").
+    # Every reader keeps the toggle on. Flip this when the reset semantics are fixed (#1968).
     it "P1 (`public`): every reader makes `x` a module function" do
       expect(readings("P1")).to eq(
         singleton: { "x@4" => true }, deferred: { :rows => [], "x@4" => true },
@@ -264,7 +418,7 @@ RSpec.describe Rigor::Inference::ModuleFunctionState do
     end
 
     # Ruby: `x` is a private instance method with no singleton copy. Flip this when the reset semantics are
-    # fixed (#1550, "Related findings").
+    # fixed (#1968).
     it "P2 (`private`): every reader makes `x` a module function" do
       expect(readings("P2")).to eq(
         singleton: { "x@4" => true }, deferred: { :rows => [], "x@4" => true },
@@ -277,7 +431,7 @@ RSpec.describe Rigor::Inference::ModuleFunctionState do
     end
 
     # Ruby: `x` is a protected instance method with no singleton copy. Flip this when the reset semantics are
-    # fixed (#1550, "Related findings").
+    # fixed (#1968).
     it "P12 (`protected`): every reader makes `x` a module function" do
       expect(readings("P12")).to eq(
         singleton: { "x@4" => true }, deferred: { :rows => [], "x@4" => true },
@@ -290,8 +444,7 @@ RSpec.describe Rigor::Inference::ModuleFunctionState do
     end
 
     # Ruby: `a` and `c` are module functions, and `b`, after `public`, is a public instance method only.
-    # `b@5 => true` in every reader is the reset bug. Flip this when the reset semantics are fixed (#1550,
-    # "Related findings").
+    # `b@5 => true` in every reader is the reset bug. Flip this when #1968 fixes the reset semantics.
     it "P10 (a second bare call after `public`): every reader keeps `b` a module function" do
       expect(readings("P10")).to eq(
         singleton: { "a@3" => true, "b@5" => true, "c@7" => true },
@@ -309,34 +462,67 @@ RSpec.describe Rigor::Inference::ModuleFunctionState do
 
   describe "the named form" do
     # Ruby: `module_function :a` copies the def in effect at the call, so `P9.a` returns 1, and the later
-    # `def a` redefines only the public instance method. The singleton reading copies the later def (`a@4`).
-    # Flip this when #1550 is fixed: the copy is `a@2`.
-    it "P9 (a redefinition after the call): the singleton reading copies the later def" do
+    # `def a` redefines only the public instance method. The singleton reading copies that def (`a@2`).
+    it "P9 (a redefinition after the call): the singleton reading copies the def before the call" do
       expect(readings("P9")).to eq(
-        singleton: { "a@2" => false, "copy a" => "a@4", "a@4" => false },
+        singleton: { "a@2" => false, "copy a" => "a@2", "a@4" => false },
         deferred: { :rows => [[:a, 3, :singleton, "P9"]], "a@2" => false, "a@4" => false },
         extends: { "module_function@3:2" => false }, sig_gen: { "a@2" => false, "a@4" => false }
       )
       expect(tables("P9")).to eq(
-        singleton_def_nodes: { "P9" => { a: "a@4" } },
+        singleton_def_nodes: { "P9" => { a: "a@2" } },
         deferred_ranges: [[:a, 3, :singleton, "P9"], [:a, 2, :instance, "P9"], [:a, 4, :instance, "P9"]],
         extends: {}
       )
     end
 
-    # Ruby: the call raises `NameError`, because `a` is not defined yet. The singleton reading resolves the
-    # later def. Flip this when #1550 is fixed: a name with no preceding def declines.
-    it "P6 (the call before any def): the singleton reading copies the later def" do
+    # Ruby: the call raises `NameError`, because `a` is not defined yet; with a reopening loaded first, it
+    # copies that file's def. The singleton reading declines.
+    it "P6 (the call before any def): the singleton reading declines" do
       expect(readings("P6")).to eq(
-        singleton: { "copy a" => "a@3", "a@3" => false },
+        singleton: { "a@3" => false },
         deferred: { :rows => [[:a, 2, :singleton, "P6"]], "a@3" => false },
         extends: { "module_function@2:2" => false }, sig_gen: { "a@3" => false }
       )
       expect(tables("P6")).to eq(
-        singleton_def_nodes: { "P6" => { a: "a@3" } },
+        singleton_def_nodes: {},
         deferred_ranges: [[:a, 2, :singleton, "P6"], [:a, 3, :instance, "P6"]],
         extends: {}
       )
+    end
+
+    # Ruby: `[P21.a, P21.b]` is `[1, 2]`.
+    it "P21 (two names, both redefined after the call): each copy is its own def before the call" do
+      expect(singleton_reading("P21")).to include("copy a" => "a@2", "copy b" => "b@3")
+      expect(tables("P21")[:singleton_def_nodes]).to eq("P21" => { a: "a@2", b: "b@3" })
+    end
+
+    # Ruby, in order: 2 (the alias), 2 (the `define_method` block), 2 (the def in the `if`), 2 (the
+    # `define_method` in the block), 2 (`alias a x`), nil (the `attr_accessor` reader), `NameError` (the
+    # `undef`), the `attr_writer` writer, 2 (`self.alias_method`), nil (`attr_reader`), `NameError`
+    # (`remove_method`, `undef_method`), nil (`attr`) and 2 (an `alias` with an interpolated name). Each
+    # rebinds the name after its plain def in a way the singleton reading does not name, so it declines.
+    %w[P22 P23 P24 P25 P27 P28 P29 P30 P31 P34 P35 P36 P37 P38].each do |probe|
+      it "#{probe} (a rebinding between the def and the call): the singleton reading declines" do
+        expect(singleton_reading(probe).keys.grep(/\Acopy /)).to eq([])
+        expect(tables(probe)[:singleton_def_nodes]).to eq({})
+      end
+    end
+
+    # Ruby: `P26.a` is 1. `alias_method :b, :a` reads `a` without rebinding it, `def self.a` defines only the
+    # singleton method the copy then replaces, and the `define_method` on another module and `Inner`'s `def a`
+    # belong to other modules.
+    it "P26 (statements that do not rebind the instance method): the copy is the plain def" do
+      expect(singleton_reading("P26")).to include("copy a" => "a@2")
+      expect(tables("P26")[:singleton_def_nodes]).to eq("P26" => { a: "a@2" })
+    end
+
+    # Ruby: `P32.a` and `P33.a` are 1. The `class << self` body and the `def self.a` in the `if` define
+    # singleton methods, which the copy replaces; neither rebinds the instance method.
+    { "P32" => { a: "a@2" }, "P33" => { a: "a@2" } }.each do |probe, slot|
+      it "#{probe} (a singleton-side def before the call): the copy is the plain def" do
+        expect(tables(probe)[:singleton_def_nodes]).to eq(probe => slot)
+      end
     end
   end
 

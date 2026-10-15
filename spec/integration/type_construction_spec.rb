@@ -1174,6 +1174,26 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  # Issue #1484 — a subject `case` the evaluator does not enter narrows its clauses as its statement form does.
+  describe "fixtures/subject_case_value_position.rb — a value-position subject `case` narrows its clauses" do
+    let(:harness) { harness_for("subject_case_value_position") }
+
+    it "types each clause under the subject's clause narrowing" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+
+    it "reports an undefined method only where the narrowed subject lacks it" do
+      undefined = harness.diagnostics.select do |d|
+        %w[call.undefined-method call.possible-nil-receiver].include?(d.rule)
+      end
+      expect(undefined.map(&:line)).to eq(marked_lines(harness, "# GENUINE-UNDEFINED"))
+      expect(undefined.map(&:message)).to eq(
+        ["undefined method `no_such_method' for File", %q(undefined method `no_such_method' for "a" | "s")]
+      )
+    end
+  end
+
   describe "fixtures/regex_global_narrowing.rb — C1 regex match-data global narrowing" do
     let(:harness) { harness_for("regex_global_narrowing") }
 
@@ -1235,6 +1255,15 @@ RSpec.describe "Rigor type construction (integration)" do
     it "reports nothing on a `$1` read past a `!~` guard" do
       reads = marked_lines(harness, "# NOT-MATCH-1379")
       expect(reads.size).to eq(8)
+      expect(harness.diagnostics.select { |d| reads.include?(d.line) }).to be_empty
+    end
+
+    # Issue #1494 — `=~` does not refine a Symbol or untyped subject to the String an anchored pattern names, so a
+    # Symbol method called on it past the guard is not flagged; and a String subclass, a union with an `Integer`
+    # member and a safe-navigation `=~` keep the match edge, so a copy of `$1` read past the guard is not either.
+    it "reports nothing on a read past a `=~` guard" do
+      reads = marked_lines(harness, "# MATCH-1494")
+      expect(reads.size).to eq(6)
       expect(harness.diagnostics.select { |d| reads.include?(d.line) }).to be_empty
     end
   end

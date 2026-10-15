@@ -5,13 +5,20 @@ require "prism"
 module Rigor
   module Plugin
     class FFI < Base
+      # Issue #1803 — the walk lists and reads through the plugin's {Rigor::Plugin::IoBoundary} (`io:`), so every
+      # `.rb` the catalog was built from is a dependency row of the `:ffi_catalog` producer's cache entry and of
+      # every run-result cache built on the run. The producer declares no `watch:`, so before this its entry
+      # carried no row at all and was served after any edit, an analysed file's included, until `--no-cache`.
       class Discoverer
-        def self.discover(root:)
-          new(root: root).discover
+        RUBY_GLOB = "**/*.rb"
+
+        def self.discover(root:, io:)
+          new(root: root, io: io).discover
         end
 
-        def initialize(root:)
+        def initialize(root:, io:)
           @root = root
+          @io = io
         end
 
         def discover
@@ -24,7 +31,7 @@ module Rigor
           callbacks = {}
 
           ruby_files.each do |file_path|
-            parse_result = Prism.parse_file(file_path)
+            parse_result = parse(file_path)
             next unless parse_result.value
 
             walk_tree(parse_result.value, nil) do |node, mod_name|
@@ -61,9 +68,24 @@ module Rigor
         private
 
         def ruby_files
-          return [] unless @root && File.directory?(@root)
+          return [] unless @root && @io.directory?(@root.to_s)
 
-          Dir.glob(File.join(@root, "**", "*.rb")).reject { |p| p.include?("/vendor/") || p.include?("/.git/") }
+          boundary_glob.reject { |p| p.include?("/vendor/") || p.include?("/.git/") }
+        end
+
+        # One `:names` `**/*.rb` row over the root, `vendor/` included: a per-entry walk that skipped it recorded
+        # names only, so a top-level entry that changed kind under the same name went unseen. The boundary
+        # answers absolute paths; they are spelled back under `@root` as `Dir.glob` spells them, so the filter
+        # above sees the same strings it always did.
+        def boundary_glob
+          root = @root.to_s
+          prefix = "#{File.absolute_path(root)}/"
+          @io.glob(root, RUBY_GLOB).map { |path| File.join(root, path.delete_prefix(prefix)) }
+        end
+
+        # The glob's rows record which files match; this read's row carries an edit.
+        def parse(file_path)
+          Prism.parse(@io.read_file(file_path))
         end
 
         def walk_tree(node, current_module, &)

@@ -68,6 +68,14 @@ module Rigor
         @declared_annotations + @annotations + [@rbs].compact
       end
 
+      # The RBS member kind `rbs` declares: `:singleton_instance` for a `def self?.` line (a `module_function`
+      # method, whose `kind` stays `:instance`), `kind` otherwise. The writer replaces only a member of this
+      # kind, so an overwrite neither drops a `self?.` member's singleton half nor adds one beside a split
+      # `def self.f` / `def f` pair (#1488).
+      def rbs_kind
+        kind == :instance && rbs.to_s.start_with?("def self?.") ? :singleton_instance : kind
+      end
+
       # A copy carrying a different annotation decision. The generator's effect pass rebuilds rather than
       # mutates, because a candidate is frozen the moment it is built.
       def with_effect_annotation(annotations, reason)

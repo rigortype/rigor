@@ -2480,6 +2480,18 @@ module Rigor
         # fail-soft: a broken RBS environment yields no entries.
       end
 
+      # ADR-113 — the RBS declaration of the constant `name` (qualified) as `[type, buffer name]`, or nil when no
+      # signature declares it. `rigor lens` reports the declared type with the provenance the buffer names.
+      def constant_declaration(name)
+        rbs_name = parse_type_name(name)
+        entry = rbs_name && env&.constant_decls&.[](rbs_name)
+        return nil unless entry
+
+        [entry.decl.type.to_s, entry.decl.location&.buffer&.name.to_s]
+      rescue ::RBS::BaseError
+        nil
+      end
+
       # Slice A constant-value lookup. Returns the translated `Rigor::Type` for a non-class constant
       # declaration (`BUCKETS: Array[Symbol]`, `DEFAULT_PATH: String`, ...) or `nil` when no constant entry
       # exists for `name` in the loaded RBS environment. Callers MUST treat the return value as authoritative

@@ -142,6 +142,7 @@ module Rigor
         return bare_module_function if bare_call?(child, :module_function)
         return end_module_function if toggle_visibility?(child)
         return named_module_function(child, nesting, singleton) if named_module_function?(child)
+        return constant_visibility(child, nesting, direct: true) if constant_visibility_call?(child)
 
         visibility_call(child, nesting, singleton, direct: true) if visibility_call?(child)
         @direct_statement = child
@@ -210,13 +211,20 @@ module Rigor
           read_attribute(node, nesting, singleton, in_block)
         elsif node.receiver.nil? && OMITTED_CALLS.key?(node.name)
           omitted_call(node, nesting, singleton, in_block)
+        elsif constant_visibility_call?(node)
+          constant_visibility(node, nesting, direct: false)
         else
-          @visited_visibility_calls ||= {}.compare_by_identity
-          if visibility_call?(node) && !@visited_visibility_calls.key?(node)
-            visibility_call(node, nesting, singleton, direct: false)
-          end
+          unplaced_visibility_call(node, nesting, singleton)
           walk_children(node, nesting, singleton, in_block)
         end
+      end
+
+      # A visibility call the body walk did not already read directly.
+      def unplaced_visibility_call(node, nesting, singleton)
+        @visited_visibility_calls ||= {}.compare_by_identity
+        return unless visibility_call?(node) && !@visited_visibility_calls.key?(node)
+
+        visibility_call(node, nesting, singleton, direct: false)
       end
 
       def omitted_call(node, nesting, singleton, in_block)
@@ -361,9 +369,12 @@ module Rigor
         target = node.respond_to?(:target) ? node.target : node
         name = node.respond_to?(:target) ? qualify(nesting, node.target) : qualify_name(nesting, node.name.to_s)
         builder = data_or_struct(node.value)
-        fields = builder && builder_fields(node.value, builder)
-        if fields && name && !in_block && plain_write?(node) && !constant_scope_unknown?
-          return read_builder_class(node, name, nesting, builder, fields)
+        if modelled_write?(node, name, in_block)
+          fields = builder && builder_fields(node.value, builder)
+          return read_builder_class(node, name, nesting, builder, fields) if fields
+          # A path write (`Foo::BAR = 1`, `::BAR = 1`) lands on the path's namespace, which `check` resolves
+          # through the nesting and Rigor does not name the way it does: an omission.
+          return read_constant(node, name, nesting) if builder.nil? && node.is_a?(Prism::ConstantWriteNode)
         end
 
         kind = { data: "data_class", struct: "struct_class" }.fetch(builder, "constant")
@@ -371,6 +382,26 @@ module Rigor
         written = node.respond_to?(:target) ? target.slice : node.name.to_s
         omit(kind, constant_scope_unknown? ? written : (name || written), node)
         walk(node.value, nesting, singleton: false, in_block: true)
+      end
+
+      # `X = value` written directly in a namespace body (or at the top level): a `constant` site (capability
+      # `constant`). Its `value` slot is filled from the run's tables ({Run#read_constant_value}). A declaration
+      # inside the value (a lambda body, a `Class.new` block) is an omission, as anywhere in a block.
+      def read_constant(node, name, nesting)
+        owner = nesting.last || "Object"
+        add_site(node, { "kind" => "constant", "name" => name, "owner" => owner, "scope" => nil,
+                         "attribute" => nil, "members" => [], "module_function" => false,
+                         "visibility" => reassigned_visibility(name, owner), "params" => nil, "block" => nil,
+                         "body_return" => nil, "value" => Slot.unavailable("not_computed") })
+        walk(node.value, nesting, singleton: false, in_block: true)
+      end
+
+      # Reassigning a constant keeps its visibility in Ruby: a `private_constant` above still holds.
+      def reassigned_visibility(name, owner)
+        earlier = @sites.rfind do |site|
+          site.data["kind"] == "constant" && site.data["owner"] == owner && site.data["name"] == name
+        end
+        earlier ? earlier.data["visibility"] : "public"
       end
 
       # `Foo = Data.define(:a, :b) do … end` and `Foo = Struct.new(:a, keyword_init: true) do … end`: a class site
@@ -400,6 +431,43 @@ module Rigor
       # `class << self` body (constants go to the singleton class). Such a declaration is an omission.
       def constant_scope_unknown?
         @bodies.any? { |body| %i[builder singleton].include?(body.kind) }
+      end
+
+      def constant_visibility_call?(node)
+        node.is_a?(Prism::CallNode) && node.receiver.nil? && %i[private_constant public_constant].include?(node.name) &&
+          node.arguments
+      end
+
+      # `private_constant :X` written directly in a namespace body makes the constants it names, already assigned
+      # above it in this body's namespace, private. Written anywhere else (an `if`, a block, a method) it runs at a
+      # time Rigor does not know, so those constants read unknown; a non-literal argument leaves every constant of
+      # the namespace unknown. Under a builder block or `class << self` it targets the new class or the singleton
+      # class, which hold none of the constants listed here.
+      def constant_visibility(node, nesting, direct:)
+        return if constant_scope_unknown?
+
+        direct &&= !@bodies.last&.detached
+        visibility = node.name == :private_constant ? "private" : "public"
+        node.arguments.arguments.each do |argument|
+          names = argument_names(argument)
+          named_constants(nesting, names).each { |site| site.data["visibility"] = names && direct ? visibility : nil }
+        end
+      end
+
+      # The namespace's constant sites so far that `names` names, or all of them when `names` is nil.
+      def named_constants(nesting, names)
+        owner = nesting.last || "Object"
+        qualified = names&.map { |name| qualify_name(nesting, name) }
+        @sites.select do |site|
+          site.data["kind"] == "constant" && site.data["owner"] == owner &&
+            (qualified.nil? || qualified.include?(site.data["name"]))
+        end
+      end
+
+      # A plain constant assignment whose name Rigor can qualify, outside any block or a body whose constants land
+      # somewhere the nesting does not name.
+      def modelled_write?(node, name, in_block)
+        name && !in_block && plain_write?(node) && !constant_scope_unknown?
       end
 
       def plain_write?(node)
@@ -617,7 +685,7 @@ module Rigor
         tail = { "ordinal" => ordinal, "span" => Lens.span(location),
                  "contract_span" => Lens.contract_span(anchor.contract_comments), "anchor" => anchor.token,
                  "contract" => nil }
-        head = { "key" => key, "builder" => nil, "alias_of" => nil }
+        head = { "key" => key, "builder" => nil, "value" => nil, "alias_of" => nil }
         @sites << Site.new(data: head.merge(data).merge(tail), node: node, contract_comments: anchor.contract_comments)
       end
 

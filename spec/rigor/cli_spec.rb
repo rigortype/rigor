@@ -209,6 +209,37 @@ RSpec.describe Rigor::CLI do
       expect(err).to match(/\.rigor\.yml:\d+:\d+: not valid YAML: /)
       expect(err).not_to include("psych")
     end
+
+    # Issue #1895 — a `dependencies.source_inference:` entry that is not a mapping (a bare gem name, a number, an
+    # empty item) used to escape as an uncaught `ArgumentError` backtrace.
+    it "renders a non-mapping dependencies.source_inference entry as one rigor: line" do
+      { "no-such-gem-xyz" => '"no-such-gem-xyz"', "42" => "42", "~" => "nil" }.each do |entry, shown|
+        config = "paths: [.]\ndependencies:\n  source_inference: [#{entry}]\n"
+        status, _out, err = in_project(config) { run_cli("check", ".") }
+
+        expect(status).to eq(Rigor::CLI::EXIT_USAGE)
+        expect(err).to eq("rigor: dependencies.source_inference[] entry must be a Hash, got #{shown}\n")
+      end
+    end
+
+    # A `mode:` or `budget_overrun_strategy:` that is not a String used to escape as a `NoMethodError` from `#to_sym`.
+    it "renders a non-String dependencies mode and budget_overrun_strategy as one rigor: line" do
+      {
+        "  source_inference: [{ gem: x, mode: 5 }]\n" =>
+          "rigor: dependencies.source_inference[].mode must be one of [:disabled, :when_missing, :full], got 5\n",
+        "  source_inference: [{ gem: x, mode: [a] }]\n" =>
+          "rigor: dependencies.source_inference[].mode must be one of [:disabled, :when_missing, :full], " \
+          "got [\"a\"]\n",
+        "  budget_overrun_strategy: 5\n" =>
+          "rigor: dependencies.budget_overrun_strategy must be one of " \
+          "#{Rigor::Configuration::Dependencies::VALID_BUDGET_OVERRUN_STRATEGIES.inspect}, got 5\n"
+      }.each do |entry, expected|
+        status, _out, err = in_project("paths: [.]\ndependencies:\n#{entry}") { run_cli("check", ".") }
+
+        expect(status).to eq(Rigor::CLI::EXIT_USAGE)
+        expect(err).to eq(expected)
+      end
+    end
   end
 
   # ADR-46 — the incremental-analysis acceptance gate.
@@ -643,6 +674,38 @@ RSpec.describe Rigor::CLI do
         check_status, check_out, = run_cli("check", "--no-stats", "--config", config, "probe.rb")
         expect(check_status).to eq(0)
         expect(check_out).not_to include("assert_type")
+      end
+    end
+
+    # Issue #1895 — `type-scan`, `trace`, `annotate` and `sig-gen` build their environment with the same `pre_eval:`
+    # registry, so each answers the patched `Integer#foo` as `rigor check` does: `Dynamic[1]`, and `String` once
+    # `#to_s` is sent to it.
+    it "types a pre_eval-patched method in every other probe command as `rigor check` does", :aggregate_failures do
+      write_fixture("patch.rb", "class Integer\n  def foo = 1\nend\n")
+      write_fixture("probe.rb", "class Probe\n  def bar\n    rand(3).foo\n  end\n\n  " \
+                                "def baz\n    rand(3).foo.to_s\n  end\nend\n")
+      write_fixture("oracle.rb", "require \"rigor/testing\"\ninclude Rigor::Testing\n\n" \
+                                 "assert_type(\"Dynamic[1]\", rand(3).foo)\n" \
+                                 "assert_type(\"String\", rand(3).foo.to_s)\n")
+      write_fixture(".rigor.yml", "paths: [probe.rb]\npre_eval: [patch.rb]\n")
+
+      Dir.chdir(tmpdir) do
+        check_status, check_out, = run_cli("check", "--no-stats", "--no-cache", "oracle.rb")
+        expect(check_status).to eq(0)
+        expect(check_out).not_to include("assert_type")
+
+        _, annotated, = run_cli("annotate", "probe.rb")
+        expect(annotated).to match(/rand\(3\)\.foo\s+#=> Dynamic\[1\]/)
+
+        _, traced, = run_cli("trace", "--format", "json", "probe.rb")
+        foo = JSON.parse(traced).map { |frame| frame["data"] }.find { |data| data["method"] == "foo" }
+        expect(foo).to include("type" => "Dynamic[1]", "resolved" => true)
+
+        _, scanned, = run_cli("type-scan", "probe.rb")
+        expect(scanned).to match(/unrecognized:\s+0 /)
+
+        _, generated, = run_cli("sig-gen", "--print", "probe.rb")
+        expect(generated).to include("def baz: () -> String")
       end
     end
 

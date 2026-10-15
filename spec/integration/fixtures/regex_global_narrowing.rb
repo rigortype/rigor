@@ -2169,6 +2169,207 @@ def not_match_rebound(line, u)
   key = $1
   key.upcase # GENUINE-NIL
 end
+# Issue #1494 — `=~` gates its edges on the subject as `!~` does. A Symbol subject is not refined to the String an
+# anchored pattern names, nor is an untyped one, which may be a Symbol (Ruby: a Proc for `match_symbol_subject("12")`,
+# `match_symbol_argument("12")` and `match_untyped_subject(:"12")`).
+def match_symbol_subject(raw)
+  name = String(raw).to_sym
+  return unless name =~ /\A\d+\z/
+
+  assert_type("Symbol", name)
+  name.to_proc # MATCH-1494
+end
+
+def match_symbol_argument(raw)
+  name = String(raw).to_sym
+  return unless /\A\d+\z/ =~ name
+
+  assert_type("Symbol", name)
+  name.to_proc # MATCH-1494
+end
+
+def match_untyped_subject(raw)
+  return unless raw =~ /\A\d+\z/
+
+  assert_type("Dynamic[top]", raw)
+  raw.to_proc # MATCH-1494
+end
+
+# A subject that may be a Symbol keeps its type too; `String#=~` and `Symbol#=~` both set `$~`, so the edges stay
+# narrowed (Ruby: a MatchData for `match_string_or_symbol(false, "1")`, nil for `match_string_or_symbol(true, "x")`).
+def match_string_or_symbol(flag, raw)
+  subject = flag ? String(raw) : String(raw).to_sym
+  if subject =~ /\A\d+\z/
+    assert_type("String | Symbol", subject)
+    assert_type("MatchData", $~)
+  else
+    assert_type("nil", $~)
+  end
+end
+
+# A String subject keeps both edges, as does a Regexp receiver, which sets `$~` whatever its argument, `nil` included
+# (Ruby: nil for `$1` and `$~` in the `else` arm of each with `raw = nil`).
+def match_string_edges(raw)
+  line = String(raw)
+  if line =~ /(a)/
+    assert_type("String", $1)
+  else
+    assert_type("nil", $1)
+    assert_type("nil", $~)
+  end
+end
+
+def match_regexp_receiver_nilable(raw)
+  line = raw ? String(raw) : nil
+  "ab" =~ /(a)/
+  if /(z)/ =~ line
+    assert_type("String", $1)
+  else
+    assert_type("nil", $1)
+  end
+end
+
+# `NilClass#=~` answers nil and leaves `$~` alone, so a subject that may be nil, or an untyped one, reaches the
+# no-match edge with the previous match bound; nil never reaches the match edge, so it stays narrowed (Ruby: "a" in
+# the `else` arm for `match_nilable_subject(nil)` and `match_untyped_edges(nil)`).
+def match_nilable_subject(raw)
+  "ab" =~ /(a)/
+  x = raw ? String(raw) : nil
+  if x =~ /(z)/
+    assert_type("String", $1)
+  else
+    assert_type("String?", $1)
+  end
+end
+
+def match_untyped_edges(line)
+  "ab" =~ /(a)/
+  if line =~ /(z)/
+    assert_type("String", $1)
+  else
+    assert_type("String?", $1)
+  end
+end
+
+# The same edges in an `unless`, a ternary and an `&&` operand (Ruby: "a" in each no-match read for `raw = nil`).
+def match_nilable_forms(raw)
+  "ab" =~ /(a)/
+  x = raw ? String(raw) : nil
+  assert_type("String?", $1) unless x =~ /(z)/
+  x =~ /(z)/ ? assert_type("String", $1) : assert_type("String?", $1)
+  x =~ /(z)/ && assert_type("String", $1)
+end
+
+# A receiver whose `=~` is defined in Ruby binds `$~` in its own frame, so neither edge says anything about the
+# caller's (Ruby: "a" for `$1` on both arms of `match_custom_receiver`).
+class MatchMatcher
+  def =~(_other) = [0, nil].sample
+end
+
+def match_custom_receiver
+  "ab" =~ /(a)/
+  if MatchMatcher.new =~ /(z)/
+    assert_type("String?", $1)
+  else
+    assert_type("String?", $1)
+  end
+end
+
+# A project subclass of String matches in the caller's frame as String does, so both edges hold, though the
+# refinement, which names a String, leaves it out; a union member with no `=~` (`Integer`, since Ruby 3.2 dropped
+# `Object#=~`) never reaches the match edge (Ruby: "A" for `match_string_subclass("a")` and for
+# `MatchUnionHolder.new.run` when `@v` is "a" and nil in the `else` arm for `match_string_subclass("b")`).
+class MatchSubStr < String
+end
+
+def match_string_subclass(raw)
+  s = MatchSubStr.new(raw)
+  if s =~ /(a)/
+    key = $1
+    key.upcase # MATCH-1494
+  else
+    assert_type("nil", $1)
+  end
+end
+
+def match_string_subclass_refinement(raw)
+  s = MatchSubStr.new(raw)
+  return unless s =~ /\A\d+\z/
+
+  assert_type("MatchSubStr", s)
+end
+
+class MatchUnionHolder
+  def run
+    @v = rand(2).zero? ? "a" : 1
+    return unless @v =~ /(a)/
+
+    key = $1
+    key.upcase # MATCH-1494
+  end
+end
+
+# A safe-navigation `=~` answers nil without matching on a nil receiver, which reaches the no-match edge only
+# (Ruby: "A" for `match_safe_navigation("a")`, and "a" in the `else` arm for `match_safe_navigation_edges(nil)`).
+def match_safe_navigation(raw)
+  x = raw ? String(raw) : nil
+  return unless x&.=~(/(a)/)
+
+  key = $1
+  key.upcase # MATCH-1494
+end
+
+def match_safe_navigation_edges(raw)
+  "ab" =~ /(a)/
+  x = raw ? String(raw) : nil
+  if x&.=~(/(z)/)
+    assert_type("String", $1)
+  else
+    assert_type("String?", $1)
+  end
+end
+
+# `!~` reads a project String subclass as a String too: `String#=~` clears `$~` on a failed match, so its no-match
+# edge binds `$1` to nil (Ruby: nil for `not_match_string_subclass("ab")`).
+def not_match_string_subclass(raw)
+  "ab" =~ /(a)/
+  s = MatchSubStr.new(raw)
+  assert_type("nil", $1) if s !~ /(z)/
+end
+
+# A `=~` a module gives the receiver's class binds `$~` in that method's frame too, so neither edge holds (Ruby:
+# "a" for `$1` on both arms of `match_mixin_receiver("q")`).
+module MatchOwnOperator
+  def =~(_other) = [0, nil].sample
+end
+
+class MatchMixinStr < String
+  include MatchOwnOperator
+end
+
+def match_mixin_receiver(raw)
+  "ab" =~ /(a)/
+  if MatchMixinStr.new(raw) =~ /(z)/
+    assert_type("String?", $1)
+  else
+    assert_type("String?", $1)
+  end
+end
+
+# A String subclass that defines its own `=~` binds `$~` in that method's frame, so neither edge holds (Ruby:
+# NoMethodError on nil for `match_custom_string_subclass("a")` whenever that `=~` answers 0).
+class MatchCustomStr < String
+  def =~(_other) = [0, nil].sample
+end
+
+def match_custom_string_subclass(raw)
+  s = MatchCustomStr.new(raw)
+  return unless s =~ /(a)/
+
+  key = $1
+  key.upcase # GENUINE-NIL
+end
+
 # Issue #1384 — a call that may re-run a match forgets every numbered global, not only `$1`..`$9`. After the `sub`,
 # `$9`, `$10` and `$12` all read `String?` (Ruby: nil for each on "abcdefghijkl".sub(/q/, "")).
 def numbered_forgotten_after_sub(s)

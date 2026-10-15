@@ -1,0 +1,1 @@
+- **[cli]** `rigor lens` lists constants: `X = value` written directly in a namespace body or at the top level is a `constant` site with its owner, visibility and the type of its value (declared, or inferred). ([#1935](https://github.com/rigortype/rigor/pull/1935))

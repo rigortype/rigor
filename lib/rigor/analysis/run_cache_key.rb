@@ -70,13 +70,14 @@ module Rigor
       RUN_EFFECTS_TABLE_PRODUCER_ID = "analysis.run-effects-table"
 
       # The run-result producer's declared compaction budget (`Cache::Store#evict!` pass 2). Whole-project,
-      # but unlike the `rbs.*` producers several generations can be live at once: the `paths` key slot means
-      # one entry per analyzed-path SET, so `rigor check` over the whole project, over `lib`, and over a
-      # single file are three separate live generations. 16 is a judgement call sized for that churn; it is
-      # a cap on GENERATIONS, not on correctness — over-evicting here costs a recompute, never a wrong
-      # answer. Measured 2026-07-25 against a real project's `.rigor/cache`: the cap does bind (60 distinct
-      # path-set generations observed, differing in the `paths` slot alone), with no evidence yet on how
-      # often an evicted generation is asked for again — see issue #151.
+      # but unlike the `rbs.*` producers several generations can be live at once: the `paths` and `roots` key
+      # slots mean one entry per analyzed-path SET x root list as written (#1559), so `rigor check` over the
+      # whole project, over `lib`, and over a single file are three separate live generations, and `rigor
+      # check` and `rigor check lib` are two even when `lib` is the configured `paths:`. 16 is a judgement call
+      # sized for that churn; it is a cap on GENERATIONS, not on correctness — over-evicting here costs a
+      # recompute, never a wrong answer. Measured 2026-07-25 against a real project's `.rigor/cache`: the cap
+      # does bind (60 distinct path-set generations observed, differing in the `paths` slot alone), with no
+      # evidence yet on how often an evicted generation is asked for again — see issue #151.
       GENERATION_CAP = 16
 
       # The effects sidecar's own compaction budget. One generation per (path set × effects identity), and
@@ -107,6 +108,29 @@ module Rigor
         )
       rescue StandardError
         nil
+      end
+
+      # #1559 — the run-result key's analysis ROOTS, as the run was given them. The `paths` slot holds only the
+      # files the roots expand to, so `check lib extra` with `extra` missing and `check lib` shared a key while
+      # only the first prints `extra:1:1: warning: no such file or directory (skipped)`, which changes the exit
+      # code under `--fail-on=warning`. The roots are kept in the order and spelling written, not normalised: a
+      # missing root is reported as written (`./extra` is not `extra`), and the order of the roots is the order
+      # the diagnostics come out in, so two runs that differ only in either are two slots (a forgone hit, never a
+      # wrong one).
+      #
+      # Added to the DIAGNOSTICS key only. The ADR-103 effects sidecar derives its identity from {#descriptor}
+      # without it: the effect table is a function of the analysed files, and no path-error row reaches it.
+      # The `--incremental` slot builds its own, normalised, roots entry ({IncrementalRunSlot}).
+      #
+      # @param descriptor — a {#descriptor} result (nil passes through, so a disabled cache stays disabled).
+      def with_roots(descriptor, roots)
+        return nil if descriptor.nil?
+
+        entry = config_entry("roots", Marshal.dump(Array(roots).map(&:to_s)))
+        Cache::Descriptor.new(
+          gems: descriptor.gems, dependencies: descriptor.dependencies, plugins: descriptor.plugins,
+          configs: descriptor.configs + [entry]
+        )
       end
 
       # Issue #285 — the `engine` slot above pins the engine by VERSION, which identifies the source only

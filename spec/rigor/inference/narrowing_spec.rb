@@ -1722,12 +1722,13 @@ RSpec.describe Rigor::Inference::Narrowing do
   end
 
   describe ".predicate_scopes — #172 constant-operand regex match" do
+    # `x` is a String: `NilClass#=~` and an untyped subject leave the no-match edge unbound (#1494).
     def string_t = Rigor::Type::Combinator.nominal_of("String")
     def matchdata_t = Rigor::Type::Combinator.nominal_of("MatchData")
 
     def const_scope(constants)
       index = Rigor::Scope::DiscoveryIndex::EMPTY.with(in_source_constants: constants)
-      Rigor::Scope.empty.with_discovery(index)
+      Rigor::Scope.empty.with_discovery(index).with_local(:x, string_t)
     end
 
     def edges_with(source, constants)

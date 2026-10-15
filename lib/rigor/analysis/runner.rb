@@ -297,7 +297,8 @@ module Rigor
                      record_dependencies: false, record_self_calls: false, analyze_only: nil,
                      seed_bundles: nil, collect_seed_bundles: false, param_inferred_types: nil,
                      discovery_seed: nil, no_tolerated_effects: false,
-                     restored_run_level_rows: nil, served_per_file_diagnostics: nil, on_file_indexed: nil)
+                     restored_run_level_rows: nil, served_per_file_diagnostics: nil, served_effect_collections: nil,
+                     on_file_indexed: nil)
         @configuration = configuration
         # ADR-113 WD2 — `rigor lens` reads a target's seeded index here: called with `(path, parse_result, scope,
         # index)` for every file this process indexes, after its rules ran and inside the run window, so the reader
@@ -311,6 +312,10 @@ module Rigor
         # narrowed run does not analyse, spliced into this run's per-file stream by
         # {#interleave_served_diagnostics}. Empty on every other run.
         @served_per_file_diagnostics = served_per_file_diagnostics || {}
+        # Issue #1898 — `{path => FileCollection}` the {IncrementalSession} serves for the same unanalysed files, so the
+        # effect graph this run closes (and the envelope pass judges) spans the whole project, not just the closure.
+        # Never part of {#effect_collections_by_path}, which stays what THIS run collected. Empty on every other run.
+        @served_effect_collections = served_effect_collections || {}
         @explain = explain
         @cache_store = enforce_read_only_cache(cache_store, buffer)
         @plugin_requirer = plugin_requirer
@@ -851,7 +856,8 @@ module Rigor
         analysis = serve_effect_collections(expansion, environment, key_descriptor, rbs_descriptor)
         computed = false
         diagnostics = @cache_store.fetch_or_validate(
-          producer_id: RunCacheKey::RUN_DIAGNOSTICS_PRODUCER_ID, key_descriptor: key_descriptor,
+          producer_id: RunCacheKey::RUN_DIAGNOSTICS_PRODUCER_ID,
+          key_descriptor: RunCacheKey.with_roots(key_descriptor, expansion.fetch(:roots)),
           generation_cap: RunCacheKey::GENERATION_CAP
         ) do
           computed = true
@@ -1380,7 +1386,8 @@ module Rigor
 
       def build_run_dependency_descriptor(expansion, rbs_descriptor)
         entries = analyzed_file_entries(expansion) + discovery_file_entries(expansion) +
-                  pre_eval_file_entries + template_unit_file_entries + rbs_descriptor.files
+                  pre_eval_file_entries + template_unit_file_entries + rbs_descriptor.files +
+                  root_presence_entries(expansion)
         # #979 — the signature ROOTS' listings, one glob row each. `rbs_descriptor.files` covers only the
         # `.rbs` files that existed while the run read them, so without these a signature file written after
         # the run left the slot validating fresh and the warm run answered without it.
@@ -1389,6 +1396,20 @@ module Rigor
         entries.concat(boundary.files)
         globs.concat(boundary.globs).concat(producer_watch_glob_entries)
         Cache::Descriptor.new(files: entries, globs: globs.uniq)
+      end
+
+      # #1962 / #1555 — a kind row per path the run's answer depends on the presence and kind of, not only its
+      # bytes. An analysis root: its path errors (`no such file or directory`, `not a Ruby file`) answer to whether
+      # it exists and whether it is a directory or a file, while what a directory root holds is the analysed-file
+      # set the key carries. A `pre_eval:` entry: `pre-eval.file-not-found` answers to whether it is a file (one
+      # that is has its `:stat` row from {#pre_eval_file_entries}). A project signature root, configured or the
+      # auto-detected `sig`: the loader reads a directory and a file differently, and #979's listing rows cover a
+      # file appearing under a root that existed, not the root appearing. A kind row rather than an existence row,
+      # because a directory replaced by a file of the same name leaves an existence row fresh. The `--incremental`
+      # slot records existence rows for the same paths ({#incremental_slot_rows}, {#baseline_dependency_rows}).
+      def root_presence_entries(expansion)
+        (expansion.fetch(:roots) + @configuration.pre_eval + signature_root_candidates)
+          .uniq.map { |path| Cache::Descriptor::FileEntry.kind(path: path) }
       end
 
       # Every file a plugin read or probed through its `IoBoundary` (#577 / #613), and every directory it listed
@@ -1580,7 +1601,7 @@ module Rigor
           end
         end
       end
-      private :plugin_boundary_rows, :producer_watch_glob_entries, :existence_entries,
+      private :plugin_boundary_rows, :producer_watch_glob_entries, :existence_entries, :root_presence_entries,
               :analysis_reads_attributed?, :signature_root_candidates, :discovery_glob_entries,
               :unanalysed_pre_eval_entries, :signature_rows, :within?
 
@@ -1907,8 +1928,10 @@ module Rigor
       # The run's per-file effect collections in sorted path order — the sequential half merged with the
       # pool's, exactly as {#file_dependencies} reconciles its two halves. Sorted, because the fold below
       # it must not depend on pool-completion order.
+      # Issue #1898 — a narrowed incremental run adds the collections its session served for the files it did not
+      # analyse, under this run's own for any path both name.
       def effect_collections
-        effect_collections_by_path.sort_by { |path, _| path.to_s }.map(&:last)
+        @served_effect_collections.merge(effect_collections_by_path).sort_by { |path, _| path.to_s }.map(&:last)
       end
 
       # Editor mode § "Scope choice — option A". Under `buffer:` non-nil the per-file analysis emits
@@ -2199,7 +2222,7 @@ module Rigor
             bad << [path, "no such file or directory"]
           end
         end
-        { files: files, errors: path_expansion_errors(bad, any_files: files.any?) }
+        { files: files, roots: Array(paths).map(&:to_s), errors: path_expansion_errors(bad, any_files: files.any?) }
       end
 
       # A bad path *among valid ones* is a warn-and-skip — the run still does useful work, so `rigor check

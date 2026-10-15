@@ -507,11 +507,25 @@ module Rigor
         method_assign_effects = build_method_assign_effects(root)
         walk_class_ivars(root, [], default_scope, accumulator, mutated_ivars,
                          read_before_write, init_writes, method_assign_effects)
+        exempt_class_body_writes!(init_writes, accumulator.delete(DEFINE_METHOD_WRITES) || {})
         merge_held_ivar_writes!(accumulator)
         record_aliased_ivar_mutations!(root, mutated_ivars)
         widen_mutated_ivar_entries!(accumulator, mutated_ivars)
         contribute_read_before_write_nil!(accumulator, read_before_write, init_writes)
         accumulator.transform_values(&:freeze).freeze
+      end
+
+      # Folds the class-body writes {#collect_class_body_ivar_writes} held under {CLASS_BODY_WRITES} into the
+      # `init_writes` exemption, except for an ivar a `define_method` block of the class writes (#1768). Such an ivar
+      # had no census entry before the block's writes were counted, so the exemption never applied to it; a
+      # class-body `@x = nil` writes the class object's ivar and says nothing about whether an instance's `@x` is set,
+      # and exempting it would seed `@x` non-nil from the block's write alone (`if @x` folding always-truthy on an
+      # instance whose `@x` is unset). It keeps the read-before-write `nil` instead, which only widens.
+      def exempt_class_body_writes!(init_writes, define_method_writes)
+        (init_writes.delete(CLASS_BODY_WRITES) || {}).each do |class_name, ivars|
+          kept = ivars - (define_method_writes[class_name] || EMPTY_GUARDED_IVARS)
+          (init_writes[class_name] ||= Set.new).merge(kept)
+        end
       end
 
       # B2.3 — finalize the read-before-write nil contribution. For each class, for each ivar where SOME method body
@@ -854,6 +868,7 @@ module Rigor
           owner = def_owner || qualified_prefix
           collect_initializer_block_ivars(node, owner, default_scope, accumulator, mutated_ivars, init_writes)
           record_attr_writer_ivars(node, owner, accumulator) if ATTR_WRITER_MACROS.include?(node.name)
+          collect_define_method_block_ivars(node, owner, default_scope, accumulator, mutated_ivars)
           false
         else
           walk_ivars_meta_new?(node, qualified_prefix, default_scope, accumulator,
@@ -1065,6 +1080,44 @@ module Rigor
         end
       end
 
+      # The `define_method` arm of {#walk_class_ivars} (#1768). `define_method(:m) { … }` on the implicit
+      # or `self` receiver installs its block as an instance method of `owner`, and Ruby runs the body on
+      # the instance, so its `@x = …` writes are the instance's ivars exactly as a `def m` body's are —
+      # `DefineMethodBlockSelf` narrows the block's `self` the same way when it is evaluated. Without this
+      # arm an ivar `initialize` sets to `nil` and a `define_method` block sets to a String read as `nil`
+      # in every sibling `def`. The block is typed under the instance `self`, as a def body is. Only the
+      # literal-block form counts: a `define_method(:m, callable)` or `&callable` argument is not walked.
+      # `owner` is empty in a `class << self` body (the call defines a class method there) and in an
+      # anonymous factory body, and the block contributes nothing there. A `define_method` inside a `def`
+      # body is already reached by that body's walk ({#gather_ivar_writes} enters blocks).
+      def collect_define_method_block_ivars(node, owner, default_scope, accumulator, mutated_ivars)
+        return if owner.empty?
+        return unless define_method_block_call?(node)
+
+        block = node.block
+        return unless block.body
+
+        class_name = owner.join("::")
+        body_scope = census_body_scope(default_scope, owner, Type::Combinator.nominal_of(class_name))
+        gather_ivar_writes(block.body, body_scope, class_name, accumulator, EMPTY_GUARDED_IVARS, mutated_ivars)
+        written = (accumulator[DEFINE_METHOD_WRITES] ||= {})[class_name] ||= Set.new
+        define_method_written_ivars(block.body, written)
+      end
+
+      # The ivars a `define_method` block body writes, in any write form, outside a nested `def` / `class` / `module`.
+      def define_method_written_ivars(node, acc)
+        return unless node.is_a?(Prism::Node)
+        return if IVAR_BARRIER_NODES.any? { |klass| node.is_a?(klass) }
+
+        case node
+        when Prism::InstanceVariableWriteNode, Prism::InstanceVariableOrWriteNode,
+             Prism::InstanceVariableAndWriteNode, Prism::InstanceVariableOperatorWriteNode,
+             Prism::InstanceVariableTargetNode
+          acc << node.name
+        end
+        node.rigor_each_child { |child| define_method_written_ivars(child, acc) }
+      end
+
       # ADR-38 block-form gate: true when a loaded plugin declares `method_name` a block-form initializer for
       # `class_name` (or an ancestor). Mirrors `additional_initializer?` but queries `covers_block_method?` instead of
       # `covers_method?`.
@@ -1156,20 +1209,38 @@ module Rigor
       # every `@x = …` write target as a class-body init. Consumed by `contribute_read_before_write_nil!` to exempt
       # ivars the author already knows might be nil (the `@x = nil` at class-body level is the canonical nullability
       # acknowledgement; the instance @x is technically a separate store, but the pragmatic intent is unambiguous).
+      #
+      # A literal `define_method` block is a method body, not class-body code (#1768): its writes reach the census as
+      # a `def` body's do, so they must not exempt the ivar from the read-before-write `nil` either. Only its receiver
+      # and arguments are walked.
       def collect_class_body_ivar_writes(node, class_name, init_writes)
         return unless node.is_a?(Prism::Node)
         return if IVAR_BARRIER_NODES.any? { |klass| node.is_a?(klass) }
+
+        return collect_define_method_argument_writes(node, class_name, init_writes) if define_method_block_call?(node)
 
         if node.is_a?(Prism::InstanceVariableWriteNode) ||
            node.is_a?(Prism::InstanceVariableOrWriteNode) ||
            node.is_a?(Prism::InstanceVariableAndWriteNode) ||
            node.is_a?(Prism::InstanceVariableOperatorWriteNode)
-          (init_writes[class_name] ||= Set.new) << node.name
+          ((init_writes[CLASS_BODY_WRITES] ||= {})[class_name] ||= Set.new) << node.name
         end
 
         node.rigor_each_child do |child|
           collect_class_body_ivar_writes(child, class_name, init_writes)
         end
+      end
+
+      # The arguments of a `define_method` block call, walked by {#collect_class_body_ivar_writes} in place of the
+      # call's children so the block body stays out of the class-body init writes.
+      def collect_define_method_argument_writes(node, class_name, init_writes)
+        node.arguments&.arguments&.each { |arg| collect_class_body_ivar_writes(arg, class_name, init_writes) }
+      end
+
+      # A `define_method` call with a literal block on the implicit or `self` receiver: the block is an instance
+      # method body of the class the walk is in (#1768).
+      def define_method_block_call?(node)
+        DefineMethodBlockSelf.define_method_on_lexical_self?(node) && node.block.is_a?(Prism::BlockNode)
       end
 
       def detect_read_before_write(node, seen_writes, read_first)
@@ -2010,6 +2081,13 @@ module Rigor
       AND_WRITE_CONTRIBUTIONS = :and_write_contributions
       OPERATOR_WRITE_CONTRIBUTIONS = :operator_write_contributions
       private_constant :AND_WRITE_CONTRIBUTIONS, :OPERATOR_WRITE_CONTRIBUTIONS
+
+      # The same Symbol-key convention for two side tables the walk fills and {#build_class_ivar_index} removes
+      # before anything reads class names: the ivars each class's `define_method` blocks write (in the
+      # accumulator), and the class-body writes held out of `init_writes` until {#exempt_class_body_writes!}.
+      DEFINE_METHOD_WRITES = :define_method_writes
+      CLASS_BODY_WRITES = :class_body_writes
+      private_constant :DEFINE_METHOD_WRITES, :CLASS_BODY_WRITES
 
       # Unions `type` into the class-ivar accumulator for `(class_name, ivar_name)`. Shared by the single-write and
       # multi-write (parallel-assignment) collectors.
@@ -8404,12 +8482,14 @@ module Rigor
       # {#discovered_project_index_incremental}'s changed-file branch) yields the live def nodes the signature
       # reads their parameter structure from. Issue #1120 — and each file's own refinement table, which the merged
       # def-index cannot attribute back to a file, so the session can diff it against the file's seed bundle.
-      # @return `{ def_index:, code_fingerprints:, declaration_signatures:, refinements: }`.
+      # Issue #1459 — and each file's {#defined_method_names}, diffed the same way.
+      # @return `{ def_index:, code_fingerprints:, declaration_signatures:, refinements:, defined_method_names: }`.
       def scan_summary_for_paths(paths, buffer: nil)
         acc = new_def_index_accumulator
         code_fingerprints = {}
         declaration_signatures = {}
         refinements = {}
+        defined_method_names = {}
         paths.each do |path|
           physical = buffer ? buffer.resolve(path) : path
           source = File.read(physical)
@@ -8419,13 +8499,29 @@ module Rigor
           code_fingerprints[path] = code_fingerprint(source, parsed.comments)
           declaration_signatures[path] = declaration_signature(file_index)
           refinements[path] = file_index[:refinements] if file_index[:refinements]
+          defined_method_names[path] = defined_method_names(file_index)
         rescue DeclarationWalk::ContractError
           raise # a broken walk contract, not an unreadable file: skipping it would hide the failure
         rescue StandardError
           next
         end
         { def_index: finalize_def_index(acc), code_fingerprints: code_fingerprints,
-          declaration_signatures: declaration_signatures, refinements: refinements }
+          declaration_signatures: declaration_signatures, refinements: refinements,
+          defined_method_names: defined_method_names }
+      end
+
+      # Issue #1459 — every method name one file's index defines, on any class or module and either side: the keys of
+      # `methods` (which also carries an `attr_*`, `alias` or `define_method` name) and of the instance and singleton
+      # def-node tables. A single file's `methods` already holds its `def` names, since `subtract_def_methods` runs only
+      # on the merged accumulator; the def-node tables are read as well so the census reads exactly the tables
+      # `BlockCallTiming.project_defines_anywhere?` reads. Takes a live file index or a seed bundle, which hold the
+      # same three keys.
+      def defined_method_names(file_index)
+        names = Set.new
+        %i[methods def_nodes singleton_def_nodes].each do |key|
+          file_index[key]&.each_value { |table| names.merge(table.keys) }
+        end
+        names.freeze
       end
 
       # ADR-89 WD1 — a per-file digest of every cross-file DECLARATION surface an ancestry / file-level
@@ -10642,11 +10738,13 @@ module Rigor
 
       # Issue #1717 — a `def` / `class` / `module` body opens its own `self`, so an enclosing unentered block's
       # unknown-`self` mark ({Scope#block_self_unknown?}) stops at it, as the evaluator's fresh body scope does.
-      # A `case` without a subject narrows its clauses ({#propagate_subjectless_case}). Every other node hands its
-      # children the scope as is.
+      # A `case` narrows its clauses ({#propagate_subjectless_case}, {#propagate_subject_case}). Every other node
+      # hands its children the scope as is.
       def propagate_children(node, table, current_scope)
-        if node.is_a?(Prism::CaseNode) && node.predicate.nil?
-          return propagate_subjectless_case(node, table, current_scope)
+        if node.is_a?(Prism::CaseNode) || node.is_a?(Prism::CaseMatchNode)
+          return propagate_subjectless_case(node, table, current_scope) if node.predicate.nil?
+
+          return propagate_subject_case(node, table, current_scope)
         end
 
         child_scope =
@@ -10873,6 +10971,58 @@ module Rigor
           propagate(when_node, table, truthy_edges.reduce(:join))
         end
         propagate(node.else_clause, table, falsey) if node.else_clause
+      end
+
+      # Issue #1484 — a `case` with a subject the evaluator did not enter (`[case io when StringIO then io.string
+      # end]`, `[case io in StringIO then io.string else nil end]`) narrows each clause as the evaluator does
+      # ({Narrowing.case_clause_scopes}): the body under the clause's narrowed edge, the next clause and the `else`
+      # under its falsey edge. The walk applies no write the subject, a `when` condition or an `in` pattern makes, so
+      # every bound local one of them writes reads `Dynamic[top]` from that point on ({#widen_condition_writes}).
+      # Nor does it run the evaluator's per-clause `LastLine.forget_if_set`: the statement holding the `case`
+      # already forgets a `$_` any of its tests may set. A clause's tests are recorded under the scope the earlier
+      # clauses' falsey edges left, where the evaluator's `when` tests read the post-subject scope: a test reading
+      # the subject sees what the earlier clauses ruled out (`when NilClass then 0 when v.succ`).
+      #
+      # A test that calls a method may rebind an instance-variable or global subject before the body reads it
+      # (`when String then 1 when reset! then @x.upcase`, where `reset!` writes `@x`), and the walk cannot tell. From
+      # the first such test on, the subject reads `Dynamic[top]` on both edges ({#forget_called_subject}). The
+      # evaluator keeps the narrowing there (a separate defect); the walk declines it rather than add a report.
+      def propagate_subject_case(node, table, current_scope)
+        subject = node.predicate
+        propagate(subject, table, current_scope)
+        falsey = widen_condition_writes(subject, current_scope)
+        called = false
+        node.conditions.each do |clause|
+          tests = clause.is_a?(Prism::WhenNode) ? clause.conditions : [clause.pattern]
+          tests.each { |test| propagate(test, table, falsey) }
+          falsey = tests.reduce(falsey) { |acc, test| widen_condition_writes(test, acc) }
+          called ||= tests.any? { |test| runs_call?(test) }
+          body, falsey = Narrowing.case_clause_scopes(subject, clause, falsey)
+          body, falsey = [body, falsey].map { |scope| forget_called_subject(subject, scope) } if called
+          propagate(clause, table, body)
+        end
+        propagate(node.else_clause, table, falsey) if node.else_clause
+      end
+
+      CODE_RUNNING_NODES = [Prism::CallNode, Prism::SuperNode, Prism::ForwardingSuperNode, Prism::YieldNode].freeze
+      private_constant :CODE_RUNNING_NODES
+
+      # Whether `node` holds a method call, `super` or `yield` anywhere, a lambda body's included.
+      def runs_call?(node)
+        return false unless node.is_a?(Prism::Node)
+        return true if CODE_RUNNING_NODES.include?(node.class)
+
+        node.rigor_each_child { |child| return true if runs_call?(child) }
+        false
+      end
+
+      # `scope` with an instance-variable or global `subject` rebound to `Dynamic[top]`; any other subject as is.
+      def forget_called_subject(subject, scope)
+        case subject
+        when Prism::InstanceVariableReadNode then scope.with_ivar(subject.name, Type::Combinator.untyped)
+        when Prism::GlobalVariableReadNode then scope.with_global(subject.name, Type::Combinator.untyped)
+        else scope
+        end
       end
 
       # `scope` with every bound local `condition` writes rebound to `Dynamic[top]`.

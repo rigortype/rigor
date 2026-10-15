@@ -298,6 +298,81 @@ end
     end
   end
 
+  describe "constants" do
+    let(:source) do
+      <<~RUBY
+        module K
+          LIMIT = 10
+          SECRET = "x"
+          private_constant :SECRET
+          HIDDEN = 1
+          if $x
+            private_constant :HIDDEN
+          end
+          MEMO ||= {}
+          A, B = 1, 2
+          CALLBACK = -> { def inside = 1 }
+          class << self
+            ON_SINGLETON = 1
+          end
+        end
+        TOP = :top
+      RUBY
+    end
+
+    it "reads a plain constant write as a constant site with its owner and visibility" do
+      rows = sites(source).filter_map do |site|
+        [site["owner"], site["name"], site["visibility"]] if site["kind"] == "constant"
+      end
+
+      expect(rows).to eq([["K", "K::LIMIT", "public"], ["K", "K::SECRET", "private"], ["K", "K::HIDDEN", nil],
+                          ["K", "K::CALLBACK", "public"], ["Object", "TOP", "public"]])
+    end
+
+    it "leaves compound, multiple and singleton-body writes, and declarations in a value, as omissions" do
+      expect(omissions(source)).to include(%w[constant K::MEMO], %w[constant K::A], %w[constant K::B],
+                                           %w[method inside], %w[constant ON_SINGLETON])
+    end
+  end
+
+  describe "constant visibility and value" do
+    def constant_rows(source)
+      sites(source).filter_map do |site|
+        [site["name"], site["visibility"], site["value"]] if site["kind"] == "constant"
+      end
+    end
+
+    it "keeps a reassigned constant's visibility and reads a string argument" do
+      source = "module K\n  X = 1\n  private_constant \"X\"\n  X = 2\n  Y = 1\n  public_constant :Y\nend\n"
+
+      expect(constant_rows(source).map { |name, visibility, _| [name, visibility] })
+        .to eq([%w[K::X private], %w[K::X private], %w[K::Y public]])
+    end
+
+    it "lets a private_constant in a singleton body or a builder block change none of the listed constants" do
+      source = <<~RUBY
+        module K
+          LIMIT = 10
+          class << self
+            private_constant :LIMIT
+          end
+          D = Data.define(:a) do
+            private_constant :LIMIT
+          end
+        end
+      RUBY
+
+      expect(constant_rows(source).map { |name, visibility, _| [name, visibility] }).to eq([%w[K::LIMIT public]])
+    end
+
+    it "omits a path write, whose namespace check resolves through the nesting" do
+      source = "module K\n  N::Y = 3\n  ::TOPZ = 4\nend\nFoo::BAR = 1\n"
+
+      expect(constant_rows(source)).to eq([])
+      expect(omissions(source)).to include(%w[constant K::N::Y], %w[constant TOPZ], %w[constant Foo::BAR])
+    end
+  end
+
   describe "aliases" do
     let(:source) do
       <<~RUBY

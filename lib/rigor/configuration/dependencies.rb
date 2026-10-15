@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "../configuration_error"
+
 module Rigor
   class Configuration
     # Parsed `dependencies:` section of `.rigor.yml`. Per
@@ -56,7 +58,7 @@ module Rigor
       # Hash with `source_inference:` and / or `budget_per_gem:` / `budget_overrun_strategy:` present.
       def self.from_h(data)
         return new([]) if data.nil?
-        raise ArgumentError, "dependencies: must be a Hash, got #{data.inspect}" unless data.is_a?(Hash)
+        raise ConfigurationError, "dependencies: must be a Hash, got #{data.inspect}" unless data.is_a?(Hash)
 
         raw_entries = coerce_source_inference(data["source_inference"])
         entries, warnings = dedupe_entries(raw_entries)
@@ -139,7 +141,7 @@ module Rigor
           return [] if value.nil? || value == false
 
           unless value.is_a?(Array)
-            raise ArgumentError,
+            raise ConfigurationError,
                   "dependencies.source_inference: must be a list of entries " \
                   "(or false / omitted to disable), got #{value.inspect}"
           end
@@ -149,7 +151,7 @@ module Rigor
 
         def coerce_entry(raw)
           unless raw.is_a?(Hash)
-            raise ArgumentError,
+            raise ConfigurationError,
                   "dependencies.source_inference[] entry must be a Hash, got #{raw.inspect}"
           end
 
@@ -162,7 +164,7 @@ module Rigor
 
         def coerce_gem(value)
           unless value.is_a?(String) && !value.empty?
-            raise ArgumentError,
+            raise ConfigurationError,
                   "dependencies.source_inference[].gem must be a non-empty String, got #{value.inspect}"
           end
 
@@ -170,28 +172,34 @@ module Rigor
         end
 
         def coerce_mode(value)
-          mode = (value || "when_missing").to_sym
+          mode = config_symbol(value || "when_missing")
           return mode if VALID_MODES.include?(mode)
 
-          raise ArgumentError,
+          raise ConfigurationError,
                 "dependencies.source_inference[].mode must be one of " \
                 "#{VALID_MODES.inspect}, got #{value.inspect}"
+        end
+
+        # The Symbol a String / Symbol value names, or nil for any other YAML shape (a number, a list, a mapping), which
+        # the caller then reports as not one of its valid values rather than crashing on `#to_sym`.
+        def config_symbol(value)
+          value.to_sym if value.is_a?(String) || value.is_a?(Symbol)
         end
 
         def coerce_roots(raw)
           roots = Array(raw.fetch("roots", DEFAULT_ROOTS)).map(&:to_s).freeze
           return roots unless roots.empty?
 
-          raise ArgumentError,
+          raise ConfigurationError,
                 "dependencies.source_inference[].roots must not be empty when supplied " \
                 "(omit the key to fall back to the default #{DEFAULT_ROOTS.inspect})"
         end
 
         def coerce_budget_overrun_strategy(value)
-          symbol = value.to_sym
+          symbol = config_symbol(value)
           return symbol if VALID_BUDGET_OVERRUN_STRATEGIES.include?(symbol)
 
-          raise ArgumentError,
+          raise ConfigurationError,
                 "dependencies.budget_overrun_strategy must be one of " \
                 "#{VALID_BUDGET_OVERRUN_STRATEGIES.inspect}, got #{value.inspect}"
         end
@@ -201,13 +209,13 @@ module Rigor
         # MIN_BUDGET_PER_GEM .. MAX_BUDGET_PER_GEM (i.e. 0.25× – 4× of the default).
         def coerce_budget_per_gem(value)
           unless value.is_a?(Integer)
-            raise ArgumentError,
+            raise ConfigurationError,
                   "dependencies.budget_per_gem must be an Integer, " \
                   "got #{value.inspect}"
           end
 
           unless value.between?(MIN_BUDGET_PER_GEM, MAX_BUDGET_PER_GEM)
-            raise ArgumentError,
+            raise ConfigurationError,
                   "dependencies.budget_per_gem must be in the range " \
                   "#{MIN_BUDGET_PER_GEM}..#{MAX_BUDGET_PER_GEM}, " \
                   "got #{value.inspect}"

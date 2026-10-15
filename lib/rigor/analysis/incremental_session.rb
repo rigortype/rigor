@@ -38,7 +38,13 @@ module Rigor
       # gate) can report what was re-analyzed versus served from cache. `added` / `removed` carry the
       # structural delta so {#run_incremental} (ADR-87 WD3) can recognise a zero-change recheck and skip the
       # unconditional snapshot rewrite.
-      Recheck = Data.define(:diagnostics, :changed, :added, :removed, :affected, :reused, :templates) do
+      # `rebaselined` (#1898) is true when the recheck found its served effect collections stale and answered with a
+      # full baseline instead; see {#rebaseline_recheck}.
+      Recheck = Data.define(:diagnostics, :changed, :added, :removed, :affected, :reused, :templates, :rebaselined) do
+        def initialize(rebaselined: false, **rest)
+          super
+        end
+
         # A recheck that changed, added, and removed nothing — the session state is byte-equivalent to the
         # snapshot that was restored, so persisting it again would only rewrite identical bytes.
         def no_change?
@@ -208,6 +214,7 @@ module Rigor
         # ADR-103 WD13 / #382 — a baseline collects every file, so its collections are the whole world.
         @effect_collections = runner.effect_collections_by_path
         @effects_identity = current_effects_identity
+        @effect_plugin_digest = effect_plugin_digest_of(runner)
         @cache = per_file(runner.per_file_diagnostics)
         @digests = @analyzed.to_h { |path| [path, pack_digest(path)] }
         forget_unbound_digests
@@ -238,15 +245,13 @@ module Rigor
         # go in too, so the runner lists them in the full run's file order (#1524).
         runner = build_runner(analyze_only: analyze_set, record_dependencies: true,
                               param_inferred_types: fresh_params, **forced_target_options(forced),
-                              restored_run_level_rows: @run_level_rows,
-                              served_per_file_diagnostics: @cache.slice(*reused))
+                              restored_run_level_rows: @run_level_rows, **served_state(reused))
         merged = run_runner(runner).diagnostics
-        @last_runner = runner # ADR-88 WD1 — the post-hoc fact-surface fingerprint reads this prepared registry.
+        return rebaseline_recheck(changed, added, removed) if served_effects_stale?(runner, reused)
+
         absorb(runner, current, analyze_set, removed)
         @param_table = fresh_params
-        Recheck.new(diagnostics: merged, changed: changed.to_set, added: added.to_set,
-                    removed: removed.to_set, affected: affected, reused: reused.to_set,
-                    templates: runner.template_unit_paths.size)
+        recheck_result(merged, [changed, added, removed], affected: affected, reused: reused.to_set, runner: runner)
       end
 
       # Editor mode option B (#146) — a whole-project recheck with the editor's buffer substituted for one
@@ -271,6 +276,9 @@ module Rigor
           # latency this mode exists to avoid, so decline and let the caller drop to single-file scope.
           break nil unless @plugin_fact_reusable.reusable_against?(restored.plugin_fact_digest)
           break nil if source_rbs_unverified?(result)
+          # #1898 — a recheck that re-baselined over stale plugin effect facts ran its baseline with the buffer set,
+          # which analyses the buffer alone, so it is not a whole-project answer. Decline, as above.
+          break nil if result.rebaselined
 
           result
         end
@@ -520,8 +528,7 @@ module Rigor
         # ADR-67 WD6c lift — seed the subset run from the baseline's own table so the verification engine
         # exercises the exact seeds the served cache entries were computed under (and skips a re-collect).
         runner = build_runner(analyze_only: affected, param_inferred_types: @param_table,
-                              restored_run_level_rows: @run_level_rows,
-                              served_per_file_diagnostics: @cache.slice(*reused))
+                              restored_run_level_rows: @run_level_rows, **served_state(reused))
         run_runner(runner).diagnostics
       end
 
@@ -565,7 +572,7 @@ module Rigor
             result = recheck
             adopt_plugin_fact_fingerprint
             fact_reusable = @plugin_fact_reusable.reusable_against?(restored.plugin_fact_digest)
-            if fact_reusable && effects_reusable && !source_rbs_unverified?(result)
+            if fact_reusable && effects_reusable && !result.rebaselined && !source_rbs_unverified?(result)
               diagnostics = keep_recheck(result)
               warm = true
               # ADR-87 WD3 — a warm recheck that changed nothing leaves the session state byte-equivalent to the
@@ -580,7 +587,8 @@ module Rigor
               # digest (from the recheck runner) is unchanged by the re-analysis, so it is kept for the save.
               # Only a genuine fact-surface reason sets the reporting flag the CLI banner reads.
               @fact_surface_invalidated = true unless fact_reusable
-              diagnostics = baseline
+              # #1898 — a recheck that already re-baselined over stale plugin effect facts is that re-analysis.
+              diagnostics = result.rebaselined ? result.diagnostics : baseline
               warm = false
               skip_save = false
             end
@@ -904,6 +912,7 @@ module Rigor
         # a partial re-collection cannot be closed into a whole-project fixpoint.
         @effects_identity  = payload.effects_identity
         @effect_collections = effect_collections_reusable?(payload) ? payload.effect_collections.dup : {}
+        @effect_plugin_digest = payload.effect_plugin_digest
         @symbol_dependents = Incremental.invert_symbols(@symbol_sources)
         @ancestry_dependents = Incremental.invert(@ancestry_sources)
         @negative_dependents = Incremental.invert(@missing)
@@ -932,7 +941,8 @@ module Rigor
           param_table: marshal_safe_param_table,
           effect_collections: marshal_safe_effect_collections,
           effects_identity: @effects_identity,
-          run_level_rows: @run_level_rows
+          run_level_rows: @run_level_rows,
+          effect_plugin_digest: @effect_plugin_digest
         )
       end
 
@@ -944,6 +954,7 @@ module Rigor
       def reset_effect_state
         @effect_collections = {}
         @effects_identity = nil
+        @effect_plugin_digest = nil
       end
 
       # The state this session carries ACROSS processes in the snapshot rather than deriving each run: the
@@ -1034,6 +1045,7 @@ module Rigor
       # multiple edits: the analyzed set gets fresh diagnostics + digests + dependency edges, removed files
       # are evicted from every map, and the analyzed-file list advances to `current`.
       def absorb(runner, current, analyze_set, removed)
+        @last_runner = runner # ADR-88 WD1 — the post-hoc fact-surface fingerprint reads this prepared registry.
         removed.each { |path| forget(path) }
         @analyzed = current
         # ADR-85 WD2 — the recheck's discovery folded the restored bundles and refreshed them (changed files
@@ -1067,6 +1079,7 @@ module Rigor
         @effect_collections.reject! { |path, _| analyzed.include?(path) }
         @effect_collections.merge!(runner.effect_collections_by_path)
         @effects_identity = current_effects_identity
+        @effect_plugin_digest = effect_plugin_digest_of(runner)
       end
 
       # ADR-89 WD2 — replace the behavioural summaries of every re-analyzed file with THIS run's harvest: drop
@@ -1162,7 +1175,8 @@ module Rigor
       # appeared `"ClassName#method"` to the negative-dependency key it would satisfy (`toplevel:foo` for a
       # top-level def, `method:C#m` otherwise), then unions the recorded negative-dependents of those keys.
       # Issue #1120 — plus the consumers of any refinement name the edit moved ({#refinement_affected}). Issue #1367 —
-      # and every file whose last result holds a `global.*` diagnostic ({#global_write_reporters}).
+      # and every file whose last result holds a `global.*` diagnostic ({#global_write_reporters}). Issue #1459 — and
+      # the consumers of any method name a file started or stopped defining ({#defined_name_affected}).
       def negative_affected(changed, removed, new_fingerprints, new_class_decls, new_constant_decls, summary = nil)
         appeared_methods = Incremental.appeared_symbols(changed, @symbol_fingerprints, new_fingerprints)
         # Issue #639 — a class DISAPPEARING satisfies the `class:` kind too, now that a resolved bare
@@ -1180,7 +1194,7 @@ module Rigor
         keys.concat(class_move_keys(moved_classes))
         keys.concat(moved_constants.map { |name| "constant:#{name.split('::').last}" })
         Incremental.negative_closure(keys, @negative_dependents) | refinement_affected(changed + removed, summary) |
-          global_write_reporters
+          defined_name_affected(changed + removed, summary) | global_write_reporters
       end
 
       # The negative keys a class-declaration diff fires: `class:<last segment>` for a class name, and (issue #1820)
@@ -1206,6 +1220,22 @@ module Rigor
         return Set.new if names.empty?
 
         Incremental.negative_closure(names.map { |name| "refinement:#{name}" }, @negative_dependents)
+      end
+
+      # Issue #1459 — the consumers whose answer asked whether the program defines a method name anywhere, for each
+      # name a file in `paths` started or stopped defining. The before-state is each file's seed bundle, the
+      # after-state the scan's per-file name sets. Unlike the appeared-symbol diff, it sees a name an `attr_*`,
+      # `alias` or `define_method` adds, and one that vanishes, which brings a declined reading back.
+      def defined_name_affected(paths, summary)
+        after = (summary && summary[:defined_method_names]) || {}
+        before = paths.to_h do |path|
+          bundle = @seed_bundles[path]
+          [path, bundle && Inference::ScopeIndexer.defined_method_names(bundle)]
+        end
+        names = Incremental.changed_defined_names(paths, before, after)
+        return Set.new if names.empty?
+
+        Incremental.negative_closure(names.map { |name| "defines:#{name}" }, @negative_dependents)
       end
 
       # The qualified class/module names declared in the pre-parsed `index` (shared with
@@ -1364,6 +1394,45 @@ module Rigor
       def forced_analyze_set(affected, current)
         forced = @force_targets & current.to_set
         [forced, (affected | forced) & current]
+      end
+
+      # What the session serves a narrowed run for the files it does not analyse: their cached per-file rows (#1524),
+      # and (#1898) their effect collections, so the run closes its effect graph over the whole project.
+      def served_state(reused)
+        { served_per_file_diagnostics: @cache.slice(*reused),
+          served_effect_collections: @effect_collections.slice(*reused) }
+      end
+
+      # Issue #1898 — the plugin effect-fact digest a run's collections were stamped under. A plugin writes its
+      # attributions and edges into a file's collection when the file is collected, and what it contributes can
+      # follow project state no file digest sees (rigor-activejob reads `config.active_job.queue_adapter`), so a
+      # served collection is current only while this digest is. nil when collection is off.
+      def effect_plugin_digest_of(runner)
+        @configuration.effects_enabled? ? runner.effect_plugin_facts.digest : nil
+      end
+
+      # Whether `runner` judged envelopes over served collections stamped under a different plugin effect-fact
+      # digest, or an unknown one. The comparison waits for the run because the plugins load inside it.
+      def served_effects_stale?(runner, reused)
+        return false if reused.empty? || @effect_collections.empty?
+
+        effect_plugin_digest_of(runner) != @effect_plugin_digest
+      end
+
+      # The answer {#recheck} gives when {#served_effects_stale?}: a full baseline, reported as a recheck that
+      # re-analysed every file. {#run_incremental} reads `rebaselined` so it neither runs a second baseline
+      # nor reports the run as warm.
+      def rebaseline_recheck(changed, added, removed)
+        diagnostics = baseline
+        recheck_result(diagnostics, [changed, added, removed],
+                       affected: @analyzed.to_set, reused: Set.new, runner: @last_runner, rebaselined: true)
+      end
+
+      # A {Recheck} over `deltas` (`[changed, added, removed]`), counting `runner`'s template units.
+      def recheck_result(diagnostics, deltas, affected:, reused:, runner:, rebaselined: false)
+        changed, added, removed = deltas.map(&:to_set)
+        Recheck.new(diagnostics: diagnostics, changed: changed, added: added, removed: removed, affected: affected,
+                    reused: reused, templates: runner.template_unit_paths.size, rebaselined: rebaselined)
       end
 
       # A recheck that forces targets analyses in this process, so the index callback reaches them.

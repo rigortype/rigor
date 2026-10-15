@@ -78,7 +78,7 @@ cache:
 | --- | --- | --- | --- |
 | `libraries` | Array | `[]` | Standard-library / gem names whose bundled RBS to load. |
 | `signature_paths` | Array | `nil` | Extra directories of `.rbs` files. Relative entries resolve against the config file's directory. |
-| `pre_eval` | Array | `[]` | Files (or globs) walked before per-file analysis, to register project monkey-patches and publish their top-level constants project-wide. The walker does not follow `require` / `require_relative`, so list the files in load order: a method declared in two files takes the last-listed one, and a file that requires a later-listed one is still read in list order. |
+| `pre_eval` | Array | `[]` | Files (or globs) walked before per-file analysis, to register project monkey-patches and publish their top-level constants project-wide. The walker does not follow `require` / `require_relative`, so list the files in load order: a method declared in two files takes the last-listed one, and a file that requires a later-listed one is still read in list order. `type-of`, `type-scan`, `trace`, `annotate` and `sig-gen` read the patches too, so they type a patched method as `rigor check` does. |
 | `plugins` | Array | `[]` | Plugins to activate — see [Using plugins](07-plugins.md). |
 
 ### Signature generation
@@ -136,7 +136,7 @@ statically and may resolve at run time. The same findings appear in the
 
 | Key | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `disable` | Array | `[]` | Rule IDs or families to suppress project-wide. |
+| `disable` | Array | `[]` | Rule IDs or families to suppress project-wide; `all` suppresses every built-in check rule (not the run-level `.rigor.yml` rows or a plugin's own `plugin.<id>.*` rows). See [Diagnostics](04-diagnostics.md). |
 | `severity_profile` | String | `"balanced"` | `lenient`, `balanced`, or `strict` — see [Diagnostics](04-diagnostics.md). |
 | `severity_overrides` | Hash | `{}` | Per-rule / per-family severity, e.g. `{ call: warning, flow.always-truthy-condition: off }`. |
 | `baseline` | String / `false` | `nil` | Path to a `.rigor-baseline.yml`, or `false` to disable an inherited one. See [Baselines](06-baseline.md). |

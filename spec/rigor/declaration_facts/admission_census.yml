@@ -64,6 +64,7 @@ members:
     reads:
     - lib/rigor/inference/last_line/implicit_self.rb
     - lib/rigor/inference/self_call_ivar_writes.rb
+    - lib/rigor/lens/run.rb
     - lib/rigor/reflection.rb
     copies:
     - lib/rigor/analysis/runner.rb

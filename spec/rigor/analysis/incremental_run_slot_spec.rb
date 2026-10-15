@@ -1071,8 +1071,9 @@ RSpec.describe Rigor::Analysis::IncrementalRunSlot do
     expect(plain.send(:run_slot_writable?)).to be(true)
   end
 
-  # Two things keep them apart, each enough alone: the producer id, and the roots entry the plain key does not
-  # carry. The plain run must neither read nor replace the incremental entry, nor the reverse.
+  # Two things keep them apart, each enough alone: the producer id, and the roots entry (`incremental.roots`,
+  # normalised and sorted, against the plain key's `roots`, as written).
+  # The plain run must neither read nor replace the incremental entry, nor the reverse.
   it "keeps the plain and the incremental slots apart" do
     write_project
     incremental, = incremental_run

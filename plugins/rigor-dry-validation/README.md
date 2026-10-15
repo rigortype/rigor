@@ -237,7 +237,10 @@ plugins:
 No plugin-specific config keys, and no `signature_paths:` wiring —
 the manifest's `signature_paths: ["sig"]` auto-contributes the RBS
 overlay (ADR-25). The plugin walks every `paths:`
-entry's `.rb` files looking for the Contract subclass shape.
+entry's `.rb` files looking for the Contract subclass shape, `exclude:`d
+files included. It lists and reads them through its `IoBoundary`, so a new
+`exclude:`d file reaches the run-result caches like an edit does
+([#1803](https://github.com/rigortype/rigor/issues/1803)).
 
 ## Related
 

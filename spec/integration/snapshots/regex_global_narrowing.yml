@@ -241,8 +241,36 @@ assertions:
   '233': String
   '234': String?
   '235': String?
-  '236': String?
-  '237': String?
-  '238': String?
-  '239': String
-  '240': String
+  '236': Symbol
+  '237': Symbol
+  '238': Dynamic[top]
+  '239': String | Symbol
+  '240': MatchData
+  '241': nil
+  '242': String
+  '243': nil
+  '244': nil
+  '245': String
+  '246': nil
+  '247': String
+  '248': String?
+  '249': String
+  '250': String?
+  '251': String?
+  '252': String
+  '253': String?
+  '254': String
+  '255': String?
+  '256': String?
+  '257': nil
+  '258': MatchSubStr
+  '259': String
+  '260': String?
+  '261': nil
+  '262': String?
+  '263': String?
+  '264': String?
+  '265': String?
+  '266': String?
+  '267': String
+  '268': String

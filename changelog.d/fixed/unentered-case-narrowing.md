@@ -1,0 +1,1 @@
+- **[engine]** A `case` with a subject used as an array element, a call argument or a receiver now narrows its arms as the statement form does, so `[case io when StringIO then io.string end]` no longer reports `call.undefined-method` on correct code. ([#1961](https://github.com/rigortype/rigor/pull/1961))

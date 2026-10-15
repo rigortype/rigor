@@ -111,6 +111,20 @@ RSpec.describe "diagnostic suppression", type: :runner do
     it "keeps a diagnostic whose rule the list does not name" do
       expect(rules_for(unsuppressed, config: { "disable" => ["flow"] })).to contain_exactly("call.undefined-method")
     end
+
+    # Issue #1895 — `all` in the list is the same sentinel the file and line markers honour.
+    it "drops every rule under `all`" do
+      expect(rules_for(unsuppressed, config: { "disable" => ["all"] })).to be_empty
+    end
+
+    # The per-file filter on its own, without the run's final stamp (which applies the same list again).
+    it "drops a rule-bearing row but keeps a rule-less one under `all` in `filter_suppressed`" do
+      ruled = Rigor::Analysis::Diagnostic.new(path: "a.rb", line: 1, column: 1, message: "m",
+                                              rule: "call.undefined-method")
+      bare = Rigor::Analysis::Diagnostic.new(path: "a.rb", line: 1, column: 1, message: "parse")
+      kept = Rigor::Analysis::CheckRules.filter_suppressed([ruled, bare], comments: [], disabled_rules: ["all"])
+      expect(kept).to eq([bare])
+    end
   end
 
   describe "marker surveillance" do

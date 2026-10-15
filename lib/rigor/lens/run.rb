@@ -157,11 +157,18 @@ module Rigor
       # A forced target the run did not read: one that does not parse stops before indexing; otherwise reading it
       # failed, or the run never indexed it.
       def uncaptured(absolute, own)
-        if Prism.parse_file(absolute, version: @configuration.target_ruby).errors.any?
+        if parse_errors?(absolute)
           { status: "parse_error", reason: "the file does not parse", diagnostics: own }
         else
           { status: "failed", reason: @capture_errors.fetch(absolute, "the file was not analysed") }
         end
+      rescue StandardError => e
+        # The parse itself failed (an unsupported `target_ruby`, say): the run's own parse did too.
+        { status: "failed", reason: "#{e.class}: #{e.message}" }
+      end
+
+      def parse_errors?(absolute)
+        Prism.parse_file(absolute, version: @configuration.target_ruby).errors.any?
       end
 
       def inputs(session, session_path)

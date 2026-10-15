@@ -132,6 +132,16 @@ RSpec.describe "rigor lens" do
     expect(keys).to eq(keys.uniq)
   end
 
+  it "still writes the document when the configured Ruby cannot be parsed" do
+    File.write(".rigor.yml", File.read(".rigor.yml").sub('target_ruby: "3.4"', 'target_ruby: "3.2"'))
+    status, out, = lens(["--format=json", "lib/order.rb"])
+    file = JSON.parse(out)["files"].first
+
+    expect(status).to eq(1)
+    expect(file["status"]).to eq("failed")
+    expect(file["reason"]).to include("3.2")
+  end
+
   it "exits 64 for a configuration file that does not exist" do
     status, out, = lens(["--config=nope.yml", "lib/order.rb"])
 

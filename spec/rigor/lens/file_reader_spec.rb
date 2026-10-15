@@ -49,24 +49,34 @@ RSpec.describe Rigor::Lens::FileReader do
                                  "i" => "public", "j" => nil)
     end
 
-    it "applies a named call only when it is written directly in the body" do
+    def visibilities_of(source)
+      sites(source).filter_map { |site| [site["name"], site["visibility"]] if site["owner"] }.to_h
+    end
+
+    it "reads a member a named call in a method body names as unknown, and leaves the rest" do
+      source = "class V\n  def b = 2\n  def c = 3\n  def self.configure\n    private :b\n  end\nend\n"
+
+      expect(visibilities_of(source)).to include("b" => nil, "c" => "public", "configure" => "public")
+    end
+
+    it "reads a non-literal named call as making the body's members unknown" do
+      source = "class V\n  def a = 1\n  protected(*NAMES)\n  def e = 5\nend\n"
+
+      expect(visibilities_of(source)).to eq("a" => nil, "e" => nil)
+    end
+
+    it "keeps a toggle inside a block local to the block" do
       source = <<~RUBY
-        class V
-          def a = 1
-          def b = 2
-          def c = 3
-          def d = 4
-          private %i[a]
-          def configure
-            private :b
+        class Foo
+          Point = Struct.new(:x) do
+            private
+            def helper; end
           end
-          protected(*NAMES)
-          def e = 5
+          def bar; end
         end
       RUBY
-      visibilities = sites(source).filter_map { |site| [site["name"], site["visibility"]] if site["owner"] }.to_h
 
-      expect(visibilities).to include("a" => nil, "b" => nil, "c" => nil, "d" => nil, "e" => nil)
+      expect(visibilities_of(source)).to eq("bar" => "public")
     end
 
     it "reads a literal array argument" do

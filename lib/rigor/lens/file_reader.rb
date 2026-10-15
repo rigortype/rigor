@@ -20,7 +20,9 @@ module Rigor
       Result = Data.define(:sites, :omissions, :digest)
       # The running visibility of one class body: Ruby's default for its later `def`s, and whether a toggle the
       # walk cannot place (under an `if`, a `begin`, a block) leaves that default unknown.
-      Body = Struct.new(:current, :uncertain)
+      # A `detached` body stands for code that is not the class body (a block, a method body, a superclass
+      # expression, an omitted class): its toggles and named calls stay local and change no site.
+      Body = Struct.new(:current, :uncertain, :detached)
 
       ATTRIBUTE_CALLS = { attr_reader: "reader", attr_writer: "writer", attr_accessor: "accessor" }.freeze
       OMITTED_CALLS = {
@@ -74,21 +76,30 @@ module Rigor
 
       def walk_children(node, nesting, singleton, in_block)
         node.compact_child_nodes.each do |child|
-          walk(child, nesting, singleton: singleton, in_block: in_block || BLOCK_NODES.include?(child.class))
+          if BLOCK_NODES.include?(child.class)
+            detached { walk(child, nesting, singleton: singleton, in_block: true) }
+          else
+            walk(child, nesting, singleton: singleton, in_block: in_block)
+          end
         end
+      end
+
+      def detached
+        @bodies.push(Body.new("public", false, true))
+        yield
+      ensure
+        @bodies.pop
       end
 
       def walk_namespace(node, nesting, in_block)
         kind = node.is_a?(Prism::ClassNode) ? "class" : "module"
         name = qualify(nesting, node.constant_path)
         if node.is_a?(Prism::ClassNode) && node.superclass
-          walk(node.superclass, nesting, singleton: false,
-                                         in_block: true)
+          detached { walk(node.superclass, nesting, singleton: false, in_block: true) }
         end
         if in_block || name.nil?
           omit(kind, name || node.constant_path.slice, node)
-          return walk(node.body, nesting, singleton: false, in_block: true) if node.body
-
+          detached { walk(node.body, nesting, singleton: false, in_block: true) } if node.body
           return
         end
 
@@ -103,7 +114,7 @@ module Rigor
       def walk_singleton_class(node, nesting, singleton, in_block)
         if in_block || singleton || nesting.empty? || !node.expression.is_a?(Prism::SelfNode)
           omit("singleton_class", nil, node)
-          return walk(node.body, nesting, singleton: singleton, in_block: true) if node.body
+          return detached { walk(node.body, nesting, singleton: singleton, in_block: true) } if node.body
         end
 
         walk_body(node.body, nesting, singleton: true)
@@ -115,7 +126,7 @@ module Rigor
       def walk_body(body, nesting, singleton:)
         return if body.nil?
 
-        @bodies.push(Body.new("public", false))
+        @bodies.push(Body.new("public", false, false))
         statements = body.is_a?(Prism::StatementsNode) ? body.body : [body]
         module_function_on = false
         statements.each do |child|
@@ -172,6 +183,7 @@ module Rigor
       def visibility_call(node, nesting, singleton, direct:)
         @visited_visibility_calls ||= {}.compare_by_identity
         @visited_visibility_calls[node] = true
+        direct &&= !@bodies.last&.detached
         if VISIBILITY_CALLS.include?(node.name)
           return mark_uncertain if node.arguments.nil?
 
@@ -277,7 +289,7 @@ module Rigor
           add_site(node, data)
         end
         # A declaration inside a method body runs only when the method does: not modelled.
-        walk(node.body, nesting, singleton: singleton, in_block: true) if node.body
+        detached { walk(node.body, nesting, singleton: singleton, in_block: true) } if node.body
       end
 
       def read_attribute(node, nesting, singleton, in_block)

@@ -152,6 +152,15 @@ RSpec.describe "rigor lens" do
     expect(file["reason"]).to include("3.2")
   end
 
+  # rigortype/rigor#1907: the reported reproduction, end to end.
+  it "reads a file with a trailing-comma multiple assignment" do
+    File.write("lib/example.rb", "left, = [1, 2]\n")
+    status, out, = lens(["--format=json", "lib/example.rb"])
+
+    expect(status).to eq(0)
+    expect(JSON.parse(out)["files"].first).to include("status" => "ok", "complete" => true)
+  end
+
   it "exits 64 for a configuration file that does not exist" do
     status, out, = lens(["--config=nope.yml", "lib/order.rb"])
 

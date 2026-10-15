@@ -161,5 +161,47 @@ end
                                            %w[define_method dyn], ["constant", "Point::A"], ["constant", "Point::B"])
       expect(omissions(source).count { |kind, name| kind == "constant" && name == "Point::C" }).to eq(2)
     end
+
+    # rigortype/rigor#1907: a trailing-comma assignment's rest slot is a Prism::ImplicitRestNode, which has no
+    # `expression`; reading it failed the whole target.
+    it "reads every shape of multiple assignment" do
+      source = <<~RUBY
+        class M
+          left, = [1, 2]
+          a, * = [1, 2]
+          b, *C = [1, 2]
+          (D, e), F = [[1, 2], 3]
+          *G, h = [1, 2]
+          (i, ), J = [[1], 2]
+          (k, ::N), * = [[1, 2]]
+          def kept = 1
+        end
+      RUBY
+
+      expect(omissions(source).filter_map { |kind, name| name if kind == "constant" })
+        .to contain_exactly("M::C", "M::D", "M::F", "M::G", "M::J", "N")
+      expect(sites(source).map { |site| site["name"] }).to eq(%w[M kept])
+    end
+
+    it "lists the constants a for index or a rescue reference assigns" do
+      source = <<~RUBY
+        class M
+          for A, (B, *C) in [[1, [2]]]; end
+          for D in [1]; end
+          begin
+          rescue => E
+          end
+        end
+      RUBY
+
+      expect(omissions(source).filter_map { |kind, name| name if kind == "constant" })
+        .to contain_exactly("M::A", "M::B", "M::C", "M::D", "M::E")
+    end
+
+    it "walks the expressions inside assignment targets" do
+      source = "class M\n  a[define_method(:z) {}], b = 1\n  Class.new { def q; end }::A, c = 1\nend\n"
+
+      expect(omissions(source)).to include(%w[define_method z], %w[method q])
+    end
   end
 end

@@ -1,0 +1,1 @@
+- **[cli]** `rigor lens` no longer fails a file that contains a trailing-comma multiple assignment such as `left, = [1, 2]`, and now lists every constant a multiple assignment, a `for` index or a `rescue => E` assigns as an omission, so such a file reads `complete: false` instead of silently dropping them. ([#1915](https://github.com/rigortype/rigor/pull/1915))

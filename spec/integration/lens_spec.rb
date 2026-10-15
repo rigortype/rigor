@@ -211,6 +211,46 @@ RSpec.describe "rigor lens" do
     expect(later["visibility"]).to eq("public")
   end
 
+  def write_inline_constants
+    File.write("lib/k.rb", <<~RUBY)
+      # rbs_inline: enabled
+      module K
+        LIMIT = 10
+        NUM = 1 #: Numeric
+        Klass = Class.new(Order) { def own = 1 }
+        Mod = ::Module.new
+        Frozen = Class.new.freeze
+        CALC = LIMIT.succ
+        LIST = []
+        LIST << 1
+        WORDS = [] #: Array[String]
+        #: Integer
+        PRE = "x"
+      end
+    RUBY
+  end
+
+  # #1935 review: check reads a constant the source publishes as its value, over an rbs-inline declaration, and
+  # a sig/ declaration over the value; a Class.new value is a new class, not the superclass the call returns.
+  it "reads each constant's value the way check reads it" do
+    write_inline_constants
+    # Kept apart: a sig/ declaration of a constant in an rbs-inline file drops that file's inline RBS.
+    File.write("lib/d.rb", "module K\n  DECL = \"x\"\n  R = 1\n  R = \"two\"\nend\n")
+    File.write("sig/k.rbs", "module K\n  DECL: Integer\nend\n")
+    _, out, err = lens(["--format=json", "lib/k.rb", "lib/d.rb"])
+    values = JSON.parse(out)["files"].flat_map { |file| file["sites"] }.to_h { |site| [site["name"], site["value"]] }
+
+    expect(err).not_to include("dropped inline-RBS")
+    typed = values.slice("K::LIMIT", "K::NUM", "K::DECL", "K::WORDS").transform_values { it.slice("type", "provenance") }
+    expect(typed)
+      .to eq("K::LIMIT" => { "type" => "10", "provenance" => "inferred" },
+             "K::NUM" => { "type" => "1", "provenance" => "inferred" },
+             "K::DECL" => { "type" => "::Integer", "provenance" => "sig" },
+             "K::WORDS" => { "type" => "::Array[::String]", "provenance" => "inline" })
+    expect(values.values_at("K::Klass", "K::Mod", "K::Frozen", "K::CALC", "K::LIST", "K::R", "K::PRE"))
+      .to all(eq("state" => "unavailable", "reason" => "not_computed"))
+  end
+
   # An alias copies the def in place when it runs, and check reads the last def it saw, so the alias's overload
   # comes from the original only when that original has one project definition.
   it "reads an alias's overload from its original only when the original has one definition" do

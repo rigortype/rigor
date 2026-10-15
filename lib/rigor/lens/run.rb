@@ -127,11 +127,51 @@ module Rigor
                                 spell: speller(scope.environment)).read
         reader.sites.each do |site|
           @site_paths[site.data["key"]] = absolute
+          read_constant_value(site, scope) if site.data["kind"] == "constant"
           Members.scopes_of(site.data).product(site.data["members"]).each do |member_scope, name|
             read_contract(site.data["owner"], member_scope, name, scope)
           end
         end
         @captured[absolute] = reader
+      end
+
+      # The constant's type as `check` reads it ({Reflection.constant_type_for}): the value the project's source
+      # publishes for the name (every write joined, a mutated one widened) over any declaration, else its RBS
+      # declaration, else unknown.
+      def read_constant_value(site, scope)
+        name = site.data["name"]
+        published = scope.in_source_constants[name]
+        site.data["value"] =
+          if published
+            published_slot(published, scope.environment)
+          else
+            declared_slot(site, contract_reader(scope.environment).read_constant(name, scope.environment))
+          end
+      end
+
+      # The rbs-inline plugin declares every constant of a file it reads, typing an unannotated one from its
+      # literal (`[]` as `Array[untyped]`), and reads only a `#:` trailing the assignment as its type: an inline
+      # declaration is the constant's own only when that is the site's one contract comment.
+      def declared_slot(site, declared)
+        return Slot.unavailable("not_computed") if declared.nil?
+        return Slot.unavailable("not_computed") if declared["provenance"] == "inline" && !trailing_type?(site)
+
+        declared
+      end
+
+      def trailing_type?(site)
+        comments = site.contract_comments
+        comments.size == 1 && comments.first.location.start_line == site.node.location.end_line &&
+          comments.first.location.slice.start_with?("#:")
+      end
+
+      def published_slot(type, environment)
+        return Slot.dynamic("inferred", nil) if type.is_a?(Type::Dynamic)
+
+        spelled = speller(environment).call(type, nil)
+        spelled == "untyped" ? Slot.dynamic("inferred", nil) : Slot.typed(spelled, "inferred")
+      rescue StandardError
+        Slot.unavailable("not_computed")
       end
 
       def read_contract(owner, member_scope, name, scope)

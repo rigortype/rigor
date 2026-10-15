@@ -457,6 +457,13 @@ module Rigor
       @locals[name.to_sym]
     end
 
+    # Issue #1840 — replaces the joined bindings of locals a branch merge only narrowed with their pre-branch
+    # binding ({Inference::UntypedRejoin}). Unlike {#with_local} this is not a write: the value is the one the
+    # branches started from, so every fact, narrowing and mark the join kept about it still holds.
+    def with_rejoined_locals(bindings)
+      rebuild(locals: @locals.merge(bindings).freeze)
+    end
+
     def with_local(name, type)
       bind_local(name, type, keep_marks: false)
     end

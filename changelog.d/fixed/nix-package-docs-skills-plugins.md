@@ -1,0 +1,1 @@
+- **[packaging]** The Nix package now ships the bundled `docs/`, `skills/` and `plugins/` trees, so `rigor docs`, `rigor skill --list` and a plugin named in `.rigor.yml` work on the packaged binary instead of failing with "No bundled docs found" or a LoadError. ([#1857](https://github.com/rigortype/rigor/pull/1857))

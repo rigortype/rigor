@@ -143,6 +143,21 @@
             gemdir = ./nix;
           };
 
+          # Each bundled plugin's `lib` (Ruby) and `sig` (RBS), as
+          # `plugins/*/lib/**/*.rb` and `plugins/*/sig/**/*.rbs` in the
+          # gemspec. `sig` is optional per plugin.
+          pluginDirs = builtins.attrNames
+            (pkgs.lib.filterAttrs (_: type: type == "directory") (builtins.readDir ./plugins));
+          pluginFileSets = pkgs.lib.concatMap (name:
+            let
+              base = ./plugins + "/${name}";
+            in
+            pkgs.lib.optional (builtins.pathExists (base + "/lib"))
+              (pkgs.lib.fileset.fileFilter (file: file.hasExt "rb") (base + "/lib"))
+            ++ pkgs.lib.optional (builtins.pathExists (base + "/sig"))
+              (pkgs.lib.fileset.fileFilter (file: file.hasExt "rbs") (base + "/sig"))
+          ) pluginDirs;
+
           version =
             let
               m = builtins.match ''[^"]*"([^"]+)"[^"]*''
@@ -154,14 +169,24 @@
             pname = "rigortype";
             inherit version;
 
+            # Mirrors what `rigortype.gemspec` ships (`spec.files`), not
+            # the whole repository: the engine's code, the bundled docs
+            # (`docs/manual`, `docs/handbook`, `docs/install.md`,
+            # `docs/llms.txt`), the skills' `SKILL.md` and `references/`
+            # markdown, and each bundled plugin's `lib` and `sig`.
             src = pkgs.lib.fileset.toSource {
               root = ./.;
-              fileset = pkgs.lib.fileset.unions [
+              fileset = pkgs.lib.fileset.unions ([
                 ./lib
                 ./exe
                 ./data
                 ./sig
-              ];
+                ./docs/install.md
+                ./docs/llms.txt
+                (pkgs.lib.fileset.fileFilter (file: file.hasExt "md") ./docs/manual)
+                (pkgs.lib.fileset.fileFilter (file: file.hasExt "md") ./docs/handbook)
+                (pkgs.lib.fileset.fileFilter (file: file.hasExt "md" && file.name != "README.md") ./skills)
+              ] ++ pluginFileSets);
             };
 
             nativeBuildInputs = [ pkgs.makeWrapper ];
@@ -172,12 +197,24 @@
             # `exe/rigor` is wrapped against a Ruby carrying the
             # runtime gems. The script puts its own lib/ on the load
             # path relative to itself.
+            # `docs/` and `skills/` sit where the CLI looks for them
+            # (`DOCS_ROOT` / `SKILLS_ROOT`, relative to `lib/`), and
+            # `plugins/` where the bundled-plugin loader does
+            # (`ENGINE_ROOT/plugins`). A plugin's own tree requires its
+            # files by bare feature name (`require "rigor/plugin/…"`), so
+            # every `plugins/*/lib` goes on the wrapper's load path, the
+            # way `spec.require_paths` puts them on the gem's.
             installPhase = ''
               runHook preInstall
               mkdir -p $out/share/rigor $out/bin
-              cp -r lib exe data sig $out/share/rigor/
+              cp -r lib exe data sig docs skills plugins $out/share/rigor/
+              pluginLoadPath=""
+              for dir in "$out"/share/rigor/plugins/*/lib; do
+                pluginLoadPath="''${pluginLoadPath:+$pluginLoadPath:}$dir"
+              done
               makeWrapper ${rigorDeps.wrappedRuby}/bin/ruby $out/bin/rigor \
-                --add-flags "$out/share/rigor/exe/rigor"
+                --add-flags "$out/share/rigor/exe/rigor" \
+                --prefix RUBYLIB : "$pluginLoadPath"
               runHook postInstall
             '';
 

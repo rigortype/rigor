@@ -1,0 +1,1 @@
+- **[inference]** `min` / `max` / `min_by` / `max_by` with a `nil` count now type as the no-count call (an element, not an `Enumerator` or `Array`), and a count that may be `nil` answers the element-or-Array union, so `xs.min_by(limit) { … }.succ` no longer reports a false `call.undefined-method`. ([#1870](https://github.com/rigortype/rigor/pull/1870))

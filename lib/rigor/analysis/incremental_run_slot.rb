@@ -42,8 +42,8 @@ module Rigor
     # plugin's identity and the engine's (key slots), so a project whose plugins claim template globs is served
     # too. The ADR-87 probe misses on one: the plain slot's key carries the `template-units` slot.
     #
-    # `explain:` is always false: the session's runners never set it (#1533), and the CLI declines the probe under
-    # `--explain`.
+    # `explain:` is always false: the session writes no slot for an `--explain` run (#1533), and the CLI declines
+    # the probe under `--explain`.
     module IncrementalRunSlot
       module_function
 

@@ -72,6 +72,7 @@ module Rigor
         )
         runner = invocation.runner
         raw_result = invocation.result
+        settle_run_stats(raw_result.stats)
         result = apply_baseline_filter(raw_result, configuration, options)
 
         coverage = compute_coverage(runner, configuration, options)
@@ -180,9 +181,9 @@ module Rigor
       # A plain `--incremental` run the session would answer as a warm recheck and write a slot for. Every other
       # shape declines, and the full path handles it exactly as before: an editor buffer (never saved), `--no-cache`
       # (no store to hold a slot), `--verify-incremental`, a worker pool (the session writes no slot for one: a
-      # worker's plugin reads never reach the process that records them), and `--explain`, which the session
-      # ignores today (#1533) — the slot is keyed without it, so the probe declines rather than answer for a flag
-      # its writer never saw. The rest mirror the plain probe: `--coverage`, `--cache-stats` and the
+      # worker's plugin reads never reach the process that records them), and `--explain` (#1533: the session
+      # writes no slot for it — the slot key has no explain slot — so the probe declines rather than answer for a
+      # flag its writer never saw). The rest mirror the plain probe: `--coverage`, `--cache-stats` and the
       # `RIGOR_*_TRACE` probes each want the full path's own output.
       def incremental_run_hit_eligible?(configuration, options, buffer)
         options.fetch(:incremental) && buffer.nil? &&
@@ -268,7 +269,8 @@ module Rigor
         # cache-serving path.
         subset = analyzed.each_with_index.select { |_, index| index.even? }.map(&:first)
         incremental = normalize_diagnostics(session.reanalyze_subset(subset))
-        full = normalize_diagnostics(verify_full_diagnostics(configuration, paths))
+        full = normalize_diagnostics(verify_full_diagnostics(configuration, paths,
+                                                             collect_stats: options.fetch(:stats)))
 
         report_verify_incremental(incremental, full, subset_size: subset.size, total: analyzed.size,
                                                      format: options.fetch(:format))
@@ -288,7 +290,8 @@ module Rigor
                         nil
                       else
                         Cache::IncrementalSnapshot.fingerprint(
-                          configuration: configuration, roots: paths || configuration.paths
+                          configuration: configuration, roots: paths || configuration.paths,
+                          explain: options.fetch(:explain)
                         )
                       end
         snapshot = Cache::IncrementalSnapshot.new(root: cache_root)
@@ -300,7 +303,7 @@ module Rigor
           # (CLI `--workers` > `RIGOR_RACTOR_WORKERS` > `parallel.workers:` > 0) so the recheck's closure
           # re-analysis parallelises; the fork pool marshals dependency records back so the graph is sound.
           workers: CheckRunnerFactory.resolve_workers(options, configuration),
-          buffer: buffer
+          buffer: buffer, explain: options.fetch(:explain)
         )
 
         return run_editor_mode_option_b(session, snapshot, fingerprint, configuration, options) if buffer
@@ -398,8 +401,8 @@ module Rigor
         side_output(format).puts("  plugin fact surface: #{status}")
       end
 
-      def verify_full_diagnostics(configuration, paths)
-        runner = Analysis::Runner.new(configuration: configuration, cache_store: nil)
+      def verify_full_diagnostics(configuration, paths, collect_stats: true)
+        runner = Analysis::Runner.new(configuration: configuration, cache_store: nil, collect_stats: collect_stats)
         (paths ? runner.run(paths) : runner.run).diagnostics
       end
 
@@ -724,6 +727,13 @@ module Rigor
         else
           out.puts("Cache already empty: #{cache_root}")
         end
+      end
+
+      # Issue #1529 — reads the run's peak RSS straight after the analysis, before coverage or any output, so the
+      # figure the summary prints (and the JSON `stats` block carries) covers the analysis alone. A nil `stats`
+      # (`--no-stats`, or a run served from a cache) reads nothing.
+      def settle_run_stats(stats)
+        stats&.peak_rss_bytes
       end
 
       # Emits the {Analysis::RunStats} summary to STDERR so it doesn't interleave with the diagnostic stream (text or

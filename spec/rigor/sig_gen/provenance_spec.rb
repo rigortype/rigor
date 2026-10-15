@@ -278,7 +278,10 @@ SIG_PROVENANCE_RESIDUE = {
   # -1 (#1181 slice): `protocol_contracts` tightened to `Array[ProtocolContract]` — sig-gen
   # already inferred that exact type through `manifest.protocol_contracts`, so the row is
   # generated-equivalent now.
-  "sig/rigor/plugin/base.rbs" => 21,
+  # -1 (#1529 auditor fix): the join is now kind-aware. `Base#manifest` (instance, the no-arg reader) used to
+  # join the singleton `def manifest(**fields)` candidate first-wins and read as unrenderable; it now joins its
+  # own instance candidate, which is generated-equivalent.
+  "sig/rigor/plugin/base.rbs" => 20,
   "sig/rigor/plugin/blueprint.rbs" => 3,
   "sig/rigor/plugin/fact_store.rbs" => 2,
   # -2 (#720): `file?` / `directory?` are `probe(path) { … }`, and the block's `bool` now reaches the

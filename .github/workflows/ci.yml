@@ -915,14 +915,24 @@ jobs:
       # `check` loads the core RBS from the packaged `rbs`, and `nix run`
       # evaluates `apps.rigor`, the documented `nix run` entry point. Run
       # it from an empty directory so the result reflects the package, not
-      # this repository's own sig/ and config (and so #1853, the package
-      # shipping no plugins/, cannot fail this job).
+      # this repository's own sig/ and config. `skill --list` and
+      # `docs --list` prove the bundled docs/ and skills/ trees made it
+      # into the derivation (#1853). The `.rigor.yml` names
+      # `rigor-minitest` and `rigor-sassc`: minitest is loaded by the
+      # bundled-plugin loader from its own path, while sassc requires
+      # `rigor-ffi` by bare name, so it loads only when the wrapper's
+      # RUBYLIB puts every `plugins/*/lib` on the load path. Dropping
+      # RUBYLIB fails this step (#1853).
       - name: Smoke-test the packaged binary
         run: |
           ./result/bin/rigor --version
+          ./result/bin/rigor skill --list
+          ./result/bin/rigor docs --list
           d=$(mktemp -d)
           printf 'x = 1\nputs x\n' > "$d/smoke.rb"
+          printf 'plugins:\n  - rigor-minitest\n  - rigor-sassc\n' > "$d/.rigor.yml"
           (cd "$d" && nix run "$GITHUB_WORKSPACE#rigor" -- check --no-cache --fail-on=error smoke.rb)
+          (cd "$d" && nix run "$GITHUB_WORKSPACE#rigor" -- plugins | grep -q 'All configured plugins loaded successfully')
 
   # ── Fan-in: single required-check target for branch protection ───
   # Configure branch protection to require only "CI required" rather

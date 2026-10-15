@@ -260,7 +260,11 @@ module Rigor
       # {EngineSource.process_identity} closes it, and answers nil for a version-pinned tree — which adds no
       # part, so a released gem's fingerprint is byte-identical to the pre-#289 one and its warm snapshots
       # survive the upgrade untouched.
-      def self.fingerprint(configuration:, roots:)
+      #
+      # Issue #1533 — `explain:` is the run's `--explain` flag. It adds `:info` rows to the per-file diagnostics
+      # the snapshot caches, so a snapshot written without it holds none and one written with it holds rows a
+      # plain run must not print. No part for the default, so every plain run's fingerprint is as it was.
+      def self.fingerprint(configuration:, roots:, explain: false)
         bundler_lock, collection_lock = Analysis::RunCacheKey.resolved_lockfile_paths(configuration)
         parts = [
           "engine:#{Rigor::VERSION}:#{SCHEMA}",
@@ -283,8 +287,7 @@ module Rigor
         parts << "required-features:#{features.join(',')}" unless features.empty?
         # ADR-116 WD5 — the snapshot's per-file rows and seed bundles are only as checked as the run that
         # wrote them ({Inference::DeclarationWalk::Shadow}); nil with the harness off adds no part.
-        shadow = Analysis::ShadowHarness.cache_identity
-        parts << "shadow-harness:#{shadow}" if shadow
+        parts.concat(run_mode_parts(explain))
         Digest::SHA256.hexdigest(parts.join("\x00"))
       rescue StandardError
         # {EngineSource::Unavailable} lands here too, and nil is the answer it requires rather than one it
@@ -317,6 +320,15 @@ module Rigor
         path && File.file?(path) ? Digest::SHA256.file(path).hexdigest : "absent"
       end
       private_class_method :digest_file_if_present
+
+      # The parts naming how the run was asked to behave rather than what it reads: the ADR-116 WD5 shadow harness
+      # (the snapshot's rows are only as checked as the run that wrote them; nil with the harness off) and
+      # `--explain` (#1533).
+      def self.run_mode_parts(explain)
+        shadow = Analysis::ShadowHarness.cache_identity
+        [("shadow-harness:#{shadow}" if shadow), ("explain:true" if explain)].compact
+      end
+      private_class_method :run_mode_parts
 
       # Content-digest every `pre_eval:` file in configuration order, so an edit to one invalidates the snapshot
       # even when it lies outside the analysed paths. A missing file digests as "absent", so creating it counts too.

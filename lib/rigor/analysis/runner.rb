@@ -2061,7 +2061,8 @@ module Rigor
         )
         RunStats.new(
           wall_seconds: Process.clock_gettime(Process::CLOCK_MONOTONIC) - wall_started_at,
-          peak_rss_bytes: RunStats.peak_rss_bytes,
+          # Issue #1529 — read lazily on the summary's first use, so a run that prints none never forks for it.
+          peak_rss_probe: RunStats::CURRENT_PROCESS_PEAK_RSS,
           # #392 — the template units count too: they are files this run parsed and typed, and a stats line
           # that omitted them would under-report exactly the work a views-heavy project added.
           target_files: expansion.fetch(:files).size + template_units.paths.size,

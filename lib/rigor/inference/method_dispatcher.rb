@@ -11,6 +11,7 @@ require_relative "dynamic_origin"
 require_relative "flow_tracer"
 require_relative "void_tail_summary"
 require_relative "method_dispatcher/call_context"
+require_relative "method_dispatcher/argument_nodes"
 require_relative "method_dispatcher/constant_folding"
 require_relative "method_dispatcher/literal_string_folding"
 require_relative "method_dispatcher/shape_dispatch"
@@ -39,6 +40,7 @@ require_relative "method_dispatcher/kernel_dispatch"
 require_relative "method_dispatcher/universal_object_dispatch"
 require_relative "method_dispatcher/singleton_mixin_dispatch"
 require_relative "method_dispatcher/method_folding"
+require_relative "method_dispatcher/optional_count"
 
 module Rigor
   module Inference
@@ -104,6 +106,16 @@ module Rigor
                   block_type: nil, environment: nil,
                   call_node: nil, scope: nil, plugin_typed_sink: nil, skip_project_patched: false)
         return nil if receiver_type.nil?
+
+        # Issue #1393 — a `nil` count on `min` / `max` / `min_by` / `max_by` is the no-count call.
+        nil_count = OptionalCount.split(receiver_type, method_name, arg_types, block: !block_type.nil?)
+        if nil_count
+          return resolve_nil_count(nil_count.first, receiver_type: receiver_type, method_name: method_name,
+                                                    block_type: block_type, environment: environment,
+                                                    call_node: call_node, scope: scope,
+                                                    plugin_typed_sink: plugin_typed_sink,
+                                                    skip_project_patched: skip_project_patched)
+        end
 
         # Build the call context once and thread it — unchanged — through every tier
         # (`_DispatchTier#try_dispatch`). The dispatcher's own private fallback tiers still read
@@ -286,6 +298,20 @@ module Rigor
         # members WOULD each resolve still lands `Dynamic[top]`. Retry per projected member through
         # this same chain. See {#try_composite_receiver} for the projection rule and why it sits here.
         try_composite_receiver(context)
+      end
+
+      # The `nil` part of an optional count dispatches as the no-argument call, the rest as written; a count
+      # that is both answers the union of the two, or declines when either declines. See {OptionalCount}.
+      def resolve_nil_count(rest, **common)
+        return resolve(arg_types: [], **common) if rest.nil?
+
+        # The counted leg runs first: a leg's plugin answer records on the scope (or buffers in the sink, #1101),
+        # and a declining counted leg must not leave the no-argument leg's record behind for a call that answers nil.
+        counted = resolve(arg_types: [rest], **common)
+        return nil if counted.nil?
+
+        without = resolve(arg_types: [], **common)
+        without && Type::Combinator.union(without, counted)
       end
 
       # ADR-100 WD4 — records the transitive `-> void` provenance when the called method is a
@@ -1170,7 +1196,7 @@ module Rigor
         set_lift = set_new_lift(receiver_type.class_name, arg_types)
         return set_lift if set_lift
 
-        hash_lift = hash_new_lift(receiver_type.class_name, arg_types)
+        hash_lift = hash_new_lift(receiver_type.class_name, arg_types, context&.call_node)
         return hash_lift if hash_lift
 
         regexp_lift = regexp_new_lift(receiver_type.class_name, arg_types)
@@ -1445,15 +1471,38 @@ module Rigor
       # form (`Hash.new { |h, k| … }`) keep the bare `Nominal[Hash]` answer — the block's value
       # type is not available at this `:new` dispatch site, and conservatively leaving the read
       # as today's behaviour is precision-additive.
-      def hash_new_lift(class_name, arg_types)
+      #
+      # Issue #1812 — a brace-less keyword hash is `Hash#initialize`'s `capacity:` keyword, not the
+      # default (`Hash.new(capacity: 10).default` is `nil`), so it is dropped before counting the
+      # positionals. A braced hash (`Hash.new({ capacity: 10 })`) is a positional and stays the default.
+      def hash_new_lift(class_name, arg_types, call_node = nil)
         return nil unless class_name == "Hash"
-        return nil unless arg_types.size == 1
+
+        arg_types = hash_new_positionals(arg_types, call_node)
+        return nil unless arg_types&.size == 1
 
         default = arg_types.first
         return nil if default.nil?
 
         value = Type::Combinator.widen_value_pinned(default)
         Type::Combinator.nominal_of("Hash", type_args: [Type::Combinator.untyped, value])
+      end
+
+      # `Hash.new`'s positional argument types: `arg_types` without a trailing brace-less keyword hash. A literal
+      # send (`Hash.send(:new, capacity: 1)`) dispatches with the outer call node, whose arguments are the
+      # selector symbol followed by `arg_types`' own, and is read through that offset. When the node's arguments
+      # correspond otherwise, a sole hash argument may be the keyword hash, so the answer is nil (decline) and the
+      # bare `Hash` stands; any other argument cannot be a keyword hash and is kept.
+      def hash_new_positionals(arg_types, call_node)
+        return arg_types[0...-1] if ArgumentNodes.keyword_hash_last?(call_node, arg_types)
+
+        arguments = call_node.respond_to?(:arguments) ? call_node.arguments&.arguments : nil
+        return arg_types if arguments.nil? || arguments.size == arg_types.size
+        if arguments.size == arg_types.size + 1 && arguments.first.is_a?(Prism::SymbolNode)
+          return arguments.last.is_a?(Prism::KeywordHashNode) ? arg_types[0...-1] : arg_types
+        end
+
+        arg_types.last.is_a?(Type::HashShape) ? nil : arg_types
       end
 
       # `Range.new(b, e)` / `Range.new(b, e, excl)` — folds to `Constant[Range]` when both

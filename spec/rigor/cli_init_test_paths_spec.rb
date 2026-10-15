@@ -38,6 +38,77 @@ RSpec.describe Rigor::CLI do
     expect(Rigor::Configuration.load("config/rigor.yml").test_paths).to eq([File.expand_path("spec")])
   end
 
+  # #1399 — `paths:` is cwd-relative in the default settings, so it is rewritten against the config file's directory
+  # the same way `test_paths:` is. Without this, `config/rigor.yml` says `paths: [lib]` and loads back as `config/lib`.
+  it "writes paths: relative to a config file written elsewhere, so it loads back to the project's lib/" do
+    FileUtils.mkdir_p(%w[lib config])
+
+    config = init_config("config/rigor.yml")
+
+    expect(config["paths"]).to eq(["../lib"])
+    expect(Rigor::Configuration.load("config/rigor.yml").paths).to eq([File.expand_path("lib")])
+  end
+
+  it "keeps paths: [lib] for the default config at the project root" do
+    FileUtils.mkdir_p("lib")
+
+    config = init_config
+
+    expect(config["paths"]).to eq(["lib"])
+  end
+
+  # #1399 review — the roots are resolved against the physical cwd (Dir.pwd is getcwd), so the config dir must be
+  # physical too when `--path` is absolute. A logical spelling through a symlink makes the lexical `..` climb a
+  # different tree than the kernel does (macOS: `/tmp` is `/private/tmp`). The project sits two levels deep, and
+  # `link` is a one-level alias for that parent, so the two disagree on the path back to lib/.
+  def project_behind_symlink
+    root = Dir.pwd
+    project = File.join(root, "real", "deep", "proj")
+    FileUtils.mkdir_p(File.join(project, "lib"))
+    File.symlink(File.join(root, "real", "deep"), File.join(root, "link"))
+    [project, File.join(root, "link", "proj")]
+  end
+
+  it "writes root-level paths: [lib] when the absolute --path is spelled through a symlink" do
+    project, alias_dir = project_behind_symlink
+
+    Dir.chdir(project) do
+      config = init_config(File.join(alias_dir, ".rigor.dist.yml"))
+
+      expect(config["paths"]).to eq(["lib"])
+      loaded = Rigor::Configuration.load(File.join(alias_dir, ".rigor.dist.yml")).paths
+      expect(loaded.map { |p| File.realpath(p) }).to eq([File.realpath("lib")])
+    end
+  end
+
+  it "writes a subdirectory config's paths: relative to it when the absolute --path is spelled through a symlink" do
+    project, alias_dir = project_behind_symlink
+    FileUtils.mkdir_p(File.join(project, "config"))
+
+    Dir.chdir(project) do
+      config = init_config(File.join(alias_dir, "config", "rigor.yml"))
+
+      expect(config["paths"]).to eq(["../lib"])
+      expect(Rigor::Configuration.load("config/rigor.yml").paths).to eq([File.expand_path("lib")])
+    end
+  end
+
+  # The symlink target sits three levels below the project, so the lexical answer (`../lib`, from the spelling the
+  # user typed) differs from the physical one (`../../../lib`). Pointing it at the same depth as the link would let
+  # an always-realpath implementation pass too.
+  it "keeps a relative --path lexical: a symlinked config dir still loads its paths back" do
+    project, = project_behind_symlink
+    FileUtils.mkdir_p(File.join(project, "a", "b", "cfg"))
+    File.symlink(File.join(project, "a", "b", "cfg"), File.join(project, "linkdir"))
+
+    Dir.chdir(project) do
+      config = init_config("linkdir/l.yml")
+
+      expect(config["paths"]).to eq(["../lib"])
+      expect(Rigor::Configuration.load("linkdir/l.yml").paths).to eq([File.expand_path("lib")])
+    end
+  end
+
   it "leaves test_paths: unset (auto-detect) when there is no test directory yet" do
     config = init_config
 

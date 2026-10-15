@@ -207,6 +207,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     with_optimistic_ivar(req:name,req:cause,key:miss)
     with_optimistic_local(req:name,req:cause,key:miss)
     with_published_constant_mark(req:kind,req:name)
+    with_rejoined_locals(req:bindings)
     with_repeated_or_writes(req:nodes)
     with_self_type(req:type)
     with_singleton_class_body(req:flag)

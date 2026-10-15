@@ -141,4 +141,33 @@ RSpec.describe Rigor::CLI::DocsCommand do
       expect(out).to include("--list")
     end
   end
+
+  # #1860: under a C/POSIX locale the process default external encoding is US-ASCII. The bundled pages are UTF-8 and
+  # carry non-ASCII text (em-dashes), so the body must be read as UTF-8 explicitly. Without that, `DocLinks.rewrite`
+  # raises `ArgumentError: invalid byte sequence in US-ASCII`.
+  describe "under a US-ASCII default external encoding (#1860)" do
+    around do |example|
+      previous = Encoding.default_external
+      begin
+        Encoding.default_external = Encoding::US_ASCII
+        example.run
+      ensure
+        Encoding.default_external = previous
+      end
+    end
+
+    it "prints a page with non-ASCII text and exits 0" do
+      expect(Encoding.default_external).to eq(Encoding::US_ASCII)
+
+      page = File.expand_path("../../../docs/handbook/01-getting-started.md", __dir__)
+      page_text = File.read(page, encoding: Encoding::UTF_8)
+      non_ascii_line = page_text.lines.find { |line| line.match?(/[^\x00-\x7F]/) }
+      expect(non_ascii_line).not_to be_nil
+
+      status, out, err = run(["handbook/01-getting-started"])
+      expect(err).to eq("")
+      expect(status).to eq(0)
+      expect(out).to include(non_ascii_line.chomp)
+    end
+  end
 end

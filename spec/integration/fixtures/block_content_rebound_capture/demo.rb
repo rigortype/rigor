@@ -95,8 +95,8 @@ end
 puts "three" if bumped.last == 3
 
 # --- An `inject` accumulator is not fresh on every iteration.
-# `acc_total` reads `0 | Integer` (runtime `3`): the accumulator
-# parameter holds the seed joined with every later run (#1889). ---
+# `acc_total` reads `0 | 1 | 2 | 3` (runtime `3`): the accumulator
+# parameter holds each value the constant fold passes it (#1889). ---
 acc_total = 0
 sums = []
 [1, 2].inject(0) do |acc, x|

@@ -8,9 +8,10 @@ include Rigor::Testing
 #   memo type follows the second argument's actual type, not the
 #   RBS-declared `untyped`.
 # - `#inject` / `#reduce` yield `(memo, element)`. The memo binds
-#   to what it holds across every block run (issue #1889): the
-#   seed, or with no seed the receiver's element type, joined with
-#   the accumulator's converged type.
+#   to what it holds across the block runs (issue #1889): over a
+#   constant receiver, each value the fold passes it; otherwise the
+#   seed (or the element type) joined with the converged
+#   accumulator.
 
 # each_with_object — Tuple-shaped receiver carries the precise
 # element union; the memo arg's type passes through to the second
@@ -24,16 +25,15 @@ end
 # block result after it (`0`, then `1`, then `3`); the element
 # type is the receiver's.
 [1, 2, 3].inject(0) do |memo, elem|
-  assert_type("0 | Integer", memo)
+  assert_type("0 | 1 | 3", memo)
   assert_type("1 | 2 | 3", elem)
   memo + elem
 end
 
 # inject without a seed: the first iteration uses the first
-# element as the memo, so the memo is the element type joined
-# with the block results (`1`, then `3`).
+# element as the memo (`1`, then `3`).
 [1, 2, 3].inject do |memo, elem|
-  assert_type("1 | 2 | 3 | Integer", memo)
+  assert_type("1 | 3", memo)
   assert_type("1 | 2 | 3", elem)
   memo + elem
 end

@@ -1,6 +1,6 @@
 ---
 locals:
-  acc_total: 0 | Integer
+  acc_total: 0 | 1 | 2 | 3
   bumped: Array[Dynamic[top]]
   by_key: Hash[Dynamic[top], 1 | 2]
   caps: Array[5]

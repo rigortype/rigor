@@ -179,17 +179,27 @@ RSpec.describe "block-form inject/reduce fold", type: :runner do
       end
     end
 
-    it "binds the accumulator parameter to the seed joined with the converged accumulator" do
-      expect(dumped_type("[1, 2].inject(0) { |a, e| dump_type(a); a + e }")).to eq("dump_type: 0 | Integer")
-      expect(dumped_type("m = 0\n[1, 2].inject(0) { |a, e| m = a; a + e }\ndump_type(m)"))
-        .to eq("dump_type: 0 | Integer")
+    it "binds the accumulator parameter to the values the constant fold passes it" do
+      expect(dumped_type("[1, 2].inject(0) { |a, e| dump_type(a); a + e }")).to eq("dump_type: 0 | 1")
+      expect(dumped_type("m = 0\n[1, 2].inject(0) { |a, e| m = a; a + e }\ndump_type(m)")).to eq("dump_type: 0 | 1")
+      expect(dumped_type("[1, 2, 4].inject { |a, e| dump_type(a); a + e }")).to eq("dump_type: 1 | 3")
     end
 
-    # Guards (this example and the next): the empty receiver and the element capture answered this before #1889.
+    it "binds the accumulator parameter to the seed joined with the nominal fixpoint over a non-constant receiver" do
+      expect(dumped_type("xs = [rand(3)]\nxs.inject(0) { |a, e| dump_type(a); a + e }")).to eq("dump_type: 0 | Integer")
+    end
+
+    it "reads the accumulator off the scope the block runs from, not one an operand write left behind" do
+      # Ruby passes `a` 0, then 0 + 1 + 5.
+      expect(dumped_type("n = 0\n[1, 2].inject((n = 5; 0)) { |a, e| dump_type(a); a + e + n }"))
+        .to eq("dump_type: 0 | 6")
+    end
+
     it "keeps the pre-call value when the block never runs" do
-      expect(dumped_type("m = 0\n[].inject(0) { |a, e| m = a; a }\ndump_type(m)")).to start_with("dump_type: 0 |")
+      expect(dumped_type("m = 0\n[].inject(0) { |a, e| m = a; a }\ndump_type(m)")).to eq("dump_type: 0")
     end
 
+    # Guard: the element capture answered this before #1889.
     it "keeps the exact element union for a capture assigned from the element" do
       expect(dumped_type("m = 0\n[1, 2].inject(0) { |a, e| m = e; a + e }\ndump_type(m)"))
         .to eq("dump_type: 0 | 1 | 2")

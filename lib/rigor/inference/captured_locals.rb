@@ -130,11 +130,20 @@ module Rigor
             if LOCAL_WRITE_NODES.include?(descendant.class)
               captured_local_write(descendant, ancestors, base_scope) { introduced ||= introduced_locals(block_node) }
             elsif outliving
+              if ReflectiveIvarWrite.unknown_target?(descendant)
+                (names ||= []).concat(reflective_unknown_ivars(base_scope))
+              end
               rebindable_outliving_write(descendant, base_scope, non_locals)
             end
           (names ||= []) << name if name
         end
         names ? names.uniq : NO_NAMES
+      end
+
+      # Issue #1889 — every ivar `base_scope` rebindably binds: an `instance_variable_set` on `self` whose target no
+      # literal names ({ReflectiveIvarWrite.unknown_target?}) may write any of them.
+      def reflective_unknown_ivars(base_scope)
+        base_scope.ivars.keys.select { |name| rebindable_ivar?(base_scope, name) }
       end
 
       def rebindable_outliving_write(node, base_scope, non_locals)

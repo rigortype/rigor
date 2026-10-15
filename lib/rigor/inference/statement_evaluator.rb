@@ -123,9 +123,9 @@ module Rigor
         Prism::BeginNode => :eval_begin_node,
         Prism::RescueNode => :eval_rescue,
         Prism::EnsureNode => :eval_ensure,
-        Prism::WhileNode => :eval_loop,
-        Prism::UntilNode => :eval_loop,
-        Prism::ForNode => :eval_for,
+        Prism::WhileNode => :eval_repeating_loop,
+        Prism::UntilNode => :eval_repeating_loop,
+        Prism::ForNode => :eval_repeating_for,
         Prism::AndNode => :eval_and_or,
         Prism::OrNode => :eval_and_or,
         Prism::ParenthesesNode => :eval_parentheses,
@@ -2064,6 +2064,12 @@ module Rigor
       def last_line_kept?(after, node)
         after.global(:$_) == Type::Combinator.untyped && !LastLine.may_set?(node.statements, scope)
       end
+
+      # Issue #1889 — {#eval_loop} / {#eval_for} with a literal-name `instance_variable_set` in the body joining its
+      # value into the ivar's binding rather than replacing it ({ReflectiveIvarWrite.in_repeating_body}).
+      def eval_repeating_loop(node) = ReflectiveIvarWrite.in_repeating_body { eval_loop(node) }
+
+      def eval_repeating_for(node) = ReflectiveIvarWrite.in_repeating_body { eval_for(node) }
 
       # `while pred; body; end` / `until pred; body; end`. The body might run zero or more times, so half-bound names
       # degrade to `T | nil` in the post-loop scope. The loop expression itself types as `Constant[nil]` (Slice 3 phase

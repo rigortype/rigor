@@ -1,0 +1,1 @@
+- **[engine]** A `case` clause `when nil`, `when true` or `when false` now narrows its subject as `when NilClass`, `when TrueClass` or `when FalseClass` does, so `case x when nil then 0 else x.upcase end` no longer reports `call.possible-nil-receiver` on correct code. ([#1970](https://github.com/rigortype/rigor/pull/1970))

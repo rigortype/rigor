@@ -251,6 +251,45 @@ RSpec.describe "rigor lens" do
       .to all(eq("state" => "unavailable", "reason" => "not_computed"))
   end
 
+  # An alias copies the def in place when it runs, and check reads the last def it saw, so the alias's overload
+  # comes from the original only when that original has one project definition.
+  it "reads an alias's overload from its original only when the original has one definition" do
+    File.write("lib/a.rb", <<~RUBY)
+      class A
+        def one(x) = "\#{x}!"
+        alias two one
+        def three = 3
+        alias four three
+      end
+    RUBY
+    File.write("lib/b.rb", "class A\n  def three = :three\nend\n")
+    _, out, = lens(["--format=json", "lib/a.rb"])
+    overloads = JSON.parse(out)["members"].to_h { |member| [member["name"], member["overloads"]] }
+
+    expect(overloads["two"].first).to include("rbs" => "(untyped x) -> String")
+    expect(overloads["four"]).to eq([{ "rbs" => nil, "params" => nil, "block" => nil,
+                                       "return" => { "state" => "unavailable", "reason" => "not_computed" } }])
+  end
+
+  # An RBS alias's contract is the alias's own, as check reads it; an alias across initialize copies no return.
+  it "reads an RBS alias as a contract and an alias of initialize without its void" do
+    File.write("lib/f.rb", <<~RUBY)
+      class F
+        def old = 1
+        alias new old
+        def initialize(v) = @v = v
+        alias init2 initialize
+      end
+    RUBY
+    File.write("sig/f.rbs", "class F\n  def old: () -> Integer\n  alias new old\nend\n")
+    _, out, = lens(["--format=json", "lib/f.rb"])
+    members = JSON.parse(out)["members"].to_h { |member| [member["name"], member] }
+
+    expect(members["new"]).to include("basis" => "contract")
+    expect(members["new"]["overloads"].map { |overload| overload["rbs"] }).to eq(["() -> ::Integer"])
+    expect(members["init2"]["overloads"].first["return"]).to eq("state" => "unavailable", "reason" => "not_computed")
+  end
+
   it "exits 64 for a configuration file that does not exist" do
     status, out, = lens(["--config=nope.yml", "lib/order.rb"])
 

@@ -373,6 +373,108 @@ end
     end
   end
 
+  describe "aliases" do
+    let(:source) do
+      <<~RUBY
+        class K
+          private def x(a, &blk) = a
+          alias y x
+          def w = 1
+          private
+          alias_method :v, "w"
+          alias z w
+          alias u y
+          private :v
+          alias_method :t, :inherited_name
+          def r = 1
+          def r = 2
+          alias q r
+          attr_reader :p
+          alias o p
+          if $x
+            alias n w
+          end
+          alias_method :l, :w do end
+          alias_method name, :w
+          alias :"k\#{1}" w
+          class << self
+            def s = 1
+            alias j s
+          end
+          configure { alias i w }
+        end
+        module F
+          module_function
+          def g = 1
+          alias h g
+        end
+        class Z
+          def w = 1
+          public alias_method(:m, :w)
+        end
+        alias top_level w
+        D = Data.define(:a) do
+          alias b a
+        end
+      RUBY
+    end
+
+    def alias_rows(source)
+      sites(source).filter_map do |site|
+        next unless site["alias_of"]
+
+        [site["owner"], site["name"], site["alias_of"], site["visibility"], site["params"], site["body_return"]]
+      end
+    end
+
+    it "reads a direct alias as a method site copying the original's visibility, shape and return" do
+      unknown = { "state" => "unavailable", "reason" => "not_computed" }
+      rows = alias_rows(source)
+      x_params = sites(source).find { |site| site["name"] == "x" }.values_at("params", "body_return")
+
+      expect(rows).to eq([["K", "y", "x", "private", *x_params], ["K", "v", "w", "private", [], unknown],
+                          ["K", "z", "w", "public", [], unknown],
+                          ["K", "u", "y", "private", *x_params], ["K", "t", "inherited_name", nil, nil, unknown],
+                          ["K", "q", "r", "private", nil, unknown], ["K", "o", "p", "private", nil, unknown],
+                          ["D", "b", "a", "public", nil, unknown]])
+    end
+
+    it "copies the original's block shape and leaves alias_of null on every other site" do
+      y = sites(source).find { |site| site["name"] == "y" }
+
+      expect(y["block"]).to eq(sites(source).find { |site| site["name"] == "x" }["block"])
+      expect(sites(source).reject { |site| site["alias_of"] }.map { |site| site["alias_of"] }.uniq).to eq([nil])
+    end
+
+    it "reads an alias to a name Ruby forces private as private, and returns nothing across initialize" do
+      source = <<~RUBY
+        class X
+          def foo(a) = a
+          def initialize(v) = @v = v
+          alias initialize_copy foo
+          alias_method :respond_to_missing?, :foo
+          alias init2 initialize
+          alias bar foo
+          private :foo
+        end
+      RUBY
+      rows = sites(source).filter_map do |site|
+        [site["name"], site["visibility"], site["body_return"]["state"]] if site["alias_of"]
+      end
+
+      expect(rows).to eq([%w[initialize_copy private unavailable], %w[respond_to_missing? private unavailable],
+                          %w[init2 private unavailable], %w[bar public unavailable]])
+      expect(sites(source).find { |site| site["name"] == "initialize" }["visibility"]).to eq("private")
+      expect(sites("class E\n  attr_reader :initialize\nend\n").first(2).last["visibility"]).to be_nil
+    end
+
+    it "omits an alias it cannot place the way Ruby and check both read it" do
+      names = omissions(source).filter_map { |kind, name| [name] if kind == "alias" }.flatten(1)
+
+      expect(names).to contain_exactly("n", "m", "l", nil, "\"k\#{1}\"", "j", "i", "h", "top_level")
+    end
+  end
+
   describe "completeness" do
     it "omits what it does not model instead of dropping it" do
       source = <<~RUBY

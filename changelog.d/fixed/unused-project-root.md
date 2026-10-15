@@ -1,1 +1,1 @@
-- **[cli]** `rigor unused` reads one project root, the `.rigor.yml` directory realpath'd, so a run from a subdirectory with `--config` classifies `test/` helpers as test code, and a project reached through a symlink is scanned once. ([#1760](https://github.com/rigortype/rigor/issues/1760))
+- **[cli]** `rigor unused` reads one project root, the `.rigor.yml` directory realpath'd, so a run from a subdirectory with `--config` classifies `test/` helpers as test code, and a project reached through a symlink is scanned once. ([#1888](https://github.com/rigortype/rigor/pull/1888))

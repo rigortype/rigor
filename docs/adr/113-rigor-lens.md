@@ -215,7 +215,8 @@ premises above do not hold on current code. The binding output contract is now
   competing definition, and there is no well-defined effective site to prefer: the engine's choice is
   the file that sorts last. Rows split into **sites** (source declarations, each with its own body
   return) and **members** (one per owner, scope and name), whose `basis` is `contract`, `single_site` or
-  `contested`. A contested inferred slot is `unavailable`, never a guessed winner. Every slot is tagged
+  `contested`. A contested inferred slot is `unavailable`, never a guessed winner, and a contested member has no
+  overloads: each definition carries its own parameter list. Every slot is tagged
   `typed`, `dynamic` (with an ADR-75 cause) or `unavailable` (with a reason). `inferred` means the
   body's return with its parameters as declared or unknown, not `check`'s per-call-key result.
   WD4's "until WD5" is resolved for `sig/` against inline contracts (#1075); `extrbs` stays reserved

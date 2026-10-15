@@ -46,9 +46,9 @@ rigor lens [--format text|json] [--config FILE] [--workers N] FILE...
 
 ## Serialization conventions
 
-- **Root.** The project root is the directory of the configuration file in effect, or the working
-  directory when there is none. Relative `paths:` and `signature_paths:` already resolve against the
-  configuration file's directory, so the two agree.
+- **Root.** The project root is the working directory. Rigor auto-detects `sig/`, `Gemfile.lock` and
+  `rbs_collection.lock.yaml` there, and a configured path resolves to an absolute one first, so every
+  input has one spelling relative to it.
 - **Paths** are relative to the root, with `/` separators. A path outside the root is written relative
   to it with `..` segments. No absolute path that Rigor computed appears in the document; a target's
   `argument` echoes what the caller passed.
@@ -77,9 +77,9 @@ rigor lens [--format text|json] [--config FILE] [--workers N] FILE...
 ```
 
 - `producer.engine_source` is the engine's source identity when Rigor runs from a checkout rather than
-  an installed gem (`EngineSource.process_identity`). It is `null` for an installed gem, and `null` when
-  the identity cannot be computed. Two runs whose `version` matches but whose `engine_source` differs used
-  different engines.
+  an installed gem (`EngineSource.process_identity`). It is `null` for an installed gem, and `"unknown"` when
+  the identity cannot be computed. Two runs whose `version` matches but whose `engine_source` differs, or is
+  `"unknown"`, may have used different engines.
 - `capabilities` lists the row kinds and optional fields this revision emits. A consumer MUST NOT read
   a missing capability as an empty answer.
 
@@ -135,7 +135,10 @@ A declaration is never attached to a neighbouring site as a fallback.
 
 ### Omissions
 
-`[{kind, owner, scope, name, span, reason}]`. `owner` and `scope` are the member the declaration would
+`[{kind, owner, scope, name, span, reason}]`. `kind` is one of `class`, `module`, `method`, `attribute`
+(each when written inside a block, and `method` also for a receiver other than `self`), `singleton_class`
+(`class << obj`), `constant`, `data_class`, `struct_class`, `alias`, `define_method`, `module_function` and
+`refine`. `owner` and `scope` are the member the declaration would
 define when Rigor can tell (`alias_method :b, :a` in `class Foo` defines `Foo` / `instance` / `b`), and
 `null` otherwise. `reason` is `unsupported_kind`.
 
@@ -157,7 +160,8 @@ A site is one source declaration in a requested file.
 | `contract_span` | The span from the first to the last contract comment of the site (§ Anchors, steps 1 and 2), or `null`. |
 | `anchor` | § Anchors. |
 | `visibility` | For `method` / `attribute`: `public`, `protected` or `private` as the check path's per-file visibility table records it for this declaration. `null` when Rigor does not resolve it: every singleton member, and an instance member whose visibility the table marks contested (ADR-119). `null` for `class` / `module`. |
-| `contract` | `inline` when this site's own contract comments produced the member's inline declaration; otherwise `null`. A `sig/` or library contract belongs to the member, not to a site. |
+| `contract` | `inline` when the site carries contract comments and a member it defines has an inline declaration from this site's file; otherwise `null`. When one file holds several such sites for a member, each reads `inline`: the cached environment keeps the file, not the position. A `sig/` or library contract belongs to the member, not to a site. |
+| `params`, `block` | For `method`: this definition's own parameter list as written, in the shape of an overload's `params` and `block` (§ Members). Every `type` is the undeclared slot (`dynamic`, `inferred`, `inferred_return_untyped`); a contract's types are on the member's overloads, not here. `null` for every other kind. |
 | `body_return` | For `method`: a slot (§ Slots), the type this body returns with its parameters as declared, or unknown where none is declared. Its calls resolve against the same seeded index `check` uses, so a call to another member reads that member as `check` reads it. A body-less `def` returns `nil`; `initialize` reads `void`. `null` for every other kind. |
 
 ## Members
@@ -171,12 +175,13 @@ site defines the members `a` and `a=`, and both list it. Members are sorted by o
 | `kind` | `method` or `attribute`. |
 | `visibility` | The common `visibility` of its sites, or `null` when they differ or any is `null`. |
 | `sites` | The keys of the sites in the requested files that define it. |
-| `also_defined_at` | `[{path, line}]`: every other definition the engine's cross-file discovery records for the member, in project files outside the requested set, of any kind (`def`, `attr_*`, `alias`, `define_method`, …), sorted by path. `line` is the recorded line of a `def`, and `null` for every other kind. |
+| `also_defined_at` | `[{path, line}]`: every other definition the engine's cross-file discovery records for the member, in project files outside the requested set, of any kind (`def`, `attr_*`, `alias`, `define_method`, …), sorted by path. `line` is the line discovery recorded, or `null` when it recorded none (`attr_*`, `define_method`). For an alias, discovery records the aliased `def`, so the line points there, not at the `alias`. |
 | `basis` | Where the member's signature comes from, as a whole. See below. |
 | `overloads` | `[{rbs, params, block, return}]`. See below. |
 
 The member's **project definitions** are its sites, the omissions in the requested files that name the same
-`(owner, scope, name)`, and its `also_defined_at` entries. `basis` is one of:
+`(owner, scope, name)`, and its `also_defined_at` entries. For owner `Object` and scope `instance` they
+include top-level `def`s, which discovery records apart from `class Object`. `basis` is one of:
 
 - `contract`: a declaration written for the member's own class (in `sig/`, inline, a plugin's signatures,
   or a library) declares it, and it is not a defaulted inline declaration (below). Slots the contract
@@ -187,8 +192,9 @@ The member's **project definitions** are its sites, the omissions in the request
   runs, so every inferred slot is `unavailable` with reason `contested`, and each site keeps its own
   `body_return`.
 
-**Defaulted inline declarations.** In an `rbs_inline: enabled` file the rbs-inline plugin declares every
-`def`, and marks what it defaulted:
+**Defaulted inline declarations.** Wherever the rbs-inline plugin reads a file (`rbs_inline: enabled`, or
+the annotation-gated mode), it declares every `def` and marks what it defaulted. The rule keys on the mark,
+not on the magic comment:
 
 - A member marked `rigor:v1:inferred-signature` was not annotated at all. It is not a contract; its basis
   follows from its project definitions.
@@ -199,12 +205,16 @@ The member's **project definitions** are its sites, the omissions in the request
 
 **Overloads.**
 
-- A contract member has one overload per declared method type. A member without a contract has one
-  overload built from the site's parameter list.
+- A contract member has one overload per declared method type. A `single_site` member has one overload
+  built from its site's parameter list. A `contested` member has no overloads (`[]`): its definitions may
+  differ in arity, and each method site carries its own `params` and `block`.
+- An `attribute` member without a contract has one overload whose slots are `unavailable` with
+  `not_computed` (a reader takes no parameters; a writer takes one `required` parameter named `value`);
+  revision 1 does not report an instance variable's type.
 - `params` is `[{name, kind, type}]` in declaration order. `kind` is `required`, `optional`, `rest`,
   `post` (a positional after the rest), `keyreq`, `key` or `keyrest`; `name` is `null` when the
-  declaration names none; `type` is a slot. A parameter with no contract is a `dynamic` slot with cause
-  `inferred_return_untyped`, ADR-75's cause for an undeclared parameter. An argument-forwarding list
+  declaration names none; `type` is a slot. A parameter with no contract is a `dynamic` slot with provenance
+  `inferred` and cause `inferred_return_untyped`, ADR-75's cause for an undeclared parameter. An argument-forwarding list
   (`...`, or RBS `(?)`) gives `params: null`.
 - `block` is `null` when the member takes no block, and otherwise `{required, type}`: `required` is a
   boolean and `type` a slot whose type is the block's RBS function type (`(Integer) -> void`). A `&blk`
@@ -230,7 +240,7 @@ Every type position is a tagged slot:
   it from the declaring RBS member's buffer name:
   - `virtual:rbs-inline:…` is `inline`; any other `virtual:<id>:…` is `plugin:<id>`;
   - a file under a project signature root is `sig`, with `path` set;
-  - a file anywhere else outside the configured `paths:` is `library`;
+  - any other file is `library` (gem, `rbs collection`, stdlib and core signatures);
   - a buffer whose name did not survive the environment cache (`<cached>`, or empty) cannot be
     classified, so the member's slots are `unavailable` with `not_computed`.
 

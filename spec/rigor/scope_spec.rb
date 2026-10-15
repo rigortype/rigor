@@ -316,6 +316,30 @@ RSpec.describe Rigor::Scope do
 
       expect(seeded.forget_match_globals).to equal(seeded)
     end
+
+    # Issue #1384 — the numbered globals are cleared by name, so `$10` and above go with `$1`..`$9`.
+    it "clears every numbered match-data global, not only `$1`..`$9`" do
+      str = Rigor::Type::Combinator.nominal_of("String")
+      narrowed = scope.with_global(:$9, str).with_global(:$10, str).with_global(:$12, str).with_global(:$+, str)
+
+      forgotten = narrowed.forget_match_globals
+
+      expect(forgotten.global(:$9)).to be_nil
+      expect(forgotten.global(:$10)).to be_nil
+      expect(forgotten.global(:$12)).to be_nil
+      expect(forgotten.global(:$+)).to be_nil
+      expect(forgotten.match_globals_bound?).to be(false)
+    end
+
+    it "leaves `$0` and other non-group globals alone" do
+      str = Rigor::Type::Combinator.nominal_of("String")
+      seeded = scope.with_global(:$0, str).with_global(:$10, str)
+
+      forgotten = seeded.forget_match_globals
+
+      expect(forgotten.global(:$0)).to eq(str)
+      expect(forgotten.global(:$10)).to be_nil
+    end
   end
 
   # Issue #1361 — a `define_method` body reads the definer's slot whenever the method is called.

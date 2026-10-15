@@ -3032,7 +3032,7 @@ module Rigor
         # observes the seed's union (not the pre-call narrowed value). Always-safe (only widens; no new facts). See
         # [`docs/CURRENT_WORK.md`](../../../docs/CURRENT_WORK.md) § "Flow-folding" — G2 intervening-call case.
         post_scope = invalidate_ivars_for_intervening_call(node, post_scope) if statement_call
-        # C1 — regex match-data globals (`$~`, `$1..$9`, `$&`, …) are narrowed to non-nil on a successful-match edge; a
+        # C1 — regex match-data globals (`$~`, `$1..$N`, `$&`, …) are narrowed to non-nil on a successful-match edge; a
         # later call that itself runs a regex match rebinds them, so the narrowed facts must be dropped. We forget them
         # only when the call may run a match in this frame ({#rebinds_match_globals?}). A call provably match-free on a
         # known receiver — `$3.to_i`, `year < 50` — does NOT clobber, so the multi-statement `m = /…/ =~ s; …; use($2)`

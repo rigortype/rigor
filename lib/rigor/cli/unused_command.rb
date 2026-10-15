@@ -215,26 +215,25 @@ module Rigor
         File.absolute_path(path)
       end
 
-      # A file's role (#1760), read from every spelling of it below the project root or the working directory:
-      # as written and as its realpath. The first spelling below the root decides, then one below the working
-      # directory, then the realpath relative to the root (`../…`). Any of them reading as test code makes it
-      # test code, so a `test/` helper reached through a symlink, or a `features/` tree below a subdirectory
-      # run's working directory, stays test code as it was when the working directory was the only root.
+      # A file's role (#1760), read from its spellings as written below the project root or the working
+      # directory: the first one below the root decides, and any of them reading as test code makes it test
+      # code, so a `features/` tree below a subdirectory run's working directory stays test code as it was when
+      # the working directory was the only root. The realpath is read only when no written spelling lies below
+      # either: a symlink whose target runs through a `test/` directory must not turn the production files
+      # reached through it into test code.
       def role_of(file, real)
-        rooted = below(file, real, @root_spellings)
-        in_cwd = below(file, real, cwd_spellings)
-        spellings = rooted + in_cwd
+        spellings = below(file, @root_spellings) + below(file, cwd_spellings)
+        spellings = below(real, @root_spellings) + below(real, cwd_spellings) if spellings.empty?
         role_for = Analysis::Reachability::Scan.method(:role_for)
-        return :test if spellings.any? { |path| role_for.call(path) == :test }
+        return :test if spellings.uniq.any? { |path| role_for.call(path) == :test }
 
         role_for.call(spellings.first || relative_to_root(real))
       end
 
-      # `file` and its realpath `real`, each relative to every directory in `dirs` it lies below.
-      def below(file, real, dirs)
-        [File.absolute_path(file), real].uniq.flat_map do |path|
-          dirs.filter_map { |dir| path.delete_prefix("#{dir.chomp('/')}/") if inside?(path, dir) }
-        end.uniq
+      # `path` relative to every directory in `dirs` it lies below.
+      def below(path, dirs)
+        absolute = File.absolute_path(path)
+        dirs.filter_map { |dir| absolute.delete_prefix("#{dir.chomp('/')}/") if inside?(absolute, dir) }.uniq
       end
 
       # The working directory as its realpath and, when the shell's `PWD` names it, as that logical spelling.
@@ -324,7 +323,8 @@ module Rigor
         matcher = Analysis::Reachability::ProjectFiles.method(:entry_point_match?)
         declarations.filter_map do |d|
           real = canonical(d.path)
-          spellings = [d.path, relative_to_root(real), *below(d.path, real, @root_spellings + cwd_spellings)]
+          dirs = @root_spellings + cwd_spellings
+          spellings = [d.path, relative_to_root(real), *below(d.path, dirs), *below(real, dirs)]
           d.fqn if globs.any? { |g| spellings.any? { |path| matcher.call(g, path) } }
         end
       end

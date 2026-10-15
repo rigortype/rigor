@@ -193,8 +193,9 @@ category rather than a bucket boundary. This is a data-model decision, not a fil
 role has to be recorded when the edge is, so it cannot be retrofitted after #349.
 
 Test role is decided from the path relative to the project root of WD7, and a file is test code
-when any spelling of it below the root or the working directory, as written or as its realpath,
-reads as test code (a directory above either never counts): `spec/` and `test/`
+when any spelling of it as written below the root or the working directory reads as test code; its
+realpath is read only when no written spelling lies below either, so a symlink whose target runs
+through `test/` does not make production code test code (a directory above either never counts): `spec/` and `test/`
 anywhere below it, `*_spec.rb` / `*_test.rb`, and the conventional end-to-end trees `qa/`, `e2e/` and
 `features/` at that root (#1751; root-only because
 `app/models/features/` is an ordinary namespace). Tooling trees — `rubocop/`, `keeps/`, `tooling/`,

@@ -272,6 +272,38 @@ RSpec.describe Rigor::CLI::UnusedCommand do
       end
     end
 
+    # Round 5 of #1888: a realpath through a `test/` directory must not make production code test code.
+    it "reads production files as production when the project's realpath runs through a test/ directory" do
+      Dir.mktmpdir do |dir|
+        proj = File.join(dir, "work/test/proj")
+        write_file(proj, ".rigor.yml", "paths:\n  - lib\n")
+        write_file(proj, "lib/main.rb", "Widget.new\n")
+        write_file(proj, "lib/widget.rb", "class Widget\nend\n")
+        File.symlink(proj, File.join(dir, "proj"))
+        backdate(dir)
+
+        _, report, = run_in(dir, "--config=proj/.rigor.yml")
+
+        expect(report["test_only"]).to be_empty
+        expect(report["candidates"]).to be_empty
+      end
+    end
+
+    it "reads a lib/ file symlinked into the test tree as production" do
+      Dir.mktmpdir do |dir|
+        write_file(dir, ".rigor.yml", "paths:\n  - lib\n")
+        write_file(dir, "lib/main.rb", "Foo.new\n")
+        write_file(dir, "test/support/foo.rb", "class Foo\n  def x = Bar.new\nend\n")
+        write_file(dir, "lib/bar.rb", "class Bar\nend\n")
+        File.symlink(File.join(dir, "test/support/foo.rb"), File.join(dir, "lib/foo.rb"))
+        backdate(dir)
+
+        _, report, = run_in(dir)
+
+        expect(report["test_only"]).to be_empty
+      end
+    end
+
     it "scans each file once when the project is reached through a symlink" do
       Dir.mktmpdir do |dir|
         project = File.join(dir, "proj")

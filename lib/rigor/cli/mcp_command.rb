@@ -12,7 +12,7 @@ module Rigor
     # Starts a long-running MCP (Model Context Protocol) server over stdio. The server exposes Rigor's analysis tools as
     # MCP tool calls over a newline-delimited JSON-RPC 2.0 stream. See ADR-33.
     #
-    # Slice 1 ships the stdio transport with seven read-only tools: rigor_check, rigor_type_of, rigor_triage,
+    # The stdio transport serves eight read-only tools: rigor_check, rigor_type_of, rigor_triage, rigor_lens,
     # rigor_annotate, rigor_sig_gen, rigor_explain, rigor_coverage.
     class McpCommand < Command
       USAGE = "Usage: rigor mcp [options]"

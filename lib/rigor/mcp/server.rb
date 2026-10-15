@@ -64,6 +64,25 @@ module Rigor
           }
         },
         {
+          name: "rigor_lens",
+          description: "Map the classes, modules, methods and attributes the given Ruby files declare, with the " \
+                       "type `rigor check` gives each one and where that type came from (sig/, an inline " \
+                       "comment, a plugin, a library, or inference). Returns the lens/v0 JSON document " \
+                       "(experimental). Pass every file you need in one call: each call pays one analysis run.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              files: {
+                type: "array",
+                items: { type: "string" },
+                description: "Ruby files to map (required)"
+              },
+              config: { type: "string", description: "Path to .rigor.yml (optional)" }
+            },
+            required: ["files"]
+          }
+        },
+        {
           name: "rigor_annotate",
           description: "Return the given Ruby source file with each line's last-expression type " \
                        "appended as a comment. Useful for understanding how Rigor infers types " \
@@ -180,13 +199,12 @@ module Rigor
         out_io = StringIO.new
         err_io = StringIO.new
         require_relative "../cli"
-        exit_code = CLI.new(argv, out: out_io, err: err_io).run
+        exit_code = with_captured_streams(out_io, err_io) { CLI.new(argv, out: out_io, err: err_io).run }
 
-        is_error = exit_code == CLI::EXIT_USAGE
-        text = out_io.string
-        text = err_io.string if text.empty? && is_error
-
-        success(id, { content: [{ type: "text", text: text }], isError: is_error })
+        success(id, tool_result(out_io.string, err_io.string, exit_code))
+      rescue SystemExit => e
+        # An option parser that exits (`--help`, `--version`) must not take the server down with it.
+        success(id, { content: [{ type: "text", text: "Command exited (status #{e.status})" }], isError: true })
       rescue StandardError => e
         @err.puts("rigor mcp: #{e.class}: #{e.message}")
         @err.puts(e.backtrace.first(5).join("\n")) if e.backtrace
@@ -194,6 +212,26 @@ module Rigor
                   content: [{ type: "text", text: "Internal error: #{e.message}" }],
                   isError: true
                 })
+      end
+
+      # A non-zero exit with nothing on stdout printed only an error; exit 1 with a document (check, lens) is a
+      # result, not an error.
+      def tool_result(out, err, exit_code)
+        is_error = [CLI::EXIT_USAGE, CLI::EXIT_INTERNAL_ERROR].include?(exit_code) || (out.empty? && !exit_code.zero?)
+        { content: [{ type: "text", text: out.empty? ? err : out }], isError: is_error }
+      end
+
+      # The JSON-RPC channel is the process's stdout, so nothing a command writes past its `out:` (an option
+      # parser's `--help`, a stray `puts`) may reach it while the command runs.
+      def with_captured_streams(out_io, err_io)
+        stdout = $stdout
+        stderr = $stderr
+        $stdout = out_io
+        $stderr = err_io
+        yield
+      ensure
+        $stdout = stdout
+        $stderr = stderr
       end
 
       def build_argv(name, args) # rubocop:disable Metrics/MethodLength,Metrics/CyclomaticComplexity,Metrics/AbcSize,Metrics/PerceivedComplexity
@@ -220,6 +258,15 @@ module Rigor
           argv << "--top=#{args['top']}" if args["top"]
           argv += Array(args["paths"])
           argv
+
+        when "rigor_lens"
+          files = args["files"]
+          return nil unless files.is_a?(Array) && !files.empty? && files.all?(String)
+
+          argv = ["lens", "--format=json"]
+          argv << "--config=#{effective_config}" if effective_config
+          # `--` ends the options, so a file named like a flag (`--version`) is a file.
+          argv + ["--", *files]
 
         when "rigor_annotate"
           return nil unless args["file"]

@@ -64,12 +64,12 @@ RSpec.describe Rigor::MCP::Server do
   end
 
   describe "tools/list" do
-    it "lists the seven expected tool names" do
+    it "lists the eight expected tool names" do
       resp = request(id: 2, method: "tools/list")
 
       names = resp.dig("result", "tools").map { |t| t["name"] }
       expect(names).to contain_exactly(
-        "rigor_check", "rigor_type_of", "rigor_triage",
+        "rigor_check", "rigor_type_of", "rigor_triage", "rigor_lens",
         "rigor_annotate", "rigor_sig_gen", "rigor_explain", "rigor_coverage"
       )
     end
@@ -152,6 +152,51 @@ RSpec.describe Rigor::MCP::Server do
       parsed = JSON.parse(result.dig("content", 0, "text"))
       expect(parsed["type"]).to be_a(String)
       expect(parsed["type"]).not_to be_empty
+    end
+  end
+
+  describe "rigor_lens" do
+    it "returns missing-arg error when files is absent or empty" do
+      expect(tool_call("rigor_lens").dig("error", "code")).to eq(-32_602)
+      expect(tool_call("rigor_lens", { "files" => [] }).dig("error", "code")).to eq(-32_602)
+    end
+
+    it "rejects a files value that is not a list of strings" do
+      expect(tool_call("rigor_lens", { "files" => [5] }).dig("error", "code")).to eq(-32_602)
+      expect(tool_call("rigor_lens", { "files" => { "a" => "b" } }).dig("error", "code")).to eq(-32_602)
+    end
+
+    it "returns the lens/v0 document for a known file" do
+      resp = tool_call("rigor_lens", { "files" => ["lib/rigor/version.rb"] })
+
+      expect(resp["error"]).to be_nil
+      expect(resp.dig("result", "isError")).to be(false)
+      document = JSON.parse(resp.dig("result", "content", 0, "text"))
+      expect(document["schema"]).to eq("lens/v0")
+      expect(document["files"].first["status"]).to eq("ok")
+    end
+
+    it "keeps an option parser's exit off the JSON-RPC channel and stays up" do
+      resp = nil
+      expect { resp = tool_call("rigor_check", { "paths" => ["--help"] }) }.not_to output.to_stdout
+
+      expect(resp.dig("result", "isError")).to be(true)
+      expect(request(id: 10, method: "ping")["result"]).to eq({})
+    end
+
+    it "reports an error a command printed only to stderr as an error" do
+      resp = tool_call("rigor_annotate", { "file" => "no/such/file.rb" })
+
+      expect(resp.dig("result", "isError")).to be(true)
+      expect(resp.dig("result", "content", 0, "text")).to include("no/such/file.rb")
+    end
+
+    it "reads a file named like a flag as a file, and stays up" do
+      resp = tool_call("rigor_lens", { "files" => ["--version"] })
+
+      expect(resp.dig("result", "isError")).to be(false)
+      expect(JSON.parse(resp.dig("result", "content", 0, "text"))["files"].first["status"]).to eq("not_found")
+      expect(request(id: 9, method: "ping")["result"]).to eq({})
     end
   end
 

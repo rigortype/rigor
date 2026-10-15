@@ -33,6 +33,7 @@ There is no conflict in running both simultaneously.
 | `rigor_check` | `rigor check --format json` | JSON diagnostic report |
 | `rigor_type_of` | `rigor type-of --format json` | JSON type at `FILE:LINE:COL` |
 | `rigor_triage` | `rigor triage --format json` | JSON distribution + class/method selectors + hotspots + hints |
+| `rigor_lens` | `rigor lens --format json` | JSON `lens/v0` declaration map (experimental) |
 | `rigor_annotate` | `rigor annotate --no-color` | Annotated Ruby source |
 | `rigor_sig_gen` | `rigor sig-gen --print --format json` | JSON RBS skeleton candidates |
 | `rigor_explain` | `rigor explain --format json` | JSON rule catalog entries |
@@ -320,6 +321,34 @@ by `count` for the highest-leverage class/method, or filter by
 
 ---
 
+### rigor_lens
+
+Map the classes, modules, methods and attributes the given files declare,
+with the type `rigor check` gives each one and where it came from. The
+document is the experimental `lens/v0` format
+([specification](../internal-spec/lens.md)); see
+[Inspecting inferred types](05-inspecting-types.md) for the command.
+
+**Input:**
+
+| Argument | Type | Required |
+|---|---|---|
+| `files` | `string[]` | yes |
+| `config` | `string` | no |
+
+**Returns:** JSON. Each file carries its `status`, `sites`, `omissions`
+and `diagnostics`; `members` holds the signatures.
+
+**Typical agent use:** learn what a file or class offers, and the
+contracts its methods already have, before editing it or writing a type.
+Pass every file in one call: each call runs one analysis, and the first
+call on a project costs a full `rigor check`. Paths, site keys and the cache are
+relative to the directory the server was started in, so start it from the
+project root; `--config` fixes which files belong to the project, not how
+paths are written.
+
+---
+
 ### rigor_annotate
 
 Return the given Ruby source file with each line's last-expression
@@ -482,7 +511,7 @@ You should get a JSON response. If you get nothing or a shell error,
 `rigor` is not on your `PATH` — fix the install path first (see
 [Installing Rigor](01-installation.md)).
 
-**`rigor_check` / `rigor_triage` return an empty diagnostics array on a project that has errors.**
+**`rigor_check` / `rigor_triage` return an empty diagnostics array on a project that has errors, or `rigor_lens` reports every file `outside_project`.**
 
 The tool uses `Configuration.discover` from the working directory the
 MCP server was started in. If the client launches `rigor mcp` from a
@@ -517,8 +546,8 @@ warmed by a prior `rigor check` run reduces it significantly.
 
 ## Status and roadmap
 
-`rigor mcp` shipped in v0.1.10 with all seven tools and stdio
-transport. Queued follow-ups are demand-driven:
+`rigor mcp` shipped in v0.1.10 with seven tools and stdio
+transport; `rigor_lens` joined them in v0.4.4. Queued follow-ups are demand-driven:
 
 - **HTTP transport** (slice 2) — `--transport=http` for CI / remote
   agent use; a minimal Rack endpoint.

@@ -82,7 +82,10 @@ take from it:
 
 - **The schema is `lens/v0` and unfrozen until ZARD reads it.** The first ZARD slice that consumes it
   is what promotes it to `lens/v1` on Rigor's v1.0 freeze list. Build that slice against `v0`, and
-  report what is missing before the freeze rather than after.
+  report what is missing before the freeze rather than after. *Amended 2026-10-15 (#1907): an
+  experimental adapter reading `v0` does not trigger the freeze. Rigor ships `lens/v1` in a release
+  first, and a ZARD release then requires it. The agreed shape is
+  [`docs/internal-spec/lens.md`](../internal-spec/lens.md).*
 - **Type strings and diagnostic sets are not part of the contract.** They improve with the engine
   (ADR-50 § Decision 3). The contract covers structure: declarations, spans, provenance, and anchors.
 - **Types are spelled as `sig-gen` writes `.rbs`**: the erasure, plus `%a{rigor:v1:…}` where refined.

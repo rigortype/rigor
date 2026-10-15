@@ -87,6 +87,10 @@ These may change in any release — relying on them is unsupported:
 - **Which diagnostics fire on a given file** — precision and bug-catching
   improve freely within a minor (§ compatibility model 2). The
   [baseline](manual/06-baseline.md) absorbs the churn.
+- **`rigor lens` and its `lens/v0` output** — experimental until `lens/v1`
+  ships in a release ([ADR-113](adr/113-rigor-lens.md) § Amendment,
+  [`docs/internal-spec/lens.md`](internal-spec/lens.md)). A breaking change
+  bumps the document's `revision`.
 - **`rigor sig-gen` output precision** — the *inferred shapes* sharpen
   over time; the command, flags, and RBS validity are contract, the
   precision of what it emits is not.

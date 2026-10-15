@@ -235,9 +235,34 @@ RSpec.describe "definition build failed reporting" do
     # diagnostics, which is what an absence-only comparison would pass on; a pre-warm that contributed would
     # name the whole bundled universe (1,336 measured on the real CLI).
     expect(sequential.size).to eq(1)
-    expect(sequential.first).to start_with("3 RBS class definition(s) failed to build: String, Integer, Array.")
+    expect(sequential.first).to start_with("3 RBS class definition(s) failed to build: Array, Integer, String.")
     expect(sequential.first).to include("::Object#blank?")
     expect(pooled).to eq(sequential)
+  end
+
+  # Issue #1902 — the program demands only `Berry`'s SINGLETON side, whose failure names `::Berry.s`; the
+  # instance side fails too, for `::Berry#i`. A cold-store pooled run's parent pre-warm builds both sides
+  # under an internal demand, so its loader held both failures while a `--no-cache` run held one, and the
+  # two runs named different first failures. Building both sides of every reported class makes the
+  # candidates the same in each.
+  it "names the same failure for a two-sided class with and without the pool's pre-warm" do
+    FileUtils.mkdir_p("sig")
+    File.write(File.join("sig", "berry.rbs"), <<~RBS)
+      class Berry
+        def self.s: () -> Integer
+        def self.s: () -> Integer
+        def i: () -> Integer
+        def i: () -> Integer
+      end
+    RBS
+    File.write("app.rb", "Berry.s\n")
+
+    nocache = build_failed_diagnostics(run(config)).map(&:message)
+    pooled = build_failed_diagnostics(run(config, workers: 2, cache_store: cold_store)).map(&:message)
+
+    expect(nocache.size).to eq(1)
+    expect(nocache.first).to include("First failure: RBS::DuplicatedMethodDefinitionError on `::Berry#i`.")
+    expect(pooled).to eq(nocache)
   end
 
   it "bounds pooled stderr banners while retaining the aggregated diagnostic", :captures_rbs_banner do

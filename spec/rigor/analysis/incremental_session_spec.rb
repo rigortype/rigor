@@ -3168,6 +3168,83 @@ end
       end
     end
 
+    # Issue #1902 — a recheck records the classes ITS closure demanded before it unions in the replayed
+    # set, so editing the file that demands `AlphaDup` used to list it ahead of `ZetaDup`, which the cold
+    # run (analysing `a.rb` first) lists first. Same set, different text; the warm run must read as cold.
+    it "lists the failed classes in the cold run's order on a warm run after an edit (#1902)" do
+      Dir.mktmpdir do |dir|
+        FileUtils.mkdir_p(File.join(dir, "sig"))
+        %w[ZetaDup AlphaDup].each do |name|
+          File.write(File.join(dir, "sig", "#{name.downcase}.rbs"),
+                     "class #{name}\n  def read: () -> String\n  def read: () -> String\nend\n")
+        end
+        File.write(File.join(dir, "a.rb"), "ZetaDup.new.read\n")
+        File.write(File.join(dir, "b.rb"), "AlphaDup.new.read\n")
+        config = definition_failure_config(dir)
+        cache_root = File.join(dir, ".rigor", "cache")
+        snapshot = Rigor::Cache::IncrementalSnapshot.new(root: cache_root)
+        run = incremental_runner(config, dir, cache_root, snapshot, fingerprint(config, dir))
+
+        cold, = run.call
+        File.write(File.join(dir, "b.rb"), "AlphaDup.new.read\n# edited\n")
+        edited, warm = run.call
+        full = guarded_run(Rigor::Analysis::Runner.new(configuration: config, cache_store: nil)).diagnostics
+
+        expect(warm).to be(true)
+        expect(definition_rows(cold).first).to include("failed to build: AlphaDup, ZetaDup.")
+        expect([definition_rows(edited), definition_rows(full)]).to eq([definition_rows(cold)] * 2)
+      end
+    end
+
+    # Issue #1902 — `Berry`'s instance and singleton sides fail for different members, and `a.rb` demands
+    # one while `b.rb` demands the other. A recheck after editing either file demands only that file's
+    # side; the cold run, both rechecks, a `--no-cache` run and a two-worker pool must all name the same
+    # first failure and files.
+    def write_two_sided_fixture(dir)
+      FileUtils.mkdir_p(File.join(dir, "sig"))
+      File.write(File.join(dir, "sig", "berry.rbs"), <<~RBS)
+        class Berry
+          def self.s: () -> Integer
+          def self.s: () -> Integer
+          def i: () -> Integer
+          def i: () -> Integer
+        end
+      RBS
+      File.write(File.join(dir, "sig", "mango.rbs"),
+                 "class Mango\n  def m: () -> Integer\n  def m: () -> Integer\nend\n")
+      { "a.rb" => "Berry.new.i\n", "b.rb" => "Berry.s\n", "c.rb" => "Mango.new.m\n" }.each do |name, body|
+        File.write(File.join(dir, name), body)
+      end
+    end
+
+    def pooled_full_run(config, dir)
+      store = Rigor::Cache::Store.new(root: File.join(dir, ".rigor", "pool-cache"))
+      guarded_run(Rigor::Analysis::Runner.new(configuration: config, workers: 2, cache_store: store)).diagnostics
+    end
+
+    it "names the same failure for a two-sided class across cold, edited and pooled runs (#1902)" do
+      Dir.mktmpdir do |dir|
+        write_two_sided_fixture(dir)
+        config = definition_failure_config(dir)
+        cache_root = File.join(dir, ".rigor", "cache")
+        snapshot = Rigor::Cache::IncrementalSnapshot.new(root: cache_root)
+        run = incremental_runner(config, dir, cache_root, snapshot, fingerprint(config, dir))
+
+        cold, = run.call
+        rows = %w[b.rb a.rb].map do |edited|
+          File.write(File.join(dir, edited), "# edited\n", mode: "a")
+          diagnostics, warm = run.call
+          expect(warm).to be(true)
+          definition_rows(diagnostics)
+        end
+        full = guarded_run(Rigor::Analysis::Runner.new(configuration: config, cache_store: nil)).diagnostics
+
+        expect(definition_rows(cold).first).to include("RBS::DuplicatedMethodDefinitionError on `::Berry#i`.")
+        expect(rows + [definition_rows(full), definition_rows(pooled_full_run(config, dir))])
+          .to eq([definition_rows(cold)] * 4)
+      end
+    end
+
     it "drops the row and rebuilds both rows once the duplicate declaration is gone (#796)" do
       Dir.mktmpdir do |dir|
         write_definition_failure_fixture(dir)

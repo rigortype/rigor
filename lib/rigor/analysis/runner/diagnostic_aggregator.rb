@@ -613,9 +613,18 @@ module Rigor
         # culprit and reads the same on a cache hit, where every `RBS::Location` has been dumped to a
         # sentinel. The error class is attributed to that first failure explicitly rather than to all of
         # them: the per-class memo keeps only the first reason, and one run can mix error classes.
+        #
+        # Issue #1902 — "first" is first by CLASS NAME, not first recorded. The snapshot arrives in demand
+        # order, and that order is a property of the invocation, not of the project: an `--incremental`
+        # recheck records the classes its closure demanded before it unions in the replayed set, and a worker
+        # pool unions per-worker lists in drain order. So the classes are sorted by name and the files
+        # sorted and deduplicated here. Which tuple each class carries is fixed upstream
+        # ({Environment::RbsLoader.definition_build_detail_order}), not here.
         def build_rbs_definition_build_failed_diagnostic(failures)
+          failures = failures.sort_by { |failure| failure.first.to_s }
           sample_size = 5
-          files = failures.flat_map { |failure| Array(failure[3]) }.uniq.map { |name| relative_signature_path(name) }
+          files = failures.flat_map { |failure| Array(failure[3]) }
+                          .map { |name| relative_signature_path(name) }.uniq.sort
           Diagnostic.new(
             path: ".rigor.yml",
             line: 1,

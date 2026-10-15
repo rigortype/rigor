@@ -679,6 +679,30 @@ RSpec.describe Rigor::Environment::RbsLoader do
       expect(loader.definition_build_failures.map(&:first)).to eq(["Widget"])
     end
 
+    # Issue #1902 — the two sides of one class can fail for DIFFERENT reasons, and which side a run demands
+    # first depends on which files it analysed. The recorded tuple is chosen from both sides by a fixed
+    # order, so a run that only asks for the instance side and one that only asks for the singleton side
+    # report the same failure.
+    it "records the same tuple for a two-sided failure whichever side was demanded" do
+      File.write(File.join(tmpdir, "berry.rbs"), <<~RBS)
+        class Berry
+          def self.s: () -> Integer
+          def self.s: () -> Integer
+          def i: () -> Integer
+          def i: () -> Integer
+        end
+      RBS
+      recorded = %i[instance_definition singleton_definition].map do |demand|
+        loader = described_class.new(signature_paths: [tmpdir])
+        allow(loader).to receive(:warn)
+        loader.public_send(demand, "Berry")
+        loader.definition_build_failures
+      end
+
+      expect(recorded.uniq.size).to eq(1)
+      expect(recorded.first.map { |failure| failure[2] }).to eq(["::Berry#i"])
+    end
+
     # The must-still-succeed twin of the two above: a healthy sig set records nothing, so the diagnostic
     # cannot fire on a project with nothing wrong.
     it "records nothing for a class whose definition builds cleanly" do

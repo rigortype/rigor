@@ -48,13 +48,14 @@ def parenthesised(raw)
   end
 end
 
-# A clause with a condition Rigor does not read sees the subject unnarrowed: `with_empty("")` and
-# `with_empty(nil)` return :blank, `with_empty("a")` "A".
+# A clause that mixes a condition Rigor reads (`nil`) with one it does not (`""`) reads the subject as
+# `Dynamic[top]`, and the `else` reads it as it entered: `with_empty("")` and `with_empty(nil)` return :blank,
+# `with_empty("a")` "A".
 def with_empty(raw)
   x = raw ? String(raw) : nil
   case x
   when nil, ""
-    assert_type("String?", x)
+    assert_type("Dynamic[top]", x)
     :blank
   else
     assert_type("String?", x)
@@ -126,8 +127,12 @@ class CaseWhenNilIvar
 
   def run
     case @x
-    when nil then 0
-    else @x.upcase
+    when nil
+      assert_type("nil", @x)
+      0
+    else
+      assert_type("String", @x)
+      @x.upcase
     end
   end
 end
@@ -135,8 +140,12 @@ end
 def global(raw)
   $case_when_nil = raw ? String(raw) : nil
   case $case_when_nil
-  when nil then 0
-  else $case_when_nil.upcase
+  when nil
+    assert_type("nil", $case_when_nil)
+    0
+  else
+    assert_type("String", $case_when_nil)
+    $case_when_nil.upcase
   end
 end
 
@@ -146,5 +155,51 @@ def control(raw)
   x = raw ? String(raw) : nil
   case x
   when nil then x.upcase # GENUINE-NIL
+  end
+end
+
+# The unread condition may itself rule `nil` out, so the mixed clause's body reports no nil receiver:
+# `mixed_test("abcd")` returns "ABCD", `mixed_test("b")` nil and `mixed_test(nil)` nil.
+def mixed_test(raw)
+  x = raw ? String(raw) : nil
+  case x
+  when /a/, ->(v) { !v.nil? && v.size > 3 } then x.upcase
+  end
+end
+
+# `when true` / `when false` narrow in a value position too: `false_value(false)` returns [0],
+# `false_value(true)` [2]; `true_value(true)` [0], `true_value(false)` [2].
+def false_value(flag)
+  x = flag ? 1 : false
+  [case x
+   when false
+     assert_type("false", x)
+     0
+   else
+     assert_type("1", x)
+     x.succ
+   end]
+end
+
+def true_value(flag)
+  x = flag ? true : 1
+  [case x
+   when true
+     assert_type("true", x)
+     0
+   else
+     assert_type("1", x)
+     x.succ
+   end]
+end
+
+# Once `when String` and `when nil` cover `String?`, the `else` is dead and reports, as it does when spelled
+# `when NilClass`. `dead_else("a")` returns 1 and `dead_else(nil)` 2.
+def dead_else(raw)
+  x = raw ? String(raw) : nil
+  case x
+  when String then 1
+  when nil then 2
+  else 3 # GENUINE-UNREACHABLE
   end
 end

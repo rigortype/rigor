@@ -1209,6 +1209,11 @@ RSpec.describe "Rigor type construction (integration)" do
       end
       expect(nil_receivers.map(&:line)).to eq(marked_lines(harness, "# GENUINE-NIL"))
     end
+
+    it "reports the `else` that `when String` and `when nil` leave dead" do
+      unreachable = harness.diagnostics.select { |d| d.rule == "flow.unreachable-clause" }
+      expect(unreachable.map(&:line)).to eq(marked_lines(harness, "# GENUINE-UNREACHABLE"))
+    end
   end
 
   describe "fixtures/regex_global_narrowing.rb — C1 regex match-data global narrowing" do

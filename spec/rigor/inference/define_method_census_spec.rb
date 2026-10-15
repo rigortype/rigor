@@ -35,7 +35,7 @@ RSpec.describe "the ADR-58 ivar census counts define_method block writes" do
     end
 
     it "joins a define_method block in a class_eval block on the class" do
-      source = box("") + %(Box.class_eval { define_method(:set) { @x = "a" } }\n)
+      source = "#{box('')}Box.class_eval { define_method(:set) { @x = \"a\" } }\n"
       expect(census(source)).to eq(%("a"?))
     end
 
@@ -63,7 +63,8 @@ RSpec.describe "the ADR-58 ivar census counts define_method block writes" do
     end
 
     it "records no ownerless census entry for a class << self or anonymous Class.new body" do
-      source = box(%(class << self\n  define_method(:a) { @x = "a" }\nend\nClass.new { define_method(:b) { @x = "b" } }))
+      source = box(%(class << self\n  define_method(:a) { @x = "a" }\nend\n) +
+                   %(Class.new { define_method(:b) { @x = "b" } }))
       program = Prism.parse(source).value
       index = Rigor::Inference::ScopeIndexer.index(program, default_scope: Rigor::Scope.empty)
       expect(index[program].class_ivars.keys).to eq(["Box"])
@@ -104,7 +105,8 @@ RSpec.describe "the ADR-58 ivar census counts define_method block writes" do
     # census, exactly as a `def` written there does, and does not reach the first file's.
     it "credits a define_method in a reopening to that file's census, as a def there is" do
       first = box("def get = @x.upcase")
-      with_block = "class Box\n  define_method(:set) { @x = \"a\" }\n  def clear = (@x = nil)\n  def get2 = @x.upcase\nend\n"
+      with_block = "class Box\n  define_method(:set) { @x = \"a\" }\n  " \
+                   "def clear = (@x = nil)\n  def get2 = @x.upcase\nend\n"
       with_def = with_block.sub(%(define_method(:set) { @x = "a" }), %(def set = (@x = "a")))
 
       expected = [["box.rb", 5, "call.undefined-method"]]

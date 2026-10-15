@@ -1,6 +1,7 @@
 # ADR-113 — `rigor lens`: a declaration map with type provenance, for agents and tools
 
-Status: **Accepted, 2026-09-19. Nothing implemented yet.** Adds a `rigor lens` command. It is the
+Status: **Accepted, 2026-09-19; amended 2026-10-15 (§ Amendment).** #1081 (xxh3) and #1082
+(`declared_members`) are implemented; the command is not. Adds a `rigor lens` command. It is the
 "Rigor lens" that ZARD's `CONTEXT.md` and ADR-0003 already name. This ADR reverses #512's ruling for
 `rigor type-of`: that command stops printing "unseeded" and adopts WD2's computation. Implementation
 is tracked by #1080–#1085.
@@ -185,3 +186,52 @@ Implementation issues:
 - **[ADR-110](110-inherited-declaration-precedence.md)**: the effective type of a redefinition.
 - **[ADR-112](112-extrbs-comment-channel.md)**: `extrbs` provenance, the sig-gen spelling, and the WD5
   expansion.
+
+## Amendment 2026-10-15 — the first slice, as agreed with ZARD in #1907
+
+The consumer requirements in [#1907](https://github.com/rigortype/rigor/issues/1907), an adversarial
+review of the first reply, and a spike of the computation
+([`20261015-lens-computation-spike.md`](../notes/20261015-lens-computation-spike.md)) showed that four
+premises above do not hold on current code. The binding output contract is now
+[`docs/internal-spec/lens.md`](../internal-spec/lens.md); this section records what changed and why.
+
+- **Decision, narrowed.** "Every type it prints is the type `check` uses" holds for declaration facts
+  and diagnostics. An inferred type is a body's return with its parameters as declared or unknown; `check`
+  types such a body per call key, so the two need not be equal, and that is not a lens bug.
+- **`type-of` leaves this slice.** Moving `type-of` and hover onto this computation stays the goal, but
+  under #512's latency gates and after the producer exists; it is no longer part of #1083.
+- **WD2, computation.** The incremental snapshot is keyed by the run's roots, and a warm recheck with no
+  change analyses nothing, so "a one-file `check`, and the next lens is warm" was not reachable. A lens
+  roots its session at the configuration's `paths:`, as `check --incremental` does, forces its targets
+  into the recheck, and reads their seeded index inside the run. A cold lens costs a full `check`. A
+  lens can never be served from the run-result slot, so a warm lens always pays the engine's warm floor.
+  On redmine that floor is mostly view templates (#392); making a lens skip them safely is an
+  optimisation, not a prerequisite.
+- **WD3, queries.** Revision 1 takes files only, several per invocation. Symbol queries, `--inherited`,
+  `--library` and `redefines` wait for `def_sites` (#1080), whose fold-order rule must be specified
+  first: the existing tables fold in path order, not load order. The file slice lists other files'
+  definitions of a member from the per-file discovery bundles the engine already keeps.
+- **WD4, rows.** A row was one declaration with one type. That attaches one signature to every
+  competing definition, and there is no well-defined effective site to prefer: the engine's choice is
+  the file that sorts last. Rows split into **sites** (source declarations, each with its own body
+  return) and **members** (one per owner, scope and name), whose `basis` is `contract`, `single_site` or
+  `contested`. A contested inferred slot is `unavailable`, never a guessed winner, and a contested member has no
+  overloads: each definition carries its own parameter list. Every slot is tagged
+  `typed`, `dynamic` (with an ADR-75 cause) or `unavailable` (with a reason). `inferred` means the
+  body's return with its parameters as declared or unknown, not `check`'s per-call-key result.
+  WD4's "until WD5" is resolved for `sig/` against inline contracts (#1075); `extrbs` stays reserved
+  until #1073. WD4's `%a{rigor:v1:…}` "where a refinement applies" narrows to authored annotations:
+  sig-gen does not emit inferred refinements yet, so neither does a lens.
+- **WD6, anchors.** The hashed material is the leading contract comments (rbs-inline's annotation
+  grammar plus `@extrbs`, and their continuation lines), not the whole leading comment block, so prose
+  above a declaration does not move its anchor. The declaration's own bytes still include its body. The
+  file digest covers every byte.
+- **WD1, lifecycle.** An experimental consumer reading `lens/v0` does not freeze it. Rigor ships
+  `lens/v1` in a release first; a ZARD release then requires it. Until then `rigor lens` and its flags
+  are outside the compatibility contract.
+- **Exit status.** 0 when any target has a result, 1 when none does, 64 for usage and 70 for an
+  internal error; code diagnostics never change it. Exit 2 stays reserved for an ambiguous symbol.
+- **Kinds.** Revision 1 models classes, modules, methods and direct-body `attr_*`. Constants, aliases,
+  `define_method`, other explicit receivers, defs in blocks, `Data` / `Struct` classes,
+  `module_function`, `refine` and plugin members are listed as omissions, never dropped silently. The
+  #1083 fixture for `refine` therefore moves to the slice that models it.

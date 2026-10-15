@@ -1408,16 +1408,19 @@ end
       diagnostics.select { |diagnostic| diagnostic.path == reader_path }.map(&:rule)
     end
 
-    def run_reader_edit(dir, before, after, workers)
+    def seeded_session(dir, before, workers)
       d = File.join(dir, "d.rb")
-      b = File.join(dir, "b.rb")
       File.write(d, reader_source)
-      File.write(b, before)
+      File.write(File.join(dir, "b.rb"), before)
       File.write(File.join(dir, "c.rb"), "def unrelated = 1\n")
       session = described_class.new(configuration: configuration(dir), environment: shared_environment,
                                     workers: workers)
-      baseline = guarded_baseline(session)
-      File.write(b, after)
+      [session, d, guarded_baseline(session)]
+    end
+
+    def run_reader_edit(dir, before, after, workers)
+      session, d, baseline = seeded_session(dir, before, workers)
+      File.write(File.join(dir, "b.rb"), after)
       [d, baseline, guarded_recheck(session)]
     end
 
@@ -1456,6 +1459,79 @@ end
           expect(reader_rules(baseline, d)).to contain_exactly("flow.always-truthy-condition", "call.undefined-method")
           expect(recheck.affected).to eq(Set[File.join(dir, "b.rb")])
           expect(recheck.reused).to include(d)
+          expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
+        end
+      end
+
+      it "re-checks the reader when the only file defining gets is deleted (workers: #{workers})" do
+        skip "fork is unavailable on this platform" if workers.positive? && !Process.respond_to?(:fork)
+        Dir.mktmpdir do |dir|
+          session, d = seeded_session(dir, "class Reader\n  def gets(*) = nil\nend\n", workers)
+          File.delete(File.join(dir, "b.rb"))
+          recheck = guarded_recheck(session)
+
+          expect(recheck.affected).to include(d)
+          expect(reader_rules(recheck.diagnostics, d)).to contain_exactly("flow.always-truthy-condition",
+                                                                          "call.undefined-method")
+          expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
+        end
+      end
+
+      it "re-checks the reader when an added file defines gets (workers: #{workers})" do
+        skip "fork is unavailable on this platform" if workers.positive? && !Process.respond_to?(:fork)
+        Dir.mktmpdir do |dir|
+          session, d = seeded_session(dir, "class Reader\n  def other = nil\nend\n", workers)
+          File.write(File.join(dir, "e.rb"), "class Other\n  def gets = nil\nend\n")
+          recheck = guarded_recheck(session)
+
+          expect(recheck.affected).to include(d)
+          expect(reader_rules(recheck.diagnostics, d)).to eq(["call.undefined-method"])
+          expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
+        end
+      end
+
+      # The edge is recorded inside `project_defines_anywhere?`, so its other readers follow it too: a block that
+      # cannot complete through `raise` (`BlockCallTiming.never_completes_normally?`) and the `$@` a rescue binds
+      # (`ErrorInfo.rescue_entry`).
+      it "re-checks a caller whose block-return reading rests on raise when another file defines raise " \
+         "(workers: #{workers})" do
+        skip "fork is unavailable on this platform" if workers.positive? && !Process.respond_to?(:fork)
+        Dir.mktmpdir do |dir|
+          d = File.join(dir, "d.rb")
+          b = File.join(dir, "b.rb")
+          File.write(File.join(dir, "x.rb"),
+                     "class X\n  def self.foo\n    ints = [1, 2]\n    ints.tap { raise \"x\" }\n  end\nend\n")
+          File.write(d, "X.foo.zzz\n")
+          File.write(b, "class Placeholder\nend\n")
+          session = described_class.new(configuration: configuration(dir), environment: shared_environment,
+                                        workers: workers)
+          expect(reader_rules(guarded_baseline(session), d)).to be_empty
+
+          File.write(b, "class Other\n  def raise(*) = nil\nend\n")
+          recheck = guarded_recheck(session)
+
+          expect(recheck.affected).to include(d)
+          expect(reader_rules(recheck.diagnostics, d)).to eq(["call.undefined-method"])
+          expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
+        end
+      end
+
+      it "re-checks a $@ reader when another file defines backtrace (workers: #{workers})" do
+        skip "fork is unavailable on this platform" if workers.positive? && !Process.respond_to?(:fork)
+        Dir.mktmpdir do |dir|
+          d = File.join(dir, "d.rb")
+          b = File.join(dir, "b.rb")
+          File.write(d, "def bt\n  begin\n    1\n  rescue\n    $@.zzz\n  end\nend\n")
+          File.write(b, "class Placeholder\nend\n")
+          session = described_class.new(configuration: configuration(dir), environment: shared_environment,
+                                        workers: workers)
+          expect(reader_rules(guarded_baseline(session), d)).to eq(["call.undefined-method"])
+
+          File.write(b, "class Other\n  def backtrace = nil\nend\n")
+          recheck = guarded_recheck(session)
+
+          expect(recheck.affected).to include(d)
+          expect(reader_rules(recheck.diagnostics, d)).to be_empty
           expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
         end
       end

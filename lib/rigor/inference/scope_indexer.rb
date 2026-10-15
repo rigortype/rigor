@@ -8433,9 +8433,11 @@ module Rigor
       end
 
       # Issue #1459 — every method name one file's index defines, on any class or module and either side: the keys of
-      # the three tables `BlockCallTiming.project_defines_anywhere?` reads (`methods`, which also carries an
-      # `attr_*`, `alias` or `define_method` name, and the instance and singleton def-node tables, which carry a plain
-      # `def` the first withholds). Takes a live file index or a seed bundle, which hold the same three keys.
+      # `methods` (which also carries an `attr_*`, `alias` or `define_method` name) and of the instance and singleton
+      # def-node tables. A single file's `methods` already holds its `def` names, since `subtract_def_methods` runs only
+      # on the merged accumulator; the def-node tables are read as well so the census reads exactly the tables
+      # `BlockCallTiming.project_defines_anywhere?` reads. Takes a live file index or a seed bundle, which hold the
+      # same three keys.
       def defined_method_names(file_index)
         names = Set.new
         %i[methods def_nodes singleton_def_nodes].each do |key|

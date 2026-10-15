@@ -45,7 +45,7 @@ module Rigor
       #   `X.send(:define_method, :m, blk)`), whose body may be a block the file wrote anywhere, an eval of a
       #   String, whose code may do any of these, and a `const_set`, which may make a class a `class` body reopens;
       # - one name: a `def` of it anywhere (`def self.gets` at the top level defines it on `main`, which
-      #   {BlockCallTiming.project_defines_anywhere?} does not record), and a Symbol or String literal naming it,
+      #   {BlockCallTiming.project_defines_anywhere?} does not count), and a Symbol or String literal naming it,
       #   which a macro may define it through (`def_delegators :@io, :gets`, `attr_reader :gets`,
       #   `undef_method :gets`), other than `&:gets` and the first argument of a call that only names a method
       #   (`respond_to?(:gets)`, `send(:gets)`).

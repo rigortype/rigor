@@ -990,7 +990,7 @@ never in. A session that cannot reuse an existing snapshot therefore
 declines rather than running a baseline — nothing it computed could warm
 the next keystroke anyway.
 
-### `Payload` (current `SCHEMA = 31`)
+### `Payload` (current `SCHEMA = 38`)
 
 ```
 Payload :: Data[
@@ -1037,7 +1037,11 @@ recheck scan (`Incremental.changed_defined_names`), and fires the key for
 every name that appeared in or vanished from a file. The appeared-symbol
 diff the `method:` and `toplevel:` keys use cannot stand in for it: it
 sees only a `def`, and only one that appears. The seed bundles already
-carry the three tables, so no row moves and `SCHEMA` is unchanged.
+carry the three tables, so no row moves and `SCHEMA` is unchanged. The
+check's other readers record the key too, and one of them is broad:
+`ErrorInfo.rescue_entry` asks it for `backtrace` at every rescue entry, so
+a `backtrace` definition appearing or vanishing anywhere re-checks every
+file with a `rescue`. That is a known cost.
 
 Schema history worth pinning: `6` stored the seed bundles as
 `(node_id, name, fingerprint)` def-node handles (ADR-85); `8` added each

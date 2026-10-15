@@ -81,6 +81,12 @@ RSpec.describe Rigor::Inference::RepeatedOrWrites do
       expect([assigned, other_key, inserted]).to eq([assigned_sites, [], inserted_sites])
     end
 
+    it "counts a store above the site's object only when it may install a shared one" do
+      shared, shared_sites = straight("cache[:a] = k if cond\n(cache[:a][:b] ||= :f)")
+      fresh, = straight("cache[:a] = {} if cond\n(cache[:a][:b] ||= :f)")
+      expect([shared, fresh]).to eq([shared_sites, []])
+    end
+
     it "does not count a store after the site" do
       marks, sites = straight("(cache[:k] ||= :f).itself\ncache[:k] ||= :e if cond")
       expect(marks).to eq([sites.last])

@@ -73,10 +73,12 @@ RSpec.describe Rigor::Inference::RepeatedOrWrites do
       expect(marks).to eq([sites.last])
     end
 
-    it "counts a plain `[]=` and a mutator as earlier stores" do
+    it "counts a plain `[]=` by its key, and a mutator as writing any slot" do
       assigned, assigned_sites = straight("cache[:k] = :e if cond\n(cache[:k] ||= :f)")
-      merged, merged_sites = straight("cache.merge!(k => :e) if cond\n(cache[:k] ||= :f)")
-      expect([assigned, merged]).to eq([assigned_sites, merged_sites])
+      other_key, = straight("cache[:a] = :e if cond\n(cache[:b] ||= :f)")
+      # `insert(0, x)` shifts every element, so its first argument is no key: slot 1 may now hold the old slot 0.
+      inserted, inserted_sites = straight("cache.insert(0, :e) if cond\n(cache[1] ||= :f)")
+      expect([assigned, other_key, inserted]).to eq([assigned_sites, [], inserted_sites])
     end
 
     it "does not count a store after the site" do

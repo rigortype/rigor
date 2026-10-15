@@ -514,7 +514,7 @@ module Rigor
                  when Prism::UnlessNode then [node.statements, node.else_clause]
                  else return false
                  end
-          !left.equal?(right) && [left, right].all? { |arm| arms.any? { |candidate| candidate.equal?(arm) } }
+          [left, right].all? { |arm| arms.any? { |candidate| candidate.equal?(arm) } }
         end
       end
 

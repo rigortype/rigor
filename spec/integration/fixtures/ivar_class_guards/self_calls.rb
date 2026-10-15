@@ -693,3 +693,73 @@ class App::Clash
     @io.string # FIRES-1446 call.undefined-method
   end
 end
+
+# Issue #1596 — a value aliasing `self` (an ivar, a constant, a local) handed to core code runs `self`'s own `to_s`
+# or `exception`, which writes `@v`, so each read returns "X" under Ruby 4.0.5. A class defining such a protocol
+# method proves nothing.
+class IvarAlias
+  def initialize = (@v = "a"; @me = self)
+  def to_s = (@v = "x")
+  def log = warn("#{@me}")
+
+  def dump
+    @v = nil
+    log
+    @v.upcase # QUIET-1446
+  end
+end
+
+class RaisedAlias
+  def initialize = (@v = "a"; @me = self)
+  def exception(*) = (@v = "x"; RuntimeError.new("raised"))
+  def log = (raise(@me) rescue nil)
+
+  def dump
+    @v = nil
+    log
+    @v.upcase # QUIET-1446
+  end
+end
+
+class ConstantAlias
+  def initialize = (@v = "a")
+  def to_s = (@v = "x")
+  def log = warn("#{SHARED_CONSTANT_ALIAS}")
+
+  def dump
+    @v = nil
+    log
+    @v.upcase # QUIET-1446
+  end
+end
+
+SHARED_CONSTANT_ALIAS = ConstantAlias.new
+
+class LocalAlias
+  def initialize = (@v = "a")
+  def to_s = (@v = "x")
+  def log(value) = warn("#{value}")
+
+  def dump
+    @v = nil
+    me = self
+    log(me)
+    @v.upcase # QUIET-1446
+  end
+end
+
+# `Logger#warn` is the standard library's, not `Kernel`'s, and writes the logger's own state; the proof cannot read
+# past an ancestor no project file declares. The callee writes no `@io`, so Ruby 4.0.5 returns the text.
+require "logger"
+
+class LoggingHolder < Logger
+  def initialize = (super(StringIO.new); @io = STDOUT)
+  def log = warn("x")
+
+  def dump
+    return unless @io.is_a?(StringIO)
+
+    log
+    @io.string # FIRES-1446 call.undefined-method
+  end
+end

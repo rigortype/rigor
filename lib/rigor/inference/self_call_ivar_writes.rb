@@ -65,15 +65,26 @@ module Rigor
         Prism::InterpolatedRegularExpressionNode => "Regexp", Prism::NilNode => "NilClass",
         Prism::TrueNode => "TrueClass", Prism::FalseNode => "FalseClass"
       }.freeze
-      # The methods `Kernel` or `Object` own that a read accepts on `self` when the project does not define them: none
-      # of them runs a method of `self` by itself. Any other (`display` runs `to_s`, `inspect`, `==`, `hash`,
-      # `extend`, `method`, `binding`, `instance_variables`) proves nothing.
+      # The methods `Kernel` or `Object` own that a read accepts on `self` when the project does not define them. Any
+      # other (`display`, `inspect`, `==`, `hash`, `extend`, `method`, `binding`, `instance_variables`) proves nothing.
+      # These may still convert a value they are given, which runs that value's methods: {PROTOCOL_NAMES} answers for
+      # a value that is `self`.
       SELF_SAFE_NAMES = Set[
         :warn, :puts, :print, :p, :pp, :format, :sprintf, :printf, :raise, :fail, :loop, :catch, :throw, :rand,
         :sleep, :Integer, :Float, :String, :Array, :Hash, :Rational, :Complex, :block_given?, :frozen?, :nil?,
         :is_a?, :kind_of?, :instance_of?, :object_id, :class, :__method__, :caller, :abort, :exit
       ].freeze
-      private_constant :UNPROVABLE_NODES, :LITERAL_CLASSES, :SELF_SAFE_NAMES
+      # Issue #1596 — the methods core code calls on a value without the program spelling them: conversions,
+      # comparisons, hashing, iteration, `respond_to?` and its hook, `exception` for `raise`, `divmod` for `sleep`.
+      # A value aliasing `self` (`@me = self`, `me = self`, a constant holding the instance) handed to a core
+      # method runs `self`'s own definition of one of these, which the read never sees, so a class defining any
+      # proves nothing.
+      PROTOCOL_NAMES = Set[
+        :to_s, :inspect, :hash, :eql?, :==, :===, :<=>, :to_a, :to_ary, :to_str, :to_hash, :to_int, :to_i, :to_f,
+        :to_r, :to_c, :to_proc, :to_path, :to_sym, :to_io, :coerce, :exception, :divmod, :each, :respond_to?,
+        :respond_to_missing?, :method_missing, :initialize_copy, :marshal_dump, :pretty_print
+      ].freeze
+      private_constant :UNPROVABLE_NODES, :LITERAL_CLASSES, :SELF_SAFE_NAMES, :PROTOCOL_NAMES
 
       # Raised inside a proof to abandon it.
       class Unprovable < StandardError
@@ -93,6 +104,7 @@ module Rigor
 
         proof = Proof.new(self_type, scope)
         proof.no_self_value(call_node.arguments)
+        proof.no_protocol_override
         proof.self_call(call_node)
         proof.read(call_node.block)
         proof.written.freeze
@@ -121,6 +133,23 @@ module Rigor
             read_def(proven_def(name))
           elsif !SELF_SAFE_NAMES.include?(name) || GuardRebinding.type_method_foreign?(@self_type, name, @scope)
             unprovable!
+          end
+        end
+
+        # Issue #1596 — gives up when `self`'s class, a project subclass, or a project ancestor or module on either's
+        # chain defines a {PROTOCOL_NAMES} method (a `def`, `define_method`, `attr_*` or alias), rewrites its methods
+        # beyond the names it spells, or is refined on one; or when either chain holds an external ancestor, whose
+        # own definitions the read cannot see.
+        def no_protocol_override
+          classes = [@class_name]
+          RefinedDispatch::OwnMethod.each_subclass(@scope, @class_name) { |subclass| classes << subclass }
+          classes.each do |class_name|
+            chain = Scope::ResolutionChain.for(@scope, class_name.to_s, :instance, :methods)
+            unprovable! if chain.truncated? || chain.wildcard_mixin? || chain.unsettled? || chain.forks.positive?
+            chain.search(@scope) do |entry|
+              unprovable! if entry.external? || rewritten?(entry.name) || protocol_defined?(entry.name)
+              nil
+            end
           end
         end
 
@@ -232,6 +261,11 @@ module Rigor
           @scope.discovered_deferred_ranges.sum do |_path, rows|
             rows.count { |row| row[2] == name && row[3] == :instance && row[4] == owner }
           end
+        end
+
+        def protocol_defined?(class_name)
+          refined = @scope.discovered_refinements[class_name] || {}
+          PROTOCOL_NAMES.any? { |name| defines_here?(class_name, name) || refined.key?(name) }
         end
 
         # Whether the project rewrites `class_name`'s method table beyond the names it spells, or refines it.

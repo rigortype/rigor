@@ -2480,16 +2480,6 @@ module Rigor
         # fail-soft: a broken RBS environment yields no entries.
       end
 
-      # Slice A constant-value lookup. Returns the translated `Rigor::Type` for a non-class constant
-      # declaration (`BUCKETS: Array[Symbol]`, `DEFAULT_PATH: String`, ...) or `nil` when no constant entry
-      # exists for `name` in the loaded RBS environment. Callers MUST treat the return value as authoritative
-      # when present and as "unknown" when nil; the loader does NOT consult the class declarations here —
-      # class objects are still resolved through {#class_known?} and `Environment#singleton_for_name`.
-      #
-      # When `cache_store` is set, the loader fetches the entire translated constant table once (per
-      # process) through {Cache::RbsConstantTable.fetch} and answers point lookups from it. Cold runs pay
-      # the translation cost up-front and write the result to disk; warm runs skip the translation entirely
-      # and pay only a `Marshal.load` of the table.
       # ADR-113 — the RBS declaration of the constant `name` (qualified) as `[type, buffer name]`, or nil when no
       # signature declares it. `rigor lens` reports the declared type with the provenance the buffer names.
       def constant_declaration(name)
@@ -2502,6 +2492,16 @@ module Rigor
         nil
       end
 
+      # Slice A constant-value lookup. Returns the translated `Rigor::Type` for a non-class constant
+      # declaration (`BUCKETS: Array[Symbol]`, `DEFAULT_PATH: String`, ...) or `nil` when no constant entry
+      # exists for `name` in the loaded RBS environment. Callers MUST treat the return value as authoritative
+      # when present and as "unknown" when nil; the loader does NOT consult the class declarations here —
+      # class objects are still resolved through {#class_known?} and `Environment#singleton_for_name`.
+      #
+      # When `cache_store` is set, the loader fetches the entire translated constant table once (per
+      # process) through {Cache::RbsConstantTable.fetch} and answers point lookups from it. Cold runs pay
+      # the translation cost up-front and write the result to disk; warm runs skip the translation entirely
+      # and pay only a `Marshal.load` of the table.
       def constant_type(name)
         rbs_name = parse_type_name(name)
         return nil unless rbs_name

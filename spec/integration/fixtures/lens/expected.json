@@ -117,8 +117,8 @@
           "body_return": null,
           "value": {
             "state": "typed",
-            "type": "::Integer",
-            "provenance": "inline",
+            "type": "10",
+            "provenance": "inferred",
             "path": null,
             "from_site": null
           }

@@ -135,8 +135,12 @@ module Rigor
         @captured[absolute] = reader
       end
 
-      # A constant an RBS or inline declaration names takes the declared type in place of its value's.
+      # A constant an RBS or inline declaration names takes the declared type in place of its value's, where
+      # `check` reads it so: a constant the project's source publishes (`in_source_constants`) reads as its value
+      # there, whatever a declaration says, so it keeps the inferred slot.
       def read_constant_contract(site, scope)
+        return if scope.in_source_constants[site.data["name"]] || Slot.unavailable?(site.data["value"])
+
         declared = contract_reader(scope.environment).read_constant(site.data["name"], scope.environment)
         site.data["value"] = declared if declared
       end

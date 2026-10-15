@@ -43,10 +43,13 @@ module Rigor
         type, buffer = declaration
         provenance, path = @provenance.classify(buffer)
         return Slot.unavailable("not_computed") if provenance.nil?
+        # The rbs-inline plugin declares every constant it sees, `untyped` where nothing is annotated: an
+        # authored `untyped` cannot be told from a defaulted one.
+        return Slot.unavailable("not_computed") if provenance == "inline" && type == "untyped"
 
         Slot.from_rbs(type, provenance, path)
       rescue StandardError
-        nil
+        Slot.unavailable("not_computed")
       end
 
       private

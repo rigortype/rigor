@@ -335,6 +335,44 @@ end
     end
   end
 
+  describe "constant visibility and value" do
+    def constant_rows(source)
+      sites(source).filter_map do |site|
+        [site["name"], site["visibility"], site["value"]] if site["kind"] == "constant"
+      end
+    end
+
+    it "keeps a reassigned constant's visibility and reads a string argument" do
+      source = "module K\n  X = 1\n  private_constant \"X\"\n  X = 2\n  Y = 1\n  public_constant :Y\nend\n"
+
+      expect(constant_rows(source).map { |name, visibility, _| [name, visibility] })
+        .to eq([%w[K::X private], %w[K::X private], %w[K::Y public]])
+    end
+
+    it "lets a private_constant in a singleton body or a builder block change none of the listed constants" do
+      source = <<~RUBY
+        module K
+          LIMIT = 10
+          class << self
+            private_constant :LIMIT
+          end
+          D = Data.define(:a) do
+            private_constant :LIMIT
+          end
+        end
+      RUBY
+
+      expect(constant_rows(source).map { |name, visibility, _| [name, visibility] }).to eq([%w[K::LIMIT public]])
+    end
+
+    it "omits a path write, whose namespace check resolves through the nesting" do
+      source = "module K\n  N::Y = 3\n  ::TOPZ = 4\nend\nFoo::BAR = 1\n"
+
+      expect(constant_rows(source)).to eq([])
+      expect(omissions(source)).to include(%w[constant K::N::Y], %w[constant TOPZ], %w[constant Foo::BAR])
+    end
+  end
+
   describe "completeness" do
     it "omits what it does not model instead of dropping it" do
       source = <<~RUBY

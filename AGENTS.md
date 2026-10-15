@@ -47,7 +47,8 @@ Local runs are targeted; the full gate is CI on the pull request.
 
 - Before pushing: `make verify-changed` — whitespace, RuboCop, the affected specs, `spec/docs/`, and
   `rigor check` over what the branch changed, in under a minute. It lists what it cannot cover; CI
-  decides those.
+  decides those. Give it, and any rspec run, stdin from `/dev/null`: an agent shell's stdin never
+  closes, so a spec that reads it hangs at 0% CPU.
 - Do not run `make verify`, `make check`, or the whole suite locally. Parallel sessions each running
   it were the bottleneck (five at once took 12–20 minutes each), and CI runs a superset. Run one
   only to reproduce a failure CI does not explain, for a Flake-environment change CI cannot see, or

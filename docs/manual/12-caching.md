@@ -259,6 +259,22 @@ version change does, or `--clear-cache`. So the shortcut can stay
 off indefinitely; run `rigor check --incremental --clear-cache`
 once to turn it back on.
 
+
+A warm `--incremental` run says on stderr how far the edit spread,
+for example `rigor: --incremental warm — re-analysed 3 of 1295 files
+(1 changed), reused the rest`. The first count is the files the
+recheck re-analysed, out of M, the analysed set: every project file
+the run covers, or only the subset under a path argument such as
+`rigor check --incremental lib`. The re-analysed files are M minus
+those served from the snapshot. They include files that a change
+reached without editing them, such as a file whose inferred
+parameter types moved (ADR-67), not only the edited files and their
+dependents. The parenthesis lists `changed`, and `added` or
+`removed` when there are some. View templates from a plugin are not
+in M. The recheck re-runs every template on every warm run, so they
+are counted after the file clause, as `plus 2 view templates`. An
+unchanged run reads `re-analysed 0 of 1295 files, reused all`.
+
 `--incremental` is most useful for fast local re-checks and CI
 on a changed branch.
 

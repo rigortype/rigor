@@ -196,6 +196,7 @@ module Rigor
       # The tail {#run_incremental_check} gives a warm run, from the slot's answer: the same banner, baseline
       # filter, output and exit code. No fact-surface note, since a warm run never has one.
       def finalize_incremental_hit(hit, configuration, options)
+        # The slot is written only for a run whose every row still validates, so nothing was re-analyzed.
         report_incremental_run(true, hit.file_count)
         write_incremental_result(hit.result.diagnostics, configuration, options)
       end
@@ -312,7 +313,8 @@ module Rigor
         # The banner's file count comes from the session's analyzed set (cold analyses all; a warm recheck's
         # `@analyzed` advances to the current file set), so a dedicated probe Runner + `Dir.glob` is no longer
         # built just to size the banner (recon §3 — the analysis tree was expanded three times per recheck).
-        report_incremental_run(warm, session.analyzed_files.size)
+        # A warm banner reports the recheck's own sets (#1526), which only the session knows.
+        report_incremental_run(warm, session.analyzed_files.size, recheck: session.last_recheck)
         emit_incremental_fact_surface_notes(session)
         write_incremental_cache_stats(session, cache_root, store, options.fetch(:format)) if
           options.fetch(:cache_stats)
@@ -320,9 +322,47 @@ module Rigor
         write_incremental_result(diagnostics, configuration, options)
       end
 
-      def report_incremental_run(warm, file_count)
-        @err.puts("rigor: --incremental #{warm ? 'warm — reused cached diagnostics' : 'cold — full analysis'} " \
-                  "(#{file_count} files)")
+      # #1526 — a warm banner says how many of the analysed files the recheck re-analysed, and why: `changed` is the
+      # edited set, `added` / `removed` the structural delta, and the rest came from the snapshot. A run served from
+      # the run-result slot has no recheck, which means nothing changed: every file is reused.
+      def report_incremental_run(warm, file_count, recheck: nil)
+        body = if warm
+                 "warm — #{warm_recheck_summary(file_count, recheck)}"
+               else
+                 "cold — full analysis (#{pluralize(file_count, 'file')})"
+               end
+        @err.puts("rigor: --incremental #{body}")
+      end
+
+      # The warm clause. `file_count` is the analysed set M (the subset under a path argument); re-analysed files
+      # are M minus the reused set, which includes files invalidated by inferred-parameter changes (ADR-67), not only
+      # the edited closure. View templates are not in M: the recheck re-runs every one, so they are appended as their
+      # own count rather than folded into the file counts.
+      def warm_recheck_summary(file_count, recheck)
+        reused = recheck ? recheck.reused.size : file_count
+        # Current files are either reused or re-analysed (the recheck's `analyze_set`), so the count is taken from
+        # the reused set rather than `affected`, which can also name files that were removed.
+        analyzed = file_count - reused
+        head = "re-analysed #{analyzed} of #{pluralize(file_count, 'file')}"
+        head += " (#{change_counts(recheck).join(', ')})" if recheck && !change_counts(recheck).empty?
+        head += reuse_clause(analyzed, reused)
+        templates = recheck ? recheck.templates : 0
+        templates.positive? ? "#{head}, plus #{pluralize(templates, 'view template')}" : head
+      end
+
+      def change_counts(recheck)
+        { "changed" => recheck.changed.size, "added" => recheck.added.size, "removed" => recheck.removed.size }
+          .filter_map { |label, count| "#{count} #{label}" if count.positive? }
+      end
+
+      def reuse_clause(analyzed, reused)
+        return ", reused all" if analyzed.zero?
+
+        reused.zero? ? "" : ", reused the rest"
+      end
+
+      def pluralize(count, noun)
+        "#{count} #{count == 1 ? noun : "#{noun}s"}"
       end
 
       # The incremental tail, shared by the full path and the ADR-45 WD2 slot hit so a served run prints exactly

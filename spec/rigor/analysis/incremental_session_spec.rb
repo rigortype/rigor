@@ -1379,36 +1379,39 @@ end
   # ADR-46 slice 4 singleton extension (PR item 3) — a class/singleton-method body edit gets symbol
   # granularity: its closure scopes to the method's call sites, not the file's coarse dependents.
   # Issue #1459 — `LastLine.reads_line?` declines a reader whose name the program defines anywhere
-  # (`BlockCallTiming.project_defines_anywhere?`), so the reader's file records a `defines:<name>` edge, and an edit that
-  # makes another file start or stop defining the name in any spelling re-checks it.
+  # (`BlockCallTiming.project_defines_anywhere?`), so the reader's file records a `defines:<name>` edge, and an edit
+  # that makes another file start or stop defining the name in any spelling re-checks it.
   describe "a project definition of a line reader anywhere (#1459)" do
-    reader = <<~RUBY
-      def st
-        while $stdin.gets
-          nil
-        end
-        puts "tail" if $_
-      end
-
-      def rl
-        if $stdin.readline
-          $_.no_such_method
-        end
-      end
-    RUBY
     plain = "class Reader\n  def other = nil\nend\n"
     gets_def = "class Reader\n  def gets(*) = nil\nend\n"
     truthy = "flow.always-truthy-condition"
     undefined = "call.undefined-method"
 
+    def reader_source
+      <<~RUBY
+        def st
+          while $stdin.gets
+            nil
+          end
+          puts "tail" if $_
+        end
+
+        def rl
+          if $stdin.readline
+            $_.no_such_method
+          end
+        end
+      RUBY
+    end
+
     def reader_rules(diagnostics, reader_path)
       diagnostics.select { |diagnostic| diagnostic.path == reader_path }.map(&:rule)
     end
 
-    def run_reader_edit(dir, reader, before, after, workers)
+    def run_reader_edit(dir, before, after, workers)
       d = File.join(dir, "d.rb")
       b = File.join(dir, "b.rb")
-      File.write(d, reader)
+      File.write(d, reader_source)
       File.write(b, before)
       File.write(File.join(dir, "c.rb"), "def unrelated = 1\n")
       session = described_class.new(configuration: configuration(dir), environment: shared_environment,
@@ -1435,10 +1438,10 @@ end
         it "re-checks the reader after #{label} (workers: #{workers})" do
           skip "fork is unavailable on this platform" if workers.positive? && !Process.respond_to?(:fork)
           Dir.mktmpdir do |dir|
-            d, _baseline, recheck = run_reader_edit(dir, reader, before, after, workers)
+            d, _baseline, recheck = run_reader_edit(dir, before, after, workers)
 
             expect(recheck.affected).to include(d)
-            expect(reader_rules(recheck.diagnostics, d)).to contain_exactly(*expected)
+            expect(reader_rules(recheck.diagnostics, d)).to match_array(expected)
             expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
           end
         end
@@ -1447,10 +1450,10 @@ end
       it "keeps the reader's cached result when another file adds an unrelated method (workers: #{workers})" do
         skip "fork is unavailable on this platform" if workers.positive? && !Process.respond_to?(:fork)
         Dir.mktmpdir do |dir|
-          d, baseline, recheck = run_reader_edit(dir, reader, plain,
+          d, baseline, recheck = run_reader_edit(dir, "class Reader\n  def other = nil\nend\n",
                                                  "class Reader\n  def other = nil\n  def another = nil\nend\n", workers)
 
-          expect(reader_rules(baseline, d)).to contain_exactly(truthy, undefined)
+          expect(reader_rules(baseline, d)).to contain_exactly("flow.always-truthy-condition", "call.undefined-method")
           expect(recheck.affected).to eq(Set[File.join(dir, "b.rb")])
           expect(recheck.reused).to include(d)
           expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))

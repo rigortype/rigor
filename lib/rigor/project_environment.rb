@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "environment"
+require_relative "inference/project_patched_scanner"
 require_relative "plugin"
 require_relative "plugin/loader"
 require_relative "plugin/services"
@@ -72,15 +73,17 @@ module Rigor
       bare(configuration, features)
     end
 
-    # The patched-method registry `rigor check` types against for the project's `pre_eval:` files, built by
-    # the {Analysis::Runner}'s own project pre-pass (not a second scan). Nil when the project lists no
-    # `pre_eval:` entry, so a project without one pays nothing and stays byte-identical. Fail-soft like the
-    # rest of this module.
-    def project_patched_methods(configuration)
+    # The patched-method registry `rigor check` types against for the project's `pre_eval:` files. It depends
+    # on those files alone, so it is built by the same {Inference::ProjectPatchedScanner} the Runner's project
+    # pre-pass calls, over the same resolved `configuration.pre_eval` entries (glob-expanded at config load,
+    # missing files skipped), without the pre-pass's plugin load / `#prepare` / dependency-source work. An
+    # editor `buffer` is honoured, so a `--tmp-file` edit of a pre_eval file is read in flight. Nil when the
+    # project lists no `pre_eval:` entry, so a project without one stays byte-identical. Fail-soft.
+    def project_patched_methods(configuration, buffer: nil)
       return nil if configuration.pre_eval.empty?
 
-      require_relative "analysis/runner"
-      Analysis::Runner.new(configuration: configuration, cache_store: nil).prepare_project_scan.project_patched_methods
+      existing = configuration.pre_eval.select { |path| File.file?(path) }
+      Inference::ProjectPatchedScanner.scan(existing, buffer: buffer).registry
     rescue StandardError
       nil
     end

@@ -475,7 +475,8 @@ RSpec.describe Rigor::CLI do
 
         File.write(probe, "require \"rigor/testing\"\ninclude Rigor::Testing\n\n" \
                           "assert_type(\"Dynamic[1]\", rand(3).foo)\n")
-        _status, check_out, = run_cli("check", "--no-stats", "--config", config, "probe.rb")
+        check_status, check_out, = run_cli("check", "--no-stats", "--config", config, "probe.rb")
+        expect(check_status).to eq(0)
         expect(check_out).not_to include("assert_type")
       end
     end

@@ -133,9 +133,10 @@ module Rigor
         end
 
         # The ordinary suppression pipeline for the `pre-eval.*` rows: the `# rigor:disable` /
-        # `# rigor:disable-file` comments of the Ruby file a row is positioned in (a `pre_eval:` file need not be
+        # `# rigor:disable-file` comments of the file a row is positioned in (a `pre_eval:` file need not be
         # under `paths:`, so its comments are read here rather than by per-file analysis) and the project's
-        # `disable:` list. A row positioned at `.rigor.yml` has no Ruby comments and answers to `disable:` only.
+        # `disable:` list. A row positioned at `.rigor.yml` has no Ruby comments (`.yml` is skipped) and answers to
+        # `disable:` only.
         # Stream order is the output contract, so survivors are picked out of the original sequence.
         def suppress_pre_eval(diagnostics)
           kept = diagnostics.group_by(&:path).flat_map do |path, group|
@@ -148,7 +149,7 @@ module Rigor
         end
 
         def pre_eval_comments(path)
-          return [].freeze unless path.end_with?(".rb") && File.file?(path)
+          return [].freeze unless File.file?(path) && !path.end_with?(".rbs", ".yml", ".yaml")
 
           Prism.parse_file(path).comments
         rescue StandardError

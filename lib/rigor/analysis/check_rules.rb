@@ -87,6 +87,7 @@ module Rigor
       def self.resolve_rule_token(token)
         return nil if token == "all"
         return [LEGACY_RULE_ALIASES.fetch(token)] if LEGACY_RULE_ALIASES.key?(token)
+        return PRE_EVAL_RULES if token == "pre-eval"
         return ALL_RULES.select { |r| r.start_with?("#{token}.") } if RULE_FAMILIES.include?(token)
 
         ALL_RULES.include?(token) ? [token] : []
@@ -654,7 +655,7 @@ module Rigor
       # `dynamic.*`, `rbs.*`, `pre-eval.*`, and any `plugin.`-prefixed id — plugins load dynamically, so
       # their rule vocabulary cannot be enumerated here and under-warning is the FP-safe direction).
       def known_suppression_token?(token)
-        return true if token == "all"
+        return true if %w[all pre-eval].include?(token)
         return true if ALL_RULES.include?(token) || LEGACY_RULE_ALIASES.key?(token) ||
                        RULE_FAMILIES.include?(token) || NON_CHECK_DIAGNOSTIC_IDS.include?(token)
 

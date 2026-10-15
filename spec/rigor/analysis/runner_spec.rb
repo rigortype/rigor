@@ -1030,9 +1030,9 @@ RSpec.describe Rigor::Analysis::Runner do
       # Issue #1883 — the `pre-eval.*` rows answer to the same suppression forms as any per-file diagnostic, whether or
       # not the pre_eval file sits under `paths:`.
       describe "suppressing `pre-eval.duplicate-declaration`" do
-        def duplicate_rows(first_source, extra_config = {})
+        def duplicate_rows(first_source, extra_config = {}, first_name: "a.rb")
           Dir.mktmpdir("rigor-pre-eval-suppress-") do |tmpdir|
-            first = File.join(tmpdir, "a.rb")
+            first = File.join(tmpdir, first_name)
             second = File.join(tmpdir, "b.rb")
             File.write(first, first_source)
             File.write(second, "class Integer\n  def foo = 2\nend\n")
@@ -1061,13 +1061,24 @@ RSpec.describe Rigor::Analysis::Runner do
           expect(duplicate_rows(source)).to eq([])
         end
 
+        it "honours the bare `pre-eval` family wildcard in a comment and in `disable:`" do
+          source = "# rigor:disable-file pre-eval\n#{plain}"
+          expect(duplicate_rows(source)).to eq([])
+          expect(duplicate_rows(plain, { "disable" => ["pre-eval"] })).to eq([])
+        end
+
+        it "reads the comments of a pre_eval file that lacks a `.rb` extension" do
+          source = "# rigor:disable-file pre-eval.duplicate-declaration\n#{plain}"
+          expect(duplicate_rows(source, {}, first_name: "a.patch")).to eq([])
+        end
+
         it "honours `.rigor.yml` `disable:`" do
-          expect(duplicate_rows(plain, "disable" => ["pre-eval.duplicate-declaration"])).to eq([])
+          expect(duplicate_rows(plain, { "disable" => ["pre-eval.duplicate-declaration"] })).to eq([])
         end
 
         it "honours the suppression when the pre_eval file is also under `paths:`" do
           source = "# rigor:disable-file pre-eval.duplicate-declaration\n#{plain}"
-          expect(duplicate_rows(source, "paths" => ["."])).to eq([])
+          expect(duplicate_rows(source, { "paths" => ["."] })).to eq([])
         end
       end
 

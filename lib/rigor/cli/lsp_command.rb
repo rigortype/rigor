@@ -53,8 +53,11 @@ module Rigor
       def build_server(writer:, config_path:) # rubocop:disable Metrics/MethodLength
         configuration = Configuration.load(config_path)
         # ProjectContext caches Environment + Cache::Store across requests so hover / publish hit the warm path.
-        # Invalidated by `workspace/didChangeWatchedFiles` and `workspace/didChangeConfiguration`.
-        project_context = LanguageServer::ProjectContext.new(configuration: configuration)
+        # Invalidated by `workspace/didChangeWatchedFiles` and `workspace/didChangeConfiguration`; every save round
+        # also re-reads the configuration (the loader below) and re-baselines when its inputs moved (#1613).
+        project_context = LanguageServer::ProjectContext.new(
+          configuration: configuration, configuration_loader: -> { Configuration.load(config_path) }
+        )
         # Single source of truth for buffer state — threaded to Server + all three providers.
         buffer_table = LanguageServer::BufferTable.new
         debouncer = LanguageServer::Debouncer.new

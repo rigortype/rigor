@@ -185,4 +185,170 @@ RSpec.describe Rigor::LanguageServer::ProjectContext do
       expect(context.send(:instance_variable_get, :@incremental_session)).not_to equal(session)
     end
   end
+
+  # #1613 — a long-lived session must notice a change to the incremental snapshot's inputs without an explicit
+  # invalidate!: the editor may send only didSave / didChange, and the server registers no file watchers.
+  describe "#project_diagnostics after a fingerprint-input change" do
+    let(:project_dir) { File.realpath(Dir.mktmpdir("rigor-lsp-fingerprint-")) }
+    let(:config_path) { File.join(project_dir, ".rigor.yml") }
+    let(:loader) { -> { Rigor::Configuration.load(config_path) } }
+    let(:context) { described_class.new(configuration: loader.call, configuration_loader: loader) }
+
+    around do |example|
+      FileUtils.mkdir_p(File.join(project_dir, "sig"))
+      File.write(File.join(project_dir, "sig", "foo.rbs"), "class Foo\n  def bar: (Integer) -> Integer\nend\n")
+      File.write(File.join(project_dir, "a.rb"), "class Foo\n  def bar(x) = x\nend\nFoo.new.bar(\"s\")\n")
+      Dir.chdir(project_dir) { example.run }
+    ensure
+      FileUtils.remove_entry(project_dir)
+    end
+
+    def messages(ctx = context) = ctx.project_diagnostics.map { |d| [d.path, d.message] }
+
+    def cold
+      messages(described_class.new(configuration: loader.call))
+    end
+
+    def write_config(extra = "")
+      File.write(config_path, "paths:\n  - #{project_dir}\n#{extra}")
+    end
+
+    before { write_config }
+
+    def rebaselines?
+      session = context.instance_variable_get(:@incremental_session)
+      yield
+      context.project_diagnostics
+      !context.instance_variable_get(:@incremental_session).equal?(session)
+    end
+
+    it "reports the sig mismatch, then drops it when sig/foo.rbs is edited" do
+      expect(messages.map(&:last)).to include(a_string_matching(/argument type mismatch/))
+      File.write(File.join(project_dir, "sig", "foo.rbs"), "class Foo\n  def bar: (String) -> String\nend\n")
+
+      expect(messages).to eq([])
+      expect(messages).to eq(cold)
+    end
+
+    it "matches a cold run after a pre_eval: file changes" do
+      File.write(File.join(project_dir, "pre.rb"), "class Foo\n  def bar(x) = x\nend\n")
+      write_config("pre_eval:\n  - pre.rb\n")
+      messages
+      File.write(File.join(project_dir, "pre.rb"), "class Foo\n  def bar(x) = x.to_s\n  def baz = 1\nend\n")
+
+      expect(rebaselines? { nil }).to be(true)
+      expect(messages).to eq(cold)
+    end
+
+    it "matches a cold run and re-baselines after the configured lockfile changes" do
+      lock = File.join(project_dir, "my.lock")
+      File.write(lock, "one\n")
+      write_config("bundler:\n  lockfile: #{lock}\n")
+      messages
+      expect(rebaselines? { File.write(lock, "two\n") }).to be(true)
+      expect(messages).to eq(cold)
+    end
+
+    it "matches a cold run and re-baselines after .rigor.yml changes" do
+      messages
+      expect(rebaselines? { write_config("disable:\n  - call.argument-type-mismatch\n") }).to be(true)
+      expect(messages).to eq([])
+      expect(messages).to eq(cold)
+    end
+
+    it "re-baselines when sig/foo.rbs changes" do
+      messages
+      sig = File.join(project_dir, "sig", "foo.rbs")
+
+      expect(rebaselines? { File.write(sig, "class Foo\n  def bar: (String) -> String\nend\n") }).to be(true)
+    end
+
+    it "keeps the recheck path when nothing changed" do
+      messages
+      session = context.instance_variable_get(:@incremental_session)
+      allow(session).to receive(:recheck).and_call_original
+
+      context.project_diagnostics
+
+      expect(session).to have_received(:recheck).once
+      expect(context.instance_variable_get(:@incremental_session)).to equal(session)
+    end
+
+    it "re-baselines when the fingerprint cannot be computed" do
+      messages
+      session = context.instance_variable_get(:@incremental_session)
+      allow(Rigor::Cache::IncrementalSnapshot).to receive(:fingerprint).and_return(nil)
+
+      context.project_diagnostics
+
+      expect(context.instance_variable_get(:@incremental_session)).not_to equal(session)
+    end
+
+    it "does not bump the generation when it re-baselines" do
+      messages
+      generation = context.generation
+      File.write(File.join(project_dir, "sig", "foo.rbs"), "class Foo\n  def bar: (String) -> String\nend\n")
+      context.project_diagnostics
+
+      expect(context.generation).to eq(generation)
+    end
+
+    it "re-baselines when only the effects: block of .rigor.yml changes" do
+      File.write(File.join(project_dir, "sig", "foo.rbs"), "class Foo\n  %a{pure} def bar: () -> nil\nend\n")
+      File.write(File.join(project_dir, "a.rb"), "class Foo\n  def bar\n    puts 1\n  end\nend\n")
+      write_config("effects: {}\n")
+      messages
+      session = context.instance_variable_get(:@incremental_session)
+      write_config("effects:\n  snapshot:\n    reach: [rails-controllers]\n")
+      rebaselined = messages
+
+      expect(context.instance_variable_get(:@incremental_session)).not_to equal(session)
+      expect(rebaselined).to eq(cold)
+    end
+
+    it "keeps rechecking when the fingerprint was already uncomputable at priming" do
+      allow(Rigor::Cache::IncrementalSnapshot).to receive(:fingerprint).and_return(nil)
+      messages
+      session = context.instance_variable_get(:@incremental_session)
+
+      context.project_diagnostics
+
+      expect(context.instance_variable_get(:@incremental_session)).to equal(session)
+    end
+
+    it "re-baselines when an uncomputable fingerprint becomes computable" do
+      allow(Rigor::Cache::IncrementalSnapshot).to receive(:fingerprint).and_return(nil)
+      messages
+      session = context.instance_variable_get(:@incremental_session)
+      allow(Rigor::Cache::IncrementalSnapshot).to receive(:fingerprint).and_call_original
+
+      context.project_diagnostics
+
+      expect(context.instance_variable_get(:@incremental_session)).not_to equal(session)
+    end
+
+    it "keeps the old configuration and session when the loader raises" do
+      messages
+      session = context.instance_variable_get(:@incremental_session)
+      configuration = context.configuration
+      raising = described_class.new(configuration: configuration, configuration_loader: -> { raise "bad yaml" })
+      raising.project_diagnostics
+      raising_session = raising.instance_variable_get(:@incremental_session)
+      raising.project_diagnostics
+
+      expect(raising.configuration).to equal(configuration)
+      expect(raising.instance_variable_get(:@incremental_session)).to equal(raising_session)
+      expect(context.instance_variable_get(:@incremental_session)).to equal(session)
+    end
+
+    it "drops the cache store on a re-baseline so a cache path change takes effect" do
+      messages
+      store = context.cache_store
+      write_config("cache:\n  path: #{File.join(project_dir, 'other-cache')}\n")
+      context.project_diagnostics
+
+      expect(context.cache_store).not_to equal(store)
+      expect(context.cache_store.root).to eq(File.join(project_dir, "other-cache"))
+    end
+  end
 end

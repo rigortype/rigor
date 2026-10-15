@@ -100,13 +100,14 @@ RSpec.describe "effect.envelope-exceeded across a plugin effect-fact change" do
         primed, = check(*incremental)
         _, null_err = check(*incremental)
         adapter("async")
-        to_async, = check(*incremental)
+        to_async, async_err = check(*incremental)
         cold_async, = check("--no-cache")
         adapter("inline")
         to_inline, = check(*incremental)
 
         expect(primed.size).to eq(1)
         expect(null_err).to include("--incremental warm")
+        expect(async_err).to include("--incremental cold")
         expect(to_async).to eq(cold_async).and be_empty
         expect(to_inline).to eq(check("--no-cache").first).and eq(primed)
       end

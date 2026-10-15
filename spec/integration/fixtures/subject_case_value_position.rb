@@ -140,3 +140,54 @@ def statement_and_write
   g = case io when File then io.flock(0) end
   g && nil
 end
+
+# A later clause's test reads the subject every earlier clause ruled out: `later_condition(nil)` returns [0],
+# `later_condition(1)` [nil].
+def later_condition(raw)
+  v = raw ? 1 : nil
+  [case v
+   when NilClass then 0
+   when v.succ then 1
+   end]
+end
+
+# A test that calls a method may rebind an instance-variable subject before the body or the `else` reads it, so
+# from that test on the subject is not narrowed. `ResetsBetweenClauses.new(false).body_after_call` returns ["S"],
+# `ResetsBetweenClauses.new(false).else_after_call` ["S"]; with `true` each returns [1].
+class ResetsBetweenClauses
+  def initialize(flag)
+    @x = flag ? "a" : nil
+  end
+
+  def reset!
+    @x = "s"
+    ->(_) { true }
+  end
+
+  def reset_unmatched!
+    @x = "s"
+    ->(_) { false }
+  end
+
+  def body_after_call
+    [case @x
+     when String then 1
+     when reset! then @x.upcase
+     end]
+  end
+
+  def else_after_call
+    [case @x
+     when String then 1
+     when reset_unmatched! then 2
+     else @x.upcase
+     end]
+  end
+
+  # With no call in the tests the subject stays narrowed: `ResetsBetweenClauses.new(false).plain` returns [nil].
+  def plain
+    [case @x
+     when String then @x.no_such_method # GENUINE-UNDEFINED
+     end]
+  end
+end

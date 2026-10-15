@@ -1187,8 +1187,9 @@ RSpec.describe "Rigor type construction (integration)" do
       undefined = harness.diagnostics.select do |d|
         %w[call.undefined-method call.possible-nil-receiver].include?(d.rule)
       end
-      expect(undefined.map { |d| [d.line, d.message] }).to eq(
-        marked_lines(harness, "# GENUINE-UNDEFINED").map { |line| [line, "undefined method `no_such_method' for File"] }
+      expect(undefined.map(&:line)).to eq(marked_lines(harness, "# GENUINE-UNDEFINED"))
+      expect(undefined.map(&:message)).to eq(
+        ["undefined method `no_such_method' for File", %q(undefined method `no_such_method' for "a" | "s")]
       )
     end
   end

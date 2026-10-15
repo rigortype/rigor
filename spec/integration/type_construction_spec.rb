@@ -1167,9 +1167,10 @@ RSpec.describe "Rigor type construction (integration)" do
     end
 
     # A clause after an `=~` clause, or a condition write, in a value position the evaluator does not enter must not
-    # read what an earlier condition's falsey edge bound as `nil`.
-    it "reports no method as undefined on `nil`" do
-      expect(harness.diagnostics.select { |d| d.rule == "call.undefined-method" }.map(&:line)).to eq([])
+    # read what an earlier condition's falsey edge bound as `nil`, nor the type a written local held before the write.
+    it "reports an undefined method only on the write's own `nil`" do
+      undefined = harness.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(undefined.map(&:line)).to eq(marked_lines(harness, "# GENUINE-UNDEFINED"))
     end
   end
 

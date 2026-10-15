@@ -193,6 +193,39 @@ def write_after_guard_in_value(raw)
    end]
 end
 
+# A condition that writes a local already bound narrows the value it writes, not the local's old type. With
+# `raw = true` and `s = "a"`, each returns "A" (or ["A"]).
+def write_over_bound_local(raw, s)
+  x = raw ? 1 : nil
+  [case
+   when (x = s ? String(s) : nil) then x.upcase
+   end]
+end
+
+def write_over_bound_local_nil_check(raw, s)
+  x = raw ? 1 : nil
+  [case
+   when (x = s ? String(s) : nil).nil? then 0
+   else x.upcase
+   end]
+end
+
+def write_over_bound_local_negated(raw, s)
+  x = raw ? 1 : nil
+  Array(case
+        when !(x = s ? String(s) : nil) then 0
+        else x.upcase
+        end)
+end
+
+# Control: the write's own `nil` still reaches the clause, where Ruby raises NoMethodError.
+def write_nil_over_bound_local(raw)
+  x = raw ? 1 : nil
+  [case
+   when (x = nil).nil? then x.upcase # GENUINE-UNDEFINED
+   end]
+end
+
 # Control: a condition that does not rule out `nil` narrows nothing, so the possible `nil` receiver is reported.
 def unguarded(raw)
   x = raw ? String(raw) : nil

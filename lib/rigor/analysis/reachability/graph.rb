@@ -15,11 +15,11 @@ module Rigor
         # poison — Rigor knows the argument's shape, and a type-free indexer does not.
         #
         # A literal `const_get` on a known receiver is looked up where Ruby looks it up (#1761): the receiver,
-        # then its ancestors unless the call passes `inherit = false`, then the top level unless it does. The
-        # FIRST scope holding the name is the answer — resolving it anywhere else too would make a dead
-        # same-named constant reachable. A receiver that does not resolve as a whole is unknown — `Outer::Missing`
-        # peeled to `Outer` may alias anything, and `const_get` never searches `Outer` — so it falls back to the
-        # top level as an unknown receiver does.
+        # then its ancestors unless the call passes `inherit = false`, then the top level unless it does. A
+        # receiver holding the name is the answer — resolving it anywhere else too would make a dead same-named
+        # constant reachable; past the receiver see {#literal_targets}. A receiver that does not resolve as a
+        # whole is unknown — `Outer::Missing` peeled to `Outer` may alias anything, and `const_get` never
+        # searches `Outer` — so it falls back to the top level as an unknown receiver does.
         #
         # The reference carries the referring file's role (WD8): a spec's `const_get("Foo")` keeps `Foo`
         # test-reachable, as its written `Foo` would, rather than making it live in production.

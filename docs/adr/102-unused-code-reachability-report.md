@@ -130,12 +130,14 @@ a local variable first is read through its assignments. Reading every interpolat
 top-level namespace demoted nothing on GitLab's `Migration[2.2]`, and its whole version
 family was a false candidate ([#1734](https://github.com/rigortype/rigor/issues/1734)).
 
-A literal `const_get` is a reference looked up in the same order, and the first scope that
-declares the name is the answer: resolving it at the top level alone left the receiver's own
-constant a false candidate and kept a dead same-named top-level one alive. Where `self` is
-not the enclosing declaration — a concern's `included do`, an eval block, a `class << self`
-body — or a constant receiver resolves only in part, the receiver is unknown and the literal
-keeps the top-level reading
+A literal `const_get` is a reference looked up in the same order. When the receiver declares
+the name, that is the answer: resolving it at the top level alone left the receiver's own
+constant a false candidate and kept a dead same-named top-level one alive. Past the receiver
+the reading is approximate — it resolves an ancestor as written and counts `extend` — so a
+name found only through an ancestor keeps every scope an ancestor could be and the top level.
+Where the walk cannot name `self` — inside any block, a `def Other.x`, a `class << Other` — the
+literal is read both at the enclosing declaration and at the top level; a constant receiver
+that resolves only in part keeps the top-level reading
 ([#1761](https://github.com/rigortype/rigor/issues/1761)).
 
 ### WD5 — Whole-project only; `--incremental` is refused, not absorbed

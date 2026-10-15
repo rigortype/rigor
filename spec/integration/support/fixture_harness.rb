@@ -86,7 +86,8 @@ module Rigor
         result = Prism.parse(@source)
         @tree = result.value
         @comments = result.comments
-        @index = Rigor::Inference::ScopeIndexer.index(@tree, default_scope: @scope)
+        # As `rigor check` builds it: a rescue or `ensure` clause records the widening of issue #1231.
+        @index = Rigor::Inference::ScopeIndexer.index(@tree, default_scope: @scope, widen_clauses: true)
       end
 
       def load_flat(path)

@@ -101,13 +101,17 @@ module Rigor
       #   bodies from their CONVERGED bindings so per-line probes
       #   (`rigor annotate`) reflect the post-writeback state, not the
       #   cap-N intermediate constants. Off for the check path.
+      # @param widen_clauses — check-path flag (issue #1231): a rescue or
+      #   `ensure` clause records the variables the `begin` body writes as
+      #   `Dynamic[top]`. Off for every other reader, so parameter inference
+      #   and sig-gen observe the clause's plain entry.
       # @return identity-comparing
       #   table whose default value is `default_scope`.
       # The no-op re-anchoring table (#722 residue 2): shared so the overwhelmingly common
       # nothing-to-re-anchor walk allocates none.
       EMPTY_RENAMES = {}.freeze
 
-      def index(root, default_scope:, converged_loop_recording: false) # rubocop:disable Metrics/AbcSize
+      def index(root, default_scope:, converged_loop_recording: false, widen_clauses: false) # rubocop:disable Metrics/AbcSize
         # Slice A-declarations. Build the declaration overrides first so every scope handed to the StatementEvaluator
         # already carries the table; structural sharing through `Scope#with_local` / `#with_fact` / `#with_self_type`
         # propagates it across every derived scope.
@@ -194,7 +198,8 @@ module Rigor
 
         on_enter = ->(node, scope) { table[node] = scope }
         StatementEvaluator.new(scope: seeded_scope, on_enter: on_enter,
-                               converged_loop_recording: converged_loop_recording).evaluate(root)
+                               converged_loop_recording: converged_loop_recording,
+                               widen_clauses: widen_clauses).evaluate(root)
 
         propagate(root, table, seeded_scope)
         table

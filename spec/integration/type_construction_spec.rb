@@ -442,6 +442,22 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  # Issue #1231 — a rescue arm and an ensure clause read each name the `begin` body writes as `Dynamic[top]`, not at
+  # the `begin`'s entry binding alone; issue #1457's `return` out of a body with `ensure` is covered by the same rule.
+  # The controls read a local the body never writes, and still report.
+  describe "fixtures/rescue_arm_begin_writes.rb — a rescue arm reads the body's writes" do
+    let(:harness) { harness_for("rescue_arm_begin_writes") }
+
+    it "reports nothing but the controls" do
+      reported = harness.diagnostics.reject { |d| d.severity == :info || d.rule.to_s == "call.unresolved-toplevel" }
+      expected = [
+        *marked_lines(harness, "# GENUINE-UNDEFINED").map { |line| [line, "call.undefined-method"] },
+        *marked_lines(harness, "# GENUINE-FALSEY").map { |line| [line, "flow.always-truthy-condition"] }
+      ]
+      expect(reported.map { |d| [d.line, d.rule.to_s] }).to match_array(expected)
+    end
+  end
+
   describe "fixtures/non_empty_refinement_mutation_widening.rb — a mutator invalidates `non-empty-array`" do
     let(:harness) { harness_for("non_empty_refinement_mutation_widening") }
 
@@ -1497,7 +1513,7 @@ RSpec.describe "Rigor type construction (integration)" do
   # is restored where code may run that rebinds it. Each entry runs as `rigor check` runs a project.
   describe "fixtures/ivar_class_guards/ — class guards on instance-variable receivers (#1446)", type: :runner do
     # The number of `# QUIET-1446` lines each entry carries.
-    quiet_counts = { "guards.rb" => 7, "invalidation.rb" => 0, "bot_receivers.rb" => 5, "writes.rb" => 2 }.freeze
+    quiet_counts = { "guards.rb" => 7, "invalidation.rb" => 1, "bot_receivers.rb" => 5, "writes.rb" => 2 }.freeze
 
     def fixture_source(name) = File.read(File.join(__dir__, "fixtures/ivar_class_guards", name))
 

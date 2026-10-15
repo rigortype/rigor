@@ -762,4 +762,48 @@ RSpec.describe Rigor::Analysis::WorkerSession do
       expect(captured_locked_gems).to eq([nil])
     end
   end
+
+  describe "rescue clause widening (issue #1231)" do
+    # Both check paths build their index with `widen_clauses: true`, so a rescue arm reads the body's write of `conn`
+    # untyped. Either path dropping the flag reports `undefined method 'size' for nil` here.
+    let(:source) do
+      <<~RUBY
+        class Conn
+          def size = 0
+        end
+
+        def check(s)
+          conn = nil
+          begin
+            conn = Conn.new
+            Integer(s)
+          rescue ArgumentError
+            conn.size
+          end
+        end
+      RUBY
+    end
+
+    it "widens a rescue arm over the begin body's writes on both paths" do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, "code.rb")
+        File.write(path, source)
+        configuration = Rigor::Configuration.new("paths" => [path])
+
+        runner_diags = Dir.chdir(dir) do
+          runner = Rigor::Analysis::Runner.new(
+            configuration: configuration, cache_store: nil
+          )
+          guarded_run(runner).diagnostics
+        end
+
+        session = Dir.chdir(dir) do
+          described_class.new(configuration: configuration, cache_store: nil)
+        end
+        session_diags = Dir.chdir(dir) { guarded_session_analyze(session, path) }
+
+        expect(diag_keys(runner_diags) + diag_keys(session_diags)).to eq([])
+      end
+    end
+  end
 end

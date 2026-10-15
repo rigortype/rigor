@@ -228,7 +228,7 @@ module Rigor
         scope = @template_units.seed(
           seed_project_scope(Scope.empty(environment: @environment, source_path: path)), path
         )
-        index = Inference::ScopeIndexer.index(root, default_scope: scope)
+        index = Inference::ScopeIndexer.index(root, default_scope: scope, widen_clauses: true)
         # ADR-53 B4 — built-in collectors + plugin node rules share one walk.
         node_collectors = CheckRules.build_node_collectors(path, index, root)
         node_results = node_rule_results_by_plugin(path, root, scope, node_collectors, index)

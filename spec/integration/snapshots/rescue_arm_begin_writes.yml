@@ -1,0 +1,12 @@
+---
+locals: {}
+assertions:
+  '1': Dynamic[top]
+  '2': Dynamic[top]
+  '3': Dynamic[top]
+  '4': ArgumentError
+  '5': Dynamic[top]
+  '6': 'true'
+  '7': '1'
+  '8': Dynamic[top]
+  '9': Integer

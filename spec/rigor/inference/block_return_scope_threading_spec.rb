@@ -4404,6 +4404,17 @@ RSpec.describe "block-return scope threading", type: :runner do
       expect(dumped_type("#{source}dump_type(total)")).not_to eq("3")
     end
 
+    # The alias attribution lives in `CapturedLocals.content_mutations`, so it reaches every per-element fold.
+    it "widens a capture the body mutates through a block-local alias under `map` (Ruby: [0, 1])" do
+      source = "log = []\ndump_type([1, 2].map { |e| v = log.size; l2 = log; l2 << e; v })"
+      expect(dumped_type(source)).not_to eq("[0, 0]")
+    end
+
+    it "keeps the precision of a capture a block-local only copies and never mutates" do
+      expect(dumped_type("ro = [7]\ndump_type([1, 2].map { |e| x = ro; x.size + e })")).to eq("[2, 3]")
+      expect(dumped_type("ro = [7]\ndump_type([1, 2].inject(0) { |a, e| x = ro; a + x.size + e })")).to eq("5")
+    end
+
     it "still folds a block that reads only its parameters" do
       expect(dumped_type("dump_type([1, 2].inject(0) { |a, e| a + e })")).to eq("3")
       expect(flow_rules("t = [1, 2].inject(0) { |a, e| a + e }\nputs 'x' if t == 3"))

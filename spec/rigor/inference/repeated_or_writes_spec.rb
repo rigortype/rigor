@@ -60,4 +60,61 @@ RSpec.describe Rigor::Inference::RepeatedOrWrites do
     marks, sites = positional(source, 2)
     expect([block_of(source).body.slice.include?("||="), sites.size, marks.at(1)]).to eq([false, 1, sites])
   end
+
+  # Issue #1885 — the straight-line marks: a site whose slot a store earlier in the same body may have filled.
+  describe ".straight_line_sites" do
+    def straight(source)
+      body = Prism.parse(source, scopes: [%i[cache cond k]]).value.statements
+      [described_class.straight_line_sites(body), or_writes(body)]
+    end
+
+    it "marks a site after a conditional store into the same slot, and not the store itself" do
+      marks, sites = straight("cache[:k] ||= :e if cond\n(cache[:k] ||= :f).itself")
+      expect(marks).to eq([sites.last])
+    end
+
+    it "counts a plain `[]=` and a mutator as earlier stores" do
+      assigned, assigned_sites = straight("cache[:k] = :e if cond\n(cache[:k] ||= :f)")
+      merged, merged_sites = straight("cache.merge!(k => :e) if cond\n(cache[:k] ||= :f)")
+      expect([assigned, merged]).to eq([assigned_sites, merged_sites])
+    end
+
+    it "does not count a store after the site" do
+      marks, sites = straight("(cache[:k] ||= :f).itself\ncache[:k] ||= :e if cond")
+      expect(marks).to eq([sites.last])
+    end
+
+    it "does not count a store whose literal key differs from the site's" do
+      symbols, = straight("cache[:a] ||= 1 if cond\n(cache[:b] ||= 2)")
+      indices, = straight("cache[0] ||= 1 if cond\n(cache[1] ||= 2)")
+      expect([symbols, indices]).to eq([[], []])
+    end
+
+    it "counts a store whose key may name the same slot" do
+      mixed, mixed_sites = straight("cache[:a] ||= 1 if cond\n(cache[\"a\"] ||= 2)")
+      negative, negative_sites = straight("cache[-1] ||= 1 if cond\n(cache[0] ||= 2)")
+      computed, computed_sites = straight("cache[k] ||= 1 if cond\n(cache[:a] ||= 2)")
+      expect([mixed, negative, computed]).to eq([[mixed_sites.last], [negative_sites.last], [computed_sites.last]])
+    end
+
+    it "does not count a store in the other arm of an `if`, outside any loop" do
+      marks, = straight("if cond then cache[:k] ||= :e else (cache[:k] ||= :f) end")
+      expect(marks).to eq([])
+    end
+
+    it "counts a store in the other arm when a loop runs both arms in turn" do
+      marks, sites = straight("for x in cond do x ? (cache[:k] ||= :e) : (cache[:k] ||= :f) end")
+      expect(marks).to eq([sites.last])
+    end
+
+    it "counts a store in a block that runs before the site" do
+      marks, sites = straight("1.tap { cache[:k] ||= :e if cond }\n(cache[:k] ||= :f)")
+      expect(marks).to eq([sites.last])
+    end
+
+    it "does not look inside a nested `def` body" do
+      marks, = straight("cache[:k] ||= :e if cond\ndef helper = (@memo[:k] ||= 1)")
+      expect(marks).to eq([])
+    end
+  end
 end

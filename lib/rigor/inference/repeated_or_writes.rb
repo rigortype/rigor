@@ -58,6 +58,10 @@ module Rigor
 
       NO_MARKS = Marks.new(shared: NO_SITES, positional: NO_SITES)
 
+      # The main Ractor's {.straight_line_sites} memo, keyed on the body node by identity; a pool worker computes the
+      # sites every time.
+      @straight_line_sites = ObjectSpace::WeakMap.new
+
       # A store in the body and the object it stores into, as `[root, depth]`: the variable the receiver
       # evaluates from (`[:ivar, :@cache]`) and how many element reads lie between the two (`@cache[k][j] = v`
       # stores into depth 1). `path` is nil for an object the store cannot name. `installs_shared` is whether it
@@ -149,6 +153,85 @@ module Rigor
         return generic_marks(found) if element_types.nil?
 
         positional_marks(block, found, stores, scope, element_types)
+      end
+
+      # The index `||=` sites of a straight-line body — a method body, or a file's top level outside its `def`s —
+      # whose slot a store that comes EARLIER in the body may have filled (issue #1885). Whether that store ran is
+      # not something the reading at the later site can see: a conditional store's slot narrowing does not survive
+      # the join with the arm that skipped it, and a store in a block (`tap`, `then`) leaves none behind, so the
+      # later site's `[]` read was a lone `Dynamic` again and the memoization reading answered its own rvalue —
+      # `c[:k] ||= :e if cond; (c[:k] ||= :f)` typed `:f` where Ruby answers `:e` when `cond` held. A store reaches
+      # the site's slot when it stores into the same object ({.receiver_path}) and its key is not a literal the
+      # site's literal key provably differs from ({.distinct_literal_keys?}), or when it may put a shared object
+      # into a container above that object. A store the walk cannot attribute to a variable is not counted: like a
+      # store in another method, it is something the memoization reading already accepts not seeing. The
+      # statement evaluator and the user-method return re-walk lay these sites at the body's entry
+      # (`Scope#with_repeated_or_writes`), the same mark the repeating-block passes lay.
+      def straight_line_sites(body)
+        return NO_SITES unless body.is_a?(Prism::Node) && may_hold_or_write?(body)
+        return compute_straight_line_sites(body) unless Ractor.main?
+
+        @straight_line_sites[body] ||= compute_straight_line_sites(body)
+      end
+
+      def compute_straight_line_sites(body)
+        walked = Walk.new([], {}.compare_by_identity, [], Set.new, {})
+        walk(body, true, walked)
+        return NO_SITES if walked.or_writes.empty?
+
+        parents = nil
+        walked.or_writes.select do |site|
+          earlier_store_reaches?(site, walked.stores) do |store|
+            !ExclusiveArms.exclusive?(store.node, site, body, parents ||= ExclusiveArms.parents(body))
+          end
+        end.freeze
+      end
+
+      # Whether a store before `site` in the body reaches its slot; the block answers whether that store may have
+      # run before the site at all.
+      def earlier_store_reaches?(site, stores)
+        path = receiver_path(site.receiver, 0)
+        return false if path.nil?
+
+        start = site.location.start_offset
+        stores.any? do |store|
+          next false if store.node.equal?(site) || store.path.nil? || store.node.location.start_offset >= start
+
+          store_reaches_slot?(store, path, site) && yield(store)
+        end
+      end
+
+      def store_reaches_slot?(store, path, site)
+        root, depth = path
+        store_root, store_depth = store.path
+        return false unless store_root == root
+        return store.installs_shared if store_depth < depth
+
+        store_depth == depth && !distinct_literal_keys?(store_key(store.node), FreshKeys.sole_key(site))
+      end
+
+      # The key a store writes, or nil when it may write any slot (a mutator such as `merge!` or `<<`).
+      def store_key(node)
+        return FreshKeys.sole_key(node) unless node.is_a?(Prism::CallNode)
+
+        arguments = node.arguments&.arguments
+        node.name == :[]= && arguments&.size == 2 ? arguments.first : nil
+      end
+
+      # True when both keys are literals that name different slots of any receiver ({FreshKeys.distinguishable?}).
+      def distinct_literal_keys?(left, right)
+        values = [left, right].map { |key| literal_key_value(key) }
+        return false if values.any?(&:nil?) || values.first.eql?(values.last)
+
+        FreshKeys.distinguishable?(values, nil)
+      end
+
+      def literal_key_value(node)
+        case node
+        when Prism::SymbolNode then node.unescaped.to_sym
+        when Prism::StringNode then node.unescaped
+        when Prism::IntegerNode then node.value
+        end
       end
 
       # One source slice is far cheaper than the walk, and a body that spells no `||=` holds no such site. A
@@ -371,6 +454,68 @@ module Rigor
 
         root, depth = path
         found.installs.none? { |(other_root, other_depth)| other_root == root && other_depth < depth }
+      end
+
+      # Whether a store and a later site sit in different arms of one `if` / `unless` (a ternary included), so
+      # that the store never runs before the site. That holds when no loop or lambda between that conditional and
+      # the body runs both arms in turn. A block is not counted: one its call may run more than once is the
+      # repeating-body marks' case ({.sites}), and one that runs at most once (`tap`) repeats nothing. Any other
+      # relation — a `case` (whose `when` conditions run before a later arm), `&&` / `||`, a `begin` and its
+      # `rescue` — counts as one where the store may have run first.
+      module ExclusiveArms
+        LOOP_NODES = Set[Prism::LambdaNode, Prism::WhileNode, Prism::UntilNode, Prism::ForNode].freeze
+
+        module_function
+
+        # The parent of every node under `body`, by identity.
+        def parents(body)
+          table = {}.compare_by_identity
+          pending = [body]
+          until pending.empty?
+            node = pending.pop
+            node.rigor_each_child do |child|
+              table[child] = node
+              pending << child
+            end
+          end
+          table
+        end
+
+        def exclusive?(store, site, body, parents)
+          chain = ancestors(store, body, parents)
+          child = site
+          node = parents[site]
+          until node.nil? || chain.key?(node)
+            child = node
+            node = parents[node]
+          end
+          return false if node.nil? || !different_arms?(node, chain[node], child)
+
+          ancestors(node, body, parents).each_key.none? { |above| LOOP_NODES.include?(above.class) }
+        end
+
+        # `node` and its ancestors up to `body`, each mapped to the child the walk came up through.
+        def ancestors(node, body, parents)
+          chain = {}.compare_by_identity
+          child = nil
+          until node.nil?
+            chain[node] = child
+            break if node.equal?(body)
+
+            child = node
+            node = parents[node]
+          end
+          chain
+        end
+
+        def different_arms?(node, left, right)
+          arms = case node
+                 when Prism::IfNode then [node.statements, node.subsequent]
+                 when Prism::UnlessNode then [node.statements, node.else_clause]
+                 else return false
+                 end
+          !left.equal?(right) && [left, right].all? { |arm| arms.any? { |candidate| candidate.equal?(arm) } }
+        end
       end
 
       # Whether an index `||=` site's key differs, position by position, from every earlier position's key under

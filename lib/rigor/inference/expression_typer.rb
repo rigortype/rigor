@@ -3919,7 +3919,7 @@ module Rigor
           dynamic_origins: scope.dynamic_origins,
           # Issue #1358 — the callee runs in a frame of its own ({Scope#with_match_frame}).
           match_frame: MatchRebinding::Frame.new(def_node.body, def_node.parameters)
-        )
+        ).with_repeated_or_writes(RepeatedOrWrites.straight_line_sites(def_node.body))
       end
 
       # Issue #681 / #707 — the ONE place in `lib/` that answers "what `Module.nesting` was recorded for this

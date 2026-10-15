@@ -120,6 +120,18 @@ module Rigor
         appeared.freeze
       end
 
+      # Issue #1459 — the method names some file in `paths` started or stopped defining in this edit, on any class or
+      # side. A consumer whose answer asked whether the program defines a name anywhere
+      # (`Inference::BlockCallTiming.project_defines_anywhere?`) recorded a `defines:<name>` edge whichever way it
+      # answered. `paths` MUST include removed files, whose every name vanished. `before` / `after` map a path to the
+      # Set of names it defines (`Inference::ScopeIndexer.defined_method_names`); a path absent from either side
+      # defines nothing there.
+      def changed_defined_names(paths, before, after)
+        moved = Set.new
+        paths.each { |path| moved.merge((before[path] || Set.new) ^ (after[path] || Set.new)) }
+        moved.freeze
+      end
+
       # Issue #1120 — the method names whose refinements moved in this edit. A consumer whose answer consulted the
       # refinement table recorded a `refinement:<method>` edge whichever way it answered, because the answer is a
       # function of the whole project's refinements of that name. `paths` MUST include removed files, whose whole

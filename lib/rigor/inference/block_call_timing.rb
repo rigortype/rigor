@@ -165,7 +165,12 @@ module Rigor
       # nothing for names this rare, and the block-return pass is no independent check here: it types a
       # self-call to an overridden `raise` as Kernel's `bot` too, so a missed override is a wrong `bot`.
       # {LastLine.reads_line?} declines on it the same way for `gets` and `readline`.
+      #
+      # Issue #1459 — the answer reads every project file's tables whole, so it records a `defines:<name>` edge
+      # whichever way it answers: an edit that makes a file start or stop defining the name re-checks the reader
+      # (`Incremental.changed_defined_names`). A `pre_eval:` patch moves the snapshot's own fingerprint.
       def project_defines_anywhere?(method_name, scope)
+        Analysis::DependencyRecorder.read_missing(:defines, method_name) if Analysis::DependencyRecorder.active?
         return true if scope.top_level_def_for(method_name)
         # `discovered_methods` withholds a plain cross-file `def` (the ADR-17 monkey-patch contract); the
         # def-node tables still carry it, on both sides.

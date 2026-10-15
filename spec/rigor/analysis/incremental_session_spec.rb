@@ -1378,6 +1378,87 @@ end
 
   # ADR-46 slice 4 singleton extension (PR item 3) — a class/singleton-method body edit gets symbol
   # granularity: its closure scopes to the method's call sites, not the file's coarse dependents.
+  # Issue #1459 — `LastLine.reads_line?` declines a reader whose name the program defines anywhere
+  # (`BlockCallTiming.project_defines_anywhere?`), so the reader's file records a `defines:<name>` edge, and an edit that
+  # makes another file start or stop defining the name in any spelling re-checks it.
+  describe "a project definition of a line reader anywhere (#1459)" do
+    reader = <<~RUBY
+      def st
+        while $stdin.gets
+          nil
+        end
+        puts "tail" if $_
+      end
+
+      def rl
+        if $stdin.readline
+          $_.no_such_method
+        end
+      end
+    RUBY
+    plain = "class Reader\n  def other = nil\nend\n"
+    gets_def = "class Reader\n  def gets(*) = nil\nend\n"
+    truthy = "flow.always-truthy-condition"
+    undefined = "call.undefined-method"
+
+    def reader_rules(diagnostics, reader_path)
+      diagnostics.select { |diagnostic| diagnostic.path == reader_path }.map(&:rule)
+    end
+
+    def run_reader_edit(dir, reader, before, after, workers)
+      d = File.join(dir, "d.rb")
+      b = File.join(dir, "b.rb")
+      File.write(d, reader)
+      File.write(b, before)
+      File.write(File.join(dir, "c.rb"), "def unrelated = 1\n")
+      session = described_class.new(configuration: configuration(dir), environment: shared_environment,
+                                    workers: workers)
+      baseline = guarded_baseline(session)
+      File.write(b, after)
+      [d, baseline, guarded_recheck(session)]
+    end
+
+    cases = {
+      "a def of gets in another class" => [plain, gets_def, [undefined]],
+      "a def of readline in another class" => [plain, "class Reader\n  def readline(*) = nil\nend\n", [truthy]],
+      "a define_method of gets" => [plain, "class Reader\n  define_method(:gets) { nil }\nend\n", [undefined]],
+      "an alias_method naming gets" => [plain, "class Reader\n  def x = nil\n  alias_method :gets, :x\nend\n",
+                                        [undefined]],
+      "an attr_reader of gets" => [plain, "class Reader\n  attr_reader :gets\nend\n", [undefined]],
+      "a singleton def of gets" => [plain, "class Reader\n  def self.gets = nil\nend\n", [undefined]],
+      "a def of gets in a module" => [plain, "module Readable\n  def gets = nil\nend\n", [undefined]],
+      "the def of gets removed" => [gets_def, plain, [truthy, undefined]],
+      "the def of gets renamed" => [gets_def, "class Reader\n  def fetch_line(*) = nil\nend\n", [truthy, undefined]]
+    }
+    [0, 2].each do |workers|
+      cases.each do |label, (before, after, expected)|
+        it "re-checks the reader after #{label} (workers: #{workers})" do
+          skip "fork is unavailable on this platform" if workers.positive? && !Process.respond_to?(:fork)
+          Dir.mktmpdir do |dir|
+            d, _baseline, recheck = run_reader_edit(dir, reader, before, after, workers)
+
+            expect(recheck.affected).to include(d)
+            expect(reader_rules(recheck.diagnostics, d)).to contain_exactly(*expected)
+            expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
+          end
+        end
+      end
+
+      it "keeps the reader's cached result when another file adds an unrelated method (workers: #{workers})" do
+        skip "fork is unavailable on this platform" if workers.positive? && !Process.respond_to?(:fork)
+        Dir.mktmpdir do |dir|
+          d, baseline, recheck = run_reader_edit(dir, reader, plain,
+                                                 "class Reader\n  def other = nil\n  def another = nil\nend\n", workers)
+
+          expect(reader_rules(baseline, d)).to contain_exactly(truthy, undefined)
+          expect(recheck.affected).to eq(Set[File.join(dir, "b.rb")])
+          expect(recheck.reused).to include(d)
+          expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
+        end
+      end
+    end
+  end
+
   describe "singleton-method symbol granularity" do
     def write_util(dir, unused_body:)
       util = File.join(dir, "util.rb")

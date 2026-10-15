@@ -191,3 +191,38 @@ class ResetsBetweenClauses
      end]
   end
 end
+
+# The subject stays forgotten in every clause after the calling test, a later call-free one included:
+# `StickyForget.new.sticky` returns [6].
+class StickyForget
+  def initialize
+    @x = nil
+  end
+
+  def reset!
+    @x = 5
+    ->(_) { false }
+  end
+
+  def sticky
+    [case @x
+     when reset! then 1
+     when NilClass then @x + 1
+     end]
+  end
+end
+
+# A global subject is forgotten the same way: `global_after_call` returns [6].
+def rebind_global!
+  $subject_case_global = 5
+  ->(_) { false }
+end
+
+def global_after_call
+  $subject_case_global = nil
+  [case $subject_case_global
+   when String then 1
+   when rebind_global! then 2
+   else $subject_case_global + 1
+   end]
+end

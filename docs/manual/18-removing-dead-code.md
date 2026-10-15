@@ -116,8 +116,9 @@ gap in coverage rather than a finding about your code.
 rigor unused --entry-point='lib/cli.rb' --entry-point='lib/workers/**/*.rb'
 ```
 
-Repeatable. Each glob is matched against every declaration's path, and
-roots every declaration in a matching file.
+Repeatable. Each glob is matched against every declaration's path as
+written, relative to the project root, and relative to the directory
+you run in, and roots every declaration in a matching file.
 
 **File-level references**, free. Code that runs on load — an
 initializer naming a class, a `.rake` task — roots what it names. This
@@ -162,9 +163,12 @@ section held 22 policy classes whose only remaining caller was
 `spec/policies/`. Those 22 were not adjudicated, so treat the section
 as high-signal rather than high-yield; the yield is unmeasured.
 
-"Test code" is decided by path, relative to the directory you run `rigor unused` in (run it from the
-project root): `spec/` and `test/` anywhere below it, `*_spec.rb` and `*_test.rb`, and the end-to-end
-trees `qa/`, `e2e/` and `features/` at that root. Tooling directories such as
+"Test code" is decided by path, relative to the project root: the directory of the `.rigor.yml` in
+use, or the directory you run `rigor unused` in when there is none or when the config sits below it
+(`--config=ci/rigor.yml` from the project root). Running it from a subdirectory with `--config` reads
+the same project, and references are read from the directory you run it in as well. A file counts
+as test code when its path as written below either directory says so. The test paths are `spec/` and `test/` anywhere below the root,
+`*_spec.rb` and `*_test.rb`, and the end-to-end trees `qa/`, `e2e/` and `features/` at the root. Tooling directories such as
 `rubocop/`, `keeps/`, `tooling/` and `scripts/` count as production, so a class used only by them is
 rooted rather than listed: deleting it would break the tooling.
 

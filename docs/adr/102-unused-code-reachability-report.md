@@ -171,6 +171,16 @@ artifacts from a single initializer.
 read — pure artifacts on two of three targets. Reading a file to harvest references is far
 cheaper than type-checking it, and the report MUST take the wider corpus.
 
+The wider corpus, the template scan, the file roles and `--entry-point` matching all read one
+project root, realpath'd: the loaded config file's directory, or the working directory when
+there is none or the config sits below it (`ci/rigor.yml`). The root never rises above either,
+so the role rules keep reading the project; the working directory's files are read for
+references too, so the corpus is never narrower than the working directory alone. A file is
+parsed once however it is spelled, but each spelling keeps its references under its own role,
+and its declarations are taken once, from the analysed spelling the report prints; the scan
+cache keys on the root and the working directory
+([#1760](https://github.com/rigortype/rigor/issues/1760)).
+
 ### WD8 — A reference carries its referrer's role
 
 A class referenced only from its own spec is dead production code with a live test.
@@ -183,8 +193,10 @@ So an edge in the reference graph MUST carry the **role of the file it came from
 category rather than a bucket boundary. This is a data-model decision, not a filter: the
 role has to be recorded when the edge is, so it cannot be retrofitted after #349.
 
-Test role is decided from the path relative to the directory `rigor unused` runs in, the same root its
-reference glob and `--entry-point` use (a directory above that root never counts): `spec/` and `test/`
+Test role is decided from the path relative to the project root of WD7, and a file is test code
+when any spelling of it as written below the root or the working directory reads as test code; its
+realpath is read only when no written spelling lies below either, so a symlink whose target runs
+through `test/` does not make production code test code (a directory above either never counts): `spec/` and `test/`
 anywhere below it, `*_spec.rb` / `*_test.rb`, and the conventional end-to-end trees `qa/`, `e2e/` and
 `features/` at that root (#1751; root-only because
 `app/models/features/` is an ordinary namespace). Tooling trees — `rubocop/`, `keeps/`, `tooling/`,

@@ -185,8 +185,8 @@ paths:
   - lib
 
 exclude:
-  - vendor
-  - tmp
+  - "vendor/**"
+  - "tmp/**"
 
 plugins:
   # Rails core

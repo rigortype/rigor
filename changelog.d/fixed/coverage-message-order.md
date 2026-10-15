@@ -1,0 +1,1 @@
+- **[engine]** `rbs.coverage.definition-build-failed` now lists its failed classes, "First failure" and conflicting signature files in class-name order, so a warm `--incremental` run after an edit prints the same message as a cold run instead of moving the edited file's class to the front. ([#1922](https://github.com/rigortype/rigor/pull/1922))

@@ -49,7 +49,7 @@ module Rigor
 
         configuration = Configuration.load(options.fetch(:config))
         paths = @argv.empty? ? configuration.paths : @argv
-        @root = project_root(configuration, paths)
+        @root = project_root(configuration)
         scan_cache = open_scan_cache(configuration)
         declarations, references, dynamic_uses, shadows = scan(paths, configuration, scan_cache)
         references.concat(signature_references(configuration))
@@ -77,28 +77,28 @@ module Rigor
                                                                          root: "#{@root}#{spelled}")
       end
 
-      # The project root (#1760): the deepest directory holding both the config file in use (the working
-      # directory without one) and every analysed path, realpath'd. A config kept below the project
-      # (`ci/rigor.yml` with `paths: [../lib]`) still reads the whole project's references, and one above
-      # the working directory reads the same project from any subdirectory. A set with nothing in common
-      # but the filesystem root falls back to the config's directory rather than globbing the whole disk.
-      def project_root(configuration, paths)
+      # The project root (#1760), realpath'd: the config file's directory, unless the config sits below the
+      # working directory (`--config=ci/rigor.yml` from the project root), where the working directory is the
+      # project. Run from a subdirectory, or from a directory unrelated to the config, it is the config's.
+      # The root never rises above the config's directory or the working directory, so the role rules, which
+      # anchor `qa/`, `e2e/` and `features/` at the root, keep reading the project; an analysed path outside
+      # it reads as `../…`.
+      def project_root(configuration)
         base = canonical(configuration.exclude_base)
-        dirs = paths.filter_map do |path|
-          real = canonical(path)
-          if File.exist?(real)
-            File.directory?(real) ? real : File.dirname(real)
-          end
-        end
-        common = dirs.reduce(base) { |acc, dir| common_ancestor(acc, dir) }
-        common == File.dirname(common) ? base : common
+        cwd = canonical(Dir.pwd)
+        inside?(base, cwd) && base != cwd ? cwd : base
       end
 
-      def common_ancestor(left, right)
-        a = left.split("/")
-        b = right.split("/")
-        shared = a.zip(b).take_while { |x, y| x == y }.map(&:first)
-        shared.join("/").then { |dir| dir.empty? ? "/" : dir }
+      def inside?(path, dir)
+        path.start_with?("#{dir.chomp('/')}/")
+      end
+
+      # The directories the wider corpus is read from: the root, and the working directory when it lies
+      # outside the root. Reading the working directory too keeps the corpus no narrower than it was when
+      # the working directory alone was read; a reference only ever makes a declaration more reachable.
+      def corpus_dirs
+        cwd = canonical(Dir.pwd)
+        cwd == @root || inside?(cwd, @root) ? [@root] : [@root, cwd]
       end
 
       def build_graph(configuration, options, contribution, declarations:, references:, dynamic_uses:, shadows:)
@@ -178,7 +178,7 @@ module Rigor
       # The project is the directory of the config file in use, or the working directory without one,
       # realpath'd (#1760): running from a subdirectory or through a symlinked spelling reads the same project.
       def reference_files(_paths, configuration)
-        absolute = project_relative(REFERENCE_GLOB).map { |rel| File.join(@root, rel) }
+        absolute = project_files(REFERENCE_GLOB)
         Analysis::PathExpansion.reject_excluded(absolute, configuration.exclude_patterns,
                                                 base: configuration.exclude_base)
       end
@@ -194,8 +194,11 @@ module Rigor
         nil
       end
 
-      def project_relative(glob)
-        Analysis::Reachability::ProjectFiles.own(Dir.glob(glob, base: @root), @root)
+      # Absolute paths of the project's own files matching `glob`, under every corpus directory.
+      def project_files(glob)
+        corpus_dirs.flat_map do |dir|
+          Analysis::Reachability::ProjectFiles.own(Dir.glob(glob, base: dir), dir).map { |rel| File.join(dir, rel) }
+        end.uniq
       end
 
       def canonical(path)
@@ -247,8 +250,8 @@ module Rigor
         names = declarations.map(&:fqn)
         return [] if names.empty?
 
-        project_relative(TEMPLATE_GLOB).flat_map do |rel|
-          absolute = File.join(@root, rel)
+        project_files(TEMPLATE_GLOB).flat_map do |absolute|
+          rel = relative_to_root(absolute)
           haystack = cache.serve(:runs, absolute) { constant_bearing_text(File.read(absolute).scrub) }
           names.filter_map do |fqn|
             next unless haystack.include?(fqn)

@@ -149,6 +149,57 @@ RSpec.describe Rigor::CLI::UnusedCommand do
       end
     end
 
+    # Round 2 of #1888: a root taken as the common ancestor of the config and the analysed paths rose above
+    # the project (a sibling path) or sank below the working directory (a monorepo package's config).
+    def write_file(dir, rel, source)
+      FileUtils.mkdir_p(File.dirname(File.join(dir, rel)))
+      File.write(File.join(dir, rel), source)
+    end
+
+    it "keeps features/ test code when an analysed path lies outside the project" do
+      Dir.mktmpdir do |dir|
+        proj = File.join(dir, "proj")
+        write_file(proj, ".rigor.yml", "paths:\n  - lib\n  - ../shared\n")
+        write_file(proj, "lib/foo.rb", "class Foo\nend\n")
+        write_file(proj, "features/step.rb", "Foo.new\n")
+        write_file(dir, "shared/util.rb", "class Util\nend\n")
+        backdate(dir)
+
+        _, report, = run_in(proj)
+
+        expect(report["test_only"].map { |row| row["name"] }).to eq(["Foo"])
+      end
+    end
+
+    it "does not read a project under a test/ directory as test code when a path lies outside it" do
+      Dir.mktmpdir do |dir|
+        proj = File.join(dir, "test/proj")
+        write_file(proj, ".rigor.yml", "paths:\n  - lib\n  - ../../other/lib\n")
+        write_file(proj, "lib/bar.rb", "class Bar\nend\n")
+        write_file(proj, "lib/main.rb", "Bar.new\n")
+        write_file(dir, "other/lib/o.rb", "class Other\nend\nOther.new\n")
+        backdate(dir)
+
+        _, report, = run_in(proj)
+
+        expect(report["test_only"]).to be_empty
+        expect(report["candidates"].map { |row| row["name"] }).not_to include("Bar")
+      end
+    end
+
+    it "keeps the working directory's references for a package config run from the monorepo root" do
+      Dir.mktmpdir do |dir|
+        write_file(dir, "pkgs/a/.rigor.yml", "paths:\n  - lib\n")
+        write_file(dir, "pkgs/a/lib/a.rb", "class Alib\nend\n")
+        write_file(dir, "pkgs/b/lib/b.rb", "Alib.new\n")
+        backdate(dir)
+
+        _, report, = run_in(dir, "--config=pkgs/a/.rigor.yml")
+
+        expect(report["candidates"]).to be_empty
+      end
+    end
+
     it "scans each file once when the project is reached through a symlink" do
       Dir.mktmpdir do |dir|
         project = File.join(dir, "proj")

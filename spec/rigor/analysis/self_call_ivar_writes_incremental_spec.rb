@@ -5,15 +5,15 @@ require "tmpdir"
 
 # Issue #1596 — a class guard's narrowing of an instance variable survives an implicit-self call whose callee is
 # proven to write no such variable (`Inference::SelfCallIvarWrites`). That proof reads the callee's body, every
-# method it reaches, and the subclasses that could override it, so an edit to any of them in another file must
-# re-check the caller. The oracle is a full `--no-cache` run of the same tree, driven as in
-# `prepend_region_incremental_spec.rb`.
+# method it reaches, and the subclasses that could override it, and gives up on an owner another file reopens, so
+# an edit to any of them in another file must re-check the caller. The oracle is a full `--no-cache` run of the
+# same tree, driven as in `prepend_region_incremental_spec.rb`.
 RSpec.describe "self-call ivar-write proof — incremental" do
   let(:caller_source) do
     <<~RUBY
       require "stringio"
 
-      class Holder
+      class Holder < Base
         def initialize = (@io = STDOUT)
 
         def dump
@@ -74,30 +74,38 @@ RSpec.describe "self-call ivar-write proof — incremental" do
 
   it "re-checks the caller when the callee in another file starts writing the variable" do
     expect_recheck_to_report(
-      { "b.rb" => "class Holder\n  def log(message) = warn(message)\nend\n" },
-      { "b.rb" => "class Holder\n  def log(_message) = (@io = STDOUT)\nend\n" }
+      { "b.rb" => "class Base\n  def log(message) = warn(message)\nend\n" },
+      { "b.rb" => "class Base\n  def log(_message) = (@io = STDOUT)\nend\n" }
     )
   end
 
   it "re-checks the caller when a method the callee reaches starts writing the variable" do
     expect_recheck_to_report(
-      { "b.rb" => "class Holder\n  def log(message) = note(message)\nend\n",
-        "c.rb" => "class Holder\n  def note(message) = warn(message)\nend\n" },
-      { "c.rb" => "class Holder\n  def note(_message) = (@io = STDOUT)\nend\n" }
+      { "b.rb" => "class Base < Root\n  def log(message) = note(message)\nend\n",
+        "c.rb" => "class Root\n  def note(message) = warn(message)\nend\n" },
+      { "c.rb" => "class Root\n  def note(_message) = (@io = STDOUT)\nend\n" }
     )
   end
 
   it "re-checks the caller when a new subclass overrides the callee with a write" do
     expect_recheck_to_report(
-      { "b.rb" => "class Holder\n  def log(message) = warn(message)\nend\n" },
+      { "b.rb" => "class Base\n  def log(message) = warn(message)\nend\n" },
       { "d.rb" => "class Loud < Holder\n  def log(_message) = (@io = STDOUT)\nend\n" }
     )
   end
 
   it "re-checks the caller when an existing subclass gains a `define_method` override" do
     expect_recheck_to_report(
-      { "b.rb" => "class Holder\n  def log(message) = warn(message)\nend\n", "d.rb" => "class Loud < Holder\nend\n" },
+      { "b.rb" => "class Base\n  def log(message) = warn(message)\nend\n", "d.rb" => "class Loud < Holder\nend\n" },
       { "d.rb" => "class Loud < Holder\n  define_method(:log) { |_message| @io = STDOUT }\nend\n" }
+    )
+  end
+
+  # Issue #1596 — a second file declaring the owner gives the proof up, whatever it defines.
+  it "re-checks the caller when a new file reopens the callee's owner" do
+    expect_recheck_to_report(
+      { "b.rb" => "class Base\n  def log(message) = warn(message)\nend\n" },
+      { "e.rb" => "class Base\n  def log(_message) = (@io = STDOUT)\nend\n" }
     )
   end
 end

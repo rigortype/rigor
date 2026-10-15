@@ -1536,7 +1536,7 @@ RSpec.describe "Rigor type construction (integration)" do
   describe "fixtures/ivar_class_guards/ — class guards on instance-variable receivers (#1446)", type: :runner do
     # The number of `# QUIET-1446` lines each entry carries.
     quiet_counts = {
-      "guards.rb" => 7, "invalidation.rb" => 1, "bot_receivers.rb" => 5, "writes.rb" => 2, "self_calls.rb" => 4
+      "guards.rb" => 7, "invalidation.rb" => 1, "bot_receivers.rb" => 5, "writes.rb" => 2, "self_calls.rb" => 19
     }.freeze
 
     def fixture_source(name) = File.read(File.join(__dir__, "fixtures/ivar_class_guards", name))
@@ -1562,6 +1562,35 @@ RSpec.describe "Rigor type construction (integration)" do
         expect(result.diagnostics.map(&:rule).map(&:to_s)).not_to include("flow.unreachable-clause")
         expect(source.lines.count { |line| line.include?("# QUIET-1446") }).to eq(quiet)
       end
+    end
+
+    # Issue #1596 — a callee another file defines again, in any spelling, is not the `def` the table holds: Ruby runs
+    # the later one, which writes `@v`, so the read returns "X" under Ruby 4.0.5 and must not report.
+    it "gives up on a callee another file redefines" do
+      caller_source = <<~RUBY
+        class T
+          def initialize = (@v = "a")
+          def log = note
+          def note = nil
+
+          def dump
+            @v = nil
+            log
+            @v.upcase
+          end
+        end
+      RUBY
+      redefinitions = [
+        "class T\n  def log = (@v = \"x\")\nend\n", "class T\n  def note = (@v = \"x\")\nend\n",
+        "T.class_eval { def log = (@v = \"x\") }\n", "T.class_eval { define_method(:log) { @v = \"x\" } }\n",
+        "class T\n  define_method(:log) { @v = \"x\" }\nend\n", "T.send(:define_method, :log) { @v = \"x\" }\n",
+        "T.define_method(:log) { @v = \"x\" }\n"
+      ]
+      redefinitions.each do |redefinition|
+        result = analyze(files: { "a.rb" => caller_source, "b.rb" => redefinition })
+        expect(reported(result).map { |d| [d.line, d.rule.to_s] }).to eq([]), redefinition
+      end
+      expect(reported(analyze(files: { "a.rb" => caller_source, "b.rb" => "X = 1\n" })).map(&:line)).to eq([9])
     end
   end
 

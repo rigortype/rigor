@@ -3,6 +3,7 @@
 require "prism"
 
 require_relative "../source/node_children"
+require_relative "../source/parameter_envelope"
 require_relative "../type"
 require_relative "guard_rebinding"
 require_relative "project_method_ownership"
@@ -64,12 +65,15 @@ module Rigor
         Prism::InterpolatedRegularExpressionNode => "Regexp", Prism::NilNode => "NilClass",
         Prism::TrueNode => "TrueClass", Prism::FalseNode => "FalseClass"
       }.freeze
-      # Methods `Kernel` or `Object` own that change which method a later call on `self` dispatches to, run an
-      # `extended` hook, or hand out `self`'s methods or binding as objects.
-      DISPATCH_CHANGING_NAMES = Set[
-        :extend, :define_singleton_method, :singleton_class, :method, :public_method, :singleton_method, :binding
+      # The methods `Kernel` or `Object` own that a read accepts on `self` when the project does not define them: none
+      # of them runs a method of `self` by itself. Any other (`display` runs `to_s`, `inspect`, `==`, `hash`,
+      # `extend`, `method`, `binding`, `instance_variables`) proves nothing.
+      SELF_SAFE_NAMES = Set[
+        :warn, :puts, :print, :p, :pp, :format, :sprintf, :printf, :raise, :fail, :loop, :catch, :throw, :rand,
+        :sleep, :Integer, :Float, :String, :Array, :Hash, :Rational, :Complex, :block_given?, :frozen?, :nil?,
+        :is_a?, :kind_of?, :instance_of?, :object_id, :class, :__method__, :caller, :abort, :exit
       ].freeze
-      private_constant :UNPROVABLE_NODES, :LITERAL_CLASSES, :DISPATCH_CHANGING_NAMES
+      private_constant :UNPROVABLE_NODES, :LITERAL_CLASSES, :SELF_SAFE_NAMES
 
       # Raised inside a proof to abandon it.
       class Unprovable < StandardError
@@ -88,6 +92,7 @@ module Rigor
         return nil unless self_type.is_a?(Type::Nominal)
 
         proof = Proof.new(self_type, scope)
+        proof.no_self_value(call_node.arguments)
         proof.self_call(call_node)
         proof.read(call_node.block)
         proof.written.freeze
@@ -110,20 +115,30 @@ module Rigor
         # Reads the method an implicit-self or `self.` call to `call_node`'s name runs.
         def self_call(call_node)
           name = call_node.name
-          unprovable! if GuardRebinding.code_running_name?(name) || DISPATCH_CHANGING_NAMES.include?(name)
+          unprovable! if GuardRebinding.code_running_name?(name)
 
           if ProjectMethodOwnership.defines?(@class_name, name, :instance, @scope)
             read_def(proven_def(name))
-          elsif GuardRebinding.type_method_foreign?(@self_type, name, @scope)
+          elsif !SELF_SAFE_NAMES.include?(name) || GuardRebinding.type_method_foreign?(@self_type, name, @scope)
             unprovable!
           end
+        end
+
+        # Issue #1596 — `self` handed on as a value (an argument, an interpolation, a splat, a `when` value, a literal
+        # element or key) lets the code it reaches run `self`'s methods by protocol (`to_s`, `hash`, `==`, `to_a`),
+        # which the read does not follow, so it proves nothing. Reads `node` for one, without reading anything else.
+        def no_self_value(node)
+          return unless node.is_a?(Prism::Node)
+
+          unprovable! if node.is_a?(Prism::SelfNode)
+          node.rigor_each_child { |child| no_self_value(child) }
         end
 
         # Reads `node`, adding each instance variable it writes.
         def read(node)
           return unless node.is_a?(Prism::Node)
 
-          unprovable! if UNPROVABLE_NODES.include?(node.class)
+          unprovable! if UNPROVABLE_NODES.include?(node.class) || node.is_a?(Prism::SelfNode)
           written = ivar_write_name(node)
           @written << written if written
           if node.is_a?(Prism::InstanceVariableOperatorWriteNode) && GuardRebinding.type_method_foreign?(
@@ -132,10 +147,14 @@ module Rigor
             unprovable!
           end
           read_call(node) if node.is_a?(Prism::CallNode)
-          node.rigor_each_child { |child| read(child) }
+          # `self.m` is the one place `self` may stand: a call on it, which {#read_call} read.
+          receiver = call_receiver(node)
+          node.rigor_each_child { |child| read(child) unless child.is_a?(Prism::SelfNode) && child.equal?(receiver) }
         end
 
         private
+
+        def call_receiver(node) = node.is_a?(Prism::CallNode) ? node.receiver : nil
 
         def ivar_write_name(node)
           case node
@@ -172,6 +191,7 @@ module Rigor
           unprovable! if owner.nil?
           def_node = @scope.user_def_for(owner, name)
           unprovable! unless def_node.is_a?(Prism::DefNode) && def_node.receiver.nil?
+          single_definition(owner, name)
 
           # A subclass whose superclass the tables do not know is enumerated too, and its chain ends short of the
           # owner; one that reaches no definer of its own leaves the call to its superclass.
@@ -179,6 +199,40 @@ module Rigor
             unprovable! unless [owner, nil].include?(definer_ahead(subclass, name, owner))
           end
           def_node
+        end
+
+        # Issue #1596 — the `def` the table holds must be the owner's only definition of `name`: the owner declared in
+        # one file, with one `def` of the name there (a reopening or a `class_eval` body in the same file is a second
+        # one), and no `define_method`, `attr_*` or alias of it, nor a rewrite no literal names (`T.define_method`,
+        # `T.send(:define_method, …)`, `T.class_eval` with a computed name), nor a definition the walk could not prove
+        # runs (a possible or contested one, as `DefinerResolution` reads them). The class edge files every declaring
+        # file.
+        def single_definition(owner, name)
+          Scope::ResolutionChain.record_class(@scope, owner) if Analysis::DependencyRecorder.active?
+          unprovable! if possible_definition?(owner, name)
+          bucket = @scope.discovered_parameter_envelopes[owner] || {}
+          unprovable! if bucket[[:instance, name]] == Source::ParameterEnvelope::OPAQUE
+          unprovable! if (@scope.discovered_class_sources[owner]&.size || 0) > 1
+          unprovable! if definition_count(owner, name) > 1
+        end
+
+        def possible_definition?(owner, name)
+          discovery = @scope.discovery
+          discovery.possible_method?(owner, name, :instance) ||
+            discovery.contested?(:discovered_def_nodes, [owner, name]) ||
+            discovery.contested?(:discovered_parameter_envelopes, [owner, [:instance, name]])
+        end
+
+        def definition_count(owner, name)
+          @scope.discovered_deferred_ranges.sum do |_path, rows|
+            rows.count { |row| row[2] == name && row[3] == :instance && row[4] == owner }
+          end
+        end
+
+        # Whether the project rewrites `class_name`'s method table beyond the names it spells, or refines it.
+        def rewritten?(class_name)
+          bucket = @scope.discovered_parameter_envelopes[class_name]
+          !bucket.nil? && Scope::DiscoveryIndex.rewritten_surface?(bucket)
         end
 
         # The first project class or module on `class_name`'s settled instance chain that defines `name`, stopping
@@ -189,7 +243,7 @@ module Rigor
           unprovable! if chain.truncated? || chain.wildcard_mixin? || chain.unsettled? || chain.forks.positive?
 
           chain.search(@scope) do |entry|
-            unprovable! if entry.external?
+            unprovable! if entry.external? || rewritten?(entry.name)
 
             entry.name if entry.name == owner || defines_here?(entry.name, name)
           end

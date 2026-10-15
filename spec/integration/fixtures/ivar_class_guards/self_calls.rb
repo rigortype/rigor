@@ -342,23 +342,23 @@ end
 
 class Refined
   def initialize = (@io = STDOUT)
-  def note = nil
+  def refined_note = nil
 end
 
 module Refining
   refine Refined do
-    def note = (@io = STDOUT)
+    def refined_note = (@io = STDOUT)
   end
 end
 
 using Refining
 
-# The refinement is in effect here, so `note` runs `Refining`'s.
+# The refinement is in effect here, so `refined_note` runs `Refining`'s.
 class Refined
   def dump
     return unless @io.is_a?(StringIO)
 
-    note
+    refined_note
     @io.string # FIRES-1446 call.undefined-method
   end
 end
@@ -392,4 +392,291 @@ class UsesModuleSelf
   include ModuleSelf
 
   def initialize = setup
+end
+
+# Issue #1596 — a helper that hands `self` on as a value lets Ruby run `self`'s `to_s`, `===` or `to_ary`, which
+# memoises `@label`, so each read after `@label = nil` and the helper returns the label under Ruby 4.0.5. A plain
+# assignment's narrowing survives a helper proven not to write the variable, so without the `self` rule each read
+# would report a nil receiver.
+class Labelled
+  def initialize = (@name = "n"; @label = nil)
+  def to_s = (@label ||= "node:#{@name}")
+  def ===(_other) = to_s
+  def to_ary = [to_s, 1]
+  def interpolated = warn("visiting #{self}")
+  def formatted = warn(format("%s", self))
+  def joined = warn([self].join)
+  def displayed = display
+  def compared = (case 1 when self then 1 end)
+  def destructured = (first, = self; first)
+
+  def interpolated_dump
+    @label = nil
+    interpolated
+    @label.upcase # QUIET-1446
+  end
+
+  def formatted_dump
+    @label = nil
+    formatted
+    @label.upcase # QUIET-1446
+  end
+
+  def joined_dump
+    @label = nil
+    joined
+    @label.upcase # QUIET-1446
+  end
+
+  def displayed_dump
+    @label = nil
+    displayed
+    @label.upcase # QUIET-1446
+  end
+
+  def compared_dump
+    @label = nil
+    compared
+    @label.upcase # QUIET-1446
+  end
+
+  def destructured_dump
+    @label = nil
+    destructured
+    @label.upcase # QUIET-1446
+  end
+end
+
+# A plain assignment's narrowing now survives a helper proven to write nothing: `@label` is still nil at the read,
+# which raises NoMethodError under Ruby 4.0.5.
+class AssignedFold
+  def initialize = (@label = "set")
+  def remark = warn("noting")
+
+  def dump
+    @label = nil
+    remark
+    @label.upcase # FIRES-1446 call.undefined-method
+  end
+end
+
+# Issue #1596 — a callee the project defines again elsewhere, by a reopening, a `class_eval` body or a
+# `define_method` in any spelling: Ruby runs the later definition, which writes `@v`, so each read returns "X"
+# under Ruby 4.0.5. The table holds one `def`, so the proof gives up rather than read it.
+class ReopenedDef
+  def initialize = (@v = "a")
+  def log = nil
+
+  def dump
+    @v = nil
+    log
+    @v.upcase # QUIET-1446
+  end
+end
+
+class ReopenedDef
+  def log = (@v = "x")
+end
+
+class ClassEvalDef
+  def initialize = (@v = "a")
+  def log = nil
+
+  def dump
+    @v = nil
+    log
+    @v.upcase # QUIET-1446
+  end
+end
+
+ClassEvalDef.class_eval { def log = (@v = "x") }
+
+class ClassEvalDefineMethod
+  def initialize = (@v = "a")
+  def log = nil
+
+  def dump
+    @v = nil
+    log
+    @v.upcase # QUIET-1446
+  end
+end
+
+ClassEvalDefineMethod.class_eval { define_method(:log) { @v = "x" } }
+
+class ReopenedDefineMethod
+  def initialize = (@v = "a")
+  def log = nil
+
+  def dump
+    @v = nil
+    log
+    @v.upcase # QUIET-1446
+  end
+end
+
+class ReopenedDefineMethod
+  define_method(:log) { @v = "x" }
+end
+
+class SentDefineMethod
+  def initialize = (@v = "a")
+  def log = nil
+
+  def dump
+    @v = nil
+    log
+    @v.upcase # QUIET-1446
+  end
+end
+
+SentDefineMethod.send(:define_method, :log) { @v = "x" }
+
+class PublicDefineMethod
+  def initialize = (@v = "a")
+  def log = nil
+
+  def dump
+    @v = nil
+    log
+    @v.upcase # QUIET-1446
+  end
+end
+
+PublicDefineMethod.define_method(:log) { @v = "x" }
+
+class ReopenedHelper
+  def initialize = (@v = "a")
+  def log = note
+  def note = nil
+
+  def dump
+    @v = nil
+    log
+    @v.upcase # QUIET-1446
+  end
+end
+
+class ReopenedHelper
+  def note = (@v = "x")
+end
+
+class AliasMethodCallee
+  def initialize = (@v = "a")
+  def assign = (@v = "x")
+  def log = nil
+
+  def dump
+    @v = nil
+    log
+    @v.upcase # QUIET-1446
+  end
+end
+
+AliasMethodCallee.alias_method(:log, :assign)
+
+class AliasCallee
+  def initialize = (@v = "a")
+  def assign = (@v = "x")
+  def log = nil
+
+  def dump
+    @v = nil
+    log
+    @v.upcase # QUIET-1446
+  end
+end
+
+class AliasCallee
+  alias log assign
+end
+
+# The proof does not read past an external ancestor ahead of the definer, which a signature or gem may answer the name
+# from, nor past a mixin the tables cannot name. Neither callee here writes `@io`, so Ruby 4.0.5 returns the text; the
+# reads are reported because the proof cannot tell.
+class ExternalBase
+  def log = nil
+end
+
+class ExternalAhead < ExternalBase
+  include Comparable
+
+  def initialize = (@io = STDOUT)
+
+  def dump
+    return unless @io.is_a?(StringIO)
+
+    log
+    @io.string # FIRES-1446 call.undefined-method
+  end
+end
+
+class UnnamedMixin
+  include(Module.new)
+
+  def initialize = (@io = STDOUT)
+  def log = nil
+
+  def dump
+    return unless @io.is_a?(StringIO)
+
+    log
+    @io.string # FIRES-1446 call.undefined-method
+  end
+end
+
+# `+` on a project object runs project code: `Tally#+` resets the holder it was given.
+class Tally
+  def initialize(holder) = (@holder = holder)
+  def +(_other) = (@holder.reset; self)
+end
+
+class OperatorWrite
+  def initialize = (@io = STDOUT; @tally = Tally.new(self))
+  def reset = (@io = STDOUT)
+  def log = (@tally += 1)
+
+  def dump
+    return unless @io.is_a?(StringIO)
+
+    log
+    @io.string # FIRES-1446 call.undefined-method
+  end
+end
+
+# A default value runs when the call leaves the parameter out.
+class DefaultArgument
+  def initialize = (@io = STDOUT)
+  def reset = (@io = STDOUT)
+  def log(_level = reset) = nil
+
+  def dump
+    return unless @io.is_a?(StringIO)
+
+    log
+    @io.string # FIRES-1446 call.undefined-method
+  end
+end
+
+# `Random` in `log` is the project's `App::Random`, whose constructor resets the holder; the compact `App::Clash` header
+# resolves the same name to the core class, so a core-named constant receiver the project also declares proves nothing.
+module App
+  class Random
+    def initialize = $clash.reset
+  end
+
+  class Clash
+    def initialize = (@io = STDOUT; $clash = self)
+    def reset = (@io = STDOUT)
+    def log = Random.new
+  end
+end
+
+class App::Clash
+  def dump
+    return unless @io.is_a?(StringIO)
+
+    log
+    @io.string # FIRES-1446 call.undefined-method
+  end
 end

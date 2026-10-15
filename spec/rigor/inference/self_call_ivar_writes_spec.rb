@@ -48,6 +48,17 @@ RSpec.describe Rigor::Inference::SelfCallIvarWrites do
       end
   end
 
+  # `self` as a value lets core code run `self`'s `to_s`, `hash`, `==` or `to_a`; a Kernel method outside the
+  # accepted few may run one itself (`display` runs `to_s`).
+  it "proves nothing where `self` is a value, or for a Kernel method that may call back into `self`" do
+    ["def log = warn(\"\#{self}\")", "def log = { self => 1 }", "def log = [*self]", "def log = (a, = self)",
+     "def log = (case 1 when self then 1 end)", "def log = display", "def log = inspect"].each do |body|
+      expect(described_class.of(call("log"), scope_for(body))).to be_nil, body
+    end
+    expect(described_class.of(call("log(self)"), scope_for("def log(_x) = nil"))).to be_nil
+    expect(described_class.of(call("self.log"), scope_for("def log = self.class"))).to eq(Set[])
+  end
+
   it "proves nothing for a call with a block argument" do
     expect(described_class.of(call("log(&:upcase)"), scope_for("def log = nil"))).to be_nil
   end

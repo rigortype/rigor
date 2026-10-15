@@ -30,8 +30,8 @@ rigor lens [--format text|json] [--config FILE] [--workers N] FILE...
 ```
 
 - Every `FILE` is resolved against the working directory. Several targets in one invocation share one run.
-  A file requested more than once, in any spelling, has one `files` entry per argument and contributes its
-  sites once.
+  A file requested more than once, in any spelling, has one `files` entry per argument; the first carries
+  the answer and the later ones read `duplicate`, so every site key is unique in the document.
 - `--format json` writes exactly one JSON document to stdout, after all computation. Human-readable
   progress and errors go to stderr. The text format is for agents and people; its layout is not a
   contract, but the anchor token syntax inside it is (§ Anchors).
@@ -98,7 +98,7 @@ rigor lens [--format text|json] [--config FILE] [--workers N] FILE...
 | `rbs_version` | The loaded `rbs` gem's version. Core and stdlib signatures come from it. |
 | `signature_roots` | The project signature roots in effect, relative to the root. |
 | `signature_digest` | A digest over every `.rbs` under those roots: each relative path and its file digest, sorted by path. |
-| `plugins` | `[{id, version}]` for every plugin the run loaded, by manifest id (the id `plugin:<id>` provenance uses), sorted by `id`. A plugin bundled with Rigor reports Rigor's version. `[]` when no target was read. |
+| `plugins` | `[{id, version}]` for every plugin the run loaded, by manifest id (the id `plugin:<id>` provenance uses), sorted by `id`. A plugin bundled with Rigor reports Rigor's version; any other reports the version of the gem whose files define it, or `null`. A plugin id is not a gem name. `[]` when no target was read. |
 | `lockfiles` | `[{path, digest}]` for the Bundler lockfile and the `rbs collection` lockfile the run resolved, at their configured or auto-detected paths, when present. Gem RBS is identified through these. |
 | `digest` | A digest over the other `context` fields. |
 
@@ -110,7 +110,7 @@ One entry per requested target, in request order.
 | --- | --- |
 | `argument` | The target as the caller passed it. |
 | `path` | The target relative to the root, or `null` when it does not resolve to a file. |
-| `status` | `ok`, `not_found` (no such file, or not a regular file), `not_ruby` (not a `.rb` file; view templates included), `outside_project` (not in the run's analysed set: outside `paths:`, or matched by `exclude:`), `parse_error`, or `failed`. |
+| `status` | `ok`, `not_found` (no such file, or not a regular file), `not_ruby` (not a `.rb` file; view templates included), `outside_project` (not in the run's analysed set: outside `paths:`, or matched by `exclude:`), `duplicate` (the same file as an earlier argument, which `reason` names), `parse_error`, or `failed`. |
 | `reason` | A human-readable message, or `null` for `ok`. For `failed` it names the error that stopped Rigor reading the file; that error never changes `check`'s answer or the snapshot. |
 | `digest` | The file digest over every byte the analysis read, prose included. `null` unless `ok` or `parse_error`. |
 | `complete` | `true` when every declaration in the file is a site; `false` when `omissions` is non-empty. `null` unless `ok`. |
@@ -163,7 +163,7 @@ A site is one source declaration in a requested file.
 | `span` | The declaration's span (the `class` / `module` / `def` / `attr_*` node). |
 | `contract_span` | The span from the first to the last contract comment of the site (§ Anchors, steps 1 and 2), or `null`. |
 | `anchor` | § Anchors. |
-| `visibility` | For `method` / `attribute`: `public`, `protected` or `private` as Ruby gives it from this file's own visibility calls: a wrapping `private def x` / `private attr_reader :x`, else the body's running default set by a bare `private` / `protected` / `public` written directly in the body, revised by a later `private :x` / `private_class_method :x`. A class body's default does not reach a `def self.x`, and a top-level `def` is `private`. `null` when a bare toggle the reader cannot place (under an `if`, a `begin` or a block) leaves the default unknown, or when a named call covers only some of an attribute site's members. `null` for `class` / `module`. |
+| `visibility` | For `method` / `attribute`: `public`, `protected` or `private` as Ruby gives it from this file's own visibility calls: a wrapping `private def x` / `private attr_reader :x`, else the body's running default set by a bare `private` / `protected` / `public` written directly in the body, revised by a later `private :x` / `private %i[x y]` / `private_class_method :x` written directly in the body. A class body's default does not reach a `def self.x`, and a top-level `def` is `private`. `null` when Rigor cannot tell: a bare toggle under an `if`, a `begin` or a block leaves the default unknown; a named call written anywhere but directly in the body (an `if`, a block, a method body) leaves the members it names unknown; a non-literal argument (`private *NAMES`) leaves the body's members unknown; `private def self.x`, which Ruby rejects, is unknown; and so is an attribute site whose members a named call covers only in part. `null` for `class` / `module`. |
 | `contract` | `inline` when the site carries a contract comment other than `@extrbs` and a member it defines has an inline declaration from this site's file that is not a defaulted one (`inferred-signature`, § Members); otherwise `null`. When one file holds several such sites for a member, each reads `inline`: the cached environment keeps the file, not the position. A `sig/` or library contract belongs to the member, not to a site. |
 | `params`, `block` | For `method`: this definition's own parameter list as written, in the shape of an overload's `params` and `block` (§ Members) but with every `type` `null`: the shape only. Types are on the member's overloads; the cached environment keeps which file an inline contract came from, not which definition. `null` for every other kind. |
 | `body_return` | For `method`: a slot (§ Slots), the type this body returns with its parameters as declared, or unknown where none is declared. Its calls resolve against the same seeded index `check` uses, so a call to another member reads that member as `check` reads it. A body-less `def` returns `nil`; `initialize` reads `void`. `null` for every other kind. |

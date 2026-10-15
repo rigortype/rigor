@@ -115,19 +115,35 @@ RSpec.describe "OpenStruct (#1456)" do
     end
 
     # A known cost of the open-receiver list, pinned so a change to it is deliberate: `unbounded_receiver_surface?`
-    # also makes an inherited Object / Kernel signature unauthoritative for `call.wrong-arity`, and it does not
-    # tell the singleton side from the instance side. These four report on a class Rigor reads as closed (the
-    # mutation that drops `OpenStruct` from the list) and are silent here — lost true positives, not false ones.
-    it "no longer reports inherited-signature arity or a singleton-side typo on OpenStruct" do
+    # also makes an inherited Object / Kernel signature unauthoritative for `call.wrong-arity` and
+    # `call.argument-type-mismatch`, and it does not tell the singleton side from the instance side. These five
+    # report on a class Rigor reads as closed (the mutation that drops `OpenStruct` from the list) and are silent
+    # here — lost true positives, not false ones.
+    it "no longer reports inherited-signature arity or argument types, or a singleton-side typo, on OpenStruct" do
       result = analyze(<<~RUBY)
         o = OpenStruct.new(name: "x")
         o.freeze(1)
         o.respond_to?(:a, true, 3)
         o.instance_variable_get
         OpenStruct.no_such_method_zzz
+        o.is_a?("x")
       RUBY
 
       expect(result.diagnostics.select { |d| d.severity == :error }.map { |d| [d.line, d.qualified_rule] }).to be_empty
+    end
+
+    # An accepted effect of the overlay's `method_missing`, pinned so a change to it is deliberate:
+    # `RbsDispatch#rbs_ancestry_array_conversion_free?` reads it as a possible implicit `to_ary`, so a multiple
+    # assignment from an `OpenStruct` no longer splits it as a single non-array value. That is the sound answer:
+    # `OpenStruct.new(to_ary: [7, 8])` answers `to_ary` through a field.
+    it "types a multiple assignment from an OpenStruct as Dynamic" do
+      expect(dumped_types(<<~RUBY)).to eq(["Dynamic[top]", "Dynamic[top]"])
+        o = OpenStruct.new(name: "x")
+        a, _b = o
+        dump_type(a)
+        _x, *rest = o
+        dump_type(rest)
+      RUBY
     end
 
     # Control: a project class with no RBS at all stays quiet, as before.

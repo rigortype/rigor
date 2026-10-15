@@ -97,8 +97,9 @@ module Rigor
             "Receiver class is in the loader but its RBS definition cannot be built (constant aliases).",
             "Receiver class answers beyond any signature: a plugin-declared open receiver (ADR-26), or one " \
             "Rigor's bundled overlays name (`OpenStruct`, whose fields are per-instance singleton methods; " \
-            "`ActiveSupport::Duration` when its gem overlay loads). Both sides of the class are open, and an " \
-            "inherited Object / Kernel signature no longer decides `call.wrong-arity` on it."
+            "`ActiveSupport::Duration` and `ActiveSupport::Concern` when their gem overlay loads). Both sides " \
+            "of the class are open, and an inherited Object / Kernel signature no longer decides " \
+            "`call.wrong-arity` or `call.argument-type-mismatch` on it."
           ],
           suppression: "`# rigor:disable call.undefined-method` on the call line, " \
                        "or `disable: [\"call.undefined-method\"]` in `.rigor.yml`.",

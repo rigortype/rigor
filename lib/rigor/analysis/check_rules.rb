@@ -1373,8 +1373,9 @@ module Rigor
         # gate is needed: the core overlay loads into every environment that has RBS at all, so the list is active
         # whenever the declaration it protects is. Both sides of the class are open, as with
         # {GEM_OVERLAY_OPEN_RECEIVERS}, and an inherited Object / Kernel signature stops deciding `call.wrong-arity`
-        # ({#unauthoritative_inherited_signature?}): lost true positives, accepted. The general rule — a class
-        # declared only by another library's partial reopening — is #1978, not this list.
+        # and `call.argument-type-mismatch` ({#unauthoritative_inherited_signature?}): lost true positives,
+        # accepted. The general rule — a class declared only by another library's partial reopening — is #1978, not
+        # this list.
         CORE_OVERLAY_OPEN_RECEIVERS = Set["OpenStruct"].freeze
         private_constant :CORE_OVERLAY_OPEN_RECEIVERS
 

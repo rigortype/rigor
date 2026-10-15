@@ -1380,16 +1380,34 @@ module Rigor
       end
 
       # Returns `[body_scope, updated_falsey_scope]` for a single branch. `WhenNode` branches narrow through
-      # `Narrowing.case_when_scopes`. `InNode` branches narrow soundly only for a bare class pattern (`in C` / `in C =>
-      # x`, pure `is_a?`); every other pattern keeps the conservative "body = entry + bindings, falsey unchanged" shape.
-      # `subject_type` is the predicate's type, which an `in` branch's pattern decomposes to type the names it binds.
+      # `Narrowing.case_when_scopes`, or through {#subjectless_when_scopes} in a `case` without a subject. `InNode`
+      # branches narrow soundly only for a bare class pattern (`in C` / `in C => x`, pure `is_a?`); every other pattern
+      # keeps the conservative "body = entry + bindings, falsey unchanged" shape. `subject_type` is the predicate's
+      # type, which an `in` branch's pattern decomposes to type the names it binds.
       def branch_body_and_falsey_scopes(subject_type, subject, branch, falsey_scope)
         if branch.is_a?(Prism::InNode)
           in_branch_body_and_falsey_scopes(subject_type, subject, branch, falsey_scope)
+        elsif subject.nil?
+          subjectless_when_scopes(branch.conditions, falsey_scope)
         else
           when_conditions = branch.respond_to?(:conditions) ? branch.conditions : []
           Narrowing.case_when_scopes(subject, when_conditions, falsey_scope)
         end
+      end
+
+      # Issue #1495 — a `case` without a subject tests each `when` condition for truthiness, in order, and stops at the
+      # first truthy one, so a clause is the `||` of its conditions in an `if` / `elsif` chain. Each condition is
+      # evaluated under the falsey edges of the conditions before it, in this clause and every earlier one; the body
+      # joins the conditions' truthy edges, and the next clause starts from the last falsey edge. A condition
+      # `Narrowing.predicate_scopes` does not recognise narrows nothing: a splat (`when *conds`), and a regexp literal,
+      # which is tested for its truthiness and matches nothing, so it binds no match global (#1486).
+      def subjectless_when_scopes(conditions, entry)
+        falsey = entry
+        truthy_edges = conditions.map do |condition|
+          _type, _post, truthy, falsey = eval_with_edges(condition, falsey)
+          truthy
+        end
+        [reduce_scopes_with_nil_injection(truthy_edges), falsey]
       end
 
       # ADR-47 WD3a — a bare class pattern matches on `C === subject`, i.e. exactly `subject.is_a?(C)` with no

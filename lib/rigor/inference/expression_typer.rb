@@ -1047,12 +1047,15 @@ module Rigor
       #
       # The `case ... in` pattern-matching form (`CaseMatchNode`) and the predicate-less form (`case; when
       # c1; ...`) bypass the `===` analysis: pattern matching has richer semantics, and a predicate-less
-      # `case` reduces to a `if c1; ...; elsif c2` chain that statement-level narrowing already handles.
+      # `case` reduces to a `if c1; ...; elsif c2` chain. Issue #1495 — like {#type_of_conditional}, that
+      # chain delegates to the statement evaluator, which narrows each arm by its conditions' edges, so
+      # `[case; when x.nil? then "n"; else x end]` reads `"n" | String` as the statement form does.
       # Issue #1429 — each arm is typed under the subject's clause narrowing (`Narrowing.case_when_scopes`), the
       # scope the statement evaluator runs the arm in: `when Symbol then n` on `n: Integer | Symbol` answers
       # `Symbol`, and the `else` arm reads the subject every earlier clause has ruled out.
       def type_of_case(node)
-        return type_of_case_simple_union(node) if node.is_a?(Prism::CaseMatchNode) || node.predicate.nil?
+        return type_of_case_simple_union(node) if node.is_a?(Prism::CaseMatchNode)
+        return scope.evaluate(node, tracer: tracer).first if node.predicate.nil?
 
         subject_type = type_of(node.predicate)
         candidates = []

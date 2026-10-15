@@ -10589,8 +10589,13 @@ module Rigor
 
       # Issue #1717 — a `def` / `class` / `module` body opens its own `self`, so an enclosing unentered block's
       # unknown-`self` mark ({Scope#block_self_unknown?}) stops at it, as the evaluator's fresh body scope does.
-      # Every other node hands its children the scope as is.
+      # A `case` without a subject narrows its clauses ({#propagate_subjectless_case}). Every other node hands its
+      # children the scope as is.
       def propagate_children(node, table, current_scope)
+        if node.is_a?(Prism::CaseNode) && node.predicate.nil?
+          return propagate_subjectless_case(node, table, current_scope)
+        end
+
         child_scope =
           SELF_OPENING_BODIES.include?(node.class) ? current_scope.with_block_self_unknown(false) : current_scope
         node.rigor_each_child { |child| propagate(child, table, child_scope) }
@@ -10795,6 +10800,33 @@ module Rigor
         propagate(node.predicate, table, current_scope) if node.predicate
         propagate(node.statements, table, falsey_scope) if node.statements
         propagate(node.else_clause, table, truthy_scope) if node.else_clause
+      end
+
+      # Issue #1495 — a `case` without a subject the evaluator did not enter (`[case; when x.nil? then 0; else x.size
+      # end]`) narrows by its conditions' edges, as {StatementEvaluator#subjectless_when_scopes} does: each condition
+      # under the falsey edges of the conditions before it, each clause under the join of its conditions' truthy edges,
+      # and the `else` under the last falsey edge. Like the walk of an `if`, it applies no write a condition makes, so
+      # the edges are taken from a scope where every bound local the condition writes reads `Dynamic[top]`
+      # ({#widen_condition_writes}): neither the local's old type nor an earlier condition's narrowing of it reaches
+      # them, as `when (x = s ? String(s) : nil) then x.upcase` after `x = 1` would.
+      def propagate_subjectless_case(node, table, current_scope)
+        falsey = current_scope
+        node.conditions.each do |when_node|
+          truthy_edges = when_node.conditions.map do |condition|
+            propagate(condition, table, falsey)
+            truthy, falsey = Narrowing.predicate_scopes(condition, widen_condition_writes(condition, falsey))
+            truthy
+          end
+          propagate(when_node, table, truthy_edges.reduce(:join))
+        end
+        propagate(node.else_clause, table, falsey) if node.else_clause
+      end
+
+      # `scope` with every bound local `condition` writes rebound to `Dynamic[top]`.
+      def widen_condition_writes(condition, scope)
+        OperandEffects.written_variables(condition).reduce(scope) do |acc, name|
+          acc.local(name) ? acc.with_local(name, Type::Combinator.untyped) : acc
+        end
       end
     end
   end

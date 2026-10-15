@@ -1088,12 +1088,17 @@ module Rigor
         # in {Rigor::Builtins::RegexRefinement::RULES}, the truthy branch narrows further than
         # `String` to the matching imported refinement (e.g. `decimal-int-string` for `\d+`).
         # Bodies outside the table fall back to the v0.1.0 baseline (plain `String`).
+        #
+        # The match rebinds `$~` and the other match globals on both edges, and this rule binds none of them (#1482),
+        # so each edge forgets what an earlier match bound. The statement evaluator's walk already forgets them in the
+        # scope the match leaves; the per-node scope walk of a conditional it did not enter narrows from the scope
+        # before the match, where the falsey edge of an earlier `=~` had bound `$1` to `nil` (#1495).
         def analyse_match_write(node, scope)
           string_t = Type::Combinator.nominal_of("String")
           nil_t = Type::Combinator.constant_of(nil)
           refinements = match_write_capture_refinements(node)
-          truthy = scope
-          falsey = scope
+          truthy = scope.forget_match_globals
+          falsey = truthy
           node.targets.each do |target|
             next unless target.is_a?(Prism::LocalVariableTargetNode)
 

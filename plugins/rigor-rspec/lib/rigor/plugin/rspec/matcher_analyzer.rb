@@ -4,7 +4,6 @@ require "prism"
 require "rigor/type"
 require "rigor/flow_contribution"
 require "rigor/flow_contribution/fact"
-require "rigor/inference/project_method_ownership"
 
 module Rigor
   module Plugin
@@ -46,18 +45,23 @@ module Rigor
       # #1807). It is a meet with the local's current type, member by member:
       #
       # - a member of the literal's own core class (`Integer`, `Float`, `String`, `Symbol`, `NilClass`,
-      #   `TrueClass`, `FalseClass`) narrows to the literal; a `Constant` member is kept when it equals the
+      #   `TrueClass`, `FalseClass`) narrows to the literal, a refinement of that class (`non-empty-string`,
+      #   `decimal-int-string`, `non-zero-int`) included; a `Constant` member is kept when it equals the
       #   literal and dropped otherwise; a `Float` member meeting `0.0` (which `-0.0` also equals) is kept;
       # - a core numeric member of another class (`Integer`, `Float`, `Rational`, `Complex`) is kept under
       #   `eq` (`1.0 == 1`) and dropped under `eql` (`1.0.eql?(1)` is false);
       # - any other core member (`nil` against `9`, a `String` against `:a`) is dropped: built-in equality
-      #   across those classes is false.
+      #   across those classes is false;
+      # - a member of a core class whose ancestry in the project's source defines the operator (`class
+      #   Symbol; def ==`) is kept unnarrowed: its own method decides.
       #
-      # When any member is `Dynamic`, of any other class (a user class, `Object`, `Numeric`, `BigDecimal`), or
-      # of a core class the project defines the operator on, the analyzer emits no fact and the local keeps its
-      # type. It also emits none for an unbound local, when no member survives, and without a scope. A project
-      # `==` on the literal's class needs no check of its own: a core member's `==` calls back into it only for
-      # a non-numeric literal, whose only surviving members are of the literal's class.
+      # When any member is `Dynamic` or of any other class (a user class, `Object`, `Numeric`, `BigDecimal`),
+      # the analyzer emits no fact and the local keeps its type. It also emits none when the project's source
+      # defines the operator on the literal's class or its ancestry — a core `==` calls back into the
+      # literal's (`Integer#==` runs `other == self` for a non-numeric argument, `String#==` for one that
+      # responds to `to_str`), so a custom one there can make any member equal — and for an unbound local,
+      # when no member survives, and without a scope. A reopening that defines other methods only
+      # (`class String; def shout`) does not count.
       #
       # The negative forms (`not_to` / `to_not`) still emit a negative `Constant` fact, which the engine's fact
       # narrowing does not act on, so the local keeps its type there too.
@@ -202,6 +206,8 @@ module Rigor
         # the literal's, or nil when any member is undecided or none survives. An unbound local (nil) is one
         # undecided member.
         def equality_meet(current, literal, operator, scope)
+          return nil if project_defines?(literal.class.name, operator, scope)
+
           members = current.is_a?(Rigor::Type::Union) ? current.members : [current]
           kept = []
           members.each do |member|
@@ -219,7 +225,8 @@ module Rigor
         # the literal, or UNDECIDED.
         def meet_member(member, literal, operator, scope)
           class_name = member_class_name(member)
-          return UNDECIDED if class_name.nil? || project_defines?(class_name, operator, scope)
+          return UNDECIDED if class_name.nil?
+          return member if project_defines?(class_name, operator, scope)
 
           case member
           when Rigor::Type::Constant then member.value.public_send(operator, literal) ? member : nil
@@ -229,9 +236,16 @@ module Rigor
           end
         end
 
-        # The core class a member's values belong to, or nil for a member that is not wholly of one.
+        # The core class a member's values belong to, or nil for a member that is not wholly of one. A
+        # refinement (`Difference`, `Refined`) belongs to its base's class, an `Intersection` to the class all
+        # its members share.
         def member_class_name(member)
           case member
+          when Rigor::Type::Difference, Rigor::Type::Refined then member_class_name(member.base)
+          when Rigor::Type::Intersection
+            names = member.members.map { |part| member_class_name(part) }.uniq
+            names.size == 1 ? names.first : nil
+          when Rigor::Type::FloatRange then "Float"
           when Rigor::Type::Constant
             klass = EQUALITY_CORE_CLASSES.find { |core| member.value.instance_of?(core) }
             klass&.name
@@ -251,8 +265,15 @@ module Rigor
           end
         end
 
+        # Whether the project's source defines `operator` on `class_name` or an ancestor it declares (a
+        # reopening's `def`, an included or prepended project module, a `define_method` in the same file). The
+        # def-node walk sees other files' `def`s and records the dependency on them; the discovery table adds
+        # `define_method`. An RBS declaration is not consulted: once the project reopens `String` for
+        # anything, `String#==`'s declaring owner is a project class, which says nothing about who wrote `==`.
         def project_defines?(class_name, operator, scope)
-          Rigor::Inference::ProjectMethodOwnership.defines?(class_name, operator, :instance, scope)
+          return true unless scope.user_def_through_ancestors(class_name, operator).first.nil?
+
+          scope.discovered_method_through_ancestors?(class_name, operator, :instance)
         end
 
         def string_type_for_regex_arg(matcher)

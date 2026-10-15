@@ -220,6 +220,31 @@ RSpec.describe "plugins/rigor-rspec" do
         expect(equality_fact_type("expect(x).to eq(9)", union(constant(1), constant(9)))).to eq(constant(9))
       end
 
+      it "drops a core member of a non-numeric class other than the literal's" do
+        expect(equality_fact_type("expect(x).to eq(9)", union(nominal("String"), nominal("Integer"))))
+          .to eq(constant(9))
+      end
+
+      it "narrows a refinement of the literal's class and drops one of another core class" do
+        non_empty_string = Rigor::Type::Combinator.non_empty_string
+        expect(equality_fact_type('expect(x).to eq("3")', union(non_empty_string, constant(nil))))
+          .to eq(constant("3"))
+        expect(equality_fact_type("expect(x).to eq(3)", union(non_empty_string, nominal("Integer"))))
+          .to eq(constant(3))
+        lowercase = Rigor::Type::Combinator.lowercase_string
+        expect(equality_fact_type('expect(x).to eq("a")', union(lowercase, constant(nil)))).to eq(constant("a"))
+      end
+
+      it "narrows an Intersection of refinements of the literal's class" do
+        lowercase = Rigor::Type::Combinator.non_empty_lowercase_string
+        expect(equality_fact_type('expect(x).to eq("a")', union(lowercase, constant(nil)))).to eq(constant("a"))
+      end
+
+      it "narrows a FloatRange member to a Float literal" do
+        range = Rigor::Type::Combinator.float_range(0.0, 2.0)
+        expect(equality_fact_type("expect(x).to eq(1.5)", union(range, constant(nil)))).to eq(constant(1.5))
+      end
+
       it "narrows an IntegerRange member that covers the literal and drops one that does not" do
         expect(equality_fact_type("expect(x).to eq(9)", Rigor::Type::Combinator.integer_range(0, 9)))
           .to eq(constant(9))
@@ -388,6 +413,18 @@ RSpec.describe "plugins/rigor-rspec" do
         expect(nil_recv).to be_empty
       end
 
+      # Runs `body` as `T#case_eq(x)` with `x` declared `x_type` in `sig/`, plus `patch` as an analysed file.
+      def run_case_eq(x_type, body, patch: nil)
+        files = patch ? { "patch.rb" => patch } : {}
+        source = "class T\n  def case_eq(x)\n#{body.gsub(/^/, '    ')}  end\nend\n"
+        run_plugin(
+          source: source,
+          files: files.merge("sig/t.rbs" => "class T\n  def case_eq: (#{x_type}) -> void\nend\n"),
+          paths: ["demo.rb", *files.keys],
+          signature_paths: ["sig"]
+        )
+      end
+
       def dumped_types(result)
         result.diagnostics.select { |d| d.rule == "dump.type" }.map { |d| d.message.delete_prefix("dump_type: ") }
       end
@@ -415,6 +452,68 @@ RSpec.describe "plugins/rigor-rspec" do
         expect(result.diagnostics.select { |d| d.rule == "call.undefined-method" }).to be_empty
       end
 
+      it "removes nil from a decimal-int-string? local after eq of a String literal" do
+        result = run_case_eq("Integer?", <<~RUBY)
+          y = x && x.to_s
+          expect(y).to eq("3")
+          dump_type(y)
+          y.length
+        RUBY
+        expect(dumped_types(result)).to eq(['"3"'])
+        expect(result.diagnostics.select { |d| d.rule == "call.possible-nil-receiver" }).to be_empty
+      end
+
+      it "removes nil from a non-empty-string? local after eq of a String literal" do
+        result = run_case_eq("String?", <<~RUBY)
+          y = x && x + "!"
+          expect(y).to eq("a!")
+          dump_type(y)
+          y.length
+        RUBY
+        expect(dumped_types(result)).to eq(['"a!"'])
+        expect(result.diagnostics.select { |d| d.rule == "call.possible-nil-receiver" }).to be_empty
+      end
+
+      it "still narrows when the project reopens the literal's class with other methods only" do
+        patch = "class String\n  def shout = upcase + \"!\"\nend\n"
+        result = run_case_eq("String?", "expect(x).to eq(\"a\")\ndump_type(x)\n", patch: patch)
+        expect(dumped_types(result)).to eq(['"a"'])
+      end
+
+      it "keeps the local's type when the project defines == on the literal's class with define_method" do
+        result = run_plugin(
+          source: <<~RUBY
+            class Integer
+              define_method(:==) { |_other| true }
+            end
+
+            x = rand(10)
+            expect(x).to eq(9)
+            dump_type(x)
+          RUBY
+        )
+        expect(dumped_types(result)).not_to include("9")
+      end
+
+      it "keeps the local's type when another file defines == on the literal's class" do
+        patch = "class String\n  def ==(other) = true\nend\n"
+        result = run_case_eq("String?", "expect(x).to eq(\"a\")\ndump_type(x)\n", patch: patch)
+        expect(dumped_types(result)).to eq(["String?"])
+      end
+
+      it "keeps a member whose class the project gives its own ==, and narrows the rest" do
+        patch = "class Symbol\n  def ==(other) = true\nend\n"
+        result = run_case_eq("Symbol | Integer | nil", "expect(x).to eq(9)\ndump_type(x)\n", patch: patch)
+        expect(dumped_types(result)).to eq(["9 | Symbol"])
+      end
+
+      # `Integer#==` runs `other == self` for a non-numeric argument, so the literal's own `==` decides there.
+      it "gives no fact when the project defines == on the literal's class, though a kept member survives" do
+        patch = "class Symbol\n  def ==(other) = true\nend\nclass String\n  def ==(other) = true\nend\n"
+        result = run_case_eq("Symbol | Integer", "expect(x).to eq(\"a\")\ndump_type(x)\n", patch: patch)
+        expect(dumped_types(result)).to eq(["Integer | Symbol"])
+      end
+
       it "narrows an Integer local to the literal after eq(9)" do
         result = run_plugin(source: "x = rand(10)\nexpect(x).to eq(9)\ndump_type(x)\n")
         expect(dumped_types(result)).to eq(["9"])
@@ -435,6 +534,8 @@ RSpec.describe "plugins/rigor-rspec" do
         expect(dumped_types(result)).not_to include("9")
       end
 
+      # Guard: pins the engine's handling of the negative Constant fact, which predates #1807 and survives a revert
+      # of the fix.
       it "leaves the local unchanged after not_to eq(literal)" do
         result = run_plugin(source: "x = rand(10)\ndump_type(x)\nexpect(x).not_to eq(9)\ndump_type(x)\n")
         before, after = dumped_types(result)

@@ -10642,11 +10642,13 @@ module Rigor
 
       # Issue #1717 — a `def` / `class` / `module` body opens its own `self`, so an enclosing unentered block's
       # unknown-`self` mark ({Scope#block_self_unknown?}) stops at it, as the evaluator's fresh body scope does.
-      # A `case` without a subject narrows its clauses ({#propagate_subjectless_case}). Every other node hands its
-      # children the scope as is.
+      # A `case` narrows its clauses ({#propagate_subjectless_case}, {#propagate_subject_case}). Every other node
+      # hands its children the scope as is.
       def propagate_children(node, table, current_scope)
-        if node.is_a?(Prism::CaseNode) && node.predicate.nil?
-          return propagate_subjectless_case(node, table, current_scope)
+        if node.is_a?(Prism::CaseNode) || node.is_a?(Prism::CaseMatchNode)
+          return propagate_subjectless_case(node, table, current_scope) if node.predicate.nil?
+
+          return propagate_subject_case(node, table, current_scope)
         end
 
         child_scope =
@@ -10871,6 +10873,25 @@ module Rigor
             truthy
           end
           propagate(when_node, table, truthy_edges.reduce(:join))
+        end
+        propagate(node.else_clause, table, falsey) if node.else_clause
+      end
+
+      # Issue #1484 — a `case` with a subject the evaluator did not enter (`[case io when StringIO then io.string
+      # end]`, `[case io in StringIO then io.string else nil end]`) narrows each clause as the evaluator does
+      # ({Narrowing.case_clause_scopes}): the body under the clause's narrowed edge, the next clause and the `else`
+      # under its falsey edge. The walk applies no write the subject, a `when` condition or an `in` pattern makes, so
+      # every bound local one of them writes reads `Dynamic[top]` from that point on ({#widen_condition_writes}).
+      def propagate_subject_case(node, table, current_scope)
+        subject = node.predicate
+        propagate(subject, table, current_scope)
+        falsey = widen_condition_writes(subject, current_scope)
+        node.conditions.each do |clause|
+          tests = clause.is_a?(Prism::WhenNode) ? clause.conditions : [clause.pattern]
+          tests.each { |test| propagate(test, table, falsey) }
+          falsey = tests.reduce(falsey) { |acc, test| widen_condition_writes(test, acc) }
+          body, falsey = Narrowing.case_clause_scopes(subject, clause, falsey)
+          propagate(clause, table, body)
         end
         propagate(node.else_clause, table, falsey) if node.else_clause
       end

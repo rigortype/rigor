@@ -361,7 +361,8 @@ module Rigor
 
         kind = { data: "data_class", struct: "struct_class" }.fetch(builder, "constant")
         # Under a builder block or `class << self` the nesting does not name where the constant lands: as written.
-        omit(kind, constant_scope_unknown? ? target.slice : (name || target.slice), node)
+        written = node.respond_to?(:target) ? target.slice : node.name.to_s
+        omit(kind, constant_scope_unknown? ? written : (name || written), node)
         walk(node.value, nesting, singleton: false, in_block: true)
       end
 

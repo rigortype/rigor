@@ -262,7 +262,8 @@ end
       names = sites(source).map { |site| site["name"] }
 
       expect(names).to eq(%w[X X::P a])
-      expect(omissions(source).map(&:first)).to include("class", "struct_class", "constant", "data_class")
+      expect(omissions(source)).to include(%w[class Inner], %w[struct_class Q], %w[constant LIMIT], %w[data_class K],
+                                           %w[class Foo])
     end
 
     it "models symbol fields only, with keyword_init alone, unique and valid names" do

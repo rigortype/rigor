@@ -589,6 +589,29 @@ RSpec.describe Rigor::Analysis::Reachability do
         expect(report.candidates.map(&:fqn)).not_to include("Base::Foo")
       end
 
+      # Round-3 review of #1767: `self.class` in a module's instance method is the includer's class, or
+      # `Module` under `module_function`; a def nested in another def lands on a cref the walk cannot name.
+      it "keeps the top level for self.class in a module method and in a nested def" do
+        report = report_for({ "lib/a.rb" => <<~RUBY, "lib/main.rb" => "Mod.x\nHost.foo\nHost.bar\n" })
+          class Foo; end
+          class Bar; end
+          module Mod
+            class Foo; end
+            module_function
+            def x = self.class.const_get(:Foo)
+          end
+          class Host
+            class Bar; end
+            class << self
+              def foo
+                def bar = self.class.const_get(:Bar)
+              end
+            end
+          end
+        RUBY
+        expect(report.candidates.map(&:fqn)).not_to include("Foo", "Bar")
+      end
+
       it "keeps the top level for a literal in a DSL block whose self it cannot name" do
         report = report_for({ "lib/a.rb" => <<~RUBY, "lib/main.rb" => "Conf\n" })
           class Foo; end

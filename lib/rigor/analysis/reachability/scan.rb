@@ -484,6 +484,8 @@ module Rigor
             @self_kind = :declaration
             # Whether the walk is inside a block, whose `self` it cannot name. See {#self_lookup}.
             @in_block = false
+            # Whether the innermost declaration is a module, whose instance methods' `self.class` is not it.
+            @module_body = false
           end
 
           def walk(node, nesting)
@@ -491,7 +493,7 @@ module Rigor
 
             case node
             when Prism::ClassNode  then return walk_declaration(node, nesting, superclass: node.superclass)
-            when Prism::ModuleNode then return walk_declaration(node, nesting, superclass: nil)
+            when Prism::ModuleNode then return walk_declaration(node, nesting, superclass: nil, module_body: true)
             when Prism::ConstantReadNode, Prism::ConstantPathNode
               record_reference(node, nesting)
               # A constant path's segments are not separate references — `A::B::C` is one reference to the leaf,
@@ -519,7 +521,7 @@ module Rigor
 
           private
 
-          def walk_declaration(node, nesting, superclass:)
+          def walk_declaration(node, nesting, superclass:, module_body: false)
             name = Source::ConstantPath.qualified_name(node.constant_path)
             return node.rigor_each_child { |child| walk(child, nesting) } if name.nil?
 
@@ -543,12 +545,13 @@ module Rigor
             # The body's nesting names the declaration itself, so a credit inherited from a meta-new rvalue
             # this declaration sits in must not leak into it.
             owner = @owner
-            saved = [@self_rebound, @in_block]
+            saved = [@self_rebound, @in_block, @module_body]
             @owner = nil
             @self_rebound = @in_block = false
+            @module_body = module_body
             in_local_scope(node.body, :declaration) { walk(node.body, nesting + [name]) }
             @owner = owner
-            @self_rebound, @in_block = saved
+            @self_rebound, @in_block, @module_body = saved
           end
 
           # A meta-new rvalue — `Class.new(Base) { ... }`, `Struct.new(:a) do ... end` — is the declaration's
@@ -619,12 +622,16 @@ module Rigor
             end
           end
 
+          # A receiver-less def names its `self` only directly in a class body or a `class << self` body. In a
+          # module body `self.class` is the includer's class, or `Module` under `module_function` / `extend
+          # self`; a def nested in another def lands on whatever that method's cref is, which the walk cannot
+          # tell apart.
           def def_self_kind(node)
             if node.receiver.nil?
               case @self_kind
               when :singleton_class then :singleton_method
-              when :unknown then :unknown
-              else :instance_method
+              when :declaration then @module_body ? :unknown : :instance_method
+              else :unknown
               end
             elsif node.receiver.is_a?(Prism::SelfNode) && @self_kind == :declaration
               :singleton_method

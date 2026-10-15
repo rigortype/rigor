@@ -355,7 +355,9 @@ The hashed material is built from the file's bytes:
 
 The rule is the same for every kind, except a builder's field (§ Kinds): it has no leading contract
 comments, which belong to the constant, and its trailing contract comment counts only when the field is
-not on the assignment's first line. For a `class`, `module` or `def` the declaration's bytes are its whole
+not on the assignment's first line. A `#:` that trails the call's closing parenthesis on the last field's line counts
+toward that field's span and anchor too, though Ruby and `check` read no type from it; the field's slots
+then come only from its other declarations. For a `class`, `module` or `def` the declaration's bytes are its whole
 body, so an edit anywhere inside it, prose included, moves its anchor; prose in the leading comment run
 does not. The file `digest` changes on every edit. An unchanged anchor never licenses reusing stale offsets,
 line numbers or documentation: a consumer re-associates on the current file whenever its digest moved.

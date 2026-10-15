@@ -5,19 +5,22 @@ require "prism"
 module Rigor
   module Plugin
     class FFI < Base
-      # Issue #1803 — given the plugin's {Rigor::Plugin::IoBoundary} (`io:`), the walk lists and reads through it,
-      # so every `.rb` the catalog was built from is a dependency row of the `:ffi_catalog` producer's cache
-      # entry and of every run-result cache built on the run. The producer declares no `watch:`, so before this
-      # its entry carried no row at all and was served after any edit, an analysed file's included, until
-      # `--no-cache`. `io: nil` reads the filesystem directly.
+      # Issue #1803 — the walk lists and reads through the plugin's {Rigor::Plugin::IoBoundary} (`io:`), so every
+      # `.rb` the catalog was built from is a dependency row of the `:ffi_catalog` producer's cache entry and of
+      # every run-result cache built on the run. The producer declares no `watch:`, so before this its entry
+      # carried no row at all and was served after any edit, an analysed file's included, until `--no-cache`.
       class Discoverer
         RUBY_GLOB = "**/*.rb"
+        # The top-level directory the walk never enters. Its files were always filtered out after the glob;
+        # skipping it here keeps an installed bundle out of the rows too, so a warm run does not re-glob it
+        # and a `bundle install` does not invalidate the catalog.
+        SKIPPED_TOP_LEVEL = "vendor"
 
-        def self.discover(root:, io: nil)
+        def self.discover(root:, io:)
           new(root: root, io: io).discover
         end
 
-        def initialize(root:, io: nil)
+        def initialize(root:, io:)
           @root = root
           @io = io
         end
@@ -69,32 +72,31 @@ module Rigor
         private
 
         def ruby_files
-          return [] unless @root
+          return [] unless @root && @io.directory?(@root.to_s)
 
-          files = if @io
-                    @io.directory?(@root.to_s) ? boundary_glob : []
-                  else
-                    File.directory?(@root) ? Dir.glob(File.join(@root, RUBY_GLOB)) : []
-                  end
-          files.reject { |p| p.include?("/vendor/") || p.include?("/.git/") }
+          walk_root.reject { |p| p.include?("/vendor/") || p.include?("/.git/") }
         end
 
-        # The boundary answers absolute paths; spelled back under `@root` as `Dir.glob` spells them, so the
-        # `/vendor/` filter sees the same strings it always did.
-        def boundary_glob
-          prefix = "#{File.absolute_path(@root.to_s)}/"
-          @io.glob(@root.to_s, RUBY_GLOB).map { |path| File.join(@root.to_s, path.delete_prefix(prefix)) }
+        # `Dir.glob("<root>/**/*.rb")`, built one top-level entry at a time so `vendor/` is never globbed: one
+        # `:names` row over the root's entries, and one `:names` `**/*.rb` row per other top-level directory.
+        # The order is `Dir.glob`'s, which visits the sorted entries of a directory one by one, yielding an
+        # entry that matches `*.rb` and then descending into it; `**` does not descend through a symlink.
+        # Paths are spelled under `@root`, as `Dir.glob` spells them, so the filter above sees the same strings.
+        def walk_root
+          root = @root.to_s
+          prefix = "#{File.absolute_path(root)}/"
+          @io.glob(root, "*").flat_map do |entry|
+            name = entry.delete_prefix(prefix)
+            files = name.end_with?(".rb") ? [File.join(root, name)] : []
+            next files if name == SKIPPED_TOP_LEVEL || File.symlink?(entry) || !@io.directory?(entry)
+
+            files + @io.glob(entry, RUBY_GLOB).map { |path| File.join(root, path.delete_prefix(prefix)) }
+          end
         end
 
-        # The glob's row records which files match; this read's row carries an edit. A path outside the
-        # boundary's trust policy (a `root:` configured elsewhere) is refused there and parsed directly here,
-        # as {TargetDetector.read_text} does: the catalog does not depend on the policy.
+        # The glob's rows record which files match; this read's row carries an edit.
         def parse(file_path)
-          return Prism.parse_file(file_path) if @io.nil?
-
           Prism.parse(@io.read_file(file_path))
-        rescue Rigor::Plugin::AccessDeniedError
-          Prism.parse_file(file_path)
         end
 
         def walk_tree(node, current_module, &)

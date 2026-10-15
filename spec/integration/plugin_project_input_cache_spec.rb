@@ -91,6 +91,23 @@ RSpec.describe "run-result caches over a plugin's own project inputs (#1803)" do
       expect(check("--incremental")[1]).to include("--incremental warm")
       expect(Rigor::Analysis::IncrementalSession).not_to have_received(:new)
     end
+
+    # The walk drops every `/vendor/` path, and never globs the top-level `vendor/`, so installing a gem there
+    # leaves both run-result caches serving. `vendor/` itself exists beforehand: a new top-level entry is a
+    # membership change of the project root, which the walk does record.
+    it "keeps serving both run-result caches when a file appears under an existing vendor/" do
+      FileUtils.mkdir_p("vendor/bundle")
+      prime
+      FileUtils.mkdir_p("vendor/bundle/gems/x/lib")
+      File.write("vendor/bundle/gems/x/lib/x.rb", "module L\n  attach_function :foo, [], :int\nend\n")
+      allow(Rigor::Analysis::IncrementalSession).to receive(:new).and_call_original
+      allow(Rigor::Analysis::Runner).to receive(:new).and_call_original
+
+      expect(check("--incremental")[1]).to include("--incremental warm")
+      expect(Rigor::Analysis::IncrementalSession).not_to have_received(:new)
+      check
+      expect(Rigor::Analysis::Runner).not_to have_received(:new)
+    end
   end
 
   # rigor-dry-validation refines a Contract's `params` block through rigor-dry-schema's walker, so its

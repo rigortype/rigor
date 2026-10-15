@@ -29,6 +29,7 @@ module Rigor
             site.data["members"].each { |name| groups[[site.data["owner"], scope, name]] << site }
           end
         end
+        @groups = groups
         result = groups.sort_by { |key, _| key }.map { |key, sites| member(key, sites) }
         mark_inline_sites
         result
@@ -109,11 +110,42 @@ module Rigor
       def body_overload(site, name, single, scope)
         return attribute_overload(name, single) if site.data["kind"] == "attribute"
 
-        params, block, head = Parameters.read(site.node.parameters, yields: Parameters.yields?(site.node.body))
+        node = site.data["alias_of"] ? resolved_alias(site) : site.node
+        return unknown_overload if node.nil?
+
+        params, block, head = Parameters.read(node.parameters, yields: Parameters.yields?(node.body))
         slot = inferred_return(single, scope)
         block_rbs = block ? " ?{ (?) -> untyped }" : ""
         { "rbs" => "#{head}#{block_rbs} -> #{return_spelling(slot)}", "params" => params, "block" => block,
           "return" => slot }
+      end
+
+      # An alias whose original Rigor cannot pin to one `def`: nothing about its signature is known.
+      def unknown_overload
+        { "rbs" => nil, "params" => nil, "block" => nil, "return" => Slot.unavailable("not_computed") }
+      end
+
+      # The `def` an alias site copied, when its original has no other project definition (one site in the
+      # requested files, no omission naming it, none elsewhere) and no contract. Otherwise which `def` Ruby copied
+      # depends on load order, and `check` reads the last one it saw.
+      def resolved_alias(site)
+        node = site.data["aliased_node"]
+        return nil if node.nil?
+
+        owner = site.data["owner"]
+        old_name = site.data["alias_of"]
+        omitted = @omissions.any? do |omission|
+          [omission["owner"], omission["scope"]] == [owner, "instance"] && [old_name, nil].include?(omission["name"])
+        end
+        olds = @groups.fetch([owner, "instance", old_name], [])
+        return nil if omitted || olds.size != 1 || !@elsewhere.call(owner, "instance", old_name).empty?
+        # The original's contract is not the alias's: whether a declaration carries it over (`alias` in RBS) or
+        # not (`alias_method` under rbs-inline), the alias's undeclared parameters would contradict it.
+        return nil if @contracts[[owner, "instance", old_name]]
+        # An alias of an alias holds only if the alias it copied does.
+        return nil if olds.first.data["alias_of"] && resolved_alias(olds.first).nil?
+
+        node
       end
 
       # An attribute without a contract: Rigor does not report the ivar's type in revision 1.
@@ -130,6 +162,8 @@ module Rigor
       # A module function's singleton copy has its own return reading (`singleton_body_return`).
       def inferred_return(single, scope)
         return Slot.unavailable("contested") unless single
+
+        return Slot.unavailable("not_computed") if single.data["alias_of"] && resolved_alias(single).nil?
 
         copy = single.data["module_function"] && scope == "singleton"
         body = copy ? single.data["singleton_body_return"] : single.data["body_return"]

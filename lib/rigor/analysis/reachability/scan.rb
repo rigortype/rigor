@@ -64,8 +64,9 @@ module Rigor
         # then looks the literal name up in those descendants as well.
         DynamicUse = Data.define(:name, :prefix, :reason, :site, :path, :line, :scope, :within, :inherit, :role,
                                  :receiver_open) do
-          def initialize(scope: :namespace, within: nil, inherit: true, role: :production, receiver_open: false,
-                         **) = super
+          def initialize(scope: :namespace, within: nil, inherit: true, role: :production, receiver_open: false, **)
+            super
+          end
 
           # Whether this site's evidence reaches `fqn`.
           def taints?(fqn)

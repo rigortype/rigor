@@ -741,8 +741,9 @@ RSpec.describe Rigor::Analysis::Reachability do
 
       it "searches a descendant's own mixins unless inherit is false" do
         fixture = lambda do |args|
-          { "lib/a.rb" => "module Mix\n  class Shared; end\nend\nclass Base\n  def self.x = const_get(:Shared#{args})\n" \
-                          "end\nclass Sub < Base\n  include Mix\nend\n", "lib/main.rb" => "Base.x\n" }
+          { "lib/a.rb" => "module Mix\n  class Shared; end\nend\nclass Base\n  " \
+                          "def self.x = const_get(:Shared#{args})\nend\nclass Sub < Base\n  include Mix\nend\n",
+            "lib/main.rb" => "Base.x\n" }
         end
         expect(dead(fixture.call(""))).to eq(%w[Sub Unrelated Unrelated::X])
         expect(dead(fixture.call(", false"))).to include("Mix::Shared")

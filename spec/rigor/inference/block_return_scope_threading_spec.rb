@@ -4388,4 +4388,26 @@ RSpec.describe "block-return scope threading", type: :runner do
       expect(flow_rules("#{source}puts 'second missing' unless r.last")).to be_empty
     end
   end
+
+  # Issue #1332 — the inject / reduce fold lays the same #587 (b) binding the per-element folds above lay, in its
+  # constant arm and in its nominal fixpoint, so a step reads what an earlier step rebound or stored.
+  describe "captured state the body rebinds or mutates under the inject / reduce fold" do
+    it "does not pin a result that reads a rebound captured local (Ruby: 3)" do
+      source = "n = 0\nt = [1, 2].inject(0) { |a, e| n += 1; a + n }\n"
+      expect(flow_rules("#{source}puts '2' if t == 2")).to be_empty
+      expect(dumped_type("#{source}dump_type(t)")).not_to eq("2")
+    end
+
+    it "does not pin a result that reads a memoizing index `||=` an earlier step filled (Ruby: 2)" do
+      source = "cache = Hash.new\ntotal = [1, 2].inject(0) { |acc, e| acc + (cache[:first] ||= e) }\n"
+      expect(flow_rules(%(#{source}puts "3" if total == 3))).to be_empty
+      expect(dumped_type("#{source}dump_type(total)")).not_to eq("3")
+    end
+
+    it "still folds a block that reads only its parameters" do
+      expect(dumped_type("dump_type([1, 2].inject(0) { |a, e| a + e })")).to eq("3")
+      expect(flow_rules("t = [1, 2].inject(0) { |a, e| a + e }\nputs 'x' if t == 3"))
+        .to eq(["flow.always-truthy-condition"])
+    end
+  end
 end

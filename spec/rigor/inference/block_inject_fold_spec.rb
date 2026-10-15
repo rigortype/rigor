@@ -106,31 +106,57 @@ RSpec.describe "block-form inject/reduce fold", type: :runner do
     end
   end
 
-  describe "a body that rebinds or reads a mutated capture declines the constant fold" do
+  # Issue #1332 — both arms lay the #587 (b) captured-block binding, so a step reads a captured variable as an
+  # earlier step may have left it. Each shape reads the capture BEFORE rebinding or mutating it, so the answer
+  # depends on the previous iteration's write: Ruby gives `1` for every one, and a fold reading the entry binding
+  # pinned `0` and reported the `t == 0` guard always-truthy.
+  describe "a body that reads captured state an earlier step rebound or mutated" do
     def flow_diagnostics(source)
-      analyze(source).diagnostics.select { |d| d.rule == "flow.always-truthy-condition" }
+      analyze(source).diagnostics.select { |d| d.rule.to_s.start_with?("flow.") }
     end
 
-    it "does not pin a result that depends on a rebound captured local" do
-      # Ruby answers 3: `n` is rebound at every step, not read at its entry binding.
-      source = "n = 0\nt = [1, 2].inject(0) { |a, e| n += 1; a + n }\nputs 'x' if t == 2\n"
+    {
+      "a rebound local" => ["n = 0", "r = a + n; n += 1; r"],
+      "a rebound local under `reduce`" => ["n = 0", "r = a + n; n += 1; r", :reduce],
+      "a `<<` on a captured Array" => ["log = []", "r = a + log.size; log << e; r"],
+      "a rebound instance variable" => ["@n = 0", "r = a + @n; @n += 1; r"],
+      "a memoizing index `||=`" => ["c = {}", "r = a + (c[:k] || 0); c[:k] ||= e; r"],
+      "`push`" => ["arr = []", "r = a + arr.size; arr.push(e); r"],
+      "`Hash#store`" => ["h = {}", "r = a + h.size; h.store(e, e); r"],
+      "an index write" => ["h = {}", "r = a + h.size; h[e] = e; r"],
+      "`String#concat`" => ["s = +''", "r = a + s.size; s.concat('z'); r"],
+      "`replace`" => ["x = []", "r = a + x.size; x.replace([e]); r"],
+      "a `<<` through a body-local alias" => ["log = []", "r = a + log.size; l2 = log; l2 << e; r"],
+      "a self-call that mutates its argument" => [
+        "def add(list, v) = list << v\nlog = []", "r = a + log.size; add(log, e); r"
+      ]
+    }.each do |label, (setup, body, method_name)|
+      it "does not pin the result through #{label}" do
+        source = "#{setup}\nt = [1, 2].#{method_name || :inject}(0) { |a, e| #{body} }\nputs 'x' if t == 0\n"
+        expect(flow_diagnostics(source)).to be_empty
+        expect(dumped_type("#{setup}\ndump_type([1, 2].#{method_name || :inject}(0) { |a, e| #{body} })"))
+          .not_to eq("dump_type: 0")
+      end
+    end
+
+    it "does not pin the no-seed form, whose first step is the second element" do
+      source = "n = 0\nt = [1, 2, 3].inject { |a, e| r = a + n; n += 1; r }\nputs 'x' if t == 1\n"
       expect(flow_diagnostics(source)).to be_empty
-      expect(dumped_type("n = 0\nt = [1, 2].inject(0) { |a, e| n += 1; a + n }\ndump_type(t)")).not_to include("2")
     end
 
-    it "does not pin a result that depends on a repeated `||=` index write" do
-      source = "c = {}\ntotal = [1, 2].reduce(0) { |a, e| c[e] ||= e; a + c.size }\nputs 'x' if total == 2\n"
-      expect(flow_diagnostics(source)).to be_empty
+    it "still folds a body that captures nothing, with its true-positive guard" do
+      expect(dumped_type("dump_type([1, 2].inject(0) { |a, e| a + e })")).to eq("dump_type: 3")
+      expect(dumped_type("dump_type([1, 2].reduce(0) { |a, e| a + e })")).to eq("dump_type: 3")
+      expect(flow_diagnostics("t = [1, 2].inject(0) { |a, e| a + e }\nputs 'x' if t == 3\n").map(&:rule))
+        .to eq(["flow.always-truthy-condition"])
     end
 
-    it "does not pin a result that reads a captured receiver the body mutates" do
-      source = "log = []\nt = [1, 2].inject(0) { |a, e| log << e; a + log.size }\nputs 'x' if t == 3\n"
-      expect(flow_diagnostics(source)).to be_empty
+    it "still folds a body that only stores into a sink it never reads" do
+      expect(dumped_type("log = []\ndump_type([1, 2].inject(0) { |a, e| log << e; a + e })")).to eq("dump_type: 3")
     end
 
-    it "still folds a body that captures nothing" do
-      expect(dumped_type("dump_type([1, 2].inject(0) { |a, e| a + e })")).to include("3")
-      expect(dumped_type("dump_type([1, 2].reduce(0) { |a, e| a + e })")).to include("3")
+    it "still folds a body whose only write is to a block-local that shadows the capture" do
+      expect(dumped_type("n = 0\ndump_type([1, 2].inject(0) { |a, e; n| n = 5; a + e })")).to eq("dump_type: 3")
     end
   end
 end

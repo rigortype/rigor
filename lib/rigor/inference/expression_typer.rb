@@ -5416,56 +5416,26 @@ module Rigor
 
         acc, rest = inject_constant_start(members, seed, has_seed)
         return nil if acc.nil?
-        return nil if inject_block_touches_captured?(block, rest)
 
-        rest.each do |element_value|
-          acc = inject_constant_step(block, acc, element_value)
+        captured = inject_captured_bindings(block, rest.map { |value| Type::Combinator.constant_of(value) })
+        rest.each_with_index do |element_value, position|
+          acc = inject_constant_step(block, acc, element_value, captured, position)
           return nil if acc.nil?
         end
         acc
       end
 
-      # The per-step evaluation below binds only the block parameters, so a body that rebinds or mutates a
-      # captured variable (`n += 1`, `log << e`, a repeated `||=` write) would read the entry binding at every
-      # step and pin the result: `n = 0; [1, 2].inject(0) { |a, e| n += 1; a + n }` folded to `2` where Ruby
-      # answers `3`. Such a body declines the constant fold and falls to the nominal fixpoint, as the Tuple /
-      # Range per-element folds' `captured:` binding would otherwise have to thread it.
-      def inject_block_touches_captured?(block, rest)
-        stores = CapturedLocals.content_mutations(block, scope, non_locals: true)
-        names = CapturedLocals.writes(block, scope, non_locals: true)
-        return true unless names.empty?
-
-        elements = rest.map { |value| Type::Combinator.constant_of(value) }
-        return true unless RepeatedOrWrites.sites(block, stores, scope, element_types: elements).empty?
-
-        stores.any? { |name, sites| inject_mutated_capture_read?(block, name, sites) }
-      rescue StandardError
-        true
-      end
-
-      # Whether the body reads the mutated capture `name` anywhere but as a mutation site's receiver — the one
-      # way an in-place store can reach the accumulator. `sink << x` alone does not (the fold keeps its answer
-      # and the write-back still runs); `log << e; a + log.size` does.
-      def inject_mutated_capture_read?(block, name, sites)
-        receivers = sites.map { |site| inject_site_receiver(site) }
-        return true if receivers.any?(&:nil?)
-
-        spans = receivers.map { |r| r.location.start_offset...r.location.end_offset }
-        reads = []
-        Source::NodeWalker.each_with_ancestors(block.body) do |node, _ancestors|
-          next unless node.class.name.end_with?("ReadNode") && node.respond_to?(:name) && node.name == name
-
-          reads << node.location.start_offset
-        end
-        reads.any? { |offset| spans.none? { |span| span.cover?(offset) } }
-      end
-
-      def inject_site_receiver(site)
-        case site
-        when Prism::CallNode, Prism::IndexOrWriteNode, Prism::IndexAndWriteNode,
-             Prism::IndexOperatorWriteNode, Prism::IndexTargetNode
-          site.receiver
-        end
+      # Issue #1332 — the #587 (b) captured-block binding ({#captured_block_bindings}) both inject arms lay under
+      # every step, as the Tuple / Range per-element folds and the per-pair `HashShape` fold do. Without it each
+      # step reads a captured variable at its entry binding, so a body that rebinds or mutates one (`n += 1`,
+      # `log << e`, `cache[:k] ||= e`) pinned the result: `n = 0; [1, 2].inject(0) { |a, e| r = a + n; n += 1;
+      # r }` folded to `0` where Ruby answers `1`. The fixpoint binds the accumulator parameter to `Dynamic[top]`
+      # rather than to a type the inject fixpoint has not converged yet: a captured name that reads the
+      # accumulator widens rather than pins. `element_types` is the constant arm's steps, one position per block
+      # run, which {RepeatedOrWrites} reads; nil for the nominal arm, which marks every repeated site.
+      def inject_captured_bindings(block, element_types, element: nil)
+        element ||= Type::Combinator.union(*element_types)
+        captured_block_bindings(block, [Type::Combinator.untyped, element], element_types: element_types)
       end
 
       # Extracts the receiver's foldable constant values, size-capped before enumeration, or nil to decline.
@@ -5519,9 +5489,9 @@ module Rigor
       # Evaluates the block body once with the running constant accumulator + the next constant element
       # bound to the block params, returning the result when it is a foldable `Constant` within the
       # magnitude cap, else nil to decline the whole fold.
-      def inject_constant_step(block, acc, element_value)
+      def inject_constant_step(block, acc, element_value, captured, position)
         element = Type::Combinator.constant_of(element_value)
-        result = type_block_body_with_param(block, [acc, element])
+        result = type_block_body_with_param(block, [acc, element], captured: captured, position: position)
         return nil unless result.is_a?(Type::Constant)
         return nil unless inject_foldable?(result.value)
         return nil if inject_magnitude_too_large?(result.value)
@@ -5551,13 +5521,14 @@ module Rigor
         seed_acc = has_seed ? seed : element
         return nil if seed_acc.nil?
 
+        captured = inject_captured_bindings(block, nil, element: element)
         converged = BodyFixpoint.converge(
           names: [:__inject_acc__],
           seed_bindings: { __inject_acc__: seed_acc },
           widen: method(:widen_value_pinned),
           evaluate_body: lambda do |bindings|
             acc = bindings[:__inject_acc__]
-            result = type_block_body_with_param(block, [acc, element])
+            result = type_block_body_with_param(block, [acc, element], captured: captured)
             result.nil? ? {} : { __inject_acc__: result }
           end
         )

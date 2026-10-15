@@ -127,6 +127,17 @@ hit. It is also the weakest file row — a rewrite in place leaves a
 presence row fresh — so it is only ever the row for a dependency that
 really is on existence alone; a read records the `:stat` row over it.
 
+The `:kind` comparator (#1962) carries what `FileEntry.kind_of` answers for the path, in
+the order `Runner#expand_paths` asks, each predicate following symlinks: `"directory"`,
+`"file"`, `"other"` (a FIFO, a socket), or `"absent"` (a missing path, a dangling symlink).
+`FileEntry.kind(path:)` builds it, and the run descriptor records one per analysis root,
+`pre_eval:` entry and project signature root, whose answers turn on exactly that: unlike an
+existence row it reads stale when a directory is replaced by a file of the same name. What
+a directory holds is not its concern; the analysed files are in the key and have rows of
+their own, and a signature root's files have #979's, so a non-`.rb` file added under an
+analysis root leaves it fresh. Validation is at most three stat calls with no digest,
+so it never thrashes a warm hit either. It ranks between `:mtime` and `:exists` in `compose`.
+
 ### `Descriptor.new(files: [], gems: [], plugins: [], configs: [], dependencies: [], globs: [])`
 
 Constructs a descriptor. Every slot defaults to an empty array;
@@ -167,7 +178,7 @@ choosing one contribution silently.
 Returns the canonical hex SHA-256 cache key for a producer +
 input + descriptor combination. The key incorporates:
 
-1. `Descriptor::SCHEMA_VERSION` (currently `11` — v2 added the
+1. `Descriptor::SCHEMA_VERSION` (currently `19` — v2 added the
    `dependencies` slot for the ADR-10 per-gem-version cache slice;
    v3 invalidates RBS envs marshalled before `build_env_for` began
    synthesizing missing `signature_paths:` namespaces; v4 added the
@@ -191,8 +202,10 @@ input + descriptor combination. The key incorporates:
    table (#1123); v11 invalidates run-result and plugin-producer entries
    written before a producer served from its own cache replayed its
    dependency rows into its plugin's `IoBoundary` (#1558) — the same
-   migration reason as v8). Bumping this constant invalidates every
-   cached value.
+   migration reason as v8; v12 to v18 are recorded on the constant; v19
+   invalidates run-result entries written before the run descriptor
+   carried a `:kind` row per analysis root, `pre_eval:` entry and
+   signature root (#1962, #1555), the v8 migration reason again). Bumping this constant invalidates every cached value.
 2. `producer_id` (a stable string that namespaces the cache
    slice).
 3. `params` (the producer's input hash). Recursively
@@ -1348,9 +1361,10 @@ absolute nor sorted, so a reordered or respelled root set (`extra lib`, `./lib`,
 absolute path) is a slot of its own: a forgone hit, never another run's answer. The entry is
 not part of `RunCacheKey.descriptor`, so the `--incremental` key built on it and the
 ADR-103 effects sidecar identity (still one generation per analyzed-path SET) are unchanged.
-The plain slot still records no existence rows for the roots, which the `--incremental`
-slot does (#1962). A new key entry is a new slot, not a schema
-change: entries written before it are simply never read again.
+A new key entry is a new slot, not a schema change: entries written before it are simply
+never read again. The key fixes which roots were asked for; whether each exists, and as
+what, is a `:kind` row in the slot's dependency descriptor (#1962, the run-descriptor row
+inventory).
 
 ### The run-result slot (ADR-45 WD2)
 
@@ -1807,6 +1821,14 @@ ADR-45 `analysis.run-diagnostics` slot:
 | glob, per plugin-listed directory | `IoBoundary#cache_descriptor` ([#954](https://github.com/rigortype/rigor/issues/954)) | a file appearing in a directory a plugin listed |
 | every row of a producer entry the plugin was served from | `IoBoundary#cache_descriptor`, replayed by `Plugin::Base#cache_for` ([#1558](https://github.com/rigortype/rigor/issues/1558)) | an edit to a served producer's input, which this run never read |
 | glob, per producer `watch:` pattern | `Plugin::Base#watch_glob_entries` (ADR-60 WD3) | an edit under a producer's declared watch |
+| `:kind` file, per analysis root | `root_presence_entries` ([#1962](https://github.com/rigortype/rigor/issues/1962)) | a root appearing, vanishing, or turning from a directory into a file or back, which moves its path-error row (`no such file or directory`, `not a Ruby file`) while the analysed set stays the same |
+| `:kind` file, per `pre_eval:` entry and per project signature root (configured, or the auto-detected `sig`) | `root_presence_entries` (#1962, [#1555](https://github.com/rigortype/rigor/issues/1555)) | a missing `pre_eval:` file or signature root being created, or a directory and a file trading places there, which no other row covers |
+
+The ADR-103 effects sidecar validates against this same descriptor, but its identity is one
+generation per analysed-path set, not per root set. So the root `:kind` rows can cost it a
+warm start it would otherwise have had: `rigor check lib x` with `x` missing, then
+`mkdir x`, then `rigor check lib` finds the sidecar's `x` row stale and re-collects. That
+is a recomputation, never a wrong answer, and it is a known cost of sharing the descriptor.
 
 The two template rows are the validation half of a pair. The KEY carries a
 `template-units` `configs:` slot hashing **the claimed globs, every unit's

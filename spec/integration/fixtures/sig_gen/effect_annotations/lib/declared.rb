@@ -1,10 +1,10 @@
 # frozen_string_literal: true
 
-# Two spellings of "the author already said what this does", over bodies that prove nothing (Floats: a declared `untyped` still declines an Integer literal, #1489).
+# Two spellings of "the author already said what this does", over bodies that prove nothing.
 module Annotated
   class Declared
     def store
-      2.0
+      2
     end
 
     # @rbs %a{rigor:v1:effect io.db}
@@ -13,7 +13,7 @@ module Annotated
     end
 
     def typoed
-      4.0
+      4
     end
   end
 end

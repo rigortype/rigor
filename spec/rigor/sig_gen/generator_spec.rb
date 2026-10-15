@@ -1181,27 +1181,31 @@ RSpec.describe Rigor::SigGen::Generator do
       expect(method.rbs).to eq("def f: (Float num) -> [Float, String]")
     end
 
-    # Issue #1489. The `untyped` is the author's abstraction over the body just as a declared nominal is, so a
-    # literal the body happens to prove is declined by the same {#literal_decline?} the nominal path uses.
+    # Issue #1489. A VALUE literal the body proves is widened to its class over an authored `untyped`; `nil`,
+    # `true`, `false`, bool, `T?` and a computed `Float` are honest types and are proposed as the base did.
     {
-      "an Integer literal" => "1",
-      "a union of literals" => "rand(2) == 0 ? 1 : 2",
-      "true" => "true",
-      "false" => "false",
-      "nil" => "nil",
-      "a String literal" => %("x"),
-      "a Symbol literal" => ":k"
-    }.each do |label, body|
-      it "does not propose a literal return (#{label}) over a declared `-> untyped` (#1489)" do
-        write_fixture("sig/box.rbs", "class Box\n  def v: () -> untyped\nend\n")
-        path = write_fixture("lib/box.rb", "class Box\n  def v\n    #{body}\n  end\nend\n")
+      "an Integer literal" => ["(x)", "1", "Integer"],
+      "a union of literals" => ["(x)", "rand(2) == 0 ? 1 : 2", "Integer"],
+      "a String literal" => ["(x)", %("x"), "String"],
+      "a Symbol literal" => ["(x)", ":k", "Symbol"],
+      "a literal union with nil" => ["(x)", %(rand(2) == 0 ? "S" : nil), "(String | nil)"],
+      "true" => ["(x)", "true", "true"],
+      "false" => ["(x)", "false", "false"],
+      "nil" => ["(x)", "nil", "nil"],
+      "a bool" => ["(x)", "x > 0", "(false | true)"],
+      "an Integer or nil" => ["(x)", "rand(2) == 0 ? Integer(gets) : nil", "(Integer | nil)"],
+      "a computed Float" => ["(x)", "5 / 2.0", "Float"]
+    }.each do |label, (params, body, expected)|
+      it "proposes #{expected} for #{label} over a declared `-> untyped` (#1489)" do
+        write_fixture("sig/box.rbs", "class Box\n  def v: (Integer x) -> untyped\nend\n")
+        path = write_fixture("lib/box.rb", "class Box\n  def v#{params}\n    #{body}\n  end\nend\n")
 
         gen = generator(paths: [path], signature_paths: [File.join(tmpdir, "sig")])
         method = gen.run.find { |c| c.method_name == :v }
 
-        expect(method.classification).to eq(Rigor::SigGen::Classification::EQUIVALENT)
+        expect(method.classification).to eq(Rigor::SigGen::Classification::TIGHTER_RETURN)
         expect(method.declared_return_rbs).to eq("untyped")
-        expect(method.rbs).to be_nil
+        expect(method.rbs).to eq("def v: (Integer x) -> #{expected}")
       end
     end
 

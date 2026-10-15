@@ -183,6 +183,15 @@ RSpec.describe Rigor::CLI::SigGenCommand do
     expect(sig_gen("--write", "--overwrite", "--include-private")[1]).to eq("No changes\n")
   end
 
+  # Issue #1489. A value literal the body proves is widened to its class over a declared `untyped`, never pinned.
+  it "writes the class, not the literal, over a declared `untyped` under `--write --overwrite`" do
+    write("sig/c.rbs", "class C\n  def a: (Integer x) -> untyped\n  def b: () -> untyped\nend\n")
+    write("lib/c.rb", "class C\n  def a(x) = 1\n  def b = \"s\"\nend\n")
+
+    expect(sig_gen("--write", "--overwrite").first).to eq(0)
+    expect(sig_file).to eq("class C\n  def a: (Integer x) -> Integer\n  def b: () -> String\nend\n")
+  end
+
   # An effect annotation is added only to a declaration that carries none (ADR-103 WD9). An annotation on the
   # overload counts, or the kept `%a{pure}` would get a second one above the line.
   it "adds no effect annotation above a declaration whose overload is already annotated" do

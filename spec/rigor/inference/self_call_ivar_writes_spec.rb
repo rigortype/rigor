@@ -6,12 +6,12 @@ require "prism"
 # Issue #1596 — the instance variables an implicit-self or `self.` call may write, when the analysis proves the set.
 RSpec.describe Rigor::Inference::SelfCallIvarWrites do
   # A scope whose `self` is a `Holder` defining each `def` of `body`.
-  def scope_for(body)
+  def scope_for(body, refinements: {})
     defs = Prism.parse("class Holder\n#{body}\nend").value.statements.body.first.body.body
     table = defs.grep(Prism::DefNode).to_h { |node| [node.name, node] }
     index = Rigor::Scope::DiscoveryIndex::EMPTY.with(
       discovered_classes: { "Holder" => true }, discovered_def_nodes: { "Holder" => table },
-      contested_discovered_def_nodes: {}
+      contested_discovered_def_nodes: {}, discovered_refinements: refinements
     )
     Rigor::Scope.empty(environment: Rigor::Environment.default).with_discovery(index)
                 .with_self_type(Rigor::Type::Combinator.nominal_of("Holder"))
@@ -63,8 +63,10 @@ RSpec.describe Rigor::Inference::SelfCallIvarWrites do
     expect(described_class.of(call("log(&:upcase)"), scope_for("def log = nil"))).to be_nil
   end
 
-  it "keeps a core method on a literal receiver" do
+  it "keeps a core method on a literal receiver, unless a refine block anywhere defines its name" do
     expect(described_class.of(call("log"), scope_for("def log = 'x'.upcase"))).to eq(Set[])
+    refined = scope_for("def log = 'x'.upcase", refinements: { "String" => { upcase: ["Loud"] } })
+    expect(described_class.of(call("log"), refined)).to be_nil
   end
 
   it "gives up past its def budget" do

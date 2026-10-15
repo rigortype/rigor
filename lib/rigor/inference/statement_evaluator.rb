@@ -525,10 +525,13 @@ module Rigor
         [result_type, current]
       end
 
+      # The top level is a straight-line body: an index `||=` there whose slot an earlier store may have filled is
+      # marked ({RepeatedOrWrites.straight_line_sites}).
       def eval_program(node)
         return [Type::Combinator.constant_of(nil), scope] if node.statements.nil?
 
-        sub_eval(node.statements, scope)
+        marks = RepeatedOrWrites.straight_line_sites(node.statements, scope)
+        sub_eval(node.statements, scope.with_repeated_or_writes(marks))
       end
 
       # `name = rvalue` evaluates the rvalue under the entry scope (so earlier assignments in a chained `a = b = expr`
@@ -2947,6 +2950,7 @@ module Rigor
       # evaluates `def` to the method's name as a Symbol, so the produced type is `Constant[:name]`.
       def eval_def(node)
         body_scope = build_method_entry_scope(node)
+        body_scope = body_scope.with_repeated_or_writes(RepeatedOrWrites.straight_line_sites(node.body, body_scope))
         # Parameter default value expressions (e.g. `self.x` in `def copy(x: self.x)`) execute when the method is
         # *invoked*, not when the `def` is read; their `self` is the instance receiver, not the surrounding class body.
         # Walk the parameters subtree under `body_scope` so the scope-index records the instance `self_type` for every

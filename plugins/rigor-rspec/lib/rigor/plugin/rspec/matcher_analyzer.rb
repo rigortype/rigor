@@ -52,12 +52,14 @@ module Rigor
       #   `eq` (`1.0 == 1`) and dropped under `eql` (`1.0.eql?(1)` is false);
       # - any other core member (`nil` against `9`, a `String` against `:a`) is dropped: built-in equality
       #   across those classes is false;
-      # - a member of a core class whose ancestry in the project's source defines the operator (`class
-      #   Symbol; def ==`) is kept unnarrowed: its own method decides.
+      # - a member of a core class is kept unnarrowed when the project's source defines the operator on that
+      #   class or on a core ancestor up to the one that owns the operator at runtime (`class Symbol; def
+      #   ==`, `class Numeric; def eql?` for an `Integer`, `class Object; def ==` for `nil`): its own method
+      #   decides.
       #
       # When any member is `Dynamic` or of any other class (a user class, `Object`, `Numeric`, `BigDecimal`),
       # the analyzer emits no fact and the local keeps its type. It also emits none when the project's source
-      # defines the operator on the literal's class or its ancestry — a core `==` calls back into the
+      # defines the operator on the literal's class or those ancestors of it — a core `==` calls back into the
       # literal's (`Integer#==` runs `other == self` for a non-numeric argument, `String#==` for one that
       # responds to `to_str`), so a custom one there can make any member equal — and for an unbound local,
       # when no member survives, and without a scope. A reopening that defines other methods only
@@ -198,6 +200,19 @@ module Rigor
         Ractor.make_shareable(NUMERIC_CLASS_NAMES)
         private_constant :NUMERIC_CLASS_NAMES
 
+        # For each core class and operator, the class and its ancestors up to and including the one that owns
+        # the operator at runtime (`Integer#eql?` is `Numeric`'s, `nil == x` is `BasicObject`'s). A project
+        # definition on any of them is the method the member runs; one above the owner is shadowed by it.
+        OPERATOR_OWNER_CHAINS = EQUALITY_CORE_CLASSES.each_with_object({}) do |klass, chains|
+          %i[== eql?].each do |operator|
+            ancestors = klass.ancestors
+            owner_index = ancestors.index(klass.instance_method(operator).owner)
+            chains[[klass.name, operator]] = ancestors[0..owner_index].map(&:name).freeze
+          end
+        end.freeze
+        Ractor.make_shareable(OPERATOR_OWNER_CHAINS)
+        private_constant :OPERATOR_OWNER_CHAINS
+
         # Marks a member whose equality with the literal cannot be decided, so the whole meet gives up.
         UNDECIDED = Object.new.freeze
         private_constant :UNDECIDED
@@ -265,15 +280,17 @@ module Rigor
           end
         end
 
-        # Whether the project's source defines `operator` on `class_name` or an ancestor it declares (a
-        # reopening's `def`, an included or prepended project module, a `define_method` in the same file). The
-        # def-node walk sees other files' `def`s and records the dependency on them; the discovery table adds
-        # `define_method`. An RBS declaration is not consulted: once the project reopens `String` for
-        # anything, `String#==`'s declaring owner is a project class, which says nothing about who wrote `==`.
+        # Whether the project's source defines `operator` on the core class `class_name` or on a core ancestor
+        # up to the operator's runtime owner (OPERATOR_OWNER_CHAINS): a reopening's `def`, an included or
+        # prepended project module, a `define_method`. The def-node walk sees other files' `def`s and records
+        # the dependency on them; the discovery table adds `define_method`. An RBS declaration is not
+        # consulted: once the project reopens `String` for anything, `String#==`'s declaring owner is a
+        # project class, which says nothing about who wrote `==`.
         def project_defines?(class_name, operator, scope)
-          return true unless scope.user_def_through_ancestors(class_name, operator).first.nil?
-
-          scope.discovered_method_through_ancestors?(class_name, operator, :instance)
+          OPERATOR_OWNER_CHAINS.fetch([class_name, operator]).any? do |name|
+            !scope.user_def_through_ancestors(name, operator).first.nil? ||
+              scope.discovered_method_through_ancestors?(name, operator, :instance)
+          end
         end
 
         def string_type_for_regex_arg(matcher)

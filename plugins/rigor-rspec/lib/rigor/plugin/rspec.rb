@@ -104,8 +104,9 @@ module Rigor
       # file's OWN `describe`/`let` structure (`let` is file-scoped). A spec file's edit changes its own
       # content (re-analysed already). The one cross-file input — the optional factorybot `:factory_index`
       # fact this plugin consumes — is itself an ADR-9 publication captured in the incremental fact-surface
-      # digest via factorybot's own channel, so it need not appear here. A stable sentinel declares "no OWN cross-file fact surface", keeping the plugin
-      # incremental-capable; `--verify-incremental` backstops the claim.
+      # digest via factorybot's own channel, so it need not appear here. A stable sentinel declares "no OWN
+      # cross-file fact surface", keeping the plugin incremental-capable; `--verify-incremental` backstops
+      # the claim.
       def incremental_state_fingerprint
         "per-file-lets"
       end

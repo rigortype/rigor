@@ -240,6 +240,12 @@ RSpec.describe "plugins/rigor-rspec" do
         expect(equality_fact_type('expect(x).to eq("a")', union(lowercase, constant(nil)))).to eq(constant("a"))
       end
 
+      it "is silent for an Intersection whose parts do not all belong to one core class" do
+        mixed = Rigor::Type::Combinator.intersection(Rigor::Type::Combinator.lowercase_string, nominal("Greeting"))
+        expect(mixed).to be_a(Rigor::Type::Intersection)
+        expect(equality_fact_type('expect(x).to eq("a")', union(mixed, constant(nil)))).to be_nil
+      end
+
       it "narrows a FloatRange member to a Float literal" do
         range = Rigor::Type::Combinator.float_range(0.0, 2.0)
         expect(equality_fact_type("expect(x).to eq(1.5)", union(range, constant(nil)))).to eq(constant(1.5))
@@ -385,34 +391,6 @@ RSpec.describe "plugins/rigor-rspec" do
     # End-to-end: the plugin's contribution flows through the engine's `apply_plugin_assertions` → `:local`
     # branch and narrows the local so a downstream `.upcase` / `.+` / etc. resolves cleanly.
     context "when running end-to-end through the engine" do
-      it "removes the possible-nil-receiver after expect(x).to be_a(String)" do
-        result = run_plugin(
-          source: <<~RUBY
-            # @rbs (String | nil) -> void
-            def case_after(x)
-              expect(x).to be_a(String)
-              x.upcase
-            end
-          RUBY
-        )
-        nil_recv = result.diagnostics.select { |d| d.rule == "call.possible-nil-receiver" }
-        expect(nil_recv).to be_empty
-      end
-
-      it "narrows x to Constant<42> after expect(x).to eq(42) — downstream `x + 1` resolves" do
-        result = run_plugin(
-          source: <<~RUBY
-            # @rbs (Integer | nil) -> void
-            def case_eq(x)
-              expect(x).to eq(42)
-              x + 1
-            end
-          RUBY
-        )
-        nil_recv = result.diagnostics.select { |d| d.rule == "call.possible-nil-receiver" }
-        expect(nil_recv).to be_empty
-      end
-
       # Runs `body` as `T#case_eq(x)` with `x` declared `x_type` in `sig/`, plus `patch` as an analysed file.
       def run_case_eq(x_type, body, patch: nil)
         files = patch ? { "patch.rb" => patch } : {}
@@ -427,6 +405,20 @@ RSpec.describe "plugins/rigor-rspec" do
 
       def dumped_types(result)
         result.diagnostics.select { |d| d.rule == "dump.type" }.map { |d| d.message.delete_prefix("dump_type: ") }
+      end
+
+      # Guard: `x` reads as String here even when MatcherAnalyzer emits no be_a fact, so this pins the end-to-end
+      # result, not the plugin's be_a path (the unit examples above pin that).
+      it "removes the possible-nil-receiver after expect(x).to be_a(String)" do
+        result = run_case_eq("String?", "expect(x).to be_a(String)\nx.upcase\n")
+        nil_recv = result.diagnostics.select { |d| d.rule == "call.possible-nil-receiver" }
+        expect(nil_recv).to be_empty
+      end
+
+      it "narrows x to Constant<42> after expect(x).to eq(42) — downstream `x + 1` resolves" do
+        result = run_case_eq("Integer?", "expect(x).to eq(42)\nx + 1\n")
+        nil_recv = result.diagnostics.select { |d| d.rule == "call.possible-nil-receiver" }
+        expect(nil_recv).to be_empty
       end
 
       # Issue #1807 — the local is `==`'s receiver, so its own `==` decides `eq`.
@@ -512,6 +504,21 @@ RSpec.describe "plugins/rigor-rspec" do
         patch = "class Symbol\n  def ==(other) = true\nend\nclass String\n  def ==(other) = true\nend\n"
         result = run_case_eq("Symbol | Integer", "expect(x).to eq(\"a\")\ndump_type(x)\n", patch: patch)
         expect(dumped_types(result)).to eq(["Integer | Symbol"])
+      end
+
+      it "keeps a member whose operator a reopened core ancestor up to its owner defines" do
+        patch = "class Numeric\n  def eql?(other) = true\nend\n"
+        expect(dumped_types(run_case_eq("Integer", "expect(x).to eql(9)\ndump_type(x)\n", patch: patch)))
+          .to eq(["Integer"])
+        patch = "class Object\n  def ==(other) = true\nend\n"
+        expect(dumped_types(run_case_eq("Integer?", "expect(x).to eq(9)\ndump_type(x)\n", patch: patch)))
+          .to eq(["9?"])
+      end
+
+      it "gives no fact when a reopened core ancestor up to the owner defines the literal's operator" do
+        patch = "class Object\n  def eql?(other) = true\nend\n"
+        expect(dumped_types(run_case_eq("Symbol", "expect(x).to eql(:s)\ndump_type(x)\n", patch: patch)))
+          .to eq(["Symbol"])
       end
 
       it "narrows an Integer local to the literal after eq(9)" do

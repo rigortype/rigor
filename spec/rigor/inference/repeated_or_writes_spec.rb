@@ -186,5 +186,27 @@ RSpec.describe Rigor::Inference::RepeatedOrWrites do
       untyped, untyped_sites = straight("cache.delete(:x) if cond\n(cache[:a][:k] ||= 2)")
       expect([key, inner, root, untyped]).to eq([key_sites, inner_sites, [], untyped_sites])
     end
+
+    it "does not count a remover on an instance variable whose entry type and body writes are a `Hash`" do
+      entry = Rigor::Scope.empty.with_ivar(:@c, Rigor::Type::Combinator.nominal_of("Hash"))
+      marks, = straight("@c = Hash.new\n@c.delete(k) if cond\n(@c[k] ||= :f)", entry)
+      expect(marks).to eq([])
+    end
+
+    it "does not count a remover on a parameter whose entry type is a hash shape" do
+      shape = Rigor::Type::Combinator.hash_shape_of({ a: Rigor::Type::Combinator.constant_of(1) })
+      marks, = straight("cache.delete(k) if k.nil?\n(cache[k] ||= :f)", Rigor::Scope.empty.with_local(:cache, shape))
+      expect(marks).to eq([])
+    end
+
+    it "counts a remover on a root the body binds to `Array.new`" do
+      marks, sites = straight("c = Array.new\nc.delete(k) if cond\n(c[0] ||= :f)")
+      expect(marks).to eq(sites)
+    end
+
+    it "counts a store in the other arm when a lambda runs both arms in turn" do
+      marks, sites = straight("f = ->(x) { x ? (cache[:k] ||= :e) : (cache[:k] ||= :f) }")
+      expect(marks).to eq([sites.last])
+    end
   end
 end

@@ -63,7 +63,10 @@ reshaping code, and lanes that collided or started on a premise master had alrea
    when watchers fail oddly. To add a commit to a lane's branch yourself, never in the lane's
    worktree or the main clone: `git worktree add --detach <tmp> origin/<branch>`, make the edit,
    commit, `git push origin HEAD:refs/heads/<branch>` (a fast-forward), then `git worktree remove
-   <tmp>`. Rebasing first makes the push non-fast-forward.
+   --force <tmp>`, and tell the lane with SendMessage to `git fetch && git merge --ff-only
+   origin/<branch>` before its next commit. Do it only while the lane has pushed everything;
+   otherwise the push rejects or the branches diverge. Rebasing first makes the push
+   non-fast-forward.
 8. **File the review's scope expansion** as issues outside the milestone. When a merged commit
    carried a `Fixes #N` for an issue the PR only partly fixed, reopen #N with what remains.
 

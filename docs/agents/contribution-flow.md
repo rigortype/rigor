@@ -71,15 +71,16 @@ Each of these fails silently: the command succeeds and reports something plausib
   only your files.
 - **Re-applying a reverted change.** On a branch that already contains the commit as an ancestor, a
   rebase replays nothing and fast-forwards onto the revert; cherry-pick it instead.
-- **Cleanup after a merge.** Remove a worktree or local branch only once its content is on
-  `origin/master`: for a merge-commit landing, `git merge-base --is-ancestor <head-sha>
-  origin/master`; for a `--rebase` or `--squash` landing (release PRs), the head SHA is never an
-  ancestor, so check `gh pr view N --json state,mergeCommit` and that `git diff <head-sha>
-  <mergeCommit.oid>` is empty. Never chain the removal after `gh pr merge` with `;`: a refused merge
-  still runs the rest of the line.
-- **Mergeability lags a push.** "Head branch is out of date" on a branch that is current, after `git
-  merge-base --is-ancestor origin/master origin/<branch>` confirms the branch contains master, clears
-  on its own; retry with backoff rather than merging `master` in again.
+- **Cleanup after a merge.** Remove a worktree or local branch only once the PR's content is on
+  `origin/master`: `gh pr view N --json state,baseRefName,mergeCommit` must read `MERGED` with base
+  `master`, and `git merge-base --is-ancestor <mergeCommit.oid> origin/master` must exit 0. This holds
+  for merge-commit, `--rebase` and `--squash` landings alike; after a rebase or squash the head SHA
+  itself is never an ancestor, and a child merged into its parent branch fails on `baseRefName`.
+  Never chain the removal after `gh pr merge` with `;`: a refused merge still runs the rest of the
+  line.
+- **Mergeability lags a push.** When `git merge-base --is-ancestor origin/master origin/<branch>`
+  confirms the branch contains master, a "Head branch is out of date" refusal clears on its own;
+  retry with backoff rather than merging `master` in again.
 - **The main clone is shared.** Uncommitted edits in it follow every branch switch and are swept in
   by the next `git add -A`. Each parallel worker gets its own worktree.
 

@@ -46,7 +46,7 @@ module Rigor
                        synthetic_method_index:, project_patched_methods:,
                        analyze_file:, project_scope_seed: -> { {} }, record_dependencies: false,
                        restored_run_level_rows: nil, template_units: -> { TemplateUnits.empty },
-                       feature_sources: -> { {} })
+                       feature_sources: -> { {} }, plugin_prepare: ->(_registry) { [] })
           @configuration = configuration
           @cache_store = cache_store
           @explain = explain
@@ -84,6 +84,10 @@ module Rigor
           # inherits the same compiled bytes.
           @template_units_reader = template_units
           @analyze_file = analyze_file
+          # Issue #1541 — `(registry) -> diagnostics`, the runner's own `#prepare` envelope. Read only by
+          # {#serve_empty_closure}: a pooled run's `#prepare` happens inside its workers, and an empty
+          # closure dispatches none.
+          @plugin_prepare = plugin_prepare
           # Issues #796 / #794 — the previous full run's run-level rows, handed down by
           # {Analysis::IncrementalSession} on a NARROWED run only (a recheck's closure, a
           # `--verify-incremental` partition). A full run leaves this nil and derives everything itself.
@@ -146,10 +150,8 @@ module Rigor
         #   (`expansion.fetch(:files)`), independent of any `analyze_only` narrowing of `files`; see
         #   {#serve_empty_closure} for what an empty `files` does with it.
         def analyze_files(files, environment: nil, project_files: nil)
-          if files.empty?
-            serve_empty_closure(environment, project_files)
-            return []
-          end
+          return serve_empty_closure(environment, project_files) if files.empty?
+
           # Issue #784 / #793 — `files` is what this run ANALYSES; `source_files` is what its environment
           # is BUILT over, and the two are the same only on a full run. A narrowed run (`analyze_only`: an
           # incremental closure, a `--verify-incremental` partition) used to build its environment over the
@@ -199,7 +201,16 @@ module Rigor
         #   whether anyone could have demanded anything at all: with no files, nobody could have, and an
         #   empty project keeps paying no env build. Keyed on the project's files rather than on
         #   `analyze_only`, because a recheck over an EMPTY project narrows to `Set[]`, which is non-nil.
+        #
+        # Issue #1541 — and, in pool mode, its `prepare` rows. A pooled run's `#prepare` happens inside the
+        # workers and its rows reach the stream through their first payload, so the coordinator-side
+        # pre-pass skips it ({ProjectPrePasses#run}) and {DiagnosticAggregator#pre_file_diagnostics} omits
+        # the cached rows; with no worker dispatched the row appeared nowhere, and a plugin whose `#prepare`
+        # raises turned a red project green on a nothing-changed `--incremental --workers N` recheck. They
+        # are returned as the run's per-file stream head, where the pool path puts them (`.rigor.yml`).
+        # Sequential, whose pre-pass already ran `#prepare`, returns no rows here.
         def serve_empty_closure(environment, project_files)
+          prepare_rows = pool_mode? ? Array(@plugin_prepare.call(plugin_registry)) : []
           env = environment || @environment_override
           # Resolved over the project's OWN file list — not `[]`, which would drop every plugin-synthesized
           # virtual RBS (`Environment.collect_virtual_rbs` short-circuits on an empty list) and scan a
@@ -217,9 +228,8 @@ module Rigor
           # `env` rather than `resolve.call`: read the demand the snapshots above just made when they built
           # an environment, and force nothing when they did not.
           record_definition_build_failures(env&.rbs_loader&.definition_build_failures)
-          return if replayed_restored_run_level_rows?
-
-          record_hkt_scan_failure(hkt_scan_outcome(resolve.call))
+          record_hkt_scan_failure(hkt_scan_outcome(resolve.call)) unless replayed_restored_run_level_rows?
+          prepare_rows
         end
 
         # Issue #794 — the signature-state snapshot's own gates, asked BEFORE an environment exists. Every

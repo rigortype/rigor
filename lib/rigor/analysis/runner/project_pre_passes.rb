@@ -251,6 +251,12 @@ module Rigor
           registry
         end
 
+        # Issue #1541 — runs `#prepare` on a registry the pre-pass left unprepared (a pooled run's) and returns
+        # its rows. For the coordinator's empty-closure branch only: it dispatches no worker to do it.
+        def prepare_registry(registry)
+          plugin_prepare_diagnostics(registry)
+        end
+
         # Returns the per-run shared `Plugin::FactStore` instance. All loaded plugins share this store
         # through their respective `Plugin::Services` (the same instance is threaded by
         # `Plugin::Loader.load`). Returns `nil` when no plugins are loaded.

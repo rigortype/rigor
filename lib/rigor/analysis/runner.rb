@@ -2015,7 +2015,8 @@ module Rigor
           template_units: -> { template_units },
           analyze_file: ->(path, environment) { analyze_file(path, environment) },
           restored_run_level_rows: @restored_run_level_rows,
-          feature_sources: -> { required_feature_sources }
+          feature_sources: -> { required_feature_sources },
+          plugin_prepare: ->(registry) { @pre_passes.prepare_registry(registry) }
         )
         @diagnostic_aggregator = DiagnosticAggregator.new(
           configuration: @configuration,

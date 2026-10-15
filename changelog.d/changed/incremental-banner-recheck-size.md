@@ -1,1 +1,0 @@
-- **[rigor check]** `rigor check --incremental` now reports how much a warm run re-analysed: the stderr banner reads `re-analysed N of M files`, with the changed, added and removed counts, instead of the size of the whole analysed set ([#1896](https://github.com/rigortype/rigor/pull/1896)).

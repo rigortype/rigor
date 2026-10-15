@@ -1,1 +1,0 @@
-- **[cache]** A source checkout's run, `--incremental` and mutation caches now key on the engine-owned data under `data/` (builtin and effect catalogues, `.rbs` overlays) and bundled plugin `sig/` trees, so a data-only edit no longer replays the previous engine's diagnostics from a warm cache. ([#1865](https://github.com/rigortype/rigor/pull/1865))

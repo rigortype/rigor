@@ -1,1 +1,0 @@
-- **[rigor check]** `--verify-incremental` now compares the diagnostic order as well as the set: a recheck that lists the same diagnostics in another order fails with a "same set, different order" report that names the first index where the lists diverge ([#1897](https://github.com/rigortype/rigor/pull/1897)).

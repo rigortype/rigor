@@ -1,1 +1,0 @@
-- **[inference]** Re-joining the branches that narrowed an untyped value (`x.nil?`, then `case x when String`) gives it back its untyped type, so `call.possible-nil-receiver` no longer reports a later call on correct code; a `nil` the program assigns still reports. ([#1875](https://github.com/rigortype/rigor/pull/1875))

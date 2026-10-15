@@ -1,1 +1,0 @@
-- **[rigor sig-gen]** A member declared `-> untyped` in `sig/` is no longer proposed a pinned literal return such as `-> 1` or `-> "x"`; an Integer, String or Symbol literal is widened to its class, while `nil`, `true`, `false`, `T?` and computed results keep their spelling ([#1890](https://github.com/rigortype/rigor/pull/1890)).

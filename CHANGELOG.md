@@ -13,6 +13,62 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-10-15
+
+v0.4.3 is a stabilization release. It removes a set of false positives from flow and type inference, around `rescue` and `ensure` clauses, block-form `inject` / `reduce`, memoizing `||=` in loops, re-joined narrowings of untyped values, and calls such as `Hash.new(capacity:)`, `min_by(nil)` and `Rational(x, 1)`. It fixes stale answers in the warm, incremental and language-server caches, and makes `exclude:`, `rigor init` and `pre_eval:` behave as documented. It also adds the experimental `rigor lens` command and fixes the Nix package.
+
+### Added
+
+- **[rigor lens]** The experimental `rigor lens FILE...` command maps a file's classes, modules, methods and attributes with the type `rigor check` gives each one and where that type came from (`sig/`, an inline comment, a plugin, a library, or inference), as text or as a `lens/v0` JSON document for tools such as ZARD ([#1910](https://github.com/rigortype/rigor/pull/1910)).
+
+### Changed
+
+- **[rigor check]** A warm `rigor check --incremental` run now reports how many files it re-analysed (`re-analysed N of M files`, with the changed, added and removed counts and any view templates) instead of the size of the whole analysed set ([#1526](https://github.com/rigortype/rigor/issues/1526), [#1896](https://github.com/rigortype/rigor/pull/1896)).
+- **[rigor check]** `rigor check --incremental` now says why each plugin forces a full analysis, naming the producer, fact or hook value it cannot digest, the hook that raised, or an unreadable fact store ([#1579](https://github.com/rigortype/rigor/issues/1579), [#1884](https://github.com/rigortype/rigor/pull/1884)).
+- **[rigor check]** `--verify-incremental` now also compares the order of the diagnostics and fails with a "same set, different order" report that names the first index where the lists diverge ([#1542](https://github.com/rigortype/rigor/issues/1542), [#1897](https://github.com/rigortype/rigor/pull/1897)).
+
+### Fixed
+
+- **[inference]** A block-form `inject` / `reduce` whose block rebinds or mutates a captured variable no longer folds to the first iteration's constant and reports a false `flow.always-truthy-condition` ([#1332](https://github.com/rigortype/rigor/issues/1332), [#1877](https://github.com/rigortype/rigor/pull/1877)).
+  - A mutation through a block-local alias (`l2 = log; l2 << e`) now widens the captured collection in every repeating block and loop body.
+- **[inference]** A memoizing `cache[k] ||= v` inside a repeating block whose value escapes through a captured local is no longer read as an empty slot on every run, which folded a later comparison to always-false ([#1336](https://github.com/rigortype/rigor/issues/1336), [#1882](https://github.com/rigortype/rigor/pull/1882)).
+- **[inference]** Re-joining the branches that narrowed an untyped value (`x.nil?`, then `case x when String`) now gives it back its untyped type, so a later call on correct code no longer reports `call.possible-nil-receiver` ([#1840](https://github.com/rigortype/rigor/issues/1840), [#1875](https://github.com/rigortype/rigor/pull/1875)).
+- **[inference]** A `rescue` arm or `ensure` clause now reads a variable the `begin` body writes as untyped instead of its value before the `begin`, so `conn.size` after `conn = nil; begin; conn = open_conn; …; rescue` and `unless done` in an `ensure` no longer report on correct code ([#1231](https://github.com/rigortype/rigor/issues/1231), [#1457](https://github.com/rigortype/rigor/issues/1457), [#1837](https://github.com/rigortype/rigor/pull/1837)).
+  - The widening applies inside the clause only; a misuse of such a variable there is no longer reported, and the code after the `begin` keeps its precise types.
+- **[inference]** `Hash.new(capacity: n)` no longer reads the `capacity:` keyword as the default value, so a read from the hash is no longer typed as `{ capacity: n }` ([#1812](https://github.com/rigortype/rigor/issues/1812), [#1868](https://github.com/rigortype/rigor/pull/1868)).
+- **[inference]** `min`, `max`, `min_by` and `max_by` with a `nil` count are now typed as the no-count call, so `xs.min_by(limit) { … }.succ` with a maybe-`nil` limit no longer reports `call.undefined-method` ([#1393](https://github.com/rigortype/rigor/issues/1393), [#1870](https://github.com/rigortype/rigor/pull/1870)).
+- **[inference]** `Rational(x, 1)` with a Float, Integer or BigDecimal `x` is now typed `Rational`, and `Rational | Complex` for a Complex `x`, instead of the argument's own class ([#1357](https://github.com/rigortype/rigor/issues/1357), [#1879](https://github.com/rigortype/rigor/pull/1879)).
+- **[inference]** A call that may re-run a regex match, or a nested `=~` inside a match with ten or more groups, now forgets every numbered match global, so `$10` and higher read `String?` afterwards as `$9` already did ([#1384](https://github.com/rigortype/rigor/issues/1384), [#1886](https://github.com/rigortype/rigor/pull/1886)).
+- **[engine]** A refinement of `Object`, `Module`, `Class`, `Kernel` or `BasicObject`, or of a module a class extends, now reaches a call on a class object, so `Integer.oo` under `refine(Object) { def oo = :o }` no longer reports `call.undefined-method` ([#1752](https://github.com/rigortype/rigor/issues/1752), [#1836](https://github.com/rigortype/rigor/pull/1836)).
+  - Such a call types as `Dynamic`, since a hook may install the class's own method unseen, and a class object's own singleton method still answers first.
+  - Inside a `using` of a module Rigor cannot read, calls on class objects also type as `Dynamic`.
+- **[engine]** `Struct` instances no longer answer `with` as if it were `Data#with`, so a `Struct` subclass that defines its own `with` is typed by it ([#1335](https://github.com/rigortype/rigor/issues/1335), [#1862](https://github.com/rigortype/rigor/pull/1862)).
+- **[config]** A relative `exclude:` glob such as `lib/gen/**` now applies to the configured `paths:` as well as to a path argument, so `rigor check` and `rigor check lib` skip the same files ([#1576](https://github.com/rigortype/rigor/issues/1576), [#1858](https://github.com/rigortype/rigor/pull/1858)).
+  - A relative pattern is matched against the path relative to the config file's directory and never against a directory above it.
+- **[pre_eval]** A method declared in two `pre_eval:` files is now typed as the last-listed declaration, as Ruby runs it ([#1710](https://github.com/rigortype/rigor/issues/1710), [#1880](https://github.com/rigortype/rigor/pull/1880)).
+  - `pre-eval.duplicate-declaration` is reported on the shadowed earlier declaration, and a definition guarded by `method_defined?` no longer shadows an earlier one.
+- **[rigor check]** `pre-eval.*` diagnostics now honour `# rigor:disable`, `# rigor:disable-file`, the `.rigor.yml` `disable:` list and the `pre-eval` family token ([#1883](https://github.com/rigortype/rigor/issues/1883), [#1892](https://github.com/rigortype/rigor/pull/1892)).
+- **[rigor check]** A nothing-changed `--incremental --workers N` recheck, and a `--workers N` run over a project with no Ruby files, now keep a plugin's `prepare`-time rows, so a project whose plugin `prepare` raised no longer passes ([#1541](https://github.com/rigortype/rigor/issues/1541), [#1894](https://github.com/rigortype/rigor/pull/1894)).
+- **[rigor check]** `rigor check --incremental --explain` now prints the `--explain` fallback rows instead of dropping them ([#1533](https://github.com/rigortype/rigor/issues/1533), [#1863](https://github.com/rigortype/rigor/pull/1863)).
+  - An `--explain` run keeps its own incremental snapshot, so it neither reuses nor evicts a plain run's ([#1867](https://github.com/rigortype/rigor/issues/1867), [#1899](https://github.com/rigortype/rigor/pull/1899)).
+- **[rigor check]** `--incremental` runs on macOS no longer fork `ps` for a peak-memory figure they never print ([#1529](https://github.com/rigortype/rigor/issues/1529), [#1871](https://github.com/rigortype/rigor/pull/1871)).
+- **[cache]** A source checkout's caches now key on the engine's own data files and bundled plugin signatures, so a data-only edit no longer replays the previous engine's diagnostics from a warm cache ([#1492](https://github.com/rigortype/rigor/issues/1492), [#1865](https://github.com/rigortype/rigor/pull/1865)).
+- **[rigor lsp]** The language server now re-checks from scratch when a `pre_eval:` file, an auto-detected `sig/*.rbs`, a lockfile or `.rigor.yml` changes between saves, instead of serving diagnostics from the old inputs until it restarts ([#1613](https://github.com/rigortype/rigor/issues/1613), [#1893](https://github.com/rigortype/rigor/pull/1893)).
+- **[rigor type-of]** `rigor type-of` now reads the `pre_eval:` registry, so it agrees with `rigor check` on a patched method ([#1883](https://github.com/rigortype/rigor/issues/1883), [#1892](https://github.com/rigortype/rigor/pull/1892)).
+- **[rigor init]** `rigor init --path=PATH` now writes `paths:` relative to the config file, so a config in a subdirectory loads back to the project's `lib/` ([#1399](https://github.com/rigortype/rigor/issues/1399), [#1859](https://github.com/rigortype/rigor/pull/1859)).
+- **[rigor sig-gen]** `rigor sig-gen` no longer proposes a pinned literal return such as `-> 1` for a member declared `-> untyped`, and widens an Integer, String or Symbol literal to its class instead ([#1489](https://github.com/rigortype/rigor/issues/1489), [#1890](https://github.com/rigortype/rigor/pull/1890)).
+- **[rigor unused]** `rigor unused` now resolves a literal `const_get` name at its receiver and the receiver's ancestors, so `Finder.const_get(:Params, false)` no longer leaves `Finder::Params` listed as unused ([#1767](https://github.com/rigortype/rigor/pull/1767)).
+- **[rigor unused]** `rigor unused` now reads one project root, so a run from a subdirectory with `--config` classifies `test/` helpers as test code and parses a file reached under two spellings once ([#1888](https://github.com/rigortype/rigor/pull/1888)).
+- **[rigor docs]** `rigor docs <page>` no longer crashes with `invalid byte sequence in US-ASCII` when the locale is not UTF-8 ([#1860](https://github.com/rigortype/rigor/issues/1860), [#1873](https://github.com/rigortype/rigor/pull/1873)).
+- **[rbs]** A gem locked for several platforms (`bundle lock --add-platform`) now keeps its shipped `sig/` on every host, so `ffi`'s signatures no longer vanish on macOS ([#1854](https://github.com/rigortype/rigor/pull/1854)); thank you @n-rodriguez!
+  - The lockfile filter used to remember only the last-listed platform variant, so every class inheriting `::FFI::Struct` failed to build.
+- **[coverage]** `coverage --protection` now attributes the constants of a gem installed as a platform build (`commonmarker-2.10.0-arm64-darwin`) to that gem instead of reporting reads into it as an engine gap ([#1855](https://github.com/rigortype/rigor/pull/1855)).
+- **[plugins/rigor-active-model-serializers]** A serializer class declared in several files that each name its superclass is now read as one class, so a sibling file can no longer hide the valid file's attributes from `object` typing ([#1831](https://github.com/rigortype/rigor/issues/1831), [#1864](https://github.com/rigortype/rigor/pull/1864)).
+  - A class whose files name different superclasses is left undecided.
+- **[packaging]** The Nix package now ships the bundled `docs/`, `skills/` and `plugins/` trees, so `rigor docs`, `rigor skill --list` and a plugin named in `.rigor.yml` work on the packaged binary ([#1853](https://github.com/rigortype/rigor/issues/1853), [#1857](https://github.com/rigortype/rigor/pull/1857)).
+- **[packaging]** The Nix package now ships the same `rbs` (4.2.0) and `language_server-protocol` (3.17.0.6) that the suite and release gate validate ([#1850](https://github.com/rigortype/rigor/pull/1850)).
+- **[docs]** The Rails quickstart and the `rigor-project-init` skill's example now write `exclude:` entries as globs (`vendor/**`, `tmp/**`), which a bare directory name never matched ([#1861](https://github.com/rigortype/rigor/issues/1861)).
+
 ## [0.4.2] - 2026-10-11
 
 v0.4.2 introduces full typing support for Ruby refinements ([ADR-121](docs/adr/121-ruby-refinement-typing.md)), resolving method calls under `using` and Ruby 4.1's `Proc#refined` from their refinement bodies rather than the replaced methods. Ruby 4.1 support expands with signatures for new core methods, a deprecation diagnostic for `ruby2_keywords`, and plugin support for refined blocks. Overload selection is overhauled to accurately handle keyword arguments, splat parameters, and untyped arguments, joining candidate returns when calls are ambiguous. New plugins add bundled signatures for `ac-library-rb`, Alba serializers, and Typelizer, alongside improvements to `rigor unused` root detection and encoding crash fixes.
@@ -345,7 +401,8 @@ v0.4.0 opens the 0.4 line by bringing Rails views into the analysis: rigor-actio
 - **[skills]** The shipped agent skills no longer give commands that fail or advice that is out of date, such as a bare `rigor diff` or a `< 0.2.0` version pin ([#1222](https://github.com/rigortype/rigor/pull/1222)).
 - **[playground]** Tab indents in the playground editor, which also shows how to move focus back out, and the dark theme's cursor is visible again ([#990](https://github.com/rigortype/rigor/pull/990)).
 
-[Unreleased]: https://github.com/rigortype/rigor/compare/v0.4.2...HEAD
+[Unreleased]: https://github.com/rigortype/rigor/compare/v0.4.3...HEAD
+[0.4.3]: https://github.com/rigortype/rigor/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/rigortype/rigor/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/rigortype/rigor/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/rigortype/rigor/compare/v0.3.9...v0.4.0

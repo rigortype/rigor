@@ -1,1 +1,0 @@
-- **[config]** A relative `exclude:` glob such as `lib/gen/**` now applies to the configured `paths:` as well as to a path argument, so `rigor check` and `rigor check lib` skip the same files. ([#1858](https://github.com/rigortype/rigor/pull/1858))

@@ -1,1 +1,0 @@
-- **[inference]** `Hash.new(capacity: n)` no longer reads the `capacity:` keyword as the default value, so a read from the hash is no longer typed as `{ capacity: n }` and draws no `undefined method` on correct code. ([#1868](https://github.com/rigortype/rigor/pull/1868))

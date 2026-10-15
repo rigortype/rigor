@@ -1,1 +1,0 @@
-- **[inference]** A memoizing `cache[k] ||= v` inside a repeating block no longer reads the slot as empty on every run when its value escapes through a captured local, so `last = (cache[:k] ||= :f).itself` beside another `cache[:k] ||= :e` no longer folds `last == :e` to always-false. ([#1882](https://github.com/rigortype/rigor/pull/1882))

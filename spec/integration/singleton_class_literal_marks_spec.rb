@@ -68,6 +68,40 @@ RSpec.describe "singleton_class calls with literal names (#1906)", type: :runner
       RUBY
     }
   end
+  let(:skipped_block_rewrites) do
+    <<~RUBY
+      class Prep2
+        def self.to_prepare = yield
+      end
+      class D1; def self.own(a) = a; def self.other(a, b) = a; end
+      class D2; def self.own(a) = a; def self.other(a, b) = a; end
+      class D3; def self.own(a) = a; end
+      class D6; def self.own(a) = a; def self.other(a, b) = a; end
+      class D8; def self.own(a) = a; def self.other(a, b) = a; end
+      class X
+        def self.s1 = [1].each { D1.singleton_class.alias_method(:own, :other) }
+        def self.s2 = 1.tap { D2.singleton_class.alias_method(:own, :other) }
+        def self.s3
+          Prep2.to_prepare { D3.singleton_class.define_method(:own) { |a, b| a } }
+        end
+        Prep2.to_prepare do
+          def helper6 = D6.singleton_class.alias_method(:own, :other)
+        end
+      end
+      module Y
+        def self.go
+          [1].each { D8.singleton_class.alias_method(:own, :other) }
+        end
+      end
+      X.s1
+      X.s2
+      X.s3
+      X.new.helper6
+      Y.go
+      p D1.own(1, 2), D2.own(1, 2), D3.own(1, 2), D6.own(1, 2), D8.own(1, 2)
+    RUBY
+  end
+
   let(:inherited_rewrites) do
     <<~RUBY
       class B2
@@ -223,6 +257,13 @@ RSpec.describe "singleton_class calls with literal names (#1906)", type: :runner
     expect(arity_rows(indirect_rewrites)).to eq([])
   end
 
+  # A literal naming call in a block the extends walk skips (one in a method body, or one that may not run, as a
+  # `to_prepare` hook) or in a `def` such a block holds reaches no mark, so it taints the whole singleton side. Ruby
+  # 4.0.5 prints `1` five times; before this change every call was reported.
+  it "keeps the singleton side unreadable for a literal naming call in a skipped block" do
+    expect(arity_rows("app.rb" => skipped_block_rewrites)).to eq([])
+  end
+
   # The class body and the `singleton_class` call live in different files, reopening the class or calling on the
   # constant. Ruby 4.0.5 runs `D.own` through the alias of `keep`, so it answers; `E.own` has no new body and raises,
   # as do `D.keep` and `E.keep`.
@@ -261,15 +302,17 @@ RSpec.describe "singleton_class calls with literal names (#1906)", type: :runner
       diagnostics.select { |d| d.rule == "call.wrong-arity" }.map { |d| [d.path, d.line] }.sort
     end
 
-    def incremental_rows
+    def incremental_run
       root = File.join(Dir.pwd, ".rigor", "cache")
       snapshot = Rigor::Cache::IncrementalSnapshot.new(root: root)
       fingerprint = Rigor::Cache::IncrementalSnapshot.fingerprint(configuration: configuration, roots: paths)
       session = Rigor::Analysis::IncrementalSession.new(configuration: configuration, paths: paths,
                                                         cache_store: Rigor::Cache::Store.new(root: root))
       diagnostics, warm = guarded_run_incremental(session, snapshot: snapshot, fingerprint: fingerprint)
-      [rows(diagnostics), warm]
+      [rows(diagnostics), warm, session]
     end
+
+    def incremental_rows = incremental_run.first(2)
 
     def cold_rows
       runner = Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil)
@@ -312,6 +355,21 @@ RSpec.describe "singleton_class calls with literal names (#1906)", type: :runner
       write("lib/rewrite.rb", "D.singleton_class.alias_method :o9, :keep\n")
       expect(incremental_rows).to eq([[["lib/d.rb", 5]], true])
       expect(cold_rows).to eq([["lib/d.rb", 5]])
+    end
+
+    # Through the session: the file only includes into `AR::Base`, which records no singleton entry, so an edit that
+    # moves its declaration signature (a new `def`) re-checks no reader of another `Base`, though the reader records
+    # the `class:Base` edge.
+    it "re-checks no reader of a same-named constant when the file only includes into one" do
+      write("lib/d.rb", "module Other\n  class Base\n    def self.x(a) = a\n  end\nend\nOther::Base.x(1, 2)\n")
+      mixins = "module Mo1; end\nAR::Base.include(Mo1)\n"
+      write("lib/rewrite.rb", "module AR; class Base; end; end\n#{mixins}")
+      expect(incremental_rows).to eq([[["lib/d.rb", 6]], false])
+
+      write("lib/rewrite.rb", "module AR; class Base; def y = 1; end; end\n#{mixins}")
+      rows, warm, session = incremental_run
+      expect([rows, warm]).to eq([[["lib/d.rb", 6]], true])
+      expect(session.last_recheck.affected).not_to include("lib/d.rb")
     end
 
     # The key fires only for a constant whose singleton names or side the file rewrote: `ActiveRecord::Base.include`

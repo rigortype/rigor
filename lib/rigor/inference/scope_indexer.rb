@@ -7004,13 +7004,40 @@ module Rigor
       def extends_block_handled?(node, qualified_prefix, current_class, accumulator, in_singleton, singleton_self,
                                  singleton_cref)
         case extends_block_plan(node, accumulator)
-        when :skip then true
+        when :skip
+          taint_skipped_singleton_rewrites(node.block, qualified_prefix, current_class, accumulator)
+          true
         when :rebound
           walk_extends_block_call(node, qualified_prefix, current_class, accumulator,
                                   in_singleton, singleton_self, singleton_cref)
           true
         else false
         end
+      end
+
+      # Issue #1906 — a block the extends walk skips may still run, and a `singleton_class` call in it, or in a `def`
+      # it holds (`[1].each { D.singleton_class.alias_method :own, :other }` in a method body,
+      # `to_prepare do def helper = D.singleton_class.alias_method(...) end`), reaches no mark the methods walk records
+      # there. Every such call taints the side it may rewrite, as {#singleton_class_rewrite_tainted?} does for one the
+      # walk visits; a constant receiver taints every name it can denote from here.
+      def taint_skipped_singleton_rewrites(node, qualified_prefix, current_class, accumulator)
+        return unless node.is_a?(Prism::Node)
+
+        if node.is_a?(Prism::CallNode) && singleton_class_of_receiver?(node.receiver) && surface_rewriting_call?(node)
+          skipped_rewrite_owners(node.receiver.receiver, qualified_prefix, current_class).each do |owner|
+            accumulator.taint(owner, :extend)
+          end
+        end
+        node.rigor_each_child do |child|
+          taint_skipped_singleton_rewrites(child, qualified_prefix, current_class, accumulator)
+        end
+      end
+
+      def skipped_rewrite_owners(object, qualified_prefix, current_class)
+        return [current_class].compact if object.nil? || object.is_a?(Prism::SelfNode)
+        return [] unless object.is_a?(Prism::ConstantReadNode) || object.is_a?(Prism::ConstantPathNode)
+
+        constant_receiver_candidates(object, qualified_prefix)
       end
 
       ARRAY_ITERATORS = %i[each each_with_index map].freeze

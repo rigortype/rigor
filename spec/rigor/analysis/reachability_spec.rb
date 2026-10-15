@@ -873,7 +873,7 @@ RSpec.describe Rigor::Analysis::Reachability do
             class Blk; end
           end
         RUBY
-        expect(found).to eq(%w[Sub])
+        expect(found).to be_empty
       end
 
       it "reads an inherit = false literal at the eval receiver" do

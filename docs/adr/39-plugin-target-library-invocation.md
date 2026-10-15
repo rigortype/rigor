@@ -319,6 +319,10 @@ and reused. `process` falls back to `none` where `fork` is unavailable.
   configured strategy (`process` by default) instead of segfaulting. The
   check is behavioural rather than a version bound, so a fixed 4.1.0dev
   build and any future 4.0.x backport are admitted without a code change.
+  The same probe runs when `RUBY_BOX` is already set, since that process
+  boots inside the box before any Rigor code runs: a refused Ruby is
+  re-exec'ed without `RUBY_BOX` ([#1346](https://github.com/rigortype/rigor/issues/1346)).
+  The verdict is cached per Ruby build so the child is paid once.
 
 So **`process` (fork) is the default** — the production-ready isolation
 that works today: validated on a full Redmine `app` run (byte-identical

@@ -2024,7 +2024,8 @@ module Rigor
           analyze_file: ->(path, environment) { analyze_file(path, environment) },
           restored_run_level_rows: @restored_run_level_rows,
           feature_sources: -> { required_feature_sources },
-          plugin_prepare: -> { @pre_passes.prepare_throwaway_registry }
+          plugin_prepare: -> { @pre_passes.prepare_throwaway_registry },
+          prepare_coordinator_plugins: -> { @pre_passes.prepare_registry(@plugin_registry) }
         )
         @diagnostic_aggregator = DiagnosticAggregator.new(
           configuration: @configuration,
@@ -2044,7 +2045,8 @@ module Rigor
           definition_build_failures_snapshot: -> { @snapshots.definition_build_failures },
           hkt_scan_failure_snapshot: -> { @snapshots.hkt_scan_failure },
           conformance_results_snapshot: -> { @snapshots.conformance_results },
-          pooled_run_disclosures: -> { @pool_coordinator.collected_run_disclosures }
+          pooled_run_disclosures: -> { @pool_coordinator.collected_run_disclosures },
+          pooled_trust_refusals: -> { @pool_coordinator.collected_trust_refusals }
         )
       end
 

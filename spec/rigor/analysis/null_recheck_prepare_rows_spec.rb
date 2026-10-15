@@ -26,8 +26,9 @@ RSpec.describe Rigor::Analysis::IncrementalSession, "null recheck keeps the plug
         end
       end
     )
-    # A refused read in `#prepare` is recorded on the plugin instance and surfaces as an info row on a
-    # sequential run only; a pooled run never shows it, and a pooled null recheck must not either.
+    # A refused read in `#prepare` is recorded on the plugin instance and surfaces as an info row. Since
+    # #1900 a pooled run shows it too, and a pooled null recheck, which runs `#prepare` on a throwaway
+    # registry, must show the same row.
     Rigor::Plugin.const_set(
       :NullRecheckPrepareRefused,
       Class.new(Rigor::Plugin::Base) do
@@ -146,7 +147,7 @@ RSpec.describe Rigor::Analysis::IncrementalSession, "null recheck keeps the plug
         recheck = guarded_recheck(subject_session, allow_plugin_crash: true)
 
         expect(hashes(recheck.diagnostics)).to eq(hashes(expected))
-        expect(recheck.diagnostics.map(&:rule)).not_to include("plugin_trust.read-refused")
+        expect(recheck.diagnostics.map(&:rule)).to include("plugin_trust.read-refused")
       end
     end
   end

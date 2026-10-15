@@ -1,0 +1,4 @@
+class Order
+  def amount: () -> Integer
+  def broken: () -> untyped
+end

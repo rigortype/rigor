@@ -71,6 +71,7 @@ members:
     - lib/rigor/analysis/check_rules/ruby_deprecations.rb
     - lib/rigor/analysis/runner.rb
     - lib/rigor/inference/block_call_timing.rb
+    - lib/rigor/lens/run.rb
     copies:
     - lib/rigor/inference/parameter_inference_collector.rb
   discovered_def_nodes:
@@ -164,6 +165,7 @@ members:
     reads:
     - lib/rigor/analysis/incremental_session.rb
     - lib/rigor/analysis/runner.rb
+    - lib/rigor/lens/run.rb
     copies:
     - lib/rigor/analysis/runner.rb
     - lib/rigor/inference/parameter_inference_collector.rb
@@ -173,6 +175,7 @@ members:
     - lib/rigor/analysis/incremental_session.rb
     - lib/rigor/analysis/runner.rb
     - lib/rigor/inference/refined_dispatch/class_object.rb
+    - lib/rigor/lens/run.rb
     copies:
     - lib/rigor/analysis/runner.rb
     - lib/rigor/protection/discovery_seed.rb

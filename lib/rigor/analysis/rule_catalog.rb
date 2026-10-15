@@ -94,7 +94,9 @@ module Rigor
           does_not_fire_when: [
             "Implicit-self calls (no receiver) — too noisy without per-method RBS for every helper.",
             "Receiver is `Dynamic[T]` / `Top` / `Union` — by definition the method set isn't enumerable.",
-            "Receiver class is in the loader but its RBS definition cannot be built (constant aliases)."
+            "Receiver class is in the loader but its RBS definition cannot be built (constant aliases).",
+            "Receiver class answers beyond any signature: a plugin-declared open receiver (ADR-26), or one " \
+            "Rigor's bundled overlays name — `OpenStruct`, whose fields are per-instance singleton methods."
           ],
           suppression: "`# rigor:disable call.undefined-method` on the call line, " \
                        "or `disable: [\"call.undefined-method\"]` in `.rigor.yml`.",

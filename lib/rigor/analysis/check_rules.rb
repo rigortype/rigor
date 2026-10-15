@@ -1364,6 +1364,20 @@ module Rigor
         GEM_OVERLAY_OPEN_RECEIVERS = Set["ActiveSupport::Duration", "ActiveSupport::Concern"].freeze
         private_constant :GEM_OVERLAY_OPEN_RECEIVERS
 
+        # Issue #1456 — the `data/core_overlay/` twin of {GEM_OVERLAY_OPEN_RECEIVERS}. `OpenStruct` defines
+        # each field as a per-instance singleton method and answers the rest through a private
+        # `method_missing` (ostruct 0.6), so no signature can enumerate its surface. The only other
+        # declaration in the environment is json's add-on reopening (`json_create` / `as_json` / `to_json`),
+        # which made the class read as fully declared and every field access a `call.undefined-method`.
+        # `data/core_overlay/ostruct.rbs` declares the `method_missing` / `respond_to_missing?` pair, and an
+        # RBS-declared `method_missing` does not by itself open a receiver here, so the class is named. No
+        # load gate is needed: the core overlay loads into every environment that has RBS at all, so the
+        # list is active whenever the declaration it protects is. Both sides of the class are open, as
+        # with {GEM_OVERLAY_OPEN_RECEIVERS}. The general rule — a class declared only by another library's
+        # partial reopening — is #1978, not this list.
+        CORE_OVERLAY_OPEN_RECEIVERS = Set["OpenStruct"].freeze
+        private_constant :CORE_OVERLAY_OPEN_RECEIVERS
+
         # ADR-26 — whether `class_name` is declared "open" by a
         # loaded plugin (manifest `open_receivers:`). An open
         # class responds beyond its RBS surface, so the
@@ -1372,11 +1386,14 @@ module Rigor
         # RBS method table, so proving a call "undefined" against it is
         # unsound: a plugin-declared open receiver, a Rigor-bundled-
         # overlay open receiver ({GEM_OVERLAY_OPEN_RECEIVERS}) whose
-        # bundled directory this run actually loaded, or a
+        # bundled directory this run actually loaded, a core-overlay
+        # open receiver ({CORE_OVERLAY_OPEN_RECEIVERS}), or a
         # Rigor-synthesized stub type (see `RbsLoader#synthesized_type_names`).
         def unbounded_receiver_surface?(class_name, scope)
+          bare_name = class_name.to_s.sub(/\A::/, "")
           open_receiver?(class_name, scope) || synthesized_stub_receiver?(class_name, scope) ||
-            (GEM_OVERLAY_OPEN_RECEIVERS.include?(class_name.to_s.sub(/\A::/, "")) && gem_overlay_loaded?(scope))
+            CORE_OVERLAY_OPEN_RECEIVERS.include?(bare_name) ||
+            (GEM_OVERLAY_OPEN_RECEIVERS.include?(bare_name) && gem_overlay_loaded?(scope))
         end
 
         def open_receiver?(class_name, scope)

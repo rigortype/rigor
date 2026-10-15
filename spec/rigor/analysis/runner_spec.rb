@@ -1037,7 +1037,8 @@ RSpec.describe Rigor::Analysis::Runner do
             File.write(first, first_source)
             File.write(second, "class Integer\n  def foo = 2\nend\n")
             Dir.chdir(tmpdir) do
-              configuration = Rigor::Configuration.new({ "paths" => [], "pre_eval" => [first, second] }.merge(extra_config))
+              base = { "paths" => [], "pre_eval" => [first, second] }
+              configuration = Rigor::Configuration.new(base.merge(extra_config))
               result = guarded_run(described_class.new(configuration: configuration, cache_store: nil))
               return result.diagnostics.select { |d| d.rule == "pre-eval.duplicate-declaration" }
             end

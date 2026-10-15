@@ -463,7 +463,7 @@ RSpec.describe Rigor::CLI do
 
     # Issue #1883 — `type-of` builds the same `pre_eval:` patched registry `rigor check` types against.
     it "answers a pre_eval-patched method with the type `rigor check` reports" do
-      patch = write_fixture("patch.rb", "class Integer\n  def foo = 1\nend\n")
+      write_fixture("patch.rb", "class Integer\n  def foo = 1\nend\n")
       probe = write_fixture("probe.rb", "rand(3).foo\n")
       config = write_fixture(".rigor.yml", "paths: [probe.rb]\npre_eval: [patch.rb]\n")
 
@@ -473,7 +473,8 @@ RSpec.describe Rigor::CLI do
         expect(status).to eq(0)
         expect(out).to include("type:    Dynamic[1]")
 
-        File.write(probe, "require \"rigor/testing\"\ninclude Rigor::Testing\n\nassert_type(\"Dynamic[1]\", rand(3).foo)\n")
+        File.write(probe, "require \"rigor/testing\"\ninclude Rigor::Testing\n\n" \
+                          "assert_type(\"Dynamic[1]\", rand(3).foo)\n")
         _status, check_out, = run_cli("check", "--no-stats", "--config", config, "probe.rb")
         expect(check_out).not_to include("assert_type")
       end

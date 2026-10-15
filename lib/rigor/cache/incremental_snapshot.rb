@@ -169,7 +169,10 @@ module Rigor
       # file's conditional `def` as certain and a warm run would answer a definer a cold run declines.
       # 37: ADR-119 WD3 — the visibility walk fills `contested_discovered_method_visibilities`, which a pre-37 bundle
       # carries empty.
-      SCHEMA = 37
+      # 38: issue #1898 — the payload gains `effect_plugin_digest`, the plugin effect-fact digest the collections were
+      # stamped under, which a recheck now checks before its served collections reach the envelope pass. A pre-38
+      # blob carries none, so the gate rejects it and the next run is cold.
+      SCHEMA = 38
 
       # The persisted per-file state.
       # `cache` maps an analyzed file to its diagnostics.
@@ -224,11 +227,22 @@ module Rigor
       # Issues #796 / #794 — the run-level rows a narrowed run replays instead of re-deriving; see
       # docs/internal-spec/cache.md § "Run-level rows the snapshot carries" for why exactly these two are
       # fresh under the fingerprint and why no other `.rigor.yml`-level row may join them.
+      # Issue #1898 — `effect_plugin_digest` is {Rigor::Effects::PluginFacts#digest} at the run that collected
+      # `effect_collections` (nil when collection was off). A plugin stamps its attributions and edges into a file's
+      # collection, and `effects_identity` is plugin-blind (it is compared before any plugin loads), so the session
+      # compares this one after the recheck has loaded them.
       Payload = Data.define(:cache, :sources, :digests, :analyzed,
                             :symbol_sources, :ancestry_sources, :symbol_fingerprints,
                             :missing, :class_decls, :constant_decls, :seed_bundles, :plugin_fact_digest,
                             :return_summaries, :param_table,
-                            :effect_collections, :effects_identity, :run_level_rows)
+                            :effect_collections, :effects_identity, :run_level_rows,
+                            :effect_plugin_digest) do
+        # Defaults to nil so a payload built without it (an older caller, a spec fixture) reads as "unknown",
+        # which the session treats as moved.
+        def initialize(effect_plugin_digest: nil, **rest)
+          super
+        end
+      end
 
       # Issues #796 / #794 — the two run-level rows the snapshot carries. `definition_build_failures` is the
       # reported per-class detail list ({Environment::RbsLoader#definition_build_failures}); `hkt_scan_failure`
@@ -434,7 +448,8 @@ module Rigor
           param_table: data[:param_table] || {},
           effect_collections: data[:effect_collections] || {},
           effects_identity: data[:effects_identity],
-          run_level_rows: data[:run_level_rows]
+          run_level_rows: data[:run_level_rows],
+          effect_plugin_digest: data[:effect_plugin_digest]
         )
       end
       private :payload_from
@@ -459,7 +474,8 @@ module Rigor
           param_table: payload.param_table,
           effect_collections: payload.effect_collections,
           effects_identity: payload.effects_identity,
-          run_level_rows: payload.run_level_rows
+          run_level_rows: payload.run_level_rows,
+          effect_plugin_digest: payload.effect_plugin_digest
         )
         # #1507 — every `--incremental` run that analysed anything rewrites this whole blob, so its deflate is
         # on the edit path; see {Store::DEFLATE_LEVEL}.

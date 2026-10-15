@@ -1180,7 +1180,9 @@ from its comments — every `#:` / `# @rbs` annotation under the auto-wired
 that file contributed — the *direct* summaries and unresolved call edges, never the
 propagated table, which is re-run over the merged whole on every run (a leaf's summary
 reaches every caller, so a stored closure would have to be invalidated by all of them).
-A recheck re-collects only the changed closure and folds the rest back from here.
+A recheck re-collects only the changed closure and folds the rest back from here,
+into the session's table and into the recheck runner's own graph, which is what the
+envelope pass judges (#1898).
 
 `effects_identity` is a **second gate**, independent of the global fingerprint above,
 and it exists because the `effects:` block is deliberately absent from
@@ -1194,6 +1196,11 @@ the diagnostics half of the payload is untouched, and the session then takes a f
 baseline, because a recheck re-collects only the closure and a partial collection cannot
 be closed into a whole-project fixpoint. A run with collection off keeps no collections,
 writes `{}` / `nil`, and behaves exactly as it did before the slot existed.
+
+`effect_plugin_digest` (#1898) is the plugin effect-fact digest (`PluginFacts#digest`) the
+collections were stamped under. `effects_identity` is compared before any plugin loads, so
+it cannot carry it; a recheck compares this one after its run instead, and re-baselines
+when it moved and the recheck served any collection.
 
 The contract in full — both slots, the two identities, and what each invalidates — is
 [`effect-summaries.md` § Caching](effect-summaries.md).

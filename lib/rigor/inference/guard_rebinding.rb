@@ -223,6 +223,12 @@ module Rigor
         end || Type::Combinator.untyped
       end
 
+      # Issue #1596 — true when `name` runs code chosen by name or by a String, or a block or String it is given
+      # ({CODE_RUNNING_NAMES}, {BLOCK_OR_CODE_NAMES}), whatever its receiver.
+      def code_running_name?(name)
+        CODE_RUNNING_NAMES.include?(name) || BLOCK_OR_CODE_NAMES.include?(name)
+      end
+
       # True when `method_name` on a value of `type` may run foreign code ({.foreign_target?}).
       def type_method_foreign?(type, method_name, scope)
         targets = ProjectMethodOwnership.targets(type)
@@ -326,8 +332,7 @@ module Rigor
       private_class_method :scan, :guarded_ivar_write?, :scan_call, :receiver_targets, :foreign_target?,
                            :universal_delegate_foreign?, :method_owner, :deferred_block_call?,
                            :compound_write_foreign?,
-                           :compound_receiver_type, :compound_accessors, :compound_read_type, :variable_type,
-                           :type_method_foreign?
+                           :compound_receiver_type, :compound_accessors, :compound_read_type, :variable_type
     end
 
     module GuardRebinding

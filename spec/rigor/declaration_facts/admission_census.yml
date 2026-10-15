@@ -48,6 +48,7 @@ members:
     - lib/rigor/inference/refined_dispatch.rb
     - lib/rigor/inference/refined_dispatch/class_object.rb
     - lib/rigor/inference/refined_dispatch/own_method.rb
+    - lib/rigor/inference/self_call_ivar_writes.rb
     - lib/rigor/inference/singleton_hook_decline.rb
     - lib/rigor/protection/discovery_seed.rb
     - lib/rigor/reflection.rb
@@ -62,6 +63,7 @@ members:
   in_source_constants:
     reads:
     - lib/rigor/inference/last_line/implicit_self.rb
+    - lib/rigor/inference/self_call_ivar_writes.rb
     - lib/rigor/reflection.rb
     copies:
     - lib/rigor/analysis/runner.rb
@@ -259,6 +261,7 @@ members:
     - lib/rigor/inference/in_effect_refinements/scope_reads.rb
     - lib/rigor/inference/refined_dispatch.rb
     - lib/rigor/inference/refined_dispatch/own_method.rb
+    - lib/rigor/inference/self_call_ivar_writes.rb
     copies:
     - lib/rigor/analysis/runner.rb
     - lib/rigor/protection/discovery_seed.rb

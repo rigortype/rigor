@@ -507,11 +507,25 @@ module Rigor
         method_assign_effects = build_method_assign_effects(root)
         walk_class_ivars(root, [], default_scope, accumulator, mutated_ivars,
                          read_before_write, init_writes, method_assign_effects)
+        exempt_class_body_writes!(init_writes, accumulator.delete(DEFINE_METHOD_WRITES) || {})
         merge_held_ivar_writes!(accumulator)
         record_aliased_ivar_mutations!(root, mutated_ivars)
         widen_mutated_ivar_entries!(accumulator, mutated_ivars)
         contribute_read_before_write_nil!(accumulator, read_before_write, init_writes)
         accumulator.transform_values(&:freeze).freeze
+      end
+
+      # Folds the class-body writes {#collect_class_body_ivar_writes} held under {CLASS_BODY_WRITES} into the
+      # `init_writes` exemption, except for an ivar a `define_method` block of the class writes (#1768). Such an ivar
+      # had no census entry before the block's writes were counted, so the exemption never applied to it; a
+      # class-body `@x = nil` writes the class object's ivar and says nothing about whether an instance's `@x` is set,
+      # and exempting it would seed `@x` non-nil from the block's write alone (`if @x` folding always-truthy on an
+      # instance whose `@x` is unset). It keeps the read-before-write `nil` instead, which only widens.
+      def exempt_class_body_writes!(init_writes, define_method_writes)
+        (init_writes.delete(CLASS_BODY_WRITES) || {}).each do |class_name, ivars|
+          kept = ivars - (define_method_writes[class_name] || EMPTY_GUARDED_IVARS)
+          (init_writes[class_name] ||= Set.new).merge(kept)
+        end
       end
 
       # B2.3 — finalize the read-before-write nil contribution. For each class, for each ivar where SOME method body
@@ -854,6 +868,7 @@ module Rigor
           owner = def_owner || qualified_prefix
           collect_initializer_block_ivars(node, owner, default_scope, accumulator, mutated_ivars, init_writes)
           record_attr_writer_ivars(node, owner, accumulator) if ATTR_WRITER_MACROS.include?(node.name)
+          collect_define_method_block_ivars(node, owner, default_scope, accumulator, mutated_ivars)
           false
         else
           walk_ivars_meta_new?(node, qualified_prefix, default_scope, accumulator,
@@ -1065,6 +1080,44 @@ module Rigor
         end
       end
 
+      # The `define_method` arm of {#walk_class_ivars} (#1768). `define_method(:m) { … }` on the implicit
+      # or `self` receiver installs its block as an instance method of `owner`, and Ruby runs the body on
+      # the instance, so its `@x = …` writes are the instance's ivars exactly as a `def m` body's are —
+      # `DefineMethodBlockSelf` narrows the block's `self` the same way when it is evaluated. Without this
+      # arm an ivar `initialize` sets to `nil` and a `define_method` block sets to a String read as `nil`
+      # in every sibling `def`. The block is typed under the instance `self`, as a def body is. Only the
+      # literal-block form counts: a `define_method(:m, callable)` or `&callable` argument is not walked.
+      # `owner` is empty in a `class << self` body (the call defines a class method there) and in an
+      # anonymous factory body, and the block contributes nothing there. A `define_method` inside a `def`
+      # body is already reached by that body's walk ({#gather_ivar_writes} enters blocks).
+      def collect_define_method_block_ivars(node, owner, default_scope, accumulator, mutated_ivars)
+        return if owner.empty?
+        return unless define_method_block_call?(node)
+
+        block = node.block
+        return unless block.body
+
+        class_name = owner.join("::")
+        body_scope = census_body_scope(default_scope, owner, Type::Combinator.nominal_of(class_name))
+        gather_ivar_writes(block.body, body_scope, class_name, accumulator, EMPTY_GUARDED_IVARS, mutated_ivars)
+        written = (accumulator[DEFINE_METHOD_WRITES] ||= {})[class_name] ||= Set.new
+        define_method_written_ivars(block.body, written)
+      end
+
+      # The ivars a `define_method` block body writes, in any write form, outside a nested `def` / `class` / `module`.
+      def define_method_written_ivars(node, acc)
+        return unless node.is_a?(Prism::Node)
+        return if IVAR_BARRIER_NODES.any? { |klass| node.is_a?(klass) }
+
+        case node
+        when Prism::InstanceVariableWriteNode, Prism::InstanceVariableOrWriteNode,
+             Prism::InstanceVariableAndWriteNode, Prism::InstanceVariableOperatorWriteNode,
+             Prism::InstanceVariableTargetNode
+          acc << node.name
+        end
+        node.rigor_each_child { |child| define_method_written_ivars(child, acc) }
+      end
+
       # ADR-38 block-form gate: true when a loaded plugin declares `method_name` a block-form initializer for
       # `class_name` (or an ancestor). Mirrors `additional_initializer?` but queries `covers_block_method?` instead of
       # `covers_method?`.
@@ -1156,20 +1209,38 @@ module Rigor
       # every `@x = …` write target as a class-body init. Consumed by `contribute_read_before_write_nil!` to exempt
       # ivars the author already knows might be nil (the `@x = nil` at class-body level is the canonical nullability
       # acknowledgement; the instance @x is technically a separate store, but the pragmatic intent is unambiguous).
+      #
+      # A literal `define_method` block is a method body, not class-body code (#1768): its writes reach the census as
+      # a `def` body's do, so they must not exempt the ivar from the read-before-write `nil` either. Only its receiver
+      # and arguments are walked.
       def collect_class_body_ivar_writes(node, class_name, init_writes)
         return unless node.is_a?(Prism::Node)
         return if IVAR_BARRIER_NODES.any? { |klass| node.is_a?(klass) }
+
+        return collect_define_method_argument_writes(node, class_name, init_writes) if define_method_block_call?(node)
 
         if node.is_a?(Prism::InstanceVariableWriteNode) ||
            node.is_a?(Prism::InstanceVariableOrWriteNode) ||
            node.is_a?(Prism::InstanceVariableAndWriteNode) ||
            node.is_a?(Prism::InstanceVariableOperatorWriteNode)
-          (init_writes[class_name] ||= Set.new) << node.name
+          ((init_writes[CLASS_BODY_WRITES] ||= {})[class_name] ||= Set.new) << node.name
         end
 
         node.rigor_each_child do |child|
           collect_class_body_ivar_writes(child, class_name, init_writes)
         end
+      end
+
+      # The arguments of a `define_method` block call, walked by {#collect_class_body_ivar_writes} in place of the
+      # call's children so the block body stays out of the class-body init writes.
+      def collect_define_method_argument_writes(node, class_name, init_writes)
+        node.arguments&.arguments&.each { |arg| collect_class_body_ivar_writes(arg, class_name, init_writes) }
+      end
+
+      # A `define_method` call with a literal block on the implicit or `self` receiver: the block is an instance
+      # method body of the class the walk is in (#1768).
+      def define_method_block_call?(node)
+        DefineMethodBlockSelf.define_method_on_lexical_self?(node) && node.block.is_a?(Prism::BlockNode)
       end
 
       def detect_read_before_write(node, seen_writes, read_first)
@@ -2010,6 +2081,13 @@ module Rigor
       AND_WRITE_CONTRIBUTIONS = :and_write_contributions
       OPERATOR_WRITE_CONTRIBUTIONS = :operator_write_contributions
       private_constant :AND_WRITE_CONTRIBUTIONS, :OPERATOR_WRITE_CONTRIBUTIONS
+
+      # The same Symbol-key convention for two side tables the walk fills and {#build_class_ivar_index} removes
+      # before anything reads class names: the ivars each class's `define_method` blocks write (in the
+      # accumulator), and the class-body writes held out of `init_writes` until {#exempt_class_body_writes!}.
+      DEFINE_METHOD_WRITES = :define_method_writes
+      CLASS_BODY_WRITES = :class_body_writes
+      private_constant :DEFINE_METHOD_WRITES, :CLASS_BODY_WRITES
 
       # Unions `type` into the class-ivar accumulator for `(class_name, ivar_name)`. Shared by the single-write and
       # multi-write (parallel-assignment) collectors.

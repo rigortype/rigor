@@ -253,6 +253,8 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#collect_declared_path_write: grandfathered
     Rigor::Inference::ScopeIndexer#collect_def_cvar_writes: grandfathered
     Rigor::Inference::ScopeIndexer#collect_def_ivar_writes: grandfathered
+    Rigor::Inference::ScopeIndexer#collect_define_method_argument_writes: a recursion step of collect_class_body_ivar_writes (#1768); it hands a define_method block call's arguments back to that walk under the class name it was given, skipping the block body, and derives no declaration context of its own
+    Rigor::Inference::ScopeIndexer#collect_define_method_block_ivars: the define_method arm of the ivar census walk (#1768); it reads the owner the walk passes in, as record_attr_writer_ivars does, and decides only whether the call is a literal define_method block on the implicit or self receiver, deriving no declaration context of its own
     Rigor::Inference::ScopeIndexer#collect_defined_test_ivars: grandfathered
     Rigor::Inference::ScopeIndexer#collect_eval_class_decls?: grandfathered
     Rigor::Inference::ScopeIndexer#collect_eval_method_defs?: grandfathered
@@ -269,10 +271,12 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#collect_truthy_test_ivars: grandfathered
     Rigor::Inference::ScopeIndexer#constant_mutation_candidates: grandfathered
     Rigor::Inference::ScopeIndexer#declared_ancestor_names: grandfathered
+    Rigor::Inference::ScopeIndexer#define_method_written_ivars: lists the ivar names a define_method block body writes (#1768), stopping at a nested def, class or module as gather_ivar_writes does; it records them under the class the walk passes in and derives no declaration context
     Rigor::Inference::ScopeIndexer#detect_multi_write_target_writes: grandfathered
     Rigor::Inference::ScopeIndexer#detect_read_before_write: grandfathered
     Rigor::Inference::ScopeIndexer#each_refinement_def: grandfathered
     Rigor::Inference::ScopeIndexer#each_class_body_def: yields the defs of a value-position class-body block so the per-node scope walk records the self each body runs on (#1696); it registers no method, the def index having keyed them already
+    Rigor::Inference::ScopeIndexer#exempt_class_body_writes!: folds the class-body ivar writes into the read-before-write exemption per class name the census walk already keyed them under, minus the ivars a define_method block writes (#1768); it derives no declaration context
     Rigor::Inference::ScopeIndexer#extends_block_handled?: a dispatcher over the block-carrying call; it decides which extends-walk arm owns a block (rebound, skipped, or descended) and adds no table entry itself, the arms it calls being the listed producers
     Rigor::Inference::ScopeIndexer#finalize_call_surface_tables: grandfathered
     Rigor::Inference::ScopeIndexer#finalize_def_index: grandfathered

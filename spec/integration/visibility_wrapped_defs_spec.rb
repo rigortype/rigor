@@ -88,16 +88,19 @@ RSpec.describe "visibility lints over wrapped defs and attrs (#1911, #1819, #163
     RUBY
   end
 
-  # Ruby: `x` is private where the condition holds and undefined where it does not; `a` after `private(*[])` is
-  # private. Neither is placed by the walk, so neither is reported.
+  # Ruby: the condition is false, so `K#x` is the public first def; `public(*[])` is a bare `public`, so `L#a` is
+  # public. The walk records each private and contested, so neither is reported.
   it "is quiet on a conditional wrapped def and after a splatted toggle" do
     expect(rules(<<~RUBY)).to eq([])
       class K
-        private def x = 1 if RUBY_VERSION > "3"
+        def x = 1
+        private def x = 2 if RUBY_VERSION < "3"
       end
 
       class L
-        private(*[])
+        private
+
+        public(*[])
         def a = 1
       end
 

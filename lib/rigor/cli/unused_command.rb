@@ -153,33 +153,45 @@ module Rigor
       # Every file is consulted every run — an unchanged one contributes its cached scan, so the
       # whole-project completeness the `--incremental` refusal protects is unaffected.
       #
-      # A file is one file however it is spelled (#1760): the analysed paths keep the spelling they were
-      # given, which is what the report prints, and a wider-corpus file whose realpath is an analysed one is
-      # not scanned a second time as its own shadow. Two wider-corpus spellings of one file are both scanned,
-      # each with its own role: a `spec/support/seeds.rb` symlink to `db/seeds.rb` keeps the production
-      # reading of `db/seeds.rb`.
+      # A file is parsed once however it is spelled (#1760), but every spelling of it keeps what it referred
+      # to under its own path and role, exactly as when each spelling was scanned separately: dropping a
+      # spelling lost its role, and with it a production reference a `spec/` symlink to the same file would
+      # otherwise have hidden. Only the declarations are taken once, from the first analysed spelling, which
+      # is the one the report prints; any other spelling's declarations are shadows, as a wider-corpus
+      # file's are (#1732).
       def scan(paths, configuration, cache)
-        declaration_files = Analysis::PathExpansion.ruby_files(paths, configuration.exclude_patterns,
-                                                               base: configuration.exclude_base)
-                                                   .to_h { |file| [canonical(file), file] }
-        references_only = reference_files(paths, configuration).filter_map do |file|
-          real = canonical(file)
-          [real, file] unless declaration_files.key?(real)
-        end
-        files = declaration_files.to_a + references_only
-        declarations = []
-        shadows = []
-        references = []
-        dynamic_uses = []
-        files.sort_by { |real, file| [real, file] }.each do |real, file|
-          result = cache.serve(:scan, file) { read_and_scan(file, real, configuration) }
+        out = { declarations: [], references: [], dynamic_uses: [], shadows: [] }
+        file_spellings(paths, configuration).sort.each do |real, list|
+          primary, analysed = list.find { |_, declared| declared } || list.first
+          result = cache.serve(:scan, primary) { read_and_scan(primary, real, configuration) }
           next if result.nil?
 
-          (declaration_files.key?(real) ? declarations : shadows).concat(result.declarations)
-          references.concat(result.references)
-          dynamic_uses.concat(result.dynamic_uses)
+          out[analysed ? :declarations : :shadows].concat(result.declarations)
+          list.map(&:first).each { |file| add_spelling(out, result, file, real, primary) }
         end
-        [declarations, references, dynamic_uses, shadows]
+        out.values_at(:declarations, :references, :dynamic_uses, :shadows)
+      end
+
+      def add_spelling(out, result, file, real, primary)
+        out[:shadows].concat(result.declarations.map { |d| d.with(path: file) }) unless file == primary
+        role = role_of(file, real)
+        out[:references].concat(result.references.map { |r| r.with(path: file, role: role) })
+        out[:dynamic_uses].concat(result.dynamic_uses.map { |u| respelled(u, file, role) })
+      end
+
+      # `{realpath => [[spelling, analysed?], ...]}`: the analysed spellings first, in `paths:` order, then
+      # the wider corpus's.
+      def file_spellings(paths, configuration)
+        analysed = Analysis::PathExpansion.ruby_files(paths, configuration.exclude_patterns,
+                                                      base: configuration.exclude_base)
+        spellings = Hash.new { |hash, real| hash[real] = [] }
+        analysed.each { |file| spellings[canonical(file)] << [file, true] }
+        reference_files(paths, configuration).each { |file| spellings[canonical(file)] << [file, false] }
+        spellings.transform_values { |list| list.uniq(&:first) }
+      end
+
+      def respelled(use, file, role)
+        use.with(path: file, role: role, site: use.site && "#{file}:#{use.line}")
       end
 
       # The reference corpus is the PROJECT, not the analysed paths. A constant declared in `lib/` is commonly

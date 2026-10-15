@@ -320,6 +320,39 @@ RSpec.describe Rigor::CLI::UnusedCommand do
       end
     end
 
+    # Round 7 of #1888: an analysed test spelling of a file must not hide its production spelling's references.
+    it "keeps a production reference when a spec/ symlink to the same file is analysed" do
+      Dir.mktmpdir do |dir|
+        write_file(dir, ".rigor.yml", "paths:\n  - lib\n  - spec/support\n")
+        write_file(dir, "lib/helper.rb", "Bar.new\n")
+        write_file(dir, "lib/bar.rb", "class Bar\nend\n")
+        FileUtils.mkdir_p(File.join(dir, "spec/support"))
+        File.symlink(File.join(dir, "lib/helper.rb"), File.join(dir, "spec/support/helper.rb"))
+        backdate(dir)
+
+        _, report, = run_in(dir)
+        _, by_argv, = run_in(dir, "spec/support/helper.rb", "lib/bar.rb")
+
+        expect(report["test_only"]).to be_empty
+        expect(by_argv["test_only"]).to be_empty
+      end
+    end
+
+    it "keeps production references when lib/ is analysed through a spec/ directory symlink" do
+      Dir.mktmpdir do |dir|
+        write_file(dir, ".rigor.yml", "paths:\n  - lib\n")
+        write_file(dir, "lib/main.rb", "Widget.new\n")
+        write_file(dir, "lib/widget.rb", "class Widget\nend\n")
+        FileUtils.mkdir_p(File.join(dir, "spec"))
+        File.symlink(File.join(dir, "lib"), File.join(dir, "spec/support"))
+        backdate(dir)
+
+        _, report, = run_in(dir, "spec/support")
+
+        expect(rows(report)).to eq("declared" => 1, "candidates" => [], "test_only" => [])
+      end
+    end
+
     it "scans each file once when the project is reached through a symlink" do
       Dir.mktmpdir do |dir|
         project = File.join(dir, "proj")

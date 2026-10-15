@@ -19,8 +19,10 @@ To *layer* configs rather than replace, a config file can name
 a base with `includes:` (recursive). `--config=PATH` bypasses
 discovery entirely.
 
-All relative paths in a config file resolve against that
-file's own directory.
+Relative paths in a config file resolve against that file's own directory, with three exceptions:
+`bundler.bundle_path:`, `bundler.lockfile:` and `rbs_collection.lockfile:` resolve against the working directory
+`rigor` runs from. They match only when you run `rigor` from the directory that holds the config file, which is
+the usual case; with `--config path/to/.rigor.yml` from elsewhere, give these three as absolute paths.
 A leading `~/` (or a bare `~`) in a path setting expands to your home directory; `~name` is an ordinary
 directory called `~name`, not another user's home. This covers `paths:`, `signature_paths:`, `test_paths:`,
 `pre_eval:`, `plugins_io.allowed_paths:`, `includes:`, `bundler.bundle_path:`, `bundler.lockfile:` and

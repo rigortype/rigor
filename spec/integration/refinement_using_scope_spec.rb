@@ -2008,7 +2008,7 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
 
     # Each new file redefines `Regexp.escape` with two parameters from outside `Regexp`'s body (Ruby 4.0.5: `:x`), so
     # the re-check drops the report, as a cold run does, and its removal brings the report back.
-    it "re-checks the `using` file under --incremental when a new file redefines the class object's method outside it" do
+    it "re-checks the `using` file under --incremental when a new file redefines a class object's method elsewhere" do
       write("lib/rs.rb", object_sqrt)
       write("lib/use.rb", "using RS\nRegexp.escape(1, 2)\n")
       fires = [["use.rb", 2, "call.wrong-arity"]]

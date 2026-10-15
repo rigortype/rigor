@@ -461,7 +461,7 @@ RSpec.describe "Typing calls through Ruby refinements (#1664)", type: :runner do
   # a class object answers `Dynamic[top]`, never the body's type: a hook on any ancestor can install the class object's
   # own method where no table sees it (`include Singleton`'s `instance`). `Mod.cc` raises `NoMethodError` (a module
   # object is not a `Class`); `Comparable` is no `Class` either, so `Comparable.cc` stays undefined.
-  it "answers Dynamic[top] for a class object's call a refinement of Object, Module, Class, Kernel or BasicObject wins" do
+  it "answers Dynamic[top] for a class object's call that a refinement of Object, Module, Class, … wins" do
     expect(rows(<<~RUBY).map { |rule, line, message| [rule, line, message.split(" for ").first] }).to eq(
       module R
         refine(Object) { def oo = :o }

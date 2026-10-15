@@ -1954,8 +1954,8 @@ module Rigor
       # body, or a list that may hold any refinement, answers `Dynamic[top]`, never the replaced method's signature.
       # A union receiver is decided per member; a `Dynamic` receiver and a call no refinement wins fall through. A
       # class object walks its own lookup (issue #1752): under `refine(Object) { def oo = :o }` a refinement that wins
-      # `Integer.oo` answers `Dynamic[top]` ({#refined_class_object_result}). A call site no refinement is in effect at answers nil at once
-      # and records nothing: its answer cannot change without an edit to its own file.
+      # `Integer.oo` answers `Dynamic[top]` ({#refined_class_object_result}). A call site no refinement is in effect
+      # at answers nil at once and records nothing: its answer cannot change without an edit to its own file.
       #
       # ADR-121 WD7 (A2) — inside the span of an activation that puts an opaque module in effect
       # ({InEffectRefinements.opaque_module?}), any method of any object may be replaced, so every call on an instance

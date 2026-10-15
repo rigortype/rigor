@@ -297,7 +297,8 @@ module Rigor
                      record_dependencies: false, record_self_calls: false, analyze_only: nil,
                      seed_bundles: nil, collect_seed_bundles: false, param_inferred_types: nil,
                      discovery_seed: nil, no_tolerated_effects: false,
-                     restored_run_level_rows: nil, served_per_file_diagnostics: nil, on_file_indexed: nil)
+                     restored_run_level_rows: nil, served_per_file_diagnostics: nil, served_effect_collections: nil,
+                     on_file_indexed: nil)
         @configuration = configuration
         # ADR-113 WD2 — `rigor lens` reads a target's seeded index here: called with `(path, parse_result, scope,
         # index)` for every file this process indexes, after its rules ran and inside the run window, so the reader
@@ -311,6 +312,10 @@ module Rigor
         # narrowed run does not analyse, spliced into this run's per-file stream by
         # {#interleave_served_diagnostics}. Empty on every other run.
         @served_per_file_diagnostics = served_per_file_diagnostics || {}
+        # Issue #1898 — `{path => FileCollection}` the {IncrementalSession} serves for the same unanalysed files, so the
+        # effect graph this run closes (and the envelope pass judges) spans the whole project, not just the closure.
+        # Never part of {#effect_collections_by_path}, which stays what THIS run collected. Empty on every other run.
+        @served_effect_collections = served_effect_collections || {}
         @explain = explain
         @cache_store = enforce_read_only_cache(cache_store, buffer)
         @plugin_requirer = plugin_requirer
@@ -1907,8 +1912,10 @@ module Rigor
       # The run's per-file effect collections in sorted path order — the sequential half merged with the
       # pool's, exactly as {#file_dependencies} reconciles its two halves. Sorted, because the fold below
       # it must not depend on pool-completion order.
+      # Issue #1898 — a narrowed incremental run adds the collections its session served for the files it did not
+      # analyse, under this run's own for any path both name.
       def effect_collections
-        effect_collections_by_path.sort_by { |path, _| path.to_s }.map(&:last)
+        @served_effect_collections.merge(effect_collections_by_path).sort_by { |path, _| path.to_s }.map(&:last)
       end
 
       # Editor mode § "Scope choice — option A". Under `buffer:` non-nil the per-file analysis emits

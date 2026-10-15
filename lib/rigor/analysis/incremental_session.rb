@@ -239,7 +239,8 @@ module Rigor
         runner = build_runner(analyze_only: analyze_set, record_dependencies: true,
                               param_inferred_types: fresh_params, **forced_target_options(forced),
                               restored_run_level_rows: @run_level_rows,
-                              served_per_file_diagnostics: @cache.slice(*reused))
+                              served_per_file_diagnostics: @cache.slice(*reused),
+                              served_effect_collections: @effect_collections.slice(*reused))
         merged = run_runner(runner).diagnostics
         @last_runner = runner # ADR-88 WD1 — the post-hoc fact-surface fingerprint reads this prepared registry.
         absorb(runner, current, analyze_set, removed)
@@ -490,7 +491,8 @@ module Rigor
         # exercises the exact seeds the served cache entries were computed under (and skips a re-collect).
         runner = build_runner(analyze_only: affected, param_inferred_types: @param_table,
                               restored_run_level_rows: @run_level_rows,
-                              served_per_file_diagnostics: @cache.slice(*reused))
+                              served_per_file_diagnostics: @cache.slice(*reused),
+                              served_effect_collections: @effect_collections.slice(*reused))
         run_runner(runner).diagnostics
       end
 

@@ -180,12 +180,12 @@ RSpec.describe Rigor::Plugin::BoxProbe do
     end
   end
 
-  describe ".prepare_launch" do
+  describe ".needs_reexec?" do
     let(:stderr) { StringIO.new }
     let(:refusal) { "Ruby 4.0.5 crashes running Ractor-shareable procs inside Ruby::Box (Ruby Bug #22260)" }
 
-    def prepare(env, box_active: true)
-      described_class.prepare_launch(env, stderr: stderr, box_active: box_active, cache_dir: "/unused")
+    def reexec?(env, box_active: true)
+      described_class.needs_reexec?(env, stderr: stderr, box_active: box_active, cache_dir: "/unused")
     end
 
     def probe_answers(reason)
@@ -196,7 +196,7 @@ RSpec.describe Rigor::Plugin::BoxProbe do
       it "re-execs without RUBY_BOX, drops the ruby_box request, marks the child and says so when the probe fails" do
         probe_answers(refusal)
         env = { "RUBY_BOX" => "1", "RIGOR_PLUGIN_ISOLATION" => "ruby_box", "RIGOR_BOX" => "1" }
-        expect(prepare(env)).to be(true)
+        expect(reexec?(env)).to be(true)
         expect(env).to eq(described_class::REEXEC_MARKER => "1")
         expect(stderr.string).to eq("rigor: RUBY_BOX is set, but #{refusal}. " \
                                     "Re-running without RUBY_BOX; plugins will not run inside Ruby::Box.\n")
@@ -205,14 +205,14 @@ RSpec.describe Rigor::Plugin::BoxProbe do
       it "keeps RUBY_BOX and does not re-exec when the probe passes" do
         probe_answers(nil)
         env = { "RUBY_BOX" => "1" }
-        expect(prepare(env)).to be(false)
+        expect(reexec?(env)).to be(false)
         expect([env, stderr.string]).to eq([{ "RUBY_BOX" => "1" }, ""])
       end
 
       it "does not probe when Ruby::Box is not active in this process" do
         allow(described_class).to receive(:cached_unsupported_reason)
         env = { "RUBY_BOX" => "1" }
-        expect(prepare(env, box_active: false)).to be(false)
+        expect(reexec?(env, box_active: false)).to be(false)
         expect(described_class).not_to have_received(:cached_unsupported_reason)
         expect(env).to eq("RUBY_BOX" => "1")
       end
@@ -221,7 +221,7 @@ RSpec.describe Rigor::Plugin::BoxProbe do
     it "does nothing and does not probe when RUBY_BOX is unset and ruby_box is not requested" do
       allow(described_class).to receive(:cached_unsupported_reason)
       env = { "RIGOR_PLUGIN_ISOLATION" => "process" }
-      expect(prepare(env)).to be(false)
+      expect(reexec?(env)).to be(false)
       expect(described_class).not_to have_received(:cached_unsupported_reason)
       expect(env).to eq("RIGOR_PLUGIN_ISOLATION" => "process")
     end
@@ -229,7 +229,7 @@ RSpec.describe Rigor::Plugin::BoxProbe do
     it "neither probes nor re-execs in a re-exec'ed child, and clears the marker" do
       allow(described_class).to receive(:cached_unsupported_reason)
       env = { "RUBY_BOX" => "1", "RIGOR_PLUGIN_ISOLATION" => "ruby_box", described_class::REEXEC_MARKER => "1" }
-      expect(prepare(env)).to be(false)
+      expect(reexec?(env)).to be(false)
       expect(described_class).not_to have_received(:cached_unsupported_reason)
       expect(env).to eq("RUBY_BOX" => "1", "RIGOR_PLUGIN_ISOLATION" => "ruby_box")
     end
@@ -237,7 +237,7 @@ RSpec.describe Rigor::Plugin::BoxProbe do
     it "re-execs a ruby_box request under a marked RUBY_BOX=1 when the probe passes" do
       probe_answers(nil)
       env = { "RIGOR_BOX" => "1" }
-      expect(prepare(env)).to be(true)
+      expect(reexec?(env)).to be(true)
       expect(env).to eq("RIGOR_BOX" => "1", "RUBY_BOX" => "1", "RIGOR_PLUGIN_ISOLATION" => "ruby_box",
                         described_class::REEXEC_MARKER => "1")
     end
@@ -245,7 +245,7 @@ RSpec.describe Rigor::Plugin::BoxProbe do
     it "drops a ruby_box request with a warning when the probe fails" do
       probe_answers(refusal)
       env = { "RIGOR_PLUGIN_ISOLATION" => "ruby_box" }
-      expect(prepare(env)).to be(false)
+      expect(reexec?(env)).to be(false)
       expect(env).to eq({})
       expect(stderr.string).to start_with("rigor: ruby_box plugin isolation is unavailable: #{refusal}.")
     end

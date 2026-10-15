@@ -61,17 +61,17 @@ module Rigor
       # - `ruby_box` requested and `RUBY_BOX` unset: probe; re-exec under `RUBY_BOX=1` when it passes,
       #   otherwise warn and drop the request.
       # - Otherwise nothing.
-      def prepare_launch(env, stderr: $stderr, box_active: box_active?, cache_dir: default_cache_dir(env))
+      def needs_reexec?(env, stderr: $stderr, box_active: box_active?, cache_dir: default_cache_dir(env))
         return false if env.delete(REEXEC_MARKER)
 
         if env["RUBY_BOX"].to_s.empty?
-          prepare_box_request(env, stderr, cache_dir)
+          reexec_for_box_request?(env, stderr, cache_dir)
         else
-          prepare_preset_box(env, stderr, box_active, cache_dir)
+          reexec_without_preset_box?(env, stderr, box_active, cache_dir)
         end
       end
 
-      def prepare_box_request(env, stderr, cache_dir)
+      def reexec_for_box_request?(env, stderr, cache_dir)
         isolation = env["RIGOR_PLUGIN_ISOLATION"].to_s
         return false unless isolation == "ruby_box" || !env["RIGOR_BOX"].to_s.empty?
 
@@ -89,7 +89,7 @@ module Rigor
         end
       end
 
-      def prepare_preset_box(env, stderr, box_active, cache_dir)
+      def reexec_without_preset_box?(env, stderr, box_active, cache_dir)
         return false unless box_active
 
         reason = cached_unsupported_reason(cache_dir: cache_dir)
@@ -111,7 +111,9 @@ module Rigor
       # Whether this process booted inside `Ruby::Box`. False on a Ruby without the feature, which ignores
       # `RUBY_BOX`, so a preset variable there costs nothing.
       def box_active?
-        defined?(::Ruby::Box) && ::Ruby::Box.respond_to?(:enabled?) && ::Ruby::Box.enabled? ? true : false
+        return false unless defined?(::Ruby::Box) && ::Ruby::Box.respond_to?(:enabled?)
+
+        ::Ruby::Box.enabled? == true
       end
 
       # `$XDG_CACHE_HOME/rigor` when that is an absolute path, else `~/.cache/rigor`; nil when neither can

@@ -956,6 +956,43 @@ RSpec.describe Rigor::SigGen::Writer do
         expect(result.skipped.map(&:last)).to eq([:user_authored])
       end
 
+      it "does not add `def self?.f` beside a lone `def self.f` in the same file" do
+        original = "module M\n  def self.f: () -> untyped\nend\n"
+        target = sig_file("sig/m.rbs", original)
+        f = member_candidate(class_name: "M", method_name: :f, rbs: "def self?.f: () -> Integer")
+
+        result = layout_writer.write_all([f]).first
+
+        expect(File.read(target)).to eq(original)
+        expect(result.skipped.map(&:last)).to eq([:user_authored])
+        expect { build_definitions("M") }.not_to raise_error
+      end
+
+      it "does not add `def self?.f` to the module's first file when another file declares `def self.f`" do
+        first = sig_file("sig/a.rbs", "module M\nend\n")
+        original = "module M\n  def self.f: () -> untyped\nend\n"
+        other = sig_file("sig/m.rbs", original)
+        f = member_candidate(class_name: "M", method_name: :f, rbs: "def self?.f: () -> Integer")
+
+        layout_writer.write_all([f])
+
+        expect(File.read(first)).to eq("module M\nend\n")
+        expect(File.read(other)).to eq(original)
+        expect { build_definitions("M") }.not_to raise_error
+      end
+
+      it "does not add `def self?.f` to a file whose second opening of the module declares it" do
+        original = "module M\n  def self.g: () -> untyped\nend\nmodule M\n  def self?.f: () -> untyped\nend\n"
+        target = sig_file("sig/m.rbs", original)
+        f = member_candidate(class_name: "M", method_name: :f, rbs: "def self?.f: () -> Integer")
+
+        result = layout_writer.write_all([f]).first
+
+        expect(File.read(target)).to eq(original)
+        expect(result.skipped.map(&:last)).to eq([:user_authored])
+        expect { build_definitions("M") }.not_to raise_error
+      end
+
       it "keeps a split `def self.f` / `def f` pair instead of turning one half into `def self?.f`" do
         original = "module M\n  def self.f: () -> untyped\n  def f: () -> untyped\nend\n"
         target = sig_file("sig/m.rbs", original)
@@ -1047,6 +1084,42 @@ RSpec.describe Rigor::SigGen::Writer do
 
         expect(File.read(primary)).to eq("class C\n  def g: () -> Integer\nend\n")
       end
+    end
+
+    it "does not add `def self.y` beside an `attr_reader self.y`" do
+      original = "class C\n  attr_reader self.y: untyped\nend\n"
+      target = sig_file("sig/c.rbs", original)
+      y = member_candidate(method_name: :y, kind: :singleton, rbs: "def self.y: () -> Integer",
+                           classification: Rigor::SigGen::Classification::NEW_METHOD)
+
+      result = layout_writer.write_all([y]).first
+
+      expect(File.read(target)).to eq(original)
+      expect(result.skipped.map(&:last)).to eq([:user_authored])
+    end
+
+    it "never replaces an overloading member (`| ...`) in the class's file" do
+      original = "class C\n  def f: (String) -> String | ...\nend\n"
+      target = sig_file("sig/c.rbs", original)
+      f = member_candidate(method_name: :f, rbs: "def f: (Integer) -> Integer")
+
+      result = layout_writer.write_all([f]).first
+
+      expect(File.read(target)).to eq(original)
+      expect(result.skipped.map(&:last)).to eq([:user_authored])
+    end
+
+    it "routes past an overloading member to the file holding the declaration it adds to" do
+      overload = "class C\n  def f: (String) -> String | ...\nend\n"
+      first = sig_file("sig/a.rbs", overload)
+      base = sig_file("sig/b.rbs", "class C\n  def f: (Integer) -> untyped\nend\n")
+      f = member_candidate(method_name: :f, rbs: "def f: (Integer) -> Integer")
+
+      layout_writer.write_all([f])
+
+      expect(File.read(first)).to eq(overload)
+      expect(File.read(base)).to eq("class C\n  def f: (Integer) -> Integer\nend\n")
+      expect { build_definitions("C") }.not_to raise_error
     end
   end
 end

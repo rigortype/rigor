@@ -127,6 +127,10 @@ module Rigor
         full = prefix.empty? ? local_name : "#{prefix.join('::')}::#{local_name}"
         accumulator[full] ||= rbs_path
         decl.members.each do |member|
+          # An `overloading?` member (`def f: ... | ...`) adds to a declaration elsewhere; routing a candidate to
+          # it would replace the user's overload.
+          next if member.is_a?(RBS::AST::Members::MethodDefinition) && member.overloading?
+
           self.class.member_keys(member).each { |name, kind| @members[[full, name, kind]] ||= rbs_path }
         end
 

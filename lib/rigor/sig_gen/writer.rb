@@ -64,7 +64,7 @@ module Rigor
         @global_namespace_kinds = build_namespace_kinds(candidates)
         @global_superclasses = build_superclasses(candidates)
         grouped = emittable.group_by do |c|
-          @path_mapper.target_for(c.path, class_name: c.class_name, method_name: c.method_name, kind: c.kind)
+          @path_mapper.target_for(c.path, class_name: c.class_name, method_name: c.method_name, kind: c.rbs_kind)
         end
         grouped.map { |target, group| write_target(target, group) }
       end
@@ -565,7 +565,10 @@ module Rigor
           state.applied.concat(methods)
           insert_namespace_chain(state, class_name, kinds, supers, methods)
         else
-          state.source = merge_into_existing_class(state.source, decl, methods, state)
+          # A class reopened in one file answers for every member of every opening, not just the first one's
+          # (#1488): a member another opening declares is user-authored, not new.
+          declared = find_class_decls(state.decls, class_name).flat_map { |d| collect_member_pairs(d) }
+          state.source = merge_into_existing_class(state.source, decl, methods, state, declared)
           state.decls = parse_signature(state.source) || state.decls
         end
       end
@@ -592,12 +595,25 @@ module Rigor
         nil
       end
 
+      # Every declaration of `qualified_name` in the file, in {#find_class_decl}'s order (so the first is the one
+      # it returns).
+      def find_class_decls(decls, qualified_name, prefix = [], found = [])
+        decls.each do |decl|
+          next unless decl.is_a?(RBS::AST::Declarations::Class) || decl.is_a?(RBS::AST::Declarations::Module)
+
+          local = decl.name.to_s.sub(/\A::/, "")
+          full = prefix.empty? ? local : "#{prefix.join('::')}::#{local}"
+          found << decl if full == qualified_name
+          find_class_decls(decl.members, qualified_name, prefix + [local], found)
+        end
+        found
+      end
+
       def ends_with_newline?(source)
         source.end_with?("\n")
       end
 
-      def merge_into_existing_class(source, decl, methods, state)
-        existing_pairs = collect_member_pairs(decl)
+      def merge_into_existing_class(source, decl, methods, state, existing_pairs)
         new_methods, conflicting = partition_against_existing(methods, existing_pairs)
 
         source = insert_into_class(source, decl, new_methods)
@@ -627,8 +643,13 @@ module Rigor
         decl.members.flat_map { |m| LayoutIndex.member_keys(m) }
       end
 
+      # A `def self?.f` candidate conflicts with a declared instance OR singleton `f`: inserting it beside a lone
+      # `def self.f` (or `def f`) would declare that half twice (#1488).
       def partition_against_existing(methods, existing_pairs)
-        methods.partition { |c| !existing_pairs.include?([c.method_name, c.kind]) }
+        methods.partition do |c|
+          kinds = c.rbs_kind == :singleton_instance ? %i[instance singleton] : [c.kind]
+          kinds.none? { |kind| existing_pairs.include?([c.method_name, kind]) }
+        end
       end
 
       # Inserts each new method line one column before the class declaration's `end` keyword. The insertion
@@ -741,11 +762,12 @@ module Rigor
 
       # Matches on the candidate's {MethodCandidate#rbs_kind}, so a `def self?.f` proposal finds only a
       # `def self?.f` member: a `def f` beside a `def self.f`, or a `def self?.f` under a plain `def f`
-      # proposal, is left as the user wrote it.
+      # proposal, is left as the user wrote it. An `overloading?` member (`def f: ... | ...`) adds to a
+      # declaration elsewhere rather than being one, so it is never replaced (#1488).
       def find_method_member(decl, candidate)
         decl.members.find do |m|
           m.is_a?(RBS::AST::Members::MethodDefinition) && m.name == candidate.method_name &&
-            m.kind == candidate.rbs_kind
+            m.kind == candidate.rbs_kind && !m.overloading?
         end
       end
 

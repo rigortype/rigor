@@ -49,10 +49,17 @@ module Rigor
         sig_root_dir / "#{stripped.sub_ext('')}.rbs"
       end
 
+      # `kind` may be `:singleton_instance` (a `def self?.` candidate), which routes to whichever file declares
+      # either half.
       def existing_member_target_for(class_name, method_name, kind)
         return nil if class_name.nil? || method_name.nil? || @layout_index.nil?
 
-        @layout_index.member_file_for(class_name, method_name, kind)
+        kinds = kind == :singleton_instance ? %i[instance singleton] : [kind]
+        kinds.each do |k|
+          file = @layout_index.member_file_for(class_name, method_name, k)
+          return file if file
+        end
+        nil
       end
 
       def existing_target_for(class_name)

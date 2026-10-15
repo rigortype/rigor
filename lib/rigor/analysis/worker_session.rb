@@ -431,7 +431,7 @@ module Rigor
         return nil if gem_name.nil? || gem_name.empty?
 
         spec = Gem.loaded_specs[gem_name]
-        spec&.full_gem_path
+        spec&.full_gem_path # rigor:disable undefined-method
       rescue StandardError
         nil
       end
@@ -536,7 +536,7 @@ module Rigor
         return nil if summary.nil?
 
         plugin_id = safe_plugin_id(plugin)
-        delta = summary[:count] - @reported_refusal_counts.fetch(plugin_id, 0) # rigor:disable undefined-method
+        delta = summary[:count] - @reported_refusal_counts.fetch(plugin_id, 0)
         return nil unless delta.positive?
 
         @reported_refusal_counts[plugin_id] = summary[:count]

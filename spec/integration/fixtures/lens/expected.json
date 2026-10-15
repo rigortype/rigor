@@ -28,6 +28,7 @@
     "module",
     "method",
     "attribute",
+    "constant",
     "module_function",
     "builder",
     "body_return",
@@ -43,21 +44,6 @@
       "digest": "xxh3-64:af24c3087206d10d",
       "complete": false,
       "omissions": [
-        {
-          "kind": "constant",
-          "owner": null,
-          "scope": null,
-          "name": "Shop::LIMIT",
-          "span": {
-            "start_line": 5,
-            "start_column": 2,
-            "end_line": 5,
-            "end_column": 12,
-            "start_offset": 46,
-            "end_offset": 56
-          },
-          "reason": "unsupported_kind"
-        },
         {
           "kind": "alias",
           "owner": "Shop",
@@ -100,7 +86,42 @@
           "contract": null,
           "params": null,
           "block": null,
-          "body_return": null
+          "body_return": null,
+          "value": null
+        },
+        {
+          "key": "lib/shop.rb:46-56:0",
+          "kind": "constant",
+          "name": "Shop::LIMIT",
+          "owner": "Shop",
+          "scope": null,
+          "attribute": null,
+          "members": [],
+          "module_function": false,
+          "builder": null,
+          "ordinal": 0,
+          "span": {
+            "start_line": 5,
+            "start_column": 2,
+            "end_line": 5,
+            "end_column": 12,
+            "start_offset": 46,
+            "end_offset": 56
+          },
+          "contract_span": null,
+          "anchor": "5:8b07",
+          "visibility": "public",
+          "contract": null,
+          "params": null,
+          "block": null,
+          "body_return": null,
+          "value": {
+            "state": "typed",
+            "type": "::Integer",
+            "provenance": "inline",
+            "path": null,
+            "from_site": null
+          }
         },
         {
           "key": "lib/shop.rb:122-143:0",
@@ -148,7 +169,8 @@
             "provenance": "inferred",
             "path": null,
             "from_site": null
-          }
+          },
+          "value": null
         },
         {
           "key": "lib/shop.rb:167-191:0",
@@ -196,7 +218,8 @@
             "provenance": "inferred",
             "path": null,
             "from_site": null
-          }
+          },
+          "value": null
         },
         {
           "key": "lib/shop.rb:195-223:0",
@@ -231,7 +254,8 @@
             "provenance": "inferred",
             "path": null,
             "from_site": null
-          }
+          },
+          "value": null
         },
         {
           "key": "lib/shop.rb:227-245:0",
@@ -273,7 +297,8 @@
             "path": null,
             "from_site": null,
             "cause": "inferred_return_untyped"
-          }
+          },
+          "value": null
         },
         {
           "key": "lib/shop.rb:249-273:0",
@@ -309,7 +334,8 @@
           "contract": "inline",
           "params": null,
           "block": null,
-          "body_return": null
+          "body_return": null,
+          "value": null
         },
         {
           "key": "lib/shop.rb:249-273:1",
@@ -345,7 +371,8 @@
           "contract": "inline",
           "params": null,
           "block": null,
-          "body_return": null
+          "body_return": null,
+          "value": null
         },
         {
           "key": "lib/shop.rb:287-307:0",
@@ -380,7 +407,8 @@
             "provenance": "inferred",
             "path": null,
             "from_site": null
-          }
+          },
+          "value": null
         },
         {
           "key": "lib/shop.rb:311-331:0",
@@ -417,7 +445,8 @@
           "contract": "inline",
           "params": null,
           "block": null,
-          "body_return": null
+          "body_return": null,
+          "value": null
         },
         {
           "key": "lib/shop.rb:364-381:0",
@@ -452,7 +481,8 @@
             "provenance": "inferred",
             "path": null,
             "from_site": null
-          }
+          },
+          "value": null
         },
         {
           "key": "lib/shop.rb:433-447:0",
@@ -487,7 +517,8 @@
             "provenance": "inferred",
             "path": null,
             "from_site": null
-          }
+          },
+          "value": null
         }
       ],
       "diagnostics": [],
@@ -536,7 +567,8 @@
           "contract": null,
           "params": null,
           "block": null,
-          "body_return": null
+          "body_return": null,
+          "value": null
         },
         {
           "key": "lib/order.rb:14-29:0",
@@ -571,7 +603,8 @@
             "provenance": "inferred",
             "path": null,
             "from_site": null
-          }
+          },
+          "value": null
         },
         {
           "key": "lib/order.rb:33-94:0",
@@ -636,7 +669,8 @@
             "path": null,
             "from_site": null,
             "cause": "inferred_return_untyped"
-          }
+          },
+          "value": null
         },
         {
           "key": "lib/order.rb:98-134:0",
@@ -675,7 +709,8 @@
             "path": null,
             "from_site": null,
             "cause": null
-          }
+          },
+          "value": null
         },
         {
           "key": "lib/order.rb:138-164:0",
@@ -711,7 +746,8 @@
             "path": null,
             "from_site": null,
             "cause": "unsupported_syntax"
-          }
+          },
+          "value": null
         }
       ],
       "diagnostics": [
@@ -759,7 +795,8 @@
           "contract": null,
           "params": null,
           "block": null,
-          "body_return": null
+          "body_return": null,
+          "value": null
         },
         {
           "key": "lib/util.rb:33-47:0",
@@ -794,7 +831,8 @@
             "provenance": "inferred",
             "path": null,
             "from_site": null
-          }
+          },
+          "value": null
         },
         {
           "key": "lib/util.rb:53-73:0",
@@ -829,7 +867,8 @@
             "provenance": "inferred",
             "path": null,
             "from_site": null
-          }
+          },
+          "value": null
         }
       ],
       "diagnostics": [],
@@ -869,7 +908,8 @@
           "contract": null,
           "params": null,
           "block": null,
-          "body_return": null
+          "body_return": null,
+          "value": null
         },
         {
           "key": "lib/point.rb:20-22:0",
@@ -898,7 +938,8 @@
           "contract": null,
           "params": null,
           "block": null,
-          "body_return": null
+          "body_return": null,
+          "value": null
         },
         {
           "key": "lib/point.rb:24-26:0",
@@ -927,7 +968,8 @@
           "contract": null,
           "params": null,
           "block": null,
-          "body_return": null
+          "body_return": null,
+          "value": null
         },
         {
           "key": "lib/point.rb:33-61:0",
@@ -962,7 +1004,8 @@
             "provenance": "inferred",
             "path": null,
             "from_site": null
-          }
+          },
+          "value": null
         },
         {
           "key": "lib/point.rb:67-99:0",
@@ -989,7 +1032,8 @@
           "contract": null,
           "params": null,
           "block": null,
-          "body_return": null
+          "body_return": null,
+          "value": null
         },
         {
           "key": "lib/point.rb:85-90:0",
@@ -1019,7 +1063,8 @@
           "contract": null,
           "params": null,
           "block": null,
-          "body_return": null
+          "body_return": null,
+          "value": null
         },
         {
           "key": "lib/point.rb:92-98:0",
@@ -1049,7 +1094,8 @@
           "contract": null,
           "params": null,
           "block": null,
-          "body_return": null
+          "body_return": null,
+          "value": null
         }
       ],
       "diagnostics": [],

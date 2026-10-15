@@ -2490,6 +2490,18 @@ module Rigor
       # process) through {Cache::RbsConstantTable.fetch} and answers point lookups from it. Cold runs pay
       # the translation cost up-front and write the result to disk; warm runs skip the translation entirely
       # and pay only a `Marshal.load` of the table.
+      # ADR-113 — the RBS declaration of the constant `name` (qualified) as `[type, buffer name]`, or nil when no
+      # signature declares it. `rigor lens` reports the declared type with the provenance the buffer names.
+      def constant_declaration(name)
+        rbs_name = parse_type_name(name)
+        entry = rbs_name && env&.constant_decls&.[](rbs_name)
+        return nil unless entry
+
+        [entry.decl.type.to_s, entry.decl.location&.buffer&.name.to_s]
+      rescue ::RBS::BaseError
+        nil
+      end
+
       def constant_type(name)
         rbs_name = parse_type_name(name)
         return nil unless rbs_name

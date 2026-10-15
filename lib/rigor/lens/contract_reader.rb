@@ -34,6 +34,21 @@ module Rigor
         unreadable("definition_build_failed", [])
       end
 
+      # The declared type of the constant `name` (qualified), as a slot with its declaration's provenance, or nil
+      # when no RBS or inline declaration names it.
+      def read_constant(name, environment)
+        declaration = environment&.rbs_loader&.constant_declaration(name)
+        return nil if declaration.nil?
+
+        type, buffer = declaration
+        provenance, path = @provenance.classify(buffer)
+        return Slot.unavailable("not_computed") if provenance.nil?
+
+        Slot.from_rbs(type, provenance, path)
+      rescue StandardError
+        nil
+      end
+
       private
 
       def contract(defs, annotations)

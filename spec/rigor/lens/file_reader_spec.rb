@@ -298,6 +298,43 @@ end
     end
   end
 
+  describe "constants" do
+    let(:source) do
+      <<~RUBY
+        module K
+          LIMIT = 10
+          SECRET = "x"
+          private_constant :SECRET
+          HIDDEN = 1
+          if $x
+            private_constant :HIDDEN
+          end
+          MEMO ||= {}
+          A, B = 1, 2
+          CALLBACK = -> { def inside = 1 }
+          class << self
+            ON_SINGLETON = 1
+          end
+        end
+        TOP = :top
+      RUBY
+    end
+
+    it "reads a plain constant write as a constant site with its owner and visibility" do
+      rows = sites(source).filter_map do |site|
+        [site["owner"], site["name"], site["visibility"]] if site["kind"] == "constant"
+      end
+
+      expect(rows).to eq([["K", "K::LIMIT", "public"], ["K", "K::SECRET", "private"], ["K", "K::HIDDEN", nil],
+                          ["K", "K::CALLBACK", "public"], ["Object", "TOP", "public"]])
+    end
+
+    it "leaves compound, multiple and singleton-body writes, and declarations in a value, as omissions" do
+      expect(omissions(source)).to include(%w[constant K::MEMO], %w[constant K::A], %w[constant K::B],
+                                           %w[method inside], %w[constant ON_SINGLETON])
+    end
+  end
+
   describe "completeness" do
     it "omits what it does not model instead of dropping it" do
       source = <<~RUBY

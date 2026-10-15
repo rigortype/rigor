@@ -74,7 +74,7 @@ rigor lens [--format text|json] [--config FILE] [--workers N] FILE...
   "revision": 1,
   "producer": { "name": "rigor", "version": "0.4.3", "engine_source": null },
   "context": { "...": "§ Context" },
-  "capabilities": ["class", "module", "method", "attribute", "module_function", "builder", "body_return", "diagnostics", "inputs"],
+  "capabilities": ["class", "module", "method", "attribute", "constant", "module_function", "builder", "body_return", "diagnostics", "inputs"],
   "files": [ { "...": "§ Files" } ],
   "members": [ { "...": "§ Members" } ]
 }
@@ -128,6 +128,10 @@ One entry per requested target, in request order.
   - "Directly" includes a visibility call wrapping it (`private def x`, `private attr_reader :x`), and
     the body of a class whose superclass expression is `Struct.new(…)` or `Data.define(…)`.
   - A `def` or `attr_*` inside a block, or inside `class << obj` for anything but `self`, is an omission.
+  - A constant (capability `constant`): `X = value` written as a plain constant assignment directly in a
+    namespace body or at the top level (not in a block, a method, a builder's block or `class << self`), with a
+    name Rigor can qualify. It is a `constant` site spanning the assignment, whose `owner` is the enclosing
+    namespace (`Object` at the top level) and whose `value` is a slot (§ Sites).
   - A class a builder defines (capability `builder`): `Foo = Data.define(:a, …)` and
     `Foo = Struct.new(:a, …)` (optionally ending with `keyword_init:` and no other keyword), written as a plain
     constant assignment directly in a namespace body (not in a block, a method, another builder's block or
@@ -144,7 +148,9 @@ One entry per requested target, in request order.
   - A module function is a `method` site with `module_function: true` (capability `module_function`): a `def`
     written directly in a module body after a bare `module_function` there. That is the form Ruby and `check`'s
     singleton table read the same way.
-- Omissions: constant assignments (`constant`); the `Data.define` / `Struct.new` forms § Kinds does not
+- Omissions: the constant writes § Kinds does not model (`constant`): `||=`, `&&=` and operator writes,
+  multiple assignment and `for` / `rescue =>` targets, a path Rigor cannot qualify (`self::X`), and a write
+  in a block, a method, a builder's block or `class << self`; the `Data.define` / `Struct.new` forms § Kinds does not
   model (`data_class`, `struct_class`), with any member declared in their block; `alias` and `alias_method`
   (`alias`); `define_method`; a `def` with any receiver but `self`; any declaration inside a block;
   `class << obj`; the `module_function` cases Rigor cannot read the way both Ruby and `check` do
@@ -180,19 +186,20 @@ A site is one source declaration in a requested file.
 | Field | Content |
 | --- | --- |
 | `key` | `<path>:<start_offset>-<end_offset>:<ordinal>`. Unique within the document. Not stable across edits and not a public identity. |
-| `kind` | `class`, `module`, `method` or `attribute`. |
-| `name` | For `class` / `module`, the qualified name. For `method`, the method name. For `attribute`, the attribute name as written (`name`, not `name=`). |
-| `owner` | The qualified name of the class or module a `method` / `attribute` is defined on. `null` for `class` / `module`. |
+| `kind` | `class`, `module`, `method`, `attribute` or `constant`. |
+| `name` | For `class` / `module` / `constant`, the qualified name. For `method`, the method name. For `attribute`, the attribute name as written (`name`, not `name=`). |
+| `owner` | The qualified name of the class or module a `method` / `attribute` / `constant` is defined on. `null` for `class` / `module`. |
 | `scope` | `instance` or `singleton` for `method` / `attribute`; `null` otherwise. |
 | `attribute` | `reader`, `writer` or `accessor` for `attribute`; `null` otherwise. |
 | `members` | For `method` / `attribute`, the names of the members this site defines: one for a method, `name` and/or `name=` for an attribute. `[]` otherwise. |
 | `builder` | `data` or `struct` for a `class` site a `Data.define` / `Struct.new` assignment defines; `null` otherwise. |
+| `value` | For `constant`: a slot. When an RBS or inline declaration names the constant, its declared type with that provenance; otherwise the type of the assigned value under the seeded index (`inferred`), which can be a literal type (`10`, `["a", "b"]`). `null` for every other kind. |
 | `module_function` | `true` for a module function: the `def` defines a private instance method and a singleton copy, so its name is a member under both scopes and both list this site. `scope` is then `instance` and `visibility` `private`. `false` otherwise. |
 | `ordinal` | The 0-based index among sites that share one declaration span (`attr_reader :a, :b` gives 0 and 1); 0 otherwise. |
 | `span` | The declaration's span (the `class` / `module` / `def` / `attr_*` node). |
 | `contract_span` | The span from the first to the last contract comment of the site (§ Anchors, steps 1 and 2), or `null`. |
 | `anchor` | § Anchors. |
-| `visibility` | For `method` / `attribute`: `public`, `protected` or `private` as Ruby gives it from this file's own visibility calls: a wrapping `private def x` / `private attr_reader :x`, else the body's running default set by a bare `private` / `protected` / `public` written directly in the body, revised by a later `private :x` / `private %i[x y]` / `private_class_method :x` written directly in the body. A class body's default does not reach a `def self.x`, and a top-level `def` is `private`. `null` when Rigor cannot tell: a bare toggle under an `if`, a `begin` or a block leaves the default unknown; a named call written anywhere but directly in the body (an `if`, a block, a method body) leaves the members it names unknown; a non-literal argument (`private *NAMES`) leaves the body's members unknown; `private def self.x`, which Ruby rejects, is unknown; and so is an attribute site whose members a named call covers only in part. `null` for `class` / `module`. |
+| `visibility` | For `method` / `attribute`: `public`, `protected` or `private` as Ruby gives it from this file's own visibility calls: a wrapping `private def x` / `private attr_reader :x`, else the body's running default set by a bare `private` / `protected` / `public` written directly in the body, revised by a later `private :x` / `private %i[x y]` / `private_class_method :x` written directly in the body. A class body's default does not reach a `def self.x`, and a top-level `def` is `private`. `null` when Rigor cannot tell: a bare toggle under an `if`, a `begin` or a block leaves the default unknown; a named call written anywhere but directly in the body (an `if`, a block, a method body) leaves the members it names unknown; a non-literal argument (`private *NAMES`) leaves the body's members unknown; `private def self.x`, which Ruby rejects, is unknown; and so is an attribute site whose members a named call covers only in part. For `constant`: `public`, or `private` after a `private_constant :X` written directly in its namespace's body (`null` when that call is written anywhere else, or has a non-literal argument). `null` for `class` / `module`. |
 | `contract` | `inline` when the site carries a contract comment other than `@extrbs` and a member it defines has an inline declaration from this site's file that is not a defaulted one (`inferred-signature`, § Members); otherwise `null`. When one file holds several such sites for a member, each reads `inline`: the cached environment keeps the file, not the position. A `sig/` or library contract belongs to the member, not to a site. |
 | `params`, `block` | For `method`: this definition's own parameter list as written, in the shape of an overload's `params` and `block` (§ Members) but with every `type` `null`: the shape only. Types are on the member's overloads; the cached environment keeps which file an inline contract came from, not which definition. `null` for every other kind. |
 | `body_return` | For `method`: a slot (§ Slots), the type this body returns with its parameters as declared, or unknown where none is declared. Its calls resolve against the same seeded index `check` uses, so a call to another member reads that member as `check` reads it. A body-less `def` returns `nil`; `initialize` reads `void`. `null` for every other kind. |

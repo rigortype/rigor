@@ -127,11 +127,18 @@ module Rigor
                                 spell: speller(scope.environment)).read
         reader.sites.each do |site|
           @site_paths[site.data["key"]] = absolute
+          read_constant_contract(site, scope) if site.data["kind"] == "constant"
           Members.scopes_of(site.data).product(site.data["members"]).each do |member_scope, name|
             read_contract(site.data["owner"], member_scope, name, scope)
           end
         end
         @captured[absolute] = reader
+      end
+
+      # A constant an RBS or inline declaration names takes the declared type in place of its value's.
+      def read_constant_contract(site, scope)
+        declared = contract_reader(scope.environment).read_constant(site.data["name"], scope.environment)
+        site.data["value"] = declared if declared
       end
 
       def read_contract(owner, member_scope, name, scope)

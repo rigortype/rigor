@@ -1419,26 +1419,8 @@ module Rigor
       # arity, hash keys, ...), so removing anything from the falsey scope would be unsound — they keep the conservative
       # shape.
       def in_branch_body_and_falsey_scopes(subject_type, subject, branch, falsey_scope)
-        class_node = bare_class_pattern_node(branch.pattern)
-        unless class_node
-          bound = apply_in_pattern_bindings(subject_type, subject, branch.pattern, falsey_scope)
-          return [bound, falsey_scope]
-        end
-
-        truthy_scope, narrowed_falsey = Narrowing.case_when_scopes(subject, [class_node], falsey_scope)
+        truthy_scope, narrowed_falsey = Narrowing.case_clause_scopes(subject, branch, falsey_scope)
         [apply_in_pattern_bindings(subject_type, subject, branch.pattern, truthy_scope), narrowed_falsey]
-      end
-
-      # The class-constant node of a `in C` / `in C => x` pattern (the only `in` shapes whose match is pure `is_a?`), or
-      # nil for any pattern that deconstructs, binds, or matches a value.
-      def bare_class_pattern_node(pattern)
-        case pattern
-        when Prism::ConstantReadNode, Prism::ConstantPathNode
-          pattern
-        when Prism::CapturePatternNode
-          value = pattern.value
-          value if value.is_a?(Prism::ConstantReadNode) || value.is_a?(Prism::ConstantPathNode)
-        end
       end
 
       def eval_case_else(else_clause, falsey_scope)

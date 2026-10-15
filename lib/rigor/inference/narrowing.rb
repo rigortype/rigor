@@ -535,6 +535,30 @@ module Rigor
       CASE_SUBJECT_KINDS = %i[local ivar global constant].freeze
       private_constant :CASE_SUBJECT_KINDS
 
+      # Returns `[body_scope, falsey_scope]` for one clause of a `case` with a subject: a `when` clause narrows
+      # through {.case_when_scopes}, and an `in` clause only for a bare class pattern ({.bare_class_pattern_node}),
+      # which matches exactly when `subject.is_a?(C)`. Every other pattern can fail to match where a class test
+      # passes (deconstruction arity, hash keys, a guard), so it narrows neither edge. The pattern's bindings are
+      # the caller's to apply.
+      def case_clause_scopes(subject, clause, scope)
+        return case_when_scopes(subject, clause.conditions, scope) if clause.is_a?(Prism::WhenNode)
+
+        class_node = bare_class_pattern_node(clause.pattern)
+        class_node ? case_when_scopes(subject, [class_node], scope) : [scope, scope]
+      end
+
+      # ADR-47 WD3a — the class-constant node of a `in C` / `in C => x` pattern (the only `in` shapes whose match is
+      # pure `is_a?`), or nil for any pattern that deconstructs, binds, or matches a value.
+      def bare_class_pattern_node(pattern)
+        case pattern
+        when Prism::ConstantReadNode, Prism::ConstantPathNode
+          pattern
+        when Prism::CapturePatternNode
+          value = pattern.value
+          value if value.is_a?(Prism::ConstantReadNode) || value.is_a?(Prism::ConstantPathNode)
+        end
+      end
+
       # When the clause has exactly one `RegularExpressionNode` literal condition, narrow the
       # match-data globals on the body edge (same rule as `analyse_regex_match_predicate`'s
       # truthy edge). With multiple regex conditions (`when /a/, /b/`) the body is reachable

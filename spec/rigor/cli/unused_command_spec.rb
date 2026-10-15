@@ -353,6 +353,22 @@ RSpec.describe Rigor::CLI::UnusedCommand do
       end
     end
 
+    # Round 8 of #1888: an entry point naming the analysed spelling the report does not print.
+    it "matches an entry point against every analysed spelling of a file" do
+      Dir.mktmpdir do |dir|
+        write_file(dir, ".rigor.yml", "paths:\n  - lib\n  - tools\n")
+        write_file(dir, "lib/entry.rb", "class Entry\n  def x = Used\nend\n")
+        write_file(dir, "lib/used.rb", "class Used\nend\n")
+        FileUtils.mkdir_p(File.join(dir, "tools"))
+        File.symlink(File.join(dir, "lib/entry.rb"), File.join(dir, "tools/entry_cli.rb"))
+        backdate(dir)
+
+        _, report, = run_in(dir, "--entry-point=tools/entry_cli.rb")
+
+        expect(report["candidates"]).to be_empty
+      end
+    end
+
     it "scans each file once when the project is reached through a symlink" do
       Dir.mktmpdir do |dir|
         project = File.join(dir, "proj")

@@ -187,7 +187,13 @@ module Rigor
         spellings = Hash.new { |hash, real| hash[real] = [] }
         analysed.each { |file| spellings[canonical(file)] << [file, true] }
         reference_files(paths, configuration).each { |file| spellings[canonical(file)] << [file, false] }
-        spellings.transform_values { |list| list.uniq(&:first) }
+        spellings = spellings.transform_values { |list| list.uniq(&:first) }
+        @analysed_spellings = spellings.transform_values do |list|
+          list.filter_map do |file, analysed|
+            file if analysed
+          end
+        end
+        spellings
       end
 
       def respelled(use, file, role)
@@ -271,8 +277,8 @@ module Rigor
         real
       end
 
-      # A glob is matched against the declaration's path, and its path as written and as its realpath relative
-      # to the project root (#1760) and to the working directory:
+      # A glob is matched against every analysed spelling of the declaration's file, and each of them and its
+      # realpath relative to the project root (#1760) and to the working directory:
       # `configuration.paths` are expanded to absolute, so a user-written `--entry-point=lib/entry.rb` would
       # otherwise never match anything and silently produce a root set of zero.
       # A constant named only from the project's own `sig/` is referenced — the #345 probe reported exactly this
@@ -341,7 +347,8 @@ module Rigor
         declarations.filter_map do |d|
           real = canonical(d.path)
           dirs = @root_spellings + cwd_spellings
-          spellings = [d.path, relative_to_root(real), *below(d.path, dirs), *below(real, dirs)]
+          written = @analysed_spellings.fetch(real, [d.path]) | [d.path]
+          spellings = [*written, relative_to_root(real), *written.flat_map { |w| below(w, dirs) }, *below(real, dirs)]
           d.fqn if globs.any? { |g| spellings.any? { |path| matcher.call(g, path) } }
         end
       end

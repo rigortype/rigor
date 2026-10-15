@@ -69,6 +69,8 @@ module Rigor
         when Prism::AliasMethodNode
           omit("alias", node.new_name.slice.delete_prefix(":"), node, owner: nesting.last, singleton: singleton)
         when Prism::MultiWriteNode then walk_multi_write(node, nesting, singleton, in_block)
+        when Prism::ForNode then walk_assigning(node, node.index, nesting, singleton, in_block)
+        when Prism::RescueNode then walk_assigning(node, node.reference, nesting, singleton, in_block)
         when *CONSTANT_WRITES then walk_constant(node, nesting)
         else walk_children(node, nesting, singleton, in_block)
         end
@@ -252,25 +254,41 @@ module Rigor
         end
       end
 
+      # `a, B = …`: each constant target is an omission. The targets are walked too, since an index or call target
+      # (`a[expr], b = …`) or a constant path's parent can hold a declaration; the value is walked last.
       def walk_multi_write(node, nesting, singleton, in_block)
-        constant_targets(node).each do |target|
-          omit("constant", qualify(nesting, target) || target.slice, target)
-        end
+        omit_constant_targets(node, nesting)
+        targets_of(node).each { |target| walk(target, nesting, singleton: singleton, in_block: in_block) }
         walk(node.value, nesting, singleton: singleton, in_block: in_block)
       end
 
-      # The constant targets of a multiple assignment, through nested `(a, B), c` groups and a `*Rest` splat. The
-      # rest slot is a `SplatNode` (`a, *B = …`, or a bare `*`) or an `ImplicitRestNode` (the trailing comma of
-      # `a, = …`), which names nothing.
-      def constant_targets(node)
-        rest = node.rest.is_a?(Prism::SplatNode) ? [node.rest.expression].compact : []
-        (node.lefts + rest + node.rights).flat_map do |target|
-          case target
-          when Prism::ConstantTargetNode, Prism::ConstantPathTargetNode then [target]
-          when Prism::MultiTargetNode then constant_targets(target)
-          else []
-          end
+      # A `for A in …` index or a `rescue => E` reference assigns the constants it names, like a multiple
+      # assignment does.
+      def walk_assigning(node, target, nesting, singleton, in_block)
+        omit_constant_targets(target, nesting) if target
+        walk_children(node, nesting, singleton, in_block)
+      end
+
+      def omit_constant_targets(target, nesting)
+        constant_targets(target).each do |constant|
+          omit("constant", qualify(nesting, constant) || constant.slice, constant)
         end
+      end
+
+      # The constants a target assigns: itself when it is one, and those inside a nested `(a, B)` group or a
+      # `*Rest` splat. A group's rest slot is a `SplatNode` (`a, *B = …`, or a bare `*`) or an `ImplicitRestNode`
+      # (the trailing comma of `a, = …`), which names nothing.
+      def constant_targets(target)
+        case target
+        when Prism::ConstantTargetNode, Prism::ConstantPathTargetNode then [target]
+        when Prism::MultiWriteNode, Prism::MultiTargetNode then targets_of(target).flat_map { |t| constant_targets(t) }
+        when Prism::SplatNode then target.expression ? constant_targets(target.expression) : []
+        else []
+        end
+      end
+
+      def targets_of(node)
+        node.lefts + [node.rest].compact + node.rights
       end
 
       def walk_constant(node, nesting)

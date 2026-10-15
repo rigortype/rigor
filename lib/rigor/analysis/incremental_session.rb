@@ -276,6 +276,9 @@ module Rigor
           # latency this mode exists to avoid, so decline and let the caller drop to single-file scope.
           break nil unless @plugin_fact_reusable.reusable_against?(restored.plugin_fact_digest)
           break nil if source_rbs_unverified?(result)
+          # #1898 — a recheck that re-baselined over stale plugin effect facts ran its baseline with the buffer set,
+          # which analyses the buffer alone, so it is not a whole-project answer. Decline, as above.
+          break nil if result.rebaselined
 
           result
         end

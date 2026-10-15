@@ -141,5 +141,20 @@ RSpec.describe "effect.envelope-exceeded across a plugin effect-fact change" do
         expect(to_inline).to eq(check("--no-cache").first).and eq(primed)
       end
     end
+
+    # A buffer recheck that re-baselined did so with the buffer set, which analyses the buffer alone, so it falls
+    # back to the explicit single-file mode instead of reporting that answer as whole-project editor mode.
+    it "drops a buffer recheck to the buffer alone when the plugin effect digest moved" do
+      check("--incremental")
+      File.write("svc_buffer.rb", File.read("lib/svc.rb"))
+      buffer = ["--incremental", "--tmp-file=svc_buffer.rb", "--instead-of=lib/svc.rb"]
+      _, same_err = check(*buffer)
+      adapter("async")
+      _, moved_err = check(*buffer)
+
+      expect(same_err).to include("--incremental editor mode")
+      expect(moved_err).to include("analysing the buffer alone")
+      expect(moved_err).not_to include("--incremental editor mode")
+    end
   end
 end

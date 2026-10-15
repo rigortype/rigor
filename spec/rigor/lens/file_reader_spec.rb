@@ -68,6 +68,9 @@ RSpec.describe Rigor::Lens::FileReader do
     it "keeps a toggle inside a block local to the block" do
       source = <<~RUBY
         class Foo
+          configure do
+            private
+          end
           Point = Struct.new(:x) do
             private
             def helper; end
@@ -76,7 +79,7 @@ RSpec.describe Rigor::Lens::FileReader do
         end
       RUBY
 
-      expect(visibilities_of(source)).to eq("bar" => "public")
+      expect(visibilities_of(source)).to eq("x" => "public", "helper" => "private", "bar" => "public")
     end
 
     it "reads a literal array argument" do
@@ -206,6 +209,43 @@ end
       expect(returns["iv"]).to eq("state" => "unavailable", "reason" => "not_computed")
       expect(returns["sp"]).to eq("state" => "unavailable", "reason" => "not_computed")
       expect(returns["plain"]).to eq(sites(source).find { |data| data["name"] == "plain" }["body_return"])
+    end
+  end
+
+  describe "Data.define and Struct.new" do
+    let(:source) do
+      <<~RUBY
+        module X
+          P = Data.define(:a, :b) do
+            def m = 1
+            private
+            def hidden = 2
+          end
+          S = Struct.new(:c, keyword_init: true)
+          N = Struct.new("Named", :d)
+          D = Data.define(*FIELDS)
+          E ||= Data.define(:e)
+          F = Data.define(:f, &blk)
+        end
+      RUBY
+    end
+
+    it "reads a constant-assigned builder as a class with field attributes and its block as the body" do
+      rows = sites(source).map { |site| site.values_at("kind", "owner", "name", "attribute", "builder", "visibility") }
+
+      expect(rows).to eq([["module", nil, "X", nil, nil, nil],
+                          ["class", nil, "X::P", nil, "data", nil],
+                          ["attribute", "X::P", "a", "reader", nil, "public"],
+                          ["attribute", "X::P", "b", "reader", nil, "public"],
+                          ["method", "X::P", "m", nil, nil, "public"],
+                          ["method", "X::P", "hidden", nil, nil, "private"],
+                          ["class", nil, "X::S", nil, "struct", nil],
+                          ["attribute", "X::S", "c", "accessor", nil, "public"]])
+    end
+
+    it "omits the builder forms it does not model" do
+      expect(omissions(source)).to include(%w[struct_class X::N], %w[data_class X::D], %w[data_class X::E],
+                                           %w[data_class X::F])
     end
   end
 

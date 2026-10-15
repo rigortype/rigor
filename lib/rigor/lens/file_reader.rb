@@ -74,7 +74,7 @@ module Rigor
         when Prism::MultiWriteNode then walk_multi_write(node, nesting, singleton, in_block)
         when Prism::ForNode then walk_assigning(node, node.index, nesting, singleton, in_block)
         when Prism::RescueNode then walk_assigning(node, node.reference, nesting, singleton, in_block)
-        when *CONSTANT_WRITES then walk_constant(node, nesting)
+        when *CONSTANT_WRITES then walk_constant(node, nesting, in_block)
         else walk_children(node, nesting, singleton, in_block)
         end
       end
@@ -350,16 +350,57 @@ module Rigor
         node.lefts + [node.rest].compact + node.rights
       end
 
-      def walk_constant(node, nesting)
+      def walk_constant(node, nesting, in_block)
         target = node.respond_to?(:target) ? node.target : node
         name = node.respond_to?(:target) ? qualify(nesting, node.target) : qualify_name(nesting, node.name.to_s)
-        kind = case data_or_struct(node.value)
-               when :data then "data_class"
-               when :struct then "struct_class"
-               else "constant"
-               end
+        builder = data_or_struct(node.value)
+        fields = builder && builder_fields(node.value, builder)
+        if fields && name && !in_block && plain_write?(node)
+          return read_builder_class(node, name, nesting, builder, fields)
+        end
+
+        kind = { data: "data_class", struct: "struct_class" }.fetch(builder, "constant")
         omit(kind, name || target.slice, node)
         walk(node.value, nesting, singleton: false, in_block: true)
+      end
+
+      # `Foo = Data.define(:a, :b) do … end` and `Foo = Struct.new(:a, keyword_init: true) do … end`: a class site
+      # with `builder` set, an attribute site per field (a reader for `Data`, an accessor for `Struct`), and the block
+      # read as the class body, which Ruby `class_eval`s on the new class. `check`'s discovery keys the block's defs
+      # and the fields under the same constant name.
+      def read_builder_class(node, name, nesting, builder, fields)
+        add_site(node, { "kind" => "class", "name" => name, "owner" => nil, "scope" => nil, "attribute" => nil,
+                         "members" => [], "module_function" => false, "builder" => builder.to_s,
+                         "visibility" => nil, "params" => nil, "block" => nil, "body_return" => nil })
+        attribute = builder == :data ? "reader" : "accessor"
+        fields.each do |field, field_node|
+          add_site(field_node, { "kind" => "attribute", "name" => field, "owner" => name, "scope" => "instance",
+                                 "attribute" => attribute, "members" => attribute_members(field, attribute),
+                                 "module_function" => false, "visibility" => "public", "params" => nil,
+                                 "block" => nil, "body_return" => nil })
+        end
+        block = node.value.block
+        walk_body(block.body, nesting + [name], singleton: false, kind: :class) if block&.body
+      end
+
+      def plain_write?(node)
+        node.is_a?(Prism::ConstantWriteNode) || node.is_a?(Prism::ConstantPathWriteNode)
+      end
+
+      # `[[name, node], …]` for a builder call whose fields are all literal, or nil. `Struct.new` may end with
+      # `keyword_init:`; a leading string (`Struct.new("Name", …)`, which defines `Struct::Name`) or a `&block`
+      # argument is not modelled.
+      def builder_fields(call, builder)
+        return nil if call.block.is_a?(Prism::BlockArgumentNode)
+
+        arguments = call.arguments&.arguments || []
+        arguments = arguments[0...-1] if builder == :struct && arguments.last.is_a?(Prism::KeywordHashNode)
+        return nil if builder == :struct && arguments.first.is_a?(Prism::StringNode)
+        unless arguments.all? { |argument| argument.is_a?(Prism::SymbolNode) || argument.is_a?(Prism::StringNode) }
+          return nil
+        end
+
+        arguments.map { |argument| [argument.unescaped, argument] }
       end
 
       # A bare `module_function` the walk cannot place in the body's statement list (under an `if`, say) leaves the
@@ -469,7 +510,7 @@ module Rigor
         tail = { "ordinal" => ordinal, "span" => Lens.span(location),
                  "contract_span" => Lens.contract_span(anchor.contract_comments), "anchor" => anchor.token,
                  "contract" => nil }
-        @sites << Site.new(data: { "key" => key }.merge(data).merge(tail), node: node,
+        @sites << Site.new(data: { "key" => key, "builder" => nil }.merge(data).merge(tail), node: node,
                            contract_comments: anchor.contract_comments)
       end
 

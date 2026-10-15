@@ -13,7 +13,7 @@
     "signature_roots": [
       "sig"
     ],
-    "signature_digest": "xxh3-64:1623bff860a2465e",
+    "signature_digest": "xxh3-64:19d381c7e4c51d94",
     "plugins": [
       {
         "id": "rbs-inline",
@@ -29,6 +29,7 @@
     "method",
     "attribute",
     "module_function",
+    "builder",
     "body_return",
     "diagnostics",
     "inputs"
@@ -83,6 +84,7 @@
           "attribute": null,
           "members": [],
           "module_function": false,
+          "builder": null,
           "ordinal": 0,
           "span": {
             "start_line": 4,
@@ -111,6 +113,7 @@
             "label"
           ],
           "module_function": false,
+          "builder": null,
           "ordinal": 0,
           "span": {
             "start_line": 9,
@@ -158,6 +161,7 @@
             "scale"
           ],
           "module_function": false,
+          "builder": null,
           "ordinal": 0,
           "span": {
             "start_line": 12,
@@ -205,6 +209,7 @@
             "total"
           ],
           "module_function": false,
+          "builder": null,
           "ordinal": 0,
           "span": {
             "start_line": 14,
@@ -239,6 +244,7 @@
             "fetch"
           ],
           "module_function": false,
+          "builder": null,
           "ordinal": 0,
           "span": {
             "start_line": 16,
@@ -280,6 +286,7 @@
             "name"
           ],
           "module_function": false,
+          "builder": null,
           "ordinal": 0,
           "span": {
             "start_line": 18,
@@ -315,6 +322,7 @@
             "code"
           ],
           "module_function": false,
+          "builder": null,
           "ordinal": 1,
           "span": {
             "start_line": 18,
@@ -350,6 +358,7 @@
             "build"
           ],
           "module_function": false,
+          "builder": null,
           "ordinal": 0,
           "span": {
             "start_line": 20,
@@ -385,6 +394,7 @@
             "price="
           ],
           "module_function": false,
+          "builder": null,
           "ordinal": 0,
           "span": {
             "start_line": 22,
@@ -420,6 +430,7 @@
             "registry"
           ],
           "module_function": false,
+          "builder": null,
           "ordinal": 0,
           "span": {
             "start_line": 25,
@@ -454,6 +465,7 @@
             "secret"
           ],
           "module_function": false,
+          "builder": null,
           "ordinal": 0,
           "span": {
             "start_line": 32,
@@ -508,6 +520,7 @@
           "attribute": null,
           "members": [],
           "module_function": false,
+          "builder": null,
           "ordinal": 0,
           "span": {
             "start_line": 1,
@@ -536,6 +549,7 @@
             "amount"
           ],
           "module_function": false,
+          "builder": null,
           "ordinal": 0,
           "span": {
             "start_line": 2,
@@ -570,6 +584,7 @@
             "note"
           ],
           "module_function": false,
+          "builder": null,
           "ordinal": 0,
           "span": {
             "start_line": 4,
@@ -634,6 +649,7 @@
             "each_line"
           ],
           "module_function": false,
+          "builder": null,
           "ordinal": 0,
           "span": {
             "start_line": 6,
@@ -672,6 +688,7 @@
             "broken"
           ],
           "module_function": false,
+          "builder": null,
           "ordinal": 0,
           "span": {
             "start_line": 10,
@@ -726,6 +743,7 @@
           "attribute": null,
           "members": [],
           "module_function": false,
+          "builder": null,
           "ordinal": 0,
           "span": {
             "start_line": 1,
@@ -754,6 +772,7 @@
             "helper"
           ],
           "module_function": true,
+          "builder": null,
           "ordinal": 0,
           "span": {
             "start_line": 4,
@@ -788,6 +807,7 @@
             "top_helper"
           ],
           "module_function": false,
+          "builder": null,
           "ordinal": 0,
           "span": {
             "start_line": 7,
@@ -810,6 +830,226 @@
             "path": null,
             "from_site": null
           }
+        }
+      ],
+      "diagnostics": [],
+      "inputs": []
+    },
+    {
+      "argument": "lib/point.rb",
+      "path": "lib/point.rb",
+      "status": "ok",
+      "reason": null,
+      "digest": "xxh3-64:d8215bb8fb3662ec",
+      "complete": true,
+      "omissions": [],
+      "sites": [
+        {
+          "key": "lib/point.rb:0-65:0",
+          "kind": "class",
+          "name": "Point",
+          "owner": null,
+          "scope": null,
+          "attribute": null,
+          "members": [],
+          "module_function": false,
+          "builder": "data",
+          "ordinal": 0,
+          "span": {
+            "start_line": 1,
+            "start_column": 0,
+            "end_line": 3,
+            "end_column": 3,
+            "start_offset": 0,
+            "end_offset": 65
+          },
+          "contract_span": null,
+          "anchor": "1:56de",
+          "visibility": null,
+          "contract": null,
+          "params": null,
+          "block": null,
+          "body_return": null
+        },
+        {
+          "key": "lib/point.rb:20-22:0",
+          "kind": "attribute",
+          "name": "x",
+          "owner": "Point",
+          "scope": "instance",
+          "attribute": "reader",
+          "members": [
+            "x"
+          ],
+          "module_function": false,
+          "builder": null,
+          "ordinal": 0,
+          "span": {
+            "start_line": 1,
+            "start_column": 20,
+            "end_line": 1,
+            "end_column": 22,
+            "start_offset": 20,
+            "end_offset": 22
+          },
+          "contract_span": null,
+          "anchor": "1:2fb5",
+          "visibility": "public",
+          "contract": null,
+          "params": null,
+          "block": null,
+          "body_return": null
+        },
+        {
+          "key": "lib/point.rb:24-26:0",
+          "kind": "attribute",
+          "name": "y",
+          "owner": "Point",
+          "scope": "instance",
+          "attribute": "reader",
+          "members": [
+            "y"
+          ],
+          "module_function": false,
+          "builder": null,
+          "ordinal": 0,
+          "span": {
+            "start_line": 1,
+            "start_column": 24,
+            "end_line": 1,
+            "end_column": 26,
+            "start_offset": 24,
+            "end_offset": 26
+          },
+          "contract_span": null,
+          "anchor": "1:3585",
+          "visibility": "public",
+          "contract": null,
+          "params": null,
+          "block": null,
+          "body_return": null
+        },
+        {
+          "key": "lib/point.rb:33-61:0",
+          "kind": "method",
+          "name": "norm",
+          "owner": "Point",
+          "scope": "instance",
+          "attribute": null,
+          "members": [
+            "norm"
+          ],
+          "module_function": false,
+          "builder": null,
+          "ordinal": 0,
+          "span": {
+            "start_line": 2,
+            "start_column": 2,
+            "end_line": 2,
+            "end_column": 30,
+            "start_offset": 33,
+            "end_offset": 61
+          },
+          "contract_span": null,
+          "anchor": "2:2f62",
+          "visibility": "public",
+          "contract": null,
+          "params": [],
+          "block": null,
+          "body_return": {
+            "state": "typed",
+            "type": "Integer",
+            "provenance": "inferred",
+            "path": null,
+            "from_site": null
+          }
+        },
+        {
+          "key": "lib/point.rb:67-99:0",
+          "kind": "class",
+          "name": "Pair",
+          "owner": null,
+          "scope": null,
+          "attribute": null,
+          "members": [],
+          "module_function": false,
+          "builder": "struct",
+          "ordinal": 0,
+          "span": {
+            "start_line": 5,
+            "start_column": 0,
+            "end_line": 5,
+            "end_column": 32,
+            "start_offset": 67,
+            "end_offset": 99
+          },
+          "contract_span": null,
+          "anchor": "5:259e",
+          "visibility": null,
+          "contract": null,
+          "params": null,
+          "block": null,
+          "body_return": null
+        },
+        {
+          "key": "lib/point.rb:85-90:0",
+          "kind": "attribute",
+          "name": "left",
+          "owner": "Pair",
+          "scope": "instance",
+          "attribute": "accessor",
+          "members": [
+            "left",
+            "left="
+          ],
+          "module_function": false,
+          "builder": null,
+          "ordinal": 0,
+          "span": {
+            "start_line": 5,
+            "start_column": 18,
+            "end_line": 5,
+            "end_column": 23,
+            "start_offset": 85,
+            "end_offset": 90
+          },
+          "contract_span": null,
+          "anchor": "5:0cb2",
+          "visibility": "public",
+          "contract": null,
+          "params": null,
+          "block": null,
+          "body_return": null
+        },
+        {
+          "key": "lib/point.rb:92-98:0",
+          "kind": "attribute",
+          "name": "right",
+          "owner": "Pair",
+          "scope": "instance",
+          "attribute": "accessor",
+          "members": [
+            "right",
+            "right="
+          ],
+          "module_function": false,
+          "builder": null,
+          "ordinal": 0,
+          "span": {
+            "start_line": 5,
+            "start_column": 25,
+            "end_line": 5,
+            "end_column": 31,
+            "start_offset": 92,
+            "end_offset": 98
+          },
+          "contract_span": null,
+          "anchor": "5:17b5",
+          "visibility": "public",
+          "contract": null,
+          "params": null,
+          "block": null,
+          "body_return": null
         }
       ],
       "diagnostics": [],
@@ -1051,6 +1291,194 @@
             "path": null,
             "from_site": "lib/order.rb:33-94:0",
             "cause": "inferred_return_untyped"
+          }
+        }
+      ]
+    },
+    {
+      "owner": "Pair",
+      "scope": "instance",
+      "name": "left",
+      "kind": "attribute",
+      "visibility": "public",
+      "sites": [
+        "lib/point.rb:85-90:0"
+      ],
+      "also_defined_at": [],
+      "basis": "single_site",
+      "overloads": [
+        {
+          "rbs": null,
+          "params": [],
+          "block": null,
+          "return": {
+            "state": "unavailable",
+            "reason": "not_computed"
+          }
+        }
+      ]
+    },
+    {
+      "owner": "Pair",
+      "scope": "instance",
+      "name": "left=",
+      "kind": "attribute",
+      "visibility": "public",
+      "sites": [
+        "lib/point.rb:85-90:0"
+      ],
+      "also_defined_at": [],
+      "basis": "single_site",
+      "overloads": [
+        {
+          "rbs": null,
+          "params": [
+            {
+              "name": null,
+              "kind": "required",
+              "type": {
+                "state": "unavailable",
+                "reason": "not_computed"
+              }
+            }
+          ],
+          "block": null,
+          "return": {
+            "state": "unavailable",
+            "reason": "not_computed"
+          }
+        }
+      ]
+    },
+    {
+      "owner": "Pair",
+      "scope": "instance",
+      "name": "right",
+      "kind": "attribute",
+      "visibility": "public",
+      "sites": [
+        "lib/point.rb:92-98:0"
+      ],
+      "also_defined_at": [],
+      "basis": "single_site",
+      "overloads": [
+        {
+          "rbs": null,
+          "params": [],
+          "block": null,
+          "return": {
+            "state": "unavailable",
+            "reason": "not_computed"
+          }
+        }
+      ]
+    },
+    {
+      "owner": "Pair",
+      "scope": "instance",
+      "name": "right=",
+      "kind": "attribute",
+      "visibility": "public",
+      "sites": [
+        "lib/point.rb:92-98:0"
+      ],
+      "also_defined_at": [],
+      "basis": "single_site",
+      "overloads": [
+        {
+          "rbs": null,
+          "params": [
+            {
+              "name": null,
+              "kind": "required",
+              "type": {
+                "state": "unavailable",
+                "reason": "not_computed"
+              }
+            }
+          ],
+          "block": null,
+          "return": {
+            "state": "unavailable",
+            "reason": "not_computed"
+          }
+        }
+      ]
+    },
+    {
+      "owner": "Point",
+      "scope": "instance",
+      "name": "norm",
+      "kind": "method",
+      "visibility": "public",
+      "sites": [
+        "lib/point.rb:33-61:0"
+      ],
+      "also_defined_at": [],
+      "basis": "contract",
+      "overloads": [
+        {
+          "rbs": "() -> ::Integer",
+          "params": [],
+          "block": null,
+          "return": {
+            "state": "typed",
+            "type": "::Integer",
+            "provenance": "sig",
+            "path": "sig/point.rbs",
+            "from_site": null
+          }
+        }
+      ]
+    },
+    {
+      "owner": "Point",
+      "scope": "instance",
+      "name": "x",
+      "kind": "attribute",
+      "visibility": "public",
+      "sites": [
+        "lib/point.rb:20-22:0"
+      ],
+      "also_defined_at": [],
+      "basis": "contract",
+      "overloads": [
+        {
+          "rbs": "() -> ::Integer",
+          "params": [],
+          "block": null,
+          "return": {
+            "state": "typed",
+            "type": "::Integer",
+            "provenance": "sig",
+            "path": "sig/point.rbs",
+            "from_site": null
+          }
+        }
+      ]
+    },
+    {
+      "owner": "Point",
+      "scope": "instance",
+      "name": "y",
+      "kind": "attribute",
+      "visibility": "public",
+      "sites": [
+        "lib/point.rb:24-26:0"
+      ],
+      "also_defined_at": [],
+      "basis": "contract",
+      "overloads": [
+        {
+          "rbs": "() -> ::Integer",
+          "params": [],
+          "block": null,
+          "return": {
+            "state": "typed",
+            "type": "::Integer",
+            "provenance": "sig",
+            "path": "sig/point.rbs",
+            "from_site": null
           }
         }
       ]

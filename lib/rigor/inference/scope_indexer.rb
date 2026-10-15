@@ -1078,10 +1078,10 @@ module Rigor
       # body is already reached by that body's walk ({#gather_ivar_writes} enters blocks).
       def collect_define_method_block_ivars(node, owner, default_scope, accumulator, mutated_ivars)
         return if owner.empty?
-        return unless DefineMethodBlockSelf.define_method_on_lexical_self?(node)
+        return unless define_method_block_call?(node)
 
         block = node.block
-        return unless block.is_a?(Prism::BlockNode) && block.body
+        return unless block.body
 
         class_name = owner.join("::")
         body_scope = census_body_scope(default_scope, owner, Type::Combinator.nominal_of(class_name))
@@ -1179,9 +1179,15 @@ module Rigor
       # every `@x = …` write target as a class-body init. Consumed by `contribute_read_before_write_nil!` to exempt
       # ivars the author already knows might be nil (the `@x = nil` at class-body level is the canonical nullability
       # acknowledgement; the instance @x is technically a separate store, but the pragmatic intent is unambiguous).
+      #
+      # A literal `define_method` block is a method body, not class-body code (#1768): its writes reach the census as
+      # a `def` body's do, so they must not exempt the ivar from the read-before-write `nil` either. Only its receiver
+      # and arguments are walked.
       def collect_class_body_ivar_writes(node, class_name, init_writes)
         return unless node.is_a?(Prism::Node)
         return if IVAR_BARRIER_NODES.any? { |klass| node.is_a?(klass) }
+
+        return collect_define_method_argument_writes(node, class_name, init_writes) if define_method_block_call?(node)
 
         if node.is_a?(Prism::InstanceVariableWriteNode) ||
            node.is_a?(Prism::InstanceVariableOrWriteNode) ||
@@ -1193,6 +1199,18 @@ module Rigor
         node.rigor_each_child do |child|
           collect_class_body_ivar_writes(child, class_name, init_writes)
         end
+      end
+
+      # The arguments of a `define_method` block call, walked by {#collect_class_body_ivar_writes} in place of the
+      # call's children so the block body stays out of the class-body init writes.
+      def collect_define_method_argument_writes(node, class_name, init_writes)
+        node.arguments&.arguments&.each { |arg| collect_class_body_ivar_writes(arg, class_name, init_writes) }
+      end
+
+      # A `define_method` call with a literal block on the implicit or `self` receiver: the block is an instance
+      # method body of the class the walk is in (#1768).
+      def define_method_block_call?(node)
+        DefineMethodBlockSelf.define_method_on_lexical_self?(node) && node.block.is_a?(Prism::BlockNode)
       end
 
       def detect_read_before_write(node, seen_writes, read_first)

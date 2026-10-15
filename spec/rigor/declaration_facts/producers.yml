@@ -253,6 +253,7 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#collect_declared_path_write: grandfathered
     Rigor::Inference::ScopeIndexer#collect_def_cvar_writes: grandfathered
     Rigor::Inference::ScopeIndexer#collect_def_ivar_writes: grandfathered
+    Rigor::Inference::ScopeIndexer#collect_define_method_argument_writes: a recursion step of collect_class_body_ivar_writes (#1768); it hands a define_method block call's arguments back to that walk under the class name it was given, skipping the block body, and derives no declaration context of its own
     Rigor::Inference::ScopeIndexer#collect_define_method_block_ivars: the define_method arm of the ivar census walk (#1768); it reads the owner the walk passes in, as record_attr_writer_ivars does, and decides only whether the call is a literal define_method block on the implicit or self receiver, deriving no declaration context of its own
     Rigor::Inference::ScopeIndexer#collect_defined_test_ivars: grandfathered
     Rigor::Inference::ScopeIndexer#collect_eval_class_decls?: grandfathered

@@ -39,6 +39,18 @@ RSpec.describe "the ADR-58 ivar census counts define_method block writes" do
       expect(census(source)).to eq(%("a"?))
     end
 
+    # A define_method block is a method body, not class-body code: its write does not exempt the ivar from the
+    # read-before-write `nil` a sibling def's read contributes.
+    it "keeps the read-before-write nil for an ivar only a define_method block writes" do
+      source = %(class W\n  define_method(:set) { @x = "a" }\n  def get = @x\nend\n)
+      expect(census(source, "W")).to eq(%("a"?))
+    end
+
+    it "keeps it for a define_method block in an included block" do
+      source = %(module M\n  included do\n    define_method(:arm!) { @x = :yes }\n  end\n  def armed? = @x\nend\n)
+      expect(census(source, "M")).to eq(":yes?")
+    end
+
     it "types the block's rvalue on the instance side" do
       expect(census(box(%(define_method(:set) { @x = self })))).to eq("Box?")
     end
@@ -94,6 +106,49 @@ RSpec.describe "the ADR-58 ivar census counts define_method block writes" do
 
     it "keeps a sibling def's read quiet (the issue)" do
       expect(diagnostics_for("box.rb" => box(%(define_method(:set) { @x = "a" }\ndef get = @x.upcase)))).to be_empty
+    end
+
+    it "does not fold a writer-only ivar's truthiness in a sibling def" do
+      source = <<~RUBY
+        class Feature
+          define_method(:enable!) { @enabled = true }
+          define_method(:set) { @x = "a" }
+          def status
+            if @enabled then "on" else "off" end
+          end
+          def label = (@enabled ? "on" : "off")
+          def get
+            return "none" unless @x
+            @x
+          end
+        end
+      RUBY
+      expect(diagnostics_for("feature.rb" => source)).to be_empty
+    end
+
+    it "still folds a flow-live write in a def beside the block (the control)" do
+      source = <<~RUBY
+        class Feature
+          define_method(:enable!) { @enabled = true }
+          def status
+            @enabled = true
+            if @enabled then "on" else "off" end
+          end
+        end
+      RUBY
+      expect(diagnostics_for("feature.rb" => source)).to eq([["feature.rb", 5, "flow.always-truthy-condition"]])
+    end
+
+    it "does not have sig-gen write a non-nil return for a writer-only ivar" do
+      Dir.mktmpdir do |dir|
+        lib = File.join(dir, "lib")
+        FileUtils.mkdir_p(lib)
+        source = %(class Getter\n  define_method(:set) { @x = "a" }\n  def get = @x\nend\n)
+        File.write(File.join(lib, "getter.rb"), source)
+        configuration = Rigor::Configuration.new(Rigor::Configuration::DEFAULTS.merge("paths" => [lib]))
+        candidates = Rigor::SigGen::Generator.new(configuration: configuration, paths: [lib]).run
+        expect(candidates.find { |c| c.method_name == :get }.rbs).to eq(%(def get: () -> ("a" | nil)))
+      end
     end
 
     it "still reports a def's read when only the class object's ivar is written" do

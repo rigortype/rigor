@@ -362,11 +362,20 @@ module Rigor
       end
       private_class_method :digest_signature_paths
 
-      # Issue #1867 — one snapshot FILE per fingerprint mode. `explain: true` (a `--explain` run) keeps its own
-      # file so it neither reads nor overwrites the plain run's warm snapshot, and the reverse; the plain path
-      # is unchanged. The fingerprint still carries the `explain:true` part, so the two never cross-serve.
+      # Issue #1867 — one snapshot FILE per fingerprint mode. A run whose fingerprint carries run-mode parts
+      # (`--explain`, the ADR-116 shadow harness) keeps its own file so it neither reads nor overwrites the
+      # plain run's warm snapshot, and the reverse. The plain file name is unchanged. The fingerprint still
+      # carries the mode parts, so the files never cross-serve.
       def initialize(root:, explain: false)
-        @path = File.join(root.to_s, "incremental", explain ? "snapshot-explain.bin" : "snapshot.bin")
+        @path = File.join(root.to_s, "incremental", self.class.file_name(explain: explain))
+      end
+
+      # `snapshot.bin` for a plain run; `snapshot-<mode digest>.bin` when {run_mode_parts} is non-empty.
+      def self.file_name(explain: false)
+        parts = run_mode_parts(explain)
+        return "snapshot.bin" if parts.empty?
+
+        "snapshot-#{Digest::SHA256.hexdigest(parts.join("\x00"))[0, 12]}.bin"
       end
 
       attr_reader :path

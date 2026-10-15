@@ -387,8 +387,11 @@ RSpec.describe Rigor::CLI do
           base = explain_project(dir)
           run_cli(*base, "--incremental")
           run_cli(*base, "--incremental", "--explain")
-          2.times do
+          # Each run follows an edit, so the run-result slot cannot serve it: the full path must read its snapshot.
+          2.times do |round|
+            File.write(File.join(dir, "a.rb"), "BEGIN { #{round + 10} }\n")
             expect(run_cli(*base, "--incremental")[2]).to include("--incremental warm")
+            File.write(File.join(dir, "a.rb"), "BEGIN { #{round + 20} }\n")
             expect(run_cli(*base, "--incremental", "--explain")[2]).to include("--incremental warm")
           end
           File.write(File.join(dir, "a.rb"), "BEGIN { 2 }\nBEGIN { 3 }\n")
@@ -405,7 +408,8 @@ RSpec.describe Rigor::CLI do
           run_cli(*base, "--incremental", "--explain")
           incremental = File.join(dir, ".cache", "incremental")
           expect(File).to exist(File.join(incremental, "snapshot.bin"))
-          expect(File).to exist(File.join(incremental, "snapshot-explain.bin"))
+          expect(File).to exist(File.join(incremental, Rigor::Cache::IncrementalSnapshot.file_name(explain: true)))
+          expect(Dir.children(incremental).grep(/\Asnapshot.*\.bin\z/).size).to eq(2)
         end
       end
     end

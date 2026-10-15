@@ -1,1 +1,0 @@
-- **[rigor check]** An `--incremental --explain` run keeps its own snapshot file, so it no longer evicts the warm plain `--incremental` snapshot (and the reverse): a plain recheck after an occasional `--explain` run is warm again instead of a full baseline. ([#1899](https://github.com/rigortype/rigor/pull/1899))

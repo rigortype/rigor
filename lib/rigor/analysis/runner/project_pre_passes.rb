@@ -256,7 +256,7 @@ module Rigor
         # registrations (`#disclose_once` / `#emit_once`) made there. It runs on a THROWAWAY registry, so
         # nothing `#prepare` records on a plugin instance (a trust refusal, say) reaches the coordinator-side
         # instances {DiagnosticAggregator} reads — a pooled cold run never shows those either.
-        # @return [Array(Array<Diagnostic>, Array<Hash>)] the rows and the disclosure records.
+        # Returns the rows first, then the disclosure records.
         def prepare_throwaway_registry
           registry = load_plugins
           rows = plugin_prepare_diagnostics(registry)

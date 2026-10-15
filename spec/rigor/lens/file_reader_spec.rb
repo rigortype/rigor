@@ -185,7 +185,7 @@ end
     # omissions, and the instance methods they name read unknown visibility.
     it "leaves the named forms and the defs it cannot read as module functions as omissions" do
       expect(omissions(source).filter_map { |kind, name| name if kind == "module_function" })
-        .to contain_exactly("c", "x", "x", "z", "missing", "missing", "k", "m")
+        .to contain_exactly("c", "x", "x", "z", "z", "missing", "missing", "k", "m")
     end
 
     it "lets private_class_method reach a module function's singleton copy" do

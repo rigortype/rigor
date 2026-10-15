@@ -173,26 +173,23 @@ module Rigor
       # so their visibility reads unknown, and the omission makes each named member contested.
       def named_module_function(node, nesting, singleton)
         owner = nesting.last
-        scope_name(singleton)
         node.arguments.arguments.each do |argument|
-          if argument.is_a?(Prism::DefNode)
-            omit("module_function", argument.name.to_s, argument, owner: owner, singleton: singleton)
-            detached { walk(argument.body, nesting, singleton: singleton, in_block: true) } if argument.body
-            next
-          end
-
           # The copy replaces any `def self.x` already there, so the singleton side is contested as well.
-          names = argument_names(argument)
+          names = argument.is_a?(Prism::DefNode) ? [argument.name.to_s] : argument_names(argument)
           if names.nil?
             [false, true].each do |side|
-              unknown_visibility(owner, scope_name(side))
+              unknown_visibility(owner, scope_name(side), default_too: false)
               omit("module_function", nil, argument, owner: owner, singleton: side, any_member: true)
             end
           else
             names.product([false, true]).each do |name, side|
               name_visibility(owner, scope_name(side), name, nil)
-              omit("module_function", name, node, owner: owner, singleton: side)
+              omit("module_function", name, argument.is_a?(Prism::DefNode) ? argument : node, owner: owner,
+                                                                                              singleton: side)
             end
+          end
+          if argument.is_a?(Prism::DefNode) && argument.body
+            detached { walk(argument.body, nesting, singleton: singleton, in_block: true) }
           end
         end
       end
@@ -288,7 +285,9 @@ module Rigor
         end
       end
 
-      def unknown_visibility(owner, scope)
+      # `default_too: false` leaves the body's running default alone: `module_function(*NAMES)` changes only the
+      # members it names, while `private *NAMES` is read as making the default unknown too, the safe side.
+      def unknown_visibility(owner, scope, default_too: true)
         @sites.each do |site|
           data = site.data
           next unless data["owner"] == owner
@@ -296,7 +295,7 @@ module Rigor
           data["visibility"] = nil if data["scope"] == scope
           data["singleton_visibility"] = nil if scope == "singleton" && data["module_function"]
         end
-        mark_uncertain
+        mark_uncertain if default_too
       end
 
       # `private :x` changes the visibility of the members already defined under that name in this file.

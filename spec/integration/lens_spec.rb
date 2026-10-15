@@ -196,13 +196,19 @@ RSpec.describe "rigor lens" do
         def self.b = "s"
         def b = 1
         module_function :b
+        def self.c = "s"
+        module_function def c = 1
+        def later = 3
       end
     RUBY
     _, out, = lens(["--format=json", "lib/t.rb"])
     basis = JSON.parse(out)["members"].to_h { |member| [[member["scope"], member["name"]], member["basis"]] }
 
-    expect(basis).to eq(%w[instance a] => "contested", %w[singleton a] => "contested",
-                        %w[instance b] => "contested", %w[singleton b] => "contested")
+    expect(basis).to include(%w[instance a] => "contested", %w[singleton a] => "contested",
+                             %w[instance b] => "contested", %w[singleton b] => "contested",
+                             %w[singleton c] => "contested")
+    later = JSON.parse(out)["files"].first["sites"].find { |site| site["name"] == "later" }
+    expect(later["visibility"]).to eq("public")
   end
 
   it "exits 64 for a configuration file that does not exist" do

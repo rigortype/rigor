@@ -48,8 +48,8 @@ module Rigor
         return CLI::EXIT_USAGE if options == :usage_error
 
         configuration = Configuration.load(options.fetch(:config))
-        @root = canonical(configuration.exclude_base)
         paths = @argv.empty? ? configuration.paths : @argv
+        @root = project_root(configuration, paths)
         scan_cache = open_scan_cache(configuration)
         declarations, references, dynamic_uses, shadows = scan(paths, configuration, scan_cache)
         references.concat(signature_references(configuration))
@@ -69,9 +69,36 @@ module Rigor
       private
 
       # A scan's role and the spelling it records depend on the root and the working directory (#1760).
+      # The working directory matters only to a relative path argument, whose spelling is what a cached scan
+      # records; keying on it otherwise would reset a shared cache whenever two runs differ in directory.
       def open_scan_cache(configuration)
+        spelled = @argv.any? { |path| !File.absolute_path?(path) } ? ":#{canonical(Dir.pwd)}" : ""
         Analysis::Reachability::ScanCache.open(configuration.cache_path, target_ruby: configuration.target_ruby,
-                                                                         root: "#{@root}:#{canonical(Dir.pwd)}")
+                                                                         root: "#{@root}#{spelled}")
+      end
+
+      # The project root (#1760): the deepest directory holding both the config file in use (the working
+      # directory without one) and every analysed path, realpath'd. A config kept below the project
+      # (`ci/rigor.yml` with `paths: [../lib]`) still reads the whole project's references, and one above
+      # the working directory reads the same project from any subdirectory. A set with nothing in common
+      # but the filesystem root falls back to the config's directory rather than globbing the whole disk.
+      def project_root(configuration, paths)
+        base = canonical(configuration.exclude_base)
+        dirs = paths.filter_map do |path|
+          real = canonical(path)
+          if File.exist?(real)
+            File.directory?(real) ? real : File.dirname(real)
+          end
+        end
+        common = dirs.reduce(base) { |acc, dir| common_ancestor(acc, dir) }
+        common == File.dirname(common) ? base : common
+      end
+
+      def common_ancestor(left, right)
+        a = left.split("/")
+        b = right.split("/")
+        shared = a.zip(b).take_while { |x, y| x == y }.map(&:first)
+        shared.join("/").then { |dir| dir.empty? ? "/" : dir }
       end
 
       def build_graph(configuration, options, contribution, declarations:, references:, dynamic_uses:, shadows:)

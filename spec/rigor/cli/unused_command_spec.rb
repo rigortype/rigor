@@ -132,6 +132,23 @@ RSpec.describe Rigor::CLI::UnusedCommand do
       end
     end
 
+    it "reads the whole project when the config is kept in a subdirectory" do
+      Dir.mktmpdir do |dir|
+        FileUtils.mkdir_p(%w[ci lib app spec].map { |sub| File.join(dir, sub) })
+        File.write(File.join(dir, "ci/rigor.yml"), "paths:\n  - ../lib\n")
+        File.write(File.join(dir, "lib/used.rb"), "class Used\nend\n")
+        File.write(File.join(dir, "lib/dead.rb"), "class Dead\nend\n")
+        File.write(File.join(dir, "app/main.rb"), "Used.new\n")
+        File.write(File.join(dir, "spec/dead_spec.rb"), "Dead.new\n")
+        backdate(dir)
+
+        _, report, = run_in(dir, "--config=ci/rigor.yml", "--entry-point=lib/used.rb")
+
+        expect(rows(report)).to eq("declared" => 2, "candidates" => [], "test_only" => ["Dead"])
+        expect(report["roots"]).to eq(1)
+      end
+    end
+
     it "scans each file once when the project is reached through a symlink" do
       Dir.mktmpdir do |dir|
         project = File.join(dir, "proj")

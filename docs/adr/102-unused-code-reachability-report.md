@@ -172,9 +172,10 @@ read — pure artifacts on two of three targets. Reading a file to harvest refer
 cheaper than type-checking it, and the report MUST take the wider corpus.
 
 The wider corpus, the template scan, the file roles and `--entry-point` matching all read one
-project root: the loaded config file's directory, or the working directory without one,
-realpath'd. A file is one file however it is spelled, so a symlinked spelling is not scanned
-twice, and the scan cache keys on the root and the working directory
+project root: the deepest directory holding both the loaded config file (the working directory
+without one) and every analysed path, realpath'd, so a config kept in `ci/` still reads the
+whole project. A file is one file however it is spelled, so a symlinked spelling is not scanned
+twice, and the scan cache keys on the root
 ([#1760](https://github.com/rigortype/rigor/issues/1760)).
 
 ### WD8 — A reference carries its referrer's role

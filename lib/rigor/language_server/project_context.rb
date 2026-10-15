@@ -44,8 +44,13 @@ module Rigor
       # invalidated never reach the editor.
       attr_reader :configuration, :generation
 
-      def initialize(configuration:)
+      # `configuration_loader` re-reads the configuration (e.g. `-> { Configuration.load(path) }`); a save round
+      # calls it so an edit to `.rigor.yml` (or a file it `includes:`) reaches the server without a restart. Nil
+      # keeps the configuration the context was built with.
+      def initialize(configuration:, configuration_loader: nil)
         @configuration = configuration
+        @configuration_loader = configuration_loader
+        @primed_fingerprint = nil
         @buffer_sources = {}
         @disk_feature_files = nil
         @environment_features = nil
@@ -110,16 +115,27 @@ module Rigor
       # The session is never persisted. Its state lives as long as this context, which is what a long-running
       # server needs, and writing it would race exactly the way the read-only {#cache_store} exists to avoid.
       # Seeding is therefore one-directional: the terminal warms the server, not the reverse.
+      #
+      # Every round recomputes {Cache::IncrementalSnapshot.fingerprint} (the function the CLI's `--incremental`
+      # keys its snapshot on — one input list) and compares it with the one the session was primed with. A
+      # session's recheck only sees source-file digests, so an edit to a `pre_eval:` file, an auto-detected
+      # `sig/*.rbs`, a lockfile or `.rigor.yml` would otherwise keep serving answers computed from the old
+      # inputs until the server restarts (#1613). A mismatch — or a fingerprint that cannot be computed — drops
+      # the session and the world built from the old inputs and re-baselines, so the round equals a cold run.
+      # {#generation} is deliberately NOT bumped: the round that notices the change is itself computed from the
+      # new inputs, and the publisher discards a round whose generation moved.
       def project_diagnostics
+        reload_configuration
+        fingerprint = current_fingerprint
+        rebaseline if @session_primed && (fingerprint.nil? || fingerprint != @primed_fingerprint)
         session = (@incremental_session ||= build_incremental_session)
         return session.recheck.diagnostics if @session_primed
 
         @session_primed = true
+        @primed_fingerprint = fingerprint
         diagnostics, = session.run_incremental(
           snapshot: Cache::IncrementalSnapshot.new(root: @configuration.cache_path),
-          fingerprint: Cache::IncrementalSnapshot.fingerprint(
-            configuration: @configuration, roots: @configuration.paths
-          ),
+          fingerprint: fingerprint,
           persist: false
         )
         diagnostics
@@ -153,6 +169,13 @@ module Rigor
       # `workspace/didChangeConfiguration`.
       def invalidate!
         @generation += 1
+        reset_world
+      end
+
+      private
+
+      # Drops what was built from the previous inputs, without touching {#generation}.
+      def reset_world
         @environment = nil
         @environment_features = nil
         @disk_feature_files = nil
@@ -161,12 +184,31 @@ module Rigor
         # outlive them. The next save round primes a fresh one.
         @incremental_session = nil
         @session_primed = false
+        @primed_fingerprint = nil
         # Cache store stays — it's content-addressed; a stale env build won't be served because the file
         # digest mixed into the cache key has changed.
         nil
       end
 
-      private
+      # A changed configuration may also move `cache_path`, so the store goes too (unlike {#invalidate!}).
+      def rebaseline
+        reset_world
+        @cache_store = nil
+      end
+
+      def current_fingerprint
+        Cache::IncrementalSnapshot.fingerprint(configuration: @configuration, roots: @configuration.paths)
+      end
+
+      # A load that raises (a half-typed `.rigor.yml`) keeps the previous configuration: the editor must not
+      # lose its diagnostics to a transient parse error, and the next round retries.
+      def reload_configuration
+        return unless @configuration_loader
+
+        @configuration = @configuration_loader.call
+      rescue StandardError
+        nil
+      end
 
       # The session shares this context's warm Environment, so a round does not rebuild the RBS universe. It
       # deliberately does NOT share the prebuilt ProjectScan: a round runs after a save, i.e. after the file

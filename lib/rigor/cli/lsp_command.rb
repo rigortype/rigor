@@ -54,7 +54,9 @@ module Rigor
         configuration = Configuration.load(config_path)
         # ProjectContext caches Environment + Cache::Store across requests so hover / publish hit the warm path.
         # Invalidated by `workspace/didChangeWatchedFiles` and `workspace/didChangeConfiguration`.
-        project_context = LanguageServer::ProjectContext.new(configuration: configuration)
+        project_context = LanguageServer::ProjectContext.new(
+          configuration: configuration, configuration_loader: -> { Configuration.load(config_path) }
+        )
         # Single source of truth for buffer state — threaded to Server + all three providers.
         buffer_table = LanguageServer::BufferTable.new
         debouncer = LanguageServer::Debouncer.new

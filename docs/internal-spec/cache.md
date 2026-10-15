@@ -840,6 +840,19 @@ full run, so the snapshot can never wedge or stale an analysis.
    not serve a run with it, nor the reverse ([#1533](https://github.com/rigortype/rigor/issues/1533)).
    A mismatch drops the snapshot.
 
+   The language server's in-process session is gated the same way
+   ([#1613](https://github.com/rigortype/rigor/issues/1613)).
+   `LanguageServer::ProjectContext#project_diagnostics` re-reads the
+   configuration and recomputes this fingerprint on every save round, and
+   compares it with the one the session was primed with. A mismatch, or a
+   fingerprint that cannot be computed (`nil`), discards the session and the
+   Environment / project scan built from the old inputs and re-baselines, so
+   the round equals a cold run; an unchanged fingerprint takes the plain
+   `IncrementalSession#recheck` path. The re-baseline does not bump
+   `ProjectContext#generation`: the round that noticed the change is already
+   computed from the new inputs. The fingerprint costs about 20 ms on a
+   573-file project.
+
    The lockfile paths are resolved by `Analysis::RunCacheKey.resolved_lockfile_paths`
    — the same call that builds the ADR-45 run-result key's `bundler.lockfile` /
    `rbs_collection.lockfile` slots — so the two caches identify the gem set by the

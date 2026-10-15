@@ -1,1 +1,0 @@
-- **[cli]** `rigor unused` reads one project root, the `.rigor.yml` directory unless the config sits below the working directory, so a run from a subdirectory with `--config` classifies `test/` helpers as test code, and a file reached under two spellings is parsed once. ([#1888](https://github.com/rigortype/rigor/pull/1888))

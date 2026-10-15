@@ -1,1 +1,0 @@
-- **[engine]** `Struct` instances no longer answer `with` as if it were `Data#with`: Ruby defines no `Struct#with`, so the folded member-updated type was wrong, and the call now falls through to normal method dispatch, so a `Struct` subclass that defines its own `with` answers with its own method. ([#1862](https://github.com/rigortype/rigor/pull/1862))

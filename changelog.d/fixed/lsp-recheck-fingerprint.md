@@ -1,1 +1,0 @@
-- **[rigor lsp]** The language server now notices an edit to a `pre_eval:` file, an auto-detected `sig/*.rbs`, a lockfile or `.rigor.yml` (including `effects:`) between save rounds and re-checks from scratch, instead of serving diagnostics computed from the old inputs until it restarts ([#1893](https://github.com/rigortype/rigor/pull/1893)).

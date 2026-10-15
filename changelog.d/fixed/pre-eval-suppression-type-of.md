@@ -1,1 +1,0 @@
-- **[rigor check]** `pre-eval.*` diagnostics now honour `# rigor:disable <rule>`, `# rigor:disable-file`, the `.rigor.yml` `disable:` list, and the `pre-eval` family wildcard. ([#1892](https://github.com/rigortype/rigor/pull/1892))

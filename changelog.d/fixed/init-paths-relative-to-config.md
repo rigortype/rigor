@@ -1,1 +1,0 @@
-- **[cli]** `rigor init --path=PATH` now writes `paths:` relative to the config file, so a config in a subdirectory loads back to the project's `lib/`. ([#1859](https://github.com/rigortype/rigor/pull/1859))

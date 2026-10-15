@@ -200,19 +200,24 @@ module Rigor
       # whose methods belong to another module.
       def each_rebound_name(node, &)
         case node
-        when Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode then return
-        when Prism::DefNode
-          yield node.name if node.receiver.nil?
-          return
-        when Prism::AliasMethodNode
-          yield symbol_argument_name(node.new_name) || ANY_NAME
-        when Prism::UndefNode
-          node.names.each { |name| yield symbol_argument_name(name) || ANY_NAME }
+        when Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode then nil
+        when Prism::DefNode then yield node.name if node.receiver.nil?
+        else
+          each_own_rebound_name(node, &)
+          node.compact_child_nodes.each { |child| each_rebound_name(child, &) }
+        end
+      end
+
+      # The names `node` itself may rebind, apart from its children: an `alias`, an `undef` or a
+      # {REBINDING_CALLS} call on the module.
+      def each_own_rebound_name(node, &)
+        case node
+        when Prism::AliasMethodNode then yield symbol_argument_name(node.new_name) || ANY_NAME
+        when Prism::UndefNode then node.names.each { |name| yield symbol_argument_name(name) || ANY_NAME }
         when Prism::CallNode
           each_rebinding_call_name(node, &) if REBINDING_CALLS.include?(node.name) &&
                                                (node.receiver.nil? || node.receiver.is_a?(Prism::SelfNode))
         end
-        node.compact_child_nodes.each { |child| each_rebound_name(child, &) }
       end
 
       # The names a {REBINDING_CALLS} call may rebind: the first argument of `alias_method` and
@@ -222,8 +227,6 @@ module Rigor
         arguments = call.arguments&.arguments || []
         arguments = arguments.first(1) if %i[alias_method define_method].include?(call.name)
         arguments.each do |arg|
-          next if arg.is_a?(Prism::KeywordHashNode)
-
           name = symbol_argument_name(arg)
           next yield(ANY_NAME) unless name
 
@@ -268,7 +271,7 @@ module Rigor
       end
 
       private_class_method :prescan_call, :prescan_eval_call, :symbol_argument_name, :each_rebound_name,
-                           :each_rebinding_call_name
+                           :each_own_rebound_name, :each_rebinding_call_name
     end
   end
 end

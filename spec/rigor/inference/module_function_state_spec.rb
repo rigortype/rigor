@@ -4,7 +4,7 @@ require "spec_helper"
 require "prism"
 
 # The `module_function` probes P1–P13 from the #1507 declaration-fact review, each a single declaration,
-# and P21–P28 for the named form's snapshot (#1550). Ruby 4.0.5's answer is in each example's comment.
+# and P21–P30 for the named form's snapshot (#1550). Ruby 4.0.5's answer is in each example's comment.
 # The examples pin what each reader answers TODAY, which `Rigor::Inference::ModuleFunctionState`
 # reproduces for all four of them: the singleton def-node table, the deferred ranges, the extends table
 # and sig-gen. Where today's answer contradicts Ruby and a fix is planned, the example says what to flip.
@@ -143,7 +143,7 @@ module ModuleFunctionStateProbes
         def a; end
       end
     RUBY
-    "P20" => <<~RUBY,
+    "P20" => <<~RUBY
       module P20
         Other = Module.new
         Other.module_eval do
@@ -153,6 +153,12 @@ module ModuleFunctionStateProbes
         def after; end
       end
     RUBY
+  }.freeze
+end
+
+# P21–P30: the named form's snapshot (#1550).
+module ModuleFunctionSnapshotProbes
+  SOURCES = {
     "P21" => <<~RUBY,
       module P21
         def a; 1; end
@@ -219,12 +225,30 @@ module ModuleFunctionStateProbes
         module_function :a
       end
     RUBY
+    "P29" => <<~RUBY,
+      module P29
+        def a; 1; end
+        undef a
+        module_function :a
+      end
+    RUBY
+    "P30" => <<~RUBY
+      module P30
+        def a=(v); 1; end
+        attr_writer :a
+        module_function :a=
+      end
+    RUBY
   }.freeze
 end
 
 RSpec.describe Rigor::Inference::ModuleFunctionState do
+  def probe_source(probe)
+    ModuleFunctionStateProbes::SOURCES[probe] || ModuleFunctionSnapshotProbes::SOURCES.fetch(probe)
+  end
+
   def root_of(probe)
-    Prism.parse(ModuleFunctionStateProbes::SOURCES.fetch(probe)).value
+    Prism.parse(probe_source(probe)).value
   end
 
   def body_of(probe)
@@ -236,7 +260,7 @@ RSpec.describe Rigor::Inference::ModuleFunctionState do
   end
 
   def line_of(probe, offset)
-    ModuleFunctionStateProbes::SOURCES.fetch(probe)[0, offset].count("\n") + 1
+    probe_source(probe)[0, offset].count("\n") + 1
   end
 
   # `"name@line" => toggle on` for each direct def, and `"copy name" => "name@line"` for each def a named
@@ -411,9 +435,10 @@ RSpec.describe Rigor::Inference::ModuleFunctionState do
     end
 
     # Ruby, in order: 2 (the alias), 2 (the `define_method` block), 2 (the def in the `if`), 2 (the
-    # `define_method` in the block), 2 (`alias a x`) and nil (the `attr_accessor` reader). Each rebinds `a`
-    # after its plain def in a way the singleton reading does not name, so it declines.
-    %w[P22 P23 P24 P25 P27 P28].each do |probe|
+    # `define_method` in the block), 2 (`alias a x`), nil (the `attr_accessor` reader), `NameError` (the
+    # `undef`) and the `attr_writer` writer. Each rebinds the name after its plain def in a way the singleton
+    # reading does not name, so it declines.
+    %w[P22 P23 P24 P25 P27 P28 P29 P30].each do |probe|
       it "#{probe} (a rebinding between the def and the call): the singleton reading declines" do
         expect(singleton_reading(probe).keys.grep(/\Acopy /)).to eq([])
         expect(tables(probe)[:singleton_def_nodes]).to eq({})
@@ -421,7 +446,8 @@ RSpec.describe Rigor::Inference::ModuleFunctionState do
     end
 
     # Ruby: `P26.a` is 1. `alias_method :b, :a` reads `a` without rebinding it, `def self.a` defines only the
-    # singleton method the copy then replaces, and `Inner`'s `def a` belongs to `Inner`.
+    # singleton method the copy then replaces, and the `define_method` on another module and `Inner`'s `def a`
+    # belong to other modules.
     it "P26 (statements that do not rebind the instance method): the copy is the plain def" do
       expect(singleton_reading("P26")).to include("copy a" => "a@2")
       expect(tables("P26")[:singleton_def_nodes]).to eq("P26" => { a: "a@2" })

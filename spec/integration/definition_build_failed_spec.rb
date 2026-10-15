@@ -240,6 +240,26 @@ RSpec.describe "definition build failed reporting" do
     expect(pooled).to eq(sequential)
   end
 
+  # Issue #1902 — the program demands only `Berry`'s SINGLETON side, whose failure names `::Berry.s`; the
+  # instance side fails too, for `::Berry#i`. A cold-store pooled run's parent pre-warm builds both sides
+  # under an internal demand, so its loader held both failures while a `--no-cache` run held one, and the
+  # two runs named different first failures. Building both sides of every reported class makes the
+  # candidates the same in each.
+  it "names the same failure for a two-sided class with and without the pool's pre-warm" do
+    FileUtils.mkdir_p("sig")
+    File.write(File.join("sig", "berry.rbs"),
+               "class Berry\n  def self.s: () -> Integer\n  def self.s: () -> Integer\n" \
+               "  def i: () -> Integer\n  def i: () -> Integer\nend\n")
+    File.write("app.rb", "Berry.s\n")
+
+    nocache = build_failed_diagnostics(run(config)).map(&:message)
+    pooled = build_failed_diagnostics(run(config, workers: 2, cache_store: cold_store)).map(&:message)
+
+    expect(nocache.size).to eq(1)
+    expect(nocache.first).to include("First failure: RBS::DuplicatedMethodDefinitionError on `::Berry#i`.")
+    expect(pooled).to eq(nocache)
+  end
+
   it "bounds pooled stderr banners while retaining the aggregated diagnostic", :captures_rbs_banner do
     FileUtils.mkdir_p("sig")
     File.write(

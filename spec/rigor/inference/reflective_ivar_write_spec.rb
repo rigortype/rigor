@@ -56,10 +56,22 @@ RSpec.describe "a reflective instance variable write (`instance_variable_set`)" 
     expect(class_rules(source).grep(/\Aflow\./)).to be_empty
   end
 
-  # Guard: the `Dynamic[top]` join already keeps `@s.size` quiet; the re-stamped declaration mark is the second line.
+  it "widens a declaration-seeded ivar a block may write through a name it cannot see" do
+    source = "class Seeded\n  def initialize = @k = 0\n\n  def blk(name, items)\n    " \
+             "items.each { |v| instance_variable_set(name, v) }\n    puts 'k' if @k == 0\n  end\n\n  " \
+             "def inj(name)\n    t = [1, 2].inject(0) { |a, e| instance_variable_set(name, e); a + @k }\n    " \
+             "puts 't' if t == 0\n  end\nend\n"
+    expect(class_rules(source).grep(/\Aflow\./)).to be_empty
+  end
+
+  # A read straight off `@s` is quiet on the `Dynamic[top]` join alone; a copy into a local (`x = @s; x.size`)
+  # reports a possible nil unless the widened ivar keeps its declaration mark, straight-line and after a
+  # non-escaping block's write-back.
   it "keeps the declaration mark of a nil-seeded ivar it widens" do
     source = "class Lazy\n  def initialize = @s = nil\n  def fill = @s = 'x'\n\n  def m(name)\n    " \
-             "instance_variable_set(name, 1)\n    @s.size\n  end\nend\n"
+             "instance_variable_set(name, 1)\n    @s.size\n    x = @s\n    x.size\n  end\n\n  " \
+             "def blk(name)\n    [1, 2].each { |v| instance_variable_set(name, v) }\n    " \
+             "x = @s\n    x.size\n  end\nend\n"
     expect(class_rules(source)).to be_empty
   end
 

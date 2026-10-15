@@ -140,10 +140,11 @@ module Rigor
         names ? names.uniq : NO_NAMES
       end
 
-      # Issue #1889 — every ivar `base_scope` rebindably binds: an `instance_variable_set` on `self` whose target no
-      # literal names ({ReflectiveIvarWrite.unknown_target?}) may write any of them.
+      # Issue #1889 — every ivar `base_scope` binds: an `instance_variable_set` on `self` whose target no literal
+      # names ({ReflectiveIvarWrite.unknown_target?}) may write any of them. One on its ADR-58 declaration seed
+      # counts too, since the census behind the seed sees no reflective write; {.bind} keeps its mark.
       def reflective_unknown_ivars(base_scope)
-        base_scope.ivars.keys.select { |name| rebindable_ivar?(base_scope, name) }
+        base_scope.ivars.keys
       end
 
       def rebindable_outliving_write(node, base_scope, non_locals)
@@ -215,11 +216,19 @@ module Rigor
       # it the miss answer the mark records (issue #1302).
       def bind(scope, name, type, optimistic: nil)
         case variable_kind(name)
-        when :ivar then OptimisticOrigin.carry_ivar_mark(scope, scope.with_ivar(name, type), name, optimistic)
+        when :ivar then bind_ivar(scope, name, type, optimistic)
         when :cvar then scope.with_cvar(name, type)
         when :global then scope.with_global(name, type)
         else OptimisticOrigin.carry_local_mark(scope, scope.with_local(name, type), name, optimistic)
         end
+      end
+
+      # An ivar on its ADR-58 declaration seed reaches {.bind} only through {.reflective_unknown_ivars}; rebinding it
+      # re-stamps the declaration mark, as `ReflectiveIvarWrite.apply` does, so a nil in the seed fuels no
+      # nil-receiver diagnostic.
+      def bind_ivar(scope, name, type, optimistic)
+        bound = OptimisticOrigin.carry_ivar_mark(scope, scope.with_ivar(name, type), name, optimistic)
+        scope.declaration_sourced?(:ivar, name) ? bound.seed_declaration_sourced_ivar(name, type) : bound
       end
 
       # The optimistic nil-freeness mark `scope` holds for a name from {.writes}, or nil.

@@ -5486,9 +5486,10 @@ module Rigor
       end
 
       # Records `type` as the accumulator `block` receives when typed from this typer's scope
-      # ({.recorded_inject_accumulator}). The map is weak, so a finished file's nodes do not stay reachable.
+      # ({.recorded_inject_accumulator}). The keys are weak, so a finished file's nodes do not stay reachable, and
+      # the values strong, so a record outlives a collection while its node does. Prism nodes compare by identity.
       def record_inject_accumulator(block, type)
-        (Thread.current[INJECT_ACCUMULATOR_KEY] ||= ObjectSpace::WeakMap.new)[block] = [scope, type].freeze
+        (Thread.current[INJECT_ACCUMULATOR_KEY] ||= ObjectSpace::WeakKeyMap.new)[block] = [scope, type].freeze
       end
 
       # Issue #1332 — the #587 (b) captured-block binding ({#captured_block_bindings}) both inject arms lay under

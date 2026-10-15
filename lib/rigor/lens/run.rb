@@ -135,7 +135,7 @@ module Rigor
                                     inputs: inputs(session, entry[:session_path]))
         end
 
-        Target.new(**base.merge(uncaptured(entry[:absolute], own)))
+        Target.new(**base, **uncaptured(entry[:absolute], own))
       end
 
       # A forced target the run did not read: one that does not parse stops before indexing; otherwise reading it

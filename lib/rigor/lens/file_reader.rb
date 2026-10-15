@@ -119,7 +119,7 @@ module Rigor
             next
           end
           module_function_on = true if bare_call?(child, :module_function)
-          next if toggle_visibility(child)
+          next if toggle_visibility?(child)
 
           walk(child, nesting, singleton: singleton, in_block: false)
         end
@@ -128,7 +128,7 @@ module Rigor
       end
 
       # A bare `private` / `protected` / `public` written directly in the body sets the default for later defs.
-      def toggle_visibility(child)
+      def toggle_visibility?(child)
         return false unless VISIBILITY_CALLS.any? { |name| bare_call?(child, name) }
 
         @bodies.last.current = child.name.to_s

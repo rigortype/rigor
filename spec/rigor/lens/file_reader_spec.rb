@@ -71,7 +71,7 @@ RSpec.describe Rigor::Lens::FileReader do
       RUBY
 
       expect(sites(source).filter_map { |site| [site["owner"], site["scope"], site["name"]] if site["owner"] })
-        .to eq([["Outer", "singleton", "meta"]])
+        .to eq([%w[Outer singleton meta]])
       expect(omissions(source)).to include(%w[method meta_meta], ["class", "self::Dyn"], ["singleton_class", nil],
                                            %w[method top_singleton])
     end

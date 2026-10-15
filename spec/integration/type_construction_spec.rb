@@ -1592,6 +1592,32 @@ RSpec.describe "Rigor type construction (integration)" do
       end
       expect(reported(analyze(files: { "a.rb" => caller_source, "b.rb" => "X = 1\n" })).map(&:line)).to eq([9])
     end
+
+    # Two files each mix a module into the class, so the tables cannot say which runs first: loaded in this order,
+    # Ruby runs `Loudly#log`, which writes `@v`, and the read returns "X" under Ruby 4.0.5.
+    it "gives up on a class whose mixin order the tables cannot settle" do
+      files = {
+        "a.rb" => <<~RUBY,
+          module Quietly
+            def log = nil
+          end
+
+          class Mixed
+            include Quietly
+
+            def initialize = (@v = "a")
+
+            def dump
+              @v = nil
+              log
+              @v.upcase
+            end
+          end
+        RUBY
+        "b.rb" => "module Loudly\n  def log = (@v = \"x\")\nend\n\nclass Mixed\n  include Loudly\nend\n"
+      }
+      expect(reported(analyze(files: files))).to eq([])
+    end
   end
 
   describe "fixtures/special_global_writes/ — a write the special's setter rejects (#1367)", type: :runner do

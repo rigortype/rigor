@@ -22,6 +22,93 @@ RSpec.describe "singleton_class calls with literal names (#1906)", type: :runner
 
   def arity(klass, name) = "wrong number of arguments to `#{name}' on #{klass} (given 2, expected 1)"
 
+  let(:indirect_rewrites) do
+    {
+      "foo.rb" => <<~RUBY,
+        class Foo; def self.find(id) = id; end
+        class D1; def self.own(a) = a; def self.other(a, b) = a; end
+        class D2; def self.own(a) = a; def self.other(a, b) = a; end
+        class D4; def self.own(a) = a; def self.other(a, b) = a; end
+        class D9; def self.own(a) = a; def self.other(a, b) = a; end
+        class A1; def self.own(a) = a; end
+        class C5; def self.own(a) = a; def self.other(a, b) = a; end
+      RUBY
+      "patches.rb" => <<~RUBY,
+        module Patches
+          def self.apply!
+            Foo.singleton_class.alias_method :orig_find, :find
+            Foo.singleton_class.define_method(:find) { |id, opts = {}| orig_find(id) }
+          end
+        end
+        class Setup1
+          def self.setup
+            D1.singleton_class.alias_method :own, :other
+          end
+          def self.setup2 = D2.singleton_class.alias_method(:own, :other)
+          def self.setup3 = A1.singleton_class.attr_reader(:own)
+        end
+        def setup4 = D4.singleton_class.alias_method(:own, :other)
+        module X9
+          def self.included(base)
+            D9.singleton_class.alias_method :own, :other
+          end
+        end
+        C5.singleton_class.alias_method :own, :other if Foo.respond_to?(:find)
+      RUBY
+      "app.rb" => <<~RUBY
+        Patches.apply!
+        Setup1.setup
+        Setup1.setup2
+        Setup1.setup3
+        setup4
+        class Host; include X9; end
+        p Foo.find(1, { cache: true })
+        p D1.own(1, 2), D2.own(1, 2), D4.own(1, 2), D9.own(1, 2), C5.own(1, 2)
+        p A1.own
+      RUBY
+    }
+  end
+  let(:inherited_rewrites) do
+    <<~RUBY
+      class B2
+        def self.own(a) = a
+        def self.other(a, b) = a
+      end
+      class D2 < B2
+        singleton_class.alias_method :own, :other
+      end
+      module Mx
+        def own(a) = a
+        def other(a, b) = a
+      end
+      class E1
+        extend Mx
+        singleton_class.alias_method :own, :other
+      end
+      class E2
+        extend Mx
+        singleton_class.define_method(:own) { |*a| a }
+      end
+      module S1
+        extend self
+        def own(a) = a
+        def other(a, b) = a
+        singleton_class.alias_method :own, :other
+      end
+      module F1
+        module_function
+        def own(a) = a
+        def other(a, b) = a
+        singleton_class.alias_method :own, :other
+      end
+      D2.own(1, 2)
+      E1.own(1, 2)
+      E2.own(1, 2)
+      S1.own(1, 2)
+      F1.own(1, 2)
+    RUBY
+  end
+
   # `D.own(1, 2)`, `M.own(1, 2)` and `Q.keep(1, 2)` raise; `D.o2(1)` and `M.o3(1)` return 1, and `Q.own(1, 2)` runs
   # `other`'s body. `define_method`'s second argument is the body, not a name, so it need not be a literal.
   it "keeps checking a singleton method the call does not rewrite" do
@@ -120,6 +207,22 @@ RSpec.describe "singleton_class calls with literal names (#1906)", type: :runner
     RUBY
   end
 
+  # The rewritten name's old definer is not the class's own `def self.own`: an inherited singleton method, an
+  # extended module's, an `extend self` or `module_function` module's own. Ruby 4.0.5 runs the rewritten body (`1`,
+  # `1`, `[1, 2]`, `1`, `1`), so only the name's opaque envelope keeps the check off.
+  it "declines a rewritten name whose old definer is inherited or extended" do
+    expect(arity_rows("app.rb" => inherited_rewrites)).to eq([])
+  end
+
+  # A literal naming call that is not a direct statement — in a method body or a hook outside the constant's class,
+  # or behind a condition — may run on a receiver or at a time no mark places, so the whole singleton side stays
+  # unreadable. Ruby 4.0.5 prints `1` for every call but `A1.own`, which the reader answers with `nil`. Before #1906 the
+  # `alias_method` and `define_method` calls tainted the side too, while the `attr_reader` call was neither marked nor
+  # tainted and `A1.own` was reported.
+  it "keeps the singleton side unreadable for a literal naming call that is not a direct statement" do
+    expect(arity_rows(indirect_rewrites)).to eq([])
+  end
+
   # The class body and the `singleton_class` call live in different files, reopening the class or calling on the
   # constant. Ruby 4.0.5 runs `D.own` through the alias of `keep`, so it answers; `E.own` has no new body and raises,
   # as do `D.keep` and `E.keep`.
@@ -197,6 +300,18 @@ RSpec.describe "singleton_class calls with literal names (#1906)", type: :runner
       write("lib/rewrite.rb", "class D\n  singleton_class.define_method(:own) { |*a| a }\nend\n")
       expect(incremental_rows).to eq([[], true])
       expect(cold_rows).to eq([])
+    end
+
+    # A computed name leaves `D`'s singleton side unpositioned and records no envelope entry; once the name is a
+    # literal the side reads again, and only the unpositioned side recorded before the edit names `D`.
+    it "re-checks the reader when a computed name becomes a literal one" do
+      write("lib/d.rb", "class D\n  def self.own(a) = a\n  def self.keep(a) = a\nend\nD.own(1, 2)\n")
+      write("lib/rewrite.rb", "name = :o9\nD.singleton_class.alias_method name, :keep\n")
+      expect(incremental_rows).to eq([[], false])
+
+      write("lib/rewrite.rb", "D.singleton_class.alias_method :o9, :keep\n")
+      expect(incremental_rows).to eq([[["lib/d.rb", 5]], true])
+      expect(cold_rows).to eq([["lib/d.rb", 5]])
     end
   end
 end

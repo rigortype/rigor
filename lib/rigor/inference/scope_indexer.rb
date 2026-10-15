@@ -7228,10 +7228,15 @@ module Rigor
       # `Const.singleton_class.send(:include, M)`) puts methods or modules on that singleton class that no edge
       # records, so its singleton side is unpositioned: the owner is the enclosing class for a bare or `self.`
       # receiver, else the constant. True when it tainted.
+      #
+      # Issue #1906 — a naming call with literal names ({#singleton_class_named_call?}) marks only its names instead,
+      # but only where it is a direct statement (a top-level statement, or one of a direct declaration body or of a
+      # block that runs there once): there the methods walk records those marks under the same owner. In a method
+      # body, a hook or a conditional it may run on a receiver or at a time the marks cannot place, so it still taints.
       def singleton_class_rewrite_tainted?(node, qualified_prefix, current_class, accumulator)
         receiver = node.receiver
         return false unless singleton_class_of_receiver?(receiver) && surface_rewriting_call?(node)
-        return false if singleton_class_named_call?(node)
+        return false if singleton_class_named_call?(node) && accumulator.direct?(node)
 
         owner = singleton_class_owner(node, receiver.receiver, qualified_prefix, current_class)
         return false if owner.nil?

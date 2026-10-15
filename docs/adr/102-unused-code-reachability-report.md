@@ -176,8 +176,9 @@ project root, realpath'd: the loaded config file's directory, or the working dir
 there is none or the config sits below it (`ci/rigor.yml`). The root never rises above either,
 so the role rules keep reading the project; the working directory's files are read for
 references too, so the corpus is never narrower than the working directory alone. A file is
-one file however it is spelled, so a symlinked spelling is not scanned twice, and the scan
-cache keys on the root
+parsed once however it is spelled, but each spelling keeps its references under its own role,
+and its declarations are taken once, from the analysed spelling the report prints; the scan
+cache keys on the root and the working directory
 ([#1760](https://github.com/rigortype/rigor/issues/1760)).
 
 ### WD8 — A reference carries its referrer's role

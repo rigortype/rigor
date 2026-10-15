@@ -1316,6 +1316,47 @@ RSpec.describe "block-return scope threading", type: :runner do
         RUBY
       end
 
+      it "does not fold a value only a `break` path rebinds when the fixpoint is capped" do
+        # `n += 1` never converges, so the `break` arms come from one more pass from the widened binding; that
+        # pass marks the site too. Ruby with input `,a` prints `e`.
+        expect(flow_rules(<<~RUBY)).to be_empty
+          cache = Hash.new
+          n = 0
+          found = nil
+          gets.to_s.split(",", -1).each do |x|
+            n += 1
+            if x.empty?
+              cache[:k] ||= :e
+            else
+              found = (cache[:k] ||= :f).itself
+              break
+            end
+          end
+          puts "e" if found == :e
+        RUBY
+      end
+
+      it "does not read an earlier run's store as the rvalue in the statement pass's own diagnostics" do
+        # The second run's `||=` keeps the first run's `"s"`, so `upcase!` is a String call.
+        expect(undefined_method_rules(<<~RUBY)).to be_empty
+          h = Hash.new
+          3.times do |i|
+            (h[:z] ||= :f).itself.upcase! if i > 0
+            h[:z] = +"s"
+          end
+        RUBY
+      end
+
+      it "marks nothing under a block its call runs at most once (control)" do
+        # `tap` runs the body once, so no earlier run stored into the slot: the second site keeps its rvalue.
+        expect(dumped_type(<<~RUBY)).to eq(":f?")
+          c1 = Hash.new
+          l1 = nil
+          1.tap { |_| gets ? (c1[:k] ||= :e) : (l1 = (c1[:k] ||= :f).itself) }
+          dump_type(l1)
+        RUBY
+      end
+
       it "keeps the rvalue reading for an isolated site (control)" do
         # No other store reaches the slot, so whatever an earlier run stored there is this site's own `:f`.
         expect(dumped_type(<<~RUBY)).to eq(":f?")

@@ -486,9 +486,10 @@ module Rigor
       # `opts[k] ||= raise KeyError` is a guard, never `bot`, and `@flags[n] ||= false` is `true` after an
       # `@flags[n] = true` elsewhere, never provably `false`.
       #
-      # Nor is a site a block-return pass marked (`Scope#repeated_or_write?`, {RepeatedOrWrites}): the pass types
-      # every run of a repeating body from one entry scope, so its slot's gradual type may be what an EARLIER run
-      # stored rather than an absence of evidence.
+      # Nor is a marked site (`Scope#repeated_or_write?`, {RepeatedOrWrites}): a block-return pass, and this
+      # evaluator's statement and write-back passes ({#with_repeated_or_write_marks}), type every run of a repeating
+      # body from one entry scope, so its slot's gradual type may be what an EARLIER run stored rather than an
+      # absence of evidence.
       def index_compound_write_value(node)
         return index_write_stored_type(node, scope) unless node.is_a?(Prism::IndexOrWriteNode)
 

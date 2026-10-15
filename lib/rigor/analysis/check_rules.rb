@@ -504,6 +504,26 @@ module Rigor
         end
       end
 
+      # Issue #1953 — the in-source markers over the rows a plugin emitted while `path` was analysed
+      # (`#diagnostics_for_file` and node rules). A row answers to a `plugin.<id>.<rule>` or `plugin.<id>` token
+      # only ({.plugin_row_disabled?}); a bare id and `all` keep reaching built-in rows alone. `comments` are
+      # `path`'s, so a row the plugin positioned in another file is left to the `disable:` list and the baseline.
+      # The `disable:` list itself is applied to these rows by {SeverityStamp}, on every run shape.
+      def filter_plugin_suppressed(diagnostics, path:, comments:)
+        return diagnostics if diagnostics.empty?
+
+        line_suppressions, file_suppressions = parse_suppression_comments(comments)
+        return diagnostics if line_suppressions.empty? && file_suppressions.empty?
+
+        diagnostics.reject do |diagnostic|
+          next false unless diagnostic.path == path
+          next true if plugin_row_disabled?(diagnostic, file_suppressions)
+
+          line_rules = line_suppressions.fetch(diagnostic.line, nil)
+          !line_rules.nil? && plugin_row_disabled?(diagnostic, line_rules)
+        end
+      end
+
       # Every suppression-recognition pattern below is anchored with `\A` against the COMMENT SLICE —
       # Prism hands us a slice that starts at the `#`, so `\A#` means "the marker is the first thing in
       # the comment". A real directive always has that shape, in both the whole-line form and the

@@ -2679,7 +2679,8 @@ module Rigor
           node_collectors: node_collectors,
           stated_runtime_ruby: @configuration.stated_runtime_ruby
         )
-        diagnostics + plugin_emitted_diagnostics(path, root, scope, node_results)
+        plugin_rows = plugin_emitted_diagnostics(path, root, scope, node_results)
+        diagnostics + CheckRules.filter_plugin_suppressed(plugin_rows, path: path, comments: parse_result.comments)
       end
 
       # ADR-24 slice 4a — runs `block` (the typing pass) with the self-call recorder active when either

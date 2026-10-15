@@ -241,7 +241,8 @@ module Rigor
           node_collectors: node_collectors,
           stated_runtime_ruby: @configuration.stated_runtime_ruby
         )
-        diagnostics += plugin_emitted_diagnostics(path, root, scope, node_results)
+        plugin_rows = plugin_emitted_diagnostics(path, root, scope, node_results)
+        diagnostics += CheckRules.filter_plugin_suppressed(plugin_rows, path: path, comments: parse_result.comments)
         diagnostics + explain_diagnostics(path, parse_result.value, scope)
       rescue Errno::ENOENT => e
         [analyzer_error(path, e.message)]

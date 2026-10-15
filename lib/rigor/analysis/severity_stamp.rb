@@ -15,8 +15,10 @@ module Rigor
     # check-rule row (see {.check_rule_row?}): the rows the diagnostic policy already says `disable:` reaches. Most
     # are filtered where they were produced; this catches the ones that are not (the `effect.annotations-unchecked`
     # residual under `disable: [all]`) on every run shape (sequential, pool, `--incremental`, a warm cache hit).
-    # The run-level rows outside the check-rule catalogue (`rbs.coverage.*`, `dynamic.dependency-source.*`, the
-    # plugin loader, `plugin_trust.*`, `plugin.<id>.*`) keep answering to `severity_overrides:` only.
+    # Issue #1953 — a plugin's `plugin.<id>.*` row answers here to its qualified id (`plugin.<id>.<rule>`) or to
+    # `plugin.<id>`, never to a bare id or `all`. The run-level rows outside the check-rule catalogue
+    # (`rbs.coverage.*`, `dynamic.dependency-source.*`, the plugin loader, `plugin_trust.*`, `pool-degraded`) keep
+    # answering to `severity_overrides:` only, by any spelling.
     #
     # Extracted (ADR-87 WD4) so the miss path ({Runner::DiagnosticAggregator}) and the boot-slimming hit path
     # ({RunCacheProbe}, which never loads the aggregator) apply the IDENTICAL final filter — a warm HIT's
@@ -30,14 +32,22 @@ module Rigor
       def apply(diagnostics, configuration)
         disabled = CheckRules.expand_rule_tokens(configuration.disabled_rules)
         diagnostics.filter_map do |diagnostic|
-          next nil if check_rule_row?(diagnostic) && CheckRules.config_disabled?(diagnostic.rule, disabled)
+          next nil if config_disabled_row?(diagnostic, disabled)
 
           stamp(diagnostic, configuration)
         end
       end
 
-      # A built-in check-rule row: its id is in the CheckRules catalogue and no plugin emitted it. Only these answer
-      # to `disable:` here; whether the other rule-bearing rows should (and by bare or qualified id) is open.
+      # A built-in check-rule row answers to the expanded list by its id or `all`; a plugin's `plugin.<id>.*` row
+      # by its qualified id or `plugin.<id>` only ({CheckRules.plugin_row_disabled?}, issue #1953). Every other
+      # row is out of the list's reach.
+      def config_disabled_row?(diagnostic, disabled)
+        return CheckRules.config_disabled?(diagnostic.rule, disabled) if check_rule_row?(diagnostic)
+
+        CheckRules.plugin_row_disabled?(diagnostic, disabled)
+      end
+
+      # A built-in check-rule row: its id is in the CheckRules catalogue and no plugin emitted it.
       def check_rule_row?(diagnostic)
         diagnostic.source_family == Diagnostic::DEFAULT_SOURCE_FAMILY && CHECK_RULES.include?(diagnostic.rule)
       end

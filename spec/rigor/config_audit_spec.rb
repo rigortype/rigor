@@ -141,10 +141,64 @@ RSpec.describe Rigor::ConfigAudit do
       expect(warnings.select { |w| w.kind == :disabled_rule }).to be_empty
     end
 
-    it "does NOT flag a plugin / non-built-in family token (FP-safety for plugin rules)" do
-      warnings = audit("disable" => ["rspec.let-binding", "rbs_extended.conforms-to"])
+    it "does NOT flag a token under a non-check engine family (FP-safety for rows it cannot enumerate)" do
+      warnings = audit("disable" => ["rbs_extended.conforms-to", "configuration-error"])
 
       expect(warnings.select { |w| w.kind == :disabled_rule }).to be_empty
+    end
+  end
+
+  # Issue #1953 — `disable:` reaches a built-in check-rule row by its id, a family or `all`, and a plugin's row by its
+  # qualified id only, so every other token is inert and flagged.
+  describe "disable: tokens since qualified-id matching" do
+    def disabled_warnings(config_hash)
+      audit(config_hash).select { |w| w.kind == :disabled_rule }
+    end
+
+    def flagged_tokens(config_hash)
+      disabled_warnings(config_hash).map { |w| w.fields.fetch("token") }
+    end
+
+    it "does NOT flag a token `disable:` reaches" do
+      tokens = %w[all call undefined-method call.undefined-method pre-eval pre-eval.parse-error]
+      expect(flagged_tokens("disable" => tokens)).to be_empty
+    end
+
+    it "flags a bare token that names no rule, and a plugin's bare rule, with the qualified spelling as the hint" do
+      warnings = disabled_warnings("disable" => %w[no-such-rule rspec.let-binding])
+
+      expect(warnings.map { |w| w.fields.fetch("token") }).to eq(%w[no-such-rule rspec.let-binding])
+      expect(warnings.map(&:message)).to all(include("is not a recognized rule id").and(include("plugin.<id>.<rule>")))
+    end
+
+    it "flags a run-level row the policy keeps on `severity_overrides:`, by any spelling" do
+      tokens = %w[plugin_loader.load-error plugin_loader load-error runtime-error pool-degraded
+                  plugin_trust.read-refused rbs.coverage.missing-gem rbs.coverage dynamic.dependency-source.gem-not-found]
+      warnings = disabled_warnings("disable" => tokens)
+
+      expect(warnings.map { |w| w.fields.fetch("token") }).to eq(tokens)
+      expect(warnings.map(&:message)).to all(include("which `disable:` does not reach; use `severity_overrides:`"))
+    end
+
+    it "does NOT flag a qualified token for a configured bundled plugin, by gem name or explicit id" do
+      config = { "plugins" => ["rigor-rails-i18n", { "gem" => "acme-rigor-1953", "id" => "acme.tools" }],
+                 "disable" => %w[plugin.rails-i18n.load-error plugin.rails-i18n plugin.acme.tools.x plugin.acme.tools] }
+      expect(flagged_tokens(config)).to be_empty
+    end
+
+    it "flags a qualified token for a plugin `plugins:` does not configure" do
+      config = { "plugins" => ["rigor-rails-i18n"],
+                 "disable" => %w[plugin.shoulda-matchers.unknown-column plugin.rails-i18nx plugin.acme.tools.x] }
+      warnings = disabled_warnings(config)
+
+      expect(warnings.map { |w| w.fields.fetch("token") })
+        .to eq(%w[plugin.shoulda-matchers.unknown-column plugin.rails-i18nx plugin.acme.tools.x])
+      expect(warnings.map(&:message)).to all(include("names no plugin `plugins:` configures"))
+    end
+
+    it "does NOT flag any qualified token while a third-party gem's id is unknown without loading it" do
+      config = { "plugins" => ["rigor-rails-i18n", "acme-rigor-1953"], "disable" => ["plugin.whatever.rule"] }
+      expect(flagged_tokens(config)).to be_empty
     end
   end
 

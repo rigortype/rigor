@@ -32,7 +32,7 @@
       "items": { "$ref": "#/$defs/pluginEntry" }
     },
     "disable": {
-      "description": "Project-wide rule suppressions. Entries are canonical rule ids (`call.undefined-method`), legacy unprefixed names (`undefined-method`), or family wildcards (`call`, `flow`, `assert`, `dump`, `def`).",
+      "description": "Project-wide rule suppressions. Entries are canonical rule ids (`call.undefined-method`), legacy unprefixed names (`undefined-method`), or family wildcards (`call`, `flow`, `assert`, `dump`, `def`), `all`, or a plugin's qualified id (`plugin.<id>.<rule>`, or `plugin.<id>` for the whole plugin).",
       "type": "array",
       "items": { "type": "string" }
     },

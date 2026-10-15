@@ -253,7 +253,12 @@ config.merge(extra)  # rigor:disable call.undefined-method
 ```
 
 It accepts qualified IDs, family wildcards (`call`), a
-comma- or space-separated list, or `all`. The comment must sit
+comma- or space-separated list, or `all`. A plugin's diagnostic
+is reached only by its qualified ID as printed in brackets
+(`plugin.shoulda-matchers.unknown-column`) or by the plugin's
+whole family (`plugin.shoulda-matchers`); its bare rule
+(`unknown-column`) and `all` leave it alone, because several
+plugins share bare rules. The comment must sit
 on the line the diagnostic points at; there is no
 `disable-block` form, so an expression spread over several
 lines needs the comment on each line that fires.
@@ -302,13 +307,38 @@ disable:
 
 `disable: [all]` turns off every built-in check rule, including
 `effect.annotations-unchecked`, which is reported at a signature
-file. The list does not reach the run-level rows reported at
+file.
+
+A plugin's own diagnostics are turned off by their qualified ID —
+`plugin.<id>.<rule>` for one rule, `plugin.<id>` for every rule
+of that plugin:
+
+```yaml
+disable:
+  - plugin.shoulda-matchers.unknown-column
+  - plugin.rails-i18n
+```
+
+A bare rule (`unknown-column`, `load-error`) and `all` do not
+reach them, so one plugin's suppression never hides another
+plugin's finding of the same name.
+
+The list does not reach the run-level rows reported at
 `.rigor.yml` — a plugin that failed to load or raised in
-`prepare`, a `dependencies.source_inference:` gem that did not
-resolve, the `rbs.coverage.*` notices — nor a plugin's own
-`plugin.<id>.<rule>` rows. Fully qualified spellings
-(`plugin_loader.load-error`, `plugin.<id>.<rule>`) are not
-matched. A path or parse error, which has no rule ID, is always
+`prepare` (`plugin_loader.*`), a `dependencies.source_inference:`
+gem that did not resolve (`dynamic.dependency-source.*`), the
+`rbs.coverage.*` notices, `plugin_trust.*`, `pool-degraded` —
+under any spelling, `plugin_loader.load-error` included. Turn
+those off with [`severity_overrides:`](#severity-profiles) set
+to `off`, or record them in a [baseline](06-baseline.md).
+`severity_overrides:` matches the row's rule ID without the
+source prefix, so the plugin loader's rows are `load-error` and
+`runtime-error` there — and that key also re-stamps any plugin
+diagnostic whose bare rule is the same. `rigor check` warns when a
+`disable:` entry names one of these rows, names no rule at all,
+or names a plugin `plugins:` does not configure (see
+[Config validation warnings](03-configuration.md#config-validation-warnings)).
+A path or parse error, which has no rule ID, is always
 reported.
 
 For a *known backlog* you want to keep visible but not fail

@@ -85,8 +85,9 @@ rules and other producers may call the factories directly.
 
 ## `qualified_rule` derivation and provenance
 
-`#qualified_rule` is the identifier consumers key on (suppression,
-baseline buckets, `--format json`). It MUST be:
+`#qualified_rule` is the identifier consumers key on (baseline
+buckets, `--format json`, and the suppression of a plugin's row). It
+MUST be:
 
 - `nil` when `rule` is `nil`.
 - `rule` verbatim when `source_family` is the default `:builtin`.
@@ -94,6 +95,16 @@ baseline buckets, `--format json`). It MUST be:
   `plugin.<id>.<rule>`, an RBS::Extended rule as `rbs_extended.<rule>`,
   and a generated-signature rule as `generated.<provider>.<rule>`
   ([ADR-2](../adr/2-extension-api.md) § "Plugin Diagnostic Provenance").
+
+Suppression keys on it for a plugin's row only: a `plugin.<id>` row
+answers to a `disable:` or `# rigor:disable` token equal to its
+`qualified_rule` or to its `source_family`, never to its bare `rule`
+(`CheckRules.plugin_row_disabled?`). A built-in row is matched by its
+`rule`, which for the `:builtin` family is the same string. The other
+non-default families (`plugin_loader`, `rbs_extended`) are not matched
+by `qualified_rule`; the reach of each is
+[diagnostic-policy.md](../type-specification/diagnostic-policy.md)
+§ "Token resolution".
 
 `#to_s` (the `rigor check` text line `path:line:column: severity:
 message`) appends `[<qualified_rule>]` only when `source_family` is

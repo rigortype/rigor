@@ -12,16 +12,19 @@ RSpec.describe "qualified ids in `disable:` and suppression markers" do
   before { Rigor::Plugin.unregister! }
   after { Rigor::Plugin.unregister! }
 
-  # Two plugins reporting the same bare rule on line 2, so a token that reached one by its bare rule would reach both.
+  # Two plugins reporting the same bare rules on line 2, so a token that reached one by its bare rule would reach both.
+  # Each also positions a `far-rule` row in another file, whose comments the analysed file's markers do not speak for.
   def emitter(id, const_name)
     klass = Class.new(Rigor::Plugin::Base) do
       manifest(id: id, version: "0.1.0")
 
       def diagnostics_for_file(path:, **)
-        %w[unknown-column other-rule].map do |rule|
+        rows = %w[unknown-column other-rule].map do |rule|
           Rigor::Analysis::Diagnostic.new(path: path, line: 2, column: 1, message: "#{rule} here", severity: :warning,
                                           rule: rule)
         end
+        rows << Rigor::Analysis::Diagnostic.new(path: "elsewhere.rb", line: 2, column: 1, message: "far",
+                                                severity: :warning, rule: "far-rule")
       end
     end
     stub_const(const_name, klass)
@@ -34,7 +37,8 @@ RSpec.describe "qualified ids in `disable:` and suppression markers" do
   end
   let(:all_rows) do
     %w[plugin.left-1953.unknown-column plugin.left-1953.other-rule
-       plugin.right-1953.unknown-column plugin.right-1953.other-rule]
+       plugin.right-1953.unknown-column plugin.right-1953.other-rule
+       plugin.left-1953.far-rule plugin.right-1953.far-rule]
   end
 
   # Runs a sequential, uncached check of `a.rb` (holding `source`) with `extra` merged into the configuration and
@@ -72,7 +76,8 @@ RSpec.describe "qualified ids in `disable:` and suppression markers" do
 
     it "drops every row of the plugin `plugin.<id>` names, and no other plugin's" do
       rows = run_rows({ "disable" => ["plugin.left-1953"] })
-      expect(rows).not_to include("plugin.left-1953.unknown-column", "plugin.left-1953.other-rule")
+      expect(rows).not_to include("plugin.left-1953.unknown-column", "plugin.left-1953.other-rule",
+                                  "plugin.left-1953.far-rule")
       expect(rows).to include("plugin.right-1953.unknown-column", "plugin.right-1953.other-rule")
     end
 
@@ -102,6 +107,8 @@ RSpec.describe "qualified ids in `disable:` and suppression markers" do
       rows = run_rows(source: "# rigor:disable-file plugin.right-1953\nx = 1\n")
       expect(rows).not_to include("plugin.right-1953.unknown-column", "plugin.right-1953.other-rule")
       expect(rows).to include("plugin.left-1953.unknown-column", "plugin.left-1953.other-rule")
+      # The row the plugin positioned in another file is not this file's to suppress.
+      expect(rows).to include("plugin.right-1953.far-rule")
     end
 
     it "drops no plugin row for a bare id or `all`" do

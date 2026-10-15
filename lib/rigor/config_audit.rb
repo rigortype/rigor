@@ -26,11 +26,12 @@ module Rigor
   #
   # Every check is held to the same bar that {SignaturePathAudit} set: it mirrors the
   # loader's own acceptance test, so a warning means the loader really did load nothing, and
-  # it never fires on a setup that works. In particular the rule-token check only flags a
-  # token under a built-in family (`call`, `flow`, …) — a plugin- or `rbs_extended.*` rule id
-  # (whose family Rigor cannot statically enumerate, since a `node_rule` block emits any
-  # `rule:` string it likes) is left alone, so disabling a plugin rule is never mistaken for
-  # a typo.
+  # it never fires on a setup that works. In particular the `severity_overrides:` check only
+  # flags a key under a built-in family (`call`, `flow`, …) — a plugin- or `rbs_extended.*`
+  # rule id (whose family Rigor cannot statically enumerate, since a `node_rule` block emits
+  # any `rule:` string it likes) is left alone. The `disable:` check goes further because the
+  # list's reach is enumerable (issue #1953): a plugin's row answers only to its qualified
+  # `plugin.<id>.<rule>` id, so a bare plugin rule there is inert (see {.disable_token_warning}).
   module ConfigAudit
     # One config-level finding. `kind` discriminates the source key (`:signature_path`,
     # `:bundled_plugin_signature_path`, `:library`, `:disabled_rule`, `:severity_override`,

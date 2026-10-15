@@ -991,7 +991,7 @@ never in. A session that cannot reuse an existing snapshot therefore
 declines rather than running a baseline — nothing it computed could warm
 the next keystroke anyway.
 
-### `Payload` (current `SCHEMA = 31`)
+### `Payload` (current `SCHEMA = 38`)
 
 ```
 Payload :: Data[
@@ -1021,6 +1021,28 @@ name-keyed rather than a positive edge to the declaring file, so a body edit
 inside the declaration does not re-check the referent. `class_decls` already
 carries the per-file declared sets, so no row moves and `SCHEMA` is
 unchanged.
+
+The `defines:<method name>` key in `missing` is recorded by
+`Inference::BlockCallTiming.project_defines_anywhere?` whichever way it
+answers ([#1459](https://github.com/rigortype/rigor/issues/1459)): the
+answer reads every file's method tables whole, so it is a function of
+whether ANY file defines the name, on any class or module and either side,
+by a `def`, an `attr_*`, an `alias` / `alias_method` or a `define_method`.
+`LastLine.reads_line?` declines a `gets` / `readline` on it, so a `$_`
+narrowing a reader earned while no file defined the name must go when one
+starts to, and come back when the last one stops. Its producer diffs each
+changed, added or removed file's defined names
+(`ScopeIndexer.defined_method_names` over the `methods`, `def_nodes` and
+`singleton_def_nodes` tables) between the file's seed bundle and the
+recheck scan (`Incremental.changed_defined_names`), and fires the key for
+every name that appeared in or vanished from a file. The appeared-symbol
+diff the `method:` and `toplevel:` keys use cannot stand in for it: it
+sees only a `def`, and only one that appears. The seed bundles already
+carry the three tables, so no row moves and `SCHEMA` is unchanged. The
+check's other readers record the key too, and one of them is broad:
+`ErrorInfo.rescue_entry` asks it for `backtrace` at every rescue entry, so
+a `backtrace` definition appearing or vanishing anywhere re-checks every
+file with a `rescue`. That is a known cost.
 
 Schema history worth pinning: `6` stored the seed bundles as
 `(node_id, name, fingerprint)` def-node handles (ADR-85); `8` added each

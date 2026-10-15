@@ -109,12 +109,27 @@ RSpec.describe "the method-visibility table over visibility calls (#1911, #1819,
     RUBY
   end
 
-  it "contests a conditional wrapped def and a def nested under another call" do
-    expect(tables(<<~RUBY)).to eq([{ "K" => { x: :private, m: :public, y: :public } }, Set[["K", :x], ["K", :m]]])
+  it "contests a conditional wrapped def and a def nested under another call or a list" do
+    expect(tables(<<~RUBY))
       class K
         private def x = 1 if RUBY_VERSION > "3"
         private memoize def m = 1
+        private [def n = 1]
         def y = 1
+      end
+    RUBY
+      .to eq([{ "K" => { x: :private, m: :public, n: :public, y: :public } }, Set[["K", :x], ["K", :m], ["K", :n]]])
+  end
+
+  # Ruby: after a toggle the walk cannot place, a later bare def's visibility is unknown, while a wrapped def or attr
+  # still takes its wrapper's.
+  it "does not contest a wrapped def or attr after an uncertain toggle" do
+    expect(tables(<<~RUBY)).to eq([{ "K" => { a: :public, x: :public, r: :private } }, Set[["K", :a]]])
+      class K
+        [1].each { private }
+        def a = 1
+        public def x = 1
+        private attr_reader :r
       end
     RUBY
   end
@@ -138,7 +153,10 @@ RSpec.describe "the method-visibility table over visibility calls (#1911, #1819,
         private_class_method def self.c = 1
         def a = 1
       end
-      K.instance_eval { private attr_reader :ie }
+      K.instance_eval do
+        attr_reader :ie
+        private attr_reader :pie
+      end
     RUBY
   end
 

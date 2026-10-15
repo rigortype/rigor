@@ -175,6 +175,35 @@ before its first `#analyze` call; any raise from `prepare` is captured into
 `#prepare_diagnostics` for the runner to surface alongside the per-file
 stream rather than aborting the worker.
 
+`#drain_trust_refusals` reports the `Plugin::IoBoundary` trust-policy
+refusals the session's plugins made since the previous drain, per plugin
+([#1900](https://github.com/rigortype/rigor/issues/1900)). Unlike the
+other drains it reports only what is new, because the coordinator sums
+the drains. The first drain starts after `#init`: every registry runs
+`#init`, and the coordinator-side registry reports those reads itself.
+The fork backend drains the parent session after `#prepare` and before
+forking, so a child that inherits the parent's boundaries does not count
+the prepare-time refusals again; it merges the children's drains by slice
+in file order, and drains a dead child's slice file by file as the parent
+re-analyses it. The Ractor backend drains after `#prepare` and after
+every file so it can count one worker's prepare refusals and every
+file's in file order. These orderings make the first refused path match
+the sequential run's except after a Ractor degrade or when a plugin's
+`#init` refuses differently per registry; the count and the row's
+presence match regardless.
+
+When the pool cannot dispatch workers (no `fork`, or the Ractor backend
+without a cache store) it falls back to analysing on the coordinator-side
+registry. That registry's `#prepare` is skipped by the pooled pre-pass,
+so the fallback MUST run it — once, before building its environment, as
+the sequential pre-pass does — and put its rows at the head of the
+stream, or every plugin analyses unprepared and its prepare rows and
+prepare-time refusals are lost
+([#1900](https://github.com/rigortype/rigor/issues/1900)). The rows sit
+where the pool backends put their workers' prepare rows, not where a
+sequential run puts them (before the pre-eval rows): the run assembles
+that pre-file block before analysis, when the fallback has not run yet.
+
 ## Equivalence contract
 
 Given identical `(configuration, cache_store, plugin_blueprints)`, the

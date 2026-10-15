@@ -336,6 +336,45 @@ module Rigor
         end
       end
 
+      # Issue #1900 — `{plugin id => refused-read count}` over `registry`'s boundaries right now: the baseline
+      # a later drain subtracts, so it reports only the refusals made after the baseline was taken.
+      def self.refusal_counts(registry)
+        registry.plugins.to_h do |plugin|
+          summary = begin
+            plugin.io_boundary.refusal_summary
+          rescue StandardError
+            nil
+          end
+          [safe_plugin_id(plugin), summary ? summary[:count] : 0]
+        end
+      end
+
+      def self.safe_plugin_id(plugin)
+        plugin.manifest.id
+      rescue StandardError
+        plugin.class.to_s
+      end
+
+      # Issue #1900 — the {Plugin::IoBoundary} trust-policy refusals this session's plugin instances made
+      # since the previous drain, one `{plugin_id:, count:, first_path:, nearest_root:}` per plugin that hit
+      # any, in registry order. Unlike {#drain_run_disclosures} each drain reports only what is new — the
+      # boundary keeps its running total and this session remembers how much of it was already reported —
+      # because the coordinator SUMS the drains: a fork child inherits the parent's `#prepare` refusals,
+      # and reporting them again would count them once per worker. `first_path` is the boundary's first
+      # refusal overall, which is the delta's own first path whenever nothing was reported before it, and
+      # the coordinator keeps the first-merged path otherwise. It is not baselined after `#init`, so a plugin
+      # whose `#init` refuses differently here than on the coordinator registry can have this session's
+      # `#init` path named. Marshal-clean and Ractor-copyable.
+      def drain_trust_refusals
+        return [] if @plugin_registry.empty?
+
+        @plugin_registry.plugins.filter_map do |plugin|
+          trust_refusal_delta(plugin)
+        rescue StandardError
+          nil
+        end
+      end
+
       private
 
       # Mirrors {Runner#seed_project_scope}: applies the cross-file pre-pass discovery tables the
@@ -402,6 +441,10 @@ module Rigor
       def run_plugin_prepare
         return [] if @plugin_registry.empty?
 
+        # Issue #1900 — per plugin id, how much of its boundary's count is already reported. Starts at what
+        # `#init` refused while the registry was materialised: `#init` runs on the coordinator-side registry
+        # too, which reports those reads itself, so counting them here as well would double them.
+        @reported_refusal_counts = self.class.refusal_counts(@plugin_registry)
         @plugin_registry.plugins.flat_map do |plugin|
           plugin.prepare(plugin.services)
           []
@@ -488,6 +531,18 @@ module Rigor
           rule: "runtime-error",
           source_family: :plugin_loader
         )
+      end
+
+      def trust_refusal_delta(plugin)
+        summary = plugin.io_boundary.refusal_summary
+        return nil if summary.nil?
+
+        plugin_id = safe_plugin_id(plugin)
+        delta = summary[:count] - @reported_refusal_counts.fetch(plugin_id, 0)
+        return nil unless delta.positive?
+
+        @reported_refusal_counts[plugin_id] = summary[:count]
+        summary.merge(count: delta, plugin_id: plugin_id)
       end
 
       def safe_plugin_id(plugin)

@@ -44,6 +44,10 @@ lib/rigor/analysis/dependency_source_inference/walker.rb:
     Rigor::Analysis::DependencySourceInference::Walker#collect_bound_constants: qualifies a constant write by the lexical nesting of the class and module headers around it, as walk_node qualifies a def, so a refine key is matched by the name the write binds rather than by its last segment (#1814); it records no declaration fact
     Rigor::Analysis::DependencySourceInference::Walker#walk_node: grandfathered
     Rigor::Analysis::DependencySourceInference::Walker#walk_refine_declarations: a dispatcher over a refine body; it hands each nested class or module back to walk_node under the prefix it was given and derives no declaration context itself
+lib/rigor/analysis/incremental_session.rb:
+  computes: which constants a changed file rewrote the singleton side of, to choose the readers an --incremental recheck re-checks (#1906)
+  producers:
+    Rigor::Analysis::IncrementalSession#singleton_rewritten_constants: reads the seed bundle the indexer already wrote (its singleton-source names, singleton envelope keys and unpositioned :extend side) only to pick the negative class keys of the recheck closure; it records no declaration fact and derives no context
 lib/rigor/analysis/reachability/scan.rb:
   computes: every constant declaration and reference with the lexical nesting in force there (ADR-102)
   producers:
@@ -379,6 +383,7 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#subtract_sibling_methods!: rewrites only the possible_discovered_methods sibling in the finalize pass, dropping the names a def declares; it derives no declaration context
     Rigor::Inference::ScopeIndexer#surface_mixin_call?: grandfathered
     Rigor::Inference::ScopeIndexer#taint_opaque_eval: taints the enclosing owner the walk passes in when an eval block on an opaque receiver mixes a module in; it computes no declaration context
+    Rigor::Inference::ScopeIndexer#taint_skipped_singleton_rewrites: taints the singleton side a singleton_class surface call in a block the extends walk skips may rewrite (#1906), on the enclosing owner the walk passes in or every name a constant receiver can denote; it computes no declaration context
     Rigor::Inference::ScopeIndexer#unentered_block_entry: the entry scope of a block the evaluator never entered; it passes the scope table to unentered_meta_class_body_entry, which records which scope a node is typed under, not what a declaration is
     Rigor::Inference::ScopeIndexer#unentered_meta_class_body_entry: records the class-body self of a value-position Class.new / Module.new / Struct.new / Data.define block in the per-node scope table (#1696), under the name AnonymousMetaClass.name_for gives; it records which scope a node is typed under, not what a declaration is
     Rigor::Inference::ScopeIndexer#walk_anonymous_meta_block: grandfathered

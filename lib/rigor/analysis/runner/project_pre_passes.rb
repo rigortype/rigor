@@ -8,6 +8,7 @@ require_relative "../../inference/synthetic_method_scanner"
 require_relative "../../inference/project_patched_scanner"
 require_relative "../dependency_source_inference"
 require_relative "../project_scan"
+require_relative "../worker_session"
 require_relative "../template_units"
 require_relative "../template_unit_collector"
 
@@ -256,11 +257,15 @@ module Rigor
         # Issue #1541 — what a pooled run's workers would have produced from `#prepare`, for the coordinator's
         # empty-closure branch, which dispatches none: the `#prepare` error rows and the run-scoped
         # registrations (`#disclose_once` / `#emit_once`) made there. It runs on a THROWAWAY registry, so
-        # nothing `#prepare` records on a plugin instance (a trust refusal, say) reaches the coordinator-side
-        # instances {DiagnosticAggregator} reads — a pooled cold run never shows those either.
-        # Returns the rows first, then the disclosure records.
+        # nothing `#prepare` records on a plugin instance reaches the coordinator-side instances
+        # {DiagnosticAggregator} reads; issue #1900 — the trust refusals are therefore handed back too, in
+        # the shape {Analysis::WorkerSession#drain_trust_refusals} gives a pooled cold run's.
+        # Returns the rows first, then the disclosure records, then the refusals.
         def prepare_throwaway_registry
           registry = load_plugins
+          # Issue #1900 — `#init` already ran (in `load_plugins`) and its refusals are the coordinator-side
+          # registry's to report, so only what `#prepare` refuses from here on is handed back.
+          baseline = WorkerSession.refusal_counts(registry)
           rows = plugin_prepare_diagnostics(registry)
           records = registry.plugins.flat_map do |plugin|
             plugin_id = safe_plugin_id(plugin)
@@ -268,7 +273,14 @@ module Rigor
           rescue StandardError
             []
           end
-          [rows, records]
+          [rows, records, trust_refusals(registry, baseline)]
+        end
+
+        # Issue #1900 — `#prepare` on `plugin_registry` itself, returning its error rows. For the pool
+        # coordinator's sequential fallback, which analyses on the coordinator-side registry that {#run}
+        # left unprepared because the run is in pool mode.
+        def prepare_registry(plugin_registry)
+          plugin_prepare_diagnostics(plugin_registry)
         end
 
         # Returns the per-run shared `Plugin::FactStore` instance. All loaded plugins share this store
@@ -281,6 +293,19 @@ module Rigor
         end
 
         private
+
+        def trust_refusals(registry, baseline)
+          registry.plugins.filter_map do |plugin|
+            summary = plugin.io_boundary.refusal_summary
+            next nil if summary.nil?
+
+            plugin_id = safe_plugin_id(plugin)
+            delta = summary[:count] - baseline.fetch(plugin_id, 0)
+            summary.merge(count: delta, plugin_id: plugin_id) if delta.positive?
+          rescue StandardError
+            nil
+          end
+        end
 
         def pool_mode?
           @pool_mode_reader.call

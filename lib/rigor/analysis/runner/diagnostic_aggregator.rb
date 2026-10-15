@@ -57,7 +57,8 @@ module Rigor
                        quarantined_signatures_snapshot:, env_build_failure_snapshot:,
                        definition_build_failures_snapshot:, hkt_scan_failure_snapshot:,
                        conformance_results_snapshot:, signature_standdowns_snapshot: -> { [] },
-                       vendored_standdowns_snapshot: -> { [] }, pooled_run_disclosures: -> { [] })
+                       vendored_standdowns_snapshot: -> { [] }, pooled_run_disclosures: -> { [] },
+                       pooled_trust_refusals: -> { [] })
           @configuration = configuration
           @rbs_extended_reporter = rbs_extended_reporter
           @boundary_cross_reporter = boundary_cross_reporter
@@ -78,6 +79,9 @@ module Rigor
           # Issue #1051 — reader for the pool coordinator's de-duplicated run-scoped disclosure table.
           # Empty on a sequential run, where `plugin_registry`'s own instances are the ones that registered.
           @pooled_run_disclosures_reader = pooled_run_disclosures
+          # Issue #1900 — reader for the pool coordinator's summed trust-refusal table. Empty on a
+          # sequential run, where `plugin_registry`'s own boundaries made every read.
+          @pooled_trust_refusals_reader = pooled_trust_refusals
         end
 
         # Pre-file diagnostic streams that fire once per run rather than per analyzed file: plugin load /
@@ -1093,16 +1097,22 @@ module Rigor
         # cache"). It is also never routed through `IncrementalSession`'s per-file cache (`#788`): that cache
         # holds only `Runner#per_file_diagnostics`, and this row is not part of that stream.
         #
-        # Scope: `plugin_registry` here is the coordinator-side registry, which only actually RUNS `#prepare`
-        # / per-file analysis in sequential mode (`--workers` unset, the default) — a pooled run (`--workers
-        # N`) prepares and analyses on per-worker `WorkerSession` registries this reader never sees, so a
-        # refusal confined to a pooled worker's slice is not reported. Left out deliberately: draining it
-        # needs a fourth marshalled channel beside `drain_reporters` / `drain_dependencies` / `drain_effects`
-        # in `Runner::PoolCoordinator`, and the default (unpooled) path already covers the reported bug.
+        # Two sources (issue #1900), summed per plugin: the coordinator-side registry's own boundaries — where
+        # a sequential run, and the pool's no-worker fallback, made every read — and `pooled_trust_refusals`,
+        # what a pooled run drained from its pre-fork parent session and every worker
+        # ({Runner::PoolCoordinator#merge_trust_refusals}). The count is per refused ATTEMPT, as
+        # `--workers 0` always counted it; the pool drains the parent's `#prepare` refusals before forking and
+        # each worker reports only what it added, so the workers, which inherit the parent's boundaries, do
+        # not count them again. Rows follow registry
+        # (plugin load) order, which every mode shares.
         def plugin_trust_refusal_diagnostics
           return [] if plugin_registry.empty?
 
-          plugin_registry.plugins.filter_map { |plugin| plugin_trust_refusal_diagnostic(plugin) }
+          pooled = Array(pooled_trust_refusals).to_h { |record| [record[:plugin_id], record] }
+          plugin_registry.plugins.filter_map do |plugin|
+            summary = combined_refusal_summary(pooled[disclosure_plugin_id(plugin)], plugin)
+            plugin_trust_refusal_diagnostic(plugin, summary) if summary
+          end
         end
 
         # Issue #1051 — the run-scoped plugin disclosures ({Plugin::Base#disclose_once}), the run's
@@ -1202,10 +1212,23 @@ module Rigor
           plugin.class.to_s
         end
 
-        def plugin_trust_refusal_diagnostic(plugin)
-          summary = plugin.io_boundary.refusal_summary
-          return nil if summary.nil?
+        # The coordinator's own record first when it has one: on a pooled run it holds the `#init` reads
+        # (every registry runs `#init`; the workers' drains start after it), which `--workers 0` makes before
+        # `#prepare` and before any file, so its first path is the one a sequential run names. Not so after a
+        # Ractor-backend degrade, where this record also holds the re-analysed files' refusals and is named
+        # ahead of a worker's `#prepare` path; the count is right either way.
+        def combined_refusal_summary(pooled, plugin)
+          local = begin
+            plugin.io_boundary.refusal_summary
+          rescue StandardError
+            nil
+          end
+          return local || pooled if pooled.nil? || local.nil?
 
+          local.merge(count: local[:count] + pooled[:count])
+        end
+
+        def plugin_trust_refusal_diagnostic(plugin, summary)
           plugin_id = plugin.manifest.id
           Diagnostic.new(
             path: ".rigor.yml", line: 1, column: 1,
@@ -1290,6 +1313,10 @@ module Rigor
 
         def pooled_run_disclosures
           @pooled_run_disclosures_reader.call
+        end
+
+        def pooled_trust_refusals
+          @pooled_trust_refusals_reader.call
         end
 
         def pre_eval_diagnostics_from_scanner

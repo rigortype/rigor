@@ -342,6 +342,35 @@ module Rigor
         closure.freeze
       end
 
+      # Issue #1906 — a file that rewrites a constant's singleton names without declaring it
+      # (`D.singleton_class.alias_method :own, :keep`) contributes opaque singleton envelopes to the constant's bucket,
+      # but a reader's class edge names only the files that declared the constant when the reader last ran, and the
+      # class-declaration diff does not move while the constant stays in the file (`:own` becoming `:keep`, or the
+      # call becoming a `class D` reopening). So a declaration-unstable edit to such a file fires `class:<last
+      # segment>` for each constant that, before the edit, both sat in the file's singleton-source set and held a
+      # singleton envelope entry or an unpositioned singleton side the file recorded (a computed name there leaves the
+      # side unpositioned, and becoming literal reads it again). A file that only includes into a constant
+      # (`ActiveRecord::Base.include(X)`) records neither and fires nothing. A constant the edit makes the file
+      # rewrite needs no key: the class-declaration diff fires if it is new to the file, and the reader's class edge
+      # names the file if the file declared it.
+      def singleton_rewrite_affected(unstable)
+        names = unstable.flat_map { |path| singleton_rewritten_constants(@seed_bundles[path]) }.uniq
+        return Set.new if names.empty?
+
+        Incremental.negative_closure(names.map { |name| "class:#{name.split('::').last}" }, @negative_dependents)
+      end
+
+      def singleton_rewritten_constants(bundle)
+        return [] if bundle.nil?
+
+        envelopes = bundle[:parameter_envelopes] || {}
+        unpositioned = bundle[:unpositioned_mixins] || {}
+        (bundle[:singleton_class_source_names] || []).select do |name|
+          (envelopes[name] || {}).each_key.any? { |key| key.is_a?(Array) && key.first == :singleton } ||
+            unpositioned.dig(name, :extend)
+        end
+      end
+
       # Issue #1367 — every file whose last result holds a `global.*` diagnostic re-checks on any recheck. What
       # exempts such a write is a fact of the whole program — an alias, or a `write` / `to_str` / `to_int` / hatch
       # defined in any spelling on any receiver, a rewritten ancestor, a mixin — which no name-keyed edge can
@@ -365,13 +394,15 @@ module Rigor
 
       # The dependents contributed by the declaration-unstable changed files and the behaviourally-unstable
       # symbol pairs: the ADR-46 slice-4 symbol-granular fan-out when either is present (ancestry deps of the
-      # unstable files + symbol deps of the changed pairs), else the coarse file-level fan-out.
+      # unstable files + symbol deps of the changed pairs), else the coarse file-level fan-out; plus the readers of
+      # the constants an unstable file rewrote from outside their bodies ({#singleton_rewrite_affected}).
       def dependents_base(unstable, symbol_pairs)
-        if symbol_pairs.any? || unstable.any? { |f| @ancestry_dependents[f] }
-          Incremental.affected_with_symbols(unstable, symbol_pairs, @symbol_dependents, @ancestry_dependents)
-        else
-          Incremental.affected(unstable, @dependents)
-        end
+        base = if symbol_pairs.any? || unstable.any? { |f| @ancestry_dependents[f] }
+                 Incremental.affected_with_symbols(unstable, symbol_pairs, @symbol_dependents, @ancestry_dependents)
+               else
+                 Incremental.affected(unstable, @dependents)
+               end
+        base | singleton_rewrite_affected(unstable)
       end
 
       # ADR-67 WD6c lift — the fresh whole-project inferred-param table for this recheck ({} when the gate
@@ -466,7 +497,7 @@ module Rigor
       def whole_project_closure(changed, added)
         (@analyzed.to_set | changed | added).freeze
       end
-      private :gated_closure, :whole_project_closure
+      private :gated_closure, :whole_project_closure, :singleton_rewrite_affected, :singleton_rewritten_constants
 
       # The current project file set (cheap directory expansion, no analysis), used to detect files added /
       # removed since the last run. Also where an editor buffer's binding is re-spelled onto the set, since

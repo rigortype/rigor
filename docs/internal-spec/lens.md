@@ -74,7 +74,7 @@ rigor lens [--format text|json] [--config FILE] [--workers N] FILE...
   "revision": 1,
   "producer": { "name": "rigor", "version": "0.4.3", "engine_source": null },
   "context": { "...": "§ Context" },
-  "capabilities": ["class", "module", "method", "attribute", "module_function", "body_return", "diagnostics", "inputs"],
+  "capabilities": ["class", "module", "method", "attribute", "module_function", "builder", "body_return", "diagnostics", "inputs"],
   "files": [ { "...": "§ Files" } ],
   "members": [ { "...": "§ Members" } ]
 }
@@ -128,11 +128,24 @@ One entry per requested target, in request order.
   - "Directly" includes a visibility call wrapping it (`private def x`, `private attr_reader :x`), and
     the body of a class whose superclass expression is `Struct.new(…)` or `Data.define(…)`.
   - A `def` or `attr_*` inside a block, or inside `class << obj` for anything but `self`, is an omission.
+  - A class a builder defines (capability `builder`): `Foo = Data.define(:a, …)` and
+    `Foo = Struct.new(:a, …)` (optionally ending with `keyword_init:` and no other keyword), written as a plain
+    constant assignment directly in a namespace body (not in a block, a method, another builder's block or
+    `class << self`), with unique symbol field names Ruby accepts (not ending in `=`). It is a `class` site with `builder` set to `data` or
+    `struct`, spanning the assignment; each field is an `attribute` site spanning its name (`reader` for
+    `Data`, `accessor` for `Struct`, `public`), whose only contract comment is a `#:` trailing it on its own line
+    of a multi-line call, rbs-inline's per-field form (§ Anchors); and the call's block is read as the class body for its methods, which
+    Ruby `class_eval`s on the new class. `check`'s discovery keys these fields and methods under the same constant
+    name. A class, module or constant written inside the block stays with the lexical scope in Ruby, and one
+    inside `class << self` lands on the singleton class, so those are omissions. Other builder forms stay
+    omissions (`data_class`, `struct_class`): `||=` and other compound writes, a non-symbol or non-literal field
+    list (`Struct.new("Name", …)` included), any other keyword argument, a duplicate or rejected field name, a
+    `&block` argument, and a builder inside a block, a method, a builder's block or `class << self`.
   - A module function is a `method` site with `module_function: true` (capability `module_function`): a `def`
     written directly in a module body after a bare `module_function` there. That is the form Ruby and `check`'s
     singleton table read the same way.
-- Omissions: constant assignments (`constant`); `Data.define` / `Struct.new` assigned to a constant
-  (`data_class`, `struct_class`), with any member declared in their block; `alias` and `alias_method`
+- Omissions: constant assignments (`constant`); the `Data.define` / `Struct.new` forms § Kinds does not
+  model (`data_class`, `struct_class`), with any member declared in their block; `alias` and `alias_method`
   (`alias`); `define_method`; a `def` with any receiver but `self`; any declaration inside a block;
   `class << obj`; the `module_function` cases Rigor cannot read the way both Ruby and `check` do
   (`module_function`): a `def` after a bare `module_function` once a bare `private` / `public` /
@@ -173,6 +186,7 @@ A site is one source declaration in a requested file.
 | `scope` | `instance` or `singleton` for `method` / `attribute`; `null` otherwise. |
 | `attribute` | `reader`, `writer` or `accessor` for `attribute`; `null` otherwise. |
 | `members` | For `method` / `attribute`, the names of the members this site defines: one for a method, `name` and/or `name=` for an attribute. `[]` otherwise. |
+| `builder` | `data` or `struct` for a `class` site a `Data.define` / `Struct.new` assignment defines; `null` otherwise. |
 | `module_function` | `true` for a module function: the `def` defines a private instance method and a singleton copy, so its name is a member under both scopes and both list this site. `scope` is then `instance` and `visibility` `private`. `false` otherwise. |
 | `ordinal` | The 0-based index among sites that share one declaration span (`attr_reader :a, :b` gives 0 and 1); 0 otherwise. |
 | `span` | The declaration's span (the `class` / `module` / `def` / `attr_*` node). |
@@ -339,7 +353,11 @@ The hashed material is built from the file's bytes:
    `[start_offset, end_offset)`; then, when step 2 kept a comment, `\n` and that comment's bytes to the end
    of its line without the terminator.
 
-The rule is the same for every kind. For a `class`, `module` or `def` the declaration's bytes are its whole
+The rule is the same for every kind, except a builder's field (§ Kinds): it has no leading contract
+comments, which belong to the constant, and its trailing contract comment counts only when the field is
+not on the assignment's first line. A `#:` that trails the call's closing parenthesis on the last field's line counts
+toward that field's span and anchor too, though Ruby and `check` read no type from it; the field's slots
+then come only from its other declarations. For a `class`, `module` or `def` the declaration's bytes are its whole
 body, so an edit anywhere inside it, prose included, moves its anchor; prose in the leading comment run
 does not. The file `digest` changes on every edit. An unchanged anchor never licenses reusing stale offsets,
 line numbers or documentation: a consumer re-associates on the current file whenever its digest moved.

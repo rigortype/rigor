@@ -32,9 +32,9 @@ module Rigor
       end
 
       # The anchor of the declaration spanning bytes `start_offset...end_offset` and lines `start_line..end_line`.
-      def for_span(start_offset, end_offset, start_line, end_line)
-        leading = leading_contract_comments(start_line)
-        trailing = trailing_contract_comment(end_line, end_offset)
+      def for_span(start_offset, end_offset, start_line, end_line, leading: true, trailing: true)
+        leading = leading ? leading_contract_comments(start_line) : []
+        trailing = trailing ? trailing_contract_comment(end_line, end_offset) : nil
         material = +"".b
         leading.each { |comment| material << line_text_from(comment.location.start_offset) << "\n" }
         material << @source.byteslice(start_offset, end_offset - start_offset)

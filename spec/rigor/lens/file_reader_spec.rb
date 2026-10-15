@@ -68,6 +68,9 @@ RSpec.describe Rigor::Lens::FileReader do
     it "keeps a toggle inside a block local to the block" do
       source = <<~RUBY
         class Foo
+          configure do
+            private
+          end
           Point = Struct.new(:x) do
             private
             def helper; end
@@ -76,7 +79,7 @@ RSpec.describe Rigor::Lens::FileReader do
         end
       RUBY
 
-      expect(visibilities_of(source)).to eq("bar" => "public")
+      expect(visibilities_of(source)).to eq("x" => "public", "helper" => "private", "bar" => "public")
     end
 
     it "reads a literal array argument" do
@@ -206,6 +209,92 @@ end
       expect(returns["iv"]).to eq("state" => "unavailable", "reason" => "not_computed")
       expect(returns["sp"]).to eq("state" => "unavailable", "reason" => "not_computed")
       expect(returns["plain"]).to eq(sites(source).find { |data| data["name"] == "plain" }["body_return"])
+    end
+  end
+
+  describe "Data.define and Struct.new" do
+    let(:source) do
+      <<~RUBY
+        module X
+          P = Data.define(:a, :b) do
+            def m = 1
+            private
+            def hidden = 2
+          end
+          S = Struct.new(:c, keyword_init: true)
+          N = Struct.new("Named", :d)
+          D = Data.define(*FIELDS)
+          E ||= Data.define(:e)
+          F = Data.define(:f, &blk)
+        end
+      RUBY
+    end
+
+    it "reads a constant-assigned builder as a class with field attributes and its block as the body" do
+      rows = sites(source).map { |site| site.values_at("kind", "owner", "name", "attribute", "builder", "visibility") }
+
+      expect(rows).to eq([["module", nil, "X", nil, nil, nil],
+                          ["class", nil, "X::P", nil, "data", nil],
+                          ["attribute", "X::P", "a", "reader", nil, "public"],
+                          ["attribute", "X::P", "b", "reader", nil, "public"],
+                          ["method", "X::P", "m", nil, nil, "public"],
+                          ["method", "X::P", "hidden", nil, nil, "private"],
+                          ["class", nil, "X::S", nil, "struct", nil],
+                          ["attribute", "X::S", "c", "accessor", nil, "public"]])
+    end
+
+    # #1927 review: Ruby class_evals the block, so a constant, class or module written there stays with the lexical
+    # scope; a builder under class << self lands on the singleton class.
+    it "omits declarations whose owner the builder block or a singleton body would misname" do
+      source = <<~RUBY
+        module X
+          P = Data.define(:a) do
+            class Inner; def inner_m = 1; end
+            Q = Struct.new(:b)
+            LIMIT = 1
+          end
+          class << self
+            K = Data.define(:k)
+            class Foo; end
+          end
+        end
+      RUBY
+      names = sites(source).map { |site| site["name"] }
+
+      expect(names).to eq(%w[X X::P a])
+      expect(omissions(source)).to include(%w[class Inner], %w[struct_class Q], %w[constant LIMIT], %w[data_class K],
+                                           %w[class Foo])
+    end
+
+    it "models symbol fields only, with keyword_init alone, unique and valid names" do
+      source = <<~RUBY
+        T = Data.define("t")
+        S = Struct.new(:c, "d")
+        O = Struct.new(:o, foo: 1)
+        Dup = Data.define(:a, :a)
+        Bad = Struct.new(:"a=")
+        Ok = Struct.new(:k, keyword_init: true)
+        Pred = Data.define(:ok?, :x!)
+      RUBY
+
+      expect(sites(source).map { |site| site["name"] }).to eq(%w[Ok k Pred ok? x!])
+    end
+
+    it "reads a field's own trailing #: on a multi-line call, and nothing of the constant's comments" do
+      typed = "# @rbs inherits Data\nP = Data.define(\n  :a, #: Integer\n  :b\n)\n"
+      retyped = typed.sub("#: Integer", "#: String")
+      one_line = "P = Data.define(:a) #: Integer\n"
+      field = ->(source, name) { sites(source).find { |site| site["name"] == name } }
+
+      expect(field.call(typed, "a")["contract_span"]).not_to be_nil
+      expect(field.call(retyped, "a")["anchor"]).not_to eq(field.call(typed, "a")["anchor"])
+      expect(field.call(typed, "b")["contract_span"]).to be_nil
+      expect(field.call(one_line, "a")["contract_span"]).to be_nil
+    end
+
+    it "omits the builder forms it does not model" do
+      expect(omissions(source)).to include(%w[struct_class X::N], %w[data_class X::D], %w[data_class X::E],
+                                           %w[data_class X::F])
     end
   end
 

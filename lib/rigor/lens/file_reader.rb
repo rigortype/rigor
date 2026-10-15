@@ -74,7 +74,7 @@ module Rigor
         when Prism::MultiWriteNode then walk_multi_write(node, nesting, singleton, in_block)
         when Prism::ForNode then walk_assigning(node, node.index, nesting, singleton, in_block)
         when Prism::RescueNode then walk_assigning(node, node.reference, nesting, singleton, in_block)
-        when *CONSTANT_WRITES then walk_constant(node, nesting)
+        when *CONSTANT_WRITES then walk_constant(node, nesting, in_block)
         else walk_children(node, nesting, singleton, in_block)
         end
       end
@@ -102,8 +102,8 @@ module Rigor
         if node.is_a?(Prism::ClassNode) && node.superclass
           detached { walk(node.superclass, nesting, singleton: false, in_block: true) }
         end
-        if in_block || name.nil?
-          omit(kind, name || node.constant_path.slice, node)
+        if in_block || name.nil? || constant_scope_unknown?
+          omit(kind, constant_scope_unknown? ? node.constant_path.slice : (name || node.constant_path.slice), node)
           detached { walk(node.body, nesting, singleton: false, in_block: true) } if node.body
           return
         end
@@ -350,16 +350,79 @@ module Rigor
         node.lefts + [node.rest].compact + node.rights
       end
 
-      def walk_constant(node, nesting)
+      def walk_constant(node, nesting, in_block)
         target = node.respond_to?(:target) ? node.target : node
         name = node.respond_to?(:target) ? qualify(nesting, node.target) : qualify_name(nesting, node.name.to_s)
-        kind = case data_or_struct(node.value)
-               when :data then "data_class"
-               when :struct then "struct_class"
-               else "constant"
-               end
-        omit(kind, name || target.slice, node)
+        builder = data_or_struct(node.value)
+        fields = builder && builder_fields(node.value, builder)
+        if fields && name && !in_block && plain_write?(node) && !constant_scope_unknown?
+          return read_builder_class(node, name, nesting, builder, fields)
+        end
+
+        kind = { data: "data_class", struct: "struct_class" }.fetch(builder, "constant")
+        # Under a builder block or `class << self` the nesting does not name where the constant lands: as written.
+        written = node.respond_to?(:target) ? target.slice : node.name.to_s
+        omit(kind, constant_scope_unknown? ? written : (name || written), node)
         walk(node.value, nesting, singleton: false, in_block: true)
+      end
+
+      # `Foo = Data.define(:a, :b) do … end` and `Foo = Struct.new(:a, keyword_init: true) do … end`: a class site
+      # with `builder` set, an attribute site per field (a reader for `Data`, an accessor for `Struct`), and the block
+      # read as the class body, which Ruby `class_eval`s on the new class. `check`'s discovery keys the block's defs
+      # and the fields under the same constant name.
+      def read_builder_class(node, name, nesting, builder, fields)
+        add_site(node, { "kind" => "class", "name" => name, "owner" => nil, "scope" => nil, "attribute" => nil,
+                         "members" => [], "module_function" => false, "builder" => builder.to_s,
+                         "visibility" => nil, "params" => nil, "block" => nil, "body_return" => nil })
+        attribute = builder == :data ? "reader" : "accessor"
+        start_line = node.location.start_line
+        fields.each do |field, field_node|
+          # rbs-inline reads a `#:` trailing a field on its own line of a multi-line call as that field's type.
+          trailing = field_node.location.start_line != start_line
+          add_site(field_node, { "kind" => "attribute", "name" => field, "owner" => name, "scope" => "instance",
+                                 "attribute" => attribute, "members" => attribute_members(field, attribute),
+                                 "module_function" => false, "visibility" => "public", "params" => nil,
+                                 "block" => nil, "body_return" => nil }, contracts: trailing ? :trailing : false)
+        end
+        block = node.value.block
+        walk_body(block.body, nesting + [name], singleton: false, kind: :builder) if block&.body
+      end
+
+      # Whether a constant, class or module written here lands somewhere the nesting does not name: a builder
+      # block, which Ruby `class_eval`s (defs go to the new class, but constants stay with the lexical scope), or a
+      # `class << self` body (constants go to the singleton class). Such a declaration is an omission.
+      def constant_scope_unknown?
+        @bodies.any? { |body| %i[builder singleton].include?(body.kind) }
+      end
+
+      def plain_write?(node)
+        node.is_a?(Prism::ConstantWriteNode) || node.is_a?(Prism::ConstantPathWriteNode)
+      end
+
+      # `[[name, node], …]` for a builder call whose fields are all symbols, or nil. `Struct.new` may end with
+      # `keyword_init:` alone. Not modelled: a string field (`check`'s discovery reads only symbols, and
+      # `Struct.new("Name", …)` defines `Struct::Name`), a `&block` argument, and a duplicate field or a writer-like
+      # name (`a=`), which Ruby rejects at load time.
+      def builder_fields(call, builder)
+        return nil if call.block.is_a?(Prism::BlockArgumentNode)
+
+        arguments = call.arguments&.arguments || []
+        arguments = arguments[0...-1] if builder == :struct && keyword_init_only?(arguments.last)
+        return nil unless arguments.all?(Prism::SymbolNode)
+
+        names = arguments.map(&:unescaped)
+        return nil if names.uniq.size != names.size || names.any? { |name| name.end_with?("=") }
+
+        names.zip(arguments)
+      end
+
+      def keyword_init_only?(argument)
+        return false unless argument.is_a?(Prism::KeywordHashNode)
+
+        argument.elements.all? do |element|
+          element.is_a?(Prism::AssocNode) && element.key.is_a?(Prism::SymbolNode) &&
+            element.key.unescaped == "keyword_init"
+        end
       end
 
       # A bare `module_function` the walk cannot place in the body's statement list (under an `if`, say) leaves the
@@ -461,15 +524,17 @@ module Rigor
         end
       end
 
-      def add_site(node, data, ordinal: 0)
+      # A builder's field reads no leading contract comments, which belong to the constant: `contracts: :trailing`
+      # reads only a `#:` trailing it (rbs-inline's per-field form on its own line), and `false` reads none.
+      def add_site(node, data, ordinal: 0, contracts: true)
         location = node.location
-        anchor = @anchor.for_span(location.start_offset, location.end_offset, location.start_line,
-                                  location.end_line)
+        anchor = @anchor.for_span(location.start_offset, location.end_offset, location.start_line, location.end_line,
+                                  leading: contracts == true, trailing: contracts != false)
         key = "#{@path}:#{location.start_offset}-#{location.end_offset}:#{ordinal}"
         tail = { "ordinal" => ordinal, "span" => Lens.span(location),
                  "contract_span" => Lens.contract_span(anchor.contract_comments), "anchor" => anchor.token,
                  "contract" => nil }
-        @sites << Site.new(data: { "key" => key }.merge(data).merge(tail), node: node,
+        @sites << Site.new(data: { "key" => key, "builder" => nil }.merge(data).merge(tail), node: node,
                            contract_comments: anchor.contract_comments)
       end
 

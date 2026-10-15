@@ -1,0 +1,1 @@
+- **[cli]** `rigor lens` lists classes defined with `Foo = Data.define(...)` and `Foo = Struct.new(...)`: the class, an attribute per field, and the methods in the block, instead of an omission. ([#1927](https://github.com/rigortype/rigor/pull/1927))

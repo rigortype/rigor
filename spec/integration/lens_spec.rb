@@ -14,7 +14,7 @@ require "rigor/cli/check_command"
 RSpec.describe "rigor lens" do
   let(:fixture) { File.expand_path("fixtures/lens", __dir__) }
   let(:expected_path) { File.join(fixture, "expected.json") }
-  let(:targets) { ["lib/shop.rb", "lib/order.rb", "lib/util.rb", "lib/missing.rb", "README.md"] }
+  let(:targets) { ["lib/shop.rb", "lib/order.rb", "lib/util.rb", "lib/point.rb", "lib/missing.rb", "README.md"] }
 
   def lens(argv)
     out = StringIO.new

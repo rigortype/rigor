@@ -1,0 +1,5 @@
+class Point < Data
+  attr_reader x: Integer
+  attr_reader y: Integer
+  def norm: () -> Integer
+end

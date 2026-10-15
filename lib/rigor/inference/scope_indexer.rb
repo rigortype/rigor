@@ -7243,10 +7243,13 @@ module Rigor
 
       # An `attr_*` on a singleton class (`singleton_class.attr_accessor :conf`) rewrites only the names it spells, so
       # it makes those names' singleton envelopes opaque ({#record_singleton_class_names}) and leaves the rest of the
-      # singleton side readable. An `alias_method` or `define_method` there still taints the side: the own-definer
-      # read would otherwise answer the body Ruby replaced (`definer_resolution_witness_spec.rb`).
+      # singleton side readable. An `attr_*` with a name it does not spell as a literal (`attr_accessor(*KEYS)`, a
+      # block's variable), and an `alias_method` or `define_method` there, still taint the side: the own-definer read
+      # would otherwise answer the body Ruby replaced (`definer_resolution_witness_spec.rb`).
       def singleton_class_named_call?(node)
-        ATTR_MACROS.include?(node.name)
+        arguments = node.arguments&.arguments || []
+        ATTR_MACROS.include?(node.name) && !arguments.empty? &&
+          arguments.all? { |argument| literal_method_name(argument) }
       end
 
       def singleton_class_owner(node, object, qualified_prefix, current_class)

@@ -703,6 +703,24 @@ RSpec.describe "Typing calls through Ruby refinements (#1664)", type: :runner do
     )
   end
 
+  # An `attr_*` on `singleton_class` whose names are not literals may define any name. Ruby 4.0.5 prints `"    x    "`
+  # for both, so `center` is not reported on the refinement's `Symbol`.
+  it "answers Dynamic[top] past a singleton_class attr_* that spells no literal name" do
+    expect(rows(<<~RUBY)).to eq([["dump.type", 9, "dump_type: Dynamic[top]"], 
+["dump.type", 10, "dump_type: Dynamic[top]"]])
+      module TN
+        refine(Object) { def conf = :sym }
+      end
+      class Foo; %i[conf].each { |n| singleton_class.attr_accessor n }; end
+      class Bar; singleton_class.attr_accessor(*%i[conf]); end
+      Foo.conf = "x"
+      Bar.conf = "x"
+      using TN
+      Rigor.dump_type(Foo.conf)
+      Rigor.dump_type(Bar.conf)
+    RUBY
+  end
+
   # Each class rewrites its singleton methods in a way the walk cannot read: a `define_singleton_method` in the body,
   # a `def W2.x` outside it, `singleton_class.class_eval`, `singleton_class.send(:define_method, ...)`, a top-level
   # `define_singleton_method`, and a module prepended or included into the singleton class (directly or through

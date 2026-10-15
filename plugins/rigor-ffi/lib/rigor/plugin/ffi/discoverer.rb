@@ -11,10 +11,6 @@ module Rigor
       # carried no row at all and was served after any edit, an analysed file's included, until `--no-cache`.
       class Discoverer
         RUBY_GLOB = "**/*.rb"
-        # The top-level directory the walk never enters. Its files were always filtered out after the glob;
-        # skipping it here keeps an installed bundle out of the rows too, so a warm run does not re-glob it
-        # and a `bundle install` does not invalidate the catalog.
-        SKIPPED_TOP_LEVEL = "vendor"
 
         def self.discover(root:, io:)
           new(root: root, io: io).discover
@@ -74,24 +70,17 @@ module Rigor
         def ruby_files
           return [] unless @root && @io.directory?(@root.to_s)
 
-          walk_root.reject { |p| p.include?("/vendor/") || p.include?("/.git/") }
+          boundary_glob.reject { |p| p.include?("/vendor/") || p.include?("/.git/") }
         end
 
-        # `Dir.glob("<root>/**/*.rb")`, built one top-level entry at a time so `vendor/` is never globbed: one
-        # `:names` row over the root's entries, and one `:names` `**/*.rb` row per other top-level directory.
-        # The order is `Dir.glob`'s, which visits the sorted entries of a directory one by one, yielding an
-        # entry that matches `*.rb` and then descending into it; `**` does not descend through a symlink.
-        # Paths are spelled under `@root`, as `Dir.glob` spells them, so the filter above sees the same strings.
-        def walk_root
+        # One `:names` `**/*.rb` row over the root, `vendor/` included: a per-entry walk that skipped it recorded
+        # names only, so a top-level entry that changed kind under the same name went unseen. The boundary
+        # answers absolute paths; they are spelled back under `@root` as `Dir.glob` spells them, so the filter
+        # above sees the same strings it always did.
+        def boundary_glob
           root = @root.to_s
           prefix = "#{File.absolute_path(root)}/"
-          @io.glob(root, "*").flat_map do |entry|
-            name = entry.delete_prefix(prefix)
-            files = name.end_with?(".rb") ? [File.join(root, name)] : []
-            next files if name == SKIPPED_TOP_LEVEL || File.symlink?(entry) || !@io.directory?(entry)
-
-            files + @io.glob(entry, RUBY_GLOB).map { |path| File.join(root, path.delete_prefix(prefix)) }
-          end
+          @io.glob(root, RUBY_GLOB).map { |path| File.join(root, path.delete_prefix(prefix)) }
         end
 
         # The glob's rows record which files match; this read's row carries an edit.

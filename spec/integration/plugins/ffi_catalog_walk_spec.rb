@@ -8,10 +8,9 @@ FFI_CATALOG_WALK_PLUGIN_LIB = File.expand_path("../../../plugins/rigor-ffi/lib",
 $LOAD_PATH.unshift(FFI_CATALOG_WALK_PLUGIN_LIB) unless $LOAD_PATH.include?(FFI_CATALOG_WALK_PLUGIN_LIB)
 require "rigor-ffi"
 
-# Issue #1803 — rigor-ffi's catalog walk lists the project through its IoBoundary one top-level entry at a time,
-# so `vendor/` (whose files the walk always dropped) is never globbed: a warm run does not re-glob an installed
-# bundle, and a `bundle install` does not invalidate the catalog. The walk must still answer exactly what
-# `Dir.glob("<root>/**/*.rb")` minus the `/vendor/` and `/.git/` paths answered, in the same order.
+# Issue #1803 — rigor-ffi's catalog walk lists the project through its IoBoundary, as one recorded
+# `**/*.rb` glob over the root. It must still answer exactly what `Dir.glob("<root>/**/*.rb")` minus the
+# `/vendor/` and `/.git/` paths answered, in the same order.
 RSpec.describe "rigor-ffi catalog walk (#1803)" do
   let(:root) { File.realpath(Dir.mktmpdir("rigor-ffi-walk-")) }
   let(:boundary) do
@@ -50,12 +49,6 @@ RSpec.describe "rigor-ffi catalog walk (#1803)" do
     end
 
     it "is fresh while nothing changed" do
-      expect(boundary.cache_descriptor.fresh?).to be(true)
-    end
-
-    it "stays fresh when a file appears under vendor/" do
-      write("vendor/bundle/gems/y/lib/y.rb")
-
       expect(boundary.cache_descriptor.fresh?).to be(true)
     end
 

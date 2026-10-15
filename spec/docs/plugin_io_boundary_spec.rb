@@ -54,10 +54,6 @@ ALLOWED_PLUGIN_FILESYSTEM_CALLS = {
   # policy (the boundary refuses the read and has noted the refusal).
   "plugins/rigor-ffi/lib/rigor/plugin/ffi/target_detector.rb" =>
     [{ "Dir.glob" => 1, "File.file?" => 1, "File.read" => 2 }, "boundary-less branch and out-of-policy fallback"],
-  # `**` does not descend through a symlink, and neither does the catalog walk; the entry's name is in the
-  # walk's `:names` row over the project root.
-  "plugins/rigor-ffi/lib/rigor/plugin/ffi/discoverer.rb" =>
-    [{ "File.symlink?" => 1 }, "keeps the walk off a symlinked top-level directory, as `**` does"],
   # Each entry of a directory the boundary just listed (`#list_directory`), whose `:stat` row covers it.
   "plugins/rigor-actionpack/lib/rigor/plugin/actionpack/analyzer.rb" =>
     [{ "File.directory?" => 1 }, "classifies the entries of a boundary-listed directory"],

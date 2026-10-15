@@ -92,21 +92,31 @@ RSpec.describe "run-result caches over a plugin's own project inputs (#1803)" do
       expect(Rigor::Analysis::IncrementalSession).not_to have_received(:new)
     end
 
-    # The walk drops every `/vendor/` path, and never globs the top-level `vendor/`, so installing a gem there
-    # leaves both run-result caches serving. `vendor/` itself exists beforehand: a new top-level entry is a
-    # membership change of the project root, which the walk does record.
-    it "keeps serving both run-result caches when a file appears under an existing vendor/" do
-      FileUtils.mkdir_p("vendor/bundle")
-      prime
-      FileUtils.mkdir_p("vendor/bundle/gems/x/lib")
-      File.write("vendor/bundle/gems/x/lib/x.rb", "module L\n  attach_function :foo, [], :int\nend\n")
-      allow(Rigor::Analysis::IncrementalSession).to receive(:new).and_call_original
-      allow(Rigor::Analysis::Runner).to receive(:new).and_call_original
+    # A top-level entry that changes kind under the same name: the walk's glob row sees the `.rb` files the new
+    # directory holds. `paths:` is `lib`, so only the catalog sees those files.
+    context "with a top-level entry that becomes a directory" do
+      def make_directory(name)
+        FileUtils.rm_rf(name)
+        FileUtils.mkdir_p(name)
+        File.write("#{name}/a.rb", "module L\n  attach_function :foo, [], :int\nend\n")
+      end
 
-      expect(check("--incremental")[1]).to include("--incremental warm")
-      expect(Rigor::Analysis::IncrementalSession).not_to have_received(:new)
-      check
-      expect(Rigor::Analysis::Runner).not_to have_received(:new)
+      it "drops both run-result caches when a file becomes a directory" do
+        File.write("gen", "not ruby\n")
+        prime
+        make_directory("gen")
+
+        expect_both_caches_to_match_cold("b.rb call.undefined-method")
+      end
+
+      it "drops both run-result caches when a symlink becomes a directory" do
+        FileUtils.mkdir_p("elsewhere")
+        File.symlink("elsewhere", "tools")
+        prime
+        make_directory("tools")
+
+        expect_both_caches_to_match_cold("b.rb call.undefined-method")
+      end
     end
   end
 

@@ -185,6 +185,26 @@ RSpec.describe "rigor lens" do
     expect(returns[%w[singleton num]]).to include("state" => "typed", "type" => "1")
   end
 
+  # #1918 review: a named module_function's copy replaces an existing def self.x, so neither side is single-site.
+  it "reads both sides of a member a named module_function names as contested" do
+    File.write("lib/t.rb", <<~RUBY)
+      module T
+        NAMES = %i[a].freeze
+        def self.a = "s"
+        def a = 1
+        module_function(*NAMES)
+        def self.b = "s"
+        def b = 1
+        module_function :b
+      end
+    RUBY
+    _, out, = lens(["--format=json", "lib/t.rb"])
+    basis = JSON.parse(out)["members"].to_h { |member| [[member["scope"], member["name"]], member["basis"]] }
+
+    expect(basis).to eq(%w[instance a] => "contested", %w[singleton a] => "contested",
+                        %w[instance b] => "contested", %w[singleton b] => "contested")
+  end
+
   it "exits 64 for a configuration file that does not exist" do
     status, out, = lens(["--config=nope.yml", "lib/order.rb"])
 

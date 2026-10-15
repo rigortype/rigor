@@ -173,7 +173,7 @@ module Rigor
       # so their visibility reads unknown, and the omission makes each named member contested.
       def named_module_function(node, nesting, singleton)
         owner = nesting.last
-        scope = scope_name(singleton)
+        scope_name(singleton)
         node.arguments.arguments.each do |argument|
           if argument.is_a?(Prism::DefNode)
             omit("module_function", argument.name.to_s, argument, owner: owner, singleton: singleton)
@@ -181,14 +181,17 @@ module Rigor
             next
           end
 
+          # The copy replaces any `def self.x` already there, so the singleton side is contested as well.
           names = argument_names(argument)
           if names.nil?
-            unknown_visibility(owner, scope)
-            omit("module_function", nil, argument, owner: owner, singleton: singleton, any_member: true)
+            [false, true].each do |side|
+              unknown_visibility(owner, scope_name(side))
+              omit("module_function", nil, argument, owner: owner, singleton: side, any_member: true)
+            end
           else
-            names.each do |name|
-              name_visibility(owner, scope, name, nil)
-              omit("module_function", name, node, owner: owner, singleton: singleton)
+            names.product([false, true]).each do |name, side|
+              name_visibility(owner, scope_name(side), name, nil)
+              omit("module_function", name, node, owner: owner, singleton: side)
             end
           end
         end
@@ -418,7 +421,8 @@ module Rigor
         node.compact_child_nodes.any? { |child| instance_state?(child) }
       end
 
-      # Whether a spelled type mentions the owner, by its qualified name or its last segment.
+      # Whether a spelled type mentions the owner, by its qualified name or its last segment. A heuristic, not a proof:
+      # a self-dependent body whose instance-scope type folds to something that names no owner slips through.
       def names_owner?(slot, owner)
         type = slot["type"]
         return false unless type

@@ -142,8 +142,9 @@ One entry per requested target, in request order.
   `module_function` that follows such a toggle, any `module_function` in a class, and every named form
   (`module_function :x`, `module_function %i[x]`, `module_function def x`, a non-literal argument), whose
   reading differs between Ruby and `check` (a `def` nested in the body, a reopened module, a redefinition after
-  the call). The instance members a named form names read `visibility: null`, and the omission counts as a
-  project definition, so each such member is `contested`; `refine` blocks with everything inside them; and
+  the call). The members a named form names, on both sides (its copy replaces a `def self.x` already
+  there), read `visibility: null`, and the omission counts as a project definition, so each such member is
+  `contested`; `refine` blocks with everything inside them; and
   the members a plugin synthesizes, which revision 1 does not list at all (`capabilities` has no `plugin`).
 
 A declaration is never attached to a neighbouring site as a fallback.

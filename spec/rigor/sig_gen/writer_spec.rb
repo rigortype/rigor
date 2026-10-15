@@ -885,4 +885,166 @@ RSpec.describe Rigor::SigGen::Writer do
       expect { build_environment(parent, nested) }.not_to raise_error
     end
   end
+
+  # Issue #1488 — `--overwrite` inserted a second declaration of a member the signature tree already declared,
+  # and `RBS::DuplicatedMethodDefinitionError` then quarantined the class: a `def self?.f` read as a different
+  # member from the `:instance` candidate of a `module_function` method, and a member declared in a sibling
+  # file was inserted into the class's first-found file. ADR-122 WD2.
+  describe "members the signature tree already declares (#1488)" do
+    def sig_file(rel, content)
+      full = File.join(tmpdir, rel)
+      FileUtils.mkdir_p(File.dirname(full))
+      File.write(full, content)
+      full
+    end
+
+    def layout_writer(overwrite: true, dry_run: false)
+      index = Rigor::SigGen::LayoutIndex.new(signature_paths: [File.join(tmpdir, "sig")], project_root: tmpdir)
+      mapper = Rigor::SigGen::PathMapper.new(configuration: configuration, project_root: tmpdir, layout_index: index)
+      described_class.new(path_mapper: mapper, overwrite: overwrite, dry_run: dry_run)
+    end
+
+    def member_candidate(method_name:, rbs:, class_name: "C", kind: :instance,
+                         classification: Rigor::SigGen::Classification::TIGHTER_RETURN)
+      Rigor::SigGen::MethodCandidate.new(
+        path: "lib/c.rb", class_name: class_name, method_name: method_name, kind: kind,
+        classification: classification, rbs: rbs
+      )
+    end
+
+    # The definition build is where a duplicated member raises, so this is the check `rigor check` quarantines on.
+    def build_definitions(class_name)
+      loader = RBS::EnvironmentLoader.new
+      loader.add(path: Pathname(File.join(tmpdir, "sig")))
+      env = RBS::Environment.from_loader(loader).resolve_type_names
+      builder = RBS::DefinitionBuilder.new(env: env)
+      type_name = RBS::TypeName.parse("::#{class_name}")
+      [builder.build_instance(type_name), builder.build_singleton(type_name)]
+    end
+
+    describe "a `def self?.` member" do
+      it "updates a declared `def self?.f` in place instead of inserting a second one" do
+        target = sig_file("sig/m.rbs", "module M\n  def self?.f: () -> untyped\nend\n")
+        f = member_candidate(class_name: "M", method_name: :f, rbs: "def self?.f: () -> Integer")
+
+        result = layout_writer.write_all([f]).first
+
+        expect(File.read(target)).to eq("module M\n  def self?.f: () -> Integer\nend\n")
+        expect(result.replaced.map(&:method_name)).to eq([:f])
+        expect { build_definitions("M") }.not_to raise_error
+      end
+
+      it "leaves a declared `def self?.f` alone without --overwrite" do
+        original = "module M\n  def self?.f: () -> untyped\nend\n"
+        target = sig_file("sig/m.rbs", original)
+        f = member_candidate(class_name: "M", method_name: :f, rbs: "def self?.f: () -> Integer")
+
+        result = layout_writer(overwrite: false).write_all([f]).first
+
+        expect(File.read(target)).to eq(original)
+        expect(result.skipped.map(&:last)).to eq([:user_authored])
+      end
+
+      it "does not add a plain `def f` beside a declared `def self?.f`" do
+        original = "module M\n  def self?.f: () -> untyped\nend\n"
+        target = sig_file("sig/m.rbs", original)
+        f = member_candidate(class_name: "M", method_name: :f, rbs: "def f: () -> Integer")
+
+        result = layout_writer.write_all([f]).first
+
+        expect(File.read(target)).to eq(original)
+        expect(result.skipped.map(&:last)).to eq([:user_authored])
+      end
+
+      it "keeps a split `def self.f` / `def f` pair instead of turning one half into `def self?.f`" do
+        original = "module M\n  def self.f: () -> untyped\n  def f: () -> untyped\nend\n"
+        target = sig_file("sig/m.rbs", original)
+        f = member_candidate(class_name: "M", method_name: :f, rbs: "def self?.f: () -> Integer")
+
+        result = layout_writer.write_all([f]).first
+
+        expect(File.read(target)).to eq(original)
+        expect(result.skipped.map(&:last)).to eq([:user_authored])
+        expect { build_definitions("M") }.not_to raise_error
+      end
+    end
+
+    describe "a member declared in another file of a reopened class" do
+      let(:other_rbs) { "class C\n  def g: () -> untyped\n  def self.s: () -> untyped\n  attr_reader name: untyped\nend\n" }
+
+      it "updates the instance member in the file that declares it" do
+        primary = sig_file("sig/c.rbs", "class C\nend\n")
+        other = sig_file("sig/other.rbs", other_rbs)
+        g = member_candidate(method_name: :g, rbs: "def g: () -> Integer")
+
+        result = layout_writer.write_all([g]).first
+
+        expect(result.target_path).to eq(Pathname(other))
+        expect(File.read(primary)).to eq("class C\nend\n")
+        expect(File.read(other)).to include("def g: () -> Integer")
+        expect { build_definitions("C") }.not_to raise_error
+      end
+
+      it "updates the singleton member in the file that declares it" do
+        primary = sig_file("sig/c.rbs", "class C\nend\n")
+        other = sig_file("sig/other.rbs", other_rbs)
+        s = member_candidate(method_name: :s, kind: :singleton, rbs: "def self.s: () -> Integer")
+
+        layout_writer.write_all([s])
+
+        expect(File.read(primary)).to eq("class C\nend\n")
+        expect(File.read(other)).to include("def self.s: () -> Integer")
+      end
+
+      it "does not insert a `def` for a reader an `attr_reader` in the other file declares" do
+        primary = sig_file("sig/c.rbs", "class C\nend\n")
+        sig_file("sig/other.rbs", other_rbs)
+        name = member_candidate(method_name: :name, rbs: "def name: () -> String",
+                                classification: Rigor::SigGen::Classification::NEW_METHOD)
+
+        result = layout_writer.write_all([name]).first
+
+        expect(File.read(primary)).to eq("class C\nend\n")
+        expect(result.skipped.map(&:last)).to eq([:user_authored])
+      end
+
+      it "still inserts a new member into the class's file beside one routed to the other file" do
+        primary = sig_file("sig/c.rbs", "class C\nend\n")
+        other = sig_file("sig/other.rbs", other_rbs)
+        g = member_candidate(method_name: :g, rbs: "def g: () -> Integer")
+        h = member_candidate(method_name: :h, rbs: "def h: () -> String",
+                             classification: Rigor::SigGen::Classification::NEW_METHOD)
+
+        layout_writer.write_all([g, h])
+
+        expect(File.read(primary)).to eq("class C\n  def h: () -> String\nend\n")
+        expect(File.read(other)).not_to include("def h")
+        expect { build_definitions("C") }.not_to raise_error
+      end
+
+      it "reports the same target and replacement in a dry run, without writing" do
+        primary = sig_file("sig/c.rbs", "class C\nend\n")
+        other = sig_file("sig/other.rbs", other_rbs)
+        g = member_candidate(method_name: :g, rbs: "def g: () -> Integer")
+
+        result = layout_writer(dry_run: true).write_all([g]).first
+
+        expect(result.target_path).to eq(Pathname(other))
+        expect(result.replaced.map(&:method_name)).to eq([:g])
+        expect(File.read(primary)).to eq("class C\nend\n")
+        expect(File.read(other)).to eq(other_rbs)
+      end
+
+      it "inserts a member another file declares only on a different class" do
+        primary = sig_file("sig/c.rbs", "class C\nend\n")
+        sig_file("sig/d.rbs", "class D\n  def g: () -> untyped\nend\n")
+        g = member_candidate(method_name: :g, rbs: "def g: () -> Integer",
+                             classification: Rigor::SigGen::Classification::NEW_METHOD)
+
+        layout_writer.write_all([g])
+
+        expect(File.read(primary)).to eq("class C\n  def g: () -> Integer\nend\n")
+      end
+    end
+  end
 end

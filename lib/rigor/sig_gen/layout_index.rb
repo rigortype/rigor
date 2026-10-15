@@ -20,7 +20,26 @@ module Rigor
     # First-found wins on duplicate declarations across files; RBS itself allows the same class to be declared
     # in multiple files for additive member contributions, but the writer only needs one canonical target per
     # class.
+    #
+    # ADR-122 WD2 adds the member level: `(class_name, method_name, kind) → sig_file_path`, so a member the project
+    # already declares in one file is updated there rather than inserted a second time into the class's
+    # first-found file (#1488).
     class LayoutIndex
+      # The `[method_name, kind]` keys a member declaration answers for, `kind` being `:instance` or
+      # `:singleton`. A `def self?.f` answers for both kinds; an `attr_accessor` answers for its reader and its
+      # writer. Shared with {Writer}, which asks the same question of the target file it is merging into.
+      def self.member_keys(member)
+        case member
+        when RBS::AST::Members::MethodDefinition
+          kinds = member.kind == :singleton_instance ? %i[instance singleton] : [member.kind]
+          kinds.map { |kind| [member.name, kind] }
+        when RBS::AST::Members::AttrReader then [[member.name, member.kind]]
+        when RBS::AST::Members::AttrWriter then [[:"#{member.name}=", member.kind]]
+        when RBS::AST::Members::AttrAccessor then [[member.name, member.kind], [:"#{member.name}=", member.kind]]
+        else []
+        end
+      end
+
       # @param signature_paths —
       #   the `.rigor.yml`-configured signature directories.
       #   When `nil` or empty, falls back to `<project_root>/sig`
@@ -29,6 +48,7 @@ module Rigor
       def initialize(signature_paths:, project_root: Dir.pwd)
         @signature_paths = resolve_paths(signature_paths, project_root)
         @index = nil
+        @members = nil
       end
 
       # @param class_name — fully-qualified Ruby class
@@ -38,6 +58,13 @@ module Rigor
       #   existing declaration is found.
       def file_for(class_name)
         index[class_name]
+      end
+
+      # @return absolute path of the first sig file (in the same order as {#file_for}) that declares
+      #   `method_name` of `kind` on `class_name`, or `nil` when no file does.
+      def member_file_for(class_name, method_name, kind)
+        index
+        @members[[class_name, method_name, kind]]
       end
 
       def empty?
@@ -60,6 +87,7 @@ module Rigor
 
       def build_index
         accumulator = {}
+        @members = {}
         Array(@signature_paths).each do |dir|
           base = Pathname(dir)
           next unless base.directory?
@@ -68,6 +96,7 @@ module Rigor
             index_file(Pathname(rbs_file), accumulator)
           end
         end
+        @members.freeze
         accumulator.freeze
       end
 
@@ -97,6 +126,9 @@ module Rigor
         local_name = decl.name.to_s.sub(/\A::/, "")
         full = prefix.empty? ? local_name : "#{prefix.join('::')}::#{local_name}"
         accumulator[full] ||= rbs_path
+        decl.members.each do |member|
+          self.class.member_keys(member).each { |name, kind| @members[[full, name, kind]] ||= rbs_path }
+        end
 
         record_decls(decl.members, prefix + [local_name], rbs_path, accumulator)
       end

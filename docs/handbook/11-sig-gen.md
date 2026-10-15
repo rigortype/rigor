@@ -751,6 +751,14 @@ by side without coordination.
   every other byte of the file verbatim.
 - **Will** append a new `class Foo … end` block when the
   target file does not declare the class yet.
+- **Will** treat a method as already declared when any file
+  under the signature tree declares it on the same class —
+  a `def`, an `attr_*`, or a `def self?.` (which counts for
+  both the instance and the singleton method) — and update
+  or skip it in that file rather than add a second
+  declaration to the class's first file. A `def self?.`
+  proposal replaces only a `def self?.` member: a split
+  `def self.f` / `def f` pair is left as written.
 - **Will not** touch files outside the configured signature
   tree.
 - **Will not** replace an existing method declaration

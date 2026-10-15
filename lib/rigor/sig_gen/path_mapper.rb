@@ -37,13 +37,22 @@ module Rigor
       #   returned instead of the 1:1 mirror.
       # @return absolute path of the target `.rbs`
       #   file for the candidate.
-      def target_for(source_path, class_name: nil)
-        existing = existing_target_for(class_name)
+      #
+      # A member the signature tree already declares (`method_name` / `kind`, ADR-122 WD2) is routed to the file
+      # that declares it, even when another file declares its class first (#1488).
+      def target_for(source_path, class_name: nil, method_name: nil, kind: nil)
+        existing = existing_member_target_for(class_name, method_name, kind) || existing_target_for(class_name)
         return existing if existing
 
         rel_to_root = source_relative_to_root(source_path)
         stripped = strip_source_root(rel_to_root)
         sig_root_dir / "#{stripped.sub_ext('')}.rbs"
+      end
+
+      def existing_member_target_for(class_name, method_name, kind)
+        return nil if class_name.nil? || method_name.nil? || @layout_index.nil?
+
+        @layout_index.member_file_for(class_name, method_name, kind)
       end
 
       def existing_target_for(class_name)

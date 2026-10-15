@@ -4,6 +4,7 @@ require "fileutils"
 require "rbs"
 
 require_relative "classification"
+require_relative "layout_index"
 require_relative "superclass_spelling"
 require_relative "write_result"
 
@@ -62,8 +63,10 @@ module Rigor
 
         @global_namespace_kinds = build_namespace_kinds(candidates)
         @global_superclasses = build_superclasses(candidates)
-        emittable.group_by { |c| @path_mapper.target_for(c.path, class_name: c.class_name) }
-                 .map { |target, group| write_target(target, group) }
+        grouped = emittable.group_by do |c|
+          @path_mapper.target_for(c.path, class_name: c.class_name, method_name: c.method_name, kind: c.kind)
+        end
+        grouped.map { |target, group| write_target(target, group) }
       end
 
       # @param candidates — only
@@ -617,27 +620,11 @@ module Rigor
       end
 
       # Returns a list of `[method_name (Symbol), kind (Symbol)]` pairs for every method-like member in the
-      # declaration. ADR-14 slice 4 recognises `MethodDefinition`'s `:instance` / `:singleton` kind plus the
-      # three `attr_*` declaration kinds so a source-side `attr_reader :name` and an RBS-side
-      # `attr_reader name: T` are treated as the same member (i.e. user-authored).
+      # declaration ({LayoutIndex.member_keys}). ADR-14 slice 4 recognises the three `attr_*` declaration kinds
+      # so a source-side `attr_reader :name` and an RBS-side `attr_reader name: T` are treated as the same member
+      # (i.e. user-authored); a `def self?.f` counts as both an instance and a singleton `f` (#1488).
       def collect_member_pairs(decl)
-        pairs = []
-        decl.members.each { |m| collect_pairs_for_member(m, pairs) }
-        pairs
-      end
-
-      def collect_pairs_for_member(member, pairs)
-        case member
-        when RBS::AST::Members::MethodDefinition
-          pairs << [member.name, member.kind]
-        when RBS::AST::Members::AttrReader
-          pairs << [member.name, :instance]
-        when RBS::AST::Members::AttrWriter
-          pairs << [:"#{member.name}=", :instance]
-        when RBS::AST::Members::AttrAccessor
-          pairs << [member.name, :instance]
-          pairs << [:"#{member.name}=", :instance]
-        end
+        decl.members.flat_map { |m| LayoutIndex.member_keys(m) }
       end
 
       def partition_against_existing(methods, existing_pairs)
@@ -710,7 +697,7 @@ module Rigor
       # part of the contract. A candidate that keeps `void` is still eligible, which is what case 2 is for —
       # the `initialize` stub is always spelled `-> void`.
       def replaces_declared_void?(candidate, decl)
-        member = find_method_member(decl, candidate.method_name, candidate.kind)
+        member = find_method_member(decl, candidate)
         return false if member.nil?
 
         declared_void = member.overloads.any? do |overload|
@@ -722,7 +709,7 @@ module Rigor
       # Compares the existing member's source-side RBS text against the candidate's proposed RBS text
       # ({.fewer_untyped?}).
       def tightens_untyped?(candidate, decl, source)
-        member = find_method_member(decl, candidate.method_name, candidate.kind)
+        member = find_method_member(decl, candidate)
         return false if member.nil?
 
         self.class.fewer_untyped?(candidate.rbs, source[member.location.start_pos...member.location.end_pos])
@@ -737,24 +724,28 @@ module Rigor
       # the same method (ADR-112 WD4), which it replaces in the inline attribute's own spelling; an
       # `overloading?` member (`| ...`) is never its target.
       def replaceable_member(decl, candidate)
-        member = find_method_member(decl, candidate.method_name, candidate.kind)
+        member = find_method_member(decl, candidate)
         return member unless candidate.classification == Classification::INLINE_OVERWRITE
 
         member = nil if member.respond_to?(:overloading?) && member.overloading?
-        member || find_attr_member(decl, candidate.method_name, candidate.kind)
+        member || find_attr_member(decl, candidate.method_name, candidate.rbs_kind)
       end
 
       def find_attr_member(decl, method_name, kind)
         decl.members.find do |m|
-          pairs = []
-          collect_pairs_for_member(m, pairs) unless m.is_a?(RBS::AST::Members::MethodDefinition)
-          m.respond_to?(:kind) && m.kind == kind && pairs.any? { |name, _| name == method_name }
+          next false if m.is_a?(RBS::AST::Members::MethodDefinition)
+
+          LayoutIndex.member_keys(m).include?([method_name, kind])
         end
       end
 
-      def find_method_member(decl, method_name, kind)
+      # Matches on the candidate's {MethodCandidate#rbs_kind}, so a `def self?.f` proposal finds only a
+      # `def self?.f` member: a `def f` beside a `def self.f`, or a `def self?.f` under a plain `def f`
+      # proposal, is left as the user wrote it.
+      def find_method_member(decl, candidate)
         decl.members.find do |m|
-          m.is_a?(RBS::AST::Members::MethodDefinition) && m.name == method_name && m.kind == kind
+          m.is_a?(RBS::AST::Members::MethodDefinition) && m.name == candidate.method_name &&
+            m.kind == candidate.rbs_kind
         end
       end
 

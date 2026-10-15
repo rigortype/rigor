@@ -97,4 +97,43 @@ RSpec.describe Rigor::SigGen::LayoutIndex do
     idx = index(File.join(tmpdir, "sig"))
     expect(idx.empty?).to be(false)
   end
+
+  describe "#member_file_for (ADR-122 WD2, #1488)" do
+    it "maps a member to the file that declares it, not to the class's first-found file" do
+      write_sig("sig/a.rbs", "class Foo\nend\n")
+      other = write_sig("sig/b.rbs", "class Foo\n  def g: () -> Integer\n  def self.s: () -> Integer\nend\n")
+      idx = index(File.join(tmpdir, "sig"))
+
+      expect(idx.member_file_for("Foo", :g, :instance)).to eq(Pathname(other))
+      expect(idx.member_file_for("Foo", :s, :singleton)).to eq(Pathname(other))
+      expect(idx.member_file_for("Foo", :s, :instance)).to be_nil
+    end
+
+    it "indexes a `def self?.` member under both kinds" do
+      path = write_sig("sig/m.rbs", "module M\n  def self?.f: () -> Integer\nend\n")
+      idx = index(File.join(tmpdir, "sig"))
+
+      expect(idx.member_file_for("M", :f, :instance)).to eq(Pathname(path))
+      expect(idx.member_file_for("M", :f, :singleton)).to eq(Pathname(path))
+    end
+
+    it "indexes an `attr_accessor` under its reader and writer, and a singleton attribute as singleton" do
+      path = write_sig("sig/foo.rbs", "class Foo\n  attr_accessor name: String\n  attr_reader self.count: Integer\nend\n")
+      idx = index(File.join(tmpdir, "sig"))
+
+      expect(idx.member_file_for("Foo", :name, :instance)).to eq(Pathname(path))
+      expect(idx.member_file_for("Foo", :name=, :instance)).to eq(Pathname(path))
+      expect(idx.member_file_for("Foo", :count, :singleton)).to eq(Pathname(path))
+      expect(idx.member_file_for("Foo", :count, :instance)).to be_nil
+    end
+
+    it "keys members by their fully-qualified class" do
+      write_sig("sig/d.rbs", "module Outer\n  class D\n    def g: () -> Integer\n  end\nend\n")
+      idx = index(File.join(tmpdir, "sig"))
+
+      expect(idx.member_file_for("Outer::D", :g, :instance)).not_to be_nil
+      expect(idx.member_file_for("D", :g, :instance)).to be_nil
+      expect(idx.member_file_for("C", :g, :instance)).to be_nil
+    end
+  end
 end

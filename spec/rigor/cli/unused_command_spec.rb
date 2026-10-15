@@ -304,6 +304,22 @@ RSpec.describe Rigor::CLI::UnusedCommand do
       end
     end
 
+    # Round 6 of #1888: two reference-only spellings of one file keep both roles.
+    it "keeps a production reference when a test-tree symlink points at its file" do
+      Dir.mktmpdir do |dir|
+        write_file(dir, ".rigor.yml", "paths:\n  - lib\n")
+        write_file(dir, "lib/widget.rb", "class Widget\nend\n")
+        write_file(dir, "db/seeds.rb", "Widget.new\n")
+        FileUtils.mkdir_p(File.join(dir, "spec/support"))
+        File.symlink(File.join(dir, "db/seeds.rb"), File.join(dir, "spec/support/seeds.rb"))
+        backdate(dir)
+
+        _, report, = run_in(dir)
+
+        expect(rows(report)).to eq("declared" => 1, "candidates" => [], "test_only" => [])
+      end
+    end
+
     it "scans each file once when the project is reached through a symlink" do
       Dir.mktmpdir do |dir|
         project = File.join(dir, "proj")

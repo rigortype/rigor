@@ -155,18 +155,23 @@ module Rigor
       #
       # A file is one file however it is spelled (#1760): the analysed paths keep the spelling they were
       # given, which is what the report prints, and a wider-corpus file whose realpath is an analysed one is
-      # not scanned a second time as its own shadow.
+      # not scanned a second time as its own shadow. Two wider-corpus spellings of one file are both scanned,
+      # each with its own role: a `spec/support/seeds.rb` symlink to `db/seeds.rb` keeps the production
+      # reading of `db/seeds.rb`.
       def scan(paths, configuration, cache)
         declaration_files = Analysis::PathExpansion.ruby_files(paths, configuration.exclude_patterns,
                                                                base: configuration.exclude_base)
                                                    .to_h { |file| [canonical(file), file] }
-        files = reference_files(paths, configuration).to_h { |file| [canonical(file), file] }
-                                                     .merge(declaration_files)
+        references_only = reference_files(paths, configuration).filter_map do |file|
+          real = canonical(file)
+          [real, file] unless declaration_files.key?(real)
+        end
+        files = declaration_files.to_a + references_only
         declarations = []
         shadows = []
         references = []
         dynamic_uses = []
-        files.sort.each do |real, file|
+        files.sort_by { |real, file| [real, file] }.each do |real, file|
           result = cache.serve(:scan, file) { read_and_scan(file, real, configuration) }
           next if result.nil?
 

@@ -1239,10 +1239,11 @@ RSpec.describe "Rigor type construction (integration)" do
     end
 
     # Issue #1494 — `=~` does not refine a Symbol or untyped subject to the String an anchored pattern names, so a
-    # Symbol method called on it past the guard is not flagged.
-    it "reports nothing on a Symbol method called past a `=~` guard" do
+    # Symbol method called on it past the guard is not flagged; and a String subclass, a union with an `Integer`
+    # member and a safe-navigation `=~` keep the match edge, so a copy of `$1` read past the guard is not either.
+    it "reports nothing on a read past a `=~` guard" do
       reads = marked_lines(harness, "# MATCH-1494")
-      expect(reads.size).to eq(2)
+      expect(reads.size).to eq(6)
       expect(harness.diagnostics.select { |d| reads.include?(d.line) }).to be_empty
     end
   end

@@ -12,6 +12,7 @@ require_relative "../builtins/regex_refinement"
 require_relative "guard_rebinding"
 require_relative "key_presence_guard"
 require_relative "last_line"
+require_relative "project_method_ownership"
 require_relative "operand_effects"
 require_relative "optimistic_origin"
 require_relative "project_method_ownership"
@@ -1656,28 +1657,57 @@ module Rigor
           [truthy, falsey]
         end
 
-        # Which edges of `recv =~ pattern` the receiver lets {#gated_regex_match_edges} narrow; `Kernel#!~` dispatches
-        # `=~` on the receiver too:
+        # Which edges of `recv =~ pattern` / `recv !~ pattern` the receiver lets {#gated_regex_match_edges} narrow:
+        # `:both`, `:match` (the match edge only) or nil. `Kernel#!~` dispatches `=~` on the receiver:
         #
         # - A Regexp receiver (the pattern on the left) runs `Regexp#=~`, which sets `$~` on both outcomes, a `nil`
         #   argument included: `:both`.
-        # - `String#=~` and `Symbol#=~` do the same: `:both` when every member of the receiver's type is a String or a
-        #   Symbol.
+        # - `String#=~` and `Symbol#=~` do the same: `:both` when every member of the receiver's type is a String
+        #   (a project subclass of String included) or a Symbol.
         # - `NilClass#=~` answers nil and leaves `$~` alone, so a nil receiver reaches the no-match edge with the
         #   previous match still bound; it never reaches the match edge. A `Dynamic` receiver may be nil at run time
-        #   whatever its static facet says: `:match` when every member is a String, a Symbol, nil, or a `Dynamic`
-        #   that is untyped or whose facet holds only those.
-        # - Any other receiver may define `=~` in Ruby, which binds `$~` in its own frame, not the caller's: nil.
+        #   whatever its static facet says. So does a safe-navigation call, which answers nil without matching on a
+        #   nil receiver.
         #
-        # A safe-navigation `recv&.=~(pattern)` answers nil without matching on a nil receiver, so it declines too.
+        # The two operators part over a receiver that is none of those ({#match_operator_edges},
+        # {#not_match_operator_edges}).
         def match_receiver_edges(node, scope)
-          return nil if node.receiver.nil? || node.safe_navigation?
-          return :both if regex_operand_pattern(node.receiver, scope).is_a?(RegexMatchPattern)
+          return nil if node.receiver.nil?
 
-          kinds = match_member_kinds(scope.type_of(node.receiver), scope)
-          return :both if kinds.all? { |kind| %i[string symbol].include?(kind) }
+          edges =
+            if regex_operand_pattern(node.receiver, scope).is_a?(RegexMatchPattern)
+              :both
+            else
+              kinds = match_member_kinds(scope.type_of(node.receiver), scope)
+              node.name == :=~ ? match_operator_edges(kinds) : not_match_operator_edges(kinds)
+            end
+          return edges unless node.safe_navigation?
 
-          :match if kinds.all? { |kind| %i[string symbol nil dynamic].include?(kind) }
+          :match if edges && node.name == :=~
+        end
+
+        STRING_MATCH_KINDS = %i[string string_subclass symbol].freeze
+        private_constant :STRING_MATCH_KINDS
+
+        # `recv =~ pattern`'s match edge is the truthy one. Only a member known to define its own `=~` in the
+        # project keeps it out (#1494): that method binds `$~` in its own frame, not the caller's. Any other member
+        # either matches in the caller's frame, answers nil (`NilClass`), or has no `=~` at all (`Integer` since
+        # Ruby 3.2 drops `Object#=~`) and so never reaches the edge; a receiver the analyzer cannot classify keeps the
+        # edge, as every `=~` did before #1494.
+        def match_operator_edges(kinds)
+          return nil if kinds.include?(:custom)
+          return :both if kinds.all? { |kind| STRING_MATCH_KINDS.include?(kind) }
+
+          :match
+        end
+
+        # `recv !~ pattern`'s match edge is the falsey one, which a receiver whose `=~` is not the caller's match
+        # also reaches, so it is kept only when every member is a String, a Symbol, nil, or a `Dynamic` that is
+        # untyped or whose facet holds only those (#1379).
+        def not_match_operator_edges(kinds)
+          return :both if kinds.all? { |kind| STRING_MATCH_KINDS.include?(kind) }
+
+          :match if kinds.all? { |kind| (STRING_MATCH_KINDS + %i[nil dynamic]).include?(kind) }
         end
 
         # Whether the local operand {#apply_whole_receiver_refinement} would narrow holds only Strings and nil, which
@@ -1696,19 +1726,22 @@ module Rigor
           (type.is_a?(Type::Union) ? type.members : [type]).map { |member| match_member_kind(member, scope) }
         end
 
-        # `:string` or `:symbol` for a member {.narrow_not_class} proves a String or a Symbol (a value or refinement of
-        # either, or a class the environment orders below it; a project subclass it cannot order reads as neither),
-        # `:nil`, `:dynamic` for a `Dynamic` whose facet is untyped or holds only Strings, Symbols and nil, or nil for
-        # anything else.
+        # `:custom` for a member whose class the project gives a `=~` of its own (in its ancestry, a reopened
+        # `String` included); `:string` or `:symbol` for a member {.narrow_not_class} proves a String or a Symbol (a
+        # value or refinement of either, or a class the environment orders below it); `:string_subclass` for a
+        # project class whose superclass chain reaches `String`, which the environment cannot order; `:nil`;
+        # `:dynamic` for a `Dynamic` whose facet is untyped or holds only Strings, Symbols and nil; or nil for anything
+        # else.
         def match_member_kind(member, scope)
           return match_dynamic_kind(member, scope) if member.is_a?(Type::Dynamic)
           return :nil if narrow_nil(member) == member && !member.is_a?(Type::Bot)
+          return :custom if custom_match_operator?(member, scope)
 
           environment = scope.environment
           { "String" => :string, "Symbol" => :symbol }.each do |class_name, kind|
             return kind if narrow_not_class(member, class_name, environment: environment, scope: scope).is_a?(Type::Bot)
           end
-          nil
+          :string_subclass if project_string_subclass?(member, scope)
         end
 
         def match_dynamic_kind(member, scope)
@@ -1716,7 +1749,21 @@ module Rigor
           return :dynamic if facet.is_a?(Type::Top)
 
           facet_kinds = match_member_kinds(facet, scope)
-          :dynamic if facet_kinds.all? { |kind| %i[string symbol nil].include?(kind) }
+          :dynamic if facet_kinds.all? { |kind| (STRING_MATCH_KINDS + [:nil]).include?(kind) }
+        end
+
+        def custom_match_operator?(member, scope)
+          targets = ProjectMethodOwnership.targets(member)
+          return false if targets.nil?
+
+          targets.any? { |class_name, kind| ProjectMethodOwnership.defines?(class_name, :=~, kind, scope) }
+        end
+
+        def project_string_subclass?(member, scope)
+          return false unless member.is_a?(Type::Nominal) && scope.known_user_class?(member.class_name)
+
+          scope.external_ancestor_name_candidates(member.class_name, mixins: false)
+               .flatten.any? { |name| name.to_s.delete_prefix("::") == "String" }
         end
 
         # `str.match?(/\A\d+\z/)` — `String#match?` is a pure boolean predicate whose truthy edge

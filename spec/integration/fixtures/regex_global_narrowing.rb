@@ -2170,11 +2170,19 @@ def not_match_rebound(line, u)
   key.upcase # GENUINE-NIL
 end
 # Issue #1494 — `=~` gates its edges on the subject as `!~` does. A Symbol subject is not refined to the String an
-# anchored pattern names, nor is an untyped one, which may be a Symbol (Ruby: a Proc for `match_symbol_subject("12")`
-# and `match_untyped_subject(:"12")`).
+# anchored pattern names, nor is an untyped one, which may be a Symbol (Ruby: a Proc for `match_symbol_subject("12")`,
+# `match_symbol_argument("12")` and `match_untyped_subject(:"12")`).
 def match_symbol_subject(raw)
   name = String(raw).to_sym
   return unless name =~ /\A\d+\z/
+
+  assert_type("Symbol", name)
+  name.to_proc # MATCH-1494
+end
+
+def match_symbol_argument(raw)
+  name = String(raw).to_sym
+  return unless /\A\d+\z/ =~ name
 
   assert_type("Symbol", name)
   name.to_proc # MATCH-1494
@@ -2265,6 +2273,74 @@ def match_custom_receiver
   else
     assert_type("String?", $1)
   end
+end
+
+# A project subclass of String matches in the caller's frame as String does, so both edges hold, though the
+# refinement, which names a String, leaves it out; a union member with no `=~` (`Integer`, since Ruby 3.2 dropped
+# `Object#=~`) never reaches the match edge (Ruby: "A" for `match_string_subclass("a")` and for
+# `MatchUnionHolder.new.run` when `@v` is "a" and nil in the `else` arm for `match_string_subclass("b")`).
+class MatchSubStr < String
+end
+
+def match_string_subclass(raw)
+  s = MatchSubStr.new(raw)
+  if s =~ /(a)/
+    key = $1
+    key.upcase # MATCH-1494
+  else
+    assert_type("nil", $1)
+  end
+end
+
+def match_string_subclass_refinement(raw)
+  s = MatchSubStr.new(raw)
+  return unless s =~ /\A\d+\z/
+
+  assert_type("MatchSubStr", s)
+end
+
+class MatchUnionHolder
+  def run
+    @v = rand(2).zero? ? "a" : 1
+    return unless @v =~ /(a)/
+
+    key = $1
+    key.upcase # MATCH-1494
+  end
+end
+
+# A safe-navigation `=~` answers nil without matching on a nil receiver, which reaches the no-match edge only
+# (Ruby: "A" for `match_safe_navigation("a")`, and "a" in the `else` arm for `match_safe_navigation_edges(nil)`).
+def match_safe_navigation(raw)
+  x = raw ? String(raw) : nil
+  return unless x&.=~(/(a)/)
+
+  key = $1
+  key.upcase # MATCH-1494
+end
+
+def match_safe_navigation_edges(raw)
+  "ab" =~ /(a)/
+  x = raw ? String(raw) : nil
+  if x&.=~(/(z)/)
+    assert_type("String", $1)
+  else
+    assert_type("String?", $1)
+  end
+end
+
+# A String subclass that defines its own `=~` binds `$~` in that method's frame, so neither edge holds (Ruby:
+# NoMethodError on nil for `match_custom_string_subclass("a")` whenever that `=~` answers 0).
+class MatchCustomStr < String
+  def =~(_other) = [0, nil].sample
+end
+
+def match_custom_string_subclass(raw)
+  s = MatchCustomStr.new(raw)
+  return unless s =~ /(a)/
+
+  key = $1
+  key.upcase # GENUINE-NIL
 end
 
 # Issue #1384 — a call that may re-run a match forgets every numbered global, not only `$1`..`$9`. After the `sub`,

@@ -1,0 +1,1 @@
+- **[rigor type-of]** `rigor type-of` now consults the `pre_eval:` registry, so it agrees with `rigor check` on a patched method. ([#1892](https://github.com/rigortype/rigor/pull/1892))

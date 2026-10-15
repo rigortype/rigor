@@ -57,7 +57,8 @@ module Rigor
     #   a parameter-only inline `# @rbs` annotation) is the ABSENCE of a return statement, not the author's
     #   word about it — the opposite of `void`. It is treated like no declaration at all: the inferred return
     #   is proposed as `tighter-return`, carrying `untyped` as the declared spelling so `--diff` still shows a
-    #   declaration existed (#995; see {#declared_untyped?}).
+    #   declaration existed (#995; see {#declared_untyped?}). A literal the body proves is still declined there,
+    #   as it is over a declared nominal, unless the `untyped` is only the inline reader's synthesis (#1489).
     # - A `tighter-return` over the class's own declaration replaces the return and nothing else: the rest of
     #   the line is the declaration's, spelled as written, so `--overwrite` never changes which calls the
     #   signature accepts. A declaration with more than one overload, or one spelled as an `alias`, is left
@@ -1416,12 +1417,26 @@ module Rigor
         declared.is_a?(Type::Dynamic)
       end
 
-      # Proposed without {#compare_against_declared}'s tightening guards: a declared `untyped` return carries no
-      # information to weigh {#tighter?} or {#literal_decline?} against, the same position a method with no
-      # declaration at all is in. The line is built as for any tightening ({#tighter_return_line}), and
-      # `declared_return_rbs` carries `"untyped"` so the `[tighter, was: untyped]` print tag says one existed.
+      # Proposed without {#tighter?}: a declared `untyped` return carries no information to weigh it against, the
+      # same position a method with no declaration at all is in. {#literal_decline?} still applies (#1489) to a
+      # declaration the author wrote ({#synthesized_declaration?} excepted): the `untyped` is the author's
+      # abstraction over the body exactly as a declared nominal is, so a literal the body happens to prove
+      # (`-> 1`, `-> "x"`, `-> true`) is not proposed in its place, and the method stays `equivalent`. The line is
+      # built as for any tightening ({#tighter_return_line}), and `declared_return_rbs` carries `"untyped"` so the
+      # `[tighter, was: untyped]` print tag says one existed.
       def declared_untyped_candidate(path, def_node, class_name, kind, inferred, method_def, rendered: nil)
+        if !synthesized_declaration?(method_def) && literal_decline?(inferred, def_node)
+          return equivalent(path, def_node, class_name, kind, inferred, "untyped")
+        end
+
         tighter_return_candidate(path, def_node, class_name, kind, inferred, method_def, "untyped", rendered)
+      end
+
+      # A declaration only the inline reader's synthesis (a `virtual:` buffer) supplies — ADR-93 gives every `def` an
+      # `untyped` member, annotated or not — is no word of the author's about the return, so it keeps the proposal
+      # a method with no declaration at all gets: the strictest carrier the body proves.
+      def synthesized_declaration?(method_def)
+        method_def.defs.all? { |type_def| type_def.member.location&.buffer&.name.to_s.start_with?("virtual:") }
       end
 
       def build_declared_return(method_def)

@@ -204,7 +204,11 @@ declaration is opaque.**
   activation that puts an opaque module in effect. A class object fell through until #1752 walked its own
   lookup (its singleton class and each superclass's with their `extend`s, then `Class`, `Module`, `Object`,
   `Kernel` and `BasicObject`); lifting that exception widens the span's cost, since a `Foo.new` chain or a
-  class-body call under a `using` of a gem's module now types as `Dynamic` too.
+  class-body call under a `using` of a gem's module now types as `Dynamic` too. Outside that span a
+  refinement that wins on a class object also answers `Dynamic`, never its refine body's type: a hook on
+  any ancestor can install the class object's own method where no table sees it (`include Singleton`'s
+  `instance`, a gem concern's class methods), and three review rounds each found another such shape, so
+  the walk decides only whether a refinement may answer.
   WD3's rule that the unknown marker answers `Dynamic` only where some refinement defines the name is
   not extended to opaque modules: their rows cannot be read, so every name may be replaced. Wildcard
   rows never yield a winner: a class-unknown row answers `Dynamic` for its names on every instance, a

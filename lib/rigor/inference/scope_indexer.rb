@@ -4737,7 +4737,7 @@ module Rigor
       def bundle_path_sets(names, path) = (names || []).to_h { |name| [name, Set[path]] }
 
       # Issue #1752 — the constants a `class << Const` body opens in this file, and those whose singleton side a call
-      # or `def Const.x` there may rewrite ({#singleton_side_call?}). Such a body records facts about
+      # there may rewrite ({#singleton_side_call?}). Such a body records facts about
       # `Const`'s singleton class (a `remove_method`, a `def`) without declaring `Const`, so it stays out of
       # `class_sources` (whose readers take a name there as one the project declares) and joins only the per-file
       # class-declaration sets the incremental `class:` edges diff (`Runner#class_declarations`).
@@ -4754,18 +4754,17 @@ module Rigor
         when Prism::SingletonClassNode
           rendered = singleton_receiver_constant_name(node.expression)
           yield eval_constant_receiver_prefix(node, node.expression, rendered, lexical_prefix).join("::") if rendered
-        when Prism::DefNode
-          yield_singleton_side_constant(node, node.receiver, lexical_prefix, &)
         when Prism::CallNode
           yield_singleton_side_constant(node, node.receiver, lexical_prefix, &) if singleton_side_call?(node)
         end
         node.rigor_each_child { |child| collect_singleton_class_targets(child, lexical_prefix, &) }
       end
 
-      # A `def Const.x`, and a call on a constant that may rewrite its singleton side (`Const.singleton_class`,
-      # `Const.define_singleton_method`, `Const.extend(M)`, `Const.instance_eval { … }`), record facts about `Const`'s
+      # A call on a constant that may rewrite its singleton side (`Const.singleton_class`,
+      # `Const.define_singleton_method`, `Const.extend(M)`, `Const.instance_eval { … }`) records facts about `Const`'s
       # singleton methods the refinement walk reads from a file that need not declare `Const`, so the file joins the
-      # constant's set too. Written inside `Const`'s own body, the name is in the file's set already.
+      # constant's set too. Written inside `Const`'s own body, the name is in the file's set already; a `def Const.x`
+      # files its own `method:` key.
       def singleton_side_call?(node)
         node.name == :singleton_class || surface_rewriting_call?(node)
       end

@@ -1382,8 +1382,8 @@ module Rigor
       # Returns `[body_scope, updated_falsey_scope]` for a single branch. `WhenNode` branches narrow through
       # `Narrowing.case_when_scopes`, or through {#subjectless_when_scopes} in a `case` without a subject. `InNode`
       # branches narrow soundly only for a bare class pattern (`in C` / `in C => x`, pure `is_a?`); every other pattern
-      # keeps the conservative "body = entry + bindings, falsey unchanged" shape. `subject_type` is the predicate's type,
-      # which an `in` branch's pattern decomposes to type the names it binds.
+      # keeps the conservative "body = entry + bindings, falsey unchanged" shape. `subject_type` is the predicate's
+      # type, which an `in` branch's pattern decomposes to type the names it binds.
       def branch_body_and_falsey_scopes(subject_type, subject, branch, falsey_scope)
         if branch.is_a?(Prism::InNode)
           in_branch_body_and_falsey_scopes(subject_type, subject, branch, falsey_scope)

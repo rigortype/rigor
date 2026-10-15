@@ -10561,10 +10561,6 @@ module Rigor
           propagate_if_branches(node, table, current_scope)
         when Prism::UnlessNode
           propagate_unless_branches(node, table, current_scope)
-        when Prism::CaseNode
-          if node.predicate then propagate_children(node, table, current_scope)
-          else propagate_subjectless_case(node, table, current_scope)
-          end
         when Prism::BlockNode, Prism::LambdaNode
           # An entered block is recorded with its entry scope, parameters bound. An entered `->` is recorded with
           # the ENCLOSING scope ({StatementEvaluator#eval_lambda} enters only its body), so its parameter list
@@ -10593,8 +10589,13 @@ module Rigor
 
       # Issue #1717 — a `def` / `class` / `module` body opens its own `self`, so an enclosing unentered block's
       # unknown-`self` mark ({Scope#block_self_unknown?}) stops at it, as the evaluator's fresh body scope does.
-      # Every other node hands its children the scope as is.
+      # A `case` without a subject narrows its clauses ({#propagate_subjectless_case}). Every other node hands its
+      # children the scope as is.
       def propagate_children(node, table, current_scope)
+        if node.is_a?(Prism::CaseNode) && node.predicate.nil?
+          return propagate_subjectless_case(node, table, current_scope)
+        end
+
         child_scope =
           SELF_OPENING_BODIES.include?(node.class) ? current_scope.with_block_self_unknown(false) : current_scope
         node.rigor_each_child { |child| propagate(child, table, child_scope) }

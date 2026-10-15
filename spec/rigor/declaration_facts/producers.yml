@@ -319,6 +319,7 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#propagate_children: drops the opaque-block mark at a def, class or module body the per-node scope walk reaches inside an unentered block (#1717); it records which scope a child is typed under, not what a declaration is
     Rigor::Inference::ScopeIndexer#propagate_end_body: grandfathered
     Rigor::Inference::ScopeIndexer#propagate_if_branches: grandfathered
+    Rigor::Inference::ScopeIndexer#propagate_subjectless_case: narrows the clauses of a `case` without a subject the per-node scope walk reaches unentered by its `when` conditions' edges (#1495); it records which scope a child is typed under, not what a declaration is
     Rigor::Inference::ScopeIndexer#propagate_unless_branches: grandfathered
     Rigor::Inference::ScopeIndexer#receiver_mixin_effects: names the ancestry sides a receiver-form mixin call reshapes; it computes no declaration context
     Rigor::Inference::ScopeIndexer#record_alias_call_entry: the alias_method call's alias-map write, split out of record_alias_leaf? so the AliasMap can note the writer's certainty (ADR-119 WD3); the owner is the caller's

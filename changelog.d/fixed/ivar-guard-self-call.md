@@ -1,0 +1,1 @@
+- **[engine]** An implicit-self or `self.` call between a guard on an instance variable and its read, such as `return unless @io.is_a?(StringIO); log("dumping"); @io.string`, no longer widens the variable when Rigor proves the callee writes no instance variable it narrowed, so the read is no longer reported. ([#1965](https://github.com/rigortype/rigor/pull/1965))

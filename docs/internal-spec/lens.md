@@ -49,7 +49,9 @@ rigor lens [--format text|json] [--config FILE] [--workers N] FILE...
 - **Root.** The project root is the working directory. Rigor auto-detects `sig/`, `Gemfile.lock` and
   `rbs_collection.lock.yaml` there, and a configured path resolves to an absolute one first, so every
   input has one spelling relative to it.
-- **Paths** are relative to the root, with `/` separators. A path outside the root is written relative
+- **Paths** are relative to the root, with `/` separators. They, the site keys and `context.digest`
+  therefore depend on the working directory: a consumer MUST NOT reuse a document produced from another
+  one. A path outside the root is written relative
   to it with `..` segments. No absolute path that Rigor computed appears in the document; a target's
   `argument` echoes what the caller passed.
 - **Spans** are objects `{start_line, start_column, end_line, end_column, start_offset, end_offset}`.
@@ -160,8 +162,8 @@ A site is one source declaration in a requested file.
 | `contract_span` | The span from the first to the last contract comment of the site (§ Anchors, steps 1 and 2), or `null`. |
 | `anchor` | § Anchors. |
 | `visibility` | For `method` / `attribute`: `public`, `protected` or `private` as the check path's per-file visibility table records it for this declaration. `null` when Rigor does not resolve it: every singleton member, and an instance member whose visibility the table marks contested (ADR-119). `null` for `class` / `module`. |
-| `contract` | `inline` when the site carries contract comments and a member it defines has an inline declaration from this site's file; otherwise `null`. When one file holds several such sites for a member, each reads `inline`: the cached environment keeps the file, not the position. A `sig/` or library contract belongs to the member, not to a site. |
-| `params`, `block` | For `method`: this definition's own parameter list as written, in the shape of an overload's `params` and `block` (§ Members). Every `type` is the undeclared slot (`dynamic`, `inferred`, `inferred_return_untyped`); a contract's types are on the member's overloads, not here. `null` for every other kind. |
+| `contract` | `inline` when the site carries a contract comment other than `@extrbs` and a member it defines has an inline declaration from this site's file that is not a defaulted one (`inferred-signature`, § Members); otherwise `null`. When one file holds several such sites for a member, each reads `inline`: the cached environment keeps the file, not the position. A `sig/` or library contract belongs to the member, not to a site. |
+| `params`, `block` | For `method`: this definition's own parameter list as written, in the shape of an overload's `params` and `block` (§ Members) but with every `type` `null`: the shape only. Types are on the member's overloads; the cached environment keeps which file an inline contract came from, not which definition. `null` for every other kind. |
 | `body_return` | For `method`: a slot (§ Slots), the type this body returns with its parameters as declared, or unknown where none is declared. Its calls resolve against the same seeded index `check` uses, so a call to another member reads that member as `check` reads it. A body-less `def` returns `nil`; `initialize` reads `void`. `null` for every other kind. |
 
 ## Members
@@ -206,19 +208,21 @@ not on the magic comment:
 **Overloads.**
 
 - A contract member has one overload per declared method type. A `single_site` member has one overload
-  built from its site's parameter list. A `contested` member has no overloads (`[]`): its definitions may
-  differ in arity, and each method site carries its own `params` and `block`.
-- An `attribute` member without a contract has one overload whose slots are `unavailable` with
-  `not_computed` (a reader takes no parameters; a writer takes one `required` parameter named `value`);
-  revision 1 does not report an instance variable's type.
+  built from its site's parameter list. A `contested` member, of either kind, has no overloads (`[]`): its
+  definitions may differ in arity, and each method site carries its own `params` and `block`.
+- A `single_site` `attribute` member has one overload whose slots are `unavailable` with `not_computed`
+  (a reader takes no parameters; a writer takes one unnamed `required` parameter); revision 1 does not
+  report an instance variable's type.
 - `params` is `[{name, kind, type}]` in declaration order. `kind` is `required`, `optional`, `rest`,
   `post` (a positional after the rest), `keyreq`, `key` or `keyrest`; `name` is `null` when the
   declaration names none; `type` is a slot. A parameter with no contract is a `dynamic` slot with provenance
   `inferred` and cause `inferred_return_untyped`, ADR-75's cause for an undeclared parameter. An argument-forwarding list
   (`...`, or RBS `(?)`) gives `params: null`.
-- `block` is `null` when the member takes no block, and otherwise `{required, type}`: `required` is a
-  boolean and `type` a slot whose type is the block's RBS function type (`(Integer) -> void`). A `&blk`
-  parameter with no contract reads `{required: false, type: <dynamic slot>}`.
+- `block` is `{required, type}` when the member takes a block: `required` is a boolean and `type` a slot
+  whose type is the block's RBS function type (`(Integer) -> void`). Without a contract, a definition takes a
+  block when it declares `&blk` or its body (outside nested `def`s, lambdas and `define_method` blocks)
+  contains `yield`; it then reads `{required: false, type: <dynamic slot>}`. `null` means no block was
+  declared or detected.
 - `return` is a slot.
 - `rbs` is the overload as RBS in `sig-gen`'s spelling, authored `%a{rigor:v1:…}` annotations of the
   declaring member first. It is `null` when any slot of the overload is `unavailable`: an `untyped` there
@@ -239,6 +243,7 @@ Every type position is a tagged slot:
 - `provenance` is one of `sig`, `inline`, `inferred`, `plugin:<id>` and `library`. A contract slot reads
   it from the declaring RBS member's buffer name:
   - `virtual:rbs-inline:…` is `inline`; any other `virtual:<id>:…` is `plugin:<id>`;
+  - a file under a loaded plugin's `signature_paths:` is `plugin:<id>`;
   - a file under a project signature root is `sig`, with `path` set;
   - any other file is `library` (gem, `rbs collection`, stdlib and core signatures);
   - a buffer whose name did not survive the environment cache (`<cached>`, or empty) cannot be
@@ -277,8 +282,9 @@ A member with an authored parameter, a defaulted return, and a second definition
 }
 ```
 
-The producer's specs carry the shared fixture project and its expected document; ZARD's adapter reads
-that document as its revision-1 fixture.
+The shared fixture is the project `spec/integration/fixtures/lens/project/` and its expected document
+`spec/integration/fixtures/lens/expected.json`, which the producer's spec regenerates and compares. ZARD's
+adapter pins that file at a Rigor commit as its revision-1 fixture.
 
 ## Anchors
 

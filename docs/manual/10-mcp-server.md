@@ -33,6 +33,7 @@ There is no conflict in running both simultaneously.
 | `rigor_check` | `rigor check --format json` | JSON diagnostic report |
 | `rigor_type_of` | `rigor type-of --format json` | JSON type at `FILE:LINE:COL` |
 | `rigor_triage` | `rigor triage --format json` | JSON distribution + class/method selectors + hotspots + hints |
+| `rigor_lens` | `rigor lens --format json` | JSON `lens/v0` declaration map (experimental) |
 | `rigor_annotate` | `rigor annotate --no-color` | Annotated Ruby source |
 | `rigor_sig_gen` | `rigor sig-gen --print --format json` | JSON RBS skeleton candidates |
 | `rigor_explain` | `rigor explain --format json` | JSON rule catalog entries |
@@ -317,6 +318,31 @@ review or cleanup session to understand the diagnostic landscape
 before deciding which rules and files to focus on — sort `selectors`
 by `count` for the highest-leverage class/method, or filter by
 `files` to separate systemic clusters from one-off bugs.
+
+---
+
+### rigor_lens
+
+Map the classes, modules, methods and attributes the given files declare,
+with the type `rigor check` gives each one and where it came from. The
+document is the experimental `lens/v0` format
+([specification](../internal-spec/lens.md)); see
+[Inspecting inferred types](05-inspecting-types.md) for the command.
+
+**Input:**
+
+| Argument | Type | Required |
+|---|---|---|
+| `files` | `string[]` | yes |
+| `config` | `string` | no |
+
+**Returns:** JSON. Each file carries its `status`, `sites`, `omissions`
+and `diagnostics`; `members` holds the signatures.
+
+**Typical agent use:** learn what a file or class offers, and the
+contracts its methods already have, before editing it or writing a type.
+Pass every file in one call: each call runs one analysis, and the first
+call on a project costs a full `rigor check`.
 
 ---
 

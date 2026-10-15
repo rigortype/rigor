@@ -64,12 +64,12 @@ RSpec.describe Rigor::MCP::Server do
   end
 
   describe "tools/list" do
-    it "lists the seven expected tool names" do
+    it "lists the eight expected tool names" do
       resp = request(id: 2, method: "tools/list")
 
       names = resp.dig("result", "tools").map { |t| t["name"] }
       expect(names).to contain_exactly(
-        "rigor_check", "rigor_type_of", "rigor_triage",
+        "rigor_check", "rigor_type_of", "rigor_triage", "rigor_lens",
         "rigor_annotate", "rigor_sig_gen", "rigor_explain", "rigor_coverage"
       )
     end
@@ -152,6 +152,20 @@ RSpec.describe Rigor::MCP::Server do
       parsed = JSON.parse(result.dig("content", 0, "text"))
       expect(parsed["type"]).to be_a(String)
       expect(parsed["type"]).not_to be_empty
+    end
+  end
+
+  describe "rigor_lens" do
+    it "returns missing-arg error when files is absent or empty" do
+      expect(tool_call("rigor_lens").dig("error", "code")).to eq(-32_602)
+      expect(tool_call("rigor_lens", { "files" => [] }).dig("error", "code")).to eq(-32_602)
+    end
+
+    it "builds the lens argv with JSON output and the config" do
+      argv = described_class.new(config_path: "c.yml", err: StringIO.new)
+                            .send(:build_argv, "rigor_lens", { "files" => ["a.rb", "b.rb"] })
+
+      expect(argv).to eq(["lens", "--format=json", "--config=c.yml", "a.rb", "b.rb"])
     end
   end
 

@@ -64,6 +64,25 @@ module Rigor
           }
         },
         {
+          name: "rigor_lens",
+          description: "Map the classes, modules, methods and attributes the given Ruby files declare, with the " \
+                       "type `rigor check` gives each one and where that type came from (sig/, an inline " \
+                       "comment, a plugin, a library, or inference). Returns the lens/v0 JSON document " \
+                       "(experimental). Pass every file you need in one call: each call pays one analysis run.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              files: {
+                type: "array",
+                items: { type: "string" },
+                description: "Ruby files to map (required)"
+              },
+              config: { type: "string", description: "Path to .rigor.yml (optional)" }
+            },
+            required: ["files"]
+          }
+        },
+        {
           name: "rigor_annotate",
           description: "Return the given Ruby source file with each line's last-expression type " \
                        "appended as a comment. Useful for understanding how Rigor infers types " \
@@ -220,6 +239,14 @@ module Rigor
           argv << "--top=#{args['top']}" if args["top"]
           argv += Array(args["paths"])
           argv
+
+        when "rigor_lens"
+          files = Array(args["files"])
+          return nil if files.empty?
+
+          argv = ["lens", "--format=json"]
+          argv << "--config=#{effective_config}" if effective_config
+          argv + files
 
         when "rigor_annotate"
           return nil unless args["file"]

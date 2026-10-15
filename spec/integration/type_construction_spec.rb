@@ -1593,6 +1593,29 @@ RSpec.describe "Rigor type construction (integration)" do
       expect(reported(analyze(files: { "a.rb" => caller_source, "b.rb" => "X = 1\n" })).map(&:line)).to eq([9])
     end
 
+    # A refinement in effect where the callee sits reroutes even a core call: `warn` here runs `LoudWarn`'s, which
+    # writes `@v`, so the read returns "X" under Ruby 4.0.5 when `b.rb` loads first.
+    it "gives up on a call a refine block anywhere in the project defines" do
+      files = {
+        "a.rb" => <<~RUBY,
+          using LoudWarn
+
+          class Warned
+            def initialize = (@v = "a")
+            def log = warn("x")
+
+            def dump
+              @v = nil
+              log
+              @v.upcase
+            end
+          end
+        RUBY
+        "b.rb" => "module LoudWarn\n  refine Kernel do\n    def warn(*) = (@v = \"x\")\n  end\nend\n"
+      }
+      expect(reported(analyze(files: files))).to eq([])
+    end
+
     # Two files each mix a module into the class, so the tables cannot say which runs first: loaded in this order,
     # Ruby runs `Loudly#log`, which writes `@v`, and the read returns "X" under Ruby 4.0.5.
     it "gives up on a class whose mixin order the tables cannot settle" do

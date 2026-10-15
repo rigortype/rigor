@@ -115,7 +115,7 @@ module Rigor
         # Reads the method an implicit-self or `self.` call to `call_node`'s name runs.
         def self_call(call_node)
           name = call_node.name
-          unprovable! if GuardRebinding.code_running_name?(name)
+          unprovable! if GuardRebinding.code_running_name?(name) || refined?(name)
 
           if ProjectMethodOwnership.defines?(@class_name, name, :instance, @scope)
             read_def(proven_def(name))
@@ -154,6 +154,12 @@ module Rigor
 
         private
 
+        # Whether a `refine` block anywhere in the project defines `name`, on any class: a `using` in effect where the
+        # read code sits may route the call to it (`refine Kernel do def warn …`), whatever the receiver.
+        def refined?(name)
+          @scope.discovered_refinements.any? { |_refined, methods| methods.key?(name) }
+        end
+
         def call_receiver(node) = node.is_a?(Prism::CallNode) ? node.receiver : nil
 
         def ivar_write_name(node)
@@ -168,7 +174,7 @@ module Rigor
           receiver = node.receiver
           return self_call(node) if receiver.nil? || receiver.is_a?(Prism::SelfNode)
 
-          unprovable! if GuardRebinding.code_running_name?(node.name)
+          unprovable! if GuardRebinding.code_running_name?(node.name) || refined?(node.name)
           type = receiver_type(receiver)
           unprovable! if type.nil? || GuardRebinding.type_method_foreign?(type, node.name, @scope)
         end
@@ -185,7 +191,6 @@ module Rigor
         # The `def` the name resolves to on the class and on every project subclass, or unprovable.
         def proven_def(name)
           unprovable! if RefinedDispatch::OwnMethod.module_name?(@scope, @class_name)
-          unprovable! if @scope.discovered_refinements.any? { |_refined, methods| methods.key?(name) }
 
           owner = definer_ahead(@class_name, name, nil)
           unprovable! if owner.nil?

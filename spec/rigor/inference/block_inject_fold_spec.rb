@@ -105,4 +105,32 @@ RSpec.describe "block-form inject/reduce fold", type: :runner do
       expect(messages[1]).to match(/1.*2.*3/)
     end
   end
+
+  describe "a body that rebinds or reads a mutated capture declines the constant fold" do
+    def flow_diagnostics(source)
+      analyze(source).diagnostics.select { |d| d.rule == "flow.always-truthy-condition" }
+    end
+
+    it "does not pin a result that depends on a rebound captured local" do
+      # Ruby answers 3: `n` is rebound at every step, not read at its entry binding.
+      source = "n = 0\nt = [1, 2].inject(0) { |a, e| n += 1; a + n }\nputs 'x' if t == 2\n"
+      expect(flow_diagnostics(source)).to be_empty
+      expect(dumped_type("n = 0\nt = [1, 2].inject(0) { |a, e| n += 1; a + n }\ndump_type(t)")).not_to include("2")
+    end
+
+    it "does not pin a result that depends on a repeated `||=` index write" do
+      source = "c = {}\ntotal = [1, 2].reduce(0) { |a, e| c[e] ||= e; a + c.size }\nputs 'x' if total == 2\n"
+      expect(flow_diagnostics(source)).to be_empty
+    end
+
+    it "does not pin a result that reads a captured receiver the body mutates" do
+      source = "log = []\nt = [1, 2].inject(0) { |a, e| log << e; a + log.size }\nputs 'x' if t == 3\n"
+      expect(flow_diagnostics(source)).to be_empty
+    end
+
+    it "still folds a body that captures nothing" do
+      expect(dumped_type("dump_type([1, 2].inject(0) { |a, e| a + e })")).to include("3")
+      expect(dumped_type("dump_type([1, 2].reduce(0) { |a, e| a + e })")).to include("3")
+    end
+  end
 end

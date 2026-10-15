@@ -5416,12 +5416,56 @@ module Rigor
 
         acc, rest = inject_constant_start(members, seed, has_seed)
         return nil if acc.nil?
+        return nil if inject_block_touches_captured?(block, rest)
 
         rest.each do |element_value|
           acc = inject_constant_step(block, acc, element_value)
           return nil if acc.nil?
         end
         acc
+      end
+
+      # The per-step evaluation below binds only the block parameters, so a body that rebinds or mutates a
+      # captured variable (`n += 1`, `log << e`, a repeated `||=` write) would read the entry binding at every
+      # step and pin the result: `n = 0; [1, 2].inject(0) { |a, e| n += 1; a + n }` folded to `2` where Ruby
+      # answers `3`. Such a body declines the constant fold and falls to the nominal fixpoint, as the Tuple /
+      # Range per-element folds' `captured:` binding would otherwise have to thread it.
+      def inject_block_touches_captured?(block, rest)
+        stores = CapturedLocals.content_mutations(block, scope, non_locals: true)
+        names = CapturedLocals.writes(block, scope, non_locals: true)
+        return true unless names.empty?
+
+        elements = rest.map { |value| Type::Combinator.constant_of(value) }
+        return true unless RepeatedOrWrites.sites(block, stores, scope, element_types: elements).empty?
+
+        stores.any? { |name, sites| inject_mutated_capture_read?(block, name, sites) }
+      rescue StandardError
+        true
+      end
+
+      # Whether the body reads the mutated capture `name` anywhere but as a mutation site's receiver — the one
+      # way an in-place store can reach the accumulator. `sink << x` alone does not (the fold keeps its answer
+      # and the write-back still runs); `log << e; a + log.size` does.
+      def inject_mutated_capture_read?(block, name, sites)
+        receivers = sites.map { |site| inject_site_receiver(site) }
+        return true if receivers.any?(&:nil?)
+
+        spans = receivers.map { |r| r.location.start_offset...r.location.end_offset }
+        reads = []
+        Source::NodeWalker.each_with_ancestors(block.body) do |node, _ancestors|
+          next unless node.class.name.end_with?("ReadNode") && node.respond_to?(:name) && node.name == name
+
+          reads << node.location.start_offset
+        end
+        reads.any? { |offset| spans.none? { |span| span.cover?(offset) } }
+      end
+
+      def inject_site_receiver(site)
+        case site
+        when Prism::CallNode, Prism::IndexOrWriteNode, Prism::IndexAndWriteNode,
+             Prism::IndexOperatorWriteNode, Prism::IndexTargetNode
+          site.receiver
+        end
       end
 
       # Extracts the receiver's foldable constant values, size-capped before enumeration, or nil to decline.

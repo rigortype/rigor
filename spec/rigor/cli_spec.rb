@@ -365,6 +365,53 @@ RSpec.describe Rigor::CLI do
           expect(out).not_to include("fail-soft fallback")
         end
       end
+
+      # #1867 — one snapshot file per fingerprint mode, so an occasional --explain run does not evict the
+      # warm plain snapshot (and the reverse).
+      it "keeps the plain snapshot warm across an --explain run and an edit" do
+        Dir.mktmpdir do |dir|
+          base = explain_project(dir)
+          run_cli(*base, "--incremental")
+          expect(run_cli(*base, "--incremental")[2]).to include("--incremental warm")
+          run_cli(*base, "--incremental", "--explain")
+          File.write(File.join(dir, "a.rb"), "BEGIN { 2 }\n")
+
+          _status, out, err = run_cli(*base, "--incremental")
+          expect(err).to include("--incremental warm")
+          expect(out).not_to include("fail-soft fallback")
+        end
+      end
+
+      it "keeps each mode warm when the flag alternates, and re-analyses an edit under --explain" do
+        Dir.mktmpdir do |dir|
+          base = explain_project(dir)
+          run_cli(*base, "--incremental")
+          run_cli(*base, "--incremental", "--explain")
+          # Each run follows an edit, so the run-result slot cannot serve it: the full path must read its snapshot.
+          2.times do |round|
+            File.write(File.join(dir, "a.rb"), "BEGIN { #{round + 10} }\n")
+            expect(run_cli(*base, "--incremental")[2]).to include("--incremental warm")
+            File.write(File.join(dir, "a.rb"), "BEGIN { #{round + 20} }\n")
+            expect(run_cli(*base, "--incremental", "--explain")[2]).to include("--incremental warm")
+          end
+          File.write(File.join(dir, "a.rb"), "BEGIN { 2 }\nBEGIN { 3 }\n")
+          _status, out, err = run_cli(*base, "--incremental", "--explain")
+          expect(err).to include("--incremental warm")
+          expect(out.scan("fail-soft fallback").size).to eq(2)
+        end
+      end
+
+      it "writes the plain snapshot where it always has and the explain one beside it" do
+        Dir.mktmpdir do |dir|
+          base = explain_project(dir)
+          run_cli(*base, "--incremental")
+          run_cli(*base, "--incremental", "--explain")
+          incremental = File.join(dir, ".cache", "incremental")
+          expect(File).to exist(File.join(incremental, "snapshot.bin"))
+          expect(File).to exist(File.join(incremental, Rigor::Cache::IncrementalSnapshot.file_name(explain: true)))
+          expect(Dir.children(incremental).grep(/\Asnapshot.*\.bin\z/).size).to eq(2)
+        end
+      end
     end
 
     it "does not reuse the snapshot when only a bundler.lockfile: at a non-default path changes" do

@@ -295,7 +295,7 @@ module Rigor
                           explain: options.fetch(:explain)
                         )
                       end
-        snapshot = Cache::IncrementalSnapshot.new(root: cache_root)
+        snapshot = Cache::IncrementalSnapshot.new(root: cache_root, explain: options.fetch(:explain))
         store = incremental_cache_store(configuration, options, cache_root)
         session = Analysis::IncrementalSession.new(
           configuration: configuration, paths: paths,

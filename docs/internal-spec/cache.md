@@ -838,6 +838,14 @@ full run, so the snapshot can never wedge or stale an analysis.
    otherwise, so a plain run's fingerprint is unchanged): the per-file cache
    holds the `:info` fallback rows, so a snapshot primed without the flag must
    not serve a run with it, nor the reverse ([#1533](https://github.com/rigortype/rigor/issues/1533)).
+   The modes also persist to separate files under `<cache>/incremental/`: a plain run
+   to `snapshot.bin` (unchanged), a run with run-mode parts (`--explain`, the ADR-116
+   shadow harness) to `snapshot-<mode digest>.bin` (`IncrementalSnapshot.file_name`), so
+   an occasional `--explain` run neither reads nor evicts the warm plain snapshot, and the
+   reverse ([#1867](https://github.com/rigortype/rigor/issues/1867)). The language server
+   and `Protection::MutationCache#load_snapshot` have no run mode and stay on the plain
+   file. Snapshot files are not budgeted or pruned by `Cache::Store`; they stay until
+   `--clear-cache`.
    A mismatch drops the snapshot.
 
    The language server's in-process session is gated the same way

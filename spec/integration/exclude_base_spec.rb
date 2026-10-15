@@ -162,6 +162,45 @@ RSpec.describe "exclude: pattern base (#1576)" do
     end
   end
 
+  # The base and the file spelled through different symlink roots (macOS `/tmp` vs `/private/tmp`): the logical
+  # relative path would climb out through physical parents and show their names to an unanchored pattern.
+  context "with the base and the file reached through different symlink roots" do
+    def physical_project(parent)
+      dir = File.join(tmp, parent, "proj")
+      project(dir, "paths:\n  - lib\nexclude:\n  - \"**/#{parent}/**\"\n")
+      File.symlink(File.join(tmp, parent), File.join(tmp, "alias"))
+      dir
+    end
+
+    it "does not let a physical parent name exclude the project (config through the symlink)" do
+      dir = physical_project("tmp")
+      Dir.chdir(dir) do
+        rows = reported(config: File.join(tmp, "alias/proj/.rigor.yml"), paths: %w[lib])
+        expect(rows).to include(a_string_ending_with("lib/ok.rb"))
+      end
+    end
+
+    it "does not let the symlink's own name exclude a file given through it" do
+      dir = File.join(tmp, "phys/proj")
+      project(dir, "paths:\n  - lib\nexclude:\n  - \"**/viaa/**\"\n")
+      File.symlink(File.join(tmp, "phys"), File.join(tmp, "viaa"))
+      Dir.chdir(dir) do
+        rows = reported(paths: [File.join(tmp, "viaa/proj/lib")])
+        expect(rows).to include(a_string_ending_with("lib/ok.rb"))
+      end
+    end
+
+    it "does not let the built-in node_modules pattern exclude a project under one" do
+      dir = File.join(tmp, "nmreal/node_modules/realproj")
+      project(dir, "paths:\n  - lib\n")
+      File.symlink(dir, File.join(tmp, "nmlink"))
+      Dir.chdir(dir) do
+        rows = reported(config: File.join(tmp, "nmlink/.rigor.yml"), paths: %w[lib])
+        expect(rows).to include(a_string_ending_with("lib/ok.rb"))
+      end
+    end
+  end
+
   it "keeps an absolute pattern working" do
     project(tmp, "paths:\n  - lib\nexclude:\n  - \"#{tmp}/lib/gen/**\"\n",
             extra: { "lib/gen/x.rb" => "z = nil\nz.upcase\n" })

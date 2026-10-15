@@ -35,37 +35,45 @@ module Rigor
       #
       # #1576 — a RELATIVE pattern (a leading `./` is ignored) is matched against the file's path relative to
       # `base` (the config file's directory, or the working directory with no config), so the same file is
-      # excluded whether `paths:` (absolute) or an argument (relative) named it. A file outside `base` comes out
-      # as `../…`, which never shows a directory name above `base`: `**/tmp/**` cannot exclude a project merely
-      # located under a `tmp/`, while `**/vendor/bundle/**` still reaches `../other/vendor/bundle/x.rb`. The
-      # pattern is also tried against `/<relative>`, because without `FNM_PATHNAME` the unanchored `**/tmp/**`
-      # needs a leading `/` to match a top-level `tmp/x.rb` (and `*` never matches a leading `.`, as in
-      # `../other`). The LOGICAL spelling (the path as given, against
-      # the logical base) is tried first, then the realpath spelling, so a symlinked `lib` or a symlinked
-      # working directory (macOS `/tmp` vs `/private/tmp`) matches whichever way a pattern was written.
-      # An ABSOLUTE pattern is matched only against the absolute path (logical, then real).
+      # excluded whether `paths:` (absolute) or an argument (relative) named it.
+      #
+      # Two spellings are tried. The LOGICAL one (the path as given, against the logical base) counts only when
+      # the file lies inside the base; it is what lets a symlinked `lib` match `lib/gen/**`. The REALPATH one
+      # (realpath of the file against realpath of the base) is the only one used for a file outside the base, and
+      # it also catches a base or file spelled through a different symlink root (macOS `/tmp` vs `/private/tmp`).
+      # Neither shows a directory name above the base: a file outside it comes out as `../…`, so `**/tmp/**`
+      # cannot exclude a project merely located under a `tmp/`, while `**/vendor/bundle/**` still reaches
+      # `../other/vendor/bundle/x.rb`. The pattern is also tried against `/<relative>`, because without
+      # `FNM_PATHNAME` the unanchored `**/tmp/**` needs a leading `/` to match a top-level `tmp/x.rb` (and `*`
+      # never matches a leading `.`, as in `../other`). A pattern starting with `.` therefore also matches files
+      # outside the base. An ABSOLUTE pattern is matched only against the absolute path (logical, then real).
       def reject_excluded(file_list, exclude_patterns, base: Dir.pwd)
         return file_list if exclude_patterns.empty?
 
         absolute_patterns, relative_patterns = exclude_patterns.partition { |pattern| pattern.start_with?("/") }
         relative_patterns = relative_patterns.map { |pattern| pattern.sub(%r{\A(?:\./+)+}, "") }
-        context = { base: File.absolute_path(base), real_base: nil, real_dirs: {} }
+        logical_base = File.absolute_path(base)
+        context = { base: logical_base, real_base: real_directory(logical_base), real_dirs: {} }
         file_list.reject { |path| excluded?(path, absolute_patterns, relative_patterns, context) }
       end
 
       def excluded?(path, absolute_patterns, relative_patterns, context)
         logical = File.absolute_path(path)
-        return true if matches_relative?(relative_patterns, relative_path(logical, context.fetch(:base)))
+        base = context.fetch(:base)
+        inside = logical.start_with?("#{base}/")
+        return true if inside && matches_relative?(relative_patterns, logical.byteslice((base.bytesize + 1)..))
         return true if absolute_patterns.any? { |pattern| File.fnmatch?(pattern, logical) }
-        return false unless (relative_patterns + absolute_patterns).any?
 
         real = real_file(logical, context.fetch(:real_dirs))
-        real_base = (context[:real_base] ||= real_directory(context.fetch(:base)))
-        matches_relative?(relative_patterns, relative_path(real, real_base)) ||
-          absolute_patterns.any? { |pattern| File.fnmatch?(pattern, real) }
+        return false if real == logical && inside && context.fetch(:real_base) == base
+
+        matches_relative?(relative_patterns, relative_path(real, context.fetch(:real_base))) ||
+          (real != logical && absolute_patterns.any? { |pattern| File.fnmatch?(pattern, real) })
       end
 
       def relative_path(absolute, base)
+        return absolute.byteslice((base.bytesize + 1)..) if absolute.start_with?("#{base}/")
+
         Pathname.new(absolute).relative_path_from(Pathname.new(base)).to_s
       end
 

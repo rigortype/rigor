@@ -204,6 +204,7 @@ module ModuleFunctionSnapshotProbes
         def a; 1; end
         alias_method :b, :a
         def self.a; 2; end
+        Module.new.define_method(:a) { 3 }
         module Inner
           def a; 3; end
         end

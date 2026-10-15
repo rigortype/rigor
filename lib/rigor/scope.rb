@@ -1097,7 +1097,7 @@ module Rigor
     # True when any match-data global holds a binding, which a match edge or {#untyped_match_globals} makes: the only
     # state {#forget_match_globals} can drop, and so the gate on every scan that decides whether to.
     def match_globals_bound?
-      !!@globals.keys.any? { |name| MATCH_DATA_GLOBAL_NAME.match?(name.name) }
+      !@globals.empty? && @globals.any? { |name, _| MATCH_DATA_GLOBAL_NAME.match?(name.name) }
     end
 
     # Issue #1359 — the last line read, `$_`, lives in the same frame slot as the match globals, and so on the same

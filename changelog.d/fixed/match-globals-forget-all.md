@@ -1,1 +1,1 @@
-- **[inference]** A call that may re-run a regex match now forgets every numbered match global, so a `$10` or higher read after an intervening `sub` is `String?` as `$9` already was, instead of a stale `String`. ([#1886](https://github.com/rigortype/rigor/pull/1886))
+- **[inference]** A call that may re-run a regex match, or a nested `=~` inside a match with ten or more groups, now forgets every numbered match global, so a `$10` or higher read afterwards is `String?` as `$9` already was, instead of a stale `String`. ([#1886](https://github.com/rigortype/rigor/pull/1886))

@@ -1,0 +1,1 @@
+- **[inference]** `inject` / `reduce` over a constant receiver no longer pins a result when the block rebinds or reads back a mutated captured variable (`n += 1; a + n`), which had folded to a wrong constant and raised a false `flow.always-truthy-condition` ([#1877](https://github.com/rigortype/rigor/pull/1877)).

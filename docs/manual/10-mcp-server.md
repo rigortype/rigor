@@ -344,7 +344,8 @@ contracts its methods already have, before editing it or writing a type.
 Pass every file in one call: each call runs one analysis, and the first
 call on a project costs a full `rigor check`. Paths, site keys and the cache are
 relative to the directory the server was started in, so start it from the
-project root (or pass `--config`).
+project root; `--config` fixes which files belong to the project, not how
+paths are written.
 
 ---
 

@@ -176,6 +176,22 @@ RSpec.describe Rigor::MCP::Server do
       expect(document["files"].first["status"]).to eq("ok")
     end
 
+    it "keeps an option parser's exit off the JSON-RPC channel and stays up" do
+      stdout = $stdout
+      resp = tool_call("rigor_check", { "paths" => ["--help"] })
+
+      expect($stdout).to equal(stdout)
+      expect(resp.dig("result", "isError")).to be(true)
+      expect(request(id: 10, method: "ping")["result"]).to eq({})
+    end
+
+    it "reports an error a command printed only to stderr as an error" do
+      resp = tool_call("rigor_annotate", { "file" => "no/such/file.rb" })
+
+      expect(resp.dig("result", "isError")).to be(true)
+      expect(resp.dig("result", "content", 0, "text")).to include("no/such/file.rb")
+    end
+
     it "reads a file named like a flag as a file, and stays up" do
       resp = tool_call("rigor_lens", { "files" => ["--version"] })
 

@@ -199,13 +199,9 @@ module Rigor
         out_io = StringIO.new
         err_io = StringIO.new
         require_relative "../cli"
-        exit_code = CLI.new(argv, out: out_io, err: err_io).run
+        exit_code = with_captured_streams(out_io, err_io) { CLI.new(argv, out: out_io, err: err_io).run }
 
-        is_error = [CLI::EXIT_USAGE, CLI::EXIT_INTERNAL_ERROR].include?(exit_code)
-        text = out_io.string
-        text = err_io.string if text.empty?
-
-        success(id, { content: [{ type: "text", text: text }], isError: is_error })
+        success(id, tool_result(out_io.string, err_io.string, exit_code))
       rescue SystemExit => e
         # An option parser that exits (`--help`, `--version`) must not take the server down with it.
         success(id, { content: [{ type: "text", text: "Command exited (status #{e.status})" }], isError: true })
@@ -216,6 +212,26 @@ module Rigor
                   content: [{ type: "text", text: "Internal error: #{e.message}" }],
                   isError: true
                 })
+      end
+
+      # A non-zero exit with nothing on stdout printed only an error; exit 1 with a document (check, lens) is a
+      # result, not an error.
+      def tool_result(out, err, exit_code)
+        is_error = [CLI::EXIT_USAGE, CLI::EXIT_INTERNAL_ERROR].include?(exit_code) || (out.empty? && !exit_code.zero?)
+        { content: [{ type: "text", text: out.empty? ? err : out }], isError: is_error }
+      end
+
+      # The JSON-RPC channel is the process's stdout, so nothing a command writes past its `out:` (an option
+      # parser's `--help`, a stray `puts`) may reach it while the command runs.
+      def with_captured_streams(out_io, err_io)
+        stdout = $stdout
+        stderr = $stderr
+        $stdout = out_io
+        $stderr = err_io
+        yield
+      ensure
+        $stdout = stdout
+        $stderr = stderr
       end
 
       def build_argv(name, args) # rubocop:disable Metrics/MethodLength,Metrics/CyclomaticComplexity,Metrics/AbcSize,Metrics/PerceivedComplexity

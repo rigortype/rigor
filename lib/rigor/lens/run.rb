@@ -150,13 +150,19 @@ module Rigor
       end
 
       # The rbs-inline plugin declares every constant of a file it reads, typing an unannotated one from its
-      # literal (`[]` as `Array[untyped]`): an inline declaration is the constant's own only when the site carries
-      # a contract comment (`#: T`).
+      # literal (`[]` as `Array[untyped]`), and reads only a `#:` trailing the assignment as its type: an inline
+      # declaration is the constant's own only when that is the site's one contract comment.
       def declared_slot(site, declared)
         return Slot.unavailable("not_computed") if declared.nil?
-        return Slot.unavailable("not_computed") if declared["provenance"] == "inline" && site.contract_comments.empty?
+        return Slot.unavailable("not_computed") if declared["provenance"] == "inline" && !trailing_type?(site)
 
         declared
+      end
+
+      def trailing_type?(site)
+        comments = site.contract_comments
+        comments.size == 1 && comments.first.location.start_line == site.node.location.end_line &&
+          comments.first.location.slice.start_with?("#:")
       end
 
       def published_slot(type, environment)

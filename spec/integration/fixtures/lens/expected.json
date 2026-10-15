@@ -28,6 +28,7 @@
     "module",
     "method",
     "attribute",
+    "module_function",
     "body_return",
     "diagnostics",
     "inputs"
@@ -81,6 +82,7 @@
           "scope": null,
           "attribute": null,
           "members": [],
+          "module_function": false,
           "ordinal": 0,
           "span": {
             "start_line": 4,
@@ -108,6 +110,7 @@
           "members": [
             "label"
           ],
+          "module_function": false,
           "ordinal": 0,
           "span": {
             "start_line": 9,
@@ -154,6 +157,7 @@
           "members": [
             "scale"
           ],
+          "module_function": false,
           "ordinal": 0,
           "span": {
             "start_line": 12,
@@ -200,6 +204,7 @@
           "members": [
             "total"
           ],
+          "module_function": false,
           "ordinal": 0,
           "span": {
             "start_line": 14,
@@ -233,6 +238,7 @@
           "members": [
             "fetch"
           ],
+          "module_function": false,
           "ordinal": 0,
           "span": {
             "start_line": 16,
@@ -273,6 +279,7 @@
           "members": [
             "name"
           ],
+          "module_function": false,
           "ordinal": 0,
           "span": {
             "start_line": 18,
@@ -307,6 +314,7 @@
           "members": [
             "code"
           ],
+          "module_function": false,
           "ordinal": 1,
           "span": {
             "start_line": 18,
@@ -341,6 +349,7 @@
           "members": [
             "build"
           ],
+          "module_function": false,
           "ordinal": 0,
           "span": {
             "start_line": 20,
@@ -375,6 +384,7 @@
             "price",
             "price="
           ],
+          "module_function": false,
           "ordinal": 0,
           "span": {
             "start_line": 22,
@@ -409,6 +419,7 @@
           "members": [
             "registry"
           ],
+          "module_function": false,
           "ordinal": 0,
           "span": {
             "start_line": 25,
@@ -442,6 +453,7 @@
           "members": [
             "secret"
           ],
+          "module_function": false,
           "ordinal": 0,
           "span": {
             "start_line": 32,
@@ -495,6 +507,7 @@
           "scope": null,
           "attribute": null,
           "members": [],
+          "module_function": false,
           "ordinal": 0,
           "span": {
             "start_line": 1,
@@ -522,6 +535,7 @@
           "members": [
             "amount"
           ],
+          "module_function": false,
           "ordinal": 0,
           "span": {
             "start_line": 2,
@@ -555,6 +569,7 @@
           "members": [
             "note"
           ],
+          "module_function": false,
           "ordinal": 0,
           "span": {
             "start_line": 4,
@@ -618,6 +633,7 @@
           "members": [
             "each_line"
           ],
+          "module_function": false,
           "ordinal": 0,
           "span": {
             "start_line": 6,
@@ -655,6 +671,7 @@
           "members": [
             "broken"
           ],
+          "module_function": false,
           "ordinal": 0,
           "span": {
             "start_line": 10,
@@ -697,24 +714,8 @@
       "status": "ok",
       "reason": null,
       "digest": "xxh3-64:8bb9bdd3c71159e9",
-      "complete": false,
-      "omissions": [
-        {
-          "kind": "module_function",
-          "owner": "Util",
-          "scope": "instance",
-          "name": "helper",
-          "span": {
-            "start_line": 4,
-            "start_column": 2,
-            "end_line": 4,
-            "end_column": 16,
-            "start_offset": 33,
-            "end_offset": 47
-          },
-          "reason": "unsupported_kind"
-        }
-      ],
+      "complete": true,
+      "omissions": [],
       "sites": [
         {
           "key": "lib/util.rb:0-51:0",
@@ -724,6 +725,7 @@
           "scope": null,
           "attribute": null,
           "members": [],
+          "module_function": false,
           "ordinal": 0,
           "span": {
             "start_line": 1,
@@ -742,6 +744,40 @@
           "body_return": null
         },
         {
+          "key": "lib/util.rb:33-47:0",
+          "kind": "method",
+          "name": "helper",
+          "owner": "Util",
+          "scope": "instance",
+          "attribute": null,
+          "members": [
+            "helper"
+          ],
+          "module_function": true,
+          "ordinal": 0,
+          "span": {
+            "start_line": 4,
+            "start_column": 2,
+            "end_line": 4,
+            "end_column": 16,
+            "start_offset": 33,
+            "end_offset": 47
+          },
+          "contract_span": null,
+          "anchor": "4:428d",
+          "visibility": "private",
+          "contract": null,
+          "params": [],
+          "block": null,
+          "body_return": {
+            "state": "typed",
+            "type": "1",
+            "provenance": "inferred",
+            "path": null,
+            "from_site": null
+          }
+        },
+        {
           "key": "lib/util.rb:53-73:0",
           "kind": "method",
           "name": "top_helper",
@@ -751,6 +787,7 @@
           "members": [
             "top_helper"
           ],
+          "module_function": false,
           "ordinal": 0,
           "span": {
             "start_line": 7,
@@ -1330,6 +1367,58 @@
             "provenance": "inferred",
             "path": null,
             "from_site": "lib/shop.rb:364-381:0"
+          }
+        }
+      ]
+    },
+    {
+      "owner": "Util",
+      "scope": "instance",
+      "name": "helper",
+      "kind": "method",
+      "visibility": "private",
+      "sites": [
+        "lib/util.rb:33-47:0"
+      ],
+      "also_defined_at": [],
+      "basis": "single_site",
+      "overloads": [
+        {
+          "rbs": "() -> 1",
+          "params": [],
+          "block": null,
+          "return": {
+            "state": "typed",
+            "type": "1",
+            "provenance": "inferred",
+            "path": null,
+            "from_site": "lib/util.rb:33-47:0"
+          }
+        }
+      ]
+    },
+    {
+      "owner": "Util",
+      "scope": "singleton",
+      "name": "helper",
+      "kind": "method",
+      "visibility": "public",
+      "sites": [
+        "lib/util.rb:33-47:0"
+      ],
+      "also_defined_at": [],
+      "basis": "single_site",
+      "overloads": [
+        {
+          "rbs": "() -> 1",
+          "params": [],
+          "block": null,
+          "return": {
+            "state": "typed",
+            "type": "1",
+            "provenance": "inferred",
+            "path": null,
+            "from_site": "lib/util.rb:33-47:0"
           }
         }
       ]

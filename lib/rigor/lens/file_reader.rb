@@ -22,7 +22,10 @@ module Rigor
       # walk cannot place (under an `if`, a `begin`, a block) leaves that default unknown.
       # A `detached` body stands for code that is not the class body (a block, a method body, a superclass
       # expression, an omitted class): its toggles and named calls stay local and change no site.
-      Body = Struct.new(:current, :uncertain, :detached)
+      # `kind` is :module, :class or :singleton. `module_function` is :off, :on (a bare `module_function` written
+      # directly in a module body covers the later direct defs) or :unknown (the reading Ruby gives and the one
+      # `check`'s tables give could differ, so the later defs are omissions).
+      Body = Struct.new(:current, :uncertain, :detached, :kind, :module_function)
 
       ATTRIBUTE_CALLS = { attr_reader: "reader", attr_writer: "writer", attr_accessor: "accessor" }.freeze
       OMITTED_CALLS = {
@@ -87,7 +90,7 @@ module Rigor
       end
 
       def detached
-        @bodies.push(Body.new("public", false, true))
+        @bodies.push(Body.new("public", false, true, :detached, :off))
         yield
       ensure
         @bodies.pop
@@ -106,9 +109,9 @@ module Rigor
         end
 
         add_site(node, { "kind" => kind, "name" => name, "owner" => nil, "scope" => nil, "attribute" => nil,
-                         "members" => [], "visibility" => nil, "params" => nil, "block" => nil,
-                         "body_return" => nil })
-        walk_body(node.body, nesting + [name], singleton: false)
+                         "members" => [], "module_function" => false, "visibility" => nil, "params" => nil,
+                         "block" => nil, "body_return" => nil })
+        walk_body(node.body, nesting + [name], singleton: false, kind: kind.to_sym)
       end
 
       # `class << self` directly in a class or module body opens its singleton class. Any other `class << x`, one
@@ -119,31 +122,79 @@ module Rigor
           return detached { walk(node.body, nesting, singleton: singleton, in_block: true) } if node.body
         end
 
-        walk_body(node.body, nesting, singleton: true)
+        walk_body(node.body, nesting, singleton: true, kind: :singleton)
       end
 
-      # A class body's statements, tracking the running visibility and `module_function`. A bare `module_function`
-      # makes every later `def` of the body a method on both sides: one site, two members, which revision 1 does
-      # not model.
-      def walk_body(body, nesting, singleton:)
+      # A class body's statements, tracking the running visibility and `module_function`.
+      def walk_body(body, nesting, singleton:, kind:)
         return if body.nil?
 
-        @bodies.push(Body.new("public", false, false))
+        @bodies.push(Body.new("public", false, false, kind, :off))
         statements = body.is_a?(Prism::StatementsNode) ? body.body : [body]
-        module_function_on = false
-        statements.each do |child|
-          if module_function_on && child.is_a?(Prism::DefNode)
-            omit("module_function", child.name.to_s, child, owner: nesting.last, singleton: singleton)
-            next
-          end
-          module_function_on = true if bare_call?(child, :module_function)
-          next if toggle_visibility?(child)
-
-          visibility_call(child, nesting, singleton, direct: true) if visibility_call?(child)
-          walk(child, nesting, singleton: singleton, in_block: false)
-        end
+        statements.each { |child| walk_body_statement(child, nesting, singleton) }
       ensure
         @bodies.pop if body
+      end
+
+      def walk_body_statement(child, nesting, singleton)
+        return bare_module_function if bare_call?(child, :module_function)
+        return end_module_function if toggle_visibility?(child)
+        return named_module_function(child, nesting, singleton) if named_module_function?(child)
+
+        visibility_call(child, nesting, singleton, direct: true) if visibility_call?(child)
+        @direct_statement = child
+        walk(child, nesting, singleton: singleton, in_block: false)
+      end
+
+      # A bare `module_function` directly in a module body turns the mode on for the later direct defs. In a class
+      # (where Ruby raises) or after the mode was left unknown, the later defs stay omissions.
+      def bare_module_function
+        body = @bodies.last
+        body.module_function = body.kind == :module && body.module_function != :unknown ? :on : :unknown
+      end
+
+      # A bare `private` / `public` / `protected` ends the mode in Ruby, but `check`'s tables keep it on. The two
+      # readings differ for the later defs, so they are left as omissions.
+      def end_module_function
+        body = @bodies.last
+        body.module_function = :unknown if body.module_function == :on
+      end
+
+      def named_module_function?(child)
+        child.is_a?(Prism::CallNode) && child.receiver.nil? && child.name == :module_function && child.arguments
+      end
+
+      # `module_function :a`, `module_function %i[a b]` or `module_function def a` directly in a module body makes
+      # the instance methods it names, already defined above it, module functions. A name with no such def above
+      # it, a non-literal argument, or a call in a class stays an omission.
+      def named_module_function(node, nesting, singleton)
+        owner = nesting.last
+        node.arguments.arguments.each do |argument|
+          if argument.is_a?(Prism::DefNode) && argument.receiver.nil? && @bodies.last.kind == :module && !singleton
+            read_def(argument, nesting, singleton, false, module_function: true)
+            next
+          end
+
+          names = @bodies.last.kind == :module && !singleton ? argument_names(argument) : nil
+          unmatched = if names.nil?
+                        [first_argument_name(node)]
+                      else
+                        names.reject do |name|
+                          marked_module_function?(owner, name)
+                        end
+                      end
+          unmatched.each { |name| omit("module_function", name, node, owner: owner, singleton: singleton) }
+        end
+      end
+
+      # Marks the instance method sites defined above as module functions; false when there is none.
+      def marked_module_function?(owner, name)
+        matching = @sites.select do |site|
+          data = site.data
+          data["kind"] == "method" && data["owner"] == owner && data["scope"] == "instance" && data["name"] == name
+        end
+        matching.each { |site| site.data.merge!("module_function" => true, "visibility" => "private") }
+        !matching.empty?
       end
 
       # A bare `private` / `protected` / `public` written directly in the body sets the default for later defs.
@@ -159,7 +210,7 @@ module Rigor
         if node.receiver.nil? && ATTRIBUTE_CALLS.key?(node.name)
           read_attribute(node, nesting, singleton, in_block)
         elsif node.receiver.nil? && OMITTED_CALLS.key?(node.name)
-          return if bare_call?(node, :module_function)
+          return unplaced_module_function if bare_call?(node, :module_function)
 
           omit(OMITTED_CALLS.fetch(node.name), first_argument_name(node), node,
                owner: node.name == :refine ? nil : nesting.last, singleton: singleton)
@@ -303,23 +354,46 @@ module Rigor
         walk(node.value, nesting, singleton: false, in_block: true)
       end
 
-      def read_def(node, nesting, singleton, in_block)
+      # A bare `module_function` the walk cannot place in the body's statement list (under an `if`, say) leaves the
+      # mode unknown for the body's later defs.
+      def unplaced_module_function
+        body = @bodies.last
+        body.module_function = :unknown if body && !body.detached
+      end
+
+      def read_def(node, nesting, singleton, in_block, module_function: false)
         scope = def_scope(node, nesting, singleton)
+        module_function ||= module_function_state(node, singleton)
         if in_block || scope.nil?
           omit("method", node.name.to_s, node)
+        elsif module_function.nil?
+          omit("module_function", node.name.to_s, node, owner: nesting.last, singleton: singleton)
         else
-          owner = nesting.last || "Object"
-          data = { "kind" => "method", "name" => node.name.to_s, "owner" => owner, "scope" => scope.to_s,
-                   "attribute" => nil, "members" => [node.name.to_s],
-                   "visibility" => visibility(node, nesting, scope) }
-          params, block, = Parameters.read(node.parameters, yields: Parameters.yields?(node.body))
-          shape_params, shape_block = Parameters.shape(params, block)
-          data.merge!("params" => shape_params, "block" => shape_block,
-                      "body_return" => body_return(node, owner, scope))
-          add_site(node, data)
+          add_site(node, method_site(node, nesting, scope, module_function))
         end
         # A declaration inside a method body runs only when the method does: not modelled.
         detached { walk(node.body, nesting, singleton: singleton, in_block: true) } if node.body
+      end
+
+      def method_site(node, nesting, scope, module_function)
+        owner = nesting.last || "Object"
+        params, block, = Parameters.read(node.parameters, yields: Parameters.yields?(node.body))
+        shape_params, shape_block = Parameters.shape(params, block)
+        { "kind" => "method", "name" => node.name.to_s, "owner" => owner, "scope" => scope.to_s, "attribute" => nil,
+          "members" => [node.name.to_s], "module_function" => module_function,
+          "visibility" => module_function ? "private" : visibility(node, nesting, scope),
+          "params" => shape_params, "block" => shape_block, "body_return" => body_return(node, owner, scope) }
+      end
+
+      # Whether a receiverless instance `def` is a module function: true when the body's mode is on and the def is
+      # one of the body's direct statements, nil when the mode is on or unknown but Rigor cannot say (a def nested
+      # in the body, or after the mode became unknown), false otherwise.
+      def module_function_state(node, singleton)
+        body = @bodies.last
+        return false if body.nil? || body.detached || singleton || node.receiver
+        return false if body.module_function == :off
+
+        body.module_function == :on && node.equal?(@direct_statement) ? true : nil
       end
 
       def read_attribute(node, nesting, singleton, in_block)
@@ -335,6 +409,7 @@ module Rigor
         names.each_with_index do |name, ordinal|
           add_site(node, { "kind" => "attribute", "name" => name, "owner" => owner, "scope" => scope.to_s,
                            "attribute" => attribute, "members" => attribute_members(name, attribute),
+                           "module_function" => false,
                            "visibility" => visibility(node, nesting, scope),
                            "params" => nil, "block" => nil, "body_return" => nil }, ordinal: ordinal)
         end

@@ -140,6 +140,53 @@ end
     end
   end
 
+  describe "module_function" do
+    let(:source) do
+      <<~RUBY
+        module U
+          def before = 0
+          module_function
+          def a = 1
+          def b(x) = x
+          private
+          def c = 2
+        end
+        module V
+          def x = 1
+          def y = 2
+          module_function :x
+          module_function def z = 3
+          module_function :missing
+        end
+        class C
+          module_function
+          def k = 1
+        end
+        module W
+          if $x
+            module_function
+          end
+          def m = 1
+        end
+      RUBY
+    end
+
+    it "reads a def a module_function covers as one private site that is a module function" do
+      rows = sites(source).filter_map do |site|
+        [site["owner"], site["name"], site["module_function"], site["visibility"]] if site["kind"] == "method"
+      end
+
+      expect(rows).to contain_exactly(["U", "before", false, "public"], ["U", "a", true, "private"],
+                                      ["U", "b", true, "private"], ["V", "x", true, "private"],
+                                      ["V", "y", false, "public"], ["V", "z", true, "private"])
+    end
+
+    it "leaves the defs it cannot read as module functions as omissions" do
+      expect(omissions(source).filter_map { |kind, name| name if kind == "module_function" })
+        .to contain_exactly("c", "missing", "k", "m")
+    end
+  end
+
   describe "completeness" do
     it "omits what it does not model instead of dropping it" do
       source = <<~RUBY

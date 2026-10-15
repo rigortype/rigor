@@ -25,11 +25,19 @@ module Rigor
       def build
         groups = Hash.new { |hash, key| hash[key] = [] }
         @sites.each do |site|
-          site.data["members"].each { |name| groups[[site.data["owner"], site.data["scope"], name]] << site }
+          Members.scopes_of(site.data).each do |scope|
+            site.data["members"].each { |name| groups[[site.data["owner"], scope, name]] << site }
+          end
         end
         result = groups.sort_by { |key, _| key }.map { |key, sites| member(key, sites) }
         mark_inline_sites
         result
+      end
+
+      # The scopes a site's members live in: a module function (`module_function`) defines a private instance method
+      # and a public singleton copy from one `def`.
+      def self.scopes_of(data)
+        data["module_function"] ? %w[instance singleton] : [data["scope"]]
       end
 
       private
@@ -41,7 +49,7 @@ module Rigor
         omitted = @omissions.count { |omission| [omission["owner"], omission["scope"], omission["name"]] == key }
         single = sites.size == 1 && omitted.zero? && also.empty? ? sites.first : nil
         { "owner" => owner, "scope" => scope, "name" => name, "kind" => member_kind(sites),
-          "visibility" => common_visibility(sites), "sites" => sites.map { |site| site.data["key"] },
+          "visibility" => common_visibility(sites, scope), "sites" => sites.map { |site| site.data["key"] },
           "also_defined_at" => also, "basis" => basis(contract, single),
           "overloads" => overloads(contract, sites.first, name, single) }
       end
@@ -58,8 +66,11 @@ module Rigor
         "contested"
       end
 
-      def common_visibility(sites)
-        values = sites.map { |site| site.data["visibility"] }.uniq
+      # A module function's singleton copy is public; its instance method carries the site's (private) visibility.
+      def common_visibility(sites, scope)
+        values = sites.map do |site|
+          site.data["module_function"] && scope == "singleton" ? "public" : site.data["visibility"]
+        end.uniq
         values.size == 1 ? values.first : nil
       end
 

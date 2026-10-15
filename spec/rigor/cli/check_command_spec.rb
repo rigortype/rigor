@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "fileutils"
 require "json"
 require "stringio"
 require "tmpdir"
@@ -1000,7 +1001,7 @@ RSpec.describe Rigor::CLI::CheckCommand do
     def write_project(disable)
       File.write(".rigor.yml", "paths: [clean.rb]\ndisable: #{disable}\n")
       File.write("clean.rb", "x = 1\n")
-      Dir.mkdir("sig") unless Dir.exist?("sig")
+      FileUtils.mkdir_p("sig")
       File.write("sig/widget.rbs", "class Widget\n  %a{pure}\n  def price: () -> Integer\nend\n")
     end
 

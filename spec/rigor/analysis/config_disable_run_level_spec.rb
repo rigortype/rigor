@@ -134,7 +134,7 @@ RSpec.describe "config `disable:` over run-level rows" do
         File.write("config/locales/en.yml", "en:\n  foo: [\n")
         config = Rigor::Configuration.new(
           Rigor::Configuration::DEFAULTS.merge(
-            "paths" => ["a.rb"], "plugins" => ["rigor-rails-i18n", "rigor-no-such-plugin-1895"],
+            "paths" => ["a.rb"], "plugins" => %w[rigor-rails-i18n rigor-no-such-plugin-1895],
             "disable" => ["load-error"]
           )
         )

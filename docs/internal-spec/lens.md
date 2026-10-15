@@ -129,14 +129,18 @@ One entry per requested target, in request order.
     the body of a class whose superclass expression is `Struct.new(…)` or `Data.define(…)`.
   - A `def` or `attr_*` inside a block, or inside `class << obj` for anything but `self`, is an omission.
   - A class a builder defines (capability `builder`): `Foo = Data.define(:a, …)` and
-    `Foo = Struct.new(:a, …)` (optionally ending with `keyword_init:`), written as a plain constant assignment
-    outside any block or method, with literal field names. It is a `class` site with `builder` set to `data` or
+    `Foo = Struct.new(:a, …)` (optionally ending with `keyword_init:` and no other keyword), written as a plain
+    constant assignment directly in a namespace body (not in a block, a method, another builder's block or
+    `class << self`), with unique symbol field names Ruby accepts (not ending in `=`, `?` or `!`). It is a `class` site with `builder` set to `data` or
     `struct`, spanning the assignment; each field is an `attribute` site spanning its name (`reader` for
-    `Data`, `accessor` for `Struct`, `public`); and the call's block is read as the class body, which Ruby
-    `class_eval`s on the new class. `check`'s discovery keys the fields and the block's defs under the same
-    constant name. Other builder forms stay omissions (`data_class`, `struct_class`): `||=` and other compound
-    writes, a non-literal field list, `Struct.new("Name", …)`, a `&block` argument, and a builder inside a block
-    or a method.
+    `Data`, `accessor` for `Struct`, `public`), which carries no contract comments (`contract_span: null`; its
+    anchor hashes the field's name alone); and the call's block is read as the class body for its methods, which
+    Ruby `class_eval`s on the new class. `check`'s discovery keys these fields and methods under the same constant
+    name. A class, module or constant written inside the block stays with the lexical scope in Ruby, and one
+    inside `class << self` lands on the singleton class, so those are omissions. Other builder forms stay
+    omissions (`data_class`, `struct_class`): `||=` and other compound writes, a non-symbol or non-literal field
+    list (`Struct.new("Name", …)` included), any other keyword argument, a duplicate or rejected field name, a
+    `&block` argument, and a builder inside a block, a method, a builder's block or `class << self`.
   - A module function is a `method` site with `module_function: true` (capability `module_function`): a `def`
     written directly in a module body after a bare `module_function` there. That is the form Ruby and `check`'s
     singleton table read the same way.

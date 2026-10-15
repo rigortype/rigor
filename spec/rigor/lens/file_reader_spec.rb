@@ -243,6 +243,49 @@ end
                           ["attribute", "X::S", "c", "accessor", nil, "public"]])
     end
 
+    # #1927 review: Ruby class_evals the block, so a constant, class or module written there stays with the lexical
+    # scope; a builder under class << self lands on the singleton class.
+    it "omits declarations whose owner the builder block or a singleton body would misname" do
+      source = <<~RUBY
+        module X
+          P = Data.define(:a) do
+            class Inner; def inner_m = 1; end
+            Q = Struct.new(:b)
+            LIMIT = 1
+          end
+          class << self
+            K = Data.define(:k)
+            class Foo; end
+          end
+        end
+      RUBY
+      names = sites(source).map { |site| site["name"] }
+
+      expect(names).to eq(%w[X X::P a])
+      expect(omissions(source).map(&:first)).to include("class", "struct_class", "constant", "data_class")
+    end
+
+    it "models symbol fields only, with keyword_init alone, unique and valid names" do
+      source = <<~RUBY
+        T = Data.define("t")
+        S = Struct.new(:c, "d")
+        O = Struct.new(:o, foo: 1)
+        Dup = Data.define(:a, :a)
+        Bad = Struct.new(:"a=")
+        Ok = Struct.new(:k, keyword_init: true)
+      RUBY
+
+      expect(sites(source).map { |site| site["name"] }).to eq(%w[Ok k])
+    end
+
+    it "reads no contract comments on a field" do
+      source = "P = Data.define(\n  :a, #: Integer\n  :b\n)\n"
+      field = sites(source).find { |site| site["name"] == "a" }
+
+      expect(field).to include("contract_span" => nil)
+      expect(read(source).sites.find { |site| site.data["name"] == "a" }.contract_comments).to be_empty
+    end
+
     it "omits the builder forms it does not model" do
       expect(omissions(source)).to include(%w[struct_class X::N], %w[data_class X::D], %w[data_class X::E],
                                            %w[data_class X::F])

@@ -44,6 +44,13 @@ module Rigor
                    contract_comments: leading + [trailing].compact)
       end
 
+      # The anchor of a declaration that carries no contract comments: its own bytes alone.
+      def bare(start_offset, end_offset, start_line)
+        material = @source.byteslice(start_offset, end_offset - start_offset)
+        Result.new(token: "#{start_line}:#{Hashing::XXH3.anchor_hash(material)}", line: start_line,
+                   contract_comments: [])
+      end
+
       private
 
       # The contract comments among the contiguous comment-only lines directly above `start_line`, in file order,

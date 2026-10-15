@@ -102,7 +102,7 @@ module Rigor
         if node.is_a?(Prism::ClassNode) && node.superclass
           detached { walk(node.superclass, nesting, singleton: false, in_block: true) }
         end
-        if in_block || name.nil?
+        if in_block || name.nil? || constant_scope_unknown?
           omit(kind, name || node.constant_path.slice, node)
           detached { walk(node.body, nesting, singleton: false, in_block: true) } if node.body
           return
@@ -355,7 +355,7 @@ module Rigor
         name = node.respond_to?(:target) ? qualify(nesting, node.target) : qualify_name(nesting, node.name.to_s)
         builder = data_or_struct(node.value)
         fields = builder && builder_fields(node.value, builder)
-        if fields && name && !in_block && plain_write?(node)
+        if fields && name && !in_block && plain_write?(node) && !constant_scope_unknown?
           return read_builder_class(node, name, nesting, builder, fields)
         end
 
@@ -377,30 +377,47 @@ module Rigor
           add_site(field_node, { "kind" => "attribute", "name" => field, "owner" => name, "scope" => "instance",
                                  "attribute" => attribute, "members" => attribute_members(field, attribute),
                                  "module_function" => false, "visibility" => "public", "params" => nil,
-                                 "block" => nil, "body_return" => nil })
+                                 "block" => nil, "body_return" => nil }, contracts: false)
         end
         block = node.value.block
-        walk_body(block.body, nesting + [name], singleton: false, kind: :class) if block&.body
+        walk_body(block.body, nesting + [name], singleton: false, kind: :builder) if block&.body
+      end
+
+      # Whether a constant, class or module written here lands somewhere the nesting does not name: a builder
+      # block, which Ruby `class_eval`s (defs go to the new class, but constants stay with the lexical scope), or a
+      # `class << self` body (constants go to the singleton class). Such a declaration is an omission.
+      def constant_scope_unknown?
+        @bodies.any? { |body| %i[builder singleton].include?(body.kind) }
       end
 
       def plain_write?(node)
         node.is_a?(Prism::ConstantWriteNode) || node.is_a?(Prism::ConstantPathWriteNode)
       end
 
-      # `[[name, node], …]` for a builder call whose fields are all literal, or nil. `Struct.new` may end with
-      # `keyword_init:`; a leading string (`Struct.new("Name", …)`, which defines `Struct::Name`) or a `&block`
-      # argument is not modelled.
+      # `[[name, node], …]` for a builder call whose fields are all symbols, or nil. `Struct.new` may end with
+      # `keyword_init:` alone. Not modelled: a string field (`check`'s discovery reads only symbols, and
+      # `Struct.new("Name", …)` defines `Struct::Name`), a `&block` argument, and a duplicate field or a name Ruby
+      # rejects (`a=`, `a?`, `a!`), which raises at load time.
       def builder_fields(call, builder)
         return nil if call.block.is_a?(Prism::BlockArgumentNode)
 
         arguments = call.arguments&.arguments || []
-        arguments = arguments[0...-1] if builder == :struct && arguments.last.is_a?(Prism::KeywordHashNode)
-        return nil if builder == :struct && arguments.first.is_a?(Prism::StringNode)
-        unless arguments.all? { |argument| argument.is_a?(Prism::SymbolNode) || argument.is_a?(Prism::StringNode) }
-          return nil
-        end
+        arguments = arguments[0...-1] if builder == :struct && keyword_init_only?(arguments.last)
+        return nil unless arguments.all?(Prism::SymbolNode)
 
-        arguments.map { |argument| [argument.unescaped, argument] }
+        names = arguments.map(&:unescaped)
+        return nil if names.uniq.size != names.size || names.any? { |name| name.end_with?("=", "?", "!") }
+
+        names.zip(arguments)
+      end
+
+      def keyword_init_only?(argument)
+        return false unless argument.is_a?(Prism::KeywordHashNode)
+
+        argument.elements.all? do |element|
+          element.is_a?(Prism::AssocNode) && element.key.is_a?(Prism::SymbolNode) &&
+            element.key.unescaped == "keyword_init"
+        end
       end
 
       # A bare `module_function` the walk cannot place in the body's statement list (under an `if`, say) leaves the
@@ -502,10 +519,15 @@ module Rigor
         end
       end
 
-      def add_site(node, data, ordinal: 0)
+      # `contracts: false` (a builder's field) reads no contract comments: a comment there is not an annotation
+      # rbs-inline or `check` reads, so the anchor hashes the field's name alone.
+      def add_site(node, data, ordinal: 0, contracts: true)
         location = node.location
-        anchor = @anchor.for_span(location.start_offset, location.end_offset, location.start_line,
-                                  location.end_line)
+        anchor = if contracts
+                   @anchor.for_span(location.start_offset, location.end_offset, location.start_line, location.end_line)
+                 else
+                   @anchor.bare(location.start_offset, location.end_offset, location.start_line)
+                 end
         key = "#{@path}:#{location.start_offset}-#{location.end_offset}:#{ordinal}"
         tail = { "ordinal" => ordinal, "span" => Lens.span(location),
                  "contract_span" => Lens.contract_span(anchor.contract_comments), "anchor" => anchor.token,

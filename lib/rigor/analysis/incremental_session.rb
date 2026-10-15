@@ -336,8 +336,7 @@ module Rigor
         symbol_pairs = behaviourally_unstable_pairs(changed_pairs, unstable, scan_index) | param_pairs
         base = dependents_base(unstable, symbol_pairs)
         closure = base | changed.to_set | added.to_set |
-                  negative_affected(scan, removed, new_fps, new_class_decls, new_constant_decls, summary) |
-                  singleton_rewrite_affected(unstable)
+                  negative_affected(scan, removed, new_fps, new_class_decls, new_constant_decls, summary)
         closure = param_seed_closure(closure, param_files)
         removed.each { |path| closure |= @dependents[path] || Set.new }
         closure.freeze
@@ -381,13 +380,15 @@ module Rigor
 
       # The dependents contributed by the declaration-unstable changed files and the behaviourally-unstable
       # symbol pairs: the ADR-46 slice-4 symbol-granular fan-out when either is present (ancestry deps of the
-      # unstable files + symbol deps of the changed pairs), else the coarse file-level fan-out.
+      # unstable files + symbol deps of the changed pairs), else the coarse file-level fan-out; plus the readers of
+      # the constants an unstable file rewrote from outside their bodies ({#singleton_rewrite_affected}).
       def dependents_base(unstable, symbol_pairs)
-        if symbol_pairs.any? || unstable.any? { |f| @ancestry_dependents[f] }
-          Incremental.affected_with_symbols(unstable, symbol_pairs, @symbol_dependents, @ancestry_dependents)
-        else
-          Incremental.affected(unstable, @dependents)
-        end
+        base = if symbol_pairs.any? || unstable.any? { |f| @ancestry_dependents[f] }
+                 Incremental.affected_with_symbols(unstable, symbol_pairs, @symbol_dependents, @ancestry_dependents)
+               else
+                 Incremental.affected(unstable, @dependents)
+               end
+        base | singleton_rewrite_affected(unstable)
       end
 
       # ADR-67 WD6c lift — the fresh whole-project inferred-param table for this recheck ({} when the gate

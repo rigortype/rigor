@@ -79,9 +79,9 @@ RSpec.describe "singleton_class calls with literal names (#1906)", type: :runner
     RUBY
   end
 
-  # A guard: each of these already declined before #1906. Ruby 4.0.5 raises `ArgumentError` on every call but
-  # `K2.own(1, 2)`, which the computed `define_method` answers with `[1, 2]`; the walk cannot tell which.
-  it "keeps the singleton side unreadable for a computed name or another surface call" do
+  # Each of these already declined before #1906. Ruby 4.0.5 raises `ArgumentError` on every call but `K2.own(1, 2)`,
+  # which the computed `define_method` answers with `[1, 2]`; the walk cannot tell which.
+  it "keeps the singleton side unreadable for a computed name" do
     expect(arity_rows("app.rb" => <<~RUBY)).to eq([])
       class K
         def self.own(a) = a
@@ -98,6 +98,15 @@ RSpec.describe "singleton_class calls with literal names (#1906)", type: :runner
         args = %i[o2 own]
         singleton_class.alias_method(*args)
       end
+      K.own(1, 2)
+      K2.own(1, 2)
+      K3.own(1, 2)
+    RUBY
+  end
+
+  # A guard: both declined before #1906 and no change here reaches them. Ruby 4.0.5 raises `ArgumentError` on both.
+  it "keeps the singleton side unreadable for another surface call" do
+    expect(arity_rows("app.rb" => <<~RUBY)).to eq([])
       class L
         def self.own(a) = a
         singleton_class.class_eval { def x = 1 }
@@ -106,9 +115,6 @@ RSpec.describe "singleton_class calls with literal names (#1906)", type: :runner
         def self.own(a) = a
         singleton_class.send(:alias_method, :o2, :own)
       end
-      K.own(1, 2)
-      K2.own(1, 2)
-      K3.own(1, 2)
       L.own(1, 2)
       L2.own(1, 2)
     RUBY

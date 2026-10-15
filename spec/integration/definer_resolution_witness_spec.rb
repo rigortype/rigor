@@ -852,23 +852,14 @@ RSpec.describe Rigor::Inference::DefinerResolution do # rubocop:disable RSpec/Sp
       end
 
       # Closed by #1752: a surface call on `singleton_class` (`class_eval`) leaves the singleton side unpositioned, so
-      # the read declines instead of answering the wrong body. Since #1906 an `alias_method` with literal names makes
-      # only the name it rewrites opaque and contested, which declines the same read.
+      # the read declines instead of answering the wrong body. Since #1906 an `alias_method` or `define_method` whose
+      # names are literals (Strings included) makes only the name it rewrites opaque and contested, which declines
+      # the same read.
       {
         "`singleton_class.class_eval { def x }`" =>
           "class C; def self.x = :own; singleton_class.class_eval { def x = :late }; end",
         "a singleton `alias_method`" =>
-          "class C; def self.late = :late; def self.x = :own; singleton_class.alias_method :x, :late; end"
-      }.each do |label, source|
-        it "declines an own def read past #{label} (wrong body: Ruby runs the later definition)" do
-          expect(ruby_singleton("#{source}\n", "C", :x)).to eq([%w[#<Class:C>], "#<Class:C>", ":late"])
-          expect(singleton(scope_for("#{source}\n"), "C", :x)).to eq(:unknown)
-        end
-      end
-
-      # Issue #1906 — a `singleton_class.define_method` or `alias_method` spelling its names as literals (Strings
-      # included) rewrites only those names: the read declines on the name it rewrites.
-      {
+          "class C; def self.late = :late; def self.x = :own; singleton_class.alias_method :x, :late; end",
         "`singleton_class.define_method(:x)`" =>
           "class C; def self.x = :own; singleton_class.define_method(:x) { :late }; end",
         "a singleton `alias_method` spelled with Strings" =>

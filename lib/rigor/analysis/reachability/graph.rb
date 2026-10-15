@@ -50,11 +50,31 @@ module Rigor
           return [nil] if receiver.nil?
 
           local = @shadows[use.path]
+          runtime = use.receiver_open ? runtime_targets(receiver, name, use.inherit, local) : []
           own = declared_member(receiver, name, local)
-          return [own] if own
-          return [] unless use.inherit
+          return [own, *runtime].uniq if own
+          return runtime unless use.inherit
 
-          plausible_ancestors(receiver).filter_map { |scope| declared_member(scope, name, local) }.uniq + [nil]
+          (plausible_ancestors(receiver).filter_map { |scope| declared_member(scope, name, local) } + runtime)
+            .uniq + [nil]
+        end
+
+        # The declarations a descendant of `receiver` holding `name` adds (#1878): a `self` standing for the
+        # enclosing declaration is whichever subclass, includer, prepender or extender the method runs on, and
+        # Ruby looks the name up there first. Each descendant is searched with its own ancestors unless the call
+        # passes `inherit = false`. The descendants are over-approximated as {#plausible_ancestors} is.
+        def runtime_targets(receiver, name, inherit, local)
+          descendants_of(receiver).flat_map do |descendant|
+            scopes = inherit ? [descendant, *plausible_ancestors(descendant)] : [descendant]
+            scopes.filter_map { |scope| declared_member(scope, name, local) }
+          end.uniq
+        end
+
+        def descendants_of(fqn)
+          @plausible_descendants ||= @by_fqn.keys.each_with_object(Hash.new { |h, k| h[k] = [] }) do |declared, out|
+            plausible_ancestors(declared).each { |ancestor| out[ancestor] << declared }
+          end
+          @plausible_descendants.fetch(fqn, [])
         end
 
         # `scope::name`, or the longest declared prefix of it, when one is declared.

@@ -732,6 +732,22 @@ RSpec.describe Rigor::Analysis::Reachability do
         expect(found).to eq(%w[InnerMix Mid Unrelated Unrelated::X])
       end
 
+      it "reaches the runtime receiver's constant as well as the enclosing declaration's own" do
+        found = dead({ "lib/a.rb" => "class Base\n  class Both; end\n  def self.x = const_get(:Both)\nend\n" \
+                                     "class Sub < Base\n  class Both; end\nend\n",
+                       "lib/main.rb" => "Base.x\n" })
+        expect(found).to eq(%w[Unrelated Unrelated::X])
+      end
+
+      it "searches a descendant's own mixins unless inherit is false" do
+        fixture = lambda do |args|
+          { "lib/a.rb" => "module Mix\n  class Shared; end\nend\nclass Base\n  def self.x = const_get(:Shared#{args})\n" \
+                          "end\nclass Sub < Base\n  include Mix\nend\n", "lib/main.rb" => "Base.x\n" }
+        end
+        expect(dead(fixture.call(""))).to eq(%w[Sub Unrelated Unrelated::X])
+        expect(dead(fixture.call(", false"))).to include("Mix::Shared")
+      end
+
       it "reaches the subclass's constant with inherit = false and with a String name" do
         found = dead({ "lib/a.rb" => "class Base\n  def self.x = const_get(\"X1\", false)\nend\n" \
                                      "class Sub < Base\n  class X1; end\nend\n",
@@ -791,6 +807,19 @@ RSpec.describe Rigor::Analysis::Reachability do
           end
         RUBY
         expect(found).to eq(%w[Other::Sym Unrelated Unrelated::E1])
+      end
+
+      it "stops reading the eval receiver inside a def in the block" do
+        found = report_for({ "lib/a.rb" => <<~RUBY, "lib/main.rb" => "Driver\n" }).candidates.map(&:fqn)
+          class Other
+            class Z; end
+          end
+          class Driver
+            class Z; end
+            Other.class_eval { def m = const_get(:Z) }
+          end
+        RUBY
+        expect(found).to eq(%w[Other::Z])
       end
 
       it "reads an inherit = false literal at the eval receiver" do

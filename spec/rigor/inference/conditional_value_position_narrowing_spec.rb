@@ -150,4 +150,17 @@ RSpec.describe "conditional narrowing across spellings and positions" do
         .to eq({ statement: ":inf | :no | finite-float", value: ":inf | :no | finite-float" })
     end
   end
+
+  # Issue #1495 — a `case` without a subject is an `if` / `elsif` chain: each arm reads its conditions' edges.
+  describe "a `case` without a subject" do
+    it "narrows the `else` by the falsey edge of every condition" do
+      expect(types_of("case; when s.nil? then :no; else s end"))
+        .to eq({ statement: ":no | String", value: ":no | String" })
+    end
+
+    it "narrows a clause by the truthy edge of its condition" do
+      expect(types_of("case; when s then s; else :no end"))
+        .to eq({ statement: ":no | String", value: ":no | String" })
+    end
+  end
 end

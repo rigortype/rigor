@@ -1152,6 +1152,21 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  # Issue #1495 — a `case` without a subject narrows as the `if` / `elsif` chain it is.
+  describe "fixtures/subjectless_case_narrowing.rb — a subjectless `case` narrows by its `when` conditions" do
+    let(:harness) { harness_for("subjectless_case_narrowing") }
+
+    it "types each clause, the `else` and the value under the conditions' edges" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+
+    it "reports a possible nil receiver only where no condition rules `nil` out" do
+      nil_receivers = harness.diagnostics.select { |d| d.rule == "call.possible-nil-receiver" }
+      expect(nil_receivers.map(&:line)).to eq(marked_lines(harness, "# GENUINE-NIL"))
+    end
+  end
+
   describe "fixtures/regex_global_narrowing.rb — C1 regex match-data global narrowing" do
     let(:harness) { harness_for("regex_global_narrowing") }
 

@@ -3864,7 +3864,7 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
     end
 
     it "forgets `$_` where a `case` clause's tests may set it, and in every later operand of a reader" do
-      ["case\nwhen gets then 1\nelse $_\nend", "case x\nwhen $stdin.gets then 1\nend\n$_",
+      ["case x\nwhen $stdin.gets then 1\nend\n$_",
        "case x\nin Integer if gets then 1\nelse $_\nend", "bar(gets, $_)", "[gets, $_]", "gets.to_s + $_",
        "show(gets, xs.map { $_ })", "h = { a: gets, b: [1].map { $_ } }", "puts(foo(gets) ? $_ : 0)"].each do |body|
         reads = indexed_last_line_reads("def m(x, xs)\n  if $stdin.gets\n#{body}\n  end\nend\n")
@@ -3872,6 +3872,10 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
         expect(reads).not_to be_empty, body
       end
       expect(indexed_last_line_reads("def m\n  if $stdin.gets\n    [$_, 1]\n  end\nend\n")).to eq([string_t])
+      # Issue #1495 — a `case` without a subject tests its `when gets` as `if gets` does, so the clause reads the line
+      # the condition read and the `else` the `nil` it returned.
+      expect(indexed_last_line_reads("def m\n  if $stdin.gets\ncase\nwhen gets then $_\nelse $_\nend\n  end\nend\n"))
+        .to eq([string_t, Rigor::Type::Combinator.constant_of(nil)])
       # A statement list, a loop or a conditional runs its parts in order, so a read before the reader keeps it.
       expect(indexed_last_line_reads("def m(ok)\n  if $stdin.gets\n    a = $_\n    b = gets if ok\n  end\nend\n"))
         .to eq([string_t])

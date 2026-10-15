@@ -10561,6 +10561,10 @@ module Rigor
           propagate_if_branches(node, table, current_scope)
         when Prism::UnlessNode
           propagate_unless_branches(node, table, current_scope)
+        when Prism::CaseNode
+          if node.predicate then propagate_children(node, table, current_scope)
+          else propagate_subjectless_case(node, table, current_scope)
+          end
         when Prism::BlockNode, Prism::LambdaNode
           # An entered block is recorded with its entry scope, parameters bound. An entered `->` is recorded with
           # the ENCLOSING scope ({StatementEvaluator#eval_lambda} enters only its body), so its parameter list
@@ -10795,6 +10799,23 @@ module Rigor
         propagate(node.predicate, table, current_scope) if node.predicate
         propagate(node.statements, table, falsey_scope) if node.statements
         propagate(node.else_clause, table, truthy_scope) if node.else_clause
+      end
+
+      # Issue #1495 — a `case` without a subject the evaluator did not enter (`[case; when x.nil? then 0; else x.size
+      # end]`) narrows as {StatementEvaluator#subjectless_when_scopes} does: each condition under the falsey edges of
+      # the conditions before it, each clause under the join of its conditions' truthy edges, and the `else` under the
+      # last falsey edge.
+      def propagate_subjectless_case(node, table, current_scope)
+        falsey = current_scope
+        node.conditions.each do |when_node|
+          truthy_edges = when_node.conditions.map do |condition|
+            propagate(condition, table, falsey)
+            truthy, falsey = Narrowing.predicate_scopes(condition, falsey)
+            truthy
+          end
+          propagate(when_node, table, truthy_edges.reduce(:join))
+        end
+        propagate(node.else_clause, table, falsey) if node.else_clause
       end
     end
   end

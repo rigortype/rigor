@@ -65,9 +65,11 @@ module Rigor
       #   probe must never turn a servable run into a crash.
       def serve(paths)
         files = PathExpansion.ruby_files(paths, @configuration.exclude_patterns, base: @configuration.exclude_base)
-        key = RunCacheKey.descriptor(
-          configuration: @configuration, files: files, explain: @explain,
-          rbs_config_entries: RunCacheKey.libraries_config_entries(@configuration)
+        key = RunCacheKey.with_roots(
+          RunCacheKey.descriptor(
+            configuration: @configuration, files: files, explain: @explain,
+            rbs_config_entries: RunCacheKey.libraries_config_entries(@configuration)
+          ), paths
         )
         return nil if key.nil?
 

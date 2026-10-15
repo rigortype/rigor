@@ -109,6 +109,29 @@ module Rigor
         nil
       end
 
+      # #1559 — the run-result key's analysis ROOTS, as the run was given them. The `paths` slot holds only the
+      # files the roots expand to, so `check lib extra` with `extra` missing and `check lib` shared a key while
+      # only the first prints `extra:1:1: warning: no such file or directory (skipped)`, which changes the exit
+      # code under `--fail-on=warning`. The roots are kept in the order and spelling written, not normalised: a
+      # missing root is reported as written (`./extra` is not `extra`), and the order of the roots is the order
+      # the diagnostics come out in, so two runs that differ only in either are two slots (a forgone hit, never a
+      # wrong one).
+      #
+      # Added to the DIAGNOSTICS key only. The ADR-103 effects sidecar derives its identity from {#descriptor}
+      # without it: the effect table is a function of the analysed files, and no path-error row reaches it.
+      # The `--incremental` slot builds its own, normalised, roots entry ({IncrementalRunSlot}).
+      #
+      # @param descriptor — a {#descriptor} result (nil passes through, so a disabled cache stays disabled).
+      def with_roots(descriptor, roots)
+        return nil if descriptor.nil?
+
+        entry = config_entry("roots", Marshal.dump(Array(roots).map(&:to_s)))
+        Cache::Descriptor.new(
+          gems: descriptor.gems, dependencies: descriptor.dependencies, plugins: descriptor.plugins,
+          configs: descriptor.configs + [entry]
+        )
+      end
+
       # Issue #285 — the `engine` slot above pins the engine by VERSION, which identifies the source only
       # for a released gem. A checkout (a contributor's, or a `bundle add rigor, github:` clone) gets one
       # extra slot carrying a digest of the engine's own source, so editing `lib/rigor/inference/*.rb` no

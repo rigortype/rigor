@@ -1304,6 +1304,22 @@ union logic and never the persisted snapshot. The cross-process oracle that does
 is `spec/rigor/analysis/incremental_session_spec.rb` — two `Cache::Store`s over one
 snapshot directory, a `.rb` edit between them, compared against a `--no-cache` full run.
 
+### The run-result key's analysis roots (ADR-45, #1559)
+
+The plain `analysis.run-diagnostics` key (`RunCacheKey.descriptor`) names the analysed files
+(`paths`), not the roots they expanded from, and a root that contributes no file still
+changes the printed rows: `rigor check lib extra` with `extra` missing prints
+`extra:1:1: warning: no such file or directory (skipped)` and `rigor check lib` does not.
+`RunCacheKey.with_roots` therefore adds a `roots` config entry over the roots as the run was
+given them, in order and as spelled (`Runner#expand_paths` carries them as `:roots`), to the
+diagnostics key, on both readers: the runner's slot and the engine-free `RunCacheProbe`.
+Unlike the `--incremental` slot's `incremental.roots` entry below, they are neither made
+absolute nor sorted, so a reordered or respelled root set (`extra lib`, `./lib`, `lib/`, an
+absolute path) is a slot of its own: a forgone hit, never another run's answer. The entry is
+not part of `RunCacheKey.descriptor`, so the `--incremental` key built on it and the
+ADR-103 effects sidecar identity are unchanged. A new key entry is a new slot, not a schema
+change: entries written before it are simply never read again.
+
 ### The run-result slot (ADR-45 WD2)
 
 After every run whose snapshot it persists, `IncrementalSession#run_incremental`

@@ -250,8 +250,8 @@ the library list without `rbs.virtual_rbs`, no `template-units` slot,
 `analysis.incremental-run-diagnostics`. The roots are not implied by the
 files: `--incremental lib extra` with `extra` missing analyses what
 `--incremental lib` analyses, and only the first reports `extra` missing
-(the plain key has the same gap, #1559). The key holds them normalised to
-absolute paths and sorted (`lib`, `./lib` and `lib/` are one root there),
+(the plain key had the same gap, closed by #1559: it holds the roots as
+written). The key holds them normalised to absolute paths and sorted (`lib`, `./lib` and `lib/` are one root there),
 so a run that reorders them still finds the previous slot's chain, as the
 snapshot fingerprint, which sorts them too, still restores, and a respelled
 run replaces the slot rather than adding one beside it. The entry keeps them as the run was given them, and is served only to a

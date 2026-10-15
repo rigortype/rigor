@@ -845,31 +845,51 @@ module Rigor
           worker_count = [@workers, files.size].min
           slices = files.each_slice((files.size.to_f / worker_count).ceil).to_a
           results_by_path = {}
+          # Issue #1900 — each surviving child's refusal drain by slice index, and each re-analysed file's by
+          # path, merged below in file order so the first refused path is the one `--workers 0` names.
+          refusals_by_slice = {}
+          refusals_by_path = {}
 
           degraded = Dir.mktmpdir("rigor-fork-pool") do |tmpdir|
             children = slices.each_with_index.map do |slice, index|
               out_path = File.join(tmpdir, "worker-#{index}")
               { pid: fork { run_fork_worker(session, slice, out_path) },
-                slice: slice, out_path: out_path }
+                slice: slice, out_path: out_path, index: index }
             end
-            collect_fork_results(children, results_by_path)
+            collect_fork_results(children, results_by_path, refusals_by_slice: refusals_by_slice)
           end
 
           unless degraded.empty?
-            degraded.each { |path| results_by_path[path] = session.analyze(path) }
+            degraded.each do |path|
+              results_by_path[path] = session.analyze(path)
+              refusals_by_path[path] = session.drain_trust_refusals
+            end
             merge_worker_reporters(session.drain_reporters)
             # The degraded slice ran on the parent session, so a disclosure it registered lives there.
             merge_run_disclosures(session.drain_run_disclosures)
-            merge_trust_refusals(session.drain_trust_refusals)
             # The degraded slice was re-analysed on the parent session, so its dependency records live there,
             # not in a child payload — fold them in alongside the successful children's.
             @collected_dependencies.merge!(session.drain_dependencies) if @record_dependencies
             @collected_effects.merge!(session.drain_effects) if @record_effects
           end
 
+          merge_slice_refusals(slices, refusals_by_slice, refusals_by_path)
           diagnostics = Array(session.prepare_diagnostics) +
                         files.flat_map { |path| results_by_path.fetch(path, []) }
           degraded.empty? ? diagnostics : diagnostics.unshift(pool_degraded_diagnostic(degraded.size, "fork"))
+        end
+
+        # Issue #1900 — a surviving child's drain covers its whole slice; a degraded slice was re-analysed on
+        # the parent and drained file by file. Slices are contiguous runs of `files`, so walking them in index
+        # order merges every refusal in the order the sequential run made it.
+        def merge_slice_refusals(slices, refusals_by_slice, refusals_by_path)
+          slices.each_with_index do |slice, index|
+            if refusals_by_slice.key?(index)
+              merge_trust_refusals(refusals_by_slice[index])
+            else
+              slice.each { |path| merge_trust_refusals(refusals_by_path[path]) }
+            end
+          end
         end
 
         # Child-process body for {#analyze_files_in_fork_pool}. Analyses the slice with the
@@ -911,7 +931,9 @@ module Rigor
 
         # Waits for every forked child, merges each successful payload into `results_by_path`, and returns
         # the file paths whose worker exited abnormally (for in-process degrade).
-        def collect_fork_results(children, results_by_path)
+        # @param refusals_by_slice — issue #1900 — receives each successful payload's trust-refusal drain
+        #   under the child's slice index, for the caller to merge in file order; nil merges it at once.
+        def collect_fork_results(children, results_by_path, refusals_by_slice: nil)
           degraded = []
           children.each do |child|
             _, status = Process.waitpid2(child[:pid])
@@ -920,7 +942,8 @@ module Rigor
               results_by_path.merge!(payload.fetch(:results))
               merge_worker_reporters(payload.fetch(:reporters))
               merge_run_disclosures(payload.fetch(:disclosures, []))
-              merge_trust_refusals(payload.fetch(:refusals, []))
+              refusals = payload.fetch(:refusals, [])
+              refusals_by_slice ? refusals_by_slice[child[:index]] = refusals : merge_trust_refusals(refusals)
               @collected_dependencies.merge!(payload.fetch(:dependencies, {})) if @record_dependencies
               @collected_effects.merge!(payload.fetch(:effects, {})) if @record_effects
             else

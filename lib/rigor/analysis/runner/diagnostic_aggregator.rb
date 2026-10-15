@@ -1212,8 +1212,9 @@ module Rigor
           plugin.class.to_s
         end
 
-        # The pooled record first: it holds the run's `#prepare` reads, which `--workers 0` makes before any
-        # file, so its first path is the one a sequential run names.
+        # The coordinator's own record first when it has one: on a pooled run it holds the `#init` reads
+        # (every registry runs `#init`; the workers' drains start after it), which `--workers 0` makes before
+        # `#prepare` and before any file, so its first path is the one a sequential run names.
         def combined_refusal_summary(pooled, plugin)
           local = begin
             plugin.io_boundary.refusal_summary
@@ -1222,7 +1223,7 @@ module Rigor
           end
           return local || pooled if pooled.nil? || local.nil?
 
-          pooled.merge(count: pooled[:count] + local[:count])
+          local.merge(count: local[:count] + pooled[:count])
         end
 
         def plugin_trust_refusal_diagnostic(plugin, summary)

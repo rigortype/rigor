@@ -8,6 +8,7 @@ require_relative "../../inference/synthetic_method_scanner"
 require_relative "../../inference/project_patched_scanner"
 require_relative "../dependency_source_inference"
 require_relative "../project_scan"
+require_relative "../worker_session"
 require_relative "../template_units"
 require_relative "../template_unit_collector"
 
@@ -262,6 +263,9 @@ module Rigor
         # Returns the rows first, then the disclosure records, then the refusals.
         def prepare_throwaway_registry
           registry = load_plugins
+          # Issue #1900 — `#init` already ran (in `load_plugins`) and its refusals are the coordinator-side
+          # registry's to report, so only what `#prepare` refuses from here on is handed back.
+          baseline = WorkerSession.refusal_counts(registry)
           rows = plugin_prepare_diagnostics(registry)
           records = registry.plugins.flat_map do |plugin|
             plugin_id = safe_plugin_id(plugin)
@@ -269,7 +273,7 @@ module Rigor
           rescue StandardError
             []
           end
-          [rows, records, trust_refusals(registry)]
+          [rows, records, trust_refusals(registry, baseline)]
         end
 
         # Issue #1900 — `#prepare` on `plugin_registry` itself, returning its error rows. For the pool
@@ -290,9 +294,14 @@ module Rigor
 
         private
 
-        def trust_refusals(registry)
+        def trust_refusals(registry, baseline)
           registry.plugins.filter_map do |plugin|
-            plugin.io_boundary.refusal_summary&.merge(plugin_id: safe_plugin_id(plugin))
+            summary = plugin.io_boundary.refusal_summary
+            next nil if summary.nil?
+
+            plugin_id = safe_plugin_id(plugin)
+            delta = summary[:count] - baseline.fetch(plugin_id, 0)
+            summary.merge(count: delta, plugin_id: plugin_id) if delta.positive?
           rescue StandardError
             nil
           end

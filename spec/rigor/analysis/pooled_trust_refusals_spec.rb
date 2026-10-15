@@ -23,6 +23,12 @@ RSpec.describe "Trust-policy refusal rows under the worker pool (#1900)" do
           attr_accessor :settings
         end
 
+        # `#init` runs on every registry a run materialises — the coordinator's, the pool's parent session's,
+        # each worker's, a null recheck's throwaway — not only on the one that analyses.
+        def init(_services)
+          read_refused(self.class.settings[:init_read]) if self.class.settings[:init_read]
+        end
+
         def prepare(_services)
           self.class.settings[:prepare_calls] += 1
           read_refused(self.class.settings[:prepare_read]) if self.class.settings[:prepare_read]
@@ -31,8 +37,12 @@ RSpec.describe "Trust-policy refusal rows under the worker pool (#1900)" do
 
         # One refused read per file, each naming its own file, so the reported first path also pins the
         # order the counts were merged in.
+        # `crash_on` kills a fork child (never the parent, which re-analyses the dead child's slice) when it
+        # reaches that file, before the file's read.
         def diagnostics_for_file(path:, scope:, root:) # rubocop:disable Lint/UnusedMethodArgument
-          read_refused("/rigor-refused-#{File.basename(path)}") if self.class.settings[:file_reads]
+          settings = self.class.settings
+          exit!(1) if File.basename(path) == settings[:crash_on] && Process.pid != settings[:parent_pid]
+          read_refused("/rigor-refused-#{File.basename(path)}") if settings[:file_reads]
           []
         end
 
@@ -49,7 +59,8 @@ RSpec.describe "Trust-policy refusal rows under the worker pool (#1900)" do
 
   before do
     Rigor::Plugin.unregister!
-    probe.settings = { prepare_read: nil, file_reads: false, prepare_raises: false, prepare_calls: 0 }
+    probe.settings = { init_read: nil, prepare_read: nil, file_reads: false, prepare_raises: false,
+                       prepare_calls: 0, crash_on: nil, parent_pid: Process.pid }
   end
 
   after { Rigor::Plugin.unregister! }
@@ -96,7 +107,12 @@ RSpec.describe "Trust-policy refusal rows under the worker pool (#1900)" do
     {
       "a refusal in `#prepare` only" => [{ prepare_read: "/etc/hosts" }, 1, "/etc/hosts"],
       "refusals in per-file analysis only" => [{ file_reads: true }, 3, "/rigor-refused-a.rb"],
-      "refusals in both" => [{ prepare_read: "/etc/hosts", file_reads: true }, 4, "/etc/hosts"]
+      "refusals in both" => [{ prepare_read: "/etc/hosts", file_reads: true }, 4, "/etc/hosts"],
+      # The coordinator-side registry reports `#init`'s reads; the workers' drains start after `#init`, so
+      # the reads are neither lost nor counted twice, and the coordinator's path is named first.
+      "a refusal in `#init` only" => [{ init_read: "/etc/shells" }, 1, "/etc/shells"],
+      "refusals in `#init`, `#prepare` and per-file analysis" =>
+        [{ init_read: "/etc/shells", prepare_read: "/etc/hosts", file_reads: true }, 5, "/etc/shells"]
     }.each do |label, (settings, count, first_path)|
       it "reports #{label} exactly as --workers 0 does, counting every refused attempt once" do
         probe.settings.merge!(settings)
@@ -110,6 +126,21 @@ RSpec.describe "Trust-policy refusal rows under the worker pool (#1900)" do
           expect(first_refused_path(sequential.first)).to eq(first_path)
           expect(pooled).to eq(sequential)
         end
+      end
+    end
+
+    # The child holding [a.rb, b.rb] dies on a.rb; the parent re-analyses that slice after the surviving
+    # child (c.rb) has reported. The refusals are merged in file order regardless.
+    it "names the sequential run's first path when a worker's slice is re-analysed in process" do
+      probe.settings.merge!(file_reads: true, crash_on: "a.rb")
+      Dir.mktmpdir do |dir|
+        project(dir)
+        sequential = run(dir, 0)
+        pooled = run(dir, 2)
+
+        expect(pooled.map(&:rule)).to include("pool-degraded")
+        expect(first_refused_path(refusal_rows(sequential).first)).to eq("/rigor-refused-a.rb")
+        expect(refusal_rows(pooled)).to eq(refusal_rows(sequential))
       end
     end
 
@@ -136,11 +167,12 @@ RSpec.describe "Trust-policy refusal rows under the worker pool (#1900)" do
       end
     end
 
-    # A nothing-changed `--incremental` recheck analyses no file, so only the run's `#prepare` reads are
-    # made again: on the coordinator registry sequentially, on a throwaway registry pooled (#1541). Both
-    # report that one refusal; the cold run's per-file refusals are not replayed in either mode.
+    # A nothing-changed recheck through the session API analyses no file, so only the run's `#init` and
+    # `#prepare` reads are made again: both on the coordinator registry sequentially; pooled, `#init` there
+    # and `#prepare` on a throwaway registry (#1541) whose own `#init` is not counted. Both report those two
+    # refusals; the cold run's per-file refusals are not replayed in either mode.
     it "reports the same row on an incremental null recheck" do
-      probe.settings.merge!(prepare_read: "/etc/hosts", file_reads: true)
+      probe.settings.merge!(init_read: "/etc/shells", prepare_read: "/etc/hosts", file_reads: true)
       Dir.mktmpdir do |dir|
         project(dir)
         rechecks = [0, 2].map do |workers|
@@ -154,7 +186,7 @@ RSpec.describe "Trust-policy refusal rows under the worker pool (#1900)" do
         end
 
         expect(rechecks.first.size).to eq(1)
-        expect(read_count(rechecks.first.first)).to eq(1)
+        expect(read_count(rechecks.first.first)).to eq(2)
         expect(rechecks.last).to eq(rechecks.first)
       end
     end

@@ -336,6 +336,25 @@ module Rigor
         end
       end
 
+      # Issue #1900 — `{plugin id => refused-read count}` over `registry`'s boundaries right now: the baseline
+      # a later drain subtracts, so it reports only the refusals made after the baseline was taken.
+      def self.refusal_counts(registry)
+        registry.plugins.to_h do |plugin|
+          summary = begin
+            plugin.io_boundary.refusal_summary
+          rescue StandardError
+            nil
+          end
+          [safe_plugin_id(plugin), summary ? summary[:count] : 0]
+        end
+      end
+
+      def self.safe_plugin_id(plugin)
+        plugin.manifest.id
+      rescue StandardError
+        plugin.class.to_s
+      end
+
       # Issue #1900 — the {Plugin::IoBoundary} trust-policy refusals this session's plugin instances made
       # since the previous drain, one `{plugin_id:, count:, first_path:, nearest_root:}` per plugin that hit
       # any, in registry order. Unlike {#drain_run_disclosures} each drain reports only what is new — the
@@ -347,8 +366,6 @@ module Rigor
       def drain_trust_refusals
         return [] if @plugin_registry.empty?
 
-        # Per plugin id, how much of its boundary's count an earlier drain already reported.
-        @reported_refusal_counts ||= {}
         @plugin_registry.plugins.filter_map do |plugin|
           trust_refusal_delta(plugin)
         rescue StandardError
@@ -414,7 +431,7 @@ module Rigor
         return nil if gem_name.nil? || gem_name.empty?
 
         spec = Gem.loaded_specs[gem_name]
-        spec&.full_gem_path # rigor:disable undefined-method
+        spec&.full_gem_path
       rescue StandardError
         nil
       end
@@ -422,6 +439,10 @@ module Rigor
       def run_plugin_prepare
         return [] if @plugin_registry.empty?
 
+        # Issue #1900 — per plugin id, how much of its boundary's count is already reported. Starts at what
+        # `#init` refused while the registry was materialised: `#init` runs on the coordinator-side registry
+        # too, which reports those reads itself, so counting them here as well would double them.
+        @reported_refusal_counts = self.class.refusal_counts(@plugin_registry)
         @plugin_registry.plugins.flat_map do |plugin|
           plugin.prepare(plugin.services)
           []
@@ -515,7 +536,7 @@ module Rigor
         return nil if summary.nil?
 
         plugin_id = safe_plugin_id(plugin)
-        delta = summary[:count] - @reported_refusal_counts.fetch(plugin_id, 0)
+        delta = summary[:count] - @reported_refusal_counts.fetch(plugin_id, 0) # rigor:disable undefined-method
         return nil unless delta.positive?
 
         @reported_refusal_counts[plugin_id] = summary[:count]

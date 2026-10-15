@@ -854,6 +854,7 @@ module Rigor
           owner = def_owner || qualified_prefix
           collect_initializer_block_ivars(node, owner, default_scope, accumulator, mutated_ivars, init_writes)
           record_attr_writer_ivars(node, owner, accumulator) if ATTR_WRITER_MACROS.include?(node.name)
+          collect_define_method_block_ivars(node, owner, default_scope, accumulator, mutated_ivars)
           false
         else
           walk_ivars_meta_new?(node, qualified_prefix, default_scope, accumulator,
@@ -1063,6 +1064,28 @@ module Rigor
         each_attr_macro_name(node) do |base|
           accumulate_ivar_type(accumulator, class_name, :"@#{base}", Type::Combinator.untyped)
         end
+      end
+
+      # The `define_method` arm of {#walk_class_ivars} (#1768). `define_method(:m) { … }` on the implicit
+      # or `self` receiver installs its block as an instance method of `owner`, and Ruby runs the body on
+      # the instance, so its `@x = …` writes are the instance's ivars exactly as a `def m` body's are —
+      # `DefineMethodBlockSelf` narrows the block's `self` the same way when it is evaluated. Without this
+      # arm an ivar `initialize` sets to `nil` and a `define_method` block sets to a String read as `nil`
+      # in every sibling `def`. The block is typed under the instance `self`, as a def body is. Only the
+      # literal-block form counts: a `define_method(:m, callable)` or `&callable` argument is not walked.
+      # `owner` is empty in a `class << self` body (the call defines a class method there) and in an
+      # anonymous factory body, and the block contributes nothing there. A `define_method` inside a `def`
+      # body is already reached by that body's walk ({#gather_ivar_writes} enters blocks).
+      def collect_define_method_block_ivars(node, owner, default_scope, accumulator, mutated_ivars)
+        return if owner.empty?
+        return unless DefineMethodBlockSelf.define_method_on_lexical_self?(node)
+
+        block = node.block
+        return unless block.is_a?(Prism::BlockNode) && block.body
+
+        class_name = owner.join("::")
+        body_scope = census_body_scope(default_scope, owner, Type::Combinator.nominal_of(class_name))
+        gather_ivar_writes(block.body, body_scope, class_name, accumulator, EMPTY_GUARDED_IVARS, mutated_ivars)
       end
 
       # ADR-38 block-form gate: true when a loaded plugin declares `method_name` a block-form initializer for

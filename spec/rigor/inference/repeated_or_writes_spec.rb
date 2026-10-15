@@ -121,7 +121,7 @@ RSpec.describe Rigor::Inference::RepeatedOrWrites do
     end
 
     it "does not look inside a nested `def` body" do
-      marks, = straight("cache[:k] ||= :e if cond\ndef helper = (@memo[:k] ||= 1)")
+      marks, = straight("@memo[:k] ||= :e if cond\ndef helper = (@memo[:k] ||= 1)")
       expect(marks).to eq([])
     end
   end

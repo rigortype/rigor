@@ -1,0 +1,1 @@
+- **[engine]** A plugin's `plugin_trust.read-refused` row now reports the same count under `--workers N` as under `--workers 0` (it was missing from pooled runs), and the worker pool's sequential fallback now runs plugin `#prepare` instead of analysing with unprepared plugins. ([#1938](https://github.com/rigortype/rigor/pull/1938))

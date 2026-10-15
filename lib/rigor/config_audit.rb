@@ -212,7 +212,7 @@ module Rigor
     private_class_method :disable_token_problem
 
     def self.effective_disable_token?(token)
-      return true if token == "all" || Analysis::CheckRules::PRE_EVAL_RULES.include?(token)
+      return true if token == "all"
 
       !Array(Analysis::CheckRules.resolve_rule_token(token)).empty?
     end

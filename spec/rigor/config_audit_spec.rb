@@ -182,9 +182,11 @@ RSpec.describe Rigor::ConfigAudit do
     end
 
     it "does NOT flag a qualified token for a configured bundled plugin, by gem name or explicit id" do
+      valid = %w[plugin.rails-i18n.load-error plugin.rails-i18n plugin.acme.tools.x plugin.acme.tools]
       config = { "plugins" => ["rigor-rails-i18n", { "gem" => "acme-rigor-1953", "id" => "acme.tools" }],
-                 "disable" => %w[plugin.rails-i18n.load-error plugin.rails-i18n plugin.acme.tools.x plugin.acme.tools] }
-      expect(flagged_tokens(config)).to be_empty
+                 "disable" => valid + ["plugin.shoulda-matchers.unknown-column"] }
+      # The explicit `id:` keeps the check on: the unconfigured plugin's token is still flagged.
+      expect(flagged_tokens(config)).to eq(["plugin.shoulda-matchers.unknown-column"])
     end
 
     it "flags a qualified token for a plugin `plugins:` does not configure" do

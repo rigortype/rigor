@@ -12,7 +12,7 @@ require "rigor-ffi"
 # so `vendor/` (whose files the walk always dropped) is never globbed: a warm run does not re-glob an installed
 # bundle, and a `bundle install` does not invalidate the catalog. The walk must still answer exactly what
 # `Dir.glob("<root>/**/*.rb")` minus the `/vendor/` and `/.git/` paths answered, in the same order.
-RSpec.describe Rigor::Plugin::FFI::Discoverer do
+RSpec.describe "rigor-ffi catalog walk (#1803)" do
   let(:root) { File.realpath(Dir.mktmpdir("rigor-ffi-walk-")) }
   let(:boundary) do
     Rigor::Plugin::IoBoundary.new(policy: Rigor::Plugin::TrustPolicy.new(allowed_read_roots: [root]), plugin_id: "ffi")
@@ -27,7 +27,7 @@ RSpec.describe Rigor::Plugin::FFI::Discoverer do
   end
 
   def walk
-    described_class.new(root: root, io: boundary).send(:ruby_files)
+    Rigor::Plugin::FFI::Discoverer.new(root: root, io: boundary).send(:ruby_files)
   end
 
   # Sorts differently entry by entry than as whole strings (`lib` < `lib-x.rb`, but `lib-x.rb` < `lib/`), holds a
@@ -47,6 +47,9 @@ RSpec.describe Rigor::Plugin::FFI::Discoverer do
       write("lib/a.rb")
       write("vendor/bundle/gems/x/lib/x.rb")
       walk
+    end
+
+    it "is fresh while nothing changed" do
       expect(boundary.cache_descriptor.fresh?).to be(true)
     end
 

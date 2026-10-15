@@ -160,7 +160,8 @@ RSpec.describe "plugin project reads go through the IoBoundary" do
     samples = {
       "File.read(path)" => "File.read", "File::read(path)" => "File.read", "File.readlines(path)" => "File.readlines",
       "File.new(path)" => "File.new", "File.realpath(path)" => "File.realpath", "Dir.new(path)" => "Dir.new",
-      "Dir[pattern]" => "Dir", "FileTest.exist?(path)" => "FileTest.exist?", "Pathname.glob(pattern)" => "Pathname.glob",
+      "Dir[pattern]" => "Dir", "FileTest.exist?(path)" => "FileTest.exist?",
+      "Pathname.glob(pattern)" => "Pathname.glob",
       "Pathname(path).read" => "Pathname().read", "Pathname.new(path).readlines" => "Pathname().readlines",
       "Psych.load_file(path)" => "Psych.load_file", "JSON.load_file(path)" => "JSON.load_file",
       "open(path)" => "open", "Kernel.open(path)" => "Kernel.open"

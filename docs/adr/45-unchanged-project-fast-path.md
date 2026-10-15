@@ -294,10 +294,13 @@ answer was computed by earlier runs. The rows come from three sources:
    globs, which #1558 replays into the boundary whether the producer
    computed or was served. Taken when the run ends: the template files and
    globs (re-analysed every run), and an existence row per analysis root
-   and per `pre_eval:` entry. The plain slot records no existence rows, but
-   the incremental path regenerates its path-error rows every run, so a
-   slot that served one past the edit that retracts it would print what no
-   run of the tree prints. They carry WD1b's bound.
+   and per `pre_eval:` entry. The incremental path regenerates its
+   path-error rows every run, so a slot that served one past the edit that
+   retracts it would print what no run of the tree prints. They carry
+   WD1b's bound. The plain slot records the same rows since #1962: a
+   `:kind` row per analysis root, which also reads a directory replaced by
+   a file as stale, and an existence row per `pre_eval:` entry and per
+   signature root (#1555).
 3. The **chain** the slot's value carries forward. Its baseline part is
    what a full run records for inputs a recheck does NOT re-derive
    (`Runner#baseline_dependency_rows`): the signature tree

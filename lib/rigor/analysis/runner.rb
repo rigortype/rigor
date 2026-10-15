@@ -1386,7 +1386,8 @@ module Rigor
 
       def build_run_dependency_descriptor(expansion, rbs_descriptor)
         entries = analyzed_file_entries(expansion) + discovery_file_entries(expansion) +
-                  pre_eval_file_entries + template_unit_file_entries + rbs_descriptor.files
+                  pre_eval_file_entries + template_unit_file_entries + rbs_descriptor.files +
+                  root_presence_entries(expansion)
         # #979 — the signature ROOTS' listings, one glob row each. `rbs_descriptor.files` covers only the
         # `.rbs` files that existed while the run read them, so without these a signature file written after
         # the run left the slot validating fresh and the warm run answered without it.
@@ -1395,6 +1396,18 @@ module Rigor
         entries.concat(boundary.files)
         globs.concat(boundary.globs).concat(producer_watch_glob_entries)
         Cache::Descriptor.new(files: entries, globs: globs.uniq)
+      end
+
+      # #1962 / #1555 — the rows for paths whose mere presence the run's answer depends on. A kind row per analysis
+      # root: its path errors (`no such file or directory`, `not a Ruby file`) answer to whether it exists and
+      # whether it is a directory or a file, while what a directory root holds is the analysed-file set the key
+      # carries. An existence row per `pre_eval:` entry (`pre-eval.file-not-found`; one that exists has its
+      # `:stat` row from {#pre_eval_file_entries}) and per project signature root, configured or the auto-detected
+      # `sig` (#979's listing rows cover a file appearing under a root that existed, not the root appearing). The
+      # `--incremental` slot records the same existence rows ({#incremental_slot_rows}, {#baseline_dependency_rows}).
+      def root_presence_entries(expansion)
+        expansion.fetch(:roots).uniq.map { |root| Cache::Descriptor::FileEntry.kind(path: root) } +
+          existence_entries(@configuration.pre_eval + signature_root_candidates)
       end
 
       # Every file a plugin read or probed through its `IoBoundary` (#577 / #613), and every directory it listed
@@ -1586,7 +1599,7 @@ module Rigor
           end
         end
       end
-      private :plugin_boundary_rows, :producer_watch_glob_entries, :existence_entries,
+      private :plugin_boundary_rows, :producer_watch_glob_entries, :existence_entries, :root_presence_entries,
               :analysis_reads_attributed?, :signature_root_candidates, :discovery_glob_entries,
               :unanalysed_pre_eval_entries, :signature_rows, :within?
 

@@ -37,8 +37,8 @@ RSpec.describe Rigor::Cache::Descriptor do
       end.to raise_error(ArgumentError, /comparator/)
     end
 
-    it "accepts :digest, :mtime, :exists" do
-      %i[digest mtime exists].each do |c|
+    it "accepts :digest, :mtime, :kind, :exists" do
+      %i[digest mtime kind exists].each do |c|
         entry = described_class::FileEntry.new(path: "a.rb", comparator: c, value: "x")
         expect(entry.comparator).to eq(c)
       end
@@ -452,6 +452,39 @@ RSpec.describe Rigor::Cache::Descriptor do
       FileUtils.mkdir_p(File.dirname(path))
       File.write(path, "A")
       expect(d.fresh?).to be(false)
+    end
+
+    # #1962 — the kind row an analysis root records: a directory, a file, another kind of entry, or nothing.
+    it "keeps FileEntry.kind fresh while the path stays the same kind, stale at each change of kind" do
+      path = File.join(dir, "root")
+      kinds = []
+      check = lambda do
+        entry = described_class::FileEntry.kind(path: path)
+        kinds << entry.value
+        expect(described_class.new(files: [entry]).fresh?).to be(true)
+        entry
+      end
+
+      absent = check.call
+      FileUtils.mkdir_p(path)
+      expect(described_class.new(files: [absent]).fresh?).to be(false)
+      directory = check.call
+      File.write(File.join(path, "n.txt"), "x")
+      expect(described_class.new(files: [directory]).fresh?).to be(true)
+      FileUtils.rm_rf(path)
+      File.write(path, "x")
+      expect(described_class.new(files: [directory]).fresh?).to be(false)
+      file = check.call
+      File.unlink(path)
+      File.mkfifo(path)
+      expect(described_class.new(files: [file]).fresh?).to be(false)
+      other = check.call
+      File.unlink(path)
+      File.symlink(File.join(dir, "nowhere"), path)
+      expect(described_class.new(files: [other]).fresh?).to be(false)
+      check.call
+
+      expect(kinds).to eq(%w[absent directory file other absent])
     end
 
     it "reports absent? only for the absence row, not for a present :exists row or a content row" do

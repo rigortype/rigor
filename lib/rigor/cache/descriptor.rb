@@ -82,7 +82,12 @@ module Rigor
       # an unchanged file would fold as "no possible fact" where a cold walk records one.
       # v18: ADR-119 WD3 — the visibility walk fills `contested_discovered_method_visibilities`; a pre-18 bundle
       # carries it empty, so an unchanged file's conditional visibility would fold as certain.
-      SCHEMA_VERSION = 18
+      # v19: #1555 / #1962 — the run-result dependency descriptor now carries a `:kind` row per analysis root
+      # and an existence row per `pre_eval:` entry and per project signature root (configured, or the
+      # auto-detected `sig`), so a root that appears, vanishes or changes kind invalidates the warm entry. A
+      # pre-19 entry carries none of them and would validate fresh across exactly those edits, so cached
+      # entries must read as misses once and rebuild carrying the rows.
+      SCHEMA_VERSION = 19
 
       # Per-slot entry value objects. Constructors validate enums / required fields and freeze the resulting
       # struct so no caller can mutate after the entry is in a Descriptor.
@@ -96,7 +101,7 @@ module Rigor
         # It MUST NOT be placed in a descriptor used as a cache KEY (its value carries machine-local,
         # per-run-nondeterministic stat data); {RbsDescriptor.build}'s env-cache `files` therefore stay
         # `:digest`, while the {Runner} run-dependency descriptor and plugin {IoBoundary} reads use `:stat`.
-        VALID_COMPARATORS = %i[digest stat mtime exists].freeze
+        VALID_COMPARATORS = %i[digest stat mtime kind exists].freeze
 
         # The two `:exists` values — `File.exist?`'s answer rendered with `to_s`, which is what
         # {Descriptor#file_entry_fresh?} compares the live answer against.
@@ -161,6 +166,31 @@ module Rigor
         # row over it.
         def self.present(path:)
           new(path: path, comparator: :exists, value: PRESENT)
+        end
+
+        # The four `:kind` values, in the order {Analysis::Runner}'s path expansion asks: a directory, a regular
+        # file, something else that exists (a FIFO, a socket), nothing (a missing path or a dangling symlink).
+        # Each predicate follows symlinks, as the expansion's do.
+        KIND_DIRECTORY = "directory"
+        KIND_FILE = "file"
+        KIND_OTHER = "other"
+        KIND_ABSENT = "absent"
+
+        # #1962 — the kind row: fresh while `path` is still the same kind of thing, stale once it appears,
+        # vanishes, or a directory and a file trade places. It is the row for an analysis root, whose
+        # diagnostics (`no such file or directory`, `not a Ruby file`) answer to exactly that and to nothing
+        # else about the path: an existence row would read a directory replaced by a file of the same name as
+        # fresh (ADR-45 WD1b's bound), and the root's contents are the analysed-file set the key already carries.
+        def self.kind(path:)
+          new(path: path, comparator: :kind, value: kind_of(path))
+        end
+
+        def self.kind_of(path)
+          if File.directory?(path) then KIND_DIRECTORY
+          elsif File.file?(path) then KIND_FILE
+          elsif File.exist?(path) then KIND_OTHER
+          else KIND_ABSENT
+          end
         end
 
         # @return whether this row records the path as absent (see {.absent}).
@@ -413,10 +443,11 @@ module Rigor
 
       # File-comparator strictness ordering. `:stat` is strictest (it carries the content digest AND a stat
       # tuple, so it validates content-authoritatively while short-circuiting on an unmoved stat); `:digest` is
-      # deterministic across machines; `:mtime` is cheaper but local; `:exists` is the weakest signal. Ranking
-      # `:stat` and `:digest` apart guarantees a path contributed under both never raises a value {Conflict}
-      # (their `value` strings differ by construction) — the stricter one wins and its value is used.
-      COMPARATOR_STRICTNESS = { stat: 3, digest: 2, mtime: 1, exists: 0 }.freeze
+      # deterministic across machines; `:mtime` is cheaper but local; `:kind` answers what the path is and
+      # `:exists` only whether it is there, the weakest signal. Ranking `:stat` and `:digest` apart guarantees a
+      # path contributed under both never raises a value {Conflict} (their `value` strings differ by
+      # construction) — the stricter one wins and its value is used.
+      COMPARATOR_STRICTNESS = { stat: 4, digest: 3, mtime: 2, kind: 1, exists: 0 }.freeze
       private_constant :COMPARATOR_STRICTNESS
 
       # Composes any number of descriptors into a single descriptor whose slots are the union of the inputs'
@@ -505,6 +536,8 @@ module Rigor
           FileDigest.stat_fresh?(entry.path, entry.value)
         when :mtime
           File.exist?(entry.path) && File.mtime(entry.path).to_i.to_s == entry.value
+        when :kind
+          FileEntry.kind_of(entry.path) == entry.value
         when :exists
           File.exist?(entry.path).to_s == entry.value
         else

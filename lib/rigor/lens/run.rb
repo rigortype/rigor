@@ -18,7 +18,7 @@ module Rigor
     # The check-equivalent computation behind `rigor lens` (docs/internal-spec/lens.md § Computation). The session
     # is the `--incremental` one rooted at the configuration's `paths:`, so it shares the snapshot with
     # `rigor check --incremental`; the targets are forced into the run and read inside it, on the seeded index.
-    class Run
+    class Run # rubocop:disable Metrics/ClassLength
       # One target's answer: `status` is `ok` or a failure reason; the rest is set only for `ok`.
       Target = Data.define(:argument, :path, :absolute, :status, :reason, :reader, :diagnostics, :inputs)
       Outcome = Data.define(:targets, :member_rows, :plugins, :warm)
@@ -127,7 +127,9 @@ module Rigor
                                 spell: speller(scope.environment)).read
         reader.sites.each do |site|
           @site_paths[site.data["key"]] = absolute
-          site.data["members"].each { |name| read_contract(site.data["owner"], site.data["scope"], name, scope) }
+          Members.scopes_of(site.data).product(site.data["members"]).each do |member_scope, name|
+            read_contract(site.data["owner"], member_scope, name, scope)
+          end
         end
         @captured[absolute] = reader
       end

@@ -25,11 +25,19 @@ module Rigor
       def build
         groups = Hash.new { |hash, key| hash[key] = [] }
         @sites.each do |site|
-          site.data["members"].each { |name| groups[[site.data["owner"], site.data["scope"], name]] << site }
+          Members.scopes_of(site.data).each do |scope|
+            site.data["members"].each { |name| groups[[site.data["owner"], scope, name]] << site }
+          end
         end
         result = groups.sort_by { |key, _| key }.map { |key, sites| member(key, sites) }
         mark_inline_sites
         result
+      end
+
+      # The scopes a site's members live in: a module function (`module_function`) defines a private instance method
+      # and a public singleton copy from one `def`.
+      def self.scopes_of(data)
+        data["module_function"] ? %w[instance singleton] : [data["scope"]]
       end
 
       private
@@ -38,12 +46,14 @@ module Rigor
         owner, scope, name = key
         contract = @contracts[key]
         also = @elsewhere.call(owner, scope, name)
-        omitted = @omissions.count { |omission| [omission["owner"], omission["scope"], omission["name"]] == key }
+        omitted = @omissions.count do |omission|
+          [omission["owner"], omission["scope"]] == [owner, scope] && [name, nil].include?(omission["name"])
+        end
         single = sites.size == 1 && omitted.zero? && also.empty? ? sites.first : nil
         { "owner" => owner, "scope" => scope, "name" => name, "kind" => member_kind(sites),
-          "visibility" => common_visibility(sites), "sites" => sites.map { |site| site.data["key"] },
+          "visibility" => common_visibility(sites, scope), "sites" => sites.map { |site| site.data["key"] },
           "also_defined_at" => also, "basis" => basis(contract, single),
-          "overloads" => overloads(contract, sites.first, name, single) }
+          "overloads" => overloads(contract, sites.first, name, single, scope) }
       end
 
       # A member a `def` defines anywhere in the requested files is a method, whatever `attr_*` also names it.
@@ -58,28 +68,32 @@ module Rigor
         "contested"
       end
 
-      def common_visibility(sites)
-        values = sites.map { |site| site.data["visibility"] }.uniq
+      # A module function's singleton copy is public; its instance method carries the site's (private) visibility.
+      def common_visibility(sites, scope)
+        values = sites.map do |site|
+          copy = site.data["module_function"] && scope == "singleton"
+          copy ? site.data["singleton_visibility"] : site.data["visibility"]
+        end.uniq
         values.size == 1 ? values.first : nil
       end
 
       # A contested member without a contract has no overloads: its definitions may differ in arity, and each
       # method site carries its own parameter list.
-      def overloads(contract, site, name, single)
+      def overloads(contract, site, name, single, scope)
         return [] if contract.nil? && single.nil?
 
-        overloads = contract ? contract_overloads(contract, single) : [body_overload(site, name, single)]
+        overloads = contract ? contract_overloads(contract, single, scope) : [body_overload(site, name, single, scope)]
         overloads.map { |overload| overload.merge("rbs" => rbs_unless_unavailable(overload)) }
       end
 
       # A contract's overloads. A defaulted return (`inferred-return`) is inferred as for a member without a
       # contract, and its `untyped` parameters are unknown: Rigor cannot tell an authored `untyped` from a
       # defaulted one.
-      def contract_overloads(contract, single)
+      def contract_overloads(contract, single, scope)
         contract.overloads.map do |overload|
           next overload.except("return_rbs") unless contract.return_inferred
 
-          slot = inferred_return(single)
+          slot = inferred_return(single, scope)
           params = overload["params"]&.map do |param|
             param["type"]["type"] == "untyped" ? param.merge("type" => Slot.unavailable("not_computed")) : param
           end
@@ -92,11 +106,11 @@ module Rigor
 
       # A member with no contract: its parameters as written, each `untyped` with ADR-75's undeclared-parameter
       # cause, and the return from its one body.
-      def body_overload(site, name, single)
+      def body_overload(site, name, single, scope)
         return attribute_overload(name, single) if site.data["kind"] == "attribute"
 
         params, block, head = Parameters.read(site.node.parameters, yields: Parameters.yields?(site.node.body))
-        slot = inferred_return(single)
+        slot = inferred_return(single, scope)
         block_rbs = block ? " ?{ (?) -> untyped }" : ""
         { "rbs" => "#{head}#{block_rbs} -> #{return_spelling(slot)}", "params" => params, "block" => block,
           "return" => slot }
@@ -113,10 +127,12 @@ module Rigor
         end
       end
 
-      def inferred_return(single)
+      # A module function's singleton copy has its own return reading (`singleton_body_return`).
+      def inferred_return(single, scope)
         return Slot.unavailable("contested") unless single
 
-        body = single.data["body_return"]
+        copy = single.data["module_function"] && scope == "singleton"
+        body = copy ? single.data["singleton_body_return"] : single.data["body_return"]
         return Slot.unavailable("not_computed") if body.nil?
         return body if Slot.unavailable?(body)
 

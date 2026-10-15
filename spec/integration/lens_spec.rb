@@ -161,6 +161,56 @@ RSpec.describe "rigor lens" do
     expect(JSON.parse(out)["files"].first).to include("status" => "ok", "complete" => true)
   end
 
+  # #1918 review: a module function's singleton copy runs with the module as self, so a return that flowed from
+  # self (directly, through itself, or through another module function) is not the instance-scope type.
+  it "does not give a module function's singleton copy a return that depends on self" do
+    File.write("lib/m.rb", <<~RUBY)
+      module M
+        module_function
+        def me = self
+        def via = me
+        def it = itself
+        def num = 1
+      end
+    RUBY
+    _, out, = lens(["--format=json", "lib/m.rb"])
+    returns = JSON.parse(out)["members"].to_h do |member|
+      [[member["scope"], member["name"]], member["overloads"].first["return"]]
+    end
+
+    expect(returns[%w[instance via]]).to include("state" => "typed", "type" => "M")
+    %w[me via it].each do |name|
+      expect(returns[["singleton", name]]).to eq("state" => "unavailable", "reason" => "not_computed")
+    end
+    expect(returns[%w[singleton num]]).to include("state" => "typed", "type" => "1")
+  end
+
+  # #1918 review: a named module_function's copy replaces an existing def self.x, so neither side is single-site.
+  it "reads both sides of a member a named module_function names as contested" do
+    File.write("lib/t.rb", <<~RUBY)
+      module T
+        NAMES = %i[a].freeze
+        def self.a = "s"
+        def a = 1
+        module_function(*NAMES)
+        def self.b = "s"
+        def b = 1
+        module_function :b
+        def self.c = "s"
+        module_function def c = 1
+        def later = 3
+      end
+    RUBY
+    _, out, = lens(["--format=json", "lib/t.rb"])
+    basis = JSON.parse(out)["members"].to_h { |member| [[member["scope"], member["name"]], member["basis"]] }
+
+    expect(basis).to include(%w[instance a] => "contested", %w[singleton a] => "contested",
+                             %w[instance b] => "contested", %w[singleton b] => "contested",
+                             %w[singleton c] => "contested")
+    later = JSON.parse(out)["files"].first["sites"].find { |site| site["name"] == "later" }
+    expect(later["visibility"]).to eq("public")
+  end
+
   it "exits 64 for a configuration file that does not exist" do
     status, out, = lens(["--config=nope.yml", "lib/order.rb"])
 

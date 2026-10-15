@@ -74,7 +74,7 @@ rigor lens [--format text|json] [--config FILE] [--workers N] FILE...
   "revision": 1,
   "producer": { "name": "rigor", "version": "0.4.3", "engine_source": null },
   "context": { "...": "§ Context" },
-  "capabilities": ["class", "module", "method", "attribute", "body_return", "diagnostics", "inputs"],
+  "capabilities": ["class", "module", "method", "attribute", "module_function", "body_return", "diagnostics", "inputs"],
   "files": [ { "...": "§ Files" } ],
   "members": [ { "...": "§ Members" } ]
 }
@@ -128,18 +128,32 @@ One entry per requested target, in request order.
   - "Directly" includes a visibility call wrapping it (`private def x`, `private attr_reader :x`), and
     the body of a class whose superclass expression is `Struct.new(…)` or `Data.define(…)`.
   - A `def` or `attr_*` inside a block, or inside `class << obj` for anything but `self`, is an omission.
+  - A module function is a `method` site with `module_function: true` (capability `module_function`): a `def`
+    written directly in a module body after a bare `module_function` there. That is the form Ruby and `check`'s
+    singleton table read the same way.
 - Omissions: constant assignments (`constant`); `Data.define` / `Struct.new` assigned to a constant
   (`data_class`, `struct_class`), with any member declared in their block; `alias` and `alias_method`
   (`alias`); `define_method`; a `def` with any receiver but `self`; any declaration inside a block;
-  `class << obj`; every `def` that follows a bare `module_function` in its body, and the names a
-  `module_function :a` call lists (`module_function`); `refine` blocks with everything inside them; and
+  `class << obj`; the `module_function` cases Rigor cannot read the way both Ruby and `check` do
+  (`module_function`): a `def` after a bare `module_function` once a bare `private` / `public` /
+  `protected` follows it (Ruby ends the mode there, `check`'s tables do not), a `def` nested in the body
+  (under an `if`, say) while the mode is on, every later `def` of a body whose bare `module_function` sits
+  in control flow, a `def` wrapped in a visibility call while the mode is on, every `def` after a second bare
+  `module_function` that follows such a toggle, any `module_function` in a class, and every named form
+  (`module_function :x`, `module_function %i[x]`, `module_function def x`, a non-literal argument), whose
+  reading differs between Ruby and `check` (a `def` nested in the body, a reopened module, a redefinition after
+  the call). The members a named form names, on both sides (its copy replaces a `def self.x` already
+  there), read `visibility: null`, and the omission counts as a project definition, so each such member is
+  `contested`; `refine` blocks with everything inside them; and
   the members a plugin synthesizes, which revision 1 does not list at all (`capabilities` has no `plugin`).
 
 A declaration is never attached to a neighbouring site as a fallback.
 
 ### Omissions
 
-`[{kind, owner, scope, name, span, reason}]`. `kind` is one of `class`, `module`, `method`, `attribute`
+`[{kind, owner, scope, name, span, reason}]`. An omission with `owner` and `scope` set and `name` null may
+define any member of that owner and scope (`module_function(*NAMES)`); it counts as a project definition of
+each of them. `kind` is one of `class`, `module`, `method`, `attribute`
 (each when written inside a block, and `method` also for a receiver other than `self`), `singleton_class`
 (`class << obj`), `constant`, `data_class`, `struct_class`, `alias`, `define_method`, `module_function` and
 `refine`. `owner` and `scope` are the member the declaration would
@@ -159,6 +173,7 @@ A site is one source declaration in a requested file.
 | `scope` | `instance` or `singleton` for `method` / `attribute`; `null` otherwise. |
 | `attribute` | `reader`, `writer` or `accessor` for `attribute`; `null` otherwise. |
 | `members` | For `method` / `attribute`, the names of the members this site defines: one for a method, `name` and/or `name=` for an attribute. `[]` otherwise. |
+| `module_function` | `true` for a module function: the `def` defines a private instance method and a singleton copy, so its name is a member under both scopes and both list this site. `scope` is then `instance` and `visibility` `private`. `false` otherwise. |
 | `ordinal` | The 0-based index among sites that share one declaration span (`attr_reader :a, :b` gives 0 and 1); 0 otherwise. |
 | `span` | The declaration's span (the `class` / `module` / `def` / `attr_*` node). |
 | `contract_span` | The span from the first to the last contract comment of the site (§ Anchors, steps 1 and 2), or `null`. |
@@ -171,7 +186,14 @@ A site is one source declaration in a requested file.
 ## Members
 
 A member is one `(owner, scope, name)` that a site in a requested file defines. An `attr_accessor :a`
-site defines the members `a` and `a=`, and both list it. Members are sorted by owner, scope and name.
+site defines the members `a` and `a=`, and both list it. A module-function site defines `(owner, instance,
+name)` and `(owner, singleton, name)`. The singleton member's `visibility` is `public`, revised by a later
+`private_class_method :name` or a `private :name` inside `class << self`, written directly in the body, and
+`null` under the rules § Sites gives for named calls written anywhere else. Its inferred return is the site's
+`body_return`, except where that return may depend on `self`, which the singleton copy runs with as the module:
+when the body reads `self`, `super`, an instance variable or a class variable, or the return's type names the
+owner (a `self` that flowed through `itself`, `tap` or another module function), the singleton return is
+`unavailable` with `not_computed`. Members are sorted by owner, scope and name.
 
 | Field | Content |
 | --- | --- |

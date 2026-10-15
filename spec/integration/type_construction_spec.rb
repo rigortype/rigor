@@ -1165,6 +1165,12 @@ RSpec.describe "Rigor type construction (integration)" do
       nil_receivers = harness.diagnostics.select { |d| d.rule == "call.possible-nil-receiver" }
       expect(nil_receivers.map(&:line)).to eq(marked_lines(harness, "# GENUINE-NIL"))
     end
+
+    # A clause after an `=~` clause, or a condition write, in a value position the evaluator does not enter must not
+    # read what an earlier condition's falsey edge bound as `nil`.
+    it "reports no method as undefined on `nil`" do
+      expect(harness.diagnostics.select { |d| d.rule == "call.undefined-method" }.map(&:line)).to eq([])
+    end
   end
 
   describe "fixtures/regex_global_narrowing.rb — C1 regex match-data global narrowing" do

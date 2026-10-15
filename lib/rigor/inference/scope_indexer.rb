@@ -10803,20 +10803,34 @@ module Rigor
       end
 
       # Issue #1495 — a `case` without a subject the evaluator did not enter (`[case; when x.nil? then 0; else x.size
-      # end]`) narrows as {StatementEvaluator#subjectless_when_scopes} does: each condition under the falsey edges of
-      # the conditions before it, each clause under the join of its conditions' truthy edges, and the `else` under the
-      # last falsey edge.
+      # end]`) narrows by its conditions' edges, as {StatementEvaluator#subjectless_when_scopes} does: each condition
+      # under the falsey edges of the conditions before it, each clause under the join of its conditions' truthy edges,
+      # and the `else` under the last falsey edge. Like the walk of an `if`, it applies no write a condition makes, so
+      # a local the condition writes and its edges leave as they found it reads `Dynamic[top]` on both edges
+      # ({#forget_condition_writes}) rather than an earlier condition's narrowing the write replaced.
       def propagate_subjectless_case(node, table, current_scope)
         falsey = current_scope
         node.conditions.each do |when_node|
           truthy_edges = when_node.conditions.map do |condition|
             propagate(condition, table, falsey)
-            truthy, falsey = Narrowing.predicate_scopes(condition, falsey)
+            truthy, next_falsey = Narrowing.predicate_scopes(condition, falsey)
+            truthy, falsey = forget_condition_writes(condition, falsey, truthy, next_falsey)
             truthy
           end
           propagate(when_node, table, truthy_edges.reduce(:join))
         end
         propagate(node.else_clause, table, falsey) if node.else_clause
+      end
+
+      # The edges `[truthy, falsey]` of `condition`, evaluated from `entry`, with every bound local the condition
+      # writes and the edge did not rebind widened to `Dynamic[top]`.
+      def forget_condition_writes(condition, entry, *edges)
+        written = OperandEffects.written_variables(condition).select { |name| entry.local(name) }
+        edges.map do |edge|
+          written.reduce(edge) do |acc, name|
+            acc.local(name) == entry.local(name) ? acc.with_local(name, Type::Combinator.untyped) : acc
+          end
+        end
       end
     end
   end

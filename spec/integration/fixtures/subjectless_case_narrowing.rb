@@ -103,7 +103,7 @@ def value_positions(raw)
   assert_type('"n" | String', y)
   z = [case
        when x.nil? then "n"
-       else x.upcase
+       else x
        end]
   assert_type('["n" | String]', z)
   [y, z, (case
@@ -142,6 +142,55 @@ def in_block_and_loop(items, raw)
     else x.upcase
     end
   end
+end
+
+# A named-capture `=~` rebinds the match globals on both edges, so a clause after an `=~` clause does not read `$1`
+# as the `nil` the earlier clause's falsey edge bound, in a value position the evaluator does not enter (an array
+# element, a call argument) as in a statement. Each returns "A" (or ["A"]) for "a".
+def named_capture_after_match(line)
+  [case
+   when line =~ /x(\w)/ then 1
+   when /(?<nm>a)/ =~ line then $1.upcase
+   end]
+end
+
+def named_capture_after_match_argument(line)
+  Array(case
+        when line =~ /x(\w)/ then 1
+        when /(?<nm>a)/ =~ line then $1.upcase
+        end)
+end
+
+def named_capture_after_match_elsif(line)
+  [if line =~ /x(\w)/ then 1
+   elsif /(?<nm>a)/ =~ line then $1.upcase
+   end]
+end
+
+def named_capture_after_match_statement(line)
+  case
+  when line =~ /x(\w)/ then 1
+  when /(?<nm>a)/ =~ line then $1.upcase
+  end
+end
+
+# A local a condition writes in such a value position is not narrowed by an earlier condition the write replaced.
+# `compound_write_in_value(nil)` returns ["D"], `write_after_guard_in_value(nil)` ["S"].
+def compound_write_in_value(raw)
+  x = raw ? String(raw) : nil
+  [case
+   when (x ||= "d").empty? then 0
+   else x.upcase
+   end]
+end
+
+def write_after_guard_in_value(raw)
+  x = raw ? String(raw) : nil
+  [case
+   when x then 0
+   when (x = "s").empty? then 1
+   else x.upcase
+   end]
 end
 
 # Control: a condition that does not rule out `nil` narrows nothing, so the possible `nil` receiver is reported.

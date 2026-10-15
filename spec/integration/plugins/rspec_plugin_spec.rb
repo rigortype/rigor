@@ -184,33 +184,110 @@ RSpec.describe "plugins/rigor-rspec" do
       end
     end
 
+    def nominal(name) = Rigor::Type::Combinator.nominal_of(name)
+    def constant(value) = Rigor::Type::Combinator.constant_of(value)
+    def union(*members) = Rigor::Type::Combinator.union(*members)
+
+    # The type of the fact `source` emits with `x` bound to `x_type`, or nil when it emits none.
+    def equality_fact_type(source, x_type)
+      scope = Rigor::Scope.empty.with_local(:x, x_type)
+      plugin.narrowing_facts_for(call_node: parse_call_node(source), scope: scope).first&.type
+    end
+
     context "when matcher is eq(literal)" do
       it "narrows to Constant<integer> for an integer literal" do
-        call_node = parse_call_node("expect(x).to eq(42)")
-        fact = plugin.narrowing_facts_for(call_node: call_node, scope: nil).first
-
-        expect(fact.type).to eq(Rigor::Type::Combinator.constant_of(42))
+        expect(equality_fact_type("expect(x).to eq(42)", nominal("Integer"))).to eq(constant(42))
       end
 
       it "narrows to Constant<string> for a string literal" do
-        call_node = parse_call_node('expect(x).to eq("hi")')
-        fact = plugin.narrowing_facts_for(call_node: call_node, scope: nil).first
-
-        expect(fact.type).to eq(Rigor::Type::Combinator.constant_of("hi"))
+        expect(equality_fact_type('expect(x).to eq("hi")', nominal("String"))).to eq(constant("hi"))
       end
 
       it "narrows to Constant<symbol> for a symbol literal" do
-        call_node = parse_call_node("expect(x).to eq(:foo)")
-        fact = plugin.narrowing_facts_for(call_node: call_node, scope: nil).first
-
-        expect(fact.type).to eq(Rigor::Type::Combinator.constant_of(:foo))
+        expect(equality_fact_type("expect(x).to eq(:foo)", nominal("Symbol"))).to eq(constant(:foo))
       end
 
       it "narrows to Constant<true> for a true literal" do
-        call_node = parse_call_node("expect(x).to eq(true)")
-        fact = plugin.narrowing_facts_for(call_node: call_node, scope: nil).first
+        expect(equality_fact_type("expect(x).to eq(true)", union(constant(true), constant(false))))
+          .to eq(constant(true))
+      end
 
-        expect(fact.type).to eq(Rigor::Type::Combinator.constant_of(true))
+      # Issue #1807 — `eq` passes on `x == literal` with the local as the receiver, so the fact meets the local's
+      # current type and never replaces it.
+      it "drops a core member whose built-in equality with the literal is false" do
+        expect(equality_fact_type("expect(x).to eq(9)", union(nominal("Integer"), constant(nil))))
+          .to eq(constant(9))
+        expect(equality_fact_type("expect(x).to eq(9)", union(constant(1), constant(9)))).to eq(constant(9))
+      end
+
+      it "drops a core member of a non-numeric class other than the literal's" do
+        expect(equality_fact_type("expect(x).to eq(9)", union(nominal("String"), nominal("Integer"))))
+          .to eq(constant(9))
+      end
+
+      it "narrows a refinement of the literal's class and drops one of another core class" do
+        non_empty_string = Rigor::Type::Combinator.non_empty_string
+        expect(equality_fact_type('expect(x).to eq("3")', union(non_empty_string, constant(nil))))
+          .to eq(constant("3"))
+        expect(equality_fact_type("expect(x).to eq(3)", union(non_empty_string, nominal("Integer"))))
+          .to eq(constant(3))
+        lowercase = Rigor::Type::Combinator.lowercase_string
+        expect(equality_fact_type('expect(x).to eq("a")', union(lowercase, constant(nil)))).to eq(constant("a"))
+      end
+
+      it "narrows an Intersection of refinements of the literal's class" do
+        lowercase = Rigor::Type::Combinator.non_empty_lowercase_string
+        expect(equality_fact_type('expect(x).to eq("a")', union(lowercase, constant(nil)))).to eq(constant("a"))
+      end
+
+      it "is silent for an Intersection whose parts do not all belong to one core class" do
+        mixed = Rigor::Type::Combinator.intersection(Rigor::Type::Combinator.lowercase_string, nominal("Greeting"))
+        expect(mixed).to be_a(Rigor::Type::Intersection)
+        expect(equality_fact_type('expect(x).to eq("a")', union(mixed, constant(nil)))).to be_nil
+      end
+
+      it "narrows a FloatRange member to a Float literal" do
+        range = Rigor::Type::Combinator.float_range(0.0, 2.0)
+        expect(equality_fact_type("expect(x).to eq(1.5)", union(range, constant(nil)))).to eq(constant(1.5))
+      end
+
+      it "narrows an IntegerRange member that covers the literal and drops one that does not" do
+        expect(equality_fact_type("expect(x).to eq(9)", Rigor::Type::Combinator.integer_range(0, 9)))
+          .to eq(constant(9))
+        expect(equality_fact_type("expect(x).to eq(9)", Rigor::Type::Combinator.integer_range(0, 5))).to be_nil
+      end
+
+      it "keeps a core numeric member of another class, which can equal the literal" do
+        expect(equality_fact_type("expect(x).to eq(1)", union(nominal("Integer"), nominal("Float"))))
+          .to eq(union(constant(1), nominal("Float")))
+        expect(equality_fact_type("expect(x).to eq(1)", nominal("Rational"))).to eq(nominal("Rational"))
+        expect(equality_fact_type("expect(x).to eq(1.0)", nominal("Integer"))).to eq(nominal("Integer"))
+      end
+
+      it "keeps a Float member for a zero Float literal, which -0.0 also equals" do
+        expect(equality_fact_type("expect(x).to eq(0.0)", nominal("Float"))).to eq(nominal("Float"))
+      end
+
+      it "is silent when a member may define its own ==, even for an identity literal" do
+        %w[nil true :sym 9].each do |literal|
+          expect(equality_fact_type("expect(x).to eq(#{literal})", nominal("ModInt"))).to be_nil
+          expect(equality_fact_type("expect(x).to eq(#{literal})", union(nominal("ModInt"), constant(nil))))
+            .to be_nil
+        end
+        expect(equality_fact_type("expect(x).to eq(1)", nominal("Numeric"))).to be_nil
+      end
+
+      it "is silent for a Dynamic local, an unbound local, and without a scope" do
+        expect(equality_fact_type("expect(x).to eq(9)", Rigor::Type::Combinator.untyped)).to be_nil
+        expect(plugin.narrowing_facts_for(call_node: parse_call_node("expect(x).to eq(9)"), scope: Rigor::Scope.empty))
+          .to be_empty
+        expect(plugin.narrowing_facts_for(call_node: parse_call_node("expect(x).to eq(9)"), scope: nil)).to be_empty
+        analyzer = Rigor::Plugin::Rspec::MatcherAnalyzer
+        expect(analyzer.contribution_for(parse_call_node("expect(x).to eq(9)"), scope: nil)).to be_nil
+      end
+
+      it "is silent when no member can equal the literal" do
+        expect(equality_fact_type("expect(x).to eq(9)", constant(nil))).to be_nil
       end
 
       it "is silent for a non-literal argument" do
@@ -222,10 +299,17 @@ RSpec.describe "plugins/rigor-rspec" do
 
     context "when matcher is eql(literal)" do
       it "shares the eq path" do
-        call_node = parse_call_node("expect(x).to eql(0)")
-        fact = plugin.narrowing_facts_for(call_node: call_node, scope: nil).first
+        expect(equality_fact_type("expect(x).to eql(0)", nominal("Integer"))).to eq(constant(0))
+      end
 
-        expect(fact.type).to eq(Rigor::Type::Combinator.constant_of(0))
+      it "drops a core numeric member of another class, since eql? compares classes" do
+        expect(equality_fact_type("expect(x).to eql(1)", union(nominal("Integer"), nominal("Float"))))
+          .to eq(constant(1))
+        expect(equality_fact_type("expect(x).to eql(1)", union(constant(1), constant(1.0)))).to eq(constant(1))
+      end
+
+      it "is silent when a member may define its own eql?" do
+        expect(equality_fact_type("expect(x).to eql(1)", union(nominal("Integer"), nominal("ModInt")))).to be_nil
       end
     end
 
@@ -250,6 +334,14 @@ RSpec.describe "plugins/rigor-rspec" do
 
         expect(fact.target_name).to eq(:x)
         expect(fact.type).to eq(Rigor::Type::Combinator.constant_of(nil))
+        expect(fact.negative).to be(true)
+      end
+
+      it "emits a negative Constant fact for not_to eq(literal) whatever the local's type" do
+        call_node = parse_call_node("expect(x).not_to eq(9)")
+        fact = plugin.narrowing_facts_for(call_node: call_node, scope: nil).first
+
+        expect(fact.type).to eq(constant(9))
         expect(fact.negative).to be(true)
       end
 
@@ -299,32 +391,162 @@ RSpec.describe "plugins/rigor-rspec" do
     # End-to-end: the plugin's contribution flows through the engine's `apply_plugin_assertions` → `:local`
     # branch and narrows the local so a downstream `.upcase` / `.+` / etc. resolves cleanly.
     context "when running end-to-end through the engine" do
-      it "removes the possible-nil-receiver after expect(x).to be_a(String)" do
-        result = run_plugin(
-          source: <<~RUBY
-            # @rbs (String | nil) -> void
-            def case_after(x)
-              expect(x).to be_a(String)
-              x.upcase
-            end
-          RUBY
+      # Runs `body` as `T#case_eq(x)` with `x` declared `x_type` in `sig/`, plus `patch` as an analysed file.
+      def run_case_eq(x_type, body, patch: nil)
+        files = patch ? { "patch.rb" => patch } : {}
+        source = "class T\n  def case_eq(x)\n#{body.gsub(/^/, '    ')}  end\nend\n"
+        run_plugin(
+          source: source,
+          files: files.merge("sig/t.rbs" => "class T\n  def case_eq: (#{x_type}) -> void\nend\n"),
+          paths: ["demo.rb", *files.keys],
+          signature_paths: ["sig"]
         )
+      end
+
+      def dumped_types(result)
+        result.diagnostics.select { |d| d.rule == "dump.type" }.map { |d| d.message.delete_prefix("dump_type: ") }
+      end
+
+      # Guard: `x` reads as String here even when MatcherAnalyzer emits no be_a fact, so this pins the end-to-end
+      # result, not the plugin's be_a path (the unit examples above pin that).
+      it "removes the possible-nil-receiver after expect(x).to be_a(String)" do
+        result = run_case_eq("String?", "expect(x).to be_a(String)\nx.upcase\n")
         nil_recv = result.diagnostics.select { |d| d.rule == "call.possible-nil-receiver" }
         expect(nil_recv).to be_empty
       end
 
       it "narrows x to Constant<42> after expect(x).to eq(42) — downstream `x + 1` resolves" do
-        result = run_plugin(
-          source: <<~RUBY
-            # @rbs (Integer | nil) -> void
-            def case_eq(x)
-              expect(x).to eq(42)
-              x + 1
-            end
-          RUBY
-        )
+        result = run_case_eq("Integer?", "expect(x).to eq(42)\nx + 1\n")
         nil_recv = result.diagnostics.select { |d| d.rule == "call.possible-nil-receiver" }
         expect(nil_recv).to be_empty
+      end
+
+      # Issue #1807 — the local is `==`'s receiver, so its own `==` decides `eq`.
+      it "keeps an RBS-less local with its own == at its type after eq of any literal" do
+        result = run_plugin(
+          source: <<~RUBY
+            class ModInt
+              def initialize(value) = @value = value % 7
+              def to_i = @value
+              def ==(other) = to_i == other.to_i
+              def inc! = @value += 1
+            end
+
+            m = ModInt.new(16)
+            expect(m).to eq(9)
+            m.inc!
+            expect(m).to eq(nil)
+            m.inc!
+            expect(m).to eq(:sym)
+            m.inc!
+          RUBY
+        )
+        expect(result.diagnostics.select { |d| d.rule == "call.undefined-method" }).to be_empty
+      end
+
+      it "removes nil from a decimal-int-string? local after eq of a String literal" do
+        result = run_case_eq("Integer?", <<~RUBY)
+          y = x && x.to_s
+          expect(y).to eq("3")
+          dump_type(y)
+          y.length
+        RUBY
+        expect(dumped_types(result)).to eq(['"3"'])
+        expect(result.diagnostics.select { |d| d.rule == "call.possible-nil-receiver" }).to be_empty
+      end
+
+      it "removes nil from a non-empty-string? local after eq of a String literal" do
+        result = run_case_eq("String?", <<~RUBY)
+          y = x && x + "!"
+          expect(y).to eq("a!")
+          dump_type(y)
+          y.length
+        RUBY
+        expect(dumped_types(result)).to eq(['"a!"'])
+        expect(result.diagnostics.select { |d| d.rule == "call.possible-nil-receiver" }).to be_empty
+      end
+
+      it "still narrows when the project reopens the literal's class with other methods only" do
+        patch = "class String\n  def shout = upcase + \"!\"\nend\n"
+        result = run_case_eq("String?", "expect(x).to eq(\"a\")\ndump_type(x)\n", patch: patch)
+        expect(dumped_types(result)).to eq(['"a"'])
+      end
+
+      it "keeps the local's type when the project defines == on the literal's class with define_method" do
+        result = run_plugin(
+          source: <<~RUBY
+            class Integer
+              define_method(:==) { |_other| true }
+            end
+
+            x = rand(10)
+            expect(x).to eq(9)
+            dump_type(x)
+          RUBY
+        )
+        expect(dumped_types(result)).not_to include("9")
+      end
+
+      it "keeps the local's type when another file defines == on the literal's class" do
+        patch = "class String\n  def ==(other) = true\nend\n"
+        result = run_case_eq("String?", "expect(x).to eq(\"a\")\ndump_type(x)\n", patch: patch)
+        expect(dumped_types(result)).to eq(["String?"])
+      end
+
+      it "keeps a member whose class the project gives its own ==, and narrows the rest" do
+        patch = "class Symbol\n  def ==(other) = true\nend\n"
+        result = run_case_eq("Symbol | Integer | nil", "expect(x).to eq(9)\ndump_type(x)\n", patch: patch)
+        expect(dumped_types(result)).to eq(["9 | Symbol"])
+      end
+
+      # `Integer#==` runs `other == self` for a non-numeric argument, so the literal's own `==` decides there.
+      it "gives no fact when the project defines == on the literal's class, though a kept member survives" do
+        patch = "class Symbol\n  def ==(other) = true\nend\nclass String\n  def ==(other) = true\nend\n"
+        result = run_case_eq("Symbol | Integer", "expect(x).to eq(\"a\")\ndump_type(x)\n", patch: patch)
+        expect(dumped_types(result)).to eq(["Integer | Symbol"])
+      end
+
+      it "keeps a member whose operator a reopened core ancestor up to its owner defines" do
+        patch = "class Numeric\n  def eql?(other) = true\nend\n"
+        expect(dumped_types(run_case_eq("Integer", "expect(x).to eql(9)\ndump_type(x)\n", patch: patch)))
+          .to eq(["Integer"])
+        patch = "class Object\n  def ==(other) = true\nend\n"
+        expect(dumped_types(run_case_eq("Integer?", "expect(x).to eq(9)\ndump_type(x)\n", patch: patch)))
+          .to eq(["9?"])
+      end
+
+      it "gives no fact when a reopened core ancestor up to the owner defines the literal's operator" do
+        patch = "class Object\n  def eql?(other) = true\nend\n"
+        expect(dumped_types(run_case_eq("Symbol", "expect(x).to eql(:s)\ndump_type(x)\n", patch: patch)))
+          .to eq(["Symbol"])
+      end
+
+      it "narrows an Integer local to the literal after eq(9)" do
+        result = run_plugin(source: "x = rand(10)\nexpect(x).to eq(9)\ndump_type(x)\n")
+        expect(dumped_types(result)).to eq(["9"])
+      end
+
+      it "keeps the local's type when the project defines == on the literal's class" do
+        result = run_plugin(
+          source: <<~RUBY
+            class Integer
+              def ==(other) = true
+            end
+
+            x = rand(10)
+            expect(x).to eq(9)
+            dump_type(x)
+          RUBY
+        )
+        expect(dumped_types(result)).not_to include("9")
+      end
+
+      # Guard: pins the engine's handling of the negative Constant fact, which predates #1807 and survives a revert
+      # of the fix.
+      it "leaves the local unchanged after not_to eq(literal)" do
+        result = run_plugin(source: "x = rand(10)\ndump_type(x)\nexpect(x).not_to eq(9)\ndump_type(x)\n")
+        before, after = dumped_types(result)
+        expect(after).to eq(before)
       end
     end
   end

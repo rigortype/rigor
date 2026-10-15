@@ -126,6 +126,38 @@ RSpec.describe Rigor::Environment::MissingGemConstantIndex do
     end
   end
 
+  # A multi-platform lockfile's representative variant is usually the `ruby` one, while Bundler installs the
+  # build matching the host — `commonmarker-2.10.0-arm64-darwin/`. Keyed on `<name>-<version>` alone, the
+  # index missed that directory and every `Commonmarker` read kept the generic engine-gap cause.
+  describe "a platform-tagged bundle directory" do
+    def write_platform_bundle(root)
+      write_bundle(root, [["commonmarker", "2.10.0-arm64-darwin", "module Commonmarker; end\n"]])
+    end
+
+    it "is found through one of the gem's locked variants" do
+      Dir.mktmpdir do |root|
+        bundle = write_platform_bundle(root)
+        variants = [%w[2.10.0 ruby], %w[2.10.0 x86_64-linux], %w[2.10.0 arm64-darwin]]
+        index = described_class.build(
+          [["commonmarker", "2.10.0", variants]], bundle_path: bundle, spec_resolver: ->(_n, _v) {}
+        )
+        expect(index).to eq("Commonmarker" => "commonmarker")
+      end
+    end
+
+    it "is not claimed for a platform the gem was never locked under" do
+      # The must-still-decline arm: a lookup keyed on the variants, not a prefix match on the gem name.
+      Dir.mktmpdir do |root|
+        bundle = write_platform_bundle(root)
+        index = described_class.build(
+          [["commonmarker", "2.10.0", [%w[2.10.0 ruby], %w[2.10.0 x86_64-linux]]]],
+          bundle_path: bundle, spec_resolver: ->(_n, _v) {}
+        )
+        expect(index).to eq({})
+      end
+    end
+  end
+
   # Issue #763 — the git-sourced bundler layout.
   #
   # `bundle_gem_dirs` walked `<bundle>/ruby/*/gems/*` only, so a `git:`-sourced gem owned none of its

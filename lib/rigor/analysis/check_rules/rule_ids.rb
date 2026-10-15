@@ -156,6 +156,13 @@ module Rigor
       # first segment appears here as KNOWN and stays silent: these ids are legitimate suppression /
       # `severity_overrides:` vocabulary the light rule-id table cannot enumerate (plugins load dynamically;
       # aggregator ids live in the engine-heavy runner), so under-warning is the FP-safe direction.
+      # The `pre-eval.*` ids (ADR-17 WD6) the bare family wildcard `pre-eval` expands to. Emitted by the
+      # `pre_eval:` pre-pass, outside the CheckRules catalogue, so the family cannot ride `RULE_FAMILIES`
+      # (which also drives the catalogue and the config audit over `ALL_RULES`).
+      PRE_EVAL_RULES = %w[
+        pre-eval.parse-error pre-eval.file-not-found pre-eval.duplicate-declaration
+      ].freeze
+
       NON_CHECK_DIAGNOSTIC_FAMILIES = %w[rbs_extended dynamic rbs pre-eval plugin plugin_trust].freeze
 
       # Bare (dot-less) diagnostic ids the engine emits outside the catalogue (see the `rule:` literals in

@@ -353,7 +353,10 @@ Contract:
   alike however they share objects, so a producer value served from the cache
   digests as it did when computed. A value the digest cannot read — a Proc, an
   IO, a Hash with a default proc, an instance of an anonymous class, a cyclic
-  structure — makes the plugin opaque, as if it had no surface. Keep a
+  structure — makes the plugin opaque. The `--incremental` note states that
+  reason: it names the producer, fact or hook and the class of the value, so the
+  author knows what to change (a raising hook is named by its exception class).
+  Keep a
   contribution's state where the digest reads it: plain values, Data, Struct,
   exceptions (message, backtrace, cause) and instance variables, not instance
   variables set on a String, Array or Hash or modules `extend`ed onto an object.

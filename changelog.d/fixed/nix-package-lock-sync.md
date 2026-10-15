@@ -1,0 +1,1 @@
+- **[packaging]** The Nix package now ships the same `rbs` (4.2.0) and `language_server-protocol` (3.17.0.6) that the suite and release gate validate, after `nix/Gemfile.lock` had drifted behind the root bundle. ([#1850](https://github.com/rigortype/rigor/pull/1850))

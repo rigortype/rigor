@@ -271,6 +271,29 @@ RSpec.describe "Data.define value folding", type: :runner do
       RUBY
     end
 
+    # The #293 widening reaches `Data#with` through `MemberShapeProjection#instance_with`; the Struct sibling
+    # that pinned it was rewritten for #1335, so this is the only gate on that path.
+    it "widens an empty literal introduced by #with" do
+      expect(dumped_types(<<~RUBY)).to eq(["Array[Dynamic[top]]", "[1]"])
+        Result = Data.define(:items, :other)
+        dump_type(Result.new(items: [1], other: [2]).with(items: []).items)
+        dump_type(Result.new(items: [1], other: [2]).with(other: []).items)
+      RUBY
+    end
+
+    it "stays silent on a member filled after #with introduced an empty literal" do
+      result = analyze(<<~RUBY)
+        Result = Data.define(:items)
+        def build
+          r = Result.new(items: [1]).with(items: [])
+          [1, 2].each { |t| r.items << t.to_s }
+          r
+        end
+        build.items.first.upcase
+      RUBY
+      expect(result.diagnostics.map(&:message).join("\n")).not_to match(/undefined method/i)
+    end
+
     it "keeps a NON-empty container member folding precisely" do
       expect(dumped_types(<<~RUBY)).to eq(["[1, 2]", "1"])
         Result = Data.define(:items)

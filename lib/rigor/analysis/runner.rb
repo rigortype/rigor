@@ -1807,10 +1807,8 @@ module Rigor
       # the pre-pass then saw two writers for every constant a file declares and withheld its publication (#644),
       # and every file was a discovered-not-analysed dependency of the run's cache entry.
       #
-      # The widening decision itself still compares the paths as spelled. `exclude:` patterns match a path as it
-      # is spelled, so until #1576 is fixed the configured absolute `lib` can discover files the argument `lib`
-      # excludes (a relative `lib/gen/**` pattern never matches `/abs/lib/gen/x.rb`), and treating the two as the
-      # same root would drop those files from discovery.
+      # The widening decision itself compares the paths as spelled. `exclude:` patterns apply to both spellings
+      # alike (#1576), so the configured absolute `lib` and the argument `lib` exclude the same files.
       def project_discovery_expansion(paths, expansion)
         return nil unless widen_discovery_to_project?(paths)
 
@@ -2020,7 +2018,8 @@ module Rigor
           template_units: -> { template_units },
           analyze_file: ->(path, environment) { analyze_file(path, environment) },
           restored_run_level_rows: @restored_run_level_rows,
-          feature_sources: -> { required_feature_sources }
+          feature_sources: -> { required_feature_sources },
+          plugin_prepare: -> { @pre_passes.prepare_throwaway_registry }
         )
         @diagnostic_aggregator = DiagnosticAggregator.new(
           configuration: @configuration,
@@ -2066,7 +2065,8 @@ module Rigor
         )
         RunStats.new(
           wall_seconds: Process.clock_gettime(Process::CLOCK_MONOTONIC) - wall_started_at,
-          peak_rss_bytes: RunStats.peak_rss_bytes,
+          # Issue #1529 — read lazily on the summary's first use, so a run that prints none never forks for it.
+          peak_rss_probe: RunStats::CURRENT_PROCESS_PEAK_RSS,
           # #392 — the template units count too: they are files this run parsed and typed, and a stats line
           # that omitted them would under-report exactly the work a views-heavy project added.
           target_files: expansion.fetch(:files).size + template_units.paths.size,
@@ -2179,7 +2179,8 @@ module Rigor
         bad = []
         Array(paths).each do |path|
           if File.directory?(path)
-            files.concat(PathExpansion.directory_files(path, @configuration.exclude_patterns))
+            files.concat(PathExpansion.directory_files(path, @configuration.exclude_patterns,
+                                                       base: @configuration.exclude_base))
           # Editor-mode bypass: the buffer's logical path is treated as a real `.rb` file regardless of
           # on-disk presence — `parse_source` reads bytes from the buffer's physical path. Common case: LSP
           # client editing a brand-new file.

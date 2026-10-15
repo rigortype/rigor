@@ -19,8 +19,10 @@ To *layer* configs rather than replace, a config file can name
 a base with `includes:` (recursive). `--config=PATH` bypasses
 discovery entirely.
 
-All relative paths in a config file resolve against that
-file's own directory.
+Relative paths in a config file resolve against that file's own directory, with three exceptions:
+`bundler.bundle_path:`, `bundler.lockfile:` and `rbs_collection.lockfile:` resolve against the working directory
+`rigor` runs from. They match only when you run `rigor` from the directory that holds the config file, which is
+the usual case; with `--config path/to/.rigor.yml` from elsewhere, give these three as absolute paths.
 A leading `~/` (or a bare `~`) in a path setting expands to your home directory; `~name` is an ordinary
 directory called `~name`, not another user's home. This covers `paths:`, `signature_paths:`, `test_paths:`,
 `pre_eval:`, `plugins_io.allowed_paths:`, `includes:`, `bundler.bundle_path:`, `bundler.lockfile:` and
@@ -64,7 +66,7 @@ cache:
 | --- | --- | --- | --- |
 | `target_ruby` | String | `"4.0"` | The lowest Ruby version *your* project runs on — `"X.Y"`, `"X.Y.Z"`, or `"latest"`. Independent of the Ruby Rigor itself runs on. Every value selects the syntax Rigor parses. A version you set explicitly also turns on the Ruby-deprecation rules for that version ([`call.deprecated-ruby2-keywords`](04-diagnostics.md#rule-call-deprecated-ruby2-keywords) from `"4.1"`); the default and `"latest"` never do, which is why `rigor init` writes the key commented out. |
 | `paths` | Array | `["lib"]` | Directories or files to analyse. |
-| `exclude` | Array | `[]` | Glob patterns to skip. `vendor/bundle`, `.bundle`, and `node_modules` are always excluded. |
+| `exclude` | Array | `[]` | Glob patterns to skip. A relative pattern is matched against the file's path relative to the directory of the config file in use (the working directory when no config file is used), so it excludes the same files whether the path came from `paths:` or from a command-line argument, and it never matches on a directory above that base (a file outside it is seen as `../…`, so `../shared/lib/gen/**` reaches a sibling directory that `paths:` names). A leading `./` is ignored, and a pattern starting with `.` (such as `.*`) also matches files outside the base, which appear as `../…`. A symlink to a file is matched only under its own name: the realpath pass resolves directories, not files. `*` and `**` also cross `/`, so `lib/*.rb` matches nested files too. An absolute pattern is matched against the absolute path. Patterns from an `includes:` file resolve against the top-level config's directory, not the included file's. `vendor/bundle`, `.bundle`, and `node_modules` are always excluded. |
 | `test_paths` | Array | `nil` | The project's test roots: the directories (or files) holding its tests. Relative entries resolve against the config file's directory. Unset auto-detects whichever of `spec/` and `test/` exist; `[]` declares none. `rigor sig-gen --params=observed` reads call sites there to type parameters, and names on stderr a declared root that does not exist. Test roots are not analysed unless `paths:` also lists them, and changing them invalidates no cache. |
 | `includes` | Array | `[]` | Other config files to layer underneath this one. |
 | `fold_platform_specific_paths` | Boolean | `false` | Resolve Ruby-version-conditional load paths when discovering sources. |
@@ -76,7 +78,7 @@ cache:
 | --- | --- | --- | --- |
 | `libraries` | Array | `[]` | Standard-library / gem names whose bundled RBS to load. |
 | `signature_paths` | Array | `nil` | Extra directories of `.rbs` files. Relative entries resolve against the config file's directory. |
-| `pre_eval` | Array | `[]` | Files (or globs) walked before per-file analysis, to register project monkey-patches and publish their top-level constants project-wide. |
+| `pre_eval` | Array | `[]` | Files (or globs) walked before per-file analysis, to register project monkey-patches and publish their top-level constants project-wide. The walker does not follow `require` / `require_relative`, so list the files in load order: a method declared in two files takes the last-listed one, and a file that requires a later-listed one is still read in list order. |
 | `plugins` | Array | `[]` | Plugins to activate — see [Using plugins](07-plugins.md). |
 
 ### Signature generation

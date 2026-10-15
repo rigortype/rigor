@@ -59,6 +59,19 @@ module Rigor
         end
       end
 
+      # Issue #1579 fixture — publishes a fact whose value no digest can read (a Proc), beside a surface of its own.
+      class Wd1UndigestibleFactProbe < Base
+        manifest(id: "wd1-undigestible-fact", version: "0.1.0")
+
+        def prepare(services)
+          services.fact_store.publish(plugin_id: manifest.id, name: :callback, value: -> {})
+        end
+
+        def incremental_state_fingerprint
+          "static"
+        end
+      end
+
       # #588 fixture — stands in for rigor-railties' `Rails.` reader gate: a contribution that types
       # `Widget.build` only while the PROJECT does not define that singleton method itself, asked through
       # `Rigor::Reflection.discovered_method?`. `incremental_state_fingerprint` mirrors railties so the
@@ -1200,6 +1213,46 @@ end
 
         expect(warm).to be(false) # opaque → never warm, even with unchanged files
         expect(session.opaque_plugin_ids).to eq(["wd1-opaque"])
+      end
+    end
+
+    # Issue #1579 — the reason a real run records reaches the --incremental note: the session's reasons, and the
+    # note the CLI prints from that same session, both name the undigestible fact and its value's class.
+    def undigestible_fact_session(dir)
+      File.write(File.join(dir, "a.rb"), "x = 1\nputs x\n")
+      config = Rigor::Configuration.new(
+        Rigor::Configuration::DEFAULTS.merge("paths" => [dir], "plugins" => ["wd1-undigestible-fact"])
+      )
+      requirer = lambda do |_name|
+        Rigor::Plugin.register(Rigor::Plugin::Wd1UndigestibleFactProbe)
+        true
+      end
+      snapshot = Rigor::Cache::IncrementalSnapshot.new(root: File.join(dir, ".rigor", "cache"))
+      fp = fingerprint(config, dir)
+      Rigor::Plugin.unregister!
+      session = described_class.new(configuration: config, paths: [dir], cache_store: nil, plugin_requirer: requirer)
+      _diags, warm = guarded_run_incremental(session, snapshot: snapshot, fingerprint: fp)
+      [session, warm]
+    end
+
+    it "carries an undigestible fact's reason from a real run into the --incremental note" do
+      require "rigor/cli/check_command"
+
+      Dir.mktmpdir do |dir|
+        session, warm = undigestible_fact_session(dir)
+
+        expect(warm).to be(false)
+        expect(session.opaque_reasons).to eq(
+          "wd1-undigestible-fact" => Rigor::Analysis::PluginFactFingerprint::OpaqueReason.new(
+            kind: :undigestible, input: "fact callback", class_name: "Proc"
+          )
+        )
+        err = StringIO.new
+        Rigor::CLI::CheckCommand.new(argv: [], out: StringIO.new, err: err)
+                                .send(:emit_incremental_fact_surface_notes, session)
+        expect(err.string).to include(
+          "plugin wd1-undigestible-fact's fact callback has a value the incremental fingerprint cannot digest (a Proc)"
+        )
       end
     end
 

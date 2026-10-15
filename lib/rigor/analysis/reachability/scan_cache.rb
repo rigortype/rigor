@@ -48,11 +48,13 @@ module Rigor
         # @param cache_path — the configuration's cache root; nil or empty is an inert
         #   cache (every fetch computes, nothing persists).
         # @param target_ruby — parse-affecting configuration, part of the identity.
-        def self.open(cache_path, target_ruby: nil)
+        # `root` names the project and working directory a run reads roles and spellings from (#1760): a
+        # scan cached by a run from another directory carries another role, so it is never served here.
+        def self.open(cache_path, target_ruby: nil, root: nil)
           return new(path: nil, header: nil) if cache_path.nil? || cache_path.to_s.empty?
 
           new(path: File.join(cache_path.to_s, FILE_NAME),
-              header: "#{SCHEMA}:#{Rigor::VERSION}:#{target_ruby}:#{source_digest}")
+              header: "#{SCHEMA}:#{Rigor::VERSION}:#{target_ruby}:#{source_digest}:#{root}")
         end
 
         def self.source_digest

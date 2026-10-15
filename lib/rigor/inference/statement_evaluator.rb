@@ -42,8 +42,10 @@ require_relative "operand_effects"
 require_relative "operand_walk"
 require_relative "optimistic_origin"
 require_relative "return_barrier"
+require_relative "repeated_or_writes"
 require_relative "rewrite_mutation"
 require_relative "unknown_store_widening"
+require_relative "untyped_rejoin"
 require_relative "version_guard"
 
 module Rigor
@@ -484,9 +486,10 @@ module Rigor
       # `opts[k] ||= raise KeyError` is a guard, never `bot`, and `@flags[n] ||= false` is `true` after an
       # `@flags[n] = true` elsewhere, never provably `false`.
       #
-      # Nor is a site a block-return pass marked (`Scope#repeated_or_write?`, {RepeatedOrWrites}): the pass types
-      # every run of a repeating body from one entry scope, so its slot's gradual type may be what an EARLIER run
-      # stored rather than an absence of evidence.
+      # Nor is a marked site (`Scope#repeated_or_write?`, {RepeatedOrWrites}): a block-return pass, and this
+      # evaluator's statement and write-back passes ({#with_repeated_or_write_marks}), type every run of a repeating
+      # body from one entry scope, so its slot's gradual type may be what an EARLIER run stored rather than an
+      # absence of evidence.
       def index_compound_write_value(node)
         return index_write_stored_type(node, scope) unless node.is_a?(Prism::IndexOrWriteNode)
 
@@ -1180,7 +1183,8 @@ module Rigor
 
         [
           Type::Combinator.union(then_type, else_type),
-          join_with_nil_injection(then_scope, else_scope)
+          UntypedRejoin.apply(join_with_nil_injection(then_scope, else_scope), post_pred,
+                              [node.statements, node.subsequent])
         ]
       end
 
@@ -1215,7 +1219,8 @@ module Rigor
 
         [
           Type::Combinator.union(then_type, else_type),
-          join_with_nil_injection(then_scope, else_scope)
+          UntypedRejoin.apply(join_with_nil_injection(then_scope, else_scope), post_pred,
+                              [node.statements, node.else_clause])
         ]
       end
 
@@ -1286,7 +1291,7 @@ module Rigor
         subject_type, post_pred = node.predicate ? sub_eval(node.predicate, scope) : [nil, scope]
         branch_results, falsey_scope = eval_case_when_branches(subject_type, node.predicate, node.conditions, post_pred)
         if pattern_case_matches_every_path?(node, branch_results)
-          return unmatched_pattern_result(branch_results, node.conditions)
+          return unmatched_pattern_result(branch_results, node.conditions, post_pred)
         end
 
         else_result = eval_case_else(node.else_clause, falsey_scope)
@@ -1295,7 +1300,7 @@ module Rigor
         branch_nodes = [*node.conditions, node.else_clause]
         [
           Type::Combinator.union(*all_results.map(&:first)),
-          join_case_branch_scopes(all_results, branch_nodes)
+          join_case_branch_scopes(all_results, branch_nodes, post_pred)
         ]
       end
 
@@ -1310,8 +1315,9 @@ module Rigor
         node.is_a?(Prism::CaseMatchNode) && node.else_clause.nil? && !branch_results.empty?
       end
 
-      def unmatched_pattern_result(branch_results, branch_nodes)
-        [Type::Combinator.union(*branch_results.map(&:first)), join_case_branch_scopes(branch_results, branch_nodes)]
+      def unmatched_pattern_result(branch_results, branch_nodes, entry)
+        [Type::Combinator.union(*branch_results.map(&:first)),
+         join_case_branch_scopes(branch_results, branch_nodes, entry)]
       end
 
       # Joins the post-scopes of every `when`/`in`/`else` branch, dropping the scope of any branch that terminates
@@ -1320,15 +1326,16 @@ module Rigor
       # `branch_terminates?` rule `eval_if`/`eval_unless` already apply to the if/else merge: e.g. `case x; when 1 then
       # v="a"; when 2 then v="b"; else raise; end` keeps `v: "a" | "b"` instead of `... | nil`. When every branch
       # terminates the merge is itself unreachable; fall back to the full join so the continuation scope stays
-      # well-formed.
-      def join_case_branch_scopes(results, nodes)
+      # well-formed. A local the clauses only narrowed from `Dynamic[top]` re-joins to it ({UntypedRejoin}, issue
+      # #1840), read against the post-predicate `entry`.
+      def join_case_branch_scopes(results, nodes, entry)
         live = []
         results.each_with_index do |(type, branch_scope), i|
           live << branch_scope unless branch_terminates?(nodes[i], type)
         end
 
         live = results.map(&:last) if live.empty?
-        reduce_scopes_with_nil_injection(live)
+        UntypedRejoin.apply(reduce_scopes_with_nil_injection(live), entry, nodes)
       end
 
       def eval_case_when_branches(subject_type, subject, conditions, entry_scope)
@@ -1952,7 +1959,7 @@ module Rigor
         # the single-pass join before returning.
         if names.empty?
           fast = loop_content_writeback(node.statements, base_scope, pre_body: post_pred)
-          return [Type::Combinator.constant_of(nil), narrow_loop_exit_edge(node, fast)]
+          return [Type::Combinator.constant_of(nil), loop_exit(node, post_pred, fast)]
         end
 
         post_loop = converged_loop_scope(node, post_pred, base_scope, names, body_first, jumps)
@@ -1961,7 +1968,7 @@ module Rigor
         # :idle` under `end while state != :idle`) is dead in every converged pass. The single pass runs from the
         # un-narrowed post-predicate scope, so its arms stand in for that first iteration.
         post_loop = join_break_scopes(post_loop, first_breaks, names) if node.begin_modifier?
-        post_loop = narrow_loop_exit_edge(node, post_loop)
+        post_loop = loop_exit(node, post_pred, post_loop)
         [Type::Combinator.constant_of(nil), post_loop]
       end
 
@@ -2046,6 +2053,12 @@ module Rigor
         post_loop = loop_content_writeback(node.statements, post_loop, pre_body: post_pred, rebound: names)
         arms = loop_break_arms(node, post_pred, result, body_first, jumps, break_pass)
         join_break_scopes(post_loop, arms, names)
+      end
+
+      # A loop's continuation: a local its body and predicate only narrowed from `Dynamic[top]` re-joins to it
+      # ({UntypedRejoin}, issue #1840), then the exit edge narrows.
+      def loop_exit(node, post_pred, post_loop)
+        narrow_loop_exit_edge(node, UntypedRejoin.apply(post_loop, post_pred, [node.predicate, node.statements]))
       end
 
       # Item 4 — loop-exit predicate narrowing. A `while pred` / `until pred` loop exits PRECISELY on the predicate's
@@ -2379,6 +2392,12 @@ module Rigor
         stores
       end
 
+      # A `for` loop's continuation, with a local the body only narrowed from `Dynamic[top]` re-joined to it
+      # ({UntypedRejoin}, issue #1840). The index is written on every iteration.
+      def for_exit(node, post_coll, continuation)
+        UntypedRejoin.apply(continuation, post_coll, [node.index, node.statements])
+      end
+
       # `for index in collection; body; end`. Unlike `each {}` blocks, `for` does NOT create a new variable scope: the
       # index variable AND every local written in the body leak to the surrounding scope. The collection is evaluated
       # once; the body runs zero or more times, so the post-loop scope is the join of the no-iteration scope (just
@@ -2405,7 +2424,7 @@ module Rigor
         continuation = join_with_nil_injection(post_coll, body_scope)
         pre_existing, body_first = loop_body_local_writes(node.statements, post_coll)
         continuation = join_break_scopes(continuation, breaks, pre_existing + body_first)
-        [Type::Combinator.constant_of(nil), continuation]
+        [Type::Combinator.constant_of(nil), for_exit(node, post_coll, continuation)]
       end
 
       # Issue #1429 — a `for` body runs after the collection's `each`, which may be a project method, and after itself.
@@ -2565,7 +2584,7 @@ module Rigor
 
         # A dead RHS is still evaluated and its scope still joins, so a write inside it nil-injects exactly as
         # before; only its value is dropped, because it cannot be the value of the expression.
-        joined_scope = join_with_nil_injection(left_scope, right_scope)
+        joined_scope = UntypedRejoin.apply(join_with_nil_injection(left_scope, right_scope), left_scope, [node.right])
         type = skipped_type
         type = Type::Combinator.union(skipped_type, right_type) unless right_operand_dead?(node, left_type, left_scope)
         return [type, joined_scope] unless edges
@@ -3013,7 +3032,7 @@ module Rigor
         # observes the seed's union (not the pre-call narrowed value). Always-safe (only widens; no new facts). See
         # [`docs/CURRENT_WORK.md`](../../../docs/CURRENT_WORK.md) § "Flow-folding" — G2 intervening-call case.
         post_scope = invalidate_ivars_for_intervening_call(node, post_scope) if statement_call
-        # C1 — regex match-data globals (`$~`, `$1..$9`, `$&`, …) are narrowed to non-nil on a successful-match edge; a
+        # C1 — regex match-data globals (`$~`, `$1..$N`, `$&`, …) are narrowed to non-nil on a successful-match edge; a
         # later call that itself runs a regex match rebinds them, so the narrowed facts must be dropped. We forget them
         # only when the call may run a match in this frame ({#rebinds_match_globals?}). A call provably match-free on a
         # known receiver — `$3.to_i`, `year < 50` — does NOT clobber, so the multi-statement `m = /…/ =~ s; …; use($2)`
@@ -3542,7 +3561,9 @@ module Rigor
       end
 
       def enter_call_block(node, block)
-        block_entry = narrow_define_method_block_self(node, repeating_block_entry(node, block))
+        block_entry = narrow_define_method_block_self(
+          node, with_repeated_or_write_marks(node, block, repeating_block_entry(node, block))
+        )
         # #319 — `Class.new do ... end` and friends evaluate their block as a CLASS BODY (`class_eval`
         # semantics): `self` is the freshly created class, so a `def` inside defines an instance method on it
         # and `attr_reader` runs as a class-level macro. Enter the block under the same `self_type` /
@@ -4142,7 +4163,7 @@ module Rigor
       # The `break` scopes of one unrecorded pass from `converged` — for a capped fixpoint, whose widened binding no
       # pass has run from.
       def converged_break_arms(call_node, block, converged, targets)
-        entry = block_pass_entry(call_node, block, converged)
+        entry = with_repeated_or_write_marks(call_node, block, block_pass_entry(call_node, block, converged))
         sink, = collect_break_scopes { sub_eval(block, entry, **UNRECORDED) }
         targeted_scopes(sink, targets)
       end
@@ -4942,7 +4963,8 @@ module Rigor
       # params / `;`-locals re-bound as usual) and returns the per-name exit binding for `names`. Used as the
       # `BodyFixpoint` body-evaluator.
       def block_exit_bindings(call_node, block, bindings, names)
-        _type, exit_scope = sub_eval(block, block_pass_entry(call_node, block, bindings))
+        entry = with_repeated_or_write_marks(call_node, block, block_pass_entry(call_node, block, bindings))
+        _type, exit_scope = sub_eval(block, entry)
         names.to_h { |name| [name, CapturedLocals.bound_type(exit_scope, name)] }
       end
 
@@ -4957,6 +4979,38 @@ module Rigor
           bindings.key?(name) ? bind_capture(acc, name, type) : acc.with_mutated_local(name, type)
         end
       end
+
+      # Issue #1336 — `entry` with the index `||=` sites of a repeating block marked as the generic block-return pass
+      # marks them ({RepeatedOrWrites}, `Scope#with_repeated_or_writes`). The statement pass and every ADR-56
+      # write-back pass type the body from one entry scope just as that pass does, so a slot an earlier run stored
+      # into reads as a lone `Dynamic` there too, and the memoizing reading ({#index_compound_write_value}) answered
+      # one site's rvalue: `last = (cache[:k] ||= :f).itself` beside a `cache[:k] ||= :e` wrote `:f` alone back
+      # into `last`, and `last == :e` folded always-falsey. A call that runs its block at most once marks nothing.
+      def with_repeated_or_write_marks(call_node, block, entry)
+        sites = repeated_or_write_sites(call_node, block)
+        sites.empty? ? entry : entry.with_repeated_or_writes(sites)
+      end
+
+      # The sites {#with_repeated_or_write_marks} lays, once per block: a body that spells no `||=` — nearly every
+      # one — answers none without the repetition question.
+      def repeated_or_write_sites(call_node, block)
+        memo = (@repeated_or_write_sites ||= {}.compare_by_identity)
+        return memo[block] if memo.key?(block)
+
+        memo[block] = compute_repeated_or_write_sites(call_node, block)
+      end
+
+      def compute_repeated_or_write_sites(call_node, block)
+        body = block.body
+        return NO_REPEATED_OR_WRITES if body.nil? || !RepeatedOrWrites.may_hold_or_write?(body)
+        return NO_REPEATED_OR_WRITES if repeating_block_class(call_node).nil?
+
+        stores = CapturedLocals.content_mutations(block, scope, non_locals: true)
+        RepeatedOrWrites.sites(block, stores, scope).at(nil)
+      end
+
+      NO_REPEATED_OR_WRITES = [].freeze
+      private_constant :NO_REPEATED_OR_WRITES
 
       NO_CAPTURE_BINDINGS = {}.freeze
       private_constant :NO_CAPTURE_BINDINGS
@@ -5956,8 +6010,7 @@ module Rigor
       # it is frozen, and the dispatcher already projects it (see `DataFolding`).
       def struct_instance_projection(subject_type, method_name, scope, subject_node)
         return nil unless subject_type.is_a?(Type::StructInstance)
-        return nil unless MethodDispatcher::StructMaterialization.materialization_call?(subject_node, subject_type,
-                                                                                        scope)
+        return nil unless MethodDispatcher::StructMaterialization.materialization_call?(subject_node, scope)
 
         case method_name
         when :deconstruct then Type::Combinator.tuple_of(*subject_type.members.values)

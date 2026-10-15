@@ -49,8 +49,10 @@ RSpec.describe "Struct.new value folding", type: :runner do
       RUBY
     end
 
-    it "folds Struct#with off a fresh instance" do
-      expect(dumped_types(<<~RUBY)).to eq(["99", "\"two\""])
+    # #1335: Ruby has no `Struct#with` (only `Data#with`), so a fresh Struct never folds it. The member reads
+    # fall through to RBS dispatch, which knows no `with` on Struct, and never carry the `Data` member update.
+    it "does not fold Struct#with off a fresh instance" do
+      expect(dumped_types(<<~RUBY)).to eq(["Dynamic[top]", "Dynamic[top]"])
         c = Struct.new(:x, :y)
         dump_type(c.new(1, "two").with(x: 99).x)
         dump_type(c.new(1, "two").with(x: 99).y)
@@ -526,8 +528,9 @@ RSpec.describe "Struct.new value folding", type: :runner do
       RUBY
     end
 
-    it "widens an empty literal introduced by #with" do
-      expect(dumped_types(<<~RUBY)).to eq(["Array[Dynamic[top]]", "[1]"])
+    # #1335: `Struct#with` is not a Struct method, so it no longer folds; both reads are RBS-dispatched.
+    it "does not fold an empty literal introduced by #with (was: widened, #1335)" do
+      expect(dumped_types(<<~RUBY)).to eq(["Dynamic[top]", "Dynamic[top]"])
         Result = Struct.new(:items, :other)
         dump_type(Result.new([1], [2]).with(items: []).items)
         dump_type(Result.new([1], [2]).with(other: []).items)
@@ -672,10 +675,6 @@ RSpec.describe "Struct.new value folding", type: :runner do
         expect(dumped_types("#{line_def}dump_type(Line.new(\"a\", 2).outer)")).to eq(["\"A\""])
       end
 
-      it "folds off a `.with` copy" do
-        expect(dumped_types("#{line_def}dump_type(Line.new(\"a\", 2).with(text: \"b\").shout)")).to eq(["\"B\""])
-      end
-
       it "folds each call site against ITS OWN carrier, not a shared answer" do
         types = dumped_types(<<~RUBY)
           #{line_def}
@@ -806,8 +805,9 @@ RSpec.describe "Struct.new value folding", type: :runner do
       end
 
       it "declines a `.with` copy taken off a stale-derived receiver" do
-        # The composed shape: `.with` IS a materialisation, but its receiver is not, so the copy it
-        # produces carries the stale map. Refusing the prefix kills the composition at its root.
+        # The composed shape: the copy off a stale receiver must never read as fresh. Since #1335 `.with` is
+        # never a materialisation (`Struct` has no `#with`), so this declines at the `.with` link itself; the
+        # pin stays so no future materialisation of `.with` can reopen the composition.
         expect(dumped_types(<<~RUBY)).to eq(["Dynamic[top]"])
           #{builder_def}
           x = Line.new("a", 2)
@@ -817,8 +817,9 @@ RSpec.describe "Struct.new value folding", type: :runner do
       end
 
       it "declines a block-def method call off that same stale-derived receiver" do
-        # The slice-5 grant fires off `.with`'s carrier, so the same prefix leaked into whole method
-        # bodies: this folded `"A"` against a runtime `"Z"` with the grant's own arm behaving correctly.
+        # The slice-5 grant fired off `.with`'s carrier, so the same prefix once leaked into whole method
+        # bodies and folded `"A"` against a runtime `"Z"`. `.with` is no longer a materialisation (#1335), so
+        # this now declines at the `.with` link; the pin stays as the composed-shape regression.
         expect(dumped_types(<<~RUBY)).to eq(["Dynamic[top]"])
           #{builder_def}
           x = Line.new("a", 2)
@@ -835,11 +836,6 @@ RSpec.describe "Struct.new value folding", type: :runner do
 
       it "folds a read off `[]`" do
         expect(dumped_types("#{builder_def}dump_type(Line[\"d\", 2].text)")).to eq(["\"d\""])
-      end
-
-      it "folds a read off a `.with` copy of a materialisation" do
-        source = "#{builder_def}dump_type(Line.new(\"e\", 2).with(text: \"f\").text)"
-        expect(dumped_types(source)).to eq(["\"f\""])
       end
 
       it "folds a projection off a materialisation" do
@@ -1018,17 +1014,18 @@ RSpec.describe "Struct.new value folding", type: :runner do
         RUBY
       end
 
+      # #1335: the receiver is now built with `.new` (`Struct#with` is not a Struct method).
       it "still folds both consumers when no user `with` exists anywhere" do
         # The must-still-fold sibling: without it the two declines above would be satisfied by a guard that
-        # simply refused every `.with`.
+        # simply refused every fresh receiver.
         expect(dumped_types(<<~RUBY)).to eq(["\"c\"", "\"C\""])
           class Plain < Struct.new(:text)
             def shout
               text.upcase
             end
           end
-          dump_type(Plain.new("b").with(text: "c").text)
-          dump_type(Plain.new("b").with(text: "c").shout)
+          dump_type(Plain.new("c").text)
+          dump_type(Plain.new("c").shout)
         RUBY
       end
 
@@ -1047,6 +1044,86 @@ RSpec.describe "Struct.new value folding", type: :runner do
           dump_type(x.with(a: 3).a)
         RUBY
       end
+    end
+  end
+
+  # #1335: Ruby has no `Struct#with` (only `Data#with`). A `with` call on a Struct instance must not fold to the
+  # member-updated `Struct`. Without ActiveSupport it falls through to RBS dispatch, which declines (the result is
+  # `Dynamic[top]`, not `S(x: 2)`; no `call.undefined-method` is reported for a Struct receiver). With the
+  # ActiveSupport lock, `Object#with` from the ADR-72 overlay answers and types as the block's value.
+  describe "Struct#with is not a Struct method (#1335)" do
+    def struct_with_types(source:, gemfile_lock: nil)
+      Dir.mktmpdir("rigor-struct-with-") do |dir|
+        File.write(File.join(dir, "Gemfile.lock"), gemfile_lock) if gemfile_lock
+        File.write(File.join(dir, "code.rb"), "require \"rigor/testing\"\ninclude Rigor::Testing\n#{source}")
+        Dir.chdir(dir) do
+          configuration = Rigor::Configuration.new(
+            "paths" => [File.join(dir, "code.rb")],
+            "bundler" => { "lockfile" => "Gemfile.lock", "auto_detect" => !gemfile_lock.nil? }
+          )
+          result = guarded_run(Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil))
+          result.diagnostics
+                .select { |d| d.message.start_with?("dump_type") }
+                .map { |d| d.message.delete_prefix("dump_type: ") }
+        end
+      end
+    end
+
+    let(:activesupport_lock) do
+      <<~LOCK
+        GEM
+          remote: https://rubygems.org/
+          specs:
+            activesupport (8.1.3)
+
+        PLATFORMS
+          ruby
+
+        DEPENDENCIES
+          activesupport
+
+        BUNDLED WITH
+           2.5.6
+      LOCK
+    end
+
+    it "does not type Struct#with as the member update when activesupport is not locked" do
+      types = struct_with_types(source: <<~RUBY)
+        S = Struct.new(:x)
+        r = S.new(1).with(x: 2) { |s| 5 }
+        dump_type(r)
+        dump_type(S.new(1).with(x: 2))
+      RUBY
+
+      expect(types).to eq(["Dynamic[top]", "Dynamic[top]"])
+    end
+
+    # The anonymous form: a named `S = Struct.new(:x)` receiver resolves through RBS as the class `S`, which
+    # has no signature, so its `with` degrades to `Dynamic[top]` (a pre-existing gap, not pinned here).
+    it "types the block form as Object#with's block value when activesupport is locked" do
+      types = struct_with_types(gemfile_lock: activesupport_lock, source: <<~RUBY)
+        dump_type(Struct.new(:x).new(1).with(x: 2) { |s| 5 })
+      RUBY
+
+      expect(types).to eq(["5"])
+    end
+
+    # The side effect of dropping the arm: a Struct subclass that defines its own `with` used to get the
+    # member-updated `L2(text: "q")` from the fold; now the user method answers.
+    it "lets a Struct subclass's own #with answer (was the member-updated instance, #1335)" do
+      expect(dumped_types(<<~RUBY)).to eq(["42"])
+        class L2 < Struct.new(:text)
+          def with(**) = 42
+        end
+        dump_type(L2.new("a").with(text: "q"))
+      RUBY
+    end
+
+    it "keeps the Data#with fold" do
+      expect(dumped_types(<<~RUBY)).to eq(["D(x: 2)"])
+        D = Data.define(:x)
+        dump_type(D.new(x: 1).with(x: 2))
+      RUBY
     end
   end
 end

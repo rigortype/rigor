@@ -465,11 +465,17 @@ on its own behalf.
 - **Mutable** — anything else (a checkout, a `bundle add rigor, github:`
   clone, a `path:` gem). The caller adds an `engine-source` config entry
   holding a SHA-256 over every `.rb` under the gem root's `lib/` and
-  `plugins/`, each contributing its **root-relative path** and its
-  **content**. Content, not a stat tuple: a stat tuple is barred from a
-  cache KEY (see `FileEntry`), and a path-relative content digest is what
-  makes the key survive a re-clone or a fresh CI checkout of the same
-  commit.
+  `plugins/`, every `.yml` under `data/builtins/` and `data/effects/`,
+  every `.rbs` under `data/`, and every `.rbs` under `plugins/*/sig/`,
+  each contributing its **root-relative path** and its **content**.
+  The `.rbs` files are digested by `RbsDescriptor` too, but only the
+  run-result and env caches read that; the `--incremental` snapshot
+  fingerprint and `Protection::MutationCache` key on `signature_paths`
+  plus this slot alone. Tooling-only trees such as `data/oss-sweep/` are
+  not engine input. Content, not a stat tuple: a stat tuple is barred
+  from a cache KEY (see `FileEntry`), and a path-relative content digest
+  is what makes the key survive a re-clone or a fresh CI checkout of the
+  same commit.
 
 A mutable tree whose source cannot be read raises
 `EngineSource::Unavailable`, which every caller turns into "no cache for
@@ -813,7 +819,7 @@ full run, so the snapshot can never wedge or stale an analysis.
 
 ### Two-level gating
 
-1. **Global fingerprint (gates the load).** `IncrementalSnapshot.fingerprint(configuration:, roots:)`
+1. **Global fingerprint (gates the load).** `IncrementalSnapshot.fingerprint(configuration:, roots:, explain:)`
    is a SHA-256 over the engine version + `SCHEMA`, the configuration hash
    (`configuration.to_h`, which omits the keys that change no diagnostic —
    `effects:`, below, and `test_paths:`, which only `sig-gen` reads), the
@@ -828,7 +834,36 @@ full run, so the snapshot can never wedge or stale an analysis.
    file (its path is in the configuration; a file outside the analysed paths
    would otherwise leave the snapshot stale) — but **not** the analyzed source
    contents. A missing `pre_eval:` file digests as absent, so creating one also
-   drops the snapshot. A mismatch drops the snapshot.
+   drops the snapshot. A run under `--explain` adds an `explain:true` part (none
+   otherwise, so a plain run's fingerprint is unchanged): the per-file cache
+   holds the `:info` fallback rows, so a snapshot primed without the flag must
+   not serve a run with it, nor the reverse ([#1533](https://github.com/rigortype/rigor/issues/1533)).
+   The modes also persist to separate files under `<cache>/incremental/`: a plain run
+   to `snapshot.bin` (unchanged), a run with run-mode parts (`--explain`, the ADR-116
+   shadow harness) to `snapshot-<mode digest>.bin` (`IncrementalSnapshot.file_name`), so
+   an occasional `--explain` run neither reads nor evicts the warm plain snapshot, and the
+   reverse ([#1867](https://github.com/rigortype/rigor/issues/1867)). The language server
+   and `Protection::MutationCache#load_snapshot` have no run mode and stay on the plain
+   file. Snapshot files are not budgeted or pruned by `Cache::Store`; they stay until
+   `--clear-cache`.
+   A mismatch drops the snapshot.
+
+   The language server's in-process session is gated the same way
+   ([#1613](https://github.com/rigortype/rigor/issues/1613)).
+   `LanguageServer::ProjectContext#project_diagnostics` re-reads the
+   configuration and recomputes this fingerprint on every save round, and
+   compares it with the one the session was primed with. A mismatch, or a
+   fingerprint that cannot be computed (`nil`), discards the session and the
+   Environment / project scan built from the old inputs and re-baselines, so
+   the round equals a cold run; an unchanged fingerprint takes the plain
+   `IncrementalSession#recheck` path. The re-baseline does not bump
+   `ProjectContext#generation`: the round that noticed the change is already
+   computed from the new inputs. The `effects:` identity
+   (`Effects::Identity.digest`, which `Configuration#to_h` omits) is compared
+   alongside it, and a fingerprint that was already `nil` at priming is not a
+   change. The fingerprint cost is proportional to project size: about 18 ms
+   on a 573-file project and 65-95 ms on a 1,300-file app (roughly 4% of a
+   no-op save round).
 
    The lockfile paths are resolved by `Analysis::RunCacheKey.resolved_lockfile_paths`
    — the same call that builds the ADR-45 run-result key's `bundler.lockfile` /
@@ -865,6 +900,8 @@ so warm output is byte-identical to cold
 ([#1524](https://github.com/rigortype/rigor/issues/1524)). The options
 matter: a pool backend lists its `.rigor.yml` prepare rows at the head of the
 per-file stream, while a sequential run lists them among the pre-file rows.
+A pooled run whose closure is empty dispatches no worker, so `#prepare` runs once on a throwaway registry
+(its trust refusals never reach the run) and the same rows are listed there ([#1541](https://github.com/rigortype/rigor/issues/1541)).
 A full run lists its pre-file run-level rows, then the per-file stream —
 each analysed file's rows, one file after another in analysis order (the
 expanded project files, then the template units) — then the post-analysis
@@ -886,13 +923,27 @@ still depart from a full run's, in two known cases:
   a full run lists it after the rows of the file whose analysis produced it.
   The cache cannot tell which file produced it either, so a recheck that
   re-analyses only one of the two files can list the row twice or drop it.
+  This departs whenever such a row exists, not only when it is served: the
+  interleave uses the row as a place marker at the target file's rank, so
+  served rows from files in between are spliced before it.
 - **A served path the run no longer lists.** A file deleted between the
   session's listing and the narrowed run's own expansion has no place in the
   analysis order; its rows are kept and listed after every other file's.
 
-`--verify-incremental` compares sorted sets and does not check the order;
-`spec/rigor/analysis/incremental_session_spec.rb` does, row for row, against
-a full run.
+`--verify-incremental` compares the rows as multisets, then the order
+(#1542). A recheck whose rows differ in multiplicity fails with the set
+report. One whose rows agree as a multiset but list in another order fails
+with a "same set, different order" report that names the first index where
+the two lists diverge. Rows are compared in full (every field the row
+carries), so a tie on path, line, column, rule and message is not mistaken
+for a match.
+
+Case 1 therefore fails the gate as an order mismatch or a set mismatch,
+depending on the partition: a recheck that reproduces the duplicate or the
+drop fails on order only, and one that does not fails on the set. Case 2
+always fails as a set mismatch, before and after the order check. Both are
+pinned by `spec/rigor/analysis/incremental_session_spec.rb`, which also
+checks the order row for row against a full run.
 
 ### Editor mode (`--tmp-file` / `--instead-of`)
 
@@ -1001,7 +1052,10 @@ would otherwise invalidate on every edit), and (c) each plugin's optional
 digest drops the snapshot (a conservative full re-analysis). A plugin that
 contributes types but exposes none of (a)/(b)/(c) makes the snapshot
 un-reusable and is named — a forcing function to declare its surface rather
-than a silent stale reuse.
+than a silent stale reuse. The `--incremental` note states the reason for each
+opaque plugin: it declares no surface, or the input it declares cannot be
+digested (or its hook raised). An unreadable fact store is reported once, with
+no plugin named.
 
 Each value is digested with `Cache::ValueDigest`, which MUST be a function of
 the value alone ([#1574](https://github.com/rigortype/rigor/issues/1574)): a
@@ -1329,7 +1383,8 @@ guarantee, is [ADR-45](../adr/45-unchanged-project-fast-path.md) WD2; this is th
   - Native Windows takes no mark: `File::Stat#ctime` is the creation time there.
   - A network or FUSE filesystem (NFS with its attribute cache, virtiofs, gRPC-FUSE, sshfs) may
     report a change time from before a save; nothing detects that.
-- **Not written** for an editor buffer, a pool run, a project with effect collection
+- **Not written** for an editor buffer, a pool run, an `--explain` run (the key has no
+  explain slot), a project with effect collection
   on, a run with an opaque plugin, a run in which a boundary row changed during the
   per-file loop without being credited to a file, or a run after which the session holds no content digest for some analysed file
   — the #1536 source-RBS gate forgets the digest of a file saved after the closure was

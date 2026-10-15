@@ -239,7 +239,11 @@ module Rigor
       def project_defines?(class_name, method_name, scope)
         return false unless scope.respond_to?(:user_def_through_ancestors)
 
-        !scope.user_def_through_ancestors(class_name, method_name.to_sym).first.nil?
+        # A name no Symbol can hold cannot be a method the project defines (#1831): decline, do not raise.
+        method = Rigor::Source::SymbolName.of(method_name.to_s)
+        return false if method.nil?
+
+        !scope.user_def_through_ancestors(class_name, method).first.nil?
       end
 
       # `REST::AccountSerializer` offers two readings — the namespaced `REST::Account` and the

@@ -29,10 +29,10 @@ RSpec.describe Rigor::CLI::SigGenCommand do
   end
   let(:kept) do
     {
-      "m" => "def m: (Integer x) -> nil",
-      "n" => "def n: (?) -> nil",
+      "m" => "def m: (Integer x) -> Float",
+      "n" => "def n: (?) -> Float",
       "k" => "def k: (Integer a, ?String b, *Symbol r, key: Integer, ?opt: String, **untyped) " \
-             "?{ (Integer) -> void } -> nil",
+             "?{ (Integer) -> void } -> Float",
       "t" => "def t: (Integer x) -> Integer"
     }
   end
@@ -47,9 +47,9 @@ RSpec.describe Rigor::CLI::SigGenCommand do
           @a = a
         end
 
-        def m(x) = nil
-        def n(*) = nil
-        def k(a, b = "", *r, key:, opt: "", **kw, &blk) = nil
+        def m(x) = 1.0
+        def n(*) = 1.0
+        def k(a, b = "", *r, key:, opt: "", **kw, &blk) = 1.0
         def t(x) = x
         def o(x) = nil
       end
@@ -78,8 +78,8 @@ RSpec.describe Rigor::CLI::SigGenCommand do
   it "prints each proposal on its declared parameter list, and neither the overloaded member nor `initialize`" do
     _, out, = sig_gen("--print")
 
-    expect(out).to include("  # [tighter, was: untyped]\n  def m: (Integer x) -> nil\n")
-    expect(out).to include("  # [tighter, was: untyped]\n  def n: (?) -> nil\n")
+    expect(out).to include("  # [tighter, was: untyped]\n  def m: (Integer x) -> Float\n")
+    expect(out).to include("  # [tighter, was: untyped]\n  def n: (?) -> Float\n")
     expect(out).to include("  # [tighter, was: Numeric]\n  def t: (Integer x) -> Integer\n")
     expect(out).to include("  #{kept['k']}\n")
     expect(out).not_to include("def o:")
@@ -90,8 +90,8 @@ RSpec.describe Rigor::CLI::SigGenCommand do
   it "shows the real declaration on the `-` line of `--diff`, not `() -> <declared return>`" do
     _, out, = sig_gen("--diff")
 
-    expect(out).to include("- def m: (Integer x) -> untyped\n+ def m: (Integer x) -> nil\n")
-    expect(out).to include("- def n: (?) -> untyped\n+ def n: (?) -> nil\n")
+    expect(out).to include("- def m: (Integer x) -> untyped\n+ def m: (Integer x) -> Float\n")
+    expect(out).to include("- def n: (?) -> untyped\n+ def n: (?) -> Float\n")
     expect(out).to include("- def t: (Integer x) -> Numeric\n+ def t: (Integer x) -> Integer\n")
     expect(out).not_to include("() -> untyped")
   end
@@ -126,8 +126,8 @@ RSpec.describe Rigor::CLI::SigGenCommand do
     status, out, = sig_gen("--check", "--overwrite")
 
     expect(status).to eq(1)
-    expect(out).to include("  - def m: (Integer x) -> untyped\n  + def m: (Integer x) -> nil\n")
-    expect(out).to include("  - def n: (?) -> untyped\n  + def n: (?) -> nil\n")
+    expect(out).to include("  - def m: (Integer x) -> untyped\n  + def m: (Integer x) -> Float\n")
+    expect(out).to include("  - def n: (?) -> untyped\n  + def n: (?) -> Float\n")
 
     sig_gen("--write", "--overwrite")
 
@@ -170,17 +170,26 @@ RSpec.describe Rigor::CLI::SigGenCommand do
         def b: %a[custom: {nested}] (Integer x) -> untyped
       end
     RBS
-    write("lib/c.rb", "class C\n  def a(x) = nil\n  def b(x) = nil\n\n  private\n\n  def pv(x) = nil\nend\n")
+    write("lib/c.rb", "class C\n  def a(x) = 1.0\n  def b(x) = 1.0\n\n  private\n\n  def pv(x) = 1.0\nend\n")
 
     expect(sig_gen("--write", "--overwrite", "--include-private").first).to eq(0)
     expect(sig_file).to eq(<<~RBS)
       class C
-        private def pv: (Integer x) -> nil
-        def a: %a{pure} (Integer x) -> nil
-        def b: %a[custom: {nested}] (Integer x) -> nil
+        private def pv: (Integer x) -> Float
+        def a: %a{pure} (Integer x) -> Float
+        def b: %a[custom: {nested}] (Integer x) -> Float
       end
     RBS
     expect(sig_gen("--write", "--overwrite", "--include-private")[1]).to eq("No changes\n")
+  end
+
+  # Issue #1489. A value literal the body proves is widened to its class over a declared `untyped`, never pinned.
+  it "writes the class, not the literal, over a declared `untyped` under `--write --overwrite`" do
+    write("sig/c.rbs", "class C\n  def a: (Integer x) -> untyped\n  def b: () -> untyped\nend\n")
+    write("lib/c.rb", "class C\n  def a(x) = 1\n  def b = \"s\"\nend\n")
+
+    expect(sig_gen("--write", "--overwrite").first).to eq(0)
+    expect(sig_file).to eq("class C\n  def a: (Integer x) -> Integer\n  def b: () -> String\nend\n")
   end
 
   # An effect annotation is added only to a declaration that carries none (ADR-103 WD9). An annotation on the

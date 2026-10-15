@@ -42,8 +42,8 @@ module Rigor
     # plugin's identity and the engine's (key slots), so a project whose plugins claim template globs is served
     # too. The ADR-87 probe misses on one: the plain slot's key carries the `template-units` slot.
     #
-    # `explain:` is always false: the session's runners never set it (#1533), and the CLI declines the probe under
-    # `--explain`.
+    # `explain:` is always false: the session writes no slot for an `--explain` run (#1533), and the CLI declines
+    # the probe under `--explain`.
     module IncrementalRunSlot
       module_function
 
@@ -115,7 +115,7 @@ module Rigor
       def serve(configuration:, cache_root:, paths:)
         return nil if configuration.effects_enabled?
 
-        files = PathExpansion.ruby_files(paths, configuration.exclude_patterns)
+        files = PathExpansion.ruby_files(paths, configuration.exclude_patterns, base: configuration.exclude_base)
         slot_key = key(configuration: configuration, target: Target.new(files: files, roots: paths))
         return nil if slot_key.nil?
 

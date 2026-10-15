@@ -2471,7 +2471,7 @@ module Rigor
         return every_definer_raises_type(raising, receiver, call_node, arg_types, block_type) if def_node.nil?
 
         result = infer_user_method_return(def_node, receiver, arg_types,
-                                          self_fold_safe: fold_safe_call_receiver?(call_node, receiver),
+                                          self_fold_safe: fold_safe_call_receiver?(call_node),
                                           yield_type: block_type)
         return result if result.nil?
 
@@ -2506,11 +2506,11 @@ module Rigor
       # This is only a property of the receiver expression; whether the grant is actually issued also needs
       # a `StructInstance` carrier and a body that survives the self-use scan, both decided in
       # {#build_user_method_body_scope}.
-      def fold_safe_call_receiver?(call_node, receiver)
+      def fold_safe_call_receiver?(call_node)
         return false if call_node.nil?
 
         case call_node.receiver
-        when Prism::CallNode then materialization_call?(call_node.receiver, receiver)
+        when Prism::CallNode then materialization_call?(call_node.receiver)
         when Prism::LocalVariableReadNode then scope.struct_fold_safe?(call_node.receiver.name)
         when nil, Prism::SelfNode then scope.struct_fold_safe?(:self)
         else false
@@ -2520,10 +2520,10 @@ module Rigor
       # Issue #595 — the materialisation test lives ONCE, in
       # [`struct_materialization.rb`](method_dispatcher/struct_materialization.rb), because the direct
       # member-read gate ({MethodDispatcher::StructFolding}`#fresh_receiver?`) needs the identical answer;
-      # see {MethodDispatcher::StructMaterialization.materialization_call?}. It resolves its own `.with`
-      # guard through `Scope`, so neither consumer supplies a lookup and neither can answer differently.
-      def materialization_call?(node, receiver)
-        MethodDispatcher::StructMaterialization.materialization_call?(node, receiver, scope)
+      # see {MethodDispatcher::StructMaterialization.materialization_call?}. A `.with` call is never one
+      # (`Struct` has no `#with`, #1335), so the test needs no lookup from either consumer.
+      def materialization_call?(node)
+        MethodDispatcher::StructMaterialization.materialization_call?(node, scope)
       end
 
       # Module-singleton call resolution (ADR-57 follow-up) — resolves `Foo.<name>` on a `Singleton[Foo]`
@@ -2692,7 +2692,7 @@ module Rigor
       def every_definer_raises_type(defs, receiver, call_node, arg_types, block_type)
         return nil if defs.nil?
 
-        self_fold_safe = fold_safe_call_receiver?(call_node, receiver)
+        self_fold_safe = fold_safe_call_receiver?(call_node)
         defs.each do |def_node|
           result = infer_user_method_return(def_node, receiver, arg_types,
                                             self_fold_safe: self_fold_safe, yield_type: block_type)
@@ -5435,11 +5435,25 @@ module Rigor
         acc, rest = inject_constant_start(members, seed, has_seed)
         return nil if acc.nil?
 
-        rest.each do |element_value|
-          acc = inject_constant_step(block, acc, element_value)
+        captured = inject_captured_bindings(block, rest.map { |value| Type::Combinator.constant_of(value) })
+        rest.each_with_index do |element_value, position|
+          acc = inject_constant_step(block, acc, element_value, captured, position)
           return nil if acc.nil?
         end
         acc
+      end
+
+      # Issue #1332 — the #587 (b) captured-block binding ({#captured_block_bindings}) both inject arms lay under
+      # every step, as the Tuple / Range per-element folds and the per-pair `HashShape` fold do. Without it each
+      # step reads a captured variable at its entry binding, so a body that rebinds or mutates one (`n += 1`,
+      # `log << e`, `cache[:k] ||= e`) pinned the result: `n = 0; [1, 2].inject(0) { |a, e| r = a + n; n += 1;
+      # r }` folded to `0` where Ruby answers `1`. The fixpoint binds the accumulator parameter to `Dynamic[top]`
+      # rather than to a type the inject fixpoint has not converged yet: a captured name that reads the
+      # accumulator widens rather than pins. `element_types` is the constant arm's steps, one position per block
+      # run, which {RepeatedOrWrites} reads; nil for the nominal arm, which marks every repeated site.
+      def inject_captured_bindings(block, element_types, element: nil)
+        element ||= Type::Combinator.union(*element_types)
+        captured_block_bindings(block, [Type::Combinator.untyped, element], element_types: element_types)
       end
 
       # Extracts the receiver's foldable constant values, size-capped before enumeration, or nil to decline.
@@ -5493,9 +5507,9 @@ module Rigor
       # Evaluates the block body once with the running constant accumulator + the next constant element
       # bound to the block params, returning the result when it is a foldable `Constant` within the
       # magnitude cap, else nil to decline the whole fold.
-      def inject_constant_step(block, acc, element_value)
+      def inject_constant_step(block, acc, element_value, captured, position)
         element = Type::Combinator.constant_of(element_value)
-        result = type_block_body_with_param(block, [acc, element])
+        result = type_block_body_with_param(block, [acc, element], captured: captured, position: position)
         return nil unless result.is_a?(Type::Constant)
         return nil unless inject_foldable?(result.value)
         return nil if inject_magnitude_too_large?(result.value)
@@ -5525,13 +5539,14 @@ module Rigor
         seed_acc = has_seed ? seed : element
         return nil if seed_acc.nil?
 
+        captured = inject_captured_bindings(block, nil, element: element)
         converged = BodyFixpoint.converge(
           names: [:__inject_acc__],
           seed_bindings: { __inject_acc__: seed_acc },
           widen: method(:widen_value_pinned),
           evaluate_body: lambda do |bindings|
             acc = bindings[:__inject_acc__]
-            result = type_block_body_with_param(block, [acc, element])
+            result = type_block_body_with_param(block, [acc, element], captured: captured)
             result.nil? ? {} : { __inject_acc__: result }
           end
         )

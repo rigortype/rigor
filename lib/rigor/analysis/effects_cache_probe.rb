@@ -80,7 +80,7 @@ module Rigor
       private
 
       def effects_descriptor(paths)
-        files = PathExpansion.ruby_files(paths, @configuration.exclude_patterns)
+        files = PathExpansion.ruby_files(paths, @configuration.exclude_patterns, base: @configuration.exclude_base)
         base = RunCacheKey.descriptor(
           configuration: @configuration, files: files, explain: false,
           rbs_config_entries: RunCacheKey.libraries_config_entries(@configuration)

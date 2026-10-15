@@ -280,6 +280,124 @@ RSpec.describe Rigor::CLI do
     end
   end
 
+  # Issue #1542 — the gate compared the two runs as sorted sets, so a recheck that listed the same rows in a different
+  # order passed. The order is compared too and reported as its own failure. The reordering is injected by wrapping
+  # the incremental result: a real recheck lists its rows in the full run's order today.
+  describe "check --verify-incremental diagnostic order" do
+    # Two files, each with diagnostics: the gate's even-index subset re-analyzes the first and serves the second from
+    # the cache, so the comparison covers both the subset path and the cache-served path.
+    def write_multi_diagnostic_project(dir)
+      File.write(File.join(dir, ".rigor.yml"), "severity_profile: balanced\n")
+      File.write(File.join(dir, "a.rb"), "x = \"hello\"\nx.no_such_method_here\nx.also_missing_here\n")
+      File.write(File.join(dir, "b.rb"), "y = 2\ny.other_missing_here\n")
+    end
+
+    # Every session the gate builds answers `reanalyze_subset` through the block, which sees the rows the real
+    # recheck produced and returns the rows the gate is to compare.
+    def wrap_reanalyze_subset(&transform)
+      allow(Rigor::Analysis::IncrementalSession).to receive(:new).and_wrap_original do |original, *args, **kwargs|
+        original.call(*args, **kwargs).tap do |session|
+          allow(session).to receive(:reanalyze_subset).and_wrap_original do |method, *method_args|
+            transform.call(method.call(*method_args))
+          end
+        end
+      end
+    end
+
+    it "reports OK when the incremental and full runs agree on both set and order" do
+      Dir.mktmpdir do |dir|
+        write_multi_diagnostic_project(dir)
+
+        status, out, err = run_cli(
+          "check", "--verify-incremental", "--no-stats",
+          "--config", File.join(dir, ".rigor.yml"), dir
+        )
+
+        expect(err).not_to include("different order")
+        expect(out).to include("--verify-incremental OK")
+        expect(out).to include("1/2 files re-analyzed, rest from cache")
+        expect(status).to eq(0)
+      end
+    end
+
+    it "keeps the set-mismatch failure when the incremental run is missing a diagnostic" do
+      Dir.mktmpdir do |dir|
+        write_multi_diagnostic_project(dir)
+        wrap_reanalyze_subset { |diagnostics| diagnostics.drop(1) }
+
+        status, _out, err = run_cli(
+          "check", "--verify-incremental", "--no-stats",
+          "--config", File.join(dir, ".rigor.yml"), dir
+        )
+
+        expect(status).to eq(1)
+        expect(err).to include("--verify-incremental FAILED — incremental and full diagnostics differ.")
+        expect(err).not_to include("different order")
+      end
+    end
+
+    it "fails with the order message when the incremental run lists the same diagnostics in another order" do
+      Dir.mktmpdir do |dir|
+        write_multi_diagnostic_project(dir)
+        wrap_reanalyze_subset(&:reverse)
+
+        status, _out, err = run_cli(
+          "check", "--verify-incremental", "--no-stats",
+          "--config", File.join(dir, ".rigor.yml"), dir
+        )
+
+        expect(status).to eq(1)
+        expect(err).to include("--verify-incremental FAILED — same set, different order.")
+        expect(err).to include("first divergence at index 0")
+        expect(err).not_to include("incremental and full diagnostics differ")
+      end
+    end
+
+    # A duplicated row is a multiplicity difference: the set report, with the extra copy on the incremental side, never
+    # a 0/0 report and never the order report.
+    it "reports a duplicated row as a set mismatch with its multiplicity" do
+      Dir.mktmpdir do |dir|
+        write_multi_diagnostic_project(dir)
+        wrap_reanalyze_subset { |diagnostics| diagnostics + diagnostics.first(1) }
+
+        status, _out, err = run_cli(
+          "check", "--verify-incremental", "--no-stats",
+          "--config", File.join(dir, ".rigor.yml"), dir
+        )
+
+        expect(status).to eq(1)
+        expect(err).to include("--verify-incremental FAILED — incremental and full diagnostics differ.")
+        expect(err).to include("incremental-only: 1, full-only: 0")
+        expect(err).not_to include("different order")
+      end
+    end
+
+    # Rows that tie on path, line, column, rule and message but differ in severity are not the same row: the set
+    # report names one row on each side rather than printing 0/0.
+    it "reports a tie that differs in severity as a set mismatch, not a 0/0 one" do
+      Dir.mktmpdir do |dir|
+        write_multi_diagnostic_project(dir)
+        wrap_reanalyze_subset do |diagnostics|
+          first = diagnostics.first.to_h
+          severity = first["severity"] == "info" ? "warning" : "info"
+          tied = Object.new
+          tied.define_singleton_method(:to_h) { first.merge("severity" => severity) }
+          [tied, *diagnostics.drop(1)]
+        end
+
+        status, _out, err = run_cli(
+          "check", "--verify-incremental", "--no-stats",
+          "--config", File.join(dir, ".rigor.yml"), dir
+        )
+
+        expect(status).to eq(1)
+        expect(err).to include("--verify-incremental FAILED — incremental and full diagnostics differ.")
+        expect(err).to include("incremental-only: 1, full-only: 1")
+        expect(err).not_to include("different order")
+      end
+    end
+  end
+
   describe "check --incremental" do
     it "is cold on the first run and warm on the second, with identical diagnostics" do
       Dir.mktmpdir do |dir|
@@ -311,6 +429,106 @@ RSpec.describe Rigor::CLI do
         # The diagnostic is reported identically cold and warm.
         expect(out1).to include("visibility of `greet'")
         expect(out2).to eq(out1)
+      end
+    end
+
+    context "with --explain (#1533)" do
+      def explain_project(dir)
+        File.write(File.join(dir, ".rigor.yml"),
+                   "severity_profile: balanced\ncache:\n  path: #{File.join(dir, '.cache')}\n")
+        # `BEGIN { ... }` is a node the engine does not recognise: a stable explain-row trigger.
+        File.write(File.join(dir, "a.rb"), "BEGIN { 1 }\n")
+        ["check", "--no-stats", "--config", File.join(dir, ".rigor.yml"), dir]
+      end
+
+      it "prints the explain rows a plain --explain run prints" do
+        Dir.mktmpdir do |dir|
+          base = explain_project(dir)
+          plain = run_cli(*base, "--explain")[1]
+          expect(plain).to include("fail-soft fallback")
+
+          _status, out, err = run_cli(*base, "--incremental", "--explain")
+          expect(err).to include("--incremental cold")
+          expect(out).to eq(plain)
+          # Warm: the snapshot written WITH the flag serves the same rows again.
+          _status, out, err = run_cli(*base, "--incremental", "--explain")
+          expect(err).to include("--incremental warm")
+          expect(out).to eq(plain)
+        end
+      end
+
+      it "does not serve a snapshot primed without --explain to a run with it" do
+        Dir.mktmpdir do |dir|
+          base = explain_project(dir)
+          _status, out, = run_cli(*base, "--incremental")
+          expect(out).not_to include("fail-soft fallback")
+
+          _status, out, err = run_cli(*base, "--incremental", "--explain")
+          expect(err).to include("--incremental cold")
+          expect(out).to include("fail-soft fallback")
+        end
+      end
+
+      it "does not serve explain rows to a later run without the flag" do
+        Dir.mktmpdir do |dir|
+          base = explain_project(dir)
+          run_cli(*base, "--incremental", "--explain")
+          run_cli(*base, "--incremental", "--explain")
+
+          _status, out, err = run_cli(*base, "--incremental")
+          expect(err).to include("--incremental cold")
+          expect(out).not_to include("fail-soft fallback")
+          _status, out, err = run_cli(*base, "--incremental")
+          expect(err).to include("--incremental warm")
+          expect(out).not_to include("fail-soft fallback")
+        end
+      end
+
+      # #1867 — one snapshot file per fingerprint mode, so an occasional --explain run does not evict the
+      # warm plain snapshot (and the reverse).
+      it "keeps the plain snapshot warm across an --explain run and an edit" do
+        Dir.mktmpdir do |dir|
+          base = explain_project(dir)
+          run_cli(*base, "--incremental")
+          expect(run_cli(*base, "--incremental")[2]).to include("--incremental warm")
+          run_cli(*base, "--incremental", "--explain")
+          File.write(File.join(dir, "a.rb"), "BEGIN { 2 }\n")
+
+          _status, out, err = run_cli(*base, "--incremental")
+          expect(err).to include("--incremental warm")
+          expect(out).not_to include("fail-soft fallback")
+        end
+      end
+
+      it "keeps each mode warm when the flag alternates, and re-analyses an edit under --explain" do
+        Dir.mktmpdir do |dir|
+          base = explain_project(dir)
+          run_cli(*base, "--incremental")
+          run_cli(*base, "--incremental", "--explain")
+          # Each run follows an edit, so the run-result slot cannot serve it: the full path must read its snapshot.
+          2.times do |round|
+            File.write(File.join(dir, "a.rb"), "BEGIN { #{round + 10} }\n")
+            expect(run_cli(*base, "--incremental")[2]).to include("--incremental warm")
+            File.write(File.join(dir, "a.rb"), "BEGIN { #{round + 20} }\n")
+            expect(run_cli(*base, "--incremental", "--explain")[2]).to include("--incremental warm")
+          end
+          File.write(File.join(dir, "a.rb"), "BEGIN { 2 }\nBEGIN { 3 }\n")
+          _status, out, err = run_cli(*base, "--incremental", "--explain")
+          expect(err).to include("--incremental warm")
+          expect(out.scan("fail-soft fallback").size).to eq(2)
+        end
+      end
+
+      it "writes the plain snapshot where it always has and the explain one beside it" do
+        Dir.mktmpdir do |dir|
+          base = explain_project(dir)
+          run_cli(*base, "--incremental")
+          run_cli(*base, "--incremental", "--explain")
+          incremental = File.join(dir, ".cache", "incremental")
+          expect(File).to exist(File.join(incremental, "snapshot.bin"))
+          expect(File).to exist(File.join(incremental, Rigor::Cache::IncrementalSnapshot.file_name(explain: true)))
+          expect(Dir.children(incremental).grep(/\Asnapshot.*\.bin\z/).size).to eq(2)
+        end
       end
     end
 
@@ -406,6 +624,26 @@ RSpec.describe Rigor::CLI do
       expect(err).to eq("")
       expect(status).to eq(0)
       expect(out).to include("type:    Registry")
+    end
+
+    # Issue #1883 — `type-of` builds the same `pre_eval:` patched registry `rigor check` types against.
+    it "answers a pre_eval-patched method with the type `rigor check` reports" do
+      write_fixture("patch.rb", "class Integer\n  def foo = 1\nend\n")
+      probe = write_fixture("probe.rb", "rand(3).foo\n")
+      config = write_fixture(".rigor.yml", "paths: [probe.rb]\npre_eval: [patch.rb]\n")
+
+      Dir.chdir(tmpdir) do
+        status, out, err = run_cli("type-of", "--config", config, "#{probe}:1:9")
+        expect(err).to eq("")
+        expect(status).to eq(0)
+        expect(out).to include("type:    Dynamic[1]")
+
+        File.write(probe, "require \"rigor/testing\"\ninclude Rigor::Testing\n\n" \
+                          "assert_type(\"Dynamic[1]\", rand(3).foo)\n")
+        check_status, check_out, = run_cli("check", "--no-stats", "--config", config, "probe.rb")
+        expect(check_status).to eq(0)
+        expect(check_out).not_to include("assert_type")
+      end
     end
 
     it "leaves `.instance` alone on a class that does not include the mixin" do

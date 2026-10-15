@@ -92,6 +92,7 @@ comparison) appears nowhere else in this index.
 | 2026-09-17 | [Plugin-supplied members as an own-method veto source — sizing the corpus first (issue #963)](20260917-plugin-member-veto.md) |
 | 2026-09-17 | [Render-site locals and layouts — corpus measurement](20260917-render-locals-and-layouts.md) |
 | 2026-09-26 | [`sig/` against inline — the consistency rule's false-positive gate (issue #1075)](20260926-sig-inline-consistency-fp-gate.md) |
+| 2026-10-12 | [alba onboarding + rbs-inline migration — hand-written `sig/` vs sig-gen `--overwrite`, inline integration, and a 10-file batch migration with the rbs-inline generation-boundary catalogue](20261012-alba-onboarding-rbs-inline-pilot.md) |
 
 ## Analyzer self-testing (teeth / false-negatives)
 

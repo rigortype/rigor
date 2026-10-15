@@ -38,7 +38,7 @@ module Rigor
       # gate) can report what was re-analyzed versus served from cache. `added` / `removed` carry the
       # structural delta so {#run_incremental} (ADR-87 WD3) can recognise a zero-change recheck and skip the
       # unconditional snapshot rewrite.
-      Recheck = Data.define(:diagnostics, :changed, :added, :removed, :affected, :reused) do
+      Recheck = Data.define(:diagnostics, :changed, :added, :removed, :affected, :reused, :templates) do
         # A recheck that changed, added, and removed nothing — the session state is byte-equivalent to the
         # snapshot that was restored, so persisting it again would only rewrite identical bytes.
         def no_change?
@@ -68,8 +68,8 @@ module Rigor
       #   `--verify-incremental` gate use) keeps the sequential recording path bit-for-bit unchanged. The fork
       #   pool records each worker's cross-file reads and marshals them back (PoolCoordinator), so the
       #   dependency graph a pooled recheck rebuilds equals the sequential one.
-      def initialize(configuration:, paths: nil, environment: nil, cache_store: nil, plugin_requirer: nil,
-                     workers: 0, buffer: nil)
+      def initialize(configuration:, paths: nil, environment: nil, cache_store: nil, plugin_requirer: nil, # rubocop:disable Metrics/ParameterLists,Metrics/AbcSize,Metrics/MethodLength
+                     workers: 0, buffer: nil, explain: false)
         @configuration = configuration
         @paths = paths
         # Editor mode option B (#146) — the in-flight buffer, threaded into every internal Runner so the
@@ -81,6 +81,7 @@ module Rigor
         @cache_store = cache_store
         @plugin_requirer = plugin_requirer
         @workers = workers
+        @explain = explain # #1533: threaded into every Runner; keys the snapshot, and no slot is written
         # ADR-85 WD2 — per-file discovery seed bundles keyed by logical path. A cold baseline builds them; a
         # warm recheck folds them (re-walking only changed files) and refreshes the set. Ride the snapshot.
         @seed_bundles = {}
@@ -122,7 +123,8 @@ module Rigor
         # banner + `--cache-stats`) reads after `#run_incremental`. `@last_runner` is the analysis runner the
         # post-hoc fingerprint reads from; `@plugin_fact_reusable` is the computed decision object.
         @plugin_fact_digest = nil
-        @opaque_plugin_ids = [].freeze
+        @opaque_reasons = {}.freeze
+        @fact_store_unreadable = false
         @fact_surface_invalidated = false
         @last_runner = nil
         @plugin_fact_reusable = nil
@@ -220,7 +222,8 @@ module Rigor
         absorb(runner, current, analyze_set, removed)
         @param_table = fresh_params
         Recheck.new(diagnostics: merged, changed: changed.to_set, added: added.to_set,
-                    removed: removed.to_set, affected: affected, reused: reused.to_set)
+                    removed: removed.to_set, affected: affected, reused: reused.to_set,
+                    templates: runner.template_unit_paths.size)
       end
 
       # Editor mode option B (#146) — a whole-project recheck with the editor's buffer substituted for one
@@ -480,6 +483,7 @@ module Rigor
       # to. Every soundness gate below — the fingerprint, the ADR-88 fact surface — is unchanged, so the
       # decision to reuse is made identically whether or not the result is saved.
       def run_incremental(snapshot:, fingerprint:, persist: true)
+        @last_recheck = nil # #1526 — set only by a warm recheck, see {#last_recheck}
         # ADR-87 WD1 — install the per-run digest table + recording instant + strict flag for the whole
         # invocation so change-detection's stat-then-digest freshness (`#pack_digest` / `#stat_fresh?`) honours
         # `cache.validation: digest` (and `RIGOR_STRICT_VALIDATION`, which the env-only path already sees) and
@@ -508,7 +512,7 @@ module Rigor
             adopt_plugin_fact_fingerprint
             fact_reusable = @plugin_fact_reusable.reusable_against?(restored.plugin_fact_digest)
             if fact_reusable && effects_reusable && !source_rbs_unverified?(result)
-              diagnostics = result.diagnostics
+              diagnostics = keep_recheck(result)
               warm = true
               # ADR-87 WD3 — a warm recheck that changed nothing leaves the session state byte-equivalent to the
               # snapshot it restored, so skip the unconditional rewrite (209ms + 2 MB on gitlab per null recheck).
@@ -539,9 +543,36 @@ module Rigor
 
       # ADR-88 WD1 — reporting hooks the CLI reads after {#run_incremental}. `fact_surface_invalidated?` is true
       # when a valid snapshot was dropped for a fact-surface reason (a plugin sig/catalog edit, or an opaque
-      # plugin) rather than a cold miss. `opaque_plugin_ids` names the contributing-but-surfaceless plugins that
-      # force a full run every invocation.
-      attr_reader :opaque_plugin_ids
+      # plugin) rather than a cold miss. `opaque_reasons` maps each plugin that forces a full run every invocation
+      # to its {PluginFactFingerprint::OpaqueReason}.
+      attr_reader :opaque_reasons
+
+      # #1526 — the {Recheck} of the last {#run_incremental}, or nil unless that run answered warm. A baseline
+      # (cold, or a re-baseline after a fact-surface, effects or source-RBS reason) has no recheck to report.
+      # The diagnostics are not kept: a long-lived session (the LSP) would otherwise retain every merged list.
+      attr_reader :last_recheck
+
+      # Records the warm recheck's sets for {#last_recheck} and hands back its diagnostics.
+      def keep_recheck(result)
+        @last_recheck = result.with(diagnostics: [])
+        result.diagnostics
+      end
+      private :keep_recheck
+
+      # The opaque plugin ids, sorted (the keys of {#opaque_reasons}).
+      def opaque_plugin_ids
+        @opaque_reasons.keys
+      end
+
+      # True when the fact store could not be read, so no single plugin is named (see {PluginFactFingerprint::Result}).
+      def fact_store_unreadable?
+        @fact_store_unreadable
+      end
+
+      # True when the fact surface forces a full run: some plugin is opaque, or the fact store is unreadable.
+      def opaque_fact_surface?
+        !@opaque_reasons.empty? || @fact_store_unreadable
+      end
 
       def fact_surface_invalidated?
         @fact_surface_invalidated
@@ -566,7 +597,8 @@ module Rigor
         registry = prepared_plugin_registry
         fact = compute_plugin_fact_fingerprint(registry)
         @plugin_fact_digest = fact.digest
-        @opaque_plugin_ids = fact.opaque_plugin_ids
+        @opaque_reasons = fact.opaque_reasons
+        @fact_store_unreadable = fact.fact_store_unreadable
         @plugin_fact_reusable = fact
         @seed_bundles = source_rbs_gate.verify(registry, @seed_bundles)
       end
@@ -596,10 +628,10 @@ module Rigor
 
       # ADR-88 WD1 — the plugin fact-surface fingerprint for this invocation. For a SEQUENTIAL run it is read
       # post-hoc from the analysis runner's already-prepared registry (no second `#prepare`, producers already
-      # validated during analysis). A POOLED run's main process skips `#prepare`, so its registry carries no
-      # published facts — there it falls back to the always-sequential probe. Both paths compute the identical
-      # digest for a given fact surface, so the reuse decision is worker-count-independent (the parity spec
-      # asserts this).
+      # validated during analysis). A POOLED run's main process does not run `#prepare` on it (its workers do),
+      # so its registry carries no published facts — there it falls back to the always-sequential probe. Both
+      # paths compute the identical digest for a given fact surface, so the reuse decision is worker-count-independent
+      # (the parity spec asserts this).
       def compute_plugin_fact_fingerprint(registry = prepared_plugin_registry)
         PluginFactFingerprint.from_registry(registry)
       end
@@ -710,7 +742,8 @@ module Rigor
         return nil if fingerprint.nil? || @cache_store.nil? || @cache_store.read_only? || !@buffer.nil?
         # Known before the run: none of these can be written afterwards, so the stamp and the recomputed
         # fingerprint would be spent for nothing.
-        return nil unless @workers.zero? && !@configuration.effects_enabled?
+        # `WriteGuard.start` would also refuse (it recomputes the fingerprint without `explain:`); say so here.
+        return nil unless @workers.zero? && !@configuration.effects_enabled? && !@explain
 
         IncrementalRunSlot::WriteGuard.start(
           configuration: @configuration, roots: @paths || @configuration.paths, cache_root: @cache_store.root,
@@ -724,7 +757,7 @@ module Rigor
       # cold, not the warm run the probe stands in for.
       def run_slot_writable?
         !@cache_store.nil? && !@cache_store.read_only? && @buffer.nil? && @workers.zero? &&
-          !@configuration.effects_enabled? && @opaque_plugin_ids.empty? && !@last_runner.nil?
+          !@configuration.effects_enabled? && !@explain && !opaque_fact_surface? && !@last_runner.nil?
       end
 
       def start_chain(rows)
@@ -1269,7 +1302,7 @@ module Rigor
         Runner.new(
           configuration: @configuration, cache_store: @cache_store, environment: @environment,
           plugin_requirer: @plugin_requirer, seed_bundles: @seed_bundles, collect_seed_bundles: true,
-          workers: @workers, buffer: @buffer, **
+          workers: @workers, buffer: @buffer, explain: @explain, **
         )
       end
 

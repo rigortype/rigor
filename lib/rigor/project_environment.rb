@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "environment"
+require_relative "inference/project_patched_scanner"
 require_relative "plugin"
 require_relative "plugin/loader"
 require_relative "plugin/services"
@@ -55,9 +56,12 @@ module Rigor
     #   `source_rbs_synthesizer` runs over them at env-build time; an empty list contributes no synthesized RBS.
     # @param feature_sources — path => source text the required-feature scan reads in place of that file (an
     #   editor buffer bound with `--tmp-file` / `--instead-of`).
-    def build(configuration:, source_files:, feature_sources: {})
+    # @param project_patched_methods — the `pre_eval:` registry (see {.project_patched_methods}); nil keeps
+    #   the unpatched universe.
+    def build(configuration:, source_files:, feature_sources: {}, project_patched_methods: nil)
       features = required_features(configuration, source_files, sources: feature_sources)
       Environment.for_project(
+        project_patched_methods: project_patched_methods,
         libraries: configuration.libraries,
         signature_paths: configuration.signature_paths,
         plugin_registry: load_plugin_registry(configuration),
@@ -67,6 +71,21 @@ module Rigor
       )
     rescue StandardError
       bare(configuration, features)
+    end
+
+    # The patched-method registry `rigor check` types against for the project's `pre_eval:` files. It depends
+    # on those files alone, so it is built by the same {Inference::ProjectPatchedScanner} the Runner's project
+    # pre-pass calls, over the same resolved `configuration.pre_eval` entries (glob-expanded at config load,
+    # missing files skipped), without the pre-pass's plugin load / `#prepare` / dependency-source work. An
+    # editor `buffer` is honoured, so a `--tmp-file` edit of a pre_eval file is read in flight. Nil when the
+    # project lists no `pre_eval:` entry, so a project without one stays byte-identical. Fail-soft.
+    def project_patched_methods(configuration, buffer: nil)
+      return nil if configuration.pre_eval.empty?
+
+      existing = configuration.pre_eval.select { |path| File.file?(path) }
+      Inference::ProjectPatchedScanner.scan(existing, buffer: buffer).registry
+    rescue StandardError
+      nil
     end
 
     # Issue #1700 — the {Environment::RequiredFeatures} the environment gates on: the configured paths plus

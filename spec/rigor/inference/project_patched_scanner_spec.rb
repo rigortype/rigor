@@ -220,8 +220,8 @@ end
           outcome = described_class.scan([first, second])
 
           reported = outcome.diagnostics.map { |d| [d[:rule], d[:path]] }
-          expect(reported).to eq([["pre-eval.duplicate-declaration", second]])
-          expect(lookup(outcome.registry, :foo).source_path).to eq(first)
+          expect(reported).to eq([["pre-eval.duplicate-declaration", first]])
+          expect(lookup(outcome.registry, :foo).source_path).to eq(second)
         end
       end
 
@@ -266,10 +266,99 @@ end
         dup = outcome.diagnostics.select { |d| d[:rule] == "pre-eval.duplicate-declaration" }
         expect(dup.size).to eq(1)
         expect(dup.first[:severity]).to eq(:info)
-        expect(dup.first[:path]).to eq(b)
-        # First-write-wins is preserved by the registry.
+        # The earlier (shadowed) declaration is the one reported, naming the winner.
+        expect(dup.first[:path]).to eq(a)
+        expect(dup.first[:message]).to include("declared again at #{b}:1", "The last-listed declaration wins")
         entry = outcome.registry.lookup(class_name: "String", method_name: :to_url, kind: :instance)
-        expect(entry.source_path).to eq(a)
+        expect(entry.source_path).to eq(b)
+      end
+    end
+
+    it "keeps the last-listed type and resolves each alias against the binding current when it ran" do
+      Dir.mktmpdir do |dir|
+        a = File.join(dir, "a.rb")
+        b = File.join(dir, "b.rb")
+        File.write(a, "class Integer\n  def foo = 1\n  alias bar_a foo\nend\n")
+        File.write(b, "class Integer\n  def foo = \"s\"\n  alias bar_b foo\nend\n")
+        registry = described_class.scan([a, b]).registry
+        const1 = Rigor::Type::Combinator.constant_of(1)
+
+        expect(registry.lookup(class_name: "Integer", method_name: :foo, kind: :instance).return_type).to eq(Rigor::Type::Combinator.nominal_of("String"))
+        expect(registry.lookup(class_name: "Integer", method_name: :bar_a, kind: :instance).return_type).to eq(const1)
+        expect(registry.lookup(class_name: "Integer", method_name: :bar_b, kind: :instance).return_type).to eq(Rigor::Type::Combinator.nominal_of("String"))
+      end
+    end
+
+    it "lets the later of two defs in one file win, with no duplicate report" do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, "ext.rb")
+        File.write(path, "class Integer\n  def foo = 1\n  def foo = \"s\"\nend\n")
+        outcome = described_class.scan([path])
+
+        expect(outcome.registry.lookup(class_name: "Integer", method_name: :foo, kind: :instance).return_type).to eq(Rigor::Type::Combinator.nominal_of("String"))
+        expect(outcome.diagnostics).to be_empty
+      end
+    end
+
+    describe "a def under a definedness guard (polyfill)" do
+      def scan_pair(first_src, second_src)
+        Dir.mktmpdir do |dir|
+          a = File.join(dir, "a.rb")
+          b = File.join(dir, "b.rb")
+          File.write(a, first_src)
+          File.write(b, second_src)
+          yield described_class.scan([a, b]), a, b
+        end
+      end
+
+      def foo_of(outcome)
+        outcome.registry.lookup(class_name: "Integer", method_name: :foo, kind: :instance)
+      end
+
+      let(:one) { Rigor::Type::Combinator.constant_of(1) }
+
+      [
+        "def foo = \"s\" unless method_defined?(:foo)",
+        "def foo = \"s\" unless instance_methods.include?(:foo)",
+        "def foo = \"s\" if !respond_to?(:foo)",
+        "unless private_method_defined?(:foo)\n  def foo = \"s\"\nend"
+      ].each do |guarded|
+        it "does not replace an earlier def or report it shadowed: #{guarded.lines.first.strip}" do
+          scan_pair("class Integer; def foo = 1; end\n", "class Integer\n#{guarded}\nend\n") do |outcome, a, _b|
+            expect(foo_of(outcome).source_path).to eq(a)
+            expect(foo_of(outcome).return_type).to eq(one)
+            expect(outcome.diagnostics).to be_empty
+          end
+        end
+      end
+
+      it "records the guarded def when nothing bound the name earlier" do
+        scan_pair("class Integer; def bar = 1; end\n",
+                  "class Integer; def foo = \"s\" unless method_defined?(:foo); end\n") do |outcome, _a, b|
+          expect(foo_of(outcome).source_path).to eq(b)
+        end
+      end
+
+      it "lets a later unguarded def win over an earlier guarded one" do
+        scan_pair("class Integer; def foo = 1 unless method_defined?(:foo); end\n",
+                  "class Integer; def foo = \"s\"; end\n") do |outcome, _a, b|
+          expect(foo_of(outcome).source_path).to eq(b)
+        end
+      end
+
+      it "keeps the earlier def within one file" do
+        source = "class Integer\n  def foo = 1\n  def foo = \"s\" unless method_defined?(:foo)\nend\n"
+        scan_pair(source, "") do |outcome, a, _b|
+          expect(foo_of(outcome).source_path).to eq(a)
+          expect(foo_of(outcome).return_type).to eq(one)
+        end
+      end
+
+      it "still treats a def in the branch that runs when the name IS defined as a redefinition" do
+        scan_pair("class Integer; def foo = 1; end\n",
+                  "class Integer\n  if method_defined?(:foo)\n    def foo = \"s\"\n  end\nend\n") do |outcome, _a, b|
+          expect(foo_of(outcome).source_path).to eq(b)
+        end
       end
     end
 

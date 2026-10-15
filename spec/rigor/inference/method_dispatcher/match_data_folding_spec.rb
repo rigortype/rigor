@@ -83,7 +83,7 @@ RSpec.describe Rigor::Inference::MethodDispatcher::MatchDataFolding do
       expect(fold("$~[0..0]", :[], c(0..0), scope: proven_scope({}))).to be_nil
     end
 
-    it "ignores a `$10` binding, which forgetting the match globals does not clear (#1384)" do
+    it "ignores a `$10` binding: the fold reads `$1`..`$9` only (#1384)" do
       scope = proven_scope({ :$10 => string_t })
       expect(fold("$~[0..0]", :[], c(0..0), scope: scope)).to be_nil
     end

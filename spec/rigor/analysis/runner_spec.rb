@@ -997,6 +997,91 @@ RSpec.describe Rigor::Analysis::Runner do
         end
       end
 
+      # Issue #1710 — the last-listed `pre_eval:` file wins a repeated `(class, method, kind)`, as at runtime, and an
+      # alias reads the binding current when it ran.
+      it "types a method two pre_eval files declare as the last-listed one, with aliases bound as Ruby binds them" do
+        Dir.mktmpdir("rigor-pre-eval-last-wins-") do |tmpdir|
+          first = File.join(tmpdir, "a.rb")
+          second = File.join(tmpdir, "b.rb")
+          consumer_path = File.join(tmpdir, "consumer.rb")
+          File.write(first, "class Integer\n  def foo = 1\n  alias bar_a foo\nend\n")
+          File.write(second, "class Integer\n  def foo = \"s\"\n  alias bar_b foo\nend\n")
+          File.write(consumer_path, <<~RUBY)
+            require "rigor/testing"
+            include Rigor::Testing
+
+            i = rand(3)
+            assert_type("Dynamic[String]", i.foo)
+            assert_type("Dynamic[1]", i.bar_a)
+            assert_type("Dynamic[String]", i.bar_b)
+          RUBY
+          Dir.chdir(tmpdir) do
+            configuration = Rigor::Configuration.new("paths" => [consumer_path], "pre_eval" => [first, second])
+            result = guarded_run(described_class.new(configuration: configuration, cache_store: nil))
+            mismatches = result.diagnostics.select { |d| d.message.start_with?("assert_type ") }.map(&:message)
+            shadowed = result.diagnostics.select { |d| d.rule == "pre-eval.duplicate-declaration" }
+
+            expect(mismatches).to eq([])
+            expect(shadowed.map(&:path)).to eq([first])
+          end
+        end
+      end
+
+      # Issue #1883 — the `pre-eval.*` rows answer to the same suppression forms as any per-file diagnostic, whether or
+      # not the pre_eval file sits under `paths:`.
+      describe "suppressing `pre-eval.duplicate-declaration`" do
+        def duplicate_rows(first_source, extra_config = {}, first_name: "a.rb")
+          Dir.mktmpdir("rigor-pre-eval-suppress-") do |tmpdir|
+            first = File.join(tmpdir, first_name)
+            second = File.join(tmpdir, "b.rb")
+            File.write(first, first_source)
+            File.write(second, "class Integer\n  def foo = 2\nend\n")
+            Dir.chdir(tmpdir) do
+              base = { "paths" => [], "pre_eval" => [first, second] }
+              configuration = Rigor::Configuration.new(base.merge(extra_config))
+              result = guarded_run(described_class.new(configuration: configuration, cache_store: nil))
+              return result.diagnostics.select { |d| d.rule == "pre-eval.duplicate-declaration" }
+            end
+          end
+        end
+
+        let(:plain) { "class Integer\n  def foo = 1\nend\n" }
+
+        it "keeps the row when nothing suppresses it" do
+          expect(duplicate_rows(plain).size).to eq(1)
+        end
+
+        it "honours `# rigor:disable <rule>` on the reported line" do
+          source = "class Integer\n  def foo = 1 # rigor:disable pre-eval.duplicate-declaration\nend\n"
+          expect(duplicate_rows(source)).to eq([])
+        end
+
+        it "honours `# rigor:disable-file <rule>`" do
+          source = "# rigor:disable-file pre-eval.duplicate-declaration\n#{plain}"
+          expect(duplicate_rows(source)).to eq([])
+        end
+
+        it "honours the bare `pre-eval` family wildcard in a comment and in `disable:`" do
+          source = "# rigor:disable-file pre-eval\n#{plain}"
+          expect(duplicate_rows(source)).to eq([])
+          expect(duplicate_rows(plain, { "disable" => ["pre-eval"] })).to eq([])
+        end
+
+        it "reads the comments of a pre_eval file that lacks a `.rb` extension" do
+          source = "# rigor:disable-file pre-eval.duplicate-declaration\n#{plain}"
+          expect(duplicate_rows(source, {}, first_name: "a.patch")).to eq([])
+        end
+
+        it "honours `.rigor.yml` `disable:`" do
+          expect(duplicate_rows(plain, { "disable" => ["pre-eval.duplicate-declaration"] })).to eq([])
+        end
+
+        it "honours the suppression when the pre_eval file is also under `paths:`" do
+          source = "# rigor:disable-file pre-eval.duplicate-declaration\n#{plain}"
+          expect(duplicate_rows(source, { "paths" => ["."] })).to eq([])
+        end
+      end
+
       it "surfaces `pre-eval.parse-error` :warning when a pre_eval file has a parse error" do
         Dir.mktmpdir("rigor-pre-eval-parse-") do |tmpdir|
           broken_path = File.join(tmpdir, "broken.rb")

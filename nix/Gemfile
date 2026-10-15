@@ -7,9 +7,15 @@
 # code on top. It deliberately does NOT use `gemspec` — that would
 # pull in the development dependencies as well.
 #
-# Regenerate Gemfile.lock + gemset.nix after changing this file:
+# Regenerate Gemfile.lock + gemset.nix after changing this file, and to
+# re-resolve the pins to the latest in-range versions:
 #
-#   cd nix && bundle lock && bundix
+#   cd nix && bundle update && bundix
+#
+# `bundle lock` only fills gaps in an existing lockfile — it leaves the
+# pinned versions alone, so it does not refresh this package when the
+# root bundle moves. spec/docs/nix_lockfile_sync_spec.rb fails if the
+# versions here no longer match the root Gemfile.lock.
 #
 source "https://rubygems.org"
 

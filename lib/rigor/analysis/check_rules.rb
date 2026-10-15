@@ -87,6 +87,7 @@ module Rigor
       def self.resolve_rule_token(token)
         return nil if token == "all"
         return [LEGACY_RULE_ALIASES.fetch(token)] if LEGACY_RULE_ALIASES.key?(token)
+        return PRE_EVAL_RULES if token == "pre-eval"
         return ALL_RULES.select { |r| r.start_with?("#{token}.") } if RULE_FAMILIES.include?(token)
 
         ALL_RULES.include?(token) ? [token] : []
@@ -654,7 +655,7 @@ module Rigor
       # `dynamic.*`, `rbs.*`, `pre-eval.*`, and any `plugin.`-prefixed id — plugins load dynamically, so
       # their rule vocabulary cannot be enumerated here and under-warning is the FP-safe direction).
       def known_suppression_token?(token)
-        return true if token == "all"
+        return true if %w[all pre-eval].include?(token)
         return true if ALL_RULES.include?(token) || LEGACY_RULE_ALIASES.key?(token) ||
                        RULE_FAMILIES.include?(token) || NON_CHECK_DIAGNOSTIC_IDS.include?(token)
 
@@ -2086,7 +2087,13 @@ module Rigor
         # arm restores the polarity without touching the shared helper:
         # `String | nil` keeps firing, and so does `Dynamic | String | nil` —
         # the nameless arm stays permissive inside the all-arms check, which is
-        # only about the arms' method surface.
+        # only about the arms' method surface. That union no longer arises from
+        # a merge re-joining the narrowed edges of one untyped local, which
+        # binds it back to `Dynamic[top]` (issue #1840,
+        # `Inference::UntypedRejoin`); it still does when the program writes
+        # the `nil` (`x = nil if c`) and no `nil?` edge strips it before the
+        # re-joining merge, or when the arms are not a narrowing of one
+        # untyped value.
         def union_has_nameable_non_nil_arm?(union, scope)
           union.members.any? do |m|
             next false if nil_member?(m)

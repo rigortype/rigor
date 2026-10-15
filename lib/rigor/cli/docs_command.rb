@@ -78,7 +78,7 @@ module Rigor
 
       def run_index
         if File.file?(LLMS_INDEX)
-          @out.write(File.read(LLMS_INDEX))
+          @out.write(File.read(LLMS_INDEX, encoding: Encoding::UTF_8))
           0
         else
           run_list(nil)
@@ -115,11 +115,12 @@ module Rigor
         doc = resolve_doc(name)
         return doc if doc.is_a?(Integer) # error status, already reported
 
-        # ASCII-only provenance header: the doc body is read with the external encoding (US-ASCII under a C locale), so
-        # a UTF-8 header would set the output buffer to UTF-8 and clash with the body.
+        # The bundled page is UTF-8 by contract, so it is read as UTF-8 explicitly: under a C or POSIX locale the
+        # process default external encoding is US-ASCII, and a non-ASCII body would otherwise raise in `gsub`.
+        # The provenance header stays ASCII-only so it never disagrees with the rest of the output.
         @out.puts("<!-- rigor docs #{doc.fetch(:name)} (rigortype #{Rigor::VERSION}, offline) -->")
         @out.puts
-        @out.write(DocLinks.rewrite(File.read(doc.fetch(:path)), from: doc.fetch(:path)))
+        @out.write(DocLinks.rewrite(File.read(doc.fetch(:path), encoding: Encoding::UTF_8), from: doc.fetch(:path)))
         0
       end
 

@@ -1181,6 +1181,50 @@ RSpec.describe Rigor::SigGen::Generator do
       expect(method.rbs).to eq("def f: (Float num) -> [Float, String]")
     end
 
+    # Issue #1489. A VALUE literal the body proves is widened to its class over an authored `untyped`; `nil`,
+    # `true`, `false`, bool, `T?` and a computed `Float` are honest types and are proposed as the base did.
+    {
+      "an Integer literal" => ["(x)", "1", "Integer"],
+      "a union of literals" => ["(x)", "rand(2) == 0 ? 1 : 2", "Integer"],
+      "a String literal" => ["(x)", %("x"), "String"],
+      "a Symbol literal" => ["(x)", ":k", "Symbol"],
+      "a literal union with nil" => ["(x)", %(rand(2) == 0 ? "S" : nil), "(String | nil)"],
+      "true" => ["(x)", "true", "true"],
+      "false" => ["(x)", "false", "false"],
+      "nil" => ["(x)", "nil", "nil"],
+      "a bool" => ["(x)", "x > 0", "(false | true)"],
+      "an Integer or nil" => ["(x)", "rand(2) == 0 ? Integer(gets) : nil", "(Integer | nil)"],
+      "a computed Float" => ["(x)", "5 / 2.0", "Float"]
+    }.each do |label, (params, body, expected)|
+      it "proposes #{expected} for #{label} over a declared `-> untyped` (#1489)" do
+        write_fixture("sig/box.rbs", "class Box\n  def v: (Integer x) -> untyped\nend\n")
+        path = write_fixture("lib/box.rb", "class Box\n  def v#{params}\n    #{body}\n  end\nend\n")
+
+        gen = generator(paths: [path], signature_paths: [File.join(tmpdir, "sig")])
+        method = gen.run.find { |c| c.method_name == :v }
+
+        expect(method.classification).to eq(Rigor::SigGen::Classification::TIGHTER_RETURN)
+        expect(method.declared_return_rbs).to eq("untyped")
+        expect(method.rbs).to eq("def v: (Integer x) -> #{expected}")
+      end
+    end
+
+    it "still proposes a tuple and a record shape over a declared `-> untyped`, as the new-method path does" do
+      write_fixture("sig/box.rbs", "class Box\n  def t: () -> untyped\n  def r: () -> untyped\nend\n")
+      path = write_fixture("lib/box.rb", <<~RUBY)
+        class Box
+          def t = [1, "a"]
+          def r = { a: 1 }
+        end
+      RUBY
+
+      gen = generator(paths: [path], signature_paths: [File.join(tmpdir, "sig")])
+      candidates = gen.run
+
+      expect(candidates.map(&:classification).uniq).to eq([Rigor::SigGen::Classification::TIGHTER_RETURN])
+      expect(candidates.find { |c| c.method_name == :t }.rbs).to eq(%(def t: () -> [1, "a"]))
+    end
+
     it "still classifies a declared `void` equivalent — #836's carve-out is untouched by the untyped fix" do
       write_fixture("sig/box.rbs", "class Box\n  def load_factor: () -> void\nend\n")
       path = write_fixture("lib/box.rb", "class Box\n  def load_factor\n    3.14\n  end\nend\n")
@@ -1225,12 +1269,12 @@ RSpec.describe Rigor::SigGen::Generator do
           def k: [T] (Integer a, ?String b, *Symbol r, T t, key: Integer, ?opt: String, **untyped) ?{ (Integer) -> void } -> untyped
         end
       RBS
-      method = candidate_for(rbs, "class C\n  def k(a, b = '', *r, t, key:, opt: '', **kw, &blk) = nil\nend\n", :k)
+      method = candidate_for(rbs, "class C\n  def k(a, b = '', *r, t, key:, opt: '', **kw, &blk) = 1.0\nend\n", :k)
 
       expect(method.classification).to eq(Rigor::SigGen::Classification::TIGHTER_RETURN)
       expect(method.rbs).to eq(
         "def k: [T] (Integer a, ?String b, *Symbol r, T t, key: Integer, ?opt: String, **untyped) " \
-        "?{ (Integer) -> void } -> nil"
+        "?{ (Integer) -> void } -> Float"
       )
       expect(method.declared_rbs).to eq(
         "def k: [T] (Integer a, ?String b, *Symbol r, T t, key: Integer, ?opt: String, **untyped) " \
@@ -1240,10 +1284,10 @@ RSpec.describe Rigor::SigGen::Generator do
 
     it "keeps a singleton method's declared parameters" do
       method = candidate_for("class C\n  def self.s: (String s) -> untyped\nend\n",
-                             "class C\n  def self.s(s) = nil\nend\n", :s)
+                             "class C\n  def self.s(s) = 1.0\nend\n", :s)
 
       expect([method.classification, method.rbs])
-        .to eq([Rigor::SigGen::Classification::TIGHTER_RETURN, "def self.s: (String s) -> nil"])
+        .to eq([Rigor::SigGen::Classification::TIGHTER_RETURN, "def self.s: (String s) -> Float"])
     end
 
     # An ancestor's parameters describe the ancestor's `def`. The subclass's may take other arguments, and the
@@ -1265,7 +1309,7 @@ RSpec.describe Rigor::SigGen::Generator do
         end
         class Sub < Base
           def m(x, y = 1, *rest, &blk) = 1.0
-          def k(x, flag: false) = 1
+          def k(x, flag: false) = 1.0
         end
       RUBY
       m = candidate_for(rbs, ruby, :m, owner: "Sub")
@@ -1275,20 +1319,20 @@ RSpec.describe Rigor::SigGen::Generator do
         [Rigor::SigGen::Classification::TIGHTER_RETURN,
          "def m: (untyped, ?untyped, *untyped) ?{ (*untyped) -> untyped } -> Float", nil]
       )
-      expect(k.rbs).to eq("def k: (untyped, ?flag: untyped) -> 1")
+      expect(k.rbs).to eq("def k: (untyped, ?flag: untyped) -> Float")
     end
 
     it "keeps an overload's own annotation and the declaration's visibility" do
       rbs = "class C\n  def a: %a{pure} (Integer x) -> untyped\n  private def pv: (Integer x) -> untyped\nend\n"
       write_fixture("sig/c.rbs", rbs)
-      path = write_fixture("lib/c.rb", "class C\n  def a(x) = nil\n\n  private\n\n  def pv(x) = nil\nend\n")
+      path = write_fixture("lib/c.rb", "class C\n  def a(x) = 1.0\n\n  private\n\n  def pv(x) = 1.0\nend\n")
       config = Rigor::Configuration.new(
         Rigor::Configuration::DEFAULTS.merge("paths" => [path], "signature_paths" => [File.join(tmpdir, "sig")])
       )
       candidates = described_class.new(configuration: config, paths: [path], include_private: true).run
 
       expect(candidates.select { |c| c.class_name == "C" }.map(&:rbs))
-        .to eq(["def a: %a{pure} (Integer x) -> nil", "private def pv: (Integer x) -> nil"])
+        .to eq(["def a: %a{pure} (Integer x) -> Float", "private def pv: (Integer x) -> Float"])
     end
 
     # The alias's parameters are the aliased method's, and the proposal would read as a rewrite of `m`'s line.

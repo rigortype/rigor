@@ -349,7 +349,7 @@ doesn't want analyzed for `call.undefined-method` etc.
 ### WD6 — Why a new diagnostic family `pre-eval.*` instead of folding into existing families?
 
 The `pre-eval.*` family makes the cause-of-diagnostic visible:
-users can `# rigor:disable pre-eval.*` to silence the whole
+users can `# rigor:disable pre-eval` (the bare family wildcard, as for `call`) to silence the whole
 pre-eval channel without affecting `call.*` / `flow.*` /
 `def.*`. Folding pre-eval errors into `configuration-error` /
 `call.*` would lose that surgical disability.

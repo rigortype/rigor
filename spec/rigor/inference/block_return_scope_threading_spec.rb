@@ -1278,6 +1278,102 @@ RSpec.describe "block-return scope threading", type: :runner do
         RUBY
       end
     end
+
+    # Issue #1336. The ADR-56 captured-local write-back types the body through `StatementEvaluator` once per
+    # fixpoint pass, from one entry scope as the block-return pass does, so it marks the same sites: a value that
+    # escapes through a rebound capture carries every site's store, not the one site's rvalue.
+    describe "under the ADR-56 captured-local write-back" do
+      it "does not fold a capture the escaping `||=` value rebinds (the reported probe)" do
+        # Ruby with input `,a` prints `e`: the empty element stores `:e`, and the second keeps it.
+        expect(flow_rules(<<~RUBY)).to be_empty
+          cache = Hash.new
+          last = nil
+          gets.to_s.split(",", -1).each do |x|
+            if x.empty?
+              cache[:k] ||= :e
+            else
+              last = (cache[:k] ||= :f).itself
+            end
+          end
+          puts "e" if last == :e
+        RUBY
+      end
+
+      it "does not fold it under `Hash#each` or `Integer#times` either" do
+        expect(flow_rules(<<~RUBY)).to be_empty
+          cache = Hash.new
+          first = nil
+          second = nil
+          xs = gets.to_s.split(",", -1)
+          xs.each_with_index.to_h { |x, i| [i, x] }.each do |_i, x|
+            x.empty? ? (cache[:k] ||= :e) : (first = (cache[:k] ||= :f).itself)
+          end
+          xs.size.times do |i|
+            xs[i].empty? ? (cache[:j] ||= :e) : (second = (cache[:j] ||= :f).itself)
+          end
+          puts "e" if first == :e
+          puts "e" if second == :e
+        RUBY
+      end
+
+      it "does not fold a value only a `break` path rebinds when the fixpoint is capped" do
+        # `n += 1` never converges, so the `break` arms come from one more pass from the widened binding; that
+        # pass marks the site too. Ruby with input `,a` prints `e`.
+        expect(flow_rules(<<~RUBY)).to be_empty
+          cache = Hash.new
+          n = 0
+          found = nil
+          gets.to_s.split(",", -1).each do |x|
+            n += 1
+            if x.empty?
+              cache[:k] ||= :e
+            else
+              found = (cache[:k] ||= :f).itself
+              break
+            end
+          end
+          puts "e" if found == :e
+        RUBY
+      end
+
+      it "does not read an earlier run's store as the rvalue in the statement pass's own diagnostics" do
+        # The second run's `||=` keeps the first run's `"s"`, so `upcase!` is a String call.
+        expect(undefined_method_rules(<<~RUBY)).to be_empty
+          h = Hash.new
+          3.times do |i|
+            (h[:z] ||= :f).itself.upcase! if i > 0
+            h[:z] = +"s"
+          end
+        RUBY
+      end
+
+      it "marks nothing under a block its call runs at most once (control)" do
+        # `tap` runs the body once, so no earlier run stored into the slot: the second site keeps its rvalue.
+        expect(dumped_type(<<~RUBY)).to eq(":f?")
+          c1 = Hash.new
+          l1 = nil
+          1.tap { |_| gets ? (c1[:k] ||= :e) : (l1 = (c1[:k] ||= :f).itself) }
+          dump_type(l1)
+        RUBY
+      end
+
+      it "keeps the rvalue reading for an isolated site (control)" do
+        # No other store reaches the slot, so whatever an earlier run stored there is this site's own `:f`.
+        expect(dumped_type(<<~RUBY)).to eq(":f?")
+          cache = Hash.new
+          last = nil
+          gets.to_s.split(",").each { |w| last = (cache[w] ||= :f).itself }
+          dump_type(last)
+        RUBY
+      end
+
+      it "keeps it for a lone site outside any block (control)" do
+        expect(dumped_type(<<~RUBY)).to eq(":f")
+          cache = Hash.new
+          dump_type(cache[:k] ||= :f)
+        RUBY
+      end
+    end
   end
 
   # The content half of the pin above. The fixpoint answers the outer locals the body REBINDS; a captured
@@ -4386,6 +4482,39 @@ RSpec.describe "block-return scope threading", type: :runner do
       RUBY
       expect(dumped_type("#{source}dump_type(r)")).to eq("[bool, bool]")
       expect(flow_rules("#{source}puts 'second missing' unless r.last")).to be_empty
+    end
+  end
+
+  # Issue #1332 — the inject / reduce fold lays the same #587 (b) binding the per-element folds above lay, in its
+  # constant arm and in its nominal fixpoint, so a step reads what an earlier step rebound or stored.
+  describe "captured state the body rebinds or mutates under the inject / reduce fold" do
+    it "does not pin a result that reads a rebound captured local (Ruby: 3)" do
+      source = "n = 0\nt = [1, 2].inject(0) { |a, e| n += 1; a + n }\n"
+      expect(flow_rules("#{source}puts '2' if t == 2")).to be_empty
+      expect(dumped_type("#{source}dump_type(t)")).not_to eq("2")
+    end
+
+    it "does not pin a result that reads a memoizing index `||=` an earlier step filled (Ruby: 2)" do
+      source = "cache = Hash.new\ntotal = [1, 2].inject(0) { |acc, e| acc + (cache[:first] ||= e) }\n"
+      expect(flow_rules(%(#{source}puts "3" if total == 3))).to be_empty
+      expect(dumped_type("#{source}dump_type(total)")).not_to eq("3")
+    end
+
+    # The alias attribution lives in `CapturedLocals.content_mutations`, so it reaches every per-element fold.
+    it "widens a capture the body mutates through a block-local alias under `map` (Ruby: [0, 1])" do
+      source = "log = []\ndump_type([1, 2].map { |e| v = log.size; l2 = log; l2 << e; v })"
+      expect(dumped_type(source)).not_to eq("[0, 0]")
+    end
+
+    it "keeps the precision of a capture a block-local only copies and never mutates" do
+      expect(dumped_type("ro = [7]\ndump_type([1, 2].map { |e| x = ro; x.size + e })")).to eq("[2, 3]")
+      expect(dumped_type("ro = [7]\ndump_type([1, 2].inject(0) { |a, e| x = ro; a + x.size + e })")).to eq("5")
+    end
+
+    it "still folds a block that reads only its parameters" do
+      expect(dumped_type("dump_type([1, 2].inject(0) { |a, e| a + e })")).to eq("3")
+      expect(flow_rules("t = [1, 2].inject(0) { |a, e| a + e }\nputs 'x' if t == 3"))
+        .to eq(["flow.always-truthy-condition"])
     end
   end
 end

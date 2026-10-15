@@ -728,7 +728,7 @@ module Rigor
         return member unless candidate.classification == Classification::INLINE_OVERWRITE
 
         member = nil if member.respond_to?(:overloading?) && member.overloading?
-        member || find_attr_member(decl, candidate.method_name, candidate.rbs_kind)
+        member || find_attr_member(decl, candidate.method_name, candidate.kind)
       end
 
       def find_attr_member(decl, method_name, kind)

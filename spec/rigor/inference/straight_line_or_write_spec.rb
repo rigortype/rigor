@@ -88,7 +88,9 @@ RSpec.describe "a memoizing index `||=` after an earlier store on a straight-lin
     RUBY
   end
 
-  it "marks it on an array receiver" do
+  it "does not read an array slot as empty either (guard)" do
+    # A guard, not a pin of the marks: the array literal's widened element read is no lone `Dynamic`, so the
+    # memoization reading never applied here, with or without them.
     expect(flow_rules(<<~RUBY)).to be_empty
       def run(cond)
         a = []

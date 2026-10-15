@@ -58,29 +58,28 @@ module Rigor
       end
 
       # ADR-17 § "Failure modes" — when two pre-eval entries declare the same `(class_name, method_name,
-      # kind)` triple, emit one `:info` `pre-eval.duplicate-declaration` diagnostic per collision. The
-      # registry's first-write-wins behaviour is unchanged; the diagnostic just makes the shadowing
-      # visible so users notice when a later patch is silently masked.
+      # kind)` triple, the last-listed one wins, as at runtime where the later `def` replaces the earlier. Emit
+      # one `:info` `pre-eval.duplicate-declaration` diagnostic per SHADOWED entry, reported on that earlier
+      # declaration (the code that never takes effect, where a `# rigor:disable` reads naturally) and naming the
+      # winning declaration it yields to.
       def duplicate_declaration_diagnostics(entries)
-        seen = {}
-        entries.each_with_object([]) do |entry, acc|
-          key = [entry.class_name, entry.method_name, entry.kind]
-          if (first = seen[key])
-            acc << build_diagnostic(
-              path: entry.source_path,
-              line: entry.source_line,
-              column: 1,
-              severity: :info,
-              rule: "pre-eval.duplicate-declaration",
-              message: "pre-eval duplicate declaration: " \
-                       "#{entry.class_name}##{entry.method_name} " \
-                       "(#{entry.kind}) is already declared at " \
-                       "#{first.source_path}:#{first.source_line}. " \
-                       "The first declaration wins; this entry is shadowed."
-            )
-          else
-            seen[key] = entry
-          end
+        winners = entries.to_h { |entry| [[entry.class_name, entry.method_name, entry.kind], entry] }
+        entries.filter_map do |entry|
+          winner = winners[[entry.class_name, entry.method_name, entry.kind]]
+          next if winner.equal?(entry)
+
+          build_diagnostic(
+            path: entry.source_path,
+            line: entry.source_line,
+            column: 1,
+            severity: :info,
+            rule: "pre-eval.duplicate-declaration",
+            message: "pre-eval duplicate declaration: " \
+                     "#{entry.class_name}##{entry.method_name} " \
+                     "(#{entry.kind}) is declared again at " \
+                     "#{winner.source_path}:#{winner.source_line}. " \
+                     "The last-listed declaration wins; this entry is shadowed."
+          )
         end
       end
       private_class_method :duplicate_declaration_diagnostics
@@ -97,7 +96,7 @@ module Rigor
       # Within one file the later binding of a name replaces the earlier, as at runtime: the alias-method-chain
       # idiom (`def foo`, `alias_method :foo_without_x, :foo`, `alias_method :foo, :foo_with_x`) leaves `foo` the
       # alias. Bindings of one name in DIFFERENT files are what `pre-eval.duplicate-declaration` reports, and the
-      # registry keeps the first of those, as it always has for `def`s.
+      # registry keeps the last of those, as Ruby does.
       def resolve_aliases(collected)
         bound = {}
         per_file = collected.group_by(&:source_path).values.map do |items|

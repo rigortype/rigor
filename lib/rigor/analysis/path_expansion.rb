@@ -53,12 +53,12 @@ module Rigor
         absolute_patterns, relative_patterns = exclude_patterns.partition { |pattern| pattern.start_with?("/") }
         relative_patterns = relative_patterns.map { |pattern| pattern.sub(%r{\A(?:\./+)+}, "") }
         logical_base = File.absolute_path(base)
-        context = { base: logical_base, real_base: real_directory(logical_base), real_dirs: {} }
+        context = { cwd: Dir.pwd, base: logical_base, real_base: real_directory(logical_base), real_dirs: {} }
         file_list.reject { |path| excluded?(path, absolute_patterns, relative_patterns, context) }
       end
 
       def excluded?(path, absolute_patterns, relative_patterns, context)
-        logical = File.absolute_path(path)
+        logical = File.absolute_path(path, context.fetch(:cwd))
         base = context.fetch(:base)
         inside = logical.start_with?("#{base}/")
         return true if inside && matches_relative?(relative_patterns, logical.byteslice((base.bytesize + 1)..))

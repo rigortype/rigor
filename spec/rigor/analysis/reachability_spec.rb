@@ -823,6 +823,59 @@ RSpec.describe Rigor::Analysis::Reachability do
         expect(found).to eq(%w[Other::Z])
       end
 
+      it "stops reading the eval receiver in a nested non-constant eval block" do
+        found = report_for({ "lib/a.rb" => <<~RUBY, "lib/main.rb" => "Driver.go\n" }).candidates.map(&:fqn)
+          class A
+            class E; end
+          end
+          class Driver
+            class E; end
+            def self.go(obj) = A.class_eval { obj.instance_eval { const_get(:E) } }
+          end
+        RUBY
+        expect(found).to eq(%w[A::E])
+      end
+
+      it "does not widen an explicit eval receiver to its subclasses" do
+        found = report_for({ "lib/a.rb" => <<~RUBY, "lib/main.rb" => "Driver.go\n" }).candidates.map(&:fqn)
+          class Other
+            class X; end
+          end
+          class Sub < Other
+            class X; end
+          end
+          class Driver
+            def self.go = Other.instance_eval { const_get(:X) }
+          end
+        RUBY
+        expect(found).to eq(%w[Sub Sub::X])
+      end
+
+      it "keeps an inherit = false literal in an eval block off the top level" do
+        found = report_for({ "lib/a.rb" => <<~RUBY, "lib/main.rb" => "Driver.go\n" }).candidates.map(&:fqn)
+          class X; end
+          class Other
+            class X; end
+          end
+          class Driver
+            def self.go = Other.instance_eval { const_get(:X, false) }
+          end
+        RUBY
+        expect(found).to eq(%w[X])
+      end
+
+      it "widens a block in a class body (lambda, define_method) like a method" do
+        found = report_for({ "lib/a.rb" => <<~RUBY, "lib/main.rb" => "Base.new.go\n" }).candidates.map(&:fqn)
+          class Base
+            define_method(:go) { self.class.const_get(:Blk) }
+          end
+          class Sub < Base
+            class Blk; end
+          end
+        RUBY
+        expect(found).to eq(%w[Sub])
+      end
+
       it "reads an inherit = false literal at the eval receiver" do
         found = report_for({ "lib/a.rb" => <<~RUBY, "lib/main.rb" => "Driver.go\n" }).candidates.map(&:fqn)
           class Other

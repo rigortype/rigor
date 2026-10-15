@@ -1,0 +1,1 @@
+- **[inference]** `Rational(x, 1)` with a Float, Integer or Complex `x` is typed `Rational` instead of the argument's own class ([#1879](https://github.com/rigortype/rigor/pull/1879)).

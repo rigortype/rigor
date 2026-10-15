@@ -118,7 +118,8 @@ RSpec.describe Rigor::SigGen::LayoutIndex do
     end
 
     it "indexes an `attr_accessor` under its reader and writer, and a singleton attribute as singleton" do
-      path = write_sig("sig/foo.rbs", "class Foo\n  attr_accessor name: String\n  attr_reader self.count: Integer\nend\n")
+      path = write_sig("sig/foo.rbs",
+                       "class Foo\n  attr_accessor name: String\n  attr_reader self.count: Integer\nend\n")
       idx = index(File.join(tmpdir, "sig"))
 
       expect(idx.member_file_for("Foo", :name, :instance)).to eq(Pathname(path))

@@ -970,7 +970,9 @@ RSpec.describe Rigor::SigGen::Writer do
     end
 
     describe "a member declared in another file of a reopened class" do
-      let(:other_rbs) { "class C\n  def g: () -> untyped\n  def self.s: () -> untyped\n  attr_reader name: untyped\nend\n" }
+      let(:other_rbs) do
+        "class C\n  def g: () -> untyped\n  def self.s: () -> untyped\n  attr_reader name: untyped\nend\n"
+      end
 
       it "updates the instance member in the file that declares it" do
         primary = sig_file("sig/c.rbs", "class C\nend\n")

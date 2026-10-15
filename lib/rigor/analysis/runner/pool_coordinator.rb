@@ -46,7 +46,8 @@ module Rigor
                        synthetic_method_index:, project_patched_methods:,
                        analyze_file:, project_scope_seed: -> { {} }, record_dependencies: false,
                        restored_run_level_rows: nil, template_units: -> { TemplateUnits.empty },
-                       feature_sources: -> { {} }, plugin_prepare: -> { [[], []] })
+                       feature_sources: -> { {} }, plugin_prepare: -> { [[], [], []] },
+                       prepare_coordinator_plugins: -> { [] })
           @configuration = configuration
           @cache_store = cache_store
           @explain = explain
@@ -66,6 +67,12 @@ module Rigor
           # The de-duplication has to happen here, on the parent, because each fork worker owns its own
           # plugin instances and therefore its own `@run_disclosures` table.
           @collected_run_disclosures = {}
+          # Issue #1900 — the trust-policy refusals ({Analysis::WorkerSession#drain_trust_refusals}) a pool run
+          # collected from the pre-fork parent session and every worker, keyed by plugin id and summed. The
+          # coordinator-side registry, which {DiagnosticAggregator#plugin_trust_refusal_diagnostics} also
+          # reads, runs neither `#prepare` nor per-file analysis on a pooled run, so without this table a
+          # refusal recorded in `--workers 0` vanished in `--workers N`.
+          @collected_trust_refusals = {}
           @collect_stats = collect_stats
           @buffer = buffer
           @feature_sources = feature_sources
@@ -84,10 +91,15 @@ module Rigor
           # inherits the same compiled bytes.
           @template_units_reader = template_units
           @analyze_file = analyze_file
-          # Issue #1541 — `() -> [rows, disclosure records]`, a `#prepare` run on a throwaway registry. Read
-          # only by {#serve_empty_closure}: a pooled run's `#prepare` happens inside its workers, and an
-          # empty closure dispatches none.
+          # Issue #1541 — `() -> [rows, disclosure records, trust refusals]`, a `#prepare` run on a throwaway
+          # registry. Read only by {#serve_empty_closure}: a pooled run's `#prepare` happens inside its
+          # workers, and an empty closure dispatches none.
           @plugin_prepare = plugin_prepare
+          # Issue #1900 — `() -> rows`, `#prepare` run on the coordinator-side registry itself. Read only by
+          # {#analyze_files_sequentially_fallback}, which analyses on that registry: the pre-pass skips
+          # `#prepare` whenever `pool_mode?`, so without this the fallback ran every plugin unprepared.
+          @prepare_coordinator_plugins = prepare_coordinator_plugins
+          @coordinator_plugins_prepared = false
           # Issues #796 / #794 — the previous full run's run-level rows, handed down by
           # {Analysis::IncrementalSession} on a NARROWED run only (a recheck's closure, a
           # `--verify-incremental` partition). A full run leaves this nil and derives everything itself.
@@ -120,6 +132,26 @@ module Rigor
           Array(records).each do |record|
             identity = [record[:plugin_id], record[:key]].freeze
             @collected_run_disclosures[identity] ||= record
+          end
+        end
+
+        # Issue #1900 — the trust refusals a pool run collected, one `{plugin_id:, count:, first_path:,
+        # nearest_root:}` per plugin, in first-merge order. Empty on a sequential run, where the runner's own
+        # registry made every read.
+        def collected_trust_refusals
+          @collected_trust_refusals.values
+        end
+
+        # Issue #1900 — folds one session's / one worker payload's refusal drain in: counts add, and the
+        # first path stays the one merged first. Callers merge in the order `--workers 0` would have made the
+        # reads — the parent's (or one worker's) `#prepare`, then the files in analysis order — so the summed
+        # row names the same first path the sequential run does.
+        def merge_trust_refusals(records)
+          Array(records).each do |record|
+            plugin_id = record[:plugin_id]
+            existing = @collected_trust_refusals[plugin_id]
+            @collected_trust_refusals[plugin_id] =
+              existing ? existing.merge(count: existing[:count] + record[:count]) : record
           end
         end
 
@@ -235,8 +267,9 @@ module Rigor
         # Issue #1541 — the pooled empty closure's `#prepare`: the rows go to the caller, the run-scoped
         # registrations into the table the workers' payloads would have filled.
         def pooled_prepare_rows
-          rows, records = @plugin_prepare.call
+          rows, records, refusals = @plugin_prepare.call
           merge_run_disclosures(records)
+          merge_trust_refusals(refusals)
           Array(rows)
         end
 
@@ -639,13 +672,15 @@ module Rigor
                 required_features: features
               )
               main = Ractor.main
-              main.send([:prepare, session.prepare_diagnostics])
+              # Issue #1900 — each message carries the refusals made since the previous one, so the coordinator
+              # can count ONE worker's `#prepare` (every worker repeats it) and sum the files in file order.
+              main.send([:prepare, session.prepare_diagnostics, session.drain_trust_refusals])
 
               loop do
                 msg = Ractor.receive
                 break if msg.nil?
 
-                main.send([:file, msg, session.analyze(msg)])
+                main.send([:file, msg, session.analyze(msg), session.drain_trust_refusals])
               end
 
               # Issue #1051 — sent with `:done`, not with `:prepare`: this backend builds no parent session,
@@ -664,6 +699,8 @@ module Rigor
           pool.each { |worker| worker.send(nil) }
 
           prepare_diagnostics = nil
+          prepare_refusals = nil
+          refusals_by_path = {}
           results_by_path = {}
           terminated = 0
 
@@ -681,9 +718,11 @@ module Rigor
 
             case message.first
             when :prepare
-              prepare_diagnostics ||= message.last
+              prepare_diagnostics ||= message[1]
+              prepare_refusals ||= message[2]
             when :file
               results_by_path[message[1]] = message[2]
+              refusals_by_path[message[1]] = message[3]
             when :done
               merge_worker_reporters(message[1])
               merge_run_disclosures(message[2])
@@ -702,6 +741,8 @@ module Rigor
           # it did. Re-analysed in process, exactly as the fork backend re-analyses a dead child's slice.
           degraded = files.reject { |path| results_by_path.key?(path) }
           reanalyze_degraded_in_process(degraded, results_by_path, source_files: source_files)
+          merge_trust_refusals(prepare_refusals)
+          files.each { |path| merge_trust_refusals(refusals_by_path[path]) }
 
           diagnostics = Array(prepare_diagnostics) + files.flat_map { |path| results_by_path.fetch(path, []) }
           degraded.empty? ? diagnostics : diagnostics.unshift(pool_degraded_diagnostic(degraded.size, "ractor"))
@@ -795,6 +836,10 @@ module Rigor
           # `merge_run_disclosures` drops it as a duplicate; only a disclosure a worker registers while
           # analysing its own slice adds anything.
           merge_run_disclosures(session.drain_run_disclosures)
+          # Issue #1900 — the parent's `#prepare` refusals, drained BEFORE the fork: every child inherits the
+          # session's record of what it already reported and drains only its own slice's, so the prepare-time
+          # refusal is counted once, as `--workers 0` counts it, rather than once per worker.
+          merge_trust_refusals(session.drain_trust_refusals)
           snapshot_fork_pool_stats(session) if @collect_stats
 
           worker_count = [@workers, files.size].min
@@ -815,6 +860,7 @@ module Rigor
             merge_worker_reporters(session.drain_reporters)
             # The degraded slice ran on the parent session, so a disclosure it registered lives there.
             merge_run_disclosures(session.drain_run_disclosures)
+            merge_trust_refusals(session.drain_trust_refusals)
             # The degraded slice was re-analysed on the parent session, so its dependency records live there,
             # not in a child payload — fold them in alongside the successful children's.
             @collected_dependencies.merge!(session.drain_dependencies) if @record_dependencies
@@ -840,7 +886,8 @@ module Rigor
           results = slice.to_h { |path| [path, session.analyze(path)] }
           payload = { results: results, reporters: session.drain_reporters,
                       dependencies: session.drain_dependencies,
-                      disclosures: session.drain_run_disclosures }
+                      disclosures: session.drain_run_disclosures,
+                      refusals: session.drain_trust_refusals }
           # ADR-103 WD13 — the effects slot exists only on a collecting run, so a normal `--workers N` run
           # marshals exactly the payload it marshalled before the feature existed.
           payload[:effects] = session.drain_effects if @record_effects
@@ -873,6 +920,7 @@ module Rigor
               results_by_path.merge!(payload.fetch(:results))
               merge_worker_reporters(payload.fetch(:reporters))
               merge_run_disclosures(payload.fetch(:disclosures, []))
+              merge_trust_refusals(payload.fetch(:refusals, []))
               @collected_dependencies.merge!(payload.fetch(:dependencies, {})) if @record_dependencies
               @collected_effects.merge!(payload.fetch(:effects, {})) if @record_effects
             else
@@ -957,7 +1005,15 @@ module Rigor
         # @param source_files — issue #793 — the whole project, so this path's environment
         #   carries the same plugin-synthesized RBS the pool workers' would. It used to build over `[]`,
         #   i.e. with no synthesized RBS at all, even on a full run.
+        #
+        # Issue #1900 — it also runs `#prepare` on the coordinator-side registry it analyses with, BEFORE the
+        # environment build as the sequential pre-pass does. A pooled run's pre-pass skips `#prepare` (the
+        # workers run it), and this path has no workers, so every plugin used to analyse unprepared and its
+        # prepare rows and prepare-time trust refusals were lost. The rows head the stream, where the pool
+        # backends put their workers' prepare rows; the refusals land on the coordinator's own
+        # {Plugin::IoBoundary}s, which {DiagnosticAggregator#plugin_trust_refusal_diagnostics} reads.
         def analyze_files_sequentially_fallback(files, reason:, source_files: files)
+          prepare_rows = prepare_coordinator_plugins_once
           environment = build_runner_environment(source_files: source_files)
           # Same set, same ORDER as `#analyze_files_sequentially`. The signature state used to be hand-copied
           # here slot by slot, which dropped `synthesized-namespace` and every conformance row. The conformance
@@ -965,7 +1021,7 @@ module Rigor
           # BEFORE the definition-build failures are read below, or a failure only that scan reaches is lost.
           snapshot_project_signature_state(environment)
           snapshot_effect_annotation_carrier(environment.rbs_loader)
-          diagnostics = files.flat_map { |path| @analyze_file.call(path, environment) }
+          diagnostics = prepare_rows + files.flat_map { |path| @analyze_file.call(path, environment) }
           loader = environment.rbs_loader
           # Issue #696 — this path analyses on the coordinator, so its loader IS the one that reached the
           # failing build, and it must snapshot the same slot the two real paths do. Reached whenever
@@ -985,6 +1041,15 @@ module Rigor
               severity: :warning, rule: "pool-degraded", source_family: :builtin
             )
           )
+        end
+
+        # Issue #1900 — `#prepare` on the coordinator-side registry, at most once per run: a second call would
+        # re-publish every cross-plugin fact into the shared fact store.
+        def prepare_coordinator_plugins_once
+          return [] if @coordinator_plugins_prepared
+
+          @coordinator_plugins_prepared = true
+          Array(@prepare_coordinator_plugins.call)
         end
 
         def merge_worker_reporters(drained)

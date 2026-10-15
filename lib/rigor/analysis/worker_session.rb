@@ -336,6 +336,26 @@ module Rigor
         end
       end
 
+      # Issue #1900 — the {Plugin::IoBoundary} trust-policy refusals this session's plugin instances made
+      # since the previous drain, one `{plugin_id:, count:, first_path:, nearest_root:}` per plugin that hit
+      # any, in registry order. Unlike {#drain_run_disclosures} each drain reports only what is new — the
+      # boundary keeps its running total and this session remembers how much of it was already reported —
+      # because the coordinator SUMS the drains: a fork child inherits the parent's `#prepare` refusals,
+      # and reporting them again would count them once per worker. `first_path` is the boundary's first
+      # refusal overall, which is the delta's own first path whenever nothing was reported before it, and
+      # the coordinator keeps the first-merged path otherwise. Marshal-clean and Ractor-copyable.
+      def drain_trust_refusals
+        return [] if @plugin_registry.empty?
+
+        # Per plugin id, how much of its boundary's count an earlier drain already reported.
+        @reported_refusal_counts ||= {}
+        @plugin_registry.plugins.filter_map do |plugin|
+          trust_refusal_delta(plugin)
+        rescue StandardError
+          nil
+        end
+      end
+
       private
 
       # Mirrors {Runner#seed_project_scope}: applies the cross-file pre-pass discovery tables the
@@ -488,6 +508,18 @@ module Rigor
           rule: "runtime-error",
           source_family: :plugin_loader
         )
+      end
+
+      def trust_refusal_delta(plugin)
+        summary = plugin.io_boundary.refusal_summary
+        return nil if summary.nil?
+
+        plugin_id = safe_plugin_id(plugin)
+        delta = summary[:count] - @reported_refusal_counts.fetch(plugin_id, 0)
+        return nil unless delta.positive?
+
+        @reported_refusal_counts[plugin_id] = summary[:count]
+        summary.merge(count: delta, plugin_id: plugin_id)
       end
 
       def safe_plugin_id(plugin)

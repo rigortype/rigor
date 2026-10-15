@@ -175,6 +175,25 @@ before its first `#analyze` call; any raise from `prepare` is captured into
 `#prepare_diagnostics` for the runner to surface alongside the per-file
 stream rather than aborting the worker.
 
+`#drain_trust_refusals` reports the `Plugin::IoBoundary` trust-policy
+refusals the session's plugins made since the previous drain, per plugin
+([#1900](https://github.com/rigortype/rigor/issues/1900)). Unlike the
+other drains it reports only what is new, because the coordinator sums
+the drains: the fork backend drains the parent session after `#prepare`
+and before forking, so a child that inherits the parent's boundaries does
+not count the prepare-time refusals again, and the Ractor backend drains
+after `#prepare` and after every file so it can count one worker's
+prepare refusals and every file's in file order.
+
+When the pool cannot dispatch workers (no `fork`, or the Ractor backend
+without a cache store) it falls back to analysing on the coordinator-side
+registry. That registry's `#prepare` is skipped by the pooled pre-pass,
+so the fallback MUST run it — once, before building its environment, as
+the sequential pre-pass does — and put its rows at the head of the
+stream, or every plugin analyses unprepared and its prepare rows and
+prepare-time refusals are lost
+([#1900](https://github.com/rigortype/rigor/issues/1900)).
+
 ## Equivalence contract
 
 Given identical `(configuration, cache_store, plugin_blueprints)`, the

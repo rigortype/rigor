@@ -123,12 +123,22 @@ confidence instead of reading a flat list.
 
 An interpolated name is bounded by where its lookup starts and by its literal head. A
 `const_get` starts at its receiver — the enclosing declaration when the receiver is implicit
-— and also at the top level unless it passes `inherit = false`; a head that does not end in
-`::` is the start of a name, so `const_get("V#{version}")` inside `Migration` demotes every
-`Migration::V*`. A name built in a local variable first is read through its assignments.
-Reading every interpolated head as a top-level namespace demoted nothing on GitLab's
-`Migration[2.2]`, and its whole version family was a false candidate
-([#1734](https://github.com/rigortype/rigor/issues/1734)).
+— and, unless it passes `inherit = false`, also at the receiver's superclass chain and mixins
+and at the top level; a head that does not end in `::` is the start of a name, so
+`const_get("V#{version}")` inside `Migration` demotes every `Migration::V*`. A name built in
+a local variable first is read through its assignments. Reading every interpolated head as a
+top-level namespace demoted nothing on GitLab's `Migration[2.2]`, and its whole version
+family was a false candidate ([#1734](https://github.com/rigortype/rigor/issues/1734)).
+
+A literal `const_get` is a reference looked up in the same order. When the receiver declares
+the name, that is the answer: resolving it at the top level alone left the receiver's own
+constant a false candidate and kept a dead same-named top-level one alive. Past the receiver
+the reading is approximate — it resolves an ancestor as written and counts `extend` — so a
+name found only through an ancestor keeps every scope an ancestor could be and the top level.
+Where the walk cannot name `self` — inside any block, a `def Other.x`, a `class << Other` — the
+literal is read both at the enclosing declaration and at the top level; a constant receiver
+that resolves only in part keeps the top-level reading
+([#1761](https://github.com/rigortype/rigor/issues/1761)).
 
 ### WD5 — Whole-project only; `--incremental` is refused, not absorbed
 

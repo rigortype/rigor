@@ -174,13 +174,14 @@ RSpec.describe "Declaration-fact witness" do
     end
 
     it "#1550: copies the def in effect at a named module_function call" do
-      pending "the named form records no singleton side in discovered_methods (untracked; #1550 fixed the def table)"
+      pending "https://github.com/rigortype/rigor/issues/1969 — the named form records no singleton side in " \
+              "discovered_methods"
 
       expect(violations("issue_1550")).to eq([])
     end
 
     # #1550 fixed the singleton def-node table, which now resolves Fmt.label to the def before the call. Flip this
-    # when the `methods` gap closes: the named form records no singleton side in `discovered_methods`.
+    # when #1969 closes the `methods` gap: the named form records no singleton side in `discovered_methods`.
     it "#1550 today" do
       expect(violations("issue_1550")).to eq(["methods: Ruby defines Fmt singleton label, which Rigor does not record"])
     end

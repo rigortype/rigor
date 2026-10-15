@@ -80,16 +80,20 @@ module Rigor
 
       # The defs a named call copies onto the module's singleton, for the singleton def-node table. Ruby
       # copies the method in effect at the call (#1550), so a later def of the name redefines only the
-      # instance method. Yields `name, def_node` for each Symbol or String argument whose method in effect
-      # at the call is a receiverless def among the body's direct `statements` written before the call; the
-      # last such def wins.
+      # instance method. This reading approximates that from the body's direct `statements`: it yields
+      # `name, def_node` for each Symbol or String argument, where `def_node` is the last receiverless def
+      # of that name written as a direct statement before the call.
       #
       # A name declines (nothing is yielded) when no def precedes the call, where Ruby raises `NameError` or
       # copies a def another file may load first, and when a statement after that def and before the call
       # may rebind it in a way this reading cannot name: a def nested in control flow or a block, an `alias`,
-      # an `undef`, or an `alias_method`, `define_method`, `attr_*`, `remove_method` or `undef_method` call.
-      # Such a call with a non-literal name declines every name. A `module_function def x` argument names
-      # nothing here.
+      # an `undef`, or a receiverless or `self.` `alias_method`, `define_method`, `attr_*`, `remove_method`
+      # or `undef_method` call. Such a call or `alias` with a non-literal name anywhere before the call, even
+      # before the def, declines every name. A `module_function def x` argument names nothing here.
+      #
+      # It does not see `send(:define_method, ...)`, a `define_method` on an explicit module receiver, a
+      # `prepend`, another file's singleton defs, or that a `rescue` clause's statements may run after an
+      # `ensure` call's (#1969).
       def each_singleton_copy(call, statements)
         call_start = call.location.start_offset
         in_effect = {}

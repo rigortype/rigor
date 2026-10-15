@@ -156,6 +156,25 @@ RSpec.describe "a memoizing index `||=` after an earlier store on a straight-lin
     RUBY
   end
 
+  it "does not read a slot as empty under an object an earlier store installed with the key in it" do
+    expect(flow_rules(<<~RUBY)).to be_empty
+      cond = gets.to_s.empty?
+      c = Hash.new
+      c[:a] = { k: :e } if cond
+      c[:a] ||= Hash.new
+      l = (c[:a][:k] ||= :f).itself
+      puts "e" if l == :e
+    RUBY
+  end
+
+  it "keeps the rvalue reading after a `delete` on a `Hash`, which can only empty the slot (control)" do
+    expect(dumped_type(<<~RUBY)).to eq("String")
+      c = Hash.new
+      c.delete(:k) if gets
+      dump_type((c[:k] ||= String.new("x")).itself)
+    RUBY
+  end
+
   it "keeps the rvalue reading for a different literal key (control)" do
     expect(dumped_type(<<~RUBY)).to eq("2")
       c = Hash.new

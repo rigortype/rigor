@@ -151,8 +151,9 @@ module Rigor
         positional_marks(block, found, stores, scope, element_types)
       end
 
-      # {StraightLine.sites}: the sites of a straight-line body that an earlier store in it may have filled.
-      def straight_line_sites(body) = StraightLine.sites(body)
+      # {StraightLine.sites}: the sites of a straight-line body that an earlier store in it may have filled, with the
+      # root's kind read from `scope`, the body's entry scope.
+      def straight_line_sites(body, scope) = StraightLine.sites(body, scope)
 
       # One source slice is far cheaper than the walk, and a body that spells no `||=` holds no such site. A
       # heredoc's text lies outside its node's location, so a body that opens one is walked regardless.
@@ -376,98 +377,354 @@ module Rigor
         found.installs.none? { |(other_root, other_depth)| other_root == root && other_depth < depth }
       end
 
-      # The index `||=` sites of a straight-line body — a method body, or a file's top level outside its `def`s —
-      # whose slot a store that comes EARLIER in the body may have filled (issue #1885). Whether that store ran is
-      # not something the reading at the later site can see: a conditional store's slot narrowing does not survive
-      # the join with the arm that skipped it, and a store in a block (`tap`, `then`) leaves none behind, so the
-      # later site's `[]` read was a lone `Dynamic` again and the memoization reading answered its own rvalue —
-      # `c[:k] ||= :e if cond; (c[:k] ||= :f)` typed `:f` where Ruby answers `:e` when `cond` held. A store reaches
-      # the site's slot when it stores into the same object ({RepeatedOrWrites.receiver_path}) and its key is not
-      # a literal the site's literal key provably differs from ({.distinct_literal_keys?}), or when it may put a
-      # shared object into a container above that object. A store the walk cannot attribute to a variable is not
-      # counted: like a store in another method, it is something the memoization reading already accepts not
-      # seeing. The statement evaluator and the user-method return re-walk lay these sites at the body's entry
-      # (`Scope#with_repeated_or_writes`), the same mark the repeating-block passes lay.
+      # The index `||=` sites of a straight-line body — a method body, or a file's top level — whose slot a store that
+      # comes EARLIER in the body may have filled (issue #1885). A `class` / `module` body is typed from a scope of its
+      # own, which the top level's marks do not reach, so its sites are never marked; its stores are still walked, since
+      # one into a constant or a global reaches a later top-level site. Whether that store ran is not something the
+      # reading at the later site can see: a conditional store's slot narrowing does not survive the join with the arm
+      # that skipped it, and a store in a block (`tap`, `then`) leaves none behind, so the later site's `[]` read was a
+      # lone `Dynamic` again and the memoization reading answered its own rvalue —
+      # `c[:k] ||= :e if cond; (c[:k] ||= :f)` typed `:f` where Ruby answers `:e` when `cond` held. Only a store
+      # through the site's own variable counts ({RepeatedOrWrites.receiver_path}); an alias (`d = c`), a block
+      # parameter and a helper method's store are not seen, which is the cost the memoization reading already
+      # accepts. A store reaches the site's slot when it is
+      #
+      # - at the site's depth, with a key that may name the same slot (a literal that `eql?`s the site's, or one that is
+      #   no literal; a mutator such as `merge!` or `insert` writes any slot);
+      # - above it, installing anything but an empty `{}` / `[]` / `Hash.new` / `Array.new` (`c[:a] = { k: :e }` above
+      #   `c[:a][:k] ||= :f`);
+      # - below it, through the site's slot (`c[:a][:k] = 1` cannot run unless `c[:a]` holds an object).
+      #
+      # Two relations reach the slot only when the root object is not a `Hash` ({Analysis#unless_hash}): a store that
+      # only removes or reorders (`delete`, `shift`, `compact!`), which on an `Array` moves an element into the slot,
+      # and a literal key that differs from the site's but that an `Array` reads as the same index or an unknown `[]`
+      # may normalise (`:k` and `"k"`, `1` and `1.0`, `-1` and `2`). The statement evaluator and the user-method return
+      # re-walk lay the sites at the body's entry (`Scope#with_repeated_or_writes`), the same mark the repeating-block
+      # passes lay, deciding the root's kind from the entry scope and the body's writes.
       module StraightLine
-        # The main Ractor's {.sites} memo, keyed on the body node by identity; a pool worker computes the sites
-        # every time.
+        # `marked` is marked whatever the root is; `unless_hash` maps a site to the root the entry scope decides on;
+        # `root_writes` maps each root the body writes to `:hash` when every write stores a new `Hash`, else `:other`.
+        Analysis = Data.define(:marked, :unless_hash, :root_writes)
+        NOTHING = Analysis.new(marked: NO_SITES, unless_hash: {}.compare_by_identity.freeze, root_writes: {}.freeze)
+
+        # The stores at one `[root, depth]`, or the deeper stores through one of its slots. `by_key` groups the ones
+        # with a literal key by that key (`eql?`, as a `Hash` compares), and `by_tag` the same groups by
+        # {.key_tag}; `wild` holds the ones with no literal key, `removers` the remove-or-reorder calls, and
+        # `installers` the ones that may put a non-empty object into a slot of this object.
+        Bucket = Struct.new(:by_key, :by_tag, :wild, :removers, :installers) do
+          def self.fresh = new({}, Hash.new { |table, tag| table[tag] = [] }, [], [], [])
+
+          def add_keyed(value, store)
+            group = by_key[value]
+            unless group
+              group = by_key[value] = []
+              by_tag[StraightLine.key_tag(value)] << value
+            end
+            group << store
+          end
+        end
+
+        # The bodies whose variables are not the enclosing body's, so their writes say nothing about its roots.
+        CLASS_BODY_NODES = Set[Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode].freeze
+
+        # The tags under which two different literal keys name different slots of any receiver.
+        DISTINCT_TAGS = Set[:symbol, :string, :index].freeze
+
+        # The main Ractor's {.analysis} memo, keyed on the body node by identity; a pool worker computes it every
+        # time.
         @memo = ObjectSpace::WeakMap.new
 
         module_function
 
-        def sites(body)
-          return NO_SITES unless body.is_a?(Prism::Node) && RepeatedOrWrites.may_hold_or_write?(body)
-          return compute_sites(body) unless Ractor.main?
+        def sites(body, scope)
+          found = analysis(body)
+          return found.marked if found.unless_hash.empty?
 
-          @memo[body] ||= compute_sites(body)
+          found.marked + found.unless_hash.filter_map { |site, root| site unless hash_root?(root, found, scope) }
         end
 
-        def compute_sites(body)
+        def analysis(body)
+          return NOTHING unless body.is_a?(Prism::Node) && RepeatedOrWrites.may_hold_or_write?(body)
+          return compute(body) unless Ractor.main?
+
+          @memo[body] ||= compute(body)
+        end
+
+        def compute(body)
           walked = RepeatedOrWrites::Walk.new([], {}.compare_by_identity, [], Set.new, {})
           RepeatedOrWrites.walk(body, true, walked)
-          return NO_SITES if walked.or_writes.empty?
+          return NOTHING if walked.or_writes.empty?
 
-          parents = nil
-          walked.or_writes.select do |site|
-            earlier_store_reaches?(site, walked.stores) do |store|
-              !ExclusiveArms.exclusive?(store.node, site, body, parents ||= ExclusiveArms.parents(body))
-            end
-          end.freeze
+          Scan.new(body, walked).run
         end
 
-        # Whether a store before `site` in the body reaches its slot; the block answers whether that store may have
-        # run before the site at all.
-        def earlier_store_reaches?(site, stores)
-          path = RepeatedOrWrites.receiver_path(site.receiver, 0)
-          return false if path.nil?
-
-          start = site.location.start_offset
-          stores.any? do |store|
-            next false if store.node.equal?(site) || store.path.nil? || store.node.location.start_offset >= start
-
-            store_reaches_slot?(store, path, site) && yield(store)
+        def key_tag(value)
+          case value
+          when Symbol then :symbol
+          when String then :string
+          when Integer then value.negative? ? :negative : :index
+          else :float
           end
-        end
-
-        def store_reaches_slot?(store, path, site)
-          root, depth = path
-          store_root, store_depth = store.path
-          return false unless store_root == root
-          return store.installs_shared if store_depth < depth
-
-          store_depth == depth && !distinct_literal_keys?(store_key(store.node), FreshKeys.sole_key(site))
-        end
-
-        # The key a store writes, or nil when it may write any slot (a mutator such as `merge!` or `<<`).
-        def store_key(node)
-          return FreshKeys.sole_key(node) unless node.is_a?(Prism::CallNode)
-
-          arguments = node.arguments&.arguments
-          node.name == :[]= && arguments&.size == 2 ? arguments.first : nil
-        end
-
-        # True when both keys are literals that name different slots of any receiver ({FreshKeys.distinguishable?}).
-        def distinct_literal_keys?(left, right)
-          values = [left, right].map { |key| literal_key_value(key) }
-          return false if values.any?(&:nil?) || values.first.eql?(values.last)
-
-          FreshKeys.distinguishable?(values, nil)
         end
 
         def literal_key_value(node)
           case node
           when Prism::SymbolNode then node.unescaped.to_sym
           when Prism::StringNode then node.unescaped
-          when Prism::IntegerNode then node.value
+          when Prism::IntegerNode, Prism::FloatNode then node.value
           end
         end
 
-        # Whether a store and a later site sit in different arms of one `if` / `unless` (a ternary included), so
-        # that the store never runs before the site. That holds when no loop or lambda between that conditional and
-        # the body runs both arms in turn. A block is not counted: one its call may run more than once is the
-        # repeating-body marks' case ({.sites}), and one that runs at most once (`tap`) repeats nothing. Any other
-        # relation — a `case` (whose `when` conditions run before a later arm), `&&` / `||`, a `begin` and its
-        # `rescue` — counts as one where the store may have run first.
+        # Whether the entry scope and the body's own writes show the root is a `Hash`: a local the entry scope
+        # binds (a parameter) or an instance variable by its entry type, a local only the body binds by its writes;
+        # either way no write in the body may store anything else.
+        def hash_root?(root, found, scope)
+          writes = found.root_writes[root]
+          return false if writes == :other
+
+          kind, name = root
+          case kind
+          when :local then scope.locals.key?(name) ? hash_type?(scope.local(name)) : writes == :hash
+          when :ivar then hash_type?(scope.ivar(name))
+          else false
+          end
+        end
+
+        def hash_type?(type)
+          case type
+          when Type::HashShape then true
+          when Type::Nominal then type.class_name == "Hash"
+          else false
+          end
+        end
+
+        # An expression that evaluates to a new core `Hash`.
+        def new_hash?(node)
+          case node
+          when Prism::HashNode then true
+          when Prism::CallNode then node.name == :new && constant_named?(node.receiver, :Hash)
+          else false
+          end
+        end
+
+        # An expression that evaluates to a new, empty `Hash` or `Array`, which holds no slot a later site reads.
+        def empty_fresh?(node)
+          case node
+          when Prism::HashNode, Prism::ArrayNode then node.elements.empty?
+          when Prism::CallNode
+            node.name == :new && node.arguments.nil? && node.block.nil? &&
+              (constant_named?(node.receiver, :Hash) || constant_named?(node.receiver, :Array))
+          else false
+          end
+        end
+
+        def constant_named?(node, name)
+          case node
+          when Prism::ConstantReadNode then node.name == name
+          when Prism::ConstantPathNode then node.parent.nil? && node.name == name
+          else false
+          end
+        end
+
+        # One body's stores, bucketed by object so that each site compares only against the stores that can reach
+        # it: a site whose key is a literal looks up its own key's group, the stores with no literal key, and the
+        # groups of the tags that do not tell its key apart.
+        class Scan
+          def initialize(body, walked)
+            @body = body
+            @walked = walked
+            @buckets = Hash.new { |table, at| table[at] = Bucket.fresh }
+            @deeper = Hash.new { |table, at| table[at] = Bucket.fresh }
+            @parents = nil
+          end
+
+          def run
+            @walked.stores.each { |store| index(store) }
+            marked = []
+            unless_hash = {}.compare_by_identity
+            @walked.or_writes.each do |site|
+              case verdict(site)
+              when :marked then marked << site
+              when :unless_hash then unless_hash[site] = RepeatedOrWrites.receiver_path(site.receiver, 0).first
+              end
+            end
+            Analysis.new(marked: marked.freeze, unless_hash: unless_hash.freeze,
+                         root_writes: unless_hash.empty? ? NOTHING.root_writes : root_writes)
+          end
+
+          private
+
+          def index(store)
+            return if store.path.nil?
+
+            root, depth = store.path
+            bucket = @buckets[store.path]
+            node = store.node
+            if node.is_a?(Prism::CallNode) && UnknownStoreWidening::VALUE_PRESERVING.include?(node.name)
+              bucket.removers << store
+            else
+              add(bucket, StraightLine.literal_key_value(store_key(node)), store)
+              bucket.installers << store unless empty_value?(node)
+            end
+            chain_keys(node.receiver).each_with_index do |key, at|
+              break if at >= depth
+
+              add(@deeper[[root, at]], StraightLine.literal_key_value(key), store)
+            end
+          end
+
+          def add(bucket, value, store)
+            value.nil? ? bucket.wild << store : bucket.add_keyed(value, store)
+          end
+
+          # The key a store writes, or nil when it may write any slot (a mutator such as `merge!` or `<<`).
+          def store_key(node)
+            return FreshKeys.sole_key(node) unless node.is_a?(Prism::CallNode)
+
+            arguments = node.arguments&.arguments
+            node.name == :[]= && arguments&.size == 2 ? arguments.first : nil
+          end
+
+          # Whether the store puts nothing a deeper site could read: an index write of an empty new collection.
+          def empty_value?(node)
+            value = case node
+                    when Prism::CallNode
+                      return false unless node.name == :[]=
+
+                      node.arguments&.arguments&.last
+                    when Prism::IndexTargetNode then nil
+                    else node.value
+                    end
+            !value.nil? && StraightLine.empty_fresh?(value)
+          end
+
+          # The key of each element read between the store's root and its receiver, root first; nil for a key that is
+          # no single argument.
+          def chain_keys(node)
+            keys = []
+            loop do
+              case node
+              when Prism::ParenthesesNode
+                statements = node.body
+                break unless statements.is_a?(Prism::StatementsNode) && statements.body.size == 1
+
+                node = statements.body.first
+              when Prism::CallNode
+                break unless node.name == :[] && node.receiver
+
+                keys.unshift(FreshKeys.sole_key(node))
+                node = node.receiver
+              when *IndexWriteWidening::NODE_CLASSES
+                keys.unshift(FreshKeys.sole_key(node))
+                node = node.receiver
+              else break
+              end
+            end
+            keys
+          end
+
+          # `:marked`, `:unless_hash` or nil for one site. A literal key told apart only on a `Hash` is decided by the
+          # root's kind for a site on the root alone; a deeper object's kind is not known.
+          def verdict(site)
+            path = RepeatedOrWrites.receiver_path(site.receiver, 0)
+            return nil if path.nil?
+
+            same = at_depth(path, site)
+            return :marked if same == :marked || (same && path.last.positive?)
+
+            above = above_depth(path, site)
+            return :marked if above == :marked
+
+            :unless_hash if same || above
+          end
+
+          # The stores at the site's depth, and the deeper ones through its object: `:marked`, `:weak` (reaching
+          # unless the object is a `Hash`) or nil.
+          def at_depth(path, site)
+            value = StraightLine.literal_key_value(FreshKeys.sole_key(site))
+            weak = false
+            [@buckets.fetch(path, nil), @deeper.fetch(path, nil)].compact.each do |bucket|
+              strong, loose = candidates(bucket, value)
+              return :marked if reaches?(strong, site)
+
+              weak ||= reaches?(loose, site)
+            end
+            weak ? :weak : nil
+          end
+
+          # The stores into a container above the site's object. A remover there moves objects between slots only
+          # on an `Array`, which the root's kind decides for the root alone.
+          def above_depth(path, site)
+            root, depth = path
+            weak = false
+            (0...depth).each do |level|
+              bucket = @buckets.fetch([root, level], nil) or next
+              return :marked if reaches?([bucket.installers], site)
+              next unless reaches?([bucket.removers], site)
+              return :marked unless level.zero?
+
+              weak = true
+            end
+            weak ? :weak : nil
+          end
+
+          # The store groups of `bucket` that reach a site keyed `value` on any receiver, and those that reach it
+          # unless the receiver is a `Hash`.
+          def candidates(bucket, value)
+            return [[bucket.wild, *bucket.by_key.values], [bucket.removers]] if value.nil?
+
+            strong = [bucket.wild]
+            own = bucket.by_key[value]
+            strong << own if own
+            tag = StraightLine.key_tag(value)
+            loose = [bucket.removers]
+            bucket.by_tag.each do |other_tag, values|
+              next if other_tag == tag && DISTINCT_TAGS.include?(tag)
+
+              values.each { |other| loose << bucket.by_key[other] unless other.eql?(value) }
+            end
+            [strong, loose]
+          end
+
+          def reaches?(groups, site)
+            start = site.location.start_offset
+            groups.any? do |stores|
+              stores.any? do |store|
+                node = store.node
+                node.location.start_offset < start && !node.equal?(site) &&
+                  !ExclusiveArms.exclusive?(node, site, @body, @parents ||= ExclusiveArms.parents(@body))
+              end
+            end
+          end
+
+          # Each variable root the body writes, `:hash` when every write stores a new `Hash`.
+          def root_writes
+            table = {}
+            collect_writes(@body, table)
+            table.freeze
+          end
+
+          def collect_writes(node, table)
+            return if node.is_a?(Prism::DefNode) || CLASS_BODY_NODES.include?(node.class)
+
+            kind = Forms::VARIABLE_KINDS[node.class]
+            if kind && !Forms::READ_NODES.include?(node.class)
+              fresh_hash = Forms::VALUE_WRITE_NODES.include?(node.class) && StraightLine.new_hash?(node.value)
+              root = [kind, node.name]
+              table[root] = table.fetch(root, :hash) == :hash && fresh_hash ? :hash : :other
+            end
+            node.rigor_each_child { |child| collect_writes(child, table) }
+          end
+        end
+
+        # Whether a store and a later site sit in different arms of one `if` / `unless` (a ternary included), so that
+        # the store never runs before the site in the same run of the body. That holds when no loop or lambda between
+        # that conditional and the body runs both arms in turn. For a receiver that outlives the call — an instance
+        # variable, a constant, a global — an earlier call of the same method can have run the other arm; the exemption
+        # follows the memoization reading's existing optimism about what other calls stored. A block is not counted: one
+        # its call may run more than once is the repeating-body marks' case ({.sites}), and one that runs at most once
+        # (`tap`) repeats nothing. Any other relation — a `case` (whose `when` conditions run before a later arm),
+        # `&&` / `||`, a `begin` and its `rescue` — counts as one where the store may have run first.
         module ExclusiveArms
           LOOP_NODES = Set[Prism::LambdaNode, Prism::WhileNode, Prism::UntilNode, Prism::ForNode].freeze
 

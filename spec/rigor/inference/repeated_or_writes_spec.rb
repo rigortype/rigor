@@ -63,10 +63,12 @@ RSpec.describe Rigor::Inference::RepeatedOrWrites do
 
   # Issue #1885 — the straight-line marks: a site whose slot a store earlier in the same body may have filled.
   describe ".straight_line_sites" do
-    def straight(source)
+    def straight(source, entry = Rigor::Scope.empty)
       body = Prism.parse(source, scopes: [%i[cache cond k]]).value.statements
-      [described_class.straight_line_sites(body), or_writes(body)]
+      [described_class.straight_line_sites(body, entry), or_writes(body)]
     end
+
+    def hash_entry = Rigor::Scope.empty.with_local(:cache, Rigor::Type::Combinator.nominal_of("Hash"))
 
     it "marks a site after a conditional store into the same slot, and not the store itself" do
       marks, sites = straight("cache[:k] ||= :e if cond\n(cache[:k] ||= :f).itself")
@@ -123,6 +125,53 @@ RSpec.describe Rigor::Inference::RepeatedOrWrites do
     it "does not look inside a nested `def` body" do
       marks, = straight("@memo[:k] ||= :e if cond\ndef helper = (@memo[:k] ||= 1)")
       expect(marks).to eq([])
+    end
+
+    it "does not count a remover on a root the body binds to a new `Hash`, nor on a parameter typed `Hash`" do
+      local, = straight("c = {}\nc.delete(k) if cond\n(c[k] ||= :f)")
+      parameter, = straight("cache.delete(k) if k.nil?\n(cache[k] ||= :f)", hash_entry)
+      expect([local, parameter]).to eq([[], []])
+    end
+
+    it "counts a remover on an array, an untyped root, or a root the body also binds to something else" do
+      array, array_sites = straight("c = []\nc.delete(k) if cond\n(c[0] ||= :f)")
+      untyped, untyped_sites = straight("cache.delete(k) if k.nil?\n(cache[k] ||= :f)")
+      rebound_source = "cache = [] if cond\ncache.delete(k) if k.nil?\n(cache[k] ||= :f)"
+      rebound, rebound_sites = straight(rebound_source, hash_entry)
+      expect([array, untyped, rebound]).to eq([array_sites, untyped_sites, rebound_sites])
+    end
+
+    it "tells literal keys of different classes apart on a `Hash` root only" do
+      source = "cache[\"k\"] = 1 if cond\ncache[1] = 1 if cond\n(cache[:k] ||= 2)\n(cache[1.0] ||= 2)"
+      on_hash, = straight(source, hash_entry)
+      untyped, untyped_sites = straight("cache[1] = 1 if cond\n(cache[1.0] ||= 2)")
+      expect([on_hash, untyped]).to eq([[], [untyped_sites.last]])
+    end
+
+    it "tells two different `String` keys apart on any root" do
+      marks, = straight("cache[\"a\"] ||= 1 if cond\n(cache[\"b\"] ||= 2)")
+      expect(marks).to eq([])
+    end
+
+    it "counts a store above the site that installs a non-empty literal" do
+      marks, sites = straight("cache[:a] = { k: :e } if cond\ncache[:a] ||= Hash.new\n(cache[:a][:k] ||= :f)")
+      expect(marks).to eq(sites)
+    end
+
+    it "counts a store below the site through its slot, and not one through another slot" do
+      through, through_sites = straight("cache[:a][:k] = 1 if cond\n(cache[:a] ||= 2)")
+      other, = straight("cache[:x][:k] = 1 if cond\n(cache[:a] ||= 2)")
+      expect([through, other]).to eq([through_sites, []])
+    end
+
+    it "does not count a store in the other arm of an `unless`" do
+      marks, = straight("unless cond then cache[:k] ||= :e else (cache[:k] ||= :f) end")
+      expect(marks).to eq([])
+    end
+
+    it "counts a store in the other arm when a `while` loop runs both arms in turn" do
+      marks, sites = straight("while cond do k ? (cache[:k] ||= :e) : (cache[:k] ||= :f) end")
+      expect(marks).to eq([sites.last])
     end
   end
 end

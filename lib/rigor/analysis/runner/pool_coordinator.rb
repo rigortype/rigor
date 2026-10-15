@@ -1081,8 +1081,14 @@ module Rigor
         def record_definition_build_failures(failures)
           return if failures.nil? || failures.empty?
 
+          # Issue #1902 — one tuple per class, chosen by {Environment::RbsLoader.definition_build_detail_order}
+          # rather than by arrival: a fresh record and a replayed one (or two workers' records) for the same
+          # class can name different failures, and the earlier one used to win.
           @snapshots.definition_build_failures =
-            (@snapshots.definition_build_failures + failures).uniq(&:first).freeze
+            (@snapshots.definition_build_failures + failures)
+            .group_by(&:first)
+            .map { |_, candidates| candidates.min_by { |c| Environment::RbsLoader.definition_build_detail_order(c) } }
+            .freeze
         end
 
         # Issue #784 — first-wins, unlike {#record_definition_build_failures}'s accumulate-and-dedup. That

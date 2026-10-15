@@ -430,10 +430,10 @@ RSpec.describe Rigor::Analysis::Runner::DiagnosticAggregator do
 
     # Issue #1902 — the snapshot arrives in DEMAND order, which an `--incremental` recheck (its closure's
     # classes first, then the replayed set) and a worker pool (per-worker drain order) each change without
-    # changing the set. The message is rendered from the set alone: the sample, the "First failure" clause,
-    # the advice that clause selects, and the file list all read the same in either order.
+    # changing the set. The sample and the "First failure" clause (with the advice it selects) follow class
+    # name, and the file list is sorted on its own (`base.rbs` belongs to `Zeta`, the last class).
     it "renders the same message whatever order the failures were recorded in" do
-      zeta = ["Zeta", "RBS::GenericParameterMismatchError", "::Zeta", ["sig/zeta.rbs"]]
+      zeta = ["Zeta", "RBS::GenericParameterMismatchError", "::Zeta", ["sig/base.rbs"]]
       alpha = definition_failure("Alpha", member: "::Alpha#label", buffers: ["sig/alpha.rbs"])
       mid = definition_failure("Mid", member: "::Mid#label", buffers: ["sig/mid.rbs"])
 
@@ -445,7 +445,7 @@ RSpec.describe Rigor::Analysis::Runner::DiagnosticAggregator do
       expect(messages.uniq.size).to eq(1)
       expect(messages.first).to include("failed to build: Alpha, Mid, Zeta.")
       expect(messages.first).to include("First failure: RBS::DuplicatedMethodDefinitionError on `::Alpha#label`.")
-      expect(messages.first).to include("Conflicting signature file(s): sig/alpha.rbs, sig/mid.rbs, sig/zeta.rbs.")
+      expect(messages.first).to include("Conflicting signature file(s): sig/alpha.rbs, sig/base.rbs, sig/mid.rbs.")
       expect(messages.first).to include("remove the duplicate declaration")
     end
 

@@ -617,13 +617,13 @@ module Rigor
         # Issue #1902 — "first" is first by CLASS NAME, not first recorded. The snapshot arrives in demand
         # order, and that order is a property of the invocation, not of the project: an `--incremental`
         # recheck records the classes its closure demanded before it unions in the replayed set, and a worker
-        # pool unions per-worker lists in drain order. Sorting here, at the one place the set is rendered,
-        # makes the sample, the "First failure" clause, the advice it selects and the file list identical
-        # however the run reached the set, which is what keeps warm output byte-identical to cold.
+        # pool unions per-worker lists in drain order. So the classes are sorted by name and the files
+        # sorted and deduplicated here. Which tuple each class carries is fixed upstream
+        # ({Environment::RbsLoader.definition_build_detail_order}), not here.
         def build_rbs_definition_build_failed_diagnostic(failures)
           failures = failures.sort_by { |failure| failure.first.to_s }
           sample_size = 5
-          files = failures.flat_map { |failure| Array(failure[3]) }.uniq.map { |name| relative_signature_path(name) }
+          files = failures.flat_map { |failure| Array(failure[3]) }.map { |name| relative_signature_path(name) }.uniq.sort
           Diagnostic.new(
             path: ".rigor.yml",
             line: 1,

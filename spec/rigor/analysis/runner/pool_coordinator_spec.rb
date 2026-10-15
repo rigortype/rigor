@@ -256,6 +256,23 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
       expect(snapshots.definition_build_failures).to eq([failure])
     end
 
+    # Issue #1902 — a fresh record and a replayed one (or two workers') for the same class can carry
+    # different tuples; the merge keeps one by a fixed order rather than whichever arrived first.
+    it "keeps the same tuple per class whatever order the records are merged in" do
+      instance_side = ["Berry", "RBS::DuplicatedMethodDefinitionError", "::Berry#i", ["sig/berry.rbs"]]
+      singleton_side = ["Berry", "RBS::DuplicatedMethodDefinitionError", "::Berry.s", ["sig/berry.rbs"]]
+      mango = ["Mango", "RBS::DuplicatedMethodDefinitionError", "::Mango#m", ["sig/mango.rbs"]]
+
+      merged = [[[singleton_side, mango], [instance_side]], [[instance_side], [mango, singleton_side]]].map do |batches|
+        snapshots = Rigor::Analysis::Runner::RunSnapshots.new
+        coordinator = build_coordinator(snapshots: snapshots)
+        batches.each { |batch| coordinator.send(:record_definition_build_failures, batch) }
+        snapshots.definition_build_failures.sort_by(&:first)
+      end
+
+      expect(merged).to eq([[instance_side, mango]] * 2)
+    end
+
     # Issue #784 — the seam in `Environment#hkt_registry` is demand-driven, and a subset run (a
     # `--verify-incremental` partition, an incremental closure) can contain no file that demands it. The
     # RUN must demand it once itself, or the row silently depends on which files happened to be analysed.

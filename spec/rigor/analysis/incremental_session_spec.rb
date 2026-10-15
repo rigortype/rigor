@@ -3196,6 +3196,43 @@ end
       end
     end
 
+    # Issue #1902 — `Berry`'s instance and singleton sides fail for different members, and `a.rb` demands
+    # one while `b.rb` demands the other. A recheck after editing either file demands only that file's
+    # side; the cold run, both rechecks, a `--no-cache` run and a two-worker pool must all name the same
+    # first failure and files.
+    it "names the same failure for a two-sided class across cold, edited and pooled runs (#1902)" do
+      Dir.mktmpdir do |dir|
+        FileUtils.mkdir_p(File.join(dir, "sig"))
+        File.write(File.join(dir, "sig", "berry.rbs"),
+                   "class Berry\n  def self.s: () -> Integer\n  def self.s: () -> Integer\n" \
+                   "  def i: () -> Integer\n  def i: () -> Integer\nend\n")
+        File.write(File.join(dir, "sig", "mango.rbs"), "class Mango\n  def m: () -> Integer\n  def m: () -> Integer\nend\n")
+        File.write(File.join(dir, "a.rb"), "Berry.new.i\n")
+        File.write(File.join(dir, "b.rb"), "Berry.s\n")
+        File.write(File.join(dir, "c.rb"), "Mango.new.m\n")
+        config = definition_failure_config(dir)
+        cache_root = File.join(dir, ".rigor", "cache")
+        snapshot = Rigor::Cache::IncrementalSnapshot.new(root: cache_root)
+        run = incremental_runner(config, dir, cache_root, snapshot, fingerprint(config, dir))
+
+        cold, = run.call
+        rows = %w[b.rb a.rb].map do |edited|
+          File.write(File.join(dir, edited), "# edited\n", mode: "a")
+          diagnostics, warm = run.call
+          expect(warm).to be(true)
+          definition_rows(diagnostics)
+        end
+        full = guarded_run(Rigor::Analysis::Runner.new(configuration: config, cache_store: nil)).diagnostics
+        pooled = guarded_run(Rigor::Analysis::Runner.new(
+                               configuration: config, workers: 2,
+                               cache_store: Rigor::Cache::Store.new(root: File.join(dir, ".rigor", "pool-cache"))
+                             )).diagnostics
+
+        expect(definition_rows(cold).first).to include("First failure: RBS::DuplicatedMethodDefinitionError on `::Berry#i`.")
+        expect(rows + [definition_rows(full), definition_rows(pooled)]).to eq([definition_rows(cold)] * 4)
+      end
+    end
+
     it "drops the row and rebuilds both rows once the duplicate declaration is gone (#796)" do
       Dir.mktmpdir do |dir|
         write_definition_failure_fixture(dir)

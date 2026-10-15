@@ -235,7 +235,7 @@ RSpec.describe "definition build failed reporting" do
     # diagnostics, which is what an absence-only comparison would pass on; a pre-warm that contributed would
     # name the whole bundled universe (1,336 measured on the real CLI).
     expect(sequential.size).to eq(1)
-    expect(sequential.first).to start_with("3 RBS class definition(s) failed to build: String, Integer, Array.")
+    expect(sequential.first).to start_with("3 RBS class definition(s) failed to build: Array, Integer, String.")
     expect(sequential.first).to include("::Object#blank?")
     expect(pooled).to eq(sequential)
   end

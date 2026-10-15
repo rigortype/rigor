@@ -2904,15 +2904,25 @@ module Rigor
       #
       # So the rescue only remembers, keyed by the `::`-stripped name (the eager walk spells it `::Acme`,
       # a dispatch site spells it `Acme`, and they are one class — the {#synthesized_namespaces}
-      # convention), and {#report_definition_build_failure} decides. First writer wins: the instance and
-      # singleton sides fail for the same underlying collision, and the first is the one a caller hit.
+      # convention), and {#report_definition_build_failure} decides. Every side's detail is kept, not the
+      # first one written (issue #1902): the instance and singleton sides can fail for DIFFERENT reasons
+      # (a duplicated `def self.s` and a duplicated `def i` on one class), and which side a run demands first
+      # depends on which files it analysed, so first-writer-wins made the reported tuple — and with it the
+      # message's "First failure", advice and file list — differ between a cold run and a warm recheck.
       def store_definition_build_detail(class_name, error)
         key = class_name.to_s.delete_prefix("::")
-        details = (@state[:definition_build_details] ||= {})
-        return if details.key?(key)
+        details = ((@state[:definition_build_details] ||= {})[key] ||= [])
+        details << [key, error.class.name.to_s, definition_build_member(error),
+                    definition_build_conflict_buffers(error), unresolved_type_name_detail(error)].freeze
+      end
 
-        details[key] = [key, error.class.name.to_s, definition_build_member(error),
-                        definition_build_conflict_buffers(error), unresolved_type_name_detail(error)].freeze
+      # Issue #1902 — the fixed total order that picks ONE detail tuple for a class out of several: its two
+      # sides here, or a fresh and a replayed record in {Analysis::Runner::PoolCoordinator}. Content-only (the
+      # tuple carries no side), so both places choose the same tuple from the same candidates, whatever
+      # order those candidates arrived in.
+      def self.definition_build_detail_order(detail)
+        _, error_class, member, buffers, unresolved = detail
+        [error_class.to_s, member.to_s, Array(buffers).map(&:to_s), Array(unresolved).map(&:to_s)]
       end
 
       # Issue #997 — the `RBS::NoTypeFoundError` twin of {#definition_build_member}: `nil` for every other
@@ -2987,14 +2997,28 @@ module Rigor
         return if details.nil?
 
         key = class_name.to_s.delete_prefix("::")
-        detail = details[key]
-        return if detail.nil?
+        return if details[key].nil?
 
         reported = (@state[:definition_build_reported] ||= {})
         return if reported[key]
 
         reported[key] = true
-        (@state[:definition_build_failures] ||= []) << detail
+        attempt_both_definition_sides(class_name)
+        canonical = details[key].min_by { |candidate| self.class.definition_build_detail_order(candidate) }
+        (@state[:definition_build_failures] ||= []) << canonical
+      end
+
+      # Issue #1902 — a reported class's tuple is chosen from BOTH sides' failures, so the side this demand
+      # did not ask for is built here too. Without it, the candidate set would be whatever sides the run
+      # happened to demand, and a recheck whose closure touches only `Berry.s` would report the singleton
+      # side's reason where the full run, which also demanded `Berry.new.i`, reported the instance side's.
+      # An internal demand: it decides WHICH reason is shown for a class the analysis already demanded, never
+      # WHETHER a class is reported, so the set #696 binds to the analysis's own demand is unchanged.
+      def attempt_both_definition_sides(class_name)
+        during_internal_demand do
+          instance_definition(class_name)
+          singleton_definition(class_name)
+        end
       end
 
       # Marks a definition demand that is RIGOR'S OWN, not the analysed program's, so

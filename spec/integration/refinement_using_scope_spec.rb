@@ -2006,23 +2006,19 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
       expect(incremental_call_rows).to eq([fires, true])
     end
 
-    # Each new file gives `Integer` a singleton `oo` from outside its body (Ruby 4.0.5: `"s"`), so the re-check types
-    # `Integer.oo` as Dynamic[top], as a cold run does, rather than keeping the refinement's `:o`.
-    it "re-types the `using` file under --incremental when a new file defines the class object's method outside it" do
-      write("lib/ro.rb", "module RO\n  refine(Object) { def oo = :o }\nend\n")
-      write("lib/use.rb", "using RO\nRigor.dump_type(Integer.oo)\n")
-      refined = [[["use.rb", 2, "dump_type: :o"]], false]
+    # Each new file redefines `Regexp.escape` with two parameters from outside `Regexp`'s body (Ruby 4.0.5: `:x`), so
+    # the re-check drops the report, as a cold run does, and its removal brings the report back.
+    it "re-checks the `using` file under --incremental when a new file redefines the class object's method outside it" do
+      write("lib/rs.rb", object_sqrt)
+      write("lib/use.rb", "using RS\nRegexp.escape(1, 2)\n")
+      fires = [["use.rb", 2, "call.wrong-arity"]]
 
-      expect(incremental_call_rows(%w[dump.type])).to eq(refined)
-      [
-        "def Integer.oo = \"s\"\n",
-        "Integer.define_singleton_method(:oo) { \"s\" }\n",
-        "module Ext\n  def oo = \"s\"\nend\nInteger.extend(Ext)\n"
-      ].each do |source|
+      expect(incremental_call_rows).to eq([fires, false])
+      ["def Regexp.escape(a, b) = :x\n", "Regexp.define_singleton_method(:escape) { |a, b| :x }\n"].each do |source|
         write("lib/def.rb", source)
-        expect(incremental_call_rows(%w[dump.type])).to eq([[["use.rb", 2, "dump_type: Dynamic[top]"]], true])
+        expect(incremental_call_rows).to eq([[], true])
         File.delete("lib/def.rb")
-        expect(incremental_call_rows(%w[dump.type])).to eq([refined.first, true])
+        expect(incremental_call_rows).to eq([fires, true])
       end
     end
 

@@ -1953,8 +1953,8 @@ module Rigor
       # `def` must not bind ahead of a refinement of `Object`, a plugin models the class's own method). An unreadable
       # body, or a list that may hold any refinement, answers `Dynamic[top]`, never the replaced method's signature.
       # A union receiver is decided per member; a `Dynamic` receiver and a call no refinement wins fall through. A
-      # class object walks its own lookup (issue #1752): `refine(Object) { def oo = :o }` types `Integer.oo` as `:o`,
-      # with `Singleton[Integer]` as the body's `self`. A call site no refinement is in effect at answers nil at once
+      # class object walks its own lookup (issue #1752): under `refine(Object) { def oo = :o }` a refinement that wins
+      # `Integer.oo` answers `Dynamic[top]` ({#refined_class_object_result}). A call site no refinement is in effect at answers nil at once
       # and records nothing: its answer cannot change without an edit to its own file.
       #
       # ADR-121 WD7 (A2) — inside the span of an activation that puts an opaque module in effect
@@ -2071,14 +2071,14 @@ module Rigor
           dynamic_top
       end
 
-      # Issue #1752 — a call on a class object, walked through its singleton levels; the winning refine body is
-      # re-typed with the class object itself as `self`.
-      def refined_class_object_result(node, receiver, list, arg_types, block_type)
+      # Issue #1752 — a call on a class object, walked through its singleton levels. A refinement that wins answers
+      # `Dynamic[top]`, never its refine body's type: a hook on any ancestor (an RBS-declared `include Singleton`, a
+      # gem concern, `define_singleton_method(:included)`, a `Module#included` patch) can install the class object's
+      # own method where no table sees it, and the body's type then fires downstream on correct code. A walk that finds
+      # no winner keeps the class object's own answer (`Integer.sqrt(16)` stays `Integer`).
+      def refined_class_object_result(node, receiver, list, _arg_types, _block_type)
         winner = RefinedDispatch.winner(scope, receiver.class_name, node.name, list, kind: :singleton)
-        return nil if winner.nil?
-        return dynamic_top if winner == RefinedDispatch::UNKNOWN
-
-        refined_body_return(winner, node.name, receiver, arg_types, block_type) || dynamic_top
+        dynamic_top unless winner.nil?
       end
 
       # The winning refine body's inferred return, re-typed with the receiver's class as `self` and the call's

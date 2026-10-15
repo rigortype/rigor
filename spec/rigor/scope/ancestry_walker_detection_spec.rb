@@ -82,9 +82,6 @@ ALLOWED_ANCESTRY_WALKERS = {
   "lib/rigor/inference/method_dispatcher/rbs_dispatch.rb#each_source_ancestor_candidate" =>
     "yields every candidate spelling to three shadow guards and files no ADR-46 edge; two guards are unions, " \
     "the third (`allowed_rbs_complete_ancestor`) is a breadth-first first-definer walk deferred to #1572",
-  "lib/rigor/inference/refined_dispatch/class_object.rb#installs_singleton?" =>
-    "asks of each name one chain entry's spelling can denote whether its hook may install singleton methods; " \
-    "any that may makes the walk unreadable, order-independent, and it walks no ancestor",
   "lib/rigor/inference/refined_dispatch/class_object.rb#project_levels" =>
     "existential over each level's own `extend` edges (does the class record one the chain did not place on its " \
     "level?), read to mark that level of a class object's refinement walk `mixed` and withhold: the tables record " \

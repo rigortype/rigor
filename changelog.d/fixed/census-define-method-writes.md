@@ -1,0 +1,1 @@
+- **[engine]** An instance variable that a `define_method` block in the class body assigns, such as `define_method(:set) { @x = "a" }` beside `@x = nil` in `initialize`, no longer reads as `nil` in the class's other methods, so `@x.upcase` there is no longer reported as a call on `nil`. ([#1957](https://github.com/rigortype/rigor/pull/1957))

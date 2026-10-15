@@ -238,9 +238,7 @@ module Rigor
         # go in too, so the runner lists them in the full run's file order (#1524).
         runner = build_runner(analyze_only: analyze_set, record_dependencies: true,
                               param_inferred_types: fresh_params, **forced_target_options(forced),
-                              restored_run_level_rows: @run_level_rows,
-                              served_per_file_diagnostics: @cache.slice(*reused),
-                              served_effect_collections: @effect_collections.slice(*reused))
+                              restored_run_level_rows: @run_level_rows, **served_state(reused))
         merged = run_runner(runner).diagnostics
         @last_runner = runner # ADR-88 WD1 — the post-hoc fact-surface fingerprint reads this prepared registry.
         absorb(runner, current, analyze_set, removed)
@@ -521,9 +519,7 @@ module Rigor
         # ADR-67 WD6c lift — seed the subset run from the baseline's own table so the verification engine
         # exercises the exact seeds the served cache entries were computed under (and skips a re-collect).
         runner = build_runner(analyze_only: affected, param_inferred_types: @param_table,
-                              restored_run_level_rows: @run_level_rows,
-                              served_per_file_diagnostics: @cache.slice(*reused),
-                              served_effect_collections: @effect_collections.slice(*reused))
+                              restored_run_level_rows: @run_level_rows, **served_state(reused))
         run_runner(runner).diagnostics
       end
 
@@ -1366,6 +1362,13 @@ module Rigor
       def forced_analyze_set(affected, current)
         forced = @force_targets & current.to_set
         [forced, (affected | forced) & current]
+      end
+
+      # What the session serves a narrowed run for the files it does not analyse: their cached per-file rows (#1524),
+      # and (#1898) their effect collections, so the run closes its effect graph over the whole project.
+      def served_state(reused)
+        { served_per_file_diagnostics: @cache.slice(*reused),
+          served_effect_collections: @effect_collections.slice(*reused) }
       end
 
       # A recheck that forces targets analyses in this process, so the index callback reaches them.

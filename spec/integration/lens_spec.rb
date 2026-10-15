@@ -34,6 +34,16 @@ RSpec.describe "rigor lens" do
     document
   end
 
+  # The fixture lists `rigor-rbs-inline` as a bare gem name, which the loader resolves through the gem→id memo
+  # its first `require` records (ADR-88 WD4b). An earlier spec that required the plugin directly leaves that
+  # memo empty and the suite empties the registry, so the plugin is registered and recorded by hand; without
+  # this the document depends on spec order.
+  before do
+    require "rigor-rbs-inline"
+    Rigor::Plugin.register(Rigor::Plugin::RbsInline) unless Rigor::Plugin.registered_for("rbs-inline")
+    Rigor::Plugin.record_gem_registration("rigor-rbs-inline", ["rbs-inline"])
+  end
+
   around do |example|
     Dir.mktmpdir do |dir|
       FileUtils.cp_r(File.join(fixture, "project", "."), dir)

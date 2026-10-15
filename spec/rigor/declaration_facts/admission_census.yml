@@ -199,6 +199,7 @@ members:
     reads:
     - lib/rigor/analysis/check_rules.rb
     - lib/rigor/analysis/check_rules/source_arity.rb
+    - lib/rigor/analysis/incremental_session.rb
     - lib/rigor/analysis/runner.rb
     - lib/rigor/inference/definer_resolution.rb
     - lib/rigor/inference/refined_dispatch/class_object.rb
@@ -210,6 +211,8 @@ members:
       lib/rigor/analysis/check_rules.rb:
       - existence
       lib/rigor/analysis/check_rules/source_arity.rb:
+      - existence
+      lib/rigor/analysis/incremental_session.rb:
       - existence
       lib/rigor/analysis/runner.rb:
       - paired_copy
@@ -308,6 +311,7 @@ members:
     - lib/rigor/protection/discovery_seed.rb
   unpositioned_mixins:
     reads:
+    - lib/rigor/analysis/incremental_session.rb
     - lib/rigor/analysis/runner.rb
     - lib/rigor/inference/singleton_hook_decline.rb
     - lib/rigor/scope/resolution_chain.rb

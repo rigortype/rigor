@@ -851,18 +851,30 @@ RSpec.describe Rigor::Inference::DefinerResolution do # rubocop:disable RSpec/Sp
         end
       end
 
-      # Closed by #1752: a surface call on `singleton_class` (`class_eval`, `alias_method`) leaves the singleton side
-      # unpositioned, so the read declines instead of answering the wrong body.
+      # Closed by #1752: a surface call on `singleton_class` (`class_eval`) leaves the singleton side unpositioned, so
+      # the read declines instead of answering the wrong body. Since #1906 an `alias_method` or `define_method` whose
+      # names are literals (Strings included) makes only the name it rewrites opaque and contested, which declines
+      # the same read.
       {
         "`singleton_class.class_eval { def x }`" =>
           "class C; def self.x = :own; singleton_class.class_eval { def x = :late }; end",
         "a singleton `alias_method`" =>
-          "class C; def self.late = :late; def self.x = :own; singleton_class.alias_method :x, :late; end"
+          "class C; def self.late = :late; def self.x = :own; singleton_class.alias_method :x, :late; end",
+        "`singleton_class.define_method(:x)`" =>
+          "class C; def self.x = :own; singleton_class.define_method(:x) { :late }; end",
+        "a singleton `alias_method` spelled with Strings" =>
+          "class C; def self.late = :late; def self.x = :own; singleton_class.alias_method \"x\", \"late\"; end"
       }.each do |label, source|
         it "declines an own def read past #{label} (wrong body: Ruby runs the later definition)" do
           expect(ruby_singleton("#{source}\n", "C", :x)).to eq([%w[#<Class:C>], "#<Class:C>", ":late"])
           expect(singleton(scope_for("#{source}\n"), "C", :x)).to eq(:unknown)
         end
+      end
+
+      it "keeps an own def Known past a singleton `alias_method` that rewrites another name" do
+        source = "class C; def self.late = :late; def self.x = :own; singleton_class.alias_method :o2, :late; end\n"
+        expect(ruby_singleton(source, "C", :x)).to eq([%w[#<Class:C>], "#<Class:C>", ":own"])
+        expect(singleton(scope_for(source), "C", :x)).to eq("C")
       end
 
       # Closed by C1d-a's certainty classifier: a `def` inside a non-meta block is POSSIBLE, which contests the

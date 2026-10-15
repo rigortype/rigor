@@ -7004,13 +7004,40 @@ module Rigor
       def extends_block_handled?(node, qualified_prefix, current_class, accumulator, in_singleton, singleton_self,
                                  singleton_cref)
         case extends_block_plan(node, accumulator)
-        when :skip then true
+        when :skip
+          taint_skipped_singleton_rewrites(node.block, qualified_prefix, current_class, accumulator)
+          true
         when :rebound
           walk_extends_block_call(node, qualified_prefix, current_class, accumulator,
                                   in_singleton, singleton_self, singleton_cref)
           true
         else false
         end
+      end
+
+      # Issue #1906 — a block the extends walk skips may still run, and a `singleton_class` call in it, or in a `def`
+      # it holds (`[1].each { D.singleton_class.alias_method :own, :other }` in a method body,
+      # `to_prepare do def helper = D.singleton_class.alias_method(...) end`), reaches no mark the methods walk records
+      # there. Every such call taints the side it may rewrite, as {#singleton_class_rewrite_tainted?} does for one the
+      # walk visits; a constant receiver taints every name it can denote from here.
+      def taint_skipped_singleton_rewrites(node, qualified_prefix, current_class, accumulator)
+        return unless node.is_a?(Prism::Node)
+
+        if node.is_a?(Prism::CallNode) && singleton_class_of_receiver?(node.receiver) && surface_rewriting_call?(node)
+          skipped_rewrite_owners(node.receiver.receiver, qualified_prefix, current_class).each do |owner|
+            accumulator.taint(owner, :extend)
+          end
+        end
+        node.rigor_each_child do |child|
+          taint_skipped_singleton_rewrites(child, qualified_prefix, current_class, accumulator)
+        end
+      end
+
+      def skipped_rewrite_owners(object, qualified_prefix, current_class)
+        return [current_class].compact if object.nil? || object.is_a?(Prism::SelfNode)
+        return [] unless object.is_a?(Prism::ConstantReadNode) || object.is_a?(Prism::ConstantPathNode)
+
+        constant_receiver_candidates(object, qualified_prefix)
       end
 
       ARRAY_ITERATORS = %i[each each_with_index map].freeze
@@ -7228,10 +7255,15 @@ module Rigor
       # `Const.singleton_class.send(:include, M)`) puts methods or modules on that singleton class that no edge
       # records, so its singleton side is unpositioned: the owner is the enclosing class for a bare or `self.`
       # receiver, else the constant. True when it tainted.
+      #
+      # Issue #1906 — a naming call with literal names ({#singleton_class_named_call?}) marks only its names instead,
+      # but only where it is a direct statement (a top-level statement, or one of a direct declaration body or of a
+      # block that runs there once): there the methods walk records those marks under the same owner. In a method
+      # body, a hook or a conditional it may run on a receiver or at a time the marks cannot place, so it still taints.
       def singleton_class_rewrite_tainted?(node, qualified_prefix, current_class, accumulator)
         receiver = node.receiver
         return false unless singleton_class_of_receiver?(receiver) && surface_rewriting_call?(node)
-        return false if singleton_class_named_call?(node)
+        return false if singleton_class_named_call?(node) && accumulator.direct?(node)
 
         owner = singleton_class_owner(node, receiver.receiver, qualified_prefix, current_class)
         return false if owner.nil?
@@ -7245,15 +7277,37 @@ module Rigor
         receiver.is_a?(Prism::CallNode) && receiver.name == :singleton_class && receiver.arguments.nil?
       end
 
-      # An `attr_*` on a singleton class (`singleton_class.attr_accessor :conf`) rewrites only the names it spells, so
-      # it makes those names' singleton envelopes opaque ({#record_singleton_class_names}) and leaves the rest of the
-      # singleton side readable. An `attr_*` with a name it does not spell as a literal (`attr_accessor(*KEYS)`, a
-      # block's variable), and an `alias_method` or `define_method` there, still taint the side: the own-definer read
-      # would otherwise answer the body Ruby replaced (`definer_resolution_witness_spec.rb`).
+      # An `attr_*`, `alias_method`, `define_method` or `remove_method` on a singleton class
+      # (`singleton_class.attr_accessor :conf`, `singleton_class.alias_method :o2, :own`) rewrites only the names it
+      # spells, so it makes those names' singleton envelopes opaque and contested ({#record_singleton_class_names}) and
+      # leaves the rest of the singleton side readable. One whose rewritten name is not a literal Symbol or String
+      # (`attr_accessor(*KEYS)`, `alias_method name, :own`, `define_method(sym)`), and any other surface call there
+      # (`class_eval`, `send`, `prepend`), still taints the side: the own-definer read would otherwise answer the body
+      # Ruby replaced (`definer_resolution_witness_spec.rb`).
       def singleton_class_named_call?(node)
+        !singleton_class_rewritten_names(node).nil?
+      end
+
+      # Issue #1906 — the names a singleton-class call rewrites, or nil where it is not one of the naming forms or
+      # does not spell every rewritten name as a literal. `alias_method` rewrites its new name (the aliased one keeps
+      # its body), `define_method` its first argument, `remove_method` and `attr_*` every argument.
+      def singleton_class_rewritten_names(node)
         arguments = node.arguments&.arguments || []
-        ATTR_MACROS.include?(node.name) && !arguments.empty? &&
-          arguments.all? { |argument| literal_method_name(argument) }
+        rewritten = case node.name
+                    when :alias_method, :define_method then arguments.first(1)
+                    when :remove_method then arguments
+                    else ATTR_MACROS.include?(node.name) && arguments
+                    end
+        return nil if !rewritten || arguments.empty? || !arguments.all? { |argument| literal_argument?(node, argument) }
+
+        rewritten.map { |argument| literal_method_name(argument) }
+      end
+
+      # `define_method(:x, body)` takes a body that is not a name; every other argument must be a literal name.
+      def literal_argument?(node, argument)
+        return true if node.name == :define_method && !argument.equal?(node.arguments.arguments.first)
+
+        !literal_method_name(argument).nil?
       end
 
       def singleton_class_owner(node, object, qualified_prefix, current_class)
@@ -7858,21 +7912,20 @@ module Rigor
       end
 
       # Issue #1752 — the names a {#singleton_class_named_call?} rewrites on its singleton class's owner, each
-      # singleton envelope opaque: the evidence the refinement typer reads as a rewritten singleton name.
+      # singleton envelope opaque and contested: the evidence the refinement typer reads as a rewritten singleton name.
       def record_singleton_class_names(node, object, qualified_prefix, tables)
         current_class = qualified_prefix.empty? ? nil : qualified_prefix.join("::")
         owner = singleton_class_owner(node, object, qualified_prefix, current_class)
         return if owner.nil?
 
-        (node.arguments&.arguments || []).each do |argument|
-          method_name = literal_method_name(argument)
-          next unless method_name
-
+        singleton_class_rewritten_names(node).each do |method_name|
           names = [method_name]
           names << :"#{method_name}=" if %i[attr_writer attr_accessor].include?(node.name)
           names.each do |name|
             record_envelope(tables.envelopes, owner, [:singleton, name], Source::ParameterEnvelope::OPAQUE)
-            contest_envelope(tables, owner, [:singleton, name]) unless tables.certain
+            # Contested even where the call is certain: the slot's `def` is not the body Ruby runs, so the
+            # own-definer read declines on the name rather than answering it.
+            contest_envelope(tables, owner, [:singleton, name])
           end
         end
       end

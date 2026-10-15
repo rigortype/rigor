@@ -142,8 +142,8 @@ module Rigor
         # @param root — the project root `path` is made relative to when its role is decided.
         # @return nil when the file does not parse (a parse error is the analyzer's business, not
         #   this scan's — it simply contributes nothing rather than half a file).
-        # `role_path`, when given, is the path the role is read from instead of `path` (#1760).
-        def self.call(path:, source:, target_ruby: nil, root: nil, role_path: nil)
+        # `role`, when given, is the referring file's role, decided by the caller instead of from `path` (#1760).
+        def self.call(path:, source:, target_ruby: nil, root: nil, role: nil)
           parsed = if target_ruby
                      Prism.parse(source, filepath: path,
                                          version: target_ruby)
@@ -152,7 +152,7 @@ module Rigor
                    end
           return nil unless parsed.success?
 
-          walker = Walker.new(path: path, role: role_path ? role_for(role_path) : role_for(path, root: root))
+          walker = Walker.new(path: path, role: role || role_for(path, root: root))
           walker.walk(parsed.value, [])
           Result.new(declarations: walker.declarations.freeze, references: walker.references.freeze,
                      dynamic_uses: walker.dynamic_uses.freeze)

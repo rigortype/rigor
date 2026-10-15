@@ -228,6 +228,50 @@ RSpec.describe Rigor::CLI::UnusedCommand do
       end
     end
 
+    # Round 4 of #1888: a spelling the working directory alone used to give must still count.
+    it "matches an entry point written through a symlinked declaration path" do
+      Dir.mktmpdir do |dir|
+        write_file(dir, "ext/eng/lib/eng_entry.rb", "class EngEntry\nend\n")
+        write_file(dir, "proj/.rigor.yml", "paths:\n  - lib\n  - engines/eng/lib\n")
+        write_file(dir, "proj/lib/a.rb", "A = 1\nA\n")
+        FileUtils.mkdir_p(File.join(dir, "proj/engines"))
+        File.symlink(File.join(dir, "ext/eng"), File.join(dir, "proj/engines/eng"))
+        backdate(dir)
+
+        _, report, = run_in(File.join(dir, "proj"), "--entry-point=engines/eng/lib/eng_entry.rb")
+
+        expect(report["candidates"].map { |row| row["name"] }).not_to include("EngEntry")
+      end
+    end
+
+    it "keeps a test helper symlinked from outside the project test code" do
+      Dir.mktmpdir do |dir|
+        write_file(dir, "proj/.rigor.yml", "paths:\n  - lib\n")
+        write_file(dir, "proj/lib/test_thing.rb", "class TestThing\nend\n")
+        write_file(dir, "shared/helper_common.rb", "TestThing.new\n")
+        FileUtils.mkdir_p(File.join(dir, "proj/test"))
+        File.symlink(File.join(dir, "shared/helper_common.rb"), File.join(dir, "proj/test/helper_common.rb"))
+        backdate(dir)
+
+        _, report, = run_in(File.join(dir, "proj"))
+
+        expect(report["test_only"].map { |row| row["name"] }).to eq(["TestThing"])
+      end
+    end
+
+    it "keeps a package's features/ test code when run from the package against an ancestor config" do
+      Dir.mktmpdir do |dir|
+        write_file(dir, "mono/.rigor.yml", "paths:\n  - packages/a/lib\n")
+        write_file(dir, "mono/packages/a/lib/feature_helper.rb", "class FeatureHelper\nend\n")
+        write_file(dir, "mono/packages/a/features/steps.rb", "FeatureHelper.new\n")
+        backdate(dir)
+
+        _, report, = run_in(File.join(dir, "mono/packages/a"), "--config=../../.rigor.yml")
+
+        expect(report["test_only"].map { |row| row["name"] }).to eq(["FeatureHelper"])
+      end
+    end
+
     it "scans each file once when the project is reached through a symlink" do
       Dir.mktmpdir do |dir|
         project = File.join(dir, "proj")

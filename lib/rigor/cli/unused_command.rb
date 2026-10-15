@@ -49,7 +49,7 @@ module Rigor
 
         configuration = Configuration.load(options.fetch(:config))
         paths = @argv.empty? ? configuration.paths : @argv
-        @root = project_root(configuration)
+        establish_root(configuration)
         scan_cache = open_scan_cache(configuration)
         declarations, references, dynamic_uses, shadows = scan(paths, configuration, scan_cache)
         references.concat(signature_references(configuration))
@@ -68,15 +68,21 @@ module Rigor
 
       private
 
-      # A scan's role and the spelling it records depend on the root and the working directory (#1760).
-      # The working directory matters only to a relative path argument, whose spelling is what a cached scan
-      # records, and to a file read from it outside the root, whose role it decides ({#role_path}); keying on
-      # it otherwise would reset a shared cache whenever two runs differ in directory.
+      # A scan's role and the spelling it records depend on the root and the working directory (#1760): a role
+      # reads every spelling below either ({#role_of}), and a relative path argument is recorded as written
+      # relative to the working directory.
       def open_scan_cache(configuration)
-        cwd_matters = corpus_dirs.size > 1 || @argv.any? { |path| !File.absolute_path?(path) }
-        spelled = cwd_matters ? ":#{canonical(Dir.pwd)}" : ""
+        cwd = canonical(Dir.pwd)
+        spelled = cwd == @root ? "" : ":#{cwd}"
         Analysis::Reachability::ScanCache.open(configuration.cache_path, target_ruby: configuration.target_ruby,
                                                                          root: "#{@root}#{spelled}")
+      end
+
+      # The root, and its spellings: the realpath and the logical directory it was named by.
+      def establish_root(configuration)
+        @root = project_root(configuration)
+        logical = @root == canonical(Dir.pwd) ? Dir.pwd : configuration.exclude_base
+        @root_spellings = [@root, File.absolute_path(logical)].uniq
       end
 
       # The project root (#1760), realpath'd: the config file's directory, unless the config sits below the
@@ -191,7 +197,7 @@ module Rigor
       def read_and_scan(file, real, configuration)
         Analysis::Reachability::Scan.call(path: file, source: File.read(file),
                                           target_ruby: configuration.target_ruby,
-                                          role_path: role_path(real))
+                                          role: role_of(file, real))
       rescue SystemCallError
         nil
       end
@@ -209,14 +215,35 @@ module Rigor
         File.absolute_path(path)
       end
 
-      # A file the working directory's glob found outside the root takes its role from its path below the
-      # working directory, as it did when the working directory was the only root; any other file from its
-      # path relative to the root.
-      def role_path(real)
-        cwd = canonical(Dir.pwd)
-        return real.delete_prefix("#{cwd.chomp('/')}/") if !inside?(real, @root) && inside?(real, cwd)
+      # A file's role (#1760), read from every spelling of it below the project root or the working directory:
+      # as written and as its realpath. The first spelling below the root decides, then one below the working
+      # directory, then the realpath relative to the root (`../…`). Any of them reading as test code makes it
+      # test code, so a `test/` helper reached through a symlink, or a `features/` tree below a subdirectory
+      # run's working directory, stays test code as it was when the working directory was the only root.
+      def role_of(file, real)
+        rooted = below(file, real, @root_spellings)
+        in_cwd = below(file, real, cwd_spellings)
+        spellings = rooted + in_cwd
+        role_for = Analysis::Reachability::Scan.method(:role_for)
+        return :test if spellings.any? { |path| role_for.call(path) == :test }
 
-        relative_to_root(real)
+        role_for.call(spellings.first || relative_to_root(real))
+      end
+
+      # `file` and its realpath `real`, each relative to every directory in `dirs` it lies below.
+      def below(file, real, dirs)
+        [File.absolute_path(file), real].uniq.flat_map do |path|
+          dirs.filter_map { |dir| path.delete_prefix("#{dir.chomp('/')}/") if inside?(path, dir) }
+        end.uniq
+      end
+
+      # The working directory as its realpath and, when the shell's `PWD` names it, as that logical spelling.
+      def cwd_spellings
+        @cwd_spellings ||= begin
+          logical = ENV.fetch("PWD", nil)
+          real = canonical(Dir.pwd)
+          logical && canonical(logical) == real ? [real, Dir.pwd, logical].uniq : [real, Dir.pwd].uniq
+        end
       end
 
       def relative_to_root(real)
@@ -228,8 +255,8 @@ module Rigor
         real
       end
 
-      # A glob is matched against the declaration's path, its path relative to the project root (#1760), and
-      # its path relative to the working directory:
+      # A glob is matched against the declaration's path, and its path as written and as its realpath relative
+      # to the project root (#1760) and to the working directory:
       # `configuration.paths` are expanded to absolute, so a user-written `--entry-point=lib/entry.rb` would
       # otherwise never match anything and silently produce a root set of zero.
       # A constant named only from the project's own `sig/` is referenced — the #345 probe reported exactly this
@@ -295,10 +322,9 @@ module Rigor
         return [] if globs.empty?
 
         matcher = Analysis::Reachability::ProjectFiles.method(:entry_point_match?)
-        cwd = canonical(Dir.pwd)
         declarations.filter_map do |d|
           real = canonical(d.path)
-          spellings = [d.path, relative_to_root(real), real.delete_prefix("#{cwd.chomp('/')}/")]
+          spellings = [d.path, relative_to_root(real), *below(d.path, real, @root_spellings + cwd_spellings)]
           d.fqn if globs.any? { |g| spellings.any? { |path| matcher.call(g, path) } }
         end
       end

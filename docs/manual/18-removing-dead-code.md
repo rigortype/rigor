@@ -166,7 +166,8 @@ as high-signal rather than high-yield; the yield is unmeasured.
 "Test code" is decided by path, relative to the project root: the directory of the `.rigor.yml` in
 use, or the directory you run `rigor unused` in when there is none or when the config sits below it
 (`--config=ci/rigor.yml` from the project root). Running it from a subdirectory with `--config` reads
-the same project, and references are read from the directory you run it in as well. The test paths are `spec/` and `test/` anywhere below the root,
+the same project, and references are read from the directory you run it in as well. A file counts
+as test code when its path below either directory, as written or through symlinks, says so. The test paths are `spec/` and `test/` anywhere below the root,
 `*_spec.rb` and `*_test.rb`, and the end-to-end trees `qa/`, `e2e/` and `features/` at the root. Tooling directories such as
 `rubocop/`, `keeps/`, `tooling/` and `scripts/` count as production, so a class used only by them is
 rooted rather than listed: deleting it would break the tooling.

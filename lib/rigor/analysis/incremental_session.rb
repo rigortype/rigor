@@ -38,7 +38,7 @@ module Rigor
       # gate) can report what was re-analyzed versus served from cache. `added` / `removed` carry the
       # structural delta so {#run_incremental} (ADR-87 WD3) can recognise a zero-change recheck and skip the
       # unconditional snapshot rewrite.
-      Recheck = Data.define(:diagnostics, :changed, :added, :removed, :affected, :reused) do
+      Recheck = Data.define(:diagnostics, :changed, :added, :removed, :affected, :reused, :templates) do
         # A recheck that changed, added, and removed nothing — the session state is byte-equivalent to the
         # snapshot that was restored, so persisting it again would only rewrite identical bytes.
         def no_change?
@@ -222,7 +222,8 @@ module Rigor
         absorb(runner, current, analyze_set, removed)
         @param_table = fresh_params
         Recheck.new(diagnostics: merged, changed: changed.to_set, added: added.to_set,
-                    removed: removed.to_set, affected: affected, reused: reused.to_set)
+                    removed: removed.to_set, affected: affected, reused: reused.to_set,
+                    templates: runner.template_unit_paths.size)
       end
 
       # Editor mode option B (#146) — a whole-project recheck with the editor's buffer substituted for one
@@ -482,7 +483,7 @@ module Rigor
       # to. Every soundness gate below — the fingerprint, the ADR-88 fact surface — is unchanged, so the
       # decision to reuse is made identically whether or not the result is saved.
       def run_incremental(snapshot:, fingerprint:, persist: true)
-        @last_recheck = nil
+        @last_recheck = nil # #1526 — set only by a warm recheck, see {#last_recheck}
         # ADR-87 WD1 — install the per-run digest table + recording instant + strict flag for the whole
         # invocation so change-detection's stat-then-digest freshness (`#pack_digest` / `#stat_fresh?`) honours
         # `cache.validation: digest` (and `RIGOR_STRICT_VALIDATION`, which the env-only path already sees) and
@@ -507,11 +508,11 @@ module Rigor
             # it is paid on the first collecting run and on an identity change, never with collection off.
             # Asked BEFORE the recheck, which re-stamps the session with the current identity.
             effects_reusable = effects_reuse_permitted?(restored)
-            result = @last_recheck = recheck
+            result = recheck
             adopt_plugin_fact_fingerprint
             fact_reusable = @plugin_fact_reusable.reusable_against?(restored.plugin_fact_digest)
             if fact_reusable && effects_reusable && !source_rbs_unverified?(result)
-              diagnostics = result.diagnostics
+              diagnostics = keep_recheck(result)
               warm = true
               # ADR-87 WD3 — a warm recheck that changed nothing leaves the session state byte-equivalent to the
               # snapshot it restored, so skip the unconditional rewrite (209ms + 2 MB on gitlab per null recheck).
@@ -546,9 +547,17 @@ module Rigor
       # to its {PluginFactFingerprint::OpaqueReason}.
       attr_reader :opaque_reasons
 
-      # #1526 — the {Recheck} the last {#run_incremental} merged, or nil after a cold run (a baseline has no recheck
-      # to report). The CLI banner reads its changed / added / removed / affected / reused sets from it.
+      # #1526 — the {Recheck} of the last {#run_incremental}, or nil unless that run answered warm. A baseline
+      # (cold, or a re-baseline after a fact-surface, effects or source-RBS reason) has no recheck to report.
+      # The diagnostics are not kept: a long-lived session (the LSP) would otherwise retain every merged list.
       attr_reader :last_recheck
+
+      # Records the warm recheck's sets for {#last_recheck} and hands back its diagnostics.
+      def keep_recheck(result)
+        @last_recheck = result.with(diagnostics: [])
+        result.diagnostics
+      end
+      private :keep_recheck
 
       # The opaque plugin ids, sorted (the keys of {#opaque_reasons}).
       def opaque_plugin_ids

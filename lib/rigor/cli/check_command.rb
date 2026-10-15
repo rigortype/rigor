@@ -322,35 +322,47 @@ module Rigor
         write_incremental_result(diagnostics, configuration, options)
       end
 
-      # #1526 — a warm banner says how many of the analysed files the recheck re-analyzed, and why: `changed` is the
+      # #1526 — a warm banner says how many of the analysed files the recheck re-analysed, and why: `changed` is the
       # edited set, `added` / `removed` the structural delta, and the rest came from the snapshot. A run served from
       # the run-result slot has no recheck, which means nothing changed: every file is reused.
       def report_incremental_run(warm, file_count, recheck: nil)
         body = if warm
                  "warm — #{warm_recheck_summary(file_count, recheck)}"
                else
-                 "cold — full analysis (#{file_count} files)"
+                 "cold — full analysis (#{pluralize(file_count, 'file')})"
                end
         @err.puts("rigor: --incremental #{body}")
       end
 
+      # The warm clause. `file_count` is the analysed set M (the subset under a path argument); re-analysed files
+      # are M minus the reused set, which includes files invalidated by inferred-parameter changes (ADR-67), not only
+      # the edited closure. View templates are not in M: the recheck re-runs every one, so they are appended as their
+      # own count rather than folded into the file counts.
       def warm_recheck_summary(file_count, recheck)
-        changed = recheck ? recheck.changed.size : 0
-        added = recheck ? recheck.added.size : 0
-        removed = recheck ? recheck.removed.size : 0
         reused = recheck ? recheck.reused.size : file_count
-        # Current files are either reused or re-analyzed (the recheck's `analyze_set`), so the count is taken
-        # from the reused set rather than `affected`, which can also name files that were removed.
+        # Current files are either reused or re-analysed (the recheck's `analyze_set`), so the count is taken from
+        # the reused set rather than `affected`, which can also name files that were removed.
         analyzed = file_count - reused
-        counts = []
-        counts << "#{changed} changed" if changed.positive?
-        counts << "#{added} added" if added.positive?
-        counts << "#{removed} removed" if removed.positive?
-        head = "re-analyzed #{analyzed} of #{file_count} files"
-        head += " (#{counts.join(', ')})" unless counts.empty?
-        return "#{head}, reused all" if analyzed.zero?
+        head = "re-analysed #{analyzed} of #{pluralize(file_count, 'file')}"
+        head += " (#{change_counts(recheck).join(', ')})" if recheck && !change_counts(recheck).empty?
+        head += reuse_clause(analyzed, reused)
+        templates = recheck ? recheck.templates : 0
+        templates.positive? ? "#{head}, plus #{pluralize(templates, 'view template')}" : head
+      end
 
-        reused.zero? ? head : "#{head}, reused the rest"
+      def change_counts(recheck)
+        { "changed" => recheck.changed.size, "added" => recheck.added.size, "removed" => recheck.removed.size }
+          .filter_map { |label, count| "#{count} #{label}" if count.positive? }
+      end
+
+      def reuse_clause(analyzed, reused)
+        return ", reused all" if analyzed.zero?
+
+        reused.zero? ? "" : ", reused the rest"
+      end
+
+      def pluralize(count, noun)
+        "#{count} #{count == 1 ? noun : "#{noun}s"}"
       end
 
       # The incremental tail, shared by the full path and the ADR-45 WD2 slot hit so a served run prints exactly

@@ -132,7 +132,7 @@ RSpec.describe Rigor::CLI::CheckCommand do
   # #1526 — the warm banner reports the recheck's own sets, not the size of the whole analysed set. The session
   # path is pinned with the run-result slot stubbed to decline, so the recheck is what prints the banner; the slot
   # path has its own example below. `lib/b.rb` calls `Widget#price`, so an edit to `lib/a.rb` that changes its
-  # return type re-analyzes the dependent too: the banner shows 2 re-analyzed for 1 changed.
+  # return type re-analyzes the dependent too: the banner shows 2 re-analysed for 1 changed.
   describe "--incremental banner reports the recheck" do
     before { require "rigor/analysis/incremental_run_slot" }
 
@@ -161,26 +161,26 @@ RSpec.describe Rigor::CLI::CheckCommand do
       expect(err).not_to include("reused cached diagnostics")
     end
 
-    it "says it re-analyzed 0 files on a no-change warm run, from the session" do
+    it "says it re-analysed 0 files on a no-change warm run, from the session" do
       write_banner_project
       banner_run
       decline_slot
 
       _status, _out, err = banner_run
 
-      expect(err).to include("rigor: --incremental warm — re-analyzed 0 of 3 files, reused all")
+      expect(err).to include("rigor: --incremental warm — re-analysed 0 of 3 files, reused all")
     end
 
-    it "says it re-analyzed 0 files on a no-change warm run served from the slot" do
+    it "says it re-analysed 0 files on a no-change warm run served from the slot" do
       write_banner_project
       banner_run
 
       _status, _out, err = banner_run
 
-      expect(err).to include("rigor: --incremental warm — re-analyzed 0 of 3 files, reused all")
+      expect(err).to include("rigor: --incremental warm — re-analysed 0 of 3 files, reused all")
     end
 
-    it "counts the dependent as re-analyzed when one edit reaches a file that uses it" do
+    it "counts the dependent as re-analysed when one edit reaches a file that uses it" do
       write_banner_project
       banner_run
       File.write(File.join("lib", "a.rb"), "class Widget\n  def price\n    :ten\n  end\nend\n")
@@ -189,8 +189,68 @@ RSpec.describe Rigor::CLI::CheckCommand do
       _status, _out, err = banner_run
 
       expect(err).to include(
-        "rigor: --incremental warm — re-analyzed 2 of 3 files (1 changed), reused the rest"
+        "rigor: --incremental warm — re-analysed 2 of 3 files (1 changed), reused the rest"
       )
+    end
+
+    it "names a removed file, and says nothing was re-analysed when the rest is unchanged" do
+      write_banner_project
+      banner_run
+      FileUtils.rm_f(File.join("lib", "c.rb"))
+      decline_slot
+
+      _status, _out, err = banner_run
+
+      expect(err).to include("rigor: --incremental warm — re-analysed 0 of 2 files (1 removed), reused all")
+      expect(err).not_to include("0 changed")
+    end
+
+    it "uses singular nouns for a one-file project" do
+      FileUtils.mkdir_p("lib")
+      File.write(File.join("lib", "a.rb"), "class Solo\n  def go = 1\nend\n")
+      banner_run
+      decline_slot
+
+      _status, _out, err = banner_run
+
+      expect(err).to include("rigor: --incremental warm — re-analysed 0 of 1 file, reused all")
+    end
+
+    # A view template is a plugin-declared unit outside the `.rb` analysed set. The recheck re-runs every template on
+    # every warm run, so the banner appends them as their own count and leaves the file counts alone.
+    describe "with a plugin view template" do
+      before do
+        $LOAD_PATH.unshift(File.expand_path("../../fixtures/template_units", __dir__))
+        require "view_demo_plugin"
+        Rigor::Plugin.register(RigorViewDemoPlugin)
+      end
+
+      after { Rigor::Plugin.unregister! }
+
+      def write_template_project
+        write_banner_project
+        FileUtils.mkdir_p(File.join("app", "views", "users"))
+        File.write(File.join("app", "views", "users", "show.rbx"), "1\n")
+        File.write(".rigor.yml", "paths:\n  - lib\nplugins:\n  - gem: view_demo_plugin\n    id: view-demo\n")
+      end
+
+      it "appends the re-run templates to a warm banner for a template edit, and for a Ruby edit" do
+        write_template_project
+        banner_run
+        decline_slot
+
+        File.write(File.join("app", "views", "users", "show.rbx"), "2\n")
+        _status, _out, template_err = banner_run
+        expect(template_err).to include(
+          "rigor: --incremental warm — re-analysed 0 of 3 files, reused all, plus 1 view template"
+        )
+
+        File.write(File.join("lib", "a.rb"), "class Widget\n  def price\n    :ten\n  end\nend\n")
+        _status, _out, ruby_err = banner_run
+        expect(ruby_err).to include(
+          "rigor: --incremental warm — re-analysed 2 of 3 files (1 changed), reused the rest, plus 1 view template"
+        )
+      end
     end
 
     it "names an added file in the parenthesis, and leaves zero counts out" do
@@ -201,7 +261,7 @@ RSpec.describe Rigor::CLI::CheckCommand do
 
       _status, _out, err = banner_run
 
-      expect(err).to include("rigor: --incremental warm — re-analyzed 1 of 4 files (1 added), reused the rest")
+      expect(err).to include("rigor: --incremental warm — re-analysed 1 of 4 files (1 added), reused the rest")
       expect(err).not_to include("0 changed")
       expect(err).not_to include("removed")
     end

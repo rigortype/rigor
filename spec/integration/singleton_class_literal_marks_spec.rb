@@ -180,5 +180,17 @@ RSpec.describe "singleton_class calls with literal names (#1906)", type: :runner
       expect(incremental_rows).to eq([[], true])
       expect(cold_rows).to eq([])
     end
+
+    # The edit turns the call on the constant into a reopening, so `D` stays in the file's declaration set and the
+    # reader's class edge, recorded before the file declared `D`, does not name it: the before-edit names fire.
+    it "re-checks the reader when a call on the constant becomes a reopening that rewrites the name" do
+      write("lib/d.rb", "class D\n  def self.own(a) = a\n  def self.keep(a) = a\nend\nD.own(1, 2)\n")
+      write("lib/rewrite.rb", "D.singleton_class.remove_method :keep\n")
+      expect(incremental_rows).to eq([[["lib/d.rb", 5]], false])
+
+      write("lib/rewrite.rb", "class D\n  singleton_class.define_method(:own) { |*a| a }\nend\n")
+      expect(incremental_rows).to eq([[], true])
+      expect(cold_rows).to eq([])
+    end
   end
 end

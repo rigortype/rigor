@@ -763,3 +763,45 @@ class LoggingHolder < Logger
     @io.string # FIRES-1446 call.undefined-method
   end
 end
+
+# A subclass's `to_s` runs for an instance of it: `SubclassAlias.new.dump` returns "X" under Ruby 4.0.5.
+class AliasBase
+  def initialize = (@v = "a"; @me = self)
+  def log = warn("#{@me}")
+
+  def dump
+    @v = nil
+    log
+    @v.upcase # QUIET-1446
+  end
+end
+
+class SubclassAlias < AliasBase
+  def to_s = (@v = "x")
+end
+
+# `to_s` is defined from outside the class, so no table names it; Ruby 4.0.5 returns "X".
+class OutsideAlias
+  def initialize = (@v = "a"; @me = self)
+
+  def dump
+    @v = nil
+    warn("#{@me}")
+    @v.upcase # QUIET-1446
+  end
+end
+
+OutsideAlias.define_method(:to_s) { @v = "x" }
+
+# An ancestor no project file declares may define a protocol method the read cannot see, so the proof gives up
+# although `log` here writes nothing: Ruby 4.0.5 raises on the read, which the widened `@v` no longer reports.
+class ExternalProtocol < Logger
+  def initialize = (super(StringIO.new); @v = "a")
+  def log = nil
+
+  def dump
+    @v = nil
+    log
+    assert_type('"a"?', @v)
+  end
+end

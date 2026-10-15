@@ -251,11 +251,11 @@ module Rigor
     # class in a project that publishes nothing) allocates none.
     EMPTY_PUBLISHED_CONSTANT_IVARS = Set.new.freeze
     # The index `||=` sites of a repeating block body whose slot an earlier run of the body may have filled,
-    # keyed by node identity and laid by a block-return pass at the body's entry
-    # ({#with_repeated_or_writes}; `Inference::RepeatedOrWrites` decides which). The memoizing `||=` reading
-    # (`StatementEvaluator#index_compound_write_value`) is withheld at such a site. The mark belongs to the
-    # site, so no rebind or narrowing of a variable drops it, and a join keeps a site either arm holds: the
-    # mark only ever withholds that reading, whose answer is the narrower one.
+    # keyed by node identity and laid at the body's entry by a block-return pass or by `StatementEvaluator`'s
+    # statement and write-back passes ({#with_repeated_or_writes}; `Inference::RepeatedOrWrites` decides which).
+    # The memoizing `||=` reading (`StatementEvaluator#index_compound_write_value`) is withheld at such a site.
+    # The mark belongs to the site, so no rebind or narrowing of a variable drops it, and a join keeps a site
+    # either arm holds: the mark only ever withholds that reading, whose answer is the narrower one.
     EMPTY_REPEATED_OR_WRITES = {}.compare_by_identity.freeze
     # Issue #1429 — the narrowing a guard leaves on a constant reference (`STDOUT.is_a?(StringIO)`, `if CONFIG`),
     # keyed by the reference's spelling ({Inference::Narrowing.constant_key}: `"STDOUT"`, `"::Foo::BAR"`). A constant

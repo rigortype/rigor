@@ -20,6 +20,8 @@ module Rigor
     # `cache = {}; [1, 2].find { |e| (cache[:first] ||= e) == 2 }` answered its own `2`, where Ruby keeps the
     # first iteration's `1`, folded `find` to `2` and reported `found == 2` always-truthy. The pass marks the
     # sites this module returns (`Scope#with_repeated_or_writes`), and the reading is withheld at a marked site.
+    # `StatementEvaluator` types a repeating body from one entry scope too — its statement pass and every ADR-56
+    # write-back pass — and marks the generic pass's sites there (issue #1336).
     #
     # The mark is per site, not per receiver, because nothing about the receiver's type can say that its slot
     # was filled: `{}` widens to `Hash[Dynamic[top], Dynamic[top]]`, a bare `Hash.new` is not widened at all, and

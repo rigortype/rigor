@@ -145,7 +145,8 @@ module Rigor
         # Issue #1900 — folds one session's / one worker payload's refusal drain in: counts add, and the
         # first path stays the one merged first. Callers merge in the order `--workers 0` would have made the
         # reads — the parent's (or one worker's) `#prepare`, then the files in analysis order — so the summed
-        # row names the same first path the sequential run does.
+        # row names the same first path the sequential run does, except where a drain's own first path is
+        # not this merge's to choose (see {DiagnosticAggregator#plugin_trust_refusal_diagnostics}).
         def merge_trust_refusals(records)
           Array(records).each do |record|
             plugin_id = record[:plugin_id]

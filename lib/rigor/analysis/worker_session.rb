@@ -362,7 +362,9 @@ module Rigor
       # because the coordinator SUMS the drains: a fork child inherits the parent's `#prepare` refusals,
       # and reporting them again would count them once per worker. `first_path` is the boundary's first
       # refusal overall, which is the delta's own first path whenever nothing was reported before it, and
-      # the coordinator keeps the first-merged path otherwise. Marshal-clean and Ractor-copyable.
+      # the coordinator keeps the first-merged path otherwise. It is not baselined after `#init`, so a plugin
+      # whose `#init` refuses differently here than on the coordinator registry can have this session's
+      # `#init` path named. Marshal-clean and Ractor-copyable.
       def drain_trust_refusals
         return [] if @plugin_registry.empty?
 

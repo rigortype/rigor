@@ -1214,7 +1214,9 @@ module Rigor
 
         # The coordinator's own record first when it has one: on a pooled run it holds the `#init` reads
         # (every registry runs `#init`; the workers' drains start after it), which `--workers 0` makes before
-        # `#prepare` and before any file, so its first path is the one a sequential run names.
+        # `#prepare` and before any file, so its first path is the one a sequential run names. Not so after a
+        # Ractor-backend degrade, where this record also holds the re-analysed files' refusals and is named
+        # ahead of a worker's `#prepare` path; the count is right either way.
         def combined_refusal_summary(pooled, plugin)
           local = begin
             plugin.io_boundary.refusal_summary

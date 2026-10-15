@@ -187,7 +187,10 @@ the prepare-time refusals again; it merges the children's drains by slice
 in file order, and drains a dead child's slice file by file as the parent
 re-analyses it. The Ractor backend drains after `#prepare` and after
 every file so it can count one worker's prepare refusals and every
-file's in file order.
+file's in file order. These orderings make the first refused path match
+the sequential run's except after a Ractor degrade or when a plugin's
+`#init` refuses differently per registry; the count and the row's
+presence match regardless.
 
 When the pool cannot dispatch workers (no `fork`, or the Ractor backend
 without a cache store) it falls back to analysing on the coordinator-side

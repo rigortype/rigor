@@ -26,7 +26,7 @@ RSpec.describe Rigor::Inference::ProjectPatchedMethods do
       expect(registry.lookup(class_name: "String", method_name: :missing, kind: :instance)).to be_nil
     end
 
-    it "applies first-write-wins on duplicate (class, method, kind)" do
+    it "applies last-write-wins (ADR-17, as at runtime) on duplicate (class, method, kind)" do
       first = entry_klass.new(
         class_name: "Hash", method_name: :deep_merge, kind: :instance,
         source_path: "a.rb", source_line: 1
@@ -37,7 +37,7 @@ RSpec.describe Rigor::Inference::ProjectPatchedMethods do
       )
       registry = described_class.new(entries: [first, second])
       result = registry.lookup(class_name: "Hash", method_name: :deep_merge, kind: :instance)
-      expect(result.source_path).to eq("a.rb")
+      expect(result.source_path).to eq("b.rb")
     end
 
     it "distinguishes instance from singleton kind under the same (class, method)" do

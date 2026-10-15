@@ -997,6 +997,36 @@ RSpec.describe Rigor::Analysis::Runner do
         end
       end
 
+      # Issue #1710 — the last-listed `pre_eval:` file wins a repeated `(class, method, kind)`, as at runtime, and an
+      # alias reads the binding current when it ran.
+      it "types a method two pre_eval files declare as the last-listed one, with aliases bound as Ruby binds them" do
+        Dir.mktmpdir("rigor-pre-eval-last-wins-") do |tmpdir|
+          first = File.join(tmpdir, "a.rb")
+          second = File.join(tmpdir, "b.rb")
+          consumer_path = File.join(tmpdir, "consumer.rb")
+          File.write(first, "class Integer\n  def foo = 1\n  alias bar_a foo\nend\n")
+          File.write(second, "class Integer\n  def foo = \"s\"\n  alias bar_b foo\nend\n")
+          File.write(consumer_path, <<~RUBY)
+            require "rigor/testing"
+            include Rigor::Testing
+
+            i = rand(3)
+            assert_type("Dynamic[String]", i.foo)
+            assert_type("Dynamic[1]", i.bar_a)
+            assert_type("Dynamic[String]", i.bar_b)
+          RUBY
+          Dir.chdir(tmpdir) do
+            configuration = Rigor::Configuration.new("paths" => [consumer_path], "pre_eval" => [first, second])
+            result = guarded_run(described_class.new(configuration: configuration, cache_store: nil))
+            mismatches = result.diagnostics.select { |d| d.message.start_with?("assert_type ") }.map(&:message)
+            shadowed = result.diagnostics.select { |d| d.rule == "pre-eval.duplicate-declaration" }
+
+            expect(mismatches).to eq([])
+            expect(shadowed.map(&:path)).to eq([first])
+          end
+        end
+      end
+
       it "surfaces `pre-eval.parse-error` :warning when a pre_eval file has a parse error" do
         Dir.mktmpdir("rigor-pre-eval-parse-") do |tmpdir|
           broken_path = File.join(tmpdir, "broken.rb")

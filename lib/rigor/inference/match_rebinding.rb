@@ -16,7 +16,7 @@ require_relative "last_line"
 
 module Rigor
   module Inference
-    # Which code may rebind the regex match globals (`$~` and the `$&` / `` $` `` / `$'` / `$+` / `$1`..`$9` family
+    # Which code may rebind the regex match globals (`$~` and the `$&` / `` $` `` / `$'` / `$+` / `$1`..`$N` family
     # derived from it) that a scope's narrowing speaks for. Ruby keeps them in the method frame's special-variable
     # slot, and every block and closure made in the method reaches that same slot, so a match a block body runs
     # rebinds the enclosing method's `$~` (issue #1358). A `def`, class or module body runs in a frame of its own,

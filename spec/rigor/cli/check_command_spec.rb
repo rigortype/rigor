@@ -5,6 +5,7 @@ require "stringio"
 require "tmpdir"
 
 require "rigor/cli/check_command"
+require "rigor/analysis/plugin_fact_fingerprint"
 
 # Focused unit coverage for the extracted `rigor check` command object. The full behavioural surface (CI formats,
 # baselines, incremental modes, editor mode, cache stats) is exercised end-to-end through the dispatcher in
@@ -755,6 +756,101 @@ RSpec.describe Rigor::CLI::CheckCommand do
         expect(command.send(:apply_bleeding_edge_override, config, { bleeding_edge: false })
                       .bleeding_edge_active?("feat-b")).to be(false)
       end
+    end
+  end
+
+  # Issue #1579 — the `--incremental` opaque-plugin notes say WHY a plugin is opaque. A plugin with no surface
+  # must declare one; an undigestible value or a raising hook must be fixed where it lives, so the note names it.
+  describe "the --incremental opaque-plugin notes" do
+    let(:reason) { Rigor::Analysis::PluginFactFingerprint::OpaqueReason }
+    let(:no_surface) { reason.new(kind: :no_surface, input: nil, class_name: nil) }
+    let(:proc_producer) { reason.new(kind: :undigestible, input: "producer worker_index", class_name: "Proc") }
+    let(:fingerprint_tail) { "; the snapshot cannot be reused (full analysis every run).\n" }
+
+    def session_double(reasons, invalidated: false, store: false)
+      instance_double(
+        Rigor::Analysis::IncrementalSession,
+        opaque_reasons: reasons, fact_surface_invalidated?: invalidated, fact_store_unreadable?: store,
+        opaque_fact_surface?: !reasons.empty? || store
+      )
+    end
+
+    def note_for(session)
+      err = StringIO.new
+      described_class.new(argv: [], out: StringIO.new, err: err).send(:emit_incremental_fact_surface_notes, session)
+      err.string
+    end
+
+    it "words a single plugin with no fingerprint surface, in the singular" do
+      expect(note_for(session_double({ "fp-opaque" => no_surface }))).to eq(
+        "rigor: --incremental plugin fp-opaque contributes call-site types with no incremental " \
+        "fingerprint surface#{fingerprint_tail}"
+      )
+    end
+
+    it "groups several surfaceless plugins into one line, in the plural" do
+      err = note_for(session_double({ "fp-a" => no_surface, "fp-b" => no_surface }))
+
+      expect(err).to eq(
+        "rigor: --incremental plugins fp-a, fp-b contribute call-site types with no incremental " \
+        "fingerprint surface#{fingerprint_tail}"
+      )
+    end
+
+    it "names the undigestible producer value and its class" do
+      expect(note_for(session_double({ "sidekiq" => proc_producer }))).to eq(
+        "rigor: --incremental plugin sidekiq's producer worker_index has a value the incremental fingerprint " \
+        "cannot digest (a Proc)#{fingerprint_tail}"
+      )
+    end
+
+    it "chooses the article from the class name, and says an anonymous class plainly" do
+      io = reason.new(kind: :undigestible, input: "fact callback", class_name: "IO")
+      anon = reason.new(kind: :undigestible, input: "fact callback", class_name: "anonymous Class")
+
+      expect(note_for(session_double({ "a" => io }))).to include("(an IO)")
+      expect(note_for(session_double({ "a" => anon }))).to include("(an anonymous Class)")
+    end
+
+    it "words a raising hook as raising the exception class, not as an undigestible value" do
+      hook = reason.new(kind: :raised, input: "hook incremental_state_fingerprint", class_name: "ArgumentError")
+
+      expect(note_for(session_double({ "a" => hook }))).to eq(
+        "rigor: --incremental plugin a's hook incremental_state_fingerprint raised ArgumentError#{fingerprint_tail}"
+      )
+    end
+
+    it "emits one line for an unreadable fact store, naming no plugin" do
+      err = note_for(session_double({}, store: true))
+
+      expect(err).to eq(
+        "rigor: --incremental the plugin fact store could not be read; the snapshot cannot be reused " \
+        "(full analysis every run).\n"
+      )
+    end
+
+    it "prints nothing for a run with no opaque plugin and an unchanged fact surface" do
+      expect(note_for(session_double({}))).to eq("")
+    end
+
+    it "reports a changed fact surface only when nothing is opaque" do
+      expect(note_for(session_double({}, invalidated: true))).to eq(
+        "rigor: --incremental plugin fact surface changed since the snapshot; ran a full analysis.\n"
+      )
+      expect(note_for(session_double({ "fp-opaque" => no_surface }, invalidated: true))).not_to include("changed")
+    end
+
+    it "gives --cache-stats the same reason per opaque plugin, and the store when it is unreadable" do
+      session = session_double({ "fp-opaque" => no_surface, "sidekiq" => proc_producer }, store: true)
+      command = described_class.new(argv: [], out: StringIO.new, err: StringIO.new)
+      allow(command).to receive(:write_cache_stats)
+
+      command.send(:write_incremental_cache_stats, session, "root", nil, "text")
+
+      expect(command.instance_variable_get(:@out).string).to eq(
+        "  plugin fact surface: opaque (fp-opaque: no incremental fingerprint surface; sidekiq: producer " \
+        "worker_index has a value the incremental fingerprint cannot digest (a Proc); fact store: could not be read)\n"
+      )
     end
   end
 end

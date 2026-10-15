@@ -251,11 +251,11 @@ module Rigor
     # class in a project that publishes nothing) allocates none.
     EMPTY_PUBLISHED_CONSTANT_IVARS = Set.new.freeze
     # The index `||=` sites of a repeating block body whose slot an earlier run of the body may have filled,
-    # keyed by node identity and laid by a block-return pass at the body's entry
-    # ({#with_repeated_or_writes}; `Inference::RepeatedOrWrites` decides which). The memoizing `||=` reading
-    # (`StatementEvaluator#index_compound_write_value`) is withheld at such a site. The mark belongs to the
-    # site, so no rebind or narrowing of a variable drops it, and a join keeps a site either arm holds: the
-    # mark only ever withholds that reading, whose answer is the narrower one.
+    # keyed by node identity and laid at the body's entry by a block-return pass or by `StatementEvaluator`'s
+    # statement and write-back passes ({#with_repeated_or_writes}; `Inference::RepeatedOrWrites` decides which).
+    # The memoizing `||=` reading (`StatementEvaluator#index_compound_write_value`) is withheld at such a site.
+    # The mark belongs to the site, so no rebind or narrowing of a variable drops it, and a join keeps a site
+    # either arm holds: the mark only ever withholds that reading, whose answer is the narrower one.
     EMPTY_REPEATED_OR_WRITES = {}.compare_by_identity.freeze
     # Issue #1429 — the narrowing a guard leaves on a constant reference (`STDOUT.is_a?(StringIO)`, `if CONFIG`),
     # keyed by the reference's spelling ({Inference::Narrowing.constant_key}: `"STDOUT"`, `"::Foo::BAR"`). A constant
@@ -1062,20 +1062,22 @@ module Rigor
       @repeated_or_writes.key?(node)
     end
 
-    # Regex match-data globals (`$~`, `$&`, `$1..$9`, the pre/post-match and last-paren back-references). Narrowed
+    # Regex match-data globals (`$~`, `$&`, `$1..$N`, the pre/post-match and last-paren back-references). Narrowed
     # on a successful-`=~` / `case`-`when` match edge (see `Narrowing#regex_match_predicate_scopes`). They live in
     # the method frame's special-variable slot, which the method's blocks and closures share (issue #1358), so a
     # later call that may run a match in this frame — a match-capable call, a block that may match, a call once
     # the frame has made a closure that may — rebinds every one of them, and `eval_call` forgets the narrowed
     # facts here. Always safe — only drops facts, so a subsequent read falls back to the default `String | nil`.
     # Program-level `$GLOBAL = ...` seeds use other names and are untouched.
-    MATCH_DATA_GLOBALS = %i[$~ $& $` $' $+ $1 $2 $3 $4 $5 $6 $7 $8 $9].freeze
-    private_constant :MATCH_DATA_GLOBALS
+    # Issue #1384 — the numbered groups are matched by name, not listed: a regex may carry more than nine captures, and
+    # `$10` and above are the same slot as `$1`..`$9`, so forgetting must clear them too.
+    MATCH_DATA_GLOBAL_NAME = /\A\$(?:~|&|`|'|\+|[1-9]\d*)\z/
+    private_constant :MATCH_DATA_GLOBAL_NAME
 
     def forget_match_globals
       return self unless match_globals_bound?
 
-      rebuild(globals: @globals.except(*MATCH_DATA_GLOBALS).freeze)
+      rebuild(globals: @globals.reject { |name, _| MATCH_DATA_GLOBAL_NAME.match?(name.name) }.freeze)
     end
 
     # Issue #1361 — this scope with every bound match-data global rebound to `Dynamic[top]`, and an unbound one left
@@ -1086,14 +1088,16 @@ module Rigor
       return self unless match_globals_bound?
 
       untyped = Type::Combinator.untyped
-      rebound = MATCH_DATA_GLOBALS.each_with_object({}) { |name, acc| acc[name] = untyped if @globals.key?(name) }
+      rebound = @globals.each_with_object({}) do |(name, _), acc|
+        acc[name] = untyped if MATCH_DATA_GLOBAL_NAME.match?(name.name)
+      end
       rebuild(globals: @globals.merge(rebound).freeze)
     end
 
     # True when any match-data global holds a binding, which a match edge or {#untyped_match_globals} makes: the only
     # state {#forget_match_globals} can drop, and so the gate on every scan that decides whether to.
     def match_globals_bound?
-      !@globals.empty? && MATCH_DATA_GLOBALS.any? { |name| @globals.key?(name) }
+      !@globals.empty? && @globals.any? { |name, _| MATCH_DATA_GLOBAL_NAME.match?(name.name) }
     end
 
     # Issue #1359 — the last line read, `$_`, lives in the same frame slot as the match globals, and so on the same

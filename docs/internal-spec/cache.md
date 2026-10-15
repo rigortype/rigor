@@ -1011,7 +1011,10 @@ would otherwise invalidate on every edit), and (c) each plugin's optional
 digest drops the snapshot (a conservative full re-analysis). A plugin that
 contributes types but exposes none of (a)/(b)/(c) makes the snapshot
 un-reusable and is named — a forcing function to declare its surface rather
-than a silent stale reuse.
+than a silent stale reuse. The `--incremental` note states the reason for each
+opaque plugin: it declares no surface, or the input it declares cannot be
+digested (or its hook raised). An unreadable fact store is reported once, with
+no plugin named.
 
 Each value is digested with `Cache::ValueDigest`, which MUST be a function of
 the value alone ([#1574](https://github.com/rigortype/rigor/issues/1574)): a

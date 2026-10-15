@@ -221,7 +221,8 @@ module Rigor
       # Issue #1700 — an editor buffer is scanned for required features in place of the file it stands for.
       def project_environment(files, configuration, buffer = nil)
         ProjectEnvironment.build(configuration: configuration, source_files: files,
-                                 feature_sources: ProjectEnvironment.buffer_sources(buffer))
+                                 feature_sources: ProjectEnvironment.buffer_sources(buffer),
+                                 project_patched_methods: ProjectEnvironment.project_patched_methods(configuration))
       end
 
       def file_exists?(file)

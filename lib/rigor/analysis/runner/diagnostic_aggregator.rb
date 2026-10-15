@@ -128,7 +128,31 @@ module Rigor
               source_family: :builtin
             )
           end
-          not_found + Array(pre_eval_diagnostics_from_scanner).map { |hash| diagnostic_from_hash(hash) }
+          scanned = Array(pre_eval_diagnostics_from_scanner).map { |hash| diagnostic_from_hash(hash) }
+          suppress_pre_eval(not_found + scanned)
+        end
+
+        # The ordinary suppression pipeline for the `pre-eval.*` rows: the `# rigor:disable` /
+        # `# rigor:disable-file` comments of the Ruby file a row is positioned in (a `pre_eval:` file need not be
+        # under `paths:`, so its comments are read here rather than by per-file analysis) and the project's
+        # `disable:` list. A row positioned at `.rigor.yml` has no Ruby comments and answers to `disable:` only.
+        # Stream order is the output contract, so survivors are picked out of the original sequence.
+        def suppress_pre_eval(diagnostics)
+          kept = diagnostics.group_by(&:path).flat_map do |path, group|
+            CheckRules.filter_suppressed(
+              group, comments: pre_eval_comments(path), disabled_rules: @configuration.disabled_rules
+            )
+          end
+          kept_ids = kept.to_set(&:object_id)
+          diagnostics.select { |diagnostic| kept_ids.include?(diagnostic.object_id) }
+        end
+
+        def pre_eval_comments(path)
+          return [].freeze unless path.end_with?(".rb") && File.file?(path)
+
+          Prism.parse_file(path).comments
+        rescue StandardError
+          [].freeze
         end
 
         def diagnostic_from_hash(hash)

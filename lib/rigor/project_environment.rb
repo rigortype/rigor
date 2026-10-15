@@ -55,9 +55,12 @@ module Rigor
     #   `source_rbs_synthesizer` runs over them at env-build time; an empty list contributes no synthesized RBS.
     # @param feature_sources — path => source text the required-feature scan reads in place of that file (an
     #   editor buffer bound with `--tmp-file` / `--instead-of`).
-    def build(configuration:, source_files:, feature_sources: {})
+    # @param project_patched_methods — the `pre_eval:` registry (see {.project_patched_methods}); nil keeps
+    #   the unpatched universe.
+    def build(configuration:, source_files:, feature_sources: {}, project_patched_methods: nil)
       features = required_features(configuration, source_files, sources: feature_sources)
       Environment.for_project(
+        project_patched_methods: project_patched_methods,
         libraries: configuration.libraries,
         signature_paths: configuration.signature_paths,
         plugin_registry: load_plugin_registry(configuration),
@@ -67,6 +70,19 @@ module Rigor
       )
     rescue StandardError
       bare(configuration, features)
+    end
+
+    # The patched-method registry `rigor check` types against for the project's `pre_eval:` files, built by
+    # the {Analysis::Runner}'s own project pre-pass (not a second scan). Nil when the project lists no
+    # `pre_eval:` entry, so a project without one pays nothing and stays byte-identical. Fail-soft like the
+    # rest of this module.
+    def project_patched_methods(configuration)
+      return nil if configuration.pre_eval.empty?
+
+      require_relative "analysis/runner"
+      Analysis::Runner.new(configuration: configuration, cache_store: nil).prepare_project_scan.project_patched_methods
+    rescue StandardError
+      nil
     end
 
     # Issue #1700 — the {Environment::RequiredFeatures} the environment gates on: the configured paths plus

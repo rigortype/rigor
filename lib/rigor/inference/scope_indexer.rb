@@ -8482,12 +8482,14 @@ module Rigor
       # {#discovered_project_index_incremental}'s changed-file branch) yields the live def nodes the signature
       # reads their parameter structure from. Issue #1120 — and each file's own refinement table, which the merged
       # def-index cannot attribute back to a file, so the session can diff it against the file's seed bundle.
-      # @return `{ def_index:, code_fingerprints:, declaration_signatures:, refinements: }`.
+      # Issue #1459 — and each file's {#defined_method_names}, diffed the same way.
+      # @return `{ def_index:, code_fingerprints:, declaration_signatures:, refinements:, defined_method_names: }`.
       def scan_summary_for_paths(paths, buffer: nil)
         acc = new_def_index_accumulator
         code_fingerprints = {}
         declaration_signatures = {}
         refinements = {}
+        defined_method_names = {}
         paths.each do |path|
           physical = buffer ? buffer.resolve(path) : path
           source = File.read(physical)
@@ -8497,13 +8499,29 @@ module Rigor
           code_fingerprints[path] = code_fingerprint(source, parsed.comments)
           declaration_signatures[path] = declaration_signature(file_index)
           refinements[path] = file_index[:refinements] if file_index[:refinements]
+          defined_method_names[path] = defined_method_names(file_index)
         rescue DeclarationWalk::ContractError
           raise # a broken walk contract, not an unreadable file: skipping it would hide the failure
         rescue StandardError
           next
         end
         { def_index: finalize_def_index(acc), code_fingerprints: code_fingerprints,
-          declaration_signatures: declaration_signatures, refinements: refinements }
+          declaration_signatures: declaration_signatures, refinements: refinements,
+          defined_method_names: defined_method_names }
+      end
+
+      # Issue #1459 — every method name one file's index defines, on any class or module and either side: the keys of
+      # `methods` (which also carries an `attr_*`, `alias` or `define_method` name) and of the instance and singleton
+      # def-node tables. A single file's `methods` already holds its `def` names, since `subtract_def_methods` runs only
+      # on the merged accumulator; the def-node tables are read as well so the census reads exactly the tables
+      # `BlockCallTiming.project_defines_anywhere?` reads. Takes a live file index or a seed bundle, which hold the
+      # same three keys.
+      def defined_method_names(file_index)
+        names = Set.new
+        %i[methods def_nodes singleton_def_nodes].each do |key|
+          file_index[key]&.each_value { |table| names.merge(table.keys) }
+        end
+        names.freeze
       end
 
       # ADR-89 WD1 — a per-file digest of every cross-file DECLARATION surface an ancestry / file-level

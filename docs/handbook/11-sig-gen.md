@@ -751,6 +751,22 @@ by side without coordination.
   every other byte of the file verbatim.
 - **Will** append a new `class Foo … end` block when the
   target file does not declare the class yet.
+- **Will** treat a method as already declared when a file
+  under the signature tree declares it on the same class
+  with a `def` or an `attr_*` of the same kind (instance or
+  singleton), in any opening of the class in that file. A
+  `def self?.` declares both kinds, and a `def self?.`
+  proposal counts as declared when either kind is. The
+  method is updated (`--overwrite`) or skipped in the file
+  that declares it instead of being added to the class's
+  first file. A replacement lands only on a `def` of the
+  proposal's own kind in the first opening of the class:
+  a `def self?.` proposal over a lone `def self.f` or
+  `def f`, a plain proposal over a `def self?.f`, or a
+  method declared in a later opening is skipped. A
+  `def f: ... | ...` overload is never replaced and never
+  counts as the file that declares `f`. An `alias` in
+  `sig/` is not yet recognised as declaring its name.
 - **Will not** touch files outside the configured signature
   tree.
 - **Will not** replace an existing method declaration

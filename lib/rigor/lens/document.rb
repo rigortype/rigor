@@ -11,7 +11,7 @@ module Rigor
     # Assembles the `lens/v0` document (docs/internal-spec/lens.md § Document) from a {Run::Outcome}.
     class Document
       SITE_FIELDS = %w[key kind name owner scope attribute members module_function builder ordinal span contract_span
-                       anchor visibility contract params block body_return alias_of].freeze
+                       anchor visibility contract params block body_return value alias_of].freeze
 
       def initialize(outcome:, configuration:, root:, config_path:)
         @outcome = outcome

@@ -62,6 +62,7 @@ members:
   in_source_constants:
     reads:
     - lib/rigor/inference/last_line/implicit_self.rb
+    - lib/rigor/lens/run.rb
     - lib/rigor/reflection.rb
     copies:
     - lib/rigor/analysis/runner.rb

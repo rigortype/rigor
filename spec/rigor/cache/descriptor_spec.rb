@@ -37,8 +37,8 @@ RSpec.describe Rigor::Cache::Descriptor do
       end.to raise_error(ArgumentError, /comparator/)
     end
 
-    it "accepts :digest, :mtime, :exists" do
-      %i[digest mtime exists].each do |c|
+    it "accepts :digest, :mtime, :kind, :exists" do
+      %i[digest mtime kind exists].each do |c|
         entry = described_class::FileEntry.new(path: "a.rb", comparator: c, value: "x")
         expect(entry.comparator).to eq(c)
       end
@@ -128,6 +128,16 @@ RSpec.describe Rigor::Cache::Descriptor do
       b = described_class.new(files: [file_a_digest])
       composed = described_class.compose(a, b)
       expect(composed.files.first.comparator).to eq(:digest)
+    end
+
+    it "ranks :kind above :exists and below :mtime" do
+      kind = described_class::FileEntry.kind(path: "lib")
+      present = described_class::FileEntry.present(path: "lib")
+      mtime = described_class::FileEntry.new(path: "lib", comparator: :mtime, value: "1")
+      pick = ->(*rows) { described_class.compose(*rows.map { |row| described_class.new(files: [row]) }).files }
+
+      expect(pick.call(present, kind)).to eq([kind])
+      expect(pick.call(kind, mtime)).to eq([mtime])
     end
 
     it "raises a Conflict on disagreeing values under the stricter comparator" do
@@ -452,6 +462,43 @@ RSpec.describe Rigor::Cache::Descriptor do
       FileUtils.mkdir_p(File.dirname(path))
       File.write(path, "A")
       expect(d.fresh?).to be(false)
+    end
+
+    # #1962 — the kind row an analysis root records: a directory, a file, another kind of entry, or nothing.
+    def kind_fresh?(entry) = described_class.new(files: [entry]).fresh?
+
+    def kind_row(path)
+      described_class::FileEntry.kind(path: path).tap { |entry| expect(kind_fresh?(entry)).to be(true) }
+    end
+
+    it "keeps FileEntry.kind fresh while a directory stays one, stale when it appears or turns into a file" do
+      path = File.join(dir, "root")
+      absent = kind_row(path)
+      FileUtils.mkdir_p(path)
+      expect(kind_fresh?(absent)).to be(false)
+      directory = kind_row(path)
+      File.write(File.join(path, "n.txt"), "x")
+      expect(kind_fresh?(directory)).to be(true)
+      FileUtils.rm_rf(path)
+      File.write(path, "x")
+      expect(kind_fresh?(directory)).to be(false)
+
+      expect([absent, directory, kind_row(path)].map(&:value)).to eq(%w[absent directory file])
+    end
+
+    it "tells FileEntry.kind a file from another kind of entry, and a dangling symlink from either" do
+      path = File.join(dir, "root")
+      File.write(path, "x")
+      file = kind_row(path)
+      File.unlink(path)
+      File.mkfifo(path)
+      expect(kind_fresh?(file)).to be(false)
+      other = kind_row(path)
+      File.unlink(path)
+      File.symlink(File.join(dir, "nowhere"), path)
+      expect(kind_fresh?(other)).to be(false)
+
+      expect([file, other, kind_row(path)].map(&:value)).to eq(%w[file other absent])
     end
 
     it "reports absent? only for the absence row, not for a present :exists row or a content row" do

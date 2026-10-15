@@ -138,7 +138,17 @@ RSpec.describe "config `disable:` over run-level rows" do
             "disable" => ["load-error"]
           )
         )
-        runner = Rigor::Analysis::Runner.new(configuration: config, cache_store: nil)
+        # `require` runs the plugin's `Rigor::Plugin.register` once per process, and the `before` hook's
+        # `unregister!` empties the registry, so an earlier spec that loaded rigor-rails-i18n (rails_layer_spec
+        # requires it at file load) would leave the loader an empty delta and a second `plugin_loader.load-error`
+        # in place of the plugin. Re-registering after the real `require` keeps the example order-independent;
+        # the missing gem still goes through `require` and fails.
+        requirer = lambda do |name|
+          require name
+          Rigor::Plugin.register(Rigor::Plugin::RailsI18n) if File.basename(name, ".rb") == "rigor-rails-i18n"
+          true
+        end
+        runner = Rigor::Analysis::Runner.new(configuration: config, cache_store: nil, plugin_requirer: requirer)
         rows = guarded_run(runner).diagnostics.map(&:qualified_rule)
         expect(rows).to include("plugin.rails-i18n.load-error", "plugin_loader.load-error")
       end

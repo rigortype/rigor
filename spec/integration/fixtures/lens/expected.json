@@ -28,6 +28,7 @@
     "module",
     "method",
     "attribute",
+    "constant",
     "module_function",
     "builder",
     "alias",
@@ -42,24 +43,8 @@
       "status": "ok",
       "reason": null,
       "digest": "xxh3-64:5fcf0cb4b523eaf1",
-      "complete": false,
-      "omissions": [
-        {
-          "kind": "constant",
-          "owner": null,
-          "scope": null,
-          "name": "Shop::LIMIT",
-          "span": {
-            "start_line": 5,
-            "start_column": 2,
-            "end_line": 5,
-            "end_column": 12,
-            "start_offset": 46,
-            "end_offset": 56
-          },
-          "reason": "unsupported_kind"
-        }
-      ],
+      "complete": true,
+      "omissions": [],
       "sites": [
         {
           "key": "lib/shop.rb:33-493:0",
@@ -87,6 +72,42 @@
           "params": null,
           "block": null,
           "body_return": null,
+          "value": null,
+          "alias_of": null
+        },
+        {
+          "key": "lib/shop.rb:46-56:0",
+          "kind": "constant",
+          "name": "Shop::LIMIT",
+          "owner": "Shop",
+          "scope": null,
+          "attribute": null,
+          "members": [],
+          "module_function": false,
+          "builder": null,
+          "ordinal": 0,
+          "span": {
+            "start_line": 5,
+            "start_column": 2,
+            "end_line": 5,
+            "end_column": 12,
+            "start_offset": 46,
+            "end_offset": 56
+          },
+          "contract_span": null,
+          "anchor": "5:8b07",
+          "visibility": "public",
+          "contract": null,
+          "params": null,
+          "block": null,
+          "body_return": null,
+          "value": {
+            "state": "typed",
+            "type": "10",
+            "provenance": "inferred",
+            "path": null,
+            "from_site": null
+          },
           "alias_of": null
         },
         {
@@ -136,6 +157,7 @@
             "path": null,
             "from_site": null
           },
+          "value": null,
           "alias_of": null
         },
         {
@@ -185,6 +207,7 @@
             "path": null,
             "from_site": null
           },
+          "value": null,
           "alias_of": null
         },
         {
@@ -221,6 +244,7 @@
             "path": null,
             "from_site": null
           },
+          "value": null,
           "alias_of": null
         },
         {
@@ -264,6 +288,7 @@
             "from_site": null,
             "cause": "inferred_return_untyped"
           },
+          "value": null,
           "alias_of": null
         },
         {
@@ -301,6 +326,7 @@
           "params": null,
           "block": null,
           "body_return": null,
+          "value": null,
           "alias_of": null
         },
         {
@@ -338,6 +364,7 @@
           "params": null,
           "block": null,
           "body_return": null,
+          "value": null,
           "alias_of": null
         },
         {
@@ -374,6 +401,7 @@
             "path": null,
             "from_site": null
           },
+          "value": null,
           "alias_of": null
         },
         {
@@ -412,6 +440,7 @@
           "params": null,
           "block": null,
           "body_return": null,
+          "value": null,
           "alias_of": null
         },
         {
@@ -448,6 +477,7 @@
             "path": null,
             "from_site": null
           },
+          "value": null,
           "alias_of": null
         },
         {
@@ -490,6 +520,7 @@
             "path": null,
             "from_site": null
           },
+          "value": null,
           "alias_of": "label"
         },
         {
@@ -532,6 +563,7 @@
             "path": null,
             "from_site": null
           },
+          "value": null,
           "alias_of": "label"
         },
         {
@@ -568,6 +600,7 @@
             "path": null,
             "from_site": null
           },
+          "value": null,
           "alias_of": "total"
         },
         {
@@ -604,6 +637,7 @@
             "path": null,
             "from_site": null
           },
+          "value": null,
           "alias_of": null
         }
       ],
@@ -654,6 +688,7 @@
           "params": null,
           "block": null,
           "body_return": null,
+          "value": null,
           "alias_of": null
         },
         {
@@ -690,6 +725,7 @@
             "path": null,
             "from_site": null
           },
+          "value": null,
           "alias_of": null
         },
         {
@@ -756,6 +792,7 @@
             "from_site": null,
             "cause": "inferred_return_untyped"
           },
+          "value": null,
           "alias_of": null
         },
         {
@@ -796,6 +833,7 @@
             "from_site": null,
             "cause": null
           },
+          "value": null,
           "alias_of": null
         },
         {
@@ -833,6 +871,7 @@
             "from_site": null,
             "cause": "unsupported_syntax"
           },
+          "value": null,
           "alias_of": null
         }
       ],
@@ -882,6 +921,7 @@
           "params": null,
           "block": null,
           "body_return": null,
+          "value": null,
           "alias_of": null
         },
         {
@@ -918,6 +958,7 @@
             "path": null,
             "from_site": null
           },
+          "value": null,
           "alias_of": null
         },
         {
@@ -954,6 +995,7 @@
             "path": null,
             "from_site": null
           },
+          "value": null,
           "alias_of": null
         }
       ],
@@ -995,6 +1037,7 @@
           "params": null,
           "block": null,
           "body_return": null,
+          "value": null,
           "alias_of": null
         },
         {
@@ -1025,6 +1068,7 @@
           "params": null,
           "block": null,
           "body_return": null,
+          "value": null,
           "alias_of": null
         },
         {
@@ -1055,6 +1099,7 @@
           "params": null,
           "block": null,
           "body_return": null,
+          "value": null,
           "alias_of": null
         },
         {
@@ -1091,6 +1136,7 @@
             "path": null,
             "from_site": null
           },
+          "value": null,
           "alias_of": null
         },
         {
@@ -1119,6 +1165,7 @@
           "params": null,
           "block": null,
           "body_return": null,
+          "value": null,
           "alias_of": null
         },
         {
@@ -1150,6 +1197,7 @@
           "params": null,
           "block": null,
           "body_return": null,
+          "value": null,
           "alias_of": null
         },
         {
@@ -1181,6 +1229,7 @@
           "params": null,
           "block": null,
           "body_return": null,
+          "value": null,
           "alias_of": null
         }
       ],

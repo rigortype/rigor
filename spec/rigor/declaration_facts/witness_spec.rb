@@ -174,18 +174,16 @@ RSpec.describe "Declaration-fact witness" do
     end
 
     it "#1550: copies the def in effect at a named module_function call" do
-      pending "https://github.com/rigortype/rigor/issues/1550 — Fmt.label resolves to the later def"
+      pending "https://github.com/rigortype/rigor/issues/1969 — the named form records no singleton side in " \
+              "discovered_methods"
 
       expect(violations("issue_1550")).to eq([])
     end
 
-    # Flip this when #1550 is fixed. The `methods` line is a second gap: the named form records no singleton side in
-    # `discovered_methods`.
+    # #1550 fixed the singleton def-node table, which now resolves Fmt.label to the def before the call. Flip this
+    # when #1969 closes the `methods` gap: the named form records no singleton side in `discovered_methods`.
     it "#1550 today" do
-      expect(violations("issue_1550")).to eq(
-        ["methods: Ruby defines Fmt singleton label, which Rigor does not record",
-         "singleton_def_nodes: Rigor resolves Fmt.label to the def at line 10; Ruby's is the def at line 8"]
-      )
+      expect(violations("issue_1550")).to eq(["methods: Ruby defines Fmt singleton label, which Rigor does not record"])
     end
 
     it "#1573: keeps a repeated extend at its first position" do

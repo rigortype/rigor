@@ -313,5 +313,18 @@ RSpec.describe "singleton_class calls with literal names (#1906)", type: :runner
       expect(incremental_rows).to eq([[["lib/d.rb", 5]], true])
       expect(cold_rows).to eq([["lib/d.rb", 5]])
     end
+
+    # The key fires only for a constant whose singleton names or side the file rewrote: `ActiveRecord::Base.include`
+    # puts the constant in the singleton-source set but records neither, so it re-checks no `*::Base` reader.
+    it "keys only the constants whose singleton names or side the file rewrote" do
+      write("lib/rewrite.rb", "ActiveRecord::Base.include(Mo)\nD.singleton_class.alias_method :o9, :keep\n" \
+                               "E.singleton_class.class_eval { }\n")
+      index = Rigor::Inference::ScopeIndexer.discovered_project_index_incremental(["lib/rewrite.rb"], seed_bundles: {})
+      bundle = index.fetch(:bundles).fetch("lib/rewrite.rb")
+      session = Rigor::Analysis::IncrementalSession.new(configuration: configuration, paths: paths, cache_store: nil)
+
+      expect(bundle[:singleton_class_source_names]).to include("ActiveRecord::Base")
+      expect(session.send(:singleton_rewritten_constants, bundle).sort).to eq(%w[D E])
+    end
   end
 end

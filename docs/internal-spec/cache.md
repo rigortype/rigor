@@ -1197,6 +1197,11 @@ baseline, because a recheck re-collects only the closure and a partial collectio
 be closed into a whole-project fixpoint. A run with collection off keeps no collections,
 writes `{}` / `nil`, and behaves exactly as it did before the slot existed.
 
+`effect_plugin_digest` (#1898) is the plugin effect-fact digest (`PluginFacts#digest`) the
+collections were stamped under. `effects_identity` is compared before any plugin loads, so
+it cannot carry it; a recheck compares this one after its run instead, and re-baselines
+when it moved and the recheck served any collection.
+
 The contract in full — both slots, the two identities, and what each invalidates — is
 [`effect-summaries.md` § Caching](effect-summaries.md).
 

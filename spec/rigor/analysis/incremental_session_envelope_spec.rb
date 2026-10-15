@@ -113,6 +113,22 @@ RSpec.describe "effect.envelope-exceeded across incremental rechecks" do
     expect(envelope_rows(subset)).to eq(baseline)
   end
 
+  # `effect.liskov-widened` is judged in the same pass over the same table, against the parent's envelope.
+  it "keeps an effect.liskov-widened row whose overriding file is served from the session" do
+    write("lib/base.rb", "class Base\n  def run\n    nil\n  end\nend\n")
+    write("lib/kid.rb", "class Kid < Base\n  def run\n    puts 1\n  end\nend\n")
+    write("sig/base.rbs", "class Base\n  %a{pure} def run: () -> nil\nend\n")
+    session = session_for
+    widened = guarded_baseline(session).select { |row| row.rule == "effect.liskov-widened" }.map(&:to_h)
+    write("lib/b.rb", "class Other\n  def x = 2\nend\n")
+    recheck = guarded_recheck(session)
+
+    expect(widened.map { |row| row.fetch("path") }).to eq([File.join(lib_path, "kid.rb")])
+    expect(recheck.reused).to include(File.join(lib_path, "kid.rb"))
+    rechecked = recheck.diagnostics.select { |row| row.rule == "effect.liskov-widened" }.map(&:to_h)
+    expect(rechecked).to eq(widened)
+  end
+
   describe "through rigor check --incremental" do
     around do |example|
       Dir.chdir(dir) do

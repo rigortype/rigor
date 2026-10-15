@@ -278,9 +278,13 @@ directories with `Dir.glob`, so a new file that `exclude:` keeps
 out of analysis, and which they scan all the same, reached no cache
 ([#1803](https://github.com/rigortype/rigor/issues/1803)). A
 membership-only `#glob` row needs a `#read_file` of each match the
-answer depends on. `spec/docs/plugin_io_boundary_spec.rb` lists
-every direct call left in `plugins/*/lib`, with the reason it needs
-no row, and fails on a new one.
+answer depends on. `spec/docs/plugin_io_boundary_spec.rb` is a
+lexical check of the common spellings (`File.read`, `Dir.glob`,
+`Pathname(...).read`, `open(`, `YAML.load_file`, …) in `plugins/*/lib`,
+not a proof: it does not see a receiver held in a variable, a
+`send`, or a read inside a library the plugin calls. It lists each
+call it finds with the reason it needs no row, or as a known gap
+that needs one, and fails on a new one.
 
 A producer that consumes another producer of the same plugin
 declares nothing extra. Asked inside its block, or earlier in the

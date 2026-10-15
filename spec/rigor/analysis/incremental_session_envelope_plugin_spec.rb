@@ -85,6 +85,35 @@ RSpec.describe "effect.envelope-exceeded across a plugin effect-fact change" do
     end
   end
 
+  # A recheck that re-analyses every file serves no collection, so there is nothing to re-baseline; it has to
+  # adopt the new digest, or the next null recheck would compare against the old one and re-baseline for nothing.
+  it "adopts the new digest from a recheck that served no collection" do
+    session = Rigor::Analysis::IncrementalSession.new(configuration: configuration)
+    guarded_baseline(session)
+    adapter("async")
+    %w[lib/welcome_job.rb lib/svc.rb].each { |path| File.write(path, "#{File.read(path)}# edited\n") }
+
+    expect(guarded_recheck(session).rebaselined).to be(false)
+    expect(guarded_recheck(session).rebaselined).to be(false)
+  end
+
+  # The re-baselined recheck is the run's answer: `run_incremental` reports it cold and does not baseline again.
+  it "runs one baseline and reports cold when a restored snapshot's digest moved" do
+    snapshot = Rigor::Cache::IncrementalSnapshot.new(root: File.join(Dir.pwd, ".rigor-snapshot"))
+    fingerprint = Rigor::Cache::IncrementalSnapshot.fingerprint(configuration: configuration, roots: ["lib"])
+    guarded_run_incremental(Rigor::Analysis::IncrementalSession.new(configuration: configuration),
+                            snapshot: snapshot, fingerprint: fingerprint)
+    adapter("async")
+    session = Rigor::Analysis::IncrementalSession.new(configuration: configuration)
+    allow(session).to receive(:baseline).and_call_original
+
+    diagnostics, warm = guarded_run_incremental(session, snapshot: snapshot, fingerprint: fingerprint)
+
+    expect(warm).to be(false)
+    expect(session).to have_received(:baseline).once
+    expect(envelope_rows(diagnostics)).to eq(cold_rows).and be_empty
+  end
+
   describe "through rigor check --incremental" do
     def check(*flags)
       out = StringIO.new

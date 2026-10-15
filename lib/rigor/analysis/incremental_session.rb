@@ -276,7 +276,6 @@ module Rigor
           # latency this mode exists to avoid, so decline and let the caller drop to single-file scope.
           break nil unless @plugin_fact_reusable.reusable_against?(restored.plugin_fact_digest)
           break nil if source_rbs_unverified?(result)
-          break nil if result.rebaselined
 
           result
         end

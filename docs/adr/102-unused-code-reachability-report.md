@@ -171,6 +171,12 @@ artifacts from a single initializer.
 read — pure artifacts on two of three targets. Reading a file to harvest references is far
 cheaper than type-checking it, and the report MUST take the wider corpus.
 
+The wider corpus, the template scan, the file roles and `--entry-point` matching all read one
+project root: the loaded config file's directory, or the working directory without one,
+realpath'd. A file is one file however it is spelled, so a symlinked spelling is not scanned
+twice, and the scan cache keys on the root and the working directory
+([#1760](https://github.com/rigortype/rigor/issues/1760)).
+
 ### WD8 — A reference carries its referrer's role
 
 A class referenced only from its own spec is dead production code with a live test.

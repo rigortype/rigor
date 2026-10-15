@@ -89,6 +89,70 @@ RSpec.describe Rigor::CLI::UnusedCommand do
     end
   end
 
+  # #1760 — one project root for the whole command: the loaded config's directory, realpath'd.
+  describe "the project root" do
+    def write_helper_project(dir)
+      FileUtils.mkdir_p(File.join(dir, "lib"))
+      FileUtils.mkdir_p(File.join(dir, "test/support"))
+      File.write(File.join(dir, ".rigor.yml"), "paths:\n  - lib\n")
+      File.write(File.join(dir, "lib/helped.rb"), "class Helped\nend\n")
+      File.write(File.join(dir, "lib/loner.rb"), "class Loner\nend\n")
+      File.write(File.join(dir, "test/support/helper.rb"), "Helped.new\n")
+      backdate(dir)
+    end
+
+    def rows(report)
+      report.slice("declared", "candidates", "test_only").transform_values do |value|
+        value.is_a?(Array) ? value.map { |row| row["name"] } : value
+      end
+    end
+
+    it "reads a test helper as test code when run from a subdirectory" do
+      Dir.mktmpdir do |dir|
+        write_helper_project(dir)
+
+        _, report, = run_in(File.join(dir, "test"), "--config=../.rigor.yml")
+
+        expect(rows(report)).to eq("declared" => 2, "candidates" => ["Loner"], "test_only" => ["Helped"])
+      end
+    end
+
+    it "reads the config's project when --config points at another directory" do
+      Dir.mktmpdir do |dir|
+        project = File.join(dir, "proj")
+        write_helper_project(project)
+        elsewhere = File.join(dir, "elsewhere")
+        FileUtils.mkdir_p(elsewhere)
+
+        _, at_root, = run_in(project)
+        _, from_elsewhere, = run_in(elsewhere, "--config=#{project}/.rigor.yml")
+
+        expect(rows(from_elsewhere)).to eq(rows(at_root))
+        expect(rows(at_root)["test_only"]).to eq(["Helped"])
+      end
+    end
+
+    it "scans each file once when the project is reached through a symlink" do
+      Dir.mktmpdir do |dir|
+        project = File.join(dir, "proj")
+        write_helper_project(project)
+        File.write(File.join(project, "lib/twin.rb"), "class Twin\nend\nTwin.new\n")
+        link = File.join(dir, "link")
+        File.symlink(project, link)
+        backdate(project)
+
+        allow(Rigor::Analysis::Reachability::Scan).to receive(:call).and_call_original
+        _, through_link, = run_in(link, "--config=#{link}/.rigor.yml")
+        # Four Ruby files, each scanned once — not once under the link's spelling and again under the realpath.
+        expect(Rigor::Analysis::Reachability::Scan).to have_received(:call).exactly(4).times
+        _, direct, = run_in(project)
+
+        expect(rows(through_link)).to eq(rows(direct))
+        expect(through_link["declared"]).to eq(3)
+      end
+    end
+  end
+
   describe "template mentions (ADR-102 WD4)" do
     it "demotes a declaration named inside a longer identifier — substring, not token, semantics" do
       Dir.mktmpdir do |dir|

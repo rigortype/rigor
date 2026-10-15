@@ -48,9 +48,9 @@ module Rigor
         return CLI::EXIT_USAGE if options == :usage_error
 
         configuration = Configuration.load(options.fetch(:config))
+        @root = canonical(configuration.exclude_base)
         paths = @argv.empty? ? configuration.paths : @argv
-        scan_cache = Analysis::Reachability::ScanCache.open(configuration.cache_path,
-                                                            target_ruby: configuration.target_ruby)
+        scan_cache = open_scan_cache(configuration)
         declarations, references, dynamic_uses, shadows = scan(paths, configuration, scan_cache)
         references.concat(signature_references(configuration))
         dynamic_uses.concat(template_mentions(declarations, scan_cache))
@@ -67,6 +67,12 @@ module Rigor
       end
 
       private
+
+      # A scan's role and the spelling it records depend on the root and the working directory (#1760).
+      def open_scan_cache(configuration)
+        Analysis::Reachability::ScanCache.open(configuration.cache_path, target_ruby: configuration.target_ruby,
+                                                                         root: "#{@root}:#{canonical(Dir.pwd)}")
+      end
 
       def build_graph(configuration, options, contribution, declarations:, references:, dynamic_uses:, shadows:)
         Analysis::Reachability::Graph.new(
@@ -111,18 +117,25 @@ module Rigor
       # references resolve to first (#1732).
       # Every file is consulted every run — an unchanged one contributes its cached scan, so the
       # whole-project completeness the `--incremental` refusal protects is unaffected.
+      #
+      # A file is one file however it is spelled (#1760): the analysed paths keep the spelling they were
+      # given, which is what the report prints, and a wider-corpus file whose realpath is an analysed one is
+      # not scanned a second time as its own shadow.
       def scan(paths, configuration, cache)
         declaration_files = Analysis::PathExpansion.ruby_files(paths, configuration.exclude_patterns,
-                                                               base: configuration.exclude_base).to_set
+                                                               base: configuration.exclude_base)
+                                                   .to_h { |file| [canonical(file), file] }
+        files = reference_files(paths, configuration).to_h { |file| [canonical(file), file] }
+                                                     .merge(declaration_files)
         declarations = []
         shadows = []
         references = []
         dynamic_uses = []
-        (declaration_files + reference_files(paths, configuration)).sort.each do |file|
-          result = cache.serve(:scan, file) { read_and_scan(file, configuration) }
+        files.sort.each do |real, file|
+          result = cache.serve(:scan, file) { read_and_scan(file, real, configuration) }
           next if result.nil?
 
-          (declaration_files.include?(file) ? declarations : shadows).concat(result.declarations)
+          (declaration_files.key?(real) ? declarations : shadows).concat(result.declarations)
           references.concat(result.references)
           dynamic_uses.concat(result.dynamic_uses)
         end
@@ -134,22 +147,46 @@ module Rigor
       # treating those as absent is what manufactured artifacts on two of three corpus targets in #345.
       # Widening the *declaration* set the same way would cancel the gain (measured: +1 / −3 / +2 candidates,
       # ADR-102 WD2), which is exactly why the two corpora are separated rather than both widened.
+      #
+      # The project is the directory of the config file in use, or the working directory without one,
+      # realpath'd (#1760): running from a subdirectory or through a symlinked spelling reads the same project.
       def reference_files(_paths, configuration)
-        relative = Analysis::Reachability::ProjectFiles.own(Dir.glob(REFERENCE_GLOB, base: Dir.pwd), Dir.pwd)
-        absolute = relative.map { |rel| File.absolute_path(rel) }
+        absolute = project_relative(REFERENCE_GLOB).map { |rel| File.join(@root, rel) }
         Analysis::PathExpansion.reject_excluded(absolute, configuration.exclude_patterns,
-                                                base: configuration.exclude_base).to_set
+                                                base: configuration.exclude_base)
       end
 
-      def read_and_scan(file, configuration)
+      # The role is read from the file's realpath relative to the project root (#1760), so `test/helper.rb`
+      # is test code whichever directory the command runs from. A file outside the root reads as `../…`,
+      # which names no directory above the root.
+      def read_and_scan(file, real, configuration)
         Analysis::Reachability::Scan.call(path: file, source: File.read(file),
                                           target_ruby: configuration.target_ruby,
-                                          root: File.absolute_path(Dir.pwd))
+                                          role_path: relative_to_root(real))
       rescue SystemCallError
         nil
       end
 
-      # A glob is matched against the declaration's path AND its path relative to the working directory:
+      def project_relative(glob)
+        Analysis::Reachability::ProjectFiles.own(Dir.glob(glob, base: @root), @root)
+      end
+
+      def canonical(path)
+        File.realpath(path)
+      rescue SystemCallError
+        File.absolute_path(path)
+      end
+
+      def relative_to_root(real)
+        prefix = "#{@root.chomp('/')}/"
+        return real.delete_prefix(prefix) if real.start_with?(prefix)
+
+        Pathname.new(real).relative_path_from(Pathname.new(@root)).to_s
+      rescue ArgumentError
+        real
+      end
+
+      # A glob is matched against the declaration's path AND its path relative to the project root (#1760):
       # `configuration.paths` are expanded to absolute, so a user-written `--entry-point=lib/entry.rb` would
       # otherwise never match anything and silently produce a root set of zero.
       # A constant named only from the project's own `sig/` is referenced — the #345 probe reported exactly this
@@ -183,8 +220,8 @@ module Rigor
         names = declarations.map(&:fqn)
         return [] if names.empty?
 
-        Analysis::Reachability::ProjectFiles.own(Dir.glob(TEMPLATE_GLOB, base: Dir.pwd), Dir.pwd).flat_map do |rel|
-          absolute = File.absolute_path(rel)
+        project_relative(TEMPLATE_GLOB).flat_map do |rel|
+          absolute = File.join(@root, rel)
           haystack = cache.serve(:runs, absolute) { constant_bearing_text(File.read(absolute).scrub) }
           names.filter_map do |fqn|
             next unless haystack.include?(fqn)
@@ -215,10 +252,9 @@ module Rigor
         return [] if globs.empty?
 
         matcher = Analysis::Reachability::ProjectFiles.method(:entry_point_match?)
-        cwd = "#{File.absolute_path(Dir.pwd)}/"
         declarations.filter_map do |d|
-          relative = d.path.delete_prefix(cwd)
-          d.fqn if globs.any? { |g| matcher.call(g, d.path) || matcher.call(g, relative) }
+          spellings = [d.path, relative_to_root(canonical(d.path))]
+          d.fqn if globs.any? { |g| spellings.any? { |path| matcher.call(g, path) } }
         end
       end
 

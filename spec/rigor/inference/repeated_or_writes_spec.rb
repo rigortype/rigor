@@ -89,6 +89,11 @@ RSpec.describe Rigor::Inference::RepeatedOrWrites do
       expect([shared, fresh]).to eq([shared_sites, []])
     end
 
+    it "does not count a store that encloses the site, which stores after evaluating it" do
+      marks, = straight("(cache[k] ||= []) << k")
+      expect(marks).to eq([])
+    end
+
     it "does not count a store after the site" do
       marks, sites = straight("(cache[:k] ||= :f).itself\ncache[:k] ||= :e if cond")
       expect(marks).to eq([sites.last])

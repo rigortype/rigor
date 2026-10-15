@@ -686,12 +686,14 @@ module Rigor
             [strong, loose]
           end
 
+          # Whether a store in `groups` ends before `site` starts and may have run first. A store that encloses the
+          # site (`(c[:a] ||= []) << x` around `c[:a] ||= []`) stores after evaluating it, so it is not earlier.
           def reaches?(groups, site)
             start = site.location.start_offset
             groups.any? do |stores|
               stores.any? do |store|
                 node = store.node
-                node.location.start_offset < start && !node.equal?(site) &&
+                node.location.end_offset <= start &&
                   !ExclusiveArms.exclusive?(node, site, @body, @parents ||= ExclusiveArms.parents(@body))
               end
             end

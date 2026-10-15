@@ -32,9 +32,9 @@ module Rigor
       end
 
       # The anchor of the declaration spanning bytes `start_offset...end_offset` and lines `start_line..end_line`.
-      def for_span(start_offset, end_offset, start_line, end_line)
-        leading = leading_contract_comments(start_line)
-        trailing = trailing_contract_comment(end_line, end_offset)
+      def for_span(start_offset, end_offset, start_line, end_line, leading: true, trailing: true)
+        leading = leading ? leading_contract_comments(start_line) : []
+        trailing = trailing ? trailing_contract_comment(end_line, end_offset) : nil
         material = +"".b
         leading.each { |comment| material << line_text_from(comment.location.start_offset) << "\n" }
         material << @source.byteslice(start_offset, end_offset - start_offset)
@@ -42,13 +42,6 @@ module Rigor
         line = leading.empty? ? start_line : leading.first.location.start_line
         Result.new(token: "#{line}:#{Hashing::XXH3.anchor_hash(material)}", line: line,
                    contract_comments: leading + [trailing].compact)
-      end
-
-      # The anchor of a declaration that carries no contract comments: its own bytes alone.
-      def bare(start_offset, end_offset, start_line)
-        material = @source.byteslice(start_offset, end_offset - start_offset)
-        Result.new(token: "#{start_line}:#{Hashing::XXH3.anchor_hash(material)}", line: start_line,
-                   contract_comments: [])
       end
 
       private

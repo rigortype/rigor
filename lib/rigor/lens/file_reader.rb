@@ -103,7 +103,7 @@ module Rigor
           detached { walk(node.superclass, nesting, singleton: false, in_block: true) }
         end
         if in_block || name.nil? || constant_scope_unknown?
-          omit(kind, name || node.constant_path.slice, node)
+          omit(kind, constant_scope_unknown? ? node.constant_path.slice : (name || node.constant_path.slice), node)
           detached { walk(node.body, nesting, singleton: false, in_block: true) } if node.body
           return
         end
@@ -360,7 +360,8 @@ module Rigor
         end
 
         kind = { data: "data_class", struct: "struct_class" }.fetch(builder, "constant")
-        omit(kind, name || target.slice, node)
+        # Under a builder block or `class << self` the nesting does not name where the constant lands: as written.
+        omit(kind, constant_scope_unknown? ? target.slice : (name || target.slice), node)
         walk(node.value, nesting, singleton: false, in_block: true)
       end
 
@@ -373,11 +374,14 @@ module Rigor
                          "members" => [], "module_function" => false, "builder" => builder.to_s,
                          "visibility" => nil, "params" => nil, "block" => nil, "body_return" => nil })
         attribute = builder == :data ? "reader" : "accessor"
+        start_line = node.location.start_line
         fields.each do |field, field_node|
+          # rbs-inline reads a `#:` trailing a field on its own line of a multi-line call as that field's type.
+          trailing = field_node.location.start_line != start_line
           add_site(field_node, { "kind" => "attribute", "name" => field, "owner" => name, "scope" => "instance",
                                  "attribute" => attribute, "members" => attribute_members(field, attribute),
                                  "module_function" => false, "visibility" => "public", "params" => nil,
-                                 "block" => nil, "body_return" => nil }, contracts: false)
+                                 "block" => nil, "body_return" => nil }, contracts: trailing ? :trailing : false)
         end
         block = node.value.block
         walk_body(block.body, nesting + [name], singleton: false, kind: :builder) if block&.body
@@ -396,8 +400,8 @@ module Rigor
 
       # `[[name, node], …]` for a builder call whose fields are all symbols, or nil. `Struct.new` may end with
       # `keyword_init:` alone. Not modelled: a string field (`check`'s discovery reads only symbols, and
-      # `Struct.new("Name", …)` defines `Struct::Name`), a `&block` argument, and a duplicate field or a name Ruby
-      # rejects (`a=`, `a?`, `a!`), which raises at load time.
+      # `Struct.new("Name", …)` defines `Struct::Name`), a `&block` argument, and a duplicate field or a writer-like
+      # name (`a=`), which Ruby rejects at load time.
       def builder_fields(call, builder)
         return nil if call.block.is_a?(Prism::BlockArgumentNode)
 
@@ -406,7 +410,7 @@ module Rigor
         return nil unless arguments.all?(Prism::SymbolNode)
 
         names = arguments.map(&:unescaped)
-        return nil if names.uniq.size != names.size || names.any? { |name| name.end_with?("=", "?", "!") }
+        return nil if names.uniq.size != names.size || names.any? { |name| name.end_with?("=") }
 
         names.zip(arguments)
       end
@@ -519,15 +523,12 @@ module Rigor
         end
       end
 
-      # `contracts: false` (a builder's field) reads no contract comments: a comment there is not an annotation
-      # rbs-inline or `check` reads, so the anchor hashes the field's name alone.
+      # A builder's field reads no leading contract comments, which belong to the constant: `contracts: :trailing`
+      # reads only a `#:` trailing it (rbs-inline's per-field form on its own line), and `false` reads none.
       def add_site(node, data, ordinal: 0, contracts: true)
         location = node.location
-        anchor = if contracts
-                   @anchor.for_span(location.start_offset, location.end_offset, location.start_line, location.end_line)
-                 else
-                   @anchor.bare(location.start_offset, location.end_offset, location.start_line)
-                 end
+        anchor = @anchor.for_span(location.start_offset, location.end_offset, location.start_line, location.end_line,
+                                  leading: contracts == true, trailing: contracts != false)
         key = "#{@path}:#{location.start_offset}-#{location.end_offset}:#{ordinal}"
         tail = { "ordinal" => ordinal, "span" => Lens.span(location),
                  "contract_span" => Lens.contract_span(anchor.contract_comments), "anchor" => anchor.token,

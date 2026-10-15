@@ -273,17 +273,22 @@ end
         Dup = Data.define(:a, :a)
         Bad = Struct.new(:"a=")
         Ok = Struct.new(:k, keyword_init: true)
+        Pred = Data.define(:ok?, :x!)
       RUBY
 
-      expect(sites(source).map { |site| site["name"] }).to eq(%w[Ok k])
+      expect(sites(source).map { |site| site["name"] }).to eq(%w[Ok k Pred ok? x!])
     end
 
-    it "reads no contract comments on a field" do
-      source = "P = Data.define(\n  :a, #: Integer\n  :b\n)\n"
-      field = sites(source).find { |site| site["name"] == "a" }
+    it "reads a field's own trailing #: on a multi-line call, and nothing of the constant's comments" do
+      typed = "# @rbs inherits Data\nP = Data.define(\n  :a, #: Integer\n  :b\n)\n"
+      retyped = typed.sub("#: Integer", "#: String")
+      one_line = "P = Data.define(:a) #: Integer\n"
+      field = ->(source, name) { sites(source).find { |site| site["name"] == name } }
 
-      expect(field).to include("contract_span" => nil)
-      expect(read(source).sites.find { |site| site.data["name"] == "a" }.contract_comments).to be_empty
+      expect(field.call(typed, "a")["contract_span"]).not_to be_nil
+      expect(field.call(retyped, "a")["anchor"]).not_to eq(field.call(typed, "a")["anchor"])
+      expect(field.call(typed, "b")["contract_span"]).to be_nil
+      expect(field.call(one_line, "a")["contract_span"]).to be_nil
     end
 
     it "omits the builder forms it does not model" do

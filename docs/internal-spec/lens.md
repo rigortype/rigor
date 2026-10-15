@@ -131,10 +131,10 @@ One entry per requested target, in request order.
   - A class a builder defines (capability `builder`): `Foo = Data.define(:a, …)` and
     `Foo = Struct.new(:a, …)` (optionally ending with `keyword_init:` and no other keyword), written as a plain
     constant assignment directly in a namespace body (not in a block, a method, another builder's block or
-    `class << self`), with unique symbol field names Ruby accepts (not ending in `=`, `?` or `!`). It is a `class` site with `builder` set to `data` or
+    `class << self`), with unique symbol field names Ruby accepts (not ending in `=`). It is a `class` site with `builder` set to `data` or
     `struct`, spanning the assignment; each field is an `attribute` site spanning its name (`reader` for
-    `Data`, `accessor` for `Struct`, `public`), which carries no contract comments (`contract_span: null`; its
-    anchor hashes the field's name alone); and the call's block is read as the class body for its methods, which
+    `Data`, `accessor` for `Struct`, `public`), whose only contract comment is a `#:` trailing it on its own line
+    of a multi-line call, rbs-inline's per-field form (§ Anchors); and the call's block is read as the class body for its methods, which
     Ruby `class_eval`s on the new class. `check`'s discovery keys these fields and methods under the same constant
     name. A class, module or constant written inside the block stays with the lexical scope in Ruby, and one
     inside `class << self` lands on the singleton class, so those are omissions. Other builder forms stay
@@ -353,7 +353,9 @@ The hashed material is built from the file's bytes:
    `[start_offset, end_offset)`; then, when step 2 kept a comment, `\n` and that comment's bytes to the end
    of its line without the terminator.
 
-The rule is the same for every kind. For a `class`, `module` or `def` the declaration's bytes are its whole
+The rule is the same for every kind, except a builder's field (§ Kinds): it has no leading contract
+comments, which belong to the constant, and its trailing contract comment counts only when the field is
+not on the assignment's first line. For a `class`, `module` or `def` the declaration's bytes are its whole
 body, so an edit anywhere inside it, prose included, moves its anchor; prose in the leading comment run
 does not. The file `digest` changes on every edit. An unchanged anchor never licenses reusing stale offsets,
 line numbers or documentation: a consumer re-associates on the current file whenever its digest moved.

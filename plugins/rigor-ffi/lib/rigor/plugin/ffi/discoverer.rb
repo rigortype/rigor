@@ -5,13 +5,21 @@ require "prism"
 module Rigor
   module Plugin
     class FFI < Base
+      # Issue #1803 — given the plugin's {Rigor::Plugin::IoBoundary} (`io:`), the walk lists and reads through it,
+      # so every `.rb` the catalog was built from is a dependency row of the `:ffi_catalog` producer's cache
+      # entry and of every run-result cache built on the run. The producer declares no `watch:`, so before this
+      # its entry carried no row at all and was served after any edit, an analysed file's included, until
+      # `--no-cache`. `io: nil` reads the filesystem directly.
       class Discoverer
-        def self.discover(root:)
-          new(root: root).discover
+        RUBY_GLOB = "**/*.rb"
+
+        def self.discover(root:, io: nil)
+          new(root: root, io: io).discover
         end
 
-        def initialize(root:)
+        def initialize(root:, io: nil)
           @root = root
+          @io = io
         end
 
         def discover
@@ -24,7 +32,7 @@ module Rigor
           callbacks = {}
 
           ruby_files.each do |file_path|
-            parse_result = Prism.parse_file(file_path)
+            parse_result = parse(file_path)
             next unless parse_result.value
 
             walk_tree(parse_result.value, nil) do |node, mod_name|
@@ -61,9 +69,32 @@ module Rigor
         private
 
         def ruby_files
-          return [] unless @root && File.directory?(@root)
+          return [] unless @root
 
-          Dir.glob(File.join(@root, "**", "*.rb")).reject { |p| p.include?("/vendor/") || p.include?("/.git/") }
+          files = if @io
+                    @io.directory?(@root.to_s) ? boundary_glob : []
+                  else
+                    File.directory?(@root) ? Dir.glob(File.join(@root, RUBY_GLOB)) : []
+                  end
+          files.reject { |p| p.include?("/vendor/") || p.include?("/.git/") }
+        end
+
+        # The boundary answers absolute paths; spelled back under `@root` as `Dir.glob` spells them, so the
+        # `/vendor/` filter sees the same strings it always did.
+        def boundary_glob
+          prefix = "#{File.absolute_path(@root.to_s)}/"
+          @io.glob(@root.to_s, RUBY_GLOB).map { |path| File.join(@root.to_s, path.delete_prefix(prefix)) }
+        end
+
+        # The glob's row records which files match; this read's row carries an edit. A path outside the
+        # boundary's trust policy (a `root:` configured elsewhere) is refused there and parsed directly here,
+        # as {TargetDetector.read_text} does: the catalog does not depend on the policy.
+        def parse(file_path)
+          return Prism.parse_file(file_path) if @io.nil?
+
+          Prism.parse(@io.read_file(file_path))
+        rescue Rigor::Plugin::AccessDeniedError
+          Prism.parse_file(file_path)
         end
 
         def walk_tree(node, current_module, &)

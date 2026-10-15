@@ -82,7 +82,7 @@ parameter), and `Schema.execute` result typing (#136).
 | `manifest(... signature_paths:)` | Bundles `sig/graphql.rbs` — the class-level DSL surface (ADR-25). |
 | `manifest(... rbs_complete_ancestors:)` | Lets source subclasses bridge inherited calls to the bundled sig (ADR-43 WD4). |
 | `manifest(... open_receivers:)` | Keeps the declared classes exempt from `call.undefined-method` on non-declared members (ADR-26). |
-| `prepare(services)` + `scannable_paths(services)` | Scans every `paths:` entry's `.rb` files for schema-class shapes. |
+| `prepare(services)` + `scannable_paths(services)` | Scans every `paths:` entry's `.rb` files for schema-class shapes, `exclude:`d files included, listing and reading them through the `IoBoundary` ([#1803](https://github.com/rigortype/rigor/issues/1803)). |
 | `services.fact_store.publish` (ADR-9) | Publishes each frozen table; empty tables are suppressed via `publish_if_present`. |
 | `Rigor::Source::Literals.symbol_name` | Symbol/string argument extraction in the `field` / `argument` / `value` parse. |
 

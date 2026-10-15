@@ -55,8 +55,10 @@ RSpec.describe "dry-rb / graphql plugin reads are recorded dependencies (#630)" 
   before { Rigor::Plugin.unregister! }
   after { Rigor::Plugin.unregister! }
 
-  # Runs the plugin over a one-file project and returns its IoBoundary's recorded FileEntry rows.
-  def boundary_rows_for(plugin_class, plugin_gem, source)
+  # Runs the plugin over a one-file project and returns its IoBoundary's recorded descriptor rows: the
+  # FileEntry rows by default, or the GlobEntry rows (`rows: :globs`) of a project whose `paths:` entry is
+  # the directory `lib`.
+  def boundary_rows_for(plugin_class, plugin_gem, source, rows: :files)
     boundaries = []
     plugin_id = plugin_class.manifest.id
     allow(Rigor::Plugin::IoBoundary).to receive(:new).and_wrap_original do |orig, **kwargs|
@@ -67,11 +69,13 @@ RSpec.describe "dry-rb / graphql plugin reads are recorded dependencies (#630)" 
       # `Dir.mktmpdir` hands back the unresolved `/tmp/...` alias on macOS while the plugin TrustPolicy's
       # read roots come from the symlink-resolved `Dir.pwd`; name the project the way the policy does.
       dir = File.realpath(raw_dir)
-      File.write(File.join(dir, "defs.rb"), source)
+      defs = rows == :globs ? "lib/defs.rb" : "defs.rb"
+      FileUtils.mkdir_p(File.join(dir, "lib"))
+      File.write(File.join(dir, defs), source)
       Dir.chdir(dir) do
         runner = Rigor::Analysis::Runner.new(
           configuration: Rigor::Configuration.new(
-            Rigor::Configuration::DEFAULTS.merge("paths" => ["defs.rb"], "plugins" => [plugin_gem])
+            Rigor::Configuration::DEFAULTS.merge("paths" => [rows == :globs ? "lib" : defs], "plugins" => [plugin_gem])
           ),
           cache_store: nil, collect_stats: false,
           plugin_requirer: lambda { |_name|
@@ -81,7 +85,7 @@ RSpec.describe "dry-rb / graphql plugin reads are recorded dependencies (#630)" 
         )
         guarded_run(runner)
       end
-      boundaries.flat_map { |b| b.cache_descriptor.files }
+      [boundaries.flat_map { |b| b.cache_descriptor.public_send(rows) }, dir]
     end
   end
 
@@ -93,13 +97,32 @@ RSpec.describe "dry-rb / graphql plugin reads are recorded dependencies (#630)" 
     "rigor-graphql" => [-> { Rigor::Plugin::Graphql }, "rigor-graphql", :GRAPHQL_SOURCE]
   }.each do |label, (klass, gem_name, source_const)|
     it "records a CONTENT row for the file #{label} read" do
-      rows = boundary_rows_for(klass.call, gem_name, self.class.const_get(source_const))
+      rows, = boundary_rows_for(klass.call, gem_name, self.class.const_get(source_const))
       scanned = rows.find { |entry| entry.path.end_with?("/defs.rb") }
       expect(scanned).not_to be_nil
       # `:stat`/`:digest` is the row a boundary READ records. The classification probe in `scannable_paths`
       # records the weaker `:exists` presence row for the same path, so asserting mere presence would pass
       # with the `File.read` bug still in place — the comparator is what discriminates.
       expect(scanned.comparator.to_s).to match(/\A(stat|digest)\z/)
+    end
+  end
+
+  # Issue #1803 — the walk that finds those files records which ones a `paths:` directory holds. A file
+  # `exclude:` keeps out of analysis is scanned all the same and has no analysed-file row, so this
+  # membership row is what reaches the run-result caches when one appears or disappears.
+  # `spec/integration/plugin_project_input_cache_spec.rb` is the end-to-end half for the two plugins whose
+  # scan shapes a diagnostic. rigor-dry-types is left out: its producer's `watch:` covers the same tree.
+  {
+    "rigor-dry-schema" => [-> { Rigor::Plugin::DrySchema }, "rigor-dry-schema", :DRY_SCHEMA_SOURCE],
+    "rigor-dry-validation" => [-> { Rigor::Plugin::DryValidation }, "rigor-dry-validation",
+                               :DRY_VALIDATION_SOURCE],
+    "rigor-graphql" => [-> { Rigor::Plugin::Graphql }, "rigor-graphql", :GRAPHQL_SOURCE]
+  }.each do |label, (klass, gem_name, source_const)|
+    it "records the membership of the `paths:` directory #{label} walked" do
+      rows, dir = boundary_rows_for(klass.call, gem_name, self.class.const_get(source_const), rows: :globs)
+
+      expect(rows.map { |row| [row.root, row.pattern, row.mode] })
+        .to include([File.join(dir, "lib"), "**/*.rb", :names])
     end
   end
 end

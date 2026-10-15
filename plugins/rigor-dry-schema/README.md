@@ -319,7 +319,10 @@ plugins:
 ```
 
 No plugin-specific config keys. The plugin walks every `paths:`
-entry's `.rb` files looking for the schema declarations.
+entry's `.rb` files looking for the schema declarations, `exclude:`d
+files included. It lists and reads them through its `IoBoundary`, so a new
+`exclude:`d file reaches the run-result caches like an edit does
+([#1803](https://github.com/rigortype/rigor/issues/1803)).
 
 ## Related
 

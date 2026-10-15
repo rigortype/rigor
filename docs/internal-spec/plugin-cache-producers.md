@@ -262,6 +262,26 @@ runs the round-trip with a nil-inclusive memo and a
 a plugin that needs distinct per-failure messages keeps a bespoke
 `rescue` ladder around `cache_for(id).call`.
 
+**Every project file a plugin reads, lists or probes MUST reach a
+row**: through the boundary (`#read_file`, `#file?`,
+`#directory?`, `#list_directory`, `#glob`) or, for the reads of a
+producer block, through a `watch:` glob covering the file. A plain
+`File.read`, `Dir.glob` or `Prism.parse_file` records nothing, in
+`#prepare` as much as in a producer block. The run-result caches
+answer a run whose analysed files are unchanged without loading the
+plugin, and a producer entry with no row is served after any edit.
+`rigor-ffi`'s `:ffi_catalog` declared no `watch:` and parsed every
+`.rb` with `Prism.parse_file`, so it kept its first catalog across
+edits to analysed files too. `rigor-dry-schema`,
+`rigor-dry-validation` and `rigor-graphql` listed their `paths:`
+directories with `Dir.glob`, so a new file that `exclude:` keeps
+out of analysis, and which they scan all the same, reached no cache
+([#1803](https://github.com/rigortype/rigor/issues/1803)). A
+membership-only `#glob` row needs a `#read_file` of each match the
+answer depends on. `spec/docs/plugin_io_boundary_spec.rb` lists
+every direct call left in `plugins/*/lib`, with the reason it needs
+no row, and fails on a new one.
+
 A producer that consumes another producer of the same plugin
 declares nothing extra. Asked inside its block, or earlier in the
 run, the consumed producer leaves its rows in the boundary whether

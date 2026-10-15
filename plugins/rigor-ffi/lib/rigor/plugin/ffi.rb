@@ -32,7 +32,7 @@ module Rigor
 
       producer :ffi_catalog do
         root = config["root"] || Dir.pwd
-        Discoverer.discover(root: root)
+        Discoverer.discover(root: root, io: io_boundary)
       end
 
       # Dynamic return rule for attached FFI functions

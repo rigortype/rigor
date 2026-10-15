@@ -142,10 +142,14 @@ module Rigor
 
       # ADR-45 WD1b (#613 / #630) — the classification probes go through the boundary, so an entry that
       # is not there yet (or stops being a directory) is a recorded dependency of the scan's input set.
+      # #1803 — so is the walk: `IoBoundary#glob` records which `.rb` files the entry holds, and a file
+      # `exclude:` keeps out of analysis, which no analysed-file row covers, reaches the run-result caches
+      # when it appears or disappears. The matches are spelled under `entry`, as `Dir.glob` spelled them.
       def scannable_paths(services)
         @scannable_paths ||= services.configuration.paths.flat_map do |entry|
           if io_boundary.directory?(entry)
-            Dir.glob(File.join(entry, "**", "*.rb"), sort: true)
+            prefix = "#{File.absolute_path(entry)}/"
+            io_boundary.glob(entry, "**/*.rb").map { |path| File.join(entry, path.delete_prefix(prefix)) }
           elsif io_boundary.file?(entry) && entry.end_with?(".rb")
             [entry]
           else

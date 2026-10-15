@@ -2604,7 +2604,7 @@ module Rigor
         end
         self_call_misses = self_call_record ? self_call_record.calls : []
         diagnostics = rule_and_plugin_diagnostics(path, parse_result, scope, index, self_call_misses)
-        @on_file_indexed&.call(path, parse_result, scope, index)
+        notify_file_indexed(path, parse_result, scope, index)
         diagnostics + explain_diagnostics(path, parse_result.value, scope)
       rescue Errno::ENOENT => e
         [
@@ -2626,6 +2626,14 @@ module Rigor
             severity: :error
           )
         ]
+      end
+
+      # ADR-113 WD2 — the `on_file_indexed` observer. It reads; an error inside it never changes this file's
+      # diagnostics, so it is contained here rather than reaching {#analyze_file_body}'s crash row.
+      def notify_file_indexed(path, parse_result, scope, index)
+        @on_file_indexed&.call(path, parse_result, scope, index)
+      rescue StandardError
+        nil
       end
 
       # ADR-53 B4 — the built-in node collectors and the plugin node rules share ONE traversal of the file.

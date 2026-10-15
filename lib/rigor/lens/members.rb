@@ -40,10 +40,15 @@ module Rigor
         also = @elsewhere.call(owner, scope, name)
         omitted = @omissions.count { |omission| [omission["owner"], omission["scope"], omission["name"]] == key }
         single = sites.size == 1 && omitted.zero? && also.empty? ? sites.first : nil
-        { "owner" => owner, "scope" => scope, "name" => name, "kind" => sites.first.data["kind"],
+        { "owner" => owner, "scope" => scope, "name" => name, "kind" => member_kind(sites),
           "visibility" => common_visibility(sites), "sites" => sites.map { |site| site.data["key"] },
           "also_defined_at" => also, "basis" => basis(contract, single),
           "overloads" => overloads(contract, sites.first, name, single) }
+      end
+
+      # A member a `def` defines anywhere in the requested files is a method, whatever `attr_*` also names it.
+      def member_kind(sites)
+        sites.any? { |site| site.data["kind"] == "method" } ? "method" : "attribute"
       end
 
       def basis(contract, single)

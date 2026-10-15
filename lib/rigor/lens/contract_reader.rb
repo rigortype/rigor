@@ -31,21 +31,26 @@ module Rigor
 
         contract(defs, annotations)
       rescue StandardError
-        nil
+        unreadable("definition_build_failed", [])
       end
 
       private
 
       def contract(defs, annotations)
         buffers = defs.map { |definition| buffer_name(definition) }
-        provenance, path = @provenance.classify(buffers.first)
-        return unclassified(buffers) if provenance.nil?
+        classified = buffers.map { |buffer| @provenance.classify(buffer) }
+        return unreadable("not_computed", buffers) if classified.include?(nil)
 
         return_inferred = annotations.include?(INFERRED_RETURN)
         authored = annotations.select do |string|
           string.start_with?("rigor:v1:") && !string.start_with?(INFERRED_RETURN)
         end
-        overloads = defs.map { |definition| overload(definition.type, provenance, path, return_inferred, authored) }
+        # Each overload carries the provenance of the declaration it came from: a `sig/` overload extending a
+        # library declaration reads `sig`, the library one `library`.
+        overloads = defs.zip(classified).map do |definition, (provenance, path)|
+          overload(definition.type, provenance, path, return_inferred, authored)
+        end
+        provenance, path = classified.first
         Contract.new(overloads: overloads, provenance: provenance, path: path,
                      return_inferred: return_inferred, buffers: buffers)
       end
@@ -70,11 +75,12 @@ module Rigor
         end
       end
 
-      # A declaration whose buffer name did not survive the environment cache and that sits inside the project:
-      # Rigor cannot say whether it was `sig/` or inline, so every slot is unavailable.
-      def unclassified(buffers)
+      # A declaration Rigor cannot read: its buffer name did not survive the environment cache
+      # (`not_computed`), or building the member's definition failed (`definition_build_failed`). The member has a
+      # contract, so it is not inferred; every slot is unavailable, and so are its parameters (`params: null`).
+      def unreadable(reason, buffers)
         Contract.new(overloads: [{ "rbs" => nil, "params" => nil, "block" => nil,
-                                   "return" => Slot.unavailable("not_computed") }],
+                                   "return" => Slot.unavailable(reason) }],
                      provenance: nil, path: nil, return_inferred: false, buffers: buffers)
       end
 

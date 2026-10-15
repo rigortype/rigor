@@ -13,36 +13,47 @@ module Rigor
   module Lens
     # Reads one analysed file into sites and omissions (docs/internal-spec/lens.md § Files, § Sites). Runs inside
     # the check run, on the seeded scope index the check rules read, so a body return is the type `check` gives
-    # that body.
-    class FileReader
+    # that body. Every declaration the walk meets is either a site or an omission; none is dropped.
+    class FileReader # rubocop:disable Metrics/ClassLength
       # A site plus what the member pass needs from it: the declaration node and the contract comments above it.
       Site = Data.define(:data, :node, :contract_comments)
-      Result = Data.define(:sites, :omissions)
+      Result = Data.define(:sites, :omissions, :digest)
+      # The running visibility of one class body: Ruby's default for its later `def`s, and whether a toggle the
+      # walk cannot place (under an `if`, a `begin`, a block) leaves that default unknown.
+      Body = Struct.new(:current, :uncertain)
 
       ATTRIBUTE_CALLS = { attr_reader: "reader", attr_writer: "writer", attr_accessor: "accessor" }.freeze
       OMITTED_CALLS = {
         alias_method: "alias", define_method: "define_method", module_function: "module_function",
         refine: "refine"
       }.freeze
+      VISIBILITY_CALLS = %i[private protected public].freeze
+      CLASS_VISIBILITY_CALLS = { private_class_method: "private", public_class_method: "public" }.freeze
       BLOCK_NODES = [Prism::BlockNode, Prism::LambdaNode].freeze
+      CONSTANT_WRITES = [
+        Prism::ConstantWriteNode, Prism::ConstantPathWriteNode, Prism::ConstantOrWriteNode,
+        Prism::ConstantPathOrWriteNode, Prism::ConstantAndWriteNode, Prism::ConstantPathAndWriteNode,
+        Prism::ConstantOperatorWriteNode, Prism::ConstantPathOperatorWriteNode
+      ].freeze
 
       # @param path — the file, relative to the project root
       # @param spell — callable `(type, owner) -> String` spelling a type as sig-gen writes it
       def initialize(path:, parse_result:, index:, spell:)
         @path = path
         @root = parse_result.value
+        @source = parse_result.source.source
         @index = index
         @spell = spell
-        @anchor = Anchor.new(parse_result.source.source, parse_result.comments)
-        @visibilities, contested = Inference::ScopeIndexer.build_method_visibility_tables(@root)
-        @contested_visibility = contested
+        @anchor = Anchor.new(@source, parse_result.comments)
+        @bodies = []
+        @node_visibility = {}.compare_by_identity
         @sites = []
         @omissions = []
       end
 
       def read
         walk(@root, [], singleton: false, in_block: false)
-        Result.new(sites: @sites, omissions: @omissions)
+        Result.new(sites: @sites, omissions: @omissions, digest: Lens.digest(@source.b))
       end
 
       private
@@ -50,15 +61,13 @@ module Rigor
       def walk(node, nesting, singleton:, in_block:)
         case node
         when Prism::ClassNode, Prism::ModuleNode then walk_namespace(node, nesting, in_block)
-        when Prism::SingletonClassNode then walk_singleton_class(node, nesting, in_block)
+        when Prism::SingletonClassNode then walk_singleton_class(node, nesting, singleton, in_block)
         when Prism::DefNode then read_def(node, nesting, singleton, in_block)
-        when Prism::StatementsNode then walk_statements(node, nesting, singleton, in_block)
         when Prism::CallNode then walk_call(node, nesting, singleton, in_block)
         when Prism::AliasMethodNode
-          omit("alias", node.new_name.slice.delete_prefix(":"), node, owner: nesting.last, scope: singleton)
-        when Prism::ConstantWriteNode, Prism::ConstantPathWriteNode, Prism::ConstantOrWriteNode,
-             Prism::ConstantPathOrWriteNode
-          walk_constant(node, nesting, in_block)
+          omit("alias", node.new_name.slice.delete_prefix(":"), node, owner: nesting.last, singleton: singleton)
+        when Prism::MultiWriteNode then walk_multi_write(node, nesting, singleton, in_block)
+        when *CONSTANT_WRITES then walk_constant(node, nesting)
         else walk_children(node, nesting, singleton, in_block)
         end
       end
@@ -71,33 +80,60 @@ module Rigor
 
       def walk_namespace(node, nesting, in_block)
         kind = node.is_a?(Prism::ClassNode) ? "class" : "module"
-        name = qualify(nesting, node.constant_path.slice)
-        return omit(kind, name, node) if in_block
+        name = qualify(nesting, node.constant_path)
+        if node.is_a?(Prism::ClassNode) && node.superclass
+          walk(node.superclass, nesting, singleton: false,
+                                         in_block: true)
+        end
+        return omit(kind, name || node.constant_path.slice, node) if in_block || name.nil?
 
         add_site(node, { "kind" => kind, "name" => name, "owner" => nil, "scope" => nil, "attribute" => nil,
                          "members" => [], "visibility" => nil, "params" => nil, "block" => nil,
                          "body_return" => nil })
-        walk(node.body, nesting + [name], singleton: false, in_block: false) if node.body
+        walk_body(node.body, nesting + [name], singleton: false)
       end
 
-      def walk_singleton_class(node, nesting, in_block)
-        return omit("singleton_class", nil, node) if in_block || !node.expression.is_a?(Prism::SelfNode)
+      # `class << self` directly in a class or module body opens its singleton class. Any other `class << x`, one
+      # nested in another, or one at the top level (which opens `main`'s) is not modelled.
+      def walk_singleton_class(node, nesting, singleton, in_block)
+        if in_block || singleton || nesting.empty? || !node.expression.is_a?(Prism::SelfNode)
+          omit("singleton_class", nil, node)
+          return walk(node.body, nesting, singleton: singleton, in_block: true) if node.body
+        end
 
-        walk(node.body, nesting, singleton: true, in_block: false) if node.body
+        walk_body(node.body, nesting, singleton: true)
       end
 
-      # A bare `module_function` makes every later `def` of the body a method on both sides: one site, two
-      # members, which revision 1 does not model.
-      def walk_statements(node, nesting, singleton, in_block)
+      # A class body's statements, tracking the running visibility and `module_function`. A bare `module_function`
+      # makes every later `def` of the body a method on both sides: one site, two members, which revision 1 does
+      # not model.
+      def walk_body(body, nesting, singleton:)
+        return if body.nil?
+
+        @bodies.push(Body.new("public", false))
+        statements = body.is_a?(Prism::StatementsNode) ? body.body : [body]
         module_function_on = false
-        node.body.each do |child|
+        statements.each do |child|
           if module_function_on && child.is_a?(Prism::DefNode)
-            omit("module_function", child.name.to_s, child, owner: nesting.last, scope: singleton)
+            omit("module_function", child.name.to_s, child, owner: nesting.last, singleton: singleton)
             next
           end
           module_function_on = true if bare_call?(child, :module_function)
-          walk(child, nesting, singleton: singleton, in_block: in_block)
+          next if toggle_visibility(child)
+
+          walk(child, nesting, singleton: singleton, in_block: false)
         end
+      ensure
+        @bodies.pop if body
+      end
+
+      # A bare `private` / `protected` / `public` written directly in the body sets the default for later defs.
+      def toggle_visibility(child)
+        return false unless VISIBILITY_CALLS.any? { |name| bare_call?(child, name) }
+
+        @bodies.last.current = child.name.to_s
+        @bodies.last.uncertain = false
+        true
       end
 
       def walk_call(node, nesting, singleton, in_block)
@@ -107,36 +143,88 @@ module Rigor
           return if bare_call?(node, :module_function)
 
           omit(OMITTED_CALLS.fetch(node.name), first_argument_name(node), node,
-               owner: node.name == :refine ? nil : nesting.last, scope: singleton)
+               owner: node.name == :refine ? nil : nesting.last, singleton: singleton)
           walk_children(node, nesting, singleton, true) unless node.name == :refine
         else
+          visibility_call(node, nesting, singleton) if node.receiver.nil?
           walk_children(node, nesting, singleton, in_block)
         end
       end
 
-      def walk_constant(node, nesting, _in_block)
-        name = node.respond_to?(:target) ? node.target.slice : node.name.to_s
+      # `private :x`, `private def x`, `private attr_reader :x`, `private_class_method :x`, and a bare toggle the
+      # walk cannot place in the body's statement list.
+      def visibility_call(node, nesting, singleton)
+        if VISIBILITY_CALLS.include?(node.name)
+          return mark_uncertain if node.arguments.nil?
+
+          apply_visibility(node, node.name.to_s, nesting.last, singleton)
+        elsif CLASS_VISIBILITY_CALLS.key?(node.name)
+          apply_visibility(node, CLASS_VISIBILITY_CALLS.fetch(node.name), nesting.last, true)
+        end
+      end
+
+      def mark_uncertain
+        @bodies.last&.uncertain = true
+      end
+
+      def apply_visibility(node, visibility, owner, singleton)
+        node.arguments.arguments.each do |argument|
+          case argument
+          when Prism::DefNode, Prism::CallNode then @node_visibility[argument] = visibility
+          when Prism::SymbolNode, Prism::StringNode
+            name_visibility(owner, singleton ? "singleton" : "instance", argument.unescaped, visibility)
+          end
+        end
+      end
+
+      # `private :x` changes the visibility of the members already defined under that name in this file.
+      def name_visibility(owner, scope, name, visibility)
+        @sites.each do |site|
+          data = site.data
+          next unless data["owner"] == owner && data["scope"] == scope && data["members"].include?(name)
+
+          data["visibility"] = data["members"] == [name] ? visibility : nil
+        end
+      end
+
+      def walk_multi_write(node, nesting, singleton, in_block)
+        (node.lefts + [node.rest&.expression].compact + node.rights).each do |target|
+          next unless target.is_a?(Prism::ConstantTargetNode) || target.is_a?(Prism::ConstantPathTargetNode)
+
+          omit("constant", qualify(nesting, target) || target.slice, target)
+        end
+        walk(node.value, nesting, singleton: singleton, in_block: in_block)
+      end
+
+      def walk_constant(node, nesting)
+        target = node.respond_to?(:target) ? node.target : node
+        name = node.respond_to?(:target) ? qualify(nesting, node.target) : qualify_name(nesting, node.name.to_s)
         kind = case data_or_struct(node.value)
                when :data then "data_class"
                when :struct then "struct_class"
                else "constant"
                end
-        omit(kind, qualify(nesting, name), node)
+        omit(kind, name || target.slice, node)
         walk(node.value, nesting, singleton: false, in_block: true)
       end
 
       def read_def(node, nesting, singleton, in_block)
-        owner = nesting.last || "Object"
-        scope = def_scope(node, singleton)
-        return omit("method", node.name.to_s, node) if in_block || scope.nil?
-
-        data = { "kind" => "method", "name" => node.name.to_s, "owner" => owner, "scope" => scope.to_s,
-                 "attribute" => nil, "members" => [node.name.to_s],
-                 "visibility" => visibility(nesting, owner, scope, node.name) }
-        params, block, = Parameters.read(node.parameters, yields: Parameters.yields?(node.body))
-        shape_params, shape_block = Parameters.shape(params, block)
-        data.merge!("params" => shape_params, "block" => shape_block, "body_return" => body_return(node, owner, scope))
-        add_site(node, data)
+        scope = def_scope(node, nesting, singleton)
+        if in_block || scope.nil?
+          omit("method", node.name.to_s, node)
+        else
+          owner = nesting.last || "Object"
+          data = { "kind" => "method", "name" => node.name.to_s, "owner" => owner, "scope" => scope.to_s,
+                   "attribute" => nil, "members" => [node.name.to_s],
+                   "visibility" => visibility(node, nesting, scope) }
+          params, block, = Parameters.read(node.parameters, yields: Parameters.yields?(node.body))
+          shape_params, shape_block = Parameters.shape(params, block)
+          data.merge!("params" => shape_params, "block" => shape_block,
+                      "body_return" => body_return(node, owner, scope))
+          add_site(node, data)
+        end
+        # A declaration inside a method body runs only when the method does: not modelled.
+        walk(node.body, nesting, singleton: singleton, in_block: true) if node.body
       end
 
       def read_attribute(node, nesting, singleton, in_block)
@@ -147,12 +235,12 @@ module Rigor
         end
 
         owner = nesting.last
+        scope = singleton ? :singleton : :instance
+        attribute = ATTRIBUTE_CALLS.fetch(node.name)
         names.each_with_index do |name, ordinal|
-          scope = singleton ? :singleton : :instance
-          attribute = ATTRIBUTE_CALLS.fetch(node.name)
           add_site(node, { "kind" => "attribute", "name" => name, "owner" => owner, "scope" => scope.to_s,
                            "attribute" => attribute, "members" => attribute_members(name, attribute),
-                           "visibility" => visibility(nesting, owner, scope, name.to_sym),
+                           "visibility" => visibility(node, nesting, scope),
                            "params" => nil, "block" => nil, "body_return" => nil }, ordinal: ordinal)
         end
       end
@@ -162,23 +250,24 @@ module Rigor
         anchor = @anchor.for_span(location.start_offset, location.end_offset, location.start_line,
                                   location.end_line)
         key = "#{@path}:#{location.start_offset}-#{location.end_offset}:#{ordinal}"
-        head = { "key" => key }
         tail = { "ordinal" => ordinal, "span" => Lens.span(location),
                  "contract_span" => Lens.contract_span(anchor.contract_comments), "anchor" => anchor.token,
                  "contract" => nil }
-        @sites << Site.new(data: head.merge(data).merge(tail), node: node,
+        @sites << Site.new(data: { "key" => key }.merge(data).merge(tail), node: node,
                            contract_comments: anchor.contract_comments)
       end
 
-      # `owner` / `scope` name the member the declaration would define, when Rigor can tell.
-      def omit(kind, name, node, owner: nil, scope: nil)
+      # `owner` / `singleton` name the member the declaration would define, when Rigor can tell.
+      def omit(kind, name, node, owner: nil, singleton: false)
         member = owner && name
         @omissions << { "kind" => kind, "owner" => member ? owner : nil,
-                        "scope" => if member
-                                     scope ? "singleton" : "instance"
-                                   end, "name" => name,
+                        "scope" => member ? scope_name(singleton) : nil, "name" => name,
                         "span" => Lens.span(node.location), "reason" => "unsupported_kind" }
         nil
+      end
+
+      def scope_name(singleton)
+        singleton ? "singleton" : "instance"
       end
 
       def attribute_members(name, attribute)
@@ -189,22 +278,29 @@ module Rigor
         end
       end
 
-      # Instance-side visibility as the check path's per-file table records it. Rigor does not resolve a
-      # singleton method's visibility, and a slot the table marks contested has no single answer: both read nil.
-      def visibility(nesting, owner, scope, name)
-        return "private" if nesting.empty? && scope == :instance
-        return nil if scope == :singleton
+      # The member's visibility as Ruby gives it: a `private def` / `private attr_reader` wrapper, else the running
+      # default of the body (unknown after a toggle the walk could not place). A class body's toggles do not reach
+      # a `def self.x`. A later `private :x` revises it ({#name_visibility}). A top-level `def` is private.
+      def visibility(node, nesting, scope)
+        return "private" if nesting.empty?
+        return @node_visibility[node] if @node_visibility.key?(node)
+        return "public" if scope == :singleton && node.is_a?(Prism::DefNode) && node.receiver
 
-        value = @visibilities.dig(owner, name)
-        return nil if @contested_visibility.include?([owner, name])
+        body = @bodies.last
+        return nil if body.nil? || body.uncertain
 
-        (value || :public).to_s
+        body.current
       end
 
-      def def_scope(node, singleton)
+      # `def x` in a class body is an instance method, in `class << self` a singleton one; `def self.x` is a
+      # singleton method of a class body. A `def self.x` inside `class << self`, a top-level `def self.x`, and any
+      # other receiver define methods revision 1 does not model.
+      def def_scope(node, nesting, singleton)
         return (singleton ? :singleton : :instance) if node.receiver.nil?
+        return nil unless node.receiver.is_a?(Prism::SelfNode)
+        return nil if singleton || nesting.empty?
 
-        node.receiver.is_a?(Prism::SelfNode) ? :singleton : nil
+        :singleton
       end
 
       # The body's return under the seeded index, with its parameters as declared (§ Sites).
@@ -228,10 +324,21 @@ module Rigor
         scope && Inference::OriginLookup.origin_for(scope, last)
       end
 
-      def qualify(nesting, slice)
-        return slice.delete_prefix("::") if slice.start_with?("::") || nesting.empty?
+      # The qualified name a constant path declares under `nesting`, or nil when it is not a plain constant path
+      # (`self::Foo`, `expr::Foo`).
+      def qualify(nesting, path)
+        case path
+        when Prism::ConstantReadNode, Prism::ConstantTargetNode then qualify_name(nesting, path.name.to_s)
+        when Prism::ConstantPathNode, Prism::ConstantPathTargetNode
+          return path.name.to_s if path.parent.nil?
 
-        "#{nesting.last}::#{slice}"
+          parent = qualify(nesting, path.parent)
+          parent && "#{parent}::#{path.name}"
+        end
+      end
+
+      def qualify_name(nesting, name)
+        nesting.empty? ? name : "#{nesting.last}::#{name}"
       end
 
       def bare_call?(node, name)

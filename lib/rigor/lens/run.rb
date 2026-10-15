@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "prism"
+
 require_relative "file_reader"
 require_relative "contract_reader"
 require_relative "members"
@@ -18,7 +20,7 @@ module Rigor
     class Run
       # One target's answer: `status` is `ok` or a failure reason; the rest is set only for `ok`.
       Target = Data.define(:argument, :path, :absolute, :status, :reason, :reader, :diagnostics, :inputs)
-      Outcome = Data.define(:targets, :member_rows)
+      Outcome = Data.define(:targets, :member_rows, :plugins, :warm)
 
       # @param root — the project root (absolute); every path in the answer is relative to it
       def initialize(configuration:, root:, arguments:, workers:)
@@ -27,9 +29,9 @@ module Rigor
         @arguments = arguments
         @argument_paths = arguments.to_set { |argument| File.expand_path(argument) }
         @workers = workers
-        @captured = {}
-        @contracts = {}
-        @site_paths = {}
+        reset_captures
+        @capture_errors = {}
+        @plugins = []
       end
 
       def call
@@ -37,10 +39,10 @@ module Rigor
         project = session.project_files.to_h { |path| [File.expand_path(path), path] }
         resolved = @arguments.map { |argument| resolve(argument, project) }
         forced = resolved.filter_map { |entry| entry[:session_path] }
-        session.force_targets = forced
-        diagnostics = analyse(session, forced)
+        session.force_targets = forced.uniq
+        diagnostics, warm = analyse(session, forced.uniq)
         targets = resolved.map { |entry| target(entry, diagnostics, session) }
-        Outcome.new(targets: targets, member_rows: members(targets, session))
+        Outcome.new(targets: targets, member_rows: members(targets, session), plugins: @plugins, warm: warm)
       end
 
       private
@@ -54,16 +56,28 @@ module Rigor
         )
       end
 
-      # A cold run is a baseline; a pooled baseline indexes the targets in workers, where the callback never
-      # runs, so one forced recheck in this process captures them.
+      # A warm run is a recheck that forced the targets. A cold one is a baseline: a sequential baseline indexes
+      # every target in this process, a pooled one in workers where the callback never runs. The session also
+      # falls back to a baseline after a recheck whose seeds it no longer trusts, and the captures that recheck
+      # made are stale. So after a pooled baseline the captures are dropped and one forced recheck, on the
+      # baseline's fresh state, reads the targets again.
       def analyse(session, forced)
         fingerprint = Cache::IncrementalSnapshot.fingerprint(configuration: @configuration,
                                                              roots: @configuration.paths)
         snapshot = Cache::IncrementalSnapshot.new(root: @configuration.cache_path)
-        diagnostics, = session.run_incremental(snapshot: snapshot, fingerprint: fingerprint)
+        diagnostics, warm = session.run_incremental(snapshot: snapshot, fingerprint: fingerprint)
         missing = forced.reject { |path| @captured.key?(File.expand_path(path)) }
-        diagnostics = session.recheck.diagnostics unless missing.empty?
-        diagnostics
+        if (!warm && @workers.positive?) || !missing.empty?
+          reset_captures
+          diagnostics = session.recheck.diagnostics
+        end
+        [diagnostics, warm]
+      end
+
+      def reset_captures
+        @captured = {}
+        @contracts = {}
+        @site_paths = {}
       end
 
       def resolve(argument, project)
@@ -78,10 +92,21 @@ module Rigor
         entry.merge(status: "ok", session_path: session_path)
       end
 
+      # The runner's index callback. An error here never reaches the run: it is recorded, and the target reads
+      # `failed` with the reason.
       def capture(path, parse_result, scope, index)
         absolute = File.expand_path(path)
         return unless @argument_paths.include?(absolute)
 
+        @plugins = loaded_plugins(scope.environment) if @plugins.empty?
+        read_target(absolute, parse_result, scope, index)
+        @capture_errors.delete(absolute)
+      rescue StandardError => e
+        @captured.delete(absolute)
+        @capture_errors[absolute] = "#{e.class}: #{e.message}"
+      end
+
+      def read_target(absolute, parse_result, scope, index)
         reader = FileReader.new(path: relative(absolute), parse_result: parse_result, index: index,
                                 spell: speller(scope.environment)).read
         reader.sites.each do |site|
@@ -110,15 +135,16 @@ module Rigor
                                     inputs: inputs(session, entry[:session_path]))
         end
 
-        Target.new(**base, **uncaptured(own))
+        Target.new(**base.merge(uncaptured(entry[:absolute], own)))
       end
 
-      # A forced target the run did not index: a file that does not parse stops before indexing.
-      def uncaptured(own)
-        if own.any? { |diagnostic| diagnostic.rule.nil? && diagnostic.severity == :error }
+      # A forced target the run did not read: one that does not parse stops before indexing; otherwise reading it
+      # failed, or the run never indexed it.
+      def uncaptured(absolute, own)
+        if Prism.parse_file(absolute).errors.any?
           { status: "parse_error", reason: "the file does not parse", diagnostics: own }
         else
-          { status: "failed", reason: "the file was not analysed" }
+          { status: "failed", reason: @capture_errors.fetch(absolute, "the file was not analysed") }
         end
       end
 
@@ -133,26 +159,42 @@ module Rigor
       end
 
       def members(targets, session)
-        sites = targets.flat_map { |target| target.reader&.sites || [] }
-        omissions = targets.flat_map { |target| target.reader&.omissions || [] }
-        requested = targets.filter_map { |target| target.reader && target.absolute }.to_set
+        # A file requested twice, in any spelling, contributes its declarations once.
+        readers = targets.filter_map { |target| target.reader && [target.absolute, target.reader] }.to_h
+        sites = readers.values.flat_map(&:sites)
+        omissions = readers.values.flat_map(&:omissions)
+        requested = readers.keys.to_set
         Members.new(sites: sites, omissions: omissions, contracts: @contracts,
                     elsewhere: elsewhere(session, requested), site_paths: @site_paths).build
       end
 
-      # Other project files that define a member, from the per-file discovery bundles the session keeps.
+      # Other project files that define a member, from the per-file discovery bundles the session keeps. The bundle
+      # paths are resolved once; each member then costs one lookup per bundle.
       def elsewhere(session, requested)
-        bundles = session.seed_bundles
+        bundles = session.seed_bundles.filter_map do |path, bundle|
+          absolute = File.expand_path(path)
+          [relative(absolute), bundle] unless requested.include?(absolute)
+        end
         lambda do |owner, scope, name|
           entries = bundles.filter_map do |path, bundle|
-            absolute = File.expand_path(path)
-            next if requested.include?(absolute)
-
             line = defined_line(bundle, owner, scope, name)
-            line == false ? nil : { "path" => relative(absolute), "line" => line }
+            line == false ? nil : { "path" => path, "line" => line }
           end
           entries.sort_by { |entry| entry["path"] }
         end
+      end
+
+      # `[{id, version}]` of the plugins the run loaded, by manifest id (the id slot provenance uses).
+      def loaded_plugins(environment)
+        plugins = environment&.plugin_registry&.plugins || []
+        rows = plugins.map do |plugin|
+          id = plugin.manifest.id.to_s
+          spec = Gem.loaded_specs[id]
+          { "id" => id, "version" => spec ? spec.version.to_s : Rigor::VERSION }
+        end
+        rows.uniq.sort_by { |plugin| plugin["id"] }
+      rescue StandardError
+        []
       end
 
       # The line a bundle records for the member, nil when it defines the member without a recorded line (an

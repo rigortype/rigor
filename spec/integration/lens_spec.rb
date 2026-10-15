@@ -63,29 +63,75 @@ RSpec.describe "rigor lens" do
 
     JSON.parse(out)["files"].each do |file|
       oracle = check_rows.select { |row| File.expand_path(row["path"]) == File.expand_path(file["path"]) }
-      expect(file["diagnostics"].map { |row| row.values_at("line", "column", "message") })
-        .to eq(oracle.map { |row| row.values_at("line", "column", "message") })
+      expect(file["diagnostics"].map { |row| row.values_at("line", "column", "severity", "rule", "message") })
+        .to eq(oracle.map { |row| row.values_at("line", "column", "severity", "rule", "message") })
     end
     expect(JSON.parse(out)["files"].sum { |file| file["diagnostics"].size }).to be_positive
   end
 
   it "answers a warm run with the same document, sharing the snapshot with check --incremental" do
-    _, cold, = lens(["--format=json", *targets])
-    _, warm, = lens(["--format=json", *targets])
+    _, cold, cold_err = lens(["--format=json", *targets])
+    _, warm, warm_err = lens(["--format=json", *targets])
+    expect([cold_err, warm_err]).to match([/lens: cold/, /lens: warm/])
     expect(warm).to eq(cold)
 
+    incremental_out = StringIO.new
     err = StringIO.new
-    Rigor::CLI::CheckCommand.new(argv: ["--incremental", "--no-ci-detect", "--no-stats"],
-                                 out: StringIO.new, err: err).run
+    Rigor::CLI::CheckCommand.new(argv: ["--incremental", "--no-ci-detect", "--no-stats", "--format=json"],
+                                 out: incremental_out, err: err).run
+    no_cache_out = StringIO.new
+    Rigor::CLI::CheckCommand.new(argv: ["--no-cache", "--no-ci-detect", "--no-stats", "--format=json"],
+                                 out: no_cache_out, err: StringIO.new).run
     expect(err.string).to include("--incremental warm")
+    expect(JSON.parse(incremental_out.string)["diagnostics"]).to eq(JSON.parse(no_cache_out.string)["diagnostics"])
   end
 
   it "captures the targets of a pooled cold run with one forced recheck" do
     _, sequential, = lens(["--format=json", "--workers=0", *targets])
     FileUtils.rm_rf(".rigor")
+    rechecks = 0
+    allow(Rigor::Analysis::IncrementalSession).to receive(:new).and_wrap_original do |original, **options|
+      expect(options[:workers]).to eq(2)
+      session = original.call(**options)
+      allow(session).to receive(:recheck).and_wrap_original do |recheck|
+        rechecks += 1
+        recheck.call
+      end
+      session
+    end
     _, pooled, = lens(["--format=json", "--workers=2", *targets])
 
+    expect(rechecks).to eq(1)
     expect(pooled).to eq(sequential)
+  end
+
+  it "contains an error while reading a target: check's diagnostics and snapshot are untouched" do
+    allow_any_instance_of(Rigor::Lens::FileReader).to receive(:read).and_raise("boom") # rubocop:disable RSpec/AnyInstance
+    _, out, = lens(["--format=json", "--workers=0", "lib/order.rb"])
+    file = JSON.parse(out)["files"].first
+    expect(file).to include("status" => "failed", "reason" => "RuntimeError: boom")
+
+    incremental_out = StringIO.new
+    Rigor::CLI::CheckCommand.new(argv: ["--incremental", "--no-ci-detect", "--no-stats", "--format=json"],
+                                 out: incremental_out, err: StringIO.new).run
+    messages = JSON.parse(incremental_out.string)["diagnostics"].map { |row| row["message"] }
+    expect(messages).to include(a_string_including("undefined method `upcase'"))
+    expect(messages).not_to include(a_string_including("internal analyzer error"))
+  end
+
+  it "reads a file passed twice, in two spellings, once" do
+    _, once, = lens(["--format=json", "lib/order.rb"])
+    _, twice, = lens(["--format=json", "lib/order.rb", "./lib/order.rb"])
+
+    expect(JSON.parse(twice)["members"]).to eq(JSON.parse(once)["members"])
+    expect(JSON.parse(twice)["files"].size).to eq(2)
+  end
+
+  it "exits 64 for a configuration file that does not exist" do
+    status, out, = lens(["--config=nope.yml", "lib/order.rb"])
+
+    expect(status).to eq(Rigor::CLI::EXIT_USAGE)
+    expect(out).to be_empty
   end
 
   it "exits 1 when no target has a result, and still writes the document" do

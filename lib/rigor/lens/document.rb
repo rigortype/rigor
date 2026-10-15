@@ -44,7 +44,7 @@ module Rigor
           "rbs_version" => rbs_version,
           "signature_roots" => signature_roots.map { |root| relative(root) },
           "signature_digest" => signature_digest,
-          "plugins" => plugins,
+          "plugins" => @outcome.plugins,
           "lockfiles" => lockfiles
         }
         fields.merge("digest" => Lens.digest(JSON.generate(fields)))
@@ -66,17 +66,6 @@ module Rigor
         Lens.digest(listing.join)
       end
 
-      def plugins
-        rows = Array(@configuration.plugins).filter_map do |entry|
-          id = entry.is_a?(Hash) ? (entry["gem"] || entry[:gem] || entry["id"] || entry[:id]) : entry
-          next if id.nil?
-
-          spec = Gem.loaded_specs[id.to_s]
-          { "id" => id.to_s, "version" => spec ? spec.version.to_s : Rigor::VERSION }
-        end
-        rows.sort_by { |plugin| plugin["id"] }
-      end
-
       def lockfiles
         Analysis::RunCacheKey.resolved_lockfile_paths(@configuration).compact.filter_map do |path|
           absolute = File.expand_path(path.to_s)
@@ -91,10 +80,18 @@ module Rigor
         read = %w[ok parse_error].include?(target.status)
         head = { "argument" => target.argument, "path" => target.status == "not_found" ? nil : target.path,
                  "status" => target.status, "reason" => target.status == "ok" ? nil : target.reason,
-                 "digest" => read ? Lens.digest(File.binread(target.absolute)) : nil }
+                 "digest" => file_digest(target, read) }
         head.merge(analysed_fields(target.status == "ok" ? target : nil))
             .merge("diagnostics" => read ? target.diagnostics.map { |diagnostic| diagnostic_row(diagnostic) } : nil)
             .merge("inputs" => target.status == "ok" ? target.inputs : nil)
+      end
+
+      # The digest of the bytes the analysis read; a file that did not parse is read once more.
+      def file_digest(target, read)
+        return nil unless read
+        return target.reader.digest if target.reader
+
+        Lens.digest(File.binread(target.absolute))
       end
 
       def analysed_fields(target)

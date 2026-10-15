@@ -21,7 +21,13 @@ module Rigor
         options = parse_options
         return CLI::EXIT_USAGE if options.nil?
 
-        configuration = Configuration.load(options.fetch(:config))
+        config = options.fetch(:config)
+        if config && !File.file?(config)
+          usage_error("no configuration file at #{config}")
+          return CLI::EXIT_USAGE
+        end
+
+        configuration = Configuration.load(config)
         config_path = options.fetch(:config) || Configuration.discover
         # The working directory: Rigor auto-detects sig/ and the lockfiles there (lens.md § Serialization).
         root = Dir.pwd
@@ -29,6 +35,7 @@ module Rigor
         outcome = Lens::Run.new(configuration: configuration, root: root, arguments: @argv, workers: workers).call
         document = Lens::Document.new(outcome: outcome, configuration: configuration, root: root,
                                       config_path: config_path).to_h
+        @err.puts("rigor lens: #{outcome.warm ? 'warm' : 'cold'} — #{@argv.size} target(s)")
         render(document, options.fetch(:format))
         outcome.targets.any? { |target| target.status == "ok" } ? 0 : 1
       end

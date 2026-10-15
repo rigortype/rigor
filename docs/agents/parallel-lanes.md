@@ -44,8 +44,8 @@ reshaping code, and lanes that collided or started on a premise master had alrea
    per contribution-flow.md step 3, including the "Engine allocations (advisory)" summary. Send each
    fix back to the lane that wrote the change with SendMessage, so it keeps its context; route a
    severe fix in intricate logic to the strongest model instead. Delta rounds go to the same
-   reviewer with SendMessage and follow contribution-flow.md steps 4–5: three rounds at most, then
-   the decision is the user's.
+   reviewer with SendMessage and follow contribution-flow.md steps 4–5: three rounds at most; a
+   severe finding in round 3 goes to the user.
 7. **Land in order.** Before merging, fetch, merge `origin/master` into a detached copy of the
    branch, and rerun the spec files the PR touched; a clean textual merge can still break a sibling's
    spec. Check `mergeable` before waiting on CI: a `CONFLICTING` PR starts no run, so send it back to
@@ -73,11 +73,12 @@ A lane brief restates these:
   it fails. The table goes in the report.
 - **Honest gates.** When a provenance pin, residue count or other gate moves, stop and report the
   row and what `rigor sig-gen --print` proposes. Adding a `# sig-gen gap:` or `# authored:` marker,
-  extending `spec/rigor/sig_gen/gap_issues.yml`, or moving a pin needs the brief's authorisation;
+  extending `spec/rigor/sig_gen/gap_issues.yml`, or moving a pin needs the brief's authorisation,
+  which the coordinator gives only for a row the user or a `ready-for-agent` issue settled;
   the marker rules are ADR-107 and its G3 gate, the hand-edit rule is
   [`type-authoring.md`](type-authoring.md) § "RBS". Code keeps the shape it would have without the
   gate. Keep each rewritten spec's original assertion.
-- **Reach.** After deleting or renaming a method, `git grep -nw <name> -- ':!references'`:
+- **Reach.** After deleting or renaming a method, `git grep --untracked -nw <name> -- ':!references'`:
   `verify-changed` lists a deletion as uncovered and does not search for its callers.
 - **Claims.** The PR body, doc edits and changelog fragment say what the specs pin and no more. A
   binding doc under `docs/type-specification/` or `docs/internal-spec/` that describes the changed
@@ -97,11 +98,14 @@ A lane brief restates these:
 ## Reviewer contract
 
 The reviewer is a fresh agent on the strongest model that did not write the change. Its brief
-carries the base commit, the PR and its issue, the Environment bullet of the lane contract, and:
+carries the base commit, the PR and its issue, the Environment bullet of the lane contract, no
+`make verify`, `make check` or whole-suite run, and:
 
 - A detached review worktree at the PR's head SHA with its bundle cloned (`git worktree add --detach
-  <path> <sha>`, then `cp -Rc vendor/bundle <path>/vendor/` and copy `.bundle/config`), removed at
-  the end; no edits, pushes or comments on the PR.
+  <path> <sha>`, then from the main clone `mkdir -p <path>/vendor <path>/.bundle && cp -Rc
+  vendor/bundle <path>/vendor/bundle && cp .bundle/config <path>/.bundle/`; `cp -Rc` is the macOS
+  clone, elsewhere `cp -R --reflink=auto`), removed at the end; no edits, pushes or comments on the
+  PR.
 - **Probe, not re-run.** For a change that makes Rigor answer something, build the wrong-answer
   shapes as fixtures, run that tree's `bundle exec exe/rigor check --no-cache` with a same-file
   positive control, and compare against Ruby; read [`measurement.md`](measurement.md) first.

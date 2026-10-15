@@ -47,7 +47,7 @@ RSpec.describe "config `disable:` over run-level rows" do
 
       def diagnostics_for_file(path:, **)
         [Rigor::Analysis::Diagnostic.new(path: path, line: 1, column: 1, message: "saw it", severity: :warning,
-                                         rule: "saw-file")]
+                                         rule: "flow.dead-assignment")]
       end
     end
     stub_const("FakeEmitter1895Plugin", klass)
@@ -118,9 +118,10 @@ RSpec.describe "config `disable:` over run-level rows" do
     # The path-error row for `ghost.rb` carries no rule and stays: a nil-rule row is never suppressed.
     expect(kept.select { |d| d.rule.nil? }.map(&:path)).to eq(["ghost.rb"])
 
+    # A plugin row stays even when its bare rule names a built-in check rule.
     plugins = { "plugins" => ["rigor-emitter"] }
-    expect(run_rows(plugins.merge("disable" => ["all", "saw-file"]), plugin: emitting_plugin))
-      .to include("plugin.emitter-1895.saw-file")
+    expect(run_rows(plugins.merge("disable" => ["all", "flow.dead-assignment"]), plugin: emitting_plugin))
+      .to include("plugin.emitter-1895.flow.dead-assignment")
   end
 
   # The collision the round-1 review of #1948 found: `rigor-rails-i18n` reports an unparsable locale file as its

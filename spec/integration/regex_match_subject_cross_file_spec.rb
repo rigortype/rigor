@@ -22,7 +22,7 @@ RSpec.describe "a `=~` guard on a String subclass declared in another file (#149
     Dir.mktmpdir("rigor-regex-match-subject-") { |dir| Dir.chdir(dir) { example.run } }
   end
 
-  it "reports the nil receiver only for the subclass with its own `=~`" do
+  def write_project
     FileUtils.mkdir_p("lib")
     File.write(File.join("lib", "strings.rb"), <<~RUBY)
       class PlainStr < String
@@ -49,6 +49,10 @@ RSpec.describe "a `=~` guard on a String subclass declared in another file (#149
         key.upcase
       end
     RUBY
+  end
+
+  it "reports the nil receiver only for the subclass with its own `=~`" do
+    write_project
     result = guarded_run(Rigor::Analysis::Runner.new(configuration: config), %w[lib])
     reported = result.diagnostics
                      .select { |d| d.path.to_s.end_with?("caller.rb") }

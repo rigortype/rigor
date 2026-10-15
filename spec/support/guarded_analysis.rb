@@ -71,9 +71,9 @@ module GuardedAnalysis
   # hence the Array-shaped guard).
   #
   # @raise InternalAnalyzerErrorGuard::AnalyzerCrashed
-  def guarded_baseline(session)
+  def guarded_baseline(session, allow_plugin_crash: false)
     InternalAnalyzerErrorGuard.check_diagnostics!(
-      session.baseline, context: guarded_analysis_context("guarded_baseline")
+      session.baseline, context: guarded_analysis_context("guarded_baseline"), allow_plugin_crash: allow_plugin_crash
     )
   end
 
@@ -82,10 +82,10 @@ module GuardedAnalysis
   # hands back the whole struct — every call site reads `changed` / `affected` / `reused` off it too.
   #
   # @raise InternalAnalyzerErrorGuard::AnalyzerCrashed
-  def guarded_recheck(session)
+  def guarded_recheck(session, allow_plugin_crash: false)
     result = session.recheck
     InternalAnalyzerErrorGuard.check_diagnostics!(
-      result.diagnostics, context: guarded_analysis_context("guarded_recheck")
+      result.diagnostics, context: guarded_analysis_context("guarded_recheck"), allow_plugin_crash: allow_plugin_crash
     )
     result
   end
@@ -104,10 +104,10 @@ module GuardedAnalysis
   # warm]`. Guards the diagnostics half and hands back the same tuple.
   #
   # @raise InternalAnalyzerErrorGuard::AnalyzerCrashed
-  def guarded_run_incremental(session, snapshot:, fingerprint:, persist: true)
+  def guarded_run_incremental(session, snapshot:, fingerprint:, persist: true, allow_plugin_crash: false)
     diagnostics, warm = session.run_incremental(snapshot: snapshot, fingerprint: fingerprint, persist: persist)
     InternalAnalyzerErrorGuard.check_diagnostics!(
-      diagnostics, context: guarded_analysis_context("guarded_run_incremental")
+      diagnostics, context: guarded_analysis_context("guarded_run_incremental"), allow_plugin_crash: allow_plugin_crash
     )
     [diagnostics, warm]
   end

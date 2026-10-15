@@ -1,0 +1,1 @@
+- **[rigor check]** A nothing-changed `--incremental --workers N` recheck, and a `--workers N` run over a project with no Ruby files, no longer drop a plugin's `prepare`-time rows (its `prepare` error, `disclose_once` and `emit_once` rows), so a project whose plugin `prepare` raised could pass. ([#1894](https://github.com/rigortype/rigor/pull/1894))

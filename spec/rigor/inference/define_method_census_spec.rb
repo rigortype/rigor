@@ -20,6 +20,21 @@ RSpec.describe "the ADR-58 ivar census counts define_method block writes" do
     "class Box\n  def initialize\n    @x = nil\n  end\n#{body.gsub(/^/, '  ')}\nend\n"
   end
 
+  def diagnostics_for(files)
+    Dir.mktmpdir do |dir|
+      lib = File.join(dir, "lib")
+      FileUtils.mkdir_p(lib)
+      files.each { |name, source| File.write(File.join(lib, name), source) }
+      runner = Rigor::Analysis::Runner.new(
+        configuration: Rigor::Configuration.new("paths" => [lib]),
+        cache_store: nil
+      )
+      guarded_run(runner).diagnostics
+                         .reject { |d| d.path.to_s.end_with?(".rigor.yml") }
+                         .map { |d| [File.basename(d.path.to_s), d.line, d.rule] }
+    end
+  end
+
   describe "instance-side define_method blocks" do
     {
       "a brace block (the issue)" => %(define_method(:set) { @x = "a" }),
@@ -57,6 +72,12 @@ RSpec.describe "the ADR-58 ivar census counts define_method block writes" do
       source = %(class W\n  @x = nil\n  define_method(:set) { @x = "a" }\n  def get = @x\nend\n)
       expect(census(source, "W")).to eq(%("a"?))
       expect(census(source.sub(%(define_method(:set) { @x = "a" }), %(def set = (@x = "a"))), "W")).to eq(%("a"))
+    end
+
+    it "keeps the read-before-write nil for an op-write in the block beside a class-body write" do
+      source = %(class OpW\n  @n = 0\n  define_method(:inc) { @n += 1 }\n  def get = (@n ? 1 : 2)\nend\n)
+      expect(census(source, "OpW", :@n)).to eq("Integer?")
+      expect(diagnostics_for("opw.rb" => source)).to be_empty
     end
 
     it "keeps a define_method call's own argument write a class-body write" do
@@ -102,21 +123,6 @@ RSpec.describe "the ADR-58 ivar census counts define_method block writes" do
   end
 
   describe "rigor check" do
-    def diagnostics_for(files)
-      Dir.mktmpdir do |dir|
-        lib = File.join(dir, "lib")
-        FileUtils.mkdir_p(lib)
-        files.each { |name, source| File.write(File.join(lib, name), source) }
-        runner = Rigor::Analysis::Runner.new(
-          configuration: Rigor::Configuration.new("paths" => [lib]),
-          cache_store: nil
-        )
-        guarded_run(runner).diagnostics
-                           .reject { |d| d.path.to_s.end_with?(".rigor.yml") }
-                           .map { |d| [File.basename(d.path.to_s), d.line, d.rule] }
-      end
-    end
-
     it "keeps a sibling def's read quiet (the issue)" do
       expect(diagnostics_for("box.rb" => box(%(define_method(:set) { @x = "a" }\ndef get = @x.upcase)))).to be_empty
     end

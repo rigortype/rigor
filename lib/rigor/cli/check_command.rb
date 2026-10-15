@@ -692,6 +692,7 @@ module Rigor
         data = data.dup
         data["plugins"] = inject_treat_all_as_inline_rbs(Array(data["plugins"]))
         Configuration.new(Configuration::DEFAULTS.merge(data), effects_key_present, target_ruby_key_present)
+                     .with_exclude_base(path && File.exist?(path) ? File.dirname(path) : nil)
       end
 
       # ADR-50 § WD2 — applies the `--bleeding-edge[=ids]` / `--no-bleeding-edge` CLI selection over the configured

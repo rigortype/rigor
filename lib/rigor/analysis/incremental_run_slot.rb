@@ -115,7 +115,7 @@ module Rigor
       def serve(configuration:, cache_root:, paths:)
         return nil if configuration.effects_enabled?
 
-        files = PathExpansion.ruby_files(paths, configuration.exclude_patterns)
+        files = PathExpansion.ruby_files(paths, configuration.exclude_patterns, base: configuration.exclude_base)
         slot_key = key(configuration: configuration, target: Target.new(files: files, roots: paths))
         return nil if slot_key.nil?
 

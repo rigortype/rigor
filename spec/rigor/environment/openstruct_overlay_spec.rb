@@ -13,26 +13,25 @@ require "spec_helper"
 
 RSpec.describe "OpenStruct (#1456)" do
   describe "the RBS definition" do
-    def instance_methods(libraries)
-      Rigor::Environment::RbsLoader.new(libraries: libraries).instance_definition("OpenStruct")&.methods
+    def definition(libraries)
+      Rigor::Environment::RbsLoader.new(libraries: libraries).instance_definition("OpenStruct")
     end
 
-    def overlay_owned?(method)
-      method.defs.map { |definition| definition.member.location.buffer.name.to_s }
-            .all? { |name| name.end_with?("data/core_overlay/ostruct.rbs") }
-    end
+    it "declares the private method_missing on an overlay module the class includes" do
+      method = definition([])&.methods&.[](:method_missing)
 
-    it "declares the private method_missing / respond_to_missing? pair from the core overlay" do
-      methods = instance_methods([])
-
-      %i[method_missing respond_to_missing?].each do |name|
-        expect(methods&.[](name)).to have_attributes(accessibility: :private)
-        expect(overlay_owned?(methods[name])).to be(true)
-      end
+      expect(method).to have_attributes(accessibility: :private)
+      expect(method.defined_in.to_s).to eq("::RigorCoreOverlay::OpenStructMissing")
+      expect(method.defs.map { |d| d.member.location.buffer.name.to_s })
+        .to all(end_with("data/core_overlay/ostruct.rbs"))
     end
 
     it "keeps json's reopening of the class beside it" do
-      expect(instance_methods(["json"])&.keys).to include(:method_missing, :respond_to_missing?, :to_json, :as_json)
+      methods = definition(["json"])&.methods
+
+      expect(methods&.[](:method_missing)&.defined_in.to_s).to eq("::RigorCoreOverlay::OpenStructMissing")
+      expect(methods.slice(:to_json, :as_json).transform_values { |m| m.defined_in.to_s })
+        .to eq(to_json: "::OpenStruct", as_json: "::OpenStruct")
     end
   end
 
@@ -87,6 +86,48 @@ RSpec.describe "OpenStruct (#1456)" do
         dump_type(o.to_json)
         dump_type(o.name)
       RUBY
+    end
+
+    # Review round 1 of #1982 — a project `sig/` that declares the hook pair on `OpenStruct` itself is a correct
+    # hand-written signature. A `def method_missing` directly on the overlay's `class OpenStruct` collided with it
+    # (`RBS::DuplicatedMethodDefinitionError`): a `rbs.coverage.definition-build-failed` row and the whole class
+    # degraded to `Dynamic[top]`. The overlay's module is an ancestor the project's member overrides.
+    it "lets a project sig/ declare the hook pair without a build failure or degradation" do
+      sig = <<~RBS
+        class OpenStruct
+          private def method_missing: (Symbol mid, *untyped args) -> untyped
+          private def respond_to_missing?: (Symbol | String mid, ?bool include_private) -> bool
+        end
+      RBS
+      result = analyze(<<~RUBY, sig: { "ostruct.rbs" => sig })
+        require "rigor/testing"
+        include Rigor::Testing
+        o = OpenStruct.new(name: "x")
+        o.age = 3
+        dump_type(o.to_json)
+        dump_type(o.name)
+      RUBY
+
+      expect(result.diagnostics.map(&:qualified_rule)).not_to include(start_with("rbs.coverage"))
+      expect(result.diagnostics.select { |d| d.qualified_rule == "call.undefined-method" }).to be_empty
+      dumps = result.diagnostics.map(&:message).grep(/\Adump_type: /).map { |m| m.delete_prefix("dump_type: ") }
+      expect(dumps).to eq(["String", "Dynamic[top]"])
+    end
+
+    # A known cost of the open-receiver list, pinned so a change to it is deliberate: `unbounded_receiver_surface?`
+    # also makes an inherited Object / Kernel signature unauthoritative for `call.wrong-arity`, and it does not
+    # tell the singleton side from the instance side. These four report on a class Rigor reads as closed (the
+    # mutation that drops `OpenStruct` from the list) and are silent here — lost true positives, not false ones.
+    it "no longer reports inherited-signature arity or a singleton-side typo on OpenStruct" do
+      result = analyze(<<~RUBY)
+        o = OpenStruct.new(name: "x")
+        o.freeze(1)
+        o.respond_to?(:a, true, 3)
+        o.instance_variable_get
+        OpenStruct.no_such_method_zzz
+      RUBY
+
+      expect(result.diagnostics.select { |d| d.severity == :error }.map { |d| [d.line, d.qualified_rule] }).to be_empty
     end
 
     # Control: a project class with no RBS at all stays quiet, as before.

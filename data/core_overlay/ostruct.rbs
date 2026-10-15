@@ -1,6 +1,6 @@
 # Rigor core overlay — supplemental core signatures.
 #
-# --- OpenStruct#method_missing / #respond_to_missing? (issue #1456) ---
+# --- OpenStruct#method_missing (issue #1456) ---
 #
 # rbs 4.2 ships no `ostruct` signatures (since Ruby 4.0 `ostruct` is a bundled
 # gem, not a default one), and the gem ships no `sig/`. The only `OpenStruct`
@@ -9,21 +9,32 @@
 # class read as fully declared and `OpenStruct.new(name: "x").name` reported
 # `call.undefined-method`.
 #
-# ostruct 0.6 defines each field as a per-instance singleton method and routes
-# everything else through a private `method_missing` /
-# `respond_to_missing?` pair, which is what this file declares. The
-# per-field accessors cannot be declared on the class at all, so
-# `Rigor::Analysis::CheckRules::CORE_OVERLAY_OPEN_RECEIVERS` also names
+# Upstream: ostruct 0.6.3 `lib/ostruct.rb` defines each field as a
+# per-instance singleton method (`new_ostruct_member!` through
+# `define_singleton_method!`) and answers the rest through
+# `private def method_missing(mid, *args)`, which this file declares. It
+# defines no `respond_to_missing?` of its own (Kernel's answers, and the
+# fields are real singleton methods), so none is declared here.
+#
+# The per-field accessors cannot be declared on the class at all, so
+# `Rigor::Analysis::CheckRules::CORE_OVERLAY_OPEN_RECEIVERS` names
 # `OpenStruct` as an open receiver: an RBS `method_missing` alone does not
-# stop the undefined-method rule. Nothing else is declared here, so a project
-# or collection signature for `OpenStruct` collides with this file only if it
-# declares one of these two hooks too.
+# stop the undefined-method rule. That list is what quiets `rigor check`;
+# this file supplies the declaration the maintainer decision asked for.
+#
+# The declaration sits on a module the class includes, as `process.rbs`
+# does, so a project `sig/` that declares `OpenStruct#method_missing` itself
+# overrides it instead of raising `DuplicatedMethodDefinitionError`.
 #
 # Maintainer decision on #1456 (2026-10-16, option c): this narrow overlay.
 # The general rule for a class declared only by another library's partial
 # reopening is #1978.
-class OpenStruct
-  private def method_missing: (Symbol mid, *untyped args) -> untyped
+module RigorCoreOverlay
+  module OpenStructMissing
+    private def method_missing: (Symbol mid, *untyped args) -> untyped
+  end
+end
 
-  private def respond_to_missing?: (Symbol | String mid, ?bool include_private) -> bool
+class OpenStruct
+  include RigorCoreOverlay::OpenStructMissing
 end

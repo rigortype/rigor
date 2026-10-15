@@ -240,9 +240,10 @@ def ensure_next_in_loop(items)
   end
 end
 
-# The one way the widening reports where the entry binding did not: a
-# widened variable narrows as any untyped value does, so testing it with
-# both `is_a?` and `nil?` leaves `nil` beside `Conn` for the next call.
+# A widened variable narrows as any untyped value does. Testing it with
+# both `is_a?` and `nil?` used to leave `nil` beside `Conn` for the next
+# call; since #1840 (#1875) the merge re-joins those edges to
+# `Dynamic[top]`, so the call stays quiet.
 def rescue_widened_narrowing
   x = Conn.new
   begin
@@ -250,7 +251,7 @@ def rescue_widened_narrowing
     work
   rescue
     if x.is_a?(Conn) then x.close elsif x.nil? then puts "nil" end
-    x.size # WIDENED-NIL
+    x.size
   end
 end
 

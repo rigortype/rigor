@@ -452,9 +452,7 @@ RSpec.describe "Rigor type construction (integration)" do
       reported = harness.diagnostics.reject { |d| d.severity == :info || d.rule.to_s == "call.unresolved-toplevel" }
       expected = [
         *marked_lines(harness, "# GENUINE-UNDEFINED").map { |line| [line, "call.undefined-method"] },
-        *marked_lines(harness, "# GENUINE-FALSEY").map { |line| [line, "flow.always-truthy-condition"] },
-        # The documented residual: a widened variable narrowed by both a class test and `nil?`.
-        *marked_lines(harness, "# WIDENED-NIL").map { |line| [line, "call.possible-nil-receiver"] }
+        *marked_lines(harness, "# GENUINE-FALSEY").map { |line| [line, "flow.always-truthy-condition"] }
       ]
       expect(reported.map { |d| [d.line, d.rule.to_s] }).to match_array(expected)
     end

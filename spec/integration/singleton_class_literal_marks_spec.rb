@@ -318,7 +318,7 @@ RSpec.describe "singleton_class calls with literal names (#1906)", type: :runner
     # puts the constant in the singleton-source set but records neither, so it re-checks no `*::Base` reader.
     it "keys only the constants whose singleton names or side the file rewrote" do
       write("lib/rewrite.rb", "ActiveRecord::Base.include(Mo)\nD.singleton_class.alias_method :o9, :keep\n" \
-                               "E.singleton_class.class_eval { }\n")
+                              "E.singleton_class.class_eval { }\n")
       index = Rigor::Inference::ScopeIndexer.discovered_project_index_incremental(["lib/rewrite.rb"], seed_bundles: {})
       bundle = index.fetch(:bundles).fetch("lib/rewrite.rb")
       session = Rigor::Analysis::IncrementalSession.new(configuration: configuration, paths: paths, cache_store: nil)

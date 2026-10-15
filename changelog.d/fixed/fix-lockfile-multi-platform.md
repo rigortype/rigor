@@ -1,0 +1,1 @@
+- **[rbs]** A gem locked for several platforms (`bundle lock --add-platform`) keeps its shipped `sig/` on every host: the lockfile filter used to remember only the last-listed platform variant, so e.g. `ffi`'s signatures vanished on macOS and every class inheriting `::FFI::Struct` failed to build — thank you @n-rodriguez! ([#1854](https://github.com/rigortype/rigor/pull/1854))

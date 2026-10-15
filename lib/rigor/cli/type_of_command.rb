@@ -220,7 +220,8 @@ module Rigor
       # so probes against files outside the current process's CWD still see the right `sig/` tree.
       # Issue #1700 — an editor buffer is scanned for required features in place of the file it stands for.
       def project_environment(files, configuration, buffer = nil)
-        ProjectEnvironment.build(configuration: configuration, source_files: files,
+        patched = ProjectEnvironment.project_patched_methods(configuration, buffer: buffer)
+        ProjectEnvironment.build(configuration: configuration, source_files: files, project_patched_methods: patched,
                                  feature_sources: ProjectEnvironment.buffer_sources(buffer))
       end
 

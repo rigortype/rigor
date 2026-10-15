@@ -1,0 +1,1 @@
+- **[pre_eval]** A method two `pre_eval:` files declare is now typed as the last-listed declaration, as Ruby runs it, instead of the first, and `pre-eval.duplicate-declaration` is reported on the shadowed earlier declaration ([#1880](https://github.com/rigortype/rigor/pull/1880)).

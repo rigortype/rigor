@@ -87,6 +87,7 @@ module Rigor
       def self.resolve_rule_token(token)
         return nil if token == "all"
         return [LEGACY_RULE_ALIASES.fetch(token)] if LEGACY_RULE_ALIASES.key?(token)
+        return PRE_EVAL_RULES if token == "pre-eval"
         return ALL_RULES.select { |r| r.start_with?("#{token}.") } if RULE_FAMILIES.include?(token)
 
         ALL_RULES.include?(token) ? [token] : []
@@ -654,7 +655,7 @@ module Rigor
       # `dynamic.*`, `rbs.*`, `pre-eval.*`, and any `plugin.`-prefixed id — plugins load dynamically, so
       # their rule vocabulary cannot be enumerated here and under-warning is the FP-safe direction).
       def known_suppression_token?(token)
-        return true if token == "all"
+        return true if %w[all pre-eval].include?(token)
         return true if ALL_RULES.include?(token) || LEGACY_RULE_ALIASES.key?(token) ||
                        RULE_FAMILIES.include?(token) || NON_CHECK_DIAGNOSTIC_IDS.include?(token)
 
@@ -863,29 +864,23 @@ module Rigor
 
         # Is a refinement of `call_node`'s method name into `class_name` (or an ancestor) in effect at the call?
         # Issue #1120 asks it for a method the class lacks. The two argument rules ask
-        # {#refined_redefinition_in_effect?} instead (issue #1740), and this only for a class-object receiver.
-        # Typing the call from the refine body is #1664.
-        # A refinement answers instance-side receivers only: a refined singleton (`refine X.singleton_class`) names
-        # no constant target, so nothing records it. Issue #1673 — the answer is derived from the file's in-effect
-        # refinements ({Inference::InEffectRefinements}), the list the typer reads, with each `using` expanded
-        # through its module's includes (issue #1671).
+        # {#refined_redefinition_in_effect?} instead (issue #1740). Typing the call from the refine body is #1664.
+        # Issue #1752 — a class-object receiver (`kind` `:singleton`) is reached by a refinement of any class or module
+        # on its lookup: `Class`, `Module`, `Object`, `Kernel`, `BasicObject`, or a module it extends. A refined
+        # singleton class (`refine X.singleton_class`) names no constant target, so its rows are class-unknown, which
+        # reach every receiver. Issue #1673 — the answer is derived from the file's in-effect refinements
+        # ({Inference::InEffectRefinements}), the list the typer reads, with each `using` expanded through its
+        # module's includes (issue #1671).
         #
         # ADR-121 WD7 — a module in effect whose refinements Rigor cannot read
         # ({Inference::InEffectRefinements.opaque_module?}: a gem's, one from outside the analysed paths, one with an
         # unreadable `refine`) may refine any class, a class object's included, so the call declines whatever its
-        # receiver. Issue #1796; both argument rules ask this predicate too.
+        # receiver. Issue #1796.
         def refined_method_in_effect?(class_name, call_node, scope, kind, lexical_sites)
           return false if lexical_sites.nil?
           return true if opaque_refinement_in_effect?(call_node, scope, lexical_sites)
 
-          modules =
-            if kind == :instance
-              Inference::InEffectRefinements.refining_modules(scope, class_name, call_node.name)
-            else
-              # ADR-121 WD7 — a row whose class the walk could not name (`refine(k)` with `k` a singleton class)
-              # reaches a class object too.
-              Inference::InEffectRefinements.class_unknown_refining_modules(scope, call_node.name)
-            end
+          modules = Inference::InEffectRefinements.refining_modules(scope, class_name, call_node.name, kind)
           !modules.nil? &&
             lexical_sites.refinements.refinement_active?(call_node.location.start_offset, modules,
                                                          scope.declared_refinements) do |name|
@@ -902,8 +897,8 @@ module Rigor
         #
         # A call with nothing in effect is checked. Otherwise it reports only from positive knowledge: the list
         # carries no unknown marker and no opaque module, and {Inference::RefinedDispatch::OwnMethod} proves the
-        # receiver's own definer answers first. A class-object receiver keeps {#refined_method_in_effect?}'s
-        # answer: its singleton-side levels are not walked yet.
+        # receiver's own definer answers first. Issue #1752 — a class-object receiver (`kind` `:singleton`) walks its
+        # singleton levels: `Integer.sqrt(1, 2)` under `refine Object do def sqrt(a, b)` runs `Integer.sqrt` and raises.
         def refined_redefinition_in_effect?(class_name, call_node, scope, kind, lexical_sites)
           return false if lexical_sites.nil?
 
@@ -911,9 +906,8 @@ module Rigor
           return false if list.empty?
           return true if list.include?(Inference::InEffectRefinements::UNKNOWN)
           return true if opaque_refinement_in_effect?(call_node, scope, lexical_sites)
-          return refined_method_in_effect?(class_name, call_node, scope, kind, lexical_sites) unless kind == :instance
 
-          !Inference::RefinedDispatch::OwnMethod.answers?(scope, class_name, call_node.name, list)
+          !Inference::RefinedDispatch::OwnMethod.answers?(scope, class_name, call_node.name, list, kind: kind)
         end
 
         # The in-effect list at the call as the typer reads it: the lexical activations, each `using` expanded,
@@ -2093,7 +2087,13 @@ module Rigor
         # arm restores the polarity without touching the shared helper:
         # `String | nil` keeps firing, and so does `Dynamic | String | nil` —
         # the nameless arm stays permissive inside the all-arms check, which is
-        # only about the arms' method surface.
+        # only about the arms' method surface. That union no longer arises from
+        # a merge re-joining the narrowed edges of one untyped local, which
+        # binds it back to `Dynamic[top]` (issue #1840,
+        # `Inference::UntypedRejoin`); it still does when the program writes
+        # the `nil` (`x = nil if c`) and no `nil?` edge strips it before the
+        # re-joining merge, or when the arms are not a narrowing of one
+        # untyped value.
         def union_has_nameable_non_nil_arm?(union, scope)
           union.members.any? do |m|
             next false if nil_member?(m)
@@ -2195,7 +2195,8 @@ module Rigor
         # ADR-121 WD7 — a refinement in effect (or one Rigor cannot read) may define the name on one arm's class.
         def refined_on_some_arm?(members, call_node, scope, lexical_sites)
           members.any? do |member|
-            refined_method_in_effect?(concrete_class_name(member), call_node, scope, :instance, lexical_sites)
+            kind = member.is_a?(Type::Singleton) ? :singleton : :instance
+            refined_method_in_effect?(concrete_class_name(member), call_node, scope, kind, lexical_sites)
           end
         end
 

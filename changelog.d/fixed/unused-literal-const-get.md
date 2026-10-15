@@ -1,0 +1,1 @@
+- **[engine]** `rigor unused` resolves a literal `const_get` name at its receiver and the receiver's ancestors before the top level, credits it in the referring file's role, and reads interpolated symbols and `.freeze`d names, so `Finder.const_get(:Params, false)` no longer leaves `Finder::Params` listed as unused. ([#1767](https://github.com/rigortype/rigor/pull/1767))

@@ -1,0 +1,3 @@
+target_ruby: "3.4"
+paths: [lib]
+plugins: [rigor-rbs-inline]

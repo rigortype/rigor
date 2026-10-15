@@ -89,6 +89,307 @@ RSpec.describe Rigor::CLI::UnusedCommand do
     end
   end
 
+  # #1760 — one project root for the whole command: the loaded config's directory, realpath'd.
+  describe "the project root" do
+    def write_helper_project(dir)
+      FileUtils.mkdir_p(File.join(dir, "lib"))
+      FileUtils.mkdir_p(File.join(dir, "test/support"))
+      File.write(File.join(dir, ".rigor.yml"), "paths:\n  - lib\n")
+      File.write(File.join(dir, "lib/helped.rb"), "class Helped\nend\n")
+      File.write(File.join(dir, "lib/loner.rb"), "class Loner\nend\n")
+      File.write(File.join(dir, "test/support/helper.rb"), "Helped.new\n")
+      backdate(dir)
+    end
+
+    def rows(report)
+      report.slice("declared", "candidates", "test_only").transform_values do |value|
+        value.is_a?(Array) ? value.map { |row| row["name"] } : value
+      end
+    end
+
+    it "reads a test helper as test code when run from a subdirectory" do
+      Dir.mktmpdir do |dir|
+        write_helper_project(dir)
+
+        _, report, = run_in(File.join(dir, "test"), "--config=../.rigor.yml")
+
+        expect(rows(report)).to eq("declared" => 2, "candidates" => ["Loner"], "test_only" => ["Helped"])
+      end
+    end
+
+    it "reads the config's project when --config points at another directory" do
+      Dir.mktmpdir do |dir|
+        project = File.join(dir, "proj")
+        write_helper_project(project)
+        elsewhere = File.join(dir, "elsewhere")
+        FileUtils.mkdir_p(elsewhere)
+
+        _, at_root, = run_in(project)
+        _, from_elsewhere, = run_in(elsewhere, "--config=#{project}/.rigor.yml")
+
+        expect(rows(from_elsewhere)).to eq(rows(at_root))
+        expect(rows(at_root)["test_only"]).to eq(["Helped"])
+      end
+    end
+
+    it "reads the whole project when the config is kept in a subdirectory" do
+      Dir.mktmpdir do |dir|
+        FileUtils.mkdir_p(%w[ci lib app spec].map { |sub| File.join(dir, sub) })
+        File.write(File.join(dir, "ci/rigor.yml"), "paths:\n  - ../lib\n")
+        File.write(File.join(dir, "lib/used.rb"), "class Used\nend\n")
+        File.write(File.join(dir, "lib/dead.rb"), "class Dead\nend\n")
+        File.write(File.join(dir, "app/main.rb"), "Used.new\n")
+        File.write(File.join(dir, "spec/dead_spec.rb"), "Dead.new\n")
+        backdate(dir)
+
+        _, report, = run_in(dir, "--config=ci/rigor.yml", "--entry-point=lib/used.rb")
+
+        expect(rows(report)).to eq("declared" => 2, "candidates" => [], "test_only" => ["Dead"])
+        expect(report["roots"]).to eq(1)
+      end
+    end
+
+    # Round 2 of #1888: a root taken as the common ancestor of the config and the analysed paths rose above
+    # the project (a sibling path) or sank below the working directory (a monorepo package's config).
+    def write_file(dir, rel, source)
+      FileUtils.mkdir_p(File.dirname(File.join(dir, rel)))
+      File.write(File.join(dir, rel), source)
+    end
+
+    it "keeps features/ test code when an analysed path lies outside the project" do
+      Dir.mktmpdir do |dir|
+        proj = File.join(dir, "proj")
+        write_file(proj, ".rigor.yml", "paths:\n  - lib\n  - ../shared\n")
+        write_file(proj, "lib/foo.rb", "class Foo\nend\n")
+        write_file(proj, "features/step.rb", "Foo.new\n")
+        write_file(dir, "shared/util.rb", "class Util\nend\n")
+        backdate(dir)
+
+        _, report, = run_in(proj)
+
+        expect(report["test_only"].map { |row| row["name"] }).to eq(["Foo"])
+      end
+    end
+
+    it "does not read a project under a test/ directory as test code when a path lies outside it" do
+      Dir.mktmpdir do |dir|
+        proj = File.join(dir, "test/proj")
+        write_file(proj, ".rigor.yml", "paths:\n  - lib\n  - ../../other/lib\n")
+        write_file(proj, "lib/bar.rb", "class Bar\nend\n")
+        write_file(proj, "lib/main.rb", "Bar.new\n")
+        write_file(dir, "other/lib/o.rb", "class Other\nend\nOther.new\n")
+        backdate(dir)
+
+        _, report, = run_in(proj)
+
+        expect(report["test_only"]).to be_empty
+        expect(report["candidates"].map { |row| row["name"] }).not_to include("Bar")
+      end
+    end
+
+    it "keeps the working directory's references for a package config run from the monorepo root" do
+      Dir.mktmpdir do |dir|
+        write_file(dir, "pkgs/a/.rigor.yml", "paths:\n  - lib\n")
+        write_file(dir, "pkgs/a/lib/a.rb", "class Alib\nend\n")
+        write_file(dir, "pkgs/b/lib/b.rb", "Alib.new\n")
+        backdate(dir)
+
+        _, report, = run_in(dir, "--config=pkgs/a/.rigor.yml")
+
+        expect(report["candidates"]).to be_empty
+      end
+    end
+
+    # Round 3 of #1888: a cwd-relative entry point, and the role of a file read only from the working directory.
+    it "matches an entry point relative to the working directory in a subdirectory run" do
+      Dir.mktmpdir do |dir|
+        write_file(dir, ".rigor.yml", "paths:\n  - pkg/lib\n")
+        write_file(dir, "pkg/lib/entry.rb", "class Entry\n  def go = Worker.new\nend\n")
+        write_file(dir, "pkg/lib/worker.rb", "class Worker\nend\n")
+        write_file(dir, "pkg/lib/lonely.rb", "class Lonely\nend\n")
+        backdate(dir)
+
+        _, report, = run_in(File.join(dir, "pkg"), "--config=../.rigor.yml", "--entry-point=lib/entry.rb")
+
+        expect(report["candidates"].map { |row| row["name"] }).to eq(["Lonely"])
+      end
+    end
+
+    it "reads a working-directory file outside the root by its path below the working directory" do
+      Dir.mktmpdir do |dir|
+        write_file(dir, "proj/.rigor.yml", "paths:\n  - lib\n")
+        write_file(dir, "proj/lib/a.rb", "class A\nend\n")
+        write_file(dir, "spec/tool/use.rb", "A.new\n")
+        backdate(dir)
+
+        _, report, = run_in(File.join(dir, "spec/tool"), "--config=#{dir}/proj/.rigor.yml")
+
+        expect(rows(report)).to eq("declared" => 1, "candidates" => [], "test_only" => [])
+      end
+    end
+
+    # Round 4 of #1888: a spelling the working directory alone used to give must still count.
+    it "matches an entry point written through a symlinked declaration path" do
+      Dir.mktmpdir do |dir|
+        write_file(dir, "ext/eng/lib/eng_entry.rb", "class EngEntry\nend\n")
+        write_file(dir, "proj/.rigor.yml", "paths:\n  - lib\n  - engines/eng/lib\n")
+        write_file(dir, "proj/lib/a.rb", "A = 1\nA\n")
+        FileUtils.mkdir_p(File.join(dir, "proj/engines"))
+        File.symlink(File.join(dir, "ext/eng"), File.join(dir, "proj/engines/eng"))
+        backdate(dir)
+
+        _, report, = run_in(File.join(dir, "proj"), "--entry-point=engines/eng/lib/eng_entry.rb")
+
+        expect(report["candidates"].map { |row| row["name"] }).not_to include("EngEntry")
+      end
+    end
+
+    it "keeps a test helper symlinked from outside the project test code" do
+      Dir.mktmpdir do |dir|
+        write_file(dir, "proj/.rigor.yml", "paths:\n  - lib\n")
+        write_file(dir, "proj/lib/test_thing.rb", "class TestThing\nend\n")
+        write_file(dir, "shared/helper_common.rb", "TestThing.new\n")
+        FileUtils.mkdir_p(File.join(dir, "proj/test"))
+        File.symlink(File.join(dir, "shared/helper_common.rb"), File.join(dir, "proj/test/helper_common.rb"))
+        backdate(dir)
+
+        _, report, = run_in(File.join(dir, "proj"))
+
+        expect(report["test_only"].map { |row| row["name"] }).to eq(["TestThing"])
+      end
+    end
+
+    it "keeps a package's features/ test code when run from the package against an ancestor config" do
+      Dir.mktmpdir do |dir|
+        write_file(dir, "mono/.rigor.yml", "paths:\n  - packages/a/lib\n")
+        write_file(dir, "mono/packages/a/lib/feature_helper.rb", "class FeatureHelper\nend\n")
+        write_file(dir, "mono/packages/a/features/steps.rb", "FeatureHelper.new\n")
+        backdate(dir)
+
+        _, report, = run_in(File.join(dir, "mono/packages/a"), "--config=../../.rigor.yml")
+
+        expect(report["test_only"].map { |row| row["name"] }).to eq(["FeatureHelper"])
+      end
+    end
+
+    # Round 5 of #1888: a realpath through a `test/` directory must not make production code test code.
+    it "reads production files as production when the project's realpath runs through a test/ directory" do
+      Dir.mktmpdir do |dir|
+        proj = File.join(dir, "work/test/proj")
+        write_file(proj, ".rigor.yml", "paths:\n  - lib\n")
+        write_file(proj, "lib/main.rb", "Widget.new\n")
+        write_file(proj, "lib/widget.rb", "class Widget\nend\n")
+        File.symlink(proj, File.join(dir, "proj"))
+        backdate(dir)
+
+        _, report, = run_in(dir, "--config=proj/.rigor.yml")
+
+        expect(report["test_only"]).to be_empty
+        expect(report["candidates"]).to be_empty
+      end
+    end
+
+    it "reads a lib/ file symlinked into the test tree as production" do
+      Dir.mktmpdir do |dir|
+        write_file(dir, ".rigor.yml", "paths:\n  - lib\n")
+        write_file(dir, "lib/main.rb", "Foo.new\n")
+        write_file(dir, "test/support/foo.rb", "class Foo\n  def x = Bar.new\nend\n")
+        write_file(dir, "lib/bar.rb", "class Bar\nend\n")
+        File.symlink(File.join(dir, "test/support/foo.rb"), File.join(dir, "lib/foo.rb"))
+        backdate(dir)
+
+        _, report, = run_in(dir)
+
+        expect(report["test_only"]).to be_empty
+      end
+    end
+
+    # Round 6 of #1888: two reference-only spellings of one file keep both roles.
+    it "keeps a production reference when a test-tree symlink points at its file" do
+      Dir.mktmpdir do |dir|
+        write_file(dir, ".rigor.yml", "paths:\n  - lib\n")
+        write_file(dir, "lib/widget.rb", "class Widget\nend\n")
+        write_file(dir, "db/seeds.rb", "Widget.new\n")
+        FileUtils.mkdir_p(File.join(dir, "spec/support"))
+        File.symlink(File.join(dir, "db/seeds.rb"), File.join(dir, "spec/support/seeds.rb"))
+        backdate(dir)
+
+        _, report, = run_in(dir)
+
+        expect(rows(report)).to eq("declared" => 1, "candidates" => [], "test_only" => [])
+      end
+    end
+
+    # Round 7 of #1888: an analysed test spelling of a file must not hide its production spelling's references.
+    it "keeps a production reference when a spec/ symlink to the same file is analysed" do
+      Dir.mktmpdir do |dir|
+        write_file(dir, ".rigor.yml", "paths:\n  - lib\n  - spec/support\n")
+        write_file(dir, "lib/helper.rb", "Bar.new\n")
+        write_file(dir, "lib/bar.rb", "class Bar\nend\n")
+        FileUtils.mkdir_p(File.join(dir, "spec/support"))
+        File.symlink(File.join(dir, "lib/helper.rb"), File.join(dir, "spec/support/helper.rb"))
+        backdate(dir)
+
+        _, report, = run_in(dir)
+        _, by_argv, = run_in(dir, "spec/support/helper.rb", "lib/bar.rb")
+
+        expect(report["test_only"]).to be_empty
+        expect(by_argv["test_only"]).to be_empty
+      end
+    end
+
+    it "keeps production references when lib/ is analysed through a spec/ directory symlink" do
+      Dir.mktmpdir do |dir|
+        write_file(dir, ".rigor.yml", "paths:\n  - lib\n")
+        write_file(dir, "lib/main.rb", "Widget.new\n")
+        write_file(dir, "lib/widget.rb", "class Widget\nend\n")
+        FileUtils.mkdir_p(File.join(dir, "spec"))
+        File.symlink(File.join(dir, "lib"), File.join(dir, "spec/support"))
+        backdate(dir)
+
+        _, report, = run_in(dir, "spec/support")
+
+        expect(rows(report)).to eq("declared" => 1, "candidates" => [], "test_only" => [])
+      end
+    end
+
+    # Round 8 of #1888: an entry point naming the analysed spelling the report does not print.
+    it "matches an entry point against every analysed spelling of a file" do
+      Dir.mktmpdir do |dir|
+        write_file(dir, ".rigor.yml", "paths:\n  - lib\n  - tools\n")
+        write_file(dir, "lib/entry.rb", "class Entry\n  def x = Used\nend\n")
+        write_file(dir, "lib/used.rb", "class Used\nend\n")
+        FileUtils.mkdir_p(File.join(dir, "tools"))
+        File.symlink(File.join(dir, "lib/entry.rb"), File.join(dir, "tools/entry_cli.rb"))
+        backdate(dir)
+
+        _, report, = run_in(dir, "--entry-point=tools/entry_cli.rb")
+
+        expect(report["candidates"]).to be_empty
+      end
+    end
+
+    it "scans each file once when the project is reached through a symlink" do
+      Dir.mktmpdir do |dir|
+        project = File.join(dir, "proj")
+        write_helper_project(project)
+        File.write(File.join(project, "lib/twin.rb"), "class Twin\nend\nTwin.new\n")
+        link = File.join(dir, "link")
+        File.symlink(project, link)
+        backdate(project)
+
+        allow(Rigor::Analysis::Reachability::Scan).to receive(:call).and_call_original
+        _, through_link, = run_in(link, "--config=#{link}/.rigor.yml")
+        # Four Ruby files, each scanned once — not once under the link's spelling and again under the realpath.
+        expect(Rigor::Analysis::Reachability::Scan).to have_received(:call).exactly(4).times
+        _, direct, = run_in(project)
+
+        expect(rows(through_link)).to eq(rows(direct))
+        expect(through_link["declared"]).to eq(3)
+      end
+    end
+  end
+
   describe "template mentions (ADR-102 WD4)" do
     it "demotes a declaration named inside a longer identifier — substring, not token, semantics" do
       Dir.mktmpdir do |dir|

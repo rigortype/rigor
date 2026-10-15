@@ -1952,19 +1952,20 @@ module Rigor
       # replaces (a refined `String#upcase` must not fold, a refined `map` must not fold per element, a top-level
       # `def` must not bind ahead of a refinement of `Object`, a plugin models the class's own method). An unreadable
       # body, or a list that may hold any refinement, answers `Dynamic[top]`, never the replaced method's signature.
-      # A union receiver is decided per member; a `Dynamic` receiver, a class object and a call no refinement wins
-      # fall through. A call site no refinement is in effect at answers nil at once and records nothing: its answer
-      # cannot change without an edit to its own file.
+      # A union receiver is decided per member; a `Dynamic` receiver and a call no refinement wins fall through. A
+      # class object walks its own lookup (issue #1752): under `refine(Object) { def oo = :o }` a refinement that wins
+      # `Integer.oo` answers `Dynamic[top]` ({#refined_class_object_result}). A call site no refinement is in effect
+      # at answers nil at once and records nothing: its answer cannot change without an edit to its own file.
       #
       # ADR-121 WD7 (A2) — inside the span of an activation that puts an opaque module in effect
-      # ({InEffectRefinements.opaque_module?}), any method of any instance may be replaced, so every instance-receiver
-      # call answers `Dynamic[top]`; a class object falls through, as it does below.
+      # ({InEffectRefinements.opaque_module?}), any method of any object may be replaced, so every call on an instance
+      # or a class object answers `Dynamic[top]`.
       def try_refined_dispatch(node, receiver, arg_types, block_type)
         list = scope.in_effect_refinements(node)
         return nil if list.empty?
 
         InEffectRefinements.record_refinement_names(node.name)
-        return dynamic_top if refined_instance_receiver?(receiver) && opaque_refinement_span?(node, list)
+        return dynamic_top if refined_receiver?(receiver) && opaque_refinement_span?(node, list)
         return nil if scope.discovered_refinements.empty?
 
         refined_indirect_result(node, receiver, list) ||
@@ -2010,6 +2011,9 @@ module Rigor
       def refined_name_for?(receiver, name, list)
         members = receiver.is_a?(Type::Union) ? receiver.members : [receiver]
         members.any? do |member|
+          next !RefinedDispatch.winner(scope, member.class_name, name, list, kind: :singleton).nil? if
+            member.is_a?(Type::Singleton)
+
           class_name = refined_receiver_class_name(member)
           !class_name.nil? && !RefinedDispatch.winner(scope, class_name, name, list).nil?
         end
@@ -2033,11 +2037,11 @@ module Rigor
         InEffectRefinements.opaque_in?(scope, lexical)
       end
 
-      # Does `receiver` (or a member of a union) have a class the refined arm answers for: an instance, not a class
-      # object or `Dynamic`?
-      def refined_instance_receiver?(receiver)
+      # Does `receiver` (or a member of a union) have a lookup the refined arm answers for: an instance of a class,
+      # or a class object (issue #1752), not `Dynamic`?
+      def refined_receiver?(receiver)
         members = receiver.is_a?(Type::Union) ? receiver.members : [receiver]
-        members.any? { |member| !refined_receiver_class_name(member).nil? }
+        members.any? { |member| member.is_a?(Type::Singleton) || !refined_receiver_class_name(member).nil? }
       end
 
       def refined_receiver_result(node, receiver, list, arg_types, block_type)
@@ -2053,6 +2057,9 @@ module Rigor
       end
 
       def refined_member_result(node, receiver, list, arg_types, block_type)
+        return refined_class_object_result(node, receiver, list, arg_types, block_type) if
+          receiver.is_a?(Type::Singleton)
+
         class_name = refined_receiver_class_name(receiver)
         return nil if class_name.nil?
 
@@ -2062,6 +2069,16 @@ module Rigor
 
         refined_body_return(winner, node.name, Type::Combinator.nominal_of(class_name), arg_types, block_type) ||
           dynamic_top
+      end
+
+      # Issue #1752 — a call on a class object, walked through its singleton levels. A refinement that wins answers
+      # `Dynamic[top]`, never its refine body's type: a hook on any ancestor (an RBS-declared `include Singleton`, a
+      # gem concern, `define_singleton_method(:included)`, a `Module#included` patch) can install the class object's
+      # own method where no table sees it, and the body's type then fires downstream on correct code. A walk that finds
+      # no winner keeps the class object's own answer (`Integer.sqrt(16)` stays `Integer`).
+      def refined_class_object_result(node, receiver, list, _arg_types, _block_type)
+        winner = RefinedDispatch.winner(scope, receiver.class_name, node.name, list, kind: :singleton)
+        dynamic_top unless winner.nil?
       end
 
       # The winning refine body's inferred return, re-typed with the receiver's class as `self` and the call's
@@ -2082,8 +2099,9 @@ module Rigor
         nil
       end
 
-      # The class an instance-side receiver is an instance of, or nil for one a refinement does not answer here: a
-      # class object (refinements of singleton classes are not recorded), `Dynamic`, `top`, or a shape with no class.
+      # The class an instance-side receiver is an instance of, or nil for one this instance walk does not answer: a
+      # class object (it walks its own lookup, {#refined_class_object_result}), `Dynamic`, `top`, or a shape with no
+      # class.
       def refined_receiver_class_name(receiver)
         case receiver
         when Type::Nominal, Type::StructInstance, Type::DataInstance then receiver.class_name
@@ -2453,7 +2471,7 @@ module Rigor
         return every_definer_raises_type(raising, receiver, call_node, arg_types, block_type) if def_node.nil?
 
         result = infer_user_method_return(def_node, receiver, arg_types,
-                                          self_fold_safe: fold_safe_call_receiver?(call_node, receiver),
+                                          self_fold_safe: fold_safe_call_receiver?(call_node),
                                           yield_type: block_type)
         return result if result.nil?
 
@@ -2488,11 +2506,11 @@ module Rigor
       # This is only a property of the receiver expression; whether the grant is actually issued also needs
       # a `StructInstance` carrier and a body that survives the self-use scan, both decided in
       # {#build_user_method_body_scope}.
-      def fold_safe_call_receiver?(call_node, receiver)
+      def fold_safe_call_receiver?(call_node)
         return false if call_node.nil?
 
         case call_node.receiver
-        when Prism::CallNode then materialization_call?(call_node.receiver, receiver)
+        when Prism::CallNode then materialization_call?(call_node.receiver)
         when Prism::LocalVariableReadNode then scope.struct_fold_safe?(call_node.receiver.name)
         when nil, Prism::SelfNode then scope.struct_fold_safe?(:self)
         else false
@@ -2502,10 +2520,10 @@ module Rigor
       # Issue #595 — the materialisation test lives ONCE, in
       # [`struct_materialization.rb`](method_dispatcher/struct_materialization.rb), because the direct
       # member-read gate ({MethodDispatcher::StructFolding}`#fresh_receiver?`) needs the identical answer;
-      # see {MethodDispatcher::StructMaterialization.materialization_call?}. It resolves its own `.with`
-      # guard through `Scope`, so neither consumer supplies a lookup and neither can answer differently.
-      def materialization_call?(node, receiver)
-        MethodDispatcher::StructMaterialization.materialization_call?(node, receiver, scope)
+      # see {MethodDispatcher::StructMaterialization.materialization_call?}. A `.with` call is never one
+      # (`Struct` has no `#with`, #1335), so the test needs no lookup from either consumer.
+      def materialization_call?(node)
+        MethodDispatcher::StructMaterialization.materialization_call?(node, scope)
       end
 
       # Module-singleton call resolution (ADR-57 follow-up) — resolves `Foo.<name>` on a `Singleton[Foo]`
@@ -2674,7 +2692,7 @@ module Rigor
       def every_definer_raises_type(defs, receiver, call_node, arg_types, block_type)
         return nil if defs.nil?
 
-        self_fold_safe = fold_safe_call_receiver?(call_node, receiver)
+        self_fold_safe = fold_safe_call_receiver?(call_node)
         defs.each do |def_node|
           result = infer_user_method_return(def_node, receiver, arg_types,
                                             self_fold_safe: self_fold_safe, yield_type: block_type)
@@ -5417,11 +5435,25 @@ module Rigor
         acc, rest = inject_constant_start(members, seed, has_seed)
         return nil if acc.nil?
 
-        rest.each do |element_value|
-          acc = inject_constant_step(block, acc, element_value)
+        captured = inject_captured_bindings(block, rest.map { |value| Type::Combinator.constant_of(value) })
+        rest.each_with_index do |element_value, position|
+          acc = inject_constant_step(block, acc, element_value, captured, position)
           return nil if acc.nil?
         end
         acc
+      end
+
+      # Issue #1332 — the #587 (b) captured-block binding ({#captured_block_bindings}) both inject arms lay under
+      # every step, as the Tuple / Range per-element folds and the per-pair `HashShape` fold do. Without it each
+      # step reads a captured variable at its entry binding, so a body that rebinds or mutates one (`n += 1`,
+      # `log << e`, `cache[:k] ||= e`) pinned the result: `n = 0; [1, 2].inject(0) { |a, e| r = a + n; n += 1;
+      # r }` folded to `0` where Ruby answers `1`. The fixpoint binds the accumulator parameter to `Dynamic[top]`
+      # rather than to a type the inject fixpoint has not converged yet: a captured name that reads the
+      # accumulator widens rather than pins. `element_types` is the constant arm's steps, one position per block
+      # run, which {RepeatedOrWrites} reads; nil for the nominal arm, which marks every repeated site.
+      def inject_captured_bindings(block, element_types, element: nil)
+        element ||= Type::Combinator.union(*element_types)
+        captured_block_bindings(block, [Type::Combinator.untyped, element], element_types: element_types)
       end
 
       # Extracts the receiver's foldable constant values, size-capped before enumeration, or nil to decline.
@@ -5475,9 +5507,9 @@ module Rigor
       # Evaluates the block body once with the running constant accumulator + the next constant element
       # bound to the block params, returning the result when it is a foldable `Constant` within the
       # magnitude cap, else nil to decline the whole fold.
-      def inject_constant_step(block, acc, element_value)
+      def inject_constant_step(block, acc, element_value, captured, position)
         element = Type::Combinator.constant_of(element_value)
-        result = type_block_body_with_param(block, [acc, element])
+        result = type_block_body_with_param(block, [acc, element], captured: captured, position: position)
         return nil unless result.is_a?(Type::Constant)
         return nil unless inject_foldable?(result.value)
         return nil if inject_magnitude_too_large?(result.value)
@@ -5507,13 +5539,14 @@ module Rigor
         seed_acc = has_seed ? seed : element
         return nil if seed_acc.nil?
 
+        captured = inject_captured_bindings(block, nil, element: element)
         converged = BodyFixpoint.converge(
           names: [:__inject_acc__],
           seed_bindings: { __inject_acc__: seed_acc },
           widen: method(:widen_value_pinned),
           evaluate_body: lambda do |bindings|
             acc = bindings[:__inject_acc__]
-            result = type_block_body_with_param(block, [acc, element])
+            result = type_block_body_with_param(block, [acc, element], captured: captured)
             result.nil? ? {} : { __inject_acc__: result }
           end
         )

@@ -97,8 +97,8 @@ test_paths:
   - spec
 
 exclude:
-  - vendor
-  - tmp
+  - "vendor/**"
+  - "tmp/**"
 
 plugins:
   - rigor-actionpack

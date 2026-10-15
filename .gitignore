@@ -11,6 +11,10 @@
 /tmp/
 /vendor/bundle/
 /tool/*/vendor/bundle/
+# `cd nix && bundle update` resolves the package's own Gemfile against the dev
+# shell's relative `BUNDLE_PATH`, so it installs here; `bundix` needs only the
+# lockfile, so nothing tracked depends on this directory.
+/nix/vendor/bundle/
 /result
 /playground/backend/Gemfile.lock
 # `make bench` writes the suggested baseline here (ADR-50 WD4); the

@@ -188,11 +188,11 @@ changes which calls the signature accepts:
 $ rigor sig-gen --diff lib/c.rb
 --- lib/c.rb: C#m
 - def m: (Integer x) -> untyped
-+ def m: (Integer x) -> nil
++ def m: (Integer x) -> Float
 
 --- lib/c.rb: C#n
 - def n: (?) -> untyped
-+ def n: (?) -> nil
++ def n: (?) -> Float
 ```
 
 The `-` line is the declaration the proposal replaces. A method
@@ -523,9 +523,16 @@ Neither does a declaration the body proves as a literal.
 -> String` whose body is the string `"bot"`: the declared
 type is your abstraction over that body, and pinning the
 literal would rewrite a contract every sibling class shares.
-A method no `.rbs` declares is unaffected — the literal is
-still the strictest thing the body proves, and that is what
-gets written.
+A declared `untyped` that you wrote in `sig/` is treated
+the same way for a value literal: an Integer, String or
+Symbol the body proves is widened to its class (`-> 1`
+becomes `-> Integer`, `-> ("S" | nil)` becomes
+`-> (String | nil)`), while `nil`, `true`, `false` and a
+computed `Float` are proposed as they are. An `untyped` that
+only the inline reader synthesizes for a `def` you did not
+annotate keeps the literal, as does a method no `.rbs`
+declares — the literal is still the strictest thing the body
+proves, and that is what gets written.
 
 A comment rather than a `%a{…}` annotation, for three
 reasons: it stays out of the `rigor:v1:` directive namespace

@@ -297,8 +297,13 @@ module Rigor
                      record_dependencies: false, record_self_calls: false, analyze_only: nil,
                      seed_bundles: nil, collect_seed_bundles: false, param_inferred_types: nil,
                      discovery_seed: nil, no_tolerated_effects: false,
-                     restored_run_level_rows: nil, served_per_file_diagnostics: nil)
+                     restored_run_level_rows: nil, served_per_file_diagnostics: nil, on_file_indexed: nil)
         @configuration = configuration
+        # ADR-113 WD2 — `rigor lens` reads a target's seeded index here: called with `(path, parse_result, scope,
+        # index)` for every file this process indexes, after its rules ran and inside the run window, so the reader
+        # sees what `check` saw. A pooled file is indexed in a worker and never reaches it; the incremental session
+        # analyses forced targets with `workers: 0` for that reason.
+        @on_file_indexed = on_file_indexed
         # Issues #796 / #794 — the previous full run's run-level rows, supplied only by
         # {IncrementalSession} on a narrowed run; see {PoolCoordinator#replay_restored_run_level_rows}.
         @restored_run_level_rows = restored_run_level_rows
@@ -431,6 +436,7 @@ module Rigor
         # Issue #1367 — the project's `Inference::GlobalWriteCensus`, which the `global.*` write rules read.
         @project_discovered_global_write_census = Set.new.freeze
         @project_discovered_class_sources = {}.freeze
+        @project_singleton_class_sources = {}.freeze
         # Issue #644 — the cross-file VALUE-constant publication table (`{qualified name => Type::Constant}`,
         # literal writes only) and its per-name write attribution. The first seeds `in_source_constants` on
         # every per-file scope so `FOO = :sym` in one file reads as `:sym` in another; the second seeds
@@ -648,8 +654,8 @@ module Rigor
       # subclasses (`subclass_of:<last segment>`).
       def class_declarations
         result = Hash.new { |hash, key| hash[key] = Set.new }
-        @project_discovered_class_sources.each do |class_name, files|
-          files.each { |file| result[file] << class_name }
+        [@project_discovered_class_sources, @project_singleton_class_sources].each do |sources|
+          sources.each { |class_name, files| files.each { |file| result[file] << class_name } }
         end
         Incremental.add_superclass_edges(result, @project_discovered_class_sources, @project_discovered_superclasses)
         result.transform_values(&:freeze).freeze
@@ -1748,6 +1754,8 @@ module Rigor
         @project_discovered_prepends = discovery.discovered_prepends
         @project_discovered_extends = discovery.discovered_extends
         @project_unpositioned_mixins = discovery.unpositioned_mixins
+        # Issue #1752 — the files that open `class << Const`, read only by {#class_declarations}.
+        @project_singleton_class_sources = discovery.singleton_class_sources
       end
 
       # Internal: builds the deferred cross-file discovery tables at most once per run and adopts them.
@@ -1804,10 +1812,8 @@ module Rigor
       # the pre-pass then saw two writers for every constant a file declares and withheld its publication (#644),
       # and every file was a discovered-not-analysed dependency of the run's cache entry.
       #
-      # The widening decision itself still compares the paths as spelled. `exclude:` patterns match a path as it
-      # is spelled, so until #1576 is fixed the configured absolute `lib` can discover files the argument `lib`
-      # excludes (a relative `lib/gen/**` pattern never matches `/abs/lib/gen/x.rb`), and treating the two as the
-      # same root would drop those files from discovery.
+      # The widening decision itself compares the paths as spelled. `exclude:` patterns apply to both spellings
+      # alike (#1576), so the configured absolute `lib` and the argument `lib` exclude the same files.
       def project_discovery_expansion(paths, expansion)
         return nil unless widen_discovery_to_project?(paths)
 
@@ -2017,7 +2023,8 @@ module Rigor
           template_units: -> { template_units },
           analyze_file: ->(path, environment) { analyze_file(path, environment) },
           restored_run_level_rows: @restored_run_level_rows,
-          feature_sources: -> { required_feature_sources }
+          feature_sources: -> { required_feature_sources },
+          plugin_prepare: -> { @pre_passes.prepare_throwaway_registry }
         )
         @diagnostic_aggregator = DiagnosticAggregator.new(
           configuration: @configuration,
@@ -2063,7 +2070,8 @@ module Rigor
         )
         RunStats.new(
           wall_seconds: Process.clock_gettime(Process::CLOCK_MONOTONIC) - wall_started_at,
-          peak_rss_bytes: RunStats.peak_rss_bytes,
+          # Issue #1529 — read lazily on the summary's first use, so a run that prints none never forks for it.
+          peak_rss_probe: RunStats::CURRENT_PROCESS_PEAK_RSS,
           # #392 — the template units count too: they are files this run parsed and typed, and a stats line
           # that omitted them would under-report exactly the work a views-heavy project added.
           target_files: expansion.fetch(:files).size + template_units.paths.size,
@@ -2176,7 +2184,8 @@ module Rigor
         bad = []
         Array(paths).each do |path|
           if File.directory?(path)
-            files.concat(PathExpansion.directory_files(path, @configuration.exclude_patterns))
+            files.concat(PathExpansion.directory_files(path, @configuration.exclude_patterns,
+                                                       base: @configuration.exclude_base))
           # Editor-mode bypass: the buffer's logical path is treated as a real `.rb` file regardless of
           # on-disk presence — `parse_source` reads bytes from the buffer's physical path. Common case: LSP
           # client editing a brand-new file.
@@ -2595,6 +2604,7 @@ module Rigor
         end
         self_call_misses = self_call_record ? self_call_record.calls : []
         diagnostics = rule_and_plugin_diagnostics(path, parse_result, scope, index, self_call_misses)
+        notify_file_indexed(path, parse_result, scope, index)
         diagnostics + explain_diagnostics(path, parse_result.value, scope)
       rescue Errno::ENOENT => e
         [
@@ -2616,6 +2626,14 @@ module Rigor
             severity: :error
           )
         ]
+      end
+
+      # ADR-113 WD2 — the `on_file_indexed` observer. It reads; an error inside it never changes this file's
+      # diagnostics, so it is contained here rather than reaching {#analyze_file_body}'s crash row.
+      def notify_file_indexed(path, parse_result, scope, index)
+        @on_file_indexed&.call(path, parse_result, scope, index)
+      rescue StandardError
+        nil
       end
 
       # ADR-53 B4 — the built-in node collectors and the plugin node rules share ONE traversal of the file.

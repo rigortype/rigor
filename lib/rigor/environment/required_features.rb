@@ -51,7 +51,8 @@ module Rigor
       #
       # @param sources — path => source text, read in place of that path's file (an editor buffer).
       def for_configuration(configuration, extra_files = [], sources: {})
-        files = Analysis::PathExpansion.ruby_files(configuration.paths, configuration.exclude_patterns)
+        files = Analysis::PathExpansion.ruby_files(configuration.paths, configuration.exclude_patterns,
+                                                   base: configuration.exclude_base)
         scan(files + Array(extra_files).map(&:to_s), sources: sources)
       rescue StandardError
         []
@@ -77,7 +78,8 @@ module Rigor
       # @return path (absolute) => the features that file requires, for every file under the configured paths
       #   that requires any. A long-lived reader (the language server) keeps this and overlays its open buffers.
       def feature_files(configuration)
-        listed = Analysis::PathExpansion.ruby_files(configuration.paths, configuration.exclude_patterns)
+        listed = Analysis::PathExpansion.ruby_files(configuration.paths, configuration.exclude_patterns,
+                                                    base: configuration.exclude_base)
         files = listed.map { |path| File.expand_path(path.to_s) }
         result = files.each_with_object({}) do |path, acc|
           features = memoized_features_in(path)

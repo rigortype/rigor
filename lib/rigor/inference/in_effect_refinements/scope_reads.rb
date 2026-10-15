@@ -29,8 +29,11 @@ module Rigor
         # `module_name`, or nil where none can be read: this file's own refine body first, else one in a file that
         # declares the module (`Scope#discovered_class_sources`), parsed once a run. A gem refinement, a module a
         # `Module.new` write names in another file, or an anonymous module answer nil, which the typed arm reads as
-        # an unreadable body (`Dynamic[top]`). The consumer's `refinement:<name>` edge covers an edit to that body
-        # (`Incremental.changed_refinement_names`).
+        # an unreadable body (`Dynamic[top]`). Issue #1749 — so does a name {RefineDefs::UNDECIDED} in this file or in
+        # any file that declares the module (a `refine` that runs inside a method, or an eval on a constant that
+        # several names denote): which refinement answers depends on an order and a module the walk cannot decide, and
+        # it can replace a module-body `def` of the name wherever it is written, so no body of the name is read. The
+        # consumer's `refinement:<name>` edge covers an edit to that body (`Incremental.changed_refinement_names`).
         def refinement_def(scope, module_name, class_name, method_name)
           refinement_def_with_query(scope, module_name, class_name, method_name).first
         end
@@ -39,17 +42,24 @@ module Rigor
         # found in, or nil for this file's own body (or none): the typed arm re-types a foreign body under that file's
         # in-effect refinements.
         def refinement_def_with_query(scope, module_name, class_name, method_name)
-          own = scope.discovery.in_effect_refinements&.refinement_def(module_name, class_name, method_name)
-          return NO_DEF if own == RefineDefs::BODILESS
-          return [own, nil] if own
-
-          (scope.discovered_class_sources[module_name] || EMPTY).each do |path|
-            query = DefNodeResolver.refinement_query(path)
+          chosen = nil
+          each_declaring_query(scope, module_name) do |query, foreign|
             found = query&.refinement_def(module_name, class_name, method_name)
+            return NO_DEF if found == RefineDefs::UNDECIDED
+            next if found.nil? || chosen
             return NO_DEF if found == RefineDefs::BODILESS
-            return [found, query] if found
+
+            chosen = [found, (query if foreign)]
           end
-          NO_DEF
+          chosen || NO_DEF
+        end
+
+        # This file's query, then one per file that declares `module_name`.
+        def each_declaring_query(scope, module_name)
+          yield scope.discovery.in_effect_refinements, false
+          (scope.discovered_class_sources[module_name] || EMPTY).each do |path|
+            yield DefNodeResolver.refinement_query(path), true
+          end
         end
 
         NO_DEF = [nil, nil].freeze
@@ -138,35 +148,26 @@ module Rigor
         # define any name), and a row whose class the walk could not name ({.class_wildcard_key?}), which reaches
         # every receiver.
         #
+        # Issue #1752 — `kind: :singleton` asks for the class object `class_name`: a refinement of any class or module
+        # on its lookup reaches it (`Class`, `Module`, `Object`, `Kernel`, `BasicObject`, a module it or a superclass
+        # extends; {RefinedDispatch::ClassObject.reach}). Where that lookup cannot be read, every row counts whose class
+        # a class object may reach ({RefinedDispatch::ClassObject.reachable?}).
+        #
         # ADR-46 — the answer is a function of every refinement of this name in the project, so the consumer
         # depends on the name whichever way it answers; a refine body edited in another file must re-check it
         # (`IncrementalSession#refinement_affected`). It also depends on the wildcard rows (`refinement:*`).
-        def refining_modules(scope, class_name, method_name)
+        def refining_modules(scope, class_name, method_name, kind = :instance)
           record_refinement_names(method_name)
           refinements = scope.discovered_refinements
           return nil if refinements.empty?
 
+          reaches = receiver_reach(scope, class_name, kind)
           modules = nil
           refinements.each do |refined, methods|
             names = methods[method_name]
             unread = methods[WILDCARD]
             next if names.nil? && unread.nil?
-            next unless refined_receiver_class?(scope, class_name, refined) || class_wildcard_key?(scope, refined)
-
-            modules = (modules || []).concat(names || EMPTY, unread || EMPTY)
-          end
-          modules
-        end
-
-        # ADR-121 WD7 — {.refining_modules} for a receiver the class rows do not reach (a class object): only the rows
-        # whose class the walk could not name ({.class_wildcard_key?}), for the name or as a names-wildcard.
-        def class_unknown_refining_modules(scope, method_name)
-          record_refinement_names(method_name)
-          modules = nil
-          scope.discovered_refinements.each do |refined, methods|
-            names = methods[method_name]
-            unread = methods[WILDCARD]
-            next if (names.nil? && unread.nil?) || !class_wildcard_key?(scope, refined)
+            next unless reaches.call(refined) || class_wildcard_key?(scope, refined)
 
             modules = (modules || []).concat(names || EMPTY, unread || EMPTY)
           end
@@ -183,18 +184,37 @@ module Rigor
         end
 
         # ADR-121 WD7 — is the refined-class key `refined` a class the walk could not name: the wildcard, or (A6) a
-        # name no class declaration or RBS knows that a project constant write binds (`K = String; refine(K)`), whose
-        # value is the class refined. A constant nothing binds (a gem's class with no RBS) keeps a normal row, which
-        # matches no receiver.
+        # name no class declaration or RBS knows, of which some segment is a constant a write binds: a project
+        # constant write (`K = String; refine(K)`), by the last segment the project's census keys writes on, or one an
+        # opted-in gem's files make (`DependencySourceInference::Index#bound_constant?`, issue #1814), by the name the
+        # write binds, asked for each prefix of the key (`Shared::Target` for `module Shared; Target = String; end` in
+        # a gem; `Pag::Enc` for the gem's own `module Pag; Enc = ::Encoding; refine(Enc::Converter)`), so a gem
+        # constant that merely shares a core class's name (`Names::String`) moves no sibling key (`Ext::String`).
+        # Every segment counts, not only the last, so a prefix alias (`Enc = ::Encoding; refine(Enc::Converter)`,
+        # #1815) reads the same way. A key that is a core or declared class never moves, whatever a file writes under
+        # its name. A constant nothing binds (a gem's class with no RBS) keeps a normal row, which matches no receiver.
+        # Each segment is a `constant:` dependency, so a file that starts or stops binding any of them re-checks the
+        # consumer.
         def class_wildcard_key?(scope, refined)
           return true if refined == WILDCARD
           return false if scope.discovered_classes.key?(refined) || scope.environment&.class_known?(refined)
 
+          segments = refined.split("::").reject(&:empty?)
           if Analysis::DependencyRecorder.active?
-            Analysis::DependencyRecorder.read_last_segment(:constant, refined)
             Analysis::DependencyRecorder.read_last_segment(:class, refined)
+            segments.each { |segment| Analysis::DependencyRecorder.read_last_segment(:constant, segment) }
           end
-          !scope.bound_constant_names(refined).empty?
+          segments.any? { |segment| !scope.bound_constant_names(segment).empty? } || gem_bound_key?(scope, segments)
+        end
+
+        # The gem half of {.class_wildcard_key?}: does an opted-in gem bind some prefix of the key (issue #1814)? A
+        # leading `Object::` spells the top level (`Object::Shared::Target` is `Shared::Target`), so it is dropped.
+        def gem_bound_key?(scope, segments)
+          index = scope.environment&.dependency_source_index
+          return false if index.nil? || !index.binds_constants?
+
+          segments = segments.drop_while { |segment| segment == "Object" }
+          segments.each_index.any? { |i| index.bound_constant?(segments[0..i].join("::")) }
         end
 
         private
@@ -226,6 +246,19 @@ module Rigor
 
           scope.discovered_refinements.each_value.any? do |methods|
             methods.each_value.any? { |modules| modules.include?(name) }
+          end
+        end
+
+        # Does a row keyed on a refined class reach the receiver? A class object's lookup is read once, on the first
+        # row that asks.
+        def receiver_reach(scope, class_name, kind)
+          return ->(refined) { refined_receiver_class?(scope, class_name, refined) } unless kind == :singleton
+
+          reach = nil
+          lambda do |refined|
+            reach ||= [RefinedDispatch::ClassObject.reach(scope, class_name)]
+            names = reach.first
+            names.nil? ? RefinedDispatch::ClassObject.reachable?(scope, refined) : names.include?(refined)
           end
         end
 

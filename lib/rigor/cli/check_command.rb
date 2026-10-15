@@ -72,6 +72,7 @@ module Rigor
         )
         runner = invocation.runner
         raw_result = invocation.result
+        settle_run_stats(raw_result.stats)
         result = apply_baseline_filter(raw_result, configuration, options)
 
         coverage = compute_coverage(runner, configuration, options)
@@ -180,9 +181,9 @@ module Rigor
       # A plain `--incremental` run the session would answer as a warm recheck and write a slot for. Every other
       # shape declines, and the full path handles it exactly as before: an editor buffer (never saved), `--no-cache`
       # (no store to hold a slot), `--verify-incremental`, a worker pool (the session writes no slot for one: a
-      # worker's plugin reads never reach the process that records them), and `--explain`, which the session
-      # ignores today (#1533) — the slot is keyed without it, so the probe declines rather than answer for a flag
-      # its writer never saw. The rest mirror the plain probe: `--coverage`, `--cache-stats` and the
+      # worker's plugin reads never reach the process that records them), and `--explain` (#1533: the session
+      # writes no slot for it — the slot key has no explain slot — so the probe declines rather than answer for a
+      # flag its writer never saw). The rest mirror the plain probe: `--coverage`, `--cache-stats` and the
       # `RIGOR_*_TRACE` probes each want the full path's own output.
       def incremental_run_hit_eligible?(configuration, options, buffer)
         options.fetch(:incremental) && buffer.nil? &&
@@ -195,6 +196,7 @@ module Rigor
       # The tail {#run_incremental_check} gives a warm run, from the slot's answer: the same banner, baseline
       # filter, output and exit code. No fact-surface note, since a warm run never has one.
       def finalize_incremental_hit(hit, configuration, options)
+        # The slot is written only for a run whose every row still validates, so nothing was re-analyzed.
         report_incremental_run(true, hit.file_count)
         write_incremental_result(hit.result.diagnostics, configuration, options)
       end
@@ -267,8 +269,8 @@ module Rigor
         # Every other file forms the re-analyzed subset, so the run exercises BOTH the subset-analysis path and the
         # cache-serving path.
         subset = analyzed.each_with_index.select { |_, index| index.even? }.map(&:first)
-        incremental = normalize_diagnostics(session.reanalyze_subset(subset))
-        full = normalize_diagnostics(verify_full_diagnostics(configuration, paths))
+        incremental = session.reanalyze_subset(subset).map(&:to_h)
+        full = verify_full_diagnostics(configuration, paths, collect_stats: options.fetch(:stats)).map(&:to_h)
 
         report_verify_incremental(incremental, full, subset_size: subset.size, total: analyzed.size,
                                                      format: options.fetch(:format))
@@ -288,10 +290,11 @@ module Rigor
                         nil
                       else
                         Cache::IncrementalSnapshot.fingerprint(
-                          configuration: configuration, roots: paths || configuration.paths
+                          configuration: configuration, roots: paths || configuration.paths,
+                          explain: options.fetch(:explain)
                         )
                       end
-        snapshot = Cache::IncrementalSnapshot.new(root: cache_root)
+        snapshot = Cache::IncrementalSnapshot.new(root: cache_root, explain: options.fetch(:explain))
         store = incremental_cache_store(configuration, options, cache_root)
         session = Analysis::IncrementalSession.new(
           configuration: configuration, paths: paths,
@@ -300,7 +303,7 @@ module Rigor
           # (CLI `--workers` > `RIGOR_RACTOR_WORKERS` > `parallel.workers:` > 0) so the recheck's closure
           # re-analysis parallelises; the fork pool marshals dependency records back so the graph is sound.
           workers: CheckRunnerFactory.resolve_workers(options, configuration),
-          buffer: buffer
+          buffer: buffer, explain: options.fetch(:explain)
         )
 
         return run_editor_mode_option_b(session, snapshot, fingerprint, configuration, options) if buffer
@@ -309,7 +312,8 @@ module Rigor
         # The banner's file count comes from the session's analyzed set (cold analyses all; a warm recheck's
         # `@analyzed` advances to the current file set), so a dedicated probe Runner + `Dir.glob` is no longer
         # built just to size the banner (recon §3 — the analysis tree was expanded three times per recheck).
-        report_incremental_run(warm, session.analyzed_files.size)
+        # A warm banner reports the recheck's own sets (#1526), which only the session knows.
+        report_incremental_run(warm, session.analyzed_files.size, recheck: session.last_recheck)
         emit_incremental_fact_surface_notes(session)
         write_incremental_cache_stats(session, cache_root, store, options.fetch(:format)) if
           options.fetch(:cache_stats)
@@ -317,9 +321,47 @@ module Rigor
         write_incremental_result(diagnostics, configuration, options)
       end
 
-      def report_incremental_run(warm, file_count)
-        @err.puts("rigor: --incremental #{warm ? 'warm — reused cached diagnostics' : 'cold — full analysis'} " \
-                  "(#{file_count} files)")
+      # #1526 — a warm banner says how many of the analysed files the recheck re-analysed, and why: `changed` is the
+      # edited set, `added` / `removed` the structural delta, and the rest came from the snapshot. A run served from
+      # the run-result slot has no recheck, which means nothing changed: every file is reused.
+      def report_incremental_run(warm, file_count, recheck: nil)
+        body = if warm
+                 "warm — #{warm_recheck_summary(file_count, recheck)}"
+               else
+                 "cold — full analysis (#{pluralize(file_count, 'file')})"
+               end
+        @err.puts("rigor: --incremental #{body}")
+      end
+
+      # The warm clause. `file_count` is the analysed set M (the subset under a path argument); re-analysed files
+      # are M minus the reused set, which includes files invalidated by inferred-parameter changes (ADR-67), not only
+      # the edited closure. View templates are not in M: the recheck re-runs every one, so they are appended as their
+      # own count rather than folded into the file counts.
+      def warm_recheck_summary(file_count, recheck)
+        reused = recheck ? recheck.reused.size : file_count
+        # Current files are either reused or re-analysed (the recheck's `analyze_set`), so the count is taken from
+        # the reused set rather than `affected`, which can also name files that were removed.
+        analyzed = file_count - reused
+        head = "re-analysed #{analyzed} of #{pluralize(file_count, 'file')}"
+        head += " (#{change_counts(recheck).join(', ')})" if recheck && !change_counts(recheck).empty?
+        head += reuse_clause(analyzed, reused)
+        templates = recheck ? recheck.templates : 0
+        templates.positive? ? "#{head}, plus #{pluralize(templates, 'view template')}" : head
+      end
+
+      def change_counts(recheck)
+        { "changed" => recheck.changed.size, "added" => recheck.added.size, "removed" => recheck.removed.size }
+          .filter_map { |label, count| "#{count} #{label}" if count.positive? }
+      end
+
+      def reuse_clause(analyzed, reused)
+        return ", reused all" if analyzed.zero?
+
+        reused.zero? ? "" : ", reused the rest"
+      end
+
+      def pluralize(count, noun)
+        "#{count} #{count == 1 ? noun : "#{noun}s"}"
       end
 
       # The incremental tail, shared by the full path and the ADR-45 WD2 slot hit so a served run prints exactly
@@ -366,17 +408,30 @@ module Rigor
 
       # ADR-88 WD1 — a one-line stderr note when the plugin fact surface (an ADR-9 fact, an ADR-60 producer
       # value, or an `incremental_state_fingerprint` hook) forced a full run: either it CHANGED since the
-      # snapshot (a Sorbet sig edit, a schema change) or a contributing plugin declares NO fingerprint surface
-      # (opaque — a full run every invocation). Both are the sound direction; the note explains why a recheck
-      # was not warm.
+      # snapshot (a Sorbet sig edit, a schema change) or a plugin is opaque to the fingerprint (a full run every
+      # invocation): it contributes types and declares NO fingerprint surface, or a value it declares cannot be
+      # digested. Each opaque plugin's reason is worded per {PluginFactFingerprint::OpaqueReason}, and an
+      # undigestible value is named. Both are the sound direction; the note explains why a recheck was not warm.
       def emit_incremental_fact_surface_notes(session)
-        opaque = session.opaque_plugin_ids
-        unless opaque.empty?
-          @err.puts("rigor: --incremental plugin#{'s' unless opaque.size == 1} #{opaque.sort.join(', ')} " \
-                    "contribute call-site types with no incremental fingerprint surface; the snapshot cannot " \
-                    "be reused (full analysis every run).")
+        reasons = session.opaque_reasons
+        surfaceless = reasons.keys.select { |id| reasons.fetch(id).kind == :no_surface }.sort
+        unless surfaceless.empty?
+          many = surfaceless.size > 1
+          @err.puts("rigor: --incremental plugin#{'s' if many} #{surfaceless.join(', ')} " \
+                    "contribute#{'s' unless many} call-site types with no incremental fingerprint surface; " \
+                    "the snapshot cannot be reused (full analysis every run).")
         end
-        return unless session.fact_surface_invalidated? && opaque.empty?
+        reasons.each do |id, reason|
+          next if reason.kind == :no_surface
+
+          @err.puts("rigor: --incremental #{reason.describe(id)}; the snapshot cannot be reused " \
+                    "(full analysis every run).")
+        end
+        if session.fact_store_unreadable?
+          @err.puts("rigor: --incremental the plugin fact store could not be read; the snapshot cannot be reused " \
+                    "(full analysis every run).")
+        end
+        return unless session.fact_surface_invalidated? && !session.opaque_fact_surface?
 
         @err.puts("rigor: --incremental plugin fact surface changed since the snapshot; ran a full analysis.")
       end
@@ -388,8 +443,10 @@ module Rigor
       def write_incremental_cache_stats(session, cache_root, store, format)
         write_cache_stats(cache_root, store, format)
         status =
-          if !session.opaque_plugin_ids.empty?
-            "opaque (#{session.opaque_plugin_ids.sort.join(', ')})"
+          if session.opaque_fact_surface?
+            verdicts = session.opaque_reasons.map { |id, reason| "#{id}: #{reason.summary}" }
+            verdicts << "fact store: could not be read" if session.fact_store_unreadable?
+            "opaque (#{verdicts.join('; ')})"
           elsif session.fact_surface_invalidated?
             "changed — snapshot invalidated"
           else
@@ -398,36 +455,70 @@ module Rigor
         side_output(format).puts("  plugin fact surface: #{status}")
       end
 
-      def verify_full_diagnostics(configuration, paths)
-        runner = Analysis::Runner.new(configuration: configuration, cache_store: nil)
+      def verify_full_diagnostics(configuration, paths, collect_stats: true)
+        runner = Analysis::Runner.new(configuration: configuration, cache_store: nil, collect_stats: collect_stats)
         (paths ? runner.run(paths) : runner.run).diagnostics
       end
 
-      def normalize_diagnostics(diagnostics)
-        diagnostics.map(&:to_h).sort_by do |hash|
-          [hash["path"].to_s, hash["line"].to_i, hash["column"].to_i, hash["rule"].to_s, hash["message"].to_s]
-        end
-      end
-
+      # Issue #1542 — the rows are compared as a multiset over every field each row carries, so two rows that tie on
+      # the sort key but differ in severity, or a duplicated row, are a set mismatch and never a silent 0/0. Only when
+      # the multisets agree is the order compared, and an order mismatch is reported as its own failure, with the first
+      # index at which the two lists diverge, so a set regression and an order regression stay distinguishable.
+      #
       # The OK line follows the same rule as the other side outputs (#493) — stdout under `text`, stderr
       # under a machine format. The FAILED branch below has always gone to stderr: it is a failure
       # report, and a run that produced one has no valid document to protect anyway.
       def report_verify_incremental(incremental, full, subset_size:, total:, format: "text")
-        if incremental == full
-          side_output(format).puts("rigor: --verify-incremental OK — incremental " \
-                                   "(#{subset_size}/#{total} files re-analyzed, rest from cache) " \
-                                   "matches full (#{full.size} diagnostics)")
-          return 0
-        end
+        return report_verify_set_mismatch(incremental, full) unless incremental.tally == full.tally
+        return report_verify_order_mismatch(incremental, full) unless incremental == full
 
-        only_incremental = incremental - full
-        only_full = full - incremental
+        side_output(format).puts("rigor: --verify-incremental OK — incremental " \
+                                 "(#{subset_size}/#{total} files re-analyzed, rest from cache) " \
+                                 "matches full (#{full.size} diagnostics)")
+        0
+      end
+
+      # The rows one side has more of than the other, counted by multiplicity: [x, x, y] against [x, y, y] has one
+      # extra x on the left and one extra y on the right.
+      def multiset_difference(left, right)
+        budget = right.tally
+        left.reject do |row|
+          next false unless budget.fetch(row, 0).positive?
+
+          budget[row] -= 1
+          true
+        end
+      end
+
+      def report_verify_set_mismatch(incremental, full)
+        only_incremental = multiset_difference(incremental, full)
+        only_full = multiset_difference(full, incremental)
         @err.puts("rigor: --verify-incremental FAILED — incremental and full diagnostics differ.")
         @err.puts("  incremental-only: #{only_incremental.size}, full-only: #{only_full.size}")
         (only_incremental + only_full).first(10).each do |hash|
-          @err.puts("    #{hash['path']}:#{hash['line']}:#{hash['column']}: [#{hash['rule']}] #{hash['message']}")
+          @err.puts("    #{diagnostic_location(hash)}")
         end
         1
+      end
+
+      def report_verify_order_mismatch(incremental, full)
+        index = (0...incremental.size).find { |i| incremental[i] != full[i] }
+        @err.puts("rigor: --verify-incremental FAILED — same set, different order.")
+        @err.puts("  incremental and full report the same #{full.size} diagnostics in a different order; " \
+                  "first divergence at index #{index}:")
+        @err.puts("    incremental: #{diagnostic_location(incremental[index])}")
+        @err.puts("    full:        #{diagnostic_location(full[index])}")
+        1
+      end
+
+      # Severity, source family and the optional fields a row may carry, so two rows that differ only in one of them
+      # never print as the same line.
+      def diagnostic_location(hash)
+        extra = %w[receiver_type method_name project_definition_site].filter_map do |key|
+          " #{key}=#{hash[key]}" if hash.key?(key)
+        end
+        "#{hash['path']}:#{hash['line']}:#{hash['column']}: #{hash['severity']} [#{hash['rule']}] " \
+          "(#{hash['source_family']}) #{hash['message']}#{extra.join}"
       end
 
       # ADR-22 slice 5 — the `--baseline-strict` CI gate. When the flag is set, ANY baseline drift fails the run — not
@@ -689,6 +780,7 @@ module Rigor
         data = data.dup
         data["plugins"] = inject_treat_all_as_inline_rbs(Array(data["plugins"]))
         Configuration.new(Configuration::DEFAULTS.merge(data), effects_key_present, target_ruby_key_present)
+                     .with_exclude_base(path && File.exist?(path) ? File.dirname(path) : nil)
       end
 
       # ADR-50 § WD2 — applies the `--bleeding-edge[=ids]` / `--no-bleeding-edge` CLI selection over the configured
@@ -723,6 +815,13 @@ module Rigor
         else
           out.puts("Cache already empty: #{cache_root}")
         end
+      end
+
+      # Issue #1529 — reads the run's peak RSS straight after the analysis, before coverage or any output, so the
+      # figure the summary prints (and the JSON `stats` block carries) covers the analysis alone. A nil `stats`
+      # (`--no-stats`, or a run served from a cache) reads nothing.
+      def settle_run_stats(stats)
+        stats&.peak_rss_bytes
       end
 
       # Emits the {Analysis::RunStats} summary to STDERR so it doesn't interleave with the diagnostic stream (text or

@@ -310,21 +310,61 @@ module Rigor
 
       # The mutation sites under `body` whose reads name a variable {.captured_target?} accepts, keyed by name.
       # The block yields the names the enclosing construct introduces, asked only when a local site is found.
+      #
+      # A site whose receiver is a body local that aliases a capture (`l2 = log; l2 << e`) mutates that capture's
+      # object, so it is attributed to the capture as well ({.aliased_captures}): left out, the next iteration
+      # read `log` at its entry `[]` and `[1, 2].inject(0) { |a, e| r = a + log.size; l2 = log; l2 << e; r }`
+      # folded to `0` where Ruby answers `1` (issue #1332).
       def body_mutation_sites(body, base_scope, non_locals, &)
         sites = nil
         evaluator = nil
+        aliases = nil
         Source::NodeWalker.each_with_ancestors(body) do |descendant, ancestors|
           # A callee is resolved in the call-site scope, as the straight-line callee floor resolves it.
           site = mutation_site(descendant) { evaluator ||= StatementEvaluator.new(scope: base_scope) }
           next if site.nil?
 
           site_reads(site).each do |read|
-            next unless captured_target?(read, ancestors, base_scope, non_locals, &)
-
-            ((sites ||= {})[read.name] ||= []) << site
+            targets = captured_target?(read, ancestors, base_scope, non_locals, &) ? [read] : []
+            if read.is_a?(Prism::LocalVariableReadNode)
+              aliases ||= local_aliases(body)
+              targets.concat(aliased_captures(read.name, aliases, base_scope, non_locals, Set.new, &))
+            end
+            targets.each { |target| ((sites ||= {})[target.name] ||= []) << site }
           end
         end
         sites || NO_SITES
+      end
+
+      # `{ name => [[read, ancestors], ...] }`: every variable read a local write under `body` may store
+      # ({ReceiverAlias.candidates} of its value), with the ancestors {.captured_target?} resolves it against.
+      def local_aliases(body)
+        aliases = {}
+        Source::NodeWalker.each_with_ancestors(body) do |node, ancestors|
+          next unless node.is_a?(Prism::LocalVariableWriteNode) || node.is_a?(Prism::LocalVariableOrWriteNode)
+
+          ReceiverAlias.candidates(node.value).each do |read|
+            (aliases[node.name] ||= []) << [read, ancestors + [node]]
+          end
+        end
+        aliases
+      end
+
+      # The captured reads the local `name` may alias, followed through local-to-local copies (`l3 = l2 = log`).
+      # It over-approximates — a write in any branch, or in a nested scope reusing the name, counts — which only
+      # widens a capture's binding.
+      def aliased_captures(name, aliases, base_scope, non_locals, visited, &)
+        return [] unless visited.add?(name)
+
+        aliases.fetch(name, NO_NAMES).flat_map do |read, ancestors|
+          if captured_target?(read, ancestors, base_scope, non_locals, &)
+            [read]
+          elsif read.is_a?(Prism::LocalVariableReadNode)
+            aliased_captures(read.name, aliases, base_scope, non_locals, visited, &)
+          else
+            NO_NAMES
+          end
+        end
       end
 
       # The mutation site `node` is — the node itself, or a {UnknownStoreWidening::CalleeStore} for a self-call

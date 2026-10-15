@@ -82,6 +82,10 @@ ALLOWED_ANCESTRY_WALKERS = {
   "lib/rigor/inference/method_dispatcher/rbs_dispatch.rb#each_source_ancestor_candidate" =>
     "yields every candidate spelling to three shadow guards and files no ADR-46 edge; two guards are unions, " \
     "the third (`allowed_rbs_complete_ancestor`) is a breadth-first first-definer walk deferred to #1572",
+  "lib/rigor/inference/refined_dispatch/class_object.rb#project_levels" =>
+    "existential over each level's own `extend` edges (does the class record one the chain did not place on its " \
+    "level?), read to mark that level of a class object's refinement walk `mixed` and withhold: the tables record " \
+    "`class << self; prepend` as an `extend`, whose position the chain cannot know; answers no definer (#1752)",
   "plugins/rigor-alba/lib/rigor/plugin/alba/resource_index.rb#resource_chain?" =>
     "existential over the project's own superclass chain (does any ancestor `include Alba::Resource`), read " \
     "from the plugin's cached file scan, which has no Scope or discovery tables to build a chain from; " \

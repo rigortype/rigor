@@ -842,16 +842,26 @@ RSpec.describe Rigor::Inference::DefinerResolution do # rubocop:disable RSpec/Sp
         "a plain `self.included` hook defining on the includer" =>
           "module H; def h = 1; def self.included(b) = b.define_singleton_method(:x) { :late }; end\n" \
           "class C; def self.x = :own; include H; end",
-        "`singleton_class.class_eval { def x }`" =>
-          "class C; def self.x = :own; singleton_class.class_eval { def x = :late }; end",
-        "a singleton `alias_method`" =>
-          "class C; def self.late = :late; def self.x = :own; singleton_class.alias_method :x, :late; end",
         "`class << self; attr_accessor :x`" =>
           "class C; def self.x = :own; class << self; attr_accessor :x; end; end; C.x = :late"
       }.each do |label, source|
         it "pins an own def read past #{label} (wrong body: Ruby runs the later definition)" do
           expect(ruby_singleton("#{source}\n", "C", :x)).to eq([%w[#<Class:C>], "#<Class:C>", ":late"])
           expect(singleton(scope_for("#{source}\n"), "C", :x)).to eq("C")
+        end
+      end
+
+      # Closed by #1752: a surface call on `singleton_class` (`class_eval`, `alias_method`) leaves the singleton side
+      # unpositioned, so the read declines instead of answering the wrong body.
+      {
+        "`singleton_class.class_eval { def x }`" =>
+          "class C; def self.x = :own; singleton_class.class_eval { def x = :late }; end",
+        "a singleton `alias_method`" =>
+          "class C; def self.late = :late; def self.x = :own; singleton_class.alias_method :x, :late; end"
+      }.each do |label, source|
+        it "declines an own def read past #{label} (wrong body: Ruby runs the later definition)" do
+          expect(ruby_singleton("#{source}\n", "C", :x)).to eq([%w[#<Class:C>], "#<Class:C>", ":late"])
+          expect(singleton(scope_for("#{source}\n"), "C", :x)).to eq(:unknown)
         end
       end
 

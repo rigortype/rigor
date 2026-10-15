@@ -123,12 +123,22 @@ confidence instead of reading a flat list.
 
 An interpolated name is bounded by where its lookup starts and by its literal head. A
 `const_get` starts at its receiver — the enclosing declaration when the receiver is implicit
-— and also at the top level unless it passes `inherit = false`; a head that does not end in
-`::` is the start of a name, so `const_get("V#{version}")` inside `Migration` demotes every
-`Migration::V*`. A name built in a local variable first is read through its assignments.
-Reading every interpolated head as a top-level namespace demoted nothing on GitLab's
-`Migration[2.2]`, and its whole version family was a false candidate
-([#1734](https://github.com/rigortype/rigor/issues/1734)).
+— and, unless it passes `inherit = false`, also at the receiver's superclass chain and mixins
+and at the top level; a head that does not end in `::` is the start of a name, so
+`const_get("V#{version}")` inside `Migration` demotes every `Migration::V*`. A name built in
+a local variable first is read through its assignments. Reading every interpolated head as a
+top-level namespace demoted nothing on GitLab's `Migration[2.2]`, and its whole version
+family was a false candidate ([#1734](https://github.com/rigortype/rigor/issues/1734)).
+
+A literal `const_get` is a reference looked up in the same order. When the receiver declares
+the name, that is the answer: resolving it at the top level alone left the receiver's own
+constant a false candidate and kept a dead same-named top-level one alive. Past the receiver
+the reading is approximate — it resolves an ancestor as written and counts `extend` — so a
+name found only through an ancestor keeps every scope an ancestor could be and the top level.
+Where the walk cannot name `self` — inside any block, a `def Other.x`, a `class << Other` — the
+literal is read both at the enclosing declaration and at the top level; a constant receiver
+that resolves only in part keeps the top-level reading
+([#1761](https://github.com/rigortype/rigor/issues/1761)).
 
 ### WD5 — Whole-project only; `--incremental` is refused, not absorbed
 
@@ -161,6 +171,16 @@ artifacts from a single initializer.
 read — pure artifacts on two of three targets. Reading a file to harvest references is far
 cheaper than type-checking it, and the report MUST take the wider corpus.
 
+The wider corpus, the template scan, the file roles and `--entry-point` matching all read one
+project root, realpath'd: the loaded config file's directory, or the working directory when
+there is none or the config sits below it (`ci/rigor.yml`). The root never rises above either,
+so the role rules keep reading the project; the working directory's files are read for
+references too, so the corpus is never narrower than the working directory alone. A file is
+parsed once however it is spelled, but each spelling keeps its references under its own role,
+and its declarations are taken once, from the analysed spelling the report prints; the scan
+cache keys on the root and the working directory
+([#1760](https://github.com/rigortype/rigor/issues/1760)).
+
 ### WD8 — A reference carries its referrer's role
 
 A class referenced only from its own spec is dead production code with a live test.
@@ -173,8 +193,10 @@ So an edge in the reference graph MUST carry the **role of the file it came from
 category rather than a bucket boundary. This is a data-model decision, not a filter: the
 role has to be recorded when the edge is, so it cannot be retrofitted after #349.
 
-Test role is decided from the path relative to the directory `rigor unused` runs in, the same root its
-reference glob and `--entry-point` use (a directory above that root never counts): `spec/` and `test/`
+Test role is decided from the path relative to the project root of WD7, and a file is test code
+when any spelling of it as written below the root or the working directory reads as test code; its
+realpath is read only when no written spelling lies below either, so a symlink whose target runs
+through `test/` does not make production code test code (a directory above either never counts): `spec/` and `test/`
 anywhere below it, `*_spec.rb` / `*_test.rb`, and the conventional end-to-end trees `qa/`, `e2e/` and
 `features/` at that root (#1751; root-only because
 `app/models/features/` is an ordinary namespace). Tooling trees — `rubocop/`, `keeps/`, `tooling/`,

@@ -30,13 +30,29 @@ module Rigor
       # dependency that moved from a `git:` source to a released version without a `bundle clean`, so its
       # git-installed directory is still sitting there under the OLD source's name). Defaults `false` so
       # existing callers that construct a `LockedGem` without an opinion stay conservative.
-      LockedGem = Data.define(:name, :version, :platform, :git_source) do
-        def initialize(name:, version:, platform:, git_source: false)
+      #
+      # `variants` is every `[version, platform]` pair the lockfile locks under this name, in Bundler's parsed
+      # order. A multi-platform lockfile (`bundle lock --add-platform`) lists one spec per platform — `ffi
+      # (1.17.4)`, `ffi (1.17.4-arm64-darwin)`, … — and Bundler installs whichever matches the host, so
+      # {BundleSigDiscovery} must admit all of them (#1844). `version` / `platform` name one representative
+      # variant for the readers that want a single version (coverage report, doctor): the `ruby` one when the
+      # lockfile has it, otherwise the last parsed. Defaults to the single `[version, platform]` pair, and the
+      # pair must be one of `variants`.
+      LockedGem = Data.define(:name, :version, :platform, :git_source, :variants) do
+        def initialize(name:, version:, platform:, git_source: false, variants: nil)
+          version = -version.to_s
+          platform = -platform.to_s
+          variants = (variants || [[version, platform]]).map { |v, p| [-v.to_s, -p.to_s].freeze }.uniq.freeze
+          unless variants.include?([version, platform])
+            raise ArgumentError, "LockedGem #{name}: [#{version}, #{platform}] is not one of its variants"
+          end
+
           super(
             name: -name.to_s,
-            version: -version.to_s,
-            platform: -platform.to_s,
-            git_source: git_source ? true : false
+            version: version,
+            platform: platform,
+            git_source: git_source ? true : false,
+            variants: variants
           )
         end
       end
@@ -162,10 +178,13 @@ module Rigor
           # `#source` is the `Bundler::Source::*` this spec resolved from — `Git` for a `GIT` lockfile
           # stanza, `Rubygems` for a `GEM` one, `Path`/`Gemspec` for `path:`. Only `Git` sources land under
           # {BundleSigDiscovery}'s `bundler/gems/` walk.
-          h[spec.name.to_s] = LockedGem.new(
+          # A multi-platform lockfile repeats the name once per platform; fold the repeats into `variants`
+          # instead of letting the last one overwrite the rest (#1844).
+          entry = LockedGem.new(
             name: spec.name, version: spec.version.to_s, platform: platform,
             git_source: spec.source.is_a?(Bundler::Source::Git)
           )
+          h[entry.name] = (prior = h[entry.name]) ? merge_variant(prior, entry) : entry
         end
         locked.freeze
       rescue ::Ractor::IsolationError => e
@@ -176,6 +195,18 @@ module Rigor
         EMPTY
       end
       private_class_method :do_parse
+
+      # Folds a further platform variant of an already-parsed name into it. The representative keeps a `ruby`
+      # variant once seen; otherwise the last variant wins, as it did before variants were kept.
+      def self.merge_variant(prior, entry)
+        rep = prior.platform == "ruby" ? prior : entry
+        prior.with(
+          variants: [*prior.variants, [entry.version, entry.platform]],
+          version: rep.version, platform: rep.platform,
+          git_source: prior.git_source || entry.git_source
+        )
+      end
+      private_class_method :merge_variant
 
       # #1064 — Bundler's lockfile parser reads RubyGems module state a non-main Ractor may not touch, so the
       # parse raises `Ractor::IsolationError` there whatever the lockfile says. That is an engine constraint, not

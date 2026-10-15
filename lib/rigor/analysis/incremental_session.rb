@@ -38,7 +38,7 @@ module Rigor
       # gate) can report what was re-analyzed versus served from cache. `added` / `removed` carry the
       # structural delta so {#run_incremental} (ADR-87 WD3) can recognise a zero-change recheck and skip the
       # unconditional snapshot rewrite.
-      Recheck = Data.define(:diagnostics, :changed, :added, :removed, :affected, :reused) do
+      Recheck = Data.define(:diagnostics, :changed, :added, :removed, :affected, :reused, :templates) do
         # A recheck that changed, added, and removed nothing — the session state is byte-equivalent to the
         # snapshot that was restored, so persisting it again would only rewrite identical bytes.
         def no_change?
@@ -68,9 +68,14 @@ module Rigor
       #   `--verify-incremental` gate use) keeps the sequential recording path bit-for-bit unchanged. The fork
       #   pool records each worker's cross-file reads and marshals them back (PoolCoordinator), so the
       #   dependency graph a pooled recheck rebuilds equals the sequential one.
-      def initialize(configuration:, paths: nil, environment: nil, cache_store: nil, plugin_requirer: nil,
-                     workers: 0, buffer: nil)
+      def initialize(configuration:, paths: nil, environment: nil, cache_store: nil, plugin_requirer: nil, # rubocop:disable Metrics/ParameterLists,Metrics/AbcSize,Metrics/MethodLength
+                     workers: 0, buffer: nil, explain: false, on_file_indexed: nil)
         @configuration = configuration
+        # ADR-113 WD2 — `rigor lens`: {#force_targets=} names files a {#recheck} analyses whether or not they changed,
+        # in this process, so `on_file_indexed` (see {Runner}) sees their seeded index. Neither moves a diagnostic:
+        # a forced file re-analyses under the same seeds its cached rows were computed with.
+        @force_targets = Set.new
+        @on_file_indexed = on_file_indexed
         @paths = paths
         # Editor mode option B (#146) — the in-flight buffer, threaded into every internal Runner so the
         # pre-passes and the closure re-analysis read the editor's bytes at the logical path. A session
@@ -81,6 +86,7 @@ module Rigor
         @cache_store = cache_store
         @plugin_requirer = plugin_requirer
         @workers = workers
+        @explain = explain # #1533: threaded into every Runner; keys the snapshot, and no slot is written
         # ADR-85 WD2 — per-file discovery seed bundles keyed by logical path. A cold baseline builds them; a
         # warm recheck folds them (re-walking only changed files) and refreshes the set. Ride the snapshot.
         @seed_bundles = {}
@@ -122,10 +128,29 @@ module Rigor
         # banner + `--cache-stats`) reads after `#run_incremental`. `@last_runner` is the analysis runner the
         # post-hoc fingerprint reads from; `@plugin_fact_reusable` is the computed decision object.
         @plugin_fact_digest = nil
-        @opaque_plugin_ids = [].freeze
+        @opaque_reasons = {}.freeze
+        @fact_store_unreadable = false
         @fact_surface_invalidated = false
         @last_runner = nil
         @plugin_fact_reusable = nil
+      end
+
+      # ADR-113 WD2 — the paths (as {#project_files} spells them) every later {#recheck} analyses in this process.
+      def force_targets=(paths)
+        @force_targets = paths.to_set
+      end
+
+      # The project files a run of this session analyses, as the runner expands the configured paths.
+      def project_files
+        current_files
+      end
+
+      # The per-file discovery bundles of the last run, keyed by path (ADR-85 WD2).
+      attr_reader :seed_bundles
+
+      # The project files `path`'s analysis read from at the last run that analysed it (ADR-46 slice 1).
+      def dependency_sources(path)
+        @sources.fetch(path, Set.new)
       end
 
       # The project files analyzed at the last baseline / recheck — the set a verify pass partitions and the
@@ -206,13 +231,13 @@ module Rigor
         fresh_params = fresh_param_table(current, changed, added, removed)
         param_files, param_pairs = param_seed_invalidation(fresh_params)
         affected = affected_closure(changed, added, removed, param_files, param_pairs)
-        analyze_set = affected & current
-        reused = (current & previous) - affected.to_a
+        forced, analyze_set = forced_analyze_set(affected, current)
+        reused = (current & previous) - analyze_set.to_a
         # The freshly collected table is handed to the runner so the run seeds from the SAME table the diff
         # was decided on (and the collector runs once per recheck, not twice). The reused files' cached rows
         # go in too, so the runner lists them in the full run's file order (#1524).
         runner = build_runner(analyze_only: analyze_set, record_dependencies: true,
-                              param_inferred_types: fresh_params,
+                              param_inferred_types: fresh_params, **forced_target_options(forced),
                               restored_run_level_rows: @run_level_rows,
                               served_per_file_diagnostics: @cache.slice(*reused))
         merged = run_runner(runner).diagnostics
@@ -220,7 +245,8 @@ module Rigor
         absorb(runner, current, analyze_set, removed)
         @param_table = fresh_params
         Recheck.new(diagnostics: merged, changed: changed.to_set, added: added.to_set,
-                    removed: removed.to_set, affected: affected, reused: reused.to_set)
+                    removed: removed.to_set, affected: affected, reused: reused.to_set,
+                    templates: runner.template_unit_paths.size)
       end
 
       # Editor mode option B (#146) — a whole-project recheck with the editor's buffer substituted for one
@@ -480,6 +506,7 @@ module Rigor
       # to. Every soundness gate below — the fingerprint, the ADR-88 fact surface — is unchanged, so the
       # decision to reuse is made identically whether or not the result is saved.
       def run_incremental(snapshot:, fingerprint:, persist: true)
+        @last_recheck = nil # #1526 — set only by a warm recheck, see {#last_recheck}
         # ADR-87 WD1 — install the per-run digest table + recording instant + strict flag for the whole
         # invocation so change-detection's stat-then-digest freshness (`#pack_digest` / `#stat_fresh?`) honours
         # `cache.validation: digest` (and `RIGOR_STRICT_VALIDATION`, which the env-only path already sees) and
@@ -508,7 +535,7 @@ module Rigor
             adopt_plugin_fact_fingerprint
             fact_reusable = @plugin_fact_reusable.reusable_against?(restored.plugin_fact_digest)
             if fact_reusable && effects_reusable && !source_rbs_unverified?(result)
-              diagnostics = result.diagnostics
+              diagnostics = keep_recheck(result)
               warm = true
               # ADR-87 WD3 — a warm recheck that changed nothing leaves the session state byte-equivalent to the
               # snapshot it restored, so skip the unconditional rewrite (209ms + 2 MB on gitlab per null recheck).
@@ -539,9 +566,36 @@ module Rigor
 
       # ADR-88 WD1 — reporting hooks the CLI reads after {#run_incremental}. `fact_surface_invalidated?` is true
       # when a valid snapshot was dropped for a fact-surface reason (a plugin sig/catalog edit, or an opaque
-      # plugin) rather than a cold miss. `opaque_plugin_ids` names the contributing-but-surfaceless plugins that
-      # force a full run every invocation.
-      attr_reader :opaque_plugin_ids
+      # plugin) rather than a cold miss. `opaque_reasons` maps each plugin that forces a full run every invocation
+      # to its {PluginFactFingerprint::OpaqueReason}.
+      attr_reader :opaque_reasons
+
+      # #1526 — the {Recheck} of the last {#run_incremental}, or nil unless that run answered warm. A baseline
+      # (cold, or a re-baseline after a fact-surface, effects or source-RBS reason) has no recheck to report.
+      # The diagnostics are not kept: a long-lived session (the LSP) would otherwise retain every merged list.
+      attr_reader :last_recheck
+
+      # Records the warm recheck's sets for {#last_recheck} and hands back its diagnostics.
+      def keep_recheck(result)
+        @last_recheck = result.with(diagnostics: [])
+        result.diagnostics
+      end
+      private :keep_recheck
+
+      # The opaque plugin ids, sorted (the keys of {#opaque_reasons}).
+      def opaque_plugin_ids
+        @opaque_reasons.keys
+      end
+
+      # True when the fact store could not be read, so no single plugin is named (see {PluginFactFingerprint::Result}).
+      def fact_store_unreadable?
+        @fact_store_unreadable
+      end
+
+      # True when the fact surface forces a full run: some plugin is opaque, or the fact store is unreadable.
+      def opaque_fact_surface?
+        !@opaque_reasons.empty? || @fact_store_unreadable
+      end
 
       def fact_surface_invalidated?
         @fact_surface_invalidated
@@ -566,7 +620,8 @@ module Rigor
         registry = prepared_plugin_registry
         fact = compute_plugin_fact_fingerprint(registry)
         @plugin_fact_digest = fact.digest
-        @opaque_plugin_ids = fact.opaque_plugin_ids
+        @opaque_reasons = fact.opaque_reasons
+        @fact_store_unreadable = fact.fact_store_unreadable
         @plugin_fact_reusable = fact
         @seed_bundles = source_rbs_gate.verify(registry, @seed_bundles)
       end
@@ -596,10 +651,10 @@ module Rigor
 
       # ADR-88 WD1 — the plugin fact-surface fingerprint for this invocation. For a SEQUENTIAL run it is read
       # post-hoc from the analysis runner's already-prepared registry (no second `#prepare`, producers already
-      # validated during analysis). A POOLED run's main process skips `#prepare`, so its registry carries no
-      # published facts — there it falls back to the always-sequential probe. Both paths compute the identical
-      # digest for a given fact surface, so the reuse decision is worker-count-independent (the parity spec
-      # asserts this).
+      # validated during analysis). A POOLED run's main process does not run `#prepare` on it (its workers do),
+      # so its registry carries no published facts — there it falls back to the always-sequential probe. Both
+      # paths compute the identical digest for a given fact surface, so the reuse decision is worker-count-independent
+      # (the parity spec asserts this).
       def compute_plugin_fact_fingerprint(registry = prepared_plugin_registry)
         PluginFactFingerprint.from_registry(registry)
       end
@@ -710,7 +765,8 @@ module Rigor
         return nil if fingerprint.nil? || @cache_store.nil? || @cache_store.read_only? || !@buffer.nil?
         # Known before the run: none of these can be written afterwards, so the stamp and the recomputed
         # fingerprint would be spent for nothing.
-        return nil unless @workers.zero? && !@configuration.effects_enabled?
+        # `WriteGuard.start` would also refuse (it recomputes the fingerprint without `explain:`); say so here.
+        return nil unless @workers.zero? && !@configuration.effects_enabled? && !@explain
 
         IncrementalRunSlot::WriteGuard.start(
           configuration: @configuration, roots: @paths || @configuration.paths, cache_root: @cache_store.root,
@@ -724,7 +780,7 @@ module Rigor
       # cold, not the warm run the probe stands in for.
       def run_slot_writable?
         !@cache_store.nil? && !@cache_store.read_only? && @buffer.nil? && @workers.zero? &&
-          !@configuration.effects_enabled? && @opaque_plugin_ids.empty? && !@last_runner.nil?
+          !@configuration.effects_enabled? && !@explain && !opaque_fact_surface? && !@last_runner.nil?
       end
 
       def start_chain(rows)
@@ -1127,8 +1183,8 @@ module Rigor
         return {} if index.nil?
 
         result = Hash.new { |hash, key| hash[key] = Set.new }
-        index[:class_sources].each do |class_name, files|
-          files.each { |file| result[file] << class_name }
+        [index[:class_sources], index[:singleton_class_sources] || {}].each do |sources|
+          sources.each { |class_name, files| files.each { |file| result[file] << class_name } }
         end
         Incremental.add_superclass_edges(result, index[:class_sources], index[:superclasses])
         result.transform_values(&:freeze).freeze
@@ -1269,8 +1325,19 @@ module Rigor
         Runner.new(
           configuration: @configuration, cache_store: @cache_store, environment: @environment,
           plugin_requirer: @plugin_requirer, seed_bundles: @seed_bundles, collect_seed_bundles: true,
-          workers: @workers, buffer: @buffer, **
+          workers: @workers, buffer: @buffer, explain: @explain, on_file_indexed: @on_file_indexed, **
         )
+      end
+
+      # The forced targets present in `current`, and the recheck's analyse set with them joined to the closure.
+      def forced_analyze_set(affected, current)
+        forced = @force_targets & current.to_set
+        [forced, (affected | forced) & current]
+      end
+
+      # A recheck that forces targets analyses in this process, so the index callback reaches them.
+      def forced_target_options(forced)
+        forced.empty? ? {} : { workers: 0 }
       end
 
       # Run the runner over the session's explicit paths (or, when none were given, the configuration's

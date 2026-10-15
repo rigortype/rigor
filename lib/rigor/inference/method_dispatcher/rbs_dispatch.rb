@@ -1019,7 +1019,7 @@ module Rigor
             self_type = self_type_override ||
                         (kind == :singleton ? Type::Combinator.singleton_of(class_name) : instance_type)
 
-            keywords_last = keyword_arguments_last?(call_node, args)
+            keywords_last = ArgumentNodes.keyword_hash_last?(call_node, args)
             call_site = [class_name, method_name, kind]
             if keywords_last && args.last.is_a?(Type::HashShape)
               distributed = distributed_keyword_return(method_definition, self_type, instance_type, type_vars, args,
@@ -1129,21 +1129,9 @@ module Rigor
             dynamic_value && !joined.is_a?(Type::Dynamic) ? Type::Combinator.dynamic(joined) : joined
           end
 
-          # Issue #1727 — whether `args`' last entry is the call's keyword hash (`f(a, k: 1)`), which the overload
-          # selector then matches against an overload's keywords. Only the AST tells a keyword hash from a
-          # braced positional one (`f(a, { k: 1 })`), so a dispatch without the call node, or one whose
-          # arguments are not the node's own (a forwarded `...`, a `send` re-dispatch), answers false and keeps
-          # reading every argument positionally.
-          def keyword_arguments_last?(call_node, args)
-            return false if args.empty? || !call_node.respond_to?(:arguments)
-
-            arguments = call_node.arguments&.arguments
-            !arguments.nil? && arguments.size == args.size && arguments.last.is_a?(Prism::KeywordHashNode)
-          end
-
           # Issue #1801 — the indices of `args` the call passes as splat arguments (`f(*xs, k: 1)`), whose positional
-          # count is not known statically, or nil without one. As for {#keyword_arguments_last?}, only a call whose
-          # node's arguments are exactly `args` answers.
+          # count is not known statically, or nil without one. As for {ArgumentNodes.keyword_hash_last?}, only a call
+          # whose node's arguments are exactly `args` answers.
           def splat_indices(call_node, args)
             return nil if args.empty? || !call_node.respond_to?(:arguments)
 
@@ -1729,7 +1717,7 @@ module Rigor
 
           def probe_block_param_types(receiver:, method_name:, args:, environment:, scope: nil, call_node: nil)
             args ||= []
-            keywords_last = keyword_arguments_last?(call_node, args)
+            keywords_last = ArgumentNodes.keyword_hash_last?(call_node, args)
             splat = splat_indices(call_node, args)
             case receiver
             when Type::Union

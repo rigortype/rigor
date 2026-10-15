@@ -151,6 +151,80 @@ RSpec.describe Rigor::Inference::InEffectRefinements do
       expect(refinements.at(":struct")).to eq([])
     end
 
+    # Issue #1749. Ruby 4.0.5 prints `1` for `M.setup; using M; "a".yy` with `def self.setup` or a `def` in
+    # `class << self` (the singleton method runs on `M`), and `1` through `M.extend(M)` and `M.setup` for an instance
+    # method (it runs on whichever module calls it). It raises `NoMethodError` for `refine` in a class's methods.
+    context "when it is written in a method" do
+      let(:source) do
+        <<~RUBY
+          module Shout
+            def self.setup = refine(String) { def yy = :in_def_self }
+            class << self
+              def setup_singleton = refine(Symbol) { def zz = :in_class_self }
+            end
+            def instance = refine(String) { :in_instance }
+            def self.computed(k) = refine(k) { :computed }
+            def self.nested = refine(String) { refine(Integer) { :nested } }
+            refine(Float) do
+              def self.defined_on_the_refinement = refine(Integer) { :on_refinement }
+            end
+          end
+          class Widget
+            def self.setup = refine(String) { :in_class_method }
+          end
+        RUBY
+      end
+      let(:root) { Prism.parse(source).value }
+      let(:refinements) { described_class.new(root) }
+      let(:at) { InEffectRefinementsAtMarker.new(refinements, source) }
+
+      it "has the module in effect inside a module's singleton method, and the unknown marker in an instance method" do
+        expect(at.at(":in_def_self")).to eq(%w[Shout])
+        expect(at.at(":in_class_self")).to eq(%w[Shout])
+        expect(at.at(":computed")).to eq(%w[Shout])
+        expect(at.at(":in_instance")).to eq([unknown])
+      end
+
+      it "charges a nested refine to the module, and a method of a refine body to a module it cannot name" do
+        expect(at.at(":nested")).to eq(%w[Shout])
+        # Inside the `refine(Float)` block its own module is in effect; the nested `refine` adds a module nothing names.
+        expect(at.at(":on_refinement")).to eq(["Shout", unknown])
+      end
+
+      it "treats a class's singleton method as the class's own refine, which activates nothing" do
+        expect(at.at(":in_class_method")).to eq([])
+      end
+
+      # `using` fixes a module's refined classes when it runs, so a refinement a method creates is in effect only for a
+      # `using` after the call, an order this walk cannot decide: the names are recorded for the module as undecided and
+      # without a body, where a refine in the module's body keeps its `def`. A module-body `def` of the same name,
+      # before or after it, does not replace the record (`M.setup` runs after the module body and replaces `yy`).
+      it "records the block's names for the module as undecided, which a module-body def does not replace" do
+        undecided = described_class::RefineDefs::UNDECIDED
+        in_body = described_class.new(Prism.parse("module Shout\n  refine(String) { def yy = 1 }\nend\n").value)
+        before = described_class.new(Prism.parse(<<~RUBY).value)
+          module Shout
+            refine(String) { def yy = 1 }
+            def self.setup = refine(String) { def yy = 2 }
+          end
+        RUBY
+        after = described_class.new(Prism.parse(<<~RUBY).value)
+          module Shout
+            def self.setup = refine(String) { def yy = 2 }
+            refine(String) { def yy = 1 }
+          end
+        RUBY
+
+        expect(refinements.refinement_def("Shout", "String", :yy)).to be(undecided)
+        expect(refinements.refinement_def("Shout", "Symbol", :zz)).to be(undecided)
+        expect(refinements.refinement_def("Other", "String", :yy)).to be_nil
+        expect(refinements.refinement_def("Widget", "String", :yy)).to be_nil
+        expect(in_body.refinement_def("Shout", "String", :yy)).to be_a(Prism::DefNode)
+        expect([before, after].map { |query| query.refinement_def("Shout", "String", :yy) })
+          .to eq([undecided, undecided])
+      end
+    end
+
     # Issue #1689 — `Class` undefines `refine`, so where `self` is known to be a class the call is the class's own
     # method: it activates nothing, and its defs are not refinement defs.
     context "when `self` is known to be a class" do
@@ -432,9 +506,9 @@ RSpec.describe Rigor::Inference::InEffectRefinements do
 
   # ADR-121 WD7 — which modules a `using` puts in the list, and which of them the readers treat as opaque.
   describe "declared candidates and opaque modules" do
-    def scope_at_last(source)
+    def scope_at_last(source, default_scope: Rigor::Scope.empty)
       root = Prism.parse(source).value
-      index = Rigor::Inference::ScopeIndexer.index(root, default_scope: Rigor::Scope.empty)
+      index = Rigor::Inference::ScopeIndexer.index(root, default_scope: default_scope)
       call = root.compact_child_nodes.first.body.last
       call = call.body.body.last while call.is_a?(Prism::ModuleNode)
       [index[call], call, root]
@@ -485,15 +559,31 @@ RSpec.describe Rigor::Inference::InEffectRefinements do
         .to eq([false, false, false, false, true, true])
     end
 
-    # Ruby 4.0.5: `def self.setup = refine(String) { … }` refines for `M`; `def setup` there refines for whichever
+    # Ruby 4.0.5: `def self.setup(k) = refine(k) { … }` refines for `M`; `def setup` there refines for whichever
     # module extends `M` and calls it, so the walk cannot name the module and every module may be the one.
     it "treats a module with an unreadable refine as opaque, and every module under an unattributable one" do
       tail = "\nend\nmodule P; end\n:probe\n"
-      self_setup, = scope_at_last("module M\n  def self.setup = refine(String) { def x = 1 }#{tail}")
+      self_setup, = scope_at_last("module M\n  def self.setup(k) = refine(k) { def x = 1 }#{tail}")
       instance_setup, = scope_at_last("module M\n  def setup = refine(String) { def x = 1 }#{tail}")
 
       expect(%w[M P].map { |name| described_class.opaque_module?(self_setup, name) }).to eq([true, false])
       expect(%w[M P].map { |name| described_class.opaque_module?(instance_setup, name) }).to eq([true, true])
+    end
+
+    # Ruby 4.0.5: `M.setup; using M; "a".yy` answers `1` for `def self.setup` and for a `def` in `class << self`
+    # (#1749), so the table holds the module's rows and it is no more opaque than a module whose body says `refine`.
+    it "keeps a module known whose singleton method refines a class it names" do
+      tail = "\nend\nmodule P; end\n:probe\n"
+      sources = {
+        "def self.setup" => "module M\n  def self.setup = refine(String) { def x = 1 }#{tail}",
+        "class << self" => "module M\n  class << self\n    def setup = refine(String) { def x = 1 }\n  end#{tail}"
+      }
+
+      sources.each do |shape, source|
+        scope, = scope_at_last(source)
+
+        expect(%w[M P].map { |name| described_class.opaque_module?(scope, name) }).to eq([false, false]), shape
+      end
     end
 
     it "gives the check rules' list and the typer's list the same entries" do
@@ -515,6 +605,46 @@ RSpec.describe Rigor::Inference::InEffectRefinements do
       expect(typer).to eq(%w[Helpers Bar Foo::Bar GemRef])
       expect(described_class.lexical_list(scope, own, offset)).to eq(typer)
       expect(described_class.lexical_list(scope, shared, offset)).to eq(typer)
+    end
+
+    # Issue #1814, #1815 item 5 — a refined-class key is class-unknown when any segment of it is a constant a write
+    # binds (`Enc = ::Encoding; refine(Enc::Converter)`, `Shared::Target = String` in an opted-in gem), and no class or
+    # RBS knows the whole key. A core class keeps its key whatever a file writes under its name.
+    describe "a refined-class key" do
+      let(:index_class) { Rigor::Analysis::DependencySourceInference::Index }
+
+      def gem_key_scope(bound, segments = [])
+        index = index_class.new(bound_constants: Set.new(bound), bound_segments: Set.new(segments))
+        environment = Rigor::Environment.for_project(dependency_source_index: index)
+        scope_at_last("module Plain; end\n:probe\n", default_scope: Rigor::Scope.empty(environment: environment)).first
+      end
+
+      it "is class-unknown when a gem binds a prefix of it, or a segment of it under an owner it cannot spell" do
+        scope = gem_key_scope(%w[Pag::Enc Shared::Target], %w[Loose])
+        keys = %w[Pag::Enc::Converter Enc::Converter Shared::Target Object::Shared::Target Target Loose::Thing
+                  Any::Loose Pag::Other Other::Plain]
+
+        expect(keys.map { |key| described_class.class_wildcard_key?(scope, key) })
+          .to eq([true, false, true, true, false, true, true, false, false])
+      end
+
+      # Round-1 review of #1838: a gem constant that merely shares a core class's name (`Names::String`) binds nothing a
+      # sibling spelling of `refine String` (`Ext::String`) could denote.
+      it "is class-unknown for the wildcard, and never moves a core class a write names, nor its sibling spelling" do
+        scope = gem_key_scope(%w[Names::String String Comparable])
+        wildcard = Rigor::Scope::DiscoveryIndex::REFINEMENT_WILDCARD
+        keys = [wildcard, "String", "Comparable", "Integer", "Ext::String"]
+
+        expect(keys.map { |key| described_class.class_wildcard_key?(scope, key) })
+          .to eq([true, false, false, false, false])
+      end
+
+      it "is not class-unknown for a project with no gem index" do
+        scope, = scope_at_last("module Plain; end\n:probe\n")
+
+        expect(%w[Enc::Converter Shared::Target].map { |key| described_class.class_wildcard_key?(scope, key) })
+          .to eq([false, false])
+      end
     end
   end
 end

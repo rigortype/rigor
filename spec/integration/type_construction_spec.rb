@@ -527,6 +527,32 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  # Issue #1840 — re-joining the narrowed edges of an untyped local gives back `Dynamic[top]`, so the
+  # `nil` its narrowing left is no possible-nil witness; a nil the program writes still is.
+  describe "fixtures/untyped_narrowing_rejoin.rb — a merge re-joins an untyped local's narrowed edges" do
+    let(:harness) { harness_for("untyped_narrowing_rejoin") }
+
+    it "binds each re-joined local back to Dynamic[top] via assert_type" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+
+    it "reports possible-nil only where the program writes the nil" do
+      reported = harness.diagnostics.reject { |d| d.severity == :info || d.rule.to_s == "call.unresolved-toplevel" }
+      expected = marked_lines(harness, "# GENUINE-NIL").map { |line| [line, "call.possible-nil-receiver"] }
+      expect(expected.size).to eq(3)
+      expect(reported.map { |d| [d.line, d.rule.to_s] }).to match_array(expected)
+    end
+
+    # The known limitation (#1876): a written nil a `nil?` edge stripped before the re-joining
+    # merge is silent. Pinned so a fix flips the marker to `# GENUINE-NIL` deliberately.
+    it "pins the nil-first `elsif` limitation as silent" do
+      silent = marked_lines(harness, "# KNOWN-SILENT")
+      expect(silent.size).to eq(1)
+      expect(harness.diagnostics.map(&:line)).not_to include(*silent)
+    end
+  end
+
   describe "fixtures/is_a_lexical_resolution.rb — `is_a?(C)` honours lexical-scope constant lookup" do
     let(:harness) { harness_for("is_a_lexical_resolution") }
 

@@ -247,6 +247,7 @@ module Rigor
     def optimistic_local_miss: (String | Symbol name) -> Object?
     def optimistic_ivar_miss: (String | Symbol name) -> Object?
     def with_local: (String | Symbol name, Type::t type) -> Scope
+    def with_rejoined_locals: (untyped) -> Rigor::Scope
     def with_ivar: (String | Symbol name, Type::t type) -> Scope
     def with_local_origin: (String | Symbol name, Symbol? cause) -> Scope
     def with_optimistic_local: (String | Symbol name, Symbol? cause, ?miss: Object?) -> Scope
@@ -299,6 +300,8 @@ module Rigor
     def inferred_param?: (String | Symbol name) -> bool
     def forget_match_globals: () -> Scope
     def untyped_match_globals: () -> Scope
+    # sig-gen gap: #1154 — the reader over the `@globals` ivar `initialize` assigns from a parameter reaches
+    # `untyped`, so the `bool` is hand-written.
     def match_globals_bound?: () -> bool
     def with_match_frame: (untyped body, ?untyped parameters) -> Scope
     # sig-gen gap: #1154 — the frame reader over an ivar assigned in `initialize` from a parameter reaches

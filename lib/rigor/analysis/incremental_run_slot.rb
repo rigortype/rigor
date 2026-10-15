@@ -42,8 +42,8 @@ module Rigor
     # plugin's identity and the engine's (key slots), so a project whose plugins claim template globs is served
     # too. The ADR-87 probe misses on one: the plain slot's key carries the `template-units` slot.
     #
-    # `explain:` is always false: the session's runners never set it (#1533), and the CLI declines the probe under
-    # `--explain`.
+    # `explain:` is always false: the session writes no slot for an `--explain` run (#1533), and the CLI declines
+    # the probe under `--explain`.
     module IncrementalRunSlot
       module_function
 
@@ -84,7 +84,9 @@ module Rigor
         return nil if base.nil?
 
         roots = RunCacheKey.config_entry("incremental.roots", normalize_roots(target.roots).sort.join("\n"))
-        Cache::Descriptor.new(gems: base.gems, configs: base.configs + [roots])
+        # Issue #1814 — the opted-in gems' `(name, version, mode)` rows travel with the key, as they do in the plain
+        # probe's: the gem's walked source reaches every file's answer and no analysed file records it.
+        Cache::Descriptor.new(gems: base.gems, dependencies: base.dependencies, configs: base.configs + [roots])
       end
 
       # The roots as absolute paths, which the KEY holds sorted: `lib`, `./lib` and `lib/` are one root there. A
@@ -113,7 +115,7 @@ module Rigor
       def serve(configuration:, cache_root:, paths:)
         return nil if configuration.effects_enabled?
 
-        files = PathExpansion.ruby_files(paths, configuration.exclude_patterns)
+        files = PathExpansion.ruby_files(paths, configuration.exclude_patterns, base: configuration.exclude_base)
         slot_key = key(configuration: configuration, target: Target.new(files: files, roots: paths))
         return nil if slot_key.nil?
 

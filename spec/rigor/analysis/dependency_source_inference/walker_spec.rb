@@ -330,11 +330,133 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::Walker do
         expect(outcome.refinements).to eq({ "Shouty::String" => rows, "String" => rows })
       end
 
-      it "records nothing for a `refine` with no enclosing module" do
+      # Issue #1814 — a constant a gem file writes without declaring a class or module by it is recorded as bound, by
+      # the name the write binds (`Outcome#bound`), or by its last segment alone when the walk cannot spell the owner
+      # (`Outcome#bound_segments`); the rows stay as the project walk records them, and the reader decides each prefix
+      # of a key at read time ({Rigor::Inference::InEffectRefinements.class_wildcard_key?}).
+      describe "a constant a gem file writes" do
+        def outcome_of(files)
+          with_fake_gem do |gem_dir|
+            files.each { |name, source| File.write(File.join(gem_dir, "lib", name), source) }
+            return walker.walk(gem_dir: gem_dir, roots: %w[lib])
+          end
+        end
+
+        it "binds the name under its lexical nesting, by every form of bare write, in this file or another" do
+          forms = ["K = String", "K ||= String", "K &&= String", "K += 1", "K, L = String, Symbol"]
+          bound = forms.map { |form| outcome_of("a.rb" => "module M\n  #{form}\nend\n").bound }
+          elsewhere = outcome_of("a.rb" => "module M\n  refine(K) { def shout = 1 }\nend\n", "b.rb" => "K = String\n")
+
+          expect(bound.map(&:to_a)).to all(include("M::K"))
+          expect(elsewhere.bound).to eq(Set["K"])
+          expect(elsewhere.bound).to be_frozen
+          expect(elsewhere.bound_segments).to eq(Set.new)
+        end
+
+        # Round-2 review of #1838: `Wrap::K` may bind under an included module's `Wrap`, `self::K` in a block under
+        # the block's `self`, and `foo::Bar::K` under a value, none of which the walk can spell; only a rooted path is
+        # a name.
+        it "binds a rooted path write by name, and any other path write by its segment alone" do
+          outcome = outcome_of("a.rb" => <<~RUBY)
+            module M
+              Wrap::K = String
+              Wrap::L, N = String, Symbol
+              ::Top::P = 1
+              self::Q = 1
+              foo::Bar::R = 1
+              ::S = 1
+            end
+          RUBY
+
+          expect(outcome.bound).to eq(Set["M::N", "Top::P", "S"])
+          expect(outcome.bound_segments).to eq(Set["K", "L", "Q", "R"])
+        end
+
+        it "records a const_set with a literal name by its segment, unless its value creates a class" do
+          outcome = outcome_of("a.rb" => <<~RUBY)
+            module M
+              Object.const_set(:K, String)
+              const_set('L', String)
+              const_set(:Pt, Struct.new(:x))
+              const_set(:V, Class.new)
+            end
+          RUBY
+
+          expect(outcome.bound_segments).to eq(Set["K", "L"])
+          expect(outcome.bound).to eq(Set.new)
+        end
+
+        # Ruby opens `W::Shared::Inner` or `::Shared::Inner`, whichever `Shared` it finds, and a block keeps the lexical
+        # scope it is written in (`Ext.module_eval { K = String }` assigns `M::K`); a `class << self` body binds on the
+        # singleton, which no key spells.
+        it "binds a write under a nested compact header under every name it can denote, in a block lexically, and " \
+           "under class << self by its segment" do
+          outcome = outcome_of("a.rb" => <<~RUBY)
+            module W
+              module Shared::Inner
+                Target = String
+              end
+              Ext.module_eval { K = String }
+              Module.new do
+                L = String
+              end
+              class << self
+                Solo = String
+              end
+            end
+          RUBY
+
+          expect(outcome.bound).to eq(Set["W::Shared::Inner::Target", "Shared::Inner::Target", "W::K", "W::L"])
+          expect(outcome.bound_segments).to eq(Set["Solo"])
+        end
+
+        it "leaves the rows as the project walk records them" do
+          outcome = outcome_of("a.rb" => "module M\n  K = String\n  refine(K) { def shout = 1 }\nend\n")
+
+          expect(outcome.refinements).to eq({ "M::K" => { shout: ["M"] }, "K" => { shout: ["M"] } })
+          expect(outcome.bound).to eq(Set["M::K"])
+        end
+
+        # The controls: a class or module the gem declares is no bound name, nor is a name nothing writes.
+        it "is not bound when the gem declares a class or module by the write, or writes another name" do
+          declared = ["K = Class.new", "K = Struct.new(:a)", "K = Data.define(:a)", "K = Module.new", "class K; end",
+                      "K = Struct.new(:a) do\n  def x = 1\nend.freeze", "K = K || Class.new(StandardError)"]
+          bound = declared.map { |form| outcome_of("a.rb" => "module M\n  #{form}\nend\n").bound }
+          other = outcome_of("a.rb" => "module M\n  L = String\n  refine(String) { def shout = 1 }\nend\n")
+
+          expect(bound).to all(eq(Set.new))
+          expect(other.bound).to eq(Set["M::L"])
+        end
+      end
+
+      # Ruby 4.0.5 raises `NoMethodError` for a top-level `refine`, so no `using` can ever activate it. The census
+      # the project walk runs records it under the module name `""` (ADR-121 WD7), which no `using` names; the gem
+      # walk reads the file through the same census (#1814), so the row is the same one.
+      it "records a `refine` with no enclosing module under a module no `using` can name" do
         outcome = walk_source("refine(::String) { def shout = nil }\n")
 
         expect(outcome.catalog).to eq({})
-        expect(outcome.refinements).to eq({})
+        expect(outcome.refinements).to eq({ "String" => { shout: [""] } })
+      end
+
+      # The census the project walk runs reaches a gem file: a refine in a method and a `:refine` literal leave the
+      # rows a project module would carry, whatever the census decides for each (a targets-wildcard today; #1835 may
+      # charge the singleton method's to the module), and the folded table is the project walk's for the same sources
+      # (see walker_walk_census_parity_spec for the full set of shapes).
+      it "records the rows the project walk records for a refine in a method and a :refine literal" do
+        wildcard = Rigor::Scope::DiscoveryIndex::REFINEMENT_WILDCARD
+        sources = ["module A\n  def self.setup = refine(String) { def x = 1 }\nend\n",
+                   "module B\n  send(:refine, Integer) { def y = 1 }\nend\n"]
+        project = sources.map { |source| Rigor::Inference::ScopeIndexer.refinement_table(Prism.parse(source).value) }
+                         .reduce { |left, right| Rigor::Inference::ScopeIndexer.merge_refinement_tables(left, right) }
+        with_fake_gem do |gem_dir|
+          sources.each_with_index { |source, i| File.write(File.join(gem_dir, "lib", "f#{i}.rb"), source) }
+
+          outcome = walker.walk(gem_dir: gem_dir, roots: %w[lib])
+
+          expect(outcome.refinements).to eq(project)
+          expect(outcome.refinements.dig(wildcard, wildcard)).to include("B")
+        end
       end
     end
   end

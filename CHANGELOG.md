@@ -13,6 +13,100 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-10-11
+
+v0.4.2 introduces full typing support for Ruby refinements ([ADR-121](docs/adr/121-ruby-refinement-typing.md)), resolving method calls under `using` and Ruby 4.1's `Proc#refined` from their refinement bodies rather than the replaced methods. Ruby 4.1 support expands with signatures for new core methods, a deprecation diagnostic for `ruby2_keywords`, and plugin support for refined blocks. Overload selection is overhauled to accurately handle keyword arguments, splat parameters, and untyped arguments, joining candidate returns when calls are ambiguous. New plugins add bundled signatures for `ac-library-rb`, Alba serializers, and Typelizer, alongside improvements to `rigor unused` root detection and encoding crash fixes.
+
+### Added
+
+- **[engine]** Method calls through an in-effect Ruby refinement are now typed directly from the refinement body rather than the method being replaced ([#1664](https://github.com/rigortype/rigor/issues/1664), [#1747](https://github.com/rigortype/rigor/pull/1747)).
+  - Respects Ruby's refinement lookup order, where later `using` statements take precedence and subclass methods beat ancestor refinements ([ADR-121](docs/adr/121-ruby-refinement-typing.md)).
+  - Unreadable refinement bodies and metaprogramming dispatches (`send`, `respond_to?`, `method`, `&:symbol`) degrade gracefully to `Dynamic[top]`.
+- **[engine]** Added support for Ruby 4.1's `Proc#refined` on Proc literals and declared its signature ([#1665](https://github.com/rigortype/rigor/issues/1665), [#1711](https://github.com/rigortype/rigor/pull/1711)).
+  - Refinements activated via `.refined(M)` chains on `proc`, `lambda`, or `Proc.new` literals take effect inside their block bodies and nested blocks ([#1666](https://github.com/rigortype/rigor/issues/1666), [#1738](https://github.com/rigortype/rigor/pull/1738)).
+- **[rigor check]** The new `call.deprecated-ruby2-keywords` diagnostic reports calls to the `ruby2_keywords` family deprecated in Ruby 4.1 when `target_ruby` is set to `"4.1"` or later ([#1692](https://github.com/rigortype/rigor/issues/1692), [#1780](https://github.com/rigortype/rigor/pull/1780)).
+  - Covers `Module#ruby2_keywords`, top-level `ruby2_keywords`, `Proc#ruby2_keywords`, and `Hash.ruby2_keywords_hash?` / `Hash.ruby2_keywords_hash`.
+- **[rbs]** Core signatures for new Ruby 4.1 methods now resolve without reporting `call.undefined-method` ([#1714](https://github.com/rigortype/rigor/pull/1714), [#1731](https://github.com/rigortype/rigor/pull/1731)).
+  - Includes `Integer#bit_count`, `IO::Buffer#bit_count`, String bit operations and `tr` with a Hash, `Range#clamp`, `MatchData#integer_at`, `Module#descendants`, three-argument `method_defined?`, `autoload_relative`, `ENV.fetch_values`, and `GC.stat` / `GC.start` keyword arguments.
+- **[plugin contract]** Plugin manifests can now declare `refinements:` on `block_as_methods:` entries to model methods that execute blocks under Ruby 4.1's `Proc#refined` ([#1667](https://github.com/rigortype/rigor/issues/1667), [#1744](https://github.com/rigortype/rigor/pull/1744)).
+  - Refined calls inside matching blocks and nested blocks no longer report `call.undefined-method` or argument mismatches.
+  - Supports `self_type: :lexical` to preserve the caller's `self`, and top-level implicit calls match `Object` receiver constraints.
+- **[plugin contract]** `Rigor::Plugin::IoBoundary#glob(root, pattern)` now allows plugins to track directory glob matches under a root directory ([#1802](https://github.com/rigortype/rigor/pull/1802)).
+  - Recorded glob results invalidate run caches when matched paths change, while patterns that could escape `root` via `..`, braces, or backslashes are rejected.
+- **[plugins/rigor-ac-library-rb]** The new `rigor-ac-library-rb` plugin provides RBS signatures for ac-library-rb, the Ruby port of the AtCoder Library ([#1679](https://github.com/rigortype/rigor/issues/1679), [#1680](https://github.com/rigortype/rigor/pull/1680)).
+  - Covers segment trees, DSU, `ModInt`, flows, `SCC`, `TwoSAT`, and math and string functions, so calls into the gem no longer read as `Dynamic[top]`.
+- **[plugins/rigor-alba]** The new `rigor-alba` plugin types Alba serializer DSL blocks and roots inferred association resource classes ([#1688](https://github.com/rigortype/rigor/pull/1688)).
+  - Types `self` inside `Alba.serialize` and `Alba.hashify` blocks so DSL calls no longer report `call.unresolved-toplevel`.
+  - Marks resource classes inferred from `many` and `one` associations as roots so `rigor unused` does not flag them.
+- **[plugins/rigor-typelizer]** The new `rigor-typelizer` plugin marks serializers using `Typelizer::DSL` as roots so `rigor unused` does not report them ([#1707](https://github.com/rigortype/rigor/pull/1707)).
+- **[plugins/rigor-activerecord]** Models loaded by an association name or a literal `class_name:` are now recognized as roots by `rigor unused` ([#1725](https://github.com/rigortype/rigor/pull/1725)).
+  - Literal options on a `with_options` block also now apply to the associations defined within it, including their reader types.
+
+### Changed
+
+- **[rigor sig-gen]** Plain top-level method definitions are now reported as skipped candidates (`sig.skipped.top-level-def`) in JSON and text summaries rather than dropped silently ([#1765](https://github.com/rigortype/rigor/pull/1765)).
+
+### Fixed
+
+- **[engine]** Method calls through in-effect Ruby refinements now evaluate under full refinement semantics and lookup rules ([#1671](https://github.com/rigortype/rigor/issues/1671), [#1672](https://github.com/rigortype/rigor/issues/1672), [#1684](https://github.com/rigortype/rigor/pull/1684), [#1686](https://github.com/rigortype/rigor/pull/1686), [#1749](https://github.com/rigortype/rigor/issues/1749), [#1814](https://github.com/rigortype/rigor/issues/1814), [#1815](https://github.com/rigortype/rigor/issues/1815), [#1835](https://github.com/rigortype/rigor/pull/1835), [#1838](https://github.com/rigortype/rigor/pull/1838)).
+  - `using M` activates refinements from modules transitively included by `M` as Ruby does ([#1671](https://github.com/rigortype/rigor/issues/1671), [#1684](https://github.com/rigortype/rigor/pull/1684)).
+  - Gem source inference recognizes method definitions inside a gem's `refine` blocks as refinements rather than module methods ([#1672](https://github.com/rigortype/rigor/issues/1672), [#1686](https://github.com/rigortype/rigor/pull/1686)).
+  - `refine` inside a module's singleton method (`def self.setup`) is recorded as the module's refinement ([#1749](https://github.com/rigortype/rigor/issues/1749), [#1835](https://github.com/rigortype/rigor/pull/1835)).
+  - Refinement targets resolved through constant aliases or opted-in gem dependencies type correctly under `using` ([#1814](https://github.com/rigortype/rigor/issues/1814), [#1815](https://github.com/rigortype/rigor/issues/1815), [#1838](https://github.com/rigortype/rigor/pull/1838)).
+- **[engine]** Calls to refined redefinitions under `using` no longer check arity or argument types against unrefined ancestor signatures ([#1663](https://github.com/rigortype/rigor/issues/1663), [#1685](https://github.com/rigortype/rigor/pull/1685), [#1740](https://github.com/rigortype/rigor/issues/1740), [#1797](https://github.com/rigortype/rigor/issues/1797), [#1811](https://github.com/rigortype/rigor/pull/1811), [#1820](https://github.com/rigortype/rigor/pull/1820)).
+  - A project class refinement no longer silences `call.wrong-arity` on all subclass methods, declining checks only when a refinement could answer the call ([#1797](https://github.com/rigortype/rigor/issues/1797), [#1820](https://github.com/rigortype/rigor/pull/1820)).
+  - Refinements defining methods via `alias`, `alias_method`, `define_method`, or `attr_*` properly silence undefined method and arity checks under `using` ([#1811](https://github.com/rigortype/rigor/pull/1811)).
+- **[engine]** `refine` blocks in class bodies and explicit `self.` calls within them now bind correctly ([#1689](https://github.com/rigortype/rigor/issues/1689), [#1745](https://github.com/rigortype/rigor/pull/1745), [#1762](https://github.com/rigortype/rigor/pull/1762)).
+  - A `refine` call inside a class body is treated as the class's own method rather than `Module#refine` ([#1689](https://github.com/rigortype/rigor/issues/1689), [#1745](https://github.com/rigortype/rigor/pull/1745)).
+  - Explicit `self.` calls in `refine` blocks and `def self.m` definitions are no longer checked against the refined class ([#1762](https://github.com/rigortype/rigor/pull/1762)).
+- **[engine]** Overload selection now discriminates keyword arguments and splat arguments accurately ([#1736](https://github.com/rigortype/rigor/pull/1736), [#1800](https://github.com/rigortype/rigor/issues/1800), [#1801](https://github.com/rigortype/rigor/issues/1801), [#1808](https://github.com/rigortype/rigor/pull/1808), [#1810](https://github.com/rigortype/rigor/pull/1810)).
+  - Keyword arguments select matching keyword overloads rather than treating keyword hashes as positional arguments ([#1800](https://github.com/rigortype/rigor/issues/1800), [#1808](https://github.com/rigortype/rigor/pull/1808)).
+  - Splat arguments are no longer counted as a single positional parameter, preventing valid overloads from being ruled out by arity alone ([#1801](https://github.com/rigortype/rigor/issues/1801), [#1810](https://github.com/rigortype/rigor/pull/1810)).
+  - Untyped keyword arguments no longer default to declaration order, and blocks receive parameter types from the selected overload ([#1742](https://github.com/rigortype/rigor/pull/1742)).
+  - Calls passing union keyword values join the return types of all matching overloads ([#1775](https://github.com/rigortype/rigor/pull/1775)).
+- **[engine]** Calls with ambiguous `Dynamic` arguments now join the returns of all reachable overloads instead of selecting the first overload ([#1798](https://github.com/rigortype/rigor/pull/1798)).
+  - Block parameters bind only when every overload the call may reach agrees, preventing false undefined method errors on valid code ([#1781](https://github.com/rigortype/rigor/pull/1781)).
+- **[engine]** Call arguments combining untyped values with precise types now reach all compatible overloads instead of only the first matching overload ([#1675](https://github.com/rigortype/rigor/issues/1675), [#1677](https://github.com/rigortype/rigor/pull/1677)).
+- **[engine]** `Integer#step` now accurately types its block parameter and arithmetic sequence elements as `Integer` when step boundaries are integral ([#1792](https://github.com/rigortype/rigor/pull/1792), [#1794](https://github.com/rigortype/rigor/issues/1794), [#1809](https://github.com/rigortype/rigor/pull/1809)).
+  - Prevents false `undefined method for Numeric` errors on Enumerable operations like `.even?` or `.map`.
+- **[engine]** Vendored signatures for the `prime` gem now ship with Rigor and activate upon `require "prime"` ([#1700](https://github.com/rigortype/rigor/issues/1700), [#1701](https://github.com/rigortype/rigor/pull/1701)).
+  - Project signatures that redefine individual members of `prime` stand down only conflicting members rather than the entire vendored signature ([#1770](https://github.com/rigortype/rigor/pull/1770)).
+- **[engine]** Top-level calls to `main`'s private singleton methods like `using`, `include`, and `define_method` no longer report `call.unresolved-toplevel` ([#1383](https://github.com/rigortype/rigor/issues/1383), [#1683](https://github.com/rigortype/rigor/pull/1683)).
+- **[engine]** Top-level `include M` now mixes `M` into `Object` for method call resolution rules ([#1697](https://github.com/rigortype/rigor/issues/1697), [#1706](https://github.com/rigortype/rigor/pull/1706)).
+- **[engine]** Constants accessed through included or prepended modules now resolve when the module is declared solely in RBS ([#1698](https://github.com/rigortype/rigor/issues/1698), [#1755](https://github.com/rigortype/rigor/pull/1755)).
+- **[engine]** `alias` and `alias_method` definitions inside `pre_eval:` monkey-patches are now published project-wide ([#1702](https://github.com/rigortype/rigor/issues/1702), [#1705](https://github.com/rigortype/rigor/pull/1705)).
+  - Later definitions within the same patch file override earlier ones without raising duplicate declaration errors.
+- **[engine]** Guarding a closed hash read with `key?`, `include?`, or `member?` using a variable or reader key now eliminates `nil` from `call.possible-nil-receiver` checks ([#1709](https://github.com/rigortype/rigor/pull/1709)).
+- **[engine]** `Hash.ruby2_keywords_hash?` and `Hash.ruby2_keywords_hash` now resolve through the core overlay without reporting `call.undefined-method` ([#1778](https://github.com/rigortype/rigor/issues/1778), [#1790](https://github.com/rigortype/rigor/pull/1790)).
+- **[engine]** `def.override-param-narrowed`, `def.override-return-widened`, and `def.override-visibility-reduced` no longer fire on `initialize` and copy hooks ([#1723](https://github.com/rigortype/rigor/pull/1723)).
+  - Also exempts `respond_to_missing?` from visibility reduction diagnostics since Ruby specifies it as private.
+- **[engine]** `def.ivar-write-mismatch` stays silent when an instance variable's RBS declaration accommodates both the initial and subsequent assigned types ([#1662](https://github.com/rigortype/rigor/pull/1662)).
+- **[engine]** Plugin `block_as_methods` and `define_method` blocks narrow `self` even when positioned as call arguments, receiver chains, or literal elements ([#1690](https://github.com/rigortype/rigor/pull/1690)).
+- **[engine]** Blocks for `Class.new`, `Module.new`, `Struct.new`, `Data.define`, and `refine` in argument or receiver positions are now properly entered as class bodies ([#1757](https://github.com/rigortype/rigor/pull/1757)).
+- **[engine]** Blocks with narrowed `self`, including `define_method`, no longer inherit instance variable bindings from the enclosing class body ([#1769](https://github.com/rigortype/rigor/pull/1769)).
+- **[engine]** Explicit `self.foo` calls inside blocks with unknown `self` no longer report `call.undefined-method` against the enclosing method's receiver ([#1726](https://github.com/rigortype/rigor/pull/1726)).
+- **[engine]** Modules mixed in through `self.extended` or instance `included` hooks no longer cause false errors on instance method calls ([#1730](https://github.com/rigortype/rigor/issues/1730), [#1735](https://github.com/rigortype/rigor/pull/1735)).
+- **[engine]** `self.class` within an instance method of an RBS-declared module now types as `Dynamic[Class]` instead of the module singleton ([#1668](https://github.com/rigortype/rigor/pull/1668)).
+- **[engine]** `call.undefined-method` now reports misspelled methods on union receivers composed of a single class's literals ([#1699](https://github.com/rigortype/rigor/issues/1699), [#1719](https://github.com/rigortype/rigor/pull/1719)).
+- **[engine]** Float range narrowing and acceptance checks no longer raise `ArgumentError` on `Float::NAN` under Ruby 4.1 ([#1784](https://github.com/rigortype/rigor/issues/1784), [#1789](https://github.com/rigortype/rigor/pull/1789)).
+- **[engine]** `rigor check --incremental` now re-checks files when external modules in their class ancestry gain hook definitions in other files ([#1641](https://github.com/rigortype/rigor/issues/1641), [#1660](https://github.com/rigortype/rigor/pull/1660)).
+- **[rigor check]** Values typed `FalseClass`, `TrueClass`, or `NilClass` now satisfy declared `bool`, `true`, `false`, and `nil` types ([#1681](https://github.com/rigortype/rigor/pull/1681)).
+- **[rigor unused]** Improved reachability tracking across non-constant superclasses, external paths, and test suites ([#1724](https://github.com/rigortype/rigor/pull/1724), [#1748](https://github.com/rigortype/rigor/pull/1748), [#1756](https://github.com/rigortype/rigor/pull/1756), [#1758](https://github.com/rigortype/rigor/pull/1758)).
+  - References from outside owned paths (such as `config/application.rb`, initializers, migrations, and specs) are counted as file-level code so referenced classes are not flagged ([#1748](https://github.com/rigortype/rigor/pull/1748)).
+  - Superclasses are credited to reachable subclasses, preventing base classes from being reported when named by reachable children ([#1724](https://github.com/rigortype/rigor/pull/1724)).
+  - `qa/`, `e2e/`, and `features/` directories at the project root are recognized as test suites ([#1756](https://github.com/rigortype/rigor/pull/1756)).
+  - Non-constant superclasses like `Struct.new(...)` or `Migration[7.1]` and dynamic `const_get` calls are walked without treating candidates as unused ([#1758](https://github.com/rigortype/rigor/pull/1758)).
+- **[rigor sig-gen]** `rigor sig-gen` no longer emits methods defined inside `refine` blocks as members of the enclosing module ([#1766](https://github.com/rigortype/rigor/pull/1766)).
+- **[inference]** `Module.new`, `Class.new`, `Struct.new`, and `Data.define` invoked with a block argument (`&block`) no longer abort analysis with an internal error ([#1816](https://github.com/rigortype/rigor/issues/1816), [#1824](https://github.com/rigortype/rigor/pull/1824)).
+- **[inference]** String-literal method names containing bytes invalid in UTF-8 no longer abort analysis with an `EncodingError` ([#1821](https://github.com/rigortype/rigor/issues/1821), [#1825](https://github.com/rigortype/rigor/pull/1825)).
+  - Such names in `alias_method`, `private`, `module_function`, `method`, and `attr_*` are treated as computed names so the rest of the file is analyzed.
+- **[cli]** Comments containing invalid UTF-8 bytes no longer cause suppression scanning or CLI commands to crash with internal analyzer errors ([#1818](https://github.com/rigortype/rigor/issues/1818), [#1823](https://github.com/rigortype/rigor/pull/1823)).
+  - Suppression scans in `rigor check` read comments through a scrubbed copy, and `rigor annotate` and `rigor trace` handle invalid bytes safely.
+- **[cli]** `rigor baseline generate` and `regenerate` now preserve your loaded configuration rather than rebuilding it from an abbreviated key list ([#1777](https://github.com/rigortype/rigor/issues/1777), [#1805](https://github.com/rigortype/rigor/pull/1805)).
+  - Findings enabled by `bleeding_edge`, `parameter_inference`, `dependencies`, or `effects` are recorded into the baseline instead of firing on the next check.
+- **[plugins/rigor-ffi]** `rigor-ffi` now tracks `Gemfile.lock` and `extconf.rb` through its `IoBoundary` so target changes invalidate incremental analysis caches ([#1652](https://github.com/rigortype/rigor/issues/1652), [#1802](https://github.com/rigortype/rigor/pull/1802)).
+- **[plugins/rigor-minitest]** `assert_equal` and `must_equal` no longer narrow types when custom `==` methods or mixed numeric types can satisfy equality ([#1678](https://github.com/rigortype/rigor/issues/1678), [#1806](https://github.com/rigortype/rigor/pull/1806)).
+
 ## [0.4.1] - 2026-10-08
 
 v0.4.1 makes repeated runs on a large Rails app faster and trustworthy: an unchanged `--incremental` run is answered from the cache without starting the analyzer, cold runs allocate less, and a batch of cases where `--incremental` served an answer computed before an edit is closed. Method, constant and override lookups now follow Ruby's ancestor order, and where a file cannot prove that order (a gem module without RBS ahead of the definer, a hook-driven or conditional include) Rigor now declines instead of guessing, which removes a family of false positives at the cost of typing fewer calls on Rails apps; see the upgrade note under Changed. It also fixes two internal-error crashes, on a directory named `~something` and on `class self::X` inside a `class_eval` on a non-constant receiver.
@@ -251,6 +345,7 @@ v0.4.0 opens the 0.4 line by bringing Rails views into the analysis: rigor-actio
 - **[skills]** The shipped agent skills no longer give commands that fail or advice that is out of date, such as a bare `rigor diff` or a `< 0.2.0` version pin ([#1222](https://github.com/rigortype/rigor/pull/1222)).
 - **[playground]** Tab indents in the playground editor, which also shows how to move focus back out, and the dark theme's cursor is visible again ([#990](https://github.com/rigortype/rigor/pull/990)).
 
-[Unreleased]: https://github.com/rigortype/rigor/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/rigortype/rigor/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/rigortype/rigor/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/rigortype/rigor/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/rigortype/rigor/compare/v0.3.9...v0.4.0

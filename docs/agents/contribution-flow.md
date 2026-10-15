@@ -56,7 +56,8 @@ Once the change is implemented and `make verify-changed` passes:
    it Draft — the review is never skipped silently. Give the reviewer the base commit, the PR and its
    issue, and this repository's rules (the Flake, read-only `references/`, no local full gates, the
    release gate — a subagent does not inherit them). Ask for findings ranked by severity, each with
-   a concrete failure scenario, and scope expansion labelled separately. A PR that changes a skill
+   a concrete failure scenario, and scope expansion labelled separately; the batch version of this
+   brief is the reviewer contract in [`parallel-lanes.md`](parallel-lanes.md). A PR that changes a skill
    also runs the `waza` review in [`skill-authoring.md`](skill-authoring.md) at the same time; its
    findings join this triage.
 3. **Triage.** For a PR that changes the engine, read the "Engine allocations (advisory)" job's summary
@@ -69,13 +70,18 @@ Once the change is implemented and `make verify-changed` passes:
    code, a wrong inferred type, a crash, a gate that passes without checking, or guidance that would
    lead an agent into a wrong irreversible or gate-skipping action (a merge, a push, a publish, a
    skipped gate). Imprecise or unclear wording is not severe.
-4. **Another round only if this round's fixes addressed a severe defect.** Make it a
+4. **Another round only if this round's fixes addressed a severe defect or changed behaviour.** Make it a
    delta review of the fix commits: re-check each prior finding and hunt for regressions the fix
    introduced. In the September 2026 review logs (167 PRs), 63% of the severe defects found in
    rounds 2 and later had been introduced by the previous round's fixes, and a round after a severe
-   finding found another half the time, against 16% after a round without one.
+   finding found another half the time, against 16% after a round without one. A fix for a
+   non-severe finding that changes behaviour rather than wording or specs gets the same delta
+   review; it counts toward the three rounds. In the v0.4.3 batch each of these (#1884, #1890,
+   #1894) found a further gap worth fixing before merge.
 5. **Stop at three rounds.** If round 3 still finds a severe defect the design is not converging:
    stop and ask the user whether to take a conservative reading, split the PR, or file the rest.
+   Fixes made after round 3 land without a fourth round unless they address a severe defect, which
+   is the user's call.
 6. **Merge** (`gh pr ready`, then `gh pr merge --merge`) once CI is green on the head commit and the
    review has stopped — when the landing point was settled before the work began: a
    `ready-for-agent` issue, or a user request that states the expected outcome. A PR that changes a

@@ -66,4 +66,35 @@ RSpec.describe Rigor::Inference::Builtins::CRubyDefiners do
     expect(described_class.defines?("Process::Status", :&)).to be(false)
     expect(described_class.defines?("Kernel", :center)).to be(false)
   end
+
+  # Issue #1752 — the singleton side: `Integer.sqrt` is CRuby's own method of `Integer`'s singleton class, which a
+  # refinement of `Object#sqrt` cannot answer ahead of; an instance method is not one.
+  it "lists a singleton method CRuby defines on the class's singleton class, apart from its instance methods" do
+    expect(described_class.singleton_defines?("Integer", :sqrt)).to be(true)
+    expect(described_class.singleton_defines?("Integer", :digits)).to be(false)
+    expect(described_class.defines?("Integer", :sqrt)).to be(false)
+    expect(described_class.singleton_defines?("Struct", :members)).to be(false)
+    expect(described_class.singleton_defines?("Kernel", :puts)).to be(false)
+  end
+
+  # Each listed singleton method the running Ruby has is owned by the class's own singleton class, so no refinement of
+  # an ancestor answers ahead of it. A method the running Ruby lacks is skipped (`Date.test_civil` and the other
+  # debug-build `date_core.c` methods).
+  it "lists only singleton methods the running Ruby owns on the class's singleton class" do
+    require "date"
+    found = Rigor::Inference::Builtins::MethodCatalog.topic_paths.flat_map do |path|
+      classes = YAML.safe_load_file(path, permitted_classes: [Symbol])["classes"] || {}
+      classes.flat_map do |name, klass|
+        owner = runtime_module(name)
+        next [] if owner.nil? || klass["rdoc_only"]
+
+        listed_names(klass["singleton_methods"]).filter_map do |method|
+          method_found = owned_method(owner.singleton_class, method)
+          [name, method, method_found.owner == owner.singleton_class] if method_found
+        end
+      end
+    end
+    expect(found.size).to be > 100
+    expect(found.reject(&:last).map { |name, method, _| "#{name}.#{method}" }).to eq([])
+  end
 end

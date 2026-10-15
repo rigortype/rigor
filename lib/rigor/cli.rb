@@ -51,6 +51,7 @@ module Rigor
       "init" => :run_init,
       "annotate" => :run_annotate,
       "type-of" => :run_type_of,
+      "lens" => :run_lens,
       "trace" => :run_trace,
       "type-scan" => :run_type_scan,
       "effects" => :run_effects,
@@ -291,18 +292,36 @@ module Rigor
 
     # The settings `rigor init` writes: the defaults, with `test_paths:` spelled out as the test roots found now, so
     # the project's config says where its tests are rather than leaving it to auto-detection. The roots are written
-    # relative to the config file's directory, which is what {Configuration.load} resolves them against.
+    # relative to the config file's directory, which is what {Configuration.load} resolves them against. `paths:`
+    # is written the same way: the default `lib` is resolved against the physical cwd, so a config written to
+    # `config/rigor.yml` must say `../lib`, or it loads back as `config/lib` (#1399).
     #
     # `target_ruby` is left out (the template writes it commented): a written key is a statement about the runtime
     # (#1692), and the starter must not make one the user never chose.
     def init_settings(path)
+      config_dir = config_dir_of(path)
       settings = Configuration::DEFAULTS.except("target_ruby")
+      settings = settings.merge("paths" => roots_relative_to(settings.fetch("paths"), config_dir))
       test_paths = Configuration.new.resolved_test_paths
       return settings if test_paths.empty?
 
-      config_dir = Pathname(File.absolute_path(File.dirname(path)))
-      relative = test_paths.map { |root| Pathname(root).relative_path_from(config_dir).to_s }
-      settings.merge("test_paths" => relative)
+      settings.merge("test_paths" => roots_relative_to(test_paths, config_dir))
+    end
+
+    # The directory the config file's roots are written relative to. An absolute `--path` is taken through its
+    # physical directory: the roots are resolved against the physical cwd (`Dir.pwd` is getcwd), so a logical
+    # spelling through a symlink makes the lexical `..` climb a different tree than the kernel does (#1399 review).
+    # A relative `--path` stays lexical, as {Configuration.load} resolves it.
+    def config_dir_of(path)
+      dir = File.dirname(path)
+      Pathname(Pathname(path).absolute? ? File.realdirpath(dir) : File.absolute_path(dir))
+    end
+
+    # Each root is resolved against the physical cwd (where `rigor` reads it from), then written relative to the config
+    # dir. With the config at the project root, both sides are the same physical directory, so the roots come out as
+    # they are spelled from it (`lib`, `spec`), which is master's output for the default config.
+    def roots_relative_to(roots, config_dir)
+      roots.map { |root| Pathname(File.absolute_path(root)).relative_path_from(config_dir).to_s }
     end
 
     def run_annotate
@@ -315,6 +334,12 @@ module Rigor
       require_relative "cli/type_of_command"
 
       TypeOfCommand.new(argv: @argv, out: @out, err: @err).run
+    end
+
+    def run_lens
+      require_relative "cli/lens_command"
+
+      LensCommand.new(argv: @argv, out: @out, err: @err).run
     end
 
     def run_trace
@@ -463,6 +488,7 @@ module Rigor
           init       Create a starter .rigor.yml
           annotate   Print FILE with each line's last-expression type
           type-of    Print inferred types at FILE:LINE[:COL] positions
+          lens       Map a file's declarations with their types and provenance (experimental)
           trace      Replay how the engine typed FILE as a terminal animation
           type-scan  Report Scope#type_of coverage across PATHs
           effects    Report each method's effect labels, and the committed effect snapshot

@@ -291,6 +291,9 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
         end
         DataStruct = Data.define(:a, :b)
         NormalStruct = Struct.new(:x, :y)
+        class << NormalStruct
+          def made = 1
+        end
         module Wrap
           class Nest::Leaf
             def leaf_m = 3

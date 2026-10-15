@@ -35,8 +35,8 @@ them. Adding a method to the hub still re-checks every ancestry dependent (#1538
 2. **No gate measured the path.** `engine-warm.yml` now measures it, but `bench/baseline.json` still
    measures only the cold full path.
 3. **The incremental tail prints less.** Still true. It lacks the JSON `config_warnings` block,
-   CI-native annotations, the `--baseline-strict` verdict, cache eviction and `--coverage`, and it
-   ignores `--explain` (#1533). Run stats and trace appendices are a separate question (WD4).
+   CI-native annotations, the `--baseline-strict` verdict, cache eviction and `--coverage`. Run stats and
+   trace appendices are a separate question (WD4). `--explain` is honoured since #1533.
 
 **Since then, the campaign found that most stale-answer bugs on the incremental path share one
 cause.** The incremental snapshot decides whether it is still valid from a hand-picked list:
@@ -129,7 +129,7 @@ The criterion, reusable for any cache that would become a default route:
   would leave those users with no snapshot at all.
 - **WD4 — One tail.** The default miss path, the plain slot hit, the incremental path and the
   incremental slot hit end in one tail. That tail writes the `config_warnings` block, CI-native
-  annotations, the `--baseline-strict` verdict and `--explain` output (#1533). Eviction runs on the
+  annotations, the `--baseline-strict` verdict and `--explain` output (honoured since #1533). Eviction runs on the
   miss paths, the default miss and the full incremental path. A slot hit defers it, as today, so a
   null run pays for no walk of the store.
   - Only a run that built the environment prints the run stats block and trace appendices: a
@@ -150,7 +150,7 @@ The criterion, reusable for any cache that would become a default route:
   - **The run is excluded from the incremental slot probe** (`incremental_run_hit_eligible?`):
     - an editor buffer;
     - `--no-cache`, which under any setting also means no snapshot is read or written (#1525);
-    - `--explain`, until #1533 lands;
+    - `--explain`, for which the session writes no slot (#1533);
     - `--coverage`, since a report run gains nothing from it;
     - `--cache-stats` or a `RIGOR_*_TRACE` probe;
     - a worker pool, until workers send their reads back (WD1).

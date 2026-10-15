@@ -2169,4 +2169,23 @@ def not_match_rebound(line, u)
   key = $1
   key.upcase # GENUINE-NIL
 end
+# Issue #1384 — a call that may re-run a match forgets every numbered global, not only `$1`..`$9`. After the `sub`,
+# `$9`, `$10` and `$12` all read `String?` (Ruby: nil for each on "abcdefghijkl".sub(/q/, "")).
+def numbered_forgotten_after_sub(s)
+  if s =~ /(a)(b)(c)(d)(e)(f)(g)(h)(i)(j)(k)(l)/
+    s.sub(/q/, "")
+    assert_type("String?", $9)
+    assert_type("String?", $10)
+    assert_type("String?", $12)
+  end
+end
+
+# The control: with nothing between the match and the read, `$10` and `$12` keep the match edge's `String`.
+def numbered_kept_without_intervening_call(s)
+  if s =~ /(a)(b)(c)(d)(e)(f)(g)(h)(i)(j)(k)(l)/
+    assert_type("String", $10)
+    assert_type("String", $12)
+  end
+end
+
 # rubocop:enable Style/PerlBackrefs

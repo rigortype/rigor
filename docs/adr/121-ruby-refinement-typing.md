@@ -157,7 +157,11 @@ declaration is opaque.**
   `{X => {"*" => [M]}}` (the body may define names the walk cannot spell), a class-unknown row
   `{"*" => {name => [M]}}` (`refine(k)`, `refine(self)`, or a target a project constant write binds),
   and a targets-wildcard `{"*" => {"*" => [M]}}` (a `refine` in a method or a `define_method` body, or
-  reached through a `:refine` literal such as `send(:refine, …)` or `alias_method :r, :refine`). As a
+  reached through a `:refine` literal such as `send(:refine, …)` or `alias_method :r, :refine`; a
+  canonical `refine X do … end` in a module's own singleton method, which runs on the module, records
+  the module's rows instead, #1749, and only the names: a refinement a method creates exists once the
+  method has run, so it never supplies a body to type a call from, whatever a module-body `def` of the
+  name says). As a
   module, `"*"` is one the walk cannot name. One function (`RefineSelf`) answers what `self` a `refine` at
   each node runs on, and the in-effect walk and the census both read its answer: a module's instance
   method runs on whatever module extends it; a block, in a module body or a method body alike, may run
@@ -176,6 +180,17 @@ declaration is opaque.**
   targets-wildcard row lists it or `"*"`. A gem's module is
   opaque even when gem source inference read it, until that inference can show it saw every file
   declaring it.
+- A refine key is decided at read time, once, for the project and every walked gem, by every segment
+  of it: a key no class or RBS declaration knows as a whole is class-unknown when any segment is a
+  constant a write binds (`K = String; refine(K)`, `Enc = ::Encoding; refine(Enc::Converter)`,
+  `Shared::Target = String` in an opted-in gem), from the project's constant census or from the
+  constants the walked gems write without declaring a class or module, a gem's matched by the name
+  the write binds against each prefix of the key (#1814, #1815). A core or declared class keeps its
+  key. The gem source walker reads every file of a gem through the census
+  the project walk runs, so a gem module's rows carry the wildcards a project module's would, and the
+  run's cache key and the incremental snapshot's fingerprint carry the `(name, version, mode)` row of
+  each opted-in gem that resolves (ADR-10 slice 3), so a project with no lockfile re-checks after a
+  gem bump.
 - Every declared candidate of a `using`'s spelling stays in the list, because which one Ruby's lookup
   finds can depend on load order; undeclared candidates leave, and a spelling with no declared
   candidate enters alone, opaque. An included module the project does not declare enters the list
@@ -185,8 +200,15 @@ declaration is opaque.**
   `call.wrong-arity`, `call.argument-type-mismatch`, `call.possible-nil-receiver`,
   `def.method-visibility-mismatch` and `flow.always-raises`. `call.raise-non-exception` (which judges
   the argument) and `call.self-undefined-method` (off in every shipped profile) do not ask.
-- The typed arm answers `Dynamic[top]` for every instance-receiver call in the span of an activation
-  that puts an opaque module in effect; a class object falls through until singleton-side levels land.
+- The typed arm answers `Dynamic[top]` for every call on an instance or a class object in the span of an
+  activation that puts an opaque module in effect. A class object fell through until #1752 walked its own
+  lookup (its singleton class and each superclass's with their `extend`s, then `Class`, `Module`, `Object`,
+  `Kernel` and `BasicObject`); lifting that exception widens the span's cost, since a `Foo.new` chain or a
+  class-body call under a `using` of a gem's module now types as `Dynamic` too. Outside that span a
+  refinement that wins on a class object also answers `Dynamic`, never its refine body's type: a hook on
+  any ancestor can install the class object's own method where no table sees it (`include Singleton`'s
+  `instance`, a gem concern's class methods), and three review rounds each found another such shape, so
+  the walk decides only whether a refinement may answer.
   WD3's rule that the unknown marker answers `Dynamic` only where some refinement defines the name is
   not extended to opaque modules: their rows cannot be read, so every name may be replaced. Wildcard
   rows never yield a winner: a class-unknown row answers `Dynamic` for its names on every instance, a
@@ -204,7 +226,10 @@ declaration is opaque.**
   no table declares, and a declared class whose instance chain cannot be read to its end (a cut, a
   superclass the tables do not know) or holds the receiver's class; a class with an unknown superclass
   is a possible subclass of every class. A class mark alone (refined, object-extended, meta-superclass)
-  does not make a name the project's for the arity walk (`DiscoveryIndex.declares_surface?`).
+  does not make a name the project's for the arity walk (`DiscoveryIndex.declares_surface?`). A class object
+  (#1752) is decided over its singleton levels on the same terms: its own singleton definer `Known` on the
+  singleton side, or a singleton method the catalogue lists, proves the definer; a refined module beside the
+  class's own singleton methods proves nothing, since `class << self; prepend M` is recorded as an `extend`.
 
 Limits it does not remove: a module reopened in a file outside the analysed paths or under
 `exclude:`; an inner `using` candidate declared only outside the analysed paths (or by a
@@ -213,5 +238,5 @@ candidate as opaque would blanket every nested `using`); a module declared or re
 string; a refine target bound by `||=` or `const_set` only in another file; and
 `TOPLEVEL_BINDING.eval("using N")`, which activates `N` to the end of the file.
 
-Consequence: under a `using` of a gem's module every instance call in the span is unchecked and
-`Dynamic` until gem modules can be known, a cost the survey corpus puts at a handful of files.
+Consequence: under a `using` of a gem's module every call in the span, on an instance or a class object, is
+unchecked and `Dynamic` until gem modules can be known, a cost the survey corpus puts at a handful of files.

@@ -356,6 +356,13 @@ module Rigor
         data = DEFAULTS.merge(raw)
       end
       new(autowire_default_plugins(data), effects_key_present, target_ruby_key_present || false)
+        .with_exclude_base(resolved && File.exist?(resolved) ? File.dirname(resolved) : nil)
+    end
+
+    # #1576 — the directory relative `exclude:` patterns are matched against: the directory of the config file in
+    # use (the base `paths:` resolve against), or the working directory when no config file is used.
+    def exclude_base
+      @base_dir || Dir.pwd
     end
 
     # ADR-93 WD2 — the one bundled plugin default-wired without a `plugins:` entry. `rigor-rbs-inline` is the
@@ -743,6 +750,14 @@ module Rigor
       copy.instance_variable_set(:@bleeding_edge_severity_overrides,
                                  BleedingEdge.severity_overrides_for(selector))
       copy.instance_variable_set(:@bleeding_edge_active_ids, BleedingEdge.active_ids_for(selector))
+      copy.freeze
+    end
+
+    # #1576 — a sibling Configuration whose relative `exclude:` patterns match against `dir` (nil: the working
+    # directory). {Configuration.load} sets it to the loaded config file's directory.
+    def with_exclude_base(dir)
+      copy = dup
+      copy.instance_variable_set(:@base_dir, dir && File.absolute_path(dir).freeze)
       copy.freeze
     end
 

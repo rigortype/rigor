@@ -119,8 +119,10 @@ Signature changes update the matching
 | `Rigor::Analysis::DependencySourceInference::Index#budget_exceeded` | Analysis | Slice 4 |
 | `Rigor::Analysis::DependencySourceInference::Builder.build` | Analysis | Slice 2a |
 | `Rigor::Analysis::DependencySourceInference::Walker.walk(budget:)` | Analysis | Slice 2b-i / 4 |
-| `Rigor::Analysis::DependencySourceInference::Walker::Outcome` Data shape | Analysis | Slice 4 / #1672 (`refinements`) |
+| `Rigor::Analysis::DependencySourceInference::Walker::Outcome` Data shape | Analysis | Slice 4 / #1672 (`refinements`) / #1814 (`bound`) |
 | `Rigor::Analysis::DependencySourceInference::Index#refinements` | Analysis | #1672 |
+| `Rigor::Analysis::DependencySourceInference::Index#bound_constant?` | Analysis | #1814 |
+| `Rigor::Analysis::DependencySourceInference::GemResolver.dependency_entries` / `Resolved#dependency_entry` | Analysis | #1814 |
 | `Rigor::Environment#dependency_source_index` | Environment | Slice 2b-ii |
 | `Rigor::Cache::Descriptor::DependencyEntry` | Cache | Slice 3 |
 | `Rigor::Cache::Descriptor#dependencies` slot | Cache | Slice 3 |
@@ -167,6 +169,10 @@ gem).
 - `#refinements` — the gems' `refine` bodies (issue #1672; see
   "Refine bodies" below), frozen
   `Hash{refined_class => Hash{method_name => Array<refining_module>}}`.
+- `#bound_constant?(segment)` — does a walked gem write a constant
+  whose last segment is `segment` without declaring a class or module
+  by it (issue #1814; `Walker::Outcome#bound`, unioned across the
+  gems; see "Refine bodies" below).
 - `#empty?` — true when no resolved gems were registered.
 - `#cache_descriptor` — frozen
   [`Cache::Descriptor`](cache.md) with one `DependencyEntry`
@@ -198,6 +204,9 @@ Recognition rules:
   carry the kind that wins the per-class first walk.
 - `refine X do … end` is a refine body, not part of the
   enclosing module (see "Refine bodies" below).
+- The constants a file writes, and the classes and modules it
+  declares, are collected for `Outcome#bound` (see "Refine bodies"
+  below).
 
 ### Refine bodies (issue #1672)
 
@@ -211,17 +220,66 @@ and a literal block, where `self` is not known to be a class.
 and walks as any other call (issue #1689). A refine body's
 instance `def`s MUST NOT enter the catalog: they are not
 methods of the refining module, and of the refined class only
-after `using`. The walker instead records
-each as a refinement of the target by the enclosing module, in
-`Walker::Outcome#refinements`, with the target resolved
-lexically the way the project walk resolves it (every name it
-can denote). `def self.x` and `def`s nested in a `def` or a
-declaration define nothing on the target and are dropped; a
-`class` / `module` declared in the body is still walked under
-the lexical prefix. A `refine` with no enclosing module, or in a
-block under `class << self`, names no refining module and
-records nothing. A computed target (`refine(klass) { … }`)
-names no class to key, so its body walks as any other block.
+after `using`; a `class` / `module` declared in the body is
+still walked under the lexical prefix.
+
+The table itself is not built from the walker's descent (issue
+#1814): `Walker.walk` reads each file through
+`Inference::ScopeIndexer.refinement_table`, the refinement table
+of the project walk's census (`build_methods_and_def_nodes`), and
+unions the per-file tables as the project fold does. A computed
+target records its names under the wildcard class, a body whose
+names are incomplete a names-wildcard row, a `refine` inside a
+method or a `:refine` literal a targets-wildcard row for the module
+it runs on (ADR-121 WD7), exactly as in a project file. A `refine`
+with no enclosing module is therefore recorded under the module
+name `""`, which no `using` names, as the project walk records it.
+`walker_walk_census_parity_spec.rb` holds the two walks to one
+table for the same source. A gem whose source holds a `:refine`
+literal the census cannot attribute (`rspec-support`'s
+`Module.private_method_defined?(:refine)`) leaves the `"*"` module
+row a project file with that line would, which makes every module
+opaque (#1829).
+
+A refine target a constant write binds (`K = String; refine(K)`,
+in this gem, another opted-in gem or the project) names whatever
+value the write holds, which the walker cannot resolve. The rows
+stay as the census records them (`K` and `M::K`); the walk's pass
+over each file also collects the names its constant writes bind
+(an assignment, an operator write, a multiple assignment, a rooted
+path write) without declaring a class or module (`Point =
+Struct.new(:x)` declares one, through the project walk's own
+`meta_new_rvalue` reading). A bare write binds its name under the
+lexical nesting of the `class` / `module` headers around it
+(`Shared::Target` for `module Shared; Target = String; end`), which
+a block does not change, under every name a nested compact header
+can denote (`module W; module Shared::Inner` opens `W::Shared::Inner`
+or `Shared::Inner`). `Walker::Outcome#bound` holds those names,
+`#bound_segments` the last segment of a write whose owner the walk
+cannot spell (a path write that is not rooted, since `Wrap::K = …`
+may bind under an included module's `Wrap` and `self::K = …` in a
+block under the block's `self`; a write under `class << …`; a
+`const_set` with a literal name, unless its value creates a class),
+and `Index#bound_constant?(name)` unions both across the walked gems:
+true for a name a gem binds, or for a name whose last segment a gem
+binds under an owner it could not spell. The reader decides the key
+at read time (`InEffectRefinements.class_wildcard_key?`, ADR-121
+WD7): a key no class or RBS knows as a whole is class-unknown when
+any segment of it is a constant the project's census binds, or when
+any prefix of it (a leading `Object::` dropped) is a name a walked
+gem binds, so `module Shared;
+Target = String; end` in one gem beside `refine(Shared::Target)` in
+the project or in another gem, and a prefix alias (`Enc =
+::Encoding; refine(Enc::Converter)`), decline the body's names on
+every receiver instead of keeping a row no receiver matches (#1815
+item 5). Matching a gem's write by the name it binds, not by its
+last segment, keeps a gem constant that merely shares a core class's
+name (`RBS::BuiltinNames` writes `String`, `Array`, …) from moving
+the sibling spelling (`Ext::String`) a project `refine String`
+inside `module Ext` also records. The gem's own module stays opaque
+(#1811), so under a `using` of it the span declines either way;
+the rows reach a project module's `using` and a `using` that names
+no module.
 
 `Builder` unions every gem's table into `Index#refinements`, and
 the runner unions that into the project's
@@ -232,11 +290,14 @@ gem's refined calls in that lexical region and still reports
 them elsewhere. The index is rebuilt by the pre-passes every
 run takes, so a file re-analysed on a warm run is seeded the
 same table a cold run seeds. An unchanged file's cached result
-is keyed on the gem's name, version and mode (see "Cache slice"),
-as the catalog's contributions are, so editing a gem's refine
-body without a version bump is not seen until that file is
-re-analysed. Refine bodies the walker reaches after the
-per-gem budget trips are not recorded. Per ADR-121 WD3 the
+is keyed on the gem's name, version and mode (see "Cache slice";
+the run-result key and the incremental snapshot's fingerprint
+carry that row since issue #1814), as the catalog's contributions
+are, so editing a gem's refine body without a version bump is not
+seen until that file is re-analysed. The catalog stops at the
+per-gem budget, and a file the walk does not reach because the
+budget tripped contributes no row and no bound constant. Per ADR-121
+WD3 the
 gem's refine bodies are not inferred: a refined call into one
 types as `Dynamic[top]` (today through the unresolved-method
 fallback; the refined dispatch arm, #1664, keeps that answer).
@@ -396,6 +457,19 @@ The slice 3 envelope lands the **primitive** for per-gem-version
 invalidation. Cache producers that route ADR-10 inferences
 through `Store#fetch_or_compute` are queued for slice 4
 alongside the per-gem budget machinery.
+
+Issue #1814 wires it into the two identities a warm run is gated
+on. The gem half of the refinement table, the method catalogue and
+the constants a gem binds reach every file's checks and no analysed
+file records them, so `GemResolver.dependency_entries(dependencies)`
+lifts each non-disabled entry that resolves into its `DependencyEntry`
+without walking the gem, and `Analysis::RunCacheKey.descriptor` carries
+the rows in its `dependencies:` slot while `IncrementalSnapshot.fingerprint`
+hashes them as a `dependency-source` part. A `bundle update` was
+already covered by the lockfile digest; these rows cover a project with
+no lockfile, or a gem installed beside the bundle. A project that lists
+no gem adds no row, so its key and fingerprint are what they were. An
+edit to a gem's files that leaves its version alone is still not seen.
 
 ## Diagnostic family
 

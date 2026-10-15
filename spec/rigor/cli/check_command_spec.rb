@@ -5,6 +5,7 @@ require "stringio"
 require "tmpdir"
 
 require "rigor/cli/check_command"
+require "rigor/analysis/plugin_fact_fingerprint"
 
 # Focused unit coverage for the extracted `rigor check` command object. The full behavioural surface (CI formats,
 # baselines, incremental modes, editor mode, cache stats) is exercised end-to-end through the dispatcher in
@@ -126,6 +127,247 @@ RSpec.describe Rigor::CLI::CheckCommand do
     expect(warm_err).to include("--incremental warm")
     expect(cold_out).to include("No diagnostics")
     expect(warm_out).to include("No diagnostics")
+  end
+
+  # #1526 — the warm banner reports the recheck's own sets, not the size of the whole analysed set. The session
+  # path is pinned with the run-result slot stubbed to decline, so the recheck is what prints the banner; the slot
+  # path has its own example below. `lib/b.rb` calls `Widget#price`, so an edit to `lib/a.rb` that changes its
+  # return type re-analyzes the dependent too: the banner shows 2 re-analysed for 1 changed.
+  describe "--incremental banner reports the recheck" do
+    before { require "rigor/analysis/incremental_run_slot" }
+
+    def write_banner_project
+      FileUtils.mkdir_p("lib")
+      File.write(File.join("lib", "a.rb"), "class Widget\n  def price\n    10\n  end\nend\n")
+      File.write(File.join("lib", "b.rb"), "class Shop\n  def total\n    Widget.new.price\n  end\nend\n")
+      File.write(File.join("lib", "c.rb"), "class Other\n  def go = 1\nend\n")
+    end
+
+    def banner_run(*extra)
+      run(["--no-ci-detect", "--no-stats", "--no-baseline", "--incremental", *extra, "lib"])
+    end
+
+    def decline_slot
+      allow(Rigor::Analysis::IncrementalRunSlot).to receive(:serve).and_return(nil)
+    end
+
+    it "prints the unchanged cold banner on a first run" do
+      write_banner_project
+
+      status, _out, err = banner_run
+
+      expect(status).to eq(0)
+      expect(err).to include("rigor: --incremental cold — full analysis (3 files)")
+      expect(err).not_to include("reused cached diagnostics")
+    end
+
+    it "says it re-analysed 0 files on a no-change warm run, from the session" do
+      write_banner_project
+      banner_run
+      decline_slot
+
+      _status, _out, err = banner_run
+
+      expect(err).to include("rigor: --incremental warm — re-analysed 0 of 3 files, reused all")
+    end
+
+    it "says it re-analysed 0 files on a no-change warm run served from the slot" do
+      write_banner_project
+      banner_run
+
+      _status, _out, err = banner_run
+
+      expect(err).to include("rigor: --incremental warm — re-analysed 0 of 3 files, reused all")
+    end
+
+    it "counts the dependent as re-analysed when one edit reaches a file that uses it" do
+      write_banner_project
+      banner_run
+      File.write(File.join("lib", "a.rb"), "class Widget\n  def price\n    :ten\n  end\nend\n")
+      decline_slot
+
+      _status, _out, err = banner_run
+
+      expect(err).to include(
+        "rigor: --incremental warm — re-analysed 2 of 3 files (1 changed), reused the rest"
+      )
+    end
+
+    it "names a removed file, and says nothing was re-analysed when the rest is unchanged" do
+      write_banner_project
+      banner_run
+      FileUtils.rm_f(File.join("lib", "c.rb"))
+      decline_slot
+
+      _status, _out, err = banner_run
+
+      expect(err).to include("rigor: --incremental warm — re-analysed 0 of 2 files (1 removed), reused all")
+      expect(err).not_to include("0 changed")
+    end
+
+    it "uses singular nouns for a one-file project" do
+      FileUtils.mkdir_p("lib")
+      File.write(File.join("lib", "a.rb"), "class Solo\n  def go = 1\nend\n")
+      banner_run
+      decline_slot
+
+      _status, _out, err = banner_run
+
+      expect(err).to include("rigor: --incremental warm — re-analysed 0 of 1 file, reused all")
+    end
+
+    # A view template is a plugin-declared unit outside the `.rb` analysed set. The recheck re-runs every template on
+    # every warm run, so the banner appends them as their own count and leaves the file counts alone.
+    describe "with a plugin view template" do
+      before do
+        $LOAD_PATH.unshift(File.expand_path("../../fixtures/template_units", __dir__))
+        require "view_demo_plugin"
+        Rigor::Plugin.register(RigorViewDemoPlugin)
+      end
+
+      after { Rigor::Plugin.unregister! }
+
+      def write_template_project
+        write_banner_project
+        FileUtils.mkdir_p(File.join("app", "views", "users"))
+        File.write(File.join("app", "views", "users", "show.rbx"), "1\n")
+        File.write(".rigor.yml", "paths:\n  - lib\nplugins:\n  - gem: view_demo_plugin\n    id: view-demo\n")
+      end
+
+      it "appends the re-run templates to a warm banner for a template edit, and for a Ruby edit" do
+        write_template_project
+        banner_run
+        decline_slot
+
+        File.write(File.join("app", "views", "users", "show.rbx"), "2\n")
+        _status, _out, template_err = banner_run
+        expect(template_err).to include(
+          "rigor: --incremental warm — re-analysed 0 of 3 files, reused all, plus 1 view template"
+        )
+
+        File.write(File.join("lib", "a.rb"), "class Widget\n  def price\n    :ten\n  end\nend\n")
+        _status, _out, ruby_err = banner_run
+        expect(ruby_err).to include(
+          "rigor: --incremental warm — re-analysed 2 of 3 files (1 changed), reused the rest, plus 1 view template"
+        )
+      end
+    end
+
+    it "names an added file in the parenthesis, and leaves zero counts out" do
+      write_banner_project
+      banner_run
+      File.write(File.join("lib", "d.rb"), "class Fresh\n  def go = 2\nend\n")
+      decline_slot
+
+      _status, _out, err = banner_run
+
+      expect(err).to include("rigor: --incremental warm — re-analysed 1 of 4 files (1 added), reused the rest")
+      expect(err).not_to include("0 changed")
+      expect(err).not_to include("removed")
+    end
+  end
+
+  # #1529 — `--no-stats` must build no RunStats: the summary is never printed, and on macOS the RSS probe forks
+  # `ps`. The ordinary path already threads `collect_stats: false` through CheckRunnerFactory, and the first
+  # examples pin that. The `--incremental` examples pin the lazy read: the session's internal runners still
+  # collect (their chain snapshots, see IncrementalSession#start_chain), but nothing prints their summary, so
+  # the RSS reader is never called. The `--coverage` example pins the read's position: it runs before the scan.
+  describe "--no-stats" do
+    before { require "rigor/analysis/run_stats" }
+
+    it "builds no RunStats on an ordinary run and prints no summary" do
+      File.write("clean.rb", "x = 1\n")
+      allow(Rigor::Analysis::RunStats).to receive(:peak_rss_bytes).and_call_original
+
+      status, _out, err = run(["--no-cache", "--no-ci-detect", "--no-stats", "clean.rb"])
+
+      expect(status).to eq(0)
+      expect(Rigor::Analysis::RunStats).not_to have_received(:peak_rss_bytes)
+      expect(err).not_to include("RBS classes available")
+    end
+
+    it "still builds RunStats and prints the summary by default" do
+      File.write("clean.rb", "x = 1\n")
+      allow(Rigor::Analysis::RunStats).to receive(:peak_rss_bytes).and_call_original
+
+      _status, _out, err = run(["--no-cache", "--no-ci-detect", "clean.rb"])
+
+      expect(Rigor::Analysis::RunStats).to have_received(:peak_rss_bytes).at_least(:once)
+      expect(err).to include("RBS classes available")
+      expect(err).to include("Memory peak:")
+    end
+
+    # Issue #1529 — the peak is read straight after the analysis, so a `--coverage` scan (a second pass over the
+    # same files) cannot inflate the figure the summary reports.
+    it "reads the peak RSS before the --coverage scan runs" do
+      File.write("clean.rb", "x = 1\n")
+      require "rigor/cli/coverage_scan"
+      events = []
+      allow(Rigor::Analysis::RunStats).to receive(:peak_rss_bytes).and_wrap_original do |original|
+        events << :rss
+        original.call
+      end
+      allow(Rigor::CLI::CoverageScan).to receive(:precision_report).and_wrap_original do |original, **kwargs|
+        events << :coverage
+        original.call(**kwargs)
+      end
+
+      run(["--no-cache", "--no-ci-detect", "--coverage", "clean.rb"])
+
+      expect(events).to include(:rss, :coverage)
+      expect(events.index(:rss)).to be < events.index(:coverage)
+    end
+
+    # Issue #1529 — the RSS reader is lazy, so a run that prints no summary never reads it. The incremental
+    # session's internal runners build a RunStats they never print, and the chain snapshots they need are
+    # collected regardless of the flag, so the reader must stay uncalled on cold and warm runs alike.
+    it "never reads the RSS on an --incremental run, cold or warm, with or without --no-stats" do
+      File.write("clean.rb", "x = 1\n")
+      File.write("clean_quiet.rb", "x = 1\n")
+      %i[peak_rss_bytes read_rss_via_ps read_vmhwm_from_proc].each do |reader|
+        allow(Rigor::Analysis::RunStats).to receive(reader).and_call_original
+      end
+
+      # Each variant gets its own root, so its snapshot starts cold and its second run is the warm one.
+      variants = [["--no-ci-detect", "--incremental", "clean.rb"],
+                  ["--no-ci-detect", "--no-stats", "--incremental", "clean_quiet.rb"]]
+      variants.each do |variant|
+        cold_status, _out, cold_err = run(variant.dup)
+        warm_status, _out, warm_err = run(variant.dup)
+
+        expect(cold_status).to eq(0)
+        expect(warm_status).to eq(0)
+        expect(cold_err).to include("--incremental cold")
+        expect(warm_err).to include("--incremental warm")
+      end
+
+      expect(Rigor::Analysis::RunStats).not_to have_received(:peak_rss_bytes)
+      expect(Rigor::Analysis::RunStats).not_to have_received(:read_rss_via_ps)
+      expect(Rigor::Analysis::RunStats).not_to have_received(:read_vmhwm_from_proc)
+    end
+
+    it "does not crash on any output format and emits no stats key in --format json" do
+      File.write("bad.rb", "x = \"hello\"\nx.no_such_method_here\n")
+
+      %w[text json sarif github gitlab checkstyle junit teamcity].each do |format|
+        status, out, err = run(["--no-cache", "--no-ci-detect", "--no-stats", "--format=#{format}", "bad.rb"])
+
+        expect(status).to eq(1), "format=#{format} exited #{status}; stderr: #{err}"
+        expect(err).not_to include("RBS classes available")
+        expect(JSON.parse(out)).not_to have_key("stats") if format == "json"
+      end
+    end
+
+    it "serves a repeat ordinary run from the run cache without a crash" do
+      File.write("clean.rb", "x = 1\n")
+
+      first_status, = run(["--no-ci-detect", "--no-stats", "--format=json", "clean.rb"])
+      second_status, second_out, = run(["--no-ci-detect", "--no-stats", "--format=json", "clean.rb"])
+
+      expect(first_status).to eq(0)
+      expect(second_status).to eq(0)
+      expect(JSON.parse(second_out)).to include("success" => true)
+    end
   end
 
   # #146 — editor mode option B. `--incremental` plus a buffer used to ignore the buffer entirely and analyse
@@ -652,6 +894,101 @@ RSpec.describe Rigor::CLI::CheckCommand do
         expect(command.send(:apply_bleeding_edge_override, config, { bleeding_edge: false })
                       .bleeding_edge_active?("feat-b")).to be(false)
       end
+    end
+  end
+
+  # Issue #1579 — the `--incremental` opaque-plugin notes say WHY a plugin is opaque. A plugin with no surface
+  # must declare one; an undigestible value or a raising hook must be fixed where it lives, so the note names it.
+  describe "the --incremental opaque-plugin notes" do
+    let(:reason) { Rigor::Analysis::PluginFactFingerprint::OpaqueReason }
+    let(:no_surface) { reason.new(kind: :no_surface, input: nil, class_name: nil) }
+    let(:proc_producer) { reason.new(kind: :undigestible, input: "producer worker_index", class_name: "Proc") }
+    let(:fingerprint_tail) { "; the snapshot cannot be reused (full analysis every run).\n" }
+
+    def session_double(reasons, invalidated: false, store: false)
+      instance_double(
+        Rigor::Analysis::IncrementalSession,
+        opaque_reasons: reasons, fact_surface_invalidated?: invalidated, fact_store_unreadable?: store,
+        opaque_fact_surface?: !reasons.empty? || store
+      )
+    end
+
+    def note_for(session)
+      err = StringIO.new
+      described_class.new(argv: [], out: StringIO.new, err: err).send(:emit_incremental_fact_surface_notes, session)
+      err.string
+    end
+
+    it "words a single plugin with no fingerprint surface, in the singular" do
+      expect(note_for(session_double({ "fp-opaque" => no_surface }))).to eq(
+        "rigor: --incremental plugin fp-opaque contributes call-site types with no incremental " \
+        "fingerprint surface#{fingerprint_tail}"
+      )
+    end
+
+    it "groups several surfaceless plugins into one line, in the plural" do
+      err = note_for(session_double({ "fp-a" => no_surface, "fp-b" => no_surface }))
+
+      expect(err).to eq(
+        "rigor: --incremental plugins fp-a, fp-b contribute call-site types with no incremental " \
+        "fingerprint surface#{fingerprint_tail}"
+      )
+    end
+
+    it "names the undigestible producer value and its class" do
+      expect(note_for(session_double({ "sidekiq" => proc_producer }))).to eq(
+        "rigor: --incremental plugin sidekiq's producer worker_index has a value the incremental fingerprint " \
+        "cannot digest (a Proc)#{fingerprint_tail}"
+      )
+    end
+
+    it "chooses the article from the class name, and says an anonymous class plainly" do
+      io = reason.new(kind: :undigestible, input: "fact callback", class_name: "IO")
+      anon = reason.new(kind: :undigestible, input: "fact callback", class_name: "anonymous Class")
+
+      expect(note_for(session_double({ "a" => io }))).to include("(an IO)")
+      expect(note_for(session_double({ "a" => anon }))).to include("(an anonymous Class)")
+    end
+
+    it "words a raising hook as raising the exception class, not as an undigestible value" do
+      hook = reason.new(kind: :raised, input: "hook incremental_state_fingerprint", class_name: "ArgumentError")
+
+      expect(note_for(session_double({ "a" => hook }))).to eq(
+        "rigor: --incremental plugin a's hook incremental_state_fingerprint raised ArgumentError#{fingerprint_tail}"
+      )
+    end
+
+    it "emits one line for an unreadable fact store, naming no plugin" do
+      err = note_for(session_double({}, store: true))
+
+      expect(err).to eq(
+        "rigor: --incremental the plugin fact store could not be read; the snapshot cannot be reused " \
+        "(full analysis every run).\n"
+      )
+    end
+
+    it "prints nothing for a run with no opaque plugin and an unchanged fact surface" do
+      expect(note_for(session_double({}))).to eq("")
+    end
+
+    it "reports a changed fact surface only when nothing is opaque" do
+      expect(note_for(session_double({}, invalidated: true))).to eq(
+        "rigor: --incremental plugin fact surface changed since the snapshot; ran a full analysis.\n"
+      )
+      expect(note_for(session_double({ "fp-opaque" => no_surface }, invalidated: true))).not_to include("changed")
+    end
+
+    it "gives --cache-stats the same reason per opaque plugin, and the store when it is unreadable" do
+      session = session_double({ "fp-opaque" => no_surface, "sidekiq" => proc_producer }, store: true)
+      command = described_class.new(argv: [], out: StringIO.new, err: StringIO.new)
+      allow(command).to receive(:write_cache_stats)
+
+      command.send(:write_incremental_cache_stats, session, "root", nil, "text")
+
+      expect(command.instance_variable_get(:@out).string).to eq(
+        "  plugin fact surface: opaque (fp-opaque: no incremental fingerprint surface; sidekiq: producer " \
+        "worker_index has a value the incremental fingerprint cannot digest (a Proc); fact store: could not be read)\n"
+      )
     end
   end
 end

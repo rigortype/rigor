@@ -83,7 +83,6 @@ module Rigor
 
     class RunStats
       attr_reader wall_seconds: Float
-      attr_reader peak_rss_bytes: Integer?
       attr_reader target_files: Integer
       attr_reader rbs_classes_total: Integer
       attr_reader rbs_classes_project_sig: Integer
@@ -93,21 +92,25 @@ module Rigor
       attr_reader rbs_attribution_available: bool
 
       CACHED_SENTINEL: String
+      CURRENT_PROCESS_PEAK_RSS: ^() -> Integer?
 
+      # authored: #1529 memoised lazy read; its type enters only through the deliberate `peak_rss_probe:` initialize parameter.
+      def peak_rss_bytes: () -> Integer?
       def self.peak_rss_bytes: () -> Integer?
       def self.partition_classes: (class_decl_paths: Hash[String, String], signature_paths: Array[untyped]) -> [Integer, Integer]
       def self.attribution_available?: (class_decl_paths: Hash[String, String]) -> bool
 
       def initialize: (
         wall_seconds: Float,
-        peak_rss_bytes: Integer?,
         target_files: Integer,
         rbs_classes_total: Integer,
         rbs_classes_project_sig: Integer,
         rbs_classes_bundled: Integer,
         gem_walk_classes: Integer,
         gem_walk_gems: Integer,
-        ?rbs_attribution_available: bool
+        ?rbs_attribution_available: bool,
+        ?peak_rss_bytes: Integer?,
+        ?peak_rss_probe: ^() -> Integer?
       ) -> void
       def format: (untyped out, ?prefix: String) -> void
       def to_h: () -> Hash[Symbol, untyped]

@@ -64,7 +64,7 @@ module Rigor
       #   the caller loads the engine and runs the full path. Any failure declines rather than raising: the
       #   probe must never turn a servable run into a crash.
       def serve(paths)
-        files = PathExpansion.ruby_files(paths, @configuration.exclude_patterns)
+        files = PathExpansion.ruby_files(paths, @configuration.exclude_patterns, base: @configuration.exclude_base)
         key = RunCacheKey.descriptor(
           configuration: @configuration, files: files, explain: @explain,
           rbs_config_entries: RunCacheKey.libraries_config_entries(@configuration)

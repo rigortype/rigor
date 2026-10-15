@@ -141,7 +141,8 @@ cannot distinguish "correctly declined" from "never analysed" — both read as s
   `ExpressionTyper#class_graph_buckets` to one slot dropped 28.7 MB of held heap and moved `lib`
   allocations by −368 objects, i.e. nothing. The two RSS readings to hand are worse than merely
   noisy. `RunStats.peak_rss_bytes` has no `/proc` on macOS and falls back to `ps -o rss=` — CURRENT
-  RSS of THIS process when the stats are built — and `Runner::PoolCoordinator` analyses every slice
+  RSS of THIS process, read on first use: straight after the analysis, before any `--coverage` scan or
+  output (#1529) — and `Runner::PoolCoordinator` analyses every slice
   in a forked child, so under `--workers=N` the figure cannot see a worker's retention at all: the
   same A/B that separates cleanly at the default `parallel.workers: 0` reported ~257 MB on both arms
   at `--workers=4`. `tool/bench.rb`'s `peak_rss_kb` is `nil` off Linux, so a local `make bench-perf`

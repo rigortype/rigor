@@ -249,6 +249,12 @@ RSpec.describe Rigor::Analysis::PluginFactFingerprint do
 
       expect(result.opaque_plugin_ids).to eq(["fp-undigestible-fact"])
       expect(result.reusable_against?(result.digest)).to be(false)
+      # The reason names the fact that cannot be digested and the class of its value (issue #1579).
+      expect(result.opaque_reasons).to eq(
+        "fp-undigestible-fact" => Rigor::Analysis::PluginFactFingerprint::OpaqueReason.new(
+          kind: :undigestible, input: "fact callback", value_class: "Proc"
+        )
+      )
     end
   end
 
@@ -257,6 +263,12 @@ RSpec.describe Rigor::Analysis::PluginFactFingerprint do
       result = compute(config_for("fp-opaque"), { "fp-opaque" => Rigor::Plugin::FpOpaquePlugin })
       expect(result.opaque?).to be(true)
       expect(result.opaque_plugin_ids).to eq(["fp-opaque"])
+      # The reason says the plugin declares no surface at all (issue #1579).
+      expect(result.opaque_reasons).to eq(
+        "fp-opaque" => Rigor::Analysis::PluginFactFingerprint::OpaqueReason.new(
+          kind: :no_surface, input: nil, value_class: nil
+        )
+      )
       # Even when the digest matches the stored one, opacity forbids reuse.
       expect(result.reusable_against?(result.digest)).to be(false)
     end

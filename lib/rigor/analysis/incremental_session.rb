@@ -123,7 +123,7 @@ module Rigor
         # banner + `--cache-stats`) reads after `#run_incremental`. `@last_runner` is the analysis runner the
         # post-hoc fingerprint reads from; `@plugin_fact_reusable` is the computed decision object.
         @plugin_fact_digest = nil
-        @opaque_plugin_ids = [].freeze
+        @opaque_reasons = {}.freeze
         @fact_surface_invalidated = false
         @last_runner = nil
         @plugin_fact_reusable = nil
@@ -540,9 +540,14 @@ module Rigor
 
       # ADR-88 WD1 — reporting hooks the CLI reads after {#run_incremental}. `fact_surface_invalidated?` is true
       # when a valid snapshot was dropped for a fact-surface reason (a plugin sig/catalog edit, or an opaque
-      # plugin) rather than a cold miss. `opaque_plugin_ids` names the contributing-but-surfaceless plugins that
-      # force a full run every invocation.
-      attr_reader :opaque_plugin_ids
+      # plugin) rather than a cold miss. `opaque_reasons` maps each plugin that forces a full run every invocation
+      # to its {PluginFactFingerprint::OpaqueReason}.
+      attr_reader :opaque_reasons
+
+      # The opaque plugin ids, sorted (the keys of {#opaque_reasons}).
+      def opaque_plugin_ids
+        @opaque_reasons.keys
+      end
 
       def fact_surface_invalidated?
         @fact_surface_invalidated
@@ -567,7 +572,7 @@ module Rigor
         registry = prepared_plugin_registry
         fact = compute_plugin_fact_fingerprint(registry)
         @plugin_fact_digest = fact.digest
-        @opaque_plugin_ids = fact.opaque_plugin_ids
+        @opaque_reasons = fact.opaque_reasons
         @plugin_fact_reusable = fact
         @seed_bundles = source_rbs_gate.verify(registry, @seed_bundles)
       end
@@ -726,7 +731,7 @@ module Rigor
       # cold, not the warm run the probe stands in for.
       def run_slot_writable?
         !@cache_store.nil? && !@cache_store.read_only? && @buffer.nil? && @workers.zero? &&
-          !@configuration.effects_enabled? && !@explain && @opaque_plugin_ids.empty? && !@last_runner.nil?
+          !@configuration.effects_enabled? && !@explain && @opaque_reasons.empty? && !@last_runner.nil?
       end
 
       def start_chain(rows)

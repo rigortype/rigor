@@ -84,7 +84,8 @@ module Rigor
 
       # Human-readable reasons the caller prints. Each names something the operator can act on.
       NO_SNAPSHOT = "no reusable `rigor check --incremental` snapshot"
-      OPAQUE_PLUGIN = "a plugin contributes types with no incremental fingerprint surface"
+      OPAQUE_PLUGIN = "a plugin is opaque to the incremental fingerprint " \
+                      "(no fingerprint surface, or a value it cannot digest)"
       UNDIGESTIBLE = "the project-scan tables could not be digested"
       UNIDENTIFIED_ENGINE = "the engine's own source tree could not be digested"
 

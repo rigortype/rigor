@@ -87,13 +87,14 @@ case above) is the same shape: widening the gemspec range also widens
 ## When the bump moves `rbs`
 
 The gemspec admits `rbs >= 3.0, < 5.0`, and `make verify` proves only the
-version in `Gemfile.lock`. CI's `rbs-compat` job runs the other line, but
-only over `spec/rigor/environment`, so an inference spec whose answer
-depends on the RBS line (a core overload that differs between 3.x and
-4.x) runs on one end only. Before pushing, run the touched specs under
-the other end with a scratch bundle outside the tree, mirroring the
-job's `Gemfile.rbs-compat` (`gem "rigortype", path: "<worktree>"`, rspec,
-and the `rbs` pin):
+version in `Gemfile.lock`. CI's `rbs-compat` job runs both lines
+(`~> 3.10` and `~> 4.0`), but only over `spec/rigor/environment`, so an
+inference spec whose answer depends on the RBS line runs on one end
+only. Before pushing, run the touched specs under the other end, from
+the worktree, with a scratch Gemfile that copies the one the job writes
+(`gem "rigortype", path: "<worktree>"`, `gem "rspec", ">= 3.13", "< 4.0"`,
+`gem "rbs", "~> 3.10"`). The install fetches from rubygems.org. A spec
+that needs `rbs-inline` cannot run on rbs 3.x.
 
 ```sh
 nix develop --command bash -c 'BUNDLE_GEMFILE=<scratch>/Gemfile \

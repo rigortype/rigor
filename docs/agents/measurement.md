@@ -36,11 +36,13 @@ reports a bogus `base=0`. Toggle the changed file in the working tree instead �
 changed versions, run all targets on each, diff the diagnostic sets per target, and wrap the whole
 thing in a `trap restore EXIT`.
 
-Attribute each delta to a sub-change rather than to the branch: with the change committed, `git checkout
-<base-sha> -- <files-of-one-sub-change>`, re-run only the affected targets, and restore with `git checkout HEAD --
-<files>`. Never `git stash` for this: the stash stack lives in the `.git` every worktree shares, so a pop can take
-another session's work. [`tool/engine_diag_diff.rb`](#diagnostic-differential-across-commits) needs no toggle at
-all. A new always-falsey or always-truthy cluster under a precision
+Attribute each delta to a sub-change rather than to the branch. In your own worktree, with the change committed,
+set `base=$(git merge-base HEAD origin/master)`, `git checkout "$base" -- <files the sub-change modified>` and `rm
+<files it added>`, check that `git diff --stat HEAD` lists exactly that sub-change, re-run only the affected
+targets, and restore with `git checkout HEAD -- <files>` under the same `trap … EXIT`. Never `git stash` for this:
+the stash stack lives in the `.git` every worktree shares, so a pop can take another session's work. When each
+sub-change is its own commit, [`tool/engine_diag_diff.rb`](#diagnostic-differential-across-commits) `--base
+<parent> --head <commit>` needs no toggle at all. A new always-falsey or always-truthy cluster under a precision
 change usually means a **stale-fold family upstream**, not a defect in the change — find or file the
 family before blaming the lever.
 
@@ -234,7 +236,7 @@ The same failure inside the suite: a green example that would stay green with th
   and diff `ObjectSpace.count_objects` and `ObjectSpace.count_imemo_objects` around
   `Rigor::CLI.new(["check", "--no-cache", "--workers=0", ...]).run`. Paired `imemo_ifunc` and
   `imemo_memo` growth means a C-implemented Enumerable method taking a block on a hot path.
-- **Hot-path idioms that allocate.** `reduce`/`inject` with a block allocates even over an empty
+- **Hot-path idioms that allocate.** `reduce`/`inject` with a block (not with a Symbol) allocates even over an empty
   Array (guard with `empty?` or use `each`); `when *CONST` copies the array on every evaluation; a
   `return` out of a `rigor_each_child` block allocates once per frame it unwinds, which goes
   quadratic when a caller re-asks the scan at every level (write `found ||= scan?(child)` instead). A

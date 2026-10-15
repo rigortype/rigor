@@ -57,10 +57,11 @@ Each of these fails silently: the command succeeds and reports something plausib
   `completed`, then read `conclusion` and `headSha`. The same check applies to the master run after
   a merge. `gh pr view --json merged` is not a field; read `state`, `mergedAt` or `mergeCommit`.
 - **Stacked PRs.** A child merged while its base is still the parent branch reports MERGED, but its
-  commits land on that branch, never reach `master`, and its `Fixes` never fires. Merge bottom-up,
-  each child only after GitHub retargets it to `master`. Deleting a parent branch closes its stacked
-  child rather than retargeting it, so retarget every child (`gh pr edit --base master`) first. Prove
-  every landing with `git merge-base --is-ancestor <tip> origin/master`, not the PR state.
+  commits land on that branch, never reach `master`, and its `Fixes` never fires. Deleting a parent
+  branch closes its stacked child instead of retargeting it. So merge the parent without
+  `--delete-branch`, retarget each child yourself (`gh pr edit <child> --base master`), delete the
+  parent branch only after that, then merge the child. Prove each landing against `origin/master`
+  (see "Cleanup after a merge" below), not by the PR state.
 - **A head ref that vanished.** When an open PR's head branch was renamed or deleted, the PR closes
   and `gh pr reopen` fails until the ref exists again: push the old SHA back to the old name, reopen,
   and retarget a stacked child with `gh pr edit --base master`.
@@ -70,11 +71,15 @@ Each of these fails silently: the command succeeds and reports something plausib
   only your files.
 - **Re-applying a reverted change.** On a branch that already contains the commit as an ancestor, a
   rebase replays nothing and fast-forwards onto the revert; cherry-pick it instead.
-- **Cleanup after a merge.** Remove a worktree or local branch only once `origin/master` contains
-  the head SHA. Never chain the removal after `gh pr merge` in one command: a refused merge still
-  runs the rest of the line.
-- **Mergeability lags a push.** "Head branch is out of date" on a branch that is current clears on
-  its own; retry with backoff rather than merging `master` in again.
+- **Cleanup after a merge.** Remove a worktree or local branch only once its content is on
+  `origin/master`: for a merge-commit landing, `git merge-base --is-ancestor <head-sha>
+  origin/master`; for a `--rebase` or `--squash` landing (release PRs), the head SHA is never an
+  ancestor, so check `gh pr view N --json state,mergeCommit` and that `git diff <head-sha>
+  <mergeCommit.oid>` is empty. Never chain the removal after `gh pr merge` with `;`: a refused merge
+  still runs the rest of the line.
+- **Mergeability lags a push.** "Head branch is out of date" on a branch that is current, after `git
+  merge-base --is-ancestor origin/master origin/<branch>` confirms the branch contains master, clears
+  on its own; retry with backoff rather than merging `master` in again.
 - **The main clone is shared.** Uncommitted edits in it follow every branch switch and are swept in
   by the next `git add -A`. Each parallel worker gets its own worktree.
 

@@ -18,7 +18,7 @@ If this file disagrees with an ADR, the CHANGELOG, or an issue, this file is the
 ## State at 2026-10-15 (master after #1913)
 
 **`v0.4.3` is released** (2026-10-15, tag `v0.4.3` = `8ad379542`, RubyGems and GitHub Release), a
-stabilization release: 35 merged PRs since `v0.4.2`, every `v0.4.3` milestone issue closed, the
+stabilization release: 41 merged PRs since `v0.4.2` (plus release PR #1912), every `v0.4.3` milestone issue closed, the
 milestone closed. The perf-gate corpus now is `v0.4.3` (#1913); on the `v0.4.2` corpus the `v0.4.3`
 engine measured +0.63% allocations, within band.
 
@@ -53,6 +53,5 @@ pass with an edge-case table for semantic changes, an overlap map, the lane and 
   batch); the lane contract's mutation table exists for this.
 - Severe review rounds came from semantics the coordinator had not tabulated (symlinked paths,
   `Complex`, a half-fixed root cause); writing the edge-case table first is the fix.
-- `make verify` failed only in one worker order: `lens_spec` relied on the plugin loader's gem→id
-  memo, which an earlier spec's direct `require` left empty (fixed in the release branch). A failure
-  that passes alone is spec order; rerun the pair with `--order defined` to find the polluter.
+- The `lens_spec` spec-order failure: see `docs/agents/measurement.md` § "Specs and gates that pass
+  without checking".

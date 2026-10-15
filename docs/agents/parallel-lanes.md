@@ -56,12 +56,14 @@ reshaping code, and lanes that collided or started on a premise master had alrea
    branch, and rerun the spec files the PR touched; a clean textual merge can still break a sibling's
    spec. Check `mergeable` before waiting on CI: a `CONFLICTING` PR starts no run, so send it back to
    its lane to merge master and resolve. After the batch, watch the resulting master CI run.
-   Watching is bounded by GitHub's API budget (5000 requests an hour per user), which a batch of
-   watchers exhausts and every watcher then dies with HTTP 403: poll each PR at most once a minute
-   with one `gh pr view N --json statusCheckRollup`, one watcher per PR, never `gh pr checks` in a
-   loop, and check `gh api rate_limit` when watchers fail oddly. To add a commit to a lane's branch
-   yourself, `git reset --hard origin/<branch>`, re-apply the edit and push fast-forward; rebasing
-   first makes the push non-fast-forward.
+   Watching is bounded by GitHub's API budgets (REST and GraphQL are separate 5000-an-hour budgets
+   per user; `gh pr view` spends GraphQL), which a batch of watchers exhausts, and every watcher then
+   dies with HTTP 403. Read the verdict per contribution-flow.md § "GitHub and git traps", at most
+   once a minute, one watcher per PR, never `gh pr checks` in a loop, and check `gh api rate_limit`
+   when watchers fail oddly. To add a commit to a lane's branch yourself, never in the lane's
+   worktree or the main clone: `git worktree add --detach <tmp> origin/<branch>`, make the edit,
+   commit, `git push origin HEAD:refs/heads/<branch>` (a fast-forward), then `git worktree remove
+   <tmp>`. Rebasing first makes the push non-fast-forward.
 8. **File the review's scope expansion** as issues outside the milestone. When a merged commit
    carried a `Fixes #N` for an issue the PR only partly fixed, reopen #N with what remains.
 

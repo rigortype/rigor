@@ -1,0 +1,1 @@
+- **[rigor check]** A nothing-changed `--incremental --workers N` recheck now keeps a plugin's `prepare` error row instead of reporting a failing project as clean on its second run. ([#1894](https://github.com/rigortype/rigor/pull/1894))

@@ -900,9 +900,13 @@ still depart from a full run's, in two known cases:
   session's listing and the narrowed run's own expansion has no place in the
   analysis order; its rows are kept and listed after every other file's.
 
-`--verify-incremental` compares sorted sets and does not check the order;
-`spec/rigor/analysis/incremental_session_spec.rb` does, row for row, against
-a full run.
+`--verify-incremental` compares the sets, then the order (#1542): a recheck
+whose rows differ in set fails with the set report, and one whose rows agree
+as a set but list in another order fails with a "same set, different order"
+report that names the first index where the two lists diverge. The two known
+cases above therefore fail the gate when they occur, not only the spec;
+`spec/rigor/analysis/incremental_session_spec.rb` also pins the order row for
+row against a full run.
 
 ### Editor mode (`--tmp-file` / `--instead-of`)
 

@@ -184,7 +184,8 @@ file, which other files its analysis read from, so it knows
 exactly which files an edit can affect. A continuous-integration
 gate, `rigor check --verify-incremental`, asserts this on every
 build: it runs the incremental analyzer and a full analysis and
-fails if they disagree on a single diagnostic.
+fails if they disagree on a single diagnostic, or list the same
+diagnostics in a different order.
 
 Rigor is also precise about *what* an edit changed. Re-checking a
 file that many others depend on — a base class, a widely-used

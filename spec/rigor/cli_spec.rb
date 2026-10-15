@@ -280,6 +280,76 @@ RSpec.describe Rigor::CLI do
     end
   end
 
+  # Issue #1542 — the gate compared the two runs as sorted sets, so a recheck that listed the same rows in a different
+  # order passed. The order is compared too and reported as its own failure. The reordering is injected by wrapping
+  # the incremental result: a real recheck lists its rows in the full run's order today.
+  describe "check --verify-incremental diagnostic order" do
+    def write_multi_diagnostic_project(dir)
+      File.write(File.join(dir, ".rigor.yml"), "severity_profile: balanced\n")
+      File.write(File.join(dir, "a.rb"), "x = \"hello\"\nx.no_such_method_here\nx.also_missing_here\n")
+    end
+
+    # Every session the gate builds answers `reanalyze_subset` through the block, which sees the rows the real
+    # recheck produced and returns the rows the gate is to compare.
+    def wrap_reanalyze_subset(&transform)
+      allow(Rigor::Analysis::IncrementalSession).to receive(:new).and_wrap_original do |original, *args, **kwargs|
+        original.call(*args, **kwargs).tap do |session|
+          allow(session).to receive(:reanalyze_subset).and_wrap_original do |method, *method_args|
+            transform.call(method.call(*method_args))
+          end
+        end
+      end
+    end
+
+    it "reports OK when the incremental and full runs agree on both set and order" do
+      Dir.mktmpdir do |dir|
+        write_multi_diagnostic_project(dir)
+
+        status, out, err = run_cli(
+          "check", "--verify-incremental", "--no-stats",
+          "--config", File.join(dir, ".rigor.yml"), dir
+        )
+
+        expect(err).not_to include("different order")
+        expect(out).to include("--verify-incremental OK")
+        expect(status).to eq(0)
+      end
+    end
+
+    it "keeps the set-mismatch failure when the incremental run is missing a diagnostic" do
+      Dir.mktmpdir do |dir|
+        write_multi_diagnostic_project(dir)
+        wrap_reanalyze_subset { |diagnostics| diagnostics.drop(1) }
+
+        status, _out, err = run_cli(
+          "check", "--verify-incremental", "--no-stats",
+          "--config", File.join(dir, ".rigor.yml"), dir
+        )
+
+        expect(status).to eq(1)
+        expect(err).to include("--verify-incremental FAILED — incremental and full diagnostics differ.")
+        expect(err).not_to include("different order")
+      end
+    end
+
+    it "fails with the order message when the incremental run lists the same diagnostics in another order" do
+      Dir.mktmpdir do |dir|
+        write_multi_diagnostic_project(dir)
+        wrap_reanalyze_subset(&:reverse)
+
+        status, _out, err = run_cli(
+          "check", "--verify-incremental", "--no-stats",
+          "--config", File.join(dir, ".rigor.yml"), dir
+        )
+
+        expect(status).to eq(1)
+        expect(err).to include("--verify-incremental FAILED — same set, different order.")
+        expect(err).to include("first divergence at index 0")
+        expect(err).not_to include("incremental and full diagnostics differ")
+      end
+    end
+  end
+
   describe "check --incremental" do
     it "is cold on the first run and warm on the second, with identical diagnostics" do
       Dir.mktmpdir do |dir|

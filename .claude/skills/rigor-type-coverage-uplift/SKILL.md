@@ -102,7 +102,31 @@ For **block-based methods**, inspect:
 
 - `lib/rigor/inference/method_dispatcher/block_folding.rb`
 
-### 1-c. Assign a coverage status to every method
+### 1-c. Probe before trusting a coverage doc
+
+The `docs/notes/20260522-*-coverage.md` tables over-report 🔲: later catalog imports and
+`*_folding.rb` modules closed rows nobody re-swept. Before implementing a 🔲 row, check that it is
+still a gap:
+
+- `rigor annotate FILE` types every line in one call. `rigor type-scan` only reports whether a node
+  got *a* type, never whether it is precise, so it cannot find a gap.
+- To sweep a class: enumerate `klass.instance_methods(false)`, call the real method on a concrete
+  value with candidate arguments until it succeeds, skip results that cannot fold, then check what
+  Rigor answers. A gap is a foldable real result that Rigor answers from the RBS signature.
+- Two probe artifacts read as false gaps: a method called without the argument it requires, and an
+  in-process receiver built with `Type::Combinator.integer_range`, which is a refined Integer value
+  (`int<1,5>`), not a `Range`.
+
+Mark each row you confirm (🔲 → ✅ or the reverse). Three rules from the slices that did land:
+
+- A fold that returns a boolean is out of scope: a proven `true`/`false` newly fires
+  `flow.always-truthy-condition` on existing code.
+- Fold with Ruby's own operator over the unwrapped values, never a hand-written equality loop:
+  `Array#&` compares with `eql?`, so `[1] & [1.0]` is `[]` although `1 == 1.0`.
+- An out-of-range index declines rather than folding Ruby's real `nil`; a proven `nil` surfaces new
+  diagnostics.
+
+### 1-d. Assign a coverage status to every method
 
 Use the four-symbol legend:
 
@@ -113,7 +137,7 @@ Use the four-symbol legend:
 | 🔲 | Gap — a `Constant[T]` / `Tuple` / `Refined` result is achievable and would increase precision. |
 | 🚫 | Out of scope — mutating methods, Enumerator-returning stubs, platform-dependent, or non-deterministic. |
 
-### 1-d. Produce the coverage document
+### 1-e. Produce the coverage document
 
 Write `docs/notes/<YYYYMMDD>-<type>-method-coverage.md` (or a multi-type file if the scope is
 broad). Follow the format of:

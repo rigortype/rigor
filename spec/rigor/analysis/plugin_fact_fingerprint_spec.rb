@@ -94,6 +94,29 @@ module Rigor
           "static"
         end
       end
+
+      # Issue #1579: publishes an undigestible fact AND declares a producer whose value is undigestible, so the
+      # plugin has two reasons. The fact is read first, and the first reason found is the one kept.
+      class FpTwoReasonPlugin < Base
+        manifest(id: "fp-two-reason", version: "0.1.0")
+
+        producer :proc_value do |_params|
+          -> {}
+        end
+
+        def prepare(services)
+          services.fact_store.publish(plugin_id: manifest.id, name: :callback, value: -> {})
+        end
+      end
+
+      # Issue #1579: a hook that raises. The reason names the exception, not a value that cannot be digested.
+      class FpRaisingHookPlugin < Base
+        manifest(id: "fp-raising-hook", version: "0.1.0")
+
+        def incremental_state_fingerprint
+          raise ArgumentError, "boom"
+        end
+      end
     end
   end
 end
@@ -252,7 +275,48 @@ RSpec.describe Rigor::Analysis::PluginFactFingerprint do
       # The reason names the fact that cannot be digested and the class of its value (issue #1579).
       expect(result.opaque_reasons).to eq(
         "fp-undigestible-fact" => Rigor::Analysis::PluginFactFingerprint::OpaqueReason.new(
-          kind: :undigestible, input: "fact callback", value_class: "Proc"
+          kind: :undigestible, input: "fact callback", class_name: "Proc"
+        )
+      )
+    end
+  end
+
+  # Issue #1579 — the reason names the input that could not be digested, and the first reason found wins.
+  describe "the reason an opaque plugin carries" do
+    it "keeps the first reason when a plugin has an undigestible fact and an undigestible producer" do
+      result = compute(config_for("fp-two-reason"), { "fp-two-reason" => Rigor::Plugin::FpTwoReasonPlugin })
+
+      expect(result.opaque_reasons).to eq(
+        "fp-two-reason" => Rigor::Analysis::PluginFactFingerprint::OpaqueReason.new(
+          kind: :undigestible, input: "fact callback", class_name: "Proc"
+        )
+      )
+    end
+
+    # Issue #1579 — an unreadable fact store makes the surface opaque as a whole. No plugin is blamed for it, so the
+    # contributing plugin below, which has no surface of its own, carries no reason.
+    it "reports an unreadable fact store as one opaque surface, naming no plugin" do
+      store = Object.new
+      def store.each_fact
+        raise IOError, "fact store gone"
+      end
+      plugin = Rigor::Plugin::FpOpaquePlugin.new(services: Struct.new(:fact_store).new(store))
+      registry = Struct.new(:plugins) { def empty? = plugins.empty? }.new([plugin])
+      result = described_class.from_registry(registry)
+
+      expect(result.fact_store_unreadable).to be(true)
+      expect(result.opaque_reasons).to eq({})
+      expect(result.opaque?).to be(true)
+      expect(result.reusable_against?(result.digest)).to be(false)
+    end
+
+    it "names a hook that raised by its exception class, not as an undigestible value" do
+      result = compute(config_for("fp-raising-hook"), { "fp-raising-hook" => Rigor::Plugin::FpRaisingHookPlugin })
+
+      expect(result.opaque_plugin_ids).to eq(["fp-raising-hook"])
+      expect(result.opaque_reasons).to eq(
+        "fp-raising-hook" => Rigor::Analysis::PluginFactFingerprint::OpaqueReason.new(
+          kind: :raised, input: "hook incremental_state_fingerprint", class_name: "ArgumentError"
         )
       )
     end
@@ -266,7 +330,7 @@ RSpec.describe Rigor::Analysis::PluginFactFingerprint do
       # The reason says the plugin declares no surface at all (issue #1579).
       expect(result.opaque_reasons).to eq(
         "fp-opaque" => Rigor::Analysis::PluginFactFingerprint::OpaqueReason.new(
-          kind: :no_surface, input: nil, value_class: nil
+          kind: :no_surface, input: nil, class_name: nil
         )
       )
       # Even when the digest matches the stored one, opacity forbids reuse.

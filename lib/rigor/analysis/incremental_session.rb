@@ -124,6 +124,7 @@ module Rigor
         # post-hoc fingerprint reads from; `@plugin_fact_reusable` is the computed decision object.
         @plugin_fact_digest = nil
         @opaque_reasons = {}.freeze
+        @fact_store_unreadable = false
         @fact_surface_invalidated = false
         @last_runner = nil
         @plugin_fact_reusable = nil
@@ -549,6 +550,16 @@ module Rigor
         @opaque_reasons.keys
       end
 
+      # True when the fact store could not be read, so no single plugin is named (see {PluginFactFingerprint::Result}).
+      def fact_store_unreadable?
+        @fact_store_unreadable
+      end
+
+      # True when the fact surface forces a full run: some plugin is opaque, or the fact store is unreadable.
+      def opaque_fact_surface?
+        !@opaque_reasons.empty? || @fact_store_unreadable
+      end
+
       def fact_surface_invalidated?
         @fact_surface_invalidated
       end
@@ -573,6 +584,7 @@ module Rigor
         fact = compute_plugin_fact_fingerprint(registry)
         @plugin_fact_digest = fact.digest
         @opaque_reasons = fact.opaque_reasons
+        @fact_store_unreadable = fact.fact_store_unreadable
         @plugin_fact_reusable = fact
         @seed_bundles = source_rbs_gate.verify(registry, @seed_bundles)
       end
@@ -731,7 +743,7 @@ module Rigor
       # cold, not the warm run the probe stands in for.
       def run_slot_writable?
         !@cache_store.nil? && !@cache_store.read_only? && @buffer.nil? && @workers.zero? &&
-          !@configuration.effects_enabled? && !@explain && @opaque_reasons.empty? && !@last_runner.nil?
+          !@configuration.effects_enabled? && !@explain && !opaque_fact_surface? && !@last_runner.nil?
       end
 
       def start_chain(rows)

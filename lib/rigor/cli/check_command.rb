@@ -377,9 +377,10 @@ module Rigor
         reasons = session.opaque_reasons
         surfaceless = reasons.keys.select { |id| reasons.fetch(id).kind == :no_surface }.sort
         unless surfaceless.empty?
-          @err.puts("rigor: --incremental plugin#{'s' unless surfaceless.size == 1} #{surfaceless.join(', ')} " \
-                    "contribute call-site types with no incremental fingerprint surface; the snapshot cannot " \
-                    "be reused (full analysis every run).")
+          many = surfaceless.size > 1
+          @err.puts("rigor: --incremental plugin#{'s' if many} #{surfaceless.join(', ')} " \
+                    "contribute#{'s' unless many} call-site types with no incremental fingerprint surface; " \
+                    "the snapshot cannot be reused (full analysis every run).")
         end
         reasons.each do |id, reason|
           next if reason.kind == :no_surface
@@ -387,7 +388,11 @@ module Rigor
           @err.puts("rigor: --incremental #{reason.describe(id)}; the snapshot cannot be reused " \
                     "(full analysis every run).")
         end
-        return unless session.fact_surface_invalidated? && reasons.empty?
+        if session.fact_store_unreadable?
+          @err.puts("rigor: --incremental the plugin fact store could not be read; the snapshot cannot be reused " \
+                    "(full analysis every run).")
+        end
+        return unless session.fact_surface_invalidated? && !session.opaque_fact_surface?
 
         @err.puts("rigor: --incremental plugin fact surface changed since the snapshot; ran a full analysis.")
       end
@@ -399,8 +404,9 @@ module Rigor
       def write_incremental_cache_stats(session, cache_root, store, format)
         write_cache_stats(cache_root, store, format)
         status =
-          if !session.opaque_reasons.empty?
+          if session.opaque_fact_surface?
             verdicts = session.opaque_reasons.map { |id, reason| "#{id}: #{reason.summary}" }
+            verdicts << "fact store: could not be read" if session.fact_store_unreadable?
             "opaque (#{verdicts.join('; ')})"
           elsif session.fact_surface_invalidated?
             "changed — snapshot invalidated"

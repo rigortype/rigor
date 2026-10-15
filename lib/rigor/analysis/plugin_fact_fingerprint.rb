@@ -36,53 +36,55 @@ module Rigor
     # The probe is ALWAYS sequential and independent of the analysis's pool mode, so the invalidation decision
     # is identical whether the recheck ran pooled or sequential (the pooled-vs-sequential parity requirement).
     class PluginFactFingerprint
-      # Marks a value that could not be read at all (the producer raised before returning one), so
-      # {OpaqueReason} names no class for it.
-      UNREAD = Object.new.freeze
-
-      # Why one plugin is opaque to the fingerprint. `kind` is `:no_surface` (it contributes types and declares
-      # no fact, producer or hook) or `:undigestible` (a value it declares or publishes cannot be digested).
-      # `input` names that value: `"producer worker_index"`, `"fact callback"`,
-      # `"hook incremental_state_fingerprint"`, or nil when the fact store itself could not be read.
-      # `value_class` is the class of the value that failed, or nil when no value was read.
-      OpaqueReason = Data.define(:kind, :input, :value_class) do
-        # The clause a note states about plugin `id`, e.g. "plugin sidekiq's producer worker_index has a value ...".
+      # Why one plugin is opaque to the fingerprint. `kind` is one of:
+      #   :no_surface    the plugin contributes types and declares no fact, producer or hook;
+      #   :undigestible  a value it declares or publishes cannot be digested (a Proc, an IO, ...);
+      #   :raised        the hook or a producer raised while its value was being read.
+      # `input` names the input: `"producer worker_index"`, `"fact callback"`, `"hook incremental_state_fingerprint"`.
+      # `class_name` is the class of the value that could not be digested, or of the exception raised; an anonymous
+      # class reads "anonymous Class", and nil means the class itself could not be read.
+      OpaqueReason = Data.define(:kind, :input, :class_name) do
+        # The clause a note states about plugin `id`. The note groups :no_surface plugins itself, so this is only
+        # called for :undigestible and :raised reasons.
         def describe(id)
-          if kind == :no_surface
-            "plugin #{id} contributes call-site types with no incremental fingerprint surface"
-          elsif input.nil?
-            "plugin #{id} publishes facts the incremental fingerprint cannot read"
-          else
-            "plugin #{id}'s #{undigestible_clause}"
-          end
+          return "plugin #{id}'s #{input} raised #{class_name}" if kind == :raised
+
+          "plugin #{id}'s #{input} has a value the incremental fingerprint cannot digest#{parenthesised_class}"
         end
 
         # The same verdict without the plugin id, for a `--cache-stats` line that already names it.
         def summary
           return "no incremental fingerprint surface" if kind == :no_surface
-          return "published facts could not be read by the incremental fingerprint" if input.nil?
+          return "#{input} raised #{class_name}" if kind == :raised
 
-          undigestible_clause
+          "#{input} has a value the incremental fingerprint cannot digest#{parenthesised_class}"
         end
 
         private
 
-        def undigestible_clause
-          "#{input} has a value the incremental fingerprint cannot digest#{" (a #{value_class})" if value_class}"
+        def parenthesised_class
+          return "" if class_name.nil?
+
+          " (#{article(class_name)} #{class_name})"
+        end
+
+        def article(word)
+          word.match?(/\A[aeiou]/i) ? "an" : "a"
         end
       end
 
-      # `digest` is nil when no plugins are loaded — the fast path (nothing to fingerprint), which reuses
-      # freely. `opaque_reasons` maps each opaque plugin id to its {OpaqueReason} (sorted by id); when non-empty
-      # the snapshot is never reused.
-      Result = Data.define(:digest, :opaque_reasons) do
+      # `digest` is nil when no plugins are loaded — the fast path (nothing to fingerprint), which reuses freely.
+      # `opaque_reasons` maps each opaque plugin id to its {OpaqueReason}, sorted by id. `fact_store_unreadable` is
+      # true when the fact store could not be read at all: no single plugin is to blame, so no reason names one.
+      # Either makes the snapshot un-reusable.
+      Result = Data.define(:digest, :opaque_reasons, :fact_store_unreadable) do
         # The opaque plugin ids, sorted (the keys of {#opaque_reasons}).
         def opaque_plugin_ids
           opaque_reasons.keys
         end
 
         def opaque?
-          !opaque_reasons.empty?
+          fact_store_unreadable || !opaque_reasons.empty?
         end
 
         # A warm recheck may reuse the snapshot only when this run is not opaque and its fact-surface digest
@@ -138,16 +140,20 @@ module Rigor
       end
 
       def digest_registry(registry)
-        return Result.new(digest: nil, opaque_reasons: {}.freeze) if registry.nil? || registry.empty?
+        empty = registry.nil? || registry.empty?
+        return Result.new(digest: nil, opaque_reasons: {}.freeze, fact_store_unreadable: false) if empty
 
         reasons = {}
-        facts_by_plugin = facts_by_plugin(registry, reasons)
-        parts = fact_parts(facts_by_plugin)
-        registry.plugins.each { |plugin| collect_plugin_parts(plugin, facts_by_plugin, parts, reasons) }
-        # Sort the parts so the digest is independent of plugin registration / iteration order.
+        facts, store_unreadable = facts_by_plugin(registry, reasons)
+        parts = fact_parts(facts)
+        registry.plugins.each { |plugin| collect_plugin_parts(plugin, facts, parts, reasons) }
+        # Sort the parts so the digest is independent of plugin registration / iteration order. An unreadable
+        # store names no plugin: the snapshot is opaque as a whole, and per-plugin reasons would blame plugins
+        # whose facts were simply not read.
         Result.new(
           digest: Digest::SHA256.hexdigest(parts.sort.join("\x00")),
-          opaque_reasons: reasons.sort.to_h.freeze
+          opaque_reasons: (store_unreadable ? {} : reasons.sort.to_h).freeze,
+          fact_store_unreadable: store_unreadable
         )
       end
 
@@ -168,16 +174,16 @@ module Rigor
         surface = has_facts || has_producers || has_hook
         return if surface || !contributes_types?(plugin)
 
-        mark_opaque(reasons, id, OpaqueReason.new(kind: :no_surface, input: nil, value_class: nil))
+        mark_opaque(reasons, id, OpaqueReason.new(kind: :no_surface, input: nil, class_name: nil))
       end
 
-      # `{ plugin_id => ["name=digest", ...] }` for every ADR-9 published fact (channel a). A plugin that
-      # published nothing does not appear.
+      # `[{ plugin_id => ["name=digest", ...] }, unreadable]` for every ADR-9 published fact (channel a). A plugin
+      # that published nothing does not appear.
       #
-      # A fact the fingerprint cannot digest is an input it cannot see, so its publisher is opaque, whether or
-      # not the publisher contributes a type itself: other plugins read its facts. A fact store that cannot be
-      # read at all makes every plugin opaque. Both force the full run; dropping the facts instead would let a
-      # plugin with another surface reuse a snapshot its facts no longer match.
+      # A fact the fingerprint cannot digest is an input it cannot see, so its publisher is opaque, whether or not
+      # the publisher contributes a type itself: other plugins read its facts. A fact store that cannot be read at
+      # all makes the whole surface opaque. Both force the full run; dropping the facts instead would let a plugin
+      # with another surface reuse a snapshot its facts no longer match.
       def facts_by_plugin(registry, reasons)
         result = Hash.new { |hash, key| hash[key] = [] }
         fact_store = registry.plugins.first&.services&.fact_store
@@ -189,10 +195,9 @@ module Rigor
             mark_opaque(reasons, plugin_id, undigestible("fact #{fact.name}", fact.value))
           end
         end
-        result
+        [result, false]
       rescue StandardError
-        registry.plugins.each { |plugin| mark_opaque(reasons, safe_id(plugin), undigestible(nil)) }
-        Hash.new { |hash, key| hash[key] = [] }
+        [Hash.new { |hash, key| hash[key] = [] }, true]
       end
 
       # Channel (b): a stable signature of every declared producer's VALUE — a digest of the producer's own
@@ -209,31 +214,40 @@ module Rigor
         return false if producer_ids.empty?
 
         producer_ids.sort.each do |producer_id|
-          value = UNREAD
+          input = "producer #{producer_id}"
           begin
             value = plugin.producer_value(producer_id)
-            parts << "prod\x1f#{id}\x1f#{producer_id}\x1f#{digest_value(value)}"
-          rescue StandardError
-            mark_opaque(reasons, id, undigestible("producer #{producer_id}", value))
+          rescue StandardError => e
+            mark_opaque(reasons, id, raised(input, e))
+            next
           end
+          digest_part(parts, reasons, id, input, "prod\x1f#{id}\x1f#{producer_id}", value)
         end
         true
       end
 
-      # Channel (c): the optional {Plugin::Base#incremental_state_fingerprint} hook. Returns true when the
-      # plugin defines it (it has a surface).
+      # Channel (c): the optional {Plugin::Base#incremental_state_fingerprint} hook. Returns true when the plugin
+      # defines it (it has a surface).
       # rubocop:disable-next Naming/PredicateMethod -- reports has-surface AND appends parts (a side-effecting builder)
       def collect_hook_part(plugin, id, parts, reasons)
         return false unless plugin.respond_to?(:incremental_state_fingerprint)
 
-        value = UNREAD
+        input = "hook incremental_state_fingerprint"
         begin
           value = plugin.incremental_state_fingerprint
-          parts << "hook\x1f#{id}\x1f#{digest_value(value)}"
-        rescue StandardError
-          mark_opaque(reasons, id, undigestible("hook incremental_state_fingerprint", value))
+        rescue StandardError => e
+          mark_opaque(reasons, id, raised(input, e))
+          return true
         end
+        digest_part(parts, reasons, id, input, "hook\x1f#{id}", value)
         true
+      end
+
+      # Appends `prefix\x1f<digest of value>` to `parts`, or marks the plugin opaque when the value cannot be digested.
+      def digest_part(parts, reasons, id, input, prefix, value)
+        parts << "#{prefix}\x1f#{digest_value(value)}"
+      rescue StandardError
+        mark_opaque(reasons, id, undigestible(input, value))
       end
 
       # The first reason a plugin is found opaque wins: one reason per plugin id, as {Result#opaque_reasons} states.
@@ -241,16 +255,19 @@ module Rigor
         reasons[id] ||= reason
       end
 
-      # An :undigestible reason for `input`, naming the class of `value` when one was read.
-      def undigestible(input, value = UNREAD)
-        OpaqueReason.new(kind: :undigestible, input: input, value_class: value_class_name(value))
+      def undigestible(input, value)
+        OpaqueReason.new(kind: :undigestible, input: input, class_name: class_name_of(value))
       end
 
-      def value_class_name(value)
-        return nil if UNREAD.equal?(value)
+      def raised(input, error)
+        OpaqueReason.new(kind: :raised, input: input, class_name: class_name_of(error))
+      end
 
-        klass = value.class
-        klass.name || klass.inspect
+      # The name of `object`'s class, "anonymous Class" for an anonymous one, or nil when even the class is unreadable
+      # (a BasicObject has no `#class`).
+      def class_name_of(object)
+        klass = object.class
+        klass.name || "anonymous Class"
       rescue StandardError
         nil
       end

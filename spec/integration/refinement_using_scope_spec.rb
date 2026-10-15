@@ -1991,6 +1991,41 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
       expect(call_rows).to eq(fires)
     end
 
+    # A new file rewriting `Regexp`'s singleton side from outside its body (Ruby 4.0.5: `:o` after it, `ArgumentError`
+    # without it) re-checks the `using` file, as one opening `class << Regexp` does.
+    it "re-checks the `using` file under --incremental when a new file rewrites the class object's singleton side" do
+      write("lib/rs.rb", object_sqrt)
+      write("lib/use.rb", "using RS\nRegexp.escape(1, 2)\n")
+      fires = [["use.rb", 2, "call.wrong-arity"]]
+
+      expect(incremental_call_rows).to eq([fires, false])
+      write("lib/rx.rb", "Regexp.singleton_class.send(:remove_method, :escape)\n")
+      expect(incremental_call_rows).to eq([[], true])
+      expect(call_rows).to eq([])
+      File.delete("lib/rx.rb")
+      expect(incremental_call_rows).to eq([fires, true])
+    end
+
+    # Each new file gives `Integer` a singleton `oo` from outside its body (Ruby 4.0.5: `"s"`), so the re-check types
+    # `Integer.oo` as Dynamic[top], as a cold run does, rather than keeping the refinement's `:o`.
+    it "re-types the `using` file under --incremental when a new file defines the class object's method outside it" do
+      write("lib/ro.rb", "module RO\n  refine(Object) { def oo = :o }\nend\n")
+      write("lib/use.rb", "using RO\nRigor.dump_type(Integer.oo)\n")
+      refined = [[["use.rb", 2, "dump_type: :o"]], false]
+
+      expect(incremental_call_rows(%w[dump.type])).to eq(refined)
+      [
+        "def Integer.oo = \"s\"\n",
+        "Integer.define_singleton_method(:oo) { \"s\" }\n",
+        "module Ext\n  def oo = \"s\"\nend\nInteger.extend(Ext)\n"
+      ].each do |source|
+        write("lib/def.rb", source)
+        expect(incremental_call_rows(%w[dump.type])).to eq([[["use.rb", 2, "dump_type: Dynamic[top]"]], true])
+        File.delete("lib/def.rb")
+        expect(incremental_call_rows(%w[dump.type])).to eq([refined.first, true])
+      end
+    end
+
     # `Base` has no methods, so `K`'s singleton chain holds it as an external entry and the walk cannot be read; a new
     # file giving `Base` a singleton `oo` types `K.oo` as `1` on the re-check (Ruby 4.0.5: `1`, and `:o` without it).
     it "re-types the `using` file under --incremental when a new file gives a method-less superclass a method" do

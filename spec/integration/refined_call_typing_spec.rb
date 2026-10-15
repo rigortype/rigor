@@ -604,6 +604,105 @@ RSpec.describe "Typing calls through Ruby refinements (#1664)", type: :runner do
     RUBY
   end
 
+  # Each class gets `table_name` from a hook no table records: an `included` hook calling `define_singleton_method`,
+  # `singleton_class.define_method` on its argument, `class << base`, the `send` form, an `inherited` hook, and a
+  # module extending `ActiveSupport::Concern` (not analysed here, whose `append_features` extends the includer with
+  # `ClassMethods`). Ruby 4.0.5 prints `"users"` for each (with ActiveSupport loaded for the last), never the
+  # refinement's `:sym`; a class including a hook-free module keeps the refinement's answer.
+  it "answers Dynamic[top] where an ancestor's hook may install the class object's method another way" do
+    expect(dumps(<<~RUBY)).to eq(["Dynamic[top]"] * 6 + [":sym"])
+      module TN
+        refine(Object) { def table_name = :sym }
+      end
+      module H1; def self.included(base) = base.define_singleton_method(:table_name) { "users" }; end
+      module H2; def self.included(base) = base.singleton_class.define_method(:table_name) { "users" }; end
+      module H3
+        def self.included(base)
+          class << base
+            def table_name = "users"
+          end
+        end
+      end
+      module H4; def self.included(base) = base.send(:define_singleton_method, :table_name) { "users" }; end
+      class B5; def self.inherited(sub) = sub.define_singleton_method(:table_name) { "users" }; end
+      module Named
+        extend ActiveSupport::Concern
+        module ClassMethods; def table_name = "users"; end
+      end
+      module Plain; def x = 1; end
+      class U1; include H1; end
+      class U2; include H2; end
+      class U3; include H3; end
+      class U4; include H4; end
+      class U5 < B5; end
+      class U6; include Named; end
+      class U7; include Plain; end
+      using TN
+      Rigor.dump_type(U1.table_name)
+      Rigor.dump_type(U2.table_name)
+      Rigor.dump_type(U3.table_name)
+      Rigor.dump_type(U4.table_name)
+      Rigor.dump_type(U5.table_name)
+      Rigor.dump_type(U6.table_name)
+      Rigor.dump_type(U7.table_name)
+    RUBY
+  end
+
+  # `GemConcern` lives outside the analysed paths, and its `included` hook extends the includer. Ruby 4.0.5 prints
+  # `  users  `, so `center` is not reported on the refinement's `Symbol`.
+  it "answers Dynamic[top] where a class includes a module from outside the analysed paths" do
+    result = analyze(
+      files: {
+        "outside/gem.rb" => <<~RUBY,
+          module GemConcern
+            def self.included(base) = base.extend(ClassMethods)
+            module ClassMethods; def table_name = "users"; end
+          end
+        RUBY
+        "lib/app.rb" => <<~RUBY
+          require_relative "../outside/gem"
+          module TN
+            refine(Object) { def table_name = :sym }
+          end
+          class User; include GemConcern; end
+          using TN
+          puts User.table_name.center(9)
+          Rigor.dump_type(User.table_name)
+        RUBY
+      },
+      config: { "paths" => ["lib"] }
+    )
+    rows = result.diagnostics.map { |d| [d.qualified_rule, d.line, d.message] }
+
+    expect(rows).to eq([["dump.type", 8, "dump_type: Dynamic[top]"]])
+  end
+
+  # `singleton_class.attr_accessor` defines `C.table_name` and `C.table_name=` only: the refinement answers neither
+  # (Ruby 4.0.5 prints `"users"`), while `C.own(1, 2)` still raises `ArgumentError` and is reported.
+  it "reads a singleton_class attr_* as rewriting only the names it spells" do
+    expect(rows(<<~RUBY)).to eq(
+      module TN
+        refine(Object) { def table_name = :sym }
+      end
+      class C
+        singleton_class.attr_accessor :table_name
+        def self.own(a) = a
+      end
+      class Sub < C; end
+      C.table_name = "users"
+      using TN
+      Rigor.dump_type(C.table_name)
+      C.own(1, 2)
+      Sub.own(1, 2)
+    RUBY
+      [
+        ["dump.type", 11, "dump_type: Dynamic[top]"],
+        ["call.wrong-arity", 12, "wrong number of arguments to `own' on C (given 2, expected 1)"],
+        ["call.wrong-arity", 13, "wrong number of arguments to `own' on Sub (given 2, expected 1)"]
+      ]
+    )
+  end
+
   # Each class rewrites its singleton methods in a way the walk cannot read: a `define_singleton_method` in the body,
   # a `def W2.x` outside it, `singleton_class.class_eval`, `singleton_class.send(:define_method, ...)`, a top-level
   # `define_singleton_method`, and a module prepended or included into the singleton class (directly or through

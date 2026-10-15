@@ -4736,7 +4736,8 @@ module Rigor
       # `{name => Set[path]}` for a bundle's name list (a bundle written before the list existed has none).
       def bundle_path_sets(names, path) = (names || []).to_h { |name| [name, Set[path]] }
 
-      # Issue #1752 — the constants a `class << Const` body opens in this file. Such a body records facts about
+      # Issue #1752 — the constants a `class << Const` body opens in this file, and those whose singleton side a call
+      # or `def Const.x` there may rewrite ({#singleton_side_call?}). Such a body records facts about
       # `Const`'s singleton class (a `remove_method`, a `def`) without declaring `Const`, so it stays out of
       # `class_sources` (whose readers take a name there as one the project declares) and joins only the per-file
       # class-declaration sets the incremental `class:` edges diff (`Runner#class_declarations`).
@@ -4753,8 +4754,27 @@ module Rigor
         when Prism::SingletonClassNode
           rendered = singleton_receiver_constant_name(node.expression)
           yield eval_constant_receiver_prefix(node, node.expression, rendered, lexical_prefix).join("::") if rendered
+        when Prism::DefNode
+          yield_singleton_side_constant(node, node.receiver, lexical_prefix, &)
+        when Prism::CallNode
+          yield_singleton_side_constant(node, node.receiver, lexical_prefix, &) if singleton_side_call?(node)
         end
         node.rigor_each_child { |child| collect_singleton_class_targets(child, lexical_prefix, &) }
+      end
+
+      # A `def Const.x`, and a call on a constant that may rewrite its singleton side (`Const.singleton_class`,
+      # `Const.define_singleton_method`, `Const.extend(M)`, `Const.instance_eval { … }`), record facts about `Const`'s
+      # singleton methods the refinement walk reads from a file that need not declare `Const`, so the file joins the
+      # constant's set too. Written inside `Const`'s own body, the name is in the file's set already.
+      def singleton_side_call?(node)
+        node.name == :singleton_class || surface_rewriting_call?(node)
+      end
+
+      def yield_singleton_side_constant(node, receiver, lexical_prefix)
+        return unless receiver.is_a?(Prism::ConstantReadNode) || receiver.is_a?(Prism::ConstantPathNode)
+
+        rendered = singleton_receiver_constant_name(receiver)
+        yield eval_constant_receiver_prefix(node, receiver, rendered, lexical_prefix).join("::") if rendered
       end
 
       def build_deferred_ranges(root)
@@ -7206,14 +7226,26 @@ module Rigor
       # receiver, else the constant. True when it tainted.
       def singleton_class_rewrite_tainted?(node, qualified_prefix, current_class, accumulator)
         receiver = node.receiver
-        return false unless receiver.is_a?(Prism::CallNode) && receiver.name == :singleton_class &&
-                            receiver.arguments.nil? && surface_rewriting_call?(node)
+        return false unless singleton_class_receiver?(receiver) && surface_rewriting_call?(node)
+        return false if singleton_class_named_call?(node)
 
         owner = singleton_class_owner(node, receiver.receiver, qualified_prefix, current_class)
         return false if owner.nil?
 
         accumulator.taint(owner, :extend)
         true
+      end
+
+      def singleton_class_receiver?(receiver)
+        receiver.is_a?(Prism::CallNode) && receiver.name == :singleton_class && receiver.arguments.nil?
+      end
+
+      # An `attr_*` on a singleton class (`singleton_class.attr_accessor :conf`) rewrites only the names it spells, so
+      # it makes those names' singleton envelopes opaque ({#record_singleton_class_names}) and leaves the rest of the
+      # singleton side readable. An `alias_method` or `define_method` there still taints the side: the own-definer
+      # read would otherwise answer the body Ruby replaced (`definer_resolution_witness_spec.rb`).
+      def singleton_class_named_call?(node)
+        ATTR_MACROS.include?(node.name)
       end
 
       def singleton_class_owner(node, object, qualified_prefix, current_class)
@@ -7811,6 +7843,28 @@ module Rigor
 
           constant_receiver_candidates(receiver, qualified_prefix).each do |name|
             record_surface_mark(tables, name, Scope::DiscoveryIndex::ENVELOPE_DYNAMIC_MARK)
+          end
+        elsif singleton_class_receiver?(receiver) && surface_rewriting_call?(node) && singleton_class_named_call?(node)
+          record_singleton_class_names(node, receiver.receiver, qualified_prefix, tables)
+        end
+      end
+
+      # Issue #1752 — the names a {#singleton_class_named_call?} rewrites on its singleton class's owner, each
+      # singleton envelope opaque: the evidence the refinement typer reads as a rewritten singleton name.
+      def record_singleton_class_names(node, object, qualified_prefix, tables)
+        current_class = qualified_prefix.empty? ? nil : qualified_prefix.join("::")
+        owner = singleton_class_owner(node, object, qualified_prefix, current_class)
+        return if owner.nil?
+
+        (node.arguments&.arguments || []).each do |argument|
+          method_name = literal_method_name(argument)
+          next unless method_name
+
+          names = [method_name]
+          names << :"#{method_name}=" if %i[attr_writer attr_accessor].include?(node.name)
+          names.each do |name|
+            record_envelope(tables.envelopes, owner, [:singleton, name], Source::ParameterEnvelope::OPAQUE)
+            contest_envelope(tables, owner, [:singleton, name]) unless tables.certain
           end
         end
       end

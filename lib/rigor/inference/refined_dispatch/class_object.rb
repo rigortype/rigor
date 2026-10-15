@@ -148,11 +148,48 @@ module Rigor
 
         # Is `name`'s instance chain unreadable? A mixin the tables cannot name there includes the one an
         # `included` hook makes (`base.extend(ClassMethods)`, `base.singleton_class.include(CM)`), which installs
-        # singleton methods on `name` that its singleton chain never records.
+        # singleton methods on `name` that its singleton chain never records. So does any other ancestor that may run
+        # such a hook ({.installs_singleton?}).
         def instance_unreadable?(scope, name)
           chain = Scope::ResolutionChain.for(scope, name, :instance, :methods)
           chain.record(scope) if Analysis::DependencyRecorder.active?
-          unreadable?(chain)
+          return true if unreadable?(chain)
+
+          chain.entries.any? { |entry| entry.name != name && installs_singleton?(scope, entry) }
+        end
+
+        # May an ancestor on a class's instance chain install singleton methods on the class when it is included,
+        # prepended or subclassed? A hook can do that in ways no table records (`base.define_singleton_method`,
+        # `class << base`, `base.singleton_class.define_method`), so any hook counts: an ancestor neither the project
+        # nor RBS declares (a module from outside the analysed paths), and a project ancestor that {.hooked?}. An
+        # external entry may still be a project class the `:methods` resolver does not admit (ADR-46, a class with no
+        # methods), read as that class.
+        def installs_singleton?(scope, entry)
+          if entry.external?
+            return entry.candidates.any? do |candidate|
+              scope.discovered_classes.key?(candidate) ? hooked?(scope, candidate) : false
+            end || entry.candidates.none? { |candidate| declared?(scope, candidate) }
+          end
+          entry.side == :instance && hooked?(scope, entry.name)
+        end
+
+        def declared?(scope, name)
+          scope.discovered_classes.key?(name) || scope.environment&.class_known?(name) || false
+        end
+
+        # Does the project module or class `name` have a singleton hook of its own or one the extends fold copied from
+        # a project module, or extend a module the project does not declare (`extend ActiveSupport::Concern`, whose
+        # `append_features` extends the includer with `ClassMethods`)? The hooks' negative method edges re-check the
+        # reader when a new file adds one.
+        def hooked?(scope, name)
+          Analysis::DependencyRecorder.read_keys(Scope::ResolutionChain.hook_keys(name)) if Analysis::DependencyRecorder.active?
+          return true if Scope::ResolutionChain::Relevance::HOOKS.any? do |hook|
+            scope.discovered_method?(name, hook, :singleton)
+          end
+
+          (scope.discovered_extends[name] || EMPTY).any? do |raw|
+            scope.ancestor_name_candidates(name, raw).none? { |candidate| scope.discovered_classes.key?(candidate) }
+          end
         end
 
         def level_entry(scope, entry, own)

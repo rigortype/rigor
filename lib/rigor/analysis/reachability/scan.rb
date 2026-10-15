@@ -296,17 +296,42 @@ module Rigor
 
           # A literal name is looked up from each receiver the call can have, so it carries the receiver as
           # `within` and {Graph} resolves it there first (#1761). A rooted name, or a call whose only anchor is
-          # the top level, is looked up from the top level as any reference is. So is one on `self` inside a
-          # block that rebinds it: a concern's `included do` runs on the including class, and resolving the name
-          # against the concern could make a dead constant reachable by finding it at the wrong scope. A `class
-          # << self` body outside its methods is the same: `self` is the singleton class, whose ancestors do not
-          # include the class, so Ruby looks the name up at the top level. An interpolated name keeps every
-          # anchor in both, since a taint is safe to over-reach.
+          # the top level, is looked up from the top level as any reference is.
+          #
+          # On `self` the receiver is the enclosing declaration only where the walk can name it ({#self_lookup}).
+          # Where `self` is a `Class` or a singleton class, Ruby looks the name up at the top level. Where the
+          # walk cannot tell what `self` is, the name is read BOTH at the enclosing declaration and at the top
+          # level: either reading alone lists a live constant as a candidate when it is the wrong one, and a
+          # dead constant kept reachable is the cheaper mistake. An interpolated name keeps every anchor, since
+          # a taint is safe to over-reach.
           def literal_bounds(node, name, anchors)
             return [] if name.start_with?("::")
-            return [] if (@self_rebound || @singleton_body) && self_receiver?(node.receiver)
 
-            anchors.grep(Reference).map { |receiver| [nil, :namespace, receiver] }
+            within = anchors.grep(Reference).map { |receiver| [nil, :namespace, receiver] }
+            return within unless self_receiver?(node.receiver)
+
+            case self_lookup(node.receiver)
+            when :declaration then within
+            when :top_level then []
+            else within + [[nil, :namespace, nil]]
+            end
+          end
+
+          # Where a `const_get` on `self` (implicit, `self`, or `self.class`) looks its name up: `:declaration`
+          # when `self` is the enclosing class or module, `:top_level` when it is `Class` or a singleton class,
+          # `:unknown` otherwise. A block's `self` is unknown — `included do`, `class_eval` and an instance-
+          # evaluated DSL block (`configure { }`, an RSpec `describe` body) all rebind it, and the walk cannot
+          # tell those from an `each` block. So is the `self` of a `def Other.x` or of a `class << Other` body.
+          def self_lookup(receiver)
+            return :unknown if @in_block || @self_rebound
+
+            class_of_self = receiver.is_a?(Prism::CallNode)
+            case @self_kind
+            when :declaration, :singleton_method then class_of_self ? :top_level : :declaration
+            when :instance_method then class_of_self ? :declaration : :unknown
+            when :singleton_class then :top_level
+            else :unknown
+            end
           end
 
           # Where a `const_get` looks a name up, as the namespaces its interpolated argument is bounded by. The
@@ -452,8 +477,13 @@ module Rigor
             # `class_eval` or anonymous `Class.new` block. See {#rebinds_self?}.
             @self_rebound = false
             @rebinding_blocks = Set.new.compare_by_identity
-            # Whether this is a `class << self` body outside its methods, where `self` is the singleton class.
-            @singleton_body = false
+            # What `self` is here, for {#self_lookup}: `:declaration` in a class or module body (and at the top
+            # level), `:singleton_method` in a `def self.x` or a def in a `class << self` body,
+            # `:instance_method` in any other def, `:singleton_class` in a `class << self` body outside its
+            # methods, and `:unknown` where the walk cannot name it.
+            @self_kind = :declaration
+            # Whether the walk is inside a block, whose `self` it cannot name. See {#self_lookup}.
+            @in_block = false
           end
 
           def walk(node, nesting)
@@ -513,12 +543,12 @@ module Rigor
             # The body's nesting names the declaration itself, so a credit inherited from a meta-new rvalue
             # this declaration sits in must not leak into it.
             owner = @owner
-            rebound = @self_rebound
+            saved = [@self_rebound, @in_block]
             @owner = nil
-            @self_rebound = false
-            in_local_scope(node.body) { walk(node.body, nesting + [name]) }
+            @self_rebound = @in_block = false
+            in_local_scope(node.body, :declaration) { walk(node.body, nesting + [name]) }
             @owner = owner
-            @self_rebound = rebound
+            @self_rebound, @in_block = saved
           end
 
           # A meta-new rvalue — `Class.new(Base) { ... }`, `Struct.new(:a) do ... end` — is the declaration's
@@ -567,24 +597,51 @@ module Rigor
             end
           end
 
-          def in_local_scope(scope)
-            saved = [@local_scope, @block_params, @singleton_body]
+          def in_local_scope(scope, self_kind = self_kind_in(scope))
+            saved = [@local_scope, @block_params, @self_kind]
             @local_scope = scope
             @block_params = Set.new.freeze
-            @singleton_body = scope.is_a?(Prism::SingletonClassNode)
+            @self_kind = self_kind
             yield
           ensure
-            @local_scope, @block_params, @singleton_body = saved
+            @local_scope, @block_params, @self_kind = saved
+          end
+
+          # The {#self_lookup} kind inside `scope`, from the kind around it. Only a receiver-less def or a `def
+          # self.x` directly in a declaration body, and a `class << self` there, keep `self` nameable.
+          def self_kind_in(scope)
+            case scope
+            when Prism::ProgramNode then :declaration
+            when Prism::SingletonClassNode
+              scope.expression.is_a?(Prism::SelfNode) && @self_kind == :declaration ? :singleton_class : :unknown
+            when Prism::DefNode then def_self_kind(scope)
+            else :unknown
+            end
+          end
+
+          def def_self_kind(node)
+            if node.receiver.nil?
+              case @self_kind
+              when :singleton_class then :singleton_method
+              when :unknown then :unknown
+              else :instance_method
+              end
+            elsif node.receiver.is_a?(Prism::SelfNode) && @self_kind == :declaration
+              :singleton_method
+            else
+              :unknown
+            end
           end
 
           def in_block(block)
-            saved = [@block_params, @self_rebound]
+            saved = [@block_params, @self_rebound, @in_block]
             names = block.parameters ? LocalValues.bindings(block.parameters) : []
             @block_params = (@block_params | names).freeze unless names.empty?
             @self_rebound ||= @rebinding_blocks.include?(block)
+            @in_block = true
             yield
           ensure
-            @block_params, @self_rebound = saved
+            @block_params, @self_rebound, @in_block = saved
           end
 
           def site(node)

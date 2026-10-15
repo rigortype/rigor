@@ -502,13 +502,15 @@ RSpec.describe Rigor::Analysis::Reachability do
             end
           end
         RUBY
-        # `Z3` with `inherit = false` reaches neither `Mom::Z3` nor the top-level `Z3`.
-        expect(report.candidates.map(&:fqn)).to eq(%w[Mom::Z3 Z1 Z2 Z3])
+        # A name found only through an ancestor keeps the top-level one too: the walk resolves an ancestor
+        # as written and may pick the wrong one. `Z3` with `inherit = false` reaches neither `Mom::Z3` nor
+        # the top-level `Z3`.
+        expect(report.candidates.map(&:fqn)).to eq(%w[Mom::Z3 Z3])
       end
 
       # A concern's `included do` runs on the including class, which this reading cannot name, so a literal
-      # there keeps the top-level reading rather than resolving against the concern.
-      it "keeps the top-level reading for a literal inside a block that rebinds self" do
+      # there is read both against the concern and at the top level.
+      it "reads a literal inside a block that rebinds self both at the declaration and at the top level" do
         report = report_for({ "lib/a.rb" => <<~RUBY, "lib/main.rb" => "Concern\n" })
           class Thing; end
           module Concern
@@ -518,7 +520,84 @@ RSpec.describe Rigor::Analysis::Reachability do
             end
           end
         RUBY
-        expect(report.candidates.map(&:fqn)).to eq(["Concern::Thing"])
+        expect(report.candidates.map(&:fqn)).to be_empty
+      end
+
+      # Round-2 review of #1767: shapes where the enclosing declaration is not where Ruby looks. Each keeps the
+      # live top-level constant reachable.
+      it "keeps the top level for an ancestor brought in by extend" do
+        report = report_for({ "lib/a.rb" => <<~RUBY, "lib/main.rb" => "Widget.go\n" })
+          class Foo; end
+          module Finder
+            class Foo; end
+          end
+          class Widget
+            extend Finder
+            def self.go = const_get(:Foo)
+          end
+        RUBY
+        expect(report.candidates.map(&:fqn)).not_to include("Foo")
+      end
+
+      it "reads self.class.const_get in a singleton method at the top level" do
+        report = report_for({ "lib/a.rb" => <<~RUBY, "lib/main.rb" => "Host.go\nHost.run\n" })
+          class Foo; end
+          class Bar; end
+          class Host
+            class Foo; end
+            class Bar; end
+            def self.go = self.class.const_get(:Foo)
+            class << self
+              def run = self.class.const_get(:Bar)
+            end
+          end
+        RUBY
+        expect(report.candidates.map(&:fqn)).to eq(%w[Host::Bar Host::Foo])
+      end
+
+      it "keeps the top level for a method defined on another object" do
+        report = report_for({ "lib/a.rb" => <<~RUBY, "lib/main.rb" => "Other.x\nOther.y\n" })
+          class Foo; end
+          class Bar; end
+          class Other; end
+          class Reg
+            class Foo; end
+            class Bar; end
+            def Other.x = const_get(:Foo)
+            class << Other
+              def y = const_get(:Bar)
+            end
+          end
+        RUBY
+        expect(report.candidates.map(&:fqn)).not_to include("Foo", "Bar")
+      end
+
+      it "finds the superclass of a compactly named class wherever it could resolve" do
+        report = report_for({ "lib/a.rb" => <<~RUBY, "lib/main.rb" => "Api::Thing.go\n" })
+          class Base
+            class Foo; end
+          end
+          module Api
+            class Base
+              class Foo; end
+            end
+          end
+          class Api::Thing < Base
+            def self.go = const_get(:Foo)
+          end
+        RUBY
+        expect(report.candidates.map(&:fqn)).not_to include("Base::Foo")
+      end
+
+      it "keeps the top level for a literal in a DSL block whose self it cannot name" do
+        report = report_for({ "lib/a.rb" => <<~RUBY, "lib/main.rb" => "Conf\n" })
+          class Foo; end
+          class Conf
+            class Foo; end
+            configure { const_get(:Foo) }
+          end
+        RUBY
+        expect(report.candidates.map(&:fqn)).to be_empty
       end
 
       # A receiver resolved only by peeling (`Outer::Missing` to `Outer`) is unknown: `const_get` never

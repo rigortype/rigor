@@ -24,44 +24,91 @@ module Rigor
         # The reference carries the referring file's role (WD8): a spec's `const_get("Foo")` keeps `Foo`
         # test-reachable, as its written `Foo` would, rather than making it live in production.
         def literal_dynamic_references(dynamic_uses)
-          dynamic_uses.filter_map do |use|
-            next if use.name.nil?
+          dynamic_uses.flat_map do |use|
+            next [] if use.name.nil?
 
             name = use.name.delete_prefix("::")
-            target = literal_target(use, name) if use.within
-            next if target == :unreachable
-
-            Scan::Reference.new(as_written: target || name, nesting: [].freeze, from: nil,
-                                role: use.role, path: use.path, line: use.line,
-                                rooted: !target.nil? || use.name.start_with?("::"))
+            targets = use.within ? literal_targets(use, name) : [nil]
+            targets.map do |target|
+              Scan::Reference.new(as_written: target || name, nesting: [].freeze, from: nil,
+                                  role: use.role, path: use.path, line: use.line,
+                                  rooted: !target.nil? || use.name.start_with?("::"))
+            end
           end
         end
 
-        # The declaration a literal `name` names when looked up from `use.within`: the first receiver scope
-        # declaring it, a member's owner peeled as {#resolve} peels it. nil falls through to the top level, as
-        # for a receiver that does not resolve as a whole; `:unreachable` when `inherit = false` confines the
-        # lookup to a resolved receiver that does not declare it (Ruby raises `NameError` there).
-        def literal_target(use, name)
+        # The declarations a literal `name` can name when looked up from `use.within`, a member's owner peeled
+        # as {#resolve} peels it; nil stands for the top level. The receiver declaring it is the answer. Past
+        # the receiver the walk only approximates Ruby: an ancestor named as written may resolve elsewhere
+        # (`class Api::Thing < Base` inherits `::Base`, not `Api::Base`), so every scope an ancestor could be
+        # that declares the name is kept, and the top level with them. Keeping a dead constant reachable is
+        # the cheaper mistake than listing a live one. A receiver that does not resolve is the top level; with
+        # `inherit = false` a resolved receiver that does not declare the name is nothing (Ruby raises
+        # `NameError` there).
+        def literal_targets(use, name)
           receiver = use.receiver { |ref| resolve_ref(ref) }
-          return nil if receiver.nil?
+          return [nil] if receiver.nil?
 
           local = @shadows[use.path]
+          own = declared_member(receiver, name, local)
+          return [own] if own
+          return [] unless use.inherit
+
+          plausible_ancestors(receiver).filter_map { |scope| declared_member(scope, name, local) }.uniq + [nil]
+        end
+
+        # `scope::name`, or the longest declared prefix of it, when one is declared.
+        def declared_member(scope, name, local)
           segments = name.split("::")
-          receiver_scopes(use, [receiver]).each do |scope|
-            segments.length.downto(1) do |count|
-              candidate = "#{scope}::#{segments.first(count).join('::')}"
-              return candidate if declared?(candidate, nil, local)
+          segments.length.downto(1) do |count|
+            candidate = "#{scope}::#{segments.first(count).join('::')}"
+            return candidate if declared?(candidate, nil, local)
+          end
+          nil
+        end
+
+        # Every declaration an ancestor of `fqn` could be: each as-written superclass or mixin resolved at
+        # every enclosing scope that declares it, not only the innermost, and transitively.
+        def plausible_ancestors(fqn)
+          (@plausible_ancestors ||= {})[fqn] ||= plausible_ancestor_walk(fqn)
+        end
+
+        def plausible_ancestor_walk(fqn)
+          seen = Set[fqn]
+          queue = [fqn]
+          out = []
+          until queue.empty?
+            current = queue.shift
+            @by_fqn.fetch(current, []).each do |decl|
+              (decl.includes + [decl.superclass]).compact.each do |raw|
+                plausible_resolutions(current, raw).each do |resolved|
+                  next if seen.include?(resolved)
+
+                  seen << resolved
+                  out << resolved
+                  queue << resolved
+                end
+              end
             end
           end
-          use.inherit ? nil : :unreachable
+          out.freeze
+        end
+
+        def plausible_resolutions(subclass_fqn, raw)
+          segments = subclass_fqn.split("::")
+          (segments.length - 1).downto(0).filter_map do |i|
+            candidate = (segments[0, i] + [raw]).join("::")
+            candidate if candidate != subclass_fqn && @by_fqn.key?(candidate)
+          end
         end
 
         # The namespaces a `const_get` on `anchors` searches before the top level: the receiver, then, with the
-        # default `inherit = true`, its superclass chain and mixins (#1761).
+        # default `inherit = true`, every scope its superclass chain and mixins could be (#1761) — a taint is
+        # safe to over-reach.
         def receiver_scopes(use, anchors)
           return anchors unless use.inherit
 
-          anchors.flat_map { |anchor| [anchor, *ancestor_scopes(anchor)] }.uniq
+          anchors.flat_map { |anchor| [anchor, *plausible_ancestors(anchor)] }.uniq
         end
 
         # An interpolated site on a known receiver, with the receiver resolved into absolute `prefix`es.

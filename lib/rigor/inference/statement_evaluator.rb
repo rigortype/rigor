@@ -123,9 +123,9 @@ module Rigor
         Prism::BeginNode => :eval_begin_node,
         Prism::RescueNode => :eval_rescue,
         Prism::EnsureNode => :eval_ensure,
-        Prism::WhileNode => :eval_loop,
-        Prism::UntilNode => :eval_loop,
-        Prism::ForNode => :eval_for,
+        Prism::WhileNode => :eval_repeating_loop,
+        Prism::UntilNode => :eval_repeating_loop,
+        Prism::ForNode => :eval_repeating_for,
         Prism::AndNode => :eval_and_or,
         Prism::OrNode => :eval_and_or,
         Prism::ParenthesesNode => :eval_parentheses,
@@ -2086,6 +2086,12 @@ module Rigor
         after.global(:$_) == Type::Combinator.untyped && !LastLine.may_set?(node.statements, scope)
       end
 
+      # Issue #1889 — {#eval_loop} / {#eval_for} with a literal-name `instance_variable_set` in the body joining its
+      # value into the ivar's binding rather than replacing it ({ReflectiveIvarWrite.in_repeating_body}).
+      def eval_repeating_loop(node) = ReflectiveIvarWrite.in_repeating_body { eval_loop(node) }
+
+      def eval_repeating_for(node) = ReflectiveIvarWrite.in_repeating_body { eval_for(node) }
+
       # `while pred; body; end` / `until pred; body; end`. The body might run zero or more times, so half-bound names
       # degrade to `T | nil` in the post-loop scope. The loop expression itself types as `Constant[nil]` (Slice 3 phase
       # 1), reflecting the common case where no `break VALUE` is observed.
@@ -3192,6 +3198,9 @@ module Rigor
         # observes the seed's union (not the pre-call narrowed value). Always-safe (only widens; no new facts). See
         # [`docs/CURRENT_WORK.md`](../../../docs/CURRENT_WORK.md) § "Flow-folding" — G2 intervening-call case.
         post_scope = invalidate_ivars_for_intervening_call(node, post_scope) if statement_call
+        # Issue #1889 — `instance_variable_set` on `self` writes an ivar no write node shows. It runs after the reset
+        # above, which would join a literal-name write back into the class seed.
+        post_scope = ReflectiveIvarWrite.apply(node, post_scope) { type_operand(ReflectiveIvarWrite.value_node(node)) }
         # C1 — regex match-data globals (`$~`, `$1..$N`, `$&`, …) are narrowed to non-nil on a successful-match edge; a
         # later call that itself runs a regex match rebinds them, so the narrowed facts must be dropped. We forget them
         # only when the call may run a match in this frame ({#rebinds_match_globals?}). A call provably match-free on a
@@ -3352,7 +3361,11 @@ module Rigor
           local_type = current_scope.ivar(ivar_name)
           next if local_type.nil? || local_type == seed_type
 
-          widened = widened.with_ivar(ivar_name, Type::Combinator.union(local_type, seed_type))
+          joined = Type::Combinator.union(local_type, seed_type)
+          widened = widened.with_ivar(ivar_name, joined)
+          # Issue #1889 — an ivar a reflective write widened keeps its declaration mark, so the reset must too.
+          widened = widened.seed_declaration_sourced_ivar(ivar_name, joined) if
+            current_scope.declaration_sourced?(:ivar, ivar_name)
         end
         widened
       end
@@ -5434,7 +5447,7 @@ module Rigor
         return [] if receiver_type.nil?
 
         arg_types = call_arg_types_for(call_node)
-        MethodDispatcher.expected_block_param_types(
+        expected = MethodDispatcher.expected_block_param_types(
           receiver_type: receiver_type,
           method_name: call_node.name,
           arg_types: arg_types,
@@ -5442,8 +5455,26 @@ module Rigor
           scope: scope,
           call_node: call_node
         )
+        with_inject_accumulator(call_node, receiver_type, arg_types, expected)
       rescue StandardError
         []
+      end
+
+      # Issue #1889 — a block-form `inject` / `reduce` call's accumulator parameter at the type it holds across
+      # every run ({ExpressionTyper#inject_accumulator_type}) rather than the seed the signature binds it to, once
+      # per call: every write-back pass builds the entry again.
+      def with_inject_accumulator(call_node, receiver_type, arg_types, expected)
+        memo = @inject_accumulator
+        accumulator =
+          if memo && memo[0].equal?(call_node)
+            memo[1]
+          else
+            typed = ExpressionTyper.new(scope: scope, tracer: tracer)
+                                   .inject_accumulator_type(call_node, receiver_type, arg_types)
+            @inject_accumulator = [call_node, typed]
+            typed
+          end
+        accumulator ? [accumulator, *expected.drop(1)] : expected
       end
 
       def call_arg_types_for(call_node)

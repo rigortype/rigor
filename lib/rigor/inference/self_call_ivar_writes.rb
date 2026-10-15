@@ -145,7 +145,7 @@ module Rigor
           RefinedDispatch::OwnMethod.each_subclass(@scope, @class_name) { |subclass| classes << subclass }
           classes.each do |class_name|
             chain = Scope::ResolutionChain.for(@scope, class_name.to_s, :instance, :methods)
-            unprovable! if chain.truncated? || chain.wildcard_mixin? || chain.unsettled? || chain.forks.positive?
+            unprovable! if chain.truncated? || chain.wildcard_mixin? || !settled?(chain)
             chain.search(@scope) do |entry|
               unprovable! if entry.external? || rewritten?(entry.name) || protocol_defined?(entry.name)
               nil
@@ -263,6 +263,13 @@ module Rigor
           end
         end
 
+        # Whether `chain`'s own order stands with no second world: no order mark and no fork. `ResolutionChain#settle`
+        # answers `:chain` for an answer no world can match only then; a fork sends it to the retro world, which the
+        # block answers otherwise, or to master's order.
+        def settled?(chain)
+          chain.settle(@scope, :chain_order) { :other_world } == :chain
+        end
+
         def protocol_defined?(class_name)
           refined = @scope.discovered_refinements[class_name] || {}
           PROTOCOL_NAMES.any? { |name| defines_here?(class_name, name) || refined.key?(name) }
@@ -279,7 +286,7 @@ module Rigor
         # signature, or a gem without one, may define the name.
         def definer_ahead(class_name, name, owner)
           chain = Scope::ResolutionChain.for(@scope, class_name.to_s, :instance, :methods)
-          unprovable! if chain.truncated? || chain.wildcard_mixin? || chain.unsettled? || chain.forks.positive?
+          unprovable! if chain.truncated? || chain.wildcard_mixin? || !settled?(chain)
 
           chain.search(@scope) do |entry|
             unprovable! if entry.external? || rewritten?(entry.name)

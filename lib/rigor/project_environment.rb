@@ -56,9 +56,12 @@ module Rigor
     #   `source_rbs_synthesizer` runs over them at env-build time; an empty list contributes no synthesized RBS.
     # @param feature_sources — path => source text the required-feature scan reads in place of that file (an
     #   editor buffer bound with `--tmp-file` / `--instead-of`).
-    # @param project_patched_methods — the `pre_eval:` registry (see {.project_patched_methods}); nil keeps
-    #   the unpatched universe.
-    def build(configuration:, source_files:, feature_sources: {}, project_patched_methods: nil)
+    # @param project_patched_methods — the `pre_eval:` registry. Defaults to the configuration's own (see
+    #   {.project_patched_methods}), so every probe command (`type-scan`, `trace`, `annotate`, `sig-gen`) types a
+    #   patched method as `rigor check` does (issue #1895); `type-of` passes its buffer-aware one. An explicit
+    #   nil keeps the unpatched universe.
+    def build(configuration:, source_files:, feature_sources: {},
+              project_patched_methods: ProjectEnvironment.project_patched_methods(configuration))
       features = required_features(configuration, source_files, sources: feature_sources)
       Environment.for_project(
         project_patched_methods: project_patched_methods,

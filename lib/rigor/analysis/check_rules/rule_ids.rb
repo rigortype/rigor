@@ -173,6 +173,43 @@ module Rigor
         configuration-error load-error pool-degraded runtime-error source-rbs-synthesis-failed
         source-rbs-annotation-not-honoured
       ].freeze
+
+      # Resolves a user-supplied rule token (`undefined-method`, `call.undefined-method`, or the family wildcard
+      # `call`) to the set of canonical rule identifiers it disables. Returns `nil` for `"all"` (the existing
+      # wildcard meaning "every rule"), or for unknown tokens.
+      def self.resolve_rule_token(token)
+        return nil if token == "all"
+        return [LEGACY_RULE_ALIASES.fetch(token)] if LEGACY_RULE_ALIASES.key?(token)
+        return PRE_EVAL_RULES if token == "pre-eval"
+        return ALL_RULES.select { |r| r.start_with?("#{token}.") } if RULE_FAMILIES.include?(token)
+
+        ALL_RULES.include?(token) ? [token] : []
+      end
+
+      # Expands a list of user-supplied rule tokens into the canonical-id set per ADR-8 § "Backward
+      # compatibility". `disabled_rules` accepts unprefixed legacy names (`undefined-method`), canonical names
+      # (`call.undefined-method`), family wildcards (`call`) and the `all` sentinel.
+      def self.expand_rule_tokens(tokens)
+        Array(tokens).each_with_object(Set.new) do |token, set|
+          set.merge(expand_token(token.to_s))
+        end
+      end
+
+      def self.expand_token(token)
+        return ["all"] if token == "all"
+
+        resolved = resolve_rule_token(token)
+        resolved.nil? || resolved.empty? ? [token] : resolved
+      end
+
+      # Whether the `.rigor.yml` `disable:` list, expanded by {.expand_rule_tokens}, drops a diagnostic whose rule
+      # id is `rule`: the `all` sentinel drops every rule-bearing row, any other entry its exact id. A nil rule (a
+      # parse, path or internal error) is never dropped.
+      def self.config_disabled?(rule, disabled)
+        return false if rule.nil?
+
+        disabled.include?("all") || disabled.include?(rule)
+      end
     end
   end
 end

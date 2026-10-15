@@ -300,6 +300,15 @@ disable:
   - flow.dead-assignment
 ```
 
+The list reaches every diagnostic that carries a rule ID,
+including the run-level ones reported at `.rigor.yml` — a
+plugin that failed to load or raised in `prepare`, a
+`dependencies.source_inference:` gem that did not resolve, the
+`rbs.coverage.*` notices. A row from the plugin loader answers
+to its bare ID (`disable: [load-error]`). `disable: [all]`
+turns off every rule; a path or parse error, which has no rule
+ID, is still reported.
+
 For a *known backlog* you want to keep visible but not fail
 on, prefer a [baseline](06-baseline.md) over a blanket
 `disable:` — `disable:` also hides any new occurrences.

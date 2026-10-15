@@ -991,4 +991,69 @@ RSpec.describe Rigor::CLI::CheckCommand do
       )
     end
   end
+
+  # Issue #1895 — the `.rigor.yml` `disable:` list reaches the run-level rows in every run shape. The rows here are
+  # positioned at `.rigor.yml`, outside any analysed file, so they are filtered only where the run's final stream is
+  # stamped. The exit status follows the filtered set: the `:error` load-error row alone makes the run fail.
+  describe "config `disable:` over run-level rows" do
+    def write_project(disable)
+      File.write(".rigor.yml", "paths: [clean.rb]\nplugins: [rigor-no-such-plugin-1895]\n" \
+                               "dependencies:\n  source_inference: [{ gem: no-such-gem-1895 }]\n" \
+                               "disable: #{disable}\n")
+      File.write("clean.rb", "x = 1\n")
+    end
+
+    [["--workers", "0"], ["--workers", "2"]].each do |workers|
+      it "drops the matching rows and follows them in the exit status under #{workers.join(' ')}" do
+        write_project("[]")
+        status, out, = run(["--no-cache", "--no-ci-detect", "--no-stats", *workers, "clean.rb"])
+        expect(status).to eq(1)
+        expect(out).to include("[plugin_loader.load-error]", "[dynamic.dependency-source.gem-not-found]")
+
+        write_project("[load-error]")
+        status, out, = run(["--no-cache", "--no-ci-detect", "--no-stats", *workers, "clean.rb"])
+        expect(status).to eq(0)
+        expect(out).not_to include("[plugin_loader.load-error]")
+        expect(out).to include("[dynamic.dependency-source.gem-not-found]")
+
+        status, = run(["--no-cache", "--no-ci-detect", "--no-stats", "--fail-on", "warning", *workers, "clean.rb"])
+        expect(status).to eq(1)
+
+        write_project("[load-error, dynamic.dependency-source.gem-not-found]")
+        status, out, = run(["--no-cache", "--no-ci-detect", "--no-stats", "--fail-on", "warning", *workers,
+                            "clean.rb"])
+        expect(status).to eq(0)
+        expect(out).not_to include("[dynamic.dependency-source.gem-not-found]")
+      end
+    end
+
+    it "drops the rows on a warm `--incremental` run" do
+      write_project("[load-error]")
+      run(["--no-ci-detect", "--no-stats", "--incremental", "clean.rb"])
+      status, out, err = run(["--no-ci-detect", "--no-stats", "--incremental", "clean.rb"])
+
+      expect(err).to include("--incremental warm")
+      expect(status).to eq(0)
+      expect(out).not_to include("[plugin_loader.load-error]")
+      expect(out).to include("[dynamic.dependency-source.gem-not-found]")
+    end
+
+    it "drops the rows on a run served whole from the run-result cache" do
+      require "rigor/analysis/run_cache_probe"
+      write_project("[all]")
+      served = []
+      allow(Rigor::Analysis::RunCacheProbe).to receive(:new).and_wrap_original do |original, **kwargs|
+        probe = original.call(**kwargs)
+        allow(probe).to(receive(:serve).and_wrap_original { |serve, *args| serve.call(*args).tap { served << it } })
+        probe
+      end
+
+      run(["--no-ci-detect", "--no-stats", "clean.rb"])
+      status, out, = run(["--no-ci-detect", "--no-stats", "--fail-on", "info", "clean.rb"])
+
+      expect(served.last).not_to be_nil
+      expect(status).to eq(0)
+      expect(out).to include("No diagnostics")
+    end
+  end
 end

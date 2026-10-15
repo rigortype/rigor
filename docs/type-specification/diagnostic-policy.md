@@ -137,6 +137,9 @@ A rule token — in a `# rigor:disable[-file]` marker or in the `.rigor.yml` `di
 
 An unrecognised token is kept verbatim, so it only ever matches a diagnostic whose `rule` is literally that string (effectively a no-op — see _Validity rules_). A diagnostic whose `rule` is `nil` is never suppressed. Because family expansion happens at token time, the match itself never does prefix matching — it is always exact equality against the expanded canonical-id set.
 
+The `.rigor.yml` `disable:` list reaches every diagnostic that carries a `rule`, not only those per-file analysis produces: the run-level rows positioned at `.rigor.yml` (plugin load and `#prepare` failures, the `dynamic.dependency-source.*` rows, `rbs.coverage.*`) answer to it too, because the list is applied once more where the run's final stream is severity-stamped, the stamp a sequential run, a worker pool, an `--incremental` recheck and a run served from the result cache all pass through. The match is the one above, against the diagnostic's `rule`, so a row from a non-builtin source family answers to its bare id: `disable: [load-error]` drops the `plugin_loader.load-error` row. `all` in the list drops every rule-bearing diagnostic, as `# rigor:disable-file all` does within a file; a path or parse error, whose `rule` is `nil`, still survives it.
+
+
 ### Ecosystem-compat markers (planned, not yet implemented)
 
 Recognizing other ecosystems' markers — Steep's line-scoped `# steep:ignore`, and opt-in Sorbet `# typed:` / RuboCop `# rubocop:disable` via `.rigor.yml` `compat.*` switches — is a designed compatibility surface that has not shipped. Until it lands, only the Rigor-native markers above are honored, and a foreign marker is treated as an ordinary comment.

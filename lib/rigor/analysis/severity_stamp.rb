@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require_relative "check_rules/rule_ids"
 require_relative "diagnostic"
 require_relative "../configuration/severity_profile"
 
@@ -9,6 +10,12 @@ module Rigor
     # overrides and drops any diagnostic resolving to `:off`. Rules emit with their authored severity; the
     # profile is the final filter.
     #
+    # Issue #1895 — the `.rigor.yml` `disable:` list is applied here too, ahead of the profile, with the same
+    # token expansion and match per-file analysis uses ({CheckRules.config_disabled?}). Per-file rows were
+    # already filtered where they were produced; the run-level rows (plugin load / prepare, dependency-source,
+    # `rbs.coverage.*`, pool-degraded, ...) are assembled outside any per-file filter, and this is the one
+    # stamp every run shape (sequential, pool, `--incremental`, a warm cache hit) passes its stream through.
+    #
     # Extracted (ADR-87 WD4) so the miss path ({Runner::DiagnosticAggregator}) and the boot-slimming hit path
     # ({RunCacheProbe}, which never loads the aggregator) apply the IDENTICAL final filter — a warm HIT's
     # served diagnostics are byte-identical to what a full run would print.
@@ -16,7 +23,12 @@ module Rigor
       module_function
 
       def apply(diagnostics, configuration)
-        diagnostics.filter_map { |diagnostic| stamp(diagnostic, configuration) }
+        disabled = CheckRules.expand_rule_tokens(configuration.disabled_rules)
+        diagnostics.filter_map do |diagnostic|
+          next nil if CheckRules.config_disabled?(diagnostic.rule, disabled)
+
+          stamp(diagnostic, configuration)
+        end
       end
 
       def stamp(diagnostic, configuration)

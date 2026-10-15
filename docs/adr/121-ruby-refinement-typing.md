@@ -200,8 +200,15 @@ declaration is opaque.**
   `call.wrong-arity`, `call.argument-type-mismatch`, `call.possible-nil-receiver`,
   `def.method-visibility-mismatch` and `flow.always-raises`. `call.raise-non-exception` (which judges
   the argument) and `call.self-undefined-method` (off in every shipped profile) do not ask.
-- The typed arm answers `Dynamic[top]` for every instance-receiver call in the span of an activation
-  that puts an opaque module in effect; a class object falls through until singleton-side levels land.
+- The typed arm answers `Dynamic[top]` for every call on an instance or a class object in the span of an
+  activation that puts an opaque module in effect. A class object fell through until #1752 walked its own
+  lookup (its singleton class and each superclass's with their `extend`s, then `Class`, `Module`, `Object`,
+  `Kernel` and `BasicObject`); lifting that exception widens the span's cost, since a `Foo.new` chain or a
+  class-body call under a `using` of a gem's module now types as `Dynamic` too. Outside that span a
+  refinement that wins on a class object also answers `Dynamic`, never its refine body's type: a hook on
+  any ancestor can install the class object's own method where no table sees it (`include Singleton`'s
+  `instance`, a gem concern's class methods), and three review rounds each found another such shape, so
+  the walk decides only whether a refinement may answer.
   WD3's rule that the unknown marker answers `Dynamic` only where some refinement defines the name is
   not extended to opaque modules: their rows cannot be read, so every name may be replaced. Wildcard
   rows never yield a winner: a class-unknown row answers `Dynamic` for its names on every instance, a
@@ -219,7 +226,10 @@ declaration is opaque.**
   no table declares, and a declared class whose instance chain cannot be read to its end (a cut, a
   superclass the tables do not know) or holds the receiver's class; a class with an unknown superclass
   is a possible subclass of every class. A class mark alone (refined, object-extended, meta-superclass)
-  does not make a name the project's for the arity walk (`DiscoveryIndex.declares_surface?`).
+  does not make a name the project's for the arity walk (`DiscoveryIndex.declares_surface?`). A class object
+  (#1752) is decided over its singleton levels on the same terms: its own singleton definer `Known` on the
+  singleton side, or a singleton method the catalogue lists, proves the definer; a refined module beside the
+  class's own singleton methods proves nothing, since `class << self; prepend M` is recorded as an `extend`.
 
 Limits it does not remove: a module reopened in a file outside the analysed paths or under
 `exclude:`; an inner `using` candidate declared only outside the analysed paths (or by a
@@ -228,5 +238,5 @@ candidate as opaque would blanket every nested `using`); a module declared or re
 string; a refine target bound by `||=` or `const_set` only in another file; and
 `TOPLEVEL_BINDING.eval("using N")`, which activates `N` to the end of the file.
 
-Consequence: under a `using` of a gem's module every instance call in the span is unchecked and
-`Dynamic` until gem modules can be known, a cost the survey corpus puts at a handful of files.
+Consequence: under a `using` of a gem's module every call in the span, on an instance or a class object, is
+unchecked and `Dynamic` until gem modules can be known, a cost the survey corpus puts at a handful of files.

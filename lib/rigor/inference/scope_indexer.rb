@@ -3990,6 +3990,7 @@ module Rigor
           if methods_acc.mentions_refine? && methods_acc.refine_in?(location.start_offset, location.end_offset)
             node.rigor_each_child { |child| census_scan(child, qualified_prefix, methods_acc) }
           end
+          record_foreign_singleton_def(node, qualified_prefix, owner_prefix, methods_acc.at(node))
           unless def_owner_prefix&.empty? || defs_singleton == :unnameable ||
                  (singleton_cref && owner_prefix.empty?)
             singleton_def = in_singleton_class || defs_singleton
@@ -4729,6 +4730,50 @@ module Rigor
         acc[:deferred_ranges][path] = build_deferred_ranges(root)
         record_class_sources(acc[:class_sources], path, root, superclasses, includes, file_def_nodes,
                              acc[:compact_headers])
+        record_singleton_class_sources(acc[:singleton_class_sources], path, root)
+      end
+
+      # `{name => Set[path]}` for a bundle's name list (a bundle written before the list existed has none).
+      def bundle_path_sets(names, path) = (names || []).to_h { |name| [name, Set[path]] }
+
+      # Issue #1752 — the constants a `class << Const` body opens in this file, and those whose singleton side a call
+      # there may rewrite ({#singleton_side_call?}). Such a body records facts about
+      # `Const`'s singleton class (a `remove_method`, a `def`) without declaring `Const`, so it stays out of
+      # `class_sources` (whose readers take a name there as one the project declares) and joins only the per-file
+      # class-declaration sets the incremental `class:` edges diff (`Runner#class_declarations`).
+      def record_singleton_class_sources(sources, path, root)
+        collect_singleton_class_targets(root, []) { |name| (sources[name] ||= Set.new) << path }
+      end
+
+      def collect_singleton_class_targets(node, lexical_prefix, &)
+        case node
+        when Prism::ClassNode, Prism::ModuleNode
+          prefix = Source::ConstantPath.declaration_prefix(lexical_prefix, node.constant_path)
+          node.body && prefix && collect_singleton_class_targets(node.body, prefix, &)
+          return
+        when Prism::SingletonClassNode
+          rendered = singleton_receiver_constant_name(node.expression)
+          yield eval_constant_receiver_prefix(node, node.expression, rendered, lexical_prefix).join("::") if rendered
+        when Prism::CallNode
+          yield_singleton_side_constant(node, node.receiver, lexical_prefix, &) if singleton_side_call?(node)
+        end
+        node.rigor_each_child { |child| collect_singleton_class_targets(child, lexical_prefix, &) }
+      end
+
+      # A call on a constant that may rewrite its singleton side (`Const.singleton_class`,
+      # `Const.define_singleton_method`, `Const.extend(M)`, `Const.instance_eval { … }`) records facts about `Const`'s
+      # singleton methods the refinement walk reads from a file that need not declare `Const`, so the file joins the
+      # constant's set too. Written inside `Const`'s own body, the name is in the file's set already; a `def Const.x`
+      # files its own `method:` key.
+      def singleton_side_call?(node)
+        node.name == :singleton_class || surface_rewriting_call?(node)
+      end
+
+      def yield_singleton_side_constant(node, receiver, lexical_prefix)
+        return unless receiver.is_a?(Prism::ConstantReadNode) || receiver.is_a?(Prism::ConstantPathNode)
+
+        rendered = singleton_receiver_constant_name(receiver)
+        yield eval_constant_receiver_prefix(node, receiver, rendered, lexical_prefix).join("::") if rendered
       end
 
       def build_deferred_ranges(root)
@@ -7160,6 +7205,7 @@ module Rigor
         return record_module_function(node, current_class, accumulator, in_singleton) if node.name == :module_function
 
         taint_opaque_eval(node, current_class, accumulator)
+        return if singleton_class_rewrite_tainted?(node, qualified_prefix, current_class, accumulator)
 
         kind, _arguments, via_send = mixin_call_view(node)
         return if kind.nil?
@@ -7170,6 +7216,49 @@ module Rigor
         return if !via_send && singleton_mixin_recorded?(node, kind, current_class, accumulator, in_singleton)
 
         effects.each { |owner, side| accumulator.taint(owner, side) }
+      end
+
+      # Issue #1752 — a call that rewrites a singleton class reached through `singleton_class` (`singleton_class.
+      # class_eval { def x }`, `singleton_class.send(:define_method, :x)`, `Const.singleton_class.prepend(M)`,
+      # `Const.singleton_class.send(:include, M)`) puts methods or modules on that singleton class that no edge
+      # records, so its singleton side is unpositioned: the owner is the enclosing class for a bare or `self.`
+      # receiver, else the constant. True when it tainted.
+      def singleton_class_rewrite_tainted?(node, qualified_prefix, current_class, accumulator)
+        receiver = node.receiver
+        return false unless singleton_class_of_receiver?(receiver) && surface_rewriting_call?(node)
+        return false if singleton_class_named_call?(node)
+
+        owner = singleton_class_owner(node, receiver.receiver, qualified_prefix, current_class)
+        return false if owner.nil?
+
+        accumulator.taint(owner, :extend)
+        true
+      end
+
+      # A bare, `self.` or constant receiver's `singleton_class` call.
+      def singleton_class_of_receiver?(receiver)
+        receiver.is_a?(Prism::CallNode) && receiver.name == :singleton_class && receiver.arguments.nil?
+      end
+
+      # An `attr_*` on a singleton class (`singleton_class.attr_accessor :conf`) rewrites only the names it spells, so
+      # it makes those names' singleton envelopes opaque ({#record_singleton_class_names}) and leaves the rest of the
+      # singleton side readable. An `attr_*` with a name it does not spell as a literal (`attr_accessor(*KEYS)`, a
+      # block's variable), and an `alias_method` or `define_method` there, still taint the side: the own-definer read
+      # would otherwise answer the body Ruby replaced (`definer_resolution_witness_spec.rb`).
+      def singleton_class_named_call?(node)
+        arguments = node.arguments&.arguments || []
+        ATTR_MACROS.include?(node.name) && !arguments.empty? &&
+          arguments.all? { |argument| literal_method_name(argument) }
+      end
+
+      def singleton_class_owner(node, object, qualified_prefix, current_class)
+        return current_class if object.nil? || object.is_a?(Prism::SelfNode)
+
+        rendered = Source::ConstantPath.qualified_name_or_nil(object)
+        return nil if rendered.nil?
+        return rendered if Source::ConstantPath.rooted?(object) || qualified_prefix.empty?
+
+        eval_constant_receiver_prefix(node, object, rendered, qualified_prefix).join("::")
       end
 
       # The bare `module_function` toggle: the module extends itself. A direct statement only.
@@ -7758,6 +7847,42 @@ module Rigor
           constant_receiver_candidates(receiver, qualified_prefix).each do |name|
             record_surface_mark(tables, name, Scope::DiscoveryIndex::ENVELOPE_DYNAMIC_MARK)
           end
+        elsif singleton_class_of_receiver?(receiver) && singleton_class_named_call?(node)
+          record_singleton_class_names(node, receiver.receiver, qualified_prefix, tables)
+        end
+      end
+
+      # Issue #1752 — the names a {#singleton_class_named_call?} rewrites on its singleton class's owner, each
+      # singleton envelope opaque: the evidence the refinement typer reads as a rewritten singleton name.
+      def record_singleton_class_names(node, object, qualified_prefix, tables)
+        current_class = qualified_prefix.empty? ? nil : qualified_prefix.join("::")
+        owner = singleton_class_owner(node, object, qualified_prefix, current_class)
+        return if owner.nil?
+
+        (node.arguments&.arguments || []).each do |argument|
+          method_name = literal_method_name(argument)
+          next unless method_name
+
+          names = [method_name]
+          names << :"#{method_name}=" if %i[attr_writer attr_accessor].include?(node.name)
+          names.each do |name|
+            record_envelope(tables.envelopes, owner, [:singleton, name], Source::ParameterEnvelope::OPAQUE)
+            contest_envelope(tables, owner, [:singleton, name]) unless tables.certain
+          end
+        end
+      end
+
+      # Issue #1752 — `def Const.x` whose receiver is not the lexical `self` (written at the top level or in another
+      # class's body) defines `Const`'s singleton method, which no table files under `Const`: its singleton name's
+      # envelope turns opaque, the evidence the refinement typer reads as a rewritten singleton name.
+      def record_foreign_singleton_def(node, qualified_prefix, owner_prefix, tables)
+        receiver = node.receiver
+        return unless receiver.is_a?(Prism::ConstantReadNode) || receiver.is_a?(Prism::ConstantPathNode)
+        return if def_receiver_targets_lexical_self?(receiver, owner_prefix)
+
+        constant_receiver_candidates(receiver, qualified_prefix).each do |name|
+          record_envelope(tables.envelopes, name, [:singleton, node.name], Source::ParameterEnvelope::OPAQUE)
+          contest_envelope(tables, name, [:singleton, node.name]) unless tables.certain
         end
       end
 
@@ -8804,6 +8929,9 @@ module Rigor
         merge_header_nestings(acc[:header_nestings], file_index[:header_nestings] || {})
         fold_mixin_lists(acc, file_index)
         file_index[:class_sources].each { |cn, files| (acc[:class_sources][cn] ||= Set.new).merge(files) }
+        (file_index[:singleton_class_sources] || {}).each do |cn, files|
+          (acc[:singleton_class_sources][cn] ||= Set.new).merge(files)
+        end
         # Issue #722 residue 2 — a pre-#722 seed bundle carries no candidates; the SCHEMA bump makes such a
         # blob a cold rebuild, but default so any in-flight fold stays total.
         acc[:compact_headers].merge!(file_index[:compact_headers] || {})
@@ -8892,6 +9020,7 @@ module Rigor
           # data, so the bundle stays Marshal-clean and a warm file joins the envelopes its cold walk records.
           parameter_envelopes: file_index[:parameter_envelopes],
           class_source_names: file_index[:class_sources].keys,
+          singleton_class_source_names: (file_index[:singleton_class_sources] || {}).keys,
           # Issue #722 residue 2 — plain data, so the bundle stays Marshal-clean and a warm incremental file
           # re-anchors its compact headers the way a cold walk of it does.
           compact_headers: file_index[:compact_headers],
@@ -8916,7 +9045,7 @@ module Rigor
       # ADR-85 WD2 — reconstitutes a cached bundle into a single-file index {#fold_file_index} folds: the
       # def-node triples become {DefHandle}s bound to this file's `path`, and the class-source names become a
       # `{name => Set[path]}` table (the shape `accumulate_project_index` produces).
-      def bundle_to_file_index(bundle, path) # rubocop:disable Metrics/CyclomaticComplexity,Metrics/PerceivedComplexity -- one read per bundle slot
+      def bundle_to_file_index(bundle, path) # rubocop:disable Metrics/AbcSize -- one read per bundle slot
         {
           def_nodes: bundle_defs_to_handles(bundle[:def_nodes], path),
           singleton_def_nodes: bundle_defs_to_handles(bundle[:singleton_def_nodes], path),
@@ -8937,7 +9066,8 @@ module Rigor
           method_visibilities: bundle[:method_visibilities],
           methods: bundle[:methods],
           parameter_envelopes: bundle[:parameter_envelopes] || {},
-          class_sources: bundle[:class_source_names].to_h { |name| [name, Set[path]] },
+          class_sources: bundle_path_sets(bundle[:class_source_names], path),
+          singleton_class_sources: bundle_path_sets(bundle[:singleton_class_source_names], path),
           compact_headers: bundle[:compact_headers] || {},
           # Issue #644 — a pre-#644 bundle carries no census; the SCHEMA bump makes such a blob a cold
           # rebuild, but default so any in-flight fold stays total.
@@ -8987,7 +9117,7 @@ module Rigor
           method_visibilities: {},
           methods: {},
           deferred_ranges: {},
-          parameter_envelopes: {}, class_sources: {},
+          parameter_envelopes: {}, class_sources: {}, singleton_class_sources: {},
           # Issue #722 residue 2 — compact-header re-anchor candidates, adjudicated in {#finalize_def_index}.
           compact_headers: {},
           constant_writes: {},

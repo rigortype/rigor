@@ -1160,8 +1160,8 @@ module Rigor
         return {} if index.nil?
 
         result = Hash.new { |hash, key| hash[key] = Set.new }
-        index[:class_sources].each do |class_name, files|
-          files.each { |file| result[file] << class_name }
+        [index[:class_sources], index[:singleton_class_sources] || {}].each do |sources|
+          sources.each { |class_name, files| files.each { |file| result[file] << class_name } }
         end
         Incremental.add_superclass_edges(result, index[:class_sources], index[:superclasses])
         result.transform_values(&:freeze).freeze

@@ -431,6 +431,7 @@ module Rigor
         # Issue #1367 — the project's `Inference::GlobalWriteCensus`, which the `global.*` write rules read.
         @project_discovered_global_write_census = Set.new.freeze
         @project_discovered_class_sources = {}.freeze
+        @project_singleton_class_sources = {}.freeze
         # Issue #644 — the cross-file VALUE-constant publication table (`{qualified name => Type::Constant}`,
         # literal writes only) and its per-name write attribution. The first seeds `in_source_constants` on
         # every per-file scope so `FOO = :sym` in one file reads as `:sym` in another; the second seeds
@@ -648,8 +649,8 @@ module Rigor
       # subclasses (`subclass_of:<last segment>`).
       def class_declarations
         result = Hash.new { |hash, key| hash[key] = Set.new }
-        @project_discovered_class_sources.each do |class_name, files|
-          files.each { |file| result[file] << class_name }
+        [@project_discovered_class_sources, @project_singleton_class_sources].each do |sources|
+          sources.each { |class_name, files| files.each { |file| result[file] << class_name } }
         end
         Incremental.add_superclass_edges(result, @project_discovered_class_sources, @project_discovered_superclasses)
         result.transform_values(&:freeze).freeze
@@ -1748,6 +1749,8 @@ module Rigor
         @project_discovered_prepends = discovery.discovered_prepends
         @project_discovered_extends = discovery.discovered_extends
         @project_unpositioned_mixins = discovery.unpositioned_mixins
+        # Issue #1752 — the files that open `class << Const`, read only by {#class_declarations}.
+        @project_singleton_class_sources = discovery.singleton_class_sources
       end
 
       # Internal: builds the deferred cross-file discovery tables at most once per run and adopts them.

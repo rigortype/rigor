@@ -20,9 +20,17 @@ module Rigor
     #
     # Issue #1740 — {OwnMethod} shares {.levels} with the walk below and asks the opposite question for the two
     # argument checks: does the receiver's own method answer ahead of every refinement in effect?
+    #
+    # Issue #1752 — a class object is walked through its own lookup ({ClassObject}): its singleton class and each
+    # superclass's, then `Class`, `Module`, `Object`, `Kernel` and `BasicObject`, so a refinement of `Object` answers
+    # `Integer.oo` while `Integer.sqrt` keeps answering ahead of one.
     module RefinedDispatch
       # The refinement that answers: `module_name` refines `refined_class` (a class or module on the walk).
       Winner = Data.define(:module_name, :refined_class)
+
+      # Issue #1752 — the singleton class `#<Class:of>` as an entry of a class object's walk ({ClassObject}): it
+      # defines the name through `of`'s own singleton methods, and no refinement table key names it.
+      SingletonClass = Data.define(:of)
 
       # The answer when the in-effect list carries {InEffectRefinements::UNKNOWN} and some refinement defines the
       # name on a class the walk reaches: any of them may answer.
@@ -37,14 +45,16 @@ module Rigor
       def wildcard = Scope::DiscoveryIndex::REFINEMENT_WILDCARD
 
       # A {Winner}, {UNKNOWN}, or nil when no in-effect refinement answers `method_name` on an instance of
-      # `class_name` (the class's own lookup does). `list` is the call site's in-effect refinements.
+      # `class_name` (the class's own lookup does), or with `kind: :singleton` on the class object `class_name`
+      # itself (issue #1752). `list` is the call site's in-effect refinements.
       #
       # ADR-121 WD7 — a row the walk could not read never yields a {Winner}: an in-effect module's row for the name
       # whose class the walk could not name reaches every receiver, and a names-wildcard row of a level the walk
       # reaches before a definer may define the name, so both answer {UNKNOWN}. So does a winner whose module shares
       # its last segment with another listed module (A1): which of a `using`'s declared candidates Ruby finds can
-      # depend on load order.
-      def winner(scope, class_name, method_name, list)
+      # depend on load order. A class object's walk always ends at `Object`, so where it cannot be read a row that
+      # may sit on it answers {UNKNOWN} too.
+      def winner(scope, class_name, method_name, list, kind: :instance)
         refinements = scope.discovered_refinements
         return UNKNOWN if class_unknown_row?(scope, refinements, method_name, list)
 
@@ -53,11 +63,24 @@ module Rigor
         unknown = list.include?(InEffectRefinements::UNKNOWN)
         return nil if targets.nil? && unread.nil? && !unknown
 
-        levels = levels(scope, class_name)
+        levels = levels(scope, class_name, kind: kind)
+        return unread_class_object(scope, refinements, method_name, list) if levels.nil? && kind == :singleton
         return nil if levels.nil?
         return UNKNOWN if unknown && unknown_reaches?(scope, refinements, method_name, levels)
 
         walk_targets(scope, levels, method_name, [targets, unread], list)
+      end
+
+      # {UNKNOWN} when some row for `method_name` (or a names-wildcard row) that `list` puts in effect, or any row
+      # under the unknown marker, names a class or module a class object may reach ({ClassObject.reachable?}).
+      def unread_class_object(scope, refinements, method_name, list)
+        unknown = list.include?(InEffectRefinements::UNKNOWN)
+        reaches = refinements.any? do |refined, methods|
+          rows = [methods[method_name], methods[wildcard]].compact
+          !rows.empty? && (unknown || rows.any? { |modules| in_effect?(modules, list) }) &&
+            ClassObject.reachable?(scope, refined)
+        end
+        reaches ? UNKNOWN : nil
       end
 
       def walk_targets(scope, levels, method_name, (targets, unread), list)
@@ -165,18 +188,38 @@ module Rigor
       # refinement first, as any level is; past that, the mixin may define the name, so a refinement further up the
       # walk may or may not win and the answer is {UNKNOWN}, never the replaced method's. ADR-121 WD7: a level an
       # in-effect module has a names-wildcard row for (`unread`) may define the name too, so it answers {UNKNOWN}.
+      #
+      # Issue #1752 — on a class object's walk a singleton level that only an entry no table names may answer
+      # (`:continue_unsure`) makes a refinement reached past it {UNKNOWN}: that entry may define the name.
       def walk(scope, levels, method_name, targets, unread)
-        levels.each_with_index do |(level_class, entries, mixed), index|
-          return UNKNOWN if level_class && unread.key?(level_class)
+        unsure = false
+        levels.each_index do |index|
+          answer = level_answer(scope, levels, index, method_name, [targets, unread])
+          next unsure = true if answer == :continue_unsure
+          next if answer == :continue
 
-          refining = level_class && targets[level_class]
-          return Winner.new(module_name: refining, refined_class: level_class) if refining
-          return targeted_after?(levels, index, targets, unread) ? UNKNOWN : nil if mixed
-
-          answer = walk_entries(scope, entries, level_class, method_name, targets, unread)
-          return answer unless answer == :continue
+          return unsure && answer.is_a?(Winner) ? UNKNOWN : answer
         end
         nil
+      end
+
+      def level_answer(scope, levels, index, method_name, (targets, unread))
+        level_class, entries, mixed, every = levels[index]
+        return UNKNOWN if level_class && unread.key?(level_class)
+
+        refining = level_class && targets[level_class]
+        return Winner.new(module_name: refining, refined_class: level_class) if refining
+        return targeted_after?(levels, index, targets, unread) ? UNKNOWN : nil if mixed
+
+        walk_level(scope, [entries, every], level_class, method_name, [targets, unread])
+      end
+
+      def walk_level(scope, (entries, every), level_class, method_name, (targets, unread))
+        if level_class.is_a?(SingletonClass)
+          return ClassObject.walk_level(scope, every || entries, method_name, targets, unread)
+        end
+
+        walk_entries(scope, entries, level_class, method_name, targets, unread)
       end
 
       # A level's prepended modules, its own method and its included modules, in that order: `:continue` when none
@@ -205,7 +248,10 @@ module Rigor
       # name. `every entry` (project levels only) is the level's entries in lookup order with each one that
       # neither the project's resolver nor RBS can name kept as its candidate names (an Array) where `entries`
       # leaves it out: the typer never reads it, and {OwnMethod} declines where a refinement may name one.
-      def levels(scope, class_name)
+      # `kind: :singleton` answers the class object `class_name` instead ({ClassObject.levels}, issue #1752).
+      def levels(scope, class_name, kind: :instance)
+        return ClassObject.levels(scope, class_name) if kind == :singleton
+
         environment = scope.environment
         return rbs_levels(scope, class_name) if environment&.class_known?(class_name)
 
@@ -257,8 +303,9 @@ module Rigor
 
       # Does `name` define `method_name` on its instance side itself: a project `def` (its dependency edge recorded
       # through `Scope#user_def_for`), another project definer (`attr_*`, `define_method`), or an RBS declaration
-      # written on `name` rather than on an ancestor?
+      # written on `name` rather than on an ancestor? A {SingletonClass} asks its own singleton methods.
       def defines?(scope, name, method_name)
+        return ClassObject.defines?(scope, name.of, method_name) if name.is_a?(SingletonClass)
         return true if scope.user_def_for(name, method_name)
         return true if scope.discovered_method?(name, method_name, :instance)
 
@@ -269,4 +316,5 @@ module Rigor
   end
 end
 
+require_relative "refined_dispatch/class_object"
 require_relative "refined_dispatch/own_method"

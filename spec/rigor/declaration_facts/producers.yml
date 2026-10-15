@@ -260,6 +260,7 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#collect_nil_test_ivars: grandfathered
     Rigor::Inference::ScopeIndexer#collect_read_before_write_evidence: grandfathered
     Rigor::Inference::ScopeIndexer#collect_rvalue_declared_names: grandfathered
+    Rigor::Inference::ScopeIndexer#collect_singleton_class_targets: names the constants a `class << Const` body opens, for the incremental class-declaration diff alone (#1752); it registers no declaration, so it reads no declaration context
     Rigor::Inference::ScopeIndexer#collect_singleton_method_defs: grandfathered
     Rigor::Inference::ScopeIndexer#collect_truthy_test_ivars: grandfathered
     Rigor::Inference::ScopeIndexer#constant_mutation_candidates: grandfathered
@@ -365,10 +366,12 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#record_multi_write_ivars: grandfathered
     Rigor::Inference::ScopeIndexer#record_published_constant_ivar: grandfathered
     Rigor::Inference::ScopeIndexer#record_self_surface_evidence: grandfathered
+    Rigor::Inference::ScopeIndexer#record_singleton_class_sources: files the constants a file's `class << Const` bodies open under that file in their own table (#1752), read only by the incremental class-declaration diff; the walk it calls names them by the lexical rule `class << X` already follows, and nothing reads them as declared
     Rigor::Inference::ScopeIndexer#record_singleton_def_node: grandfathered
     Rigor::Inference::ScopeIndexer#record_singleton_prepend: names the module a `singleton_class.prepend` on an object, or a `prepend` in a `class << obj` body, puts ahead of an object's class (#1820), and marks it as the object-extend recorder does; it reads only whether the call sits in a singleton-class body and whether its object may be an instance, which the walk passes in, and decides no owner or side
     Rigor::Inference::ScopeIndexer#record_struct_member_layout: grandfathered
     Rigor::Inference::ScopeIndexer#seed_operator_only_ivars!: grandfathered
+    Rigor::Inference::ScopeIndexer#singleton_class_rewrite_tainted?: taints the singleton side of the class a surface call on `singleton_class` or `Const.singleton_class` reshapes (#1752); the owner is the enclosing class the extends walk passes in, or the constant by the eval-receiver lexical rule, and the call decides no other owner or side
     Rigor::Inference::ScopeIndexer#singleton_constant_segments: collects the last segment of every constant write in a `class << …` body for loose_constant_segments; the segments are names a `refine` target is matched against, and it decides no declaration context
     Rigor::Inference::ScopeIndexer#singleton_mixin_recorded?: writes one singleton-side mixin call under the owner the walk passes in; it computes no declaration context
     Rigor::Inference::ScopeIndexer#strip_possible_singleton: ADR-119 WD1, a certain extend copy makes the singleton name certain, so this removes the singleton half of the name's possible kind; it adds no fact

@@ -61,6 +61,48 @@ RSpec.describe "Typing calls through Ruby refinements (#1664)", type: :runner do
     RUBY
   end
 
+  let(:singleton_rewrites) do
+    <<~RUBY
+      module RO
+        refine(Object) { def x = :o }
+      end
+      class W1
+        define_singleton_method(:x) { 1 }
+      end
+      class W2; end
+      def W2.x = 2
+      class W3
+        singleton_class.class_eval { def x = 3 }
+      end
+      class W4
+        singleton_class.send(:define_method, :x) { 4 }
+      end
+      class W5; end
+      W5.define_singleton_method(:x) { 5 }
+      module M6; def x = 6; end
+      module M7; def x = 7; end
+      module M8; def x = 8; end
+      class W6; end
+      W6.singleton_class.prepend(M6)
+      class W7; end
+      W7.singleton_class.include(M7)
+      class W8; end
+      W8.singleton_class.send(:include, M8)
+      module M9; def x = 9; end
+      Integer.singleton_class.prepend(M9)
+      using RO
+      Rigor.dump_type(W1.x)
+      Rigor.dump_type(W2.x)
+      Rigor.dump_type(W3.x)
+      Rigor.dump_type(W4.x)
+      Rigor.dump_type(W5.x)
+      Rigor.dump_type(W6.x)
+      Rigor.dump_type(W7.x)
+      Rigor.dump_type(W8.x)
+      Rigor.dump_type(Integer.x)
+    RUBY
+  end
+
   # `[rule, line, message]` for every diagnostic in `app.rb`.
   def rows(source, files: {})
     result = analyze(files: files.merge("app.rb" => source))
@@ -413,6 +455,231 @@ RSpec.describe "Typing calls through Ruby refinements (#1664)", type: :runner do
     RUBY
   end
 
+  # Issue #1752. A class object is an `Object`, so its lookup (its singleton class, each superclass's, then `Class`,
+  # `Module`, `Object`, `Kernel` and `BasicObject`) reaches these refinements. Ruby 4.0.5 prints `:o`, `1`, `"c"`,
+  # `3.0`, `[1]`, `1` and `"Integer"`: the refine body runs with the class object as `self`. A refinement that wins on
+  # a class object answers `Dynamic[top]`, never the body's type: a hook on any ancestor can install the class object's
+  # own method where no table sees it (`include Singleton`'s `instance`). `Mod.cc` raises `NoMethodError` (a module
+  # object is not a `Class`); `Comparable` is no `Class` either, so `Comparable.cc` stays undefined.
+  it "answers Dynamic[top] for a class object's call that a refinement of Object, Module, Class, … wins" do
+    expect(rows(<<~RUBY).map { |rule, line, message| [rule, line, message.split(" for ").first] }).to eq(
+      module R
+        refine(Object) { def oo = :o }
+        refine(Module) { def mm = 1; def label = name }
+        refine(Class) { def cc = "c" }
+        refine(Kernel) { def kk = 3.0 }
+        refine(BasicObject) { def bo = [1] }
+      end
+      class Own; end
+      module Mod; end
+      using R
+      Rigor.dump_type(Integer.oo)
+      Rigor.dump_type(String.mm)
+      Rigor.dump_type(String.cc)
+      Rigor.dump_type(Own.kk)
+      Rigor.dump_type(Mod.bo)
+      Rigor.dump_type(Comparable.mm)
+      Rigor.dump_type(Integer.label)
+      Comparable.cc
+    RUBY
+      [
+        *(11..17).map { |line| ["dump.type", line, "dump_type: Dynamic[top]"] },
+        ["call.undefined-method", 18, "undefined method `cc'"]
+      ]
+    )
+  end
+
+  # Ruby 4.0.5 prints `4` and `1`: `Integer.sqrt` and `Own.own` sit on the class objects' own singleton classes, ahead
+  # of the refinement of `Object`.
+  it "lets a class object's own singleton method beat a refinement of Object" do
+    expect(dumps(<<~RUBY)).to eq(%w[Integer 1])
+      module RS
+        refine(Object) { def sqrt(a) = :o; def own = :o }
+      end
+      class Own; def self.own = 1; end
+      using RS
+      Rigor.dump_type(Integer.sqrt(16))
+      Rigor.dump_type(Own.own)
+    RUBY
+  end
+
+  # Ruby 4.0.5 prints `:refined`, `:own`, `:ext`, `:p_refined` and `:p_refined`. A refinement of a module a class
+  # extends wins `C.z` (`Dynamic[top]`), and `C.w`, which nothing refines, keeps `Ext#w`'s `:ext`. `D`'s own `def
+  # self.z` answers ahead of the module it extends, but the tables record `class << self; prepend M` as an `extend`
+  # (and `E` prepends `P`, whose refinement answers ahead of `E`'s own method), so with a refined module beside it on
+  # the singleton level the arm cannot tell which comes first and answers `Dynamic[top]`. `G` prepends `P`, which
+  # `Top` already extends: the chain skips it as an `extend`, so its lookup cannot be read either.
+  it "answers Dynamic[top] for a class object's call a refinement of a module it extends may win" do
+    expect(dumps(<<~RUBY)).to eq(["Dynamic[top]", "Dynamic[top]", ":ext", "Dynamic[top]", "Dynamic[top]"])
+      module Ext; def z = :ext; def w = :ext; end
+      module P; def z = :p_own; end
+      class C; extend Ext; end
+      class D; extend Ext; def self.z = :own; end
+      class E; class << self; prepend P; end; def self.z = :e_own; end
+      class Top; extend P; end
+      class G < Top; class << self; prepend P; end; def self.z = :g_own; end
+      module RE; refine(Ext) { def z = :refined }; refine(P) { def z = :p_refined }; end
+      using RE
+      Rigor.dump_type(C.z)
+      Rigor.dump_type(D.z)
+      Rigor.dump_type(C.w)
+      Rigor.dump_type(E.z)
+      Rigor.dump_type(G.z)
+    RUBY
+  end
+
+  # Ruby 4.0.5 prints `:o` for either member; the instance member keeps the refine body's `:o`, the class object
+  # member answers `Dynamic[top]`, and a parameter's call stays `Dynamic[top]` with no finding.
+  it "types a union of a class object and an instance per member, and leaves a Dynamic receiver alone" do
+    expect(rows(<<~RUBY)).to eq(
+      module RO; refine(Object) { def oo = :o }; end
+      using RO
+      x = [true, false].sample ? Integer : "s"
+      Rigor.dump_type(x.oo)
+      def pass(v) = Rigor.dump_type(v.oo)
+    RUBY
+      [["dump.type", 4, "dump_type: :o | Dynamic[top]"], ["dump.type", 5, "dump_type: Dynamic[top]"]]
+    )
+  end
+
+  # A constant write may have made `Point` (here `Struct.new`, whose superclass no table records and whose singleton
+  # class defines `members`), so its lookup cannot be read and a refinement in effect for the name answers
+  # `Dynamic[top]`, never the replaced `Module#name`'s `String`; a name nothing refines keeps its type. A refinement of
+  # a singleton class records class-unknown rows, which answer `Dynamic[top]` for their names. Ruby 4.0.5 prints `:o`,
+  # `[:x]`, `42`, `"Point"` (`Point.to_s`) and `:s`.
+  it "answers Dynamic[top] for a class object whose lookup cannot be read, and for a refined singleton class" do
+    expect(dumps(<<~RUBY)).to eq(["Dynamic[top]", "Dynamic[top]", "Dynamic[top]", "String", "Dynamic[top]"])
+      module RO; refine(Object) { def oo = :o }; end
+      module RM; refine(Module) { def members = :m; def name = 42 }; end
+      module RSC; refine(Integer.singleton_class) { def sqrt(a) = :s }; end
+      Point = Struct.new(:x)
+      using RO
+      using RM
+      using RSC
+      Rigor.dump_type(Point.oo)
+      Rigor.dump_type(Point.members)
+      Rigor.dump_type(Point.name)
+      Rigor.dump_type(Point.to_s)
+      Rigor.dump_type(Integer.sqrt(16))
+    RUBY
+  end
+
+  # `Loud`, which the project extends `String` with at a position RBS does not record, answers `String.mm` ahead of the
+  # refinement of `Module` (Ruby 4.0.5 prints `:loud`), so the walk past `String`'s singleton class answers
+  # `Dynamic[top]`; a refinement of `Loud` itself does too, where Ruby prints `2`, and so does `Integer.mm`, which the
+  # refinement of `Module` wins (Ruby prints `1`).
+  it "answers Dynamic[top] past a singleton class the project extends" do
+    expect(dumps(<<~RUBY)).to eq(["Dynamic[top]"] * 3)
+      module Loud; def mm = :loud; def ll = :plain; end
+      class String
+        extend Loud
+      end
+      module RM
+        refine(Module) { def mm = 1 }
+        refine(Loud) { def ll = 2 }
+      end
+      using RM
+      Rigor.dump_type(String.mm)
+      Rigor.dump_type(String.ll)
+      Rigor.dump_type(Integer.mm)
+    RUBY
+  end
+
+  # An `included` hook's `base.extend` or `base.singleton_class.include` installs class methods the singleton chain
+  # never records, so the walk cannot read `User`'s, `K2`'s or the reopened `String`'s lookup. Ruby 4.0.5 prints
+  # `  users  `, `"users"`, `2` and `"strings"`: the hook's methods answer ahead of the refinement of `Object`, so no
+  # `center` is reported on its `Symbol`.
+  it "answers Dynamic[top] where an included hook may install the class object's method" do
+    dynamic = "dump_type: Dynamic[top]"
+    expect(rows(<<~RUBY)).to eq([["dump.type", 19, dynamic], ["dump.type", 20, dynamic], ["dump.type", 21, dynamic]])
+      module Naming
+        refine(Object) { def table_name = to_s.downcase.to_sym; def cm2 = :o }
+      end
+      module Persistence
+        def self.included(base) = base.extend(ClassMethods)
+        module ClassMethods
+          def table_name = "\#{name.downcase}s"
+        end
+      end
+      module Concern2
+        def self.included(base) = base.singleton_class.include(CM2)
+        module CM2; def cm2 = 2; end
+      end
+      class User; include Persistence; end
+      class K2; include Concern2; end
+      class String; include Persistence; end
+      using Naming
+      puts User.table_name.center(9)
+      Rigor.dump_type(User.table_name)
+      Rigor.dump_type(K2.cm2)
+      Rigor.dump_type(String.table_name)
+    RUBY
+  end
+
+  # `singleton_class.attr_accessor :conf` defines `Bar.conf` with no parameter after `def self.conf(a)`, so Ruby 4.0.5
+  # runs the accessor; the same with the names computed (`Foo`). Neither is reported, while `C.own(1, 2)` still raises
+  # `ArgumentError` and is: an `attr_*` with literal names makes only those names' singleton envelopes opaque, one with
+  # computed names leaves the singleton side unreadable.
+  it "reads a singleton_class attr_* as rewriting only the names it spells" do
+    expect(rows(<<~RUBY)).to eq(
+      class Bar
+        def self.conf(a) = a
+        singleton_class.attr_accessor :conf
+      end
+      class Foo
+        def self.conf(a) = a
+        %i[conf].each { |n| singleton_class.attr_accessor n }
+      end
+      class C
+        singleton_class.attr_accessor :table_name
+        def self.own(a) = a
+      end
+      class Sub < C; end
+      Bar.conf
+      Foo.conf
+      C.own(1, 2)
+      Sub.own(1, 2)
+    RUBY
+      [
+        ["call.wrong-arity", 16, "wrong number of arguments to `own' on C (given 2, expected 1)"],
+        ["call.wrong-arity", 17, "wrong number of arguments to `own' on Sub (given 2, expected 1)"]
+      ]
+    )
+  end
+
+  # Each class rewrites its singleton methods in a way the walk cannot read: a `define_singleton_method` in the body,
+  # a `def W2.x` outside it, `singleton_class.class_eval`, `singleton_class.send(:define_method, ...)`, a top-level
+  # `define_singleton_method`, and a module prepended or included into the singleton class (directly or through
+  # `send`), a core class's included. Ruby 4.0.5 prints `1` to `9`, the class's own methods, never the refinement's
+  # `:o`.
+  it "answers Dynamic[top] where the project rewrites the class object's singleton methods" do
+    expect(dumps(singleton_rewrites)).to eq(["Dynamic[top]"] * 9)
+  end
+
+  # `GemHelpers` lives outside the analysed paths, so the walk cannot tell whether it defines `d1` ahead of the
+  # refinement of `Object`. Ruby 4.0.5 prints `2`: `GemHelpers#d1` answers, so `+` is not reported on `:o`.
+  it "answers Dynamic[top] past a module from outside the analysed paths a class extends" do
+    result = analyze(
+      files: {
+        "outside/gem.rb" => "module GemHelpers; def d1 = 1; end\n",
+        "lib/app.rb" => <<~RUBY
+          require_relative "../outside/gem"
+          module RO
+            refine(Object) { def d1 = :o }
+          end
+          class K; extend GemHelpers; end
+          using RO
+          puts K.d1 + 1
+          Rigor.dump_type(K.d1)
+        RUBY
+      },
+      config: { "paths" => ["lib"] }
+    )
+    rows = result.diagnostics.map { |d| [d.qualified_rule, d.line, d.message] }
+
+    expect(rows).to eq([["dump.type", 8, "dump_type: Dynamic[top]"]])
+  end
+
   it "answers Dynamic[top] for a refined name reached through send, &:name and respond_to?, with no finding" do
     expect(rows(<<~RUBY, files: { "sym_syntax.rb" => sym_syntax })).to eq(
       using SymSyntax
@@ -439,9 +706,10 @@ RSpec.describe "Typing calls through Ruby refinements (#1664)", type: :runner do
   end
 
   # ADR-121 WD7 (critique F2). Ruby 4.0.5 prints `43` and `4`: a module whose refinements Rigor cannot read may replace
-  # any instance method, so every instance call in its `using`'s span answers `Dynamic[top]`, never the replaced
-  # method's signature; a class object falls through.
-  it "answers Dynamic[top] for every instance call under a `using` of a module from outside the analysed paths" do
+  # any method, so every call in its `using`'s span answers `Dynamic[top]`, never the replaced method's signature.
+  # Issue #1752: that includes a call on a class object (a `refine(Integer.singleton_class)` there would replace
+  # `Integer.sqrt`), which fell through before class objects walked their own lookup.
+  it "answers Dynamic[top] for every call under a `using` of a module from outside the analysed paths" do
     result = analyze(
       files: {
         "outside/gemref.rb" => "module GemRef; refine(String) { def center(a, b, c) = 42 }; end\n",
@@ -458,7 +726,7 @@ RSpec.describe "Typing calls through Ruby refinements (#1664)", type: :runner do
     )
     rows = result.diagnostics.map { |d| [d.qualified_rule, d.line, d.message] }
 
-    expect(rows).to eq([["dump.type", 5, "dump_type: Dynamic[top]"], ["dump.type", 6, "dump_type: Integer"]])
+    expect(rows).to eq([["dump.type", 5, "dump_type: Dynamic[top]"], ["dump.type", 6, "dump_type: Dynamic[top]"]])
   end
 
   # ADR-121 WD7 (A2). Ruby 4.0.5 prints `43` and `"S"`: a refinement whose target the walk cannot name makes only the

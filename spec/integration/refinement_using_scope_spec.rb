@@ -1756,6 +1756,303 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
     end
   end
 
+  # Issue #1752 — a class object is an `Object`, so Ruby applies a refinement of `Object`, `Module`, `Class`, `Kernel`
+  # or `BasicObject`, or of a module the class extends, to a call on it: its lookup is its singleton class with the
+  # modules it extends, each superclass's, then `Class` (a class only), `Module`, `Object`, `Kernel` and `BasicObject`.
+  # Every reported line raises on Ruby 4.0.5; every silent line under a `using` returns the refinement's answer there,
+  # and its control line (no `using`) reports.
+  describe "a refinement reaching a class object (#1752)" do
+    let(:call_rules) { %w[call.undefined-method call.wrong-arity call.argument-type-mismatch] }
+    let(:object_sqrt) do
+      <<~RUBY
+        module RS
+          refine(Object) do
+            def sqrt(a, b) = :o
+            def own(a, b, c) = :o
+            def members(a, b, c) = :o
+            def escape(a, b) = :o
+          end
+        end
+      RUBY
+    end
+    let(:extended) do
+      <<~RUBY
+        module Ext
+          def z(a) = :ext
+        end
+        class C
+          extend Ext
+        end
+        class Base
+          def self.y(a) = a
+        end
+        class Sub < Base
+          extend Ext
+        end
+        class Top
+          extend Ext
+        end
+        class Base2 < Top
+          def self.y(a) = a
+        end
+        class Sub2 < Base2
+          class << self
+            prepend Ext
+          end
+        end
+        module RE
+          refine(Ext) { def z(a, b, c) = :refined; def y(a, b, c) = :refined }
+        end
+      RUBY
+    end
+    let(:prepended) do
+      <<~RUBY
+        module P
+          def z(a) = :p_own
+        end
+        class D
+          class << self
+            prepend P
+          end
+          def self.z(a) = :d_own
+        end
+        class Top
+          extend P
+        end
+        class Base3 < Top
+          class << self
+            prepend P
+          end
+          def self.z(a) = :base3_own
+        end
+        module RP
+          refine(P) { def z(a, b, c) = :p_refined }
+        end
+      RUBY
+    end
+
+    # `[file basename, line, rule]` for every call-check diagnostic in `lib/`, sorted.
+    def call_rows(cache_store: nil)
+      diagnostics(cache_store: cache_store).select { |d| call_rules.include?(d.qualified_rule) }
+                                           .map { |d| [File.basename(d.path.to_s), d.line, d.qualified_rule] }
+                                           .sort
+    end
+
+    def incremental_call_rows(rules = call_rules)
+      root = File.join(Dir.pwd, ".rigor", "cache")
+      snapshot = Rigor::Cache::IncrementalSnapshot.new(root: root)
+      fingerprint = Rigor::Cache::IncrementalSnapshot.fingerprint(configuration: configuration, roots: %w[lib])
+      session = Rigor::Analysis::IncrementalSession.new(
+        configuration: configuration, paths: %w[lib], cache_store: Rigor::Cache::Store.new(root: root)
+      )
+      found, warm = guarded_run_incremental(session, snapshot: snapshot, fingerprint: fingerprint)
+      label = rules == call_rules ? :qualified_rule : :message
+      rows = found.select { |d| rules.include?(d.qualified_rule) }
+                  .map { |d| [File.basename(d.path.to_s), d.line, d.public_send(label)] }.sort
+      [rows, warm]
+    end
+
+    def controls(lines, rule = "call.wrong-arity") = lines.map { |line| ["control.rb", line, rule] }
+
+    # The issue's program. Ruby 4.0.5 raises `NoMethodError` for the call ahead of the `using` and answers `:o` after
+    # it, on a module object too.
+    it "declines a class object's method a refinement of Object defines, after the `using` only" do
+      write("lib/ro.rb", "module RO\n  refine(Object) { def oo = :o }\nend\n")
+      write("lib/use.rb", "Integer.oo\nusing RO\nInteger.oo\nComparable.oo\n")
+      write("lib/plain.rb", "Integer.oo\n")
+
+      expect(call_rows).to eq([["plain.rb", 1, "call.undefined-method"], ["use.rb", 1, "call.undefined-method"]])
+    end
+
+    # Ruby 4.0.5 answers each call but `Comparable.cc`: a module object is a `Module`, not a `Class`. `String.ll`
+    # answers `5` through `Loud`, which the project extends `String` with.
+    it "reaches a class object through Module, Class, Kernel and BasicObject, and a module object not through Class" do
+      write("lib/rm.rb", <<~RUBY)
+        module Loud; end
+        class String
+          extend Loud
+        end
+        module RM
+          refine(Module) { def mm = 1 }
+          refine(Class) { def cc = 2 }
+          refine(Kernel) { def kk = 3 }
+          refine(BasicObject) { def bo = 4 }
+          refine(Loud) { def ll = 5 }
+        end
+      RUBY
+      write("lib/use.rb", "using RM\nString.mm\nString.cc\nString.kk\nString.bo\nComparable.mm\nComparable.kk\n" \
+                          "String.ll\nComparable.cc\n")
+      write("lib/control.rb", "String.ll\n")
+
+      expect(call_rows).to eq([["control.rb", 1, "call.undefined-method"], ["use.rb", 9, "call.undefined-method"]])
+    end
+
+    # `Integer.sqrt` is CRuby's own singleton method of `Integer` (the catalogue proves it), and `Own.own` a certain
+    # `class << self` def, which `Kid` inherits: each answers ahead of the refinement of `Object`, and Ruby 4.0.5 raises
+    # `ArgumentError`, or `TypeError` for `Integer.sqrt(nil)`. A refinement of `Kid`'s instances does not reach the
+    # class object `Kid`, nor `Own` through its subclass's singleton level.
+    it "checks a class object's own singleton method ahead of a refinement of Object" do
+      write("lib/rs.rb", object_sqrt)
+      write("lib/own.rb", "class Own\n  class << self\n    def own(a) = a\n  end\nend\nclass Kid < Own; end\n" \
+                          "module RK\n  refine(Kid) { def own(a, b, c) = :kid }\nend\n")
+      write("lib/use.rb", "using RS\nusing RK\nInteger.sqrt(1, 2)\nInteger.sqrt(nil)\nOwn.own(1, 2, 3)\n" \
+                          "Kid.own(1, 2, 3)\n")
+
+      expect(call_rows).to eq(
+        [["use.rb", 3, "call.wrong-arity"], ["use.rb", 4, "call.argument-type-mismatch"],
+         ["use.rb", 5, "call.wrong-arity"], ["use.rb", 6, "call.wrong-arity"]]
+      )
+    end
+
+    # Ruby 4.0.5 answers `:o`: with the variable unset no `def self.own` runs, and the refinement answers.
+    it "declines over a singleton definer that may not have run" do
+      write("lib/rs.rb", object_sqrt)
+      write("lib/own2.rb", "class Own2\n  if ENV[\"RIGOR_PROBE_X\"]\n    def self.own(a) = a\n  end\nend\n")
+      write("sig/own2.rbs", "class Own2\n  def self.own: (untyped) -> untyped\nend\n")
+      write("lib/use.rb", "using RS\nOwn2.own(1, 2, 3)\n")
+      write("lib/control.rb", "Own2.own(1, 2, 3)\n")
+
+      expect(call_rows).to eq(controls([1]))
+    end
+
+    # A refinement of a module `C` extends answers `C.z` (Ruby 4.0.5: `:refined`). A value typed as `Base`'s class
+    # object may be `Sub`, which extends `Ext` and answers `:refined`, so `Base.y` declines too; so does `Base2.y`,
+    # whose subclass `Sub2` prepends `Ext` to its singleton class again ahead of `Base2.y` (Ruby: `:refined` for
+    # `Sub2.y(1, 2, 3)`), though `Ext` already sits further up `Base2`'s lookup.
+    it "declines where a module the class or a subclass extends is refined" do
+      write("lib/ext.rb", extended)
+      write("lib/use.rb", "using RE\nC.z(1, 2, 3)\nBase.y(1, 2, 3)\nBase2.y(1, 2, 3)\n")
+      write("lib/control.rb", "C.z(1, 2, 3)\nBase.y(1, 2, 3)\nBase2.y(1, 2, 3)\n")
+
+      expect(call_rows).to eq(controls([1, 2, 3]))
+    end
+
+    # The tables record `class << self; prepend P` as an `extend`, so a refined module on `D`'s singleton level may sit
+    # ahead of `D`'s own `def self.z`: Ruby 4.0.5 answers `:p_refined`. `Base3` prepends `P`, which `Top` already
+    # extends, so the chain skips it as an `extend` would be; Ruby puts it ahead of `Base3.z` again (`:p_refined`).
+    it "declines where a refined module may be prepended to the singleton class" do
+      write("lib/d.rb", prepended)
+      write("lib/use.rb", "using RP\nD.z(1, 2, 3)\nBase3.z(1, 2, 3)\n")
+      write("lib/control.rb", "D.z(1, 2, 3)\nBase3.z(1, 2, 3)\n")
+
+      expect(call_rows).to eq(controls([1, 2]))
+    end
+
+    # The declines the instance walk makes, on a class object. Ruby 4.0.5 answers `:gem` (an opaque module from outside
+    # the analysed paths refining `Integer.singleton_class`), `:anon` (a `using` that names no module), `:loose` (`Kid`
+    # extended at runtime with a refined module off its lookup), `:vendor` (a refined module no table declares,
+    # extended from outside the analysed paths), `:o` (`Regexp.escape` removed from the singleton class) and `:o`
+    # (`Struct.members`, which CRuby registers only for RDoc).
+    it "declines what the instance walk declines" do
+      write("lib/rs.rb", object_sqrt)
+      write("lib/own.rb", "class Own\n  def self.own(a) = a\nend\nclass Kid < Own; end\n")
+      write("vendor/gem_ref.rb", "module GemRef\n  refine(Integer.singleton_class) { def sqrt(a, b) = :gem }\nend\n")
+      write("vendor/vendor_ext.rb", "module VendorExt; end\nKid.extend(VendorExt)\nKid.extend(Loose)\n")
+      write("lib/loose.rb", "module Loose; end\nmodule RL\n  refine(Loose) { def own(a, b, c) = :loose }\nend\n")
+      write("lib/vendored.rb", "module RV\n  refine(VendorExt) { def own(a, b, c) = :vendor }\nend\n")
+      write("lib/removed.rb", "class << Regexp\n  remove_method :escape\nend\n")
+      write("lib/gem_use.rb", "using RS\nusing GemRef\nInteger.sqrt(1, 2)\n")
+      write("lib/anon_use.rb", "using Module.new { refine(Integer.singleton_class) { def sqrt(a, b) = :anon } }\n" \
+                               "Integer.sqrt(1, 2)\n")
+      write("lib/loose_use.rb", "using RL\nKid.own(1, 2, 3)\n")
+      write("lib/vendored_use.rb", "using RV\nKid.own(1, 2, 3)\n")
+      write("lib/removed_use.rb", "using RS\nRegexp.escape(1, 2)\nStruct.members(1, 2, 3)\n")
+      write("lib/control.rb", "Integer.sqrt(1, 2)\nKid.own(1, 2, 3)\nRegexp.escape(1, 2)\nStruct.members(1, 2, 3)\n")
+
+      expect(call_rows).to eq(controls([1, 2, 3, 4]))
+    end
+
+    it "answers a report and a decline the same through a warm cache as cold" do
+      write("lib/ro.rb", "module RO\n  refine(Object) { def oo = :o }\nend\n")
+      write("lib/rs.rb", object_sqrt)
+      write("lib/use.rb", "using RO\nusing RS\nInteger.oo\nInteger.nope\nInteger.sqrt(1, 2)\nComparable.own(1, 2, 3)\n")
+      root = File.join(Dir.pwd, ".rigor", "cache")
+
+      cold = call_rows(cache_store: Rigor::Cache::Store.new(root: root))
+      warm = call_rows(cache_store: Rigor::Cache::Store.new(root: root))
+
+      expect(cold).to eq([["use.rb", 4, "call.undefined-method"], ["use.rb", 5, "call.wrong-arity"]])
+      expect(warm).to eq(cold)
+    end
+
+    # A new file that only opens `class << Regexp` to remove `escape` lets the refinement of `Object` answer, so the
+    # report goes on the re-check and comes back when the file goes (Ruby 4.0.5: `:o`, then `ArgumentError`).
+    it "re-checks the `using` file under --incremental when a new file removes the class object's method" do
+      write("lib/rs.rb", object_sqrt)
+      write("lib/use.rb", "using RS\nRegexp.escape(1, 2)\n")
+      fires = [["use.rb", 2, "call.wrong-arity"]]
+
+      expect(incremental_call_rows).to eq([fires, false])
+      write("lib/rx.rb", "class << Regexp\n  remove_method :escape\nend\n")
+      expect(incremental_call_rows).to eq([[], true])
+      expect(call_rows).to eq([])
+      File.delete("lib/rx.rb")
+      expect(incremental_call_rows).to eq([fires, true])
+      expect(call_rows).to eq(fires)
+    end
+
+    # A new file rewriting `Regexp`'s singleton side from outside its body (Ruby 4.0.5: `:o` after it, `ArgumentError`
+    # without it) re-checks the `using` file, as one opening `class << Regexp` does.
+    it "re-checks the `using` file under --incremental when a new file rewrites the class object's singleton side" do
+      write("lib/rs.rb", object_sqrt)
+      write("lib/use.rb", "using RS\nRegexp.escape(1, 2)\n")
+      fires = [["use.rb", 2, "call.wrong-arity"]]
+
+      expect(incremental_call_rows).to eq([fires, false])
+      write("lib/rx.rb", "Regexp.singleton_class.send(:remove_method, :escape)\n")
+      expect(incremental_call_rows).to eq([[], true])
+      expect(call_rows).to eq([])
+      File.delete("lib/rx.rb")
+      expect(incremental_call_rows).to eq([fires, true])
+    end
+
+    # Each new file redefines `Regexp.escape` with two parameters from outside `Regexp`'s body (Ruby 4.0.5: `:x`), so
+    # the re-check drops the report, as a cold run does, and its removal brings the report back.
+    it "re-checks the `using` file under --incremental when a new file redefines a class object's method elsewhere" do
+      write("lib/rs.rb", object_sqrt)
+      write("lib/use.rb", "using RS\nRegexp.escape(1, 2)\n")
+      fires = [["use.rb", 2, "call.wrong-arity"]]
+
+      expect(incremental_call_rows).to eq([fires, false])
+      ["def Regexp.escape(a, b) = :x\n", "Regexp.define_singleton_method(:escape) { |a, b| :x }\n"].each do |source|
+        write("lib/def.rb", source)
+        expect(incremental_call_rows).to eq([[], true])
+        File.delete("lib/def.rb")
+        expect(incremental_call_rows).to eq([fires, true])
+      end
+    end
+
+    # `Base` has no methods, so `K`'s singleton chain holds it as an external entry and the walk cannot be read; a new
+    # file giving `Base` a singleton `oo` types `K.oo` as `1` on the re-check (Ruby 4.0.5: `1`, and `:o` without it).
+    it "re-types the `using` file under --incremental when a new file gives a method-less superclass a method" do
+      write("lib/k.rb", "class Base; end\nclass K < Base; end\nmodule RO\n  refine(Object) { def oo = :o }\nend\n")
+      write("lib/use.rb", "using RO\nRigor.dump_type(K.oo)\n")
+      dynamic = [[["use.rb", 2, "dump_type: Dynamic[top]"]], false]
+
+      expect(incremental_call_rows(%w[dump.type])).to eq(dynamic)
+      write("lib/base2.rb", "class Base\n  def self.oo = 1\nend\n")
+      expect(incremental_call_rows(%w[dump.type])).to eq([[["use.rb", 2, "dump_type: 1"]], true])
+      File.delete("lib/base2.rb")
+      expect(incremental_call_rows(%w[dump.type])).to eq([dynamic.first, true])
+    end
+
+    # A new file reopening the `using`'d module to refine `Object#oo` silences the class object's call on the re-check,
+    # and its removal brings the report back (`refinement:oo`).
+    it "re-checks the `using` file under --incremental when another file refines Object for the name" do
+      write("lib/ro.rb", "module RO\n  refine(Object) { def other = 1 }\nend\n")
+      write("lib/use.rb", "using RO\nInteger.oo\n")
+      fires = [["use.rb", 2, "call.undefined-method"]]
+
+      expect(incremental_call_rows).to eq([fires, false])
+      write("lib/ro_oo.rb", "module RO\n  refine(Object) { def oo = :o }\nend\n")
+      expect(incremental_call_rows).to eq([[], true])
+      expect(call_rows).to eq([])
+      File.delete("lib/ro_oo.rb")
+      expect(incremental_call_rows).to eq([fires, true])
+      expect(call_rows).to eq(fires)
+    end
+  end
+
   # Issue #1749. Ruby 4.0.5 prints `1` for `"a".yy` after `M.setup` under `using M`, for a `refine` in `def self.setup`
   # and in a `def` written in `class << self`; the same line with no `using` and `"a".zz` raise `NoMethodError`. A
   # `refine` in a module's instance method refines for whichever module calls it, and a class has no `refine` (`Class`

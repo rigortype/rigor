@@ -527,6 +527,17 @@ lib/rigor/language_server/folding_range_provider.rb:
   computes: the editor's folding ranges
   producers:
     Rigor::LanguageServer::FoldingRangeProvider#walk: grandfathered
+lib/rigor/lens/file_reader.rb:
+  computes: the owner, scope and visibility of each declaration site `rigor lens` reports, as the file writes it
+  producers:
+    Rigor::Lens::FileReader: reports a declaration site as written for `rigor lens` (ADR-113), never feeding a check decision; it reads the owner and visibility off the file's own syntax because the engine's visibility table misses wrapped defs and attr members (#1911), and moves onto DeclarationWalk::Context with that fix
+    Rigor::Lens::FileReader#toggle_visibility?: reports a declaration site as written for `rigor lens` (ADR-113), never feeding a check decision; it reads the owner and visibility off the file's own syntax because the engine's visibility table misses wrapped defs and attr members (#1911), and moves onto DeclarationWalk::Context with that fix
+    Rigor::Lens::FileReader#visibility_call: reports a declaration site as written for `rigor lens` (ADR-113), never feeding a check decision; it reads the owner and visibility off the file's own syntax because the engine's visibility table misses wrapped defs and attr members (#1911), and moves onto DeclarationWalk::Context with that fix
+    Rigor::Lens::FileReader#visibility_call?: reports a declaration site as written for `rigor lens` (ADR-113), never feeding a check decision; it reads the owner and visibility off the file's own syntax because the engine's visibility table misses wrapped defs and attr members (#1911), and moves onto DeclarationWalk::Context with that fix
+    Rigor::Lens::FileReader#walk: reports a declaration site as written for `rigor lens` (ADR-113), never feeding a check decision; it reads the owner and visibility off the file's own syntax because the engine's visibility table misses wrapped defs and attr members (#1911), and moves onto DeclarationWalk::Context with that fix
+    Rigor::Lens::FileReader#walk_body: reports a declaration site as written for `rigor lens` (ADR-113), never feeding a check decision; it reads the owner and visibility off the file's own syntax because the engine's visibility table misses wrapped defs and attr members (#1911), and moves onto DeclarationWalk::Context with that fix
+    Rigor::Lens::FileReader#walk_call: reports a declaration site as written for `rigor lens` (ADR-113), never feeding a check decision; it reads the owner and visibility off the file's own syntax because the engine's visibility table misses wrapped defs and attr members (#1911), and moves onto DeclarationWalk::Context with that fix
+    Rigor::Lens::FileReader#walk_namespace: reports a declaration site as written for `rigor lens` (ADR-113), never feeding a check decision; it reads the owner and visibility off the file's own syntax because the engine's visibility table misses wrapped defs and attr members (#1911), and moves onto DeclarationWalk::Context with that fix
 lib/rigor/plugin/node_context.rb:
   computes: the enclosing class or module a node rule sees (ADR-37)
   producers:

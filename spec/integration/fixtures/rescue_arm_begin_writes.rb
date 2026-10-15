@@ -268,6 +268,21 @@ def rescue_without_write(s)
   0
 end
 
+# A write inside a nested `def` is the method's own local, not the
+# clause's: the arm still reads the entry `nil`.
+class NestedDefWrite
+  x = nil
+  begin
+    def helper
+      x = 1
+      x
+    end
+    work
+  rescue
+    x.size # GENUINE-UNDEFINED
+  end
+end
+
 def rescue_flag_without_write(s)
   parsed = false
   begin

@@ -1,0 +1,1 @@
+- **[engine]** A memoizing index `||=` that follows an earlier store into the same slot in the same method or top level, such as `c[:k] ||= :e if cond; l = (c[:k] ||= :f)` or a store inside a `tap` block, no longer reads the slot as empty, so `l == :e` is no longer reported always falsey. ([#1932](https://github.com/rigortype/rigor/pull/1932))

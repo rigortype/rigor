@@ -3168,6 +3168,34 @@ end
       end
     end
 
+    # Issue #1902 — a recheck records the classes ITS closure demanded before it unions in the replayed
+    # set, so editing the file that demands `AlphaDup` used to list it ahead of `ZetaDup`, which the cold
+    # run (analysing `a.rb` first) lists first. Same set, different text; the warm run must read as cold.
+    it "lists the failed classes in the cold run's order on a warm run after an edit (#1902)" do
+      Dir.mktmpdir do |dir|
+        FileUtils.mkdir_p(File.join(dir, "sig"))
+        %w[ZetaDup AlphaDup].each do |name|
+          File.write(File.join(dir, "sig", "#{name.downcase}.rbs"),
+                     "class #{name}\n  def read: () -> String\n  def read: () -> String\nend\n")
+        end
+        File.write(File.join(dir, "a.rb"), "ZetaDup.new.read\n")
+        File.write(File.join(dir, "b.rb"), "AlphaDup.new.read\n")
+        config = definition_failure_config(dir)
+        cache_root = File.join(dir, ".rigor", "cache")
+        snapshot = Rigor::Cache::IncrementalSnapshot.new(root: cache_root)
+        run = incremental_runner(config, dir, cache_root, snapshot, fingerprint(config, dir))
+
+        cold, = run.call
+        File.write(File.join(dir, "b.rb"), "AlphaDup.new.read\n# edited\n")
+        edited, warm = run.call
+        full = guarded_run(Rigor::Analysis::Runner.new(configuration: config, cache_store: nil)).diagnostics
+
+        expect(warm).to be(true)
+        expect(definition_rows(cold).first).to include("failed to build: AlphaDup, ZetaDup.")
+        expect([definition_rows(edited), definition_rows(full)]).to eq([definition_rows(cold)] * 2)
+      end
+    end
+
     it "drops the row and rebuilds both rows once the duplicate declaration is gone (#796)" do
       Dir.mktmpdir do |dir|
         write_definition_failure_fixture(dir)

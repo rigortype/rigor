@@ -234,6 +234,14 @@ unchanged plain `rigor check` skips the analyzer the same way,
 except when a plugin compiles your view templates, as
 rigor-actionpack does.
 
+A warm `--incremental` run says on stderr how far the edit spread,
+for example `rigor: --incremental warm — re-analyzed 3 of 1295 files
+(1 changed), reused the rest`. The counts come from the recheck: the
+edited files (`changed`), any `added` or `removed` files in the
+parenthesis when there are some, and the files re-analyzed because
+they depend on those. An unchanged run reads `re-analyzed 0 of 1295
+files, reused all`.
+
 The shortcut stands aside under `--workers=N` (or
 `parallel.workers:`), `--explain`, `--cache-stats`, `--coverage`,
 an editor buffer, and an `effects:` block, and when the cache

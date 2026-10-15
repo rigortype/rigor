@@ -129,6 +129,84 @@ RSpec.describe Rigor::CLI::CheckCommand do
     expect(warm_out).to include("No diagnostics")
   end
 
+  # #1526 — the warm banner reports the recheck's own sets, not the size of the whole analysed set. The session
+  # path is pinned with the run-result slot stubbed to decline, so the recheck is what prints the banner; the slot
+  # path has its own example below. `lib/b.rb` calls `Widget#price`, so an edit to `lib/a.rb` that changes its
+  # return type re-analyzes the dependent too: the banner shows 2 re-analyzed for 1 changed.
+  describe "--incremental banner reports the recheck" do
+    before { require "rigor/analysis/incremental_run_slot" }
+
+    def write_banner_project
+      FileUtils.mkdir_p("lib")
+      File.write(File.join("lib", "a.rb"), "class Widget\n  def price\n    10\n  end\nend\n")
+      File.write(File.join("lib", "b.rb"), "class Shop\n  def total\n    Widget.new.price\n  end\nend\n")
+      File.write(File.join("lib", "c.rb"), "class Other\n  def go = 1\nend\n")
+    end
+
+    def banner_run(*extra)
+      run(["--no-ci-detect", "--no-stats", "--no-baseline", "--incremental", *extra, "lib"])
+    end
+
+    def decline_slot
+      allow(Rigor::Analysis::IncrementalRunSlot).to receive(:serve).and_return(nil)
+    end
+
+    it "prints the unchanged cold banner on a first run" do
+      write_banner_project
+
+      status, _out, err = banner_run
+
+      expect(status).to eq(0)
+      expect(err).to include("rigor: --incremental cold — full analysis (3 files)")
+      expect(err).not_to include("reused cached diagnostics")
+    end
+
+    it "says it re-analyzed 0 files on a no-change warm run, from the session" do
+      write_banner_project
+      banner_run
+      decline_slot
+
+      _status, _out, err = banner_run
+
+      expect(err).to include("rigor: --incremental warm — re-analyzed 0 of 3 files, reused all")
+    end
+
+    it "says it re-analyzed 0 files on a no-change warm run served from the slot" do
+      write_banner_project
+      banner_run
+
+      _status, _out, err = banner_run
+
+      expect(err).to include("rigor: --incremental warm — re-analyzed 0 of 3 files, reused all")
+    end
+
+    it "counts the dependent as re-analyzed when one edit reaches a file that uses it" do
+      write_banner_project
+      banner_run
+      File.write(File.join("lib", "a.rb"), "class Widget\n  def price\n    :ten\n  end\nend\n")
+      decline_slot
+
+      _status, _out, err = banner_run
+
+      expect(err).to include(
+        "rigor: --incremental warm — re-analyzed 2 of 3 files (1 changed), reused the rest"
+      )
+    end
+
+    it "names an added file in the parenthesis, and leaves zero counts out" do
+      write_banner_project
+      banner_run
+      File.write(File.join("lib", "d.rb"), "class Fresh\n  def go = 2\nend\n")
+      decline_slot
+
+      _status, _out, err = banner_run
+
+      expect(err).to include("rigor: --incremental warm — re-analyzed 1 of 4 files (1 added), reused the rest")
+      expect(err).not_to include("0 changed")
+      expect(err).not_to include("removed")
+    end
+  end
+
   # #1529 — `--no-stats` must build no RunStats: the summary is never printed, and on macOS the RSS probe forks
   # `ps`. The ordinary path already threads `collect_stats: false` through CheckRunnerFactory, and the first
   # examples pin that. The `--incremental` examples pin the lazy read: the session's internal runners still

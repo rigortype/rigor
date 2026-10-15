@@ -154,7 +154,7 @@ RSpec.describe "ADR-87 WD4 run-cache hit probe (subprocess)" do
       expect(engine).to eq(0)
       expect([status, out]).to eq([cold_status, cold_out])
       expect(out).to include("lib/b.rb")
-      expect(err).to include("rigor: --incremental warm — reused cached diagnostics (2 files)")
+      expect(err).to include("rigor: --incremental warm — re-analyzed 0 of 2 files, reused all")
     end
 
     it "after an edit recheck, serves the next null run engine-free with a --no-cache run's output" do

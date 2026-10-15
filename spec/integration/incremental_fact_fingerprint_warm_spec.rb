@@ -68,13 +68,13 @@ RSpec.describe "rigor check --incremental over producers that share frozen Strin
     expect(prime_err).to include("--incremental cold")
 
     null_out, null_err = check("--incremental")
-    expect(null_err).to include("--incremental warm — reused cached diagnostics")
+    expect(null_err).to match(/--incremental warm — re-analyzed 0 of \d+ files, reused all/)
     expect(null_err).not_to include("plugin fact surface changed")
     expect(null_out).to eq(check("--no-cache").first)
 
     File.write("app/models/user.rb", "class User\n  def name = \"u\"\n  def email = \"e\"\nend\n")
     edit_out, edit_err = check("--incremental")
-    expect(edit_err).to include("--incremental warm — reused cached diagnostics")
+    expect(edit_err).to match(/--incremental warm — re-analyzed \d+ of \d+ files \(1 changed\)/)
     expect(edit_err).not_to include("plugin fact surface changed")
     expect(edit_out).to eq(check("--no-cache").first)
     edit_out

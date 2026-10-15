@@ -482,6 +482,7 @@ module Rigor
       # to. Every soundness gate below — the fingerprint, the ADR-88 fact surface — is unchanged, so the
       # decision to reuse is made identically whether or not the result is saved.
       def run_incremental(snapshot:, fingerprint:, persist: true)
+        @last_recheck = nil
         # ADR-87 WD1 — install the per-run digest table + recording instant + strict flag for the whole
         # invocation so change-detection's stat-then-digest freshness (`#pack_digest` / `#stat_fresh?`) honours
         # `cache.validation: digest` (and `RIGOR_STRICT_VALIDATION`, which the env-only path already sees) and
@@ -506,7 +507,7 @@ module Rigor
             # it is paid on the first collecting run and on an identity change, never with collection off.
             # Asked BEFORE the recheck, which re-stamps the session with the current identity.
             effects_reusable = effects_reuse_permitted?(restored)
-            result = recheck
+            result = @last_recheck = recheck
             adopt_plugin_fact_fingerprint
             fact_reusable = @plugin_fact_reusable.reusable_against?(restored.plugin_fact_digest)
             if fact_reusable && effects_reusable && !source_rbs_unverified?(result)
@@ -544,6 +545,10 @@ module Rigor
       # plugin) rather than a cold miss. `opaque_reasons` maps each plugin that forces a full run every invocation
       # to its {PluginFactFingerprint::OpaqueReason}.
       attr_reader :opaque_reasons
+
+      # #1526 — the {Recheck} the last {#run_incremental} merged, or nil after a cold run (a baseline has no recheck
+      # to report). The CLI banner reads its changed / added / removed / affected / reused sets from it.
+      attr_reader :last_recheck
 
       # The opaque plugin ids, sorted (the keys of {#opaque_reasons}).
       def opaque_plugin_ids

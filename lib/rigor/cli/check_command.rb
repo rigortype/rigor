@@ -196,6 +196,7 @@ module Rigor
       # The tail {#run_incremental_check} gives a warm run, from the slot's answer: the same banner, baseline
       # filter, output and exit code. No fact-surface note, since a warm run never has one.
       def finalize_incremental_hit(hit, configuration, options)
+        # The slot is written only for a run whose every row still validates, so nothing was re-analyzed.
         report_incremental_run(true, hit.file_count)
         write_incremental_result(hit.result.diagnostics, configuration, options)
       end
@@ -312,7 +313,8 @@ module Rigor
         # The banner's file count comes from the session's analyzed set (cold analyses all; a warm recheck's
         # `@analyzed` advances to the current file set), so a dedicated probe Runner + `Dir.glob` is no longer
         # built just to size the banner (recon §3 — the analysis tree was expanded three times per recheck).
-        report_incremental_run(warm, session.analyzed_files.size)
+        # A warm banner reports the recheck's own sets (#1526), which only the session knows.
+        report_incremental_run(warm, session.analyzed_files.size, recheck: session.last_recheck)
         emit_incremental_fact_surface_notes(session)
         write_incremental_cache_stats(session, cache_root, store, options.fetch(:format)) if
           options.fetch(:cache_stats)
@@ -320,9 +322,35 @@ module Rigor
         write_incremental_result(diagnostics, configuration, options)
       end
 
-      def report_incremental_run(warm, file_count)
-        @err.puts("rigor: --incremental #{warm ? 'warm — reused cached diagnostics' : 'cold — full analysis'} " \
-                  "(#{file_count} files)")
+      # #1526 — a warm banner says how many of the analysed files the recheck re-analyzed, and why: `changed` is the
+      # edited set, `added` / `removed` the structural delta, and the rest came from the snapshot. A run served from
+      # the run-result slot has no recheck, which means nothing changed: every file is reused.
+      def report_incremental_run(warm, file_count, recheck: nil)
+        body = if warm
+                 "warm — #{warm_recheck_summary(file_count, recheck)}"
+               else
+                 "cold — full analysis (#{file_count} files)"
+               end
+        @err.puts("rigor: --incremental #{body}")
+      end
+
+      def warm_recheck_summary(file_count, recheck)
+        changed = recheck ? recheck.changed.size : 0
+        added = recheck ? recheck.added.size : 0
+        removed = recheck ? recheck.removed.size : 0
+        reused = recheck ? recheck.reused.size : file_count
+        # Current files are either reused or re-analyzed (the recheck's `analyze_set`), so the count is taken
+        # from the reused set rather than `affected`, which can also name files that were removed.
+        analyzed = file_count - reused
+        counts = []
+        counts << "#{changed} changed" if changed.positive?
+        counts << "#{added} added" if added.positive?
+        counts << "#{removed} removed" if removed.positive?
+        head = "re-analyzed #{analyzed} of #{file_count} files"
+        head += " (#{counts.join(', ')})" unless counts.empty?
+        return "#{head}, reused all" if analyzed.zero?
+
+        reused.zero? ? head : "#{head}, reused the rest"
       end
 
       # The incremental tail, shared by the full path and the ADR-45 WD2 slot hit so a served run prints exactly

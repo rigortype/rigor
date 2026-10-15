@@ -473,6 +473,19 @@ RSpec.describe Rigor::SigGen::Generator do
     end
   end
 
+  # Issue #1489. A parameter-only inline annotation over a sig/ `-> untyped` reaches the declared-untyped path
+  # with a `rendered` line spelled from the unwidened body; widening cannot rebuild it, so nothing is proposed
+  # rather than `-> 1`.
+  it "proposes no literal return for a parameter-only inline annotation over a sig/ `-> untyped`" do
+    write_fixture("sig/m.rbs", "class M\n  def m: (Integer x) -> untyped\nend\n")
+    path = write_fixture("lib/m.rb", "class M\n  # @rbs x: Integer\n  def m(x)\n    1\n  end\nend\n")
+
+    m = find(run_generator(path, sig: true), :m)
+
+    expect(m.classification).to eq(Rigor::SigGen::Classification::EQUIVALENT)
+    expect(m.rbs).to be_nil
+  end
+
   it "treats a sig/ copy that only spells names absolutely as current" do
     write_fixture("sig/greeter.rbs", "class Greeter\n  def greet: (::String name) -> ::String\nend\n")
 

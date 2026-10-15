@@ -1420,7 +1420,7 @@ module Rigor
       # Proposed without {#tighter?}: a declared `untyped` return carries no information to weigh it against, the
       # same position a method with no declaration at all is in. Over a declaration the author wrote, though, a
       # VALUE literal the body proves (`-> 1`, `-> "x"`, `-> :k`) is an implementation detail the `untyped` was
-      # abstracting over, so it is widened to its class (`1 | 2` to `Integer`, `"S" | nil` to `String?`; #1489).
+      # abstracting over, so it is widened to its class (`1 | 2` to `Integer`, `"S" | nil` to `(String | nil)`; #1489).
       # `nil`, `true` and `false` are honest types and stay, as does a computed `Float`. An `untyped` that is only
       # the inline reader's synthesis ({#synthesized_declaration?}) is no word of the author's and keeps the
       # strictest carrier. `declared_return_rbs` carries `"untyped"` so the `[tighter, was: untyped]` print tag

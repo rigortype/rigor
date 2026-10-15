@@ -336,10 +336,27 @@ module Rigor
         symbol_pairs = behaviourally_unstable_pairs(changed_pairs, unstable, scan_index) | param_pairs
         base = dependents_base(unstable, symbol_pairs)
         closure = base | changed.to_set | added.to_set |
-                  negative_affected(scan, removed, new_fps, new_class_decls, new_constant_decls, summary)
+                  negative_affected(scan, removed, new_fps, new_class_decls, new_constant_decls, summary) |
+                  singleton_rewrite_affected(unstable, scan_index)
         closure = param_seed_closure(closure, param_files)
         removed.each { |path| closure |= @dependents[path] || Set.new }
         closure.freeze
+      end
+
+      # Issue #1906 — a file that rewrites a constant's singleton side without declaring it
+      # (`D.singleton_class.alias_method :own, :keep`) contributes opaque envelopes to the constant's bucket, but a
+      # reader's class edge names only the files that declare it, and the class-declaration diff fires only when the
+      # name enters or leaves the file. So a declaration-unstable edit to such a file (`:own` becoming `:o9`)
+      # re-checks every reader of the constant, before and after the edit, through its `class:` key.
+      def singleton_rewrite_affected(unstable, scan_index)
+        names = unstable.flat_map do |path|
+          before = @seed_bundles.dig(path, :singleton_class_source_names) || []
+          after = ((scan_index && scan_index[:singleton_class_sources]) || {}).select { |_, files| files.include?(path) }
+          before | after.keys
+        end
+        return Set.new if names.empty?
+
+        Incremental.negative_closure(names.uniq.map { |name| "class:#{name.split('::').last}" }, @negative_dependents)
       end
 
       # Issue #1367 — every file whose last result holds a `global.*` diagnostic re-checks on any recheck. What
@@ -466,7 +483,7 @@ module Rigor
       def whole_project_closure(changed, added)
         (@analyzed.to_set | changed | added).freeze
       end
-      private :gated_closure, :whole_project_closure
+      private :gated_closure, :whole_project_closure, :singleton_rewrite_affected
 
       # The current project file set (cheap directory expansion, no analysis), used to detect files added /
       # removed since the last run. Also where an editor buffer's binding is re-spelled onto the set, since

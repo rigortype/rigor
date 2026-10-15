@@ -7245,15 +7245,38 @@ module Rigor
         receiver.is_a?(Prism::CallNode) && receiver.name == :singleton_class && receiver.arguments.nil?
       end
 
-      # An `attr_*` on a singleton class (`singleton_class.attr_accessor :conf`) rewrites only the names it spells, so
-      # it makes those names' singleton envelopes opaque ({#record_singleton_class_names}) and leaves the rest of the
-      # singleton side readable. An `attr_*` with a name it does not spell as a literal (`attr_accessor(*KEYS)`, a
-      # block's variable), and an `alias_method` or `define_method` there, still taint the side: the own-definer read
-      # would otherwise answer the body Ruby replaced (`definer_resolution_witness_spec.rb`).
+      # An `attr_*`, `alias_method`, `define_method` or `remove_method` on a singleton class
+      # (`singleton_class.attr_accessor :conf`, `singleton_class.alias_method :o2, :own`) rewrites only the names it
+      # spells, so it makes those names' singleton envelopes opaque and contested ({#record_singleton_class_names}) and
+      # leaves the rest of the singleton side readable. One whose rewritten name is not a literal Symbol or String
+      # (`attr_accessor(*KEYS)`, `alias_method name, :own`, `define_method(sym)`), and any other surface call there
+      # (`class_eval`, `send`, `prepend`), still taints the side: the own-definer read would otherwise answer the body
+      # Ruby replaced (`definer_resolution_witness_spec.rb`).
       def singleton_class_named_call?(node)
+        !singleton_class_rewritten_names(node).nil?
+      end
+
+      # Issue #1906 — the names a singleton-class call rewrites, or nil where it is not one of the naming forms or
+      # does not spell every rewritten name as a literal. `alias_method` rewrites its new name (the aliased one keeps
+      # its body), `define_method` its first argument, `remove_method` and `attr_*` every argument.
+      def singleton_class_rewritten_names(node)
         arguments = node.arguments&.arguments || []
-        ATTR_MACROS.include?(node.name) && !arguments.empty? &&
-          arguments.all? { |argument| literal_method_name(argument) }
+        rewritten = case node.name
+                    when :alias_method then arguments.size == 2 && arguments.first(1)
+                    when :define_method then (1..2).cover?(arguments.size) && arguments.first(1)
+                    when :remove_method then arguments
+                    else ATTR_MACROS.include?(node.name) && arguments
+                    end
+        return nil if !rewritten || arguments.empty? || !arguments.all? { |argument| literal_argument?(node, argument) }
+
+        rewritten.map { |argument| literal_method_name(argument) }
+      end
+
+      # `define_method(:x, body)` takes a body that is not a name; every other argument must be a literal name.
+      def literal_argument?(node, argument)
+        return true if node.name == :define_method && !argument.equal?(node.arguments.arguments.first)
+
+        !literal_method_name(argument).nil?
       end
 
       def singleton_class_owner(node, object, qualified_prefix, current_class)
@@ -7858,21 +7881,20 @@ module Rigor
       end
 
       # Issue #1752 — the names a {#singleton_class_named_call?} rewrites on its singleton class's owner, each
-      # singleton envelope opaque: the evidence the refinement typer reads as a rewritten singleton name.
+      # singleton envelope opaque and contested: the evidence the refinement typer reads as a rewritten singleton name.
       def record_singleton_class_names(node, object, qualified_prefix, tables)
         current_class = qualified_prefix.empty? ? nil : qualified_prefix.join("::")
         owner = singleton_class_owner(node, object, qualified_prefix, current_class)
         return if owner.nil?
 
-        (node.arguments&.arguments || []).each do |argument|
-          method_name = literal_method_name(argument)
-          next unless method_name
-
+        singleton_class_rewritten_names(node).each do |method_name|
           names = [method_name]
           names << :"#{method_name}=" if %i[attr_writer attr_accessor].include?(node.name)
           names.each do |name|
             record_envelope(tables.envelopes, owner, [:singleton, name], Source::ParameterEnvelope::OPAQUE)
-            contest_envelope(tables, owner, [:singleton, name]) unless tables.certain
+            # Contested even where the call is certain: the slot's `def` is not the body Ruby runs, so the
+            # own-definer read declines on the name rather than answering it.
+            contest_envelope(tables, owner, [:singleton, name])
           end
         end
       end

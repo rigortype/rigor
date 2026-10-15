@@ -177,13 +177,34 @@ end
       end
 
       expect(rows).to contain_exactly(["U", "before", false, "public"], ["U", "a", true, "private"],
-                                      ["U", "b", true, "private"], ["V", "x", true, "private"],
-                                      ["V", "y", false, "public"], ["V", "z", true, "private"])
+                                      ["U", "b", true, "private"], ["V", "x", false, nil],
+                                      ["V", "y", false, "public"])
     end
 
-    it "leaves the defs it cannot read as module functions as omissions" do
+    # The named forms read differently in Ruby and in check's singleton table (#1918 review), so they are
+    # omissions, and the instance methods they name read unknown visibility.
+    it "leaves the named forms and the defs it cannot read as module functions as omissions" do
       expect(omissions(source).filter_map { |kind, name| name if kind == "module_function" })
-        .to contain_exactly("c", "missing", "k", "m")
+        .to contain_exactly("c", "x", "z", "missing", "k", "m")
+    end
+
+    it "lets private_class_method reach a module function's singleton copy" do
+      site = sites("module Q\n  module_function\n  def q1 = 1\n  private_class_method :q1\nend\n")
+             .find { |data| data["name"] == "q1" }
+
+      expect(site).to include("module_function" => true, "visibility" => "private",
+                              "singleton_visibility" => "private")
+    end
+
+    it "does not reuse the instance-scope return for a singleton copy whose body reads self or instance state" do
+      source = "module P\n  module_function\n  def me = self\n  def iv = @x\n  def plain = 1\nend\n"
+      returns = sites(source).filter_map do |data|
+        [data["name"], data["singleton_body_return"]] if data["module_function"]
+      end.to_h
+
+      expect(returns["me"]).to eq("state" => "unavailable", "reason" => "not_computed")
+      expect(returns["iv"]).to eq("state" => "unavailable", "reason" => "not_computed")
+      expect(returns["plain"]).to eq(sites(source).find { |data| data["name"] == "plain" }["body_return"])
     end
   end
 

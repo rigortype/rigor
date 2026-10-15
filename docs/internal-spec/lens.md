@@ -129,8 +129,8 @@ One entry per requested target, in request order.
     the body of a class whose superclass expression is `Struct.new(…)` or `Data.define(…)`.
   - A `def` or `attr_*` inside a block, or inside `class << obj` for anything but `self`, is an omission.
   - A module function is a `method` site with `module_function: true` (capability `module_function`): a `def`
-    written directly in a module body after a bare `module_function` there, a `module_function def x` there,
-    or a `def x` above a `module_function :x` / `module_function %i[x]` there.
+    written directly in a module body after a bare `module_function` there. That is the form Ruby and `check`'s
+    singleton table read the same way.
 - Omissions: constant assignments (`constant`); `Data.define` / `Struct.new` assigned to a constant
   (`data_class`, `struct_class`), with any member declared in their block; `alias` and `alias_method`
   (`alias`); `define_method`; a `def` with any receiver but `self`; any declaration inside a block;
@@ -138,8 +138,12 @@ One entry per requested target, in request order.
   (`module_function`): a `def` after a bare `module_function` once a bare `private` / `public` /
   `protected` follows it (Ruby ends the mode there, `check`'s tables do not), a `def` nested in the body
   (under an `if`, say) while the mode is on, every later `def` of a body whose bare `module_function` sits
-  in control flow, any `module_function` in a class, and a name a named call lists with no `def` above it
-  or through a non-literal argument; `refine` blocks with everything inside them; and
+  in control flow, a `def` wrapped in a visibility call while the mode is on, every `def` after a second bare
+  `module_function` that follows such a toggle, any `module_function` in a class, and every named form
+  (`module_function :x`, `module_function %i[x]`, `module_function def x`, a non-literal argument), whose
+  reading differs between Ruby and `check` (a `def` nested in the body, a reopened module, a redefinition after
+  the call). The instance members a named form names read `visibility: null`, and the omission counts as a
+  project definition, so each such member is `contested`; `refine` blocks with everything inside them; and
   the members a plugin synthesizes, which revision 1 does not list at all (`capabilities` has no `plugin`).
 
 A declaration is never attached to a neighbouring site as a fallback.
@@ -166,7 +170,7 @@ A site is one source declaration in a requested file.
 | `scope` | `instance` or `singleton` for `method` / `attribute`; `null` otherwise. |
 | `attribute` | `reader`, `writer` or `accessor` for `attribute`; `null` otherwise. |
 | `members` | For `method` / `attribute`, the names of the members this site defines: one for a method, `name` and/or `name=` for an attribute. `[]` otherwise. |
-| `module_function` | `true` for a module function: the `def` defines a private instance method and a public singleton copy, so its name is a member under both scopes and both list this site. `scope` is then `instance` and `visibility` `private`. `false` otherwise. |
+| `module_function` | `true` for a module function: the `def` defines a private instance method and a singleton copy, so its name is a member under both scopes and both list this site. `scope` is then `instance` and `visibility` `private`. `false` otherwise. |
 | `ordinal` | The 0-based index among sites that share one declaration span (`attr_reader :a, :b` gives 0 and 1); 0 otherwise. |
 | `span` | The declaration's span (the `class` / `module` / `def` / `attr_*` node). |
 | `contract_span` | The span from the first to the last contract comment of the site (§ Anchors, steps 1 and 2), or `null`. |
@@ -180,7 +184,11 @@ A site is one source declaration in a requested file.
 
 A member is one `(owner, scope, name)` that a site in a requested file defines. An `attr_accessor :a`
 site defines the members `a` and `a=`, and both list it. A module-function site defines `(owner, instance,
-name)` and `(owner, singleton, name)`; the singleton member's `visibility` is `public`. Members are sorted by owner, scope and name.
+name)` and `(owner, singleton, name)`. The singleton member's `visibility` is `public`, revised by a later
+`private_class_method :name` written directly in the body (`null` under the rules § Sites gives for named
+calls). Its inferred return is the site's `body_return`, except that a body reading `self`, an instance
+variable or a class variable runs with the module as `self` there, so that return is `unavailable` with
+`not_computed`. Members are sorted by owner, scope and name.
 
 | Field | Content |
 | --- | --- |

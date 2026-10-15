@@ -144,10 +144,13 @@ module Rigor
         visibility_call(child, nesting, singleton, direct: true) if visibility_call?(child)
         @direct_statement = child
         walk(child, nesting, singleton: singleton, in_block: false)
+      ensure
+        @direct_statement = nil
       end
 
       # A bare `module_function` directly in a module body turns the mode on for the later direct defs. In a class
-      # (where Ruby raises) or after the mode was left unknown, the later defs stay omissions.
+      # (where Ruby raises) or after the mode was left unknown, the later defs stay omissions. A second bare call
+      # after a toggle also stays unknown, though Ruby turns the mode on again: the safe side.
       def bare_module_function
         body = @bodies.last
         body.module_function = body.kind == :module && body.module_function != :unknown ? :on : :unknown
@@ -164,37 +167,31 @@ module Rigor
         child.is_a?(Prism::CallNode) && child.receiver.nil? && child.name == :module_function && child.arguments
       end
 
-      # `module_function :a`, `module_function %i[a b]` or `module_function def a` directly in a module body makes
-      # the instance methods it names, already defined above it, module functions. A name with no such def above
-      # it, a non-literal argument, or a call in a class stays an omission.
+      # A named `module_function` (`module_function :a`, `module_function %i[a]`, `module_function def a`) is an
+      # omission: `check`'s singleton table reads it differently from Ruby (a def nested in the body, a reopened
+      # module, a redefinition after the call, a wrapped def). The instance methods it names turn private in Ruby,
+      # so their visibility reads unknown, and the omission makes each named member contested.
       def named_module_function(node, nesting, singleton)
         owner = nesting.last
+        scope = scope_name(singleton)
         node.arguments.arguments.each do |argument|
-          if argument.is_a?(Prism::DefNode) && argument.receiver.nil? && @bodies.last.kind == :module && !singleton
-            read_def(argument, nesting, singleton, false, module_function: true)
+          if argument.is_a?(Prism::DefNode)
+            omit("module_function", argument.name.to_s, argument, owner: owner, singleton: singleton)
+            detached { walk(argument.body, nesting, singleton: singleton, in_block: true) } if argument.body
             next
           end
 
-          names = @bodies.last.kind == :module && !singleton ? argument_names(argument) : nil
-          unmatched = if names.nil?
-                        [first_argument_name(node)]
-                      else
-                        names.reject do |name|
-                          marked_module_function?(owner, name)
-                        end
-                      end
-          unmatched.each { |name| omit("module_function", name, node, owner: owner, singleton: singleton) }
+          names = argument_names(argument)
+          if names.nil?
+            unknown_visibility(owner, scope)
+            omit("module_function", nil, argument)
+          else
+            names.each do |name|
+              name_visibility(owner, scope, name, nil)
+              omit("module_function", name, node, owner: owner, singleton: singleton)
+            end
+          end
         end
-      end
-
-      # Marks the instance method sites defined above as module functions; false when there is none.
-      def marked_module_function?(owner, name)
-        matching = @sites.select do |site|
-          data = site.data
-          data["kind"] == "method" && data["owner"] == owner && data["scope"] == "instance" && data["name"] == name
-        end
-        matching.each { |site| site.data.merge!("module_function" => true, "visibility" => "private") }
-        !matching.empty?
       end
 
       # A bare `private` / `protected` / `public` written directly in the body sets the default for later defs.
@@ -290,7 +287,11 @@ module Rigor
 
       def unknown_visibility(owner, scope)
         @sites.each do |site|
-          site.data["visibility"] = nil if site.data["owner"] == owner && site.data["scope"] == scope
+          data = site.data
+          next unless data["owner"] == owner
+
+          data["visibility"] = nil if data["scope"] == scope
+          data["singleton_visibility"] = nil if scope == "singleton" && data["module_function"]
         end
         mark_uncertain
       end
@@ -299,9 +300,14 @@ module Rigor
       def name_visibility(owner, scope, name, visibility)
         @sites.each do |site|
           data = site.data
-          next unless data["owner"] == owner && data["scope"] == scope && data["members"].include?(name)
+          next unless data["owner"] == owner && data["members"].include?(name)
 
-          data["visibility"] = data["members"] == [name] ? visibility : nil
+          if data["scope"] == scope
+            data["visibility"] = data["members"] == [name] ? visibility : nil
+          elsif scope == "singleton" && data["module_function"]
+            # `private_class_method :x` reaches a module function's singleton copy.
+            data["singleton_visibility"] = visibility
+          end
         end
       end
 
@@ -379,10 +385,29 @@ module Rigor
         owner = nesting.last || "Object"
         params, block, = Parameters.read(node.parameters, yields: Parameters.yields?(node.body))
         shape_params, shape_block = Parameters.shape(params, block)
-        { "kind" => "method", "name" => node.name.to_s, "owner" => owner, "scope" => scope.to_s, "attribute" => nil,
-          "members" => [node.name.to_s], "module_function" => module_function,
-          "visibility" => module_function ? "private" : visibility(node, nesting, scope),
-          "params" => shape_params, "block" => shape_block, "body_return" => body_return(node, owner, scope) }
+        returns = body_return(node, owner, scope)
+        data = { "kind" => "method", "name" => node.name.to_s, "owner" => owner, "scope" => scope.to_s,
+                 "attribute" => nil, "members" => [node.name.to_s], "module_function" => module_function,
+                 "visibility" => module_function ? "private" : visibility(node, nesting, scope),
+                 "params" => shape_params, "block" => shape_block, "body_return" => returns }
+        return data unless module_function
+
+        # Internal to the member pass: the singleton copy is public until `private_class_method` says otherwise,
+        # and its body runs with the module as `self`, so a body that reads `self` or instance state has a return
+        # the instance-scope typing does not give.
+        data.merge("singleton_visibility" => "public",
+                   "singleton_body_return" => instance_state?(node.body) ? Slot.unavailable("not_computed") : returns)
+      end
+
+      # Whether a body reads `self`, an instance variable or a class variable outside nested defs, lambdas and
+      # blocks that rebind `self`.
+      def instance_state?(node)
+        return false if node.nil?
+        return true if node.is_a?(Prism::SelfNode)
+        return true if node.type.to_s.start_with?("instance_variable_", "class_variable_")
+        return false if node.is_a?(Prism::DefNode)
+
+        node.compact_child_nodes.any? { |child| instance_state?(child) }
       end
 
       # Whether a receiverless instance `def` is a module function: true when the body's mode is on and the def is

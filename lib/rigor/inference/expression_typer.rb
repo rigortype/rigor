@@ -321,6 +321,37 @@ module Rigor
           try_project_singleton_inference(receiver, node, arg_types, method_name: :[])
       end
 
+      # Issue #1889 — the type a block-form `inject` / `reduce` accumulator parameter holds across the block's runs,
+      # or nil when the call is not one {#try_block_inject_fold} folds. The RBS tier binds the parameter to the seed
+      # alone, so the statement pass and the ADR-56 write-back typed every run's accumulator as `0` for `inject(0)`,
+      # and a capture assigned from it (`m = a`) was written back as `0`.
+      #
+      # The fold records the answer as it types the call ({#record_inject_accumulator}): the constant arm the
+      # accumulator values the block receives (`0 | 1` for `[1, 2].inject(0) { |a, e| a + e }`), the nominal
+      # arm its seed joined with the converged accumulator. The statement pass types the call from the same scope
+      # just before it enters the block, so the recorded answer is read back rather than computed again — each
+      # computation types the body, and a nested `inject` multiplied that by its depth.
+      def inject_accumulator_type(call_node, receiver, arg_types)
+        block = call_node.block
+        return nil unless INJECT_METHODS.include?(call_node.name) && block.is_a?(Prism::BlockNode)
+
+        recorded = self.class.recorded_inject_accumulator(block, scope)
+        return recorded if recorded
+
+        try_block_inject_fold(call_node, receiver, arg_types)
+        self.class.recorded_inject_accumulator(block, scope)
+      end
+
+      INJECT_ACCUMULATOR_KEY = :__rigor_inject_accumulator__
+      private_constant :INJECT_ACCUMULATOR_KEY
+
+      # The accumulator type {#record_inject_accumulator} stored for `block` when the call was typed from `scope`
+      # itself (by identity), else nil.
+      def self.recorded_inject_accumulator(block, scope)
+        slot = Thread.current[INJECT_ACCUMULATOR_KEY]&.[](block)
+        slot && slot[0].equal?(scope) ? slot[1] : nil
+      end
+
       # ADR-89 WD2 — the current run's return memo bucket as `{ def_node => [MemoEntry, …] }` (only entries
       # that carry a call descriptor, i.e. every stored entry). Read by the incremental session right after a
       # recording run to harvest each analyzed callee's observed call keys → return descriptors. Returns an
@@ -3902,7 +3933,7 @@ module Rigor
         # allocated a fresh frozen Scope per field, run per user-method-call inference (ADR-44). The
         # discovery index is inherited whole by reference (ADR-53 Track A); the hand-copied per-field list
         # this replaces had silently dropped `data_member_layouts` and `discovered_method_visibilities`.
-        Scope.new(
+        body_scope = Scope.new(
           environment: scope.environment,
           locals: locals.freeze,
           self_type: receiver,
@@ -3920,6 +3951,7 @@ module Rigor
           # Issue #1358 — the callee runs in a frame of its own ({Scope#with_match_frame}).
           match_frame: MatchRebinding::Frame.new(def_node.body, def_node.parameters)
         )
+        body_scope.with_repeated_or_writes(RepeatedOrWrites.straight_line_sites(def_node.body, body_scope))
       end
 
       # Issue #681 / #707 — the ONE place in `lib/` that answers "what `Module.nesting` was recorded for this
@@ -5445,11 +5477,23 @@ module Rigor
         return nil if acc.nil?
 
         captured = inject_captured_bindings(block, rest.map { |value| Type::Combinator.constant_of(value) })
+        received = [acc]
         rest.each_with_index do |element_value, position|
           acc = inject_constant_step(block, acc, element_value, captured, position)
           return nil if acc.nil?
+
+          received << acc
         end
+        received.pop if received.size > 1
+        record_inject_accumulator(block, Type::Combinator.union(*received))
         acc
+      end
+
+      # Records `type` as the accumulator `block` receives when typed from this typer's scope
+      # ({.recorded_inject_accumulator}). The keys are weak, so a finished file's nodes do not stay reachable, and
+      # the values strong, so a record outlives a collection while its node does. Prism nodes compare by identity.
+      def record_inject_accumulator(block, type)
+        (Thread.current[INJECT_ACCUMULATOR_KEY] ||= ObjectSpace::WeakKeyMap.new)[block] = [scope, type].freeze
       end
 
       # Issue #1332 — the #587 (b) captured-block binding ({#captured_block_bindings}) both inject arms lay under
@@ -5559,7 +5603,9 @@ module Rigor
             result.nil? ? {} : { __inject_acc__: result }
           end
         )
-        converged[:__inject_acc__] || seed_acc
+        result = converged[:__inject_acc__] || seed_acc
+        record_inject_accumulator(block, Type::Combinator.union(seed_acc, result))
+        result
       end
 
       def assemble_per_element_result(method_name, per_position, element_types)

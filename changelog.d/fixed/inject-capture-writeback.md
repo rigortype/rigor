@@ -1,0 +1,1 @@
+- **[engine]** A capture assigned from a block-form `inject` / `reduce` accumulator, and an instance variable written with `instance_variable_set(:@name, value)`, no longer stay pinned to their earlier constant, which reported `flow.always-truthy-condition` on correct code. ([#1928](https://github.com/rigortype/rigor/pull/1928))

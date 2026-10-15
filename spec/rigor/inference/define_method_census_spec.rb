@@ -51,6 +51,19 @@ RSpec.describe "the ADR-58 ivar census counts define_method block writes" do
       expect(census(source, "M")).to eq(":yes?")
     end
 
+    # A class-body write is the class object's ivar: it does not exempt an ivar a define_method block writes from
+    # the read-before-write `nil`, while a def-only writer keeps the exemption it has on master.
+    it "keeps the read-before-write nil when the class body writes the ivar too" do
+      source = %(class W\n  @x = nil\n  define_method(:set) { @x = "a" }\n  def get = @x\nend\n)
+      expect(census(source, "W")).to eq(%("a"?))
+      expect(census(source.sub(%(define_method(:set) { @x = "a" }), %(def set = (@x = "a"))), "W")).to eq(%("a"))
+    end
+
+    it "keeps a define_method call's own argument write a class-body write" do
+      source = %(class W\n  define_method((@n = :m)) { @x = "a" }\n  def set = (@n = :k)\n  def get = @n\nend\n)
+      expect(census(source, "W", :@n)).to eq(":k")
+    end
+
     it "types the block's rvalue on the instance side" do
       expect(census(box(%(define_method(:set) { @x = self })))).to eq("Box?")
     end
@@ -124,6 +137,26 @@ RSpec.describe "the ADR-58 ivar census counts define_method block writes" do
         end
       RUBY
       expect(diagnostics_for("feature.rb" => source)).to be_empty
+    end
+
+    it "does not fold it when the class body writes the ivar too" do
+      source = <<~RUBY
+        class Box
+          @x = nil
+          define_method(:set) { @x = "a" }
+          def get = (@x ? 1 : 2)
+        end
+
+        class Cfg
+          @enabled = false
+          define_method(:enable!) { @enabled = true }
+          def on?
+            return false unless @enabled
+            true
+          end
+        end
+      RUBY
+      expect(diagnostics_for("box.rb" => source)).to be_empty
     end
 
     it "still folds a flow-live write in a def beside the block (the control)" do

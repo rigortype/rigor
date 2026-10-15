@@ -44,6 +44,10 @@ lib/rigor/analysis/dependency_source_inference/walker.rb:
     Rigor::Analysis::DependencySourceInference::Walker#collect_bound_constants: qualifies a constant write by the lexical nesting of the class and module headers around it, as walk_node qualifies a def, so a refine key is matched by the name the write binds rather than by its last segment (#1814); it records no declaration fact
     Rigor::Analysis::DependencySourceInference::Walker#walk_node: grandfathered
     Rigor::Analysis::DependencySourceInference::Walker#walk_refine_declarations: a dispatcher over a refine body; it hands each nested class or module back to walk_node under the prefix it was given and derives no declaration context itself
+lib/rigor/analysis/incremental_session.rb:
+  computes: which constants a changed file rewrote the singleton side of, to choose the readers an --incremental recheck re-checks (#1906)
+  producers:
+    Rigor::Analysis::IncrementalSession#singleton_rewritten_constants: reads the seed bundle the indexer already wrote (its singleton-source names, singleton envelope keys and unpositioned :extend side) only to pick the negative class keys of the recheck closure; it records no declaration fact and derives no context
 lib/rigor/analysis/reachability/scan.rb:
   computes: every constant declaration and reference with the lexical nesting in force there (ADR-102)
   producers:

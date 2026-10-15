@@ -69,8 +69,13 @@ module Rigor
       #   pool records each worker's cross-file reads and marshals them back (PoolCoordinator), so the
       #   dependency graph a pooled recheck rebuilds equals the sequential one.
       def initialize(configuration:, paths: nil, environment: nil, cache_store: nil, plugin_requirer: nil, # rubocop:disable Metrics/ParameterLists,Metrics/AbcSize,Metrics/MethodLength
-                     workers: 0, buffer: nil, explain: false)
+                     workers: 0, buffer: nil, explain: false, force_targets: [], on_file_indexed: nil)
         @configuration = configuration
+        # ADR-113 WD2 (lens spike) — files a {#recheck} analyses whether or not they changed, in this process, so
+        # `on_file_indexed` (see {Runner}) sees their seeded index. Neither moves a diagnostic: a forced file
+        # re-analyses under the same seeds its cached rows were computed with.
+        @force_targets = force_targets.to_set
+        @on_file_indexed = on_file_indexed
         @paths = paths
         # Editor mode option B (#146) — the in-flight buffer, threaded into every internal Runner so the
         # pre-passes and the closure re-analysis read the editor's bytes at the logical path. A session
@@ -208,13 +213,13 @@ module Rigor
         fresh_params = fresh_param_table(current, changed, added, removed)
         param_files, param_pairs = param_seed_invalidation(fresh_params)
         affected = affected_closure(changed, added, removed, param_files, param_pairs)
-        analyze_set = affected & current
-        reused = (current & previous) - affected.to_a
+        forced, analyze_set = forced_analyze_set(affected, current)
+        reused = (current & previous) - analyze_set.to_a
         # The freshly collected table is handed to the runner so the run seeds from the SAME table the diff
         # was decided on (and the collector runs once per recheck, not twice). The reused files' cached rows
         # go in too, so the runner lists them in the full run's file order (#1524).
         runner = build_runner(analyze_only: analyze_set, record_dependencies: true,
-                              param_inferred_types: fresh_params,
+                              param_inferred_types: fresh_params, **forced_target_options(forced),
                               restored_run_level_rows: @run_level_rows,
                               served_per_file_diagnostics: @cache.slice(*reused))
         merged = run_runner(runner).diagnostics
@@ -1302,8 +1307,19 @@ module Rigor
         Runner.new(
           configuration: @configuration, cache_store: @cache_store, environment: @environment,
           plugin_requirer: @plugin_requirer, seed_bundles: @seed_bundles, collect_seed_bundles: true,
-          workers: @workers, buffer: @buffer, explain: @explain, **
+          workers: @workers, buffer: @buffer, explain: @explain, on_file_indexed: @on_file_indexed, **
         )
+      end
+
+      # The forced targets present in `current`, and the recheck's analyse set with them joined to the closure.
+      def forced_analyze_set(affected, current)
+        forced = @force_targets & current.to_set
+        [forced, (affected | forced) & current]
+      end
+
+      # A recheck that forces targets analyses in this process, so the index callback reaches them.
+      def forced_target_options(forced)
+        forced.empty? ? {} : { workers: 0 }
       end
 
       # Run the runner over the session's explicit paths (or, when none were given, the configuration's

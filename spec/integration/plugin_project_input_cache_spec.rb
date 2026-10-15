@@ -94,7 +94,9 @@ RSpec.describe "run-result caches over a plugin's own project inputs (#1803)" do
   end
 
   # rigor-dry-validation refines a Contract's `params` block through rigor-dry-schema's walker, so its
-  # project loads both; the shape is still found by rigor-dry-validation's own scan.
+  # project loads both. rigor-dry-schema's walk records the same `lib` membership row, so that example
+  # passes on either plugin's row: it pins the user-visible outcome, and
+  # `spec/integration/plugins/dry_graphql_io_boundary_rows_spec.rb` pins rigor-dry-validation's own row.
   {
     "rigor-dry-schema" => {
       plugins: { "rigor-dry-schema" => "dry-schema" },

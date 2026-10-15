@@ -156,9 +156,12 @@ module Rigor
       def straight_line_sites(body, scope) = StraightLine.sites(body, scope)
 
       # One source slice is far cheaper than the walk, and a body that spells no `||=` holds no such site. A
-      # heredoc's text lies outside its node's location, so a body that opens one is walked regardless.
+      # heredoc's text lies outside its node's location, so a body that opens one is walked regardless. A slice that
+      # is not valid in its encoding (an invalid byte in a comment) cannot be regex-matched, so it is walked too.
       def may_hold_or_write?(body)
         source = body.slice
+        return true unless source.valid_encoding?
+
         source.include?("||=") || source.match?(Forms::HEREDOC_OPENER)
       end
 

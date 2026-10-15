@@ -209,10 +209,11 @@ RSpec.describe Rigor::Inference::RepeatedOrWrites do
       expect(marks).to eq([sites.last])
     end
 
-    it "walks a body whose source is not valid UTF-8 instead of raising" do
-      source = (+"x = 1 # \xFF\ncache[:k] ||= 1 if cond\n(cache[:k] ||= 2)\n").force_encoding(Encoding::UTF_8)
-      marks, sites = straight(source)
-      expect([source.valid_encoding?, marks]).to eq([false, [sites.last]])
+    it "does not raise on a body whose source is not valid UTF-8" do
+      # No `||=` in the slice, so the pre-filter's heredoc pattern runs over the invalid byte.
+      source = (+"x = 1 # \xFF\ncache[:k] = 1\n").force_encoding(Encoding::UTF_8)
+      marks, = straight(source)
+      expect([source.valid_encoding?, marks]).to eq([false, []])
     end
   end
 end

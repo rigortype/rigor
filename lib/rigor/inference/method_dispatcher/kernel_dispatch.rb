@@ -3,6 +3,7 @@
 require_relative "../../type"
 require_relative "constant_folding"
 require_relative "random_folding"
+require_relative "unit_denominator_rational"
 
 module Rigor
   module Inference
@@ -346,8 +347,8 @@ module Rigor
         # is a numeric Constant. The actual Ruby constructor runs at fold time (host-side), so the result
         # respects Ruby's normalisation (`Rational(2, 4)` → `Rational(1, 2)`).
         def try_numeric_constructor(method_name, args)
-          return nil unless [1, 2].include?(args.size)
-          return nil unless args.all? { |arg| numeric_constant?(arg) }
+          foldable = [1, 2].include?(args.size) && args.all? { |arg| numeric_constant?(arg) }
+          return UnitDenominatorRational.answer(method_name, args) unless foldable
 
           values = args.map(&:value)
           result = NUMERIC_CONSTRUCTORS[method_name].call(*values)

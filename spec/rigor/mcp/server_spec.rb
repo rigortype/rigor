@@ -177,10 +177,9 @@ RSpec.describe Rigor::MCP::Server do
     end
 
     it "keeps an option parser's exit off the JSON-RPC channel and stays up" do
-      stdout = $stdout
-      resp = tool_call("rigor_check", { "paths" => ["--help"] })
+      resp = nil
+      expect { resp = tool_call("rigor_check", { "paths" => ["--help"] }) }.not_to output.to_stdout
 
-      expect($stdout).to equal(stdout)
       expect(resp.dig("result", "isError")).to be(true)
       expect(request(id: 10, method: "ping")["result"]).to eq({})
     end

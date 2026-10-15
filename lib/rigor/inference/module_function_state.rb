@@ -11,8 +11,8 @@ module Rigor
     # [#1197](https://github.com/rigortype/rigor/issues/1197)). Four readers used to compute it in four
     # places. They disagree with each other and, in places, with Ruby. Each entry point below reproduces
     # one reader's answer exactly: this module gives the readings one place to live, and does not yet make
-    # them agree. A change to one reading lands here, beside the other three. Examples are #1550's
-    # named-form snapshot and the reset a bare `public`, `private` or `protected` makes.
+    # them agree. A change to one reading lands here, beside the other three. An example is the reset a bare
+    # `public`, `private` or `protected` makes.
     #
     # - The singleton def-node table (`ScopeIndexer#walk_singleton_body`) reads
     #   {.each_singleton_sibling} and {.each_singleton_copy}. A bare call covers the later direct
@@ -78,22 +78,44 @@ module Rigor
         end
       end
 
-      # The defs a named call copies onto the module's singleton, for the singleton def-node table. Yields
-      # `name, def_node` for each Symbol or String argument that names a receiverless def among the body's
-      # direct `statements`. The last def of that name wins wherever it sits. A def written after the call
-      # is therefore taken, although Ruby copies the one in effect at the call (#1550), and a name defined
-      # only after the call resolves, although Ruby raises `NameError` there. A `module_function def x`
-      # argument names nothing here.
+      # The defs a named call copies onto the module's singleton, for the singleton def-node table. Ruby
+      # copies the method in effect at the call (#1550), so a later def of the name redefines only the
+      # instance method. Yields `name, def_node` for each Symbol or String argument whose method in effect
+      # at the call is a receiverless def among the body's direct `statements` written before the call; the
+      # last such def wins.
+      #
+      # A name declines (nothing is yielded) when no def precedes the call, where Ruby raises `NameError` or
+      # copies a def another file may load first, and when a statement after that def and before the call
+      # may rebind it in a way this reading cannot name: a def nested in control flow or a block, an `alias`,
+      # an `undef`, or an `alias_method`, `define_method`, `attr_*`, `remove_method` or `undef_method` call.
+      # Such a call with a non-literal name declines every name. A `module_function def x` argument names
+      # nothing here.
       def each_singleton_copy(call, statements)
-        defs_by_name = statements.each_with_object({}) do |stmt, acc|
-          acc[stmt.name] = stmt if stmt.is_a?(Prism::DefNode) && stmt.receiver.nil?
+        call_start = call.location.start_offset
+        in_effect = {}
+        statements.each do |stmt|
+          next unless stmt.location.end_offset <= call_start
+
+          if stmt.is_a?(Prism::DefNode)
+            in_effect[stmt.name] = stmt if stmt.receiver.nil?
+          else
+            each_rebound_name(stmt) { |name| in_effect[name] = :unknown }
+          end
         end
         call.arguments&.arguments&.each do |arg|
           name = symbol_argument_name(arg)
-          def_node = name && defs_by_name[name]
-          yield name, def_node if def_node
+          def_node = name && !in_effect.key?(ANY_NAME) && in_effect[name]
+          yield name, def_node if def_node.is_a?(Prism::DefNode)
         end
       end
+
+      # The key {.each_singleton_copy} records when a statement may rebind a name it cannot read.
+      ANY_NAME = Object.new.freeze
+
+      # Calls that may define, alias or remove an instance method of the receiverless module.
+      REBINDING_CALLS = %i[
+        alias_method define_method attr attr_reader attr_writer attr_accessor remove_method undef_method
+      ].freeze
 
       # The deferred-ranges reading, over one class-ish body's subtree. Appends to `offsets` the start of
       # every bare call; each def that starts after one is a module function
@@ -173,6 +195,43 @@ module Rigor
         active && kind == :instance
       end
 
+      # Yields each instance-method name `node` may rebind on the module whose body holds it, or
+      # {ANY_NAME} when one is not a literal. It does not enter a nested class, module or `class <<` body,
+      # whose methods belong to another module.
+      def each_rebound_name(node, &)
+        case node
+        when Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode then return
+        when Prism::DefNode
+          yield node.name if node.receiver.nil?
+          return
+        when Prism::AliasMethodNode
+          yield symbol_argument_name(node.new_name) || ANY_NAME
+        when Prism::UndefNode
+          node.names.each { |name| yield symbol_argument_name(name) || ANY_NAME }
+        when Prism::CallNode
+          each_rebinding_call_name(node, &) if REBINDING_CALLS.include?(node.name) &&
+                                               (node.receiver.nil? || node.receiver.is_a?(Prism::SelfNode))
+        end
+        node.compact_child_nodes.each { |child| each_rebound_name(child, &) }
+      end
+
+      # The names a {REBINDING_CALLS} call may rebind: the first argument of `alias_method` and
+      # `define_method`, every argument of the others (and its writer, for the `attr_*` family), or
+      # {ANY_NAME} for a non-literal one.
+      def each_rebinding_call_name(call)
+        arguments = call.arguments&.arguments || []
+        arguments = arguments.first(1) if %i[alias_method define_method].include?(call.name)
+        arguments.each do |arg|
+          next if arg.is_a?(Prism::KeywordHashNode)
+
+          name = symbol_argument_name(arg)
+          next yield(ANY_NAME) unless name
+
+          yield name
+          yield :"#{name}=" if call.name.start_with?("attr")
+        end
+      end
+
       # The prescan's call arm.
       def prescan_call(node, qualified_prefix, in_singleton_class, offsets, ranges)
         if bare?(node)
@@ -208,7 +267,8 @@ module Rigor
         Source::Literals.symbol_or_string(arg)
       end
 
-      private_class_method :prescan_call, :prescan_eval_call, :symbol_argument_name
+      private_class_method :prescan_call, :prescan_eval_call, :symbol_argument_name, :each_rebound_name,
+                           :each_rebinding_call_name
     end
   end
 end

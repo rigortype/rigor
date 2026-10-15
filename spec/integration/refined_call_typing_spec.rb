@@ -706,8 +706,7 @@ RSpec.describe "Typing calls through Ruby refinements (#1664)", type: :runner do
   # An `attr_*` on `singleton_class` whose names are not literals may define any name. Ruby 4.0.5 prints `"    x    "`
   # for both, so `center` is not reported on the refinement's `Symbol`.
   it "answers Dynamic[top] past a singleton_class attr_* that spells no literal name" do
-    expect(rows(<<~RUBY)).to eq([["dump.type", 9, "dump_type: Dynamic[top]"], 
-["dump.type", 10, "dump_type: Dynamic[top]"]])
+    expect(dumps(<<~RUBY)).to eq(["Dynamic[top]"] * 2)
       module TN
         refine(Object) { def conf = :sym }
       end

@@ -6,7 +6,7 @@ module Rigor
   module Lens
     # `context.plugins` (docs/internal-spec/lens.md § Context): the plugins a run loaded, by manifest id.
     module Plugins
-      BUNDLED_PLUGINS = File.expand_path("../../../plugins", __dir__)
+      BUNDLED_PLUGINS = File.expand_path("../../../plugins", __dir__).freeze
 
       module_function
 
@@ -28,7 +28,9 @@ module Rigor
         absolute = File.expand_path(file)
         return Rigor::VERSION if absolute.start_with?("#{BUNDLED_PLUGINS}/")
 
-        spec = Gem.loaded_specs.each_value.find { |gem| absolute.start_with?("#{gem.full_gem_path}/") }
+        spec = Gem.loaded_specs.each_value.find do |gem|
+          absolute.start_with?("#{gem.full_gem_path}/") # rigor:disable undefined-method
+        end
         spec&.version&.to_s
       rescue StandardError
         nil

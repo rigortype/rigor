@@ -353,6 +353,19 @@ run's diagnostics without loading the inference engine at all. It records
 a hit (so `--cache-stats` still balances) but never a miss — a probe miss
 hands off to the full path, which records its own.
 
+A served hit skips everything `Runner#run_analysis` appends after
+`#compute_run_diagnostics`. A diagnostic kept out of the cache identity
+there therefore needs an answer in `Analysis::RunCacheProbe`: reproduce
+it engine-free, or decline the probe for any project that could earn it,
+judged from its declarations alone. Without one the diagnostic fires
+cold and never warm (#428; [`effect-summaries.md`](effect-summaries.md)
+§ "The boot-slim probe and the two out-of-band passes"). Runs that look
+fine while diagnosing this are not probe runs: `--cache-stats` and
+`--no-cache` are ineligible, and `rigor effects` has its own probe. A
+cache spec proves its warm arm was served by asserting the run-stats
+block is absent warm, since `Runner#stats_for_run` returns nil for a
+cache-served run (`spec/rigor/effects/envelope_cache_spec.rb`).
+
 ### `store.store_validated`, `store.peek_unvalidated` and `store.discard`
 
 The pieces the `--incremental` run-result slot

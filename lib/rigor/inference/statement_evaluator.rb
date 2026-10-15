@@ -3339,7 +3339,11 @@ module Rigor
           local_type = current_scope.ivar(ivar_name)
           next if local_type.nil? || local_type == seed_type
 
-          widened = widened.with_ivar(ivar_name, Type::Combinator.union(local_type, seed_type))
+          joined = Type::Combinator.union(local_type, seed_type)
+          widened = widened.with_ivar(ivar_name, joined)
+          # Issue #1889 — an ivar a reflective write widened keeps its declaration mark, so the reset must too.
+          widened = widened.seed_declaration_sourced_ivar(ivar_name, joined) if
+            current_scope.declaration_sourced?(:ivar, ivar_name)
         end
         widened
       end

@@ -75,6 +75,18 @@ RSpec.describe "a reflective instance variable write (`instance_variable_set`)" 
     expect(class_rules(source)).to be_empty
   end
 
+  # The next implicit-self call (`puts`) joins the class seed back in; that reset must keep the mark too.
+  {
+    "after a block's write-back" => "[1, 2].each { |v| instance_variable_set(name, v) }",
+    "after a straight-line write" => "instance_variable_set(name, 1)"
+  }.each do |label, write|
+    it "keeps the declaration mark across a later implicit-self call #{label}" do
+      source = "class M3\n  def initialize\n    @x = nil\n    @k = 0\n  end\n\n  def fill = @x = 's'\n\n  " \
+               "def m(name)\n    #{write}\n    puts 'hi'\n    y = @x\n    y.size\n  end\nend\n"
+      expect(class_rules(source)).to be_empty
+    end
+  end
+
   it "treats a splat argument list as a name it cannot see" do
     expect(dumped_ivar("@n = 0\nargs = name\ninstance_variable_set(*args)")).to eq("dump_type: 0 | Dynamic[top]")
     expect(dumped_ivar("@n = 0\nrest = name\ninstance_variable_set(:@n, *rest)")).to eq("dump_type: 0 | Dynamic[top]")

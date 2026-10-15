@@ -223,9 +223,9 @@ module Rigor
         end
       end
 
-      # An ivar on its ADR-58 declaration seed reaches {.bind} only through {.reflective_unknown_ivars}; rebinding it
-      # re-stamps the declaration mark, as `ReflectiveIvarWrite.apply` does, so a nil in the seed fuels no
-      # nil-receiver diagnostic.
+      # An ivar on its ADR-58 declaration seed reaches {.bind} through {.reflective_unknown_ivars}, and through
+      # `ExpressionTyper#prefix_answered_scope`; rebinding it re-stamps the declaration mark, as
+      # `ReflectiveIvarWrite.apply` does, so a nil in the seed fuels no nil-receiver diagnostic.
       def bind_ivar(scope, name, type, optimistic)
         bound = OptimisticOrigin.carry_ivar_mark(scope, scope.with_ivar(name, type), name, optimistic)
         scope.declaration_sourced?(:ivar, name) ? bound.seed_declaration_sourced_ivar(name, type) : bound

@@ -71,6 +71,7 @@ RSpec.describe "effect.envelope-exceeded across incremental rechecks" do
     expect(envelope_rows(recheck.diagnostics)).to eq(baseline)
   end
 
+  # A guard: the declaring file is in the closure here, so this passed before #1898's fix too.
   it "drops the row when the body stops exceeding the envelope, then restores it" do
     session = session_for
     baseline = envelope_rows(guarded_baseline(session))

@@ -1180,7 +1180,9 @@ from its comments — every `#:` / `# @rbs` annotation under the auto-wired
 that file contributed — the *direct* summaries and unresolved call edges, never the
 propagated table, which is re-run over the merged whole on every run (a leaf's summary
 reaches every caller, so a stored closure would have to be invalidated by all of them).
-A recheck re-collects only the changed closure and folds the rest back from here.
+A recheck re-collects only the changed closure and folds the rest back from here,
+into the session's table and into the recheck runner's own graph, which is what the
+envelope pass judges (#1898).
 
 `effects_identity` is a **second gate**, independent of the global fingerprint above,
 and it exists because the `effects:` block is deliberately absent from

@@ -561,6 +561,19 @@ class ReopenedHelper
   def note = (@v = "x")
 end
 
+# The later `def` runs only under a condition, so Ruby keeps the first one, which writes `@v`.
+class ConditionalRedefinition
+  def initialize = (@v = "a")
+  def log = (@v = "x")
+  def log = nil if ENV["RIGOR_NEVER_SET_1596"]
+
+  def dump
+    @v = nil
+    log
+    @v.upcase # QUIET-1446
+  end
+end
+
 class AliasMethodCallee
   def initialize = (@v = "a")
   def assign = (@v = "x")

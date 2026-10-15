@@ -14,7 +14,8 @@ module Rigor
     # token expansion and match per-file analysis uses ({CheckRules.config_disabled?}). Per-file rows were
     # already filtered where they were produced; the run-level rows (plugin load / prepare, dependency-source,
     # `rbs.coverage.*`, pool-degraded, ...) are assembled outside any per-file filter, and this is the one
-    # stamp every run shape (sequential, pool, `--incremental`, a warm cache hit) passes its stream through.
+    # stamp every run shape (sequential, pool, `--incremental`, a warm cache hit) passes its stream through. Rows a
+    # plugin emits under its own `plugin.<id>` family are left alone, as they were before (see {.plugin_row?}).
     #
     # Extracted (ADR-87 WD4) so the miss path ({Runner::DiagnosticAggregator}) and the boot-slimming hit path
     # ({RunCacheProbe}, which never loads the aggregator) apply the IDENTICAL final filter — a warm HIT's
@@ -25,10 +26,17 @@ module Rigor
       def apply(diagnostics, configuration)
         disabled = CheckRules.expand_rule_tokens(configuration.disabled_rules)
         diagnostics.filter_map do |diagnostic|
-          next nil if CheckRules.config_disabled?(diagnostic.rule, disabled)
+          next nil if !plugin_row?(diagnostic) && CheckRules.config_disabled?(diagnostic.rule, disabled)
 
           stamp(diagnostic, configuration)
         end
+      end
+
+      # A row a plugin emitted under its own `plugin.<id>` family. The `disable:` list does not reach it: its id is
+      # public as `plugin.<id>.<rule>` (ADR-2), and the bare-id match would let a built-in token such as `load-error`
+      # hide every plugin's same-named rule. Matching it by its qualified id is not supported yet.
+      def plugin_row?(diagnostic)
+        diagnostic.source_family.to_s.start_with?("plugin.")
       end
 
       def stamp(diagnostic, configuration)

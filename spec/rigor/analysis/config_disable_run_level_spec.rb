@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "fileutils"
 require "tmpdir"
 require "rigor/analysis/runner"
 
@@ -101,11 +102,36 @@ RSpec.describe "config `disable:` over run-level rows" do
       .not_to include("plugin_loader.runtime-error")
   end
 
-  it "drops a plugin's per-file row under its bare rule id" do
+  # Round-1 review of #1948 — a `plugin.<id>` row is not reached by the `disable:` list, by its bare rule id or by
+  # `all`, as before #1895: the bare-id match would let a built-in token hide every plugin's same-named rule.
+  it "leaves a plugin's own row alone under its bare rule id and under `all`" do
     plugins = { "plugins" => ["rigor-emitter"] }
-    expect(run_rows(plugins, plugin: emitting_plugin)).to include("plugin.emitter-1895.saw-file")
     expect(run_rows(plugins.merge("disable" => ["saw-file"]), plugin: emitting_plugin))
-      .not_to include("plugin.emitter-1895.saw-file")
+      .to include("plugin.emitter-1895.saw-file")
+    expect(run_rows(plugins.merge("disable" => ["all"]), plugin: emitting_plugin))
+      .to eq(["plugin.emitter-1895.saw-file"])
+  end
+
+  # The collision the review found: `rigor-rails-i18n` reports an unparsable locale file as its own `load-error`,
+  # which `disable: [load-error]` must not hide while it drops the plugin loader's row.
+  it "drops the loader's load-error row but keeps rails-i18n's own load-error row" do
+    Dir.mktmpdir("rigor-1895-i18n-") do |dir|
+      Dir.chdir(dir) do
+        File.write("a.rb", "x = 1\n")
+        FileUtils.mkdir_p("config/locales")
+        File.write("config/locales/en.yml", "en:\n  foo: [\n")
+        config = Rigor::Configuration.new(
+          Rigor::Configuration::DEFAULTS.merge(
+            "paths" => ["a.rb"], "plugins" => %w[rigor-rails-i18n rigor-no-such-plugin-1895],
+            "disable" => ["load-error"]
+          )
+        )
+        runner = Rigor::Analysis::Runner.new(configuration: config, cache_store: nil)
+        rows = guarded_run(runner).diagnostics.map(&:qualified_rule)
+        expect(rows).to include("plugin.rails-i18n.load-error")
+        expect(rows).not_to include("plugin_loader.load-error")
+      end
+    end
   end
 
   it "drops the dependency-source row under its canonical id" do

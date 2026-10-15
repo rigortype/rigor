@@ -172,12 +172,18 @@ module Rigor
         end
 
         def coerce_mode(value)
-          mode = (value || "when_missing").to_sym
+          mode = config_symbol(value || "when_missing")
           return mode if VALID_MODES.include?(mode)
 
           raise ConfigurationError,
                 "dependencies.source_inference[].mode must be one of " \
                 "#{VALID_MODES.inspect}, got #{value.inspect}"
+        end
+
+        # The Symbol a String / Symbol value names, or nil for any other YAML shape (a number, a list, a mapping), which
+        # the caller then reports as not one of its valid values rather than crashing on `#to_sym`.
+        def config_symbol(value)
+          value.to_sym if value.is_a?(String) || value.is_a?(Symbol)
         end
 
         def coerce_roots(raw)
@@ -190,7 +196,7 @@ module Rigor
         end
 
         def coerce_budget_overrun_strategy(value)
-          symbol = value.to_sym
+          symbol = config_symbol(value)
           return symbol if VALID_BUDGET_OVERRUN_STRATEGIES.include?(symbol)
 
           raise ConfigurationError,

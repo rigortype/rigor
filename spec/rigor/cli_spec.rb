@@ -221,6 +221,25 @@ RSpec.describe Rigor::CLI do
         expect(err).to eq("rigor: dependencies.source_inference[] entry must be a Hash, got #{shown}\n")
       end
     end
+
+    # A `mode:` or `budget_overrun_strategy:` that is not a String used to escape as a `NoMethodError` from `#to_sym`.
+    it "renders a non-String dependencies mode and budget_overrun_strategy as one rigor: line" do
+      {
+        "  source_inference: [{ gem: x, mode: 5 }]\n" =>
+          "rigor: dependencies.source_inference[].mode must be one of [:disabled, :when_missing, :full], got 5\n",
+        "  source_inference: [{ gem: x, mode: [a] }]\n" =>
+          "rigor: dependencies.source_inference[].mode must be one of [:disabled, :when_missing, :full], " \
+          "got [\"a\"]\n",
+        "  budget_overrun_strategy: 5\n" =>
+          "rigor: dependencies.budget_overrun_strategy must be one of " \
+          "#{Rigor::Configuration::Dependencies::VALID_BUDGET_OVERRUN_STRATEGIES.inspect}, got 5\n"
+      }.each do |entry, expected|
+        status, _out, err = in_project("paths: [.]\ndependencies:\n#{entry}") { run_cli("check", ".") }
+
+        expect(status).to eq(Rigor::CLI::EXIT_USAGE)
+        expect(err).to eq(expected)
+      end
+    end
   end
 
   # ADR-46 — the incremental-analysis acceptance gate.

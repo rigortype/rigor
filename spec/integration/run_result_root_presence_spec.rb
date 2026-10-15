@@ -79,8 +79,8 @@ RSpec.describe "the run-result slot and the presence of its roots (#1962, #1555)
     [[path, :warning, "#{message} (skipped)"]]
   end
 
-  missing = "no such file or directory"
-  not_ruby = "not a Ruby file (expected `.rb` or a directory)"
+  def missing = "no such file or directory"
+  def not_ruby = "not a Ruby file (expected `.rb` or a directory)"
 
   describe "an analysis root that changes kind (#1962)" do
     it "S1: missing -> empty directory" do

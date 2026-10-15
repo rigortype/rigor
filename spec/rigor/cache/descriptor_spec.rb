@@ -465,36 +465,40 @@ RSpec.describe Rigor::Cache::Descriptor do
     end
 
     # #1962 — the kind row an analysis root records: a directory, a file, another kind of entry, or nothing.
-    it "keeps FileEntry.kind fresh while the path stays the same kind, stale at each change of kind" do
-      path = File.join(dir, "root")
-      kinds = []
-      check = lambda do
-        entry = described_class::FileEntry.kind(path: path)
-        kinds << entry.value
-        expect(described_class.new(files: [entry]).fresh?).to be(true)
-        entry
-      end
+    def kind_fresh?(entry) = described_class.new(files: [entry]).fresh?
 
-      absent = check.call
+    def kind_row(path)
+      described_class::FileEntry.kind(path: path).tap { |entry| expect(kind_fresh?(entry)).to be(true) }
+    end
+
+    it "keeps FileEntry.kind fresh while a directory stays one, stale when it appears or turns into a file" do
+      path = File.join(dir, "root")
+      absent = kind_row(path)
       FileUtils.mkdir_p(path)
-      expect(described_class.new(files: [absent]).fresh?).to be(false)
-      directory = check.call
+      expect(kind_fresh?(absent)).to be(false)
+      directory = kind_row(path)
       File.write(File.join(path, "n.txt"), "x")
-      expect(described_class.new(files: [directory]).fresh?).to be(true)
+      expect(kind_fresh?(directory)).to be(true)
       FileUtils.rm_rf(path)
       File.write(path, "x")
-      expect(described_class.new(files: [directory]).fresh?).to be(false)
-      file = check.call
+      expect(kind_fresh?(directory)).to be(false)
+
+      expect([absent, directory, kind_row(path)].map(&:value)).to eq(%w[absent directory file])
+    end
+
+    it "tells FileEntry.kind a file from another kind of entry, and a dangling symlink from either" do
+      path = File.join(dir, "root")
+      File.write(path, "x")
+      file = kind_row(path)
       File.unlink(path)
       File.mkfifo(path)
-      expect(described_class.new(files: [file]).fresh?).to be(false)
-      other = check.call
+      expect(kind_fresh?(file)).to be(false)
+      other = kind_row(path)
       File.unlink(path)
       File.symlink(File.join(dir, "nowhere"), path)
-      expect(described_class.new(files: [other]).fresh?).to be(false)
-      check.call
+      expect(kind_fresh?(other)).to be(false)
 
-      expect(kinds).to eq(%w[absent directory file other absent])
+      expect([file, other, kind_row(path)].map(&:value)).to eq(%w[file other absent])
     end
 
     it "reports absent? only for the absence row, not for a present :exists row or a content row" do

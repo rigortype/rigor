@@ -1,0 +1,1 @@
+- **[engine]** Reading or writing an `OpenStruct` field, such as `OpenStruct.new(name: "x").name` or `o.age = 3`, is no longer reported as `call.undefined-method`. ([#1982](https://github.com/rigortype/rigor/pull/1982))

@@ -76,7 +76,7 @@ cache:
 | --- | --- | --- | --- |
 | `libraries` | Array | `[]` | Standard-library / gem names whose bundled RBS to load. |
 | `signature_paths` | Array | `nil` | Extra directories of `.rbs` files. Relative entries resolve against the config file's directory. |
-| `pre_eval` | Array | `[]` | Files (or globs) walked before per-file analysis, to register project monkey-patches and publish their top-level constants project-wide. |
+| `pre_eval` | Array | `[]` | Files (or globs) walked before per-file analysis, to register project monkey-patches and publish their top-level constants project-wide. The walker does not follow `require` / `require_relative`, so list the files in load order: a method declared in two files takes the last-listed one, and a file that requires a later-listed one is still read in list order. |
 | `plugins` | Array | `[]` | Plugins to activate — see [Using plugins](07-plugins.md). |
 
 ### Signature generation

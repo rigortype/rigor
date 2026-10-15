@@ -3,6 +3,7 @@
 require "prism"
 
 require_relative "project_patched_methods"
+require_relative "project_patched_definedness_guard"
 require_relative "../analysis/dependency_source_inference/return_type_heuristic"
 require_relative "../source/alias_names"
 require_relative "../source/constant_path"
@@ -35,6 +36,13 @@ module Rigor
       PendingAlias = Data.define(:class_name, :new_name, :old_name, :kind, :source_path, :source_line)
       private_constant :PendingAlias
 
+      # A `def` written under a definedness guard (`def foo ... unless method_defined?(:foo)`): a polyfill that runs
+      # only when nothing bound the name before it, so it never replaces an earlier binding.
+      GuardedDef = Data.define(:entry) do
+        def source_path = entry.source_path
+      end
+      private_constant :GuardedDef
+
       module_function
 
       # @param paths — absolute paths to the pre-eval files. The runner has already
@@ -58,29 +66,28 @@ module Rigor
       end
 
       # ADR-17 § "Failure modes" — when two pre-eval entries declare the same `(class_name, method_name,
-      # kind)` triple, emit one `:info` `pre-eval.duplicate-declaration` diagnostic per collision. The
-      # registry's first-write-wins behaviour is unchanged; the diagnostic just makes the shadowing
-      # visible so users notice when a later patch is silently masked.
+      # kind)` triple, the last-listed one wins, as at runtime where the later `def` replaces the earlier. Emit
+      # one `:info` `pre-eval.duplicate-declaration` diagnostic per SHADOWED entry, reported on that earlier
+      # declaration (the declaration that never takes effect) and naming the
+      # winning declaration it yields to.
       def duplicate_declaration_diagnostics(entries)
-        seen = {}
-        entries.each_with_object([]) do |entry, acc|
-          key = [entry.class_name, entry.method_name, entry.kind]
-          if (first = seen[key])
-            acc << build_diagnostic(
-              path: entry.source_path,
-              line: entry.source_line,
-              column: 1,
-              severity: :info,
-              rule: "pre-eval.duplicate-declaration",
-              message: "pre-eval duplicate declaration: " \
-                       "#{entry.class_name}##{entry.method_name} " \
-                       "(#{entry.kind}) is already declared at " \
-                       "#{first.source_path}:#{first.source_line}. " \
-                       "The first declaration wins; this entry is shadowed."
-            )
-          else
-            seen[key] = entry
-          end
+        winners = entries.to_h { |entry| [[entry.class_name, entry.method_name, entry.kind], entry] }
+        entries.filter_map do |entry|
+          winner = winners[[entry.class_name, entry.method_name, entry.kind]]
+          next if winner.equal?(entry)
+
+          build_diagnostic(
+            path: entry.source_path,
+            line: entry.source_line,
+            column: 1,
+            severity: :info,
+            rule: "pre-eval.duplicate-declaration",
+            message: "pre-eval duplicate declaration: " \
+                     "#{entry.class_name}##{entry.method_name} " \
+                     "(#{entry.kind}) is declared again at " \
+                     "#{winner.source_path}:#{winner.source_line}. " \
+                     "The last-listed declaration wins; this entry is shadowed."
+          )
         end
       end
       private_class_method :duplicate_declaration_diagnostics
@@ -97,14 +104,17 @@ module Rigor
       # Within one file the later binding of a name replaces the earlier, as at runtime: the alias-method-chain
       # idiom (`def foo`, `alias_method :foo_without_x, :foo`, `alias_method :foo, :foo_with_x`) leaves `foo` the
       # alias. Bindings of one name in DIFFERENT files are what `pre-eval.duplicate-declaration` reports, and the
-      # registry keeps the first of those, as it always has for `def`s.
+      # registry keeps the last of those, as Ruby does.
       def resolve_aliases(collected)
         bound = {}
         per_file = collected.group_by(&:source_path).values.map do |items|
           final = {}
           items.each do |item|
             entry = item.is_a?(PendingAlias) ? alias_entry(item, bound) : item
+            entry = entry.entry if entry.is_a?(GuardedDef)
             key = [entry.class_name, entry.method_name, entry.kind]
+            next if item.is_a?(GuardedDef) && bound.key?(key)
+
             bound[key] = entry
             final.delete(key)
             final[key] = entry
@@ -138,6 +148,7 @@ module Rigor
           return
         end
 
+        Thread.current[:rigor_guarded_defs] = DefinednessGuard.defs(parse_result.value)
         walk_node(parse_result.value, [], false, path, entries)
         # Issue #1367 — the file's `global.*` write facts: a patch file may alias a special or give a class the
         # method a setter asks for, as any project file may.
@@ -151,6 +162,8 @@ module Rigor
                    "#{e.class}: #{e.message}. Pre-evaluation skipped for this file; " \
                    "the rest of the run proceeds."
         )
+      ensure
+        Thread.current[:rigor_guarded_defs] = nil
       end
       private_class_method :scan_file
 
@@ -233,11 +246,12 @@ module Rigor
         kind = node.receiver.is_a?(Prism::SelfNode) || in_singleton_class ? :singleton : :instance
         line = node.location&.start_line || 1
         return_type = Analysis::DependencySourceInference::ReturnTypeHeuristic.extract(node)
-        entries << ProjectPatchedMethods::Entry.new(
+        entry = ProjectPatchedMethods::Entry.new(
           class_name: class_name, method_name: node.name, kind: kind,
           source_path: source_path, source_line: line,
           return_type: return_type
         )
+        entries << (Thread.current[:rigor_guarded_defs]&.key?(node) ? GuardedDef.new(entry: entry) : entry)
       end
       private_class_method :record_def_node
 

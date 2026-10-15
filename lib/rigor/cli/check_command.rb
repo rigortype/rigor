@@ -369,17 +369,30 @@ module Rigor
 
       # ADR-88 WD1 — a one-line stderr note when the plugin fact surface (an ADR-9 fact, an ADR-60 producer
       # value, or an `incremental_state_fingerprint` hook) forced a full run: either it CHANGED since the
-      # snapshot (a Sorbet sig edit, a schema change) or a contributing plugin declares NO fingerprint surface
-      # (opaque — a full run every invocation). Both are the sound direction; the note explains why a recheck
-      # was not warm.
+      # snapshot (a Sorbet sig edit, a schema change) or a plugin is opaque to the fingerprint (a full run every
+      # invocation): it contributes types and declares NO fingerprint surface, or a value it declares cannot be
+      # digested. Each opaque plugin's reason is worded per {PluginFactFingerprint::OpaqueReason}, and an
+      # undigestible value is named. Both are the sound direction; the note explains why a recheck was not warm.
       def emit_incremental_fact_surface_notes(session)
-        opaque = session.opaque_plugin_ids
-        unless opaque.empty?
-          @err.puts("rigor: --incremental plugin#{'s' unless opaque.size == 1} #{opaque.sort.join(', ')} " \
-                    "contribute call-site types with no incremental fingerprint surface; the snapshot cannot " \
-                    "be reused (full analysis every run).")
+        reasons = session.opaque_reasons
+        surfaceless = reasons.keys.select { |id| reasons.fetch(id).kind == :no_surface }.sort
+        unless surfaceless.empty?
+          many = surfaceless.size > 1
+          @err.puts("rigor: --incremental plugin#{'s' if many} #{surfaceless.join(', ')} " \
+                    "contribute#{'s' unless many} call-site types with no incremental fingerprint surface; " \
+                    "the snapshot cannot be reused (full analysis every run).")
         end
-        return unless session.fact_surface_invalidated? && opaque.empty?
+        reasons.each do |id, reason|
+          next if reason.kind == :no_surface
+
+          @err.puts("rigor: --incremental #{reason.describe(id)}; the snapshot cannot be reused " \
+                    "(full analysis every run).")
+        end
+        if session.fact_store_unreadable?
+          @err.puts("rigor: --incremental the plugin fact store could not be read; the snapshot cannot be reused " \
+                    "(full analysis every run).")
+        end
+        return unless session.fact_surface_invalidated? && !session.opaque_fact_surface?
 
         @err.puts("rigor: --incremental plugin fact surface changed since the snapshot; ran a full analysis.")
       end
@@ -391,8 +404,10 @@ module Rigor
       def write_incremental_cache_stats(session, cache_root, store, format)
         write_cache_stats(cache_root, store, format)
         status =
-          if !session.opaque_plugin_ids.empty?
-            "opaque (#{session.opaque_plugin_ids.sort.join(', ')})"
+          if session.opaque_fact_surface?
+            verdicts = session.opaque_reasons.map { |id, reason| "#{id}: #{reason.summary}" }
+            verdicts << "fact store: could not be read" if session.fact_store_unreadable?
+            "opaque (#{verdicts.join('; ')})"
           elsif session.fact_surface_invalidated?
             "changed — snapshot invalidated"
           else

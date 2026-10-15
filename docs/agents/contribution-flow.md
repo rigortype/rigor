@@ -10,6 +10,8 @@ a changelog entry. It is the conditional detail pointed to by `AGENTS.md`.
 - Do not wrap paragraphs or list items in GitHub-rendered Markdown: GitHub turns single newlines into
   `<br>`. Tables, headings, and fenced code keep their own lines.
 - Version-bump commits use `Bump up version to x.y.z`.
+- A PR or issue body says what the change does and why, as a commit message would. It does not
+  narrate how the PR was assembled (one PR or a stack, which tool, why a rebase).
 
 ## Branches and pull requests
 
@@ -23,8 +25,10 @@ a changelog entry. It is the conditional detail pointed to by `AGENTS.md`.
   path is the one that's expensive to undo.
 - Name a branch for the change it makes, not the tool that made it: no `claude/`, `codex/`, or other
   tool-identifying prefix. Renaming a branch that already has an open PR is not safe — it can close
-  the PR outright — so get the name right at creation instead of fixing it after.
-- Push with an explicit refspec: `git push origin HEAD:refs/heads/<branch>`.
+  the PR outright — so get the name right at creation instead of fixing it after (recovery:
+  § "GitHub and git traps").
+- Push with an explicit refspec: `git push origin HEAD:refs/heads/<branch>`, never `-u`; the
+  [`rigor-worktree`](../../.claude/skills/rigor-worktree/SKILL.md) skill says why and how to recover.
 - PRs start Draft and land through § "Landing a pull request" below. A stop instruction from the
   user means `gh pr ready --undo` and no merge. Never wait for an author approval on the author's
   own PR.
@@ -41,13 +45,52 @@ a changelog entry. It is the conditional detail pointed to by `AGENTS.md`.
   bug — and a batch of PRs touching disjoint files can still turn `master` red when one of them
   fixes what another pinned, which no single PR's CI can see.
 
+## GitHub and git traps
+
+Each of these fails silently: the command succeeds and reports something plausible and wrong.
+
+- **CI verdict.** `gh pr checks --watch` exits 1 with "no checks reported" when a push cancels the
+  earlier run, and it watches only the check set present when it started. Read the head commit's run
+  instead: find its id in `gh run list --branch <branch>` by matching `headSha` (`gh run list
+  --commit` needs the full SHA; a short one returns `[]`). `gh run watch <id> --exit-status` can
+  return while jobs are still running, so poll `gh run view <id> --json status` until it reads
+  `completed`, then read `conclusion` and `headSha`. The same check applies to the master run after
+  a merge. `gh pr view --json merged` is not a field; read `state`, `mergedAt` or `mergeCommit`.
+- **Stacked PRs.** A child merged while its base is still the parent branch reports MERGED, but its
+  commits land on that branch, never reach `master`, and its `Fixes` never fires. Deleting a parent
+  branch closes its stacked child instead of retargeting it. So merge the parent without
+  `--delete-branch`, retarget each child yourself (`gh pr edit <child> --base master`), delete the
+  parent branch only after that, then merge the child. Prove each landing against `origin/master`
+  (see "Cleanup after a merge" below), not by the PR state.
+- **A head ref that vanished.** When an open PR's head branch was renamed or deleted, the PR closes
+  and `gh pr reopen` fails until the ref exists again: push the old SHA back to the old name, reopen,
+  and retarget a stacked child with `gh pr edit --base master`.
+- **Squashing.** Never `git reset --soft origin/master`: other sessions' fetches move that ref, and
+  the commit then reverts every PR merged in between while CI stays green. Reset to `git merge-base
+  HEAD origin/master`, and before pushing check that `git diff --stat origin/master...HEAD` lists
+  only your files.
+- **Re-applying a reverted change.** On a branch that already contains the commit as an ancestor, a
+  rebase replays nothing and fast-forwards onto the revert; cherry-pick it instead.
+- **Cleanup after a merge.** Remove a worktree or local branch only once the PR's content is on
+  `origin/master`: `gh pr view N --json state,baseRefName,mergeCommit` must read `MERGED` with base
+  `master`, and `git merge-base --is-ancestor <mergeCommit.oid> origin/master` must exit 0. This holds
+  for merge-commit, `--rebase` and `--squash` landings alike; after a rebase or squash the head SHA
+  itself is never an ancestor, and a child merged into its parent branch fails on `baseRefName`.
+  Never chain the removal after `gh pr merge` with `;`: a refused merge still runs the rest of the
+  line.
+- **Mergeability lags a push.** When `git merge-base --is-ancestor origin/master origin/<branch>`
+  confirms the branch contains master, a "Head branch is out of date" refusal clears on its own;
+  retry with backoff rather than merging `master` in again.
+- **The main clone is shared.** Uncommitted edits in it follow every branch switch and are swept in
+  by the next `git add -A`. Each parallel worker gets its own worktree.
+
 ## Landing a pull request
 
 Once the change is implemented and `make verify-changed` passes:
 
 1. **Push and open the Draft PR.** CI starts on the push and is the full gate; read the result for
-   the head commit, not the branch. The changelog fragment needs the PR link, so it is a second
-   push.
+   the head commit, not the branch (how: § "GitHub and git traps"). The changelog fragment needs the
+   PR link, so it is a second push.
 2. **Start the adversarial review at the same time**, not after CI: the two are independent, and a
    later push re-runs CI anyway. The reviewer is a fresh agent that did not write the change, on the
    strongest model the harness offers — Claude Opus 5.5 under Claude Code; elsewhere a model of that

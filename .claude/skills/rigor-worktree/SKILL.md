@@ -95,6 +95,12 @@ Also CoW-clones `tool/steep/vendor` and `tool/sorbet/vendor` (each its
 own bundle under `tool/*/Gemfile`). Only needed for a branch that runs
 `make steep-check` or touches the Sorbet adapter.
 
+If `steep` then dies in `dlopen`, the cloned native extensions were
+built against another Ruby in the Nix store. `bundle install` does not
+fix it, since the gems are present; `bundle pristine` rebuilds them
+from the cached gems (offline, about a minute):
+`nix develop --command bash -c 'BUNDLE_GEMFILE=tool/steep/Gemfile bundle pristine'`.
+
 ## When the branch changes `Gemfile.lock`
 
 Run `bundle install` in the worktree. It re-resolves against the cloned

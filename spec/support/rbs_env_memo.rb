@@ -35,6 +35,14 @@ require "rigor/environment/rbs_loader"
 #
 # `RIGOR_SPEC_NO_ENV_MEMO=1` disables the memo suite-wide. That is the control arm: the suite must be green
 # both ways, and a difference between them is this file's bug, not a flake.
+#
+# == Alternatives measured and not worth retrying
+#
+# - Marshal-reusing the library environment: loading the ~10 MB blob took ~140 ms against a ~180 ms rebuild,
+#   before counting the blob's own cost.
+# - Routing `cache_store: nil` examples through the shared cache store: it cut environment builds, and every
+#   saved second moved into `Marshal.dump` and the disk write. A read-only store over an empty root gives
+#   memo-only behaviour, which this memo already provides faster.
 module RbsEnvMemo
   # An environment holds a few tens of MB, so the cache is a small LRU rather than unbounded. It costs
   # almost nothing to keep it small: simulated against the census above, a cap of 1 already avoids 515.6 s

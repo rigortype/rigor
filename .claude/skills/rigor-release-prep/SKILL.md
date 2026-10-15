@@ -437,7 +437,7 @@ final commit.
 Push the version-bump commit on the release branch:
 
 ```sh
-git push -u origin release/x.y.z
+git push origin release/x.y.z:refs/heads/release/x.y.z   # never -u; see rigor-worktree
 ```
 
 The push triggers `release-gate.yml`; the base `ci.yml` gate runs on the
@@ -470,7 +470,10 @@ required gate is green:
 ```sh
 gh pr create --draft --base master --head release/x.y.z \
   --title "Bump up version to x.y.z" --body "<short release summary>"
-gh pr checks <pr> --watch        # wait for the required ci.yml gate
+# wait for the required ci.yml gate on the head commit's run, not `gh pr checks --watch`
+# (docs/agents/contribution-flow.md § "GitHub and git traps")
+gh run list --branch release/x.y.z --workflow CI --limit 3 --json databaseId,headSha
+gh run view <run-id> --json status,conclusion,headSha   # repeat until status is "completed"
 gh pr ready <pr>                 # only on the user's explicit word, CI green, no stop instruction
 gh pr merge <pr> --rebase --delete-branch
 ```

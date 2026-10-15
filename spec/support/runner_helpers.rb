@@ -147,8 +147,10 @@ module RunnerHelpers
     effective_cache = cache_store == :shared ? RunnerHelpers.shared_cache_store : cache_store
 
     # Fastest path: a bare `analyze(source)` with no sig / config / files / block analyses the source IN MEMORY (no
-    # workspace file write, no chdir) via `Runner#run_source`, which is diagnostic-equivalent to the workspace run for a
-    # single file. This is the dominant call shape.
+    # workspace file write, no chdir) via `Runner#run_source`. This is the dominant call shape. It never widens project
+    # discovery, so behaviour seeded by the project pre-pass (the constant publication census among it) can answer
+    # differently than in a workspace run of the same single file: `A, B = { x: 1 }, 2; A ||= 0` reads `0` here and
+    # `0 | Dynamic[top]` there. A census- or seed-dependent example uses `analyze(files: { "code.rb" => source })`.
     if !source.nil? && files.empty? && sig.empty? && config.empty? && !block_given?
       # Disable bundler / rbs-collection auto-detection: the workspace path `chdir`s into an empty dir with no
       # Gemfile.lock, so matching its diagnostics means NOT picking up the repo's lockfiles from the spec process's cwd.

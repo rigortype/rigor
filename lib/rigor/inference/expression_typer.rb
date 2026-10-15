@@ -3883,6 +3883,12 @@ module Rigor
       # default — or `Dynamic` when the shape is open or absent; `**kwrest`, `&block`, and destructured
       # positionals bind `Dynamic`. Binding `Dynamic` is monotone-safe (wider in → wider out), so the only
       # declines left are the shapes where positional CORRESPONDENCE itself is unknowable.
+      #
+      # The scope carries no `source_path:`: the body is re-typed for call sites in any file, so a rule that
+      # asks "did this file write it?" by comparing `scope.source_path` with census paths answers wrongly
+      # through it. Record a per-file write kind in the census instead, as {ScopeIndexer::CONSTANT_MEMO} does
+      # (#1276). Setting `source_path` here was rejected: plugins read it, and the return memo would become
+      # caller-dependent.
       def build_user_method_body_scope(def_node, receiver, arg_types, self_fold_safe: false)
         params = def_node.parameters
         locals = bind_params_from_call_types(params, arg_types)

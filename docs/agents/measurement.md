@@ -36,8 +36,13 @@ reports a bogus `base=0`. Toggle the changed file in the working tree instead �
 changed versions, run all targets on each, diff the diagnostic sets per target, and wrap the whole
 thing in a `trap restore EXIT`.
 
-Attribute each delta to a sub-change rather than to the branch: `git stash -- <files-of-one-sub-change>`
-and re-run only the affected targets. A new always-falsey or always-truthy cluster under a precision
+Attribute each delta to a sub-change rather than to the branch. In your own worktree, with the change committed,
+set `base=$(git merge-base HEAD origin/master)`, `git checkout "$base" -- <files the sub-change modified>` and `rm
+<files it added>`, check that `git diff --stat HEAD` lists exactly that sub-change, re-run only the affected
+targets, and restore with `git checkout HEAD -- <files>` under the same `trap … EXIT`. Never `git stash` for this:
+the stash stack lives in the `.git` every worktree shares, so a pop can take another session's work. When each
+sub-change is its own commit, [`tool/engine_diag_diff.rb`](#diagnostic-differential-across-commits) `--base
+<parent> --head <commit>` needs no toggle at all. A new always-falsey or always-truthy cluster under a precision
 change usually means a **stale-fold family upstream**, not a defect in the change — find or file the
 family before blaming the lever.
 
@@ -111,9 +116,42 @@ heavy job at a time.
   `bundle exec ruby -e 'require "rigor/cli"; puts $LOADED_FEATURES.grep(%r{rigor/cli\.rb$})'` under
   the same `BUNDLE_GEMFILE` — or add a control call that only the branch answers.
 
+- **Steep reads inline `.rb` annotations only under `check "lib", inline: true`** in the Steepfile.
+  Without it every class is `Ruby::UnknownConstant` and a clean run measured nothing; prove binding
+  with a control (a body returning `1` under `-> String` must report).
+
 The rule that covers all of them: **when a probe says "no", prove the harness can say "yes" first.**
 Pair every silence probe with a control that must fire. A fixture built on an undefined class name
 cannot distinguish "correctly declined" from "never analysed" — both read as silence.
+
+## Specs and gates that pass without checking
+
+The same failure inside the suite: a green example that would stay green with the fix removed.
+
+- **Prove a gate by mutating what it protects**, never by reading it; reading shows what the author
+  intended. A mutant must live in the tree rspec loads: `spec/spec_helper.rb` puts its own `../lib`
+  first, so mutating a copied `lib` and running rspec from another checkout tests the original.
+- **A load-time `Dir[]` that generates examples can generate none**, and zero examples is zero
+  failures. Assert non-vacuity explicitly, as `spec/docs/plugin_io_boundary_spec.rb` does. A floor
+  with slack (`>= 15` of 20) suits only a corpus that grows; on a static one any file can go green.
+- **A guard that keeps breaking is usually a bad proxy**, not a missing case. Replace the proxy with
+  the real check (`Prism.parse` for "does it parse") rather than adding one rule per spelling.
+- **A spec rewrite is verified by comparing payloads**, the sources each example analyses, not
+  example names; a `--dry-run` diff pins only the count and numbering.
+- **Inline RBS `-> A | B` is a parse error** (`unexpected token for method type`). The run only prints
+  the error, so every "no diagnostic" assertion passes. Write `-> (A | B)`
+  and pair each "no mismatch" example with a control that must fire under the same signature.
+- **A bare `analyze(source)` never widens project discovery**, so census- or seed-dependent
+  behaviour answers differently than in a project run (the example is at `RunnerHelpers#analyze`).
+  Use `analyze(files: { "code.rb" => source })` for anything the pre-pass seeds.
+- **A child Ruby inherits `bundler/setup`.** The suite's `RUBYOPT` and the `gemspec` line in the
+  `Gemfile` define `Rigor` in the child before it runs, and clearing a few env vars does not undo it.
+  Spawn through `RubyRun.capture` (`spec/support/ruby_run.rb`) or `Bundler.with_unbundled_env`.
+- **A decline assertion (`to be_nil`) passes on any construction error**, which also yields nil.
+  Pair it with the neighbouring case that must succeed.
+- **A failure that passes when its file runs alone is spec order.** Rerun the pair with `--order
+  defined` to find the spec that polluted shared state; v0.4.3's `lens_spec` failed only after a spec
+  that required the plugin directly, which left the plugin loader's gem-to-id memo unrecorded.
 
 ## Controls, benchmarks and the instrument
 
@@ -184,7 +222,29 @@ cannot distinguish "correctly declined" from "never analysed" — both read as s
   26–46% per slice and was prioritised as the wall lever. The next four walkers measured were worth about
   0.2% of a cold `rigor check lib`, and warm null runs never reach them. Put the saving against the command's
   end-to-end wall, from a profile of the journey the user runs, before ranking it.
+- **Coverage ratios compare only within one instrument and one kind.** #535 changed the precision
+  lens's seed, so a ratio from before it does not compare with one after; precision (type quality of
+  expressions) and protection (receiver concreteness at dispatch sites) never compare with each other.
 - **Keep the instrument.** A note in `docs/notes/` records the numbers, not the harness that produced
   them — the positive control, the trap-clearing flags, the classifier. Push the instrumented build
   as its own branch and name it in the note's limitations section; a follow-up question against the
   same subsystem is the normal case, not the exception.
+
+### Attributing an allocation delta
+
+- **`ObjectSpace.each_object` tracing misses `T_IMEMO`.** Run each arm in-process with GC disabled
+  and diff `ObjectSpace.count_objects` and `ObjectSpace.count_imemo_objects` around
+  `Rigor::CLI.new(["check", "--no-cache", "--workers=0", ...]).run`. Paired `imemo_ifunc` and
+  `imemo_memo` growth means a C-implemented Enumerable method taking a block on a hot path.
+- **Hot-path idioms that allocate.** `reduce`/`inject` with a block (not with a Symbol) allocates even over an empty
+  Array (guard with `empty?` or use `each`); `when *CONST` copies the array on every evaluation; a
+  `return` out of a `rigor_each_child` block allocates once per frame it unwinds, which goes
+  quadratic when a caller re-asks the scan at every level (write `found ||= scan?(child)` instead). A
+  docstring's "allocation-free" holds only if `GC.stat(:total_allocated_objects)` says so on a deep
+  synthetic input.
+- **A zero diagnostic diff does not mean the change did nothing.** A change to overload or facet
+  selection can flip hundreds of picks that never reach a diagnostic: count the flips with an
+  ENV-gated log in `OverloadSelector` or `FacetDistribution` on a copy of the arm. For sig-gen and
+  effect-summary changes, diff `rigor sig-gen --format=json` and `rigor effects --full --format json`
+  per arm instead of `check` diagnostics. The host Ruby defaults to US-ASCII, so read sweep JSON with
+  `encoding: "UTF-8"`.

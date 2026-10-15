@@ -16,22 +16,28 @@ reshaping code, and lanes that collided or started on a premise master had alrea
 
 1. **Check each premise before it enters the batch.** Reproduce the issue on current `origin/master`
    and search for an existing implementation by concept. An issue whose premise is gone leaves the
-   batch with a comment pointing at where the behaviour lives. Done when every issue in the batch
-   has a reproduction or a cited code path that shows the defect.
+   batch with a comment pointing at where the behaviour lives. A status comment is not a ledger: for
+   a multi-item issue read `gh pr list --state merged --search '#N'` and what each PR says it closes.
+   A repro that no longer fires does not make the defect unreachable; probe the other exits of the
+   mechanism (a fixpoint's pass cap, guards, jumps) before calling a backstop dead. Done when every
+   issue in the batch has a reproduction or a cited code path that shows the defect.
 2. **Design first where the answer is semantic.** For a change to Ruby semantics, path or symlink
    handling, cache keys, or anything that makes Rigor answer a new type, the coordinator writes the
    edge-case table into the brief before a lane starts: each input shape, what Ruby does (a
    `nix develop --command ruby -e` witness), and the answer Rigor must give. Shapes that recur:
    symlinked and logical-vs-physical paths, `Complex`/`Rational`/`BigDecimal` numerics, a
    user-defined or refined method of the same name, `send`/`public_send`, nested blocks and loops,
-   pool mode (`--workers N`), warm and `--incremental` reruns. Done when every shape the review would
-   probe has a row.
+   pool mode (`--workers N`), warm and `--incremental` reruns, and a multi-file project for any change
+   to the discovery fold (`scope_indexer.rb`, `scope.rb`), whose cross-file merge a single-file
+   fixture never runs. Done when every shape the review would probe has a row.
 3. **Map overlap, then batch.** List the modules each issue will touch, and include open PRs from
    other sessions (`gh pr list --state open`, then their files): an issue whose mechanism one of
    them changes waits for it to land or for its owner to hand over the lane. Two issues that change
    the same mechanism (one inference pass, one cache key, one diagnostic channel) run one after the
    other; disjoint ones run up to three at a time, with one heavy job (a corpus `rigor check`) on the
-   machine at a time.
+   machine at a time. PRs that regenerate a shared gate file
+   (`spec/rigor/declaration_facts/admission_census.yml`, `producers.yml`, ADR-119's errata) also land
+   one after another, each regenerating it at its rebase.
 4. **Route by difficulty.** Ruby semantics, cache and incremental soundness, and anything from step 2
    go to the strongest model; contained CLI, config and plugin changes to the middle tier;
    mechanical edits, wording and docs to the small model. Review is always the strongest model.
@@ -50,6 +56,17 @@ reshaping code, and lanes that collided or started on a premise master had alrea
    branch, and rerun the spec files the PR touched; a clean textual merge can still break a sibling's
    spec. Check `mergeable` before waiting on CI: a `CONFLICTING` PR starts no run, so send it back to
    its lane to merge master and resolve. After the batch, watch the resulting master CI run.
+   Watching is bounded by GitHub's API budgets (REST and GraphQL are separate 5000-an-hour budgets
+   per user; `gh pr view` spends GraphQL), which a batch of watchers exhausts, and every watcher then
+   dies with HTTP 403. Read the verdict per contribution-flow.md § "GitHub and git traps", at most
+   once a minute, one watcher per PR, never `gh pr checks` in a loop, and check `gh api rate_limit`
+   when watchers fail oddly. To add a commit to a lane's branch yourself, never in the lane's
+   worktree or the main clone: `git worktree add --detach <tmp> origin/<branch>`, make the edit,
+   commit, `git push origin HEAD:refs/heads/<branch>` (a fast-forward), then `git worktree remove
+   --force <tmp>`, and tell the lane with SendMessage to `git fetch && git merge --ff-only
+   origin/<branch>` before its next commit. Do it only while the lane has pushed everything;
+   otherwise the push rejects or the branches diverge. Rebasing first makes the push
+   non-fast-forward.
 8. **File the review's scope expansion** as issues outside the milestone. When a merged commit
    carried a `Fixes #N` for an issue the PR only partly fixed, reopen #N with what remains.
 
@@ -64,11 +81,16 @@ A lane brief restates these:
   and `rigor`, this worktree's own `bundle exec exe/rigor` as the oracle, `references/` read-only,
   scratch files under the worktree's `tmp/`. No `git stash`, no `git submodule deinit`, no
   `pkill`/`killall`; stop only processes you started, and leave none running when you report. No
-  version bump, no edit to `CHANGELOG.md` or its `[Unreleased]` section, never `rake release`.
+  version bump, no edit to `CHANGELOG.md` or its `[Unreleased]` section, never `rake release`. A
+  lane that edits comments leaves `# rigor:` and `# rubocop:` lines alone; in fixtures they are
+  suppression directives.
 - **Gate.** `make verify-changed` in the foreground, re-run after the last edit. Never `make
   verify`, `make check` or the whole suite.
 - **Mutation table.** For every new or changed example, name the line of the fix whose removal makes
   it fail, and run that removal: commit first, mutate, restore with `git checkout HEAD -- <path>`.
+  Inside the Flake `sed` is GNU, so `sed -i ''` edits nothing; mutate with `perl -pi -e` and show
+  `git diff --stat` to prove the mutation applied. [`measurement.md`](measurement.md) § "Specs and
+  gates that pass without checking" lists the shapes that survive every mutation.
   An example that passes with the fix removed is a guard, labelled as one, or it is rewritten until
   it fails. The table goes in the report.
 - **Honest gates.** When a provenance pin, residue count or other gate moves, stop and report the
@@ -86,7 +108,10 @@ A lane brief restates these:
   find the commit that introduced it (`git log -S`, blame or bisect), and `git merge-base
   --is-ancestor <that commit> "$(git describe --tags --abbrev=0 origin/master)"` must exit 0. A
   regression that never shipped gets no fragment; every other user-facing change gets one, per
-  contribution-flow.md § "Release Cadence".
+  contribution-flow.md § "Release Cadence". A new CLI output form is run as a user would before it
+  is timed: against the command's documented contract (1-based columns, argument order), combined
+  with the command's other input forms, and past any cap it adds. `cli.rb`'s help and `docs/manual/`
+  change in the same PR; `make docs-check` covers neither.
 - **Closing keywords.** `Fixes #N` only when the PR closes all of #N, on its own line, in the PR body
   and commit messages alike; otherwise `Refs #N`. Credit an external reporter per
   contribution-flow.md.

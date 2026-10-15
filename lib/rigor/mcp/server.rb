@@ -201,11 +201,14 @@ module Rigor
         require_relative "../cli"
         exit_code = CLI.new(argv, out: out_io, err: err_io).run
 
-        is_error = exit_code == CLI::EXIT_USAGE
+        is_error = [CLI::EXIT_USAGE, CLI::EXIT_INTERNAL_ERROR].include?(exit_code)
         text = out_io.string
-        text = err_io.string if text.empty? && is_error
+        text = err_io.string if text.empty?
 
         success(id, { content: [{ type: "text", text: text }], isError: is_error })
+      rescue SystemExit => e
+        # An option parser that exits (`--help`, `--version`) must not take the server down with it.
+        success(id, { content: [{ type: "text", text: "Command exited (status #{e.status})" }], isError: true })
       rescue StandardError => e
         @err.puts("rigor mcp: #{e.class}: #{e.message}")
         @err.puts(e.backtrace.first(5).join("\n")) if e.backtrace
@@ -241,12 +244,13 @@ module Rigor
           argv
 
         when "rigor_lens"
-          files = Array(args["files"])
-          return nil if files.empty?
+          files = args["files"]
+          return nil unless files.is_a?(Array) && !files.empty? && files.all?(String)
 
           argv = ["lens", "--format=json"]
           argv << "--config=#{effective_config}" if effective_config
-          argv + files
+          # `--` ends the options, so a file named like a flag (`--version`) is a file.
+          argv + ["--", *files]
 
         when "rigor_annotate"
           return nil unless args["file"]

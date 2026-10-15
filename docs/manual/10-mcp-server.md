@@ -342,7 +342,9 @@ and `diagnostics`; `members` holds the signatures.
 **Typical agent use:** learn what a file or class offers, and the
 contracts its methods already have, before editing it or writing a type.
 Pass every file in one call: each call runs one analysis, and the first
-call on a project costs a full `rigor check`.
+call on a project costs a full `rigor check`. Paths, site keys and the cache are
+relative to the directory the server was started in, so start it from the
+project root (or pass `--config`).
 
 ---
 
@@ -508,7 +510,7 @@ You should get a JSON response. If you get nothing or a shell error,
 `rigor` is not on your `PATH` — fix the install path first (see
 [Installing Rigor](01-installation.md)).
 
-**`rigor_check` / `rigor_triage` return an empty diagnostics array on a project that has errors.**
+**`rigor_check` / `rigor_triage` return an empty diagnostics array on a project that has errors, or `rigor_lens` reports every file `outside_project`.**
 
 The tool uses `Configuration.discover` from the working directory the
 MCP server was started in. If the client launches `rigor mcp` from a
@@ -543,8 +545,8 @@ warmed by a prior `rigor check` run reduces it significantly.
 
 ## Status and roadmap
 
-`rigor mcp` shipped in v0.1.10 with all seven tools and stdio
-transport. Queued follow-ups are demand-driven:
+`rigor mcp` shipped in v0.1.10 with seven tools and stdio
+transport; `rigor_lens` joined them in v0.4.4. Queued follow-ups are demand-driven:
 
 - **HTTP transport** (slice 2) — `--transport=http` for CI / remote
   agent use; a minimal Rack endpoint.

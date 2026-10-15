@@ -913,10 +913,11 @@ rigor mcp [--transport=stdio] [--config=PATH]
 ```
 
 `stdio` is the only transport. The server is a pure-Ruby
-JSON-RPC 2.0 implementation exposing seven read-only tools:
-`rigor_check`, `rigor_type_of`, `rigor_triage`,
+JSON-RPC 2.0 implementation exposing eight read-only tools:
+`rigor_check`, `rigor_type_of`, `rigor_triage`, `rigor_lens`,
 `rigor_annotate`, `rigor_sig_gen`, `rigor_explain`,
-`rigor_coverage`.
+`rigor_coverage`. `rigor_lens` writes only the incremental
+cache `rigor check --incremental` writes.
 
 ## `rigor lsp` vs `rigor mcp`
 

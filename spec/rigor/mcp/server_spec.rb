@@ -161,11 +161,27 @@ RSpec.describe Rigor::MCP::Server do
       expect(tool_call("rigor_lens", { "files" => [] }).dig("error", "code")).to eq(-32_602)
     end
 
-    it "builds the lens argv with JSON output and the config" do
-      argv = described_class.new(config_path: "c.yml", err: StringIO.new)
-                            .send(:build_argv, "rigor_lens", { "files" => ["a.rb", "b.rb"] })
+    it "rejects a files value that is not a list of strings" do
+      expect(tool_call("rigor_lens", { "files" => [5] }).dig("error", "code")).to eq(-32_602)
+      expect(tool_call("rigor_lens", { "files" => { "a" => "b" } }).dig("error", "code")).to eq(-32_602)
+    end
 
-      expect(argv).to eq(["lens", "--format=json", "--config=c.yml", "a.rb", "b.rb"])
+    it "returns the lens/v0 document for a known file" do
+      resp = tool_call("rigor_lens", { "files" => ["lib/rigor/version.rb"] })
+
+      expect(resp["error"]).to be_nil
+      expect(resp.dig("result", "isError")).to be(false)
+      document = JSON.parse(resp.dig("result", "content", 0, "text"))
+      expect(document["schema"]).to eq("lens/v0")
+      expect(document["files"].first["status"]).to eq("ok")
+    end
+
+    it "reads a file named like a flag as a file, and stays up" do
+      resp = tool_call("rigor_lens", { "files" => ["--version"] })
+
+      expect(resp.dig("result", "isError")).to be(false)
+      expect(JSON.parse(resp.dig("result", "content", 0, "text"))["files"].first["status"]).to eq("not_found")
+      expect(request(id: 9, method: "ping")["result"]).to eq({})
     end
   end
 

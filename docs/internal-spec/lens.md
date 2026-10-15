@@ -74,7 +74,7 @@ rigor lens [--format text|json] [--config FILE] [--workers N] FILE...
   "revision": 1,
   "producer": { "name": "rigor", "version": "0.4.3", "engine_source": null },
   "context": { "...": "§ Context" },
-  "capabilities": ["class", "module", "method", "attribute", "module_function", "builder", "body_return", "diagnostics", "inputs"],
+  "capabilities": ["class", "module", "method", "attribute", "module_function", "builder", "alias", "body_return", "diagnostics", "inputs"],
   "files": [ { "...": "§ Files" } ],
   "members": [ { "...": "§ Members" } ]
 }
@@ -141,12 +141,19 @@ One entry per requested target, in request order.
     omissions (`data_class`, `struct_class`): `||=` and other compound writes, a non-symbol or non-literal field
     list (`Struct.new("Name", …)` included), any other keyword argument, a duplicate or rejected field name, a
     `&block` argument, and a builder inside a block, a method, a builder's block or `class << self`.
+  - An alias (capability `alias`): `alias new old` or `alias_method :new, :old` with two literal names, written as
+    a statement of a class, module or builder body (not wrapped in a visibility call, not under an `if` or
+    other control flow, not in a block, a method, `class << self` or at the top level, and not while a bare
+    `module_function` is on). It is a `method` site named `new`, scope `instance`, spanning the statement, with
+    `alias_of` set to `old` (§ Sites).
   - A module function is a `method` site with `module_function: true` (capability `module_function`): a `def`
     written directly in a module body after a bare `module_function` there. That is the form Ruby and `check`'s
     singleton table read the same way.
 - Omissions: constant assignments (`constant`); the `Data.define` / `Struct.new` forms § Kinds does not
-  model (`data_class`, `struct_class`), with any member declared in their block; `alias` and `alias_method`
-  (`alias`); `define_method`; a `def` with any receiver but `self`; any declaration inside a block;
+  model (`data_class`, `struct_class`), with any member declared in their block; the `alias` and
+  `alias_method` forms § Kinds does not model (`alias`): a computed or interpolated name, an `alias_method` with a
+  block, one wrapped in a visibility call or nested under control flow, and an alias in a block, a method,
+  `class << self`, at the top level or while `module_function` is on; `define_method`; a `def` with any receiver but `self`; any declaration inside a block;
   `class << obj`; the `module_function` cases Rigor cannot read the way both Ruby and `check` do
   (`module_function`): a `def` after a bare `module_function` once a bare `private` / `public` /
   `protected` follows it (Ruby ends the mode there, `check`'s tables do not), a `def` nested in the body
@@ -187,15 +194,16 @@ A site is one source declaration in a requested file.
 | `attribute` | `reader`, `writer` or `accessor` for `attribute`; `null` otherwise. |
 | `members` | For `method` / `attribute`, the names of the members this site defines: one for a method, `name` and/or `name=` for an attribute. `[]` otherwise. |
 | `builder` | `data` or `struct` for a `class` site a `Data.define` / `Struct.new` assignment defines; `null` otherwise. |
+| `alias_of` | For an alias `method` site: the original's name as written (`old`). `null` for every other site. |
 | `module_function` | `true` for a module function: the `def` defines a private instance method and a singleton copy, so its name is a member under both scopes and both list this site. `scope` is then `instance` and `visibility` `private`. `false` otherwise. |
 | `ordinal` | The 0-based index among sites that share one declaration span (`attr_reader :a, :b` gives 0 and 1); 0 otherwise. |
-| `span` | The declaration's span (the `class` / `module` / `def` / `attr_*` node). |
+| `span` | The declaration's span (the `class` / `module` / `def` / `attr_*` / `alias` node). |
 | `contract_span` | The span from the first to the last contract comment of the site (§ Anchors, steps 1 and 2), or `null`. |
 | `anchor` | § Anchors. |
-| `visibility` | For `method` / `attribute`: `public`, `protected` or `private` as Ruby gives it from this file's own visibility calls: a wrapping `private def x` / `private attr_reader :x`, else the body's running default set by a bare `private` / `protected` / `public` written directly in the body, revised by a later `private :x` / `private %i[x y]` / `private_class_method :x` written directly in the body. A class body's default does not reach a `def self.x`, and a top-level `def` is `private`. `null` when Rigor cannot tell: a bare toggle under an `if`, a `begin` or a block leaves the default unknown; a named call written anywhere but directly in the body (an `if`, a block, a method body) leaves the members it names unknown; a non-literal argument (`private *NAMES`) leaves the body's members unknown; `private def self.x`, which Ruby rejects, is unknown; and so is an attribute site whose members a named call covers only in part. `null` for `class` / `module`. |
+| `visibility` | For `method` / `attribute`: `public`, `protected` or `private` as Ruby gives it from this file's own visibility calls. An alias takes the original's visibility at the alias, not the body's running default: that of the last site of the same owner above it defining `old` (an instance method or attribute member), `null` when there is none or an omission names `old` for that owner; a later `private :new` revises it like any other member, and a later `private :old` leaves it. An instance `def` or alias named `initialize`, `initialize_copy`, `initialize_clone`, `initialize_dup` or `respond_to_missing?` is `private` whatever the running default, as Ruby makes it (a wrapping or later `public` still revises it); an instance attribute site with such a member is `null`. Otherwise: a wrapping `private def x` / `private attr_reader :x`, else the body's running default set by a bare `private` / `protected` / `public` written directly in the body, revised by a later `private :x` / `private %i[x y]` / `private_class_method :x` written directly in the body. A class body's default does not reach a `def self.x`, and a top-level `def` is `private`. `null` when Rigor cannot tell: a bare toggle under an `if`, a `begin` or a block leaves the default unknown; a named call written anywhere but directly in the body (an `if`, a block, a method body) leaves the members it names unknown; a non-literal argument (`private *NAMES`) leaves the body's members unknown; `private def self.x`, which Ruby rejects, is unknown; and so is an attribute site whose members a named call covers only in part. `null` for `class` / `module`. |
 | `contract` | `inline` when the site carries a contract comment other than `@extrbs` and a member it defines has an inline declaration from this site's file that is not a defaulted one (`inferred-signature`, § Members); otherwise `null`. When one file holds several such sites for a member, each reads `inline`: the cached environment keeps the file, not the position. A `sig/` or library contract belongs to the member, not to a site. |
-| `params`, `block` | For `method`: this definition's own parameter list as written, in the shape of an overload's `params` and `block` (§ Members) but with every `type` `null`: the shape only. Types are on the member's overloads; the cached environment keeps which file an inline contract came from, not which definition. `null` for every other kind. |
-| `body_return` | For `method`: a slot (§ Slots), the type this body returns with its parameters as declared, or unknown where none is declared. Its calls resolve against the same seeded index `check` uses, so a call to another member reads that member as `check` reads it. A body-less `def` returns `nil`; `initialize` reads `void`. `null` for every other kind. |
+| `params`, `block` | For `method`: this definition's own parameter list as written, in the shape of an overload's `params` and `block` (§ Members) but with every `type` `null`: the shape only. Types are on the member's overloads; the cached environment keeps which file an inline contract came from, not which definition. An alias site copies the original's when exactly one site above it in the file defines `old` for the owner, that site is a `def` (or an alias that copied one), and no omission names `old`; otherwise `null`. `null` for every other kind. |
+| `body_return` | For `method`: a slot (§ Slots), the type this body returns with its parameters as declared, or unknown where none is declared. Its calls resolve against the same seeded index `check` uses, so a call to another member reads that member as `check` reads it. A body-less `def` returns `nil`; `initialize` reads `void`. An alias site copies the original's under the rule for `params`, unless either name is `initialize` (whose `void` is the name's, not the body's, so an alias named `initialize` reads `unavailable` too), and is otherwise `unavailable` with `not_computed`: Ruby copies the `def` in place at the alias, `check` reads the last one. `null` for every other kind. |
 
 ## Members
 
@@ -248,6 +256,13 @@ not on the magic comment:
 - A contract member has one overload per declared method type. A `single_site` member has one overload
   built from its site's parameter list. A `contested` member, of either kind, has no overloads (`[]`): its
   definitions may differ in arity, and each method site carries its own `params` and `block`.
+- A `single_site` member whose site is an alias has the overload of the `def` it copied, with that body's return,
+  only when the original has no contract and exactly one project definition (its one site, through an alias
+  chain if it is itself an alias). Otherwise it has one overload whose `params` is `null` and whose `return` is
+  `unavailable` with `not_computed`: the original's contract does not declare the alias (RBS `alias` carries it,
+  `alias_method` under rbs-inline does not), and with more than one definition the copied `def` depends on load
+  order. An alias's own contract is read like any member's: an RBS `alias` of a declaration the rbs-inline
+  plugin defaulted carries none of the original's marks, and `check` reads it as declared, so it is `contract`.
 - A `single_site` `attribute` member has one overload whose slots are `unavailable` with `not_computed`
   (a reader takes no parameters; a writer takes one unnamed `required` parameter); revision 1 does not
   report an instance variable's type.

@@ -8,6 +8,7 @@ require_relative "parameters"
 require_relative "../inference/def_return_typer"
 require_relative "../inference/origin_lookup"
 require_relative "../sig_gen/type_elaborator"
+require_relative "../source/alias_names"
 
 module Rigor
   module Lens
@@ -33,6 +34,8 @@ module Rigor
         refine: "refine"
       }.freeze
       VISIBILITY_CALLS = %i[private protected public].freeze
+      # Instance methods Ruby makes private whatever the visibility they are defined or aliased with.
+      FORCED_PRIVATE = %w[initialize initialize_copy initialize_clone initialize_dup respond_to_missing?].freeze
       CLASS_VISIBILITY_CALLS = { private_class_method: "private", public_class_method: "public" }.freeze
       BLOCK_NODES = [Prism::BlockNode, Prism::LambdaNode].freeze
       CONSTANT_WRITES = [
@@ -69,8 +72,7 @@ module Rigor
         when Prism::SingletonClassNode then walk_singleton_class(node, nesting, singleton, in_block)
         when Prism::DefNode then read_def(node, nesting, singleton, in_block)
         when Prism::CallNode then walk_call(node, nesting, singleton, in_block)
-        when Prism::AliasMethodNode
-          omit("alias", node.new_name.slice.delete_prefix(":"), node, owner: nesting.last, singleton: singleton)
+        when Prism::AliasMethodNode then read_alias(node, nesting, singleton, in_block)
         when Prism::MultiWriteNode then walk_multi_write(node, nesting, singleton, in_block)
         when Prism::ForNode then walk_assigning(node, node.index, nesting, singleton, in_block)
         when Prism::RescueNode then walk_assigning(node, node.reference, nesting, singleton, in_block)
@@ -207,11 +209,7 @@ module Rigor
         if node.receiver.nil? && ATTRIBUTE_CALLS.key?(node.name)
           read_attribute(node, nesting, singleton, in_block)
         elsif node.receiver.nil? && OMITTED_CALLS.key?(node.name)
-          return unplaced_module_function if bare_call?(node, :module_function)
-
-          omit(OMITTED_CALLS.fetch(node.name), first_argument_name(node), node,
-               owner: node.name == :refine ? nil : nesting.last, singleton: singleton)
-          walk_children(node, nesting, singleton, true) unless node.name == :refine
+          omitted_call(node, nesting, singleton, in_block)
         else
           @visited_visibility_calls ||= {}.compare_by_identity
           if visibility_call?(node) && !@visited_visibility_calls.key?(node)
@@ -219,6 +217,15 @@ module Rigor
           end
           walk_children(node, nesting, singleton, in_block)
         end
+      end
+
+      def omitted_call(node, nesting, singleton, in_block)
+        return unplaced_module_function if bare_call?(node, :module_function)
+        return read_alias(node, nesting, singleton, in_block) if node.name == :alias_method
+
+        omit(OMITTED_CALLS.fetch(node.name), first_argument_name(node), node,
+             owner: node.name == :refine ? nil : nesting.last, singleton: singleton)
+        walk_children(node, nesting, singleton, true) unless node.name == :refine
       end
 
       def visibility_call?(node)
@@ -505,6 +512,74 @@ module Rigor
         body.module_function == :on && node.equal?(@direct_statement) ? true : nil
       end
 
+      # `alias new old` or `alias_method :new, :old` (literal names) written as a statement of a class, module or
+      # builder body: a `method` site named `new` with `alias_of` set (capability `alias`). Ruby copies the method
+      # `old` names at that moment, visibility included, so the site takes the visibility of the last `old` site of
+      # the owner above it, and its parameters and body return when that is the only `old` site above it and a
+      # `def`. Whether that is the `def` `check` reads (the final one) is the member pass's question. Anywhere else
+      # (a block, a method, `class << self`, the top level, wrapped in a visibility call or nested under an `if`),
+      # with a computed name, or while `module_function` is on, it is an omission.
+      def read_alias(node, nesting, singleton, in_block)
+        names = alias_names(node)
+        if names && modelled_alias?(node, nesting, singleton, in_block)
+          return add_site(node, alias_site(names.map(&:to_s), nesting.last))
+        end
+
+        omit("alias", names&.first&.to_s || alias_written_name(node), node, owner: nesting.last, singleton: singleton)
+        walk_children(node, nesting, singleton, true) if node.is_a?(Prism::CallNode)
+      end
+
+      def alias_names(node)
+        if node.is_a?(Prism::AliasMethodNode)
+          Source::AliasNames.keyword_names(node)
+        else
+          node.block.nil? ? Source::AliasNames.alias_method_call_names(node) : nil
+        end
+      end
+
+      def modelled_alias?(node, nesting, singleton, in_block)
+        body = @bodies.last
+        !in_block && !singleton && !nesting.empty? && body && !body.detached &&
+          body.module_function == :off && node.equal?(@direct_statement)
+      end
+
+      def alias_written_name(node)
+        node.is_a?(Prism::AliasMethodNode) ? node.new_name.slice.delete_prefix(":") : first_argument_name(node)
+      end
+
+      def alias_site(names, owner)
+        new_name, old_name = names
+        last, copy = alias_original(owner, old_name)
+        visibility = FORCED_PRIVATE.include?(new_name) ? "private" : last&.data&.fetch("visibility")
+        # `initialize` reads `void` by its name, which neither side of an alias across it keeps.
+        returns = copy && ![new_name, old_name].include?("initialize") ? copy.data["body_return"] : nil
+        { "kind" => "method", "name" => new_name, "owner" => owner, "scope" => "instance", "attribute" => nil,
+          "members" => [new_name], "module_function" => false, "visibility" => visibility,
+          "params" => copy&.data&.fetch("params"), "block" => copy&.data&.fetch("block"),
+          "body_return" => returns || Slot.unavailable("not_computed"),
+          "alias_of" => old_name, "aliased_node" => copy && aliased_node(copy) }
+      end
+
+      # `[last, copy]`: the last site of the owner above the alias defining `old` (nil when an omission names
+      # `old` too), and that site when it is the file's only one and a `def`.
+      def alias_original(owner, old_name)
+        olds = @sites.select do |site|
+          site.data["owner"] == owner && site.data["scope"] == "instance" && site.data["members"].include?(old_name)
+        end
+        unplaced = @omissions.any? do |omission|
+          [omission["owner"], omission["scope"]] == [owner, "instance"] && [old_name, nil].include?(omission["name"])
+        end
+        return [nil, nil] if unplaced
+
+        last = olds.last
+        [last, olds.size == 1 && last.data["kind"] == "method" ? last : nil]
+      end
+
+      # The `def` a method site reads: its own, or for an alias the one it copied.
+      def aliased_node(site)
+        site.data["alias_of"] ? site.data["aliased_node"] : site.node
+      end
+
       def read_attribute(node, nesting, singleton, in_block)
         arguments = node.arguments&.arguments || []
         names = arguments.map { |arg| arg.is_a?(Prism::SymbolNode) || arg.is_a?(Prism::StringNode) ? arg.unescaped : nil }
@@ -516,12 +591,20 @@ module Rigor
         scope = singleton ? :singleton : :instance
         attribute = ATTRIBUTE_CALLS.fetch(node.name)
         names.each_with_index do |name, ordinal|
+          members = attribute_members(name, attribute)
           add_site(node, { "kind" => "attribute", "name" => name, "owner" => owner, "scope" => scope.to_s,
-                           "attribute" => attribute, "members" => attribute_members(name, attribute),
+                           "attribute" => attribute, "members" => members,
                            "module_function" => false,
-                           "visibility" => visibility(node, nesting, scope),
+                           "visibility" => attribute_visibility(node, nesting, scope, members),
                            "params" => nil, "block" => nil, "body_return" => nil }, ordinal: ordinal)
         end
+      end
+
+      # `attr_reader :initialize` is forced private while its writer is not: not modelled.
+      def attribute_visibility(node, nesting, scope, members)
+        return nil if scope == :instance && members.intersect?(FORCED_PRIVATE)
+
+        visibility(node, nesting, scope)
       end
 
       # A builder's field reads no leading contract comments, which belong to the constant: `contracts: :trailing`
@@ -534,8 +617,8 @@ module Rigor
         tail = { "ordinal" => ordinal, "span" => Lens.span(location),
                  "contract_span" => Lens.contract_span(anchor.contract_comments), "anchor" => anchor.token,
                  "contract" => nil }
-        @sites << Site.new(data: { "key" => key, "builder" => nil }.merge(data).merge(tail), node: node,
-                           contract_comments: anchor.contract_comments)
+        head = { "key" => key, "builder" => nil, "alias_of" => nil }
+        @sites << Site.new(data: head.merge(data).merge(tail), node: node, contract_comments: anchor.contract_comments)
       end
 
       # `owner` / `singleton` name the member the declaration would define, when Rigor can tell. `any_member` keeps
@@ -566,6 +649,7 @@ module Rigor
       def visibility(node, nesting, scope)
         return "private" if nesting.empty?
         return @node_visibility[node] if @node_visibility.key?(node)
+        return "private" if scope == :instance && node.is_a?(Prism::DefNode) && FORCED_PRIVATE.include?(node.name.to_s)
         return "public" if scope == :singleton && node.is_a?(Prism::DefNode) && node.receiver
 
         body = @bodies.last

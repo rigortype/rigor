@@ -26,6 +26,8 @@ class Shop
   end
 
   alias_method :title, :label
+  alias heading label
+  alias tally total
 
   private
 

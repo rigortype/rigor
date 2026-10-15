@@ -9,7 +9,8 @@ module Rigor
     SCHEMA = "lens/v0"
     # Bumped on every breaking change to the `lens/v0` document (docs/internal-spec/lens.md § Status).
     REVISION = 1
-    CAPABILITIES = %w[class module method attribute module_function builder body_return diagnostics inputs].freeze
+    CAPABILITIES = %w[class module method attribute module_function builder alias body_return diagnostics
+                      inputs].freeze
 
     module_function
 

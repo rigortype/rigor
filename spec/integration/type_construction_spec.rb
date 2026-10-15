@@ -1194,6 +1194,28 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  # Issue #1925 — `when nil` / `when true` / `when false` narrow the subject as their classes do.
+  describe "fixtures/case_when_singleton_literal.rb — a `when nil` clause narrows the subject" do
+    let(:harness) { harness_for("case_when_singleton_literal") }
+
+    it "types each clause under the literal's narrowing" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+
+    it "reports a nil receiver only in the `when nil` arm" do
+      nil_receivers = harness.diagnostics.select do |d|
+        %w[call.undefined-method call.possible-nil-receiver].include?(d.rule)
+      end
+      expect(nil_receivers.map(&:line)).to eq(marked_lines(harness, "# GENUINE-NIL"))
+    end
+
+    it "reports the `else` that `when String` and `when nil` leave dead" do
+      unreachable = harness.diagnostics.select { |d| d.rule == "flow.unreachable-clause" }
+      expect(unreachable.map(&:line)).to eq(marked_lines(harness, "# GENUINE-UNREACHABLE"))
+    end
+  end
+
   describe "fixtures/regex_global_narrowing.rb — C1 regex match-data global narrowing" do
     let(:harness) { harness_for("regex_global_narrowing") }
 

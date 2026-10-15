@@ -1,0 +1,20 @@
+---
+locals: {}
+assertions:
+  '1': nil
+  '2': String
+  '3': Dynamic[top]
+  '4': String?
+  '5': nil
+  '6': Integer
+  '7': 'false'
+  '8': 'true'
+  '9': AlwaysEqual
+  '10': nil
+  '11': String
+  '12': nil
+  '13': String
+  '14': 'false'
+  '15': '1'
+  '16': 'true'
+  '17': '1'

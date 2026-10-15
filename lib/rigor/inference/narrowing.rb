@@ -511,7 +511,8 @@ module Rigor
       # none of the condition shapes are recognised, both returned scopes equal the input
       # scope. The catalogue mirrors {.case_equality_target_class}: static class/module
       # constants narrow as `is_a?`; integer/float-endpoint ranges narrow to `Numeric`;
-      # string-endpoint ranges and regexp literals narrow to `String`.
+      # string-endpoint ranges and regexp literals narrow to `String`; a `nil`, `true` or
+      # `false` literal narrows as its class does ({.when_condition_class}).
       def case_when_scopes(subject, conditions, scope)
         # C1 — `case x when /re/` runs `/re/ === x`, which sets the regex match-data globals
         # exactly as a successful `=~` does. Narrow `$~`/`$&`/`$1..$N` on the clause body (the
@@ -2714,6 +2715,21 @@ module Rigor
           ]
         end
 
+        # The class a `when` condition narrows the subject to, as `is_a?` would, or nil when the condition is no class
+        # test Rigor reads: a class or module constant, a range or regexp literal ({.case_equality_target_class}),
+        # or (#1925) a `nil` / `true` / `false` literal. `nil === x` runs `NilClass#===`, which holds only for `nil`
+        # itself whatever the subject's class defines, and `nil` is `NilClass`'s only instance, so `when nil` is
+        # `when NilClass`; `true` and `false` likewise.
+        def when_condition_class(condition, scope)
+          lexical_class_name(condition, scope) || case_equality_target_class(condition) ||
+            SINGLETON_WHEN_LITERAL_CLASSES[unwrap_parens(condition).class]
+        end
+
+        SINGLETON_WHEN_LITERAL_CLASSES = {
+          Prism::NilNode => "NilClass", Prism::TrueNode => "TrueClass", Prism::FalseNode => "FalseClass"
+        }.freeze
+        private_constant :SINGLETON_WHEN_LITERAL_CLASSES
+
         # Maps a case-equality literal receiver to the class whose membership is implied by the
         # truthy edge. `Prism::ParenthesesNode` wrappers are transparently unwrapped (`(1..10)
         # === x` is parsed with the range inside parentheses).  Range literals: integer
@@ -2906,15 +2922,15 @@ module Rigor
         # narrowed type for the subject as if `condition === subject`, and accumulates them.
         # The body's narrowed type is the union across all conditions; the falsey type is the
         # running result after subtracting every condition's class. Conditions whose shape we
-        # cannot statically classify are treated as "no narrowing": the body falls back to the
-        # union of what we did learn (or the entry type when nothing learned), and the falsey
-        # edge is the entry type (because we cannot prove the unknown condition didn't match).
+        # cannot statically classify narrow neither edge: the body reads as
+        # {.case_when_body_type} says, and the falsey edge is the entry type.
         #
         # `[body type, next-clause type]` of a `when` clause's conditions over the subject type `current`.
         def case_when_types(scope, current, conditions)
           truthy_members = []
           falsey_type = current
           fully_narrowable = true
+          unread = false
 
           conditions.each do |condition|
             applied = apply_case_when_condition(scope, current, condition, falsey_type)
@@ -2923,12 +2939,24 @@ module Rigor
               falsey_type = applied[:falsey]
               fully_narrowable &&= applied[:fully_narrowable]
             else
+              unread = true
               fully_narrowable = false
             end
           end
 
-          truthy = truthy_members.empty? ? current : Type::Combinator.union(*truthy_members)
-          [truthy, fully_narrowable ? falsey_type : current]
+          [case_when_body_type(current, truthy_members, unread), fully_narrowable ? falsey_type : current]
+        end
+
+        # #1925 — the body type of a `when` clause. A clause whose conditions are all unread keeps the entry type. A
+        # clause mixing read conditions with an unread one reads `Dynamic[top]`: the body may run because the unread
+        # condition matched, so the read conditions' union is unsound (`when nil, ""` is not `nil`), and the entry
+        # type is wider than what reaches the body when the unread condition is itself a test
+        # (`when /a/, ->(v) { !v.nil? }` never enters with `nil`), so reading it would report a call no `nil` reaches.
+        def case_when_body_type(current, truthy_members, unread)
+          return current if truthy_members.empty?
+          return Type::Combinator.untyped if unread
+
+          Type::Combinator.union(*truthy_members)
         end
 
         # Per-condition rule. Returns `nil` when the condition shape is not recognised (caller
@@ -2943,7 +2971,7 @@ module Rigor
             return integer_literal_when_result(current, int_literal, falsey_acc)
           end
 
-          target = lexical_class_name(condition, scope) || case_equality_target_class(condition)
+          target = when_condition_class(condition, scope)
           return class_when_result(scope, current, target, falsey_acc) if target
 
           nil

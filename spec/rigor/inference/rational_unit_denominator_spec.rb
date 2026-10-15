@@ -38,10 +38,38 @@ RSpec.describe "Kernel#Rational with a unit denominator", type: :runner do
     RUBY
   end
 
-  it "types a Complex numerator as Rational (Ruby: Rational(Complex(1, 0), 1) is (1/1))" do
-    expect(dumped_types(<<~RUBY)).to eq(["Rational"])
+  it "types a Complex numerator as Rational | Complex (Ruby: Rational(Complex(1, 2), 1) is (1+2i))" do
+    expect(dumped_types(<<~RUBY)).to eq(["Complex | Rational"])
       def run
-        dump_type(Rational(Complex(rand(10), 0), 1))
+        dump_type(Rational(Complex(rand, rand(10)), 1))
+      end
+    RUBY
+  end
+
+  it "does not report a Complex-or-Rational result's real? as always true" do
+    result = analyze(<<~RUBY)
+      def run
+        r = Rational(Complex(rand, rand(10)), 1)
+        puts "real" if r.real?
+      end
+    RUBY
+    expect(result.diagnostics.map(&:rule)).not_to include("flow.always-truthy-condition")
+  end
+
+  it "types a BigDecimal numerator as Rational (it has to_r)" do
+    expect(dumped_types(<<~RUBY)).to eq(["Rational"])
+      require "bigdecimal"
+      def run
+        dump_type(Kernel.Rational(BigDecimal("1.5"), 1))
+      end
+    RUBY
+  end
+
+  it "types an Integer range or refinement numerator as Rational" do
+    expect(dumped_types(<<~RUBY)).to eq(%w[Rational Rational])
+      def run
+        dump_type(Rational(ARGV.size, 1))
+        dump_type(Rational(ARGV.first.to_s.to_i.abs, 1))
       end
     RUBY
   end

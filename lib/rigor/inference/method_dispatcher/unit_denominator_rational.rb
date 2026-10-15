@@ -5,28 +5,33 @@ require_relative "../../type"
 module Rigor
   module Inference
     module MethodDispatcher
-      # Issue #1357 — `Kernel#Rational(x, 1)` is a `Rational` for every `Float` / `Integer` / `Rational` /
-      # `Complex` `x`. CRuby's `nurat_convert` converts rather than returning the argument; only an argument
-      # that is already a `Rational` comes back as-is, and that is a `Rational` too. The core RBS spells the
-      # `1`-denominator form `[T < Numeric] (T value, 1) -> T`, which binds `T` to the argument's own class
-      # and read `Rational(f, 1)` as a `Float`. This answers the nominal `Rational` for those argument
-      # classes; any other argument (`BigDecimal`, a user `Numeric`) keeps the RBS answer.
+      # Issue #1357 — `Kernel#Rational(x, 1)` converts its argument. CRuby's `nurat_convert` returns a
+      # `Rational` for a `Float` / `Integer` / `Rational` / `String`-free numerator and for a `BigDecimal` (which
+      # has `to_r`; NaN and Infinity raise). A `Complex` is unwrapped only when its imaginary part is an exact
+      # zero, otherwise `a / 1` comes back, a `Complex`, so a `Complex` numerator answers `Rational | Complex`.
+      # The core RBS spells the `1`-denominator form `[T < Numeric] (T value, 1) -> T`, which binds `T` to the
+      # argument's own class and read `Rational(f, 1)` as a `Float`. Any other numerator (a user `Numeric`
+      # without `to_r`) keeps the RBS answer.
       module UnitDenominatorRational
         module_function
 
-        CLASSES = Set["Float", "Integer", "Rational", "Complex"].freeze
-        private_constant :CLASSES
+        CONVERTING = Set["Float", "Integer", "Rational", "BigDecimal"].freeze
+        private_constant :CONVERTING
 
-        # Answers `Rational`, or nil when the call is not the unit-denominator form.
+        # Answers `Rational` (or `Rational | Complex`), or nil when the call is not the unit-denominator form.
         def answer(method_name, args)
-          return nil unless method_name == :Rational && args.size >= 2
+          return nil unless method_name == :Rational && args.size.between?(2, 3)
           return nil if args.size == 3 && !exception_keyword?(args[2])
 
           denominator = args[1]
           return nil unless denominator.is_a?(Type::Constant) && denominator.value.eql?(1)
-          return nil unless numerator?(args.first)
 
-          Type::Combinator.nominal_of("Rational")
+          classes = numerator_classes(args.first)
+          return nil if classes.nil?
+
+          members = [Type::Combinator.nominal_of("Rational")]
+          members << Type::Combinator.nominal_of("Complex") if classes.include?(:complex)
+          Type::Combinator.union(*members)
         end
 
         # The trailing `exception:` keyword hash: a `HashShape` whose only key is `:exception`. Its value
@@ -35,13 +40,26 @@ module Rigor
           type.is_a?(Type::HashShape) && type.pairs.keys == [:exception]
         end
 
-        def numerator?(type)
+        # `[:converting]`, `[:complex]` or both for a recognised numerator; nil when any member is unknown.
+        def numerator_classes(type)
           case type
-          when Type::Union then type.members.all? { |member| numerator?(member) }
-          when Type::Constant then CLASSES.include?(type.value.class.name)
-          when Type::Nominal then CLASSES.include?(type.class_name) && type.type_args.empty?
-          else false
+          when Type::Union then union_classes(type)
+          when Type::IntegerRange then [:converting]
+          when Type::Refined then type.base.is_a?(Type::Nominal) ? numerator_classes(type.base) : nil
+          when Type::Constant then class_kind(type.value.class.name)
+          when Type::Nominal then type.type_args.empty? ? class_kind(type.class_name) : nil
           end
+        end
+
+        def union_classes(union)
+          kinds = union.members.map { |member| numerator_classes(member) }
+          kinds.any?(&:nil?) ? nil : kinds.flatten.uniq
+        end
+
+        def class_kind(name)
+          return [:complex] if name == "Complex"
+
+          CONVERTING.include?(name) ? [:converting] : nil
         end
       end
     end

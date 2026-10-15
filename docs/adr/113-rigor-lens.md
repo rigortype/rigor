@@ -195,6 +195,11 @@ review of the first reply, and a spike of the computation
 premises above do not hold on current code. The binding output contract is now
 [`docs/internal-spec/lens.md`](../internal-spec/lens.md); this section records what changed and why.
 
+- **Decision, narrowed.** "Every type it prints is the type `check` uses" holds for declaration facts
+  and diagnostics. An inferred type is a body's return with its parameters as declared or unknown; `check`
+  types such a body per call key, so the two need not be equal, and that is not a lens bug.
+- **`type-of` leaves this slice.** Moving `type-of` and hover onto this computation stays the goal, but
+  under #512's latency gates and after the producer exists; it is no longer part of #1083.
 - **WD2, computation.** The incremental snapshot is keyed by the run's roots, and a warm recheck with no
   change analyses nothing, so "a one-file `check`, and the next lens is warm" was not reachable. A lens
   roots its session at the configuration's `paths:`, as `check --incremental` does, forces its targets
@@ -214,10 +219,12 @@ premises above do not hold on current code. The binding output contract is now
   `typed`, `dynamic` (with an ADR-75 cause) or `unavailable` (with a reason). `inferred` means the
   body's return with its parameters as declared or unknown, not `check`'s per-call-key result.
   WD4's "until WD5" is resolved for `sig/` against inline contracts (#1075); `extrbs` stays reserved
-  until #1073.
-- **WD6, anchors.** The hashed material is the contract comment lines Rigor recognises (`#:`, `@rbs`,
-  `@extrbs` and their continuation lines), not the whole leading comment block, so documentation prose
-  does not move an anchor. The file digest still covers every byte.
+  until #1073. WD4's `%a{rigor:v1:…}` "where a refinement applies" narrows to authored annotations:
+  sig-gen does not emit inferred refinements yet, so neither does a lens.
+- **WD6, anchors.** The hashed material is the leading contract comments (rbs-inline's annotation
+  grammar plus `@extrbs`, and their continuation lines), not the whole leading comment block, so prose
+  above a declaration does not move its anchor. The declaration's own bytes still include its body. The
+  file digest covers every byte.
 - **WD1, lifecycle.** An experimental consumer reading `lens/v0` does not freeze it. Rigor ships
   `lens/v1` in a release first; a ZARD release then requires it. Until then `rigor lens` and its flags
   are outside the compatibility contract.

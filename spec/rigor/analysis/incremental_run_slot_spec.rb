@@ -1094,4 +1094,54 @@ RSpec.describe Rigor::Analysis::IncrementalRunSlot do
     )
     expect(served).to be_nil
   end
+
+  # Issue #1579 review — a fact store that cannot be read makes the fact surface opaque as a whole. The answer such
+  # a run computes must not be written as the slot a later null run is served from. The control arm proves the same
+  # project does write one when the store reads.
+  describe "an unreadable fact store" do
+    # A named constant: the loader's blueprint needs the class name, which an anonymous class does not have.
+    let(:store_probe) do
+      stub_const("StoreProbePlugin", Class.new(Rigor::Plugin::Base) { manifest(id: "store-probe", version: "0.1.0") })
+    end
+
+    # Services builds its store from the constant at construction time, so this subclass is the store a run reads.
+    let(:unreadable_store) do
+      stub_const("Rigor::Plugin::FactStore", Class.new(Rigor::Plugin::FactStore) do
+        def each_fact(&) = raise(IOError, "fact store gone")
+      end)
+    end
+
+    # The probe is listed under `plugins:`, or its requirer is never called and the registry holds no fact store.
+    def session_run(plugin:)
+      config = configuration("plugins" => ["store-probe"])
+      session = Rigor::Analysis::IncrementalSession.new(
+        configuration: config, paths: nil, cache_store: Rigor::Cache::Store.new(root: cache_root),
+        plugin_requirer: requirer_for(plugin)
+      )
+      guarded_run_incremental(
+        session,
+        snapshot: Rigor::Cache::IncrementalSnapshot.new(root: cache_root),
+        fingerprint: Rigor::Cache::IncrementalSnapshot.fingerprint(configuration: config, roots: config.paths)
+      )
+      session
+    end
+
+    it "writes a slot when the fact store reads (the control)" do
+      write_project
+      session = session_run(plugin: store_probe)
+
+      expect(session.send(:run_slot_writable?)).to be(true)
+      expect(slot_entries).not_to be_empty
+    end
+
+    it "writes no slot when the fact store cannot be read, so the next null run is not served from it" do
+      write_project
+      unreadable_store
+      session = session_run(plugin: store_probe)
+
+      expect(session.fact_store_unreadable?).to be(true)
+      expect(session.send(:run_slot_writable?)).to be(false)
+      expect(slot_entries).to be_empty
+    end
+  end
 end

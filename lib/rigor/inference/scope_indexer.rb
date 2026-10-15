@@ -7863,7 +7863,7 @@ module Rigor
       # it walks as a fresh body with no owner and records nothing for the enclosing class; the receiver and the
       # arguments are walked where they stand.
       def walk_anonymous_meta_visibilities(node, qualified_prefix, in_singleton_class, current_visibility,
-                                           accumulator, def_owner_prefix, singleton_cref:, defs_singleton:)
+                                           accumulator, def_owner_prefix, singleton_cref:, defs_singleton:) # rubocop:disable Metrics/ParameterLists
         [node.receiver, *node.arguments&.arguments].each do |part|
           walk_method_visibilities(part, qualified_prefix, in_singleton_class, current_visibility, accumulator,
                                    def_owner_prefix, singleton_cref: singleton_cref, defs_singleton: defs_singleton)

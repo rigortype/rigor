@@ -22,9 +22,10 @@ RSpec.describe "singleton_class calls with literal names (#1906)", type: :runner
 
   def arity(klass, name) = "wrong number of arguments to `#{name}' on #{klass} (given 2, expected 1)"
 
-  # `D.own(1, 2)` and `M.own(1, 2)` raise; `D.o2(1)` and `M.o3(1)` return 1.
+  # `D.own(1, 2)`, `M.own(1, 2)` and `Q.keep(1, 2)` raise; `D.o2(1)` and `M.o3(1)` return 1, and `Q.own(1, 2)` runs
+  # `other`'s body. `define_method`'s second argument is the body, not a name, so it need not be a literal.
   it "keeps checking a singleton method the call does not rewrite" do
-    expect(arity_rows("app.rb" => <<~RUBY)).to eq([["app.rb", 9, arity("D", "own")], ["app.rb", 11, arity("M", "own")]])
+    expect(arity_rows("app.rb" => <<~RUBY)).to eq(
       class D
         def self.own(a) = a
         singleton_class.alias_method :o2, :own
@@ -33,11 +34,21 @@ RSpec.describe "singleton_class calls with literal names (#1906)", type: :runner
         def self.own(a) = a
         singleton_class.alias_method "o3", "own"
       end
+      class Q
+        def self.own(a) = a
+        def self.other(a, b) = a
+        def self.keep(a) = a
+        singleton_class.define_method(:own, singleton_class.instance_method(:other))
+      end
       D.own(1, 2)
       D.o2(1)
       M.own(1, 2)
       M.o3(1)
+      Q.own(1, 2)
+      Q.keep(1, 2)
     RUBY
+      [["app.rb", 15, arity("D", "own")], ["app.rb", 17, arity("M", "own")], ["app.rb", 20, arity("Q", "keep")]]
+    )
   end
 
   # Ruby 4.0.5 answers `1`, `[1, 2]`, a `NoMethodError` and `1`: the rewritten name runs another body or none.

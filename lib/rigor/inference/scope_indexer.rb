@@ -7262,8 +7262,7 @@ module Rigor
       def singleton_class_rewritten_names(node)
         arguments = node.arguments&.arguments || []
         rewritten = case node.name
-                    when :alias_method then arguments.size == 2 && arguments.first(1)
-                    when :define_method then (1..2).cover?(arguments.size) && arguments.first(1)
+                    when :alias_method, :define_method then arguments.first(1)
                     when :remove_method then arguments
                     else ATTR_MACROS.include?(node.name) && arguments
                     end

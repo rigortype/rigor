@@ -668,6 +668,145 @@ RSpec.describe Rigor::Analysis::Reachability do
       end
     end
 
+    # Issue #1878 — `self` in a method is whichever subclass, includer or extender it runs on, and in
+    # `Other.instance_eval { }` it is `Other`. Reading the call at the enclosing declaration alone left a
+    # constant only the runtime receiver declares a false candidate. Every fixture holds `Unrelated::X`, which
+    # nothing reaches, so a search for "any constant named X" would fail it.
+    describe "a literal const_get on self reaches the runtime receiver (#1878)" do
+      def dead(files)
+        report_for(files.merge("lib/z.rb" => "class Unrelated\n  class X; end\nend\n")).candidates.map(&:fqn)
+      end
+
+      it "reaches a subclass's constant from a singleton method and from self.class" do
+        found = dead({ "lib/a.rb" => <<~RUBY, "lib/b.rb" => <<~RUBY2, "lib/main.rb" => "Base.x\nD.new.y\n" })
+          class Base
+            def self.x = const_get(:X1)
+            def y = self.class.const_get(:X2)
+          end
+        RUBY
+          class D < Base
+            class X1; end
+            class X2; end
+          end
+        RUBY2
+        expect(found).to eq(%w[Unrelated Unrelated::X])
+      end
+
+      it "reaches an includer's constant from a module instance method" do
+        found = dead({ "lib/a.rb" => "module Mix\n  def z = self.class.const_get(\"X3\")\nend\n",
+                       "lib/b.rb" => "class K\n  include Mix\n  class X3; end\nend\n",
+                       "lib/main.rb" => "K.new.z\n" })
+        expect(found).to eq(%w[Unrelated Unrelated::X])
+      end
+
+      it "reaches an extender's constant from a module method, and a prepender's" do
+        found = dead({ "lib/a.rb" => "module Ext\n  def w = const_get(:X4)\nend\nmodule Pre\n  " \
+                                     "def v = self.class.const_get(:X5)\nend\n",
+                       "lib/b.rb" => "class K\n  extend Ext\n  prepend Pre\n  class X4; end\n  " \
+                                     "class X5; end\nend\n",
+                       "lib/main.rb" => "K.w\n" })
+        expect(found).to eq(%w[Unrelated Unrelated::X])
+      end
+
+      it "follows a subclass of a subclass and a module included through a module" do
+        found = dead({ "lib/a.rb" => <<~RUBY, "lib/main.rb" => "Base.x\nOuterMix.w\n" })
+          class Base
+            def self.x = const_get(:Deep)
+          end
+          class Mid < Base; end
+          class Leaf < Mid
+            class Deep; end
+          end
+          module OuterMix
+            def self.w = nil
+            def u = self.class.const_get(:ViaMod)
+          end
+          module InnerMix
+            include OuterMix
+          end
+          class Host
+            include InnerMix
+            class ViaMod; end
+          end
+        RUBY
+        expect(found).to eq(%w[InnerMix Mid Unrelated Unrelated::X])
+      end
+
+      it "reaches the subclass's constant with inherit = false and with a String name" do
+        found = dead({ "lib/a.rb" => "class Base\n  def self.x = const_get(\"X1\", false)\nend\n" \
+                                     "class Sub < Base\n  class X1; end\nend\n",
+                       "lib/main.rb" => "Base.x\n" })
+        expect(found).to eq(%w[Unrelated Unrelated::X])
+      end
+
+      it "reaches a namespaced literal declared under the runtime receiver" do
+        found = dead({ "lib/a.rb" => "class Base\n  def self.x = const_get(\"Ns::Leaf\")\nend\n" \
+                                     "class Sub < Base\n  module Ns\n    class Leaf; end\n  end\nend\n",
+                       "lib/main.rb" => "Base.x\n" })
+        expect(found).to eq(%w[Unrelated Unrelated::X])
+      end
+
+      it "does not search descendants for a call directly in a class body" do
+        found = dead({ "lib/a.rb" => "class Base\n  const_get(:Own)\n  class Own; end\nend\n" \
+                                     "class Sub < Base\n  class Own; end\nend\n",
+                       "lib/main.rb" => "Base\n" })
+        expect(found).to eq(%w[Sub Sub::Own Unrelated Unrelated::X])
+      end
+
+      it "still reports a constant on an unrelated class and a non-descendant" do
+        found = dead({ "lib/a.rb" => "class Base\n  def self.x = const_get(:Mine)\nend\n" \
+                                     "class Stranger\n  class Mine; end\nend\n",
+                       "lib/main.rb" => "Base.x\n" })
+        expect(found).to eq(%w[Stranger Stranger::Mine Unrelated Unrelated::X])
+      end
+
+      it "keeps reading a non-literal argument as before" do
+        found = dead({ "lib/a.rb" => "class Base\n  def self.x(n) = const_get(n)\nend\n" \
+                                     "class Sub < Base\n  class Q; end\nend\n",
+                       "lib/main.rb" => "Base.x(:Q)\n" })
+        expect(found).to eq(%w[Sub Sub::Q Unrelated Unrelated::X])
+      end
+    end
+
+    describe "a literal const_get inside an explicit eval block reaches its receiver (#1878)" do
+      it "reads instance_eval, class_eval and module_eval on a constant at that constant" do
+        found = report_for({ "lib/a.rb" => <<~RUBY, "lib/main.rb" => "Driver.go\n" }).candidates.map(&:fqn)
+          class Other
+            class E1; end
+            class E2; end
+            class E3; end
+            class Sym; end
+          end
+          class Driver
+            def self.go
+              Other.instance_eval { const_get(:E1) }
+              Other.class_eval { self.const_get("E2") }
+              Other.module_eval do
+                [1].each { const_get(:E3) }
+              end
+            end
+          end
+          class Unrelated
+            class E1; end
+          end
+        RUBY
+        expect(found).to eq(%w[Other::Sym Unrelated Unrelated::E1])
+      end
+
+      it "reads an inherit = false literal at the eval receiver" do
+        found = report_for({ "lib/a.rb" => <<~RUBY, "lib/main.rb" => "Driver.go\n" }).candidates.map(&:fqn)
+          class Other
+            class E4; end
+          end
+          class Driver
+            class E4; end
+            def self.go = Other.instance_eval { const_get(:E4, false) }
+          end
+        RUBY
+        expect(found).to eq(%w[Driver::E4])
+      end
+    end
+
     describe "an interpolated const_get searches the receiver's ancestors (#1761)" do
       let(:family) do
         <<~RUBY

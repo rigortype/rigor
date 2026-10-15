@@ -265,7 +265,13 @@ under them are. `const_get` looks the name up from its receiver, so
 and mixins and at the top level as well, unless the call passes `false`
 as its second argument. A literal `const_get("Handler")` is a reference
 looked up in the same order, so it names `Migration::Handler` when
-that exists rather than a top-level `Handler`. A name built into a
+that exists rather than a top-level `Handler`. When the receiver is
+`self` or `self.class` inside a method, the call may run on a subclass,
+or on a class that includes, prepends or extends the module, so a
+`Handler` declared in any of those is kept reachable too; a call
+written directly in a class body is not widened that way. Inside
+`Other.instance_eval { }` (or `class_eval`, `module_eval` and their
+`_exec` forms) the receiver is `Other`. A name built into a
 local variable first (`name = "V#{version}"; const_get(name)`) is read
 the same way. A
 class name appearing as a string in a `.yml`, `.json` or template file

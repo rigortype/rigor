@@ -57,8 +57,15 @@ module Rigor
         # matching. A literal `name` keeps `within` too, and {Graph} looks it up from there (#1761). `inherit`
         # is false when the call passes `inherit = false`, which confines the lookup to the receiver itself;
         # otherwise the receiver's ancestors are searched as well. `role` is the referring file's (WD8).
-        DynamicUse = Data.define(:name, :prefix, :reason, :site, :path, :line, :scope, :within, :inherit, :role) do
-          def initialize(scope: :namespace, within: nil, inherit: true, role: :production, **) = super
+        #
+        # `receiver_open` is true when `within` is the enclosing declaration standing for a runtime `self` that
+        # may be one of its descendants (#1878): a `def self.x = const_get(:X)` runs on whichever subclass it
+        # is called on, and a module's method on whichever class includes, prepends or extends it. {Graph}
+        # then looks the literal name up in those descendants as well.
+        DynamicUse = Data.define(:name, :prefix, :reason, :site, :path, :line, :scope, :within, :inherit, :role,
+                                 :receiver_open) do
+          def initialize(scope: :namespace, within: nil, inherit: true, role: :production, receiver_open: false,
+                         **) = super
 
           # Whether this site's evidence reaches `fqn`.
           def taints?(fqn)
@@ -251,10 +258,21 @@ module Rigor
                               module_exec instance_eval instance_exec].freeze
           private_constant :SELF_REBINDING
 
+          # The `*_eval` / `*_exec` family: on a constant receiver, the block's `self` IS that constant (#1878).
+          EVAL_FAMILY = %i[class_eval module_eval class_exec module_exec instance_eval instance_exec].freeze
+          private_constant :EVAL_FAMILY
+
           # A call is a dynamic-resolution site, and its block may run with another `self` ({#rebinds_self?}).
           def record_call(node, nesting)
             record_dynamic_use(node, nesting)
-            @rebinding_blocks << node.block if node.block.is_a?(Prism::BlockNode) && rebinds_self?(node)
+            return unless node.block.is_a?(Prism::BlockNode) && rebinds_self?(node)
+
+            @rebinding_blocks << node.block
+            @eval_receivers[node.block] = receiver_reference(node.receiver, nesting) if eval_on_constant?(node)
+          end
+
+          def eval_on_constant?(call)
+            EVAL_FAMILY.include?(call.name) && constant_receiver?(call.receiver)
           end
 
           # Rigor knows the argument's shape, which is the whole reason this can be tiered rather than treated
@@ -290,6 +308,7 @@ module Rigor
             bounds.each do |prefix, scope, within|
               @dynamic_uses << DynamicUse.new(name: name, prefix: prefix, scope: scope, within: within,
                                               inherit: anchors.include?(TOP_LEVEL), role: @role,
+                                              receiver_open: !within.nil? && runtime_self?(node),
                                               site: site(node), path: @path, line: node.location.start_line,
                                               reason: reason)
             end
@@ -318,12 +337,21 @@ module Rigor
             end
           end
 
+          # Whether a `const_get` on `self` can run on a descendant of the enclosing declaration (#1878): in a
+          # method, or a block that rebinds `self`, `self` is whichever subclass or includer the method was
+          # called on. Directly in a class body, or inside `Other.class_eval { }`, it is the declaration itself.
+          def runtime_self?(node)
+            node.name == :const_get && self_receiver?(node.receiver) && @eval_receiver.nil? &&
+              !(@self_kind == :declaration && !@in_block && !@self_rebound)
+          end
+
           # Where a `const_get` on `self` (implicit, `self`, or `self.class`) looks its name up: `:declaration`
           # when `self` is the enclosing class or module, `:top_level` when it is `Class` or a singleton class,
           # `:unknown` otherwise. A block's `self` is unknown — `included do`, `class_eval` and an instance-
           # evaluated DSL block (`configure { }`, an RSpec `describe` body) all rebind it, and the walk cannot
           # tell those from an `each` block. So is the `self` of a `def Other.x` or of a `class << Other` body.
           def self_lookup(receiver)
+            return :declaration if @eval_receiver && !receiver.is_a?(Prism::CallNode)
             return :unknown if @in_block || @self_rebound
 
             class_of_self = receiver.is_a?(Prism::CallNode)
@@ -345,7 +373,7 @@ module Rigor
             receiver = node.receiver
             namespaces =
               if self_receiver?(receiver)
-                self_references(node, nesting)
+                eval_self_references(receiver) || self_references(node, nesting)
               elsif constant_receiver?(receiver)
                 [receiver_reference(receiver, nesting)]
               else
@@ -355,6 +383,11 @@ module Rigor
 
             inherit = node.arguments.arguments[1]
             inherit.is_a?(Prism::FalseNode) ? namespaces : namespaces + [TOP_LEVEL]
+          end
+
+          # Inside `Other.class_eval { }` an implicit or `self` receiver is `Other` (#1878).
+          def eval_self_references(receiver)
+            [@eval_receiver] if @eval_receiver && !receiver.is_a?(Prism::CallNode)
           end
 
           # The enclosing declaration as a rooted {Reference}, so {Graph} anchors it as it anchors a constant
@@ -478,6 +511,10 @@ module Rigor
             # `class_eval` or anonymous `Class.new` block. See {#rebinds_self?}.
             @self_rebound = false
             @rebinding_blocks = Set.new.compare_by_identity
+            # The constant receiver of each `*_eval` block, and the one the walk is inside (nil when `self` is not
+            # such a constant). See {#eval_on_constant?}.
+            @eval_receivers = {}.compare_by_identity
+            @eval_receiver = nil
             # What `self` is here, for {#self_lookup}: `:declaration` in a class or module body (and at the top
             # level), `:singleton_method` in a `def self.x` or a def in a `class << self` body,
             # `:instance_method` in any other def, `:singleton_class` in a `class << self` body outside its
@@ -602,13 +639,14 @@ module Rigor
           end
 
           def in_local_scope(scope, self_kind = self_kind_in(scope))
-            saved = [@local_scope, @block_params, @self_kind]
+            saved = [@local_scope, @block_params, @self_kind, @eval_receiver]
+            @eval_receiver = nil
             @local_scope = scope
             @block_params = Set.new.freeze
             @self_kind = self_kind
             yield
           ensure
-            @local_scope, @block_params, @self_kind = saved
+            @local_scope, @block_params, @self_kind, @eval_receiver = saved
           end
 
           # The {#self_lookup} kind inside `scope`, from the kind around it. Only a receiver-less def or a `def
@@ -642,14 +680,17 @@ module Rigor
           end
 
           def in_block(block)
-            saved = [@block_params, @self_rebound, @in_block]
+            saved = [@block_params, @self_rebound, @in_block, @eval_receiver]
             names = block.parameters ? LocalValues.bindings(block.parameters) : []
             @block_params = (@block_params | names).freeze unless names.empty?
-            @self_rebound ||= @rebinding_blocks.include?(block)
+            if @rebinding_blocks.include?(block)
+              @self_rebound = true
+              @eval_receiver = @eval_receivers[block]
+            end
             @in_block = true
             yield
           ensure
-            @block_params, @self_rebound, @in_block = saved
+            @block_params, @self_rebound, @in_block, @eval_receiver = saved
           end
 
           def site(node)

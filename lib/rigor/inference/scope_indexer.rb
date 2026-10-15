@@ -7226,7 +7226,7 @@ module Rigor
       # receiver, else the constant. True when it tainted.
       def singleton_class_rewrite_tainted?(node, qualified_prefix, current_class, accumulator)
         receiver = node.receiver
-        return false unless singleton_class_receiver?(receiver) && surface_rewriting_call?(node)
+        return false unless singleton_class_of_receiver?(receiver) && surface_rewriting_call?(node)
         return false if singleton_class_named_call?(node)
 
         owner = singleton_class_owner(node, receiver.receiver, qualified_prefix, current_class)
@@ -7236,7 +7236,8 @@ module Rigor
         true
       end
 
-      def singleton_class_receiver?(receiver)
+      # A bare, `self.` or constant receiver's `singleton_class` call.
+      def singleton_class_of_receiver?(receiver)
         receiver.is_a?(Prism::CallNode) && receiver.name == :singleton_class && receiver.arguments.nil?
       end
 
@@ -7844,7 +7845,7 @@ module Rigor
           constant_receiver_candidates(receiver, qualified_prefix).each do |name|
             record_surface_mark(tables, name, Scope::DiscoveryIndex::ENVELOPE_DYNAMIC_MARK)
           end
-        elsif singleton_class_receiver?(receiver) && surface_rewriting_call?(node) && singleton_class_named_call?(node)
+        elsif singleton_class_of_receiver?(receiver) && singleton_class_named_call?(node)
           record_singleton_class_names(node, receiver.receiver, qualified_prefix, tables)
         end
       end

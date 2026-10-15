@@ -18,7 +18,7 @@ module Rigor
       # <expr>`, `K = Class.new(Parent)`, an external superclass RBS does not declare), a class some constant write
       # may have made (`Point = Struct.new(:x)`, whose superclass the tables do not record). A singleton level whose
       # class records an `extend` the chain did not place there is read as `mixed` ({.skipped_extend?}).
-      module ClassObject
+      module ClassObject # rubocop:disable Metrics/ModuleLength
         EMPTY = [].freeze
         # The classes on every class object's lookup: the instance sides that hold `Class#new`, `Module#name` and
         # `Object#tap`. A class no table places among them may still be one a class object reaches only when it is a
@@ -182,7 +182,9 @@ module Rigor
         # `append_features` extends the includer with `ClassMethods`)? The hooks' negative method edges re-check the
         # reader when a new file adds one.
         def hooked?(scope, name)
-          Analysis::DependencyRecorder.read_keys(Scope::ResolutionChain.hook_keys(name)) if Analysis::DependencyRecorder.active?
+          if Analysis::DependencyRecorder.active?
+            Analysis::DependencyRecorder.read_keys(Scope::ResolutionChain.hook_keys(name))
+          end
           return true if Scope::ResolutionChain::Relevance::HOOKS.any? do |hook|
             scope.discovered_method?(name, hook, :singleton)
           end

@@ -609,8 +609,8 @@ RSpec.describe "Typing calls through Ruby refinements (#1664)", type: :runner do
   # module extending `ActiveSupport::Concern` (not analysed here, whose `append_features` extends the includer with
   # `ClassMethods`). Ruby 4.0.5 prints `"users"` for each (with ActiveSupport loaded for the last), never the
   # refinement's `:sym`; a class including a hook-free module keeps the refinement's answer.
-  it "answers Dynamic[top] where an ancestor's hook may install the class object's method another way" do
-    expect(dumps(<<~RUBY)).to eq(["Dynamic[top]"] * 6 + [":sym"])
+  it "answers Dynamic[top] where an ancestor's hook may install the class object's method another way" do # rubocop:disable RSpec/ExampleLength -- one program, seven witnessed shapes
+    expect(dumps(<<~RUBY)).to eq((["Dynamic[top]"] * 6) + [":sym"])
       module TN
         refine(Object) { def table_name = :sym }
       end

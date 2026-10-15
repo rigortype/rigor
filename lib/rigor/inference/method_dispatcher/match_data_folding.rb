@@ -35,8 +35,8 @@ module Rigor
       #   beginless),
       # - the slice is empty.
       #
-      # K is read from `$1`..`$9` only: `Scope#forget_match_globals` does not clear `$10` and above (#1384), so a
-      # binding there may belong to an earlier match.
+      # K is read from `$1`..`$9` only, a deliberate cap: the fold declines past nine groups rather than widen its
+      # reach. `Scope#forget_match_globals` clears `$10` and above too (#1384), so a binding there is never stale.
       module MatchDataFolding
         MAX_GROUP_GLOBAL = 9
         private_constant :MAX_GROUP_GLOBAL

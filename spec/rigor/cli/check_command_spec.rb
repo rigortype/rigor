@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "fileutils"
 require "json"
 require "stringio"
 require "tmpdir"
@@ -989,6 +990,70 @@ RSpec.describe Rigor::CLI::CheckCommand do
         "  plugin fact surface: opaque (fp-opaque: no incremental fingerprint surface; sidekiq: producer " \
         "worker_index has a value the incremental fingerprint cannot digest (a Proc); fact store: could not be read)\n"
       )
+    end
+  end
+
+  # Issue #1895 — `disable: [all]` reaches the built-in check-rule rows in every run shape, including the one no
+  # per-file filter sees: the `effect.annotations-unchecked` residual, positioned at a signature file and recomputed
+  # on a cache hit. The exit status follows the filtered set. The run-level rows outside the check-rule catalogue
+  # are not reached (the diagnostic policy keeps them on `severity_overrides:`).
+  describe "config `disable: [all]` over check-rule rows" do
+    def write_project(disable)
+      File.write(".rigor.yml", "paths: [clean.rb]\ndisable: #{disable}\n")
+      File.write("clean.rb", "x = 1\n")
+      FileUtils.mkdir_p("sig")
+      File.write("sig/widget.rbs", "class Widget\n  %a{pure}\n  def price: () -> Integer\nend\n")
+    end
+
+    [["--workers", "0"], ["--workers", "2"]].each do |workers|
+      it "drops the residual row and follows it in the exit status under #{workers.join(' ')}" do
+        write_project("[]")
+        status, out, = run(["--no-cache", "--no-ci-detect", "--no-stats", "--fail-on", "info", *workers, "clean.rb"])
+        expect(status).to eq(1)
+        expect(out).to include("[effect.annotations-unchecked]")
+
+        write_project("[all]")
+        status, out, = run(["--no-cache", "--no-ci-detect", "--no-stats", "--fail-on", "info", *workers, "clean.rb"])
+        expect(status).to eq(0)
+        expect(out).not_to include("[effect.annotations-unchecked]")
+      end
+    end
+
+    it "drops the residual row on a warm `--incremental` run" do
+      write_project("[all]")
+      run(["--no-ci-detect", "--no-stats", "--incremental", "clean.rb"])
+      status, out, err = run(["--no-ci-detect", "--no-stats", "--fail-on", "info", "--incremental", "clean.rb"])
+
+      expect(err).to include("--incremental warm")
+      expect(status).to eq(0)
+      expect(out).not_to include("[effect.annotations-unchecked]")
+    end
+
+    it "drops the residual row on a run served whole from the run-result cache" do
+      require "rigor/analysis/run_cache_probe"
+      write_project("[all]")
+      served = []
+      allow(Rigor::Analysis::RunCacheProbe).to receive(:new).and_wrap_original do |original, **kwargs|
+        probe = original.call(**kwargs)
+        allow(probe).to(receive(:serve).and_wrap_original { |serve, *args| serve.call(*args).tap { served << it } })
+        probe
+      end
+
+      run(["--no-ci-detect", "--no-stats", "clean.rb"])
+      status, out, = run(["--no-ci-detect", "--no-stats", "--fail-on", "info", "clean.rb"])
+
+      expect(served.last).not_to be_nil
+      expect(status).to eq(0)
+      expect(out).to include("No diagnostics")
+    end
+
+    it "leaves the plugin loader's load-error row, and the exit status it sets, under `disable: [load-error, all]`" do
+      File.write(".rigor.yml", "paths: [clean.rb]\nplugins: [rigor-no-such-plugin-1895]\ndisable: [load-error, all]\n")
+      File.write("clean.rb", "x = 1\n")
+      status, out, = run(["--no-cache", "--no-ci-detect", "--no-stats", "clean.rb"])
+
+      expect(status).to eq(1)
+      expect(out).to include("[plugin_loader.load-error]")
     end
   end
 end

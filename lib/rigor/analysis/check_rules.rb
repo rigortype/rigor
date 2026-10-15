@@ -79,19 +79,8 @@ module Rigor
       # runtime one and `def.override-visibility-reduced` cannot prove a reduction.
       IMPLICITLY_PRIVATE_METHODS = (LIFECYCLE_HOOKS + %i[respond_to_missing?]).freeze
 
-      # Resolves a user-supplied rule token (`undefined-method`,
-      # `call.undefined-method`, or the family wildcard `call`)
-      # to the set of canonical rule identifiers it disables.
-      # Returns `nil` for `"all"` (the existing wildcard meaning
-      # "every rule"), or for unknown tokens.
-      def self.resolve_rule_token(token)
-        return nil if token == "all"
-        return [LEGACY_RULE_ALIASES.fetch(token)] if LEGACY_RULE_ALIASES.key?(token)
-        return PRE_EVAL_RULES if token == "pre-eval"
-        return ALL_RULES.select { |r| r.start_with?("#{token}.") } if RULE_FAMILIES.include?(token)
-
-        ALL_RULES.include?(token) ? [token] : []
-      end
+      # The token expansion (`resolve_rule_token` / `expand_rule_tokens` / `expand_token`) lives in the light
+      # `check_rules/rule_ids.rb`, so {SeverityStamp} can apply the `disable:` list on the engine-free hit path.
 
       module_function
 
@@ -507,7 +496,7 @@ module Rigor
         diagnostics.reject do |diagnostic|
           rule = diagnostic.rule
           next false if rule.nil?
-          next true if disabled.include?(rule)
+          next true if config_disabled?(rule, disabled)
           next true if file_suppressions.include?("all") || file_suppressions.include?(rule)
 
           line_rules = line_suppressions[diagnostic.line]
@@ -702,24 +691,6 @@ module Rigor
           rule: RULE_SUPPRESSION_EMPTY,
           source_family: :builtin
         )
-      end
-
-      # Expands a list of user-supplied rule tokens into the
-      # canonical-id set per ADR-8 § "Backward compatibility".
-      # `disabled_rules` accepts unprefixed legacy names
-      # (`undefined-method`), canonical names
-      # (`call.undefined-method`), and family wildcards (`call`).
-      def expand_rule_tokens(tokens)
-        Array(tokens).each_with_object(Set.new) do |token, set|
-          set.merge(expand_token(token.to_s))
-        end
-      end
-
-      def expand_token(token)
-        return ["all"] if token == "all"
-
-        resolved = resolve_rule_token(token)
-        resolved.nil? || resolved.empty? ? [token] : resolved
       end
 
       # rubocop:disable-next Metrics/ClassLength

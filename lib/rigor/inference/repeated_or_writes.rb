@@ -424,9 +424,6 @@ module Rigor
           end
         end
 
-        # The bodies whose variables are not the enclosing body's, so their writes say nothing about its roots.
-        CLASS_BODY_NODES = Set[Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode].freeze
-
         # The tags under which two different literal keys name different slots of any receiver.
         DISTINCT_TAGS = Set[:symbol, :string, :index].freeze
 
@@ -699,7 +696,9 @@ module Rigor
             end
           end
 
-          # Each variable root the body writes, `:hash` when every write stores a new `Hash`.
+          # Each variable root the body writes, `:hash` when every write stores a new `Hash`. A nested `def` is skipped;
+          # a `class` / `module` body is not, so a same-named variable written there only makes the answer `:other`,
+          # the side that keeps the mark.
           def root_writes
             table = {}
             collect_writes(@body, table)
@@ -707,7 +706,7 @@ module Rigor
           end
 
           def collect_writes(node, table)
-            return if node.is_a?(Prism::DefNode) || CLASS_BODY_NODES.include?(node.class)
+            return if node.is_a?(Prism::DefNode)
 
             kind = Forms::VARIABLE_KINDS[node.class]
             if kind && !Forms::READ_NODES.include?(node.class)

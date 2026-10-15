@@ -2016,7 +2016,7 @@ module Rigor
           analyze_file: ->(path, environment) { analyze_file(path, environment) },
           restored_run_level_rows: @restored_run_level_rows,
           feature_sources: -> { required_feature_sources },
-          plugin_prepare: ->(registry) { @pre_passes.prepare_registry(registry) }
+          plugin_prepare: -> { @pre_passes.prepare_throwaway_registry }
         )
         @diagnostic_aggregator = DiagnosticAggregator.new(
           configuration: @configuration,

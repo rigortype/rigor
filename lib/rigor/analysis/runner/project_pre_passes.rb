@@ -251,10 +251,22 @@ module Rigor
           registry
         end
 
-        # Issue #1541 — runs `#prepare` on a registry the pre-pass left unprepared (a pooled run's) and returns
-        # its rows. For the coordinator's empty-closure branch only: it dispatches no worker to do it.
-        def prepare_registry(registry)
-          plugin_prepare_diagnostics(registry)
+        # Issue #1541 — what a pooled run's workers would have produced from `#prepare`, for the coordinator's
+        # empty-closure branch, which dispatches none: the `#prepare` error rows and the run-scoped
+        # registrations (`#disclose_once` / `#emit_once`) made there. It runs on a THROWAWAY registry, so
+        # nothing `#prepare` records on a plugin instance (a trust refusal, say) reaches the coordinator-side
+        # instances {DiagnosticAggregator} reads — a pooled cold run never shows those either.
+        # @return [Array(Array<Diagnostic>, Array<Hash>)] the rows and the disclosure records.
+        def prepare_throwaway_registry
+          registry = load_plugins
+          rows = plugin_prepare_diagnostics(registry)
+          records = registry.plugins.flat_map do |plugin|
+            plugin_id = safe_plugin_id(plugin)
+            Array(plugin.run_disclosure_records).map { |record| record.merge(plugin_id: plugin_id) }
+          rescue StandardError
+            []
+          end
+          [rows, records]
         end
 
         # Returns the per-run shared `Plugin::FactStore` instance. All loaded plugins share this store

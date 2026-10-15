@@ -614,10 +614,10 @@ module Rigor
 
       # ADR-88 WD1 — the plugin fact-surface fingerprint for this invocation. For a SEQUENTIAL run it is read
       # post-hoc from the analysis runner's already-prepared registry (no second `#prepare`, producers already
-      # validated during analysis). A POOLED run's main process skips `#prepare`, so its registry carries no
-      # published facts — there it falls back to the always-sequential probe. Both paths compute the identical
-      # digest for a given fact surface, so the reuse decision is worker-count-independent (the parity spec
-      # asserts this).
+      # validated during analysis). A POOLED run's main process does not run `#prepare` on it (its workers do),
+      # so its registry carries no published facts — there it falls back to the always-sequential probe. Both
+      # paths compute the identical digest for a given fact surface, so the reuse decision is worker-count-independent
+      # (the parity spec asserts this).
       def compute_plugin_fact_fingerprint(registry = prepared_plugin_registry)
         PluginFactFingerprint.from_registry(registry)
       end

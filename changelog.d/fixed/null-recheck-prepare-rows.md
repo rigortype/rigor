@@ -1,1 +1,1 @@
-- **[rigor check]** A nothing-changed `--incremental --workers N` recheck now keeps a plugin's `prepare` error row instead of reporting a failing project as clean on its second run. ([#1894](https://github.com/rigortype/rigor/pull/1894))
+- **[rigor check]** A nothing-changed `--incremental --workers N` recheck, and a `--workers N` run over a project with no Ruby files, now keep a plugin's `prepare` error row and its `prepare`-time `disclose_once` / `emit_once` rows instead of reporting a failing project as clean. ([#1894](https://github.com/rigortype/rigor/pull/1894))

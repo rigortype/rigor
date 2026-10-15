@@ -46,7 +46,7 @@ module Rigor
                        synthetic_method_index:, project_patched_methods:,
                        analyze_file:, project_scope_seed: -> { {} }, record_dependencies: false,
                        restored_run_level_rows: nil, template_units: -> { TemplateUnits.empty },
-                       feature_sources: -> { {} }, plugin_prepare: ->(_registry) { [] })
+                       feature_sources: -> { {} }, plugin_prepare: -> { [[], []] })
           @configuration = configuration
           @cache_store = cache_store
           @explain = explain
@@ -84,9 +84,9 @@ module Rigor
           # inherits the same compiled bytes.
           @template_units_reader = template_units
           @analyze_file = analyze_file
-          # Issue #1541 — `(registry) -> diagnostics`, the runner's own `#prepare` envelope. Read only by
-          # {#serve_empty_closure}: a pooled run's `#prepare` happens inside its workers, and an empty
-          # closure dispatches none.
+          # Issue #1541 — `() -> [rows, disclosure records]`, a `#prepare` run on a throwaway registry. Read
+          # only by {#serve_empty_closure}: a pooled run's `#prepare` happens inside its workers, and an
+          # empty closure dispatches none.
           @plugin_prepare = plugin_prepare
           # Issues #796 / #794 — the previous full run's run-level rows, handed down by
           # {Analysis::IncrementalSession} on a NARROWED run only (a recheck's closure, a
@@ -210,7 +210,7 @@ module Rigor
         # are returned as the run's per-file stream head, where the pool path puts them (`.rigor.yml`).
         # Sequential, whose pre-pass already ran `#prepare`, returns no rows here.
         def serve_empty_closure(environment, project_files)
-          prepare_rows = pool_mode? ? Array(@plugin_prepare.call(plugin_registry)) : []
+          prepare_rows = pool_mode? ? pooled_prepare_rows : []
           env = environment || @environment_override
           # Resolved over the project's OWN file list — not `[]`, which would drop every plugin-synthesized
           # virtual RBS (`Environment.collect_virtual_rbs` short-circuits on an empty list) and scan a
@@ -230,6 +230,14 @@ module Rigor
           record_definition_build_failures(env&.rbs_loader&.definition_build_failures)
           record_hkt_scan_failure(hkt_scan_outcome(resolve.call)) unless replayed_restored_run_level_rows?
           prepare_rows
+        end
+
+        # Issue #1541 — the pooled empty closure's `#prepare`: the rows go to the caller, the run-scoped
+        # registrations into the table the workers' payloads would have filled.
+        def pooled_prepare_rows
+          rows, records = @plugin_prepare.call
+          merge_run_disclosures(records)
+          Array(rows)
         end
 
         # Issue #794 — the signature-state snapshot's own gates, asked BEFORE an environment exists. Every
@@ -710,8 +718,9 @@ module Rigor
         # Issue #1051, known exception: run-scoped disclosures a plugin registered from `#prepare` are NOT
         # recovered here — nor, since #1060, a positioned `#emit_once` batch registered there, which rides
         # the same table. There is no session to drain — this backend builds none on the coordinator — and
-        # `#prepare` deliberately does not run on the coordinator-side registry under pool mode, so a
-        # prepare-time disclosure lives only inside the Ractor that died with it. A disclosure registered
+        # `#prepare` does not run on the coordinator-side registry under pool mode (only an empty closure
+        # runs it, on a throwaway registry; see {#serve_empty_closure}), so a prepare-time disclosure lives
+        # only inside the Ractor that died with it. A disclosure registered
         # from `#diagnostics_for_file` IS recovered, because the re-analysis below runs the coordinator-side
         # plugin instances that {DiagnosticAggregator#plugin_run_disclosure_diagnostics} reads directly.
         # Left as is: recovering the rest means running `#prepare` on the coordinator registry, which would

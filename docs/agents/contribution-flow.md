@@ -121,10 +121,18 @@ Once the change is implemented and `make verify-changed` passes:
    non-severe finding that changes behaviour rather than wording or specs gets the same delta
    review; it counts toward the three rounds. In the v0.4.3 batch each of these (#1884, #1890,
    #1894) found a further gap worth fixing before merge.
-5. **Stop at three rounds.** If round 3 still finds a severe defect the design is not converging:
-   stop and ask the user whether to take a conservative reading, split the PR, or file the rest.
-   Fixes made after round 3 land without a fourth round unless they address a severe defect, which
-   is the user's call.
+5. **Stop at three rounds.** When round 3 still finds a severe defect, first ask whether the design is
+   converging. If any severe finding is another spelling of a gap an earlier round fixed, or has no
+   conservative fix, hold the PR as Draft: the user chooses whether to take a conservative reading,
+   split the PR, or file the rest. Otherwise every severe finding is narrow and has a conservative fix,
+   one that only moves toward saying less or checking more (in the engine, drops a diagnostic or widens
+   an inferred type toward `Dynamic`; in a gate, checks more; in guidance, holds or asks more) and
+   changes nothing beyond it and its own specs and spec text. Apply those fixes and run one delta
+   review limited to the fix commits, asking the reviewer to confirm each fix is conservative. If it
+   finds nothing severe and confirms every fix as conservative, merge per step 6; otherwise the PR
+   stays Draft for the user. A non-severe finding from that check is fixed only in wording or specs;
+   anything that would change behaviour is filed as an issue. Other fixes made after round 3 land
+   without another round.
 6. **Merge** (`gh pr ready`, then `gh pr merge --merge`) once CI is green on the head commit and the
    review has stopped — when the landing point was settled before the work began: a
    `ready-for-agent` issue, or a user request that states the expected outcome. A PR that changes a

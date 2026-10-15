@@ -46,7 +46,9 @@ module Rigor
         owner, scope, name = key
         contract = @contracts[key]
         also = @elsewhere.call(owner, scope, name)
-        omitted = @omissions.count { |omission| [omission["owner"], omission["scope"], omission["name"]] == key }
+        omitted = @omissions.count do |omission|
+          [omission["owner"], omission["scope"]] == [owner, scope] && [name, nil].include?(omission["name"])
+        end
         single = sites.size == 1 && omitted.zero? && also.empty? ? sites.first : nil
         { "owner" => owner, "scope" => scope, "name" => name, "kind" => member_kind(sites),
           "visibility" => common_visibility(sites, scope), "sites" => sites.map { |site| site.data["key"] },

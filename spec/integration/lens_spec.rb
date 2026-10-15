@@ -161,6 +161,30 @@ RSpec.describe "rigor lens" do
     expect(JSON.parse(out)["files"].first).to include("status" => "ok", "complete" => true)
   end
 
+  # #1918 review: a module function's singleton copy runs with the module as self, so a return that flowed from
+  # self (directly, through itself, or through another module function) is not the instance-scope type.
+  it "does not give a module function's singleton copy a return that depends on self" do
+    File.write("lib/m.rb", <<~RUBY)
+      module M
+        module_function
+        def me = self
+        def via = me
+        def it = itself
+        def num = 1
+      end
+    RUBY
+    _, out, = lens(["--format=json", "lib/m.rb"])
+    returns = JSON.parse(out)["members"].to_h do |member|
+      [[member["scope"], member["name"]], member["overloads"].first["return"]]
+    end
+
+    expect(returns[%w[instance via]]).to include("state" => "typed", "type" => "M")
+    %w[me via it].each do |name|
+      expect(returns[["singleton", name]]).to eq("state" => "unavailable", "reason" => "not_computed")
+    end
+    expect(returns[%w[singleton num]]).to include("state" => "typed", "type" => "1")
+  end
+
   it "exits 64 for a configuration file that does not exist" do
     status, out, = lens(["--config=nope.yml", "lib/order.rb"])
 

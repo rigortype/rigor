@@ -184,7 +184,7 @@ module Rigor
           names = argument_names(argument)
           if names.nil?
             unknown_visibility(owner, scope)
-            omit("module_function", nil, argument)
+            omit("module_function", nil, argument, owner: owner, singleton: singleton, any_member: true)
           else
             names.each do |name|
               name_visibility(owner, scope, name, nil)
@@ -393,21 +393,39 @@ module Rigor
         return data unless module_function
 
         # Internal to the member pass: the singleton copy is public until `private_class_method` says otherwise,
-        # and its body runs with the module as `self`, so a body that reads `self` or instance state has a return
-        # the instance-scope typing does not give.
-        data.merge("singleton_visibility" => "public",
-                   "singleton_body_return" => instance_state?(node.body) ? Slot.unavailable("not_computed") : returns)
+        # and its body runs with the module as `self`. The instance-scope typing read `self` as an instance of the
+        # owner, so a return that may depend on `self` is not the copy's.
+        copy = self_dependent?(node.body, returns, owner) ? Slot.unavailable("not_computed") : returns
+        data.merge("singleton_visibility" => "public", "singleton_body_return" => copy)
       end
 
-      # Whether a body reads `self`, an instance variable or a class variable outside nested defs, lambdas and
-      # blocks that rebind `self`.
+      # Whether the instance-scope return may differ from the singleton copy's: the body reads `self`, instance or
+      # class state, or `super` (nested defs excluded, blocks included, which over-declines safely), or the return
+      # names the owner's type, which is where a `self` that flowed through `itself`, `tap` or another module
+      # function shows up.
+      def self_dependent?(body, returns, owner)
+        instance_state?(body) || names_owner?(returns, owner)
+      end
+
       def instance_state?(node)
         return false if node.nil?
-        return true if node.is_a?(Prism::SelfNode)
+        if node.is_a?(Prism::SelfNode) || node.is_a?(Prism::SuperNode) || node.is_a?(Prism::ForwardingSuperNode)
+          return true
+        end
         return true if node.type.to_s.start_with?("instance_variable_", "class_variable_")
         return false if node.is_a?(Prism::DefNode)
 
         node.compact_child_nodes.any? { |child| instance_state?(child) }
+      end
+
+      # Whether a spelled type mentions the owner, by its qualified name or its last segment.
+      def names_owner?(slot, owner)
+        type = slot["type"]
+        return false unless type
+
+        [owner, owner.split("::").last].uniq.any? do |name|
+          type.match?(/(?<![\w:])(?:::)?#{Regexp.escape(name)}(?!\w)/)
+        end
       end
 
       # Whether a receiverless instance `def` is a module function: true when the body's mode is on and the def is
@@ -452,9 +470,10 @@ module Rigor
                            contract_comments: anchor.contract_comments)
       end
 
-      # `owner` / `singleton` name the member the declaration would define, when Rigor can tell.
-      def omit(kind, name, node, owner: nil, singleton: false)
-        member = owner && name
+      # `owner` / `singleton` name the member the declaration would define, when Rigor can tell. `any_member` keeps
+      # them with a null name: the declaration may define any member of that owner and scope.
+      def omit(kind, name, node, owner: nil, singleton: false, any_member: false)
+        member = owner && (name || any_member)
         @omissions << { "kind" => kind, "owner" => member ? owner : nil,
                         "scope" => member ? scope_name(singleton) : nil, "name" => name,
                         "span" => Lens.span(node.location), "reason" => "unsupported_kind" }

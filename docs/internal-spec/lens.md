@@ -150,7 +150,9 @@ A declaration is never attached to a neighbouring site as a fallback.
 
 ### Omissions
 
-`[{kind, owner, scope, name, span, reason}]`. `kind` is one of `class`, `module`, `method`, `attribute`
+`[{kind, owner, scope, name, span, reason}]`. An omission with `owner` and `scope` set and `name` null may
+define any member of that owner and scope (`module_function(*NAMES)`); it counts as a project definition of
+each of them. `kind` is one of `class`, `module`, `method`, `attribute`
 (each when written inside a block, and `method` also for a receiver other than `self`), `singleton_class`
 (`class << obj`), `constant`, `data_class`, `struct_class`, `alias`, `define_method`, `module_function` and
 `refine`. `owner` and `scope` are the member the declaration would
@@ -185,10 +187,12 @@ A site is one source declaration in a requested file.
 A member is one `(owner, scope, name)` that a site in a requested file defines. An `attr_accessor :a`
 site defines the members `a` and `a=`, and both list it. A module-function site defines `(owner, instance,
 name)` and `(owner, singleton, name)`. The singleton member's `visibility` is `public`, revised by a later
-`private_class_method :name` written directly in the body (`null` under the rules § Sites gives for named
-calls). Its inferred return is the site's `body_return`, except that a body reading `self`, an instance
-variable or a class variable runs with the module as `self` there, so that return is `unavailable` with
-`not_computed`. Members are sorted by owner, scope and name.
+`private_class_method :name` or a `private :name` inside `class << self`, written directly in the body, and
+`null` under the rules § Sites gives for named calls written anywhere else. Its inferred return is the site's
+`body_return`, except where that return may depend on `self`, which the singleton copy runs with as the module:
+when the body reads `self`, `super`, an instance variable or a class variable, or the return's type names the
+owner (a `self` that flowed through `itself`, `tap` or another module function), the singleton return is
+`unavailable` with `not_computed`. Members are sorted by owner, scope and name.
 
 | Field | Content |
 | --- | --- |

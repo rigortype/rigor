@@ -197,13 +197,14 @@ end
     end
 
     it "does not reuse the instance-scope return for a singleton copy whose body reads self or instance state" do
-      source = "module P\n  module_function\n  def me = self\n  def iv = @x\n  def plain = 1\nend\n"
+      source = "module P\n  module_function\n  def me = self\n  def iv = @x\n  def sp = super\n  def plain = 1\nend\n"
       returns = sites(source).filter_map do |data|
         [data["name"], data["singleton_body_return"]] if data["module_function"]
       end.to_h
 
       expect(returns["me"]).to eq("state" => "unavailable", "reason" => "not_computed")
       expect(returns["iv"]).to eq("state" => "unavailable", "reason" => "not_computed")
+      expect(returns["sp"]).to eq("state" => "unavailable", "reason" => "not_computed")
       expect(returns["plain"]).to eq(sites(source).find { |data| data["name"] == "plain" }["body_return"])
     end
   end

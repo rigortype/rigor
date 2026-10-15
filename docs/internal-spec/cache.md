@@ -838,6 +838,12 @@ full run, so the snapshot can never wedge or stale an analysis.
    otherwise, so a plain run's fingerprint is unchanged): the per-file cache
    holds the `:info` fallback rows, so a snapshot primed without the flag must
    not serve a run with it, nor the reverse ([#1533](https://github.com/rigortype/rigor/issues/1533)).
+   The two modes also persist to separate files under `<cache>/incremental/`: a plain run
+   to `snapshot.bin` (unchanged), a `--explain` run to `snapshot-explain.bin`
+   (`IncrementalSnapshot.new(root:, explain:)`), so an occasional `--explain` run neither
+   reads nor evicts the warm plain snapshot, and the reverse
+   ([#1867](https://github.com/rigortype/rigor/issues/1867)). The language server has no
+   `--explain` and stays on the plain file.
    A mismatch drops the snapshot.
 
    The lockfile paths are resolved by `Analysis::RunCacheKey.resolved_lockfile_paths`

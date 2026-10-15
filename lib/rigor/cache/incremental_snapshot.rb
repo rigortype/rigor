@@ -362,8 +362,11 @@ module Rigor
       end
       private_class_method :digest_signature_paths
 
-      def initialize(root:)
-        @path = File.join(root.to_s, "incremental", "snapshot.bin")
+      # Issue #1867 — one snapshot FILE per fingerprint mode. `explain: true` (a `--explain` run) keeps its own
+      # file so it neither reads nor overwrites the plain run's warm snapshot, and the reverse; the plain path
+      # is unchanged. The fingerprint still carries the `explain:true` part, so the two never cross-serve.
+      def initialize(root:, explain: false)
+        @path = File.join(root.to_s, "incremental", explain ? "snapshot-explain.bin" : "snapshot.bin")
       end
 
       attr_reader :path

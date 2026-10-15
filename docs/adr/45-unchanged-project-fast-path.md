@@ -297,10 +297,9 @@ answer was computed by earlier runs. The rows come from three sources:
    and per `pre_eval:` entry. The incremental path regenerates its
    path-error rows every run, so a slot that served one past the edit that
    retracts it would print what no run of the tree prints. They carry
-   WD1b's bound. The plain slot records the same rows since #1962: a
-   `:kind` row per analysis root, which also reads a directory replaced by
-   a file as stale, and an existence row per `pre_eval:` entry and per
-   signature root (#1555).
+   WD1b's bound. The plain slot records rows for the same paths since
+   #1962, plus one per signature root (#1555), as `:kind` rows, which also
+   read a directory replaced by a file as stale.
 3. The **chain** the slot's value carries forward. Its baseline part is
    what a full run records for inputs a recheck does NOT re-derive
    (`Runner#baseline_dependency_rows`): the signature tree

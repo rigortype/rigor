@@ -1398,16 +1398,18 @@ module Rigor
         Cache::Descriptor.new(files: entries, globs: globs.uniq)
       end
 
-      # #1962 / #1555 — the rows for paths whose mere presence the run's answer depends on. A kind row per analysis
-      # root: its path errors (`no such file or directory`, `not a Ruby file`) answer to whether it exists and
-      # whether it is a directory or a file, while what a directory root holds is the analysed-file set the key
-      # carries. An existence row per `pre_eval:` entry (`pre-eval.file-not-found`; one that exists has its
-      # `:stat` row from {#pre_eval_file_entries}) and per project signature root, configured or the auto-detected
-      # `sig` (#979's listing rows cover a file appearing under a root that existed, not the root appearing). The
-      # `--incremental` slot records the same existence rows ({#incremental_slot_rows}, {#baseline_dependency_rows}).
+      # #1962 / #1555 — a kind row per path the run's answer depends on the presence and kind of, not only its
+      # bytes. An analysis root: its path errors (`no such file or directory`, `not a Ruby file`) answer to whether
+      # it exists and whether it is a directory or a file, while what a directory root holds is the analysed-file
+      # set the key carries. A `pre_eval:` entry: `pre-eval.file-not-found` answers to whether it is a file (one
+      # that is has its `:stat` row from {#pre_eval_file_entries}). A project signature root, configured or the
+      # auto-detected `sig`: the loader reads a directory and a file differently, and #979's listing rows cover a
+      # file appearing under a root that existed, not the root appearing. A kind row rather than an existence row,
+      # because a directory replaced by a file of the same name leaves an existence row fresh. The `--incremental`
+      # slot records existence rows for the same paths ({#incremental_slot_rows}, {#baseline_dependency_rows}).
       def root_presence_entries(expansion)
-        expansion.fetch(:roots).uniq.map { |root| Cache::Descriptor::FileEntry.kind(path: root) } +
-          existence_entries(@configuration.pre_eval + signature_root_candidates)
+        (expansion.fetch(:roots) + @configuration.pre_eval + signature_root_candidates)
+          .uniq.map { |path| Cache::Descriptor::FileEntry.kind(path: path) }
       end
 
       # Every file a plugin read or probed through its `IoBoundary` (#577 / #613), and every directory it listed

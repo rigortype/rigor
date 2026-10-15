@@ -82,9 +82,9 @@ module Rigor
       # an unchanged file would fold as "no possible fact" where a cold walk records one.
       # v18: ADR-119 WD3 — the visibility walk fills `contested_discovered_method_visibilities`; a pre-18 bundle
       # carries it empty, so an unchanged file's conditional visibility would fold as certain.
-      # v19: #1555 / #1962 — the run-result dependency descriptor now carries a `:kind` row per analysis root
-      # and an existence row per `pre_eval:` entry and per project signature root (configured, or the
-      # auto-detected `sig`), so a root that appears, vanishes or changes kind invalidates the warm entry. A
+      # v19: #1555 / #1962 — the run-result dependency descriptor now carries a `:kind` row per analysis root,
+      # `pre_eval:` entry and project signature root (configured, or the auto-detected `sig`), so one that
+      # appears, vanishes or changes kind invalidates the warm entry. A
       # pre-19 entry carries none of them and would validate fresh across exactly those edits, so cached
       # entries must read as misses once and rebuild carrying the rows.
       SCHEMA_VERSION = 19
@@ -179,8 +179,9 @@ module Rigor
         # #1962 — the kind row: fresh while `path` is still the same kind of thing, stale once it appears,
         # vanishes, or a directory and a file trade places. It is the row for an analysis root, whose
         # diagnostics (`no such file or directory`, `not a Ruby file`) answer to exactly that and to nothing
-        # else about the path: an existence row would read a directory replaced by a file of the same name as
-        # fresh (ADR-45 WD1b's bound), and the root's contents are the analysed-file set the key already carries.
+        # else about the path, and for a `pre_eval:` entry and a signature root: an existence row would read a
+        # directory replaced by a file of the same name as fresh (ADR-45 WD1b's bound), and what the path holds
+        # has rows of its own (the analysed-file set the key carries, a signature root's `.rbs` rows).
         def self.kind(path:)
           new(path: path, comparator: :kind, value: kind_of(path))
         end

@@ -4,7 +4,8 @@
 # answer depends on. An analysis root that appeared, vanished or changed kind while the analysed file set stayed
 # the same kept the slot fresh, so a warm run served the old path-error row (and, under `--fail-on=warning`, the
 # old exit code, which is the rows' highest severity). A signature root or a `pre_eval:` entry that did not
-# exist when the slot was written had no row at all, so creating it left the old diagnostics served.
+# exist when the slot was written had no row at all, so creating it, or replacing a file there with a directory
+# or back, left the old diagnostics served.
 #
 # Both readers are exercised against a real `Cache::Store`: the runner's read-through slot, which writes the
 # rows, and the engine-free {RunCacheProbe}, which validates them. Each served answer is judged against a cold
@@ -158,6 +159,26 @@ RSpec.describe "the run-result slot and the presence of its roots (#1962, #1555)
         end
         expect(messages(before)).not_to eq(messages(after))
       end
+
+      it "re-answers when a file named like the configured root is replaced by that directory" do
+        File.write("types", "")
+        before, after = expect_matches_cold_after(%w[lib]) do
+          File.unlink("types")
+          FileUtils.mkdir("types")
+          File.write("types/a.rbs", signature)
+        end
+        expect(messages(before)).not_to eq(messages(after))
+      end
+    end
+
+    it "re-answers when a file named `sig` is replaced by a `sig/` directory" do
+      File.write("sig", "")
+      before, after = expect_matches_cold_after(%w[lib]) do
+        File.unlink("sig")
+        FileUtils.mkdir("sig")
+        File.write("sig/a.rbs", signature)
+      end
+      expect(messages(before)).not_to eq(messages(after))
     end
 
     # A guard: #979's listing row for `sig/` already covered this before the existence rows.
@@ -174,6 +195,16 @@ RSpec.describe "the run-result slot and the presence of its roots (#1962, #1555)
 
     it "re-answers when a missing `pre_eval:` file is created after the slot was written" do
       before, after = expect_matches_cold_after(%w[lib]) { File.write("boot.rb", "") }
+      expect(before).not_to be_empty
+      expect(after).to eq([])
+    end
+
+    it "re-answers when a directory at the `pre_eval:` path is replaced by the file" do
+      FileUtils.mkdir("boot.rb")
+      before, after = expect_matches_cold_after(%w[lib]) do
+        FileUtils.rmdir("boot.rb")
+        File.write("boot.rb", "")
+      end
       expect(before).not_to be_empty
       expect(after).to eq([])
     end

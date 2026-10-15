@@ -62,6 +62,13 @@ RSpec.describe "the ADR-58 ivar census counts define_method block writes" do
       end
     end
 
+    it "records no ownerless census entry for a class << self or anonymous Class.new body" do
+      source = box(%(class << self\n  define_method(:a) { @x = "a" }\nend\nClass.new { define_method(:b) { @x = "b" } }))
+      program = Prism.parse(source).value
+      index = Rigor::Inference::ScopeIndexer.index(program, default_scope: Rigor::Scope.empty)
+      expect(index[program].class_ivars.keys).to eq(["Box"])
+    end
+
     it "credits a named Class.new body's define_method to that class" do
       source = box(%(K = Class.new { define_method(:set) { @x = "a" } }))
       expect(census(source, "Box::K")).to eq(%("a"))

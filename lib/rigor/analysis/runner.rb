@@ -856,7 +856,8 @@ module Rigor
         analysis = serve_effect_collections(expansion, environment, key_descriptor, rbs_descriptor)
         computed = false
         diagnostics = @cache_store.fetch_or_validate(
-          producer_id: RunCacheKey::RUN_DIAGNOSTICS_PRODUCER_ID, key_descriptor: key_descriptor,
+          producer_id: RunCacheKey::RUN_DIAGNOSTICS_PRODUCER_ID,
+          key_descriptor: RunCacheKey.with_roots(key_descriptor, expansion.fetch(:roots)),
           generation_cap: RunCacheKey::GENERATION_CAP
         ) do
           computed = true
@@ -2206,7 +2207,7 @@ module Rigor
             bad << [path, "no such file or directory"]
           end
         end
-        { files: files, errors: path_expansion_errors(bad, any_files: files.any?) }
+        { files: files, roots: Array(paths).map(&:to_s), errors: path_expansion_errors(bad, any_files: files.any?) }
       end
 
       # A bad path *among valid ones* is a warn-and-skip — the run still does useful work, so `rigor check

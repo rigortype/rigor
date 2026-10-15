@@ -124,10 +124,10 @@ Once the change is implemented and `make verify-changed` passes:
 5. **Stop at three rounds.** When round 3 still finds a severe defect, the next step depends on its
    shape. A narrow finding with a conservative fix (one that only declines or widens more, and
    touches nothing else) lands: apply the fix, run one delta review limited to the fix commits, and
-   merge if it finds nothing severe; otherwise the PR stays Draft for the user. A finding that shows the design is not converging (each round
-   finds another spelling of the same gap) holds the PR as Draft, and the user chooses whether to
-   take a conservative reading, split the PR, or file the rest. Other fixes made after round 3
-   land without another round.
+   merge if it finds nothing severe; otherwise the PR stays Draft for the user. A finding that
+   shows the design is not converging (each round finds another spelling of the same gap) holds the
+   PR as Draft, and the user chooses whether to take a conservative reading, split the PR, or file
+   the rest. Other fixes made after round 3 land without another round.
 6. **Merge** (`gh pr ready`, then `gh pr merge --merge`) once CI is green on the head commit and the
    review has stopped — when the landing point was settled before the work began: a
    `ready-for-agent` issue, or a user request that states the expected outcome. A PR that changes a

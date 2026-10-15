@@ -74,44 +74,56 @@ RSpec.describe "a memoizing index `||=` after an earlier store on a straight-lin
     RUBY
   end
 
-  it "marks the site in a method body, on an instance-variable receiver and on an array" do
+  it "marks the site in a method body, on an instance-variable receiver" do
     expect(flow_rules(<<~RUBY)).to be_empty
       class Memo
         def initialize = @h = Hash.new
 
-        def ivar(cond)
+        def run(cond)
           @h[:k] ||= :e if cond
           l = (@h[:k] ||= :f).itself
           puts "e" if l == :e
         end
+      end
+    RUBY
+  end
 
-        def array(cond)
-          a = []
-          a[0] ||= :e if cond
-          l = (a[0] ||= :f).itself
-          puts "e" if l == :e
+  it "marks it on an array receiver" do
+    expect(flow_rules(<<~RUBY)).to be_empty
+      def run(cond)
+        a = []
+        a[0] ||= :e if cond
+        l = (a[0] ||= :f).itself
+        puts "e" if l == :e
+      end
+    RUBY
+  end
+
+  it "marks it past a `return if` between the two sites" do
+    expect(flow_rules(<<~RUBY)).to be_empty
+      def run(cond)
+        c = Hash.new
+        c[:k] ||= :e if cond
+        return if cond.nil?
+
+        l = (c[:k] ||= :f).itself
+        puts "e" if l == :e
+      end
+    RUBY
+  end
+
+  it "marks it after a store in a `begin` body a `rescue` follows" do
+    expect(flow_rules(<<~RUBY)).to be_empty
+      def run(cond)
+        c = Hash.new
+        begin
+          c[:k] ||= :e
+          raise "x" if cond
+        rescue StandardError
+          nil
         end
-
-        def guarded(cond)
-          c = Hash.new
-          c[:k] ||= :e if cond
-          return if cond.nil?
-
-          l = (c[:k] ||= :f).itself
-          puts "e" if l == :e
-        end
-
-        def rescued(cond)
-          c = Hash.new
-          begin
-            c[:k] ||= :e
-            raise "x" if cond
-          rescue StandardError
-            nil
-          end
-          l = (c[:k] ||= :f).itself
-          puts "e" if l == :e
-        end
+        l = (c[:k] ||= :f).itself
+        puts "e" if l == :e
       end
     RUBY
   end

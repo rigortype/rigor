@@ -118,14 +118,16 @@ RSpec.describe "Discovery certainty (ADR-119 WD3)" do
     end
   end
 
-  # ADR-119 C1d-b — the visibility slots fold later-wins as the def-node slots do.
+  # ADR-119 C1d-b — the visibility slots fold later-wins as the def-node slots do. The `attr_reader` members are
+  # visibility slots too (#1911): `y`, which only the possible file writes, stays contested in either order.
   describe "contested visibility slots" do
     it "follows the file that wrote the slot last" do
       later_possible = agreed_siblings("a.rb" => certain_file, "b.rb" => possible_file)
       later_certain = agreed_siblings("a.rb" => possible_file, "b.rb" => certain_file)
 
-      expect(later_possible.fetch(:contested_discovered_method_visibilities)).to eq(Set[["C", :m]])
-      expect(later_certain.fetch(:contested_discovered_method_visibilities)).to be_empty
+      expect(later_possible.fetch(:contested_discovered_method_visibilities))
+        .to eq(Set[["C", :m], ["C", :x], ["C", :y]])
+      expect(later_certain.fetch(:contested_discovered_method_visibilities)).to eq(Set[["C", :y]])
     end
 
     it "contests every def after an uncertain toggle, until a certain one settles the default" do
@@ -170,7 +172,7 @@ RSpec.describe "Discovery certainty (ADR-119 WD3)" do
       discovery = per_file_discovery({ "a.rb" => possible_file, "b.rb" => certain_file }, "a.rb")
 
       expect(discovery.contested_discovered_def_nodes).to eq(Set[["C", :m]])
-      expect(discovery.contested_discovered_method_visibilities).to eq(Set[["C", :m]])
+      expect(discovery.contested_discovered_method_visibilities).to eq(Set[["C", :m], ["C", :x], ["C", :y]])
     end
   end
 end

@@ -76,26 +76,22 @@ RSpec.describe "Declaration-fact witness" do
   #
   # Every relation is checked on both fixtures. The taken world holds the def-node relations strict (the contested
   # slot must name the def Ruby answers with), the skipped world relaxes a contested slot to any def of that name
-  # the fixture writes, since the possible def did not run. One row is filtered from the visibilities relation:
-  # the table does not record `private def hidden`'s wrap-around form as private. That is a gap in the value the
-  # visibility walk records (`build_discovered_method_visibilities`), not in its certainty: `hidden` is a certain
-  # def, and ADR-119 C1d-b contests slots without changing a recorded value.
+  # the fixture writes, since the possible def did not run. `private def hidden` is a certain def, recorded with
+  # the wrapping call's visibility (#1911).
   describe "possible definers" do
-    def without_hidden(violations)
-      violations.reject { |line| line.include?("Probe#hidden") }
-    end
-
     it "agrees with Ruby in the world where every possible definer runs" do
-      expect(without_hidden(violations("possible_defs_taken", relax_contested: false))).to eq([])
+      expect(violations("possible_defs_taken", relax_contested: false)).to eq([])
     end
 
     it "agrees with Ruby in the world where no possible definer runs" do
-      expect(without_hidden(violations("possible_defs_skipped"))).to eq([])
+      expect(violations("possible_defs_skipped")).to eq([])
     end
 
-    it "records the wrap-around `private def hidden` as public today (a value gap C1d-b leaves)" do
-      expect(violations("possible_defs_skipped", relations: %i[visibilities]))
-        .to contain_exactly(a_string_including("Probe#hidden"))
+    it "records the wrap-around `private def hidden` as private, uncontested (#1911)" do
+      tables, = DeclarationWitness.rigor_tables(fixture("possible_defs_skipped"))
+
+      expect(tables.discovered_method_visibilities.fetch("Probe")).to include(hidden: :private)
+      expect(tables.contested_discovered_method_visibilities).not_to include(["Probe", :hidden])
     end
 
     it "reads the conditional definers as possible and the meta-new block and private def as certain" do
@@ -129,6 +125,25 @@ RSpec.describe "Declaration-fact witness" do
       expect(tables.discovered_method_visibilities).to eq("Helpers2" => { fmt2: :public })
       expect(tables.contested_discovered_method_visibilities).to eq(Set[["Helpers2", :fmt2]])
       expect(tables.possible_discovered_methods).to eq("Helpers2" => { fmt2: :singleton })
+    end
+  end
+
+  # #1911, #1819, #1633 — a def or `attr_*` wrapped in a visibility call takes that call's visibility, and the
+  # visibility calls Ruby runs on the body's self (`self.private`, `send(:private)`, `private {}`) are applied. The
+  # witness skips a contested slot, so the second example pins which slots are left contested: every other slot is
+  # compared with Ruby.
+  describe "visibility calls" do
+    it "agrees with Ruby across every relation" do
+      expect(violations("visibility_calls")).to eq([])
+    end
+
+    it "contests only the slots a splat, a wrapped `def self.x`, a condition or a nested wrapper leaves open" do
+      tables, = DeclarationWitness.rigor_tables(fixture("visibility_calls"))
+
+      expect(tables.contested_discovered_method_visibilities).to eq(
+        Set[["EmptySplatToggle", :a], ["SplatNames", :zz], ["SplatNames", :a], ["SingletonWrapped", :x],
+            ["ConditionalWrapped", :x], ["NestedWrapped", :x]]
+      )
     end
   end
 

@@ -1921,9 +1921,9 @@ module Rigor
     private_constant :EMPTY_PARAMETER_ENVELOPES
 
     # v0.1.2 — per-class table mapping `method_name (Symbol) → :public | :private | :protected`. Populated by
-    # `ScopeIndexer` for every `def` it sees inside a class body, with the visibility taken from the surrounding
-    # `private` / `protected` / `public` modifier state plus any post-hoc `private :name, ...` named-argument
-    # calls. Consumed by the `def.method-visibility-mismatch` rule so explicit-non-self calls to a private method
+    # `ScopeIndexer` for every `def` and `attr_*` member it sees inside a class body, with the visibility taken from
+    # a wrapping `private def` / `private attr_reader` call, else the surrounding `private` / `protected` / `public`
+    # modifier state, plus any post-hoc `private :name, ...` named-argument calls. Consumed by the `def.method-visibility-mismatch` rule so explicit-non-self calls to a private method
     # surface a diagnostic.
     def discovered_method_visibility(class_name, method_name)
       table = @discovery.discovered_method_visibilities[class_name.to_s]

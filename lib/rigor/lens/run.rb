@@ -127,7 +127,7 @@ module Rigor
                                 spell: speller(scope.environment)).read
         reader.sites.each do |site|
           @site_paths[site.data["key"]] = absolute
-          read_constant_contract(site, scope) if site.data["kind"] == "constant"
+          read_constant_value(site, scope) if site.data["kind"] == "constant"
           Members.scopes_of(site.data).product(site.data["members"]).each do |member_scope, name|
             read_contract(site.data["owner"], member_scope, name, scope)
           end
@@ -135,14 +135,37 @@ module Rigor
         @captured[absolute] = reader
       end
 
-      # A constant an RBS or inline declaration names takes the declared type in place of its value's, where
-      # `check` reads it so: a constant the project's source publishes (`in_source_constants`) reads as its value
-      # there, whatever a declaration says, so it keeps the inferred slot.
-      def read_constant_contract(site, scope)
-        return if scope.in_source_constants[site.data["name"]] || Slot.unavailable?(site.data["value"])
+      # The constant's type as `check` reads it ({Reflection.constant_type_for}): the value the project's source
+      # publishes for the name (every write joined, a mutated one widened) over any declaration, else its RBS
+      # declaration, else unknown.
+      def read_constant_value(site, scope)
+        name = site.data["name"]
+        published = scope.in_source_constants[name]
+        site.data["value"] =
+          if published
+            published_slot(published, scope.environment)
+          else
+            declared_slot(site, contract_reader(scope.environment).read_constant(name, scope.environment))
+          end
+      end
 
-        declared = contract_reader(scope.environment).read_constant(site.data["name"], scope.environment)
-        site.data["value"] = declared if declared
+      # The rbs-inline plugin declares every constant of a file it reads, typing an unannotated one from its
+      # literal (`[]` as `Array[untyped]`): an inline declaration is the constant's own only when the site carries
+      # a contract comment (`#: T`).
+      def declared_slot(site, declared)
+        return Slot.unavailable("not_computed") if declared.nil?
+        return Slot.unavailable("not_computed") if declared["provenance"] == "inline" && site.contract_comments.empty?
+
+        declared
+      end
+
+      def published_slot(type, environment)
+        return Slot.dynamic("inferred", nil) if type.is_a?(Type::Dynamic)
+
+        spelled = speller(environment).call(type, nil)
+        spelled == "untyped" ? Slot.dynamic("inferred", nil) : Slot.typed(spelled, "inferred")
+      rescue StandardError
+        Slot.unavailable("not_computed")
       end
 
       def read_contract(owner, member_scope, name, scope)

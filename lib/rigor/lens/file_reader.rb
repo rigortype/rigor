@@ -377,16 +377,15 @@ module Rigor
         walk(node.value, nesting, singleton: false, in_block: true)
       end
 
-      # `X = value` written directly in a namespace body (or at the top level): a `constant` site whose `value` slot
-      # is the value's type under the seeded index (capability `constant`). The member pass replaces it with a
-      # declared type when an RBS or inline declaration names the constant. A declaration inside the value (a
-      # lambda body, a `Class.new` block) is an omission, as anywhere in a block.
+      # `X = value` written directly in a namespace body (or at the top level): a `constant` site (capability
+      # `constant`). Its `value` slot is filled from the run's tables ({Run#read_constant_value}). A declaration
+      # inside the value (a lambda body, a `Class.new` block) is an omission, as anywhere in a block.
       def read_constant(node, name, nesting)
         owner = nesting.last || "Object"
         add_site(node, { "kind" => "constant", "name" => name, "owner" => owner, "scope" => nil,
                          "attribute" => nil, "members" => [], "module_function" => false,
                          "visibility" => reassigned_visibility(name, owner), "params" => nil, "block" => nil,
-                         "body_return" => nil, "value" => value_slot(node) })
+                         "body_return" => nil, "value" => Slot.unavailable("not_computed") })
         walk(node.value, nesting, singleton: false, in_block: true)
       end
 
@@ -396,27 +395,6 @@ module Rigor
           site.data["kind"] == "constant" && site.data["owner"] == owner && site.data["name"] == name
         end
         earlier ? earlier.data["visibility"] : "public"
-      end
-
-      # `Class.new(…)` / `Module.new` makes a new class or module that `check` types through its own write
-      # reading, not the call's return type (which names the superclass): not computed here.
-      def value_slot(node)
-        return Slot.unavailable("not_computed") if anonymous_namespace?(node.value)
-
-        scope = @index[node.value] || @index[node]
-        return Slot.unavailable("not_computed") if scope.nil?
-
-        type = scope.type_of(node.value)
-        if type.is_a?(Type::Dynamic)
-          return Slot.dynamic("inferred", Inference::OriginLookup.origin_for(scope, node.value))
-        end
-
-        spelled = @spell.call(type, nil)
-        return Slot.dynamic("inferred", Inference::OriginLookup.origin_for(scope, node.value)) if spelled == "untyped"
-
-        Slot.typed(spelled, "inferred")
-      rescue StandardError
-        Slot.unavailable("not_computed")
       end
 
       # `Foo = Data.define(:a, :b) do … end` and `Foo = Struct.new(:a, keyword_init: true) do … end`: a class site
@@ -446,11 +424,6 @@ module Rigor
       # `class << self` body (constants go to the singleton class). Such a declaration is an omission.
       def constant_scope_unknown?
         @bodies.any? { |body| %i[builder singleton].include?(body.kind) }
-      end
-
-      def anonymous_namespace?(value)
-        value.is_a?(Prism::CallNode) && value.name == :new && value.receiver &&
-          %w[Class Module].include?(value.receiver.slice.delete_prefix("::"))
       end
 
       def constant_visibility_call?(node)

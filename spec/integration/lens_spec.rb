@@ -222,11 +222,15 @@ RSpec.describe "rigor lens" do
         NUM = 1 #: Numeric
         Klass = Class.new(Order) { def own = 1 }
         Mod = ::Module.new
+        Frozen = Class.new.freeze
         CALC = LIMIT.succ
+        LIST = []
+        LIST << 1
+        WORDS = [] #: Array[String]
       end
     RUBY
     # Kept apart: a sig/ declaration of a constant in an rbs-inline file drops that file's inline RBS.
-    File.write("lib/d.rb", "module K\n  DECL = \"x\"\nend\n")
+    File.write("lib/d.rb", "module K\n  DECL = \"x\"\n  R = 1\n  R = \"two\"\nend\n")
     File.write("sig/k.rbs", "module K\n  DECL: Integer\nend\n")
     _, out, err = lens(["--format=json", "lib/k.rb", "lib/d.rb"])
     values = JSON.parse(out)["files"].flat_map { |file| file["sites"] }.to_h { |site| [site["name"], site["value"]] }
@@ -238,7 +242,8 @@ RSpec.describe "rigor lens" do
     expect(values["K::NUM"]).to include("state" => "typed", "type" => "1", "provenance" => "inferred")
     expect(values["K::DECL"]).to include("state" => "typed", "type" => "::Integer", "provenance" => "sig",
                                          "path" => "sig/k.rbs")
-    expect(values.values_at("K::Klass", "K::Mod", "K::CALC")).to eq([unknown, unknown, unknown])
+    expect(values["K::WORDS"]).to include("state" => "typed", "type" => "::Array[::String]", "provenance" => "inline")
+    expect(values.values_at("K::Klass", "K::Mod", "K::Frozen", "K::CALC", "K::LIST", "K::R")).to all(eq(unknown))
   end
 
   it "exits 64 for a configuration file that does not exist" do

@@ -161,5 +161,24 @@ end
                                            %w[define_method dyn], ["constant", "Point::A"], ["constant", "Point::B"])
       expect(omissions(source).count { |kind, name| kind == "constant" && name == "Point::C" }).to eq(2)
     end
+
+    # rigortype/rigor#1907: a trailing-comma assignment's rest slot is a Prism::ImplicitRestNode, which has no
+    # `expression`; reading it failed the whole target.
+    it "reads every shape of multiple assignment" do
+      source = <<~RUBY
+        class M
+          left, = [1, 2]
+          a, * = [1, 2]
+          b, *C = [1, 2]
+          (D, e), F = [[1, 2], 3]
+          *G, h = [1, 2]
+          def kept = 1
+        end
+      RUBY
+
+      expect(omissions(source).filter_map { |kind, name| name if kind == "constant" })
+        .to contain_exactly("M::C", "M::D", "M::F", "M::G")
+      expect(sites(source).map { |site| site["name"] }).to eq(%w[M kept])
+    end
   end
 end

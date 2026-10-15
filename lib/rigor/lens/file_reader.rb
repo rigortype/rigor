@@ -253,12 +253,24 @@ module Rigor
       end
 
       def walk_multi_write(node, nesting, singleton, in_block)
-        (node.lefts + [node.rest&.expression].compact + node.rights).each do |target|
-          next unless target.is_a?(Prism::ConstantTargetNode) || target.is_a?(Prism::ConstantPathTargetNode)
-
+        constant_targets(node).each do |target|
           omit("constant", qualify(nesting, target) || target.slice, target)
         end
         walk(node.value, nesting, singleton: singleton, in_block: in_block)
+      end
+
+      # The constant targets of a multiple assignment, through nested `(a, B), c` groups and a `*Rest` splat. The
+      # rest slot is a `SplatNode` (`a, *B = …`, or a bare `*`) or an `ImplicitRestNode` (the trailing comma of
+      # `a, = …`), which names nothing.
+      def constant_targets(node)
+        rest = node.rest.is_a?(Prism::SplatNode) ? [node.rest.expression].compact : []
+        (node.lefts + rest + node.rights).flat_map do |target|
+          case target
+          when Prism::ConstantTargetNode, Prism::ConstantPathTargetNode then [target]
+          when Prism::MultiTargetNode then constant_targets(target)
+          else []
+          end
+        end
       end
 
       def walk_constant(node, nesting)

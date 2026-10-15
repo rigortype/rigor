@@ -137,6 +137,8 @@ RSpec.describe Rigor::Analysis::IncrementalSession, "null recheck keeps the plug
         project(dir)
         refused = { plugin_id: "rigor-null-recheck-prepare-refused",
                     plugin_class: Rigor::Plugin::NullRecheckPrepareRefused }
+        # Positive control: the refusal is real, so the pooled comparison below cannot pass vacuously.
+        expect(full_run(dir, 0, **refused).diagnostics.map(&:rule)).to include("plugin_trust.read-refused")
         expected = full_run(dir, 2, **refused).diagnostics
 
         subject_session = session(dir, 2, **refused)

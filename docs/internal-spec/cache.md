@@ -875,8 +875,8 @@ so warm output is byte-identical to cold
 ([#1524](https://github.com/rigortype/rigor/issues/1524)). The options
 matter: a pool backend lists its `.rigor.yml` prepare rows at the head of the
 per-file stream, while a sequential run lists them among the pre-file rows.
-A pooled run whose closure is empty dispatches no worker, so the coordinator runs `#prepare` itself and
-lists the same rows there ([#1541](https://github.com/rigortype/rigor/issues/1541)).
+A pooled run whose closure is empty dispatches no worker, so `#prepare` runs once on a throwaway registry
+(its trust refusals never reach the run) and the same rows are listed there ([#1541](https://github.com/rigortype/rigor/issues/1541)).
 A full run lists its pre-file run-level rows, then the per-file stream —
 each analysed file's rows, one file after another in analysis order (the
 expanded project files, then the template units) — then the post-analysis

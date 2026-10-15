@@ -49,6 +49,45 @@ RSpec.describe Rigor::Lens::FileReader do
                                  "i" => "public", "j" => nil)
     end
 
+    it "applies a named call only when it is written directly in the body" do
+      source = <<~RUBY
+        class V
+          def a = 1
+          def b = 2
+          def c = 3
+          def d = 4
+          private %i[a]
+          def configure
+            private :b
+          end
+          protected(*NAMES)
+          def e = 5
+        end
+      RUBY
+      visibilities = sites(source).filter_map { |site| [site["name"], site["visibility"]] if site["owner"] }.to_h
+
+      expect(visibilities).to include("a" => nil, "b" => nil, "c" => nil, "d" => nil, "e" => nil)
+    end
+
+    it "reads a literal array argument" do
+      visibilities = sites("class V
+  def a = 1
+  private %i[a]
+end
+").to_h { |site| [site["name"], site["visibility"]] }
+
+      expect(visibilities["a"]).to eq("private")
+    end
+
+    it "reads private wrapping a singleton def as unknown, which Ruby rejects" do
+      site = sites("class V
+  private def self.x = 1
+end
+").find { |data| data["name"] == "x" }
+
+      expect(site["visibility"]).to be_nil
+    end
+
     it "reads a top-level def as private on Object" do
       expect(sites("def helper = 1\n").first).to include("owner" => "Object", "visibility" => "private")
     end
@@ -74,6 +113,15 @@ RSpec.describe Rigor::Lens::FileReader do
         .to eq([%w[Outer singleton meta]])
       expect(omissions(source)).to include(%w[method meta_meta], ["class", "self::Dyn"], ["singleton_class", nil],
                                            %w[method top_singleton])
+    end
+
+    it "walks the body of an omitted class" do
+      expect(omissions("class W
+  class self::Inner
+    def hidden = 1
+  end
+end
+")).to include(%w[method hidden])
     end
 
     it "qualifies nested and compact constant paths" do

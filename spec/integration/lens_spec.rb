@@ -29,7 +29,8 @@ RSpec.describe "rigor lens" do
     document["producer"].merge!("version" => "<version>", "engine_source" => "<engine>")
     context = document["context"]
     context.merge!("rbs_version" => "<rbs>", "digest" => "<digest>")
-    context["plugins"].each { |plugin| plugin["version"] = "<version>" }
+    # A bundled plugin reports Rigor's version; any other version is a fact about the plugin, kept.
+    context["plugins"].each { |plugin| plugin["version"] = "<version>" if plugin["version"] == Rigor::VERSION }
     document
   end
 
@@ -123,8 +124,12 @@ RSpec.describe "rigor lens" do
     _, once, = lens(["--format=json", "lib/order.rb"])
     _, twice, = lens(["--format=json", "lib/order.rb", "./lib/order.rb"])
 
-    expect(JSON.parse(twice)["members"]).to eq(JSON.parse(once)["members"])
-    expect(JSON.parse(twice)["files"].size).to eq(2)
+    document = JSON.parse(twice)
+    keys = document["files"].flat_map { |file| (file["sites"] || []).map { |site| site["key"] } }
+
+    expect(document["members"]).to eq(JSON.parse(once)["members"])
+    expect(document["files"].map { |file| file["status"] }).to eq(%w[ok duplicate])
+    expect(keys).to eq(keys.uniq)
   end
 
   it "exits 64 for a configuration file that does not exist" do

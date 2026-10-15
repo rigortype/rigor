@@ -5,6 +5,7 @@ require "prism"
 require_relative "file_reader"
 require_relative "contract_reader"
 require_relative "members"
+require_relative "plugins"
 require_relative "slot"
 require_relative "../analysis/incremental_session"
 require_relative "../cache/incremental_snapshot"
@@ -37,7 +38,7 @@ module Rigor
       def call
         session = build_session
         project = session.project_files.to_h { |path| [File.expand_path(path), path] }
-        resolved = @arguments.map { |argument| resolve(argument, project) }
+        resolved = mark_duplicates(@arguments.map { |argument| resolve(argument, project) })
         forced = resolved.filter_map { |entry| entry[:session_path] }
         session.force_targets = forced.uniq
         diagnostics, warm = analyse(session, forced.uniq)
@@ -80,6 +81,21 @@ module Rigor
         @site_paths = {}
       end
 
+      # A file requested again, in any spelling, is answered once: the later entries read `duplicate`, naming the
+      # argument that carries the answer, so every site key stays unique in the document.
+      def mark_duplicates(entries)
+        first = {}
+        entries.map do |entry|
+          next entry unless entry[:status] == "ok"
+
+          seen = first[entry[:absolute]]
+          first[entry[:absolute]] ||= entry[:argument]
+          next entry unless seen
+
+          entry.merge(status: "duplicate", reason: "the same file as #{seen}", session_path: nil)
+        end
+      end
+
       def resolve(argument, project)
         absolute = File.expand_path(argument)
         entry = { argument: argument, absolute: absolute, path: relative(absolute) }
@@ -98,7 +114,7 @@ module Rigor
         absolute = File.expand_path(path)
         return unless @argument_paths.include?(absolute)
 
-        @plugins = loaded_plugins(scope.environment) if @plugins.empty?
+        @plugins = Plugins.loaded(scope.environment) if @plugins.empty?
         read_target(absolute, parse_result, scope, index)
         @capture_errors.delete(absolute)
       rescue StandardError => e
@@ -141,7 +157,7 @@ module Rigor
       # A forced target the run did not read: one that does not parse stops before indexing; otherwise reading it
       # failed, or the run never indexed it.
       def uncaptured(absolute, own)
-        if Prism.parse_file(absolute).errors.any?
+        if Prism.parse_file(absolute, version: @configuration.target_ruby).errors.any?
           { status: "parse_error", reason: "the file does not parse", diagnostics: own }
         else
           { status: "failed", reason: @capture_errors.fetch(absolute, "the file was not analysed") }
@@ -182,19 +198,6 @@ module Rigor
           end
           entries.sort_by { |entry| entry["path"] }
         end
-      end
-
-      # `[{id, version}]` of the plugins the run loaded, by manifest id (the id slot provenance uses).
-      def loaded_plugins(environment)
-        plugins = environment&.plugin_registry&.plugins || []
-        rows = plugins.map do |plugin|
-          id = plugin.manifest.id.to_s
-          spec = Gem.loaded_specs[id]
-          { "id" => id, "version" => spec ? spec.version.to_s : Rigor::VERSION }
-        end
-        rows.uniq.sort_by { |plugin| plugin["id"] }
-      rescue StandardError
-        []
       end
 
       # The line a bundle records for the member, nil when it defines the member without a recorded line (an

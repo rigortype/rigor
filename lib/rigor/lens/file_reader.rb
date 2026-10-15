@@ -85,7 +85,12 @@ module Rigor
           walk(node.superclass, nesting, singleton: false,
                                          in_block: true)
         end
-        return omit(kind, name || node.constant_path.slice, node) if in_block || name.nil?
+        if in_block || name.nil?
+          omit(kind, name || node.constant_path.slice, node)
+          return walk(node.body, nesting, singleton: false, in_block: true) if node.body
+
+          return
+        end
 
         add_site(node, { "kind" => kind, "name" => name, "owner" => nil, "scope" => nil, "attribute" => nil,
                          "members" => [], "visibility" => nil, "params" => nil, "block" => nil,
@@ -121,6 +126,7 @@ module Rigor
           module_function_on = true if bare_call?(child, :module_function)
           next if toggle_visibility?(child)
 
+          visibility_call(child, nesting, singleton, direct: true) if visibility_call?(child)
           walk(child, nesting, singleton: singleton, in_block: false)
         end
       ensure
@@ -146,20 +152,32 @@ module Rigor
                owner: node.name == :refine ? nil : nesting.last, singleton: singleton)
           walk_children(node, nesting, singleton, true) unless node.name == :refine
         else
-          visibility_call(node, nesting, singleton) if node.receiver.nil?
+          @visited_visibility_calls ||= {}.compare_by_identity
+          if visibility_call?(node) && !@visited_visibility_calls.key?(node)
+            visibility_call(node, nesting, singleton, direct: false)
+          end
           walk_children(node, nesting, singleton, in_block)
         end
       end
 
-      # `private :x`, `private def x`, `private attr_reader :x`, `private_class_method :x`, and a bare toggle the
-      # walk cannot place in the body's statement list.
-      def visibility_call(node, nesting, singleton)
+      def visibility_call?(node)
+        node.is_a?(Prism::CallNode) && node.receiver.nil? &&
+          (VISIBILITY_CALLS.include?(node.name) || CLASS_VISIBILITY_CALLS.key?(node.name))
+      end
+
+      # `private :x`, `private %i[x]`, `private def x`, `private attr_reader :x`, `private_class_method :x`, and a
+      # bare toggle the walk cannot place in the body's statement list. A named call changes members only when it
+      # is written directly in the body (`direct`); one under an `if`, a block or a method body runs at a time
+      # Rigor does not know, so the members it names read unknown.
+      def visibility_call(node, nesting, singleton, direct:)
+        @visited_visibility_calls ||= {}.compare_by_identity
+        @visited_visibility_calls[node] = true
         if VISIBILITY_CALLS.include?(node.name)
           return mark_uncertain if node.arguments.nil?
 
-          apply_visibility(node, node.name.to_s, nesting.last, singleton)
-        elsif CLASS_VISIBILITY_CALLS.key?(node.name)
-          apply_visibility(node, CLASS_VISIBILITY_CALLS.fetch(node.name), nesting.last, true)
+          apply_visibility(node, node.name.to_s, nesting.last, singleton, direct)
+        else
+          apply_visibility(node, CLASS_VISIBILITY_CALLS.fetch(node.name), nesting.last, true, direct)
         end
       end
 
@@ -167,14 +185,49 @@ module Rigor
         @bodies.last&.uncertain = true
       end
 
-      def apply_visibility(node, visibility, owner, singleton)
+      def apply_visibility(node, visibility, owner, singleton, direct)
+        scope = singleton ? "singleton" : "instance"
         node.arguments.arguments.each do |argument|
-          case argument
-          when Prism::DefNode, Prism::CallNode then @node_visibility[argument] = visibility
-          when Prism::SymbolNode, Prism::StringNode
-            name_visibility(owner, singleton ? "singleton" : "instance", argument.unescaped, visibility)
+          names = argument_names(argument)
+          if wrapped_declaration?(argument, singleton)
+            @node_visibility[argument] = visibility
+          elsif argument.is_a?(Prism::DefNode)
+            # `private def self.x`: Ruby looks `x` up among instance methods and rejects it, so the result is unknown.
+            @node_visibility[argument] = nil
+          elsif names.nil?
+            # `private *NAMES`: which members change is unknown.
+            unknown_visibility(owner, scope)
+          else
+            names.each { |name| name_visibility(owner, scope, name, direct ? visibility : nil) }
           end
         end
+      end
+
+      # A `def` or `attr_*` the visibility call wraps. `private def self.x` is not one: `private` looks the
+      # name up among instance methods.
+      def wrapped_declaration?(argument, singleton)
+        case argument
+        when Prism::DefNode then argument.receiver.nil? || singleton
+        when Prism::CallNode then argument.receiver.nil? && ATTRIBUTE_CALLS.key?(argument.name)
+        else false
+        end
+      end
+
+      # The names a visibility call's argument lists, or nil when it is not a literal list of them.
+      def argument_names(argument)
+        case argument
+        when Prism::SymbolNode, Prism::StringNode then [argument.unescaped]
+        when Prism::ArrayNode
+          names = argument.elements.map { |element| argument_names(element)&.first }
+          names.include?(nil) ? nil : names
+        end
+      end
+
+      def unknown_visibility(owner, scope)
+        @sites.each do |site|
+          site.data["visibility"] = nil if site.data["owner"] == owner && site.data["scope"] == scope
+        end
+        mark_uncertain
       end
 
       # `private :x` changes the visibility of the members already defined under that name in this file.

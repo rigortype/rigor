@@ -117,34 +117,37 @@ RSpec.describe "qualified ids in `disable:` and suppression markers" do
     end
   end
 
-  # The collision #1948's review found: rigor-rails-i18n reports an unparsable locale as its own `load-error`. Its
-  # qualified id now drops it, while the plugin loader's `load-error` beside it stays.
-  it "drops rails-i18n's load-error by its qualified id and keeps the loader's" do
+  # Runs rigor-rails-i18n against an unparsable locale beside an unloadable plugin entry, with `disable` as the list.
+  # Re-registers on every load: a spec that ran `unregister!` after an earlier require leaves `require` a no-op with
+  # nothing registered (PR #1976).
+  def i18n_rows(disable)
+    config = Rigor::Configuration.new(
+      Rigor::Configuration::DEFAULTS.merge(
+        "paths" => ["a.rb"], "plugins" => %w[rigor-rails-i18n rigor-no-such-plugin-1953], "disable" => disable
+      )
+    )
+    requirer = lambda do |name|
+      require name
+      Rigor::Plugin.register(Rigor::Plugin::RailsI18n)
+      true
+    end
+    runner = Rigor::Analysis::Runner.new(configuration: config, cache_store: nil, plugin_requirer: requirer)
+    guarded_run(runner, allow_plugin_crash: true).diagnostics.map(&:qualified_rule)
+  end
+
+  # The collision #1948's review found: rigor-rails-i18n reports an unparsable locale as its own run-level
+  # `load-error` disclosure. Its qualified id and its `plugin.<id>` family now drop it, while the plugin loader's
+  # `load-error` beside it stays.
+  it "drops rails-i18n's load-error by its qualified id or family and keeps the loader's" do
     Dir.mktmpdir("rigor-1953-i18n-") do |dir|
       Dir.chdir(dir) do
         File.write("a.rb", "x = 1\n")
         FileUtils.mkdir_p("config/locales")
         File.write("config/locales/en.yml", "en:\n  foo: [\n")
-        rows_for = lambda do |disable|
-          config = Rigor::Configuration.new(
-            Rigor::Configuration::DEFAULTS.merge(
-              "paths" => ["a.rb"], "plugins" => %w[rigor-rails-i18n rigor-no-such-plugin-1953], "disable" => disable
-            )
-          )
-          # Re-register on every load: a spec that ran `unregister!` after an earlier require leaves `require` a
-          # no-op with nothing registered (PR #1976).
-          requirer = lambda do |name|
-            require name
-            Rigor::Plugin.register(Rigor::Plugin::RailsI18n)
-            true
-          end
-          runner = Rigor::Analysis::Runner.new(configuration: config, cache_store: nil, plugin_requirer: requirer)
-          guarded_run(runner, allow_plugin_crash: true).diagnostics.map(&:qualified_rule)
-        end
 
-        expect(rows_for.call([])).to include("plugin.rails-i18n.load-error", "plugin_loader.load-error")
+        expect(i18n_rows([])).to include("plugin.rails-i18n.load-error", "plugin_loader.load-error")
         %w[plugin.rails-i18n.load-error plugin.rails-i18n].each do |token|
-          rows = rows_for.call([token])
+          rows = i18n_rows([token])
           expect(rows).not_to include("plugin.rails-i18n.load-error")
           expect(rows).to include("plugin_loader.load-error")
         end

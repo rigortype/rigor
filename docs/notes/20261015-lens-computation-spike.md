@@ -113,6 +113,19 @@ Building rows is negligible: 0.08 s for the 160 rows of `issue.rb`.
   process pays the warm floor once for every target.
 - A cold lens costs a full `check`. On Rigor's own tree that is about 28 s at 4 workers.
 
+## The producer, measured
+
+`rigor lens` as built on `lens-v0-contract` (the producer PR), end to end with process boot, at 4 workers,
+redmine at `078e57f6b`. The oracle is `rigor check --no-cache --no-baseline --workers 4` on the same config.
+
+| Project | Targets | Cold lens | Warm lens | `check --no-cache` | Diagnostics, lens vs check |
+| --- | --- | --- | --- | --- | --- |
+| redmine | 10 files (models, controllers, a helper, `lib/redmine`) | 34.1 s | 16.4 s | 19.7 s | 177 / 177, identical per file |
+| mastodon | 8 files (models, a controller, a service, `app/lib`, a helper, a worker) | 30.7 s | 6.3 s | 18.7 s | 69 / 69, identical per file |
+
+The warm document equalled the cold one byte for byte on both. Warm redmine still pays the view templates
+(finding 3); mastodon's warm run is the engine's floor plus 8 targets.
+
 ## Limitations
 
 - Wall times are single runs on one host, except where a range is shown (two or three runs). They size

@@ -110,11 +110,53 @@ typer visits; the default keeps only the three teachable event
 kinds. The JSON stream is stable enough to build course
 material or figures from.
 
+## `rigor lens` — a file's declarations and where their types come from
+
+`rigor lens` lists every class, module, method and attribute a
+file declares, with the type each one has and where that type
+came from: `sig/`, an inline `#:` / `@rbs` comment, a plugin, a
+library, or Rigor's inference from the body. It is experimental:
+the command and its `lens/v0` JSON may still change.
+
+```sh
+rigor lens lib/shop.rb                    # text, for reading
+rigor lens --format=json lib/*.rb         # one JSON document
+```
+
+```text
+lib/shop.rb  xxh3-64:845f7426b6acfe12  (2 omitted)
+  4:7c90  class Shop
+  8:e37e  Shop#label: (::Integer n) -> ::String  [contract inline]
+  14:ce93  Shop#total: () -> Integer  [single_site inferred]
+  16:182b  Shop#fetch  [contested; also lib/legacy_shop.rb:2]
+  omitted constant Shop::LIMIT (line 5)
+```
+
+The answer is the one `rigor check` reaches. A lens runs the
+same incremental analysis as `rigor check --incremental` and
+shares its cache, so the first run costs a full check and later
+runs reuse it. The diagnostics it reports for a file are the
+ones `check` reports.
+
+- A method Ruby could take from more than one definition (the
+  same method defined in two files) is `contested`. Rigor does
+  not guess which one runs, so it prints no signature for it.
+- A declaration this version does not model yet (a constant, an
+  `alias`, a `define_method`) is listed as omitted, never
+  dropped.
+- `LINE:HASH` is an anchor: it changes when the declaration or
+  the type comments above it change, and not when prose
+  comments do.
+
+The JSON document is specified in
+[the lens output contract](../internal-spec/lens.md).
+
 ## Which to reach for
 
 | You want… | Use |
 | --- | --- |
 | One expression's type, from the shell | `rigor type-of` |
+| A file's declarations, their types and where each came from | `rigor lens` |
 | Every line of a file surveyed | `rigor annotate` |
 | The derivation replayed step by step | `rigor trace` |
 | A type printed mid-analysis, in context | `dump_type` |

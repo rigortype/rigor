@@ -297,8 +297,13 @@ module Rigor
                      record_dependencies: false, record_self_calls: false, analyze_only: nil,
                      seed_bundles: nil, collect_seed_bundles: false, param_inferred_types: nil,
                      discovery_seed: nil, no_tolerated_effects: false,
-                     restored_run_level_rows: nil, served_per_file_diagnostics: nil)
+                     restored_run_level_rows: nil, served_per_file_diagnostics: nil, on_file_indexed: nil)
         @configuration = configuration
+        # ADR-113 WD2 — `rigor lens` reads a target's seeded index here: called with `(path, parse_result, scope,
+        # index)` for every file this process indexes, after its rules ran and inside the run window, so the reader
+        # sees what `check` saw. A pooled file is indexed in a worker and never reaches it; the incremental session
+        # analyses forced targets with `workers: 0` for that reason.
+        @on_file_indexed = on_file_indexed
         # Issues #796 / #794 — the previous full run's run-level rows, supplied only by
         # {IncrementalSession} on a narrowed run; see {PoolCoordinator#replay_restored_run_level_rows}.
         @restored_run_level_rows = restored_run_level_rows
@@ -2599,6 +2604,7 @@ module Rigor
         end
         self_call_misses = self_call_record ? self_call_record.calls : []
         diagnostics = rule_and_plugin_diagnostics(path, parse_result, scope, index, self_call_misses)
+        @on_file_indexed&.call(path, parse_result, scope, index)
         diagnostics + explain_diagnostics(path, parse_result.value, scope)
       rescue Errno::ENOENT => e
         [

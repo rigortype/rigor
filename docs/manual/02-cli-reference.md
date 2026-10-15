@@ -171,6 +171,24 @@ the two builds against each other — but if you are chasing a
 disagreement between a probe and a `check` run, comparing
 against `rigor check --no-cache` removes that variable.
 
+## `rigor lens`
+
+Map the declarations of one or more files with their types and
+type provenance (experimental). See
+[Inspecting inferred types](05-inspecting-types.md).
+
+```sh
+rigor lens [--format=text|json] [--config=PATH] [--workers=N] FILE...
+```
+
+A lens runs the same incremental analysis as
+`rigor check --incremental` and reads and writes its cache.
+`--workers` applies to a cold run. `--format=json` writes one
+`lens/v0` document ([specification](../internal-spec/lens.md)).
+Exit `0` when at least one file has a result, `1` when none
+does, `64` on a usage error; diagnostics in the code never
+change the exit status.
+
 ## `rigor trace`
 
 Replay HOW the engine typed a file, step by step, as a

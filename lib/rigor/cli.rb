@@ -51,6 +51,7 @@ module Rigor
       "init" => :run_init,
       "annotate" => :run_annotate,
       "type-of" => :run_type_of,
+      "lens" => :run_lens,
       "trace" => :run_trace,
       "type-scan" => :run_type_scan,
       "effects" => :run_effects,
@@ -335,6 +336,12 @@ module Rigor
       TypeOfCommand.new(argv: @argv, out: @out, err: @err).run
     end
 
+    def run_lens
+      require_relative "cli/lens_command"
+
+      LensCommand.new(argv: @argv, out: @out, err: @err).run
+    end
+
     def run_trace
       require_relative "cli/trace_command"
 
@@ -481,6 +488,7 @@ module Rigor
           init       Create a starter .rigor.yml
           annotate   Print FILE with each line's last-expression type
           type-of    Print inferred types at FILE:LINE[:COL] positions
+          lens       Map a file's declarations with their types and provenance (experimental)
           trace      Replay how the engine typed FILE as a terminal animation
           type-scan  Report Scope#type_of coverage across PATHs
           effects    Report each method's effect labels, and the committed effect snapshot

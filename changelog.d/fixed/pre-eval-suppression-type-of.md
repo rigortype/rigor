@@ -1,0 +1,1 @@
+- **[rigor check]** `pre-eval.*` diagnostics now honour `# rigor:disable <rule>`, `# rigor:disable-file` and the `.rigor.yml` `disable:` list, and `rigor type-of` now consults the `pre_eval:` registry so it agrees with `rigor check` on a patched method. ([#1892](https://github.com/rigortype/rigor/pull/1892))

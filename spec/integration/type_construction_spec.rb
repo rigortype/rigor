@@ -1564,7 +1564,9 @@ RSpec.describe "Rigor type construction (integration)" do
   # is restored where code may run that rebinds it. Each entry runs as `rigor check` runs a project.
   describe "fixtures/ivar_class_guards/ — class guards on instance-variable receivers (#1446)", type: :runner do
     # The number of `# QUIET-1446` lines each entry carries.
-    quiet_counts = { "guards.rb" => 7, "invalidation.rb" => 1, "bot_receivers.rb" => 5, "writes.rb" => 2 }.freeze
+    quiet_counts = {
+      "guards.rb" => 7, "invalidation.rb" => 1, "bot_receivers.rb" => 5, "writes.rb" => 2, "self_calls.rb" => 26
+    }.freeze
 
     def fixture_source(name) = File.read(File.join(__dir__, "fixtures/ivar_class_guards", name))
 
@@ -1589,6 +1591,84 @@ RSpec.describe "Rigor type construction (integration)" do
         expect(result.diagnostics.map(&:rule).map(&:to_s)).not_to include("flow.unreachable-clause")
         expect(source.lines.count { |line| line.include?("# QUIET-1446") }).to eq(quiet)
       end
+    end
+
+    # Issue #1596 — a callee another file defines again, in any spelling, is not the `def` the table holds: Ruby runs
+    # the later one, which writes `@v`, so the read returns "X" under Ruby 4.0.5 and must not report.
+    it "gives up on a callee another file redefines" do
+      caller_source = <<~RUBY
+        class T
+          def initialize = (@v = "a")
+          def log = note
+          def note = nil
+
+          def dump
+            @v = nil
+            log
+            @v.upcase
+          end
+        end
+      RUBY
+      redefinitions = [
+        "class T\n  def log = (@v = \"x\")\nend\n", "class T\n  def note = (@v = \"x\")\nend\n",
+        "T.class_eval { def log = (@v = \"x\") }\n", "T.class_eval { define_method(:log) { @v = \"x\" } }\n",
+        "class T\n  define_method(:log) { @v = \"x\" }\nend\n", "T.send(:define_method, :log) { @v = \"x\" }\n",
+        "T.define_method(:log) { @v = \"x\" }\n"
+      ]
+      redefinitions.each do |redefinition|
+        result = analyze(files: { "a.rb" => caller_source, "b.rb" => redefinition })
+        expect(reported(result).map { |d| [d.line, d.rule.to_s] }).to eq([]), redefinition
+      end
+      expect(reported(analyze(files: { "a.rb" => caller_source, "b.rb" => "X = 1\n" })).map(&:line)).to eq([9])
+    end
+
+    # A refinement in effect where the callee sits reroutes even a core call: `warn` here runs `LoudWarn`'s, which
+    # writes `@v`, so the read returns "X" under Ruby 4.0.5 when `b.rb` loads first.
+    it "gives up on a call a refine block anywhere in the project defines" do
+      files = {
+        "a.rb" => <<~RUBY,
+          using LoudWarn
+
+          class Warned
+            def initialize = (@v = "a")
+            def log = warn("x")
+
+            def dump
+              @v = nil
+              log
+              @v.upcase
+            end
+          end
+        RUBY
+        "b.rb" => "module LoudWarn\n  refine Kernel do\n    def warn(*) = (@v = \"x\")\n  end\nend\n"
+      }
+      expect(reported(analyze(files: files))).to eq([])
+    end
+
+    # Two files each mix a module into the class, so the tables cannot say which runs first: loaded in this order,
+    # Ruby runs `Loudly#log`, which writes `@v`, and the read returns "X" under Ruby 4.0.5.
+    it "gives up on a class whose mixin order the tables cannot settle" do
+      files = {
+        "a.rb" => <<~RUBY,
+          module Quietly
+            def log = nil
+          end
+
+          class Mixed
+            include Quietly
+
+            def initialize = (@v = "a")
+
+            def dump
+              @v = nil
+              log
+              @v.upcase
+            end
+          end
+        RUBY
+        "b.rb" => "module Loudly\n  def log = (@v = \"x\")\nend\n\nclass Mixed\n  include Loudly\nend\n"
+      }
+      expect(reported(analyze(files: files))).to eq([])
     end
   end
 

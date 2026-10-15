@@ -876,13 +876,18 @@ module Rigor
     STDOUT_ALIASES = { :$stdout => :$>, :$> => :$stdout }.freeze
     private_constant :STDOUT_ALIASES
 
-    # Issue #1429 — {#forget_guard_narrowings} for the one name `[kind, name]`.
+    # Issue #1429 — {#forget_guard_narrowings} for the one name `[kind, name]`. Issue #1596 — an `:ivar` kind too,
+    # for a self-call proven to write only some instance variables.
     def forget_guard_narrowing_of(kind, name)
       key = [kind, name]
       pre_guard = @guard_records[key]
       return self if pre_guard.nil?
 
-      if kind == :global
+      if kind == :ivar
+        current = @ivars[name]
+        ivars = current ? @ivars.merge(name => Type::Combinator.union(pre_guard, current)).freeze : @ivars
+        rebuild(ivars: ivars, guard_records: @guard_records.except(key).freeze)
+      elsif kind == :global
         current = @globals[name]
         globals = current ? @globals.merge(name => Type::Combinator.union(pre_guard, current)).freeze : @globals
         rebuild(globals: globals, guard_records: @guard_records.except(key).freeze)

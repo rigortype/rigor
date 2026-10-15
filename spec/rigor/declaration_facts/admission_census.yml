@@ -48,6 +48,7 @@ members:
     - lib/rigor/inference/refined_dispatch.rb
     - lib/rigor/inference/refined_dispatch/class_object.rb
     - lib/rigor/inference/refined_dispatch/own_method.rb
+    - lib/rigor/inference/self_call_ivar_writes.rb
     - lib/rigor/inference/singleton_hook_decline.rb
     - lib/rigor/protection/discovery_seed.rb
     - lib/rigor/reflection.rb
@@ -62,6 +63,7 @@ members:
   in_source_constants:
     reads:
     - lib/rigor/inference/last_line/implicit_self.rb
+    - lib/rigor/inference/self_call_ivar_writes.rb
     - lib/rigor/lens/run.rb
     - lib/rigor/reflection.rb
     copies:
@@ -83,6 +85,7 @@ members:
     - lib/rigor/inference/block_call_timing.rb
     - lib/rigor/inference/expression_typer.rb
     - lib/rigor/inference/parameter_inference_collector.rb
+    - lib/rigor/inference/self_call_ivar_writes.rb
     - lib/rigor/inference/void_tail_summary.rb
     - lib/rigor/scope/resolution_chain.rb
     copies:
@@ -102,20 +105,22 @@ members:
       - paired_copy
       lib/rigor/inference/block_call_timing.rb:
       - existence
+      lib/rigor/inference/definer_resolution.rb:
+      - consults_contested
       lib/rigor/inference/expression_typer.rb:
       - identity
       - existence
       lib/rigor/inference/parameter_inference_collector.rb:
       - existence
       - paired_copy
+      lib/rigor/inference/self_call_ivar_writes.rb:
+      - consults_contested
       lib/rigor/inference/void_tail_summary.rb:
       - identity
-      lib/rigor/scope/resolution_chain.rb:
-      - existence
-      lib/rigor/inference/definer_resolution.rb:
-      - consults_contested
       lib/rigor/protection/discovery_seed.rb:
       - paired_copy
+      lib/rigor/scope/resolution_chain.rb:
+      - existence
   discovered_def_nestings:
     reads:
     - lib/rigor/analysis/runner.rb
@@ -205,6 +210,7 @@ members:
     - lib/rigor/inference/definer_resolution.rb
     - lib/rigor/inference/refined_dispatch/class_object.rb
     - lib/rigor/inference/refined_dispatch/own_method.rb
+    - lib/rigor/inference/self_call_ivar_writes.rb
     - lib/rigor/scope/resolution_chain.rb
     copies:
     - lib/rigor/protection/discovery_seed.rb
@@ -223,10 +229,12 @@ members:
       - existence
       lib/rigor/inference/refined_dispatch/own_method.rb:
       - existence
-      lib/rigor/scope/resolution_chain.rb:
-      - existence
+      lib/rigor/inference/self_call_ivar_writes.rb:
+      - consults_contested
       lib/rigor/protection/discovery_seed.rb:
       - paired_copy
+      lib/rigor/scope/resolution_chain.rb:
+      - existence
   discovered_superclasses:
     reads:
     - lib/rigor/analysis/check_rules.rb
@@ -249,6 +257,7 @@ members:
   discovered_deferred_ranges:
     reads:
     - lib/rigor/analysis/runner.rb
+    - lib/rigor/inference/self_call_ivar_writes.rb
     copies:
     - lib/rigor/inference/parameter_inference_collector.rb
     - lib/rigor/protection/discovery_seed.rb
@@ -260,6 +269,7 @@ members:
     - lib/rigor/inference/in_effect_refinements/scope_reads.rb
     - lib/rigor/inference/refined_dispatch.rb
     - lib/rigor/inference/refined_dispatch/own_method.rb
+    - lib/rigor/inference/self_call_ivar_writes.rb
     copies:
     - lib/rigor/analysis/runner.rb
     - lib/rigor/protection/discovery_seed.rb
@@ -327,6 +337,7 @@ members:
     - lib/rigor/analysis/runner.rb
     - lib/rigor/inference/in_effect_refinements/scope_reads.rb
     - lib/rigor/inference/refined_dispatch/own_method.rb
+    - lib/rigor/inference/self_call_ivar_writes.rb
     - lib/rigor/inference/singleton_hook_decline.rb
     - lib/rigor/scope/resolution_chain.rb
     copies:

@@ -500,6 +500,11 @@ lib/rigor/inference/scope_indexer/superclasses_collector.rb:
   computes: each class's superclass and header nesting, as a collector on the shared declaration walk
   producers:
     Rigor::Inference::ScopeIndexer::SuperclassesCollector: grandfathered
+lib/rigor/inference/self_call_ivar_writes.rb:
+  computes: the instance variables an implicit-self or self. call may write, for the intervening-call reset and the class-guard restore (#1596)
+  producers:
+    Rigor::Inference::SelfCallIvarWrites: lists `class << self` and `extend` only as code the proof declines to read past, since either may change which method a later call on `self` dispatches to; it records no declaration fact
+    Rigor::Inference::SelfCallIvarWrites::Proof#read: declines at the nodes UNPROVABLE_NODES lists rather than deriving a declaration context from them; the callee it reads comes from Scope#user_def_for and the resolution chain
 lib/rigor/inference/singleton_hook_decline.rb:
   computes: the singleton-side candidate-set read's positional hook decline (ADR-119 WD3, errata 2026-10-08)
   producers:

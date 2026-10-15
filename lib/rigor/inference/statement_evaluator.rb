@@ -27,6 +27,7 @@ require_relative "content_join"
 require_relative "define_method_block_self"
 require_relative "macro_block_self_type"
 require_relative "guard_rebinding"
+require_relative "self_call_ivar_writes"
 require_relative "match_rebinding"
 require_relative "element_read_widening"
 require_relative "hash_lookup_mutation"
@@ -3204,7 +3205,13 @@ module Rigor
         post_scope = post_scope.forget_match_globals if rebinds_match_globals?(node, post_scope)
         post_scope = post_scope.forget_last_line if rebinds_last_line?(node, post_scope)
         if post_scope.guard_narrowed? && GuardRebinding.call_may_rebind?(node, operand_scope)
-          post_scope = post_scope.forget_guard_narrowings
+          # Issue #1596 — a self-call proven to write only some instance variables restores only theirs.
+          writes = intervening_call_candidate?(node) ? self_call_ivar_writes(node) : nil
+          post_scope = if writes
+                         writes.reduce(post_scope) { |acc, name| acc.forget_guard_narrowing_of(:ivar, name) }
+                       else
+                         post_scope.forget_guard_narrowings
+                       end
         end
         forget_rescued_status(LastStatus.after(node, post_scope, scope), node)
       end
@@ -3329,6 +3336,7 @@ module Rigor
       # Returns a scope with each ivar's narrowed local binding widened back to its class-ivar seed value when the call
       # is one that could plausibly mutate ivars on the enclosing class (implicit-self or explicit `self.foo`).
       # External- receiver calls (`obj.method`) cannot reach the caller's ivars; they pass through unchanged.
+      # Issue #1596 — where the call is proven to write only some ivars ({#self_call_ivar_writes}), only those widen.
       def invalidate_ivars_for_intervening_call(call_node, current_scope)
         return current_scope unless intervening_call_candidate?(call_node)
 
@@ -3343,6 +3351,9 @@ module Rigor
           local_type = current_scope.ivar(ivar_name)
           next if local_type.nil? || local_type == seed_type
 
+          writes = self_call_ivar_writes(call_node)
+          next if writes && !writes.include?(ivar_name)
+
           joined = Type::Combinator.union(local_type, seed_type)
           widened = widened.with_ivar(ivar_name, joined)
           # Issue #1889 — an ivar a reflective write widened keeps its declaration mark, so the reset must too.
@@ -3350,6 +3361,15 @@ module Rigor
             current_scope.declaration_sourced?(:ivar, ivar_name)
         end
         widened
+      end
+
+      # Issue #1596 — the ivars the implicit-self / `self.` call `call_node` may write, or nil when that is not proven
+      # ({SelfCallIvarWrites.of}). Memoised per call node: the reset and the guard restore ask it of the same call.
+      def self_call_ivar_writes(call_node)
+        memo = (@self_call_ivar_writes ||= {}.compare_by_identity)
+        return memo[call_node] if memo.key?(call_node)
+
+        memo[call_node] = SelfCallIvarWrites.of(call_node, operand_scope)
       end
 
       def intervening_call_candidate?(call_node)

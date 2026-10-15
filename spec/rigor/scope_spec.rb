@@ -1024,6 +1024,19 @@ RSpec.describe Rigor::Scope do
       expect(joined.forget_guard_narrowings.ivar(:@io)).to eq(io_or_string_io)
       expect(guarded.join(described_class.empty).guard_narrowed?).to be(false)
     end
+
+    # Issue #1596 — a self-call proven to write only some instance variables restores only theirs.
+    it "restores one named instance variable, keeping every other record" do
+      both = guarded.with_ivar(:@other, io).with_guarded_ivar(:@other, string_io, io)
+                    .with_global(:$out, io).with_guarded_global(:$out, string_io, io)
+      restored = both.forget_guard_narrowing_of(:ivar, :@io)
+      expect(restored.ivar(:@io)).to eq(io_or_string_io)
+      expect(restored.guard_narrowed_ivar?(:@io)).to be(false)
+      expect(restored.ivar(:@other)).to eq(string_io)
+      expect(restored.guard_narrowed_ivar?(:@other)).to be(true)
+      expect(restored.global(:$out)).to eq(string_io)
+      expect(both.forget_guard_narrowing_of(:ivar, :@missing)).to equal(both)
+    end
   end
 
   # Issue #1446 — the classes a class guard named where it left a receiver `bot`, which a call on the receiver

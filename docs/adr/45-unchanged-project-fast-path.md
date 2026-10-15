@@ -78,8 +78,9 @@ The sound model inverts the order: **run, recording every input actually
 read; cache the result alongside that dependency set; on the next run,
 validate the recorded dependencies by re-reading them.**
 
-- **Key:** stable, known before the run — the analyzed-path *set* +
-  config digest (`Configuration#to_h`) + gems (`RbsDescriptor` gem/config
+- **Key:** stable, known before the run — the analyzed-path *set* + the
+  analysis roots as written (#1559; `rigor check` and `rigor check lib`
+  are two slots) + config digest (`Configuration#to_h`) + gems (`RbsDescriptor` gem/config
   entries) + `Rigor::VERSION` + `--explain`. Adding/removing a file
   changes the path set → new key; editing a file keeps the key and is
   caught by validation (so content edits reuse the same slot — no cache
@@ -250,12 +251,14 @@ the library list without `rbs.virtual_rbs`, no `template-units` slot,
 `analysis.incremental-run-diagnostics`. The roots are not implied by the
 files: `--incremental lib extra` with `extra` missing analyses what
 `--incremental lib` analyses, and only the first reports `extra` missing
-(the plain key had the same gap, closed by #1559: it holds the roots as
-written). The key holds them normalised to absolute paths and sorted (`lib`, `./lib` and `lib/` are one root there),
-so a run that reorders them still finds the previous slot's chain, as the
-snapshot fingerprint, which sorts them too, still restores, and a respelled
-run replaces the slot rather than adding one beside it. The entry keeps them as the run was given them, and is served only to a
-run that names them the same way in the same order: a missing root is
+(the plain key had the same gap, closed by #1559, which holds the roots as
+written). The incremental key holds them normalised to absolute paths and
+sorted (`lib`, `./lib` and `lib/` are one root there), so a run that
+reorders them still finds the previous slot's chain, as the snapshot
+fingerprint, which sorts them too, still restores, and a respelled run
+replaces the slot rather than adding one beside it. The entry keeps them as
+the run was given them, and is served only to a run that names them the same
+way in the same order: a missing root is
 reported as written (`./extra` is not `extra`), and `--incremental a b`
 lists `a`'s files first where `b a` lists `b`'s. The producer id and the
 roots entry each keep the two slots apart on their own, so neither probe

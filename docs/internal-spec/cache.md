@@ -778,7 +778,8 @@ passes, in order:
    judgement: `RbsCacheProducer.generation_cap` (2, inherited by every
    `rbs.*` subclass), `Analysis::RunCacheKey::GENERATION_CAP` (16 for
    `analysis.run-diagnostics`, one live generation per analyzed-path
-   SET, and for its `--incremental` twin `analysis.incremental-run-diagnostics`,
+   SET × root list as written (#1559), so `rigor check` and `rigor check lib`
+   are separate generations, and for its `--incremental` twin `analysis.incremental-run-diagnostics`,
    whose writer also discards the generation it supersedes when the path set
    moves, since the incremental path runs no compaction pass) and its
    `EFFECTS_GENERATION_CAP` twin (`analysis.run-effects`,
@@ -1317,7 +1318,9 @@ Unlike the `--incremental` slot's `incremental.roots` entry below, they are neit
 absolute nor sorted, so a reordered or respelled root set (`extra lib`, `./lib`, `lib/`, an
 absolute path) is a slot of its own: a forgone hit, never another run's answer. The entry is
 not part of `RunCacheKey.descriptor`, so the `--incremental` key built on it and the
-ADR-103 effects sidecar identity are unchanged. A new key entry is a new slot, not a schema
+ADR-103 effects sidecar identity (still one generation per analyzed-path SET) are unchanged.
+The plain slot still records no existence rows for the roots, which the `--incremental`
+slot does (#1962). A new key entry is a new slot, not a schema
 change: entries written before it are simply never read again.
 
 ### The run-result slot (ADR-45 WD2)

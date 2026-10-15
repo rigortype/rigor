@@ -1,0 +1,1 @@
+- **[cli]** `rigor lens FILE...` (experimental) maps a file's classes, modules, methods and attributes with the type `rigor check` gives each one and where that type came from (`sig/`, an inline comment, a plugin, a library, or inference), as text or as a `lens/v0` JSON document for tools such as ZARD. ([#1910](https://github.com/rigortype/rigor/pull/1910))

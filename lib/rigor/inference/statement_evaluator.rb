@@ -42,6 +42,7 @@ require_relative "operand_effects"
 require_relative "operand_walk"
 require_relative "optimistic_origin"
 require_relative "return_barrier"
+require_relative "repeated_or_writes"
 require_relative "rewrite_mutation"
 require_relative "unknown_store_widening"
 require_relative "untyped_rejoin"
@@ -3559,7 +3560,9 @@ module Rigor
       end
 
       def enter_call_block(node, block)
-        block_entry = narrow_define_method_block_self(node, repeating_block_entry(node, block))
+        block_entry = narrow_define_method_block_self(
+          node, with_repeated_or_write_marks(node, block, repeating_block_entry(node, block))
+        )
         # #319 — `Class.new do ... end` and friends evaluate their block as a CLASS BODY (`class_eval`
         # semantics): `self` is the freshly created class, so a `def` inside defines an instance method on it
         # and `attr_reader` runs as a class-level macro. Enter the block under the same `self_type` /
@@ -4159,7 +4162,7 @@ module Rigor
       # The `break` scopes of one unrecorded pass from `converged` — for a capped fixpoint, whose widened binding no
       # pass has run from.
       def converged_break_arms(call_node, block, converged, targets)
-        entry = block_pass_entry(call_node, block, converged)
+        entry = with_repeated_or_write_marks(call_node, block, block_pass_entry(call_node, block, converged))
         sink, = collect_break_scopes { sub_eval(block, entry, **UNRECORDED) }
         targeted_scopes(sink, targets)
       end
@@ -4959,7 +4962,8 @@ module Rigor
       # params / `;`-locals re-bound as usual) and returns the per-name exit binding for `names`. Used as the
       # `BodyFixpoint` body-evaluator.
       def block_exit_bindings(call_node, block, bindings, names)
-        _type, exit_scope = sub_eval(block, block_pass_entry(call_node, block, bindings))
+        entry = with_repeated_or_write_marks(call_node, block, block_pass_entry(call_node, block, bindings))
+        _type, exit_scope = sub_eval(block, entry)
         names.to_h { |name| [name, CapturedLocals.bound_type(exit_scope, name)] }
       end
 
@@ -4974,6 +4978,38 @@ module Rigor
           bindings.key?(name) ? bind_capture(acc, name, type) : acc.with_mutated_local(name, type)
         end
       end
+
+      # Issue #1336 — `entry` with the index `||=` sites of a repeating block marked as the generic block-return pass
+      # marks them ({RepeatedOrWrites}, `Scope#with_repeated_or_writes`). The statement pass and every ADR-56
+      # write-back pass type the body from one entry scope just as that pass does, so a slot an earlier run stored
+      # into reads as a lone `Dynamic` there too, and the memoizing reading ({#index_compound_write_value}) answered
+      # one site's rvalue: `last = (cache[:k] ||= :f).itself` beside a `cache[:k] ||= :e` wrote `:f` alone back
+      # into `last`, and `last == :e` folded always-falsey. A call that runs its block at most once marks nothing.
+      def with_repeated_or_write_marks(call_node, block, entry)
+        sites = repeated_or_write_sites(call_node, block)
+        sites.empty? ? entry : entry.with_repeated_or_writes(sites)
+      end
+
+      # The sites {#with_repeated_or_write_marks} lays, once per block: a body that spells no `||=` — nearly every
+      # one — answers none without the repetition question.
+      def repeated_or_write_sites(call_node, block)
+        memo = (@repeated_or_write_sites ||= {}.compare_by_identity)
+        return memo[block] if memo.key?(block)
+
+        memo[block] = compute_repeated_or_write_sites(call_node, block)
+      end
+
+      def compute_repeated_or_write_sites(call_node, block)
+        body = block.body
+        return NO_REPEATED_OR_WRITES if body.nil? || !RepeatedOrWrites.may_hold_or_write?(body)
+        return NO_REPEATED_OR_WRITES if repeating_block_class(call_node).nil?
+
+        stores = CapturedLocals.content_mutations(block, scope, non_locals: true)
+        RepeatedOrWrites.sites(block, stores, scope).at(nil)
+      end
+
+      NO_REPEATED_OR_WRITES = [].freeze
+      private_constant :NO_REPEATED_OR_WRITES
 
       NO_CAPTURE_BINDINGS = {}.freeze
       private_constant :NO_CAPTURE_BINDINGS

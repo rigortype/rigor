@@ -1278,6 +1278,61 @@ RSpec.describe "block-return scope threading", type: :runner do
         RUBY
       end
     end
+
+    # Issue #1336. The ADR-56 captured-local write-back types the body through `StatementEvaluator` once per
+    # fixpoint pass, from one entry scope as the block-return pass does, so it marks the same sites: a value that
+    # escapes through a rebound capture carries every site's store, not the one site's rvalue.
+    describe "under the ADR-56 captured-local write-back" do
+      it "does not fold a capture the escaping `||=` value rebinds (the reported probe)" do
+        # Ruby with input `,a` prints `e`: the empty element stores `:e`, and the second keeps it.
+        expect(flow_rules(<<~RUBY)).to be_empty
+          cache = Hash.new
+          last = nil
+          gets.to_s.split(",", -1).each do |x|
+            if x.empty?
+              cache[:k] ||= :e
+            else
+              last = (cache[:k] ||= :f).itself
+            end
+          end
+          puts "e" if last == :e
+        RUBY
+      end
+
+      it "does not fold it under `Hash#each` or `Integer#times` either" do
+        expect(flow_rules(<<~RUBY)).to be_empty
+          cache = Hash.new
+          first = nil
+          second = nil
+          xs = gets.to_s.split(",", -1)
+          xs.each_with_index.to_h { |x, i| [i, x] }.each do |_i, x|
+            x.empty? ? (cache[:k] ||= :e) : (first = (cache[:k] ||= :f).itself)
+          end
+          xs.size.times do |i|
+            xs[i].empty? ? (cache[:j] ||= :e) : (second = (cache[:j] ||= :f).itself)
+          end
+          puts "e" if first == :e
+          puts "e" if second == :e
+        RUBY
+      end
+
+      it "keeps the rvalue reading for an isolated site (control)" do
+        # No other store reaches the slot, so whatever an earlier run stored there is this site's own `:f`.
+        expect(dumped_type(<<~RUBY)).to eq(":f?")
+          cache = Hash.new
+          last = nil
+          gets.to_s.split(",").each { |w| last = (cache[w] ||= :f).itself }
+          dump_type(last)
+        RUBY
+      end
+
+      it "keeps it for a lone site outside any block (control)" do
+        expect(dumped_type(<<~RUBY)).to eq(":f")
+          cache = Hash.new
+          dump_type(cache[:k] ||= :f)
+        RUBY
+      end
+    end
   end
 
   # The content half of the pin above. The fixpoint answers the outer locals the body REBINDS; a captured

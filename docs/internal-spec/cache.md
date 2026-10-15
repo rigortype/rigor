@@ -850,8 +850,12 @@ full run, so the snapshot can never wedge or stale an analysis.
    the round equals a cold run; an unchanged fingerprint takes the plain
    `IncrementalSession#recheck` path. The re-baseline does not bump
    `ProjectContext#generation`: the round that noticed the change is already
-   computed from the new inputs. The fingerprint costs about 20 ms on a
-   573-file project.
+   computed from the new inputs. The `effects:` identity
+   (`Effects::Identity.digest`, which `Configuration#to_h` omits) is compared
+   alongside it, and a fingerprint that was already `nil` at priming is not a
+   change. The fingerprint cost is proportional to project size: about 18 ms
+   on a 573-file project and 65-95 ms on a 1,300-file app (roughly 4% of a
+   no-op save round).
 
    The lockfile paths are resolved by `Analysis::RunCacheKey.resolved_lockfile_paths`
    — the same call that builds the ADR-45 run-result key's `bundler.lockfile` /

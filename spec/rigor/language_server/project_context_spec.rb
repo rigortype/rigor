@@ -292,5 +292,63 @@ RSpec.describe Rigor::LanguageServer::ProjectContext do
 
       expect(context.generation).to eq(generation)
     end
+
+    it "re-baselines when only the effects: block of .rigor.yml changes" do
+      File.write(File.join(project_dir, "sig", "foo.rbs"), "class Foo\n  %a{pure} def bar: () -> nil\nend\n")
+      File.write(File.join(project_dir, "a.rb"), "class Foo\n  def bar\n    puts 1\n  end\nend\n")
+      write_config("effects: {}\n")
+      messages
+      session = context.instance_variable_get(:@incremental_session)
+      write_config("effects:\n  snapshot:\n    reach: [rails-controllers]\n")
+      rebaselined = messages
+
+      expect(context.instance_variable_get(:@incremental_session)).not_to equal(session)
+      expect(rebaselined).to eq(cold)
+    end
+
+    it "keeps rechecking when the fingerprint was already uncomputable at priming" do
+      allow(Rigor::Cache::IncrementalSnapshot).to receive(:fingerprint).and_return(nil)
+      messages
+      session = context.instance_variable_get(:@incremental_session)
+
+      context.project_diagnostics
+
+      expect(context.instance_variable_get(:@incremental_session)).to equal(session)
+    end
+
+    it "re-baselines when an uncomputable fingerprint becomes computable" do
+      allow(Rigor::Cache::IncrementalSnapshot).to receive(:fingerprint).and_return(nil)
+      messages
+      session = context.instance_variable_get(:@incremental_session)
+      allow(Rigor::Cache::IncrementalSnapshot).to receive(:fingerprint).and_call_original
+
+      context.project_diagnostics
+
+      expect(context.instance_variable_get(:@incremental_session)).not_to equal(session)
+    end
+
+    it "keeps the old configuration and session when the loader raises" do
+      messages
+      session = context.instance_variable_get(:@incremental_session)
+      configuration = context.configuration
+      raising = described_class.new(configuration: configuration, configuration_loader: -> { raise "bad yaml" })
+      raising.project_diagnostics
+      raising_session = raising.instance_variable_get(:@incremental_session)
+      raising.project_diagnostics
+
+      expect(raising.configuration).to equal(configuration)
+      expect(raising.instance_variable_get(:@incremental_session)).to equal(raising_session)
+      expect(context.instance_variable_get(:@incremental_session)).to equal(session)
+    end
+
+    it "drops the cache store on a re-baseline so a cache path change takes effect" do
+      messages
+      store = context.cache_store
+      write_config("cache:\n  path: #{File.join(project_dir, 'other-cache')}\n")
+      context.project_diagnostics
+
+      expect(context.cache_store).not_to equal(store)
+      expect(context.cache_store.root).to eq(File.join(project_dir, "other-cache"))
+    end
   end
 end

@@ -1,0 +1,1 @@
+- **[sig-gen]** A member declared `-> untyped` in `sig/` is no longer proposed a literal return such as `-> 1` or `-> "x"`; the literal is declined as it already was over a declared nominal ([#1890](https://github.com/rigortype/rigor/pull/1890)).

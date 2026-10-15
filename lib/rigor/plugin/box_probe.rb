@@ -116,12 +116,15 @@ module Rigor
         ::Ruby::Box.enabled? == true
       end
 
-      # `$XDG_CACHE_HOME/rigor` when that is an absolute path, else `~/.cache/rigor`; nil when neither can
-      # be resolved, which turns the cache off.
+      # `$XDG_CACHE_HOME/rigor` when that is an absolute path, else `$HOME/.cache/rigor` when `HOME` is an
+      # absolute path (the passwd entry when `HOME` is unset); nil otherwise, which turns the cache off
+      # rather than writing under the working directory.
       def default_cache_dir(env)
         xdg = env["XDG_CACHE_HOME"].to_s
-        base = xdg.start_with?("/") ? xdg : File.join(Dir.home, ".cache")
-        File.join(base, "rigor")
+        return File.join(xdg, "rigor") if xdg.start_with?("/")
+
+        home = env.key?("HOME") ? env["HOME"].to_s : Dir.home
+        File.absolute_path?(home) ? File.join(home, ".cache", "rigor") : nil
       rescue ArgumentError
         nil
       end

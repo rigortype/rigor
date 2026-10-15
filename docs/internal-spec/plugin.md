@@ -837,14 +837,21 @@ project's source.
     it keeps `RUBY_BOX` as set. Either re-exec carries the internal
     `RIGOR_BOX_PROBED` marker, so the child neither probes nor re-execs
     again, and clears it before Rigor loads. The verdict is cached under
-    `$XDG_CACHE_HOME/rigor/ruby-box-probe/` (`~/.cache/rigor/` when
-    `XDG_CACHE_HOME` is unset or relative), keyed on `RUBY_VERSION`,
-    `RUBY_PATCHLEVEL`, `RUBY_REVISION`, `RUBY_DESCRIPTION`, the Ruby
-    executable path, and the probe script. Only a pass, a crash signal
-    (`SEGV` / `BUS` / `ABRT` / `ILL`) or an inactive `Ruby::Box` is cached;
-    a probe that cannot start, times out, or fails another way is answered
-    but re-run next time. An unreadable or corrupt cache file reads as a
-    miss.
+    `$XDG_CACHE_HOME/rigor/ruby-box-probe/` when `XDG_CACHE_HOME` is an
+    absolute path, else under `$HOME/.cache/rigor/ruby-box-probe/`; a
+    relative or empty `HOME` turns the cache off. The key is
+    `RUBY_VERSION`, `RUBY_PATCHLEVEL`, `RUBY_REVISION`, `RUBY_DESCRIPTION`,
+    the Ruby executable path, and the probe script. Only a pass, a crash
+    signal (`SEGV` / `BUS` / `ABRT` / `ILL`) or an inactive `Ruby::Box` is
+    cached. A probe that cannot start, times out, or fails another way is
+    answered but re-run next time, so a Ruby whose probe times out pays the
+    ten-second deadline (`DEADLINE_SECONDS`) on every such run. An
+    unreadable cache file, or one whose format line is not the current one,
+    reads as a miss, and a cache write that fails is ignored. A cached
+    verdict never expires: after rebuilding a Ruby in place with the fix,
+    delete `$XDG_CACHE_HOME/rigor/ruby-box-probe` (or
+    `~/.cache/rigor/ruby-box-probe`) so the launcher probes again; a build
+    whose `RUBY_REVISION` or `RUBY_DESCRIPTION` changed misses anyway.
 - `Rigor::Plugin::Box` — the `Ruby::Box` wrapper backing the `ruby_box`
   strategy (`enabled?` / `require_feature` / `eval`).
 

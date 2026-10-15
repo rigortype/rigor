@@ -141,6 +141,93 @@ RSpec.describe Rigor::Plugin::BoxProbe do
       end
     end
 
+    %w[RUBY_VERSION RUBY_PATCHLEVEL RUBY_REVISION].each do |constant|
+      it "misses when #{constant} differs" do
+        Dir.mktmpdir do |dir|
+          ruby = counting_ruby(dir, "printf '(3/4)'")
+          cache = File.join(dir, "cache")
+          described_class.cached_unsupported_reason(ruby, cache_dir: cache)
+          stub_const(constant, "#{Object.const_get(constant)}-another-build")
+          described_class.cached_unsupported_reason(ruby, cache_dir: cache)
+          expect(probe_calls(dir)).to eq(2)
+        end
+      end
+    end
+
+    it "misses for a Ruby at another path even when the build is the same" do
+      Dir.mktmpdir do |dir|
+        first_dir = File.join(dir, "a")
+        second_dir = File.join(dir, "b")
+        [first_dir, second_dir].each { |d| FileUtils.mkdir_p(d) }
+        cache = File.join(dir, "cache")
+        described_class.cached_unsupported_reason(counting_ruby(first_dir, "printf '(3/4)'"), cache_dir: cache)
+        described_class.cached_unsupported_reason(counting_ruby(second_dir, "printf '(3/4)'"), cache_dir: cache)
+        expect([probe_calls(first_dir), probe_calls(second_dir)]).to eq([1, 1])
+      end
+    end
+
+    %w[BUS ABRT ILL].each do |signal|
+      it "caches a refusal from a child killed by SIG#{signal}" do
+        Dir.mktmpdir do |dir|
+          ruby = counting_ruby(dir, "kill -#{signal} $$")
+          cache = File.join(dir, "cache")
+          2.times { expect(described_class.cached_unsupported_reason(ruby, cache_dir: cache)).to include("22260") }
+          expect(probe_calls(dir)).to eq(1)
+        end
+      end
+    end
+
+    it "caches the verdict that Ruby::Box is not available" do
+      Dir.mktmpdir do |dir|
+        ruby = counting_ruby(dir, "exit 2")
+        cache = File.join(dir, "cache")
+        2.times do
+          expect(described_class.cached_unsupported_reason(ruby, cache_dir: cache)).to include("not available")
+        end
+        expect(probe_calls(dir)).to eq(1)
+      end
+    end
+
+    it "answers without raising when the cache directory cannot be written" do
+      Dir.mktmpdir do |dir|
+        ruby = counting_ruby(dir, "printf '(3/4)'")
+        cache = File.join(dir, "cache")
+        FileUtils.mkdir_p(cache)
+        File.chmod(0o555, cache)
+        begin
+          expect(described_class.cached_unsupported_reason(ruby, cache_dir: cache)).to be_nil
+          expect(File.exist?(described_class.cache_path(cache, ruby))).to be(false)
+        ensure
+          File.chmod(0o755, cache)
+        end
+      end
+    end
+
+    it "leaves no cache file behind when the write is interrupted part-way" do
+      Dir.mktmpdir do |dir|
+        ruby = counting_ruby(dir, "printf '(3/4)'")
+        cache = File.join(dir, "cache")
+        allow(File).to receive(:write).and_wrap_original do |original, target, body|
+          original.call(target, body[0, 5])
+          raise IOError, "interrupted"
+        end
+        described_class.cached_unsupported_reason(ruby, cache_dir: cache)
+        expect(File.exist?(described_class.cache_path(cache, ruby))).to be(false)
+      end
+    end
+
+    it "rejects a cache file whose format line is wrong even when its verdict line is valid" do
+      Dir.mktmpdir do |dir|
+        ruby = counting_ruby(dir, "kill -SEGV $$")
+        cache = File.join(dir, "cache")
+        path = described_class.cache_path(cache, ruby)
+        FileUtils.mkdir_p(File.dirname(path))
+        File.write(path, "rigor-box-probe-v0\npass")
+        expect(described_class.cached_unsupported_reason(ruby, cache_dir: cache)).to include("22260")
+        expect(probe_calls(dir)).to eq(1)
+      end
+    end
+
     it "never caches a probe that failed without a verdict about the Ruby" do
       Dir.mktmpdir do |dir|
         ruby = counting_ruby(dir, "exit 1")
@@ -177,6 +264,17 @@ RSpec.describe Rigor::Plugin::BoxProbe do
       expected = File.join(Dir.home, ".cache", "rigor")
       expect([described_class.default_cache_dir({}), described_class.default_cache_dir({ "XDG_CACHE_HOME" => "rel" })])
         .to eq([expected, expected])
+    end
+
+    it "turns the cache off for a relative or empty HOME when XDG_CACHE_HOME does not apply" do
+      expect([described_class.default_cache_dir({ "HOME" => "rel" }),
+              described_class.default_cache_dir({ "HOME" => "" }),
+              described_class.default_cache_dir({ "HOME" => "", "XDG_CACHE_HOME" => "rel" })])
+        .to eq([nil, nil, nil])
+    end
+
+    it "uses an absolute HOME" do
+      expect(described_class.default_cache_dir({ "HOME" => "/h" })).to eq("/h/.cache/rigor")
     end
   end
 
@@ -215,6 +313,16 @@ RSpec.describe Rigor::Plugin::BoxProbe do
         expect(reexec?(env, box_active: false)).to be(false)
         expect(described_class).not_to have_received(:cached_unsupported_reason)
         expect(env).to eq("RUBY_BOX" => "1")
+      end
+
+      it "treats a Ruby without Ruby::Box as inactive and neither probes nor prints a notice" do
+        hide_const("Ruby::Box")
+        allow(described_class).to receive(:cached_unsupported_reason)
+        env = { "RUBY_BOX" => "1" }
+        expect(described_class.box_active?).to be(false)
+        expect(described_class.needs_reexec?(env, stderr: stderr, cache_dir: "/unused")).to be(false)
+        expect(described_class).not_to have_received(:cached_unsupported_reason)
+        expect([env, stderr.string]).to eq([{ "RUBY_BOX" => "1" }, ""])
       end
     end
 
@@ -271,6 +379,28 @@ RSpec.describe Rigor::Plugin::BoxProbe do
         expect(err.scan(/^rigor: RUBY_BOX is set, but seeded refusal\. Re-running without RUBY_BOX/).size).to eq(1)
         expect([status.signaled?, status.exitstatus]).to eq([false, 1])
         expect(out).to include("probe_target.rb:1:3: error: undefined method")
+      end
+    end
+  end
+
+  # A re-exec'ed child sees only the marker; the launcher must still load the probe and clear the marker, so a
+  # `rigor` that child starts in turn probes again instead of inheriting the skip.
+  describe "exe/rigor with only the re-exec marker set", unless: Gem.win_platform? do
+    it "loads the probe and clears RIGOR_BOX_PROBED before Rigor runs" do
+      Dir.mktmpdir do |dir|
+        shim = File.join(dir, "report_marker.rb")
+        File.write(shim, <<~RUBY)
+          at_exit do
+            $stderr.puts "marker=\#{ENV.key?("RIGOR_BOX_PROBED")} probe=\#{defined?(Rigor::Plugin::BoxProbe) ? 1 : 0}"
+          end
+        RUBY
+        exe = File.expand_path("../../../exe/rigor", __dir__)
+        _out, err, status = Open3.capture3(
+          { "RUBY_BOX" => nil, "RIGOR_PLUGIN_ISOLATION" => nil, "RIGOR_BOX" => nil,
+            described_class::REEXEC_MARKER => "1" },
+          RbConfig.ruby, "-r", shim, exe, "version", stdin_data: ""
+        )
+        expect([status.success?, err.lines.grep(/\Amarker=/)]).to eq([true, ["marker=false probe=1\n"]])
       end
     end
   end

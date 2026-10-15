@@ -321,6 +321,24 @@ module Rigor
           try_project_singleton_inference(receiver, node, arg_types, method_name: :[])
       end
 
+      # Issue #1889 — the type a block-form `inject` / `reduce` accumulator parameter holds across every block run:
+      # the seed (or, without one, the element type) joined with the nominal fixpoint's converged accumulator
+      # ({#try_nominal_inject_fixpoint}), or nil when the call is not one or the fixpoint declines. The RBS tier binds
+      # the parameter to the seed alone, so the statement pass and the ADR-56 write-back typed every run's
+      # accumulator as `0` for `inject(0)`, and a capture assigned from it (`m = a`) was written back as `0`.
+      def inject_accumulator_type(call_node, receiver, arg_types)
+        return nil unless INJECT_METHODS.include?(call_node.name) && call_node.block.is_a?(Prism::BlockNode)
+
+        seed, has_seed = inject_seed(arg_types)
+        return nil if arg_types.size > (has_seed ? 1 : 0)
+
+        converged = try_nominal_inject_fixpoint(receiver, call_node.block, seed, has_seed)
+        return nil if converged.nil?
+
+        start = has_seed ? seed : MethodDispatcher::IteratorDispatch.element_type_of(receiver)
+        Type::Combinator.union(start, converged)
+      end
+
       # ADR-89 WD2 — the current run's return memo bucket as `{ def_node => [MemoEntry, …] }` (only entries
       # that carry a call descriptor, i.e. every stored entry). Read by the incremental session right after a
       # recording run to harvest each analyzed callee's observed call keys → return descriptors. Returns an

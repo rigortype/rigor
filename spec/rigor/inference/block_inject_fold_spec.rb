@@ -159,4 +159,45 @@ RSpec.describe "block-form inject/reduce fold", type: :runner do
       expect(dumped_type("n = 0\ndump_type([1, 2].inject(0) { |a, e; n| n = 5; a + e })")).to eq("dump_type: 3")
     end
   end
+
+  # Issue #1889 — the accumulator parameter holds the seed only on the first run. The statement pass and the ADR-56
+  # write-back bound it to the seed on every run, so a capture assigned from it was written back as the seed: Ruby
+  # leaves `m` at `1` below, Rigor kept `0` and reported the `m == 0` guard always-truthy.
+  describe "a capture assigned from the accumulator" do
+    def flow_diagnostics(source)
+      analyze(source).diagnostics.select { |d| d.rule.to_s.start_with?("flow.") }
+    end
+
+    {
+      "a seeded `inject`" => ["[1, 2].inject(0) { |a, e| m = a; a + e }", "m == 0"],
+      "a seeded `reduce`" => ["[1, 2].reduce(0) { |a, e| m = a; a + e }", "m == 0"],
+      "the no-seed form past the element union" => ["[1, 2, 4].inject { |a, e| m = a; a + e }", "m == 3"],
+      "a capture computed from the accumulator (#1232)" => ["[1, 2].inject(0) { |a, e| m = a + e; m }", "m == 3"]
+    }.each do |label, (call, guard)|
+      it "does not pin the capture through #{label}" do
+        expect(flow_diagnostics("m = 0\n#{call}\nputs 'x' if #{guard}\n")).to be_empty
+      end
+    end
+
+    it "binds the accumulator parameter to the seed joined with the converged accumulator" do
+      expect(dumped_type("[1, 2].inject(0) { |a, e| dump_type(a); a + e }")).to eq("dump_type: 0 | Integer")
+      expect(dumped_type("m = 0\n[1, 2].inject(0) { |a, e| m = a; a + e }\ndump_type(m)"))
+        .to eq("dump_type: 0 | Integer")
+    end
+
+    # Guards (this example and the next): the empty receiver and the element capture answered this before #1889.
+    it "keeps the pre-call value when the block never runs" do
+      expect(dumped_type("m = 0\n[].inject(0) { |a, e| m = a; a }\ndump_type(m)")).to start_with("dump_type: 0 |")
+    end
+
+    it "keeps the exact element union for a capture assigned from the element" do
+      expect(dumped_type("m = 0\n[1, 2].inject(0) { |a, e| m = e; a + e }\ndump_type(m)"))
+        .to eq("dump_type: 0 | 1 | 2")
+    end
+
+    # Guard: the call's own fold is untouched by the parameter binding.
+    it "still folds the call itself to its constant" do
+      expect(dumped_type("m = 0\ndump_type([1, 2].inject(0) { |a, e| m = a; a + e })")).to eq("dump_type: 3")
+    end
+  end
 end

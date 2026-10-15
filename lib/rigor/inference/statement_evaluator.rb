@@ -3170,6 +3170,9 @@ module Rigor
         # observes the seed's union (not the pre-call narrowed value). Always-safe (only widens; no new facts). See
         # [`docs/CURRENT_WORK.md`](../../../docs/CURRENT_WORK.md) § "Flow-folding" — G2 intervening-call case.
         post_scope = invalidate_ivars_for_intervening_call(node, post_scope) if statement_call
+        # Issue #1889 — `instance_variable_set` on `self` writes an ivar no write node shows. It runs after the reset
+        # above, which would join a literal-name write back into the class seed.
+        post_scope = ReflectiveIvarWrite.apply(node, post_scope) { type_operand(ReflectiveIvarWrite.value_node(node)) }
         # C1 — regex match-data globals (`$~`, `$1..$N`, `$&`, …) are narrowed to non-nil on a successful-match edge; a
         # later call that itself runs a regex match rebinds them, so the narrowed facts must be dropped. We forget them
         # only when the call may run a match in this frame ({#rebinds_match_globals?}). A call provably match-free on a
@@ -5412,7 +5415,7 @@ module Rigor
         return [] if receiver_type.nil?
 
         arg_types = call_arg_types_for(call_node)
-        MethodDispatcher.expected_block_param_types(
+        expected = MethodDispatcher.expected_block_param_types(
           receiver_type: receiver_type,
           method_name: call_node.name,
           arg_types: arg_types,
@@ -5420,8 +5423,26 @@ module Rigor
           scope: scope,
           call_node: call_node
         )
+        with_inject_accumulator(call_node, receiver_type, arg_types, expected)
       rescue StandardError
         []
+      end
+
+      # Issue #1889 — a block-form `inject` / `reduce` call's accumulator parameter at the type it holds across
+      # every run ({ExpressionTyper#inject_accumulator_type}) rather than the seed the signature binds it to, once
+      # per call: every write-back pass builds the entry again.
+      def with_inject_accumulator(call_node, receiver_type, arg_types, expected)
+        memo = @inject_accumulator
+        accumulator =
+          if memo && memo[0].equal?(call_node)
+            memo[1]
+          else
+            typed = ExpressionTyper.new(scope: scope, tracer: tracer)
+                                   .inject_accumulator_type(call_node, receiver_type, arg_types)
+            @inject_accumulator = [call_node, typed]
+            typed
+          end
+        accumulator ? [accumulator, *expected.drop(1)] : expected
       end
 
       def call_arg_types_for(call_node)

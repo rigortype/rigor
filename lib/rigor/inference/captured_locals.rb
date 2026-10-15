@@ -9,6 +9,7 @@ require_relative "index_write_widening"
 require_relative "mutation_widening"
 require_relative "optimistic_origin"
 require_relative "receiver_alias"
+require_relative "reflective_ivar_write"
 require_relative "unknown_store_widening"
 
 module Rigor
@@ -151,8 +152,12 @@ module Rigor
         yield.include?(name) ? nil : name
       end
 
-      # The non-local `node` rebinds under `non_locals:` — or, without it, the instance variable only.
+      # The non-local `node` rebinds under `non_locals:` — or, without it, the instance variable only. A literal-name
+      # `instance_variable_set` on `self` ({ReflectiveIvarWrite.literal_name}) is a write of that ivar under either.
       def outliving_write_name(node, non_locals)
+        reflective = ReflectiveIvarWrite.literal_name(node)
+        return reflective if reflective
+
         name = non_local_write_name(node)
         non_locals || (name && ivar_name?(name) && NON_LOCAL_WRITE_NODES.include?(node.class)) ? name : nil
       end
@@ -290,7 +295,7 @@ module Rigor
         receiver = node.receiver
         return true if receiver && MutationWidening::SHAPE_MUTATORS.include?(node.name)
 
-        callee_call?(node)
+        ReflectiveIvarWrite.self_write?(node) || callee_call?(node)
       end
 
       # Issue #1412 — {.content_mutations} for a `while` / `until` / `for` body: the locals bound in `base_scope`

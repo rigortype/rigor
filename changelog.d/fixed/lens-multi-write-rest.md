@@ -1,0 +1,1 @@
+- **[cli]** `rigor lens` no longer fails a file that contains a trailing-comma multiple assignment such as `left, = [1, 2]`. ([#1915](https://github.com/rigortype/rigor/pull/1915))

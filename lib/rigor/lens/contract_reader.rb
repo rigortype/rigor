@@ -123,7 +123,8 @@ module Rigor
       def overload(method_type, provenance, path, return_inferred, annotations)
         function = method_type.type
         params = function.respond_to?(:required_positionals) ? params_of(function, provenance, path) : nil
-        block = method_type.block && block_slot(method_type.block, provenance, path, return_inferred)
+        partly_defaulted = return_inferred && provenance == "inline"
+        block = method_type.block && block_slot(method_type.block, provenance, path, partly_defaulted)
         prefix = annotations.map { |string| "%a{#{string}} " }.join
         return_slot = return_inferred ? nil : Slot.from_rbs(function.return_type.to_s, provenance, path)
         { "rbs" => "#{prefix}#{method_type}", "params" => params, "block" => block, "return" => return_slot,
@@ -137,10 +138,10 @@ module Rigor
         "(#{block.type.param_to_s}) #{self_binding}-> #{block.type.return_to_s}"
       end
 
-      # Under a declaration the rbs-inline plugin defaulted in part (`return_inferred`), a block shaped like its
-      # default was not written: it reads as an undeclared block does.
-      def block_slot(block, provenance, path, return_inferred)
-        if return_inferred && default_block?(block)
+      # Under an inline declaration the rbs-inline plugin defaulted in part (`partly_defaulted`), a block shaped
+      # like its default was not written: it reads as an undeclared block does.
+      def block_slot(block, provenance, path, partly_defaulted)
+        if partly_defaulted && default_block?(block)
           return { "required" => false, "type" => Slot.dynamic("inferred", Parameters::UNDECLARED) }
         end
 

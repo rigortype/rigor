@@ -332,6 +332,12 @@ RSpec.describe "rigor lens" do
 
         # @rbs x: Integer
         def partial(x, &block) = x
+
+        # @rbs &block: (Integer) -> void
+        def yields = yield(1)
+
+        # @rbs &block: (Symbol) -> void
+        def self.on_class(&block) = nil
       end
     RUBY
     _, out, = lens(["--format=json", "lib/inline_blocks.rb"])
@@ -343,7 +349,9 @@ RSpec.describe "rigor lens" do
 
     expect(blocks).to eq("annotated" => [true, "(::Integer, name: ::String) -> (::Integer | nil)", "inline"],
                          "scoped" => [false, "() [self: ::InlineBlocks] -> void", "inline"],
-                         "bare" => [false, "untyped", "inferred"], "partial" => [false, "untyped", "inferred"])
+                         "bare" => [false, "untyped", "inferred"], "partial" => [false, "untyped", "inferred"],
+                         "yields" => [true, "(::Integer) -> void", "inline"],
+                         "on_class" => [true, "(::Symbol) -> void", "inline"])
     expect(overloads["annotated"]["rbs"])
       .to start_with("(untyped x) { (::Integer, name: ::String) -> (::Integer | nil) } -> ")
   end

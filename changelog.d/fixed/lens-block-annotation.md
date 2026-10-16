@@ -1,1 +1,1 @@
-- **[cli]** `rigor lens` reads a block declared by `# @rbs &block:` alone (the rest of the method unannotated), instead of dropping it. ([#2001](https://github.com/rigortype/rigor/pull/2001))
+- **[cli]** `rigor lens` reads a block declared by `# @rbs &block:` alone (the rest of the method unannotated) instead of dropping it, and reads the unannotated `&block` of a partly annotated method as undeclared rather than as an authored `(?) -> untyped`. ([#2001](https://github.com/rigortype/rigor/pull/2001))

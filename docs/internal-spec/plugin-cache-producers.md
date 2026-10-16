@@ -48,6 +48,13 @@ receives the call-site `params` Hash as its sole argument;
 `params` mixes into the cache key per
 `Cache::Descriptor#cache_key_for` (v0.0.8).
 
+The block MUST return everything it produces in its value. A
+cache hit skips the block, and with it any side effect the
+block would have had: an instance variable it set, a
+disclosure it registered. Anything the plugin needs again on a
+warm run (parse errors to disclose, for one) rides in the
+returned value ([#1954](https://github.com/rigortype/rigor/issues/1954)).
+
 `watch:` (ADR-60 WD3) declares the glob coverage of a
 discovery-style producer — the directories whose file
 *additions* / *removals* must invalidate the cached value even

@@ -637,7 +637,8 @@ module Rigor
       end
 
       # Returns a list of `[method_name (Symbol), kind (Symbol)]` pairs for every method-like member in the
-      # declaration ({LayoutIndex.member_keys}); an `alias` declares its new name (#1975). ADR-14 slice 4 recognises the three `attr_*` declaration kinds
+      # declaration ({LayoutIndex.member_keys}); an `alias` declares its new name (#1975). ADR-14 slice 4
+      # recognises the three `attr_*` declaration kinds
       # so a source-side `attr_reader :name` and an RBS-side `attr_reader name: T` are treated as the same member
       # (i.e. user-authored); a `def self?.f` counts as both an instance and a singleton `f` (#1488).
       def collect_member_pairs(decl)

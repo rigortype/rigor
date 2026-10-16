@@ -604,15 +604,18 @@ module Rigor
           private_constant :SENDS
 
           # Records an {Ancestry} for a mixin call the declaration's own statements do not carry (#1946). A
-          # receiver-less `include` directly in a class body is already one of its `includes`.
+          # receiver-less `include` directly in a class body is already one of its `includes` when every argument
+          # is a constant; a computed one (`include Mods.pick`) is an ancestor the walk cannot name. A `self`
+          # argument is the `self` the call is written in (`Foo.include(self)` in `module Mix`), not the receiver.
           def record_mixin(node, nesting)
             modules = mixin_arguments(node)
             return if modules.nil? || modules.empty?
-            return if node.receiver.nil? && !SENDS.include?(node.name) && @body_statements.include?(node)
+            return if node.receiver.nil? && !SENDS.include?(node.name) && @body_statements.include?(node) &&
+                      modules.all? { |arg| mixin_reference(arg, nesting) }
 
             target = mixin_target(node, nesting)
             modules.each do |arg|
-              ancestor = arg.is_a?(Prism::SelfNode) ? target : mixin_reference(arg, nesting)
+              ancestor = arg.is_a?(Prism::SelfNode) ? self_target(node, nesting) : mixin_reference(arg, nesting)
               next if target.nil? && ancestor.nil?
 
               @ancestries << Ancestry.new(target: target, ancestor: ancestor, path: @path,

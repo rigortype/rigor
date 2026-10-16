@@ -1081,6 +1081,109 @@ RSpec.describe Rigor::Analysis::Reachability do
         expect(found).to eq(%w[Unrelated Unrelated::Dead])
       end
 
+      # `self` in a mixin argument is the module the call is written in, not the receiver; nothing names `Mix`
+      # itself, so it stays a candidate.
+      it "reads a self argument as the module the call is written in" do
+        main = "Foo.new.m\nBar.new.n\nBaz.e\n"
+        found = dead({ "lib/a.rb" => <<~RUBY, "lib/s.rb" => stranger, "lib/main.rb" => main })
+          class Foo
+            class X; end
+          end
+          class Bar
+            class X; end
+          end
+          class Baz
+            class X; end
+          end
+          module Mix
+            def m = self.class.const_get(:X)
+            Foo.include(self)
+          end
+          module Nix
+            def n = self.class.const_get(:X)
+            Bar.send :include, self
+          end
+          module Ext
+            def e = const_get(:X)
+            Baz.extend(self)
+          end
+        RUBY
+        expect(found).to eq(%w[Ext Mix Nix Stranger Stranger::X Unrelated Unrelated::Dead])
+      end
+
+      it "keeps every same-named constant for a class body that includes a computed module" do
+        found = dead({ "lib/a.rb" => <<~RUBY, "lib/main.rb" => "Foo.new.m\n" })
+          module Mods
+            module A
+              class X; end
+            end
+            def self.pick = A
+          end
+          class Foo
+            include Mods.pick
+            def m = self.class.const_get(:X)
+          end
+        RUBY
+        expect(found).to eq(%w[Unrelated Unrelated::Dead])
+      end
+
+      it "searches a class with a computed ancestor as a descendant of any module" do
+        found = dead({ "lib/a.rb" => <<~RUBY, "lib/s.rb" => stranger, "lib/main.rb" => "Foo.new.m\n" })
+          module Mix
+            def m = self.class.const_get(:X)
+          end
+          MODS = [Mix].freeze
+          class Foo
+            class X; end
+          end
+          Foo.include(MODS.first)
+        RUBY
+        expect(found).to eq(%w[Stranger Stranger::X Unrelated Unrelated::Dead])
+      end
+
+      it "follows every module of a class body's multi-module include" do
+        found = dead({ "lib/a.rb" => <<~RUBY, "lib/s.rb" => stranger, "lib/main.rb" => "Foo.new.m\n" })
+          module M1; end
+          module M2
+            def m = self.class.const_get(:X)
+          end
+          class Foo
+            include M1, M2
+            class X; end
+          end
+        RUBY
+        expect(found).to eq(%w[Stranger Stranger::X Unrelated Unrelated::Dead])
+      end
+
+      it "resolves a receiver-form include's receiver in the nesting it is written in" do
+        found = dead({ "lib/a.rb" => <<~RUBY, "lib/s.rb" => stranger, "lib/main.rb" => "App::Foo.new.m\nCm\n" })
+          module Cm
+            def m = self.class.const_get(:X)
+          end
+          module App
+            class Foo
+              class X; end
+            end
+            Foo.include(Cm)
+          end
+        RUBY
+        expect(found).to eq(%w[Stranger Stranger::X Unrelated Unrelated::Dead])
+      end
+
+      {
+        "a Class.new block" => "K = Class.new(Base) { include Mix }\nclass K\n  class X; end\nend\nK.new.m\n",
+        "a Struct.new block" => "K = Struct.new(:a) do\n  include Mix\nend\nclass K\n  class X; end\nend\nK.new(1).m\n",
+        "a singleton method" => "class K\n  def self.setup = include(Mix)\n  class X; end\nend\nK.setup\nK.new.m\n",
+        "a block on a computed receiver" => "class K\n  class X; end\nend\n[K].each { |k| k.include(Mix) }\nK.new.m\n"
+      }.each do |where, source|
+        it "keeps every same-named constant for an include in #{where}" do
+          mix = "class Base; end\nmodule Mix\n  def m = self.class.const_get(:X)\nend\n"
+          found = dead({ "lib/a.rb" => mix + source,
+                         "lib/main.rb" => "Base\n" })
+          expect(found).to eq(%w[Unrelated Unrelated::Dead])
+        end
+      end
+
       it "follows an include on a constant receiver the project does not declare" do
         found = dead({ "lib/a.rb" => <<~RUBY, "lib/s.rb" => stranger, "lib/main.rb" => "Gem::Thing.new.m\n" })
           module Mix

@@ -2,6 +2,7 @@
 
 require "spec_helper"
 require "digest"
+require "tmpdir"
 require "yaml"
 
 # #1507 — ADR-119 WD6's producer tripwire (proposed). `DeclarationProducerScan` (`spec/support/
@@ -26,18 +27,6 @@ require "yaml"
 # are not scanned. The list freezes the set and certifies nothing about how an entry computes its context.
 RSpec.describe "Declaration producers" do
   let(:snapshot) { File.join(__dir__, "producers.yml") }
-  let(:header) do
-    <<~YAML
-      # Declaration producers (#1507, ADR-119 WD6): every method, or class or module body, under lib/ and
-      # plugins/*/lib/ whose code decides what a declaration is. producers_spec.rb computes the set with Prism and
-      # compares it with this file. Each file says what it computes, and each entry why it computes a declaration
-      # context itself instead of going through DeclarationWalk::Context or ModuleFunctionState. `grandfathered`
-      # marks the entries present when the tripwire landed; they converge as bugs are filed. A new entry must say
-      # why; `RIGOR_REGENERATE_GATES=1` adds new entries as TODO, which the spec fails on.
-
-    YAML
-  end
-
   # The closed grandfathered list. Lower it when an entry goes; never raise it for a new producer.
   let(:grandfathered_pin) do
     { count: 370, digest: "781b95ab0b3941dd7d8b69864f6c55c922db39b6d69a1a1f9a90ed152e04c4d5" }
@@ -54,16 +43,6 @@ RSpec.describe "Declaration producers" do
   define_method(:tripwire_problems) do |found, listed|
     (found.keys - listed).sort.map { |key| "#{key}: a producer (#{found[key].join(', ')}), not in producers.yml" } +
       (listed - found.keys).sort.map { |key| "#{key}: in producers.yml but no longer a producer" }
-  end
-
-  # `recorded` brought in line with `found`: new files and entries as TODO, vanished ones dropped.
-  define_method(:regenerated) do |found, recorded|
-    found.keys.group_by { |key| key.split("#", 2).first }.sort.to_h do |path, keys|
-      entries = keys.map { |key| key.split("#", 2).last }.sort.to_h do |scope|
-        [scope, recorded.dig(path, "producers", scope) || "TODO"]
-      end
-      [path, { "computes" => recorded.dig(path, "computes") || "TODO", "producers" => entries }]
-    end
   end
 
   define_method(:grandfathered) do |recorded|
@@ -84,7 +63,7 @@ RSpec.describe "Declaration producers" do
   it "lists exactly the producers the tree has" do
     current = found
     if DeclarationFactSources.regenerate?
-      DeclarationFactSources.write_yaml(snapshot, header, regenerated(current, YAML.load_file(snapshot)))
+      File.write(snapshot, DeclarationFactSources.regenerate_producers_text(File.read(snapshot), current.keys))
     end
 
     problems = tripwire_problems(current, listed(YAML.load_file(snapshot)))
@@ -249,10 +228,94 @@ RSpec.describe "Declaration producers" do
     end
 
     it "regenerates a new entry as TODO, which the justification check rejects" do
-      regenerated = regenerated({ "lib/a.rb#A#x" => ["Prism::ClassNode"] }, {})
+      text = DeclarationFactSources.regenerate_producers_text("# head\n\n", ["lib/a.rb#A#x"])
 
-      expect(regenerated).to eq("lib/a.rb" => { "computes" => "TODO", "producers" => { "A#x" => "TODO" } })
-      expect(unjustified(regenerated)).to eq(["lib/a.rb computes", "lib/a.rb#A#x"])
+      expect(text).to eq("# head\n\nlib/a.rb:\n  computes: TODO\n  producers:\n    A#x: TODO\n")
+      expect(unjustified(YAML.safe_load(text))).to eq(["lib/a.rb computes", "lib/a.rb#A#x"])
+    end
+  end
+
+  describe "regeneration (#1942)" do
+    def regenerate(text, keys) = DeclarationFactSources.regenerate_producers_text(text, keys)
+
+    def changed_lines(before, after)
+      before_lines = before.lines
+      after_lines = after.lines
+      { removed: before_lines - after_lines, added: after_lines - before_lines }
+    end
+
+    it "is a byte-for-byte no-op on the current tree" do
+      committed = File.read(snapshot)
+
+      expect(regenerate(committed, found.keys)).to eq(committed)
+    end
+
+    it "touches only the affected entries when a producer appears and another vanishes" do
+      committed = File.read(snapshot)
+      keys = found.keys
+      vanished = keys.find { |key| key.start_with?("lib/rigor/inference/scope_indexer.rb#") }
+      added = ["lib/rigor/inference/scope_indexer.rb#Rigor::Inference::ScopeIndexer#aa_synthetic",
+               "lib/rigor/inference/zz_synthetic.rb#Rigor::Zz#probe"]
+
+      after = regenerate(committed, (keys - [vanished]) + added)
+      diff = changed_lines(committed, after)
+
+      expect(diff[:added]).to contain_exactly(
+        "    Rigor::Inference::ScopeIndexer#aa_synthetic: TODO\n", "lib/rigor/inference/zz_synthetic.rb:\n",
+        "  computes: TODO\n", "    Rigor::Zz#probe: TODO\n"
+      )
+      expect(after).to include("lib/rigor/inference/zz_synthetic.rb:\n  computes: TODO\n  producers:\n    Rigor::Zz#probe")
+      expect(diff[:removed].size).to eq(1)
+      expect(diff[:removed].first).to start_with("    #{vanished.split('#', 2).last}:")
+      expect(unjustified(YAML.safe_load(after))).to include("lib/rigor/inference/zz_synthetic.rb#Rigor::Zz#probe")
+    end
+
+    it "keeps a reason's full text, its folded block and the entries' order" do
+      text = <<~YAML
+        # head
+
+        lib/a.rb:
+          computes: reads it (#1, #2)
+          producers:
+            A#zed: why (issue #1697); it derives nothing
+            A#alpha: >-
+              folded one
+              folded two
+      YAML
+
+      expect(regenerate(text, %w[lib/a.rb#A#alpha lib/a.rb#A#zed])).to eq(text)
+      expect(regenerate(text, %w[lib/a.rb#A#alpha lib/a.rb#A#beta lib/a.rb#A#zed]))
+        .to eq(text.sub("    A#zed", "    A#beta: TODO\n    A#zed"))
+    end
+
+    it "keeps a multi-line computes block, whatever its continuation lines look like" do
+      text = "lib/b.rb:\n  computes: >-\n    first line\n    indented4: yes\n  producers:\n    B#y: r\n"
+
+      expect(regenerate(text, ["lib/b.rb#B#y"])).to eq(text)
+    end
+
+    it "drops a file left with no entries and inserts a new file in sort position" do
+      text = "lib/a.rb:\n  computes: a\n  producers:\n    A#x: r\nlib/c.rb:\n  computes: c\n  producers:\n    C#z: r\n"
+      b = "lib/b.rb:\n  computes: TODO\n  producers:\n    B#y: TODO\n"
+
+      expect(regenerate(text, %w[lib/a.rb#A#x lib/b.rb#B#y lib/c.rb#C#z]))
+        .to eq(text.sub("lib/c.rb:", "#{b}lib/c.rb:"))
+      expect(regenerate(text, %w[lib/a.rb#A#x])).to eq(text.split("lib/c.rb:").first)
+      expect(regenerate(text, %w[lib/a.rb#A#x lib/c.rb#C#z lib/d.rb#D#w]))
+        .to eq("#{text}lib/d.rb:\n  computes: TODO\n  producers:\n    D#w: TODO\n")
+    end
+
+    it "round-trips a key the writer had to quote" do
+      text = "lib/a.rb:\n  computes: a\n  producers:\n    \"*s\": why\n"
+
+      expect(regenerate(text, ["lib/a.rb#*s"])).to eq(text)
+      expect(regenerate("lib/a.rb:\n  computes: a\n  producers:\n", ["lib/a.rb#*s"])).to eq(text.sub("why", "TODO"))
+    end
+
+    it "adds the newline a file lacks before inserting" do
+      text = "lib/a.rb:\n  computes: a\n  producers:\n    A#x: r"
+
+      expect(regenerate(text, %w[lib/a.rb#A#x lib/a.rb#A#y])).to eq("#{text}\n    A#y: TODO\n")
     end
   end
 end

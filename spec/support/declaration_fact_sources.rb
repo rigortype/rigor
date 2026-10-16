@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "json"
 require "prism"
 require "yaml"
 
@@ -32,8 +33,88 @@ module DeclarationFactSources
     ENV[REGENERATE_ENV] == "1"
   end
 
+  def yaml_text(header, data)
+    header + YAML.dump(data, line_width: -1).delete_prefix("---\n")
+  end
+
   def write_yaml(path, header, data)
-    File.write(path, header + YAML.dump(data, line_width: -1).delete_prefix("---\n"))
+    File.write(path, yaml_text(header, data))
+  end
+
+  # `producers.yml` brought in line with `keys` (`"path#scope"`) by editing its text, not by re-dumping it: the file's
+  # reasons are hand-written plain scalars, and a load and dump would cut one at a ` #` (a YAML comment), reorder
+  # entries and refold a `>-` block. An entry that is still found keeps its lines as they are, a new one is added as
+  # `TODO` before the first existing entry that sorts after it, a vanished one (and a file left with none) is dropped,
+  # and the leading comment block stays. Returns the new text.
+  def regenerate_producers_text(text, keys)
+    text += "\n" unless text.empty? || text.end_with?("\n")
+    head, sections = split_producer_sections(text)
+    wanted = keys.group_by { |key| key.split("#", 2).first }
+                 .transform_values { |paths| paths.map { |key| key.split("#", 2).last } }
+    kept = sections.filter_map do |path, preamble, entries|
+      [path, preamble, merge_producer_entries(entries, wanted[path])] if wanted.key?(path)
+    end
+    add_producer_sections(kept, wanted.slice(*(wanted.keys - sections.map(&:first))))
+    lines = kept.flat_map { |_path, preamble, entries| [*preamble, *entries.flat_map(&:last)] }
+    head.join + lines.join
+  end
+
+  def add_producer_sections(kept, added)
+    added.sort.each do |path, scopes|
+      at = kept.index { |section| section.first > path } || kept.size
+      preamble = ["#{yaml_key(path)}:\n", "  computes: TODO\n", "  producers:\n"]
+      kept.insert(at, [path, preamble, merge_producer_entries([], scopes)])
+    end
+  end
+
+  def yaml_key(text)
+    YAML.safe_load("#{text}: x") == { text => "x" } ? text : text.to_json
+  rescue Psych::Exception
+    text.to_json
+  end
+
+  # `[head lines, [[path, preamble lines, [[scope, entry lines]]]]]`; a preamble is a file's header line and the lines
+  # up to and including `  producers:`, and only after that line does a 4-space `key:` start an entry (before it, such
+  # a line continues a multi-line `computes:`). An entry is its `key: reason` line and any continuation lines.
+  def split_producer_sections(text)
+    head = []
+    sections = []
+    text.each_line do |line|
+      if line.match?(/\A\S/) && !line.start_with?("#")
+        sections << [unquote_yaml_key(line.chomp.delete_suffix(":")), [line], []]
+      elsif sections.empty?
+        head << line
+      else
+        add_producer_line(sections.last, line)
+      end
+    end
+    [head, sections]
+  end
+
+  def add_producer_line(section, line)
+    _, preamble, entries = section
+    match = line.match(/\A {4}(\S.*?):(?: |$)/) if preamble.any? { |text| text.start_with?("  producers:") }
+    if match
+      entries << [unquote_yaml_key(match[1]), [line]]
+    elsif entries.empty?
+      preamble << line
+    else
+      entries.last.last << line
+    end
+  end
+
+  # The inverse of `yaml_key`'s quoting.
+  def unquote_yaml_key(text)
+    text.start_with?('"') ? JSON.parse(text) : text
+  end
+
+  def merge_producer_entries(entries, scopes)
+    merged = entries.to_h.slice(*(entries.map(&:first) & scopes)).to_a
+    (scopes - entries.map(&:first)).sort.each do |scope|
+      at = merged.index { |existing, _| existing > scope } || merged.size
+      merged.insert(at, [scope, ["    #{yaml_key(scope)}: TODO\n"]])
+    end
+    merged
   end
 
   # The full name of a constant reference, or nil for a dynamic path (`foo::Bar`).

@@ -1,0 +1,1 @@
+- **[engine]** An `attr_reader`, `attr_accessor`, `define_method` or `alias_method` / `alias` written after a `def` of the same name in the same file now replaces that `def` for typing, so a call on the result no longer reports `call.undefined-method` on correct code. ([#2003](https://github.com/rigortype/rigor/pull/2003))

@@ -143,9 +143,26 @@ RSpec.describe "plugins/rigor-rails-i18n load-error row on a warm run (#1954)" d
     # The nothing-changed rerun is a recheck over an empty closure: it calls no `#diagnostics_for_file`, so
     # no plugin registers a disclosure, and the session snapshot does not carry run-scoped disclosures over
     # from the previous run. That drops the row for every plugin that registers from the per-file hook, not
-    # just this producer, and is outside this fix. `rigor check --incremental` normally answers that rerun
+    # just this producer, and is #2020, outside this fix. `rigor check --incremental` normally answers that rerun
     # from its run-result slot instead; `--cache-stats` or `--workers` reaches the empty-closure recheck.
     expect_row_tracks_the_locale(steps, skip_unchanged: true)
     expect(locale_index_hits(edit_store)).to be_positive
+  end
+
+  # Two broken files: each keeps its own row, once, in the same order, cold and on the warm config edit.
+  it "keeps one row per broken locale file on a warm run", :aggregate_failures do
+    rows = Dir.mktmpdir("rigor-1954-") do |raw|
+      Dir.chdir(File.realpath(raw)) do
+        write("app/a.rb", "x = 1\n")
+        write("config/locales/a_bad.yml", broken_locale)
+        write("config/locales/b_bad.yml", broken_locale)
+        [[], ["undefined-method"]].map do |disable|
+          load_error_rows(plain_check(configuration(disable), Rigor::Cache::Store.new(root: cache_root)))
+        end
+      end
+    end
+    expect(rows.first.map { |row| File.basename(row[2][/`([^`]+)`/, 1]) }).to eq(%w[a_bad.yml b_bad.yml])
+    expect(rows.last).to eq(rows.first)
+    expect(answered_by).to eq(%i[runner runner])
   end
 end

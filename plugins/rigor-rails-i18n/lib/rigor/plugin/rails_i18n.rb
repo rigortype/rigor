@@ -57,9 +57,10 @@ module Rigor
         target_gems: ["i18n"],
         # Bumped 2026-06-23 — view template lazy-key scanning (`t('.key')` inside ERB / Haml / Slim under
         # `view_search_paths`).
-        # Bumped 2026-10-17 (#1954) — the cached `:locale_index` value now carries the YAML load errors. The
-        # version is part of the producer cache KEY, so a warm run cannot serve a pre-change entry, which
-        # has no errors to re-disclose.
+        # Bumped 2026-10-17 (#1954) — the cached `:locale_index` value now carries the YAML load errors. A
+        # belt-and-braces key change: a released build already drops pre-change entries with the cache ABI
+        # (`Rigor::VERSION`) and a checkout with its engine-source identity, and the read below tolerates
+        # an index without errors either way.
         version: "0.3.1",
         description: "Validates I18n `t(key)` calls against `config/locales/*.yml`.",
         config_schema: {
@@ -112,7 +113,7 @@ module Rigor
       def diagnostics_for_file(path:, scope:, root:) # rubocop:disable Lint/UnusedMethodArgument
         index = producer_value(:locale_index)
         if index
-          disclose_load_errors(index.load_errors)
+          disclose_load_errors(Array(index.load_errors))
         elsif producer_error(:locale_index)
           disclose_locale_runtime_error
         end

@@ -410,6 +410,67 @@ RSpec.describe Rigor::SigGen::Generator do
 
       expect(candidate.rbs).to start_with("def go:")
     end
+
+    # #1968 — Ruby 4.0.5: a bare `public`, `private` or `protected` ends the module_function mode, so `M.b`, `M2.c`
+    # and `M3.d` raise, `b` stays a public instance method and `c` and `d` a private and a protected one, which the
+    # default run leaves out.
+    it "ends the module_function region at a bare visibility call" do
+      src = <<~RUBY
+        module M
+          module_function
+          def a; 1; end
+          public
+          def b; 2; end
+        end
+        module M2
+          module_function
+          private
+          def c; 3; end
+        end
+        module M3
+          module_function
+          protected
+          def d; 4; end
+        end
+      RUBY
+      path = write_fixture("lib/x.rb", src)
+
+      rbs = generator(paths: [path]).run.filter_map(&:rbs)
+
+      expect(rbs).to eq(["def self?.a: () -> 1", "def b: () -> 2"])
+    end
+
+    # #1968 — Ruby 4.0.5: a `public` under an `if` ends the mode when it runs. Whether it runs is not read, so `e`
+    # gets no `self?`.
+    it "ends the module_function region at a bare visibility call under an `if`" do
+      src = "module M\n  module_function\n  if rand > 2\n    public\n  end\n  def e; 5; end\nend\n"
+      path = write_fixture("lib/x.rb", src)
+
+      expect(generator(paths: [path]).run.filter_map(&:rbs)).to eq(["def e: () -> 5"])
+    end
+
+    # #1968 — Ruby 4.0.5: `N.b` is 1 and `b` a private instance method, which is what `def self?.b` declares. A
+    # `private` before the toggle used to drop the method.
+    it "emits a module function whose region opens after a bare `private`" do
+      src = "module N\n  private\n  module_function\n  def b; 1; end\nend\n"
+      path = write_fixture("lib/x.rb", src)
+
+      candidate = generator(paths: [path]).run.find { |c| c.method_name == :b }
+
+      expect(candidate&.rbs).to eq("def self?.b: () -> 1")
+    end
+
+    # #1968 — Ruby 4.0.5: `M.respond_to?(:b)` is false. Each `module` body starts with the mode off, so a bare
+    # `module_function` in one file does not reach a reopening in another. A guard: sig-gen reads each file's bodies
+    # apart.
+    it "does not carry a module_function region into a reopening in another file" do
+      first = write_fixture("lib/a.rb", "module M\n  module_function\n  def a; 1; end\nend\n")
+      second = write_fixture("lib/b.rb", "module M\n  def b; 2; end\nend\n")
+
+      rbs = generator(paths: [first, second]).run.to_h { |c| [c.method_name, c.rbs] }
+
+      expect(rbs).to eq(a: "def self?.a: () -> 1", b: "def b: () -> 2")
+    end
   end
 
   describe "Const = Data.define / Struct.new shell recognition (gap #3 e)" do

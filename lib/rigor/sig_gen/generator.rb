@@ -783,9 +783,13 @@ module Rigor
       # private methods are implementation details, not part of the type contract downstream consumers (Steep,
       # IDE, gem users) read. The default now skips private and protected methods; the `:include_private` flag
       # restores the slice-4 behaviour for callers that want every method.
+      #
+      # A module function renders as `def self?.name`, which RBS reads as a public singleton method and a private
+      # instance method, so a `private` written before the `module_function` toggle does not exclude it (#1968).
       def visibility_excludes?(def_node, class_name, kind, scope_index)
         return false if kind == :singleton
         return false if @include_private
+        return false if @module_function_methods.include?([class_name, def_node.name])
 
         scope = scope_index[def_node] || scope_index.each_value.first
         return false if scope.nil?

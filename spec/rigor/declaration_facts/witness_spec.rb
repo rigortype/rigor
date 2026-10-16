@@ -128,6 +128,33 @@ RSpec.describe "Declaration-fact witness" do
     end
   end
 
+  # #1968 — a bare visibility call ends the module_function mode. The `visibilities` relation is excluded: Rigor records
+  # a module function's instance copy as public where Ruby makes it private (#1569). The singleton tables still hold
+  # every instance def of these modules through the self-extend edge a bare `module_function` records (#526), which
+  # the witness reads as `possible`; the deferred ranges, which do not go through that edge, say which defs are
+  # module functions.
+  describe "a bare visibility call after a bare module_function" do
+    # A guard: the self-extend fold makes every relation agree without the reset too.
+    it "agrees with Ruby across every relation but visibilities" do
+      expect(violations("module_function_reset", relations: DeclarationWitness::RELATIONS - %i[visibilities]))
+        .to eq([])
+    end
+
+    # Ruby 4.0.5: `ResetUnreached.f` is a module function, because the `public` under the `if` does not run. Whether
+    # it runs is not read, so `f` is not claimed as one.
+    it "records a module function's deferred row only up to the reset" do
+      tables, = DeclarationWitness.rigor_tables(fixture("module_function_reset"))
+      kinds = tables.discovered_deferred_ranges.values.flatten(1).filter_map { |row| row.values_at(4, 2, 3) if row[2] }
+
+      expect(kinds).to eq(
+        [["ResetPublic", :a, :both], ["ResetPublic", :b, :instance], ["ResetPrivate", :a, :both],
+         ["ResetPrivate", :c, :instance], ["ResetProtected", :d, :instance], ["PrivateFirst", :b, :both],
+         ["NamedVisibility", :a, :both], ["NamedVisibility", :b, :both], ["ResetThenToggle", :b, :instance],
+         ["ResetThenToggle", :c, :both], ["ResetPublic", :e, :instance], ["ResetUnreached", :f, :instance]]
+      )
+    end
+  end
+
   # #1911, #1819, #1633 — a def or `attr_*` wrapped in a visibility call takes that call's visibility, and the
   # visibility calls Ruby runs on the body's self (`self.private`, `send(:private)`, `private {}`) are applied. The
   # witness skips a contested slot, so the second example pins which slots are left contested: every other slot is

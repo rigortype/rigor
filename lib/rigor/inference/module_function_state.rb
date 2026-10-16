@@ -11,20 +11,25 @@ module Rigor
     # [#1197](https://github.com/rigortype/rigor/issues/1197)). Four readers used to compute it in four
     # places. They disagree with each other and, in places, with Ruby. Each entry point below reproduces
     # one reader's answer exactly: this module gives the readings one place to live, and does not yet make
-    # them agree. A change to one reading lands here, beside the other three. An example is the reset a bare
-    # `public`, `private` or `protected` makes.
+    # them agree. A change to one reading lands here, beside the other three.
+    #
+    # In Ruby a bare `module_function` call turns the body's module_function mode on, and a later bare
+    # `public`, `private` or `protected` ({.visibility_reset?}) turns it off again (#1968). A named call
+    # (`public :x`, `private def y`) leaves the mode alone, and each `module` body starts with it off. Three
+    # readers honour the reset; a reset nested in control flow or a block, which may not run, turns the mode
+    # off for them too, so none of them claims a certain module function after it.
     #
     # - The singleton def-node table (`ScopeIndexer#walk_singleton_body`) reads
     #   {.each_singleton_sibling} and {.each_singleton_copy}. A bare call covers the later direct
-    #   statements of its own body and is never reset.
+    #   statements of its own body, up to a reset.
     # - The deferred ranges (`ScopeIndexer#walk_deferred_body`) read {.prescan_deferred} and
-    #   {.deferred_module_function?}. A bare call covers every later def by offset, and a call inside
-    #   control flow or a block counts.
+    #   {.deferred_module_function?}. A bare call covers every later def by offset, up to a later reset,
+    #   and a call or reset inside control flow or a block counts.
     # - The extends table (`ScopeIndexer#record_extend_call`) reads {.extends_self?}. A bare call covers
-    #   every instance def of the module, in any order.
+    #   every instance def of the module, in any order, and is never reset.
     # - sig-gen (`SigGen::Generator#walk_statements`) reads {.each_sig_gen_statement} and
     #   {.sig_gen_module_function?}. A bare call covers the later statements of its own statement list and
-    #   what nests in them.
+    #   what nests in them, up to a reset.
     #
     # A fifth reader does not come here yet: `rigor-activerecord`'s `ModelDiscoverer#table_name_decorators`
     # (`plugins/rigor-activerecord/lib/rigor/plugin/activerecord/model_discoverer.rb`) reads a module body's
@@ -52,17 +57,37 @@ module Rigor
         node.arguments.nil? || node.arguments.arguments.empty?
       end
 
+      # A bare `public`, `private` or `protected` call, receiverless or on `self`: Ruby ends the module_function
+      # mode there (#1968). A call with arguments sets the named methods' visibility and leaves the mode alone.
+      def visibility_reset?(node)
+        %i[public private protected].include?(node.name) && bare?(node) &&
+          (node.receiver.nil? || node.receiver.is_a?(Prism::SelfNode))
+      end
+
+      # Whether `node` holds a {.visibility_reset?} that ends the mode for the statements after it, at any depth
+      # {.prescan_deferred} enters. A reset in control flow or a block may not run; the readers that ask take it
+      # as run, so they claim no module function after it.
+      def resets_mode?(node)
+        events = []
+        prescan_deferred(node, EMPTY_PREFIX, false, events, [])
+        events.any? { |_offset, on| !on }
+      end
+
+      # The owner prefix {.resets_mode?} hands the prescan, which records no row a reset needs.
+      EMPTY_PREFIX = [].freeze
+
       # The singleton def-node table's reading, over one class-ish body's direct statements in source
       # order. `ScopeIndexer#statements_of` builds that list, folding a body-level `rescue`, `else` or
       # `ensure` clause into it. Yields `stmt, module_function_on, named_call` for every statement except a
       # bare call:
       #
-      # - `module_function_on` says whether a bare call precedes the statement. The toggle never switches
-      #   off, although a later bare `public`, `private` or `protected` resets it in Ruby.
+      # - `module_function_on` says whether a bare call precedes the statement with no statement between them
+      #   that {.resets_mode?}.
       # - `named_call` is true for a named call (`module_function :a` or `module_function def x`), which
       #   {.each_singleton_copy} resolves; the caller records nothing else for it.
       #
-      # A call nested in control flow or a block is not seen.
+      # A `module_function` call nested in control flow or a block is not seen, and a reset there turns the
+      # toggle off.
       def each_singleton_sibling(statements)
         module_function_on = false
         statements.each do |stmt|
@@ -75,6 +100,7 @@ module Rigor
             next
           end
           yield stmt, module_function_on, false
+          module_function_on = false if module_function_on && resets_mode?(stmt)
         end
       end
 
@@ -121,8 +147,9 @@ module Rigor
         alias_method define_method attr attr_reader attr_writer attr_accessor remove_method undef_method
       ].freeze
 
-      # The deferred-ranges reading, over one class-ish body's subtree. Appends to `offsets` the start of
-      # every bare call; each def that starts after one is a module function
+      # The deferred-ranges reading, over one class-ish body's subtree. Appends to `offsets` an
+      # `[offset, true]` event for the start of every bare call and an `[offset, false]` one for every
+      # {.visibility_reset?}; a def is a module function when the last event before it is a bare call
       # ({.deferred_module_function?}). Appends to `ranges` one row per named call, in the table's
       # `[start, end, name, kind, owner]` shape:
       #
@@ -134,8 +161,8 @@ module Rigor
       # The prescan looks through control flow and blocks, because a call that ran there still flips the
       # later defs. It stops at a nested class, module, `class <<` or def body, where the call targets
       # another module. It skips an `END` body, which runs after every def, and a `*_eval` / `*_exec`
-      # block, whose self is the receiver's module; that block gets its own prescan as a body. Nothing
-      # resets it.
+      # block, whose self is the receiver's module; that block gets its own prescan as a body. A reset
+      # nested in control flow or a block counts as run, as a bare call there does.
       #
       # `qualified_prefix` names the owner, and `in_singleton_class` says whether the body is a
       # `class <<` body; both feed `ScopeIndexer.def_singleton?`.
@@ -147,6 +174,7 @@ module Rigor
 
         if node.is_a?(Prism::CallNode)
           return prescan_call(node, qualified_prefix, in_singleton_class, offsets, ranges) if call?(node)
+          return offsets << [node.location.start_offset, false] if visibility_reset?(node)
           if ScopeIndexer.receiver_eval_call?(node)
             return prescan_eval_call(node, qualified_prefix, in_singleton_class, offsets, ranges)
           end
@@ -157,10 +185,11 @@ module Rigor
         end
       end
 
-      # Whether the deferred-ranges reading makes a def starting at `start` a module function: a bare call
-      # starts before it, at any depth the prescan entered.
+      # Whether the deferred-ranges reading makes a def starting at `start` a module function: the last
+      # event {.prescan_deferred} recorded before it, at any depth the prescan entered, is a bare call.
       def deferred_module_function?(offsets, start)
-        offsets.any? { |offset| offset < start }
+        last = offsets.select { |offset, _on| offset < start }.max_by(&:first)
+        last ? last[1] : false
       end
 
       # The extends table's reading. A bare call makes the module extend itself, so every instance def the
@@ -177,7 +206,8 @@ module Rigor
       # whether a bare call came before it in this list or `active` was already true on entry. The
       # generator passes the enclosing list's answer into an `if`, a block or a `begin`, but not into a
       # nested class, module or `class << self`. A bare call in a nested list covers only that list's
-      # later statements. Nothing resets it, and a named call is not a directive at all.
+      # later statements. A statement that {.resets_mode?} ends it for the statements after it, and a named
+      # call is not a directive at all.
       def each_sig_gen_statement(statements, active)
         statements.each do |stmt|
           if sig_gen_directive?(stmt)
@@ -185,6 +215,7 @@ module Rigor
             next
           end
           yield stmt, active
+          active = false if active && resets_mode?(stmt)
         end
       end
 
@@ -242,7 +273,7 @@ module Rigor
       # The prescan's call arm.
       def prescan_call(node, qualified_prefix, in_singleton_class, offsets, ranges)
         if bare?(node)
-          offsets << node.location.start_offset
+          offsets << [node.location.start_offset, true]
         else
           owner = qualified_prefix.empty? ? nil : qualified_prefix.join("::")
           node.arguments&.arguments&.each do |arg|

@@ -179,7 +179,6 @@ RSpec.describe Rigor::MCP::Server do
     it "keeps a command's SystemExit off the JSON-RPC channel and stays up" do
       cli = instance_double(Rigor::CLI)
       allow(cli).to receive(:run) do
-        puts "usage"
         exit(0)
       end
       allow(Rigor::CLI).to receive(:new).and_return(cli)

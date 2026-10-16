@@ -1,0 +1,1 @@
+- **[engine]** An `instance_variable_set` on `self` now counts as a write in the class's instance-variable typing, so a reader in another method no longer reports a call on an earlier literal (`@timeout = 5` read as `5` beside `instance_variable_set(:"@#{k}", v)`). ([#2017](https://github.com/rigortype/rigor/pull/2017))

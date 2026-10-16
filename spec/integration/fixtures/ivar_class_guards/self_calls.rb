@@ -112,7 +112,6 @@ class Reflective
   def initialize = (@io = STDOUT)
   def reset = (@io = STDOUT)
   def literal_set = instance_variable_set(:@io, STDOUT)
-  def computed_set(name = :@io) = instance_variable_set(name, STDOUT)
   def via_send = send(:reset)
   def via_public_send = public_send(:reset)
   def via_method = method(:reset).call
@@ -125,13 +124,6 @@ class Reflective
     return unless @io.is_a?(StringIO)
 
     literal_set
-    @io.string # FIRES-1446 call.undefined-method
-  end
-
-  def computed_set_dump
-    return unless @io.is_a?(StringIO)
-
-    computed_set
     @io.string # FIRES-1446 call.undefined-method
   end
 
@@ -175,6 +167,20 @@ class Reflective
 
     via_define_method
     @io.string # FIRES-1446 call.undefined-method
+  end
+end
+
+# A computed-name `instance_variable_set` may write any ivar of the class, so the class's census reads every ivar
+# `Dynamic[top]` (#1931): the reset leaves nothing a guard can be checked against.
+class ReflectiveComputed
+  def initialize = (@io = STDOUT)
+  def computed_set(name = :@io) = instance_variable_set(name, STDOUT)
+
+  def computed_set_dump
+    return unless @io.is_a?(StringIO)
+
+    computed_set
+    @io.string # QUIET-1446
   end
 end
 

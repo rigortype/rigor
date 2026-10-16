@@ -25,6 +25,7 @@ require_relative "hash_lookup_mutation"
 require_relative "in_effect_refinements"
 require_relative "refine_census"
 require_relative "refine_self"
+require_relative "reflective_ivar_write"
 require_relative "index_write_widening"
 require_relative "module_function_state"
 require_relative "multi_target_binder"
@@ -507,11 +508,13 @@ module Rigor
         method_assign_effects = build_method_assign_effects(root)
         walk_class_ivars(root, [], default_scope, accumulator, mutated_ivars,
                          read_before_write, init_writes, method_assign_effects)
+        reflective_opaque = accumulator.delete(REFLECTIVE_OPAQUE_CLASSES)
         exempt_class_body_writes!(init_writes, accumulator.delete(DEFINE_METHOD_WRITES) || {})
         merge_held_ivar_writes!(accumulator)
         record_aliased_ivar_mutations!(root, mutated_ivars)
         widen_mutated_ivar_entries!(accumulator, mutated_ivars)
         contribute_read_before_write_nil!(accumulator, read_before_write, init_writes)
+        make_reflective_classes_gradual!(accumulator, reflective_opaque)
         accumulator.transform_values(&:freeze).freeze
       end
 
@@ -1317,6 +1320,7 @@ module Rigor
           end
         else
           record_compound_ivar_write(node, scope, class_name, accumulator)
+          record_reflective_ivar_write(node, scope, class_name, accumulator)
         end
 
         # N1 — parallel / multiple assignment (`old, @cb = @cb, block`, `@i, @o, @e, @thr = Open3.popen3(cmd)`). A
@@ -1341,6 +1345,32 @@ module Rigor
 
         node.rigor_each_child do |c|
           gather_ivar_writes(c, scope, class_name, accumulator, guarded_ivars, mutated_ivars, dead_writes)
+        end
+      end
+
+      # #1931 — `instance_variable_set` on `self` writes an ivar no write node shows ({ReflectiveIvarWrite}). A literal
+      # name (`instance_variable_set(:@k, v)`) contributes the value's type to that ivar's entry, as `@k = v` would. A
+      # name the analysis cannot read (`instance_variable_set(:"@#{k}", v)`, the options-hash constructor idiom) may
+      # write any ivar of the class, so every entry of the class turns gradual once the walk ends
+      # ({#make_reflective_classes_gradual!}): a reader in another method otherwise kept a write's literal (`@timeout =
+      # 5` read as `5`) and reported a call on it.
+      def record_reflective_ivar_write(node, scope, class_name, accumulator)
+        return unless ReflectiveIvarWrite.self_write?(node)
+
+        name = ReflectiveIvarWrite.literal_name(node)
+        if name
+          accumulate_ivar_type(accumulator, class_name, name, scope.type_of(ReflectiveIvarWrite.value_node(node)))
+        else
+          (accumulator[REFLECTIVE_OPAQUE_CLASSES] ||= Set.new) << class_name
+        end
+      end
+
+      def make_reflective_classes_gradual!(accumulator, classes)
+        classes&.each do |class_name|
+          entries = accumulator[class_name]
+          next if entries.nil?
+
+          accumulator[class_name] = entries.transform_values { Type::Combinator.untyped }
         end
       end
 
@@ -2087,7 +2117,9 @@ module Rigor
       # accumulator), and the class-body writes held out of `init_writes` until {#exempt_class_body_writes!}.
       DEFINE_METHOD_WRITES = :define_method_writes
       CLASS_BODY_WRITES = :class_body_writes
-      private_constant :DEFINE_METHOD_WRITES, :CLASS_BODY_WRITES
+      # The classes a computed-name `instance_variable_set` may write any ivar of ({#record_reflective_ivar_write}).
+      REFLECTIVE_OPAQUE_CLASSES = :reflective_opaque_classes
+      private_constant :DEFINE_METHOD_WRITES, :CLASS_BODY_WRITES, :REFLECTIVE_OPAQUE_CLASSES
 
       # Unions `type` into the class-ivar accumulator for `(class_name, ivar_name)`. Shared by the single-write and
       # multi-write (parallel-assignment) collectors.

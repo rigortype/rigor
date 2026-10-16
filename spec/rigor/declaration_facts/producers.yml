@@ -303,6 +303,7 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#instance_mixin_recorded?: writes one instance-side mixin call into the include/prepend accumulator under the owner the walk passes in; it computes no declaration context
     Rigor::Inference::ScopeIndexer#ivar_write_targets: grandfathered
     Rigor::Inference::ScopeIndexer#loose_constant_segments: A6 (#1749), the last segments of the constants a file binds by `||=`, a literal `const_set` or any write in a `class << …` body, for whether a `refine` target names a class the constant census cannot; it reads each singleton class body only for the constants it writes and decides no declaration context
+    Rigor::Inference::ScopeIndexer#make_reflective_classes_gradual!: the reflective-write finish of the ivar census walk (#1931); it rewrites the entries of the classes record_reflective_ivar_write named, after the walk, deriving no declaration context of its own
     Rigor::Inference::ScopeIndexer#merge_and_fold_extends: grandfathered
     Rigor::Inference::ScopeIndexer#merge_class_keyed_index_tables: grandfathered
     Rigor::Inference::ScopeIndexer#merge_constant_literal_tables: grandfathered
@@ -377,6 +378,7 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#record_module_function_names: grandfathered
     Rigor::Inference::ScopeIndexer#record_multi_write_ivars: grandfathered
     Rigor::Inference::ScopeIndexer#record_published_constant_ivar: grandfathered
+    Rigor::Inference::ScopeIndexer#record_reflective_ivar_write: the instance_variable_set arm of the ivar census walk (#1931); it reads the class gather_ivar_writes passes in, as record_ivar_write does, and decides only whether the call is an implicit or self instance_variable_set with a literal name, deriving no declaration context of its own
     Rigor::Inference::ScopeIndexer#record_self_surface_evidence: grandfathered
     Rigor::Inference::ScopeIndexer#record_singleton_class_sources: files the constants a file's `class << Const` bodies open under that file in their own table (#1752), read only by the incremental class-declaration diff; the walk it calls names them by the lexical rule `class << X` already follows, and nothing reads them as declared
     Rigor::Inference::ScopeIndexer#record_singleton_def_node: grandfathered

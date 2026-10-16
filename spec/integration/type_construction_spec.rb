@@ -1296,6 +1296,15 @@ RSpec.describe "Rigor type construction (integration)" do
       expect(reads.size).to eq(6)
       expect(harness.diagnostics.select { |d| reads.include?(d.line) }).to be_empty
     end
+
+    # Issue #1955 — a String that does not match a `when /re/` arm reaches the next clause, so a `when String` after
+    # it is not reported as unreachable.
+    it "reports no unreachable `when String` after a regexp arm" do
+      clauses = marked_lines(harness, "# REACHABLE-1955")
+      expect(clauses.size).to eq(2)
+      unreachable = harness.diagnostics.select { |d| d.rule == "flow.unreachable-clause" }
+      expect(unreachable.map(&:line) & clauses).to be_empty
+    end
   end
 
   describe "fixtures/regex_global_field_separator.rb — a `split` on a `$;` the file sets to a Regexp (#1365)" do

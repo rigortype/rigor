@@ -2760,10 +2760,11 @@ module Rigor
         end
 
         # Issue #1955 — the subject on the match edge of `/re/ === x` (and of `case x when /re/`). `Regexp#===`
-        # matches a String, and a Symbol by its name, and answers false for anything else, so each member narrows to
-        # its String and Symbol parts: a `String | nil` subject reads `String`, a Symbol one stays `Symbol`. A
-        # `Dynamic` member is left as it is, since it may be a Symbol at run time. The no-match edge keeps the entry
-        # type: a String that does not match reaches it too.
+        # matches a String, a Symbol by its name, and an object that converts with `to_str`, and answers false for
+        # anything else. Each member narrows to its String and Symbol parts: a `String | nil` subject reads `String`, a
+        # Symbol one stays `Symbol`. The `to_str` conversion is not modelled, so a member that defines `to_str` and is
+        # neither drops out of the edge. A `Dynamic` member is left as it is, since it may be a Symbol at run time. The
+        # no-match edge keeps the entry type: a String that does not match reaches it too.
         def regexp_case_equality_type(current, scope)
           members = current.is_a?(Type::Union) ? current.members : [current]
           Type::Combinator.union(*members.map { |member| regexp_case_equality_member(member, scope) })

@@ -276,19 +276,20 @@ assertions:
   '268': Dynamic[top]
   '269': Dynamic[top]
   '270': decimal-int-string
-  '271': String
+  '271': decimal-int-string
   '272': String
-  '273': String?
-  '274': String
-  '275': String?
-  '276': String | Symbol
+  '273': String
+  '274': String?
+  '275': String
+  '276': String?
   '277': String | Symbol
   '278': String | Symbol
   '279': String | Symbol
-  '280': String
-  '281': 1 | String
-  '282': String?
+  '280': String | Symbol
+  '281': String
+  '282': 1 | String
   '283': String?
   '284': String?
-  '285': String
+  '285': String?
   '286': String
+  '287': String

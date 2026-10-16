@@ -2428,6 +2428,12 @@ def whole_match_string_subject(raw)
   assert_type("decimal-int-string", s) if s.match?(/\A\d+\z/)
 end
 
+# A `String | nil` receiver is refined too: `nil.match?` raises, so a nil never reaches the truthy edge.
+def whole_match_nilable_subject(raw)
+  s = raw ? String(raw) : nil
+  assert_type("decimal-int-string", s) if s.match?(/\A\d+\z/) # GENUINE-NIL
+end
+
 def case_equality_string_subject(raw)
   s = String(raw)
   assert_type("String", s) if /\A\d+\z/ === s
@@ -2481,6 +2487,25 @@ def case_when_string_or_integer(flag, raw)
     assert_type("String", s)
   else
     assert_type("1 | String", s)
+  end
+end
+
+# A String that does not match reaches the next `when`, so a `when String` after a regex arm is not dead (Ruby: 2 for
+# `when_string_after_regex("x")` and `when_string_after_regex_nilable("x")`).
+def when_string_after_regex(raw)
+  s = String(raw)
+  case s
+  when /\A\d+\z/ then 1
+  when String then 2 # REACHABLE-1955
+  end
+end
+
+def when_string_after_regex_nilable(raw)
+  s = raw ? String(raw) : nil
+  case s
+  when /\A\d+\z/ then 1
+  when String then 2 # REACHABLE-1955
+  when nil then 3
   end
 end
 

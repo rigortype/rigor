@@ -1,0 +1,1 @@
+- **[engine]** `rigor unused` no longer lists a constant as unused when a literal `const_get` on `self` reaches it through `K.include(Mix)` (or its `send` spellings, `prepend` and `extend`), `K = Class.new(Base)`, or a method an eval block defines, and keeps the constant when that receiver cannot be named. ([#2035](https://github.com/rigortype/rigor/pull/2035))

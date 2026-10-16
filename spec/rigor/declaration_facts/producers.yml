@@ -51,6 +51,8 @@ lib/rigor/analysis/incremental_session.rb:
 lib/rigor/analysis/reachability/scan.rb:
   computes: every constant declaration and reference with the lexical nesting in force there (ADR-102)
   producers:
+    Rigor::Analysis::Reachability::Scan::AncestrySites: MIXINS lists the mixin call names whose receiver-form and send spellings become Ancestry edges for rigor unused's const_get lookup (#1946); it derives no declaration context
+    Rigor::Analysis::Reachability::Scan::AncestrySites#mixin_arguments: reads a mixin call's module arguments into Ancestry edges that widen only rigor unused's const_get lookup (#1946); it derives no declaration context
     Rigor::Analysis::Reachability::Scan::LocalValues: SCOPE_GATES lists the nodes that open a local-variable scope, so an interpolated const_get argument is read through its own method's assignments (#1734); it derives no declaration context
     Rigor::Analysis::Reachability::Scan::LocalValues#collect_local_writes: stops a local-variable search at a nested def, class, module or singleton class (#1734); it derives no declaration context
     Rigor::Analysis::Reachability::Scan::Walker#self_kind_in: classifies what `self` is in a def or `class << self` body only to choose where a literal const_get on `self` is looked up (#1761, #1767), falling back to reading it at the top level too where `self` is not nameable; it records no declaration and decides no def's owner

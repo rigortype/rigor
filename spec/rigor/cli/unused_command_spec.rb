@@ -49,6 +49,22 @@ RSpec.describe Rigor::CLI::UnusedCommand do
     end
   end
 
+  # #1946 — `Foo.include(Mix)` in a Rails initializer, outside the analysed paths, still makes `Foo` a runtime
+  # receiver of `Mix`'s `const_get` on self.
+  it "follows an include an initializer outside the analysed paths writes" do
+    Dir.mktmpdir do |dir|
+      write_project(dir, extra_source: "module Mix\n  def m = self.class.const_get(:X)\nend\n" \
+                                       "class Foo\n  class X; end\nend\nclass Unrelated\n  class Dead; end\nend\n")
+      FileUtils.mkdir_p(File.join(dir, "config/initializers"))
+      File.write(File.join(dir, "config/initializers/mix.rb"), "Foo.include(Mix)\nFoo.new.m\n")
+      backdate(dir)
+
+      _, report, = run_in(dir)
+
+      expect(report["candidates"].map { |row| row["name"] }).to eq(%w[Loner Unrelated Unrelated::Dead])
+    end
+  end
+
   # #1751 — the command scans absolute paths, so a role rule must be judged against the project root.
   describe "file roles" do
     def write_e2e_project(dir)

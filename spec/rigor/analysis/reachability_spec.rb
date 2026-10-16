@@ -197,14 +197,16 @@ RSpec.describe Rigor::Analysis::Reachability do
       decls = []
       refs = []
       dyn = dynamic.dup
+      ancestries = []
       files.each do |path, source|
         result = Rigor::Analysis::Reachability::Scan.call(path: path, source: source)
         decls.concat(result.declarations)
         refs.concat(result.references)
         dyn.concat(result.dynamic_uses)
+        ancestries.concat(result.ancestries)
       end
       Rigor::Analysis::Reachability::Graph.new(declarations: decls, references: refs, dynamic_uses: dyn,
-                                               root_fqns: roots).report
+                                               ancestries: ancestries, root_fqns: roots).report
     end
 
     # What `CLI::UnusedCommand#template_mentions` contributes for a name found in a `.yml` / `.json` /
@@ -823,17 +825,19 @@ RSpec.describe Rigor::Analysis::Reachability do
         expect(found).to eq(%w[Other::Z])
       end
 
-      it "stops reading the eval receiver in a nested non-constant eval block" do
+      # The block's `self` is `obj`, which may be `A` itself, so `A::E` is kept with every other `E` (#1946).
+      it "keeps every same-named constant in a nested eval block on a computed receiver" do
         found = report_for({ "lib/a.rb" => <<~RUBY, "lib/main.rb" => "Driver.go\n" }).candidates.map(&:fqn)
           class A
             class E; end
+            class Dead; end
           end
           class Driver
             class E; end
             def self.go(obj) = A.class_eval { obj.instance_eval { const_get(:E) } }
           end
         RUBY
-        expect(found).to eq(%w[A::E])
+        expect(found).to eq(%w[A::Dead])
       end
 
       it "does not widen an explicit eval receiver to its subclasses" do
@@ -887,6 +891,306 @@ RSpec.describe Rigor::Analysis::Reachability do
           end
         RUBY
         expect(found).to eq(%w[Driver::E4])
+      end
+    end
+
+    # Issue #1946 — an ancestry written outside a declaration's own statements (`K.include(Mix)` in an initializer,
+    # `K.send(:include, Mix)`, `K = Class.new(Base)`) and a method an eval block defines left a constant only the
+    # runtime receiver declares a false candidate. Every fixture holds `Unrelated::Dead`, which nothing names, and
+    # the precise ones a same-named `Stranger` constant, so a search for "any constant of that name" fails them.
+    describe "a const_get on self follows ancestry written outside the declaration (#1946)" do
+      def dead(files)
+        report_for(files.merge("lib/z.rb" => "class Unrelated\n  class Dead; end\nend\n")).candidates.map(&:fqn)
+      end
+
+      let(:stranger) { "class Stranger\n  class X; end\nend\n" }
+
+      it "follows K.include(Mix) written in another file" do
+        found = dead({ "lib/mix.rb" => "module Mix\n  def m = self.class.const_get(:X)\nend\n",
+                       "lib/k.rb" => "class K\n  class X; end\nend\n", "lib/s.rb" => stranger,
+                       "config/initializers/mix.rb" => "K.include(Mix)\n", "lib/main.rb" => "K.new.m\n" })
+        expect(found).to eq(%w[Stranger Stranger::X Unrelated Unrelated::Dead])
+      end
+
+      it "follows the send, public_send and __send__ spellings of include, prepend and extend" do
+        found = dead({ "lib/a.rb" => <<~RUBY, "lib/s.rb" => stranger, "lib/main.rb" => "K.new.m\nK.new.p\nK.e\n" })
+          module Mix
+            def m = self.class.const_get(:X)
+          end
+          module Pre
+            def p = self.class.const_get(:P)
+          end
+          module Ext
+            def e = const_get(:E)
+          end
+          class K
+            class X; end
+            class P; end
+            class E; end
+          end
+          K.send(:include, Mix)
+          K.public_send(:prepend, Pre)
+          K.__send__("extend", Ext)
+        RUBY
+        expect(found).to eq(%w[Stranger Stranger::X Unrelated Unrelated::Dead])
+      end
+
+      it "follows K.extend(Ext) and every module of a multi-module include" do
+        found = dead({ "lib/a.rb" => <<~RUBY, "lib/s.rb" => stranger, "lib/main.rb" => "K.e\nK.new.n\n" })
+          module Ext
+            def e = const_get(:X)
+          end
+          module Other; end
+          module Mix
+            def n = self.class.const_get(:N)
+          end
+          class K
+            class X; end
+            class N; end
+          end
+          K.extend(Ext)
+          K.include(Other, Mix)
+        RUBY
+        expect(found).to eq(%w[Stranger Stranger::X Unrelated Unrelated::Dead])
+      end
+
+      it "follows an include in an eval block on K and one nested in a conditional" do
+        found = dead({ "lib/a.rb" => <<~RUBY, "lib/s.rb" => stranger, "lib/main.rb" => "K.new.m\nJ.new.n\n" })
+          module Mix
+            def m = self.class.const_get(:X)
+          end
+          module Nix
+            def n = self.class.const_get(:X)
+          end
+          class K
+            class X; end
+          end
+          K.class_eval { include Mix }
+          class J
+            include Nix if RUBY_VERSION
+            class X; end
+          end
+        RUBY
+        expect(found).to eq(%w[Stranger Stranger::X Unrelated Unrelated::Dead])
+      end
+
+      it "follows K = Class.new(Base) reopened as class K" do
+        found = dead({ "lib/a.rb" => "class Base\n  def y = self.class.const_get(:X)\nend\nK = Class.new(Base)\n",
+                       "lib/b.rb" => "class K\n  class X; end\nend\n", "lib/s.rb" => stranger,
+                       "lib/main.rb" => "K.new.y\n" })
+        expect(found).to eq(%w[Stranger Stranger::X Unrelated Unrelated::Dead])
+      end
+
+      it "reads self.class in an instance method an eval block defines at the eval receiver" do
+        found = dead({ "lib/a.rb" => <<~RUBY, "lib/s.rb" => stranger, "lib/main.rb" => "Other.new.m\nOther.s\n" })
+          class Other
+            class X; end
+            class Y; end
+            class W; end
+          end
+          Other.class_eval { def m = self.class.const_get(:X) }
+          Other.instance_eval { def s = const_get(:Y) }
+          Other.module_eval { define_method(:w) { self.class.const_get(:W) } }
+        RUBY
+        expect(found).to eq(%w[Stranger Stranger::X Unrelated Unrelated::Dead])
+      end
+
+      it "reaches a subclass's constant from a define_singleton_method block in an eval block" do
+        found = dead({ "lib/a.rb" => <<~RUBY, "lib/s.rb" => stranger, "lib/main.rb" => "Sub.q\n" })
+          class Other; end
+          Other.class_eval { define_singleton_method(:q) { const_get(:X) } }
+          class Sub < Other
+            class X; end
+          end
+        RUBY
+        expect(found).to eq(%w[Stranger Stranger::X Unrelated Unrelated::Dead])
+      end
+
+      it "reads a Class.new(Base) block in an eval block at the class it builds, not the eval receiver" do
+        found = dead({ "lib/a.rb" => <<~RUBY, "lib/main.rb" => "H\n$h.go\n" })
+          class Base
+            class X; end
+            class Y; end
+          end
+          class Other
+            class X; end
+          end
+          Other.class_eval do
+            H = Class.new(Base) { const_get(:X) }
+            $h = Class.new(Base) { def self.go = const_get(:Y) }
+          end
+        RUBY
+        expect(found).to eq(%w[Other::X Unrelated Unrelated::Dead])
+      end
+
+      it "keeps every same-named constant for an eval block on a local receiver" do
+        found = dead({ "lib/a.rb" => <<~RUBY, "lib/main.rb" => "Driver.go\n" })
+          class Other
+            class X; end
+          end
+          class Driver
+            def self.go
+              k = Other
+              k.class_eval { const_get(:X) }
+            end
+          end
+        RUBY
+        expect(found).to eq(%w[Unrelated Unrelated::Dead])
+      end
+
+      it "keeps every same-named constant for a module a local receiver includes" do
+        found = dead({ "lib/a.rb" => <<~RUBY, "lib/main.rb" => "Driver.go\n" })
+          module Mix
+            def m = self.class.const_get(:X)
+          end
+          class Any
+            class X; end
+          end
+          class Driver
+            def self.go(k) = k.include(Mix)
+          end
+        RUBY
+        expect(found).to eq(%w[Unrelated Unrelated::Dead])
+      end
+
+      it "keeps every same-named constant for a module included where self is unknown" do
+        found = dead({ "lib/a.rb" => <<~RUBY, "lib/main.rb" => "Host\n" })
+          module Mix
+            def m = self.class.const_get(:X)
+          end
+          class Any
+            class X; end
+          end
+          class Host
+            configure { include Mix }
+          end
+        RUBY
+        expect(found).to eq(%w[Unrelated Unrelated::Dead])
+      end
+
+      it "keeps every same-named constant for a class that includes a computed module" do
+        found = dead({ "lib/a.rb" => <<~RUBY, "lib/main.rb" => "K.y\n" })
+          module Mix
+            class Y; end
+          end
+          class K
+            def self.y = const_get(:Y)
+          end
+          K.include([Mix].first)
+        RUBY
+        expect(found).to eq(%w[Unrelated Unrelated::Dead])
+      end
+
+      # `self` in a mixin argument is the module the call is written in, not the receiver; nothing names `Mix`
+      # itself, so it stays a candidate.
+      it "reads a self argument as the module the call is written in" do
+        main = "Foo.new.m\nBar.new.n\nBaz.e\nFoo.w\n"
+        found = dead({ "lib/a.rb" => <<~RUBY, "lib/s.rb" => stranger, "lib/main.rb" => main })
+          class Foo
+            class X; end
+            def self.w = const_get(:W)
+          end
+          class Lone; class W; end; end
+          class Bar; class X; end; end
+          class Baz; class X; end; end
+          module Mix
+            def m = self.class.const_get(:X)
+            Foo.include(self)
+          end
+          module Nix
+            def n = self.class.const_get(:X)
+            Bar.send :include, self
+          end
+          module Ext
+            def e = const_get(:X)
+            Baz.extend(self)
+          end
+        RUBY
+        expect(found).to eq(%w[Ext Lone Lone::W Mix Nix Stranger Stranger::X Unrelated Unrelated::Dead])
+      end
+
+      it "keeps every same-named constant for a class body that includes a computed module" do
+        found = dead({ "lib/a.rb" => <<~RUBY, "lib/main.rb" => "Foo.new.m\n" })
+          module Mods
+            module A
+              class X; end
+            end
+            def self.pick = A
+          end
+          class Foo
+            include Mods.pick
+            def m = self.class.const_get(:X)
+          end
+        RUBY
+        expect(found).to eq(%w[Unrelated Unrelated::Dead])
+      end
+
+      it "searches a class with a computed ancestor as a descendant of any module" do
+        found = dead({ "lib/a.rb" => <<~RUBY, "lib/s.rb" => stranger, "lib/main.rb" => "Foo.new.m\n" })
+          module Mix
+            def m = self.class.const_get(:X)
+          end
+          MODS = [Mix].freeze
+          class Foo
+            class X; end
+          end
+          Foo.include(MODS.first)
+        RUBY
+        expect(found).to eq(%w[Stranger Stranger::X Unrelated Unrelated::Dead])
+      end
+
+      it "follows every module of a class body's multi-module include" do
+        found = dead({ "lib/a.rb" => <<~RUBY, "lib/s.rb" => stranger, "lib/main.rb" => "Foo.new.m\n" })
+          module M1; end
+          module M2
+            def m = self.class.const_get(:X)
+          end
+          class Foo
+            include M1, M2
+            class X; end
+          end
+        RUBY
+        expect(found).to eq(%w[Stranger Stranger::X Unrelated Unrelated::Dead])
+      end
+
+      it "resolves a receiver-form include's receiver in the nesting it is written in" do
+        found = dead({ "lib/a.rb" => <<~RUBY, "lib/s.rb" => stranger, "lib/main.rb" => "App::Foo.new.m\nCm\n" })
+          module Cm
+            def m = self.class.const_get(:X)
+          end
+          module App
+            class Foo
+              class X; end
+            end
+            Foo.include(Cm)
+          end
+        RUBY
+        expect(found).to eq(%w[Stranger Stranger::X Unrelated Unrelated::Dead])
+      end
+
+      {
+        "a Class.new block" => "K = Class.new(Base) { include Mix }\nclass K\n  class X; end\nend\nK.new.m\n",
+        "a Struct.new block" => "K = Struct.new(:a) do\n  include Mix\nend\nclass K\n  class X; end\nend\nK.new(1).m\n",
+        "a singleton method" => "class K\n  def self.setup = include(Mix)\n  class X; end\nend\nK.setup\nK.new.m\n",
+        "a block on a computed receiver" => "class K\n  class X; end\nend\n[K].each { |k| k.include(Mix) }\nK.new.m\n"
+      }.each do |where, source|
+        it "keeps every same-named constant for the included module's own const_get in #{where}" do
+          mix = "class Base; end\nmodule Mix\n  def m = self.class.const_get(:X)\nend\n"
+          found = dead({ "lib/a.rb" => mix + source,
+                         "lib/main.rb" => "Base\n" })
+          expect(found).to eq(%w[Unrelated Unrelated::Dead])
+        end
+      end
+
+      it "follows an include on a constant receiver the project does not declare" do
+        found = dead({ "lib/a.rb" => <<~RUBY, "lib/s.rb" => stranger, "lib/main.rb" => "Gem::Thing.new.m\n" })
+          module Mix
+            def m = self.class.const_get(:X)
+          end
+          class Gem::Thing::X; end
+          Gem::Thing.include(Mix)
+        RUBY
+        expect(found).to eq(%w[Stranger Stranger::X Unrelated Unrelated::Dead])
       end
     end
 

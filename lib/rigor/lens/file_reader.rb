@@ -417,13 +417,23 @@ module Rigor
         fields.each do |field, field_node|
           # rbs-inline reads a `#:` trailing a field on its own line of a multi-line call as that field's type.
           trailing = field_node.location.start_line != start_line
+          members = attribute_members(field, attribute)
+          visibility = builder_field_visibility(members)
           add_site(field_node, { "kind" => "attribute", "name" => field, "owner" => name, "scope" => "instance",
-                                 "attribute" => attribute, "members" => attribute_members(field, attribute),
-                                 "module_function" => false, "visibility" => "public", "params" => nil,
+                                 "attribute" => attribute, "members" => members,
+                                 "module_function" => false, "visibility" => visibility, "params" => nil,
                                  "block" => nil, "body_return" => nil }, contracts: trailing ? :trailing : false)
         end
         block = node.value.block
         walk_body(block.body, nesting + [name], singleton: false, kind: :builder) if block&.body
+      end
+
+      # Ruby forces a field reader named `initialize_copy` (say) private, but not its `Struct` writer: a `Data`
+      # field reads `private`, a `Struct` one, whose site covers both, `null`.
+      def builder_field_visibility(members)
+        return "public" unless members.intersect?(FORCED_PRIVATE)
+
+        members.all? { |member| FORCED_PRIVATE.include?(member) } ? "private" : nil
       end
 
       # Whether a constant, class or module written here lands somewhere the nesting does not name: a builder

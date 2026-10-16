@@ -137,7 +137,7 @@ One entry per requested target, in request order.
     constant assignment directly in a namespace body (not in a block, a method, another builder's block or
     `class << self`), with unique symbol field names Ruby accepts (not ending in `=`). It is a `class` site with `builder` set to `data` or
     `struct`, spanning the assignment; each field is an `attribute` site spanning its name (`reader` for
-    `Data`, `accessor` for `Struct`, `public`), whose only contract comment is a `#:` trailing it on its own line
+    `Data`, `accessor` for `Struct`, `public`; a `Data` field named `initialize_copy` or another name Ruby forces private is `private`, and such a `Struct` field, whose writer stays public, `null`), whose only contract comment is a `#:` trailing it on its own line
     of a multi-line call, rbs-inline's per-field form (§ Anchors); and the call's block is read as the class body for its methods, which
     Ruby `class_eval`s on the new class. `check`'s discovery keys these fields and methods under the same constant
     name. A class, module or constant written inside the block stays with the lexical scope in Ruby, and one

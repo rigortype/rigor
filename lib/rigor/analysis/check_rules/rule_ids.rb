@@ -168,7 +168,9 @@ module Rigor
       # Bare (dot-less) diagnostic ids the engine emits outside the catalogue (see the `rule:` literals in
       # `Analysis::Runner` / `Runner::DiagnosticAggregator`). A token equal to one of these is treated as
       # known by `suppression.unknown-rule` even though it carries no family prefix; extend the list when
-      # the runner grows a new bare id.
+      # the runner grows a new bare id. Ids a marker or `disable:` cannot suppress (the `--explain`
+      # `fallback` row, the `contribution_merge` conflict reasons) stay out: they are
+      # `ConfigAudit::SEVERITY_ONLY_IDS`, known to the `severity_overrides:` audit alone.
       NON_CHECK_DIAGNOSTIC_IDS = %w[
         configuration-error load-error pool-degraded runtime-error source-rbs-synthesis-failed
         source-rbs-annotation-not-honoured

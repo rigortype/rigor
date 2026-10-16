@@ -1155,6 +1155,27 @@ RSpec.describe Rigor::CLI::CheckCommand do
       end
     end
 
+    # Issue #1985 — `severity_overrides:` follows `disable:`: the qualified key re-stamps the plugin's rows, the bare
+    # rule does not. The rows are `:warning`, so promoting them to `error` moves the `--fail-on error` exit status.
+    [%w[--workers 0], %w[--workers 2]].each do |flags|
+      it "re-stamps a plugin's rows by a qualified `severity_overrides:` key only, under #{flags.join(' ')}" do
+        write_project("")
+        base = ["--no-cache", "--no-ci-detect", "--no-stats", "--fail-on", "error", *flags]
+        overrides = lambda do |key|
+          File.write(".rigor.yml", File.read(".rigor.yml") + "severity_overrides:\n  #{key}: error\n")
+        end
+
+        overrides.call("plugin.shoulda-matchers.unknown-column")
+        status, = run(base)
+        expect(status).to eq(1)
+
+        write_project("")
+        overrides.call("unknown-column")
+        status, = run(base)
+        expect(status).to eq(0)
+      end
+    end
+
     it "drops the whole plugin's rows under `disable: [plugin.shoulda-matchers]` and none under a bare id" do
       write_project(", plugin.shoulda-matchers")
       _, out, = run(%w[--no-cache --no-ci-detect --no-stats])

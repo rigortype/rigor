@@ -19,6 +19,9 @@ module Rigor
     # `plugin.<id>`, never to a bare id or `all`. The run-level rows outside the check-rule catalogue
     # (`rbs.coverage.*`, `dynamic.dependency-source.*`, the plugin loader, `plugin_trust.*`, `pool-degraded`) keep
     # answering to `severity_overrides:` only, by any spelling.
+    # Issue #1985 — `severity_overrides:` follows the same rule: a plugin's row answers to its qualified id or
+    # `plugin.<id>`, never to its bare rule or a family wildcard; the plugin loader's rows answer to
+    # `plugin_loader.<rule>` first and to their bare `load-error` / `runtime-error` after it.
     #
     # Extracted (ADR-87 WD4) so the miss path ({Runner::DiagnosticAggregator}) and the boot-slimming hit path
     # ({RunCacheProbe}, which never loads the aggregator) apply the IDENTICAL final filter — a warm HIT's
@@ -52,11 +55,19 @@ module Rigor
         diagnostic.source_family == Diagnostic::DEFAULT_SOURCE_FAMILY && CHECK_RULES.include?(diagnostic.rule)
       end
 
+      # `plugin.<id>` for a row a plugin emitted, nil for every other row.
+      def plugin_family(diagnostic)
+        family = diagnostic.source_family.to_s
+        family if family.start_with?(CheckRules::PLUGIN_FAMILY_PREFIX)
+      end
+
       def stamp(diagnostic, configuration)
         return diagnostic if diagnostic.rule.nil?
 
         resolved = Configuration::SeverityProfile.resolve(
           rule: diagnostic.rule,
+          qualified_rule: diagnostic.qualified_rule,
+          plugin_family: plugin_family(diagnostic),
           authored_severity: diagnostic.severity,
           profile: configuration.severity_profile,
           overrides: configuration.severity_overrides,

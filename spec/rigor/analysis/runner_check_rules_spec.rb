@@ -243,6 +243,12 @@ RSpec.describe Rigor::Analysis::Runner do
           expect(warning.first.line).to eq(1)
         end
 
+        it "warns on a marker token naming an id only severity_overrides: can re-stamp (`fallback`)" do
+          result = analyze(%(x = 1 # rigor:disable fallback\n))
+
+          expect(suppression_diagnostics(result).map(&:rule)).to eq(["suppression.unknown-rule"])
+        end
+
         it "warns on a typo'd canonical id (`call.undefined-metod`)" do
           result = analyze(%("x".no_method # rigor:disable call.undefined-metod\n))
 

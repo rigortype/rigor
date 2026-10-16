@@ -154,7 +154,7 @@
       "enum": ["lenient", "balanced", "strict"]
     },
     "severity_overrides": {
-      "description": "Per-rule severity overrides applied after the profile. Keys are canonical rule ids (`call.undefined-method`) or family wildcards (`call`); values are one of `error` / `warning` / `info` / `off`. `off` drops the diagnostic entirely.",
+      "description": "Per-rule severity overrides applied after the profile. Keys are canonical rule ids (`call.undefined-method`) or family wildcards (`call`), the plugin loader's `plugin_loader.load-error` / `plugin_loader.runtime-error` (also spelled `load-error` / `runtime-error`), or a plugin's qualified id (`plugin.<id>.<rule>`, or `plugin.<id>` for the whole plugin); a bare id never reaches a plugin's row. Values are one of `error` / `warning` / `info` / `off`. `off` drops the diagnostic entirely.",
       "type": "object",
       "additionalProperties": {
         "type": "string",

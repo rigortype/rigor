@@ -3,6 +3,7 @@
 require "did_you_mean"
 
 require_relative "config_path"
+require_relative "flow_contribution/conflict"
 require_relative "signature_path_audit"
 # ADR-87 WD4 — only the pure rule-id table (`ALL_RULES` / `RULE_FAMILIES`) is needed, so require the light
 # `rule_ids.rb` rather than the engine-pulling `check_rules.rb`; keeps `config_audit` (loaded by every check)
@@ -26,12 +27,13 @@ module Rigor
   #
   # Every check is held to the same bar that {SignaturePathAudit} set: it mirrors the
   # loader's own acceptance test, so a warning means the loader really did load nothing, and
-  # it never fires on a setup that works. In particular the `severity_overrides:` check only
-  # flags a key under a built-in family (`call`, `flow`, …) — a plugin- or `rbs_extended.*`
-  # rule id (whose family Rigor cannot statically enumerate, since a `node_rule` block emits
-  # any `rule:` string it likes) is left alone. The `disable:` check goes further because the
-  # list's reach is enumerable (issue #1953): a plugin's row answers only to its qualified
-  # `plugin.<id>.<rule>` id, so a bare plugin rule there is inert (see {.disable_token_warning}).
+  # it never fires on a setup that works. The rule-token checks lean on the reach of `disable:`
+  # and `severity_overrides:` being enumerable (issues #1953, #1985): a plugin's row answers only
+  # to its qualified `plugin.<id>.<rule>` id (or `plugin.<id>`), so a bare plugin rule there is
+  # inert (see {.disable_token_warning}, {.override_key_warning}). A `plugin.`-qualified token is
+  # checked only against `plugins:`, and a token under a non-check engine family
+  # (`rbs_extended.*`, `rbs.*`, `dynamic.*`) is left alone, since the engine emits those ids
+  # outside the catalogue.
   module ConfigAudit
     # One config-level finding. `kind` discriminates the source key (`:signature_path`,
     # `:bundled_plugin_signature_path`, `:library`, `:disabled_rule`, `:severity_override`,
@@ -148,24 +150,54 @@ module Rigor
     end
 
     # `disable:` tokens that reach no row ({.disable_token_warning}) and `severity_overrides:` keys
-    # that name no rule. An override key is flagged only under a built-in family, so a plugin
-    # rule id is never mis-flagged (see the module docstring).
+    # that reach none ({.override_key_warning}).
     def self.rule_token_warnings(configuration)
       plugin_ids = configured_plugin_ids(configuration.plugins)
       disable = Array(configuration.disabled_rules).filter_map do |token|
         disable_token_warning(token.to_s, plugin_ids)
       end
       overrides = configuration.severity_overrides.keys.filter_map do |key|
-        next unless inert_builtin_token?(key.to_s)
-
-        Warning.new(
-          kind: :severity_override,
-          message: "severity_overrides: #{key.to_s.inspect} is not a recognized rule id; the override has no effect",
-          fields: { "token" => key.to_s }
-        )
+        override_key_warning(key.to_s, plugin_ids)
       end
       disable + overrides
     end
+
+    # Issue #1985 — the plugin loader's own rows, which a `severity_overrides:` key names by their qualified
+    # id; they also answer to the bare `load-error` / `runtime-error`.
+    PLUGIN_LOADER_ROWS = %w[plugin_loader.load-error plugin_loader.runtime-error].freeze
+    private_constant :PLUGIN_LOADER_ROWS
+
+    # A warning for a `severity_overrides:` key that can reach no row, or nil. Mirrors {.disable_token_warning}
+    # (issue #1985): a plugin's row answers only to its qualified `plugin.<id>.<rule>` or `plugin.<id>`, so a
+    # `plugin.`-qualified key naming an unconfigured plugin, and any key outside the built-in vocabulary that is
+    # not a qualified plugin id (a plugin's bare rule included), is inert. A reserved run-level row is the home of
+    # this map, so naming one is never flagged; `all` is not a family wildcard here, so it is.
+    def self.override_key_warning(key, plugin_ids)
+      reason = override_key_problem(key, plugin_ids)
+      return nil if reason.nil?
+
+      Warning.new(kind: :severity_override, message: "severity_overrides: #{key.inspect} #{reason}",
+                  fields: { "token" => key })
+    end
+
+    def self.override_key_problem(key, plugin_ids)
+      return "is not a recognized rule id; the override has no effect" if key == "all"
+      return nil unless Array(Analysis::CheckRules.resolve_rule_token(key)).empty?
+
+      if key.start_with?(Analysis::CheckRules::PLUGIN_FAMILY_PREFIX)
+        return nil if plugin_ids.nil? || plausible_plugin_token?(key, plugin_ids)
+
+        "names no plugin `plugins:` configures; the override has no effect"
+      elsif key.start_with?("plugin_loader.")
+        "is not a recognized rule id; the override has no effect" unless PLUGIN_LOADER_ROWS.include?(key)
+      elsif inert_builtin_token?(key)
+        "is not a recognized rule id; the override has no effect"
+      elsif !non_check_engine_token?(key) && !severity_only_id?(key)
+        "is not a recognized rule id; the override has no effect " \
+          "(if this is a plugin's rule, write it as `plugin.<id>.<rule>`)"
+      end
+    end
+    private_class_method :override_key_problem
 
     # Issue #1953 — the run-level rows the diagnostic policy keeps on `severity_overrides:` and the
     # baseline. `disable:` does not reach them by any spelling, so naming one there is inert.
@@ -223,6 +255,19 @@ module Rigor
         RESERVED_RUN_LEVEL_FAMILIES.any? { |family| token == family || token.start_with?("#{family}.") }
     end
     private_class_method :reserved_run_level_token?
+
+    # Bare ids that a `severity_overrides:` key re-stamps but a marker or `disable:` cannot suppress: the `--explain`
+    # `fallback` row and the `contribution_merge` conflict reasons (`FlowContribution::CONFLICT_VALID_REASONS`,
+    # kebab-cased). They are not in `CheckRules::NON_CHECK_DIAGNOSTIC_IDS`, which would silence the warnings for a
+    # `disable:` token or marker naming them. `spec/rigor/config_audit_spec.rb` pins this list's completeness.
+    CONFLICT_IDS = FlowContribution::CONFLICT_VALID_REASONS.map { |reason| reason.to_s.tr("_", "-").freeze }.freeze
+    SEVERITY_ONLY_IDS = (%w[fallback] + CONFLICT_IDS).freeze
+    private_constant :CONFLICT_IDS, :SEVERITY_ONLY_IDS
+
+    def self.severity_only_id?(key)
+      SEVERITY_ONLY_IDS.include?(key)
+    end
+    private_class_method :severity_only_id?
 
     def self.non_check_engine_token?(token)
       Analysis::CheckRules::NON_CHECK_DIAGNOSTIC_IDS.include?(token) ||

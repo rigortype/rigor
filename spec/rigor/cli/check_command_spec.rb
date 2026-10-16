@@ -640,15 +640,38 @@ RSpec.describe Rigor::CLI::CheckCommand do
     expect(rule.fetch("token")).to eq("call.undefined-methdo")
   end
 
-  it "does NOT warn on a disable: token under a non-built-in (plugin) family" do
+  # Issue #1953 — a plugin's row answers to `disable:` only by its qualified id, so the qualified spelling of a
+  # configured plugin's rule is valid (the entry is disabled here so the example loads no plugin).
+  it "does NOT warn on a qualified disable: token for a configured plugin" do
     File.write("a.rb", "x = 1\n")
-    File.write(".rigor.yml", "disable:\n  - rspec.let-binding\n")
+    File.write(".rigor.yml", <<~YAML)
+      plugins:
+        - gem: rigor-rspec
+          enabled: false
+      disable:
+        - plugin.rspec.let-binding
+        - plugin.rspec
+    YAML
 
     _status, out, err = run(["--no-cache", "--no-ci-detect", "--no-stats", "--format=json", "--config", ".rigor.yml",
                              "a.rb"])
 
     expect(err).not_to include("the suppression has no effect")
     expect(JSON.parse(out)).not_to have_key("config_warnings")
+  end
+
+  # Issue #1953 — a bare plugin rule never reaches the plugin's row, so it is inert and warned about. Like every other
+  # config warning it leaves the exit status alone, even under `--fail-on info`.
+  it "warns on a plugin's bare rule in disable: without changing the exit status" do
+    File.write("a.rb", "x = 1\n")
+    File.write(".rigor.yml", "disable:\n  - rspec.let-binding\n")
+
+    status, out, err = run(["--no-cache", "--no-ci-detect", "--no-stats", "--format=json", "--fail-on", "info",
+                            "--config", ".rigor.yml", "a.rb"])
+
+    expect(err).to include('disable: "rspec.let-binding" is not a recognized rule id').and include("plugin.<id>.<rule>")
+    expect(JSON.parse(out).fetch("config_warnings").map { |w| w["token"] }).to eq(["rspec.let-binding"])
+    expect(status).to eq(0)
   end
 
   it "stays silent (and omits config_warnings) when nothing is misconfigured" do
@@ -1054,6 +1077,92 @@ RSpec.describe Rigor::CLI::CheckCommand do
 
       expect(status).to eq(1)
       expect(out).to include("[plugin_loader.load-error]")
+    end
+  end
+
+  # Issue #1953 — a plugin's row answers to its qualified id in `disable:` (`plugin.<id>.<rule>`, `plugin.<id>`) and in
+  # `# rigor:disable` markers, on every run shape; a bare id still does not reach it. Driven through the bundled
+  # rigor-activerecord + rigor-shoulda-matchers pair, whose manual promised the marker spelling.
+  describe "qualified plugin ids in `disable:` and markers" do
+    # Another spec file may have required these gems and then run `Rigor::Plugin.unregister!`, after which the
+    # loader's `require` no-ops and finds nothing registered. Register them explicitly, as a first load would.
+    before do
+      require "rigor/plugin/loader"
+      { "rigor-activerecord" => "Activerecord", "rigor-shoulda-matchers" => "ShouldaMatchers" }.each do |gem, name|
+        require Rigor::Plugin::Loader.bundled_plugin_path(gem)
+        klass = Rigor::Plugin.const_get(name)
+        Rigor::Plugin.register(klass)
+        Rigor::Plugin.record_gem_registration(gem, [klass.manifest.id])
+      end
+    end
+
+    after { Rigor::Plugin.unregister! }
+
+    def write_project(disable)
+      FileUtils.mkdir_p(%w[app/models db spec])
+      File.write("db/schema.rb", <<~RUBY)
+        ActiveRecord::Schema.define do
+          create_table :users do |t|
+            t.string :name
+          end
+        end
+      RUBY
+      File.write("app/models/user.rb", "class User < ApplicationRecord\nend\n")
+      File.write("spec/user_spec.rb", <<~RUBY)
+        RSpec.describe User do
+          it { should have_db_column(:nope_a) }
+          it { should have_db_column(:nope_b) } # rigor:disable plugin.shoulda-matchers.unknown-column
+          it { should have_db_column(:nope_c) } # rigor:disable unknown-column
+        end
+      RUBY
+      File.write(".rigor.yml", <<~YAML)
+        paths: [spec]
+        plugins: [rigor-activerecord, rigor-shoulda-matchers]
+        disable: [call, suppression#{disable}]
+      YAML
+    end
+
+    def columns_in(out)
+      out.scan(/nope_[abc]/).uniq.sort
+    end
+
+    shapes = {
+      "--workers 0" => [%w[--no-cache --workers 0]],
+      "--workers 2" => [%w[--no-cache --workers 2]],
+      "a warm --incremental run" => [%w[--incremental], %w[--incremental]],
+      "a run served from the run-result cache" => [[], []]
+    }
+    shapes.each do |shape, runs|
+      it "drops exactly the rows a qualified token names under #{shape}" do
+        require "rigor/analysis/run_cache_probe"
+        served = []
+        allow(Rigor::Analysis::RunCacheProbe).to receive(:new).and_wrap_original do |original, **kwargs|
+          probe = original.call(**kwargs)
+          allow(probe).to(receive(:serve).and_wrap_original { |serve, *args| serve.call(*args).tap { served << it } })
+          probe
+        end
+        base = %w[--no-ci-detect --no-stats --fail-on warning]
+
+        [["", %w[nope_a nope_c], 1], [", plugin.shoulda-matchers.unknown-column", [], 0]].each do |extra, kept, code|
+          write_project(extra)
+          served.clear
+          status, out, err = runs.map { |flags| run([*base, *flags]) }.last
+          expect(err).to include("--incremental warm") if shape.include?("incremental")
+          expect(served.compact).not_to be_empty if shape.include?("run-result cache")
+          expect(columns_in(out)).to eq(kept)
+          expect(status).to eq(code)
+        end
+      end
+    end
+
+    it "drops the whole plugin's rows under `disable: [plugin.shoulda-matchers]` and none under a bare id" do
+      write_project(", plugin.shoulda-matchers")
+      _, out, = run(%w[--no-cache --no-ci-detect --no-stats])
+      expect(columns_in(out)).to eq([])
+
+      write_project(", unknown-column, all")
+      _, out, = run(%w[--no-cache --no-ci-detect --no-stats])
+      expect(columns_in(out)).to eq(%w[nope_a nope_c])
     end
   end
 end

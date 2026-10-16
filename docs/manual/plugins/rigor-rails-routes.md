@@ -127,8 +127,8 @@ routed. Helper-name recognition for all three is unaffected.
   metaprogramming the parser can't unfold (routes built in a loop
   over runtime data, helpers injected by an engine the parser
   doesn't model) may not register, which can surface a false
-  `unknown-helper`. Record those in a baseline, or
-  `# rigor:disable` the line.
+  `unknown-helper`. Record those in a baseline, or add
+  `# rigor:disable plugin.rails-routes.unknown-helper` to the line.
 - **The "routes file did not load" warning is run-scoped.** It is a
   fact about your configuration, not about any one source file, so
   it is reported once per run on `.rigor.yml` rather than on the

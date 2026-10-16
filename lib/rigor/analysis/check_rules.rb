@@ -469,7 +469,7 @@ module Rigor
       # - **File-level** (v0.1.2): `# rigor:disable-file <rule1>,
       #   <rule2>` anywhere in the file suppresses the matching
       #   diagnostic for every line. `# rigor:disable-file all`
-      #   suppresses every rule across the file. Convention is
+      #   suppresses every built-in rule across the file. Convention is
       #   to put the comment near the top, but Rigor accepts it
       #   anywhere — the comment scope is "this file" regardless
       #   of position.
@@ -477,7 +477,8 @@ module Rigor
       #   on the same line as the offending expression
       #   suppresses the matching diagnostic for that line
       #   only. `# rigor:disable all` on a line suppresses
-      #   every rule on that line.
+      #   every built-in rule on that line. A plugin's rows are
+      #   not passed here; see {.filter_plugin_suppressed}.
       #
       # Both in-source forms are recognised only when the
       # marker is the FIRST thing in the comment, so a
@@ -501,6 +502,26 @@ module Rigor
 
           line_rules = line_suppressions[diagnostic.line]
           line_rules && (line_rules.include?("all") || line_rules.include?(rule))
+        end
+      end
+
+      # Issue #1953 — the in-source markers over the rows a plugin emitted while `path` was analysed
+      # (`#diagnostics_for_file` and node rules). A row answers to a `plugin.<id>.<rule>` or `plugin.<id>` token
+      # only ({.plugin_row_disabled?}); a bare id and `all` keep reaching built-in rows alone. `comments` are
+      # `path`'s, so a row the plugin positioned in another file is left to the `disable:` list and the baseline.
+      # The `disable:` list itself is applied to these rows by {SeverityStamp}, on every run shape.
+      def filter_plugin_suppressed(diagnostics, path:, comments:)
+        return diagnostics if diagnostics.empty?
+
+        line_suppressions, file_suppressions = parse_suppression_comments(comments)
+        return diagnostics if line_suppressions.empty? && file_suppressions.empty?
+
+        diagnostics.reject do |diagnostic|
+          next false unless diagnostic.path == path
+          next true if plugin_row_disabled?(diagnostic, file_suppressions)
+
+          line_rules = line_suppressions.fetch(diagnostic.line, nil)
+          !line_rules.nil? && plugin_row_disabled?(diagnostic, line_rules)
         end
       end
 

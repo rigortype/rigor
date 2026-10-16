@@ -103,6 +103,8 @@ rigor: signature_paths: "/path/to/sig" does not exist (no signatures loaded from
 rigor: signature_paths: "/path/to/sig" matched 0 signature files
 rigor: libraries: "csb" is not an available RBS library (no signatures loaded from it)
 rigor: disable: "call.undefined-methdo" is not a recognized rule id; the suppression has no effect
+rigor: disable: "plugin_loader.load-error" names a run-level row, which `disable:` does not reach; use `severity_overrides:` or a baseline
+rigor: disable: "plugin.shoulda-matchers.unknown-column" names no plugin `plugins:` configures; the suppression has no effect
 rigor: severity_overrides: "flow.bogus" is not a recognized rule id; the override has no effect
 rigor: bundler.lockfile: "./missing/Gemfile.lock" does not exist
 ```
@@ -125,10 +127,19 @@ the JSON schema as you type rather than at check time.
 These are warnings, not errors — partial or optional bundles and
 forward-looking config are valid setups. The audit only fires on explicit,
 working-setup-safe signals: an unset default (auto-detected `<root>/sig`,
-auto-detected bundle) is never warned about, and a `disable:` /
-`severity_overrides:` token under a *plugin* family (`rspec.…`,
+auto-detected bundle) is never warned about, and a
+`severity_overrides:` key under a non-built-in family (`rspec.…`,
 `rbs_extended.…`) is left alone, since its rule id cannot be enumerated
-statically and may resolve at run time. The same findings appear in the
+statically and may resolve at run time. `disable:` is checked more
+closely, because what it can reach is known: a plugin's rule counts
+only in its qualified `plugin.<id>.<rule>` form, so a bare plugin rule
+(`rspec.let-binding`) is warned about. A qualified token is checked
+against `plugins:` only when every entry's plugin ID is known without
+loading it — an explicit `id:`, or a bundled plugin's gem name minus
+`rigor-`; one third-party gem listed without `id:` turns that check
+off. A token under `rbs_extended.…`, `rbs.…` or `dynamic.…` is left
+alone, other than the reserved run-level rows (`rbs.coverage.…`,
+`dynamic.dependency-source.…`), which are flagged. The same findings appear in the
 `--format=json` payload under `config_warnings` (each tagged with a
 `kind`), so CI can assert on them.
 
@@ -136,7 +147,7 @@ statically and may resolve at run time. The same findings appear in the
 
 | Key | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `disable` | Array | `[]` | Rule IDs or families to suppress project-wide; `all` suppresses every built-in check rule (not the run-level `.rigor.yml` rows or a plugin's own `plugin.<id>.*` rows). See [Diagnostics](04-diagnostics.md). |
+| `disable` | Array | `[]` | Rule IDs or families to suppress project-wide; `all` suppresses every built-in check rule. A plugin's diagnostics are named by qualified ID (`plugin.<id>.<rule>`, or `plugin.<id>` for the whole plugin); a bare ID or `all` does not reach them. The run-level `.rigor.yml` rows (`plugin_loader.*`, `dynamic.dependency-source.*`, `rbs.coverage.*`, `plugin_trust.*`, `pool-degraded`) are not reached by any spelling; use `severity_overrides:` for those. See [Diagnostics](04-diagnostics.md#suppressing-a-diagnostic). |
 | `severity_profile` | String | `"balanced"` | `lenient`, `balanced`, or `strict` — see [Diagnostics](04-diagnostics.md). |
 | `severity_overrides` | Hash | `{}` | Per-rule / per-family severity, e.g. `{ call: warning, flow.always-truthy-condition: off }`. |
 | `baseline` | String / `false` | `nil` | Path to a `.rigor-baseline.yml`, or `false` to disable an inherited one. See [Baselines](06-baseline.md). |

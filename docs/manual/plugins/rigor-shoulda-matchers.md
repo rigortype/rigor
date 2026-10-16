@@ -48,7 +48,10 @@ expected kind: `belong_to` / `have_one` (singular), `have_many` /
 
 Suppress with the qualified rule, e.g.
 `# rigor:disable plugin.shoulda-matchers.unknown-column`, or silence
-the whole family with `# rigor:disable plugin.shoulda-matchers`.
+the whole family with `# rigor:disable plugin.shoulda-matchers`. The
+same spellings work project-wide in `.rigor.yml`'s `disable:`. The
+bare rule (`# rigor:disable unknown-column`) does not reach these
+diagnostics.
 
 ## No configuration
 

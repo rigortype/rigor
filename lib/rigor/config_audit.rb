@@ -26,11 +26,12 @@ module Rigor
   #
   # Every check is held to the same bar that {SignaturePathAudit} set: it mirrors the
   # loader's own acceptance test, so a warning means the loader really did load nothing, and
-  # it never fires on a setup that works. In particular the rule-token check only flags a
-  # token under a built-in family (`call`, `flow`, …) — a plugin- or `rbs_extended.*` rule id
-  # (whose family Rigor cannot statically enumerate, since a `node_rule` block emits any
-  # `rule:` string it likes) is left alone, so disabling a plugin rule is never mistaken for
-  # a typo.
+  # it never fires on a setup that works. In particular the `severity_overrides:` check only
+  # flags a key under a built-in family (`call`, `flow`, …) — a plugin- or `rbs_extended.*`
+  # rule id (whose family Rigor cannot statically enumerate, since a `node_rule` block emits
+  # any `rule:` string it likes) is left alone. The `disable:` check goes further because the
+  # list's reach is enumerable (issue #1953): a plugin's row answers only to its qualified
+  # `plugin.<id>.<rule>` id, so a bare plugin rule there is inert (see {.disable_token_warning}).
   module ConfigAudit
     # One config-level finding. `kind` discriminates the source key (`:signature_path`,
     # `:bundled_plugin_signature_path`, `:library`, `:disabled_rule`, `:severity_override`,
@@ -146,18 +147,13 @@ module Rigor
       []
     end
 
-    # `disable:` tokens and `severity_overrides:` keys that name no rule. Restricted to
-    # tokens under a built-in family so a plugin rule id is never mis-flagged (see the module
-    # docstring).
+    # `disable:` tokens that reach no row ({.disable_token_warning}) and `severity_overrides:` keys
+    # that name no rule. An override key is flagged only under a built-in family, so a plugin
+    # rule id is never mis-flagged (see the module docstring).
     def self.rule_token_warnings(configuration)
+      plugin_ids = configured_plugin_ids(configuration.plugins)
       disable = Array(configuration.disabled_rules).filter_map do |token|
-        next unless inert_builtin_token?(token.to_s)
-
-        Warning.new(
-          kind: :disabled_rule,
-          message: "disable: #{token.to_s.inspect} is not a recognized rule id; the suppression has no effect",
-          fields: { "token" => token.to_s }
-        )
+        disable_token_warning(token.to_s, plugin_ids)
       end
       overrides = configuration.severity_overrides.keys.filter_map do |key|
         next unless inert_builtin_token?(key.to_s)
@@ -170,6 +166,106 @@ module Rigor
       end
       disable + overrides
     end
+
+    # Issue #1953 — the run-level rows the diagnostic policy keeps on `severity_overrides:` and the
+    # baseline. `disable:` does not reach them by any spelling, so naming one there is inert.
+    RESERVED_RUN_LEVEL_FAMILIES = %w[plugin_loader plugin_trust rbs.coverage dynamic.dependency-source].freeze
+    RESERVED_RUN_LEVEL_IDS = %w[load-error runtime-error pool-degraded].freeze
+    private_constant :RESERVED_RUN_LEVEL_FAMILIES, :RESERVED_RUN_LEVEL_IDS
+
+    # A warning for a `disable:` token that can reach no row, or nil. Since issue #1953 the list's
+    # reach is exactly enumerable for three shapes, and those are what this flags:
+    #
+    # - a token naming a reserved run-level row ({RESERVED_RUN_LEVEL_FAMILIES} /
+    #   {RESERVED_RUN_LEVEL_IDS}), which the list never reaches;
+    # - a `plugin.`-qualified token naming no plugin `plugins:` configures — checked only when
+    #   every entry's manifest id is known without loading it ({.configured_plugin_ids});
+    # - any other token that is not `all`, a family, a legacy alias or a catalogue / `pre-eval.*`
+    #   id. A bare id never reaches a plugin's row, so a plugin's bare rule is inert here too.
+    #
+    # A token under a non-check engine family (`rbs_extended.*`, `rbs.*`, `dynamic.*`) or a known
+    # non-catalogue engine id stays unflagged: under-warning is this module's FP-safe direction.
+    def self.disable_token_warning(token, plugin_ids)
+      return nil if effective_disable_token?(token)
+
+      reason = disable_token_problem(token, plugin_ids)
+      return nil if reason.nil?
+
+      Warning.new(kind: :disabled_rule, message: "disable: #{token.inspect} #{reason}",
+                  fields: { "token" => token })
+    end
+
+    def self.disable_token_problem(token, plugin_ids)
+      if reserved_run_level_token?(token)
+        "names a run-level row, which `disable:` does not reach; use `severity_overrides:` or a baseline"
+      elsif token.start_with?(Analysis::CheckRules::PLUGIN_FAMILY_PREFIX)
+        unless plugin_ids.nil? || plausible_plugin_token?(token, plugin_ids)
+          "names no plugin `plugins:` configures; the suppression has no effect"
+        end
+      elsif inert_builtin_token?(token)
+        "is not a recognized rule id; the suppression has no effect"
+      elsif !non_check_engine_token?(token)
+        "is not a recognized rule id; the suppression has no effect " \
+          "(if this is a plugin's rule, write it as `plugin.<id>.<rule>`)"
+      end
+    end
+    private_class_method :disable_token_problem
+
+    def self.effective_disable_token?(token)
+      return true if token == "all"
+
+      !Array(Analysis::CheckRules.resolve_rule_token(token)).empty?
+    end
+    private_class_method :effective_disable_token?
+
+    def self.reserved_run_level_token?(token)
+      RESERVED_RUN_LEVEL_IDS.include?(token) ||
+        RESERVED_RUN_LEVEL_FAMILIES.any? { |family| token == family || token.start_with?("#{family}.") }
+    end
+    private_class_method :reserved_run_level_token?
+
+    def self.non_check_engine_token?(token)
+      Analysis::CheckRules::NON_CHECK_DIAGNOSTIC_IDS.include?(token) ||
+        Analysis::CheckRules::NON_CHECK_DIAGNOSTIC_FAMILIES.include?(token.split(".").first)
+    end
+    private_class_method :non_check_engine_token?
+
+    # `plugin.<id>` or `plugin.<id>.<rule>` for a configured id. A manifest id may itself hold a
+    # dot, so the token is matched against each id rather than split.
+    def self.plausible_plugin_token?(token, plugin_ids)
+      rest = token.delete_prefix(Analysis::CheckRules::PLUGIN_FAMILY_PREFIX)
+      plugin_ids.any? { |id| rest == id || rest.start_with?("#{id}.") }
+    end
+    private_class_method :plausible_plugin_token?
+
+    # The manifest id of every `plugins:` entry, or nil when one cannot be known without loading
+    # the plugin. An explicit `id:` is the id; a bundled plugin's id is its gem name minus the
+    # `rigor-` prefix ({Plugin::FirstParty}); a third-party gem named without `id:` may register
+    # any id, so its presence turns the plugin-token check off. An `enabled: false` entry counts:
+    # the user has found the plugin, and under-warning is the FP-safe direction.
+    def self.configured_plugin_ids(plugins)
+      Array(plugins).each_with_object(Set.new) do |raw, ids|
+        entry = raw.is_a?(Hash) ? raw.to_h { |key, value| [key.to_s, value] } : { "gem" => raw.to_s }
+        if entry["id"]
+          ids << entry["id"].to_s
+        elsif bundled_plugin_gem?(entry["gem"].to_s)
+          ids << entry["gem"].to_s.delete_prefix(BUNDLED_GEM_PREFIX)
+        else
+          return nil
+        end
+      end
+    end
+    private_class_method :configured_plugin_ids
+
+    BUNDLED_GEM_PREFIX = "rigor-"
+    private_constant :BUNDLED_GEM_PREFIX
+
+    def self.bundled_plugin_gem?(gem)
+      return false unless gem.start_with?(BUNDLED_GEM_PREFIX)
+
+      File.file?(File.join(SignaturePathAudit::BUNDLED_PLUGINS_ROOT, gem, "lib", "#{gem}.rb"))
+    end
+    private_class_method :bundled_plugin_gem?
 
     # True when `token` looks like a built-in rule id but matches none — its first segment
     # is a built-in family yet it is neither a bare family wildcard nor a known canonical id.

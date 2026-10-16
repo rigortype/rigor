@@ -7579,19 +7579,15 @@ module Rigor
 
       # v0.1.2 — per-class method-visibility table for the `def.method-visibility-mismatch` CheckRule.
       #
-      # Tracks two visibility-changing forms:
+      # Tracks three visibility-changing forms ({#apply_visibility_call}):
       #
-      # - **Modifier blocks**: a bare `private` / `protected` /
-      #   `public` call inside a class body switches the
-      #   "current default" visibility for every subsequent
-      #   `def` until another modifier flips it again.
-      # - **Named-argument form**: `private :foo, :bar` (or
-      #   the same with `protected` / `public`) marks specific
-      #   names already-recorded under the class. Symbol-only
-      #   args are recognised; `private def foo; end` (the
-      #   wrap-around form) is not yet — it would need
-      #   tracking the def-call's return-value visibility,
-      #   which is a separate slice.
+      # - **Modifier blocks**: a bare `private` / `protected` / `public` call inside a class body (also written
+      #   `self.private`, `send(:private)` or with a block) switches the "current default" visibility for every
+      #   subsequent `def` and `attr_*` member until another modifier flips it again.
+      # - **Named-argument form**: `private :foo, :bar` or `private %i[foo bar]` (or the same with `protected` /
+      #   `public`) marks specific names already recorded under the class.
+      # - **Wrap-around form** (#1911, #1819, #1633): `private def foo` and `private attr_reader :foo` record the
+      #   members with the call's visibility and leave the default alone.
       #
       # Top-level (no surrounding class) defs do not contribute — Ruby's top-level visibility nuances (private at
       # top-level marks the method on `Object`) are out of scope for v0.1.2.
@@ -7648,6 +7644,26 @@ module Rigor
           end
         end
 
+        # Contests the `[class_name, name]` slot, recorded or not: a visibility call changed it in a way the walk
+        # cannot read (`private def self.x` reaching an instance `x`).
+        def contest_slot(class_name, name)
+          (@contested ||= Set.new) << [class_name, name].freeze
+        end
+
+        # Contests every slot of `class_name` recorded so far (`private(*names)` may name any of them).
+        def contest_class(class_name)
+          self[class_name]&.each_key { |name| contest_slot(class_name, name) }
+        end
+
+        # Runs the block with the running default uncertain, so a `def` it records is contested.
+        def uncertainly
+          saved = @uncertain
+          @uncertain = true
+          yield
+        ensure
+          @uncertain = saved
+        end
+
         # Runs the block as a fresh body (a class or module, `class << self`, a meta-new or eval block), whose
         # default starts certain and whose toggles do not reach the enclosing body.
         def body
@@ -7669,10 +7685,37 @@ module Rigor
         end
       end
 
-      # A bare toggle ({VISIBILITY_TOGGLES}): receiverless, with no arguments.
+      # A bare toggle ({VISIBILITY_TOGGLES}): a visibility call ({#visibility_call_parts}) with no arguments.
       def bare_visibility_toggle?(node)
-        node.is_a?(Prism::CallNode) && node.receiver.nil? && VISIBILITY_TOGGLES.include?(node.name) &&
-          (node.arguments.nil? || node.arguments.arguments.empty?) && node.block.nil?
+        parts = visibility_call_parts(node)
+        !parts.nil? && parts.last.empty?
+      end
+
+      # Whether a visibility call with these arguments may set the running default: none at all, or a splat that
+      # may expand to none (`private(*[])` is a bare `private`).
+      def visibility_toggle_arguments?(arguments)
+        arguments.empty? || arguments.any?(Prism::SplatNode)
+      end
+
+      VISIBILITY_SEND_CALLS = %i[send __send__].freeze
+      EMPTY_VISIBILITY_ARGUMENTS = [].freeze
+      private_constant :VISIBILITY_SEND_CALLS, :EMPTY_VISIBILITY_ARGUMENTS
+
+      # Issue #1633 — `[name, arguments]` for a call Ruby runs as one of {VISIBILITY_TOGGLES} on the body's self:
+      # written receiverless or on `self` (`self.private`), or sent with a literal name (`send(:private, :x)`,
+      # `__send__(:private)`). A block is ignored, as `Module#private` ignores it (`private {}` is a bare
+      # `private`). nil for any other call.
+      def visibility_call_parts(node)
+        return nil unless node.is_a?(Prism::CallNode)
+        return nil unless node.receiver.nil? || node.receiver.is_a?(Prism::SelfNode)
+
+        name = node.name
+        arguments = node.arguments&.arguments || EMPTY_VISIBILITY_ARGUMENTS
+        if VISIBILITY_SEND_CALLS.include?(name)
+          name = Source::Literals.symbol_or_string(arguments.first)
+          arguments = arguments.drop(1)
+        end
+        VISIBILITY_TOGGLES.include?(name) ? [name, arguments] : nil
       end
 
       # rubocop:disable-next Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity, Metrics/AbcSize
@@ -7736,16 +7779,31 @@ module Rigor
                                                                   defs_singleton: defs_singleton)
             return current_visibility
           end
-          accumulator.toggles += 1 if bare_visibility_toggle?(node)
-          # The visibility table is instance-side only — `private :x` inside `class <<`
-          # (or a receiver-eval body that re-evaluates a singleton self) marks the
-          # SINGLETON method, which this table cannot express.
-          updated = if in_singleton_class
-                      current_visibility
-                    else
-                      apply_visibility_call(node, owner_prefix, current_visibility, accumulator)
-                    end
-          return updated unless updated.equal?(current_visibility)
+          if AnonymousMetaClass.block_form_receiver(node)
+            walk_anonymous_meta_visibilities(node, qualified_prefix, in_singleton_class, current_visibility,
+                                             accumulator, def_owner_prefix, singleton_cref: singleton_cref,
+                                                                            defs_singleton: defs_singleton)
+            return current_visibility
+          end
+          if (parts = visibility_call_parts(node))
+            accumulator.toggles += 1 if visibility_toggle_arguments?(parts.last)
+            # The visibility table is instance-side only — `private :x` inside `class <<`
+            # (or a receiver-eval body that re-evaluates a singleton self) marks the
+            # SINGLETON method, which this table cannot express. The `owner_prefix` check is a
+            # guard: an ownerless body (the top level, an anonymous factory block) records nothing,
+            # and its calls walk as any other call.
+            if !in_singleton_class && !owner_prefix.empty? && VISIBILITY_MODIFIERS.include?(parts.first)
+              return apply_visibility_call(node, *parts, owner_prefix, current_visibility, accumulator,
+                                           defs_singleton: defs_singleton) do |argument|
+                walk_method_visibilities(argument, qualified_prefix, in_singleton_class, current_visibility,
+                                         accumulator, def_owner_prefix, singleton_cref: singleton_cref,
+                                                                        defs_singleton: defs_singleton)
+              end
+            end
+          end
+          unless in_singleton_class || defs_singleton
+            record_attr_visibility(node, owner_prefix, current_visibility, accumulator, toggled: true)
+          end
         end
 
         # Statement-position StatementsNode preserves left-to-right visibility flow; everything else recurses with the
@@ -7799,6 +7857,23 @@ module Rigor
         end
       end
 
+      # A `Class.new` / `Module.new` / `Struct.new` / `Data.define` block no constant write names
+      # ({#meta_new_block_split} takes the named ones): `klass = Class.new do … end`, `@k = Struct.new(:a) do … end`,
+      # `register(Class.new do … end)` or a bare `Data.define(:a) do … end`. Its body is the anonymous class's, so
+      # it walks as a fresh body with no owner and records nothing for the enclosing class; the receiver and the
+      # arguments are walked where they stand.
+      def walk_anonymous_meta_visibilities(node, qualified_prefix, in_singleton_class, current_visibility,
+                                           accumulator, def_owner_prefix, singleton_cref:, defs_singleton:) # rubocop:disable Metrics/ParameterLists
+        [node.receiver, *node.arguments&.arguments].each do |part|
+          walk_method_visibilities(part, qualified_prefix, in_singleton_class, current_visibility, accumulator,
+                                   def_owner_prefix, singleton_cref: singleton_cref, defs_singleton: defs_singleton)
+        end
+        accumulator.body do
+          walk_method_visibilities(node.block.body, qualified_prefix, false, :public, accumulator,
+                                   EMPTY_PREFIX, singleton_cref: singleton_cref)
+        end
+      end
+
       # The eval-block arm of {#walk_method_visibilities}: the block is a fresh class body under
       # the receiver's def-owner — visibility starts at `:public`, and nothing inside it leaks
       # back to this body's modifier state. An unnameable receiver walks the body ownerless;
@@ -7836,53 +7911,112 @@ module Rigor
         end
       end
 
-      def record_def_visibility(def_node, qualified_prefix, in_singleton_class, current_visibility, accumulator)
+      # `toggled` when the def reads the running default (a statement), false for one a visibility call wraps.
+      def record_def_visibility(def_node, qualified_prefix, in_singleton_class, current_visibility, accumulator,
+                                toggled: true)
         return if def_node.receiver.is_a?(Prism::SelfNode) || in_singleton_class
         return if qualified_prefix.empty?
 
         class_name = qualified_prefix.join("::")
         accumulator[class_name] ||= {}
         accumulator[class_name][def_node.name] = current_visibility
-        accumulator.wrote(class_name, def_node.name, def_node, toggled: true)
+        accumulator.wrote(class_name, def_node.name, def_node, toggled: toggled)
       end
 
-      # Recognises modifier calls on the implicit-self receiver inside a class body. Returns the (possibly updated)
-      # current visibility:
+      # Applies one `private` / `protected` / `public` call ({#visibility_call_parts}) written on the body's self
+      # and returns the running default after it:
       #
-      # - `private` / `public` / `protected` (no args) —
-      #   switch the running default for subsequent defs.
-      # - `private :foo, :bar` — back-patch the named methods
-      #   in the accumulator. Returns `current_visibility`
-      #   unchanged because the running default does NOT
-      #   change for this form.
-      def apply_visibility_call(call_node, qualified_prefix, current_visibility, accumulator)
-        return current_visibility unless call_node.receiver.nil?
-        return current_visibility unless VISIBILITY_MODIFIERS.include?(call_node.name)
-        return current_visibility if qualified_prefix.empty?
+      # - no arguments — the call's visibility becomes the default for subsequent defs.
+      # - `private :foo, :bar`, `private %i[foo bar]` — back-patch the named methods in the accumulator; the
+      #   default does NOT change for this form.
+      # - Issues #1911, #1819, #1633 — `private def foo` (endless or not) and `private attr_reader :foo` define
+      #   the members with the call's visibility, whatever the running default is (`private; public def foo` is
+      #   public); `private def self.foo` changes the instance method `foo`, if one exists, so its slot is
+      #   contested.
+      # - a splat (`private(*names)`) may name any member or none (a bare toggle), so the class's slots this file
+      #   wrote so far are contested, and the statement loop reads the default after it as uncertain
+      #   ({#visibility_toggle_arguments?}).
+      # - any other argument (`private memoize def foo`, `private delegate(...)`) is walked with the default
+      #   uncertain, so a `def` under it is contested: the call's visibility reaches it through a return value
+      #   the walk does not read.
+      #
+      # `walk` walks an argument the call does not consume itself.
+      def apply_visibility_call(call_node, name, args, qualified_prefix, current_visibility, accumulator,
+                                defs_singleton: false, &walk)
+        return name if args.empty?
 
-        args = call_node.arguments&.arguments || []
-        if args.empty?
-          call_node.name
+        class_name = qualified_prefix.join("::")
+        accumulator.contest_class(class_name) if args.any?(Prism::SplatNode)
+        args.each do |arg|
+          apply_visibility_argument(arg, name, call_node, qualified_prefix, accumulator,
+                                    defs_singleton: defs_singleton, &walk)
+        end
+        current_visibility
+      end
+
+      def apply_visibility_argument(arg, name, call_node, qualified_prefix, accumulator, defs_singleton:, &walk)
+        case arg
+        when Prism::DefNode
+          if arg.receiver.nil?
+            record_def_visibility(arg, qualified_prefix, defs_singleton, name, accumulator, toggled: false)
+          else
+            accumulator.contest_slot(qualified_prefix.join("::"), arg.name)
+          end
+        when Prism::SymbolNode, Prism::StringNode, Prism::ArrayNode
+          apply_named_visibility(arg, name, qualified_prefix, call_node, accumulator, &walk)
         else
-          apply_named_visibility(args, qualified_prefix, call_node, accumulator)
-          current_visibility
+          # An `instance_eval` body's wrapped attr is walked like any other argument and records nothing.
+          if !defs_singleton && attr_visibility_call?(arg)
+            record_attr_visibility(arg, qualified_prefix, name, accumulator, toggled: false)
+          else
+            accumulator.uncertainly { walk.call(arg) }
+          end
         end
       end
 
-      def apply_named_visibility(args, qualified_prefix, call_node, accumulator)
+      # `private :foo` / `private "foo"` / `private %i[foo bar]`: each literal name the call's visibility. An array
+      # element that is not a literal name is walked like any other argument.
+      def apply_named_visibility(arg, visibility, qualified_prefix, call_node, accumulator, &walk)
+        elements = arg.is_a?(Prism::ArrayNode) ? arg.elements : [arg]
         class_name = qualified_prefix.join("::")
-        args.each do |arg|
-          name = visibility_target_name(arg)
-          next if name.nil?
+        elements.each do |element|
+          name = visibility_target_name(element)
+          next accumulator.uncertainly { walk.call(element) } if name.nil?
 
           accumulator[class_name] ||= {}
-          accumulator[class_name][name] = call_node.name
+          accumulator[class_name][name] = visibility
           accumulator.wrote(class_name, name, call_node, toggled: false)
         end
       end
 
       def visibility_target_name(arg)
         Source::Literals.symbol_or_string(arg)
+      end
+
+      # Issue #1911 — an `attr_reader` / `attr_writer` / `attr_accessor` call written on the body's self records
+      # each member it defines (`x`, `x=`) with `visibility`: the running default for a statement (`toggled`), the
+      # wrapping call's for `private attr_accessor :x`, which Ruby applies to the `[:x, :x=]` the macro returns.
+      # A non-literal name (`attr_reader(*FIELDS)`) records nothing; a call that is no such macro records nothing.
+      def record_attr_visibility(call_node, qualified_prefix, visibility, accumulator, toggled:)
+        return unless attr_visibility_call?(call_node)
+        return if qualified_prefix.empty?
+
+        class_name = qualified_prefix.join("::")
+        each_attr_macro_name(call_node) do |base|
+          members = []
+          members << base unless call_node.name == :attr_writer
+          members << :"#{base}=" unless call_node.name == :attr_reader
+          members.each do |member|
+            accumulator[class_name] ||= {}
+            accumulator[class_name][member] = visibility
+            accumulator.wrote(class_name, member, call_node, toggled: toggled)
+          end
+        end
+      end
+
+      # A receiverless `attr_reader` / `attr_writer` / `attr_accessor` call ({#record_attr_visibility}).
+      def attr_visibility_call?(node)
+        node.is_a?(Prism::CallNode) && node.receiver.nil? && ATTR_MACROS.include?(node.name)
       end
 
       # Registers the alias name in the `discovered_methods` table so `undefined-method` diagnostics are not emitted for

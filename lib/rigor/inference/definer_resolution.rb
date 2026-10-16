@@ -39,6 +39,9 @@ module Rigor
       Hit = Data.define(:answer, :owner, :index, :side)
 
       QUESTIONS = %i[definer visibility arity override own_side].freeze
+      # The questions whose answer reads a recorded visibility: only they treat a contested visibility slot as a
+      # possible definer ({#possible?}).
+      VISIBILITY_QUESTIONS = %i[visibility override].freeze
       NONE = :rigor_definer_resolution_none
       STRAY = :rigor_definer_resolution_stray
       private_constant :NONE, :STRAY
@@ -58,12 +61,13 @@ module Rigor
         flavor = question == :arity ? :arity : :methods
         chain = Scope::ResolutionChain.for(scope, class_name.to_s, side, flavor)
 
-        hits = candidates(scope, chain, method_name, from, answer_in)
+        reads_visibility = VISIBILITY_QUESTIONS.include?(question)
+        hits = candidates(scope, chain, method_name, from, answer_in, reads_visibility)
         return UNKNOWN if hits.nil?
 
         verdict = chain.settle(scope, outcomes(hits), owner: hits.first&.owner, unknown_for: method_name) do |retro|
           retro_from = retro_position(chain, retro, from)
-          outcomes(retro_from && candidates(scope, retro, method_name, retro_from, answer_in))
+          outcomes(retro_from && candidates(scope, retro, method_name, retro_from, answer_in, reads_visibility))
         end
         return UNKNOWN unless verdict == :chain
         return UNKNOWN if side == :singleton && SingletonHookDecline.decline?(scope, chain, method_name, from, hits)
@@ -101,7 +105,7 @@ module Rigor
       # follows (the absent candidate). A cut chain, and a chain on which an external ancestor ahead of the
       # candidate (or, with no candidate, the implicit `Object`) may define the name, is a decline, answered by
       # nil instead of a set.
-      def candidates(scope, chain, method_name, from, answer_in)
+      def candidates(scope, chain, method_name, from, answer_in, reads_visibility)
         hits = []
         position = from
         loop do
@@ -113,7 +117,9 @@ module Rigor
           return nil if hit.nil? && chain.truncated?
 
           hits << hit
-          return decided(scope, chain, method_name, from, hits) if hit.nil? || !possible?(scope, hit, method_name)
+          if hit.nil? || !possible?(scope, hit, method_name, reads_visibility)
+            return decided(scope, chain, method_name, from, hits)
+          end
 
           position = hit.index + 1
         end
@@ -188,15 +194,18 @@ module Rigor
       end
 
       # A definer that rests on a fact the walk could not prove executes: the member's `possible` sibling, or a
-      # contested slot of one of the single-valued members.
-      def possible?(scope, hit, method_name)
+      # contested slot of one of the single-valued members. A contested visibility slot counts only for a question
+      # that reads the visibility (`reads_visibility`): a slot is contested there for a visibility call the walk
+      # cannot place (an uncertain toggle, `private(*names)`, `private def self.x`), which leaves the definer and its
+      # `def` certain; a possible `def` or `attr_*` call contests its def-node slot or its name's `possible` side too.
+      def possible?(scope, hit, method_name, reads_visibility)
         discovery = scope.discovery
         owner = hit.owner
         kind = hit.side == :singleton ? :singleton : :instance
         nodes = kind == :singleton ? :discovered_singleton_def_nodes : :discovered_def_nodes
         discovery.possible_method?(owner, method_name, kind) ||
           discovery.contested?(nodes, [owner, method_name.to_sym]) ||
-          discovery.contested?(:discovered_method_visibilities, [owner, method_name.to_sym]) ||
+          (reads_visibility && discovery.contested?(:discovered_method_visibilities, [owner, method_name.to_sym])) ||
           discovery.contested?(:discovered_parameter_envelopes, [owner, [kind, method_name.to_sym]])
       end
 

@@ -137,6 +137,22 @@ RSpec.describe "visibility lints over wrapped defs and attrs (#1911, #1819, #163
     end
   end
 
+  # Ruby raises NoMethodError on `a`: the factory block's `public` toggles the anonymous class's default, not the
+  # enclosing body's.
+  it "keeps the enclosing body's running default across a factory block" do
+    expect(rules(<<~RUBY)).to eq([mismatch(9)])
+      class OuterToggle
+        private
+        klass = Class.new do
+          public
+          attr_reader :zz
+        end
+        def a = 1
+      end
+      OuterToggle.new.a
+    RUBY
+  end
+
   # Ruby: `private(*[])` makes nothing private, so `name` is the public def and `no_such` is undefined on "s". The
   # splat contests `name`'s visibility, which must not make the call's typing decline.
   it "still types a call whose visibility slot a splat contests" do

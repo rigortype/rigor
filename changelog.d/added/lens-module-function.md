@@ -1,1 +1,0 @@
-- **[cli]** `rigor lens` lists module functions: a `def` that `module_function` covers is a site whose name is both a private instance method and a public singleton method, instead of an omission. ([#1918](https://github.com/rigortype/rigor/pull/1918))

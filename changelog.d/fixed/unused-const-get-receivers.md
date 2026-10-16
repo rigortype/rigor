@@ -1,1 +1,0 @@
-- **[engine]** `rigor unused` no longer lists a constant as unused when it is declared only on the runtime receiver of a literal `const_get` on `self`, such as a subclass, an includer or extender of the module, or the receiver of an explicit `instance_eval` / `class_eval` block. ([#1944](https://github.com/rigortype/rigor/pull/1944))

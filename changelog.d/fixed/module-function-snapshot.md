@@ -1,1 +1,0 @@
-- **[engine]** A method redefined after `module_function :label` no longer changes what `Fmt.label` returns: the singleton copy keeps the def written before the call, as Ruby does, so `Fmt.label.upcase` is no longer reported as an undefined method on the later def's return value. ([#1966](https://github.com/rigortype/rigor/pull/1966))

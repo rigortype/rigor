@@ -1,1 +1,0 @@
-- **[cli]** `rigor lens` lists `alias` and `alias_method` as method sites with `alias_of` naming the original, carrying the visibility Ruby copies, instead of an omission. ([#1939](https://github.com/rigortype/rigor/pull/1939))

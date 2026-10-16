@@ -1,1 +1,0 @@
-- **[engine]** A `case` without a subject now narrows by its `when` conditions as the equivalent `if` / `elsif` chain does, so `case; when x.nil? then 1; else x.upcase end` no longer reports a possible `nil` receiver and a `when line =~ /(\w+)=/` body reads `$1` as `String`. ([#1919](https://github.com/rigortype/rigor/pull/1919))

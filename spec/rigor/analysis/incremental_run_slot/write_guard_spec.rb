@@ -236,6 +236,17 @@ RSpec.describe Rigor::Analysis::IncrementalRunSlot::WriteGuard do
       expect(guard.admits?(kind_rows)).to be(false)
     end
 
+    # An existence row first must not hide the kind row for the same path, which alone sees this change.
+    it "refuses the write when an existence row for the root comes before its kind row" do
+      guard = start
+      FileUtils.rm_rf("lib")
+      File.write("lib", "")
+      both = Rigor::Cache::Descriptor.new(
+        files: [Rigor::Cache::Descriptor::FileEntry.present(path: "lib"), *kind_rows.files]
+      )
+      expect(guard.admits?(both)).to be(false)
+    end
+
     it "admits the write when a file comes and goes inside the root after the mark" do
       guard = start
       File.write("lib/.#a.rb", "")

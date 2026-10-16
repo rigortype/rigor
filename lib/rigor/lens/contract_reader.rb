@@ -103,11 +103,18 @@ module Rigor
         function = method_type.type
         params = function.respond_to?(:required_positionals) ? params_of(function, provenance, path) : nil
         block = method_type.block && { "required" => method_type.block.required,
-                                       "type" => Slot.from_rbs(method_type.block.type.to_s, provenance, path) }
+                                       "type" => Slot.from_rbs(block_type(method_type.block), provenance, path) }
         prefix = annotations.map { |string| "%a{#{string}} " }.join
         return_slot = return_inferred ? nil : Slot.from_rbs(function.return_type.to_s, provenance, path)
         { "rbs" => "#{prefix}#{method_type}", "params" => params, "block" => block, "return" => return_slot,
           "return_rbs" => function.return_type.to_s }
+      end
+
+      # A block's function type as `RBS::MethodType#to_s` spells it inside the braces (`(Integer) -> void`, with a
+      # `[self: T]` binding when declared). Neither `RBS::Types::Function` nor `UntypedFunction` has a `to_s`.
+      def block_type(block)
+        self_binding = ::RBS::Types::SelfTypeBindingHelper.self_type_binding_to_s(block.self_type)
+        "(#{block.type.param_to_s}) #{self_binding}-> #{block.type.return_to_s}"
       end
 
       def params_of(function, provenance, path)

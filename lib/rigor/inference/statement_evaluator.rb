@@ -124,8 +124,8 @@ module Rigor
         Prism::BeginNode => :eval_begin_node,
         Prism::RescueNode => :eval_rescue,
         Prism::EnsureNode => :eval_ensure,
-        Prism::WhileNode => :eval_repeating_loop,
-        Prism::UntilNode => :eval_repeating_loop,
+        Prism::WhileNode => :eval_loop,
+        Prism::UntilNode => :eval_loop,
         Prism::ForNode => :eval_repeating_for,
         Prism::AndNode => :eval_and_or,
         Prism::OrNode => :eval_and_or,
@@ -2069,10 +2069,10 @@ module Rigor
         after.global(:$_) == Type::Combinator.untyped && !LastLine.may_set?(node.statements, scope)
       end
 
-      # Issue #1889 — {#eval_loop} / {#eval_for} with a literal-name `instance_variable_set` in the body joining its
-      # value into the ivar's binding rather than replacing it ({ReflectiveIvarWrite.in_repeating_body}).
-      def eval_repeating_loop(node) = ReflectiveIvarWrite.in_repeating_body { eval_loop(node) }
-
+      # Issue #1889 — {#eval_for} with a literal-name `instance_variable_set` in the body joining its value into the
+      # ivar's binding rather than replacing it ({ReflectiveIvarWrite.in_repeating_body}): a `for` body has no rebind
+      # fixpoint. A `while` / `until` body needs no such join since issue #1930: its fixpoint widens the ivar
+      # ({#loop_body_ivar_writes}).
       def eval_repeating_for(node) = ReflectiveIvarWrite.in_repeating_body { eval_for(node) }
 
       # `while pred; body; end` / `until pred; body; end`. The body might run zero or more times, so half-bound names
@@ -2085,8 +2085,9 @@ module Rigor
 
         # The historical single body pass joined with the pre-loop scope. This continues to carry everything the
         # fixpoint does NOT track: receiver-mutation widening of non-rebound locals (`buf.push(i)` widens `buf`'s
-        # Tuple), body-introduced locals' nil-injection, an instance variable's rebind, and the loop value itself. The
-        # fixpoint then OVERLAYS only the rebound-local bindings it corrects.
+        # Tuple), body-introduced locals' nil-injection, a rebind of an instance variable the fixpoint does not track
+        # ({#loop_body_ivar_writes}), and the loop value itself. The fixpoint then OVERLAYS only the rebound bindings it
+        # corrects.
         #
         # Like every fixpoint pass, it enters the body on the predicate's loop-entry edge ({#loop_pass_entry}): the
         # body of `while (line = gets)` reads `line` as `String`, and the body of `while gets` reads `$_` as one
@@ -2099,8 +2100,7 @@ module Rigor
         body_scope, first_breaks = single_pass(node, post_pred, jumps)
         base_scope = join_with_nil_injection(post_pred, body_scope)
 
-        rebound, body_first = loop_body_local_writes(node.statements, post_pred)
-        names = rebound + body_first
+        names, body_first = loop_rebound_names(node.statements, post_pred)
 
         # Fast path: a loop whose body rebinds no local skips the rebind fixpoint, but still needs the slice-C content
         # writeback (a loop may content-mutate a collection without rebinding any local — `acc << x`), so apply it to
@@ -2193,7 +2193,7 @@ module Rigor
         # assumptions, so the last-visit-wins scope index would annotate loop-body lines with stale pre-convergence
         # constants. One extra pass from the converged bindings (result discarded) re-records the body's entry scopes.
         record_converged_loop_body(node, post_pred, result, names, body_first, jumps, break_pass)
-        post_loop = result.reduce(base_scope) { |acc, (name, type)| acc.with_local(name, type) }
+        post_loop = result.reduce(base_scope) { |acc, (name, type)| bind_capture(acc, name, type) }
         # ADR-56 slice C — loop-body receiver-content element-type join. A loop that content-mutates a collection (`acc
         # << n`) keeps only the seed's element types after the single-pass widen; join the appended/stored types into
         # the continuation collection. Pre-state comes from `post_pred` for a name the loop only content-mutates and
@@ -2260,6 +2260,13 @@ module Rigor
       NO_LOOP_BINDINGS = {}.freeze
       NO_LOOP_NAMES = [].freeze
       private_constant :NO_LOOP_BINDINGS, :NO_LOOP_NAMES
+
+      # The instance-variable write forms {#loop_body_ivar_writes} counts.
+      IVAR_WRITE_NODES = Set[
+        Prism::InstanceVariableWriteNode, Prism::InstanceVariableOperatorWriteNode, Prism::InstanceVariableOrWriteNode,
+        Prism::InstanceVariableAndWriteNode, Prism::InstanceVariableTargetNode
+      ].freeze
+      private_constant :IVAR_WRITE_NODES
 
       # A body with no targeting jump pays two allocation-free scans.
       def loop_jumps(statements)
@@ -2356,11 +2363,11 @@ module Rigor
         floor = Type::Combinator.untyped
         breaks.reduce(continuation) do |cont, break_scope|
           names.reduce(cont) do |acc, name|
-            break_value = break_scope.local(name)
-            current = acc.local(name)
+            break_value = CapturedLocals.bound_type(break_scope, name)
+            current = CapturedLocals.bound_type(acc, name)
             next acc if break_value.nil? || current == floor
 
-            acc.with_local(name, current ? Type::Combinator.union(current, break_value) : break_value)
+            bind_capture(acc, name, current ? Type::Combinator.union(current, break_value) : break_value)
           end
         end
       end
@@ -2433,7 +2440,7 @@ module Rigor
       # treatment. `break_pass` rides along so every pass leaves its `break` arms for {#loop_break_arms}.
       def loop_rebind_fixpoint(node, post_pred, names, body_first, jumps, break_pass)
         nil_const = Type::Combinator.constant_of(nil)
-        seed = names.to_h { |name| [name, post_pred.local(name) || nil_const] }
+        seed = names.to_h { |name| [name, CapturedLocals.bound_type(post_pred, name) || nil_const] }
         evaluate_body = lambda do |bindings|
           loop_body_exit_bindings(node, post_pred, bindings, names, body_first, jumps, break_pass)
         end
@@ -2465,6 +2472,34 @@ module Rigor
         [pre_existing.uniq, body_first.uniq - pre_existing.uniq]
       end
 
+      # Every name {#eval_loop}'s rebind fixpoint tracks, and the body-first locals among them: the locals the body
+      # rebinds ({#loop_body_local_writes}) and the instance variables ({#loop_body_ivar_writes}).
+      def loop_rebound_names(statements, base_scope)
+        rebound, body_first = loop_body_local_writes(statements, base_scope)
+        [rebound + loop_body_ivar_writes(statements, base_scope) + body_first, body_first]
+      end
+
+      # Issue #1930 — the instance variables the loop body can rebind, which the rebind fixpoint widens as it widens a
+      # local: a write node (`@n = i + 1`, any depth, a nested block's included) or a literal-name
+      # `instance_variable_set` on `self` ({ReflectiveIvarWrite.literal_name}). Only an ivar `base_scope` binds off its
+      # ADR-58 declaration seed counts ({CapturedLocals.rebindable_ivar?}), as for a block's write-back: one the method
+      # has not bound reads `Dynamic[top]` before the loop, and the join drops it after; one on its declaration seed
+      # already holds the union of every write in the class. A call that writes the ivar inside the callee
+      # (`self.bump`) is not a write here; the intervening-call reset handles it.
+      def loop_body_ivar_writes(statements, base_scope)
+        return NO_LOOP_NAMES if base_scope.ivars.empty?
+
+        names = nil
+        Source::NodeWalker.each(statements) do |descendant|
+          name = ReflectiveIvarWrite.literal_name(descendant) ||
+                 (descendant.name if IVAR_WRITE_NODES.include?(descendant.class))
+          next if name.nil? || names&.include?(name) || !CapturedLocals.rebindable_ivar?(base_scope, name)
+
+          (names ||= []) << name
+        end
+        names || NO_LOOP_NAMES
+      end
+
       # Evaluates the loop body once with each fixpoint-tracked local bound to the supplied running assumption and
       # returns the per-name exit binding. Used as the {BodyFixpoint} body-evaluator for `eval_loop`.
       #
@@ -2493,14 +2528,14 @@ module Rigor
           break_pass[:entry] = bindings.except(*body_first)
           break_pass[:arms] = breaks
         end
-        names.to_h { |name| [name, exit_scope.local(name)] }
+        names.to_h { |name| [name, CapturedLocals.bound_type(exit_scope, name)] }
       end
 
       # The scope one fixpoint pass enters the body with: `post_pred` overlaid with the pre-existing names' running
       # assumption, then narrowed by the predicate's loop-entry edge ({#loop_body_exit_bindings} carries the why).
       def loop_pass_entry(node, post_pred, bindings, body_first, jumps)
         overlaid = bindings.except(*body_first)
-        entry = overlaid.reduce(post_pred) { |acc, (name, type)| acc.with_local(name, type) }
+        entry = overlaid.reduce(post_pred) { |acc, (name, type)| bind_capture(acc, name, type) }
         entry = loop_content_entry(node.statements, post_pred, entry)
         truthy_scope, falsey_scope = Narrowing.predicate_scopes(node.predicate, entry)
         edge = node.is_a?(Prism::UntilNode) ? falsey_scope : truthy_scope

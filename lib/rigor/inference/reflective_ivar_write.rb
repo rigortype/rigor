@@ -65,9 +65,9 @@ module Rigor
         node.arguments.arguments[1]
       end
 
-      # Runs the block with the evaluator inside a `while` / `until` / `for` body. The loop's rebind fixpoint widens
-      # locals only, so a literal-name write there must not replace the binding with one pass's value
-      # ({.apply}).
+      # Runs the block with the evaluator inside a `for` body. A `for` loop has no rebind fixpoint, so a literal-name
+      # write there must not replace the binding with one pass's value ({.apply}). A `while` / `until` body does not
+      # enter it: its fixpoint widens the ivar (issue #1930).
       def in_repeating_body
         depth = Thread.current[REPEATING_KEY] || 0
         Thread.current[REPEATING_KEY] = depth + 1
@@ -83,9 +83,8 @@ module Rigor
       end
 
       # `scope` after `node` runs. A literal name binds that ivar to the value's type (yielded), as `@n = v` does.
-      # Inside a loop body ({.in_repeating_body}) the value and `Dynamic[top]` are joined into the current binding
-      # instead: the loop's fixpoint widens locals only, so its single pass over an ivar types the value from one
-      # iteration's locals (`instance_variable_set(:@n, i + 1)` stored `1`) and would leave that. Any other call joins
+      # Inside a `for` body ({.in_repeating_body}) the value and `Dynamic[top]` are joined into the current binding
+      # instead: nothing widens the single pass's value across iterations there. Any other call joins
       # `Dynamic[top]` into every ivar `scope` binds: any one of them may now hold the value, and joining the
       # value's own type would report a method the old value has and the new one lacks. An ivar on its ADR-58
       # declaration seed keeps its mark, which stops a nil in the seed from fuelling a nil-receiver diagnostic.

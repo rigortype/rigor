@@ -2370,6 +2370,145 @@ def match_custom_string_subclass(raw)
   key.upcase # GENUINE-NIL
 end
 
+# Issue #1955 — `match?`, `Regexp#===` and `case`/`when` share `=~`'s gate: a Symbol or untyped subject is not
+# narrowed to a String (Ruby: a Proc for each of `whole_match_untyped_subject(:"12")`,
+# `whole_match_symbol_subject("12")`, `case_equality_symbol_subject("12")`, `case_when_symbol_subject("12")`,
+# `case_equality_untyped_subject(:"12")` and `case_when_untyped_subject(:"12")`).
+def whole_match_untyped_subject(raw)
+  return unless raw.match?(/\A\d+\z/)
+
+  assert_type("Dynamic[top]", raw)
+  raw.to_proc # MATCH-1955
+end
+
+def whole_match_symbol_subject(raw)
+  name = String(raw).to_sym
+  return unless name.match?(/\A\d+\z/)
+
+  assert_type("Symbol", name)
+  name.to_proc # MATCH-1955
+end
+
+def case_equality_symbol_subject(raw)
+  name = String(raw).to_sym
+  return unless /\A\d+\z/ === name
+
+  assert_type("Symbol", name)
+  name.to_proc # MATCH-1955
+end
+
+def case_when_symbol_subject(raw)
+  name = String(raw).to_sym
+  case name
+  when /\A\d+\z/
+    assert_type("Symbol", name)
+    name.to_proc # MATCH-1955
+  end
+end
+
+def case_equality_untyped_subject(raw)
+  return unless /\A\d+\z/ === raw
+
+  assert_type("Dynamic[top]", raw)
+  raw.to_proc # MATCH-1955
+end
+
+def case_when_untyped_subject(raw)
+  case raw
+  when /\A\d+\z/
+    assert_type("Dynamic[top]", raw)
+    raw.to_proc # MATCH-1955
+  end
+end
+
+# A String subject is still narrowed: `match?` to the refinement the anchored pattern names, `===` and `when` to
+# String.
+def whole_match_string_subject(raw)
+  s = String(raw)
+  assert_type("decimal-int-string", s) if s.match?(/\A\d+\z/)
+end
+
+# A `String | nil` receiver is refined too: `nil.match?` raises, so a nil never reaches the truthy edge.
+def whole_match_nilable_subject(raw)
+  s = raw ? String(raw) : nil
+  assert_type("decimal-int-string", s) if s.match?(/\A\d+\z/) # GENUINE-NIL
+end
+
+def case_equality_string_subject(raw)
+  s = String(raw)
+  assert_type("String", s) if /\A\d+\z/ === s
+end
+
+# `Regexp#===` answers false for nil, so a `String | nil` subject reads String on the match edge, and keeps its type
+# on the no-match edge, which a String that does not match also reaches (Ruby: the `else` arm of
+# `case_when_nilable_subject("x")` receives "x").
+def case_equality_nilable_subject(raw)
+  s = raw ? String(raw) : nil
+  if /\A\d+\z/ === s
+    assert_type("String", s)
+  else
+    assert_type("String?", s)
+  end
+end
+
+def case_when_nilable_subject(raw)
+  s = raw ? String(raw) : nil
+  case s
+  when /\A\d+\z/
+    assert_type("String", s)
+  else
+    assert_type("String?", s)
+  end
+end
+
+# A `String | Symbol` subject keeps both members on the match edge, and both on the `else` edge; an Integer member,
+# which `Regexp#===` never matches, leaves the match edge (Ruby: the `else` arm of `case_when_string_or_integer(true,
+# "x")` receives "x").
+def case_when_string_or_symbol(flag, raw)
+  s = flag ? String(raw) : String(raw).to_sym
+  case s
+  when /\A\d+\z/
+    assert_type("String | Symbol", s)
+  else
+    assert_type("String | Symbol", s)
+  end
+end
+
+def case_equality_string_or_symbol(flag, raw)
+  s = flag ? String(raw) : String(raw).to_sym
+  assert_type("String | Symbol", s) if s.match?(/\A\d+\z/)
+  assert_type("String | Symbol", s) if /\A\d+\z/ === s
+end
+
+def case_when_string_or_integer(flag, raw)
+  s = flag ? String(raw) : 1
+  case s
+  when /\A\d+\z/
+    assert_type("String", s)
+  else
+    assert_type("1 | String", s)
+  end
+end
+
+# A String that does not match reaches the next `when`, so a `when String` after a regex arm is not dead (Ruby: 2 for
+# `when_string_after_regex("x")` and `when_string_after_regex_nilable("x")`).
+def when_string_after_regex(raw)
+  s = String(raw)
+  case s
+  when /\A\d+\z/ then 1
+  when String then 2 # REACHABLE-1955
+  end
+end
+
+def when_string_after_regex_nilable(raw)
+  s = raw ? String(raw) : nil
+  case s
+  when /\A\d+\z/ then 1
+  when String then 2 # REACHABLE-1955
+  when nil then 3
+  end
+end
+
 # Issue #1384 — a call that may re-run a match forgets every numbered global, not only `$1`..`$9`. After the `sub`,
 # `$9`, `$10` and `$12` all read `String?` (Ruby: nil for each on "abcdefghijkl".sub(/q/, "")).
 def numbered_forgotten_after_sub(s)

@@ -61,7 +61,7 @@ RSpec.describe "Discovery-table admission census" do
       next [member, kinds] if justified.nil?
 
       files = kinds.values.flatten
-      [member, kinds.merge("justified" => justified.select { |file, _| files.include?(file) })]
+      [member, kinds.merge("justified" => justified.slice(*(justified.keys & files)))]
     end
     found.merge("members" => members)
   end

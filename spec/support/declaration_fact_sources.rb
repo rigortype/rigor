@@ -47,16 +47,21 @@ module DeclarationFactSources
   # and the leading comment block stays. Returns the new text.
   def regenerate_producers_text(text, keys)
     head, sections = split_producer_sections(text)
-    wanted = keys.group_by { |key| key.split("#", 2).first }.transform_values { |ks| ks.map { |k| k.split("#", 2).last } }
+    wanted = keys.group_by { |key| key.split("#", 2).first }
+                 .transform_values { |paths| paths.map { |key| key.split("#", 2).last } }
     kept = sections.filter_map do |path, preamble, entries|
-      scopes = wanted[path] or next
-      [path, preamble, merge_producer_entries(entries, scopes)]
+      [path, preamble, merge_producer_entries(entries, wanted[path])] if wanted.key?(path)
     end
-    (wanted.keys - sections.map(&:first)).sort.each do |path|
+    add_producer_sections(kept, wanted.slice(*(wanted.keys - sections.map(&:first))))
+    lines = kept.flat_map { |path, preamble, entries| ["#{yaml_key(path)}:\n", *preamble, *entries.flat_map(&:last)] }
+    head.join + lines.join
+  end
+
+  def add_producer_sections(kept, added)
+    added.sort.each do |path, scopes|
       at = kept.index { |section| section.first > path } || kept.size
-      kept.insert(at, [path, ["  computes: TODO\n", "  producers:\n"], merge_producer_entries([], wanted[path])])
+      kept.insert(at, [path, ["  computes: TODO\n", "  producers:\n"], merge_producer_entries([], scopes)])
     end
-    head.join + kept.flat_map { |path, preamble, entries| ["#{yaml_key(path)}:\n", *preamble, *entries.flat_map(&:last)] }.join
   end
 
   def yaml_key(text)
@@ -87,7 +92,7 @@ module DeclarationFactSources
   end
 
   def merge_producer_entries(entries, scopes)
-    merged = entries.select { |scope, _| scopes.include?(scope) }
+    merged = entries.to_h.slice(*(entries.map(&:first) & scopes)).to_a
     (scopes - entries.map(&:first)).sort.each do |scope|
       at = merged.index { |existing, _| existing > scope } || merged.size
       merged.insert(at, [scope, ["    #{yaml_key(scope)}: TODO\n"]])

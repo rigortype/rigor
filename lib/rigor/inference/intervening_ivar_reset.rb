@@ -84,11 +84,9 @@ module Rigor
         end
       end
 
-      # Whether a candidate call in `node`, or (with `run_lambdas`) a write in a lambda body there, may write the
-      # instance variable `name`.
+      # Whether a candidate call in `node` (with `run_lambdas`, one in a lambda body too) may write the instance
+      # variable `name`. A write to it in `node` is the caller's to check.
       def may_write?(node, name, scope, run_lambdas: false)
-        return true if run_lambdas && assigned_ivars(node).include?(name)
-
         calls = candidate_calls(node, run_lambdas)
         return false if calls.empty?
 

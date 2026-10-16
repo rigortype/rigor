@@ -195,3 +195,34 @@ class Tagged
     end
   end
 end
+
+# The rebinding test is read without a narrowing to move: a lambda that assigns an untyped local, and another
+# object's method that assigns `self`'s instance variable, which only the class-guard restore notices. Under Ruby
+# 4.0.5 `untyped_local(nil)` returns "X" and `Reflected.new(false).later_clause` returns "S".
+def untyped_local(v)
+  case v
+  when ->(_) { v = "x"; false } then 0
+  when NilClass then v.upcase # QUIET-1446
+  end
+end
+
+class Reflector
+  def self.matcher(target)
+    target.instance_variable_set(:@n, "s")
+    ->(_) { false }
+  end
+end
+
+class Reflected
+  def initialize(int)
+    @n = int ? 1 : nil
+  end
+
+  def later_clause
+    case @n
+    when Integer then 0
+    when Reflector.matcher(self) then 1
+    when NilClass then @n.upcase # QUIET-1446
+    end
+  end
+end

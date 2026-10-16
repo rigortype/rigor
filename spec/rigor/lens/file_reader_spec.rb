@@ -237,6 +237,12 @@ end
       expect(rows).to eq([["initialize_copy", nil], %w[a public], %w[initialize_dup private], %w[b public]])
     end
 
+    it "lets a public call in a Data block revise a forced-private field" do
+      source = "D = Data.define(:initialize_copy) do\n  public :initialize_copy\nend\n"
+
+      expect(sites(source).find { |site| site["kind"] == "attribute" }["visibility"]).to eq("public")
+    end
+
     it "reads a constant-assigned builder as a class with field attributes and its block as the body" do
       rows = sites(source).map { |site| site.values_at("kind", "owner", "name", "attribute", "builder", "visibility") }
 

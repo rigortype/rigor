@@ -269,8 +269,26 @@ assertions:
   '261': nil
   '262': String?
   '263': String?
-  '264': String?
-  '265': String?
-  '266': String?
-  '267': String
-  '268': String
+  '264': Dynamic[top]
+  '265': Symbol
+  '266': Symbol
+  '267': Symbol
+  '268': Dynamic[top]
+  '269': Dynamic[top]
+  '270': decimal-int-string
+  '271': String
+  '272': String
+  '273': String?
+  '274': String
+  '275': String?
+  '276': String | Symbol
+  '277': String | Symbol
+  '278': String | Symbol
+  '279': String | Symbol
+  '280': String
+  '281': 1 | String
+  '282': String?
+  '283': String?
+  '284': String?
+  '285': String
+  '286': String

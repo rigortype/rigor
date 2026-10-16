@@ -511,8 +511,9 @@ module Rigor
       # none of the condition shapes are recognised, both returned scopes equal the input
       # scope. The catalogue mirrors {.case_equality_target_class}: static class/module
       # constants narrow as `is_a?`; integer/float-endpoint ranges narrow to `Numeric`;
-      # string-endpoint ranges and regexp literals narrow to `String`; a `nil`, `true` or
-      # `false` literal narrows as its class does ({.when_condition_class}).
+      # string-endpoint ranges narrow to `String`; regexp literals narrow as
+      # {.regexp_case_equality_type} says; a `nil`, `true` or `false` literal narrows as its
+      # class does ({.when_condition_class}).
       def case_when_scopes(subject, conditions, scope)
         # C1 — `case x when /re/` runs `/re/ === x`, which sets the regex match-data globals
         # exactly as a successful `=~` does. Narrow `$~`/`$&`/`$1..$N` on the clause body (the
@@ -1797,9 +1798,13 @@ module Rigor
         # passes through unchanged (failing one pattern proves nothing about the string's shape).
         # A non-literal / unanchored / `\Z` / line-anchored / `//x` pattern falls through to no
         # narrowing.
+        #
+        # The refinement names a String, so it shares `=~`'s gate (#1955): a receiver that may be a Symbol, or an
+        # untyped one, is left as it is ({#refinable_operand?}).
         def analyse_whole_regex_match_predicate(node, scope)
           return nil unless node.receiver.is_a?(Prism::LocalVariableReadNode)
           return nil if node.arguments.nil? || node.arguments.arguments.size != 1
+          return nil unless refinable_operand?(node, scope)
 
           pattern = regex_operand_pattern(node.arguments.arguments.first, scope)
           return nil unless pattern.is_a?(RegexMatchPattern)
@@ -2636,10 +2641,10 @@ module Rigor
         #   iff the endpoints compare it. We conservatively narrow `x` to `Numeric` for
         #   integer-endpoint ranges and to `String` for string-endpoint ranges; other endpoint
         #   types fall through.
-        # - **Regexp literal receiver** (`/foo/ === x`): the match operator coerces `x` to a
-        #   String, so the truthy edge narrows `x` to `String`. The falsey edge keeps the entry
-        #   type unchanged because `Regexp#===` returns false for non-Strings AND for Strings
-        #   that simply do not match.
+        # - **Regexp literal receiver** (`/foo/ === x`): the truthy edge narrows `x` as
+        #   {#regexp_case_equality_type} says (its String and Symbol parts, #1955). The falsey edge
+        #   keeps the entry type unchanged because `Regexp#===` returns false for non-Strings AND
+        #   for Strings that simply do not match.
         #
         # Anything else — non-local LHS argument, dynamic receiver, custom `===` method — falls
         # through to the no-narrowing branch (nil), preserving the entry scope on both edges.
@@ -2703,6 +2708,9 @@ module Rigor
           if (class_name = lexical_class_name(receiver, scope))
             return class_predicate_scopes(scope, local_name, current, class_name, exact: false)
           end
+          if regexp_literal?(receiver)
+            return [scope.with_local(local_name, regexp_case_equality_type(current, scope)), scope]
+          end
 
           target_class = case_equality_target_class(receiver)
           return nil if target_class.nil?
@@ -2716,7 +2724,7 @@ module Rigor
         end
 
         # The class a `when` condition narrows the subject to, as `is_a?` would, or nil when the condition is no class
-        # test Rigor reads: a class or module constant, a range or regexp literal ({.case_equality_target_class}),
+        # test Rigor reads: a class or module constant, a range literal ({.case_equality_target_class}),
         # or (#1925) a `nil` / `true` / `false` literal. `nil === x` runs `NilClass#===`, which holds only for `nil`
         # itself whatever the subject's class defines, and `nil` is `NilClass`'s only instance, so `when nil` is
         # `when NilClass`; `true` and `false` likewise.
@@ -2733,14 +2741,41 @@ module Rigor
         # Maps a case-equality literal receiver to the class whose membership is implied by the
         # truthy edge. `Prism::ParenthesesNode` wrappers are transparently unwrapped (`(1..10)
         # === x` is parsed with the range inside parentheses).  Range literals: integer
-        # endpoints → `Numeric`; string endpoints → `String`. Regexp literals → `String`. Other
-        # shapes return nil so the caller falls through.
+        # endpoints → `Numeric`; string endpoints → `String`. Regexp literals → `String`, read only
+        # as the class a dead `when` arm names: their narrowing is {#regexp_case_equality_type}'s,
+        # which the callers consult first. Other shapes return nil so the caller falls through.
         def case_equality_target_class(receiver)
           receiver = unwrap_parens(receiver)
           case receiver
           when Prism::RangeNode then range_target_class(receiver)
           when Prism::RegularExpressionNode, Prism::InterpolatedRegularExpressionNode then "String"
           end
+        end
+
+        def regexp_literal?(node)
+          case unwrap_parens(node)
+          when Prism::RegularExpressionNode, Prism::InterpolatedRegularExpressionNode then true
+          else false
+          end
+        end
+
+        # Issue #1955 — the subject on the match edge of `/re/ === x` (and of `case x when /re/`). `Regexp#===`
+        # matches a String, and a Symbol by its name, and answers false for anything else, so each member narrows to
+        # its String and Symbol parts: a `String | nil` subject reads `String`, a Symbol one stays `Symbol`. A
+        # `Dynamic` member is left as it is, since it may be a Symbol at run time. The no-match edge keeps the entry
+        # type: a String that does not match reaches it too.
+        def regexp_case_equality_type(current, scope)
+          members = current.is_a?(Type::Union) ? current.members : [current]
+          Type::Combinator.union(*members.map { |member| regexp_case_equality_member(member, scope) })
+        end
+
+        def regexp_case_equality_member(member, scope)
+          return member if member.is_a?(Type::Dynamic)
+
+          parts = %w[String Symbol].map do |class_name|
+            narrow_class(member, class_name, exact: false, environment: scope.environment, scope: scope)
+          end
+          Type::Combinator.union(*parts)
         end
 
         def unwrap_parens(node)
@@ -2969,6 +3004,10 @@ module Rigor
           int_literal = case_equality_integer_literal(condition)
           if int_literal && integer_rooted_type?(current)
             return integer_literal_when_result(current, int_literal, falsey_acc)
+          end
+
+          if regexp_literal?(condition)
+            return { truthy: regexp_case_equality_type(current, scope), falsey: falsey_acc, fully_narrowable: true }
           end
 
           target = when_condition_class(condition, scope)

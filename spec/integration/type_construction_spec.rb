@@ -1288,6 +1288,14 @@ RSpec.describe "Rigor type construction (integration)" do
       expect(reads.size).to eq(6)
       expect(harness.diagnostics.select { |d| reads.include?(d.line) }).to be_empty
     end
+
+    # Issue #1955 — `match?`, `/re/ === x` and `case x when /re/` do not narrow a Symbol or untyped subject to a
+    # String, so a Symbol method called on it past the match is not flagged.
+    it "reports nothing on a Symbol method past a `match?`, `===` or `when` regexp match" do
+      reads = marked_lines(harness, "# MATCH-1955")
+      expect(reads.size).to eq(6)
+      expect(harness.diagnostics.select { |d| reads.include?(d.line) }).to be_empty
+    end
   end
 
   describe "fixtures/regex_global_field_separator.rb — a `split` on a `$;` the file sets to a Regexp (#1365)" do

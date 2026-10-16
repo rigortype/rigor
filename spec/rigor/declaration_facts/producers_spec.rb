@@ -301,6 +301,8 @@ RSpec.describe "Declaration producers" do
       expect(regenerate(text, %w[lib/a.rb#A#x lib/b.rb#B#y lib/c.rb#C#z]))
         .to eq(text.sub("lib/c.rb:", "#{b}lib/c.rb:"))
       expect(regenerate(text, %w[lib/a.rb#A#x])).to eq(text.split("lib/c.rb:").first)
+      expect(regenerate(text, %w[lib/a.rb#A#x lib/c.rb#C#z lib/d.rb#D#w]))
+        .to eq("#{text}lib/d.rb:\n  computes: TODO\n  producers:\n    D#w: TODO\n")
     end
 
     it "round-trips a key the writer had to quote" do

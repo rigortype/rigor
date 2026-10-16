@@ -211,6 +211,40 @@ RSpec.describe "rigor lens" do
     expect(later["visibility"]).to eq("public")
   end
 
+  # #1998 review: when two files write a name, the declaration the environment kept says nothing about the other
+  # file's site, whichever of them carries the annotation.
+  it "reads an inline constant declaration only for a site in its own file" do
+    File.write("lib/a.rb", "# rbs_inline: enabled\n\nmodule Two\n  AUTH = [] #: Array[String]\nend\n")
+    File.write("lib/b.rb", "module Two\n  AUTH = [\"z\"]\nend\n")
+    _, out, = lens(["--format=json", "lib/a.rb", "lib/b.rb"])
+    files = JSON.parse(out)["files"]
+    values = files.to_h { |file| [file["path"], file["sites"].find { it["kind"] == "constant" }["value"]] }
+
+    expect(values["lib/a.rb"]).to include("type" => "::Array[::String]", "provenance" => "inline")
+    expect(values["lib/b.rb"]).to eq("state" => "unavailable", "reason" => "not_computed")
+  end
+
+  # The reverse: a.rb sorts first, so its default is the declaration kept, and z.rb's annotated site must not
+  # read it as its own `inline` type (z.rb's inline RBS is dropped as a duplicate).
+  it "does not read another rbs-inline file's default as a site's own annotation" do
+    File.write("lib/a.rb", <<~RUBY)
+      # rbs_inline: enabled
+
+      module Two
+        #: () -> void
+        def self.x = nil
+        DUP = "s"
+      end
+    RUBY
+    File.write("lib/z.rb", "# rbs_inline: enabled\n\nmodule Two\n  DUP = [] #: Array[String]\nend\n")
+    _, out, = lens(["--format=json", "lib/a.rb", "lib/z.rb"])
+    files = JSON.parse(out)["files"]
+    values = files.to_h { |file| [file["path"], file["sites"].find { it["kind"] == "constant" }["value"]] }
+
+    expect(values["lib/a.rb"]).to include("state" => "typed", "type" => "String", "provenance" => "inferred")
+    expect(values["lib/z.rb"]).to eq("state" => "unavailable", "reason" => "not_computed")
+  end
+
   def write_inline_constants
     File.write("lib/k.rb", <<~RUBY)
       # rbs_inline: enabled
@@ -247,7 +281,12 @@ RSpec.describe "rigor lens" do
              "K::NUM" => { "type" => "1", "provenance" => "inferred" },
              "K::DECL" => { "type" => "::Integer", "provenance" => "sig" },
              "K::WORDS" => { "type" => "::Array[::String]", "provenance" => "inline" })
-    expect(values.values_at("K::Klass", "K::Mod", "K::Frozen", "K::CALC", "K::LIST", "K::R", "K::PRE"))
+    # Unannotated and unpublished: the rbs-inline plugin's literal default, which check reads too.
+    expect(values.slice("K::LIST", "K::PRE").transform_values { it.slice("state", "type", "provenance") })
+      .to eq("K::LIST" => { "state" => "typed", "type" => "Array[untyped]", "provenance" => "inferred" },
+             "K::PRE" => { "state" => "typed", "type" => "String", "provenance" => "inferred" })
+    expect(values["K::CALC"]).to include("state" => "dynamic", "provenance" => "inferred")
+    expect(values.values_at("K::Klass", "K::Mod", "K::Frozen", "K::R"))
       .to all(eq("state" => "unavailable", "reason" => "not_computed"))
   end
 

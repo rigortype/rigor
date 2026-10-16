@@ -124,6 +124,11 @@ lib/rigor/inference/guard_rebinding.rb:
   producers:
     Rigor::Inference::GuardRebinding::ScanScope: grandfathered
     Rigor::Inference::GuardRebinding::ScanScope#collect_local_writes: grandfathered
+lib/rigor/inference/intervening_ivar_reset.rb:
+  computes: the implicit-self and self. calls in a condition operand that may write a narrowed instance variable (#1963)
+  producers:
+    Rigor::Inference::InterveningIvarReset: NON_RUNNING_NODES lists a def and a class, module or singleton class body only as code whose calls do not run on the condition's self; it derives no declaration context
+    Rigor::Inference::InterveningIvarReset#collect_calls: stops the call search at a def, class, module or singleton class body (#1963); it derives no declaration context
 lib/rigor/inference/in_effect_refinements/walk.rb:
   computes: the lexical prefix a using's constant and a refine block's own module resolve in, the body a using stays in effect to the end of, and the Module.nesting a refine-body def is written in
   producers:

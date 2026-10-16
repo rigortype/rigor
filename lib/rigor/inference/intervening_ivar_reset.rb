@@ -18,6 +18,11 @@ module Rigor
     # the calls in a condition operand, where a narrowing an earlier operand or clause made would otherwise survive
     # them: `if @x.nil? && reset!` read `@x` as `nil` in the body although `reset!` assigns it.
     module InterveningIvarReset
+      # Nodes whose body does not run where it is written, or runs on another `self`: a `def`, and a class or
+      # module body, where `@x` is the class's own instance variable.
+      NON_RUNNING_NODES = [Prism::DefNode, Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode].freeze
+      private_constant :NON_RUNNING_NODES
+
       module_function
 
       # True when `node` is a call that may write `self`'s instance variables: an implicit-self or `self.` call.
@@ -31,8 +36,9 @@ module Rigor
       # `scope` with each instance variable narrowed below its class-ivar seed widened back over the seed. The block
       # answers the names the call may write, or nil for any; it runs at most once, and only when an instance
       # variable is narrowed, since a proof costs a read of the callee. An instance variable whose binding carries
-      # the declaration mark keeps it (issue #1889).
-      def widen(scope)
+      # the declaration mark keeps it (issue #1889). With `mark: true` every widened binding takes the mark, so a
+      # `nil` the seed brings back is not fuel for `call.possible-nil-receiver` (ADR-58), as a declared one is not.
+      def widen(scope, mark: false)
         seed = class_ivar_seed(scope)
         return scope if seed.nil? || seed.empty?
 
@@ -50,23 +56,29 @@ module Rigor
 
           joined = Type::Combinator.union(local_type, seed_type)
           widened = widened.with_ivar(name, joined)
-          scope.declaration_sourced?(:ivar, name) ? widened.seed_declaration_sourced_ivar(name, joined) : widened
+          marked = mark || scope.declaration_sourced?(:ivar, name)
+          marked ? widened.seed_declaration_sourced_ivar(name, joined) : widened
         end
       end
 
       # Issue #1963 — `scope` past the calls `node`, a condition operand, makes: {.widen} over the names every
       # candidate call in it may write, or every name when one of them is not proven. A call's literal block may run,
-      # so its calls count; a `def` and (unless `run_lambdas`) a lambda literal run nothing there, the two nodes
-      # {GuardRebinding.may_rebind?} does not look into either. A
-      # `when` test calls its value's `===`, which for a lambda literal runs the body, so that caller passes
-      # `run_lambdas: true`, and an instance variable a lambda body assigns widens too: evaluating the literal binds
-      # nothing.
+      # so its calls count; a `def`, a class or module body and (unless `run_lambdas`) a lambda literal run nothing
+      # on this `self` there. A `when` test calls its value's `===`, which for a lambda literal runs the body, so
+      # that caller passes `run_lambdas: true`, and an instance variable a lambda body assigns widens too:
+      # evaluating the literal binds nothing.
+      #
+      # The widened bindings take the declaration mark ({.widen}'s `mark:`): the reset forgets the narrowing without
+      # making the variable newly nil-reportable, since a call the proof cannot clear is far more often one that
+      # leaves the variable alone (`if @tag && items.any?` then `t = @tag; t.upcase`) than one that assigns `nil`.
       def after_operand(node, scope, run_lambdas: false)
+        return scope unless narrowed_ivars?(scope)
+
         calls = candidate_calls(node, run_lambdas)
         assigned = run_lambdas ? assigned_ivars(node) : []
         return scope if calls.empty? && assigned.empty?
 
-        widen(scope) do
+        widen(scope, mark: true) do
           proven = proven_writes(calls, scope)
           proven&.merge(assigned)
         end
@@ -108,13 +120,25 @@ module Rigor
 
       def collect_calls(node, run_lambdas, found)
         return unless node.is_a?(Prism::Node)
-        return if node.is_a?(Prism::DefNode)
+        return if NON_RUNNING_NODES.any? { |klass| node.is_a?(klass) }
         return if !run_lambdas && node.is_a?(Prism::LambdaNode)
 
         found << node if candidate?(node)
         node.compact_child_nodes.each { |child| collect_calls(child, run_lambdas, found) }
       end
       private_class_method :collect_calls
+
+      # Whether any instance variable is bound narrower than its class-ivar seed: the only state {.widen} changes.
+      def narrowed_ivars?(scope)
+        seed = class_ivar_seed(scope)
+        return false if seed.nil? || seed.empty?
+
+        seed.any? do |name, seed_type|
+          local_type = scope.ivar(name)
+          !local_type.nil? && local_type != seed_type
+        end
+      end
+      private_class_method :narrowed_ivars?
 
       def class_ivar_seed(scope)
         self_type = scope.self_type

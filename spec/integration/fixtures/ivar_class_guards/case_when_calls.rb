@@ -125,3 +125,73 @@ def lambda_local(int)
   when ->(_) { v = "x"; true } then v.upcase # QUIET-1446
   end
 end
+
+# A test that may rebind the subject stops a later, call-free clause narrowing it, whatever rebinds it: a call that
+# assigns a global, a lambda that assigns a local, a lambda that assigns an instance variable. Under Ruby 4.0.5, with
+# `$case_g` nil and `int` false, the reads return "G", "X" and "S".
+def gmiss!
+  $case_g = "g"
+  ->(_) { false }
+end
+
+def global_later_clause
+  case $case_g
+  when gmiss! then 0
+  when NilClass then $case_g.upcase # QUIET-1446
+  end
+end
+
+def lambda_local_later_clause(int)
+  v = int ? 1 : nil
+  case v
+  when ->(_) { v = "x"; false } then 0
+  when NilClass then v.upcase # QUIET-1446
+  end
+end
+
+class LambdaLaterClause
+  def initialize(int)
+    @n = int ? 1 : nil
+  end
+
+  def later_clause
+    case @n
+    when ->(_) { @n = "s"; false } then 0
+    when NilClass then @n.upcase # QUIET-1446
+    end
+  end
+end
+
+# A lambda test that assigns a global the earlier clause narrowed: under Ruby 4.0.5, with `$case_g` nil, the read
+# returns "G".
+def global_lambda_test
+  case $case_g
+  when String then 1
+  when ->(_) { $case_g = "g"; true } then $case_g.upcase # QUIET-1446
+  end
+end
+
+# Issue #1963 review — a call the proof cannot clear (`items.any?` reads an attribute through a local-receiver
+# call) forgets the narrowing inside a `when` test without making the variable's declared `nil` reportable:
+# under Ruby 4.0.5 `Tagged.new.tagged` returns "T".
+class Tagged
+  attr_reader :items
+
+  def initialize
+    @tag = "t"
+    @items = [1]
+  end
+
+  def clear_tag = (@tag = nil)
+  def any_item = ->(_) { items.any? }
+
+  def tagged
+    return unless @tag
+
+    case 1
+    when any_item
+      t = @tag
+      t.upcase # QUIET-1446
+    end
+  end
+end

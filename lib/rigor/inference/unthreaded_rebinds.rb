@@ -23,7 +23,9 @@ module Rigor
     # - a statement, and the body of `(…)`, `begin` / `rescue` / `else` / `ensure`;
     # - an assignment's value — every variable-write form, and an index `||=` / `&&=` / `op=`, but not its
     #   receiver or index arguments;
-    # - an `if` / `unless` / `case` predicate and every branch, but not a `when` condition or an `in` guard;
+    # - an `if` / `unless` / `case` predicate and every branch, but not a `when` condition or an `in` guard (since
+    #   issue #1963 the evaluator threads a `when` test that runs code in a `case` with a subject; the scan does
+    #   not admit it yet, which floors a name needlessly rather than letting a pin through);
     # - both operands of `&&` / `||`;
     # - a `while` / `until` predicate and body, a `for` index, collection and body;
     # - a multi-assign value and its local and instance-variable targets, and the LOCAL a `rescue => e`

@@ -117,3 +117,60 @@ class ConditionPeer
     true
   end
 end
+
+# Issue #1963 review — a call the proof cannot clear widens a narrowed variable back over its seed, but a `nil`
+# only that widening brings back is not reported, as a declared one is not (ADR-58): the call far more often leaves
+# the variable alone. Under Ruby 4.0.5 each method of `Shower.new(ShowerPeer.new)` returns "T".
+class Shower
+  attr_reader :items
+
+  def initialize(peer)
+    @tag = "t"
+    @items = [1]
+    @peer = peer
+  end
+
+  def clear_tag = (@tag = nil)
+  def any_item? = items.any?
+  def stored? = !@items.empty?
+  def visible? = respond_to?(:items)
+
+  def attribute_call
+    if @tag && any_item?
+      t = @tag
+      t.upcase # QUIET-1446
+    end
+  end
+
+  def proven_call
+    if @tag && stored?
+      t = @tag
+      t.upcase # QUIET-1446
+    end
+  end
+
+  def while_call
+    while @tag && visible?
+      t = @tag
+      return t.upcase # QUIET-1446
+    end
+  end
+
+  def peer_call
+    if @tag && @peer.ok?
+      t = @tag
+      t.upcase # QUIET-1446
+    end
+  end
+
+  def include_call
+    if @tag && items.include?(1)
+      t = @tag
+      t.upcase # QUIET-1446
+    end
+  end
+end
+
+class ShowerPeer
+  def ok? = true
+end

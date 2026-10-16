@@ -441,12 +441,34 @@ RSpec.describe Rigor::SigGen::Generator do
     end
 
     # #1968 — Ruby 4.0.5: a `public` under an `if` ends the mode when it runs. Whether it runs is not read, so `e`
-    # gets no `self?`.
-    it "ends the module_function region at a bare visibility call under an `if`" do
+    # is either `def self?.e` or `def e`; sig-gen writes neither and reports the skip.
+    it "skips a def after a bare visibility call under an `if`" do
       src = "module M\n  module_function\n  if rand > 2\n    public\n  end\n  def e; 5; end\nend\n"
       path = write_fixture("lib/x.rb", src)
 
-      expect(generator(paths: [path]).run.filter_map(&:rbs)).to eq(["def e: () -> 5"])
+      rows = generator(paths: [path]).run.map { |c| [c.method_name, c.rbs, c.skip_reason] }
+
+      expect(rows).to eq([[:e, nil, :uncertain_module_function]])
+    end
+
+    # #1968 — Ruby 4.0.5: `S1.later` is "s1". The `private` in the `Struct.new` block runs with the new class as
+    # `self`, so it does not end the module's mode.
+    it "keeps the module_function region past a `private` in a class-creating block" do
+      src = <<~RUBY
+        module S1
+          module_function
+          Pair = Struct.new(:l, :r) do
+            private
+            def hidden = 0
+          end
+          def later = "s1"
+        end
+      RUBY
+      path = write_fixture("lib/x.rb", src)
+
+      candidate = generator(paths: [path]).run.find { |c| c.method_name == :later }
+
+      expect(candidate&.rbs).to eq(%(def self?.later: () -> "s1"))
     end
 
     # #1968 — Ruby 4.0.5: `N.b` is 1 and `b` a private instance method, which is what `def self?.b` declares. A

@@ -60,7 +60,10 @@ module Rigor
         inline_differs: "sig.skipped.inline-differs",
         # #1676 — a plain top-level `def` defines a private `Object` method and has no class to write a
         # declaration under, so it is reported rather than silently dropped. Whether to emit it stays open.
-        top_level_def: "sig.skipped.top-level-def"
+        top_level_def: "sig.skipped.top-level-def",
+        # #1968 — a bare `public` / `private` / `protected` that may not run (in control flow or a block) sits
+        # between a bare `module_function` and the def, so whether the def is a module function is unknown.
+        uncertain_module_function: "sig.skipped.uncertain-module-function"
       }.freeze
     end
   end

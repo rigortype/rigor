@@ -147,6 +147,17 @@ module Rigor
                        "not reported.",
           next_step: "Nothing is required. To type the method, move it into a module (`module_function` or " \
                      "`extend self` keeps the call sites), or write the `Object` declaration by hand in `sig/`."
+        ),
+        "sig.skipped.uncertain-module-function" => Entry.new(
+          id: "sig.skipped.uncertain-module-function",
+          summary: "Whether the method is a module function depends on a visibility call that may not run.",
+          explanation: "A bare `module_function` makes the module's later methods module functions, and a later " \
+                       "bare `public`, `private` or `protected` ends that. Here such a call sits in control " \
+                       "flow or a block between the two, so it may or may not run, and the method is either a " \
+                       "module function (`def self?.name`) or an instance method only (`def name`). sig-gen " \
+                       "writes neither rather than guess (#1968).",
+          next_step: "Move the visibility call to the module body's own statements, or name the methods it " \
+                     "should cover (`public :name`, `module_function :name`), so the reading is certain."
         )
       }.freeze
 

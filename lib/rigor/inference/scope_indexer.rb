@@ -4866,9 +4866,11 @@ module Rigor
         end
 
         # Writes the slot; `node` and `other` are the contributions the write rests on, possible when either is.
-        def write(class_name, name, def_node, node, other = nil)
+        # `possible` says the write rests on a fact the contributions do not carry (a module_function copy after a
+        # reset that may not run, #1968).
+        def write(class_name, name, def_node, node, other = nil, possible: false)
           (self[class_name] ||= {})[name] = def_node
-          if Certainty.possible?(@certainty, node) || (other && Certainty.possible?(@certainty, other))
+          if possible || Certainty.possible?(@certainty, node) || (other && Certainty.possible?(@certainty, other))
             (@contested ||= Set.new) << [class_name, name]
           else
             @contested&.delete([class_name, name])
@@ -5873,19 +5875,23 @@ module Rigor
         statements
       end
 
+      # `module_function_on` is {ModuleFunctionState.each_singleton_sibling}'s: `:uncertain` writes the module
+      # function's copy as possible, so the slot is contested and a reader declines rather than read the def the
+      # slot held before (#1968).
       def record_singleton_def_node(def_node, qualified_prefix, in_singleton_class, module_function_on, accumulator)
-        singleton = def_singleton?(def_node, qualified_prefix, in_singleton_class) || module_function_on
-        return unless singleton
+        declared = def_singleton?(def_node, qualified_prefix, in_singleton_class)
+        return unless declared || module_function_on
         return if qualified_prefix.empty?
 
         class_name = qualified_prefix.join("::")
-        write_singleton_slot(accumulator, class_name, def_node.name, def_node, def_node)
+        write_singleton_slot(accumulator, class_name, def_node.name, def_node, def_node,
+                             possible: !declared && module_function_on == :uncertain)
       end
 
       # One singleton slot write, through {SingletonDefTable#write} when the walk tracks certainty.
-      def write_singleton_slot(accumulator, class_name, name, def_node, node, other = nil)
+      def write_singleton_slot(accumulator, class_name, name, def_node, node, other = nil, possible: false)
         if accumulator.is_a?(SingletonDefTable)
-          accumulator.write(class_name, name, def_node, node, other)
+          accumulator.write(class_name, name, def_node, node, other, possible: possible)
         else
           (accumulator[class_name] ||= {})[name] = def_node
         end

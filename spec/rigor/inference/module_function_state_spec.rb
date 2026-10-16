@@ -349,6 +349,28 @@ module ModuleFunctionResetProbes
         def b; end
       end
     RUBY
+    "R7" => <<~RUBY,
+      module R7
+        module_function
+        K = Class.new(StandardError) do
+          private
+        end
+        S = Struct.new(:l) do
+          private
+        end
+        D = Data.define(:v) do
+          protected
+        end
+        Class.new { public }
+        def b; end
+      end
+    RUBY
+    "R8" => <<~RUBY,
+      module R8
+        M = Module.new { module_function }
+        def b; end
+      end
+    RUBY
     "R6" => <<~RUBY
       module R6
         module_function
@@ -439,7 +461,11 @@ RSpec.describe Rigor::Inference::ModuleFunctionState do
       next unless stmt.is_a?(Prism::DefNode)
 
       kind = stmt.receiver.is_a?(Prism::SelfNode) ? :singleton : :instance
-      answer[label(stmt)] = described_class.sig_gen_module_function?(active, kind)
+      answer[label(stmt)] = if described_class.sig_gen_uncertain?(active, kind)
+                              :uncertain
+                            else
+                              described_class.sig_gen_module_function?(active, kind)
+                            end
     end
     answer
   end
@@ -535,13 +561,28 @@ RSpec.describe Rigor::Inference::ModuleFunctionState do
     end
 
     # Ruby 4.0.5: a `public` in an `if` body, or a `private` in a block, ends the mode when it runs, for the defs
-    # after it. Whether it runs is not known, so no reader claims a module function after it.
+    # after it. Whether it runs is not known, so the singleton and sig-gen readers read `b` as uncertain: neither a
+    # module function nor an instance method only. The deferred row stays `:both`, the reading that counts the def
+    # as run on both sides.
     { "R3" => "b@6", "R4" => "b@4" }.each do |probe, b|
-      it "#{probe} (a reset in control flow or a block): no reader makes `b` a module function" do
-        expect(singleton_reading(probe)).to eq(b => false)
-        expect(deferred_reading(probe)).to eq(:rows => [], b => false)
-        expect(sig_gen_reading(probe)).to eq(b => false)
+      it "#{probe} (a reset in control flow or a block): `b` is uncertain" do
+        expect(singleton_reading(probe)).to eq(b => :uncertain)
+        expect(deferred_reading(probe)).to eq(:rows => [], b => true)
+        expect(sig_gen_reading(probe)).to eq(b => :uncertain)
       end
+    end
+
+    # Ruby 4.0.5: `R7.b` is a module function; `R8.respond_to?(:b)` is false. A class-creating block runs with
+    # the new class as `self`, so a `private` there, or a `module_function` in a `Module.new` block, changes that
+    # class and not the body around it.
+    it "R7 (a reset in a class-creating block): every reader keeps `b` a module function" do
+      expect(readings("R7").values_at(:singleton, :sig_gen)).to eq([{ "b@13" => true }, { "b@13" => true }])
+      expect(deferred_reading("R7")).to include("b@13" => true)
+    end
+
+    it "R8 (a bare call in a `Module.new` block): no reader makes `b` a module function" do
+      expect(readings("R8").values_at(:singleton, :sig_gen)).to eq([{ "b@3" => false }, { "b@3" => false }])
+      expect(deferred_reading("R8")).to include("b@3" => false)
     end
 
     # Ruby 4.0.5: `R5.respond_to?(:b)` is false; `self.public` resets as a bare `public` does.

@@ -141,7 +141,7 @@ RSpec.describe "Declaration-fact witness" do
     end
 
     # Ruby 4.0.5: `ResetUnreached.f` is a module function, because the `public` under the `if` does not run. Whether
-    # it runs is not read, so `f` is not claimed as one.
+    # it runs is not read: the deferred row stays `:both`, which counts the def as run on both sides.
     it "records a module function's deferred row only up to the reset" do
       tables, = DeclarationWitness.rigor_tables(fixture("module_function_reset"))
       kinds = tables.discovered_deferred_ranges.values.flatten(1).filter_map { |row| row.values_at(4, 2, 3) if row[2] }
@@ -150,8 +150,17 @@ RSpec.describe "Declaration-fact witness" do
         [["ResetPublic", :a, :both], ["ResetPublic", :b, :instance], ["ResetPrivate", :a, :both],
          ["ResetPrivate", :c, :instance], ["ResetProtected", :d, :instance], ["PrivateFirst", :b, :both],
          ["NamedVisibility", :a, :both], ["NamedVisibility", :b, :both], ["ResetThenToggle", :b, :instance],
-         ["ResetThenToggle", :c, :both], ["ResetPublic", :e, :instance], ["ResetUnreached", :f, :instance]]
+         ["ResetThenToggle", :c, :both], ["ResetPublic", :e, :instance], ["ResetUnreached", :f, :both],
+         ["ResetInClassBlock::Hidden", :hidden, :instance], ["ResetInClassBlock", :g, :both]]
       )
+    end
+
+    # The singleton copy of `ResetUnreached.f` rests on a reset that may not run, so its slot is contested and the
+    # readers decline rather than answer from it. Every other slot is certain.
+    it "contests the singleton slot of a def after a reset that may not run" do
+      tables, = DeclarationWitness.rigor_tables(fixture("module_function_reset"))
+
+      expect(tables.contested_discovered_singleton_def_nodes).to eq(Set[["ResetUnreached", :f]])
     end
   end
 

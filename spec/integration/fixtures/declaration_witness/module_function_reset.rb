@@ -3,6 +3,7 @@
 # #1968 — a bare `public`, `private` or `protected` after a bare `module_function` ends the module_function mode, so
 # a later def is an instance method only, with the visibility the toggle names. A named visibility call leaves the
 # mode alone, a `private` before the toggle does not stop it, and a reopened body starts with the mode off.
+# A reset under an `if` that does not run leaves the mode on, and one in a class-creating block changes that class only.
 
 module ResetPublic
   module_function
@@ -74,4 +75,16 @@ module ResetUnreached
   end
 
   def f = 6
+end
+
+module ResetInClassBlock
+  module_function
+
+  Hidden = Class.new(StandardError) do
+    private
+
+    def hidden = 0
+  end
+
+  def g = 7
 end

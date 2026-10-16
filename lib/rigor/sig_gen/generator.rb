@@ -98,6 +98,7 @@ module Rigor
         # (`build_candidate`, `method_def_prefix`) a never-nil invariant without per-call-site defensive guards.
         @namespace_kinds = {}
         @module_function_methods = Set.new
+        @uncertain_module_function_defs = Set.new.compare_by_identity
         @class_shells = Set.new
         @class_superclasses = {}
         @meta_layouts = {}
@@ -463,10 +464,7 @@ module Rigor
         base_scope = Scope.empty(environment: environment)
         scope_index = Inference::ScopeIndexer.index(parse_result.value, default_scope: base_scope)
 
-        @namespace_kinds = {}
-        @module_function_methods = Set.new
-        @class_shells = Set.new
-        @class_superclasses = {}
+        reset_file_maps
         @meta_layouts = collect_meta_layouts(scope_index)
         register_meta_classes
         defs = collect_method_definitions(parse_result.value, scope_index)
@@ -486,6 +484,15 @@ module Rigor
         obs_ivar_map = build_observed_ivar_map(parse_result.value)
         meta_candidates + candidates_from_defs +
           collect_attr_candidates(parse_result.value, path, scope_index, obs_ivar_map)
+      end
+
+      # The per-file scratch state {#analyse_file} starts each file with.
+      def reset_file_maps
+        @namespace_kinds = {}
+        @module_function_methods = Set.new
+        @uncertain_module_function_defs = Set.new.compare_by_identity
+        @class_shells = Set.new
+        @class_superclasses = {}
       end
 
       # Walks the AST collecting `(def_node, class_name, kind)` tuples for every `def` Rigor can re-type. Slice 1
@@ -732,6 +739,8 @@ module Rigor
         class_name = prefix.join("::")
         if Inference::ModuleFunctionState.sig_gen_module_function?(module_function_active, kind)
           @module_function_methods << [class_name, node.name]
+        elsif Inference::ModuleFunctionState.sig_gen_uncertain?(module_function_active, kind)
+          @uncertain_module_function_defs << node
         end
         out << [node, class_name, kind]
       end
@@ -964,6 +973,9 @@ module Rigor
       # #1676 — a top-level `def` is collected with no class; it is reported, never typed.
       def classify_collected_def(path, def_node, class_name, kind, scope_index)
         return skipped(path, def_node, class_name, kind, :top_level_def) if class_name.nil?
+        if @uncertain_module_function_defs.include?(def_node)
+          return skipped(path, def_node, class_name, kind, :uncertain_module_function)
+        end
 
         classify_def(path, def_node, class_name, kind, scope_index)
       end

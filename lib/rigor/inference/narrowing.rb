@@ -10,6 +10,7 @@ require_relative "../rbs_extended"
 require_relative "../analysis/fact_store"
 require_relative "../builtins/regex_refinement"
 require_relative "guard_rebinding"
+require_relative "intervening_ivar_reset"
 require_relative "key_presence_guard"
 require_relative "last_line"
 require_relative "operand_effects"
@@ -3140,14 +3141,49 @@ module Rigor
         # `ExpressionTyper` and matched on the as-written spelling, so the two halves of one `case`
         # disagreed — the flow side narrowed through this walk while the value side resolved the
         # pattern against whatever the environment knew under that literal name.
+        #
+        # Issue #1963 — a name no class or module the analysis knows answers by the constant's value instead
+        # ({.constant_value_class_name}): `K = String` names `String`, and `LIMIT = 3` names no class, so `when
+        # LIMIT` narrows nothing rather than reading the subject as an instance of a class called `LIMIT`.
         def lexical_class_name(node, scope)
           bare_name = static_class_name(node)
           return nil if bare_name.nil?
-          return bare_name if Source::ConstantPath.rooted?(node)
 
-          resolve_class_name_lexically(bare_name, scope)
+          name = Source::ConstantPath.rooted?(node) ? bare_name : resolve_class_name_lexically(bare_name, scope)
+          return name if class_known_to_scope?(scope, name)
+
+          constant_value_class_name(scope.type_of(node), name)
         end
         public :lexical_class_name
+
+        # Issue #1963 — the class a constant reference that names no known class denotes, read off its value's
+        # `type`: the class of a class object (`Singleton[String]` for `K = String`), nil for a value that is no
+        # class or module (a literal, a tuple or hash shape, an instance of a class other than `Class` or `Module`),
+        # and `name`, the spelling, for anything the analysis cannot read — a constant it cannot resolve, an
+        # anonymous class, a `Class.new` value, a union mixing classes and values — as before.
+        def constant_value_class_name(type, name)
+          case type
+          when Type::Singleton
+            Type::AnonymousClassName.match?(type.class_name) ? name : type.class_name
+          else
+            value_constant_type?(type) ? nil : name
+          end
+        end
+
+        VALUE_CONSTANT_TYPES = [
+          Type::Constant, Type::Tuple, Type::HashShape, Type::IntegerRange, Type::FloatRange, Type::StructInstance,
+          Type::DataInstance
+        ].freeze
+        CLASS_OBJECT_NAMES = %w[Class Module].freeze
+        private_constant :VALUE_CONSTANT_TYPES, :CLASS_OBJECT_NAMES
+
+        def value_constant_type?(type)
+          case type
+          when Type::Nominal then !CLASS_OBJECT_NAMES.include?(type.class_name)
+          when Type::Union then type.members.all? { |member| value_constant_type?(member) }
+          else VALUE_CONSTANT_TYPES.any? { |klass| type.is_a?(klass) }
+          end
+        end
 
         # ----- narrow_class / narrow_not_class helpers -----
 
@@ -3833,9 +3869,12 @@ module Rigor
         # that edge, so a `$_` the earlier operand narrowed is forgotten when the operand may set it
         # (`gets && log(items.each { gets })`), before the operand's own edges narrow it again.
         # Issue #1429 — likewise a guard's narrowing of a global or constant the operand may rebind
-        # (`$sep && reset_sep && $sep.length`).
+        # (`$sep && reset_sep && $sep.length`). Issue #1963 — and an instance variable's narrowing an implicit-self
+        # or `self.` call in the operand may write ({InterveningIvarReset.after_operand}): `@x.nil? && reset!` does
+        # not leave `@x` `nil` when `reset!` assigns it.
         def operand_edges(node, edge_scope)
           edge_scope = LastLine.forget_if_set(edge_scope, node)
+          edge_scope = InterveningIvarReset.after_operand(node, edge_scope)
           if edge_scope.guard_narrowed? && GuardRebinding.may_rebind?(node, edge_scope)
             edge_scope = edge_scope.forget_guard_narrowings
           end

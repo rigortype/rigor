@@ -1,0 +1,130 @@
+# frozen_string_literal: true
+
+require "prism"
+
+require_relative "../type"
+require_relative "operand_effects"
+require_relative "self_call_ivar_writes"
+
+module Rigor
+  module Inference
+    # The intervening-call reset of instance variables. An implicit-self or `self.` call may write any instance
+    # variable of `self`, so past one each instance variable whose binding is narrower than its class-ivar seed reads
+    # the union of the two again; a call proven to write only some ({SelfCallIvarWrites.of}, issue #1596) widens only
+    # those. A call on another receiver cannot reach `self`'s instance variables and widens nothing.
+    #
+    # {.widen} is the reset itself, which the statement evaluator applies past a statement call
+    # (`StatementEvaluator#invalidate_ivars_for_intervening_call`). Issue #1963 — {.after_operand} applies it past
+    # the calls in a condition operand, where a narrowing an earlier operand or clause made would otherwise survive
+    # them: `if @x.nil? && reset!` read `@x` as `nil` in the body although `reset!` assigns it.
+    module InterveningIvarReset
+      module_function
+
+      # True when `node` is a call that may write `self`'s instance variables: an implicit-self or `self.` call.
+      def candidate?(node)
+        return false unless node.is_a?(Prism::CallNode)
+
+        receiver = node.receiver
+        receiver.nil? || receiver.is_a?(Prism::SelfNode)
+      end
+
+      # `scope` with each instance variable narrowed below its class-ivar seed widened back over the seed. The block
+      # answers the names the call may write, or nil for any; it runs at most once, and only when an instance
+      # variable is narrowed, since a proof costs a read of the callee. An instance variable whose binding carries
+      # the declaration mark keeps it (issue #1889).
+      def widen(scope)
+        seed = class_ivar_seed(scope)
+        return scope if seed.nil? || seed.empty?
+
+        computed = false
+        writes = nil
+        seed.reduce(scope) do |widened, (name, seed_type)|
+          local_type = scope.ivar(name)
+          next widened if local_type.nil? || local_type == seed_type
+
+          unless computed
+            writes = yield
+            computed = true
+          end
+          next widened if writes && !writes.include?(name)
+
+          joined = Type::Combinator.union(local_type, seed_type)
+          widened = widened.with_ivar(name, joined)
+          scope.declaration_sourced?(:ivar, name) ? widened.seed_declaration_sourced_ivar(name, joined) : widened
+        end
+      end
+
+      # Issue #1963 — `scope` past the calls `node`, a condition operand, makes: {.widen} over the names every
+      # candidate call in it may write, or every name when one of them is not proven. A call's literal block may run,
+      # so its calls count; a `def` and (unless `run_lambdas`) a lambda literal run nothing there, the two nodes
+      # {GuardRebinding.may_rebind?} does not look into either. A
+      # `when` test calls its value's `===`, which for a lambda literal runs the body, so that caller passes
+      # `run_lambdas: true`, and an instance variable a lambda body assigns widens too: evaluating the literal binds
+      # nothing.
+      def after_operand(node, scope, run_lambdas: false)
+        calls = candidate_calls(node, run_lambdas)
+        assigned = run_lambdas ? assigned_ivars(node) : []
+        return scope if calls.empty? && assigned.empty?
+
+        widen(scope) do
+          proven = proven_writes(calls, scope)
+          proven&.merge(assigned)
+        end
+      end
+
+      # Whether a candidate call in `node`, or (with `run_lambdas`) a write in a lambda body there, may write the
+      # instance variable `name`.
+      def may_write?(node, name, scope, run_lambdas: false)
+        return true if run_lambdas && assigned_ivars(node).include?(name)
+
+        calls = candidate_calls(node, run_lambdas)
+        return false if calls.empty?
+
+        proven = proven_writes(calls, scope)
+        proven.nil? || proven.include?(name)
+      end
+
+      # The union of the names each call may write ({SelfCallIvarWrites.of}), or nil when one is not proven.
+      def proven_writes(calls, scope)
+        calls.reduce(Set.new) do |acc, call|
+          writes = SelfCallIvarWrites.of(call, scope)
+          break nil if writes.nil?
+
+          acc.merge(writes)
+        end
+      end
+
+      def assigned_ivars(node)
+        OperandEffects.written_variables(node).select { |name| name.start_with?("@") && !name.start_with?("@@") }
+      end
+      private_class_method :assigned_ivars
+
+      # The candidate calls under `node`, in source order.
+      def candidate_calls(node, run_lambdas)
+        found = []
+        collect_calls(node, run_lambdas, found)
+        found
+      end
+
+      def collect_calls(node, run_lambdas, found)
+        return unless node.is_a?(Prism::Node)
+        return if node.is_a?(Prism::DefNode)
+        return if !run_lambdas && node.is_a?(Prism::LambdaNode)
+
+        found << node if candidate?(node)
+        node.compact_child_nodes.each { |child| collect_calls(child, run_lambdas, found) }
+      end
+      private_class_method :collect_calls
+
+      def class_ivar_seed(scope)
+        self_type = scope.self_type
+        class_name =
+          case self_type
+          when Type::Nominal, Type::Singleton then self_type.class_name
+          end
+        class_name && scope.class_ivars_for(class_name)
+      end
+      private_class_method :class_ivar_seed
+    end
+  end
+end

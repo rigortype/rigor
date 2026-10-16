@@ -1604,7 +1604,8 @@ RSpec.describe "Rigor type construction (integration)" do
   describe "fixtures/ivar_class_guards/ — class guards on instance-variable receivers (#1446)", type: :runner do
     # The number of `# QUIET-1446` lines each entry carries.
     quiet_counts = {
-      "guards.rb" => 7, "invalidation.rb" => 1, "bot_receivers.rb" => 5, "writes.rb" => 2, "self_calls.rb" => 27
+      "guards.rb" => 7, "invalidation.rb" => 1, "bot_receivers.rb" => 5, "writes.rb" => 2, "self_calls.rb" => 27,
+      "condition_calls.rb" => 11, "case_when_calls.rb" => 9
     }.freeze
 
     def fixture_source(name) = File.read(File.join(__dir__, "fixtures/ivar_class_guards", name))
@@ -2771,6 +2772,17 @@ RSpec.describe "Rigor type construction (integration)" do
     # and a `rescue` modifier as pure expressions, so a write nested in one never reached the scope after
     # the statement, straight-line or through ADR-56's block write-back, and a jump nested in one never
     # reached the block's jump join.
+    # Issue #1963 — a value constant in a `when` test or as a `===` receiver is no class guard, and a constant
+    # aliasing a class narrows by that class.
+    describe "fixtures/value_constant_when.rb — value constants as case-equality receivers" do
+      let(:harness) { harness_for("value_constant_when") }
+
+      it "produces no assert_type mismatches" do
+        mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+        expect(mismatches).to be_empty
+      end
+    end
+
     describe "fixtures/argument_local_write.rb — a write inside a call operand or a literal" do
       let(:harness) { harness_for("argument_local_write") }
 

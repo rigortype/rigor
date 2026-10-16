@@ -205,7 +205,7 @@ done
 for path in ${deleted[@]+"${deleted[@]}"}; do
   # A deleted sig/ file drops rows provenance_spec pins, so a deletion runs the drift specs too.
   case "$path" in
-    lib/* | sig/* | data/*)
+    lib/* | sig/* | data/* | .rigor.dist.yml)
       for spec in "${engine_drift_specs[@]}"; do add_spec "$spec"; done
       engine_changed=1
       ;;
@@ -237,9 +237,17 @@ run_on "rubocop (changed files)" "$lint_files" \
 run_on "rspec (affected specs)" "$specs" bundle exec rspec
 run_on "rspec (runner pool)" "$pool_specs" env RIGOR_INCLUDE_RACTOR_POOL=1 bundle exec rspec
 run_on "rspec (plugin integration)" "$plugin_specs" env RIGOR_INCLUDE_INTEGRATION_PLUGINS=1 bundle exec rspec
-# The pinned examples, by line (tool/pin_examples.rb): the files whole take ~75s, the pins alone ~7s.
+# The pinned examples, by line (tool/pin_examples.rb): the files whole take ~75s, the pins alone ~7s. A
+# locator that fails or finds nothing fails the gate rather than skipping the step.
 if [[ -n "$engine_changed" ]]; then
-  run_on "rspec (pinned flip-this-when examples)" "$(bundle exec ruby tool/pin_examples.rb)" bundle exec rspec
+  if pins="$(bundle exec ruby tool/pin_examples.rb)" && [[ -n "$pins" ]]; then
+    run_on "rspec (pinned flip-this-when examples)" "$pins" bundle exec rspec
+  else
+    echo
+    echo "== rspec (pinned flip-this-when examples)"
+    echo "tool/pin_examples.rb failed or found no pins"
+    failures+=("rspec (pinned flip-this-when examples)")
+  fi
 fi
 step "rspec spec/docs/" bundle exec rspec spec/docs/
 run_on "rigor check (changed lib files)" "$check_files" \

@@ -58,11 +58,15 @@ reshaping code, and lanes that collided or started on a premise master had alrea
    reviewer with SendMessage and follow contribution-flow.md steps 4–5: three rounds at most; after
    round 3, a narrow severe finding with a conservative fix lands only through one fix-only delta
    check that finds nothing severe, and a non-converging design goes to the user.
-7. **Land in order.** Before merging, fetch and check that the branch contains `origin/master`
-   (`git merge-base --is-ancestor origin/master origin/<branch>`); when it does not, have the lane
-   push again through `bin/lane-push`, which rebases and reruns the gate, since a clean textual merge
-   can still break a sibling's spec. Check `mergeable` before waiting on CI: a `CONFLICTING` PR starts no run, so send it back to
-   its lane to merge master and resolve. After the batch, watch the resulting master CI run.
+7. **Land in order.** A branch need not contain `origin/master` to merge; it is rebased at each push.
+   Before merging, fetch and compare the files the commits master gained since the branch's merge
+   base touch with the files the PR touches (`git diff --name-only <merge-base> origin/master` against
+   the PR's own list). When they overlap, have the lane push again through `bin/lane-push`, which
+   rebases and reruns the gate, since a clean textual merge can still break a sibling's spec; when
+   they do not, merge. Check `mergeable` before waiting on CI: a `CONFLICTING` PR starts no run, so
+   send it back to its lane to run `bin/lane-push` and resolve the rebase it stops on. When the lane
+   has ended, run `bin/lane-push` in its worktree yourself. After the batch, watch the resulting
+   master CI run.
    Watching is bounded by GitHub's API budgets (REST and GraphQL are separate 5000-an-hour budgets
    per user; `gh pr view` spends GraphQL), which a batch of watchers exhausts, and every watcher then
    dies with HTTP 403. Read the verdict per contribution-flow.md § "GitHub and git traps", at most

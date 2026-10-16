@@ -13,6 +13,7 @@ require_relative "../../tool/pin_examples"
 RSpec.describe "tool/pin_examples.rb" do
   # Spelled apart so this file holds no pin of its own for the locator to find.
   let(:pin) { %w[Flip this when].join(" ") }
+  let(:flip) { "Flip" }
 
   let(:root) { Dir.mktmpdir("pin-examples") }
 
@@ -68,6 +69,59 @@ RSpec.describe "tool/pin_examples.rb" do
 
           it("a") { expect(value).to eq(1) }
         end
+      end
+    RUBY
+  end
+
+  it "climbs out of a let, before or subject block to the group, which RSpec would map to a sibling" do
+    expect(locations_for(<<~RUBY)).to eq([2, 10])
+      RSpec.describe "x" do
+        describe "a group" do
+          it("a1") { expect(1).to eq(1) }
+          let(:value) do
+            # #{pin} #6 is fixed.
+            1
+          end
+          it("a2") { expect(value).to eq(1) }
+        end
+        describe "another" do
+          it("b0") { expect(1).to eq(1) }
+          before do
+            # #{pin} #7 is fixed.
+          end
+        end
+      end
+    RUBY
+  end
+
+  it "runs the example a pin introduces inside a non-example block such as an each loop" do
+    expect(locations_for(<<~RUBY)).to eq([4])
+      RSpec.describe "x" do
+        %w[a b].each do |name|
+          # #{pin} #8 is fixed.
+          it("pins \#{name}") { expect(name).to be_a(String) }
+        end
+      end
+    RUBY
+  end
+
+  it "reads the other spellings the tree uses: these, the …, if, a wrapped phrase, a trailing comment" do
+    expect(locations_for(<<~RUBY)).to eq([3, 6, 7, 12])
+      RSpec.describe "x" do
+        # #{flip} these when #9 is fixed.
+        it("a") { expect(1).to eq(1) }
+        # Ruby answers X in both worlds. #{flip.upcase} THIS
+        # if relevance is extended.
+        it("b") { expect(1).to eq(1) }
+        it "c" do
+          value = 1
+          # #{flip} the `value` row back when #10 lands.
+          expect(value).to eq(1)
+        end
+        it "d" do
+          expect(2).to eq(2) # #{flip} this if #11 is fixed.
+        end
+        it("e") { expect(3).to eq(3) }
       end
     RUBY
   end

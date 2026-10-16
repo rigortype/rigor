@@ -179,7 +179,8 @@ RSpec.describe Rigor::MCP::Server do
     it "keeps a command's SystemExit off the JSON-RPC channel and stays up" do
       cli = instance_double(Rigor::CLI)
       allow(cli).to receive(:run) do
-        exit(0)
+        puts "usage" # rubocop:disable RSpec/Output -- writing to stdout is the point: the capture must hold it
+        exit(3)
       end
       allow(Rigor::CLI).to receive(:new).and_return(cli)
       resp = nil
@@ -370,6 +371,7 @@ RSpec.describe Rigor::MCP::Server do
       expect(text_of(resp)).to include("Unknown rule: --foo")
     end
 
+    # Guard: it passes with the fix removed; it only asserts the server survives such operands.
     it "survives paths named - and --" do
       %w[- --].each do |path|
         resp = tool_call("rigor_check", { "paths" => [path] })

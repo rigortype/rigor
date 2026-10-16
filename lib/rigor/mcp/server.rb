@@ -203,7 +203,7 @@ module Rigor
 
         success(id, tool_result(out_io.string, err_io.string, exit_code))
       rescue SystemExit => e
-        # An option parser that exits (`--help`, `--version`) must not take the server down with it.
+        # Defence against any command that exits: it must not take the server down with it.
         success(id, { content: [{ type: "text", text: "Command exited (status #{e.status})" }], isError: true })
       rescue StandardError => e
         @err.puts("rigor mcp: #{e.class}: #{e.message}")

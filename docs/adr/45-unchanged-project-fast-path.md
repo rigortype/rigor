@@ -293,17 +293,18 @@ answer was computed by earlier runs. The rows come from three sources:
    every plugin `IoBoundary` row, among them each producer's `watch:`
    globs, which #1558 replays into the boundary whether the producer
    computed or was served. Taken when the run ends: the template files and
-   globs (re-analysed every run), and an existence row per analysis root
+   globs (re-analysed every run), and a `:kind` row per analysis root
    and per `pre_eval:` entry. The incremental path regenerates its
    path-error rows every run, so a slot that served one past the edit that
-   retracts it would print what no run of the tree prints. They carry
-   WD1b's bound. The plain slot records rows for the same paths since
-   #1962, plus one per signature root (#1555), as `:kind` rows, which also
-   read a directory replaced by a file as stale.
+   retracts it would print what no run of the tree prints. They were
+   existence rows, which carry WD1b's bound and so read a directory
+   replaced by a file of the same name as fresh, until #1977. The plain
+   slot records `:kind` rows for the same paths since #1962, plus one per
+   signature root (#1555).
 3. The **chain** the slot's value carries forward. Its baseline part is
    what a full run records for inputs a recheck does NOT re-derive
    (`Runner#baseline_dependency_rows`): the signature tree
-   (`RbsDescriptor.file_entries` / `.glob_entries`) and an existence row per
+   (`RbsDescriptor.file_entries` / `.glob_entries`) and a `:kind` row per
    signature root, configured or the auto-detected `sig`; the
    discovered-not-analysed files (#684) and a listing row per discovery
    root; and the `pre_eval:` files outside the analysed set. Its reads part
@@ -353,14 +354,16 @@ run ends leaves every carried row fresh. So the session takes a mark before
 the run reads anything (`IncrementalRunSlot::WriteGuard`) and writes
 nothing unless, at write time, none of those rows, carried or taken, moved
 after it: no file a content row names, no directory a glob row lists, and
-no file a stat-mode glob matches. An existence row asks only whether its
-path is there, so the mark records whether each path such a row can name
-(the analysis roots, the `pre_eval:` entries, the signature roots) is
-present, and the row moved if its path came or went since. Its
+no file a stat-mode glob matches. A `:kind` row asks only what its path
+is (a directory, a file, something else, nothing), so the mark records
+that for each path such a row can name (the analysis roots, the
+`pre_eval:` entries, the signature roots), and the row moved if its path
+came, went or changed kind since (#1977; an existence row is judged the
+same way on presence alone). Its
 directory's change time is not asked: an editor's lock file created and
 removed beside the path moves it, and a recheck refused for that leaves
 the chain broken until the next full run. A path that comes and goes again
-within the run is the bound. An existence row for a path the mark did not
+within the run is the bound. A presence row for a path the mark did not
 record falls back to its own change time, or its nearest existing
 ancestor's. A row taken as a plugin read needs no guard, since a later
 save leaves it stale.

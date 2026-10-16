@@ -282,6 +282,184 @@ RSpec.describe Rigor::Analysis::IncrementalRunSlot do
     end
   end
 
+  # Issue #1977 — the slot recorded an existence row per analysis root, so a root that turned from a directory into
+  # a file of the same name (or back) left it fresh, and the probe served the old path-error rows, and with them
+  # the old `--fail-on` exit code, which is the rows' highest severity. Each arm writes the slot from a warm run,
+  # changes the tree, and expects the probe to decline, the full path to answer as a cold run of the changed tree,
+  # and the probe to serve that answer next. `to_h` carries each row's severity, so equal rows mean an equal exit
+  # code.
+  describe "an analysis root that changes kind (#1977)" do
+    before { write_project }
+
+    def expect_matches_cold_after(paths, config = configuration, &change)
+      2.times { incremental_run(config, paths: paths) }
+      expect(served(config, paths: paths)).not_to be_nil
+      change.call
+      expected = rows(cold(config, paths: paths))
+
+      expect(served(config, paths: paths)).to be_nil
+      expect(rows(incremental_run(config, paths: paths).first)).to eq(expected)
+      expect(rows(served(config, paths: paths).result.diagnostics)).to eq(expected)
+      root_rows(expected)
+    end
+
+    # The rows outside `lib/`, whose `b.rb` carries an unrelated error throughout.
+    def root_rows(rows)
+      rows.reject { |row| row["path"].start_with?("lib/") }.map { |row| row.values_at("path", "severity", "message") }
+    end
+
+    def missing(path) = [[path, "warning", "no such file or directory (skipped)"]]
+    def not_ruby(path) = [[path, "warning", "not a Ruby file (expected `.rb` or a directory) (skipped)"]]
+
+    def to_file(path)
+      FileUtils.rm_rf(path)
+      File.write(path, "")
+    end
+
+    def to_directory(path)
+      FileUtils.rm_rf(path)
+      FileUtils.mkdir(path)
+    end
+
+    it "a directory replaced by a file of the same name" do
+      FileUtils.mkdir("x")
+      expect(expect_matches_cold_after(%w[lib x]) { to_file("x") }).to eq(not_ruby("x"))
+    end
+
+    it "a file replaced by a directory of the same name" do
+      File.write("x", "")
+      expect(expect_matches_cold_after(%w[lib x]) { to_directory("x") }).to eq([])
+    end
+
+    # Guards: an existence row already saw a root come or go.
+    it "a directory removed, and a missing root created as a directory" do
+      FileUtils.mkdir("x")
+      expect(expect_matches_cold_after(%w[lib x]) { FileUtils.rmdir("x") }).to eq(missing("x"))
+      expect(expect_matches_cold_after(%w[lib x]) { FileUtils.mkdir("x") }).to eq([])
+    end
+
+    it "a file removed, then created again" do
+      File.write("x", "")
+      expect(expect_matches_cold_after(%w[lib x]) { File.unlink("x") }).to eq(missing("x"))
+      expect(expect_matches_cold_after(%w[lib x]) { File.write("x", "") }).to eq(not_ruby("x"))
+    end
+
+    it "a root given as an absolute path, replaced by a file" do
+      FileUtils.mkdir("x")
+      root = File.join(Dir.pwd, "x")
+      expect(expect_matches_cold_after(["lib", root]) { to_file("x") }).to eq(not_ruby(root))
+    end
+
+    # The row follows symlinks, as the path expansion does.
+    context "with a root that is a symlink" do
+      before do
+        FileUtils.mkdir("target_dir")
+        File.write("target_file", "")
+        File.symlink("target_dir", "x")
+      end
+
+      it "re-pointed from a directory to a file" do
+        expect(expect_matches_cold_after(%w[lib x]) do
+          File.unlink("x")
+          File.symlink("target_file", "x")
+        end).to eq(not_ruby("x"))
+      end
+
+      # A guard: a dangling symlink does not exist, so the existence row saw it.
+      it "left dangling" do
+        expect(expect_matches_cold_after(%w[lib x]) { FileUtils.rmdir("target_dir") }).to eq(missing("x"))
+      end
+    end
+
+    it "a `pre_eval:` directory replaced by the file" do
+      FileUtils.mkdir("boot.rb")
+      config = configuration("pre_eval" => ["boot.rb"])
+      expect(root_rows(rows(cold(config)))).not_to be_empty
+      expect(expect_matches_cold_after(nil, config) { to_file("boot.rb") }).to eq([])
+    end
+
+    # The arm above passes while either row is a kind row, so each is pinned on its own: the `derived` row a run
+    # takes when it ends, and the baseline row for a `pre_eval:` entry outside the analysed set.
+    it "records the `pre_eval:` entry's kind in both the derived rows and the baseline" do
+      FileUtils.mkdir("boot.rb")
+      config = configuration("pre_eval" => ["boot.rb"])
+      captured = {}
+      allow(Rigor::Analysis::Runner).to receive(:new).and_wrap_original do |original, *args, **kwargs|
+        original.call(*args, **kwargs).tap do |runner|
+          allow(runner).to receive(:incremental_slot_rows).and_wrap_original do |method, **options|
+            captured[:derived] = method.call(**options)
+          end
+          allow(runner).to receive(:baseline_dependency_rows).and_wrap_original do |method, **options|
+            captured[:baseline] = method.call(**options)
+          end
+        end
+      end
+      incremental_run(config)
+
+      kind = Rigor::Cache::Descriptor::FileEntry.kind(path: "boot.rb")
+      expect(captured[:derived].derived.files).to include(kind)
+      expect(captured[:baseline].owned.files).to include(kind)
+    end
+
+    # A signature root's kind is in the snapshot fingerprint too, but the engine-free probe answers before any
+    # fingerprint is read, so only the baseline chain's `:kind` row declines it. `sig` is the auto-detected root,
+    # `types` a configured one. Each change moves the answer: `Widget#price` returns `String` once `sig/widget.rbs`
+    # is read.
+    [["sig", {}], ["types", { "signature_paths" => ["types"] }]].each do |root, extra|
+      context("with the signature root `#{root}`") do
+        let(:config) { configuration(extra) }
+        let(:signature) { "class Widget\n  def price: () -> String\nend\n" }
+
+        it "a file replaced by a directory of that name holding a signature" do
+          File.write(root, "")
+          before = rows(cold(config))
+          expect_matches_cold_after(nil, config) do
+            to_directory(root)
+            File.write(File.join(root, "widget.rbs"), signature)
+          end
+          expect(rows(cold(config))).not_to eq(before)
+        end
+
+        # The snapshot fingerprint digests only the root's signature files, so the next run can be a recheck,
+        # which carries the baseline's row and so writes a slot the probe keeps declining until a full run.
+        it "a directory holding no signature replaced by a file" do
+          FileUtils.mkdir(root)
+          File.write(File.join(root, "notes.txt"), "")
+          2.times { incremental_run(config) }
+          expect(served(config)).not_to be_nil
+          to_file(root)
+
+          expect(served(config)).to be_nil
+          expect(rows(incremental_run(config).first)).to eq(rows(cold(config)))
+        end
+      end
+    end
+
+    # A worker pool writes no slot and the probe declines one, so the full path answers every run: the rows it
+    # regenerates must still be a cold run's.
+    it "answers as a cold run under a worker pool" do
+      run = lambda do
+        session = Rigor::Analysis::IncrementalSession.new(
+          configuration: configuration, paths: %w[lib x], cache_store: Rigor::Cache::Store.new(root: cache_root),
+          workers: 2
+        )
+        guarded_run_incremental(
+          session,
+          snapshot: Rigor::Cache::IncrementalSnapshot.new(root: cache_root),
+          fingerprint: Rigor::Cache::IncrementalSnapshot.fingerprint(configuration: configuration, roots: %w[lib x])
+        )
+      end
+      FileUtils.mkdir("x")
+      run.call
+      run.call
+      to_file("x")
+      diagnostics, warm = run.call
+      expect(warm).to be(true)
+      expect(rows(diagnostics)).to eq(rows(cold(paths: %w[lib x])))
+      expect(rows(diagnostics).map { |row| row["path"] }).to include("x")
+    end
+  end
+
   # Inputs a recheck does not re-derive ride the chain from the full run that recorded them. Recomputing them on a
   # recheck would vouch for the tree the recheck saw while its answer still carries rows computed before the
   # change, so the probe declines until the next full run: each arm checks it still declines after a full-path
@@ -423,6 +601,21 @@ RSpec.describe Rigor::Analysis::IncrementalRunSlot do
       write_project
       FileUtils.mkdir_p("pkg/extra")
       during_first_analysis { FileUtils.rm_rf("pkg/extra") }
+      diagnostics, = incremental_run(paths: %w[lib pkg/extra])
+      after_the_run
+
+      expect(rows(diagnostics).map { |row| row["path"] }).not_to include("pkg/extra")
+      expect(served(paths: %w[lib pkg/extra])).to be_nil
+    end
+
+    # #1977 — the root's kind row is taken when the run ends; the guard compares it with the kind the mark saw.
+    it "writes no slot when an analysis root turns from a directory into a file while the run reads" do
+      write_project
+      FileUtils.mkdir_p("pkg/extra")
+      during_first_analysis do
+        FileUtils.rm_rf("pkg/extra")
+        File.write("pkg/extra", "")
+      end
       diagnostics, = incremental_run(paths: %w[lib pkg/extra])
       after_the_run
 

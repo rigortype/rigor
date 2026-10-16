@@ -1406,7 +1406,7 @@ module Rigor
       # auto-detected `sig`: the loader reads a directory and a file differently, and #979's listing rows cover a
       # file appearing under a root that existed, not the root appearing. A kind row rather than an existence row,
       # because a directory replaced by a file of the same name leaves an existence row fresh. The `--incremental`
-      # slot records existence rows for the same paths ({#incremental_slot_rows}, {#baseline_dependency_rows}).
+      # slot records kind rows for the same paths ({#incremental_slot_rows}, {#baseline_dependency_rows}, #1977).
       def root_presence_entries(expansion)
         (expansion.fetch(:roots) + @configuration.pre_eval + signature_root_candidates)
           .uniq.map { |path| Cache::Descriptor::FileEntry.kind(path: path) }
@@ -1452,11 +1452,11 @@ module Rigor
       #   globs, which a producer replays into its boundary whether it computed or was served (#1558). A save
       #   after the read leaves the row stale, so no guard is needed.
       # - `derived` — rows taken when the run ENDS: the template files and their claimed globs (#392, re-analysed
-      #   every run), and one existence row per analysis root and per `pre_eval:` entry. A run's path errors (`no
-      #   such file or directory`, `pre-eval.file-not-found`) answer to those last rows; the plain slot records
-      #   neither, and the incremental path regenerates the errors every run, so a slot that served one past the
-      #   edit that retracts it would print what no run of that tree prints. Existence rows carry ADR-45 WD1b's
-      #   bound: a directory replaced by a file of the same name stays fresh.
+      #   every run), and one `:kind` row per analysis root and per `pre_eval:` entry. A run's path errors (`no
+      #   such file or directory`, `not a Ruby file`, `pre-eval.file-not-found`) answer to those last rows, and the
+      #   incremental path regenerates the errors every run, so a slot that served one past the edit that retracts
+      #   it would print what no run of that tree prints. A kind row rather than an existence row (#1977): an
+      #   existence row reads a directory replaced by a file of the same name as fresh, ADR-45 WD1b's bound.
       # - `by_file` — `{path => Descriptor}`, the plugin reads each file's analysis made
       #   ({Plugin::IoBoundary.attributing}). A narrowed run analyses only its closure, so the session carries the
       #   other files' reads forward from the previous slot.
@@ -1480,7 +1480,7 @@ module Rigor
         IncrementalSlotRows.new(
           observed: plugin_boundary_rows,
           derived: Cache::Descriptor.new(
-            files: template_unit_file_entries + existence_entries(Array(roots) + @configuration.pre_eval),
+            files: template_unit_file_entries + kind_entries(Array(roots) + @configuration.pre_eval),
             globs: template_unit_glob_entries
           ),
           by_file: @analysis_reads.transform_values do |reads|
@@ -1507,13 +1507,14 @@ module Rigor
       # which the session therefore carries unchanged from the full run that recorded them to every later slot:
       #
       # - the signature tree the plain slot records (`RbsDescriptor.file_entries` / `.glob_entries` over the loader
-      #   roots this run's analysis resolved), and an existence row per signature root, configured or the
-      #   auto-detected `sig` — a recheck rebuilds no environment unless its closure is non-empty, and the snapshot
-      #   fingerprint digests the same roots (configured, or the auto-detected `sig`), so a change to one drops the
-      #   snapshot and forces a full run rather than reaching a recheck;
+      #   roots this run's analysis resolved), and a `:kind` row per signature root, configured or the
+      #   auto-detected `sig` — a recheck rebuilds no environment unless its closure is non-empty. The snapshot
+      #   fingerprint digests the same roots, so a change to one makes the next full-path run a full run rather
+      #   than a recheck, but the engine-free slot probe serves before any fingerprint is consulted: a root that
+      #   turns from a file into a directory (or back) is declined there by this `:kind` row alone (#1977);
       # - the discovered-not-analysed files (#684) and a listing row per discovery root — a narrowed recheck does
       #   not widen discovery at all;
-      # - every `pre_eval:` file outside `files` (a stat row, or an absence row) — the session tracks only analysed
+      # - every `pre_eval:` file outside `files` (a stat row, or a kind row) — the session tracks only analysed
       #   files, and one that is analysed is guarded by its own row.
       #
       # Recomputing any of these on a recheck would vouch for the tree the recheck saw while its answer still
@@ -1537,7 +1538,7 @@ module Rigor
         own, pinned = signature_rows
         BaselineRows.new(
           owned: Cache::Descriptor.new(
-            files: own.files + existence_entries(signature_root_candidates) +
+            files: own.files + kind_entries(signature_root_candidates) +
                    discovery_file_entries({ files: files }) + unanalysed_pre_eval_entries(files),
             globs: (own.globs + discovery_glob_entries).uniq
           ),
@@ -1563,8 +1564,8 @@ module Rigor
 
       # The project's own signature roots, whether or not they exist: the configured `signature_paths:`, or the
       # `sig` directory `Environment.default_signature_paths` auto-detects when none are configured. The
-      # signature rows' listing rows cover a file appearing under a root that existed; only an existence row
-      # covers the root itself appearing.
+      # signature rows' listing rows cover a file appearing under a root that existed; only a row for the root
+      # itself covers it appearing.
       def signature_root_candidates
         @configuration.signature_paths || ["sig"]
       end
@@ -1586,22 +1587,18 @@ module Rigor
           if File.file?(path)
             Cache::Descriptor::FileEntry.stat(path: path, digest: Cache::FileDigest.hexdigest(path))
           else
-            existence_entries([path]).first
+            kind_entries([path]).first
           end
         end
       end
 
-      def existence_entries(paths)
+      # #1977 — one `:kind` row per path, the row {#root_presence_entries} records in the plain slot.
+      def kind_entries(paths)
         paths.uniq.map do |path|
-          physical = @buffer ? @buffer.resolve(path) : path
-          if File.exist?(physical)
-            Cache::Descriptor::FileEntry.present(path: physical)
-          else
-            Cache::Descriptor::FileEntry.absent(path: physical)
-          end
+          Cache::Descriptor::FileEntry.kind(path: @buffer ? @buffer.resolve(path) : path)
         end
       end
-      private :plugin_boundary_rows, :producer_watch_glob_entries, :existence_entries, :root_presence_entries,
+      private :plugin_boundary_rows, :producer_watch_glob_entries, :kind_entries, :root_presence_entries,
               :analysis_reads_attributed?, :signature_root_candidates, :discovery_glob_entries,
               :unanalysed_pre_eval_entries, :signature_rows, :within?
 

@@ -66,8 +66,8 @@ module Rigor
         # opted-in gems' resolved versions, the key's one input that is neither a file nor the configuration (issue
         # #1814), are read at the mark and watched the same way.
         #
-        # The mark also records which of the paths an existence row can name are present: the lockfiles, the
-        # analysis roots, the `pre_eval:` entries and the signature roots.
+        # The mark also records what each path a presence row can name is ({Cache::Descriptor::FileEntry.kind_of}):
+        # the lockfiles, the analysis roots, the `pre_eval:` entries and the signature roots.
         def self.start(configuration:, roots:, cache_root:, fingerprint:)
           return nil if Gem.win_platform?
 
@@ -79,7 +79,7 @@ module Rigor
           lockfiles = lockfile_paths(configuration)
           named = Array(roots) + configuration.pre_eval + (configuration.signature_paths || ["sig"])
           presence = (lockfiles + named.map { |path| File.absolute_path(path.to_s) }).to_h do |path|
-            [path, File.exist?(path)]
+            [path, Cache::Descriptor::FileEntry.kind_of(path)]
           end
           rows = dependency_rows(configuration)
           return nil if rows.nil?
@@ -174,11 +174,12 @@ module Rigor
         # - no lockfile the key or the fingerprint digests was written, created or removed, and no opted-in gem
         #   resolves to another version than at the mark (issue #1814);
         # - no file `rows` or `pinned` names changed. A content row's file changed if its change time moved. An
-        #   existence row asks only whether its path is there, so a path the mark recorded changed if it came or
-        #   went, and an editor's lock file created and removed beside it, which moves its directory's change
-        #   time, does not count. That needs no clock, so it holds on any filesystem; it cannot see a path that
-        #   comes and goes again within the run. Any other existence row falls back to change times: its own when
-        #   present, its nearest existing ancestor's when absent;
+        #   existence row asks only whether its path is there, and a `:kind` row what it is (#1977), so a path the
+        #   mark recorded changed if it came or went, or for a kind row turned from a directory into a file or back;
+        #   an editor's lock file created and removed beside it, which moves its directory's change time, does not
+        #   count. That needs no clock, so it holds on any filesystem; it cannot see a path that comes and goes
+        #   again within the run. Any other presence row falls back to change times: its own when present, its
+        #   nearest existing ancestor's when absent;
         # - no directory a glob row lists gained or lost an entry, nor, for a stat-mode glob, did any file it
         #   matches change.
         #
@@ -231,15 +232,20 @@ module Rigor
           ns.nil? || device != @device || ns < @started_ns
         end
 
-        # An existence row and a content row for one path are different questions (the first asks only whether it
-        # is there, the second whether it changed), so the row that comes first must not hide the other.
+        # A presence row and a content row for one path are different questions (the first asks only whether it
+        # is there, or what it is, the second whether it changed), so the row that comes first must not hide the
+        # other; nor may an existence row hide a kind row.
+        PRESENCE_COMPARATORS = %i[exists kind].freeze
+        private_constant :PRESENCE_COMPARATORS
+
         def files_unchanged?(entries, strict:)
           seen = Set.new
           entries.none? do |entry|
-            next false unless seen.add?([entry.path, entry.comparator == :exists])
+            presence = PRESENCE_COMPARATORS.include?(entry.comparator) ? entry.comparator : nil
+            next false unless seen.add?([entry.path, presence])
 
-            if entry.comparator == :exists
-              existence_changed?(entry.path, strict: strict)
+            if presence
+              presence_changed?(entry.path, presence, strict: strict)
             else
               changed?(entry.path, strict: strict)
             end
@@ -257,14 +263,25 @@ module Rigor
         # A lockfile is read for its bytes: one absent at the mark must still be absent, one present must still be
         # there with its change time before the mark.
         def lockfile_changed?(path)
-          return File.exist?(path) unless @presence[path]
+          return File.exist?(path) unless present_at_mark?(path)
 
           changed?(path, strict: true, missing: true)
         end
 
-        def existence_changed?(path, strict:)
+        def present_at_mark?(path)
+          kind = @presence[path]
+          !kind.nil? && kind != Cache::Descriptor::FileEntry::KIND_ABSENT
+        end
+
+        # `comparator` is `:exists` or `:kind`: whether the path came or went, or whether it is no longer the kind
+        # of thing the mark recorded.
+        def presence_changed?(path, comparator, strict:)
           absolute = File.absolute_path(path)
-          return File.exist?(absolute) != @presence[absolute] if @presence.key?(absolute)
+          if @presence.key?(absolute)
+            return File.exist?(absolute) != present_at_mark?(absolute) if comparator == :exists
+
+            return Cache::Descriptor::FileEntry.kind_of(absolute) != @presence[absolute]
+          end
 
           nearest = absolute
           nearest = File.dirname(nearest) until File.exist?(nearest) || File.dirname(nearest) == nearest

@@ -87,7 +87,10 @@ module Rigor
       # appears, vanishes or changes kind invalidates the warm entry. A
       # pre-19 entry carries none of them and would validate fresh across exactly those edits, so cached
       # entries must read as misses once and rebuild carrying the rows.
-      SCHEMA_VERSION = 19
+      # v20: #1977 — the `--incremental` run-result slot records a `:kind` row, not an existence row, per analysis
+      # root, `pre_eval:` entry and project signature root. A pre-20 slot's existence row validates fresh across a
+      # directory replaced by a file of the same name, so it must read as a miss once and rebuild.
+      SCHEMA_VERSION = 20
 
       # Per-slot entry value objects. Constructors validate enums / required fields and freeze the resulting
       # struct so no caller can mutate after the entry is in a Descriptor.

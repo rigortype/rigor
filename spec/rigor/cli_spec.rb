@@ -427,6 +427,45 @@ RSpec.describe Rigor::CLI do
         expect(err).not_to include("different order")
       end
     end
+
+    # #1977 — a root's path-error row (`not a Ruby file`, `no such file or directory`) is one of the rows compared,
+    # so an incremental side that drops it fails the gate. The gate replays no edit (#1967), so it agrees on a tree
+    # whose root changed kind after a cached run; the warm-against-cold specs in `incremental_run_slot_spec.rb`
+    # pin that.
+    context "with an analysis root that is not a Ruby file" do
+      def run_with_file_root(dir)
+        write_multi_diagnostic_project(dir)
+        File.write(File.join(dir, "x"), "")
+        run_cli("check", "--verify-incremental", "--no-stats", "--config", File.join(dir, ".rigor.yml"),
+                dir, File.join(dir, "x"))
+      end
+
+      def path_error?(row) = row.to_h["message"].to_s.start_with?("not a Ruby file")
+
+      it "counts the root's path-error row among the rows that agree" do
+        Dir.mktmpdir do |dir|
+          rows = nil
+          wrap_reanalyze_subset { |diagnostics| rows = diagnostics }
+          status, out, = run_with_file_root(dir)
+
+          expect(rows.count { |row| path_error?(row) }).to eq(1)
+          expect(out).to include("--verify-incremental OK")
+          expect(status).to eq(0)
+        end
+      end
+
+      it "fails when the incremental side is missing the root's path-error row" do
+        Dir.mktmpdir do |dir|
+          wrap_reanalyze_subset { |diagnostics| diagnostics.reject { |row| path_error?(row) } }
+          status, _out, err = run_with_file_root(dir)
+
+          expect(status).to eq(1)
+          expect(err).to include("--verify-incremental FAILED — incremental and full diagnostics differ.")
+          expect(err).to include("incremental-only: 0, full-only: 1")
+          expect(err).to include("not a Ruby file")
+        end
+      end
+    end
   end
 
   describe "check --incremental" do

@@ -130,8 +130,8 @@ really is on existence alone; a read records the `:stat` row over it.
 The `:kind` comparator (#1962) carries what `FileEntry.kind_of` answers for the path, in
 the order `Runner#expand_paths` asks, each predicate following symlinks: `"directory"`,
 `"file"`, `"other"` (a FIFO, a socket), or `"absent"` (a missing path, a dangling symlink).
-`FileEntry.kind(path:)` builds it, and the run descriptor records one per analysis root,
-`pre_eval:` entry and project signature root, whose answers turn on exactly that: unlike an
+`FileEntry.kind(path:)` builds it, and the run descriptor and the `--incremental` slot (#1977)
+record one per analysis root, `pre_eval:` entry and project signature root, whose answers turn on exactly that: unlike an
 existence row it reads stale when a directory is replaced by a file of the same name. What
 a directory holds is not its concern; the analysed files are in the key and have rows of
 their own, and a signature root's files have #979's, so a non-`.rb` file added under an
@@ -178,7 +178,7 @@ choosing one contribution silently.
 Returns the canonical hex SHA-256 cache key for a producer +
 input + descriptor combination. The key incorporates:
 
-1. `Descriptor::SCHEMA_VERSION` (currently `19` — v2 added the
+1. `Descriptor::SCHEMA_VERSION` (currently `20` — v2 added the
    `dependencies` slot for the ADR-10 per-gem-version cache slice;
    v3 invalidates RBS envs marshalled before `build_env_for` began
    synthesizing missing `signature_paths:` namespaces; v4 added the
@@ -205,7 +205,10 @@ input + descriptor combination. The key incorporates:
    migration reason as v8; v12 to v18 are recorded on the constant; v19
    invalidates run-result entries written before the run descriptor
    carried a `:kind` row per analysis root, `pre_eval:` entry and
-   signature root (#1962, #1555), the v8 migration reason again). Bumping this constant invalidates every cached value.
+   signature root (#1962, #1555), the v8 migration reason again; v20
+   invalidates `--incremental` slot entries written while those rows
+   were existence rows, which read a directory replaced by a file of the
+   same name as fresh (#1977)). Bumping this constant invalidates every cached value.
 2. `producer_id` (a stable string that namespaces the cache
    slice).
 3. `params` (the producer's input hash). Recursively
@@ -1398,8 +1401,8 @@ guarantee, is [ADR-45](../adr/45-unchanged-project-fast-path.md) WD2; this is th
   it; `Runner#incremental_slot_rows`' `observed` rows (every plugin boundary row, each
   producer's `watch:` globs among them, recorded as the plugin read) and `derived` rows
   (taken when the run ends: the template files and one `:names` row per claimed glob, and
-  an existence row per analysis root and `pre_eval:` entry); the chain's `baseline` and
-  `pinned` (`Runner#baseline_dependency_rows`: the signature tree and an existence row per
+  a `:kind` row per analysis root and `pre_eval:` entry); the chain's `baseline` and
+  `pinned` (`Runner#baseline_dependency_rows`: the signature tree and a `:kind` row per
   signature root, the discovered-not-analysed files and a listing row per discovery root,
   the `pre_eval:` files outside the analysed set; `pinned` holds the signature files
   outside the project's own signature roots, which the key's engine slot or lockfiles
@@ -1433,14 +1436,15 @@ guarantee, is [ADR-45](../adr/45-unchanged-project-fast-path.md) WD2; this is th
   to the `(name, version, mode)` it did at the mark (#1814); the analysed files' rows, the
   `derived` rows and the chain's `baseline`, carried or taken; and the chain's `pinned`.
   No path a content row names, no directory a glob row lists and no file a `:stat` glob
-  matches may have a change time at or after the mark. An existence row for a path the
-  mark recorded (the analysis roots, the `pre_eval:` entries, the signature roots) moved if
-  the path's presence differs from the mark's; its directory's change time is not asked,
+  matches may have a change time at or after the mark. The mark records what each of the
+  analysis roots, the `pre_eval:` entries and the signature roots is (`FileEntry.kind_of`).
+  A `:kind` row for one of those paths moved if the path's kind differs from the mark's,
+  and an existence row if its presence does (#1977); its directory's change time is not asked,
   so an editor's lock file beside it does not refuse the write, and a path that comes and
   goes again within the run is not seen. A glob row still compares its directory's change
   time, so a file created and removed in a listed directory (an editor's swap file in
   `lib/` during a run that overran the mark) refuses the write; that is safe, and known.
-  Any other existence row is judged by its own
+  Any other existence or `:kind` row is judged by its own
   change time, or its nearest existing ancestor's when absent. A path whose change time is
   asked refuses the write when it is on another device, except a `pinned` row's, which is
   passed over. A content row whose file is gone passes; the row is stale already. The `observed` rows and
@@ -1863,7 +1867,7 @@ simply misses and the full path takes over, the same forgone-fast-lane trade
 `rbs.virtual_rbs` already makes, and never a wrong hit.
 
 The `--incremental` slot records the same rows, with the analysed files'
-digests taken from the session rather than re-read, an existence row per
+digests taken from the session rather than re-read, a `:kind` row per
 analysis root, `pre_eval:` entry and signature root, the rows a recheck does
 not re-derive carried from the last full run, and the plugin reads kept per
 analysed file; see § "The run-result slot (ADR-45 WD2)".

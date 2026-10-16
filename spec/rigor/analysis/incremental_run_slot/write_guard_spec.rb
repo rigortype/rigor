@@ -192,9 +192,9 @@ RSpec.describe Rigor::Analysis::IncrementalRunSlot::WriteGuard do
     expect(guard.admits?(rows_for("lib/a.rb"))).to be(false)
   end
 
-  # `derived` carries an existence row for every `pre_eval:` entry, and the baseline a content row for the same path
-  # when it is outside the analysed files. The row that comes first must not hide the other.
-  context "with a `pre_eval:` file that is an existence row and a content row" do
+  # `derived` carries a kind row for every `pre_eval:` entry (#1977), and the baseline a content row for the same
+  # path when it is outside the analysed files. The row that comes first must not hide the other.
+  context "with a `pre_eval:` file that is a kind row and a content row" do
     let(:configuration) do
       Rigor::Configuration.new(Rigor::Configuration::DEFAULTS.merge({ "paths" => ["lib"],
                                                                       "pre_eval" => ["support/pre.rb"] }))
@@ -202,7 +202,7 @@ RSpec.describe Rigor::Analysis::IncrementalRunSlot::WriteGuard do
 
     before { write("support/pre.rb", "PRE = 1\n") }
 
-    def presence_row(path) = Rigor::Cache::Descriptor::FileEntry.present(path: File.expand_path(path))
+    def presence_row(path) = Rigor::Cache::Descriptor::FileEntry.kind(path: File.expand_path(path))
 
     def content_row(path)
       absolute = File.expand_path(path)
@@ -215,6 +215,32 @@ RSpec.describe Rigor::Analysis::IncrementalRunSlot::WriteGuard do
       both = Rigor::Cache::Descriptor.new(files: [presence_row("support/pre.rb"), content_row("support/pre.rb")])
       expect(guard.admits?(Rigor::Cache::Descriptor.new(files: [content_row("support/pre.rb")]))).to be(false)
       expect(guard.admits?(both)).to be(false)
+    end
+  end
+
+  # #1977 — an analysis root's `:kind` row is judged against what the path was at the mark, not by change times:
+  # the root's kind moving refuses the write, and an editor's lock file coming and going inside it does not.
+  context "with an analysis root's kind row" do
+    def kind_rows = Rigor::Cache::Descriptor.new(files: [Rigor::Cache::Descriptor::FileEntry.kind(path: "lib")])
+
+    it "refuses the write when the root is removed after the mark" do
+      guard = start
+      FileUtils.rm_rf("lib")
+      expect(guard.admits?(kind_rows)).to be(false)
+    end
+
+    it "refuses the write when the root turns from a directory into a file after the mark" do
+      guard = start
+      FileUtils.rm_rf("lib")
+      File.write("lib", "")
+      expect(guard.admits?(kind_rows)).to be(false)
+    end
+
+    it "admits the write when a file comes and goes inside the root after the mark" do
+      guard = start
+      File.write("lib/.#a.rb", "")
+      FileUtils.rm_f("lib/.#a.rb")
+      expect(guard.admits?(kind_rows)).to be(true)
     end
   end
 

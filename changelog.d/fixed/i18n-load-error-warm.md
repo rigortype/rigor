@@ -1,0 +1,1 @@
+- **[plugins]** `rigor-rails-i18n` now reports `plugin.rails-i18n.load-error` for a broken `config/locales/*.yml` on every run while the file stays broken, including a warm run after a config edit and a `--workers` run, which used to drop the row. ([#2019](https://github.com/rigortype/rigor/pull/2019))

@@ -224,6 +224,27 @@ RSpec.describe "rigor lens" do
     expect(values["lib/b.rb"]).to eq("state" => "unavailable", "reason" => "not_computed")
   end
 
+  # The reverse: a.rb sorts first, so its default is the declaration kept, and z.rb's annotated site must not
+  # read it as its own `inline` type (z.rb's inline RBS is dropped as a duplicate).
+  it "does not read another rbs-inline file's default as a site's own annotation" do
+    File.write("lib/a.rb", <<~RUBY)
+      # rbs_inline: enabled
+
+      module Two
+        #: () -> void
+        def self.x = nil
+        DUP = "s"
+      end
+    RUBY
+    File.write("lib/z.rb", "# rbs_inline: enabled\n\nmodule Two\n  DUP = [] #: Array[String]\nend\n")
+    _, out, = lens(["--format=json", "lib/a.rb", "lib/z.rb"])
+    files = JSON.parse(out)["files"]
+    values = files.to_h { |file| [file["path"], file["sites"].find { it["kind"] == "constant" }["value"]] }
+
+    expect(values["lib/a.rb"]).to include("state" => "typed", "type" => "String", "provenance" => "inferred")
+    expect(values["lib/z.rb"]).to eq("state" => "unavailable", "reason" => "not_computed")
+  end
+
   def write_inline_constants
     File.write("lib/k.rb", <<~RUBY)
       # rbs_inline: enabled

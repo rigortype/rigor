@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "json"
 require "prism"
 require "yaml"
 
@@ -46,6 +47,7 @@ module DeclarationFactSources
   # `TODO` before the first existing entry that sorts after it, a vanished one (and a file left with none) is dropped,
   # and the leading comment block stays. Returns the new text.
   def regenerate_producers_text(text, keys)
+    text += "\n" unless text.empty? || text.end_with?("\n")
     head, sections = split_producer_sections(text)
     wanted = keys.group_by { |key| key.split("#", 2).first }
                  .transform_values { |paths| paths.map { |key| key.split("#", 2).last } }
@@ -53,14 +55,15 @@ module DeclarationFactSources
       [path, preamble, merge_producer_entries(entries, wanted[path])] if wanted.key?(path)
     end
     add_producer_sections(kept, wanted.slice(*(wanted.keys - sections.map(&:first))))
-    lines = kept.flat_map { |path, preamble, entries| ["#{yaml_key(path)}:\n", *preamble, *entries.flat_map(&:last)] }
+    lines = kept.flat_map { |_path, preamble, entries| [*preamble, *entries.flat_map(&:last)] }
     head.join + lines.join
   end
 
   def add_producer_sections(kept, added)
     added.sort.each do |path, scopes|
       at = kept.index { |section| section.first > path } || kept.size
-      kept.insert(at, [path, ["  computes: TODO\n", "  producers:\n"], merge_producer_entries([], scopes)])
+      preamble = ["#{yaml_key(path)}:\n", "  computes: TODO\n", "  producers:\n"]
+      kept.insert(at, [path, preamble, merge_producer_entries([], scopes)])
     end
   end
 
@@ -70,25 +73,39 @@ module DeclarationFactSources
     text.to_json
   end
 
-  # `[head lines, [[path, preamble lines, [[scope, entry lines]]]]]`; an entry is its `key: reason` line and any
-  # continuation lines, a preamble is a file's lines up to and including `  producers:`.
+  # `[head lines, [[path, preamble lines, [[scope, entry lines]]]]]`; a preamble is a file's header line and the lines
+  # up to and including `  producers:`, and only after that line does a 4-space `key:` start an entry (before it, such
+  # a line continues a multi-line `computes:`). An entry is its `key: reason` line and any continuation lines.
   def split_producer_sections(text)
     head = []
     sections = []
     text.each_line do |line|
       if line.match?(/\A\S/) && !line.start_with?("#")
-        sections << [line.chomp.delete_suffix(":"), [], []]
+        sections << [unquote_yaml_key(line.chomp.delete_suffix(":")), [line], []]
       elsif sections.empty?
         head << line
-      elsif (match = line.match(/\A {4}(\S.*?):(?: |$)/))
-        sections.last[2] << [match[1], [line]]
-      elsif sections.last[2].empty?
-        sections.last[1] << line
       else
-        sections.last[2].last.last << line
+        add_producer_line(sections.last, line)
       end
     end
     [head, sections]
+  end
+
+  def add_producer_line(section, line)
+    _, preamble, entries = section
+    match = line.match(/\A {4}(\S.*?):(?: |$)/) if preamble.any? { |text| text.start_with?("  producers:") }
+    if match
+      entries << [unquote_yaml_key(match[1]), [line]]
+    elsif entries.empty?
+      preamble << line
+    else
+      entries.last.last << line
+    end
+  end
+
+  # The inverse of `yaml_key`'s quoting.
+  def unquote_yaml_key(text)
+    text.start_with?('"') ? JSON.parse(text) : text
   end
 
   def merge_producer_entries(entries, scopes)

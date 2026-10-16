@@ -246,13 +246,8 @@ RSpec.describe "Declaration producers" do
 
     it "is a byte-for-byte no-op on the current tree" do
       committed = File.read(snapshot)
-      Dir.mktmpdir do |dir|
-        copy = File.join(dir, "producers.yml")
-        File.write(copy, committed)
-        File.write(copy, regenerate(File.read(copy), found.keys))
 
-        expect(File.read(copy)).to eq(committed)
-      end
+      expect(regenerate(committed, found.keys)).to eq(committed)
     end
 
     it "touches only the affected entries when a producer appears and another vanishes" do
@@ -291,6 +286,34 @@ RSpec.describe "Declaration producers" do
       expect(regenerate(text, %w[lib/a.rb#A#alpha lib/a.rb#A#zed])).to eq(text)
       expect(regenerate(text, %w[lib/a.rb#A#alpha lib/a.rb#A#beta lib/a.rb#A#zed]))
         .to eq(text.sub("    A#zed", "    A#beta: TODO\n    A#zed"))
+    end
+
+    it "keeps a multi-line computes block, whatever its continuation lines look like" do
+      text = "lib/b.rb:\n  computes: >-\n    first line\n    indented4: yes\n  producers:\n    B#y: r\n"
+
+      expect(regenerate(text, ["lib/b.rb#B#y"])).to eq(text)
+    end
+
+    it "drops a file left with no entries and inserts a new file in sort position" do
+      text = "lib/a.rb:\n  computes: a\n  producers:\n    A#x: r\nlib/c.rb:\n  computes: c\n  producers:\n    C#z: r\n"
+      b = "lib/b.rb:\n  computes: TODO\n  producers:\n    B#y: TODO\n"
+
+      expect(regenerate(text, %w[lib/a.rb#A#x lib/b.rb#B#y lib/c.rb#C#z]))
+        .to eq(text.sub("lib/c.rb:", "#{b}lib/c.rb:"))
+      expect(regenerate(text, %w[lib/a.rb#A#x])).to eq(text.split("lib/c.rb:").first)
+    end
+
+    it "round-trips a key the writer had to quote" do
+      text = "lib/a.rb:\n  computes: a\n  producers:\n    \"*s\": why\n"
+
+      expect(regenerate(text, ["lib/a.rb#*s"])).to eq(text)
+      expect(regenerate("lib/a.rb:\n  computes: a\n  producers:\n", ["lib/a.rb#*s"])).to eq(text.sub("why", "TODO"))
+    end
+
+    it "adds the newline a file lacks before inserting" do
+      text = "lib/a.rb:\n  computes: a\n  producers:\n    A#x: r"
+
+      expect(regenerate(text, %w[lib/a.rb#A#x lib/a.rb#A#y])).to eq("#{text}\n    A#y: TODO\n")
     end
   end
 end

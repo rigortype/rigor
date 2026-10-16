@@ -211,6 +211,19 @@ RSpec.describe "rigor lens" do
     expect(later["visibility"]).to eq("public")
   end
 
+  # #1998 review: when two files write a name, the declaration the environment kept says nothing about the other
+  # file's site, whichever of them carries the annotation.
+  it "reads an inline constant declaration only for a site in its own file" do
+    File.write("lib/a.rb", "# rbs_inline: enabled\n\nmodule Two\n  AUTH = [] #: Array[String]\nend\n")
+    File.write("lib/b.rb", "module Two\n  AUTH = [\"z\"]\nend\n")
+    _, out, = lens(["--format=json", "lib/a.rb", "lib/b.rb"])
+    files = JSON.parse(out)["files"]
+    values = files.to_h { |file| [file["path"], file["sites"].find { it["kind"] == "constant" }["value"]] }
+
+    expect(values["lib/a.rb"]).to include("type" => "::Array[::String]", "provenance" => "inline")
+    expect(values["lib/b.rb"]).to eq("state" => "unavailable", "reason" => "not_computed")
+  end
+
   def write_inline_constants
     File.write("lib/k.rb", <<~RUBY)
       # rbs_inline: enabled

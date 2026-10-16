@@ -154,12 +154,22 @@ module Rigor
       # declaration is the constant's own only when that is the site's one contract comment. Otherwise it is the
       # plugin's default, which `check` reads all the same: that type, `inferred`. A `Class.new` / `Module.new`
       # value is the exception, which `check` types through its own write reading, not the default `untyped`.
+      # An inline declaration from another file says nothing about this site: when the name is written in two
+      # files, the one the environment kept decides, and this site's own comment may say otherwise.
       def declared_slot(site, declared, scope)
         return Slot.unavailable("not_computed") if declared.nil?
-        return declared unless declared["provenance"] == "inline" && !trailing_type?(site)
+        return declared unless declared["provenance"] == "inline"
+        return Slot.unavailable("not_computed") unless own_inline_declaration?(site, scope)
+        return declared if trailing_type?(site)
         return Slot.unavailable("not_computed") if anonymous_namespace?(site.node.value)
 
         published_slot(scope.environment.constant_for_name(site.data["name"]), scope.environment)
+      end
+
+      def own_inline_declaration?(site, scope)
+        buffer = scope.environment.rbs_loader&.constant_declaration(site.data["name"])&.last
+        path = @site_paths.fetch(site.data["key"])
+        buffer&.end_with?(":#{path}") || false
       end
 
       def anonymous_namespace?(node)

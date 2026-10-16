@@ -78,6 +78,7 @@ module Rigor
       def reset_captures
         @captured = {}
         @contracts = {}
+        @defaulted_blocks = {}
         @site_paths = {}
       end
 
@@ -178,7 +179,11 @@ module Rigor
         key = [owner, member_scope, name]
         return if @contracts.key?(key)
 
-        @contracts[key] = contract_reader(scope.environment).read(owner, member_scope.to_sym, name, scope)
+        reader = contract_reader(scope.environment)
+        @contracts[key] = reader.read(owner, member_scope.to_sym, name, scope)
+        return if @contracts[key]
+
+        @defaulted_blocks[key] = reader.read_defaulted_block(owner, member_scope.to_sym, name, scope)
       end
 
       def target(entry, diagnostics, session)
@@ -229,7 +234,7 @@ module Rigor
         sites = readers.values.flat_map(&:sites)
         omissions = readers.values.flat_map(&:omissions)
         requested = readers.keys.to_set
-        Members.new(sites: sites, omissions: omissions, contracts: @contracts,
+        Members.new(sites: sites, omissions: omissions, contracts: @contracts, defaulted_blocks: @defaulted_blocks,
                     elsewhere: elsewhere(session, requested), site_paths: @site_paths).build
       end
 

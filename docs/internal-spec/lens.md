@@ -283,7 +283,11 @@ not on the magic comment:
   whose type is the block's RBS function type as the overload's `rbs` spells it inside the braces
   (`(::Integer) -> void`, `() [self: ::Foo] -> void`, `(?) -> untyped`). Without a contract, a definition takes a
   block when it declares `&blk` or its body (outside nested `def`s, lambdas and `define_method` blocks)
-  contains `yield`; it then reads `{required: false, type: <dynamic slot>}`. `null` means no block was
+  contains `yield`; it then reads `{required: false, type: <dynamic slot>}`. A member whose inline declaration
+  the rbs-inline plugin defaulted (`inferred-signature`) except for an annotated block (`# @rbs &block: …`) takes
+  that block as declared, with provenance `inline`, since `check` binds the block's parameters from it; its
+  parameters and return stay inferred. The plugin's default block (`?{ (?) -> untyped }`) is never read as
+  declared: in a declaration it defaulted in part, it reads as an undeclared block does. `null` means no block was
   declared or detected.
 - `return` is a slot.
 - `rbs` is the overload as RBS in `sig-gen`'s spelling, authored `%a{rigor:v1:…}` annotations of the

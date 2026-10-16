@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "slot"
+require_relative "parameters"
 require_relative "../reflection"
 
 module Rigor
@@ -32,6 +33,26 @@ module Rigor
         contract(defs, annotations)
       rescue StandardError
         unreadable("definition_build_failed", [])
+      end
+
+      # The block an otherwise defaulted inline declaration (`rigor:v1:inferred-signature`) declares, as a
+      # `{required, type}` slot, or nil. The rbs-inline plugin defaults an unannotated `&block` to `?{ (?) ->
+      # untyped }`, so any other block came from a `# @rbs &block:` annotation, and `check` binds the block's
+      # parameters from it. A block spelled like the default carries nothing either way.
+      def read_defaulted_block(owner, scope, name, lookup_scope)
+        method = lookup(owner, scope, name, lookup_scope)
+        defs = method ? method.defs.select { |definition| definition.defined_in.to_s.delete_prefix("::") == owner } : []
+        return nil unless defs.size == 1 && annotations_of(method, defs).include?(INFERRED_SIGNATURE)
+
+        block = defs.first.type.block
+        return nil if block.nil? || default_block?(block)
+
+        provenance, path = @provenance.classify(buffer_name(defs.first))
+        return nil if provenance.nil?
+
+        { "required" => block.required, "type" => Slot.from_rbs(block_type(block), provenance, path) }
+      rescue StandardError
+        nil
       end
 
       # The declared type of the constant `name` (qualified), as a slot with its declaration's provenance, or nil
@@ -102,8 +123,7 @@ module Rigor
       def overload(method_type, provenance, path, return_inferred, annotations)
         function = method_type.type
         params = function.respond_to?(:required_positionals) ? params_of(function, provenance, path) : nil
-        block = method_type.block && { "required" => method_type.block.required,
-                                       "type" => Slot.from_rbs(block_type(method_type.block), provenance, path) }
+        block = method_type.block && block_slot(method_type.block, provenance, path, return_inferred)
         prefix = annotations.map { |string| "%a{#{string}} " }.join
         return_slot = return_inferred ? nil : Slot.from_rbs(function.return_type.to_s, provenance, path)
         { "rbs" => "#{prefix}#{method_type}", "params" => params, "block" => block, "return" => return_slot,
@@ -115,6 +135,21 @@ module Rigor
       def block_type(block)
         self_binding = ::RBS::Types::SelfTypeBindingHelper.self_type_binding_to_s(block.self_type)
         "(#{block.type.param_to_s}) #{self_binding}-> #{block.type.return_to_s}"
+      end
+
+      # Under a declaration the rbs-inline plugin defaulted in part (`return_inferred`), a block shaped like its
+      # default was not written: it reads as an undeclared block does.
+      def block_slot(block, provenance, path, return_inferred)
+        if return_inferred && default_block?(block)
+          return { "required" => false, "type" => Slot.dynamic("inferred", Parameters::UNDECLARED) }
+        end
+
+        { "required" => block.required, "type" => Slot.from_rbs(block_type(block), provenance, path) }
+      end
+
+      def default_block?(block)
+        !block.required && block.type.is_a?(::RBS::Types::UntypedFunction) && block.self_type.nil? &&
+          block.type.return_type.is_a?(::RBS::Types::Bases::Any)
       end
 
       def params_of(function, provenance, path)

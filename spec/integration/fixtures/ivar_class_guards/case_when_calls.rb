@@ -226,3 +226,22 @@ class Reflected
     end
   end
 end
+
+# A lambda test whose body calls a method that assigns the subject: under Ruby 4.0.5
+# `LambdaCall.new(false).later_clause` returns "S".
+class LambdaCall
+  def initialize(int)
+    @n = int ? 1 : nil
+  end
+
+  def reset_n!
+    @n = "s"
+  end
+
+  def later_clause
+    case @n
+    when ->(_) { reset_n!; false } then 0
+    when NilClass then @n.upcase # QUIET-1446
+    end
+  end
+end

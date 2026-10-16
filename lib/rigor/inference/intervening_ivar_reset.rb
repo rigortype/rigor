@@ -62,24 +62,22 @@ module Rigor
 
       # Issue #1963 — `scope` past the calls `node`, a condition operand, makes: {.widen} over the names every
       # candidate call in it may write, or every name when one of them is not proven. A call's literal block may run,
-      # so its calls count; a `def`, a class or module body and (unless `run_lambdas`) a lambda literal run nothing
-      # on this `self` there. A `when` test calls its value's `===`, which for a lambda literal runs the body, so
-      # that caller passes `run_lambdas: true`. A write in a lambda body is not this reset's: the caller reads it.
+      # so its calls count; a `def`, a class or module body and a lambda literal run nothing on this `self` there.
       #
       # The widened bindings take the declaration mark ({.widen}'s `mark:`): the reset forgets the narrowing without
       # making the variable newly nil-reportable, since a call the proof cannot clear is far more often one that
       # leaves the variable alone (`if @tag && items.any?` then `t = @tag; t.upcase`) than one that assigns `nil`.
-      def after_operand(node, scope, run_lambdas: false)
+      def after_operand(node, scope)
         return scope unless narrowed_ivars?(scope)
 
-        calls = candidate_calls(node, run_lambdas)
+        calls = candidate_calls(node, false)
         return scope if calls.empty?
 
         widen(scope, mark: true) { proven_writes(calls, scope) }
       end
 
-      # Whether a candidate call in `node` (with `run_lambdas`, one in a lambda body too) may write the instance
-      # variable `name`. A write to it in `node` is the caller's to check.
+      # Whether a candidate call in `node` may write the instance variable `name`. A `when` test passes
+      # `run_lambdas: true`, since its `===` runs a lambda literal's body. A write to it in `node` is the caller's to check.
       def may_write?(node, name, scope, run_lambdas: false)
         calls = candidate_calls(node, run_lambdas)
         return false if calls.empty?

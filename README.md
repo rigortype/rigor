@@ -232,7 +232,7 @@ rigor docs --list                 # list every bundled page
 
 ## Status
 
-Current release: **`v0.4.3`** (2026-10-15) — on the
+Current release: **`v0.4.4`** (2026-10-16) — on the
 `0.4.x` line, continuing the evaluation era opened by `v0.2.0`, the first
 publicly-announced (general / evaluation) release. The line publishes
 an enumerated [compatibility surface](docs/compatibility.md) as a

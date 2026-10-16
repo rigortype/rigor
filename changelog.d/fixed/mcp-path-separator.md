@@ -1,1 +1,0 @@
-- **[rigor mcp]** The `rigor_check`, `rigor_triage`, `rigor_sig_gen`, `rigor_coverage`, `rigor_annotate`, `rigor_type_of` and `rigor_explain` tools now pass their paths, file and rule after `--`, so an argument such as `--format=text` or `--workers=4` is read as a path instead of silently changing the run. ([#1990](https://github.com/rigortype/rigor/pull/1990))

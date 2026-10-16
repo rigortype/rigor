@@ -1,1 +1,0 @@
-- **[engine]** `rigor check --incremental` now re-checks a file whose `$_` reading after a `gets` or `readline` call depends on whether the project defines a method of that name, when an edit in another file adds or removes such a definition, so a stale report no longer outlives it. ([#1964](https://github.com/rigortype/rigor/pull/1964))

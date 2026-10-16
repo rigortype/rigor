@@ -1,1 +1,0 @@
-- **[mcp]** The MCP server gains `rigor_lens`, which returns the `lens/v0` declaration map of the given files: each class, module, method and attribute with the type `rigor check` gives it and where that type came from. ([#1923](https://github.com/rigortype/rigor/pull/1923))

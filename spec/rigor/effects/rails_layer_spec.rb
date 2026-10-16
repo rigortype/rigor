@@ -519,6 +519,15 @@ RSpec.describe "the Rails effect layer" do
   end
 
   describe "the entry-point presets" do
+    # The presets are registered by PluginFacts during a run, not by loading the plugins. Each nested group
+    # has its own memoised run (`self.class.table` memoises on the group's class), and this group never
+    # triggered one, so the examples passed only when an earlier group's run had already filled the
+    # process-global registry. Register from this group's own run's facts instead.
+    before do
+      facts = self.class.table[1]
+      Rigor::Effects::EntryPoints.register_all(facts.entry_points)
+    end
+
     it "registers the rails preset and its per-component slices" do
       expect(Rigor::Effects::EntryPoints.names)
         .to include("rails", "rails-controllers", "rails-jobs", "rails-mailers", "rails-channels")

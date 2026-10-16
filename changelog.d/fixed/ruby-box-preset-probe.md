@@ -1,0 +1,1 @@
+- **[plugins]** Running `rigor` with `RUBY_BOX=1` already set no longer segfaults on a Ruby without the Ruby Bug #22260 fix (every release through 4.0.7): the launcher now checks for the fix in that case too, prints a notice and restarts without `RUBY_BOX`, caching the check per Ruby build. ([#1986](https://github.com/rigortype/rigor/pull/1986))

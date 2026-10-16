@@ -829,8 +829,29 @@ project's source.
     `Ruby::Box` inactive is reported as such. Either way the launcher
     writes a notice to stderr (`$stderr.puts`, so `-W0` cannot hide it),
     drops `RIGOR_PLUGIN_ISOLATION=ruby_box` / `RIGOR_BOX`, and runs under
-    the configured strategy. The probe is skipped when `RUBY_BOX` is
-    already set, since the process has booted inside the box by then.
+    the configured strategy. When `RUBY_BOX` is already set (by hand or by
+    a wrapper) and `Ruby::Box` is active, the process has booted inside the
+    box before any Rigor code runs, so the launcher runs the same probe
+    there too: on a refusal it writes a one-line notice to stderr, removes
+    `RUBY_BOX` (and any `ruby_box` request), and re-execs itself; on a pass
+    it keeps `RUBY_BOX` as set. Either re-exec carries the internal
+    `RIGOR_BOX_PROBED` marker, so the child neither probes nor re-execs
+    again, and clears it before Rigor loads. The verdict is cached under
+    `$XDG_CACHE_HOME/rigor/ruby-box-probe/` when `XDG_CACHE_HOME` is an
+    absolute path, else under `$HOME/.cache/rigor/ruby-box-probe/`; a
+    relative or empty `HOME` turns the cache off. The key is
+    `RUBY_VERSION`, `RUBY_PATCHLEVEL`, `RUBY_REVISION`, `RUBY_DESCRIPTION`,
+    the Ruby executable path, and the probe script. Only a pass, a crash
+    signal (`SEGV` / `BUS` / `ABRT` / `ILL`) or an inactive `Ruby::Box` is
+    cached. A probe that cannot start, times out, or fails another way is
+    answered but re-run next time, so a Ruby whose probe times out pays the
+    ten-second deadline (`DEADLINE_SECONDS`) on every such run. An
+    unreadable cache file, or one whose format line is not the current one,
+    reads as a miss, and a cache write that fails is ignored. A cached
+    verdict never expires: after rebuilding a Ruby in place with the fix,
+    delete `$XDG_CACHE_HOME/rigor/ruby-box-probe` (or
+    `~/.cache/rigor/ruby-box-probe`) so the launcher probes again; a build
+    whose `RUBY_REVISION` or `RUBY_DESCRIPTION` changed misses anyway.
 - `Rigor::Plugin::Box` — the `Ruby::Box` wrapper backing the `ruby_box`
   strategy (`enabled?` / `require_feature` / `eval`).
 

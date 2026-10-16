@@ -290,6 +290,31 @@ RSpec.describe "rigor lens" do
     expect(members["init2"]["overloads"].first["return"]).to eq("state" => "unavailable", "reason" => "not_computed")
   end
 
+  # rigortype/rigor#1907: a declared block's type read as `#<RBS::Types::Function:0x…>`.
+  it "spells a declared block's function type as RBS writes it" do
+    File.write("lib/blk.rb", <<~RUBY)
+      class Blk
+        def each_item = yield(1)
+        def scoped(&) = instance_exec(&)
+        def loose = yield
+      end
+    RUBY
+    File.write("sig/blk.rbs", <<~RBS)
+      class Blk
+        def each_item: () { (Integer, ?String) -> void } -> void
+        def scoped: () ?{ () [self: Blk] -> Integer } -> void
+        def loose: () { (?) -> untyped } -> void
+      end
+    RBS
+    _, out, = lens(["--format=json", "lib/blk.rb"])
+    blocks = JSON.parse(out)["members"].to_h { |member| [member["name"], member["overloads"].first["block"]] }
+
+    expect(blocks.transform_values { |block| [block["required"], block["type"]["type"]] })
+      .to eq("each_item" => [true, "(::Integer, ?::String) -> void"],
+             "scoped" => [false, "() [self: ::Blk] -> ::Integer"],
+             "loose" => [true, "(?) -> untyped"])
+  end
+
   it "exits 64 for a configuration file that does not exist" do
     status, out, = lens(["--config=nope.yml", "lib/order.rb"])
 

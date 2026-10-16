@@ -280,7 +280,8 @@ not on the magic comment:
   argument-forwarding list (`...`, or RBS `(?)`), and for a contract Rigor cannot read (its `return` is then
   `unavailable` with `not_computed` or `definition_build_failed`).
 - `block` is `{required, type}` when the member takes a block: `required` is a boolean and `type` a slot
-  whose type is the block's RBS function type (`(Integer) -> void`). Without a contract, a definition takes a
+  whose type is the block's RBS function type as the overload's `rbs` spells it inside the braces
+  (`(::Integer) -> void`, `() [self: ::Foo] -> void`, `(?) -> untyped`). Without a contract, a definition takes a
   block when it declares `&blk` or its body (outside nested `def`s, lambdas and `define_method` blocks)
   contains `yield`; it then reads `{required: false, type: <dynamic slot>}`. `null` means no block was
   declared or detected.

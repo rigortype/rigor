@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+# Push the current branch the one way a lane may: rebased onto the latest
+# origin/master, gated by bin/verify-changed, with an explicit refspec.
+#
+# Every push of a PR branch — the first one, the changelog-fragment push and each
+# review-round fix — goes through here. It folds four rules lanes kept tripping on
+# by hand (October 2026: two lanes pushed a head whose gate had not passed, and
+# rebasing by hand made the follow-up push non-fast-forward):
+#
+#   1. rebase onto a freshly fetched origin/master right before the push, so CI
+#      runs the branch as it would merge;
+#   2. run bin/verify-changed on the rebased tree and refuse to push when it fails;
+#   3. push with `HEAD:refs/heads/<branch>`, never `-u`: on a host whose global
+#      `push.default` is `tracking`, a branch cut from origin/master would
+#      otherwise push onto master (contribution-flow.md);
+#   4. once the remote branch exists, push with --force-with-lease pinned to the
+#      SHA it held before this run, so a rebase may rewrite the branch but
+#      another writer's push is never overwritten.
+#
+# A gate failure that predates the branch (an issue already filed for it) is the
+# one case for --no-verify=<reason>; the reason is printed so the hand-back can
+# quote it. Run inside the Flake: `nix develop --command bin/lane-push`.
+#
+# Usage: bin/lane-push [--no-verify=<reason>]
+
+set -uo pipefail
+
+no_verify_reason=""
+for arg in "$@"; do
+  case "$arg" in
+    --no-verify=?*) no_verify_reason="${arg#--no-verify=}" ;;
+    -h | --help)
+      sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'
+      exit 0
+      ;;
+    *)
+      echo "lane-push: unknown argument: $arg (see --help)" >&2
+      exit 2
+      ;;
+  esac
+done
+
+die() {
+  echo "lane-push: $*" >&2
+  exit 1
+}
+
+branch="$(git symbolic-ref --quiet --short HEAD)" || die "HEAD is detached; check out the PR branch first"
+case "$branch" in
+  master | main) die "refusing to push $branch; lanes push their own branch" ;;
+  claude/* | codex/*) die "branch $branch carries a tool prefix; name it for the change (contribution-flow.md)" ;;
+esac
+[[ -z "$(git status --porcelain --untracked-files=no)" ]] ||
+  die "the tree has uncommitted changes; commit them first (a rebase needs a clean tree)"
+
+git fetch --quiet origin || die "git fetch origin failed"
+remote_sha="$(git ls-remote origin "refs/heads/$branch" | cut -f1)"
+# The lease alone would let a rebased push drop a commit someone else added to
+# the remote branch (a coordinator's fix-up): require that this branch already
+# holds everything the remote one does.
+if [[ -n "$remote_sha" ]]; then
+  git cat-file -e "$remote_sha^{commit}" 2>/dev/null && git merge-base --is-ancestor "$remote_sha" HEAD ||
+    die "origin/$branch has commits this branch lacks (at $remote_sha); \`git merge --ff-only origin/$branch\` or look before pushing"
+fi
+
+if ! git rebase --quiet origin/master; then
+  die "rebase onto origin/master stopped on a conflict; resolve it, \`git rebase --continue\`, then run lane-push again"
+fi
+
+if [[ -n "$no_verify_reason" ]]; then
+  echo "lane-push: skipping bin/verify-changed: $no_verify_reason"
+else
+  bin/verify-changed </dev/null || die "bin/verify-changed failed on the rebased tree; nothing was pushed"
+fi
+
+if [[ -z "$remote_sha" ]]; then
+  git push origin "HEAD:refs/heads/$branch" || die "push failed"
+else
+  git push --force-with-lease="refs/heads/$branch:$remote_sha" origin "HEAD:refs/heads/$branch" ||
+    die "push refused: origin/$branch moved since $remote_sha; fetch and look before pushing again"
+fi
+echo "lane-push: pushed $branch at $(git rev-parse HEAD) onto origin/master $(git rev-parse --short origin/master)"

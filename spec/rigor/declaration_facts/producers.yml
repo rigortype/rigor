@@ -476,7 +476,7 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#write_mixin_targets: grandfathered
     Rigor::Inference::ScopeIndexer#write_singleton_slot: ADR-119 WD3, the singleton walk's one slot write, routed through SingletonDefTable so the slot's contest follows its writer; the owner and side are the walk's, it adds no context of its own
     Rigor::Inference::ScopeIndexer#toplevel_include_owner: names `Object` as the owner of a receiverless `include` written as a direct statement of the program (`main.include`, issue #1697); it reads only whether the call is a top-level statement, and the walk's own empty prefix and owner
-    Rigor::Inference::ScopeIndexer#supersede_def_nodes: ADR-119 WD3 (#1989), a later implicit-self non-def definer (attr_*, a literal define_method, alias_method / alias) of a name removes the walk's own def-node slot when certain and contests it when possible (through follow_slot_writer); it takes the owner prefix and certainty the walk already computed and decides no declaration context
+    Rigor::Inference::ScopeIndexer#supersede_def_nodes: ADR-119 WD3 (#1989), a later implicit-self non-def definer (attr_*, a literal define_method, alias_method / alias) of a name contests the walk's own def-node slot, certain or possible, keeping the replaced def so no sibling file fills it (through follow_slot_writer); it takes the owner prefix and certainty the walk already computed and decides no declaration context
 lib/rigor/inference/scope_indexer/certainty.rb:
   computes: ADR-119 WD3's certainty, the identity Set of a file's possible def contributions
   producers:

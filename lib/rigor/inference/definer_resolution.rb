@@ -61,7 +61,7 @@ module Rigor
         flavor = question == :arity ? :arity : :methods
         chain = Scope::ResolutionChain.for(scope, class_name.to_s, side, flavor)
 
-        reads_visibility = VISIBILITY_QUESTIONS.include?(question)
+        reads_visibility = VISIBILITY_QUESTIONS.include?(question) ? question : nil
         hits = candidates(scope, chain, method_name, from, answer_in, reads_visibility)
         return UNKNOWN if hits.nil?
 
@@ -198,13 +198,20 @@ module Rigor
       # that reads the visibility (`reads_visibility`): a slot is contested there for a visibility call the walk
       # cannot place (an uncertain toggle, `private(*names)`, `private def self.x`), which leaves the definer and its
       # `def` certain; a possible `def` or `attr_*` call contests its def-node slot or its name's `possible` side too.
+      #
+      # `reads_visibility` is the question when it reads one. The `:visibility` question does not read a contested
+      # instance def-node slot (#1989): it answers from the visibility slot and the name's existence, not from the
+      # `def` body, and a possible `def` that contests the slot also makes its name `possible`. The slot is contested
+      # alone where a later `attr_*`, `define_method` or alias replaced the `def`, which leaves the reader's
+      # visibility certain.
       def possible?(scope, hit, method_name, reads_visibility)
         discovery = scope.discovery
         owner = hit.owner
         kind = hit.side == :singleton ? :singleton : :instance
         nodes = kind == :singleton ? :discovered_singleton_def_nodes : :discovered_def_nodes
         discovery.possible_method?(owner, method_name, kind) ||
-          discovery.contested?(nodes, [owner, method_name.to_sym]) ||
+          (!(reads_visibility == :visibility && kind == :instance) &&
+           discovery.contested?(nodes, [owner, method_name.to_sym])) ||
           (reads_visibility && discovery.contested?(:discovered_method_visibilities, [owner, method_name.to_sym])) ||
           discovery.contested?(:discovered_parameter_envelopes, [owner, [kind, method_name.to_sym]])
       end

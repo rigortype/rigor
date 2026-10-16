@@ -111,17 +111,15 @@ RSpec.describe "Discovery certainty (ADR-119 WD3)" do
       expect(siblings.fetch(:contested_discovered_def_nodes)).to eq(Set[["C", :m], ["C", :n], ["C", :n2]])
     end
 
-    # Issue #1989 — a later certain `attr_reader` empties the slot of the `def` it replaces; a possible one keeps
-    # the `def` and contests its slot.
-    it "empties a def slot a certain attr_reader supersedes and contests one a possible attr_reader does" do
-      paths = write_project(
-        "a.rb" => "class C\n  def x = 1\n  attr_reader :x\n  def y = 1\n  " \
-                  "if ENV[\"X\"]\n    attr_reader :y\n  end\nend\n"
+    # Issue #1989 — a later `attr_*` keeps the slot of the `def` it replaces and contests it, certain or possible; an
+    # `attr_writer` contests the `x=` slot and leaves the reader's, and a `def` written after the attr clears it.
+    it "contests a def slot a later attr replaces, and clears it for a def after the attr" do
+      siblings = agreed_siblings(
+        "a.rb" => "class C\n  def x = 1\n  attr_reader :x\n  def y = 1\n  if ENV[\"X\"]\n    attr_reader :y\n  end\n" \
+                  "  def w = 1\n  def w=(v) = v\n  attr_writer :w\n  def z = 1\n  attr_reader :z\n  def z = 2\nend\n"
       )
-      index = indexer.discovered_project_index_for_paths(paths)
 
-      expect(index.fetch(:def_index).fetch(:def_nodes).fetch("C").keys).to eq([:y])
-      expect(siblings_of(index).fetch(:contested_discovered_def_nodes)).to eq(Set[["C", :y]])
+      expect(siblings.fetch(:contested_discovered_def_nodes)).to eq(Set[["C", :x], ["C", :y], ["C", :w=]])
     end
 
     it "contests a top-level def under a conditional" do

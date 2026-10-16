@@ -5,11 +5,14 @@ require "spec_helper"
 # Issue #1989 — a definer that is not a `def` (`attr_*`, `define_method`, `alias_method` / `alias`) written after a
 # `def` of the same name replaces that method, so its return type must not come from the `def` body. Ruby 4.0.5's
 # value of `.x` is in each example's comment; every quiet example is a correct program, and the reported ones are
-# the positive controls where the `def` still answers.
+# the positive controls where the `def` still answers. An example marked "guard" passes without the fix too.
 RSpec.describe "a later non-def definer supersedes an earlier def for typing (#1989)", type: :runner do
-  def undefined(source = nil, files: {})
-    analyze(source, files: files).diagnostics.select { |d| d.rule == "call.undefined-method" }
-                                 .map { |d| [File.basename(d.path), d.line] }
+  def undefined(source = nil, files: {}, config: {})
+    analyze(source, files: files, config: config).diagnostics.select { |d| d.rule == "call.undefined-method" }
+                                                 .map do |d|
+      [File.basename(d.path),
+       d.line]
+    end
   end
 
   # Ruby: "s".
@@ -47,7 +50,7 @@ RSpec.describe "a later non-def definer supersedes an earlier def for typing (#1
     RUBY
   end
 
-  # Ruby: "y" for both.
+  # Ruby: "y" for both. Guard: the alias pass already gave the new name the old name's `def`.
   it "does not type from a def a later alias_method or alias replaces" do
     expect(undefined(<<~RUBY)).to eq([])
       class K
@@ -123,7 +126,8 @@ RSpec.describe "a later non-def definer supersedes an earlier def for typing (#1
     expect(rules).not_to include([6, "call.undefined-method"])
   end
 
-  # Ruby: 1 without X in the environment, "s" with it; neither answer is certain, so neither call reports.
+  # Ruby: 1 without X in the environment, "s" with it; neither answer is certain, so neither call reports. Guard: the
+  # possible attr_reader already made the name possible.
   it "does not answer from the def under a conditional attr_reader" do
     expect(undefined(<<~RUBY)).to eq([])
       class K
@@ -162,6 +166,34 @@ RSpec.describe "a later non-def definer supersedes an earlier def for typing (#1
     RUBY
   end
 
+  # Ruby: NoMethodError for each — the replacing definer is on another object (`O`, or the singleton), so the
+  # instance `def` still answers (controls).
+  it "keeps the def when the replacing definer is on another receiver or the singleton side" do
+    expect(undefined(<<~RUBY)).to eq([["code.rb", 19], ["code.rb", 20], ["code.rb", 21]])
+      class O; end
+      class K
+        def x = 1
+        O.define_method(:x) { "o" }
+      end
+      class S
+        def x = 1
+        class << self
+          attr_reader :x
+        end
+      end
+      class T
+        def x = 1
+        class << self
+          def y = "y"
+          alias x y
+        end
+      end
+      K.new.x.upcase
+      S.new.x.upcase
+      T.new.x.upcase
+    RUBY
+  end
+
   # Ruby: "s", whichever file is loaded first.
   it "carries the superseded def to a caller in another file" do
     files = {
@@ -178,5 +210,42 @@ RSpec.describe "a later non-def definer supersedes an earlier def for typing (#1
       RUBY
     }
     expect(undefined(files: files)).to eq([])
+  end
+
+  # Ruby: "S" twice — `b.rb` loads `a.rb` first, so its own `def` and then its attr_reader replace `a.rb`'s `def`.
+  # The sibling file's `def` must not stand in for the one this file replaced.
+  def sibling_files(plain, superseding, caller_line: "K.new.x.upcase\n",
+                    require_line: "require_relative \"#{File.basename(plain, '.rb')}\"\n")
+    {
+      plain => "class K\n  def x = 1\nend\n",
+      superseding => "#{require_line}class K\n  def x = \"t\"\n  attr_reader :x\n  " \
+                     "def initialize = (@x = \"s\")\n  def shout = x.upcase\nend\n#{caller_line}"
+    }
+  end
+
+  it "does not type from a sibling file's def the file's attr_reader replaced" do
+    expect(undefined(files: sibling_files("a.rb", "b.rb"))).to eq([])
+  end
+
+  it "does not type from a sibling file's def in either file order" do
+    expect(undefined(files: sibling_files("b.rb", "a.rb"))).to eq([])
+  end
+
+  it "does not type from a sibling file's def at a caller in a third file" do
+    files = sibling_files("a.rb", "b.rb", caller_line: "").merge("c.rb" => "require_relative \"b\"\nK.new.x.upcase\n")
+    expect(undefined(files: files)).to eq([])
+  end
+
+  it "does not type an implicit-self call in the body from a sibling file's def" do
+    expect(undefined(files: sibling_files("a.rb", "b.rb", caller_line: ""))).to eq([])
+  end
+
+  # Ruby: "S" when `a.rb` loads first, 1 otherwise; the load order is unknown, so the call declines.
+  it "does not type from a sibling file's def without require_relative" do
+    expect(undefined(files: sibling_files("a.rb", "b.rb", require_line: ""))).to eq([])
+  end
+
+  it "does not type from a sibling file's def under the fork pool" do
+    expect(undefined(files: sibling_files("a.rb", "b.rb"), config: { "workers" => 2 })).to eq([])
   end
 end

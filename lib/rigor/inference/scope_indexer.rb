@@ -4760,25 +4760,21 @@ module Rigor
       end
 
       # Issue #1989 — a definer that is not a `def` replaces the method an earlier `def` of the same name in this walk
-      # installed: `def x = 1; attr_reader :x` answers the attr reader, so the slot must not keep the `def` body for
-      # return inference. A certain definer empties the slot (the reader then has no body to type from, and
-      # declines); a possible one keeps the `def` and contests the slot, as a possible `def` does (ADR-119 WD3).
-      # Only this walk's own slot is touched: a sibling file's `def` reaches this file through the cross-file seed,
-      # whose load order the walk does not know.
+      # installed: `def x = 1; attr_reader :x` answers the attr reader, so the `def` body must not type the call. The
+      # slot keeps the `def` and is contested, certain definer or possible, so the readers that re-type a body
+      # decline. The slot is not emptied: the file still writes it, so a sibling file's `def` of the name (which the
+      # cross-file seed and the project fold would otherwise put there) cannot fill it. A `def` written after the
+      # definer writes the slot again and clears the contest.
       def supersede_def_nodes(names, qualified_prefix, accumulator, tables)
-        return if qualified_prefix.empty? || names.empty?
+        return if names.empty?
 
         class_name = qualified_prefix.join("::")
         slot = accumulator[class_name]
         return if slot.nil?
 
         names.each do |name|
-          next unless slot.key?(name)
-
-          slot.delete(name) if tables.certain
-          follow_slot_writer(tables, :contested_def_nodes, [class_name, name], tables.certain)
+          follow_slot_writer(tables, :contested_def_nodes, [class_name, name], false) if slot.key?(name)
         end
-        accumulator.delete(class_name) if slot.empty?
       end
 
       # #319 — a `def` inside an anonymous `Class.new` / `Module.new` body ALSO stays in the `<toplevel>` table.

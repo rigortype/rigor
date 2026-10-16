@@ -16,7 +16,9 @@ module Rigor
     # - `replaced` — the subset of `applied` that replaced an existing declaration rather than adding one
     #   (`--overwrite`'s tighter returns, and inline updates).
     # - `skipped` — the {MethodCandidate}s the writer declined (e.g. tighter-return without `--overwrite`). Each
-    #   entry pairs the candidate with a skip reason keyword (`:user_authored`).
+    #   entry pairs the candidate with a skip reason keyword: `:user_authored` (the target already declares the
+    #   member, and the writer does not replace it) or `:outside_sig_root` (the member routes to a file outside
+    #   the writer's sig root, so nothing was attempted).
     # - `left_unreadable` — the {MethodCandidate}s whose effect annotation was NOT written because the
     #   target declaration already carries annotations, so its bytes were left alone
     #   (`sig.effect.left-unreadable`; see {Writer#splice_annotations}). The signature line itself was

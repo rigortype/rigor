@@ -27,12 +27,14 @@ module Rigor
     class LayoutIndex
       # The `[method_name, kind]` keys a member declaration answers for, `kind` being `:instance` or
       # `:singleton`. A `def self?.f` answers for both kinds; an `attr_accessor` answers for its reader and its
-      # writer. Shared with {Writer}, which asks the same question of the target file it is merging into.
+      # writer; an `alias new old` (`alias self.new self.old`) answers for its new name only, under its own kind
+      # (#1975). Shared with {Writer}, which asks the same question of the target file it is merging into.
       def self.member_keys(member)
         case member
         when RBS::AST::Members::MethodDefinition
           kinds = member.kind == :singleton_instance ? %i[instance singleton] : [member.kind]
           kinds.map { |kind| [member.name, kind] }
+        when RBS::AST::Members::Alias then [[member.new_name, member.kind]]
         when RBS::AST::Members::AttrReader then [[member.name, member.kind]]
         when RBS::AST::Members::AttrWriter then [[:"#{member.name}=", member.kind]]
         when RBS::AST::Members::AttrAccessor then [[member.name, member.kind], [:"#{member.name}=", member.kind]]

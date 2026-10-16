@@ -533,6 +533,10 @@ refuse a file, so a tighter return `--write` declines without
 `--overwrite` does not fail it; `--check --overwrite` counts one.
 See [handbook chapter 11](../handbook/11-sig-gen.md#keeping-sig-current-in-ci).
 
+`--write` names each proposal it skipped (a member `sig/` already declares, an `alias` included, or one declared
+in a signature path it does not write to) on its own `skipped Class#method (reason)` line; the exit status is
+unchanged. See [handbook chapter 11](../handbook/11-sig-gen.md#safety-what---write-will-and-will-not-do).
+
 A method declared inline with `# @rbs` / `#:` is written as that
 declaration, not as what its body infers; a parameter-only
 annotation keeps its parameters and takes the return from the body,

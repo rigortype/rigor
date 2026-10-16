@@ -219,7 +219,7 @@ module Rigor
       end
 
       def render_write_text(results)
-        if results.all? { |r| r.action == :noop }
+        if results.all? { |r| r.action == :noop && r.skipped.empty? }
           @out.puts("No changes")
           return
         end
@@ -228,6 +228,7 @@ module Rigor
           case result.action
           when :created then render_write_created(result)
           when :updated then render_write_updated(result)
+          when :noop then render_write_unchanged(result)
           when :skipped_outside_sig_root then render_write_skipped(result)
           when :skipped_invalid_rbs then render_write_invalid(result)
           when :skipped_invalid_encoding then render_write_invalid_encoding(result)
@@ -249,7 +250,27 @@ module Rigor
       def render_write_updated(result)
         @out.puts("updated #{result.target_path} (#{applied_counts(result)}, " \
                   "skipped #{result.skipped.size} user-authored)")
+        render_write_skips(result)
         render_left_unreadable(result)
+      end
+
+      # A target the writer opened and changed nothing in, because every proposal for it was a member the
+      # project already declares (#1975). Without this line the run read as "No changes" or said nothing about it.
+      def render_write_unchanged(result)
+        return if result.skipped.empty?
+
+        @out.puts("unchanged #{result.target_path} (skipped #{result.skipped.size} user-authored)")
+        render_write_skips(result)
+      end
+
+      # One line per proposal the writer declined, so a change `--diff` or `--print` showed is never dropped
+      # without a reason. The same entries are the `skipped` rows of the `--format=json` payload.
+      def render_write_skips(result)
+        result.skipped.each do |candidate, reason|
+          separator = candidate.kind == :singleton ? "." : "#"
+          @out.puts("  skipped #{candidate.class_name}#{separator}#{candidate.method_name} (#{reason.to_s.tr('_', '-')}): " \
+                    "#{candidate.rbs_lines.join(' ')}")
+        end
       end
 
       # ADR-103 WD9 — the declarations whose annotation region the writer refused to rewrite. Named per
@@ -268,6 +289,7 @@ module Rigor
 
       def render_write_skipped(result)
         @out.puts("skipped #{result.source_path} -> #{result.target_path} (outside sig root)")
+        render_write_skips(result)
       end
 
       # The assembled file does not parse, so it was NOT written. Writing it would poison the sig tree — the

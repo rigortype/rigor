@@ -3,7 +3,6 @@
 require "prism"
 
 require_relative "../type"
-require_relative "operand_effects"
 require_relative "self_call_ivar_writes"
 
 module Rigor
@@ -65,8 +64,7 @@ module Rigor
       # candidate call in it may write, or every name when one of them is not proven. A call's literal block may run,
       # so its calls count; a `def`, a class or module body and (unless `run_lambdas`) a lambda literal run nothing
       # on this `self` there. A `when` test calls its value's `===`, which for a lambda literal runs the body, so
-      # that caller passes `run_lambdas: true`, and an instance variable a lambda body assigns widens too:
-      # evaluating the literal binds nothing.
+      # that caller passes `run_lambdas: true`. A write in a lambda body is not this reset's: the caller reads it.
       #
       # The widened bindings take the declaration mark ({.widen}'s `mark:`): the reset forgets the narrowing without
       # making the variable newly nil-reportable, since a call the proof cannot clear is far more often one that
@@ -75,13 +73,9 @@ module Rigor
         return scope unless narrowed_ivars?(scope)
 
         calls = candidate_calls(node, run_lambdas)
-        assigned = run_lambdas ? assigned_ivars(node) : []
-        return scope if calls.empty? && assigned.empty?
+        return scope if calls.empty?
 
-        widen(scope, mark: true) do
-          proven = proven_writes(calls, scope)
-          proven&.merge(assigned)
-        end
+        widen(scope, mark: true) { proven_writes(calls, scope) }
       end
 
       # Whether a candidate call in `node` (with `run_lambdas`, one in a lambda body too) may write the instance
@@ -103,11 +97,6 @@ module Rigor
           acc.merge(writes)
         end
       end
-
-      def assigned_ivars(node)
-        OperandEffects.written_variables(node).select { |name| name.start_with?("@") && !name.start_with?("@@") }
-      end
-      private_class_method :assigned_ivars
 
       # The candidate calls under `node`, in source order.
       def candidate_calls(node, run_lambdas)

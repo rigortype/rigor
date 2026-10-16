@@ -1,0 +1,1 @@
+- **[cli]** `rigor lens` reports the type the rbs-inline plugin gives an unannotated constant (`Array[untyped]` for `[]`), which `check` reads too, instead of `unavailable`. ([#1998](https://github.com/rigortype/rigor/pull/1998))

@@ -1,0 +1,1 @@
+- **[cli]** `rigor lens` reads a block declared by `# @rbs &block:` alone (the rest of the method unannotated), instead of dropping it. ([#2001](https://github.com/rigortype/rigor/pull/2001))

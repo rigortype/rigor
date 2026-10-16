@@ -64,9 +64,6 @@ RSpec.describe "Counter" do
     count = rand(10) if rand(2).zero?  # count is Integer?
     expect(count).to eq(42)            # count is 42 from here on
     count + 1                          # no possible-nil-receiver warning
-
-    record = Object.new
-    expect(record).to be_a(String)     # record narrows to String
   end
 end
 ```
@@ -74,10 +71,12 @@ end
 | Matcher | Effect on `x` |
 | --- | --- |
 | `eq(literal)` / `eql(literal)` | meet with `Constant<literal>` (see below) |
-| `be_a(T)` / `be_kind_of(T)` / `be_instance_of(T)` | narrow to `T` |
+| `be_a(T)` / `be_kind_of(T)` / `be_instance_of(T)` / `be_an_instance_of(T)` | meet with `T` |
 | `be_nil` | narrow to `Constant<nil>` |
 | `match(/regex/)` | narrow to `String` |
-| `not_to eq(literal)` / `to_not eq(literal)` | unchanged (see below) |
+| `not_to be_nil` / `to_not be_nil` | narrow away from `nil` |
+| `not_to be_a(T)` / `not_to be_kind_of(T)` / `not_to be_instance_of(T)` / `not_to be_an_instance_of(T)` | narrow away from `T` |
+| `not_to eq(literal)` / `not_to eql(literal)` (and `to_not`) | unchanged (see below) |
 
 Other matchers emit nothing. `be_truthy` is not narrowed, nor is
 `expect { ... }.to raise_error(...)` (the block form), nor an
@@ -90,37 +89,47 @@ Other matchers emit nothing. `be_truthy` is not narrowed, nor is
 decides, and that operator can hold across classes: `1 == 1.0`, and a
 class with its own `==` (a `ModInt` that compares `to_i`) passes
 `expect(m).to eq(9)`. The matcher therefore never replaces `x`'s
-type. It narrows each member of `x`'s type on its own:
+type. It narrows each member of `x`'s type on its own.
 
-- a member of the literal's own core class (`Integer`, `Float`,
-  `String`, `Symbol`, `NilClass`, `TrueClass`, `FalseClass`) narrows
-  to the literal, refinements of that class included. After
-  `x = rand(10)`, `expect(x).to eq(9)` gives `9`; `Integer?` with
-  `eq(9)` gives `9`, because the `nil` member cannot equal `9`. A
-  refinement such as `decimal-int-string?` (from `y = x && x.to_s`
-  with `x` an `Integer?`) gives `"3"` under `eq("3")`. A `Constant`
-  member is kept when it equals the literal and dropped otherwise;
+The core equality classes are the nine in `EQUALITY_CORE_CLASSES`
+(`plugins/rigor-rspec/lib/rigor/plugin/rspec/matcher_analyzer.rb`):
+`Integer`, `Float`, `Rational`, `Complex`, `String`, `Symbol`,
+`NilClass`, `TrueClass`, and `FalseClass`. The first four are the
+numeric classes.
+
+- a member of the literal's own class narrows to the literal,
+  refinements of that class included. After `x = rand(10)`,
+  `expect(x).to eq(9)` gives `9`; `Integer?` with `eq(9)` gives `9`,
+  because the `nil` member cannot equal `9`. A refinement such as
+  `decimal-int-string?` (from `y = x && x.to_s` with `x` an
+  `Integer?`) gives `"3"` under `eq("3")`. A `Constant` member is kept
+  when it equals the literal and dropped otherwise;
 - a `Float` member meets `0.0` and is kept, since `-0.0` also equals
   it;
-- a core numeric member of another class (`Float`, `Rational`) is
-  kept under `eq`: `Integer | Float` with `eq(1)` gives `1 | Float`;
-- any other core member is dropped: `String | Integer` with `eq(9)`
-  gives `9`;
+- a numeric member of another class (`Integer`, `Float`, `Rational`,
+  `Complex`) is kept under `eq`: `Integer | Float` with `eq(1)` gives
+  `1 | Float`;
+- any other member of a core equality class is dropped:
+  `String | Integer` with `eq(9)` gives `9`;
 - `eql(literal)` takes the same path, except that a numeric member of
   another class is dropped, because `eql?` compares classes:
   `Integer | Float` with `eql(1)` gives `1`.
 
-### When a local keeps its type
+### A member, or the whole local, keeps its type in these cases
 
-No narrowing happens, and the local keeps its type, in these cases:
+A member outside the core equality classes makes the whole fact
+unavailable, so the local keeps its type, not just that member:
 
-- a member is `Dynamic`, or of a class outside the core list above,
-  such as a user class (`ModInt`) or `Numeric`;
-- the project defines `==` on the literal's class in any analysed
-  file. A `def` or a `define_method` both count. A core `==` can call
-  back into the literal's own `==` (`Integer#==` for a non-numeric
-  argument, `String#==` for one that responds to `to_str`), so the
-  plugin does not narrow there even when a kept member would survive;
+- a member is `Dynamic`, or of a class outside `EQUALITY_CORE_CLASSES`,
+  such as a user class (`ModInt`), `Numeric`, or a generic `Array` or
+  `Hash`. `Array` and `Hash` have no spec example; this follows from
+  the constant, and `9 | [1]` with `eq(9)` stays unchanged on a probe;
+- the project defines the operator (`==` for `eq`, `eql?` for `eql`)
+  on the literal's class, in any analysed file. A `def` or a
+  `define_method` both count. A core `==` can call back into the
+  literal's own `==` (`Integer#==` for a non-numeric argument,
+  `String#==` for one that responds to `to_str`), so the plugin does
+  not narrow there even when a kept member would survive;
 - the project reopens a core ancestor of the member's class and
   defines the operator there, such as `class Numeric; def eql?` or
   `class Object; def ==`. Under `eql(9)` an `Integer` stays
@@ -138,8 +147,8 @@ A reopening that defines only other methods, such as
 project keeps the `Symbol` member and narrows the rest:
 `Symbol | Integer | nil` with `eq(9)` gives `9 | Symbol`.
 
-`not_to eq(literal)` and `to_not eq(literal)` do not narrow: `x` keeps
-the type it had before the matcher.
+`not_to eq(literal)`, `to_not eq(literal)`, and their `eql` forms do
+not narrow: `x` keeps the type it had before the matcher.
 
 ## Configuration
 

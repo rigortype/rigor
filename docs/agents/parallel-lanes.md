@@ -29,7 +29,12 @@ reshaping code, and lanes that collided or started on a premise master had alrea
    user-defined or refined method of the same name, `send`/`public_send`, nested blocks and loops,
    pool mode (`--workers N`), warm and `--incremental` reruns, and a multi-file project for any change
    to the discovery fold (`scope_indexer.rb`, `scope.rb`), whose cross-file merge a single-file
-   fixture never runs. Done when every shape the review would probe has a row.
+   fixture never runs. Three more drew a severe review round in October 2026 (#2003, #2016): a block
+   that changes `self` (`Class.new`, `Struct.new`, `Data.define`, `Module.new`, `*_eval`,
+   `class << self`), where a body-level reading must not count what the block says; a sibling file
+   that defines the same name, where file order is not load order; and a statement that may not run
+   (inside an `if`, a loop or a block), which must leave the answer uncertain rather than flip it to
+   the opposite certain one. Done when every shape the review would probe has a row.
 3. **Map overlap, then batch.** List the modules each issue will touch, and include open PRs from
    other sessions (`gh pr list --state open`, then their files): an issue whose mechanism one of
    them changes waits for it to land or for its owner to hand over the lane. Two issues that change
@@ -53,10 +58,16 @@ reshaping code, and lanes that collided or started on a premise master had alrea
    reviewer with SendMessage and follow contribution-flow.md steps 4–5: three rounds at most; after
    round 3, a narrow severe finding with a conservative fix lands only through one fix-only delta
    check that finds nothing severe, and a non-converging design goes to the user.
-7. **Land in order.** Before merging, fetch, merge `origin/master` into a detached copy of the
-   branch, and rerun the spec files the PR touched; a clean textual merge can still break a sibling's
-   spec. Check `mergeable` before waiting on CI: a `CONFLICTING` PR starts no run, so send it back to
-   its lane to merge master and resolve. After the batch, watch the resulting master CI run.
+7. **Land in order.** A branch need not contain `origin/master` to merge; it is rebased at each push.
+   Before merging, fetch and list the files master changed since the branch's merge base (`git diff
+   --name-only <merge-base> origin/master`). When either that list or the PR touches `lib/`, `sig/`,
+   `data/` or `.rigor.dist.yml`, or the two share a file, have the lane push again through
+   `bin/lane-push`, which rebases and reruns the gate: an engine change on either side can move the
+   other side's specs through files neither shares, as a fix that flips a pinned answer does.
+   Otherwise merge. Check `mergeable` before waiting on CI: a `CONFLICTING` PR starts no run, so
+   send it back to its lane to run `bin/lane-push` and resolve the rebase it stops on. When the lane
+   has ended, run `bin/lane-push` in its worktree yourself. After the batch, watch the resulting
+   master CI run.
    Watching is bounded by GitHub's API budgets (REST and GraphQL are separate 5000-an-hour budgets
    per user; `gh pr view` spends GraphQL), which a batch of watchers exhausts, and every watcher then
    dies with HTTP 403. Read the verdict per contribution-flow.md § "GitHub and git traps", at most
@@ -116,10 +127,14 @@ A lane brief restates these:
 - **Closing keywords.** `Fixes #N` only when the PR closes all of #N, on its own line, in the PR body
   and commit messages alike; otherwise `Refs #N`. Credit an external reporter per
   contribution-flow.md.
-- **Hand-back.** Push with `git push origin HEAD:refs/heads/<branch>`, open the PR Draft, add the
-  fragment as a second push, then report: PR and head SHA, files changed, the mutation table, the
-  `verify-changed` result, and every decision the issue left open. Stop and report instead of
-  opening a PR when the premise is already fixed or a decision belongs to the maintainer.
+- **Hand-back.** Push only with `nix develop --command bin/lane-push`, every time: the first push,
+  the fragment push and each fix round. It rebases onto a freshly fetched `origin/master`, refuses to
+  push when `verify-changed` fails on the rebased tree, and pushes with an explicit refspec and a
+  lease. A gate failure that predates the branch and has an issue is the one use of
+  `--no-verify=<reason>`; quote the reason in the report. Open the PR Draft after the first push,
+  then report: PR and head SHA, files changed, the mutation table, the `verify-changed` result, and
+  every decision the issue left open. Stop and report instead of opening a PR when the premise is
+  already fixed or a decision belongs to the maintainer.
 
 ## Reviewer contract
 
@@ -138,9 +153,14 @@ carries the base commit, the PR and its issue, the Environment bullet of the lan
   Re-run the edge-case table from coordinator step 2 when the brief has one.
 - **Prove the specs.** Remove each part of the fix and report which examples fail; an example that
   survives every removal is a finding.
-- **Report** findings ranked severe / moderate / minor / nit, each with a concrete failure scenario
-  (for an engine change, the input and the wrong output), scope expansion listed separately, and a
-  plain statement of whether anything severe remains. Severity is defined in contribution-flow.md
-  § "Landing a pull request".
+- **Name the class, not one instance.** When a finding is one spelling of a wider shape (every
+  `self`-changing block, every reader of one table), say so and list each instance found, so the
+  lane fixes the class in one round instead of one spelling per round.
+- **Report** opening with the count per severity, then the findings ranked severe / moderate /
+  minor / nit, each with a concrete failure scenario (for an engine change, the input and the wrong
+  output) and marked *introduced* or *pre-existing* (reproduced on the base commit), scope expansion
+  listed separately, and a plain statement of whether anything severe remains. Severity is defined
+  in contribution-flow.md § "Landing a pull request"; a pre-existing finding is filed, not fixed in
+  the PR, unless the PR's change makes it reachable more often.
 - A delta round re-checks every earlier finding with its original repro, then hunts for regressions
   the fix introduced.

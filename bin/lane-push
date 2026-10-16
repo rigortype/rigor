@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+# Push the current branch the one way a lane may: rebased onto the latest
+# origin/master, gated by bin/verify-changed, with an explicit refspec.
+#
+# Every push of a PR branch — the first one, the changelog-fragment push and each
+# review-round fix — goes through here. It folds four rules lanes kept tripping on
+# by hand (October 2026: two lanes pushed a head whose gate had not passed, and
+# rebasing by hand made the follow-up push non-fast-forward):
+#
+#   1. rebase onto a freshly fetched origin/master right before the push, so CI
+#      runs the branch as it would merge;
+#   2. run bin/verify-changed on the rebased tree and refuse to push when it fails,
+#      refusing untracked files up front, since the gate reads the working tree
+#      and the push carries only commits;
+#   3. push with `HEAD:refs/heads/<branch>`, never `-u`: on a host whose global
+#      `push.default` is `tracking`, a branch cut from origin/master would
+#      otherwise push onto master (contribution-flow.md);
+#   4. once the remote branch exists, push with --force-with-lease pinned to the
+#      SHA it held before this run, and only when that SHA is one this branch
+#      holds or held (its reflog, which keeps the heads earlier runs rebased
+#      away), so a rebase may rewrite the branch but never drop a commit this
+#      branch did not hold.
+#
+# A gate failure that predates the branch (an issue already filed for it) is the
+# one case for --no-verify=<reason>; the reason is printed so the hand-back can
+# quote it. Run inside the Flake: `nix develop --command bin/lane-push`.
+#
+# Usage: bin/lane-push [--no-verify=<reason>]
+
+set -uo pipefail
+
+no_verify_reason=""
+for arg in "$@"; do
+  case "$arg" in
+    --no-verify=*)
+      no_verify_reason="${arg#--no-verify=}"
+      if [[ -z "${no_verify_reason//[[:space:]]/}" ]]; then
+        echo "lane-push: --no-verify needs a reason (the issue the failure predates the branch under)" >&2
+        exit 2
+      fi
+      ;;
+    -h | --help)
+      awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"
+      exit 0
+      ;;
+    *)
+      echo "lane-push: unknown argument: $arg (see --help)" >&2
+      exit 2
+      ;;
+  esac
+done
+
+die() {
+  echo "lane-push: $*" >&2
+  exit 1
+}
+
+top="$(git rev-parse --show-toplevel)" || die "not inside a git checkout"
+cd "$top" || die "cannot enter $top"
+branch="$(git symbolic-ref --quiet --short HEAD)" || die "HEAD is detached; check out the PR branch first"
+case "$(printf '%s' "$branch" | tr '[:upper:]' '[:lower:]')" in
+  master | main) die "refusing to push $branch; lanes push their own branch" ;;
+  claude/* | codex/*) die "branch $branch carries a tool prefix; name it for the change (contribution-flow.md)" ;;
+esac
+# verify-changed checks the working tree, untracked files included, while the
+# push carries only commits: refuse anything that would make the two differ.
+[[ -z "$(git status --porcelain)" ]] ||
+  die "the tree has uncommitted or untracked files; commit them (or ignore them) first, so the gate checks what is pushed"
+
+git fetch --quiet origin || die "git fetch origin failed"
+remote_sha="$(git ls-remote origin "refs/heads/$branch" | cut -f1)"
+# The lease alone would let a rebased push drop a commit someone else added to
+# the remote branch (a coordinator's fix-up). The remote head is ours when this
+# branch still holds it, or when it is a head this branch had before an earlier
+# lane-push rebased it (the branch reflog); anything else is someone else's.
+pushed_by_us() {
+  git merge-base --is-ancestor "$remote_sha" HEAD 2>/dev/null && return 0
+  # No `grep -q`: an early exit would kill rev-list with SIGPIPE, and pipefail
+  # would then report "not ours" for our own head.
+  git rev-list --walk-reflogs "refs/heads/$branch" 2>/dev/null | grep -Fx "$remote_sha" >/dev/null
+}
+if [[ -n "$remote_sha" ]] && ! pushed_by_us; then
+  die "origin/$branch holds $remote_sha, which this branch never had; fetch it, look at it, and merge it before pushing"
+fi
+
+if ! git rebase --quiet refs/remotes/origin/master; then
+  die "rebase onto origin/master stopped on a conflict; resolve it, \`git rebase --continue\`, then run lane-push again"
+fi
+
+if [[ -n "$no_verify_reason" ]]; then
+  echo "lane-push: skipping bin/verify-changed: $no_verify_reason"
+else
+  bin/verify-changed </dev/null || die "bin/verify-changed failed on the rebased tree; nothing was pushed"
+fi
+
+if [[ -z "$remote_sha" ]]; then
+  git push origin "HEAD:refs/heads/$branch" || die "push failed"
+else
+  git push --force-with-lease="refs/heads/$branch:$remote_sha" origin "HEAD:refs/heads/$branch" ||
+    die "push refused: origin/$branch moved since $remote_sha; fetch and look before pushing again"
+fi
+echo "lane-push: pushed $branch at $(git rev-parse HEAD) onto origin/master $(git rev-parse --short refs/remotes/origin/master)"

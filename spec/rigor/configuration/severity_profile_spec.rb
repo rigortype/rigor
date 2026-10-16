@@ -92,6 +92,42 @@ RSpec.describe Rigor::Configuration::SeverityProfile do
       ).to eq(:info)
     end
 
+    # Issue #1985 — a plugin's row (`plugin_family:` set) answers to its qualified id or `plugin.<id>` only; any other
+    # row keeps its bare rule, then its qualified id, then a family wildcard.
+    describe "qualified ids" do
+      def resolve_plugin_row(overrides, rule: "load-error")
+        described_class.resolve(rule: rule, authored_severity: :warning, overrides: overrides,
+                                qualified_rule: "plugin.acme.#{rule}", plugin_family: "plugin.acme")
+      end
+
+      it "matches a plugin row by its qualified id or its `plugin.<id>`" do
+        expect(resolve_plugin_row({ "plugin.acme.load-error" => :off })).to eq(:off)
+        expect(resolve_plugin_row({ "plugin.acme" => :info })).to eq(:info)
+        expect(resolve_plugin_row({ "plugin.acme" => :info, "plugin.acme.load-error" => :error })).to eq(:error)
+      end
+
+      it "does not match a plugin row by its bare rule, a family wildcard or another plugin's id" do
+        expect(resolve_plugin_row({ "load-error" => :off })).to eq(:warning)
+        expect(resolve_plugin_row({ "unknown" => :off }, rule: "unknown.col")).to eq(:warning)
+        expect(resolve_plugin_row({ "plugin.acme2" => :off, "plugin.other.load-error" => :off })).to eq(:warning)
+      end
+
+      it "matches a non-plugin row by its bare rule or its qualified id" do
+        row = { rule: "load-error", authored_severity: :error, qualified_rule: "plugin_loader.load-error" }
+        expect(described_class.resolve(**row, overrides: { "load-error" => :off })).to eq(:off)
+        expect(described_class.resolve(**row, overrides: { "plugin_loader.load-error" => :info })).to eq(:info)
+        expect(described_class.resolve(**row, overrides: { "plugin_loader.runtime-error" => :off })).to eq(:error)
+      end
+
+      it "keeps the bleeding-edge overlay beneath a qualified key" do
+        row = { rule: "dump.type", authored_severity: :error, qualified_rule: "dump.type" }
+        overlay = { "dump.type" => :warning }
+        expect(described_class.resolve(**row, bleeding_edge_overrides: overlay)).to eq(:warning)
+        expect(described_class.resolve(**row, bleeding_edge_overrides: overlay, overrides: { "dump.type" => :off }))
+          .to eq(:off)
+      end
+    end
+
     # ADR-50 § WD2 — the bleeding-edge overlay composes below the user's own overrides and above the profile table.
     # Defaults to {} so the shipped (empty) overlay leaves resolution bit-for-bit unchanged.
     describe "bleeding_edge_overrides:" do

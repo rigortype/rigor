@@ -205,6 +205,60 @@ RSpec.describe Rigor::ConfigAudit do
     end
   end
 
+  # Issue #1985 — a plugin's row answers to `severity_overrides:` by its qualified id only, so a key that reaches no
+  # row is flagged; a key that does (a built-in id or family, a loader row, a configured plugin) never is.
+  describe "severity_overrides: keys since qualified-id matching" do
+    def override_warnings(config_hash)
+      audit(config_hash).select { |w| w.kind == :severity_override }
+    end
+
+    def flagged_keys(config_hash)
+      override_warnings(config_hash).map { |w| w.fields.fetch("token") }
+    end
+
+    def overrides(*keys)
+      keys.to_h { [it, "off"] }
+    end
+
+    it "does NOT flag a key the map reaches" do
+      keys = %w[call call.undefined-method flow.always-truthy-condition pre-eval pre-eval.parse-error
+                load-error runtime-error pool-degraded plugin_loader.load-error plugin_loader.runtime-error
+                plugin_trust.read-refused rbs.coverage.missing-gem dynamic.dependency-source.gem-not-found
+                rbs_extended.unsatisfied-conformance]
+      expect(flagged_keys("severity_overrides" => overrides(*keys))).to be_empty
+    end
+
+    it "flags a plugin's bare rule, with the qualified spelling as the hint" do
+      warnings = override_warnings("severity_overrides" => overrides("no-such-rule", "rspec.let-binding", "rspec"))
+
+      expect(warnings.map { |w| w.fields.fetch("token") }).to eq(%w[no-such-rule rspec.let-binding rspec])
+      expect(warnings.map(&:message)).to all(include("severity_overrides:").and(include("the override has no effect"))
+                                               .and(include("plugin.<id>.<rule>")))
+    end
+
+    it "flags `all` and a loader key naming no loader row" do
+      expect(flagged_keys("severity_overrides" => overrides("all", "plugin_loader", "plugin_loader.bogus")))
+        .to eq(%w[all plugin_loader plugin_loader.bogus])
+      all_warning = override_warnings("severity_overrides" => overrides("all")).first
+      expect(all_warning.message).not_to include("plugin.<id>.<rule>")
+    end
+
+    it "does NOT flag a qualified key for a configured bundled plugin, by gem name or explicit id" do
+      valid = %w[plugin.rails-i18n.load-error plugin.rails-i18n plugin.acme.tools.x plugin.acme.tools]
+      config = { "plugins" => ["rigor-rails-i18n", { "gem" => "acme-rigor-1985", "id" => "acme.tools" }],
+                 "severity_overrides" => overrides(*valid, "plugin.shoulda-matchers.unknown-column") }
+
+      expect(flagged_keys(config)).to eq(["plugin.shoulda-matchers.unknown-column"])
+      expect(override_warnings(config).first.message).to include("names no plugin `plugins:` configures")
+    end
+
+    it "does NOT flag a qualified key while a third-party gem's id is unknown without loading it" do
+      config = { "plugins" => %w[rigor-rails-i18n acme-rigor-1985],
+                 "severity_overrides" => overrides("plugin.whatever.rule") }
+      expect(flagged_keys(config)).to be_empty
+    end
+  end
+
   describe "explicit bundler / rbs_collection paths" do
     it "flags an explicit bundler.bundle_path that is not a directory" do
       warnings = audit("bundler" => { "bundle_path" => "./no_such_bundle" })

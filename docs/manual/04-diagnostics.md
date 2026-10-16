@@ -162,6 +162,15 @@ the diagnostic from the result entirely, which makes
 below — both silence a rule; the override reads as "this one
 rule, at this severity" alongside the rest of the profile.
 
+A plugin's diagnostic is named by its qualified ID, as in `disable:`:
+`plugin.<id>.<rule>` for one rule (`plugin.rails-i18n.load-error: off`),
+or `plugin.<id>` for every row of that plugin. A bare rule or a family
+never reaches a plugin's row, so `load-error: off` leaves each plugin's
+own `load-error` alone. The plugin loader's rows are
+`plugin_loader.load-error` and `plugin_loader.runtime-error`, which also
+answer to the bare `load-error` / `runtime-error`. `rigor check` warns
+about a key that reaches no row.
+
 YAML reserves the bareword `off` as a boolean. If an override
 that names it seems not to apply, quote it — `"off"` — and the
 same for `on`.
@@ -332,10 +341,10 @@ gem that did not resolve (`dynamic.dependency-source.*`), the
 under any spelling, `plugin_loader.load-error` included. Turn
 those off with [`severity_overrides:`](#severity-profiles) set
 to `off`, or record them in a [baseline](06-baseline.md).
-`severity_overrides:` matches the row's rule ID without the
-source prefix, so the plugin loader's rows are `load-error` and
-`runtime-error` there — and that key also re-stamps any plugin
-diagnostic whose bare rule is the same. `rigor check` warns when a
+In `severity_overrides:` the plugin loader's rows are
+`plugin_loader.load-error` and `plugin_loader.runtime-error`, or the
+bare `load-error` / `runtime-error`; a bare key does not reach a
+plugin's own row of the same name (`plugin.<id>.load-error`). `rigor check` warns when a
 `disable:` entry names one of these rows, names no rule at all,
 or names a plugin `plugins:` does not configure (see
 [Config validation warnings](03-configuration.md#config-validation-warnings)).

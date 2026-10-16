@@ -202,11 +202,17 @@ module Rigor
       #   always wins) and *above* the profile table. Exact rule ids only — the overlay never carries family
       #   wildcards. Empty while the overlay is unpopulated, so the default leaves resolution bit-for-bit
       #   unchanged.
+      # @param qualified_rule — the row's `<source_family>.<rule>` id (`plugin_loader.load-error`); equal to `rule`
+      #   for a built-in row. Issue #1985 — an override key may spell it.
+      # @param plugin_family — `plugin.<id>` for a row a plugin emitted, nil for every other row. Such a row answers
+      #   to an override only by its `qualified_rule` or this whole-plugin key, never by its bare `rule` or a family
+      #   wildcard: plugins share bare rules (`load-error`), and a bare key would re-stamp them all.
       # @return the resolved severity. Returns `:off` to mean "drop the diagnostic entirely".
-      def resolve(rule:, authored_severity:, profile: DEFAULT_PROFILE, overrides: {}, bleeding_edge_overrides: {})
+      def resolve(rule:, authored_severity:, profile: DEFAULT_PROFILE, overrides: {}, bleeding_edge_overrides: {},
+                  qualified_rule: rule, plugin_family: nil)
         return authored_severity if rule.nil?
 
-        override = overrides[rule] || family_override(rule, overrides)
+        override = row_override(rule, qualified_rule, plugin_family, overrides)
         return override.to_sym if override
 
         bleeding = bleeding_edge_overrides[rule]
@@ -215,6 +221,18 @@ module Rigor
         profile_table = PROFILES[profile] || PROFILES.fetch(DEFAULT_PROFILE)
         profile_table.fetch(rule, authored_severity)
       end
+
+      # Issue #1985 — the `severity_overrides:` entry a row answers to, or nil. A plugin's row: its qualified id, then
+      # its `plugin.<id>`. Any other row: its bare rule, then its qualified id (the plugin loader's
+      # `plugin_loader.load-error`), then a family wildcard.
+      def row_override(rule, qualified_rule, plugin_family, overrides)
+        return overrides[qualified_rule] || overrides[plugin_family] unless plugin_family.nil?
+
+        overrides[rule] || (qualified_rule == rule ? nil : overrides[qualified_rule]) ||
+          family_override(rule, overrides)
+      end
+
+      private_class_method :row_override
 
       # A family name has no `.` in it, so only a dot-free key can match one. `resolve` runs for every
       # diagnostic in a run's stream, and most configurations carry no such key (usually no overrides at all),

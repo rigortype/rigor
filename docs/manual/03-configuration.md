@@ -128,18 +128,20 @@ These are warnings, not errors — partial or optional bundles and
 forward-looking config are valid setups. The audit only fires on explicit,
 working-setup-safe signals: an unset default (auto-detected `<root>/sig`,
 auto-detected bundle) is never warned about, and a
-`severity_overrides:` key under a non-built-in family (`rspec.…`,
-`rbs_extended.…`) is left alone, since its rule id cannot be enumerated
-statically and may resolve at run time. `disable:` is checked more
-closely, because what it can reach is known: a plugin's rule counts
+`rbs_extended.…`, `rbs.…` or `dynamic.…` key in `severity_overrides:` or
+`disable:` is left alone, since the engine emits those ids outside the
+catalogue. `disable:` and `severity_overrides:` are both checked
+closely, because what they can reach is known: a plugin's rule counts
 only in its qualified `plugin.<id>.<rule>` form, so a bare plugin rule
 (`rspec.let-binding`) is warned about. A qualified token is checked
 against `plugins:` only when every entry's plugin ID is known without
 loading it — an explicit `id:`, or a bundled plugin's gem name minus
 `rigor-`; one third-party gem listed without `id:` turns that check
-off. A token under `rbs_extended.…`, `rbs.…` or `dynamic.…` is left
-alone, other than the reserved run-level rows (`rbs.coverage.…`,
-`dynamic.dependency-source.…`), which are flagged. The same findings appear in the
+off. A `disable:` token under `rbs_extended.…`, `rbs.…` or `dynamic.…`
+is left alone, other than the reserved run-level rows (`rbs.coverage.…`,
+`dynamic.dependency-source.…`), which are flagged; in `severity_overrides:`
+those rows are the intended keys and are never flagged, while a bare plugin
+rule, `all`, or a `plugin.`-qualified key for an unconfigured plugin is. The same findings appear in the
 `--format=json` payload under `config_warnings` (each tagged with a
 `kind`), so CI can assert on them.
 
@@ -149,7 +151,7 @@ alone, other than the reserved run-level rows (`rbs.coverage.…`,
 | --- | --- | --- | --- |
 | `disable` | Array | `[]` | Rule IDs or families to suppress project-wide; `all` suppresses every built-in check rule. A plugin's diagnostics are named by qualified ID (`plugin.<id>.<rule>`, or `plugin.<id>` for the whole plugin); a bare ID or `all` does not reach them. The run-level `.rigor.yml` rows (`plugin_loader.*`, `dynamic.dependency-source.*`, `rbs.coverage.*`, `plugin_trust.*`, `pool-degraded`) are not reached by any spelling; use `severity_overrides:` for those. See [Diagnostics](04-diagnostics.md#suppressing-a-diagnostic). |
 | `severity_profile` | String | `"balanced"` | `lenient`, `balanced`, or `strict` — see [Diagnostics](04-diagnostics.md). |
-| `severity_overrides` | Hash | `{}` | Per-rule / per-family severity, e.g. `{ call: warning, flow.always-truthy-condition: off }`. |
+| `severity_overrides` | Hash | `{}` | Per-rule / per-family severity, e.g. `{ call: warning, flow.always-truthy-condition: off }`. A plugin's diagnostics are named by qualified ID (`plugin.<id>.<rule>`, or `plugin.<id>` for the whole plugin); a bare rule or family does not reach them. The plugin loader's own rows are `plugin_loader.load-error` / `plugin_loader.runtime-error` (or the bare `load-error` / `runtime-error`). |
 | `baseline` | String / `false` | `nil` | Path to a `.rigor-baseline.yml`, or `false` to disable an inherited one. See [Baselines](06-baseline.md). |
 | `bleeding_edge` | Boolean / Array / Hash | `false` | Adopt the next major's queued changes early ([ADR-50](../adr/50-release-engineering-and-stability-strategy.md) § WD2). `false` adopts none; `true` adopts the whole overlay; a list of feature ids adopts only those; `{ all: true, except: [ids] }` adopts all but the named. Orthogonal to `severity_profile`. Override it for a single run with [`rigor check --bleeding-edge[=ids]`](02-cli-reference.md#rigor-check) / `--no-bleeding-edge`. Inspect with [`rigor show-bleedingedge`](02-cli-reference.md#rigor-show-bleedingedge). |
 

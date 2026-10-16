@@ -548,6 +548,61 @@ RSpec.describe "plugins/rigor-rspec" do
         before, after = dumped_types(result)
         expect(after).to eq(before)
       end
+
+      # Guards of existing behaviour, added with the rigor-rspec manual's matcher table. Each one passes with the
+      # current code; none has a fix whose removal it would catch, so the mutation table records no line for them.
+      it "meets the local with the class for be_a, be_kind_of, be_instance_of and be_an_instance_of" do
+        expect(dumped_types(run_case_eq("Integer?", "expect(x).to be_a(Numeric)\ndump_type(x)\n"))).to eq(["Integer"])
+        expect(dumped_types(run_case_eq("Integer?", "expect(x).to be_kind_of(Numeric)\ndump_type(x)\n")))
+          .to eq(["Integer"])
+        expect(dumped_types(run_case_eq("Integer?", "expect(x).to be_instance_of(Integer)\ndump_type(x)\n")))
+          .to eq(["Integer"])
+        expect(dumped_types(run_case_eq("Integer?", "expect(x).to be_an_instance_of(Integer)\ndump_type(x)\n")))
+          .to eq(["Integer"])
+      end
+
+      it "narrows the local away from nil after not_to be_nil and to_not be_nil" do
+        expect(dumped_types(run_case_eq("Integer?", "expect(x).not_to be_nil\ndump_type(x)\n"))).to eq(["Integer"])
+        expect(dumped_types(run_case_eq("Integer?", "expect(x).to_not be_nil\ndump_type(x)\n"))).to eq(["Integer"])
+      end
+
+      it "narrows the local away from T after not_to be_a(T), and leaves it when T is not a member" do
+        expect(dumped_types(run_case_eq("Integer?", "expect(x).not_to be_kind_of(Integer)\ndump_type(x)\n")))
+          .to eq(["nil"])
+        expect(dumped_types(run_case_eq("Integer?", "expect(x).not_to be_instance_of(Integer)\ndump_type(x)\n")))
+          .to eq(["nil"])
+        expect(dumped_types(run_case_eq("Integer?", "expect(x).not_to be_an_instance_of(Integer)\ndump_type(x)\n")))
+          .to eq(["nil"])
+        expect(dumped_types(run_case_eq("Integer?", "expect(x).not_to be_a(String)\ndump_type(x)\n")))
+          .to eq(["Integer?"])
+      end
+
+      it "keeps the whole local when a member is outside the core equality classes" do
+        source = "k = rand(2).zero? ? [1] : 9\ndump_type(k)\nexpect(k).to eq(9)\ndump_type(k)\n"
+        expect(dumped_types(run_plugin(source: source))).to eq(["9 | [1]", "9 | [1]"])
+        source = "k = rand(2).zero? ? { a: 1 } : 9\ndump_type(k)\nexpect(k).to eq(9)\ndump_type(k)\n"
+        expect(dumped_types(run_plugin(source: source))).to eq(["9 | { a: 1 }", "9 | { a: 1 }"])
+      end
+
+      it "keeps Complex as a numeric member under eq, as it keeps Float and Rational" do
+        expect(dumped_types(run_case_eq("Integer | Complex", "expect(x).to eq(1)\ndump_type(x)\n")))
+          .to eq(["1 | Complex"])
+      end
+
+      it "leaves the local unchanged after not_to eql(literal) and to_not eql(literal)" do
+        result = run_plugin(source: "x = rand(10)\ndump_type(x)\nexpect(x).not_to eql(9)\ndump_type(x)\n")
+        before, after = dumped_types(result)
+        expect(after).to eq(before)
+        result = run_plugin(source: "x = rand(10)\ndump_type(x)\nexpect(x).to_not eql(9)\ndump_type(x)\n")
+        before, after = dumped_types(result)
+        expect(after).to eq(before)
+      end
+
+      it "keeps the local's type when the project defines eql? on the literal's class" do
+        patch = "class Integer\n  def eql?(other) = true\nend\n"
+        expect(dumped_types(run_case_eq("Integer", "expect(x).to eql(9)\ndump_type(x)\n", patch: patch)))
+          .to eq(["Integer"])
+      end
     end
   end
 

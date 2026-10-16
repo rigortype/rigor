@@ -122,8 +122,8 @@ unavailable, so the local keeps its type, not just that member:
 
 - a member is `Dynamic`, or of a class outside `EQUALITY_CORE_CLASSES`,
   such as a user class (`ModInt`), `Numeric`, or a generic `Array` or
-  `Hash`. `Array` and `Hash` have no spec example; this follows from
-  the constant, and `9 | [1]` with `eq(9)` stays unchanged on a probe;
+  `Hash`. Under `eq(9)` the whole local stays unchanged, so `9 | [1]`
+  and `9 | { a: 1 }` do not narrow;
 - the project defines the operator (`==` for `eq`, `eql?` for `eql`)
   on the literal's class, in any analysed file. A `def` or a
   `define_method` both count. A core `==` can call back into the

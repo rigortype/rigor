@@ -111,7 +111,7 @@ module Rigor
       end
 
       # A block's function type as `RBS::MethodType#to_s` spells it inside the braces (`(Integer) -> void`, with a
-      # `[self: T]` binding when declared). `RBS::Types::Function` has no `to_s` of its own.
+      # `[self: T]` binding when declared). Neither `RBS::Types::Function` nor `UntypedFunction` has a `to_s`.
       def block_type(block)
         self_binding = ::RBS::Types::SelfTypeBindingHelper.self_type_binding_to_s(block.self_type)
         "(#{block.type.param_to_s}) #{self_binding}-> #{block.type.return_to_s}"

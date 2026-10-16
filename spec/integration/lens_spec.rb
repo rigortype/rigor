@@ -247,7 +247,12 @@ RSpec.describe "rigor lens" do
              "K::NUM" => { "type" => "1", "provenance" => "inferred" },
              "K::DECL" => { "type" => "::Integer", "provenance" => "sig" },
              "K::WORDS" => { "type" => "::Array[::String]", "provenance" => "inline" })
-    expect(values.values_at("K::Klass", "K::Mod", "K::Frozen", "K::CALC", "K::LIST", "K::R", "K::PRE"))
+    # Unannotated and unpublished: the rbs-inline plugin's literal default, which check reads too.
+    expect(values.slice("K::LIST", "K::PRE").transform_values { it.slice("state", "type", "provenance") })
+      .to eq("K::LIST" => { "state" => "typed", "type" => "Array[untyped]", "provenance" => "inferred" },
+             "K::PRE" => { "state" => "typed", "type" => "String", "provenance" => "inferred" })
+    expect(values["K::CALC"]).to include("state" => "dynamic", "provenance" => "inferred")
+    expect(values.values_at("K::Klass", "K::Mod", "K::Frozen", "K::R"))
       .to all(eq("state" => "unavailable", "reason" => "not_computed"))
   end
 

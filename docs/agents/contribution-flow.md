@@ -27,7 +27,9 @@ a changelog entry. It is the conditional detail pointed to by `AGENTS.md`.
   tool-identifying prefix. Renaming a branch that already has an open PR is not safe — it can close
   the PR outright — so get the name right at creation instead of fixing it after (recovery:
   § "GitHub and git traps").
-- Push with an explicit refspec: `git push origin HEAD:refs/heads/<branch>`, never `-u`; the
+- Push a PR branch with `bin/lane-push`: it rebases onto a freshly fetched `origin/master`, reruns
+  `verify-changed` on the result, and pushes with an explicit refspec and a lease. By hand, push with
+  an explicit refspec, `git push origin HEAD:refs/heads/<branch>`, never `-u`; the
   [`rigor-worktree`](../../.claude/skills/rigor-worktree/SKILL.md) skill says why and how to recover.
 - PRs start Draft and land through § "Landing a pull request" below. A stop instruction from the
   user means `gh pr ready --undo` and no merge. Never wait for an author approval on the author's

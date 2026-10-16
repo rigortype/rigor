@@ -126,6 +126,21 @@ RSpec.describe "tool/pin_examples.rb" do
     RUBY
   end
 
+  it "runs every sibling example a plural pin introduces, up to the next comment paragraph" do
+    expect(locations_for(<<~RUBY)).to eq([3, 6])
+      RSpec.describe "x" do
+        # Both answers below are wrong. #{flip} these when #12 is fixed.
+        it "p1" do
+          expect(1).to eq(1)
+        end
+        it("p2") { expect(2).to eq(2) }
+
+        # An unrelated note.
+        it("p3") { expect(3).to eq(3) }
+      end
+    RUBY
+  end
+
   it "ignores the phrase outside a comment and in a header comment outside every block" do
     expect(locations_for(<<~RUBY)).to eq([])
       # A header that mentions the "#{pin.downcase} #N" convention.

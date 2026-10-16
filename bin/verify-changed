@@ -241,7 +241,11 @@ run_on "rspec (plugin integration)" "$plugin_specs" env RIGOR_INCLUDE_INTEGRATIO
 # locator that fails or finds nothing fails the gate rather than skipping the step.
 if [[ -n "$engine_changed" ]]; then
   if pins="$(bundle exec ruby tool/pin_examples.rb)" && [[ -n "$pins" ]]; then
-    run_on "rspec (pinned flip-this-when examples)" "$pins" bundle exec rspec
+    # Plugin integration pins run in their own process, as their files do above.
+    run_on "rspec (pinned flip-this-when examples)" "$(printf '%s\n' "$pins" | grep -v '^spec/integration/plugins/')" \
+      bundle exec rspec
+    run_on "rspec (pinned plugin examples)" "$(printf '%s\n' "$pins" | grep '^spec/integration/plugins/')" \
+      env RIGOR_INCLUDE_INTEGRATION_PLUGINS=1 bundle exec rspec
   else
     echo
     echo "== rspec (pinned flip-this-when examples)"

@@ -22,10 +22,12 @@
 #
 # Usage: ruby tool/pin_examples.rb [SPEC_DIR]   (prints one location per line; exits 1 when it finds none)
 module PinExamples
-  PIN = /\bflip\s+(?:this|these|the|each|them|it)\b[^.]*?\b(?:when|if)\b/i
+  PIN = /\bflip\s+(this|these|the|each|them|it)\b[^.]*?\b(?:when|if)\b/i
+  PLURAL = %w[these each them].freeze
   EXAMPLE = /\A\s*(?:it|specify|example)\b/
   OPENER = /\A\s*(?:it|specify|example|describe|context|RSpec\.describe)\b/
   COMMENT = /\A\s*#/
+  CLOSER = /\A\s*(?:end|\})\s*\z/
 
   module_function
 
@@ -35,19 +37,21 @@ module PinExamples
 
   def in_file(path)
     lines = File.readlines(path)
-    targets = paragraph_pins(lines).map { |first| comment_target(lines, first) }
+    targets = paragraph_pins(lines).flat_map { |first, plural| comment_targets(lines, first, plural) }
     targets += trailing_pins(lines).map { |index| climb(lines, index) }
     targets.compact.uniq.sort.map { |line| "#{path}:#{line}" }
   end
 
-  # The index of each comment paragraph's first line whose joined text holds a pin.
+  # `[index, plural]` for each comment paragraph whose joined text holds a pin: the index of its first line,
+  # and whether the pin names several examples ("flip these when").
   def paragraph_pins(lines)
-    lines.each_index.select do |i|
-      next false unless comment?(lines[i]) && !(i.positive? && comment?(lines[i - 1]))
+    lines.each_index.filter_map do |i|
+      next unless comment?(lines[i]) && !(i.positive? && comment?(lines[i - 1]))
 
       last = i
       last += 1 while last + 1 < lines.size && comment?(lines[last + 1])
-      lines[i..last].map { |line| line.strip.delete_prefix("#").strip }.join(" ").match?(PIN)
+      match = lines[i..last].map { |line| line.strip.delete_prefix("#").strip }.join(" ").match(PIN)
+      [i, PLURAL.include?(match[1].downcase)] if match
     end
   end
 
@@ -58,18 +62,40 @@ module PinExamples
     end
   end
 
-  # The 1-based line RSpec should run for the full-line pin paragraph starting at index `pin`, or nil for a
-  # paragraph outside every block (a file header that only mentions the phrase).
-  def comment_target(lines, pin)
+  # The 1-based lines RSpec should run for the full-line pin paragraph starting at index `pin`: none for a
+  # paragraph outside every block (a file header that only mentions the phrase), and for a plural pin every
+  # sibling example or group it introduces, up to the group's end or the next comment paragraph.
+  def comment_targets(lines, pin, plural)
     indent = indent_of(lines[pin])
     enclosing = enclosing_index(lines, pin, indent)
-    return nil if enclosing.nil?
-    return enclosing + 1 if lines[enclosing].match?(EXAMPLE)
+    return [] if enclosing.nil?
+    return [enclosing + 1] if lines[enclosing].match?(EXAMPLE)
 
-    following = ((pin + 1)...lines.size).find { |i| code?(lines[i]) }
-    return following + 1 if following && indent_of(lines[following]) == indent && lines[following].match?(OPENER)
+    introduced = introduced_openers(lines, pin, indent)
+    return [climb(lines, enclosing)] if introduced.empty?
 
-    climb(lines, enclosing)
+    plural ? introduced.map { |i| i + 1 } : [introduced.first + 1]
+  end
+
+  # The indexes of the openers at `indent` that follow the paragraph at `pin`, stopping at the first line that
+  # leaves the group (indented less), the next comment paragraph at `indent`, or a code line at `indent` that
+  # opens nothing (the `end` closing an opener does not count). Empty when the first code line is not an opener.
+  def introduced_openers(lines, pin, indent)
+    found = []
+    i = pin + 1
+    i += 1 while i < lines.size && comment?(lines[i])
+    while i < lines.size
+      line = lines[i]
+      if line.strip.empty? || indent_of(line) > indent || CLOSER.match?(line)
+        i += 1
+        next
+      end
+      break if indent_of(line) < indent || comment?(line) || !line.match?(OPENER)
+
+      found << i
+      i += 1
+    end
+    found
   end
 
   # The 1-based line of the example or group that contains the code line at `index` (the line itself when it

@@ -18,8 +18,8 @@
 #   4. once the remote branch exists, push with --force-with-lease pinned to the
 #      SHA it held before this run, and only when that SHA is one this branch
 #      holds or held (its reflog, which keeps the heads earlier runs rebased
-#      away), so a rebase may rewrite the branch but another writer's commit is
-#      never overwritten.
+#      away), so a rebase may rewrite the branch but never drop a commit this
+#      branch did not hold.
 #
 # A gate failure that predates the branch (an issue already filed for it) is the
 # one case for --no-verify=<reason>; the reason is printed so the hand-back can
@@ -34,7 +34,7 @@ for arg in "$@"; do
   case "$arg" in
     --no-verify=*)
       no_verify_reason="${arg#--no-verify=}"
-      if [[ -z "${no_verify_reason// /}" ]]; then
+      if [[ -z "${no_verify_reason//[[:space:]]/}" ]]; then
         echo "lane-push: --no-verify needs a reason (the issue the failure predates the branch under)" >&2
         exit 2
       fi
@@ -75,7 +75,9 @@ remote_sha="$(git ls-remote origin "refs/heads/$branch" | cut -f1)"
 # lane-push rebased it (the branch reflog); anything else is someone else's.
 pushed_by_us() {
   git merge-base --is-ancestor "$remote_sha" HEAD 2>/dev/null && return 0
-  git rev-list --walk-reflogs "refs/heads/$branch" 2>/dev/null | grep -qx "$remote_sha"
+  # No `grep -q`: an early exit would kill rev-list with SIGPIPE, and pipefail
+  # would then report "not ours" for our own head.
+  git rev-list --walk-reflogs "refs/heads/$branch" 2>/dev/null | grep -Fx "$remote_sha" >/dev/null
 }
 if [[ -n "$remote_sha" ]] && ! pushed_by_us; then
   die "origin/$branch holds $remote_sha, which this branch never had; fetch it, look at it, and merge it before pushing"

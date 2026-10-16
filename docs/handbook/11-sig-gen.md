@@ -782,8 +782,9 @@ by side without coordination.
   rows under `skipped` in `--format=json`. The reason is
   `user-authored` (the target declares the member and the
   writer does not replace it) or `outside-sig-root` (the
-  member is declared in a signature path other than the
-  first, which `--write` does not modify). A target left
+  member routes to a file in a signature path other than the
+  first, which `--write` does not modify, whether the member
+  is declared there or is new to a class that lives there). A target left
   unchanged by skips alone prints `unchanged <file>`. The
   exit status stays `0`: a skip is not a refusal, and
   `--check` still reports `sig/` as up to date.

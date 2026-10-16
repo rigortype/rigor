@@ -756,7 +756,7 @@ module Rigor
 
       def find_attr_member(decl, method_name, kind)
         decl.members.find do |m|
-          next false if m.is_a?(RBS::AST::Members::MethodDefinition)
+          next false if m.is_a?(RBS::AST::Members::MethodDefinition) || m.is_a?(RBS::AST::Members::Alias)
 
           LayoutIndex.member_keys(m).include?([method_name, kind])
         end

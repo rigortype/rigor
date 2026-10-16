@@ -2324,6 +2324,30 @@ RSpec.describe Rigor::CLI do
         expect(output).not_to match(/def (self\.)?(f|s2):/)
       end
 
+      context "with the rbs-inline plugin auto-wired (see the type-of context above)", :rbs_inline_autowire do
+        before do
+          allow(Rigor::Configuration).to receive(:rbs_inline_library_resolvable?).and_return(true)
+          require "rigor-rbs-inline"
+          Rigor::Plugin.register(Rigor::Plugin::RbsInline) unless Rigor::Plugin.registered_for("rbs-inline")
+        end
+
+        # #1975: an `alias` in `sig/` is declared, never a replacement target: an inline-declared `f` is an
+        # `inline_overwrite` candidate, and `--overwrite` must not delete the alias to put its `def` in.
+        it "keeps an alias in sig/ when an inline-declared method of that name is written with --overwrite" do
+          write_fixture("lib/w.rb", "class W\n  #: () -> Integer\n  def f; 1; end\n  def g; \"s\"; end\nend\n")
+          write_fixture("sig/w.rbs", "class W\n  def g: () -> String\n  alias f g\nend\n")
+          config = write_config
+
+          Dir.chdir(tmpdir) do
+            status, out, = run_cli("sig-gen", "--write", "--overwrite", "--config=#{config}")
+            expect(status).to eq(0)
+            expect(out).to include("skipped W#f (user-authored)")
+          end
+
+          expect(File.read(File.join(tmpdir, "sig/w.rbs"))).to eq("class W\n  def g: () -> String\n  alias f g\nend\n")
+        end
+      end
+
       # #1975: `--diff` proposes a change that `--write --overwrite` declines as user-authored (a `def self?.f`
       # is not replaced by a plain `def f`), and the write names it rather than printing nothing.
       it "reports a proposal it skipped as user-authored when the target is otherwise unchanged" do

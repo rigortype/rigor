@@ -15,8 +15,8 @@ module Rigor
       # flattened into dotted keys (`users.welcome`, `errors.messages.blank`, …). For each leaf string,
       # `%{var}` placeholders are extracted via a simple regex.
       #
-      # Files that fail to parse are skipped with a load-error diagnostic surfaced through the plugin's
-      # error channel. Non-Hash YAML roots (e.g. a top-level sequence) are also skipped — the format is
+      # Files that fail to parse are skipped and recorded in the returned index's `load_errors`, which the
+      # plugin discloses as a run-scoped load-error row. Non-Hash YAML roots (e.g. a top-level sequence) are also skipped — the format is
       # locale-keyed by convention.
       class LocaleLoader
         PLACEHOLDER_RE = /%\{(?<name>[^}]+)\}/
@@ -66,7 +66,7 @@ module Rigor
               value_kinds: per_key_kinds[dotted_key].freeze
             )
           end
-          LocaleIndex.new(entries, locales: locales.to_a.sort)
+          LocaleIndex.new(entries, locales: locales.to_a.sort, load_errors: @load_errors)
         end
 
         private

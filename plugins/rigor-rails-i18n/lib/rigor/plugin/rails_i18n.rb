@@ -57,7 +57,10 @@ module Rigor
         target_gems: ["i18n"],
         # Bumped 2026-06-23 — view template lazy-key scanning (`t('.key')` inside ERB / Haml / Slim under
         # `view_search_paths`).
-        version: "0.3.0",
+        # Bumped 2026-10-17 (#1954) — the cached `:locale_index` value now carries the YAML load errors. The
+        # version is part of the producer cache KEY, so a warm run cannot serve a pre-change entry, which
+        # has no errors to re-disclose.
+        version: "0.3.1",
         description: "Validates I18n `t(key)` calls against `config/locales/*.yml`.",
         config_schema: {
           "locale_search_paths" => { kind: :array, default: ["config/locales"] },
@@ -72,17 +75,12 @@ module Rigor
       )
 
       # `watch:` covers every `.yml` / `.yaml` file under the locale search paths so the cache invalidates
-      # when locale files are added, removed, or edited (ADR-60 WD3). `@load_errors` is a producer-side
-      # capture: it is populated only when the block runs (a cache miss / a watched file changed), which is
-      # exactly when a malformed YAML must re-surface.
+      # when locale files are added, removed, or edited (ADR-60 WD3). The YAML load errors travel inside the
+      # returned index (`LocaleIndex#load_errors`), not in an instance variable the block sets (#1954): a
+      # warm producer-cache hit skips the block, so a block-side capture lost the load-error row on every
+      # run whose result was not itself served from the run-result cache.
       producer :locale_index, watch: -> { [[@locale_search_paths, "**/*.yml", "**/*.yaml"]] } do |_params|
-        loader = LocaleLoader.new(
-          io_boundary: io_boundary,
-          search_paths: @locale_search_paths
-        )
-        index = loader.load
-        @load_errors = loader.load_errors
-        index
+        LocaleLoader.new(io_boundary: io_boundary, search_paths: @locale_search_paths).load
       end
 
       # Scans view templates under `view_search_paths` for lazy `t('.key')` / `I18n.translate('.key')`
@@ -102,7 +100,6 @@ module Rigor
         @locale_search_paths = Array(config.fetch("locale_search_paths")).map(&:to_s)
         @view_search_paths = Array(config.fetch("view_search_paths")).map(&:to_s)
         @configured_locales = Array(config.fetch("configured_locales")).map(&:to_s)
-        @load_errors = []
       end
 
       # Returns no rows of its own: every file-level outcome here is run-scoped. The YAML load errors and the
@@ -114,8 +111,11 @@ module Rigor
       # are lazily loaded + memoised by `producer_value`, so the repeat registrations are no-ops.
       def diagnostics_for_file(path:, scope:, root:) # rubocop:disable Lint/UnusedMethodArgument
         index = producer_value(:locale_index)
-        disclose_load_errors unless @load_errors.empty?
-        disclose_locale_runtime_error if index.nil? && producer_error(:locale_index)
+        if index
+          disclose_load_errors(index.load_errors)
+        elsif producer_error(:locale_index)
+          disclose_locale_runtime_error
+        end
         view_diags = producer_value(:view_diagnostics) || []
         if (view_err = producer_error(:view_diagnostics))
           disclose_view_runtime_error(view_err)
@@ -209,8 +209,8 @@ module Rigor
       # be pinned to the first analysed Ruby file — once per plugin INSTANCE, so once per fork-pool worker
       # (#1051). They go through the run-scoped channel instead: keyed by the locale path that failed, so a
       # project with two broken YAML files still discloses both, each exactly once, at `.rigor.yml:1:1`.
-      def disclose_load_errors
-        @load_errors.each do |err|
+      def disclose_load_errors(load_errors)
+        load_errors.each do |err|
           disclose_once(
             "locale-parse:#{err.path}",
             message: "rigor-rails-i18n: failed to parse `#{err.path}`: #{err.message}",

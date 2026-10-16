@@ -34,12 +34,17 @@ module Rigor
           end
         end
 
-        attr_reader :entries, :locales
+        attr_reader :entries, :locales, :load_errors
 
         # @param locales — all locale names that contributed at least one key.
-        def initialize(entries, locales:)
+        # @param load_errors — the {LocaleLoader::LoadError}s of the files that did not parse (#1954). They
+        #   ride in the index, not beside it, because the index is the cached producer value: a warm run
+        #   serves it without re-reading a single locale file, so an error kept anywhere else is lost exactly
+        #   when the cache hits.
+        def initialize(entries, locales:, load_errors: [])
           @entries = entries.freeze
           @locales = locales.dup.freeze
+          @load_errors = load_errors.map(&:freeze).freeze
           @by_key = entries.to_h { |e| [e.dotted_key, e] }.freeze
           freeze
         end

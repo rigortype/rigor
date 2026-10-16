@@ -15,7 +15,10 @@
 #      the integration specs that load it plus the two all-plugin conformance
 #      specs — the opt-in files in their own processes, as in `verify`; and
 #      for any engine change (lib/, sig/, data/) the whole-engine drift specs
-#      that CI failures most often came from on untouched files (~45s);
+#      that CI failures most often came from on untouched files (~45s), and every
+#      example that pins a known-wrong answer with "flip this when #N" (~7s): an
+#      engine change can fix #N in passing, and the pin then fails in a file the
+#      branch never touched (#2003);
 #   4. `spec/docs/` always — seconds, and it is where the Markdown gates live;
 #   5. `rigor check --fail-on=warning` on the changed lib files and the lib
 #      mirrors of changed sig/ files — the CI self-check caught a
@@ -88,6 +91,7 @@ pool_specs=""
 plugin_specs=""
 check_files=""
 uncovered=""
+engine_changed=""
 add_spec() {
   case "$1" in
     spec/rigor/analysis/runner_pool_spec.rb) pool_specs+="$1"$'\n' ;;
@@ -138,6 +142,7 @@ for path in ${changed[@]+"${changed[@]}"}; do
   case "$path" in
     lib/* | sig/* | data/* | .rigor.dist.yml)
       for spec in "${engine_drift_specs[@]}"; do add_spec "$spec"; done
+      engine_changed=1
       ;;
     plugins/*/lib/*)
       for spec in "${declaration_fact_specs[@]}"; do add_spec "$spec"; done
@@ -202,6 +207,7 @@ for path in ${deleted[@]+"${deleted[@]}"}; do
   case "$path" in
     lib/* | sig/* | data/*)
       for spec in "${engine_drift_specs[@]}"; do add_spec "$spec"; done
+      engine_changed=1
       ;;
     plugins/*/lib/*)
       for spec in "${declaration_fact_specs[@]}"; do add_spec "$spec"; done
@@ -231,6 +237,10 @@ run_on "rubocop (changed files)" "$lint_files" \
 run_on "rspec (affected specs)" "$specs" bundle exec rspec
 run_on "rspec (runner pool)" "$pool_specs" env RIGOR_INCLUDE_RACTOR_POOL=1 bundle exec rspec
 run_on "rspec (plugin integration)" "$plugin_specs" env RIGOR_INCLUDE_INTEGRATION_PLUGINS=1 bundle exec rspec
+# The pinned examples, by line (tool/pin_examples.rb): the files whole take ~75s, the pins alone ~7s.
+if [[ -n "$engine_changed" ]]; then
+  run_on "rspec (pinned flip-this-when examples)" "$(bundle exec ruby tool/pin_examples.rb)" bundle exec rspec
+fi
 step "rspec spec/docs/" bundle exec rspec spec/docs/
 run_on "rigor check (changed lib files)" "$check_files" \
   bundle exec exe/rigor check --no-cache --no-ci-detect --fail-on=warning

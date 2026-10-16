@@ -28,7 +28,10 @@ module Rigor
             next [] if use.name.nil?
 
             name = use.name.delete_prefix("::")
-            targets = use.within ? literal_targets(use, name) : [nil]
+            targets = if use.anywhere then anywhere_targets(name)
+                      elsif use.within then literal_targets(use, name)
+                      else [nil]
+                      end
             targets.map do |target|
               Scan::Reference.new(as_written: target || name, nesting: [].freeze, from: nil,
                                   role: use.role, path: use.path, line: use.line,
@@ -54,27 +57,99 @@ module Rigor
           own = declared_member(receiver, name, local)
           return [own, *runtime].uniq if own
           return runtime unless use.inherit
+          return (anywhere_targets(name) + runtime).uniq if unknown_ancestry?(receiver)
 
           (plausible_ancestors(receiver).filter_map { |scope| declared_member(scope, name, local) } + runtime)
             .uniq + [nil]
+        end
+
+        # Every declaration a literal `name` can name from a receiver the walk cannot bound (#1946): each one a
+        # scope's `name` (or a declared prefix of it) could be, and the top level.
+        def anywhere_targets(name)
+          segments = name.split("::")
+          found = segments.length.downto(1).flat_map do |count|
+            suffix = segments.first(count).join("::")
+            by_last_segment.fetch(segments[count - 1], []).select do |fqn|
+              fqn == suffix || fqn.end_with?("::#{suffix}")
+            end
+          end
+          found.uniq + [nil]
+        end
+
+        def by_last_segment
+          @by_last_segment ||= @by_fqn.keys.group_by { |fqn| fqn.split("::").last }
         end
 
         # The declarations a descendant of `receiver` holding `name` adds (#1878): a `self` standing for the
         # enclosing declaration is whichever subclass, includer, prepender or extender the method runs on, and
         # Ruby looks the name up there first. Each descendant is searched with its own ancestors unless the call
         # passes `inherit = false`. The descendants are over-approximated as {#plausible_ancestors} is.
+        #
+        # A module some unknown receiver includes or extends (`k.include(Mix)`, an `include` in an `included do`
+        # block) has descendants the walk cannot list, so the name may be any declaration's (#1946). A class
+        # with an ancestor the walk cannot name (`K.include(mods.first)`) may be a descendant of any module, so
+        # it is searched too.
         def runtime_targets(receiver, name, inherit, local)
-          descendants_of(receiver).flat_map do |descendant|
+          return anywhere_targets(name) if open_descendants?(receiver)
+
+          (descendants_of(receiver) | unknown_ancestry_classes).flat_map do |descendant|
             scopes = inherit ? [descendant, *plausible_ancestors(descendant)] : [descendant]
             scopes.filter_map { |scope| declared_member(scope, name, local) }
           end.uniq
         end
 
         def descendants_of(fqn)
-          @plausible_descendants ||= @by_fqn.keys.each_with_object(Hash.new { |h, k| h[k] = [] }) do |declared, out|
+          @plausible_descendants ||= (@by_fqn.keys | ancestry.edges.keys)
+                                     .each_with_object(Hash.new { |h, k| h[k] = [] }) do |declared, out|
             plausible_ancestors(declared).each { |ancestor| out[ancestor] << declared }
           end
           @plausible_descendants.fetch(fqn, [])
+        end
+
+        def open_descendants?(fqn)
+          ancestry.open.include?(fqn) || ancestry.open.any? { |mod| plausible_ancestors(mod).include?(fqn) }
+        end
+
+        # Whether `fqn` or one of its ancestors has an ancestor the walk cannot name, which may declare anything.
+        def unknown_ancestry?(fqn)
+          ([fqn] + plausible_ancestors(fqn)).any? { |scope| ancestry.unknown.include?(scope) }
+        end
+
+        def unknown_ancestry_classes
+          @unknown_ancestry_classes ||= ancestry.unknown.flat_map { |fqn| [fqn, *descendants_of(fqn)] }.uniq
+        end
+
+        # The {Scan::Ancestry} edges read (#1946): `edges` maps a class to the modules and superclass it gains
+        # outside its declaration; `open` holds the modules an unknown receiver gains, and `unknown` the classes
+        # that gain an ancestor the walk cannot name. A target is every scope its written name could be, declared
+        # or not (a gem class reopened as `class Foo::X` declares `Foo::X` alone); an ancestor, every scope that
+        # declares it.
+        AncestryIndex = Data.define(:edges, :open, :unknown)
+        private_constant :AncestryIndex
+
+        def ancestry
+          @ancestry ||= begin
+            edges = Hash.new { |h, k| h[k] = [] }
+            open = Set.new
+            unknown = Set.new
+            @ancestries.each do |edge|
+              targets = edge.target && written_scopes(edge.target)
+              ancestors = edge.ancestor && written_scopes(edge.ancestor).select { |fqn| @by_fqn.key?(fqn) }
+              if targets.nil? then open.merge(ancestors)
+              elsif ancestors.nil? then unknown.merge(targets)
+              else targets.each { |target| edges[target].concat(ancestors - [target]) }
+              end
+            end
+            AncestryIndex.new(edges: edges, open: open, unknown: unknown)
+          end
+        end
+
+        # Every scope a written reference could name: rooted, itself; otherwise its name under each enclosing scope.
+        def written_scopes(ref)
+          name = ref.as_written.delete_prefix("::")
+          return [name] if ref.rooted
+
+          ref.nesting.length.downto(0).map { |i| (ref.nesting.first(i) + [name]).join("::") }
         end
 
         # `scope::name`, or the longest declared prefix of it, when one is declared.
@@ -99,16 +174,15 @@ module Rigor
           out = []
           until queue.empty?
             current = queue.shift
-            @by_fqn.fetch(current, []).each do |decl|
-              (decl.includes + [decl.superclass]).compact.each do |raw|
-                plausible_resolutions(current, raw).each do |resolved|
-                  next if seen.include?(resolved)
+            resolved = @by_fqn.fetch(current, []).flat_map do |decl|
+              (decl.includes + [decl.superclass]).compact.flat_map { |raw| plausible_resolutions(current, raw) }
+            end
+            (resolved + ancestry.edges.fetch(current, [])).each do |ancestor|
+              next if seen.include?(ancestor)
 
-                  seen << resolved
-                  out << resolved
-                  queue << resolved
-                end
-              end
+              seen << ancestor
+              out << ancestor
+              queue << ancestor
             end
           end
           out.freeze
@@ -174,9 +248,12 @@ module Rigor
         #   A literal-argument site contributes a real reference; a dynamic one taints a namespace (WD4).
         # @param shadows — declarations made in files outside the analysed paths. They are never nodes, but a
         #   reference written in the SAME file resolves to them first, as Ruby would (#1732, see {#resolve_ref}).
-        def initialize(declarations:, references:, root_fqns: [], dynamic_uses: [], shadows: [],
+        # @param ancestries — {Scan::Ancestry} edges written outside a declaration, read only by the dynamic
+        #   lookup (#1946).
+        def initialize(declarations:, references:, root_fqns: [], dynamic_uses: [], shadows: [], ancestries: [],
                        foreign: ->(_fqn) { false })
           @declarations = declarations
+          @ancestries = ancestries
           @root_fqns = root_fqns.to_set
           @foreign = foreign
           @by_fqn = declarations.group_by(&:fqn)

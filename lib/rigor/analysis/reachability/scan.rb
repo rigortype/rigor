@@ -62,9 +62,14 @@ module Rigor
         # may be one of its descendants (#1878): a `def self.x = const_get(:X)` runs on whichever subclass it
         # is called on, and a module's method on whichever class includes, prepends or extends it. {Graph}
         # then looks the literal name up in those descendants as well.
+        #
+        # `anywhere` is true when the receiver is a `self` the walk cannot name at all — the block of an eval call
+        # on a local or another computed receiver (`k.class_eval { const_get(:E) }`, #1946). {Graph} then keeps
+        # every declaration the literal could name.
         DynamicUse = Data.define(:name, :prefix, :reason, :site, :path, :line, :scope, :within, :inherit, :role,
-                                 :receiver_open) do
-          def initialize(scope: :namespace, within: nil, inherit: true, role: :production, receiver_open: false, **)
+                                 :receiver_open, :anywhere) do
+          def initialize(scope: :namespace, within: nil, inherit: true, role: :production, receiver_open: false,
+                         anywhere: false, **)
             super
           end
 
@@ -102,7 +107,18 @@ module Rigor
           end
         end
 
-        Result = Data.define(:declarations, :references, :dynamic_uses)
+        # An ancestry edge written outside a declaration's header and body statements (#1946): `K.include(Mix)`,
+        # `K.send(:include, Mix)` and the `prepend` / `extend` / `public_send` / `__send__` forms, an `include`
+        # in an eval block on `K` or nested in a conditional, and the superclass of `K = Class.new(Base)`. `target`
+        # is the class the module joins, `ancestor` the module (or superclass); each is a {Reference} resolved in
+        # the call's nesting, or nil when it is not a constant the walk can name — a local receiver, an
+        # `include` whose `self` is unknown, or a computed argument (`K.include(mods.first)`). {Graph} reads
+        # these only to widen a `const_get` on `self`'s reach, never for ordinary constant resolution.
+        Ancestry = Data.define(:target, :ancestor, :path, :line)
+
+        Result = Data.define(:declarations, :references, :dynamic_uses, :ancestries) do
+          def initialize(ancestries: [].freeze, **) = super
+        end
 
         # Roles a referring file can have (ADR-102 WD8). A reference edge carries its referrer's role so
         # "used only by its own test" is a reportable category rather than a bucket boundary.
@@ -163,7 +179,7 @@ module Rigor
           walker = Walker.new(path: path, role: role || role_for(path, root: root))
           walker.walk(parsed.value, [])
           Result.new(declarations: walker.declarations.freeze, references: walker.references.freeze,
-                     dynamic_uses: walker.dynamic_uses.freeze)
+                     dynamic_uses: walker.dynamic_uses.freeze, ancestries: walker.ancestries.freeze)
         end
 
         # The values a local variable can hold, read off its assignments in one local scope, for a
@@ -263,17 +279,47 @@ module Rigor
           EVAL_FAMILY = %i[class_eval module_eval class_exec module_exec instance_eval instance_exec].freeze
           private_constant :EVAL_FAMILY
 
+          # Calls that define a method from their block: `define_method`'s block is an instance method's body,
+          # `define_singleton_method`'s a singleton method's (#1946).
+          METHOD_DEFINERS = { define_method: :instance, define_singleton_method: :singleton }.freeze
+          private_constant :METHOD_DEFINERS
+
           # A call is a dynamic-resolution site, and its block may run with another `self` ({#rebinds_self?}).
           def record_call(node, nesting)
             record_dynamic_use(node, nesting)
-            return unless node.block.is_a?(Prism::BlockNode) && rebinds_self?(node)
+            record_mixin(node, nesting)
+            return unless node.block.is_a?(Prism::BlockNode)
 
-            @rebinding_blocks << node.block
-            @eval_receivers[node.block] = receiver_reference(node.receiver, nesting) if eval_on_constant?(node)
+            classify_block(node, nesting)
           end
 
-          def eval_on_constant?(call)
-            EVAL_FAMILY.include?(call.name) && constant_receiver?(call.receiver)
+          def classify_block(node, nesting)
+            block = node.block
+            if rebinds_self?(node)
+              @rebinding_blocks << block
+              frame = eval_frame(node, nesting)
+              @eval_frames[block] = frame if frame
+            elsif meta_new_call?(node)
+              @meta_new_blocks << block
+            elsif METHOD_DEFINERS.key?(node.name) && (node.receiver.nil? || node.receiver.is_a?(Prism::SelfNode))
+              @definer_blocks[block] = METHOD_DEFINERS.fetch(node.name)
+            end
+          end
+
+          # The `self` of an eval call's block (#1878, #1946): the receiver when it is a constant, `:unknown` when
+          # it is a local or another computed value, and nil — the reading the walk had before — on `self`,
+          # `self.class`, an implicit receiver or `Object`. `singleton_defs` is whether a plain `def` in the block
+          # defines a singleton method of the receiver (`instance_eval`) rather than an instance method.
+          def eval_frame(call, nesting)
+            return anonymous_subclass_frame(call, nesting) if call.name == :new
+            return nil unless EVAL_FAMILY.include?(call.name)
+
+            singleton_defs = %i[instance_eval instance_exec].include?(call.name)
+            receiver = call.receiver
+            return EvalFrame.new(receiver_reference(receiver, nesting), singleton_defs) if constant_receiver?(receiver)
+            return nil if receiver.nil? || self_receiver?(receiver) || constant_path?(receiver)
+
+            EvalFrame.new(:unknown, singleton_defs)
           end
 
           # Rigor knows the argument's shape, which is the whole reason this can be tiered rather than treated
@@ -306,6 +352,7 @@ module Rigor
                      else []
                      end
             bounds = [[nil, :namespace, nil]] if bounds.empty?
+            record_anywhere(node, name, reason)
             bounds.each do |prefix, scope, within|
               @dynamic_uses << DynamicUse.new(name: name, prefix: prefix, scope: scope, within: within,
                                               inherit: anchors.include?(TOP_LEVEL), role: @role,
@@ -338,12 +385,46 @@ module Rigor
             end
           end
 
+          # A literal `const_get` on a `self` the walk cannot name at all reaches any declaration of that name.
+          def record_anywhere(node, name, reason)
+            return unless name && !name.start_with?("::") && unknown_self?(node)
+
+            @dynamic_uses << DynamicUse.new(name: name, prefix: nil, anywhere: true, role: @role, site: site(node),
+                                            path: @path, line: node.location.start_line, reason: reason)
+          end
+
           # Whether a `const_get` on `self` can run on a descendant of the enclosing declaration (#1878): in a
           # method, or a block that rebinds `self`, `self` is whichever subclass or includer the method was
           # called on. Directly in a class body, or inside `Other.class_eval { }`, it is the declaration itself.
           def runtime_self?(node)
-            node.name == :const_get && self_receiver?(node.receiver) && @eval_receiver.nil? &&
+            node.name == :const_get && self_receiver?(node.receiver) && @eval_frame.nil? &&
               !(@self_kind == :declaration && !@in_block && !@self_rebound)
+          end
+
+          # Whether a `const_get` on `self` runs on a receiver the walk cannot name at all (#1946): directly in the
+          # block of an eval call on a computed receiver, or in a method that block defines when the receiver form
+          # names the eval receiver ({#method_receiver?}).
+          def unknown_self?(node)
+            return false unless node.name == :const_get && self_receiver?(node.receiver)
+            return @eval_frame.receiver == :unknown && !node.receiver.is_a?(Prism::CallNode) if @eval_frame
+
+            !@eval_method.nil? && @eval_method.receiver == :unknown && method_receiver?(node.receiver)
+          end
+
+          # Whether `receiver` names the eval receiver in a method an eval block defines: `self.class` in an
+          # instance method (`self` is an instance of the receiver or of a descendant), an implicit receiver or
+          # `self` in a singleton method. An implicit `const_get` in an instance method raises `NoMethodError`.
+          def method_receiver?(receiver)
+            class_of_self = receiver.is_a?(Prism::CallNode)
+            @eval_method.kind == :instance ? class_of_self : !class_of_self
+          end
+
+          # Inside a method an eval block on a constant defines, the receiver form that names that constant reads
+          # it as a runtime `self` that may be any of its descendants (#1946).
+          def eval_method_references(receiver)
+            return [] unless @eval_method&.receiver.is_a?(Reference) && method_receiver?(receiver)
+
+            [@eval_method.receiver]
           end
 
           # Where a `const_get` on `self` (implicit, `self`, or `self.class`) looks its name up: `:declaration`
@@ -352,7 +433,7 @@ module Rigor
           # evaluated DSL block (`configure { }`, an RSpec `describe` body) all rebind it, and the walk cannot
           # tell those from an `each` block. So is the `self` of a `def Other.x` or of a `class << Other` body.
           def self_lookup(receiver)
-            return :declaration if @eval_receiver && !receiver.is_a?(Prism::CallNode)
+            return :declaration if @eval_frame&.receiver.is_a?(Reference) && !receiver.is_a?(Prism::CallNode)
             return :unknown if @in_block || @self_rebound
 
             class_of_self = receiver.is_a?(Prism::CallNode)
@@ -374,7 +455,7 @@ module Rigor
             receiver = node.receiver
             namespaces =
               if self_receiver?(receiver)
-                eval_self_references(receiver) || self_references(node, nesting)
+                eval_self_references(receiver) || (self_references(node, nesting) + eval_method_references(receiver))
               elsif constant_receiver?(receiver)
                 [receiver_reference(receiver, nesting)]
               else
@@ -388,7 +469,8 @@ module Rigor
 
           # Inside `Other.class_eval { }` an implicit or `self` receiver is `Other` (#1878).
           def eval_self_references(receiver)
-            [@eval_receiver] if @eval_receiver && !receiver.is_a?(Prism::CallNode)
+            frame = @eval_frame
+            [frame.receiver] if frame&.receiver.is_a?(Reference) && !receiver.is_a?(Prism::CallNode)
           end
 
           # The enclosing declaration as a rooted {Reference}, so {Graph} anchors it as it anchors a constant
@@ -407,9 +489,13 @@ module Rigor
           def rebinds_self?(call)
             return true if SELF_REBINDING.include?(call.name)
 
+            @owner.nil? && meta_new_call?(call)
+          end
+
+          def meta_new_call?(call)
             recv = call.receiver
             name = recv && Source::ConstantPath.qualified_name_or_nil(recv)&.delete_prefix("::")
-            @owner.nil? && !name.nil? && META_NEW[name] == call.name
+            !name.nil? && META_NEW[name] == call.name
           end
 
           def self_receiver?(receiver)
@@ -490,11 +576,123 @@ module Rigor
           end
         end
 
+        # #1946 — the {Walker}'s reading of ancestry written outside a declaration's own statements, as
+        # {Ancestry} edges: receiver-form and `send`-spelled mixin calls, a mixin call whose `self` is not the
+        # enclosing declaration body, and the superclass of `K = Class.new(Base)`.
+        module AncestrySites
+          private
+
+          # An anonymous `Class.new(Base) { }` block's `self` is a subclass of `Base` that declares no constant of
+          # its own, so a `const_get` on it is read at `Base` (#1946).
+          def anonymous_subclass_frame(call, nesting)
+            superclass = call.arguments&.arguments&.first
+            return nil unless call.receiver.is_a?(Prism::ConstantReadNode) && call.receiver.name == :Class &&
+                              constant_receiver?(superclass)
+
+            EvalFrame.new(receiver_reference(superclass, nesting), false)
+          end
+
+          def constant_path?(node)
+            node.is_a?(Prism::ConstantReadNode) || node.is_a?(Prism::ConstantPathNode)
+          end
+
+          # Mixin calls: the ones a class body writes, and their `send` spellings.
+          MIXINS = %i[include prepend extend].freeze
+          private_constant :MIXINS
+
+          SENDS = %i[send public_send __send__].freeze
+          private_constant :SENDS
+
+          # Records an {Ancestry} for a mixin call the declaration's own statements do not carry (#1946). A
+          # receiver-less `include` directly in a class body is already one of its `includes`.
+          def record_mixin(node, nesting)
+            modules = mixin_arguments(node)
+            return if modules.nil? || modules.empty?
+            return if node.receiver.nil? && !SENDS.include?(node.name) && @body_statements.include?(node)
+
+            target = mixin_target(node, nesting)
+            modules.each do |arg|
+              ancestor = arg.is_a?(Prism::SelfNode) ? target : mixin_reference(arg, nesting)
+              next if target.nil? && ancestor.nil?
+
+              @ancestries << Ancestry.new(target: target, ancestor: ancestor, path: @path,
+                                          line: node.location.start_line)
+            end
+          end
+
+          # The module arguments of a mixin call, or nil when it is not one.
+          def mixin_arguments(node)
+            args = node.arguments&.arguments || []
+            return args if MIXINS.include?(node.name)
+            return nil unless SENDS.include?(node.name)
+
+            verb = args.first
+            name = verb.unescaped if verb.is_a?(Prism::SymbolNode) || verb.is_a?(Prism::StringNode)
+            MIXINS.include?(name&.to_sym) ? args.drop(1) : nil
+          end
+
+          def mixin_reference(arg, nesting)
+            return nil unless constant_path?(arg) && Source::ConstantPath.qualified_name_or_nil(arg)
+
+            receiver_reference(arg, nesting)
+          end
+
+          # The class a mixin call adds to: a constant receiver, or for `self` and an implicit receiver whatever
+          # `self` is — the eval receiver in an eval block, the enclosing declaration in its body. Anything else,
+          # the top level (`Object`, whose descendants are every class) included, is unknown (nil).
+          def mixin_target(node, nesting)
+            receiver = node.receiver
+            return mixin_reference(receiver, nesting) unless receiver.nil? || receiver.is_a?(Prism::SelfNode)
+
+            self_target(node, nesting)
+          end
+
+          # What `self` is at `node` as a {Reference}, where the walk can name it; nil otherwise.
+          def self_target(node, nesting)
+            frame = @eval_frame
+            return frame&.receiver.is_a?(Reference) ? frame.receiver : nil if frame || @eval_method
+            return nil if @in_block || @self_rebound || @self_kind != :declaration || nesting.empty?
+
+            rooted_reference(nesting.join("::"), node)
+          end
+
+          def rooted_reference(fqn, node)
+            Reference.new(as_written: fqn, nesting: [].freeze, from: nil, role: @role, path: @path,
+                          line: node.location.start_line, rooted: true)
+          end
+
+          # `K = Class.new(Base)` makes `Base` an ancestor of `K` (#1946). It stays out of the declaration's
+          # `superclass`, which ordinary constant resolution reads: the engine does not resolve a constant
+          # through a `Class.new` superclass either, and the two are pinned to agree.
+          def record_class_new_superclass(call, fqn, nesting)
+            superclass = call.arguments&.arguments&.first
+            return unless call.receiver.name == :Class && superclass
+
+            ancestor = if superclass.is_a?(Prism::SelfNode) then self_target(call, nesting)
+                       else mixin_reference(superclass, nesting)
+                       end
+            @ancestries << Ancestry.new(target: rooted_reference(fqn, call), ancestor: ancestor,
+                                        path: @path, line: call.location.start_line)
+          end
+
+          # The receiver-less statements directly in a declaration body.
+          def body_statements(body)
+            body.child_nodes.select { |stmt| stmt.is_a?(Prism::CallNode) && stmt.receiver.nil? }
+                .to_set.compare_by_identity
+          end
+        end
+
+        # The `self` of an eval block ({DynamicSites#eval_frame}): a {Reference}, or `:unknown`.
+        EvalFrame = Data.define(:receiver, :singleton_defs)
+        # A method an eval block defines on its receiver, and whether it is an `:instance` or `:singleton` method.
+        EvalMethod = Data.define(:receiver, :kind)
+
         # Single-pass walker. Tracks `nesting` as the stack of enclosing declaration names.
         class Walker
           include DynamicSites
+          include AncestrySites
 
-          attr_reader :declarations, :references, :dynamic_uses
+          attr_reader :declarations, :references, :dynamic_uses, :ancestries
 
           def initialize(path:, role:)
             @path = path
@@ -502,6 +700,10 @@ module Rigor
             @declarations = []
             @references = []
             @dynamic_uses = []
+            @ancestries = []
+            # The receiver-less statements directly in the declaration body being walked, which its own
+            # `includes` already carry. See {#record_mixin}.
+            @body_statements = Set.new.compare_by_identity
             # The declaration a meta-new rvalue is being walked for, or nil. See {#walk_constant_write}.
             @owner = nil
             # The node whose subtree holds the local variables in scope: the file, a method, or a class body.
@@ -512,10 +714,15 @@ module Rigor
             # `class_eval` or anonymous `Class.new` block. See {#rebinds_self?}.
             @self_rebound = false
             @rebinding_blocks = Set.new.compare_by_identity
-            # The constant receiver of each `*_eval` block, and the one the walk is inside (nil when `self` is not
-            # such a constant). See {#eval_on_constant?}.
-            @eval_receivers = {}.compare_by_identity
-            @eval_receiver = nil
+            # The {EvalFrame} of each `*_eval` block, and the one whose `self` the walk is directly in (nil when
+            # `self` is not an eval receiver). See {#eval_frame}.
+            @eval_frames = {}.compare_by_identity
+            @eval_frame = nil
+            # Inside a method an eval block defines (a `def`, or a `define_method` / `define_singleton_method`
+            # block), the eval receiver and the method's kind; nil elsewhere. See {#eval_method_references}.
+            @eval_method = nil
+            @meta_new_blocks = Set.new.compare_by_identity
+            @definer_blocks = {}.compare_by_identity
             # What `self` is here, for {#self_lookup}: `:declaration` in a class or module body (and at the top
             # level), `:singleton_method` in a `def self.x` or a def in a `class << self` body,
             # `:instance_method` in any other def, `:singleton_class` in a `class << self` body outside its
@@ -583,14 +790,18 @@ module Rigor
 
             # The body's nesting names the declaration itself, so a credit inherited from a meta-new rvalue
             # this declaration sits in must not leak into it.
-            owner = @owner
-            saved = [@self_rebound, @in_block, @module_body]
+            walk_body(node.body, nesting + [name], module_body)
+          end
+
+          def walk_body(body, nesting, module_body)
+            saved = [@owner, @self_rebound, @in_block, @module_body, @body_statements]
             @owner = nil
             @self_rebound = @in_block = false
             @module_body = module_body
-            in_local_scope(node.body, :declaration) { walk(node.body, nesting + [name]) }
-            @owner = owner
-            @self_rebound, @in_block, @module_body = saved
+            @body_statements = body_statements(body)
+            in_local_scope(body, :declaration) { walk(body, nesting) }
+          ensure
+            @owner, @self_rebound, @in_block, @module_body, @body_statements = saved
           end
 
           # A meta-new rvalue — `Class.new(Base) { ... }`, `Struct.new(:a) do ... end` — is the declaration's
@@ -623,6 +834,7 @@ module Rigor
             fqn = (nesting + [node.name.to_s]).join("::")
             @declarations << Declaration.new(fqn: fqn, path: @path,
                                              line: node.location.start_line, superclass: nil, includes: [].freeze)
+            record_class_new_superclass(call, fqn, nesting)
             fqn
           end
 
@@ -630,24 +842,35 @@ module Rigor
           # top level of the body is inspected: a mixin applied inside a conditional or a nested def is not a
           # static ancestor edge.
           def mixin_names(body)
-            body.child_nodes.filter_map do |stmt|
-              next unless stmt.is_a?(Prism::CallNode) && %i[include prepend extend].include?(stmt.name)
-              next if stmt.receiver
+            body.child_nodes.flat_map do |stmt|
+              next [] unless stmt.is_a?(Prism::CallNode) && %i[include prepend extend].include?(stmt.name)
+              next [] if stmt.receiver
 
-              arg = stmt.arguments&.arguments&.first
-              arg && Source::ConstantPath.qualified_name_or_nil(arg)
+              (stmt.arguments&.arguments || []).filter_map { |arg| Source::ConstantPath.qualified_name_or_nil(arg) }
             end
           end
 
           def in_local_scope(scope, self_kind = self_kind_in(scope))
-            saved = [@local_scope, @block_params, @self_kind, @eval_receiver]
-            @eval_receiver = nil
+            saved = [@local_scope, @block_params, @self_kind, @eval_frame, @eval_method]
+            @eval_method = eval_def(scope)
+            @eval_frame = nil
             @local_scope = scope
             @block_params = Set.new.freeze
             @self_kind = self_kind
             yield
           ensure
-            @local_scope, @block_params, @self_kind, @eval_receiver = saved
+            @local_scope, @block_params, @self_kind, @eval_frame, @eval_method = saved
+          end
+
+          # The method a `def` directly in an eval block defines on the eval receiver (#1946): a plain `def` is an
+          # instance method, or a singleton one under `instance_eval`; a `def self.x` is a singleton method.
+          def eval_def(scope)
+            frame = @eval_frame
+            return nil unless frame && scope.is_a?(Prism::DefNode)
+
+            if scope.receiver.nil? then EvalMethod.new(frame.receiver, frame.singleton_defs ? :singleton : :instance)
+            elsif scope.receiver.is_a?(Prism::SelfNode) then EvalMethod.new(frame.receiver, :singleton)
+            end
           end
 
           # The {#self_lookup} kind inside `scope`, from the kind around it. Only a receiver-less def or a `def
@@ -681,17 +904,30 @@ module Rigor
           end
 
           def in_block(block)
-            saved = [@block_params, @self_rebound, @in_block, @eval_receiver]
+            saved = [@block_params, @self_rebound, @in_block, @eval_frame, @eval_method]
             names = block.parameters ? LocalValues.bindings(block.parameters) : []
             @block_params = (@block_params | names).freeze unless names.empty?
-            if @rebinding_blocks.include?(block)
-              @self_rebound = true
-              @eval_receiver = @eval_receivers[block]
-            end
+            enter_block_self(block)
             @in_block = true
             yield
           ensure
-            @block_params, @self_rebound, @in_block, @eval_receiver = saved
+            @block_params, @self_rebound, @in_block, @eval_frame, @eval_method = saved
+          end
+
+          # A block whose `self` is another object drops the eval reading around it: an eval block sets its own
+          # (#1878), and a `Class.new` / `Struct.new` block's `self` is the class it builds. A `define_method` /
+          # `define_singleton_method` block directly in an eval block is a method of the eval receiver (#1946).
+          def enter_block_self(block)
+            if @rebinding_blocks.include?(block)
+              @self_rebound = true
+              @eval_frame = @eval_frames[block]
+              @eval_method = nil
+            elsif @meta_new_blocks.include?(block)
+              @eval_frame = @eval_method = nil
+            elsif @eval_frame && @definer_blocks.key?(block)
+              @eval_method = EvalMethod.new(@eval_frame.receiver, @definer_blocks.fetch(block))
+              @eval_frame = nil
+            end
           end
 
           def site(node)

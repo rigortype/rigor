@@ -51,7 +51,7 @@ module Rigor
         paths = @argv.empty? ? configuration.paths : @argv
         establish_root(configuration)
         scan_cache = open_scan_cache(configuration)
-        declarations, references, dynamic_uses, shadows = scan(paths, configuration, scan_cache)
+        declarations, references, dynamic_uses, shadows, ancestries = scan(paths, configuration, scan_cache)
         references.concat(signature_references(configuration))
         dynamic_uses.concat(template_mentions(declarations, scan_cache))
 
@@ -60,7 +60,7 @@ module Rigor
         references.concat(plugin_references(contribution.references))
         graph = build_graph(configuration, options, contribution,
                             declarations: declarations, references: references, dynamic_uses: dynamic_uses,
-                            shadows: shadows)
+                            shadows: shadows, ancestries: ancestries)
         emit(graph.report, options, supply: root_supply(contribution.roots, declarations))
         scan_cache.save
         0
@@ -109,9 +109,9 @@ module Rigor
         cwd == @root || inside?(cwd, @root) ? [@root] : [@root, cwd]
       end
 
-      def build_graph(configuration, options, contribution, declarations:, references:, dynamic_uses:, shadows:)
+      def build_graph(configuration, options, contribution, declarations:, **scanned)
         Analysis::Reachability::Graph.new(
-          declarations: declarations, references: references, dynamic_uses: dynamic_uses, shadows: shadows,
+          declarations: declarations, **scanned,
           root_fqns: root_fqns(declarations, options.fetch(:entry_points)) + contribution.roots,
           foreign: foreign_predicate(configuration)
         )
@@ -160,16 +160,18 @@ module Rigor
       # is the one the report prints; any other spelling's declarations are shadows, as a wider-corpus
       # file's are (#1732).
       def scan(paths, configuration, cache)
-        out = { declarations: [], references: [], dynamic_uses: [], shadows: [] }
+        out = { declarations: [], references: [], dynamic_uses: [], shadows: [], ancestries: [] }
         file_spellings(paths, configuration).sort.each do |real, list|
           primary, analysed = list.find { |_, declared| declared } || list.first
           result = cache.serve(:scan, primary) { read_and_scan(primary, real, configuration) }
           next if result.nil?
 
           out[analysed ? :declarations : :shadows].concat(result.declarations)
+          # An ancestry edge is a fact about the program, not about the file's role, so one spelling carries it.
+          out[:ancestries].concat(result.ancestries)
           list.map(&:first).each { |file| add_spelling(out, result, file, real, primary) }
         end
-        out.values_at(:declarations, :references, :dynamic_uses, :shadows)
+        out.values_at(:declarations, :references, :dynamic_uses, :shadows, :ancestries)
       end
 
       def add_spelling(out, result, file, real, primary)

@@ -270,12 +270,18 @@ implicit, `self` or `self.class` inside a method (or a block in a class
 body, such as a lambda or `define_method`), the call may run on a
 subclass or on an includer, so a `Handler` declared in a descendant is
 kept reachable too. Descendants are the classes written `class D < Base`
-and the declarations whose body has a plain `include`, `prepend` or
-`extend` of the module; `K.include(Mix)`, `K.send(:include, Mix)`,
-`K.extend(Ext)` and `K = Class.new(Base)` are not followed yet. A call
-written directly in a class body is not widened. Inside
-`Other.instance_eval { }` (or `class_eval`, `module_eval` and their
-`_exec` forms) the receiver is `Other`. A name built into a
+or `K = Class.new(Base)`, and the classes that `include`, `prepend` or
+`extend` the module in their body or anywhere else: `K.include(Mix)` in
+an initializer, its `send`, `public_send` and `__send__` spellings, or
+`include Mix` inside `K.class_eval { }`. A call written directly in a
+class body is not widened. Inside `Other.instance_eval { }` (or
+`class_eval`, `module_eval` and their `_exec` forms) the receiver is
+`Other`, and a method the block defines (`def`, `define_method`,
+`define_singleton_method`) runs on `Other` or a descendant. When the
+receiver cannot be named at all, the name is kept wherever it is
+declared: an eval block on a local variable (`k.class_eval { }`), a
+module included by such a receiver, or a class that includes a computed
+module (`K.include(mods.first)`). A name built into a
 local variable first (`name = "V#{version}"; const_get(name)`) is read
 the same way. A
 class name appearing as a string in a `.yml`, `.json` or template file

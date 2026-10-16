@@ -202,8 +202,9 @@ module Rigor
       # `reads_visibility` is the question when it reads one. The `:visibility` question does not read a contested
       # instance def-node slot (#1989): it answers from the visibility slot and the name's existence, not from the
       # `def` body, and a possible `def` that contests the slot also makes its name `possible`. The slot is contested
-      # alone where a later `attr_*`, `define_method` or alias replaced the `def`, which leaves the reader's
-      # visibility certain.
+      # alone where a later `attr_*` replaced the `def`: the attr writes the name's visibility slot, so the reader's
+      # visibility is certain. A `define_method` or alias that replaced it contests the visibility slot as well, which
+      # this question does read.
       def possible?(scope, hit, method_name, reads_visibility)
         discovery = scope.discovery
         owner = hit.owner

@@ -166,6 +166,31 @@ RSpec.describe "a later non-def definer supersedes an earlier def for typing (#1
     RUBY
   end
 
+  # Ruby: public for each — a `define_method` or an alias replacing a private `def` gives the name the running
+  # default's or the old name's visibility, so the visibility lint must not read the `def`'s.
+  it "does not keep a replaced private def's visibility for define_method or an alias" do
+    result = analyze(<<~RUBY)
+      class K
+        private def x = 1
+        define_method(:x) { 1 }
+      end
+      class L
+        private def x = 1
+        def y = 1
+        alias_method :x, :y
+      end
+      class M
+        private def x = 1
+        def y = 1
+        alias x y
+      end
+      K.new.x
+      L.new.x
+      M.new.x
+    RUBY
+    expect(result.diagnostics.map(&:rule)).not_to include("def.method-visibility-mismatch")
+  end
+
   # Ruby: NoMethodError for each — the replacing definer is on another object (`O`, or the singleton), so the
   # instance `def` still answers (controls).
   it "keeps the def when the replacing definer is on another receiver or the singleton side" do
@@ -227,7 +252,9 @@ RSpec.describe "a later non-def definer supersedes an earlier def for typing (#1
     expect(undefined(files: sibling_files("a.rb", "b.rb"))).to eq([])
   end
 
-  it "does not type from a sibling file's def in either file order" do
+  # The superseding file sorts first here, and the call is in that file. A call in a third file that sorts after
+  # both still reads the other file's `def`: the project fold is later-wins by file order (pre-existing).
+  it "does not type from a sibling file's def at a call in the superseding file when it sorts first" do
     expect(undefined(files: sibling_files("b.rb", "a.rb"))).to eq([])
   end
 

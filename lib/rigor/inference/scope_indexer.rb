@@ -7853,7 +7853,14 @@ module Rigor
           end
           unless in_singleton_class || defs_singleton
             record_attr_visibility(node, owner_prefix, current_visibility, accumulator, toggled: true)
+            contest_replaced_visibility(replaced_by_call(node), owner_prefix, accumulator)
           end
+        when Prism::AliasMethodNode
+          unless in_singleton_class || defs_singleton
+            contest_replaced_visibility(Array(Source::AliasNames.keyword_names(node)&.first), owner_prefix,
+                                        accumulator)
+          end
+          return current_visibility
         end
 
         # Statement-position StatementsNode preserves left-to-right visibility flow; everything else recurses with the
@@ -8047,6 +8054,25 @@ module Rigor
       # each member it defines (`x`, `x=`) with `visibility`: the running default for a statement (`toggled`), the
       # wrapping call's for `private attr_accessor :x`, which Ruby applies to the `[:x, :x=]` the macro returns.
       # A non-literal name (`attr_reader(*FIELDS)`) records nothing; a call that is no such macro records nothing.
+      # Issue #1989 — the names a `define_method(:x)` or an `alias_method :x, :y` call replaces. An `attr_*` call is
+      # not among them: it writes its members' slots itself ({#record_attr_visibility}).
+      def replaced_by_call(call_node)
+        return define_method_superseded_name(call_node) if call_node.name == :define_method
+
+        Source::AliasNames.alias_method_call_names(call_node)&.first(1) || []
+      end
+
+      # Issue #1989 — a `define_method` or an alias that replaces a method whose visibility slot this walk recorded
+      # gives the name a visibility the walk does not read (the running default for `define_method`, the old
+      # name's for an alias), so the slot is contested rather than left asserting the replaced `def`'s.
+      def contest_replaced_visibility(names, qualified_prefix, accumulator)
+        return if names.empty? || qualified_prefix.empty?
+
+        class_name = qualified_prefix.join("::")
+        recorded = accumulator[class_name]
+        names.each { |name| accumulator.contest_slot(class_name, name) if recorded&.key?(name) }
+      end
+
       def record_attr_visibility(call_node, qualified_prefix, visibility, accumulator, toggled:)
         return unless attr_visibility_call?(call_node)
         return if qualified_prefix.empty?

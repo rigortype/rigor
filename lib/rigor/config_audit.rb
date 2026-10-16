@@ -3,6 +3,7 @@
 require "did_you_mean"
 
 require_relative "config_path"
+require_relative "flow_contribution/conflict"
 require_relative "signature_path_audit"
 # ADR-87 WD4 — only the pure rule-id table (`ALL_RULES` / `RULE_FAMILIES`) is needed, so require the light
 # `rule_ids.rb` rather than the engine-pulling `check_rules.rb`; keeps `config_audit` (loaded by every check)
@@ -191,7 +192,7 @@ module Rigor
         "is not a recognized rule id; the override has no effect" unless PLUGIN_LOADER_ROWS.include?(key)
       elsif inert_builtin_token?(key)
         "is not a recognized rule id; the override has no effect"
-      elsif !non_check_engine_token?(key)
+      elsif !non_check_engine_token?(key) && !severity_only_id?(key)
         "is not a recognized rule id; the override has no effect " \
           "(if this is a plugin's rule, write it as `plugin.<id>.<rule>`)"
       end
@@ -254,6 +255,18 @@ module Rigor
         RESERVED_RUN_LEVEL_FAMILIES.any? { |family| token == family || token.start_with?("#{family}.") }
     end
     private_class_method :reserved_run_level_token?
+
+    # Bare ids that a `severity_overrides:` key re-stamps but a marker or `disable:` cannot suppress: the `--explain`
+    # `fallback` row and the `contribution_merge` conflict reasons (`FlowContribution::CONFLICT_VALID_REASONS`,
+    # kebab-cased). They are not in `CheckRules::NON_CHECK_DIAGNOSTIC_IDS`, which would silence the warnings for a
+    # `disable:` token or marker naming them. `spec/rigor/config_audit_spec.rb` pins this list's completeness.
+    SEVERITY_ONLY_IDS = (%w[fallback] + FlowContribution::CONFLICT_VALID_REASONS.map { it.to_s.tr("_", "-") }).freeze
+    private_constant :SEVERITY_ONLY_IDS
+
+    def self.severity_only_id?(key)
+      SEVERITY_ONLY_IDS.include?(key)
+    end
+    private_class_method :severity_only_id?
 
     def self.non_check_engine_token?(token)
       Analysis::CheckRules::NON_CHECK_DIAGNOSTIC_IDS.include?(token) ||

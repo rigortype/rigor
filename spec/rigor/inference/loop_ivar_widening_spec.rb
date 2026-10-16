@@ -72,6 +72,35 @@ RSpec.describe "a loop body's instance-variable rebind", type: :runner do
     expect(dumped_type(body)).to eq("Integer")
   end
 
+  # A predicate runs before every iteration but is walked once, and the fixpoint tracks the body's writes only, so a
+  # literal-name `instance_variable_set` in it joins `Dynamic[top]` as #1889 joins one in a `for` body. Ruby 4.0.5,
+  # `k = 3`: every variant leaves the ivar at `3` and prints "three"; `{3 => "x"}[@p].upcase` prints "X".
+  {
+    "a `while` predicate" => "while (instance_variable_set(:@p, i); i < k)\n  i += 1\nend",
+    "an `until` predicate" => "until (instance_variable_set(:@p, i); i >= k)\n  i += 1\nend",
+    "a modifier `until` predicate" => "i += 1 until (instance_variable_set(:@p, i); i >= k)",
+    "the predicate of a loop with an empty body" => "nil while (instance_variable_set(:@p, i += 1); i < k)"
+  }.each do |label, loop_source|
+    it "does not fold on an ivar #{label} writes reflectively" do
+      body = "@p = 0\ni = 0\n#{loop_source}\nputs 'three' if @p == 3\nputs 'three' if @p.positive?\n" \
+             "puts({3 => 'x'}[@p].upcase)"
+      expect(reported_rules(body)).to be_empty
+    end
+  end
+
+  {
+    "on its declaration seed" => "  def initialize = @p = 0\n",
+    "unbound before the loop" => ""
+  }.each do |label, initializer|
+    it "does not fold on an ivar #{label} that a `while` predicate writes reflectively" do
+      source = "class S\n#{initializer}  def m(k)\n    i = 0\n    " \
+               "while (instance_variable_set(:@p, i); i < k)\n      i += 1\n    end\n    " \
+               "puts 'three' if @p == 3\n  end\nend\n"
+      rules = analyze(source).diagnostics.map { |d| d.rule.to_s }
+      expect(rules.grep(/\A(flow\.|call\.undefined-method\z)/)).to be_empty
+    end
+  end
+
   # A guard: the block write-back already left `@n` unfoldable (`0 | Dynamic[top]`); the fixpoint keeps it so.
   it "does not fold on an ivar a block nested in the body rebinds" do
     body = "@n = 0\ni = 0\nwhile i < k\n  a.each { |x| @n = x }\n  i += 1\nend"

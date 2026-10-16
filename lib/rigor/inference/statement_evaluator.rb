@@ -2079,7 +2079,11 @@ module Rigor
       # degrade to `T | nil` in the post-loop scope. The loop expression itself types as `Constant[nil]` (Slice 3 phase
       # 1), reflecting the common case where no `break VALUE` is observed.
       def eval_loop(node)
-        _pred_type, post_pred = sub_eval(node.predicate, loop_entry_scope(node))
+        # Issue #1930 — the predicate runs before every iteration but is walked once, so a literal-name
+        # `instance_variable_set` in it joins its value and `Dynamic[top]` ({ReflectiveIvarWrite.in_repeating_body}):
+        # the rebind fixpoint tracks the body's writes only.
+        entry = loop_entry_scope(node)
+        _pred_type, post_pred = ReflectiveIvarWrite.in_repeating_body { sub_eval(node.predicate, entry) }
         post_pred = widen_predicate_pins(node, post_pred)
         return [Type::Combinator.constant_of(nil), narrow_loop_exit_edge(node, post_pred)] if node.statements.nil?
 

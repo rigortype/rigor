@@ -60,10 +60,11 @@ reshaping code, and lanes that collided or started on a premise master had alrea
    check that finds nothing severe, and a non-converging design goes to the user.
 7. **Land in order.** A branch need not contain `origin/master` to merge; it is rebased at each push.
    Before merging, fetch and list the files master changed since the branch's merge base (`git diff
-   --name-only <merge-base> origin/master`). When that list touches `lib/`, `sig/`, `data/` or
-   `.rigor.dist.yml`, or shares a file with the PR, have the lane push again through `bin/lane-push`,
-   which rebases and reruns the gate: an engine change can move a spec the PR touches through files
-   neither shares, as a fix that flips a pinned answer does. Otherwise merge. Check `mergeable` before waiting on CI: a `CONFLICTING` PR starts no run, so
+   --name-only <merge-base> origin/master`). When either that list or the PR touches `lib/`, `sig/`,
+   `data/` or `.rigor.dist.yml`, or the two share a file, have the lane push again through
+   `bin/lane-push`, which rebases and reruns the gate: an engine change on either side can move the
+   other side's specs through files neither shares, as a fix that flips a pinned answer does.
+   Otherwise merge. Check `mergeable` before waiting on CI: a `CONFLICTING` PR starts no run, so
    send it back to its lane to run `bin/lane-push` and resolve the rebase it stops on. When the lane
    has ended, run `bin/lane-push` in its worktree yourself. After the batch, watch the resulting
    master CI run.

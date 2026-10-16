@@ -177,6 +177,7 @@ lib/rigor/inference/module_function_state.rb:
     Rigor::Inference::ModuleFunctionState#call?: grandfathered
     Rigor::Inference::ModuleFunctionState#each_rebound_name: stops at a nested class, module or `class <<` body, so a named module_function call's snapshot (#1550) declines only on a rebind of its own module's method; it lives in ModuleFunctionState, the home this census routes module_function readings to
     Rigor::Inference::ModuleFunctionState#prescan_deferred: grandfathered
+    Rigor::Inference::ModuleFunctionState#visibility_reset?: names the bare `public`, `private` and `protected` calls that end the module_function mode (#1968), which the singleton, deferred and sig-gen readings read through `prescan_deferred`; it lives in ModuleFunctionState, the home this census routes module_function readings to
 lib/rigor/inference/operand_effects.rb:
   computes: whether an operand holds a write or a jump the scope after it must see
   producers:

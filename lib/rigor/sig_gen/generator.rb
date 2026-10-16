@@ -98,6 +98,7 @@ module Rigor
         # (`build_candidate`, `method_def_prefix`) a never-nil invariant without per-call-site defensive guards.
         @namespace_kinds = {}
         @module_function_methods = Set.new
+        @uncertain_module_function_defs = Set.new.compare_by_identity
         @class_shells = Set.new
         @class_superclasses = {}
         @meta_layouts = {}
@@ -463,10 +464,7 @@ module Rigor
         base_scope = Scope.empty(environment: environment)
         scope_index = Inference::ScopeIndexer.index(parse_result.value, default_scope: base_scope)
 
-        @namespace_kinds = {}
-        @module_function_methods = Set.new
-        @class_shells = Set.new
-        @class_superclasses = {}
+        reset_file_maps
         @meta_layouts = collect_meta_layouts(scope_index)
         register_meta_classes
         defs = collect_method_definitions(parse_result.value, scope_index)
@@ -486,6 +484,15 @@ module Rigor
         obs_ivar_map = build_observed_ivar_map(parse_result.value)
         meta_candidates + candidates_from_defs +
           collect_attr_candidates(parse_result.value, path, scope_index, obs_ivar_map)
+      end
+
+      # The per-file scratch state {#analyse_file} starts each file with.
+      def reset_file_maps
+        @namespace_kinds = {}
+        @module_function_methods = Set.new
+        @uncertain_module_function_defs = Set.new.compare_by_identity
+        @class_shells = Set.new
+        @class_superclasses = {}
       end
 
       # Walks the AST collecting `(def_node, class_name, kind)` tuples for every `def` Rigor can re-type. Slice 1
@@ -732,6 +739,8 @@ module Rigor
         class_name = prefix.join("::")
         if Inference::ModuleFunctionState.sig_gen_module_function?(module_function_active, kind)
           @module_function_methods << [class_name, node.name]
+        elsif Inference::ModuleFunctionState.sig_gen_uncertain?(module_function_active, kind)
+          @uncertain_module_function_defs << node
         end
         out << [node, class_name, kind]
       end
@@ -783,9 +792,13 @@ module Rigor
       # private methods are implementation details, not part of the type contract downstream consumers (Steep,
       # IDE, gem users) read. The default now skips private and protected methods; the `:include_private` flag
       # restores the slice-4 behaviour for callers that want every method.
+      #
+      # A module function renders as `def self?.name`, which RBS reads as a public singleton method and a private
+      # instance method, so a `private` written before the `module_function` toggle does not exclude it (#1968).
       def visibility_excludes?(def_node, class_name, kind, scope_index)
         return false if kind == :singleton
         return false if @include_private
+        return false if @module_function_methods.include?([class_name, def_node.name])
 
         scope = scope_index[def_node] || scope_index.each_value.first
         return false if scope.nil?
@@ -960,6 +973,9 @@ module Rigor
       # #1676 — a top-level `def` is collected with no class; it is reported, never typed.
       def classify_collected_def(path, def_node, class_name, kind, scope_index)
         return skipped(path, def_node, class_name, kind, :top_level_def) if class_name.nil?
+        if @uncertain_module_function_defs.include?(def_node)
+          return skipped(path, def_node, class_name, kind, :uncertain_module_function)
+        end
 
         classify_def(path, def_node, class_name, kind, scope_index)
       end

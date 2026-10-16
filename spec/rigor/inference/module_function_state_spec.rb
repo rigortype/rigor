@@ -4,7 +4,8 @@ require "spec_helper"
 require "prism"
 
 # The `module_function` probes P1–P13 from the #1507 declaration-fact review, each a single declaration,
-# and P21–P38 for the named form's snapshot (#1550). Ruby 4.0.5's answer is in each example's comment.
+# P21–P38 for the named form's snapshot (#1550), and R1–R6 for what ends the bare form's mode (#1968). Ruby
+# 4.0.5's answer is in each example's comment.
 # The examples pin what each reader answers TODAY, which `Rigor::Inference::ModuleFunctionState`
 # reproduces for all four of them: the singleton def-node table, the deferred ranges, the extends table
 # and sig-gen. Where today's answer contradicts Ruby and a fix is planned, the example says what to flip.
@@ -306,9 +307,102 @@ module ModuleFunctionSnapshotProbes
   }.freeze
 end
 
+# The #1968 probes for what ends the module_function mode. Each module defines `b` after the statement under test.
+module ModuleFunctionResetProbes
+  SOURCES = {
+    "R1" => <<~RUBY,
+      module R1
+        def a; end
+        module_function
+        public :a
+        private def z; end
+        def b; end
+      end
+    RUBY
+    "R2" => <<~RUBY,
+      module R2
+        private
+        module_function
+        def b; end
+      end
+    RUBY
+    "R3" => <<~RUBY,
+      module R3
+        module_function
+        if rand > 2
+          public
+        end
+        def b; end
+      end
+    RUBY
+    "R4" => <<~RUBY,
+      module R4
+        module_function
+        [1].each { private }
+        def b; end
+      end
+    RUBY
+    "R5" => <<~RUBY,
+      module R5
+        module_function
+        self.public
+        def b; end
+      end
+    RUBY
+    "R7" => <<~RUBY,
+      module R7
+        module_function
+        K = Class.new(StandardError) do
+          private
+        end
+        S = Struct.new(:l) do
+          private
+        end
+        D = Data.define(:v) do
+          protected
+        end
+        Class.new { public }
+        def b; end
+      end
+    RUBY
+    "R9" => <<~RUBY,
+      module R9
+        module_function
+        def a; end
+      rescue
+        nil
+      else
+        private
+      ensure
+        def b; end
+      end
+    RUBY
+    "R8" => <<~RUBY,
+      module R8
+        M = Module.new { module_function }
+        def b; end
+      end
+    RUBY
+    "R6" => <<~RUBY
+      module R6
+        module_function
+        module_eval { public }
+        class Inner
+          public
+        end
+        def helper
+          private
+        end
+        def b; end
+      end
+    RUBY
+  }.freeze
+end
+
 RSpec.describe Rigor::Inference::ModuleFunctionState do
   def probe_source(probe)
-    ModuleFunctionStateProbes::SOURCES[probe] || ModuleFunctionSnapshotProbes::SOURCES.fetch(probe)
+    ModuleFunctionStateProbes::SOURCES[probe] || ModuleFunctionResetProbes::SOURCES[probe] ||
+      ModuleFunctionSnapshotProbes::SOURCES.fetch(probe)
   end
 
   def root_of(probe)
@@ -330,9 +424,11 @@ RSpec.describe Rigor::Inference::ModuleFunctionState do
   # `"name@line" => toggle on` for each direct def, and `"copy name" => "name@line"` for each def a named
   # call copies.
   def singleton_reading(probe)
-    statements = Rigor::Inference::ScopeIndexer.statements_of(body_of(probe))
+    body = body_of(probe)
+    statements = Rigor::Inference::ScopeIndexer.statements_of(body)
+    conditional = described_class.conditional_clause_statements(body)
     answer = {}
-    described_class.each_singleton_sibling(statements) do |stmt, module_function_on, named_call|
+    described_class.each_singleton_sibling(statements, conditional) do |stmt, module_function_on, named_call|
       if named_call
         described_class.each_singleton_copy(stmt, statements) do |name, def_node|
           answer["copy #{name}"] = label(def_node)
@@ -379,7 +475,11 @@ RSpec.describe Rigor::Inference::ModuleFunctionState do
       next unless stmt.is_a?(Prism::DefNode)
 
       kind = stmt.receiver.is_a?(Prism::SelfNode) ? :singleton : :instance
-      answer[label(stmt)] = described_class.sig_gen_module_function?(active, kind)
+      answer[label(stmt)] = if described_class.sig_gen_uncertain?(active, kind)
+                              :uncertain
+                            else
+                              described_class.sig_gen_module_function?(active, kind)
+                            end
     end
     answer
   end
@@ -404,59 +504,119 @@ RSpec.describe Rigor::Inference::ModuleFunctionState do
   end
 
   describe "a bare call followed by a bare visibility call" do
-    # Ruby: `public` ends the module_function mode, so `x` is a public instance method and `P1.x` raises.
-    # Every reader keeps the toggle on. Flip this when the reset semantics are fixed (#1968).
-    it "P1 (`public`): every reader makes `x` a module function" do
+    # Ruby: `public` ends the module_function mode, so `x` is a public instance method and `P1.x` raises. The
+    # singleton, deferred and sig-gen readers end the mode there (#1968), so the singleton def-node table has no
+    # `x` and the deferred row is instance-only. The extends reading still makes the module extend itself, and the
+    # project tables fold `x` onto the singleton through that edge (#526).
+    it "P1 (`public`): no reader but the extends one makes `x` a module function" do
       expect(readings("P1")).to eq(
-        singleton: { "x@4" => true }, deferred: { :rows => [], "x@4" => true },
-        extends: { "module_function@2:2" => true }, sig_gen: { "x@4" => true }
+        singleton: { "x@4" => false }, deferred: { :rows => [], "x@4" => false },
+        extends: { "module_function@2:2" => true }, sig_gen: { "x@4" => false }
       )
       expect(tables("P1")).to eq(
-        singleton_def_nodes: { "P1" => { x: "x@4" } }, deferred_ranges: [[:x, 4, :both, "P1"]],
+        singleton_def_nodes: {}, deferred_ranges: [[:x, 4, :instance, "P1"]],
         extends: { "P1" => ["P1"] }
       )
     end
 
-    # Ruby: `x` is a private instance method with no singleton copy. Flip this when the reset semantics are
-    # fixed (#1968).
-    it "P2 (`private`): every reader makes `x` a module function" do
+    # Ruby: `x` is a private instance method with no singleton copy (#1968).
+    it "P2 (`private`): no reader but the extends one makes `x` a module function" do
       expect(readings("P2")).to eq(
-        singleton: { "x@4" => true }, deferred: { :rows => [], "x@4" => true },
-        extends: { "module_function@2:2" => true }, sig_gen: { "x@4" => true }
+        singleton: { "x@4" => false }, deferred: { :rows => [], "x@4" => false },
+        extends: { "module_function@2:2" => true }, sig_gen: { "x@4" => false }
       )
       expect(tables("P2")).to eq(
-        singleton_def_nodes: { "P2" => { x: "x@4" } }, deferred_ranges: [[:x, 4, :both, "P2"]],
+        singleton_def_nodes: {}, deferred_ranges: [[:x, 4, :instance, "P2"]],
         extends: { "P2" => ["P2"] }
       )
     end
 
-    # Ruby: `x` is a protected instance method with no singleton copy. Flip this when the reset semantics are
-    # fixed (#1968).
-    it "P12 (`protected`): every reader makes `x` a module function" do
+    # Ruby: `x` is a protected instance method with no singleton copy (#1968).
+    it "P12 (`protected`): no reader but the extends one makes `x` a module function" do
       expect(readings("P12")).to eq(
-        singleton: { "x@4" => true }, deferred: { :rows => [], "x@4" => true },
-        extends: { "module_function@2:2" => true }, sig_gen: { "x@4" => true }
+        singleton: { "x@4" => false }, deferred: { :rows => [], "x@4" => false },
+        extends: { "module_function@2:2" => true }, sig_gen: { "x@4" => false }
       )
       expect(tables("P12")).to eq(
-        singleton_def_nodes: { "P12" => { x: "x@4" } }, deferred_ranges: [[:x, 4, :both, "P12"]],
+        singleton_def_nodes: {}, deferred_ranges: [[:x, 4, :instance, "P12"]],
         extends: { "P12" => ["P12"] }
       )
     end
 
-    # Ruby: `a` and `c` are module functions, and `b`, after `public`, is a public instance method only.
-    # `b@5 => true` in every reader is the reset bug. Flip this when #1968 fixes the reset semantics.
-    it "P10 (a second bare call after `public`): every reader keeps `b` a module function" do
+    # Ruby: `a` and `c` are module functions, and `b`, after `public`, is a public instance method only. The second
+    # bare call turns the mode on again for `c` (#1968).
+    it "P10 (a second bare call after `public`): `b` is not a module function, and `c` is" do
       expect(readings("P10")).to eq(
-        singleton: { "a@3" => true, "b@5" => true, "c@7" => true },
-        deferred: { :rows => [], "a@3" => true, "b@5" => true, "c@7" => true },
+        singleton: { "a@3" => true, "b@5" => false, "c@7" => true },
+        deferred: { :rows => [], "a@3" => true, "b@5" => false, "c@7" => true },
         extends: { "module_function@2:2" => true, "module_function@6:2" => true },
-        sig_gen: { "a@3" => true, "b@5" => true, "c@7" => true }
+        sig_gen: { "a@3" => true, "b@5" => false, "c@7" => true }
       )
       expect(tables("P10")).to eq(
-        singleton_def_nodes: { "P10" => { a: "a@3", b: "b@5", c: "c@7" } },
-        deferred_ranges: [[:a, 3, :both, "P10"], [:b, 5, :both, "P10"], [:c, 7, :both, "P10"]],
+        singleton_def_nodes: { "P10" => { a: "a@3", c: "c@7" } },
+        deferred_ranges: [[:a, 3, :both, "P10"], [:b, 5, :instance, "P10"], [:c, 7, :both, "P10"]],
         extends: { "P10" => ["P10"] }
       )
+    end
+
+    # Ruby 4.0.5: `R1.b` is a module function. A visibility call with arguments, `public :a` or `private def z`,
+    # sets the named methods' visibility and leaves the mode on.
+    it "R1 (a named visibility call): every reader keeps `b` a module function" do
+      expect(singleton_reading("R1")).to eq("a@2" => false, "b@6" => true)
+      expect(deferred_reading("R1")).to include("b@6" => true)
+      expect(sig_gen_reading("R1")).to include("b@6" => true)
+    end
+
+    # Ruby 4.0.5: `R2.b` is 1 and `b` a private instance method. A `private` before the toggle does not stop it. A
+    # guard: it passes without the reset.
+    it "R2 (`private` before the toggle): every reader makes `b` a module function" do
+      expect(readings("R2")).to include(singleton: { "b@4" => true }, sig_gen: { "b@4" => true })
+      expect(deferred_reading("R2")).to include("b@4" => true)
+    end
+
+    # Ruby 4.0.5: a `public` in an `if` body, or a `private` in a block, ends the mode when it runs, for the defs
+    # after it. Whether it runs is not known, so the singleton and sig-gen readers read `b` as uncertain: neither a
+    # module function nor an instance method only. The deferred row stays `:both`, the reading that counts the def
+    # as run on both sides.
+    { "R3" => "b@6", "R4" => "b@4" }.each do |probe, b|
+      it "#{probe} (a reset in control flow or a block): `b` is uncertain" do
+        expect(singleton_reading(probe)).to eq(b => :uncertain)
+        expect(deferred_reading(probe)).to eq(:rows => [], b => true)
+        expect(sig_gen_reading(probe)).to eq(b => :uncertain)
+      end
+    end
+
+    # Ruby 4.0.5: `R7.b` is a module function; `R8.respond_to?(:b)` is false. A class-creating block runs with
+    # the new class as `self`, so a `private` there, or a `module_function` in a `Module.new` block, changes that
+    # class and not the body around it.
+    it "R7 (a reset in a class-creating block): every reader keeps `b` a module function" do
+      expect(readings("R7").values_at(:singleton, :sig_gen)).to eq([{ "b@13" => true }, { "b@13" => true }])
+      expect(deferred_reading("R7")).to include("b@13" => true)
+    end
+
+    it "R8 (a bare call in a `Module.new` block): no reader makes `b` a module function" do
+      expect(readings("R8").values_at(:singleton, :sig_gen)).to eq([{ "b@3" => false }, { "b@3" => false }])
+      expect(deferred_reading("R8")).to include("b@3" => false)
+    end
+
+    # Ruby 4.0.5: with no exception the `else` clause runs, so `R9.b` raises; with one it does not. The clause may
+    # not run, so the singleton reading reads `b` as uncertain (RB and RC in the `rigor check` spec cover `rescue`).
+    it "R9 (a reset in a body-level `rescue` or `else` clause): the singleton reading reads `b` as uncertain" do
+      expect(singleton_reading("R9")).to eq("a@3" => true, "b@9" => :uncertain)
+    end
+
+    # Ruby 4.0.5: `R5.respond_to?(:b)` is false; `self.public` resets as a bare `public` does.
+    it "R5 (`self.public`): no reader makes `b` a module function" do
+      expect(readings("R5")).to include(singleton: { "b@4" => false }, sig_gen: { "b@4" => false })
+      expect(deferred_reading("R5")).to include("b@4" => false)
+    end
+
+    # Ruby 4.0.5: `R6.b` is a module function. A `public` in a `module_eval` block, a nested class body or a def body
+    # changes another scope. A guard: no reader enters those scopes.
+    it "R6 (a reset in another scope): every reader keeps `b` a module function" do
+      expect(singleton_reading("R6")).to include("b@10" => true)
+      expect(deferred_reading("R6")).to include("b@10" => true)
+      expect(sig_gen_reading("R6")).to include("b@10" => true)
     end
   end
 

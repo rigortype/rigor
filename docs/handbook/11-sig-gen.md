@@ -165,6 +165,11 @@ The `sig.skipped.*` reasons are:
   RBS for it, so `--write` and `--check` are unaffected. Its
   JSON row has no `class` key. `def self.x`, a `def` inside a
   block body and one inside `class << obj` are not reported.
+- `sig.skipped.uncertain-module-function` — a bare `public`,
+  `private` or `protected` that may not run (under an `if`, in
+  a block) sits between a bare `module_function` and the
+  method, so it is either a module function or an instance
+  method only. sig-gen writes neither.
 - `sig.skipped.unrenderable-rbs` — the signature Rigor
   rendered for this method does not parse as RBS. This one
   is a **bug in Rigor**, not a property of your code: every

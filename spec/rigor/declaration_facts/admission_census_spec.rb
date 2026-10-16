@@ -61,7 +61,7 @@ RSpec.describe "Discovery-table admission census" do
       next [member, kinds] if justified.nil?
 
       files = kinds.values.flatten
-      [member, kinds.merge("justified" => justified.slice(*files))]
+      [member, kinds.merge("justified" => justified.select { |file, _| files.include?(file) })]
     end
     found.merge("members" => members)
   end
@@ -103,6 +103,13 @@ RSpec.describe "Discovery-table admission census" do
     problems = census_problems(found, YAML.load_file(snapshot))
     expect(problems).to eq([]), "#{problems.join("\n")}\nRead the table through a Scope reader, or record the path " \
                                 "in admission_census.yml (#{DeclarationFactSources::REGENERATE_ENV}=1 rewrites it)."
+  end
+
+  it "regenerates the committed file byte for byte on the current tree (#1942)" do
+    found = DiscoveryReadScan.census(DeclarationFactSources.parsed_under, members)
+    text = DeclarationFactSources.yaml_text(header, with_justified(found, YAML.load_file(snapshot)))
+
+    expect(text).to eq(File.read(snapshot))
   end
 
   it "justifies every read and copy of a member that has a contested sibling" do

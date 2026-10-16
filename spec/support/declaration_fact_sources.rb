@@ -32,8 +32,67 @@ module DeclarationFactSources
     ENV[REGENERATE_ENV] == "1"
   end
 
+  def yaml_text(header, data)
+    header + YAML.dump(data, line_width: -1).delete_prefix("---\n")
+  end
+
   def write_yaml(path, header, data)
-    File.write(path, header + YAML.dump(data, line_width: -1).delete_prefix("---\n"))
+    File.write(path, yaml_text(header, data))
+  end
+
+  # `producers.yml` brought in line with `keys` (`"path#scope"`) by editing its text, not by re-dumping it: the file's
+  # reasons are hand-written plain scalars, and a load and dump would cut one at a ` #` (a YAML comment), reorder
+  # entries and refold a `>-` block. An entry that is still found keeps its lines as they are, a new one is added as
+  # `TODO` before the first existing entry that sorts after it, a vanished one (and a file left with none) is dropped,
+  # and the leading comment block stays. Returns the new text.
+  def regenerate_producers_text(text, keys)
+    head, sections = split_producer_sections(text)
+    wanted = keys.group_by { |key| key.split("#", 2).first }.transform_values { |ks| ks.map { |k| k.split("#", 2).last } }
+    kept = sections.filter_map do |path, preamble, entries|
+      scopes = wanted[path] or next
+      [path, preamble, merge_producer_entries(entries, scopes)]
+    end
+    (wanted.keys - sections.map(&:first)).sort.each do |path|
+      at = kept.index { |section| section.first > path } || kept.size
+      kept.insert(at, [path, ["  computes: TODO\n", "  producers:\n"], merge_producer_entries([], wanted[path])])
+    end
+    head.join + kept.flat_map { |path, preamble, entries| ["#{yaml_key(path)}:\n", *preamble, *entries.flat_map(&:last)] }.join
+  end
+
+  def yaml_key(text)
+    YAML.safe_load("#{text}: x") == { text => "x" } ? text : text.to_json
+  rescue Psych::Exception
+    text.to_json
+  end
+
+  # `[head lines, [[path, preamble lines, [[scope, entry lines]]]]]`; an entry is its `key: reason` line and any
+  # continuation lines, a preamble is a file's lines up to and including `  producers:`.
+  def split_producer_sections(text)
+    head = []
+    sections = []
+    text.each_line do |line|
+      if line.match?(/\A\S/) && !line.start_with?("#")
+        sections << [line.chomp.delete_suffix(":"), [], []]
+      elsif sections.empty?
+        head << line
+      elsif (match = line.match(/\A {4}(\S.*?):(?: |$)/))
+        sections.last[2] << [match[1], [line]]
+      elsif sections.last[2].empty?
+        sections.last[1] << line
+      else
+        sections.last[2].last.last << line
+      end
+    end
+    [head, sections]
+  end
+
+  def merge_producer_entries(entries, scopes)
+    merged = entries.select { |scope, _| scopes.include?(scope) }
+    (scopes - entries.map(&:first)).sort.each do |scope|
+      at = merged.index { |existing, _| existing > scope } || merged.size
+      merged.insert(at, [scope, ["    #{yaml_key(scope)}: TODO\n"]])
+    end
+    merged
   end
 
   # The full name of a constant reference, or nil for a dynamic path (`foo::Bar`).

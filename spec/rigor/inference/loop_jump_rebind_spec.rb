@@ -148,9 +148,9 @@ RSpec.describe "rebinds on a loop's jump paths", type: :runner do
     end
 
     it "joins an instance variable a `next` path rebinds" do
-      # The fixpoint tracks locals only; an ivar reaches the continuation through the single body pass, which now
-      # joins its `next` exit too.
-      expect(dumped_type(<<~RUBY)).to eq("1 | String")
+      # The fixpoint's passes join their `next` exits, and since issue #1930 it widens an ivar as it widens a local:
+      # Ruby leaves `@w` as `3`, which the single body pass alone (`1 | String`) missed.
+      expect(dumped_type(<<~RUBY)).to eq("Integer | String")
         class LoopJumpIvar
           def run
             @w = String.new

@@ -471,6 +471,15 @@ RSpec.describe Rigor::SigGen::Generator do
       expect(candidate&.rbs).to eq(%(def self?.later: () -> "s1"))
     end
 
+    # #1968 — Ruby 4.0.5: `RB.a` is "x". The `public` in the body-level `rescue` clause does not run, so the def
+    # before it stays a module function. A guard: sig-gen reads the clause as its own statement list.
+    it "keeps the module_function region past a `public` in a body-level `rescue` clause" do
+      src = "module RB\n  module_function\n  def a = 1\nrescue\n  public\nensure\n  def b = 2\nend\n"
+      path = write_fixture("lib/x.rb", src)
+
+      expect(generator(paths: [path]).run.filter_map(&:rbs)).to include("def self?.a: () -> 1")
+    end
+
     # #1968 — Ruby 4.0.5: `N.b` is 1 and `b` a private instance method, which is what `def self?.b` declares. A
     # `private` before the toggle used to drop the method.
     it "emits a module function whose region opens after a bare `private`" do

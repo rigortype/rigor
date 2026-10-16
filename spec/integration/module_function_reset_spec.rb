@@ -81,4 +81,16 @@ RSpec.describe "a bare visibility call after a bare module_function (#1968)" do
       G.label.upcase
     RUBY
   end
+
+  # Ruby: `RB.a` and `RC.a` are "x": the `rescue` clause does not run, so the `public` there does not end the mode,
+  # and the `ensure` / `else` def is a module function. A body-level `rescue` clause may not run, so the singleton
+  # copy is uncertain rather than the def before the clause.
+  {
+    "ensure" => "rescue\n  public\nensure\n  def a = \"x\"\n",
+    "else" => "rescue\n  public\nelse\n  def a = \"x\"\n"
+  }.each do |clause, tail|
+    it "does not read a `public` in a body-level `rescue` clause as a certain reset (#{clause})" do
+      expect(undefined_messages("module R\n  module_function\n  def a = 1\n#{tail}end\nR.a.upcase\n")).to eq([])
+    end
+  end
 end

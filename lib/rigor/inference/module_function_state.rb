@@ -69,12 +69,13 @@ module Rigor
       # The mode after `stmt`, a direct statement of a body, for the readers that walk the statements: `mode`
       # is `true`, `false` or `:uncertain` before it. A {.visibility_reset?} the statement runs ends the mode,
       # and one it may not run (`:maybe_off`, below {.prescan_deferred}) makes an on mode uncertain. A
-      # `module_function` nested in the statement is not read here, as before.
-      def mode_after(mode, stmt)
+      # `module_function` nested in the statement is not read here, as before. `nested` says the statement
+      # itself may not run, so every reset in it may not either.
+      def mode_after(mode, stmt, nested: false)
         return mode unless mode
 
         events = []
-        prescan_deferred(stmt, EMPTY_PREFIX, false, events, [])
+        prescan_deferred(stmt, EMPTY_PREFIX, false, events, [], nested: nested)
         events.sort_by(&:first).each do |_offset, event|
           case event
           when :off then mode = false
@@ -97,8 +98,11 @@ module Rigor
       # - `named_call` is true for a named call (`module_function :a` or `module_function def x`), which
       #   {.each_singleton_copy} resolves; the caller records nothing else for it.
       #
-      # A `module_function` call nested in control flow or a block is not seen.
-      def each_singleton_sibling(statements)
+      # A `module_function` call nested in control flow or a block is not seen. `conditional` lists the
+      # statements of a body-level `rescue` or `else` clause ({.conditional_clause_statements}), which may not
+      # run, so a reset there makes the mode uncertain rather than ending it.
+      def each_singleton_sibling(statements, conditional = [])
+        conditional = Set.new(conditional).compare_by_identity
         module_function_on = false
         statements.each do |stmt|
           if stmt.is_a?(Prism::CallNode) && call?(stmt)
@@ -110,8 +114,24 @@ module Rigor
             next
           end
           yield stmt, module_function_on, false
-          module_function_on = mode_after(module_function_on, stmt)
+          module_function_on = mode_after(module_function_on, stmt, nested: conditional.include?(stmt))
         end
+      end
+
+      # The statements of a body-level `rescue` or `else` clause, which `ScopeIndexer#statements_of` folds into
+      # the body's direct statements although they run only on an exception, or only without one. An `ensure`
+      # clause runs either way and is not listed.
+      def conditional_clause_statements(body)
+        return [] unless body.is_a?(Prism::BeginNode)
+
+        statements = []
+        clause = body.rescue_clause
+        while clause
+          statements.concat(ScopeIndexer.statements_of(clause.statements))
+          clause = clause.subsequent
+        end
+        statements.concat(ScopeIndexer.statements_of(body.else_clause.statements)) if body.else_clause
+        statements
       end
 
       # The defs a named call copies onto the module's singleton, for the singleton def-node table. Ruby

@@ -365,6 +365,18 @@ module ModuleFunctionResetProbes
         def b; end
       end
     RUBY
+    "R9" => <<~RUBY,
+      module R9
+        module_function
+        def a; end
+      rescue
+        nil
+      else
+        private
+      ensure
+        def b; end
+      end
+    RUBY
     "R8" => <<~RUBY,
       module R8
         M = Module.new { module_function }
@@ -412,9 +424,11 @@ RSpec.describe Rigor::Inference::ModuleFunctionState do
   # `"name@line" => toggle on` for each direct def, and `"copy name" => "name@line"` for each def a named
   # call copies.
   def singleton_reading(probe)
-    statements = Rigor::Inference::ScopeIndexer.statements_of(body_of(probe))
+    body = body_of(probe)
+    statements = Rigor::Inference::ScopeIndexer.statements_of(body)
+    conditional = described_class.conditional_clause_statements(body)
     answer = {}
-    described_class.each_singleton_sibling(statements) do |stmt, module_function_on, named_call|
+    described_class.each_singleton_sibling(statements, conditional) do |stmt, module_function_on, named_call|
       if named_call
         described_class.each_singleton_copy(stmt, statements) do |name, def_node|
           answer["copy #{name}"] = label(def_node)
@@ -583,6 +597,12 @@ RSpec.describe Rigor::Inference::ModuleFunctionState do
     it "R8 (a bare call in a `Module.new` block): no reader makes `b` a module function" do
       expect(readings("R8").values_at(:singleton, :sig_gen)).to eq([{ "b@3" => false }, { "b@3" => false }])
       expect(deferred_reading("R8")).to include("b@3" => false)
+    end
+
+    # Ruby 4.0.5: with no exception the `else` clause runs, so `R9.b` raises; with one it does not. The clause may
+    # not run, so the singleton reading reads `b` as uncertain (RB and RC in the `rigor check` spec cover `rescue`).
+    it "R9 (a reset in a body-level `rescue` or `else` clause): the singleton reading reads `b` as uncertain" do
+      expect(singleton_reading("R9")).to eq("a@3" => true, "b@9" => :uncertain)
     end
 
     # Ruby 4.0.5: `R5.respond_to?(:b)` is false; `self.public` resets as a bare `public` does.

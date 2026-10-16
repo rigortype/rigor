@@ -5825,7 +5825,8 @@ module Rigor
                               defs_singleton: false)
         owner_prefix = def_owner_prefix || qualified_prefix
         statements = statements_of(body)
-        ModuleFunctionState.each_singleton_sibling(statements) do |stmt, module_function_on, named_call|
+        conditional = ModuleFunctionState.conditional_clause_statements(body)
+        ModuleFunctionState.each_singleton_sibling(statements, conditional) do |stmt, module_function_on, named_call|
           if named_call
             # `:unnameable` — the named defs the call copies live on the metaclass,
             # which this table cannot name either.
@@ -5876,7 +5877,7 @@ module Rigor
       end
 
       # `module_function_on` is {ModuleFunctionState.each_singleton_sibling}'s: `:uncertain` writes the module
-      # function's copy as possible, so the slot is contested and a reader declines rather than read the def the
+      # function's copy as possible, so the slot holds the later def, contested, rather than the def the
       # slot held before (#1968).
       def record_singleton_def_node(def_node, qualified_prefix, in_singleton_class, module_function_on, accumulator)
         declared = def_singleton?(def_node, qualified_prefix, in_singleton_class)

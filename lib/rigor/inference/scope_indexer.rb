@@ -4088,6 +4088,10 @@ module Rigor
                  (singleton_cref && owner_prefix.empty?)
             record_alias_or_undef(node, owner_prefix, in_singleton_class || defs_singleton,
                                   methods_acc.at(node))
+            if node.is_a?(Prism::AliasMethodNode) && !(in_singleton_class || defs_singleton)
+              supersede_def_nodes(Array(Source::AliasNames.keyword_names(node)&.first), owner_prefix,
+                                  def_nodes_acc, methods_acc.at(node))
+            end
           end
           return
         when Prism::SymbolNode
@@ -4102,6 +4106,9 @@ module Rigor
           end
           anonymous = record_call_node_methods(node, owner_prefix, in_singleton_class, methods_acc.at(node),
                                                source_path)
+          unless in_singleton_class
+            supersede_def_nodes(call_superseded_names(node), owner_prefix, def_nodes_acc, methods_acc.at(node))
+          end
           tables = methods_acc.at(node)
           record_singleton_prepend(node, qualified_prefix, tables,
                                    self_ok: node.name == :prepend && tables.in_block?(node))
@@ -4725,6 +4732,53 @@ module Rigor
         else
           (tables[slot] ||= Set.new) << key
         end
+      end
+
+      # Issue #1989 — the instance method names a non-`def` definer written on the class body's self replaces:
+      # each reader (and `x=` writer) an `attr_*` call declares, a literal `define_method(:x)`, and the new name of
+      # an `alias_method :x, :y` call. A non-literal name replaces nothing Rigor can name.
+      def call_superseded_names(call_node)
+        if ATTR_MACROS.include?(call_node.name)
+          names = []
+          each_attr_macro_name(call_node) do |base|
+            names << base unless call_node.name == :attr_writer
+            names << :"#{base}=" unless call_node.name == :attr_reader
+          end
+          names
+        elsif call_node.name == :define_method
+          define_method_superseded_name(call_node)
+        else
+          Source::AliasNames.alias_method_call_names(call_node)&.first(1) || []
+        end
+      end
+
+      def define_method_superseded_name(call_node)
+        return [] unless call_node.receiver.nil? || call_node.receiver.is_a?(Prism::SelfNode)
+
+        name = literal_method_name(call_node.arguments&.arguments&.first)
+        name.nil? ? [] : [name.to_sym]
+      end
+
+      # Issue #1989 — a definer that is not a `def` replaces the method an earlier `def` of the same name in this walk
+      # installed: `def x = 1; attr_reader :x` answers the attr reader, so the slot must not keep the `def` body for
+      # return inference. A certain definer empties the slot (the reader then has no body to type from, and
+      # declines); a possible one keeps the `def` and contests the slot, as a possible `def` does (ADR-119 WD3).
+      # Only this walk's own slot is touched: a sibling file's `def` reaches this file through the cross-file seed,
+      # whose load order the walk does not know.
+      def supersede_def_nodes(names, qualified_prefix, accumulator, tables)
+        return if qualified_prefix.empty? || names.empty?
+
+        class_name = qualified_prefix.join("::")
+        slot = accumulator[class_name]
+        return if slot.nil?
+
+        names.each do |name|
+          next unless slot.key?(name)
+
+          slot.delete(name) if tables.certain
+          follow_slot_writer(tables, :contested_def_nodes, [class_name, name], tables.certain)
+        end
+        accumulator.delete(class_name) if slot.empty?
       end
 
       # #319 — a `def` inside an anonymous `Class.new` / `Module.new` body ALSO stays in the `<toplevel>` table.

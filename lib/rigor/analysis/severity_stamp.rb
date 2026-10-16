@@ -20,8 +20,8 @@ module Rigor
     # (`rbs.coverage.*`, `dynamic.dependency-source.*`, the plugin loader, `plugin_trust.*`, `pool-degraded`) keep
     # answering to `severity_overrides:` only, by any spelling.
     # Issue #1985 — `severity_overrides:` follows the same rule: a plugin's row answers to its qualified id or
-    # `plugin.<id>`, never to its bare rule or a family wildcard; the plugin loader's rows answer to their bare
-    # `load-error` / `runtime-error` and to `plugin_loader.<rule>`.
+    # `plugin.<id>`, never to its bare rule or a family wildcard; the plugin loader's rows answer to
+    # `plugin_loader.<rule>` first and to their bare `load-error` / `runtime-error` after it.
     #
     # Extracted (ADR-87 WD4) so the miss path ({Runner::DiagnosticAggregator}) and the boot-slimming hit path
     # ({RunCacheProbe}, which never loads the aggregator) apply the IDENTICAL final filter — a warm HIT's

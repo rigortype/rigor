@@ -104,6 +104,14 @@ RSpec.describe "qualified ids in `severity_overrides:`" do
       rows = run_rows({ "plugin_loader.load-error" => "warning" }, with_missing_plugin)
       expect(rows["plugin_loader.load-error"]).to eq(:warning)
     end
+
+    it "lets the qualified key beat the bare key for the loader's row" do
+      rows = run_rows({ "load-error" => "info", "plugin_loader.load-error" => "off" }, with_missing_plugin)
+      expect(rows).not_to have_key("plugin_loader.load-error")
+
+      rows = run_rows({ "load-error" => "off", "plugin_loader.load-error" => "info" }, with_missing_plugin)
+      expect(rows["plugin_loader.load-error"]).to eq(:info)
+    end
   end
 
   # rigor-rails-i18n reports an unparsable locale as its own run-level `load-error`, beside the loader's row for an

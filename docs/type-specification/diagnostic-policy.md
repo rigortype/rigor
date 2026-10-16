@@ -91,12 +91,12 @@ A rule emits each diagnostic with an *authored* severity (the rule's own default
 Two `.rigor.yml` keys drive it ([ADR-8](../adr/8-steep-inspired-improvements.md)):
 
 - `severity_profile:` — one of `lenient` / `balanced` (default) / `strict`. Each profile is a per-rule table mapping a canonical rule id to a severity; the profiles trade breadth of `:error` for adoption-friendliness (`lenient` drops uncertain rules to `:warning`/`:off`, `strict` raises every rule to `:error`). A rule absent from the active profile's table keeps its authored severity.
-- `severity_overrides:` — a `{ rule_id => severity }` map. A key is either an exact canonical rule id (`call.undefined-method`) or a **family wildcard** (`call`) matching every rule whose first dotted segment equals the key. A plugin's own row (source family `plugin.<id>`) is the exception: it answers only to its qualified id (`plugin.<id>.<rule>`, its `qualified_rule`) or to its whole plugin's `plugin.<id>`, never to its bare rule or a family wildcard (issue #1985, as `disable:` since #1953). The plugin loader's rows answer to `plugin_loader.<rule>` and to their bare `load-error` / `runtime-error`.
+- `severity_overrides:` — a `{ rule_id => severity }` map. A key is either an exact canonical rule id (`call.undefined-method`) or a **family wildcard** (`call`) matching every rule whose first dotted segment equals the key. A plugin's own row (source family `plugin.<id>`) is the exception: it answers only to its qualified id (`plugin.<id>.<rule>`, its `qualified_rule`) or to its whole plugin's `plugin.<id>`, never to its bare rule or a family wildcard (issue #1985, as `disable:` since #1953). The plugin loader's rows answer to `plugin_loader.<rule>` and, after it, to their bare `load-error` / `runtime-error`.
 
 The resolved severity is one of `:error` / `:warning` / `:info` / `:off`; **`:off` drops the diagnostic entirely**. `Configuration::SeverityProfile.resolve` MUST apply this precedence (highest first):
 
 1. A `nil` rule id keeps the authored severity (there is nothing to look up).
-2. An exact `severity_overrides` entry for the rule id. For a plugin's row this is its `qualified_rule`, then its `plugin.<id>` entry; for any other row the bare rule, then the `qualified_rule`.
+2. An exact `severity_overrides` entry for the rule id. For a plugin's row this is its `qualified_rule`, then its `plugin.<id>` entry; for any other row the `qualified_rule` first (the plugin loader's `plugin_loader.load-error`), then the bare rule, so `{ load-error: info, plugin_loader.load-error: off }` leaves the loader row off.
 3. Otherwise, for a row that is not a plugin's, a family-wildcard `severity_overrides` entry (the rule id's first segment).
 4. Otherwise the active profile table's entry for the rule id.
 5. Otherwise the authored severity.

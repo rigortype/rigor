@@ -168,10 +168,13 @@ module Rigor
       # Bare (dot-less) diagnostic ids the engine emits outside the catalogue (see the `rule:` literals in
       # `Analysis::Runner` / `Runner::DiagnosticAggregator`). A token equal to one of these is treated as
       # known by `suppression.unknown-rule` even though it carries no family prefix; extend the list when
-      # the runner grows a new bare id.
+      # the runner grows a new bare id. `fallback` is the `--explain` row; the last three are the
+      # `contribution_merge` conflict reasons (`FlowContribution::CONFLICT_VALID_REASONS`, kebab-cased).
+      # `spec/rigor/config_audit_spec.rb` scans `lib/` for `rule:` literals and pins this list's completeness.
       NON_CHECK_DIAGNOSTIC_IDS = %w[
         configuration-error load-error pool-degraded runtime-error source-rbs-synthesis-failed
-        source-rbs-annotation-not-honoured
+        source-rbs-annotation-not-honoured fallback
+        return-type-collapse exceptional-disagreement lower-tier-contradiction
       ].freeze
 
       # Resolves a user-supplied rule token (`undefined-method`, `call.undefined-method`, or the family wildcard

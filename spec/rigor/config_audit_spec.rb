@@ -224,8 +224,37 @@ RSpec.describe Rigor::ConfigAudit do
       keys = %w[call call.undefined-method flow.always-truthy-condition pre-eval pre-eval.parse-error
                 load-error runtime-error pool-degraded plugin_loader.load-error plugin_loader.runtime-error
                 plugin_trust.read-refused rbs.coverage.missing-gem dynamic.dependency-source.gem-not-found
-                rbs_extended.unsatisfied-conformance]
+                rbs_extended.unsatisfied-conformance fallback configuration-error
+                source-rbs-synthesis-failed source-rbs-annotation-not-honoured
+                return-type-collapse exceptional-disagreement lower-tier-contradiction]
       expect(flagged_keys("severity_overrides" => overrides(*keys))).to be_empty
+    end
+
+    # The audit's silence on a working key rests on `NON_CHECK_DIAGNOSTIC_IDS` / `NON_CHECK_DIAGNOSTIC_FAMILIES`
+    # naming every id the engine emits outside the catalogue. Scan `lib/` for `rule: "..."` literals (comment lines
+    # skipped) and require each to be a catalogue id, a bare engine id, or under a non-check family. The scan sees
+    # literals only, so an id built at run time (`Conflict#to_diagnostic`'s kebab-cased reason) is pinned
+    # separately below. Plugins under `plugins/` emit `plugin.<id>.*` rows and need no entry.
+    def literal_rule_ids
+      lib = File.expand_path("../../lib", __dir__)
+      lines = Dir.glob("#{lib}/**/*.rb").flat_map { File.readlines(it) }
+      lines.reject { it.lstrip.start_with?("#") }.flat_map { it.scan(/\brule: "([a-z][\w.-]*)"/).flatten }.uniq
+    end
+
+    it "knows every literal `rule:` id lib/ emits" do
+      catalogue = Rigor::Analysis::CheckRules
+      unknown = literal_rule_ids.reject do |id|
+        catalogue::ALL_RULES.include?(id) || catalogue::NON_CHECK_DIAGNOSTIC_IDS.include?(id) ||
+          catalogue::NON_CHECK_DIAGNOSTIC_FAMILIES.include?(id.split(".").first)
+      end
+
+      expect(literal_rule_ids).to include("fallback", "pool-degraded")
+      expect(unknown).to be_empty
+    end
+
+    it "knows the contribution_merge conflict reasons, which are kebab-cased at run time" do
+      ids = Rigor::FlowContribution::CONFLICT_VALID_REASONS.map { it.to_s.tr("_", "-") }
+      expect(ids - Rigor::Analysis::CheckRules::NON_CHECK_DIAGNOSTIC_IDS).to be_empty
     end
 
     it "flags a plugin's bare rule, with the qualified spelling as the hint" do

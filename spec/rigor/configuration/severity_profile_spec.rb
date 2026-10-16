@@ -119,6 +119,12 @@ RSpec.describe Rigor::Configuration::SeverityProfile do
         expect(described_class.resolve(**row, overrides: { "plugin_loader.runtime-error" => :off })).to eq(:error)
       end
 
+      it "lets a non-plugin row's qualified key beat its bare key" do
+        row = { rule: "load-error", authored_severity: :error, qualified_rule: "plugin_loader.load-error" }
+        expect(described_class.resolve(**row, overrides: { "load-error" => :info, "plugin_loader.load-error" => :off }))
+          .to eq(:off)
+      end
+
       it "keeps the bleeding-edge overlay beneath a qualified key" do
         row = { rule: "dump.type", authored_severity: :error, qualified_rule: "dump.type" }
         overlay = { "dump.type" => :warning }

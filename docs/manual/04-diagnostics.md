@@ -169,7 +169,7 @@ never reaches a plugin's row, so `load-error: off` leaves each plugin's
 own `load-error` alone. The plugin loader's rows are
 `plugin_loader.load-error` and `plugin_loader.runtime-error`, which also
 answer to the bare `load-error` / `runtime-error`. `rigor check` warns
-about a key that reaches no row.
+about a key it can tell reaches no row.
 
 YAML reserves the bareword `off` as a boolean. If an override
 that names it seems not to apply, quote it — `"off"` — and the
@@ -343,7 +343,8 @@ those off with [`severity_overrides:`](#severity-profiles) set
 to `off`, or record them in a [baseline](06-baseline.md).
 In `severity_overrides:` the plugin loader's rows are
 `plugin_loader.load-error` and `plugin_loader.runtime-error`, or the
-bare `load-error` / `runtime-error`; a bare key does not reach a
+bare `load-error` / `runtime-error` (the qualified key wins if both
+are set); a bare key does not reach a
 plugin's own row of the same name (`plugin.<id>.load-error`). `rigor check` warns when a
 `disable:` entry names one of these rows, names no rule at all,
 or names a plugin `plugins:` does not configure (see

@@ -223,13 +223,13 @@ module Rigor
       end
 
       # Issue #1985 — the `severity_overrides:` entry a row answers to, or nil. A plugin's row: its qualified id, then
-      # its `plugin.<id>`. Any other row: its bare rule, then its qualified id (the plugin loader's
-      # `plugin_loader.load-error`), then a family wildcard.
+      # its `plugin.<id>`. Any other row: its qualified id (the plugin loader's
+      # `plugin_loader.load-error`), then its bare rule, then a family wildcard. The qualified key is the more specific
+      # one, so it wins over the bare key, as it does for a plugin's row.
       def row_override(rule, qualified_rule, plugin_family, overrides)
         return overrides[qualified_rule] || overrides[plugin_family] unless plugin_family.nil?
 
-        overrides[rule] || (qualified_rule == rule ? nil : overrides[qualified_rule]) ||
-          family_override(rule, overrides)
+        overrides[qualified_rule] || overrides[rule] || family_override(rule, overrides)
       end
 
       private_class_method :row_override

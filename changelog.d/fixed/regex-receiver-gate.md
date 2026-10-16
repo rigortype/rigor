@@ -1,0 +1,1 @@
+- **[engine]** `s.match?(/\A\d+\z/)`, `/re/ === s` and `case s when /re/` no longer narrow a Symbol or untyped `s` to a String, so a Symbol method called on it past the match is not reported, and the `else` arm of `case s when /re/` keeps `String` in the subject's type. ([#1999](https://github.com/rigortype/rigor/pull/1999))

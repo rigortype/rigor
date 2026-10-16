@@ -146,18 +146,39 @@ module Rigor
           if published
             published_slot(published, scope.environment)
           else
-            declared_slot(site, contract_reader(scope.environment).read_constant(name, scope.environment))
+            declared_slot(site, contract_reader(scope.environment).read_constant(name, scope.environment), scope)
           end
       end
 
       # The rbs-inline plugin declares every constant of a file it reads, typing an unannotated one from its
       # literal (`[]` as `Array[untyped]`), and reads only a `#:` trailing the assignment as its type: an inline
-      # declaration is the constant's own only when that is the site's one contract comment.
-      def declared_slot(site, declared)
+      # declaration is the constant's own only when that is the site's one contract comment. Otherwise it is the
+      # plugin's default, which `check` reads all the same: that type, `inferred`. A `Class.new` / `Module.new`
+      # value is the exception, which `check` types through its own write reading, not the default `untyped`.
+      # An inline declaration from another file says nothing about this site: when the name is written in two
+      # files, the one the environment kept decides, and this site's own comment may say otherwise.
+      def declared_slot(site, declared, scope)
         return Slot.unavailable("not_computed") if declared.nil?
-        return Slot.unavailable("not_computed") if declared["provenance"] == "inline" && !trailing_type?(site)
+        return declared unless declared["provenance"] == "inline"
+        return Slot.unavailable("not_computed") unless own_inline_declaration?(site, scope)
+        return declared if trailing_type?(site)
+        return Slot.unavailable("not_computed") if anonymous_namespace?(site.node.value)
 
-        declared
+        published_slot(scope.environment.constant_for_name(site.data["name"]), scope.environment)
+      end
+
+      def own_inline_declaration?(site, scope)
+        buffer = scope.environment.rbs_loader&.constant_declaration(site.data["name"])&.last
+        path = @site_paths.fetch(site.data["key"])
+        buffer&.end_with?(":#{path}") || false
+      end
+
+      def anonymous_namespace?(node)
+        return false unless node.is_a?(Prism::Node)
+        return true if node.is_a?(Prism::CallNode) && node.name == :new && node.receiver &&
+                       %w[Class Module].include?(node.receiver.slice.delete_prefix("::"))
+
+        node.compact_child_nodes.any? { |child| anonymous_namespace?(child) }
       end
 
       def trailing_type?(site)
@@ -167,6 +188,7 @@ module Rigor
       end
 
       def published_slot(type, environment)
+        return Slot.unavailable("not_computed") if type.nil?
         return Slot.dynamic("inferred", nil) if type.is_a?(Type::Dynamic)
 
         spelled = speller(environment).call(type, nil)

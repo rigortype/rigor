@@ -98,7 +98,8 @@ module Rigor
         source_path ||= candidates.first&.path
         unless inside_sig_root?(target)
           return WriteResult.new(source_path: source_path, target_path: target,
-                                 action: :skipped_outside_sig_root)
+                                 action: :skipped_outside_sig_root,
+                                 skipped: candidates.map { |c| [c, :outside_sig_root] })
         end
 
         target.exist? ? update_existing(source_path, target, candidates) : create_new(source_path, target, candidates)
@@ -636,7 +637,8 @@ module Rigor
       end
 
       # Returns a list of `[method_name (Symbol), kind (Symbol)]` pairs for every method-like member in the
-      # declaration ({LayoutIndex.member_keys}). ADR-14 slice 4 recognises the three `attr_*` declaration kinds
+      # declaration ({LayoutIndex.member_keys}); an `alias` declares its new name (#1975). ADR-14 slice 4
+      # recognises the three `attr_*` declaration kinds
       # so a source-side `attr_reader :name` and an RBS-side `attr_reader name: T` are treated as the same member
       # (i.e. user-authored); a `def self?.f` counts as both an instance and a singleton `f` (#1488).
       def collect_member_pairs(decl)
@@ -754,7 +756,7 @@ module Rigor
 
       def find_attr_member(decl, method_name, kind)
         decl.members.find do |m|
-          next false if m.is_a?(RBS::AST::Members::MethodDefinition)
+          next false if m.is_a?(RBS::AST::Members::MethodDefinition) || m.is_a?(RBS::AST::Members::Alias)
 
           LayoutIndex.member_keys(m).include?([method_name, kind])
         end

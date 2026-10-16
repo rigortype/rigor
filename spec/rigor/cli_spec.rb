@@ -2298,6 +2298,100 @@ RSpec.describe Rigor::CLI do
         expect(output).not_to include("Numeric")
       end
 
+      # #1975: an `alias` in `sig/` declares its new name. The alias target here does not resolve, so the
+      # class's definitions cannot be built and the generator still proposes `f` / `s2`; the writer must see
+      # that `sig/` already declares them.
+      it "does not insert a def beside an alias that declares the name, instance or singleton" do
+        write_fixture("lib/widget.rb", <<~RUBY)
+          class Widget
+            def f; 1; end
+            def self.s2; 2; end
+            def h; 3; end
+          end
+        RUBY
+        write_fixture("sig/widget.rbs", "class Widget\n  alias f missing\n  alias self.s2 self.missing\nend\n")
+        config = write_config
+
+        Dir.chdir(tmpdir) do
+          status, out, = run_cli("sig-gen", "--write", "--overwrite", "--config=#{config}")
+          expect(status).to eq(0)
+          expect(out).to include("skipped 2 user-authored", "skipped Widget#f (user-authored)",
+                                 "skipped Widget.s2 (user-authored)")
+        end
+        output = File.read(File.join(tmpdir, "sig/widget.rbs"))
+
+        expect(output).to include("alias f missing", "alias self.s2 self.missing", "def h: () -> 3")
+        expect(output).not_to match(/def (self\.)?(f|s2):/)
+      end
+
+      context "with the rbs-inline plugin auto-wired (see the type-of context above)", :rbs_inline_autowire do
+        before do
+          allow(Rigor::Configuration).to receive(:rbs_inline_library_resolvable?).and_return(true)
+          require "rigor-rbs-inline"
+          Rigor::Plugin.register(Rigor::Plugin::RbsInline) unless Rigor::Plugin.registered_for("rbs-inline")
+        end
+
+        # #1975: an `alias` in `sig/` is declared, never a replacement target: an inline-declared `f` is an
+        # `inline_overwrite` candidate, and `--overwrite` must not delete the alias to put its `def` in.
+        it "keeps an alias in sig/ when an inline-declared method of that name is written with --overwrite" do
+          write_fixture("lib/w.rb", "class W\n  #: () -> Integer\n  def f; 1; end\n  def g; \"s\"; end\nend\n")
+          write_fixture("sig/w.rbs", "class W\n  def g: () -> String\n  alias f g\nend\n")
+          config = write_config
+
+          Dir.chdir(tmpdir) do
+            status, out, = run_cli("sig-gen", "--write", "--overwrite", "--config=#{config}")
+            expect(status).to eq(0)
+            expect(out).to include("skipped W#f (user-authored)")
+          end
+
+          expect(File.read(File.join(tmpdir, "sig/w.rbs"))).to eq("class W\n  def g: () -> String\n  alias f g\nend\n")
+        end
+      end
+
+      # #1975: `--diff` proposes a change that `--write --overwrite` declines as user-authored (a `def self?.f`
+      # is not replaced by a plain `def f`), and the write names it rather than printing nothing.
+      it "reports a proposal it skipped as user-authored when the target is otherwise unchanged" do
+        write_fixture("lib/m.rb", "module M\n  def f; 1; end\nend\n")
+        write_fixture("sig/m.rbs", "module M\n  def self?.f: () -> untyped\nend\n")
+        config = write_config
+
+        Dir.chdir(tmpdir) do
+          _, diff, = run_cli("sig-gen", "--diff", "--config=#{config}")
+          expect(diff).to include("- def self?.f: () -> untyped", "+ def f: () -> Integer")
+
+          status, out, = run_cli("sig-gen", "--write", "--overwrite", "--config=#{config}")
+          expect(status).to eq(0)
+          expect(out).not_to include("No changes")
+          expect(out).to include("unchanged", "skipped 1 user-authored",
+                                 "skipped M#f (user-authored): def f: () -> Integer")
+
+          _, json, = run_cli("sig-gen", "--write", "--overwrite", "--format=json", "--config=#{config}")
+          skipped = JSON.parse(json).fetch("results").flat_map { |r| r.fetch("skipped") }
+          expect(skipped.map { |c| [c.fetch("method"), c.fetch("write_skip_reason")] }).to eq([%w[f user_authored]])
+        end
+        expect(File.read(File.join(tmpdir, "sig/m.rbs"))).to include("def self?.f: () -> untyped")
+      end
+
+      it "reports a member declared under a second signature path instead of dropping it silently" do
+        write_fixture("lib/m.rb", "module M\n  def x; 1; end\nend\n")
+        write_fixture("sig/other.rbs", "module Other\nend\n")
+        write_fixture("extra/m.rbs", "module M\n  def x: () -> untyped\nend\n")
+        config = File.join(tmpdir, ".rigor.yml")
+        File.write(config, "paths:\n  - lib\nsignature_paths:\n  - sig\n  - extra\n")
+
+        Dir.chdir(tmpdir) do
+          status, out, = run_cli("sig-gen", "--write", "--overwrite", "--config=#{config}")
+          expect(status).to eq(0)
+          expect(out).to include("(outside sig root)", "skipped M#x (outside-sig-root): def x: () -> Integer")
+
+          _, json, = run_cli("sig-gen", "--write", "--overwrite", "--format=json", "--config=#{config}")
+          rows = JSON.parse(json).fetch("results").select { |r| r.fetch("action") == "skipped_outside_sig_root" }
+          expect(rows.flat_map { |r| r.fetch("skipped") }.map { |c| c.fetch("write_skip_reason") })
+            .to eq(["outside_sig_root"])
+        end
+        expect(File.read(File.join(tmpdir, "extra/m.rbs"))).to include("def x: () -> untyped")
+      end
+
       it "rejects --write, --print, --diff combined" do
         status, _out, err = run_cli("sig-gen", "--write", "--print")
 

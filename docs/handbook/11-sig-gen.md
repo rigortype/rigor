@@ -770,16 +770,31 @@ by side without coordination.
   `def f`, a plain proposal over a `def self?.f`, or a
   method declared in a later opening is skipped. A
   `def f: ... | ...` overload is never replaced and never
-  counts as the file that declares `f`. An `alias` in
-  `sig/` is not yet recognised as declaring its name.
+  counts as the file that declares `f`. An `alias new old`
+  (or `alias self.new self.old`) declares `new` under its own
+  kind and is never replaced, so a proposal for that name is
+  skipped.
 - **Will not** touch files outside the configured signature
   tree.
+- **Will** name every proposal it skipped, one
+  `  skipped Class#method (reason): <proposed RBS>` line under
+  its target (`Class.method` for a singleton), with the same
+  rows under `skipped` in `--format=json`. The reason is
+  `user-authored` (the target declares the member and the
+  writer does not replace it) or `outside-sig-root` (the
+  member routes to a file in a signature path other than the
+  first, which `--write` does not modify, whether the member
+  is declared there or is new to a class that lives there).
+  A target left unchanged by skips alone prints
+  `unchanged <file>`. The exit status stays `0`: a skip is
+  not a refusal, and `--check` still reports `sig/` as up to
+  date.
 - **Will not** replace an existing method declaration
   unless `--overwrite` is set AND the candidate is a
   `tighter-return`, and then only its return changes: the
   rest of the declaration is kept. Without `--overwrite`,
   existing declarations are user-authored and the new method
-  is silently skipped.
+  is skipped.
 - **Will not** change an existing method declaration that
   disagrees with the method's inline declaration unless
   `--overwrite` is set; it reports the method as `REFUSED`

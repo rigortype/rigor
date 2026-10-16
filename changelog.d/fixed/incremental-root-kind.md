@@ -1,0 +1,1 @@
+- **[rigor check]** `rigor check --incremental` now re-answers when an analysis root or a `pre_eval:` entry changes between a directory and a file, instead of serving the previous run's path errors and `--fail-on` exit code. ([#1977](https://github.com/rigortype/rigor/issues/1977), [#2024](https://github.com/rigortype/rigor/pull/2024))

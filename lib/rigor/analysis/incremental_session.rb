@@ -351,16 +351,16 @@ module Rigor
       end
 
       # Issue #1906 — a file that rewrites a constant's singleton names without declaring it
-      # (`D.singleton_class.alias_method :own, :keep`) contributes opaque singleton envelopes to the constant's bucket,
-      # but a reader's class edge names only the files that declared the constant when the reader last ran, and the
-      # class-declaration diff does not move while the constant stays in the file (`:own` becoming `:keep`, or the
-      # call becoming a `class D` reopening). So a declaration-unstable edit to such a file fires `class:<last
-      # segment>` for each constant that, before the edit, both sat in the file's singleton-source set and held a
-      # singleton envelope entry or an unpositioned singleton side the file recorded (a computed name there leaves the
-      # side unpositioned, and becoming literal reads it again). A file that only includes into a constant
-      # (`ActiveRecord::Base.include(X)`) records neither and fires nothing. A constant the edit makes the file
-      # rewrite needs no key: the class-declaration diff fires if it is new to the file, and the reader's class edge
-      # names the file if the file declared it.
+      # (`D.singleton_class.alias_method :own, :keep`, or, since #1941, `def D.own`) contributes opaque singleton
+      # envelopes to the constant's bucket, but a reader's class edge names only the files that declared the constant
+      # when the reader last ran, and the class-declaration diff does not move while the constant stays in the file
+      # (`:own` becoming `:keep`, or the call becoming a `class D` reopening). So a declaration-unstable edit to such a
+      # file fires `class:<last segment>` for each constant that, before the edit, both sat in the file's
+      # singleton-source set and held a singleton envelope entry or an unpositioned singleton side the file recorded (a
+      # computed name there leaves the side unpositioned, and becoming literal reads it again). A file that only
+      # includes into a constant (`ActiveRecord::Base.include(X)`) records neither and fires nothing. A constant the
+      # edit makes the file rewrite needs no key: the class-declaration diff fires if it is new to the file, and the
+      # reader's class edge names the file if the file declared it.
       def singleton_rewrite_affected(unstable)
         names = unstable.flat_map { |path| singleton_rewritten_constants(@seed_bundles[path]) }.uniq
         return Set.new if names.empty?

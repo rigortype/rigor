@@ -4088,6 +4088,10 @@ module Rigor
                  (singleton_cref && owner_prefix.empty?)
             record_alias_or_undef(node, owner_prefix, in_singleton_class || defs_singleton,
                                   methods_acc.at(node))
+            if node.is_a?(Prism::AliasMethodNode) && !(in_singleton_class || defs_singleton)
+              supersede_def_nodes(Array(Source::AliasNames.keyword_names(node)&.first), owner_prefix,
+                                  def_nodes_acc, methods_acc.at(node))
+            end
           end
           return
         when Prism::SymbolNode
@@ -4102,6 +4106,9 @@ module Rigor
           end
           anonymous = record_call_node_methods(node, owner_prefix, in_singleton_class, methods_acc.at(node),
                                                source_path)
+          unless in_singleton_class
+            supersede_def_nodes(call_superseded_names(node), owner_prefix, def_nodes_acc, methods_acc.at(node))
+          end
           tables = methods_acc.at(node)
           record_singleton_prepend(node, qualified_prefix, tables,
                                    self_ok: node.name == :prepend && tables.in_block?(node))
@@ -4724,6 +4731,49 @@ module Rigor
           set&.delete(key)
         else
           (tables[slot] ||= Set.new) << key
+        end
+      end
+
+      # Issue #1989 — the instance method names a non-`def` definer written on the class body's self replaces:
+      # each reader (and `x=` writer) an `attr_*` call declares, a literal `define_method(:x)`, and the new name of
+      # an `alias_method :x, :y` call. A non-literal name replaces nothing Rigor can name.
+      def call_superseded_names(call_node)
+        if ATTR_MACROS.include?(call_node.name)
+          names = []
+          each_attr_macro_name(call_node) do |base|
+            names << base unless call_node.name == :attr_writer
+            names << :"#{base}=" unless call_node.name == :attr_reader
+          end
+          names
+        elsif call_node.name == :define_method
+          define_method_superseded_name(call_node)
+        else
+          Source::AliasNames.alias_method_call_names(call_node)&.first(1) || []
+        end
+      end
+
+      def define_method_superseded_name(call_node)
+        return [] unless call_node.receiver.nil? || call_node.receiver.is_a?(Prism::SelfNode)
+
+        name = literal_method_name(call_node.arguments&.arguments&.first)
+        name.nil? ? [] : [name.to_sym]
+      end
+
+      # Issue #1989 — a definer that is not a `def` replaces the method an earlier `def` of the same name in this walk
+      # installed: `def x = 1; attr_reader :x` answers the attr reader, so the `def` body must not type the call. The
+      # slot keeps the `def` and is contested, certain definer or possible, so the readers that re-type a body
+      # decline. The slot is not emptied: the file still writes it, so a sibling file's `def` of the name (which the
+      # cross-file seed and the project fold would otherwise put there) cannot fill it. A `def` written after the
+      # definer writes the slot again and clears the contest.
+      def supersede_def_nodes(names, qualified_prefix, accumulator, tables)
+        return if names.empty?
+
+        class_name = qualified_prefix.join("::")
+        slot = accumulator[class_name]
+        return if slot.nil?
+
+        names.each do |name|
+          follow_slot_writer(tables, :contested_def_nodes, [class_name, name], false) if slot.key?(name)
         end
       end
 
@@ -7803,7 +7853,14 @@ module Rigor
           end
           unless in_singleton_class || defs_singleton
             record_attr_visibility(node, owner_prefix, current_visibility, accumulator, toggled: true)
+            contest_replaced_visibility(replaced_by_call(node), owner_prefix, accumulator)
           end
+        when Prism::AliasMethodNode
+          unless in_singleton_class || defs_singleton
+            contest_replaced_visibility(Array(Source::AliasNames.keyword_names(node)&.first), owner_prefix,
+                                        accumulator)
+          end
+          return current_visibility
         end
 
         # Statement-position StatementsNode preserves left-to-right visibility flow; everything else recurses with the
@@ -7997,6 +8054,25 @@ module Rigor
       # each member it defines (`x`, `x=`) with `visibility`: the running default for a statement (`toggled`), the
       # wrapping call's for `private attr_accessor :x`, which Ruby applies to the `[:x, :x=]` the macro returns.
       # A non-literal name (`attr_reader(*FIELDS)`) records nothing; a call that is no such macro records nothing.
+      # Issue #1989 — the names a `define_method(:x)` or an `alias_method :x, :y` call replaces. An `attr_*` call is
+      # not among them: it writes its members' slots itself ({#record_attr_visibility}).
+      def replaced_by_call(call_node)
+        return define_method_superseded_name(call_node) if call_node.name == :define_method
+
+        Source::AliasNames.alias_method_call_names(call_node)&.first(1) || []
+      end
+
+      # Issue #1989 — a `define_method` or an alias that replaces a method whose visibility slot this walk recorded
+      # gives the name a visibility the walk does not read (the running default for `define_method`, the old
+      # name's for an alias), so the slot is contested rather than left asserting the replaced `def`'s.
+      def contest_replaced_visibility(names, qualified_prefix, accumulator)
+        return if names.empty? || qualified_prefix.empty?
+
+        class_name = qualified_prefix.join("::")
+        recorded = accumulator[class_name]
+        names.each { |name| accumulator.contest_slot(class_name, name) if recorded&.key?(name) }
+      end
+
       def record_attr_visibility(call_node, qualified_prefix, visibility, accumulator, toggled:)
         return unless attr_visibility_call?(call_node)
         return if qualified_prefix.empty?

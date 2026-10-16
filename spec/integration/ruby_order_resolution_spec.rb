@@ -1040,17 +1040,18 @@ RSpec.describe "resolution in Ruby's ancestor order (#1567, #1568, #1570, #1571)
       expect(diagnostics_for(source)).to eq([[12, "call.possible-nil-receiver"], [15, "call.undefined-method"]])
     end
 
-    # A known gap, pinned as a deliberate false negative: an entry that holds a `def` of the name AND a later
-    # `define_method` (or `attr_reader`) of it keeps the `def` in the table, so the exception reads only the
-    # raising body. Ruby runs the later definition, which returns, and line 12 raises NoMethodError. The Known path
-    # reads the same slot, so without the unknown include master and C2-b1 miss it too (the second expectation).
-    # Flip this when #1657 is fixed.
-    it "misses a later define_method beside a raising def on the same entry (deliberate false negative)" do
+    # Issues #1657 and #1989: an entry that holds a `def` of the name AND a later `define_method` (or `attr_reader`)
+    # of it contests the `def`'s slot, so neither the exception nor the Known path reads the raising body. Ruby runs
+    # the later definition, which returns, and line 12 raises NoMethodError; the report is a true positive, with the
+    # unknown include and without it (the second expectation).
+    it "reads a later define_method beside a raising def on the same entry as the definer" do
       extra = "class Base; define_method(:fail_with) { |_m| nil }; end"
       source = media_source(includes: unknown_include, extra: extra)
       expect(ruby_lookup(source, empty_helper)).to eq("NoMethodError\n")
-      expect(diagnostics_for(source)).to eq([[15, "call.undefined-method"]])
-      expect(diagnostics_for(media_source(extra: extra))).to eq([[15, "call.undefined-method"]])
+      expect(diagnostics_for(source)).to eq([[12, "call.possible-nil-receiver"], [15, "call.undefined-method"]])
+      expect(diagnostics_for(media_source(extra: extra))).to eq(
+        [[12, "call.possible-nil-receiver"], [15, "call.undefined-method"]]
+      )
     end
 
     # An external RBS knows and that declares the name declines the exception: `Enumerable#to_a` sits ahead of

@@ -115,7 +115,8 @@ RSpec.describe "Discovery certainty (ADR-119 WD3)" do
     # the `def` and contests its slot.
     it "empties a def slot a certain attr_reader supersedes and contests one a possible attr_reader does" do
       paths = write_project(
-        "a.rb" => "class C\n  def x = 1\n  attr_reader :x\n  def y = 1\n  if ENV[\"X\"]\n    attr_reader :y\n  end\nend\n"
+        "a.rb" => "class C\n  def x = 1\n  attr_reader :x\n  def y = 1\n  " \
+                  "if ENV[\"X\"]\n    attr_reader :y\n  end\nend\n"
       )
       index = indexer.discovered_project_index_for_paths(paths)
 

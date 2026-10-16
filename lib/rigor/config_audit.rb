@@ -260,8 +260,9 @@ module Rigor
     # `fallback` row and the `contribution_merge` conflict reasons (`FlowContribution::CONFLICT_VALID_REASONS`,
     # kebab-cased). They are not in `CheckRules::NON_CHECK_DIAGNOSTIC_IDS`, which would silence the warnings for a
     # `disable:` token or marker naming them. `spec/rigor/config_audit_spec.rb` pins this list's completeness.
-    SEVERITY_ONLY_IDS = (%w[fallback] + FlowContribution::CONFLICT_VALID_REASONS.map { it.to_s.tr("_", "-") }).freeze
-    private_constant :SEVERITY_ONLY_IDS
+    CONFLICT_IDS = FlowContribution::CONFLICT_VALID_REASONS.map { |reason| reason.to_s.tr("_", "-").freeze }.freeze
+    SEVERITY_ONLY_IDS = (%w[fallback] + CONFLICT_IDS).freeze
+    private_constant :CONFLICT_IDS, :SEVERITY_ONLY_IDS
 
     def self.severity_only_id?(key)
       SEVERITY_ONLY_IDS.include?(key)

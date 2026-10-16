@@ -17,7 +17,7 @@ module Rigor
     #   slice 2's `--write` merge.
     # - `:json` — machine-readable payload with the same classification table as `:print`, plus every `skipped`
     #   row with its `skip_reason` (#778).
-    class Renderer
+    class Renderer # rubocop:disable Metrics/ClassLength
       def initialize(out:)
         @out = out
       end
@@ -268,8 +268,8 @@ module Rigor
       def render_write_skips(result)
         result.skipped.each do |candidate, reason|
           separator = candidate.kind == :singleton ? "." : "#"
-          @out.puts("  skipped #{candidate.class_name}#{separator}#{candidate.method_name} (#{reason.to_s.tr('_', '-')}): " \
-                    "#{candidate.rbs_lines.join(' ')}")
+          label = "#{candidate.class_name}#{separator}#{candidate.method_name}"
+          @out.puts("  skipped #{label} (#{reason.to_s.tr('_', '-')}): #{candidate.rbs_lines.join(' ')}")
         end
       end
 

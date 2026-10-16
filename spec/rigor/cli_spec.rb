@@ -2343,7 +2343,7 @@ RSpec.describe Rigor::CLI do
 
           _, json, = run_cli("sig-gen", "--write", "--overwrite", "--format=json", "--config=#{config}")
           skipped = JSON.parse(json).fetch("results").flat_map { |r| r.fetch("skipped") }
-          expect(skipped.map { |c| [c.fetch("method"), c.fetch("write_skip_reason")] }).to eq([["f", "user_authored"]])
+          expect(skipped.map { |c| [c.fetch("method"), c.fetch("write_skip_reason")] }).to eq([%w[f user_authored]])
         end
         expect(File.read(File.join(tmpdir, "sig/m.rbs"))).to include("def self?.f: () -> untyped")
       end

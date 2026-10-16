@@ -77,7 +77,8 @@ module Rigor
       end
 
       # Whether a candidate call in `node` may write the instance variable `name`. A `when` test passes
-      # `run_lambdas: true`, since its `===` runs a lambda literal's body. A write to it in `node` is the caller's to check.
+      # `run_lambdas: true`, since its `===` runs a lambda literal's body. A write to it in `node` is the caller's
+      # to check.
       def may_write?(node, name, scope, run_lambdas: false)
         calls = candidate_calls(node, run_lambdas)
         return false if calls.empty?

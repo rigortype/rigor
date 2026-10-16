@@ -1,1 +1,1 @@
-`rigor sig-gen --write` now treats an `alias` in `sig/` as declaring its name instead of inserting a duplicate `def` beside it, and lists each proposal it skipped rather than printing nothing. https://github.com/rigortype/rigor/pull/2028
+- **[sig-gen]** `rigor sig-gen --write` now treats an `alias` in `sig/` as declaring its name instead of inserting a duplicate `def` beside it, and lists each proposal it skipped rather than printing nothing. ([#2028](https://github.com/rigortype/rigor/pull/2028))

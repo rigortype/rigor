@@ -203,7 +203,7 @@ module Rigor
 
         success(id, tool_result(out_io.string, err_io.string, exit_code))
       rescue SystemExit => e
-        # An option parser that exits (`--help`, `--version`) must not take the server down with it.
+        # Defence against any command that exits: it must not take the server down with it.
         success(id, { content: [{ type: "text", text: "Command exited (status #{e.status})" }], isError: true })
       rescue StandardError => e
         @err.puts("rigor mcp: #{e.class}: #{e.message}")
@@ -241,23 +241,21 @@ module Rigor
         when "rigor_check"
           argv = ["check", "--format=json", "--no-stats"]
           argv << "--config=#{effective_config}" if effective_config
-          argv += Array(args["paths"])
-          argv
+          argv + ["--", *Array(args["paths"])]
 
         when "rigor_type_of"
           return nil unless args["file"] && args["line"] && args["col"]
 
           argv = ["type-of", "--format=json"]
           argv << "--config=#{effective_config}" if effective_config
-          argv << "#{args['file']}:#{args['line']}:#{args['col']}"
-          argv
+          # `--` ends the options, so a file named like a flag is a file.
+          argv + ["--", "#{args['file']}:#{args['line']}:#{args['col']}"]
 
         when "rigor_triage"
           argv = ["triage", "--format=json"]
           argv << "--config=#{effective_config}" if effective_config
           argv << "--top=#{args['top']}" if args["top"]
-          argv += Array(args["paths"])
-          argv
+          argv + ["--", *Array(args["paths"])]
 
         when "rigor_lens"
           files = args["files"]
@@ -273,26 +271,22 @@ module Rigor
 
           argv = ["annotate", "--no-color"]
           argv << "--config=#{effective_config}" if effective_config
-          argv << args["file"]
-          argv
+          argv + ["--", args["file"]]
 
         when "rigor_sig_gen"
           argv = ["sig-gen", "--print", "--format=json"]
           argv << "--config=#{effective_config}" if effective_config
           argv << "--params=#{args['params']}" if args["params"]
-          argv += Array(args["paths"])
-          argv
+          argv + ["--", *Array(args["paths"])]
 
         when "rigor_explain"
           argv = ["explain", "--format=json"]
-          argv << args["rule"] if args["rule"]
-          argv
+          args["rule"] ? argv + ["--", args["rule"]] : argv
 
         when "rigor_coverage"
           argv = ["coverage", "--format=json"]
           argv << "--config=#{effective_config}" if effective_config
-          argv += Array(args["paths"])
-          argv
+          argv + ["--", *Array(args["paths"])]
         end
       end
 

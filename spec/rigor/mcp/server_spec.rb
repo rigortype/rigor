@@ -176,9 +176,15 @@ RSpec.describe Rigor::MCP::Server do
       expect(document["files"].first["status"]).to eq("ok")
     end
 
-    it "keeps an option parser's exit off the JSON-RPC channel and stays up" do
+    it "keeps a command's SystemExit off the JSON-RPC channel and stays up" do
+      cli = instance_double(Rigor::CLI)
+      allow(cli).to receive(:run) do
+        puts "usage" # rubocop:disable RSpec/Output -- writing to stdout is the point: the capture must hold it
+        exit(3)
+      end
+      allow(Rigor::CLI).to receive(:new).and_return(cli)
       resp = nil
-      expect { resp = tool_call("rigor_check", { "paths" => ["--help"] }) }.not_to output.to_stdout
+      expect { resp = tool_call("rigor_check", { "paths" => ["lib"] }) }.not_to output.to_stdout
 
       expect(resp.dig("result", "isError")).to be(true)
       expect(request(id: 10, method: "ping")["result"]).to eq({})
@@ -274,23 +280,105 @@ RSpec.describe Rigor::MCP::Server do
   describe "build_argv exact argv (pins each args[...] read)" do
     it "builds the full rigor_check argv including config and every path" do
       expect(server.send(:build_argv, "rigor_check", { "config" => "custom.yml", "paths" => %w[lib app] }))
-        .to eq(["check", "--format=json", "--no-stats", "--config=custom.yml", "lib", "app"])
+        .to eq(["check", "--format=json", "--no-stats", "--config=custom.yml", "--", "lib", "app"])
     end
 
     it "builds rigor_type_of from file:line:col, nil when any is missing" do
       expect(server.send(:build_argv, "rigor_type_of", { "file" => "a.rb", "line" => 3, "col" => 5 }))
-        .to eq(["type-of", "--format=json", "a.rb:3:5"])
+        .to eq(["type-of", "--format=json", "--", "a.rb:3:5"])
       expect(server.send(:build_argv, "rigor_type_of", { "file" => "a.rb" })).to be_nil
     end
 
     it "builds the full rigor_triage argv including --top and every path" do
       expect(server.send(:build_argv, "rigor_triage", { "top" => 10, "paths" => ["lib"] }))
-        .to eq(["triage", "--format=json", "--top=10", "lib"])
+        .to eq(["triage", "--format=json", "--top=10", "--", "lib"])
     end
 
     it "builds the full rigor_sig_gen argv including --params and every path" do
       expect(server.send(:build_argv, "rigor_sig_gen", { "params" => "observed", "paths" => ["lib"] }))
-        .to eq(["sig-gen", "--print", "--format=json", "--params=observed", "lib"])
+        .to eq(["sig-gen", "--print", "--format=json", "--params=observed", "--", "lib"])
+    end
+  end
+
+  describe "flag-shaped arguments are operands, not options" do
+    def text_of(resp)
+      resp.dig("result", "content", 0, "text")
+    end
+
+    it "ends the options before the paths of every path-taking tool" do
+      {
+        "rigor_check" => %w[check --format=json --no-stats],
+        "rigor_triage" => %w[triage --format=json],
+        "rigor_sig_gen" => %w[sig-gen --print --format=json],
+        "rigor_coverage" => %w[coverage --format=json]
+      }.each do |tool, head|
+        expect(server.send(:build_argv, tool, { "paths" => ["--format=text", "--workers=4"] }))
+          .to eq([*head, "--", "--format=text", "--workers=4"])
+      end
+    end
+
+    it "ends the options before the file, the position and the rule" do
+      expect(server.send(:build_argv, "rigor_annotate", { "file" => "--x.rb" }))
+        .to eq(["annotate", "--no-color", "--", "--x.rb"])
+      expect(server.send(:build_argv, "rigor_type_of", { "file" => "--x.rb", "line" => 1, "col" => 2 }))
+        .to eq(["type-of", "--format=json", "--", "--x.rb:1:2"])
+      expect(server.send(:build_argv, "rigor_explain", { "rule" => "--foo" }))
+        .to eq(["explain", "--format=json", "--", "--foo"])
+      expect(server.send(:build_argv, "rigor_explain", {})).to eq(["explain", "--format=json"])
+    end
+
+    it "does not let rigor_check read a path as --format" do
+      resp = tool_call("rigor_check", { "paths" => ["--format=text"] })
+
+      expect(JSON.parse(text_of(resp))).to have_key("diagnostics")
+    end
+
+    it "does not let rigor_triage read a path as --format" do
+      resp = tool_call("rigor_triage", { "paths" => ["--format=text"] })
+
+      expect(JSON.parse(text_of(resp))).to have_key("distribution")
+    end
+
+    it "does not let rigor_sig_gen read a path as --format" do
+      resp = tool_call("rigor_sig_gen", { "paths" => ["--format=text"] })
+
+      expect(JSON.parse(text_of(resp))).to have_key("candidates")
+    end
+
+    it "reports a flag-shaped rigor_coverage path as a missing path" do
+      resp = tool_call("rigor_coverage", { "paths" => ["--workers=4"] })
+
+      expect(resp.dig("result", "isError")).to be(true)
+      expect(text_of(resp)).to include("not a file or directory: --workers=4")
+    end
+
+    it "reports a flag-shaped rigor_annotate file as a missing file" do
+      resp = tool_call("rigor_annotate", { "file" => "--format=text" })
+
+      expect(text_of(resp)).to include("file not found: --format=text")
+    end
+
+    it "reports a flag-shaped rigor_type_of file as a missing file" do
+      resp = tool_call("rigor_type_of", { "file" => "--x.rb", "line" => 1, "col" => 1 })
+
+      expect(text_of(resp)).to include("file not found: --x.rb")
+    end
+
+    it "reports a flag-shaped rigor_explain rule as an unknown rule" do
+      resp = tool_call("rigor_explain", { "rule" => "--foo" })
+
+      expect(resp.dig("result", "isError")).to be(true)
+      expect(text_of(resp)).to include("Unknown rule: --foo")
+    end
+
+    # Guard: it passes with the fix removed; it only asserts the server survives such operands.
+    it "survives paths named - and --" do
+      %w[- --].each do |path|
+        resp = tool_call("rigor_check", { "paths" => [path] })
+
+        expect(resp["error"]).to be_nil
+      end
+      expect(request(id: 11, method: "ping")["result"]).to eq({})
     end
   end
 

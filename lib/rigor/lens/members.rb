@@ -14,10 +14,13 @@ module Rigor
       # @param contracts — `{[owner, scope, name] => ContractReader::Contract or nil}`
       # @param elsewhere — callable `(owner, scope, name) -> [{path, line}]`: other project files defining it
       # @param site_paths — `{site key => absolute path of its file}`, to match an inline contract's buffer
-      def initialize(sites:, omissions:, contracts:, elsewhere:, site_paths:)
+      # @param defaulted_blocks — `{[owner, scope, name] => {required, type}}`: the block a member's otherwise
+      #   defaulted inline declaration declares (ContractReader#read_defaulted_block)
+      def initialize(sites:, omissions:, contracts:, elsewhere:, site_paths:, defaulted_blocks: {})
         @sites = sites
         @omissions = omissions
         @contracts = contracts
+        @defaulted_blocks = defaulted_blocks
         @elsewhere = elsewhere
         @site_paths = site_paths
       end
@@ -115,9 +118,20 @@ module Rigor
 
         params, block, head = Parameters.read(node.parameters, yields: Parameters.yields?(node.body))
         slot = inferred_return(single, scope)
-        block_rbs = block ? " ?{ (?) -> untyped }" : ""
+        declared = !site.data["alias_of"] && @defaulted_blocks[[site.data["owner"], scope, name]]
+        block = declared || block
+        block_rbs = block_spelling(block, declared)
         { "rbs" => "#{head}#{block_rbs} -> #{return_spelling(slot)}", "params" => params, "block" => block,
           "return" => slot }
+      end
+
+      # A block an otherwise defaulted declaration declares reads as declared (`{ (Integer) -> void }`); one the
+      # definition merely takes reads as `?{ (?) -> untyped }`.
+      def block_spelling(block, declared)
+        return "" if block.nil?
+        return " ?{ (?) -> untyped }" unless declared
+
+        " #{'?' unless declared['required']}{ #{declared['type']['type']} }"
       end
 
       # An alias whose original Rigor cannot pin to one `def`: nothing about its signature is known.

@@ -354,6 +354,47 @@ RSpec.describe "rigor lens" do
              "loose" => [true, "(?) -> untyped"])
   end
 
+  # rigortype/rigor#1996: a block-only `@rbs &block` annotation leaves the rest of the declaration defaulted
+  # (`inferred-signature`), and check binds the block's parameters from it all the same.
+  it "reads an annotated block of an otherwise defaulted inline declaration" do
+    File.write("lib/inline_blocks.rb", <<~RUBY)
+      # rbs_inline: enabled
+
+      class InlineBlocks
+        # @rbs &block: (Integer, name: String) -> (Integer | nil)
+        def annotated(x, &block) = block.call(x, name: "")
+
+        # @rbs &block: ? () [self: InlineBlocks] -> void
+        def scoped(&block) = nil
+
+        def bare(&block) = nil
+
+        # @rbs x: Integer
+        def partial(x, &block) = x
+
+        # @rbs &block: (Integer) -> void
+        def yields = yield(1)
+
+        # @rbs &block: (Symbol) -> void
+        def self.on_class(&block) = nil
+      end
+    RUBY
+    _, out, = lens(["--format=json", "lib/inline_blocks.rb"])
+    overloads = JSON.parse(out)["members"].to_h { |member| [member["name"], member["overloads"].first] }
+    blocks = overloads.transform_values do |overload|
+      block = overload["block"]
+      [block["required"], block["type"]["type"], block["type"]["provenance"]]
+    end
+
+    expect(blocks).to eq("annotated" => [true, "(::Integer, name: ::String) -> (::Integer | nil)", "inline"],
+                         "scoped" => [false, "() [self: ::InlineBlocks] -> void", "inline"],
+                         "bare" => [false, "untyped", "inferred"], "partial" => [false, "untyped", "inferred"],
+                         "yields" => [true, "(::Integer) -> void", "inline"],
+                         "on_class" => [true, "(::Symbol) -> void", "inline"])
+    expect(overloads["annotated"]["rbs"])
+      .to start_with("(untyped x) { (::Integer, name: ::String) -> (::Integer | nil) } -> ")
+  end
+
   it "exits 64 for a configuration file that does not exist" do
     status, out, = lens(["--config=nope.yml", "lib/order.rb"])
 

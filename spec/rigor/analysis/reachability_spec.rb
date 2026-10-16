@@ -1084,17 +1084,15 @@ RSpec.describe Rigor::Analysis::Reachability do
       # `self` in a mixin argument is the module the call is written in, not the receiver; nothing names `Mix`
       # itself, so it stays a candidate.
       it "reads a self argument as the module the call is written in" do
-        main = "Foo.new.m\nBar.new.n\nBaz.e\n"
+        main = "Foo.new.m\nBar.new.n\nBaz.e\nFoo.w\n"
         found = dead({ "lib/a.rb" => <<~RUBY, "lib/s.rb" => stranger, "lib/main.rb" => main })
           class Foo
             class X; end
+            def self.w = const_get(:W)
           end
-          class Bar
-            class X; end
-          end
-          class Baz
-            class X; end
-          end
+          class Lone; class W; end; end
+          class Bar; class X; end; end
+          class Baz; class X; end; end
           module Mix
             def m = self.class.const_get(:X)
             Foo.include(self)
@@ -1108,7 +1106,7 @@ RSpec.describe Rigor::Analysis::Reachability do
             Baz.extend(self)
           end
         RUBY
-        expect(found).to eq(%w[Ext Mix Nix Stranger Stranger::X Unrelated Unrelated::Dead])
+        expect(found).to eq(%w[Ext Lone Lone::W Mix Nix Stranger Stranger::X Unrelated Unrelated::Dead])
       end
 
       it "keeps every same-named constant for a class body that includes a computed module" do
@@ -1176,7 +1174,7 @@ RSpec.describe Rigor::Analysis::Reachability do
         "a singleton method" => "class K\n  def self.setup = include(Mix)\n  class X; end\nend\nK.setup\nK.new.m\n",
         "a block on a computed receiver" => "class K\n  class X; end\nend\n[K].each { |k| k.include(Mix) }\nK.new.m\n"
       }.each do |where, source|
-        it "keeps every same-named constant for an include in #{where}" do
+        it "keeps every same-named constant for the included module's own const_get in #{where}" do
           mix = "class Base; end\nmodule Mix\n  def m = self.class.const_get(:X)\nend\n"
           found = dead({ "lib/a.rb" => mix + source,
                          "lib/main.rb" => "Base\n" })

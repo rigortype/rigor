@@ -78,6 +78,20 @@ RSpec.describe "the ADR-58 ivar census counts instance_variable_set writes" do
     end
   end
 
+  # #2017 review: the census entry a literal write creates must not take the read-before-write nil a sibling
+  # reader contributes when `initialize` writes the ivar only this way.
+  it "counts a literal write in initialize as initialising the ivar" do
+    source = "class InitLit\n  def initialize = instance_variable_set(:@name, \"x\")\n  def name = @name\nend\n"
+
+    expect(census(source, "InitLit", :@name)).to eq(%("x"))
+  end
+
+  it "counts a literal write in a define_method block as the block's write" do
+    source = "class W\n  define_method(:set) { instance_variable_set(:@x, \"a\") }\n  def get = @x\nend\n"
+
+    expect(census(source, "W", :@x)).to eq(%("a"?))
+  end
+
   it "no longer reports a call on the literal a plain write left (the options-hash constructor)" do
     source = <<~RUBY
       class Client

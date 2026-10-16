@@ -1118,6 +1118,8 @@ module Rigor
              Prism::InstanceVariableTargetNode
           acc << node.name
         end
+        reflective = ReflectiveIvarWrite.literal_name(node)
+        acc << reflective if reflective
         node.rigor_each_child { |child| define_method_written_ivars(child, acc) }
       end
 
@@ -1273,6 +1275,9 @@ module Rigor
         end
 
         seen_writes << node.name if IVAR_WRITE_NODES.any? { |klass| node.is_a?(klass) }
+        # #1931 — a literal `instance_variable_set` is a write too; its value argument, read above, runs first.
+        reflective = ReflectiveIvarWrite.literal_name(node)
+        seen_writes << reflective if reflective
       end
 
       # Records each ivar target of a `MultiWriteNode` / nested `MultiTargetNode` into `seen_writes`, and descends into

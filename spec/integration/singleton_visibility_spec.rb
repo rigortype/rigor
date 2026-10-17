@@ -136,16 +136,16 @@ RSpec.describe "def.method-visibility-mismatch on singleton calls (#1984)", type
     RUBY
   end
 
-  # Ruby: loading `a.rb` then `b.rb` makes `Split.x` public, the other order private; file order is not load order,
-  # so the slot two files disagree on is contested in either order. `Lone.x` is private wherever it is called from.
+  # Ruby: loading the private side first leaves `Split.x` public (the later `def self.x` redefines it), the other
+  # order private; file order is not load order,
+  # so the slot two files disagree on is contested in either order, also in the file that makes it private. `Lone.x`
+  # is private wherever it is called from.
   it "declines a singleton slot two files disagree on, and reports one file's slot from another file" do
-    pair = { "Split" => "private_class_method def self.x = 1", "Split " => "class << self; public :x; end" }
-    [%w[a.rb b.rb], %w[b.rb a.rb]].each do |first, second|
-      files = {
-        first => "class Split\n  #{pair.fetch('Split')}\nend\nclass Lone\n  private_class_method def self.x = 1\nend\n",
-        second => "class Split\n  #{pair.fetch('Split ')}\nend\n",
-        "z.rb" => "Split.x\nLone.x\n"
-      }
+    private_side = "class Split\n  private_class_method def self.x = 1\nend\n" \
+                   "class Lone\n  private_class_method def self.x = 1\nend\nSplit.x\n"
+    public_side = "class Split\n  def self.x = 2\nend\n"
+    [%w[a.rb b.rb], %w[b.rb a.rb]].each do |private_file, public_file|
+      files = { private_file => private_side, public_file => public_side, "z.rb" => "Split.x\nLone.x\n" }
       expect(mismatches(files: files)).to eq([["z.rb", 2]])
     end
   end

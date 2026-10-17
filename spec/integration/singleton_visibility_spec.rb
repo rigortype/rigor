@@ -27,11 +27,37 @@ RSpec.describe "def.method-visibility-mismatch on singleton calls (#1984)", type
     "a named private in class << self" => "class K\n  class << self\n    def x = 1\n    private :x\n  end\nend",
     "an attr under a bare private in class << self" =>
       "class K\n  class << self\n    private\n    attr_reader :x\n  end\nend",
-    "send(:private_class_method, :x)" => "class K; def self.x = 1; send(:private_class_method, :x); end"
+    "send(:private_class_method, :x)" => "class K; def self.x = 1; send(:private_class_method, :x); end",
+    # #1633 — the bare toggles Ruby runs on the singleton class's self, and a def after a wrapping `public def`.
+    "send(:private) in class << self" => "class K\n  class << self\n    send(:private)\n    def x = 1\n  end\nend",
+    "__send__(:private) in class << self" =>
+      "class K\n  class << self\n    __send__(:private)\n    def x = 1\n  end\nend",
+    "self.private in class << self" => "class K\n  class << self\n    self.private\n    def x = 1\n  end\nend",
+    "private {} in class << self" => "class K\n  class << self\n    private {}\n    def x = 1\n  end\nend",
+    "public def under a bare private in class << self" =>
+      "class K\n  class << self\n    private\n    public def o = 1\n    def x = 1\n  end\nend"
   }.each do |label, declaration|
     it "reports K.x after #{label}" do
       expect(mismatches("#{declaration}\ndef run = K.x\n")).to eq([["code.rb", declaration.count("\n") + 2]])
     end
+  end
+
+  # #1633 — Ruby: `Wrapped.o` is public (`public def` under a bare `private`). `Maybe.x` and `Splat.x` are private
+  # (the `if true` runs; `private(*[])` is a bare `private`), but the walk cannot tell a toggle under a condition or
+  # behind a splat from none, so it contests both slots and the rule declines rather than answer. Those two rows are
+  # guards: the walk records both public, so they stay quiet without the contest too; they fail if a change records
+  # either toggle as certain.
+  it "is quiet on a wrapping `public def` and after a toggle that may not run in class << self" do
+    expect(mismatches(<<~RUBY)).to eq([])
+      class Wrapped; class << self; private; public def o = 1; end; end
+      class Maybe; class << self; if true then private {} end; def x = 1; end; end
+      class Splat; class << self; private(*[]); def x = 1; end; end
+      def run
+        Wrapped.o
+        Maybe.x
+        Splat.x
+      end
+    RUBY
   end
 
   # Ruby: `Base.new`, `Base.y` (whose body calls `Base.x` explicitly) and `Sub.x` (the inherited private `Base.x`)

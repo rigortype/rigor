@@ -109,6 +109,31 @@ RSpec.describe "visibility lints over wrapped defs and attrs (#1911, #1819, #163
     RUBY
   end
 
+  # #1633 — Ruby raises NoMethodError on each `a`: a toggle written on `self`, sent with a literal name or given a
+  # block is a bare `private`. `Maybe#a` is private too (the `if true` runs), but the walk cannot tell a toggle
+  # under a condition from none, so it contests the slot and the rule declines rather than answer. The `Maybe` row is
+  # a guard: the walk records `a` public, so it stays quiet without the contest too.
+  it "reports a def after a toggle written on self, sent or given a block, and declines one under a condition" do
+    expect(rules(<<~RUBY)).to eq([mismatch(13), mismatch(14), mismatch(15), mismatch(16)])
+      class Sent; send(:private); def a = 1; end
+      class UnderscoreSent; __send__(:private); def a = 1; end
+      class OnSelf; self.private; def a = 1; end
+      class WithBlock; private {}; def a = 1; end
+      class Maybe
+        if true
+          private {}
+        end
+        def a = 1
+      end
+
+      Maybe.new.a
+      Sent.new.a
+      UnderscoreSent.new.a
+      OnSelf.new.a
+      WithBlock.new.a
+    RUBY
+  end
+
   # Ruby: a bare `public` under a condition leaves `ut` public where it runs, which the walk cannot tell.
   it "is quiet on an attr after an uncertain toggle" do
     expect(rules(<<~RUBY)).to eq([])

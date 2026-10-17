@@ -87,3 +87,57 @@ class PrivateNew
   private_class_method :new
   def self.build = new
 end
+
+# Issue #1633 — the wrap-around and toggle forms in a `class << self` body.
+class SingletonPublicUnderPrivate
+  class << self
+    private
+
+    public def open = 1
+    def x = 1
+  end
+end
+
+class SingletonSentToggle
+  class << self
+    send(:private)
+    def x = 1
+  end
+end
+
+class SingletonUnderscoreSentToggle
+  class << self
+    __send__(:private)
+    def x = 1
+  end
+end
+
+class SingletonSelfToggle
+  class << self
+    self.private
+    def x = 1
+  end
+end
+
+class SingletonBlockToggle
+  class << self
+    private {}
+    def x = 1
+  end
+end
+
+class SingletonEmptySplatToggle
+  class << self
+    private(*[])
+    def x = 1
+  end
+end
+
+class SingletonConditionalToggle
+  class << self
+    if true
+      private {}
+    end
+    def x = 1
+  end
+end

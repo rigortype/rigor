@@ -627,7 +627,7 @@ two are wired today, one is reserved.
 | Policy | Behaviour |
 | --- | --- |
 | `untyped` (default) | Every parameter is spelled `untyped`. No inference-derived parameter contract is imposed on future callers. The user retains complete authorship over parameter typing. |
-| `observed` | Collect argument types from every call site under `--observe=PATH...` (defaults to the configured `test_paths:`, or whichever of `spec/` and `test/` exist), union per parameter position, erase to RBS, emit the union. With no test root to observe, or a declared root that does not exist, sig-gen says so on stderr, and `--format=json` carries the same fact in a top-level `observation` key (below). |
+| `observed` | Collect argument types from every call site under `--observe=PATH...` (defaults to the configured `test_paths:`, or whichever of `spec/` and `test/` exist), union per parameter position, erase to RBS, emit the union. With no test root to observe, or a declared root that does not exist or is not read, sig-gen says so on stderr, and `--format=json` carries the same fact in a top-level `observation` key (below). |
 | `observed-strict` | Reserved. Will additionally widen to capability roles (`_ToStr`, `_ToS`, …) once the role catalog ships. Currently rejected with a usage error. |
 
 Under `--params=observed`, the `--print` / `--diff` JSON payload gains
@@ -642,7 +642,7 @@ never reads stderr (the MCP `rigor_sig_gen` tool included) can tell
 
 `paths` are the roots the collector reads (a directory or a `.rb`
 file); `missing` are the other declared roots: ones that do not exist,
-or exist but are not read (`README.md`). Repeats are listed once. `paths: []` with `missing: []` means
+or exist but are not read (`README.md`). An identical repeat is listed once. `paths: []` with `missing: []` means
 there was no test root at all. Paths are spelled as the run resolved
 them: `--observe=PATH` as typed, `test_paths:` as absolute paths, resolved against the
 config file's directory, auto-detected `spec/` / `test/` absolute. The key is

@@ -90,6 +90,15 @@ RSpec.describe Rigor::CLI::SigGenCommand do
     expect(err).not_to include("every parameter stays untyped")
   end
 
+  it "names an existing root the collector would not read, as the JSON report does" do
+    write("README.md", "Calc.new.m(42)\n")
+
+    _status, out, err = run("--observe=README.md")
+
+    expect(out).to include("def m: (untyped) -> 1")
+    expect(err).to include("README.md").and include("not a directory or `.rb` file")
+  end
+
   it "names an explicit empty test_paths: as the reason" do
     write("spec/calc_spec.rb", "Calc.new.m(42)\n")
 

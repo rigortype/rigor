@@ -393,7 +393,8 @@ project's test roots: the configured `test_paths:`, or whichever of
 
 Under `params: "observed"` the response also carries a top-level
 `observation` object, `{"paths": [...], "missing": [...]}`: the test
-roots that were read and the declared ones that do not exist. Both
+roots that were read and the declared ones that do not exist or that
+the collector would not read (neither a directory nor a `.rb` file). Both
 empty means no test root was found, so every parameter stays `untyped`.
 The key is absent under the default `untyped` policy.
 

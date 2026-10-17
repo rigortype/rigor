@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "spec_helper"
+require "fileutils"
 require "tmpdir"
 require "rigor/protection/discovery_seed"
 
@@ -11,17 +12,14 @@ require "rigor/protection/discovery_seed"
 # in each world the read gives the answer the tree implies and, read while a dependency recording is active, files
 # the edge a change to that fact fires (the declaring file's site, or the negative method edge on `Object.ox`).
 RSpec.describe "a superclass the tables cannot follow — dependency edges (#1624)" do
-  around do |example|
-    Dir.mktmpdir("rigor-opaque-superclass-") do |dir|
-      @dir = dir
-      example.run
-    end
-  end
+  let(:dir) { Dir.mktmpdir("rigor-opaque-superclass-") }
 
-  def write(name, source) = File.write(File.join(@dir, name), source)
+  after { FileUtils.rm_rf(dir) }
+
+  def write(name, source) = File.write(File.join(dir, name), source)
 
   def scope
-    tables = Rigor::Protection::DiscoverySeed.discovery_tables(Dir[File.join(@dir, "*.rb")].sort)
+    tables = Rigor::Protection::DiscoverySeed.discovery_tables(Dir[File.join(dir, "*.rb")])
     base = Rigor::Scope.empty
     base.with_discovery(base.discovery.with(**tables))
   end
@@ -29,7 +27,7 @@ RSpec.describe "a superclass the tables cannot follow — dependency edges (#162
   # The read's answer and the record a consumer in `c.rb` keeps of it.
   def read(name, side)
     answer = nil
-    record = Rigor::Analysis::DependencyRecorder.record_for(File.join(@dir, "c.rb")) do
+    record = Rigor::Analysis::DependencyRecorder.record_for(File.join(dir, "c.rb")) do
       answer = case Rigor::Inference::DefinerResolution.resolve(scope, "Media", name, side, question: :definer)
                in Rigor::Inference::DefinerResolution::Known(answer: _, owner:) then owner
                in Rigor::Inference::DefinerResolution::UNKNOWN then :unknown

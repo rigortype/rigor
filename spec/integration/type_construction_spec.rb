@@ -1604,7 +1604,8 @@ RSpec.describe "Rigor type construction (integration)" do
   describe "fixtures/ivar_class_guards/ — class guards on instance-variable receivers (#1446)", type: :runner do
     # The number of `# QUIET-1446` lines each entry carries.
     quiet_counts = {
-      "guards.rb" => 7, "invalidation.rb" => 1, "bot_receivers.rb" => 5, "writes.rb" => 2, "self_calls.rb" => 27
+      "guards.rb" => 7, "invalidation.rb" => 1, "bot_receivers.rb" => 5, "writes.rb" => 2, "self_calls.rb" => 27,
+      "condition_calls.rb" => 16, "case_when_calls.rb" => 19
     }.freeze
 
     def fixture_source(name) = File.read(File.join(__dir__, "fixtures/ivar_class_guards", name))
@@ -2764,6 +2765,18 @@ RSpec.describe "Rigor type construction (integration)" do
 
       it "floors a compounding captured local to Dynamic[top] at the cap" do
         expect(harness.local(:growing)).to eq(Rigor::Type::Combinator.untyped)
+      end
+    end
+
+    # Issue #1963 — guards: a constant `when` test or `===` receiver, a class alias from another file or a value
+    # constant, leaves a nilable subject's read in the clause quiet.
+    describe "fixtures/constant_case_guards/ — constant case-equality guards on a nilable subject", type: :runner do
+      it "reports nothing on the clause reads" do
+        dir = File.join(__dir__, "fixtures/constant_case_guards")
+        files = %w[defs.rb use.rb].to_h { |name| [name, File.read(File.join(dir, name))] }
+        result = analyze(files: files)
+        reported = result.diagnostics.reject { |d| d.severity == :info || d.rule.to_s == "call.unresolved-toplevel" }
+        expect(reported.map { |d| [d.path.to_s, d.line, d.message] }).to eq([])
       end
     end
 

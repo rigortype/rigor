@@ -2431,13 +2431,13 @@ RSpec.describe "block-return scope threading", type: :runner do
       end
 
       it "still floors a union seed that an unthreaded write of another class escapes" do
-        # `when (seen = nil)` stores nil in a `when` condition, which the body evaluator does not thread, so the
-        # fixpoint converges on the `0 | Integer` seed. That seed holds every Integer, but not the nil: keeping
+        # `in Integer if (seen = nil)` stores nil in an `in` guard, which the body evaluator does not thread, so
+        # the fixpoint converges on the `0 | Integer` seed. That seed holds every Integer, but not the nil: keeping
         # it folded `seen.nil?` to `false` at both positions, and `find` to `nil` where Ruby answers `1`.
         expect(dumped_type(<<~RUBY)).to eq("1 | 2 | nil")
           def run(flag)
             seen = flag ? 0 : rand(10)
-            dump_type([1, 2].find { |e| case e when (seen = nil) then 0 end; seen.nil? })
+            dump_type([1, 2].find { |e| case e; in Integer if (seen = nil) then 0 else 1 end; seen.nil? })
           end
         RUBY
       end
@@ -2555,8 +2555,9 @@ RSpec.describe "block-return scope threading", type: :runner do
     # the pass's exit scope misses. That scan is a whitelist written against `StatementEvaluator`, so a position
     # the two ever disagree on reaches the fixpoint unflagged; stubbing the scan empty stands in for that drift.
     #
-    # Each rebind sits in a `when` condition, a position the evaluator does not thread, so the fixpoint cannot see
-    # it. If the evaluator ever threads that position, move these rebinds to one it still does not.
+    # Each rebind sits in an `in` guard, a position the evaluator does not thread, so the fixpoint cannot see it.
+    # If the evaluator ever threads that position, move these rebinds to one it still does not. Issue #1963 threads
+    # a `when` condition that runs code, where they sat before.
     describe "(1), the unmoved-pin floor over a shape seed the scan misses" do
       before do
         allow(Rigor::Inference::UnthreadedRebinds).to receive(:names).and_return(Set.new)
@@ -2566,14 +2567,14 @@ RSpec.describe "block-return scope threading", type: :runner do
         # Runtime `[[0], [0, 1]]`.
         expect(dumped_type(<<~RUBY)).to eq("[Dynamic[top], Dynamic[top]]")
           g = [0]
-          dump_type([1, 2].map { |i| x = g; case i when (g += [1]) then 0 end; x })
+          dump_type([1, 2].map { |i| x = g; case i; in Integer if (g += [1]) then 0 end; x })
         RUBY
       end
 
       it "no longer reports the size check the pinned arity folded" do
         expect(flow_rules(<<~RUBY)).to be_empty
           g = [0]
-          r = [1, 2].map { |i| x = g; case i when (g += [1]) then 0 end; x }
+          r = [1, 2].map { |i| x = g; case i; in Integer if (g += [1]) then 0 end; x }
           puts "one" if r.last.size == 1
         RUBY
       end
@@ -2582,7 +2583,7 @@ RSpec.describe "block-return scope threading", type: :runner do
         # Runtime `[{ a: 0 }, { a: 0, b: 1 }]`.
         expect(dumped_type(<<~RUBY)).to eq("[Dynamic[top], Dynamic[top]]")
           h = { a: 0 }
-          dump_type([1, 2].map { |i| x = h; case i when (h = h.merge(b: 1)) then 0 end; x })
+          dump_type([1, 2].map { |i| x = h; case i; in Integer if (h = h.merge(b: 1)) then 0 end; x })
         RUBY
       end
 
@@ -2591,7 +2592,7 @@ RSpec.describe "block-return scope threading", type: :runner do
         expect(dumped_type(<<~RUBY)).to eq("[Dynamic[top], Dynamic[top]]")
           def run(flag)
             g = flag ? [0] : nil
-            dump_type([1, 2].map { |i| x = g; case i when (g = [0, 1]) then 0 end; x })
+            dump_type([1, 2].map { |i| x = g; case i; in Integer if (g = [0, 1]) then 0 end; x })
           end
         RUBY
       end

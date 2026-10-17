@@ -10,6 +10,7 @@ require_relative "../rbs_extended"
 require_relative "../analysis/fact_store"
 require_relative "../builtins/regex_refinement"
 require_relative "guard_rebinding"
+require_relative "intervening_ivar_reset"
 require_relative "key_presence_guard"
 require_relative "last_line"
 require_relative "operand_effects"
@@ -3833,9 +3834,12 @@ module Rigor
         # that edge, so a `$_` the earlier operand narrowed is forgotten when the operand may set it
         # (`gets && log(items.each { gets })`), before the operand's own edges narrow it again.
         # Issue #1429 — likewise a guard's narrowing of a global or constant the operand may rebind
-        # (`$sep && reset_sep && $sep.length`).
+        # (`$sep && reset_sep && $sep.length`). Issue #1963 — and an instance variable's narrowing an implicit-self
+        # or `self.` call in the operand may write ({InterveningIvarReset.after_operand}): `@x.nil? && reset!` does
+        # not leave `@x` `nil` when `reset!` assigns it.
         def operand_edges(node, edge_scope)
           edge_scope = LastLine.forget_if_set(edge_scope, node)
+          edge_scope = InterveningIvarReset.after_operand(node, edge_scope)
           if edge_scope.guard_narrowed? && GuardRebinding.may_rebind?(node, edge_scope)
             edge_scope = edge_scope.forget_guard_narrowings
           end

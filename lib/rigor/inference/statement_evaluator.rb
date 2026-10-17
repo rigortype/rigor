@@ -28,6 +28,7 @@ require_relative "define_method_block_self"
 require_relative "macro_block_self_type"
 require_relative "guard_rebinding"
 require_relative "self_call_ivar_writes"
+require_relative "intervening_ivar_reset"
 require_relative "match_rebinding"
 require_relative "element_read_widening"
 require_relative "hash_lookup_mutation"
@@ -1349,6 +1350,9 @@ module Rigor
       def eval_case_when_branches(subject_type, subject, conditions, entry_scope)
         results = []
         falsey_scope = entry_scope
+        # Issue #1963 — set once a `when` test may have rebound the subject variable, which from there on no longer
+        # holds the value the later tests match ({#subject_when_scopes}).
+        rebound = false
         conditions.each do |branch|
           # Issue #1359 — a clause's conditions, or its pattern's pins and guard, run before its body and before
           # every later clause, and the walk types them without evaluating them, so a reader there forgets `$_` here.
@@ -1359,7 +1363,11 @@ module Rigor
           # recursion) so no condition sub-expression is newly typed; `propagate` preserves the entry because it already
           # keys the node.
           record_clause_entry_scope(branch, falsey_scope)
-          body_scope, falsey_scope = branch_body_and_falsey_scopes(subject_type, subject, branch, falsey_scope)
+          if subject && branch.is_a?(Prism::WhenNode)
+            body_scope, falsey_scope, rebound = subject_when_scopes(subject, branch.conditions, falsey_scope, rebound)
+          else
+            body_scope, falsey_scope = branch_body_and_falsey_scopes(subject_type, subject, branch, falsey_scope)
+          end
           results << sub_eval(branch, body_scope)
         end
         [results, falsey_scope]
@@ -1396,6 +1404,114 @@ module Rigor
         else
           when_conditions = branch.respond_to?(:conditions) ? branch.conditions : []
           Narrowing.case_when_scopes(subject, when_conditions, falsey_scope)
+        end
+      end
+
+      # Issue #1963 — a `when` clause of a `case` with a subject. Ruby runs each test in order (`test === subject`)
+      # until one matches, so a test that runs code — a call, a write, a lambda literal, whose `===` runs its body —
+      # runs before the clause's body and every later clause. Such a test is evaluated ({#run_when_test}), so a call
+      # in it resets the instance variables and the guard narrowings it may rebind, as a statement call does, and a
+      # write in it binds. The body is reached after any prefix of the tests ran, so it enters from the join of the
+      # scopes each test leaves, the next clause from the scope the last one leaves.
+      #
+      # The subject is evaluated once, before every test, so a test that may rebind the subject variable
+      # ({#when_test_rebinds_subject?}) leaves the variable holding something other than the value the later tests
+      # match: from that test on, no clause narrows it (`case @x when String then 1 when reset! then @x.upcase`, with
+      # `reset!` assigning `@x`, reads `@x` as `reset!` may leave it, not as `nil`). `rebound` carries that across
+      # the clauses; the answer is `[body_scope, falsey_scope, rebound]`. A clause whose tests run no code, before
+      # any test rebound the subject, keeps {Narrowing.case_when_scopes}' narrowing unchanged.
+      def subject_when_scopes(subject, conditions, entry, rebound)
+        unless rebound || conditions.any? { |condition| when_test_runs_code?(condition) }
+          return [*Narrowing.case_when_scopes(subject, conditions, entry), false]
+        end
+
+        after = entry
+        test_exits = conditions.map do |condition|
+          before = after
+          after = run_when_test(condition, before)
+          rebound ||= when_test_rebinds_subject?(subject, condition, before, after)
+          after
+        end
+        body_entry = reduce_scopes_with_nil_injection(test_exits)
+        return [Narrowing.apply_when_regex_globals(conditions, body_entry), after, true] if rebound
+
+        [Narrowing.case_when_scopes(subject, conditions, body_entry).first,
+         Narrowing.case_when_scopes(subject, conditions, after).last, false]
+      end
+
+      # Whether a `when` test runs code beyond reading a value: a call, `super`, `yield`, a lambda literal or a write.
+      WHEN_TEST_CODE_NODES = [
+        Prism::CallNode, Prism::SuperNode, Prism::ForwardingSuperNode, Prism::YieldNode, Prism::LambdaNode
+      ].freeze
+      private_constant :WHEN_TEST_CODE_NODES
+
+      def when_test_runs_code?(condition)
+        return true if OperandEffects.any?(condition)
+
+        found = false
+        Source::NodeWalker.each(condition) do |descendant|
+          found ||= WHEN_TEST_CODE_NODES.any? { |klass| descendant.is_a?(klass) }
+        end
+        found
+      end
+
+      # The scope a `when` test leaves. The instance variables its implicit-self calls may write are widened first,
+      # a lambda literal's body included, since its `===` runs it ({InterveningIvarReset.after_operand}, which
+      # marks a binding whose narrowing had ruled `nil` out). The test is then evaluated, which binds its writes
+      # and drops the narrowing of a variable a lambda literal captures and writes ({#eval_lambda}). A guard's
+      # narrowing that a lambda body may rebind is restored as a call's would be, since its `===` runs the body.
+      def run_when_test(condition, before)
+        before = InterveningIvarReset.after_operand(condition, before, run_lambdas: true)
+        _type, after = sub_eval(condition, before)
+        body = when_lambda_body(condition)
+        return after unless body && after.guard_narrowed? && GuardRebinding.may_rebind?(body, after)
+
+        after.forget_guard_narrowings
+      end
+
+      def when_lambda_body(condition)
+        condition = condition.body.body.first while condition.is_a?(Prism::ParenthesesNode) &&
+                                                    condition.body.is_a?(Prism::StatementsNode) &&
+                                                    condition.body.body.size == 1
+        condition.body if condition.is_a?(Prism::LambdaNode)
+      end
+
+      # Whether the `when` test `condition`, which took `before` to `after`, may have rebound the variable `subject`
+      # reads: its binding moved, the test writes it, or — for an instance variable — a call in the test may write
+      # it ({InterveningIvarReset.may_write?}), or — for a global or constant — the test may run code that rebinds
+      # one ({GuardRebinding.may_rebind?}).
+      def when_test_rebinds_subject?(subject, condition, before, after)
+        name = case_subject_name(subject)
+        return false if name.nil?
+        return true unless case_subject_binding(subject, before) == case_subject_binding(subject, after)
+        return true if OperandEffects.written_variables(condition).include?(name)
+
+        case subject
+        when Prism::InstanceVariableReadNode
+          InterveningIvarReset.may_write?(condition, name, before, run_lambdas: true)
+        when Prism::LocalVariableReadNode
+          false
+        else
+          body = when_lambda_body(condition)
+          GuardRebinding.may_rebind?(condition, before) || (!body.nil? && GuardRebinding.may_rebind?(body, before))
+        end
+      end
+
+      def case_subject_name(subject)
+        case subject
+        when Prism::LocalVariableReadNode, Prism::InstanceVariableReadNode, Prism::GlobalVariableReadNode
+          subject.name
+        when Prism::ConstantReadNode, Prism::ConstantPathNode
+          Narrowing.constant_key(subject)
+        end
+      end
+
+      def case_subject_binding(subject, scope)
+        case subject
+        when Prism::LocalVariableReadNode then scope.local(subject.name)
+        when Prism::InstanceVariableReadNode then scope.ivar(subject.name)
+        when Prism::GlobalVariableReadNode then scope.global(subject.name)
+        else scope.constant_narrowing(Narrowing.constant_key(subject))
         end
       end
 
@@ -3379,27 +3495,7 @@ module Rigor
       def invalidate_ivars_for_intervening_call(call_node, current_scope)
         return current_scope unless intervening_call_candidate?(call_node)
 
-        class_name = enclosing_class_name_for(current_scope.self_type)
-        return current_scope if class_name.nil?
-
-        seed = current_scope.class_ivars_for(class_name)
-        return current_scope if seed.empty?
-
-        widened = current_scope
-        seed.each do |ivar_name, seed_type|
-          local_type = current_scope.ivar(ivar_name)
-          next if local_type.nil? || local_type == seed_type
-
-          writes = self_call_ivar_writes(call_node)
-          next if writes && !writes.include?(ivar_name)
-
-          joined = Type::Combinator.union(local_type, seed_type)
-          widened = widened.with_ivar(ivar_name, joined)
-          # Issue #1889 — an ivar a reflective write widened keeps its declaration mark, so the reset must too.
-          widened = widened.seed_declaration_sourced_ivar(ivar_name, joined) if
-            current_scope.declaration_sourced?(:ivar, ivar_name)
-        end
-        widened
+        InterveningIvarReset.widen(current_scope) { self_call_ivar_writes(call_node) }
       end
 
       # Issue #1596 — the ivars the implicit-self / `self.` call `call_node` may write, or nil when that is not proven
@@ -3412,10 +3508,7 @@ module Rigor
       end
 
       def intervening_call_candidate?(call_node)
-        return false unless call_node.is_a?(Prism::CallNode)
-
-        receiver = call_node.receiver
-        receiver.nil? || receiver.is_a?(Prism::SelfNode)
+        InterveningIvarReset.candidate?(call_node)
       end
 
       def enclosing_class_name_for(self_type)

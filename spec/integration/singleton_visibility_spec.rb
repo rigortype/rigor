@@ -90,6 +90,23 @@ RSpec.describe "def.method-visibility-mismatch on singleton calls (#1984)", type
     end
   end
 
+  # Ruby: the rewrite in `z.rb` makes `K.x` public (it returns 2, or 1 for the `public_class_method` rows), so the call
+  # in `run.rb` is quiet. The walk of `z.rb` writes no visibility of its own for `K.x`, so only a contest it leaves
+  # (on the slot, or on K's wildcard singleton slot) can reach `k.rb`'s private one.
+  {
+    "K.public_class_method(*names)" => "NAMES = [:x]\nK.public_class_method(*NAMES)\n",
+    "K.singleton_class.class_eval { public :x }" => "K.singleton_class.class_eval { public :x }\n",
+    "define_method in a reopening's class << self" => "class K\n  class << self\n    define_method(:x) { 2 }\n  end\nend\n",
+    "an alias in a reopening's class << self" =>
+      "class K\n  class << self\n    def y = 2\n    alias x y\n  end\nend\n"
+  }.each do |label, rewrite|
+    it "is quiet on K.x after #{label} in another file" do
+      files = { "k.rb" => "class K\n  private_class_method def self.x = 1\nend\n", "z.rb" => rewrite,
+                "run.rb" => "def run = K.x\n" }
+      expect(mismatches(files: files)).to eq([])
+    end
+  end
+
   # Ruby: each constant below is built while the class body runs, before `private_class_method` / `private :x`, so
   # every call returns normally.
   it "is quiet on a call that runs while the class body loads" do

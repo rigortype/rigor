@@ -121,7 +121,7 @@ module Rigor
         # Stage 2, for the class {#owner_envelope} last answered.
         def authoritative?(class_name)
           !load_order_dependent?(class_name) && !object_extension_may_shadow? &&
-            @levels.all? { |level| clean_level?(level) && public_at?(level.class_name) } &&
+            @levels.all? { |level| clean_level?(level) && (@kind == :singleton || public_at?(level.class_name)) } &&
             chain_free_of_hooks?(class_name) &&
             subclasses_agree?(class_name, @envelope)
         end

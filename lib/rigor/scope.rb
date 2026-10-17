@@ -1410,6 +1410,24 @@ module Rigor
                         call_node)
     end
 
+    # Issue #1569 — whether `def_node`, written in this file, is a module function of `class_name`: a `:both`
+    # deferred-range row over the def (a bare `module_function` before it, or `module_function def x`;
+    # `ModuleFunctionState.prescan_deferred`), or a `:singleton` row for the name after the def
+    # (`module_function :x`) whose singleton copy is this def (`ModuleFunctionState.each_singleton_copy`).
+    def module_function_def?(class_name, def_node)
+      ranges = source_path && @discovery.discovered_deferred_ranges[source_path]
+      return false if ranges.nil?
+
+      start = def_node.location.start_offset
+      ranges.any? do |(row_start, _finish, name, kind, owner)|
+        next false unless name == def_node.name && owner == class_name.to_s
+
+        (kind == :both && row_start == start) ||
+          (kind == :singleton && row_start > start &&
+           singleton_def_for(class_name, name)&.location&.start_offset == start)
+      end
+    end
+
     # Shared ordering half of the two `*_def_shadows_call?` predicates, over this file's
     # `discovered_deferred_ranges` (issue #1097). `exists` — a recorded `"path:line"` site or the
     # method-existence table — says a def of `method_name`/`kind` on `class_name` is known at all; a

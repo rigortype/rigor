@@ -92,11 +92,61 @@ RSpec.describe "def.override-visibility-reduced over a module_function's instanc
     RUBY
   end
 
+  # Ruby: `Over#pb`, `Over#pc` and `Over#pd` are private instance copies of module functions that override the
+  # public `PubBase` methods; the author's intent is the public singleton copy, so the reduction is not reported.
+  # `Plain#pe` under `extend self` is no module function, and its private override still reports.
+  it "does not report a reduction a module_function makes, in each form, and still reports a private def" do
+    expect(reduced(<<~RUBY)).to eq([["code.rb", 20]])
+      module PubBase
+        def pb = 1
+        def pc = 1
+        def pd = 1
+        def pe = 1
+      end
+
+      module Over
+        include PubBase
+        def pc = 2
+        module_function :pc
+        module_function def pd = 2
+        module_function
+        def pb = 2
+      end
+
+      module Plain
+        extend self
+        include PubBase
+        private def pe = 2
+      end
+    RUBY
+  end
+
   it "reads the module_function across files" do
     files = {
       "helpers.rb" => "module Helpers\n  module_function\n  def fmt = 1\nend\n",
       "report.rb" => "class Report\n  include Helpers\n  private def fmt = 2\nend\n"
     }
     expect(reduced(files: files)).to eq([])
+  end
+
+  # The singleton side of `call.wrong-arity` does not read the instance visibility table (#1569): `Helpers.two` is a
+  # module function's public singleton copy, and `M.two` a `def self.two` beside a private instance `two`. Ruby
+  # raises ArgumentError on both calls.
+  it "reports a wrong-arity call on a module function's singleton copy and beside a private instance def" do
+    arity = analyze(<<~RUBY).diagnostics.select { |d| d.rule == "call.wrong-arity" }.map(&:line)
+      module Helpers
+        module_function
+        def two(a, b) = [a, b]
+      end
+
+      module M
+        def self.two(a, b) = a
+        private def two(a, b) = a
+      end
+
+      Helpers.two(1)
+      M.two(1)
+    RUBY
+    expect(arity).to eq([11, 12])
   end
 end

@@ -338,6 +338,7 @@ module Rigor
     # Issue #530 — public so the external-gem ancestry probe asks the same question the walk does.
     def known_user_class?: (String | Symbol name) -> bool
     def singleton_def_for: (String | Symbol class_name, String | Symbol method_name) -> ::Prism::DefNode?
+    def module_function_def?: (String | Symbol class_name, ::Prism::DefNode def_node) -> bool
     def singleton_def_through_ancestors: (String | Symbol class_name, String | Symbol method_name, ?name_memo: Hash[untyped, untyped]) -> ([::Prism::DefNode, String] | [nil, nil])
     def user_def_site_for: (String | Symbol class_name, String | Symbol method_name) -> String?
     def user_singleton_def_site_for: (String | Symbol class_name, String | Symbol method_name) -> String?

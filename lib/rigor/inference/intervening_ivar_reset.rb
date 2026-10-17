@@ -122,13 +122,12 @@ module Rigor
       end
       private_class_method :module_subclass?
 
-      # The first of `raw`'s candidate names, as written in `subclass`, that is a project class or a class the
-      # environment knows; nil when none is.
+      # The first of `raw`'s candidate names, as written in `subclass`, that is a project class
+      # (`Scope#known_user_class?`) or a class the environment knows; nil when none is.
       def resolved_superclass(subclass, raw, scope)
         environment = scope.environment
         scope.ancestor_name_candidates(subclass, raw).map { |c| c.to_s.delete_prefix("::") }.find do |candidate|
-          scope.discovered_class_sources.key?(candidate) || scope.discovered_superclasses.key?(candidate) ||
-            environment.class_known?(candidate)
+          scope.known_user_class?(candidate) || environment.class_known?(candidate)
         end
       end
       private_class_method :resolved_superclass

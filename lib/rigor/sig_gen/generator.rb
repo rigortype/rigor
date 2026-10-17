@@ -1925,39 +1925,30 @@ module Rigor
         case node
         when Prism::ClassNode, Prism::ModuleNode
           child_prefix = Source::ConstantPath.declaration_prefix(prefix, node.constant_path)
-          if child_prefix
-            collect_other_ivar_writes(node.body, child_prefix, false, other_writes) if node.body
-            return
-          end
-        when Prism::SingletonClassNode
-          return
-        when Prism::DefNode
-          record_def_ivar_writes(node, prefix, other_writes) unless node.receiver || prefix.empty?
-          return
-        when Prism::BlockNode, Prism::LambdaNode
-          in_block = true
-        when Prism::CallNode
-          record_attr_writer_ivars(node, prefix, other_writes)
+          return collect_other_ivar_writes(node.body, child_prefix, false, other_writes) if child_prefix
+        when Prism::SingletonClassNode then return
+        when Prism::DefNode then return record_def_ivar_writes(node, prefix, other_writes)
+        when Prism::BlockNode, Prism::LambdaNode then in_block = true
         end
-        if in_block && !prefix.empty?
-          name = written_ivar(node)
-          other_writes[prefix.join("::")] << name if name
-        end
+        record_class_level_write(node, prefix, in_block, other_writes) unless prefix.empty?
 
         node.rigor_each_child { |child| collect_other_ivar_writes(child, prefix, in_block, other_writes) }
       end
 
-      def record_attr_writer_ivars(call_node, prefix, other_writes)
-        return unless call_node.receiver.nil? && %i[attr_writer attr_accessor].include?(call_node.name)
-        return if prefix.empty?
-
-        Source::Literals.symbol_arguments(call_node).each { |name| other_writes[prefix.join("::")] << :"@#{name}" }
+      # An implicit-self `attr_writer` / `attr_accessor`'s ivars, or the ivar a write in a block sets.
+      def record_class_level_write(node, prefix, in_block, other_writes)
+        writes = other_writes[prefix.join("::")]
+        if node.is_a?(Prism::CallNode) && node.receiver.nil? && %i[attr_writer attr_accessor].include?(node.name)
+          Source::Literals.symbol_arguments(node).each { |name| writes << :"@#{name}" }
+        end
+        name = written_ivar(node) if in_block
+        writes << name if name
       end
 
       # Every ivar write in an instance `def` counts, except, in `initialize`, the `@ivar = param_name` write
       # {#scan_ivar_param_assignments} keys the observation on.
       def record_def_ivar_writes(def_node, prefix, other_writes)
-        return if def_node.body.nil?
+        return if def_node.body.nil? || def_node.receiver || prefix.empty?
 
         observed = {}
         if def_node.name == :initialize && def_node.parameters

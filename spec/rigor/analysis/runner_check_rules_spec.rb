@@ -1862,6 +1862,7 @@ RSpec.describe Rigor::Analysis::Runner do
           end
           class Child < Base; end
           class MyErr < StandardError; end
+          class MyOther < StandardError; end
           class MyTmp < Tempfile; end
           io = STDOUT
           #{body}
@@ -1895,6 +1896,16 @@ RSpec.describe Rigor::Analysis::Runner do
         expect(clause_diags(analyze(files: { "lib/writer.rb" => source }, sig: { "writer.rbs" => sig }))).to be_empty
       end
 
+      # A `Nominal` of `NilClass` (a parameter the signature types `NilClass`) is the value `nil` itself, so it counts
+      # as literal and the clause after its exhaustion still reports.
+      it "still reports a clause an earlier one exhausted on a `NilClass`-typed parameter" do
+        source = "class Writer\n  def pick(x)\n    case x\n    when NilClass, Integer then 1\n    " \
+                 "when String then 2\n    end\n  end\nend\n"
+        sig = "class Writer\n  def pick: (NilClass x) -> Integer?\nend\n"
+        diags = clause_diags(analyze(files: { "lib/writer.rb" => source }, sig: { "writer.rbs" => sig }))
+        expect(diags.map(&:message)).to contain_exactly(include("unreachable `when String'"))
+      end
+
       # Ruby 4.0.5 never runs these arms: the earlier clause matches every object the later one could, whatever the
       # subject holds.
       {
@@ -1909,7 +1920,9 @@ RSpec.describe Rigor::Analysis::Runner do
         "`when Child` after `when Base`" =>
           ["b = Base.new\ncase b\nwhen Base then 1\nwhen Child then 2\nend", "when Child"],
         "`when Third` after `when Other, Greet`" =>
-          ["o = Other.new\ncase o\nwhen Other, Greet then 1\nwhen Third then 2\nend", "when Third"]
+          ["o = Other.new\ncase o\nwhen Other, Greet then 1\nwhen Third then 2\nend", "when Third"],
+        "`when MyOther < StandardError` after `when MyErr, StandardError`" =>
+          ["e = MyErr.new\ncase e\nwhen MyErr, StandardError then 1\nwhen MyOther then 2\nend", "when MyOther"]
       }.each do |label, (body, clause)|
         it "still reports #{label}" do
           diags = clause_diags(analyze(prior_exhaustion_source(body)))

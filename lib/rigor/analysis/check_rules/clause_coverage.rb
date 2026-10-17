@@ -21,6 +21,9 @@ module Rigor
       # the project's own superclass and mixin edges, never past a class whose RBS ancestry Ruby contradicts
       # (`Tempfile`, `< File` in RBS and `< Delegator` in Ruby). A clause that is not a class test (`in [a]`) names no
       # class, so on a non-literal subject it is never proven.
+      #
+      # The proof assumes `when Base` matches every instance of a class below `Base`, as `Module#===` does. A class that
+      # defines its own `self.===` could break that; no such case has been observed.
       class ClauseCoverage
         # The carriers issue #1429 counts as literal, plus the value-pinned `nil`, `true` and `false`, whose `Nominal`
         # is the single value itself.

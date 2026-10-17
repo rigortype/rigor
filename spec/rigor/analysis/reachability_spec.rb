@@ -912,6 +912,13 @@ RSpec.describe Rigor::Analysis::Reachability do
         expect(found).to eq(%w[Stranger Stranger::X Unrelated Unrelated::Dead])
       end
 
+      # The scan crashed on rigor's own tree (`String#to_sym` raises EncodingError for an invalid byte) once
+      # #1946 read the first argument of every `send`.
+      it "reads a send whose name literal is not valid in its encoding as no mixin" do
+        found = dead({ "lib/a.rb" => "class K; end; K.send(\"\\xFF\", 1)\n" })
+        expect(found).to eq(%w[Unrelated Unrelated::Dead])
+      end
+
       it "follows the send, public_send and __send__ spellings of include, prepend and extend" do
         found = dead({ "lib/a.rb" => <<~RUBY, "lib/s.rb" => stranger, "lib/main.rb" => "K.new.m\nK.new.p\nK.e\n" })
           module Mix

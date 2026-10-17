@@ -125,8 +125,8 @@ module Rigor
         return scope unless narrowed_ivars?(scope)
 
         found = []
-        collect_unknown_code(call_node.receiver, found)
-        collect_unknown_code(call_node.arguments, found)
+        collect_calls(call_node.receiver, false, found, scope, unknown_only: true)
+        collect_calls(call_node.arguments, false, found, scope, unknown_only: true)
         block = call_node.block
         found << block if block.is_a?(Prism::BlockArgumentNode) && block.expression.is_a?(Prism::LocalVariableReadNode)
         return scope if found.empty?
@@ -148,7 +148,7 @@ module Rigor
 
         calls = []
         if foreign_self_block?(call_node, scope)
-          collect_unknown_code(block, calls)
+          collect_calls(block, false, calls, scope, unknown_only: true)
         else
           collect_calls(block, false, calls, scope)
           calls.reject! { |call| ReflectiveIvarWrite.literal_name(call) }
@@ -235,35 +235,27 @@ module Rigor
         found
       end
 
-      # Issue #1402 — a block that runs on another object ({.foreign_self_block?}) contributes only its unknown code
-      # ({.collect_unknown_code}).
-      def collect_calls(node, run_lambdas, found, scope)
+      # Issue #1402 — with `unknown_only: true` only the `yield`s, `super`s and proc calls ({.unknown_code?}) count,
+      # wherever they sit. A block that runs on another object ({.foreign_self_block?}) is read that way: its
+      # implicit-self calls are that object's, while the method's block runs as anywhere else.
+      def collect_calls(node, run_lambdas, found, scope, unknown_only: false)
         return unless node.is_a?(Prism::Node)
         return if NON_RUNNING_NODES.any? { |klass| node.is_a?(klass) }
         return if !run_lambdas && node.is_a?(Prism::LambdaNode)
 
-        found << node if candidate?(node)
+        found << node if unknown_only ? unknown_code?(node) : candidate?(node)
         node.compact_child_nodes.each do |child|
-          if child.is_a?(Prism::BlockNode) && foreign_self_block?(node, scope)
-            collect_unknown_code(child, found)
-          else
-            collect_calls(child, run_lambdas, found, scope)
-          end
+          foreign = !unknown_only && child.is_a?(Prism::BlockNode) && foreign_self_block?(node, scope)
+          collect_calls(child, run_lambdas, found, scope, unknown_only: unknown_only || foreign)
         end
       end
       private_class_method :collect_calls
 
-      # Issue #1402 — the `yield`s, `super`s and proc calls ({.proc_call?}) under `node`, wherever they sit, but
-      # not in a `def`, a class or module body or a lambda literal, which run nothing there.
-      def collect_unknown_code(node, found)
-        return unless node.is_a?(Prism::Node)
-        return if NON_RUNNING_NODES.any? { |klass| node.is_a?(klass) } || node.is_a?(Prism::LambdaNode)
-
-        found << node if UNKNOWN_CODE_NODES.any? { |klass| node.is_a?(klass) } ||
-                         (node.is_a?(Prism::CallNode) && proc_call?(node))
-        node.compact_child_nodes.each { |child| collect_unknown_code(child, found) }
+      # Issue #1402 — a `yield`, a `super` or a proc's call ({.proc_call?}).
+      def unknown_code?(node)
+        UNKNOWN_CODE_NODES.any? { |klass| node.is_a?(klass) } || (node.is_a?(Prism::CallNode) && proc_call?(node))
       end
-      private_class_method :collect_unknown_code
+      private_class_method :unknown_code?
 
       def nil_free?(type)
         Narrowing.narrow_non_nil(type) == type

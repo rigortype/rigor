@@ -148,6 +148,23 @@ RSpec.describe Rigor::CLI::SigGenCommand do
       expect(payload.fetch("observation")).to eq("paths" => ["spec"], "missing" => ["nowhere"])
     end
 
+    it "lists an existing root the collector would not read as missing" do
+      write("README.md", "Calc.new.m(42)\n")
+      write("spec/calc_spec.rb", "Calc.new.m(42)\n")
+
+      payload, = observation("--observe=README.md", "--observe=spec")
+
+      expect(payload.fetch("observation")).to eq("paths" => ["spec"], "missing" => ["README.md"])
+    end
+
+    it "lists a repeated root once" do
+      write("spec/calc_spec.rb", "Calc.new.m(42)\n")
+
+      payload, = observation("--observe=spec", "--observe=spec")
+
+      expect(payload.fetch("observation")).to eq("paths" => ["spec"], "missing" => [])
+    end
+
     it "is absent under --params=untyped" do
       write(".rigor.yml", "paths:\n  - lib\n")
       out = StringIO.new

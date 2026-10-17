@@ -640,11 +640,12 @@ never reads stderr (the MCP `rigor_sig_gen` tool included) can tell
   "observation": { "paths": ["/app/spec"], "missing": ["/app/tests"] } }
 ```
 
-`paths` are the roots that exist and were read; `missing` are the
-declared roots that do not exist. `paths: []` with `missing: []` means
+`paths` are the roots the collector reads (a directory or a `.rb`
+file); `missing` are the other declared roots: ones that do not exist,
+or exist but are not read (`README.md`). Repeats are listed once. `paths: []` with `missing: []` means
 there was no test root at all. Paths are spelled as the run resolved
-them: `--observe=PATH` as typed, `test_paths:` relative to the config
-file's directory, auto-detected `spec/` / `test/` absolute. The key is
+them: `--observe=PATH` as typed, `test_paths:` as absolute paths, resolved against the
+config file's directory, auto-detected `spec/` / `test/` absolute. The key is
 absent under `--params=untyped`, and absent from the `--write` and
 `--check` JSON payloads, which have their own shapes.
 

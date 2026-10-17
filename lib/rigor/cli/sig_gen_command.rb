@@ -317,7 +317,7 @@ module Rigor
       def observation_report(observe_paths, options)
         return nil if options.fetch(:params) != "observed"
 
-        present, missing = observe_paths.partition { |path| File.exist?(path) }
+        present, missing = observe_paths.uniq.partition { |path| SigGen::ObservationCollector.readable_root?(path) }
         { paths: present, missing: missing }
       end
 

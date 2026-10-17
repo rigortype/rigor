@@ -40,15 +40,19 @@ module Rigor
       # unconditional snapshot rewrite.
       # `rebaselined` (#1898) is true when the recheck found its served effect collections stale and answered with a
       # full baseline instead; see {#rebaseline_recheck}.
-      Recheck = Data.define(:diagnostics, :changed, :added, :removed, :affected, :reused, :templates, :rebaselined) do
-        def initialize(rebaselined: false, **rest)
+      # `stale_readers` (#1553) are the files the recheck re-analysed because a plugin read one of them made went
+      # stale ({#plugin_read_affected}).
+      Recheck = Data.define(:diagnostics, :changed, :added, :removed, :affected, :reused, :templates, :rebaselined,
+                            :stale_readers) do
+        def initialize(rebaselined: false, stale_readers: Set.new, **rest)
           super
         end
 
-        # A recheck that changed, added, and removed nothing — the session state is byte-equivalent to the
-        # snapshot that was restored, so persisting it again would only rewrite identical bytes.
+        # A recheck that changed, added, and removed nothing, and found no stale plugin read — the session state is
+        # byte-equivalent to the snapshot that was restored, so persisting it again would only rewrite identical
+        # bytes. A stale reader's refreshed rows differ (#1553): unsaved, every later run would re-analyse it.
         def no_change?
-          changed.empty? && added.empty? && removed.empty?
+          changed.empty? && added.empty? && removed.empty? && stale_readers.empty?
         end
       end
 
@@ -128,6 +132,10 @@ module Rigor
         # and a missing invalidation edge is impossible by construction — the reason this is a table diff
         # and not the caller→callee edge recording #204 first sketched.
         @param_table = {}
+        # Issue #1553 — analysed path => the plugin reads ({Plugin::IoBoundary.attributing}) its last analysis made:
+        # the frozen `Cache::Descriptor::FileEntry` / `GlobEntry` rows, as each read observed its input. A recheck
+        # re-analyses every file one of whose rows no longer validates ({#plugin_read_affected}).
+        @plugin_reads = {}
         reset_carried_state
         # ADR-88 WD1 — the plugin fact-surface digest computed for THIS invocation (nil until a
         # `#run_incremental` pass runs / a plugin-free project) and the reporting flags a caller (the CLI
@@ -216,6 +224,7 @@ module Rigor
         @effects_identity = current_effects_identity
         @effect_plugin_digest = effect_plugin_digest_of(runner)
         @cache = per_file(runner.per_file_diagnostics)
+        @plugin_reads = plugin_reads_of(runner, @analyzed)
         @digests = @analyzed.to_h { |path| [path, pack_digest(path)] }
         forget_unbound_digests
         @run_level_rows = runner.run_level_rows
@@ -251,7 +260,8 @@ module Rigor
 
         absorb(runner, current, analyze_set, removed)
         @param_table = fresh_params
-        recheck_result(merged, [changed, added, removed], affected: affected, reused: reused.to_set, runner: runner)
+        recheck_result(merged, [changed, added, removed], affected: affected, reused: reused.to_set, runner: runner,
+                                                          stale_readers: @stale_plugin_readers)
       end
 
       # Editor mode option B (#146) — a whole-project recheck with the editor's buffer substituted for one
@@ -304,9 +314,10 @@ module Rigor
       # records none at all), so no dependent set can bound who read it. An edit that moved it re-analyses the
       # whole project — what a `sig/` edit already costs through the snapshot fingerprint.
       def affected_closure(changed, added, removed, param_files = Set.new, param_pairs = Set.new)
+        @stale_plugin_readers = plugin_read_affected
         return whole_project_closure(changed, added) if source_rbs_gate.moved?(@seed_bundles, changed, added, removed)
 
-        gated_closure(changed, added, removed, param_files, param_pairs)
+        (gated_closure(changed, added, removed, param_files, param_pairs) | @stale_plugin_readers).freeze
       end
 
       # {#affected_closure} for an edit whose synthesized RBS is byte-identical in every file it touched.
@@ -348,6 +359,36 @@ module Rigor
         closure = param_seed_closure(closure, param_files)
         removed.each { |path| closure |= @dependents[path] || Set.new }
         closure.freeze
+      end
+
+      # Issue #1553 — every analysed file whose last analysis made a plugin read that no longer validates: a file
+      # read through {Plugin::IoBoundary#read_file} or probed through `#file?` / `#directory?` was edited,
+      # removed, or created after a read that found it absent, or a `#list_directory` / `#glob` listing moved.
+      # The ADR-46 edges record type and declaration reads only, so none of these moves a reader into the
+      # closure, and its cached rows were computed from the input as it was. The reader's own text is unchanged,
+      # so it joins the closure alone: a plugin read made while analysing a dependent is credited to that
+      # dependent. Each distinct row is validated once however many files made it (one `File.stat` for a
+      # content row whose stat tuple did not move, one re-glob for a listing row).
+      def plugin_read_affected
+        verdicts = {}
+        @plugin_reads.each_with_object(Set.new) do |(path, rows), stale|
+          next unless rows.any? { |row| !verdicts.fetch(row) { verdicts[row] = plugin_read_fresh?(row) } }
+
+          stale << path
+        end
+      end
+
+      def plugin_read_fresh?(row)
+        if row.is_a?(Cache::Descriptor::GlobEntry)
+          Cache::Descriptor::GlobEntry.fresh?(row)
+        else
+          Cache::Descriptor.new(files: [row]).fresh?
+        end
+      end
+
+      # Issue #1553 — `runner`'s per-file plugin reads for `paths`, each file's rows de-duplicated and frozen.
+      def plugin_reads_of(runner, paths)
+        runner.analysis_reads.slice(*paths).transform_values { |rows| rows.uniq.freeze }
       end
 
       # Issue #1906 — a file that rewrites a constant's singleton names without declaring it
@@ -669,7 +710,7 @@ module Rigor
       # the gate could not see. {#run_incremental} re-analyses the project and {#run_buffer_recheck} declines,
       # the way each treats a moved plugin fact surface. A run that changed nothing is exempt: under an
       # untrusted gate every earlier edit already re-analysed the whole project, so the snapshot it serves is
-      # whole, and a null run stays one.
+      # whole, and a null run stays one. A recheck that found a stale plugin read (#1553) is a change.
       def source_rbs_unverified?(result)
         source_rbs_gate.untrusted? && !result.no_change? && !result.reused.empty?
       end
@@ -903,6 +944,7 @@ module Rigor
         restore_structural_declarations(payload)
         @return_summaries  = payload.return_summaries || {}
         @param_table       = payload.param_table || {} # ADR-67 WD6c lift — the seeds the cache was built under.
+        @plugin_reads      = payload.plugin_reads # Issue #1553 — `{}` in a payload built without it.
         # Issues #796 / #794 — absent (nil) in a snapshot written before schema 22 is impossible (the SCHEMA
         # gate rejects one), so nil here means the writing run genuinely had nothing to say.
         @run_level_rows    = payload.run_level_rows
@@ -942,7 +984,8 @@ module Rigor
           effect_collections: marshal_safe_effect_collections,
           effects_identity: @effects_identity,
           run_level_rows: @run_level_rows,
-          effect_plugin_digest: @effect_plugin_digest
+          effect_plugin_digest: @effect_plugin_digest,
+          plugin_reads: @plugin_reads
         )
       end
 
@@ -1054,9 +1097,12 @@ module Rigor
         whole_project = current.all? { |path| analyze_set.include?(path) }
         @seed_bundles = source_rbs_gate.stamp(runner.seed_bundles, whole_project: whole_project)
         fresh_by_file = per_file(runner.per_file_diagnostics)
+        # Issue #1553 — a re-analysed file's reads are this run's: a read it no longer makes stops guarding it.
+        fresh_reads = plugin_reads_of(runner, analyze_set)
         analyze_set.each do |path|
           @cache[path] = fresh_by_file[path] || []
           @digests[path] = pack_digest(path)
+          fresh_reads.key?(path) ? @plugin_reads[path] = fresh_reads[path] : @plugin_reads.delete(path)
         end
         forget_unbound_digests
         absorb_dependency_graph(runner)
@@ -1105,6 +1151,7 @@ module Rigor
         @cache.delete(path)
         @digests.delete(path)
         @sources.delete(path)
+        @plugin_reads.delete(path)
         @symbol_sources.delete(path)
         @ancestry_sources.delete(path)
         @missing.delete(path)
@@ -1429,9 +1476,10 @@ module Rigor
       end
 
       # A {Recheck} over `deltas` (`[changed, added, removed]`), counting `runner`'s template units.
-      def recheck_result(diagnostics, deltas, affected:, reused:, runner:, rebaselined: false)
+      def recheck_result(diagnostics, deltas, affected:, reused:, runner:, rebaselined: false, stale_readers: Set.new)
         changed, added, removed = deltas.map(&:to_set)
         Recheck.new(diagnostics: diagnostics, changed: changed, added: added, removed: removed, affected: affected,
+                    stale_readers: stale_readers,
                     reused: reused, templates: runner.template_unit_paths.size, rebaselined: rebaselined)
       end
 

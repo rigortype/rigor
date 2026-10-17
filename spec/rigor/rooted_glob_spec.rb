@@ -60,12 +60,23 @@ RSpec.describe Rigor::RootedGlob do
     expect(described_class.glob(root, "**/*.rb")).to eq(literal_walk(root) { |path| path.end_with?(".rb") })
   end
 
-  # `Dir.glob` ignores `base:` for an absolute pattern; the joined spelling read `/etc/*` under the root.
+  # The joined spelling read a leading `/` under the root, in a brace alternative too; `Dir.glob(pattern, base:)`
+  # reads either outside it.
   it "globs a pattern with a leading slash under the root" do
     write(File.join(parent, "root", "etc", "hostname-fixture"))
 
     expect(described_class.glob(File.join(parent, "root"), "/etc/host*"))
       .to eq([File.join(parent, "root", "etc", "hostname-fixture")])
+  end
+
+  # The join keeps the alternative's `/`, so its match reads `root//etc/…`, the string the joined glob answered.
+  it "globs an absolute brace alternative under the root" do
+    root = File.join(parent, "root")
+    write(File.join(root, "etc", "hostname-fixture"))
+    write(File.join(root, "lib", "hostlib.rb"))
+
+    expect(described_class.glob(root, "{/etc,lib}/host*"))
+      .to eq(["#{root}//etc/hostname-fixture", "#{root}/lib/hostlib.rb"])
   end
 
   it "keeps the root's spelling, relative or with a trailing slash (guard)" do

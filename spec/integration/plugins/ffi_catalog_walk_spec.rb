@@ -64,7 +64,7 @@ RSpec.describe "rigor-ffi catalog walk (#1803)" do
     end
   end
 
-  # #1959 — the walk globs relative to the root, so a root spelled with glob metacharacters is read literally.
+  # #1959 — the walk reads its root literally, so a root spelled with glob metacharacters matches only itself.
   it "walks a root named `fx[1]` and not its sibling `fx1`" do
     write("fx1/sibling.rb")
     write("fx[1]/own.rb")

@@ -208,13 +208,14 @@ module Rigor
       # every `touch`, checkout or restored CI cache, though the content the caller read is unchanged (#979's
       # reasoning). {#list_directory} keeps its `:stat` listing row.
       #
-      # The pattern must stay under `root`, since the policy is checked against `root` alone: a leading `/`, a `..`
-      # segment, a brace (`{..,x}`) or a backslash escape (`.\\./`) raises {AccessDeniedError}
-      # (`:read_outside_scope`). `Dir.glob` ignores `base:` for an absolute pattern, and can spell `..` with the
-      # last two. Out of policy, `root` is globbed truthfully and contributes no row, as in {#list_directory}.
+      # The pattern must stay under `root`, since the policy is checked against `root` alone: a `..` segment, a
+      # brace (`{..,x}`) or a backslash escape (`.\\./`) raises {AccessDeniedError} (`:read_outside_scope`).
+      # The last two are refused outright because `Dir.glob` can spell `..` with them. A leading `/` is read under
+      # `root`, as the joined spelling always read it (`/lib/**/*.rb` is `root/lib/**/*.rb`). Out of policy, `root`
+      # is globbed truthfully and contributes no row, as in {#list_directory}.
       #
-      # `root` is read literally (#1959): the pattern is globbed against `base: root`, so a root spelled with
-      # glob metacharacters (`fx[1]`, a directory named `{..,zz}`) neither matches a sibling nor leaves itself.
+      # `root` is read literally (#1959): {RootedGlob} escapes its glob metacharacters before the join, so a root
+      # spelled `fx[1]` or a directory named `{..,zz}` neither matches a sibling nor leaves itself.
       # {#list_directory} lists the same way, and {Cache::Descriptor::GlobEntry} re-globs the row the same way.
       #
       # @param root — project directory; relative paths expand against the working directory
@@ -223,7 +224,7 @@ module Rigor
       def glob(root, pattern)
         absolute = File.absolute_path(root.to_s)
         pattern = pattern.to_s
-        if pattern.start_with?("/") || pattern.match?(/[{\\]/) || pattern.split("/").include?("..")
+        if pattern.match?(/[{\\]/) || pattern.split("/").include?("..")
           raise AccessDeniedError.new(
             "plugin #{@plugin_id.inspect} cannot glob #{pattern.inspect} under #{absolute.inspect}: " \
             "a `..` segment, a brace or a backslash can leave the root the trusted-read scope was checked against",

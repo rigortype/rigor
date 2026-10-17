@@ -189,6 +189,7 @@ def arm_break_in_loop
     begin
       r = :b
       work
+      r = :c
     rescue
       break
     end
@@ -206,6 +207,7 @@ def arm_in_do_while
     begin
       r = :b
       work
+      r = :c
     rescue
       i += 1
     end
@@ -222,6 +224,7 @@ def arm_next_in_block
     begin
       r = :b
       work
+      r = :c
     rescue
       next r
     end
@@ -238,6 +241,7 @@ def arm_nested
     begin
       r = :b
       work
+      r = :c
     rescue TypeError
       nil
     end
@@ -288,6 +292,7 @@ class Stage
     begin
       @stage = :parsed
       work
+      @stage = :done
     rescue
       nil
     end

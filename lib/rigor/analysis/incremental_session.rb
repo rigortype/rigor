@@ -40,15 +40,19 @@ module Rigor
       # unconditional snapshot rewrite.
       # `rebaselined` (#1898) is true when the recheck found its served effect collections stale and answered with a
       # full baseline instead; see {#rebaseline_recheck}.
-      Recheck = Data.define(:diagnostics, :changed, :added, :removed, :affected, :reused, :templates, :rebaselined) do
-        def initialize(rebaselined: false, **rest)
+      # `stale_readers` (#1553) are the files the recheck re-analysed because a plugin read one of them made went
+      # stale ({#plugin_read_affected}).
+      Recheck = Data.define(:diagnostics, :changed, :added, :removed, :affected, :reused, :templates, :rebaselined,
+                            :stale_readers) do
+        def initialize(rebaselined: false, stale_readers: Set.new, **rest)
           super
         end
 
-        # A recheck that changed, added, and removed nothing — the session state is byte-equivalent to the
-        # snapshot that was restored, so persisting it again would only rewrite identical bytes.
+        # A recheck that changed, added, and removed nothing, and found no stale plugin read — the session state is
+        # byte-equivalent to the snapshot that was restored, so persisting it again would only rewrite identical
+        # bytes. A stale reader's refreshed rows differ (#1553): unsaved, every later run would re-analyse it.
         def no_change?
-          changed.empty? && added.empty? && removed.empty?
+          changed.empty? && added.empty? && removed.empty? && stale_readers.empty?
         end
       end
 
@@ -256,7 +260,8 @@ module Rigor
 
         absorb(runner, current, analyze_set, removed)
         @param_table = fresh_params
-        recheck_result(merged, [changed, added, removed], affected: affected, reused: reused.to_set, runner: runner)
+        recheck_result(merged, [changed, added, removed], affected: affected, reused: reused.to_set, runner: runner,
+                       stale_readers: @stale_plugin_readers)
       end
 
       # Editor mode option B (#146) — a whole-project recheck with the editor's buffer substituted for one
@@ -309,9 +314,10 @@ module Rigor
       # records none at all), so no dependent set can bound who read it. An edit that moved it re-analyses the
       # whole project — what a `sig/` edit already costs through the snapshot fingerprint.
       def affected_closure(changed, added, removed, param_files = Set.new, param_pairs = Set.new)
+        @stale_plugin_readers = plugin_read_affected
         return whole_project_closure(changed, added) if source_rbs_gate.moved?(@seed_bundles, changed, added, removed)
 
-        (gated_closure(changed, added, removed, param_files, param_pairs) | plugin_read_affected).freeze
+        (gated_closure(changed, added, removed, param_files, param_pairs) | @stale_plugin_readers).freeze
       end
 
       # {#affected_closure} for an edit whose synthesized RBS is byte-identical in every file it touched.
@@ -1470,9 +1476,10 @@ module Rigor
       end
 
       # A {Recheck} over `deltas` (`[changed, added, removed]`), counting `runner`'s template units.
-      def recheck_result(diagnostics, deltas, affected:, reused:, runner:, rebaselined: false)
+      def recheck_result(diagnostics, deltas, affected:, reused:, runner:, rebaselined: false, stale_readers: Set.new)
         changed, added, removed = deltas.map(&:to_set)
         Recheck.new(diagnostics: diagnostics, changed: changed, added: added, removed: removed, affected: affected,
+                    stale_readers: stale_readers,
                     reused: reused, templates: runner.template_unit_paths.size, rebaselined: rebaselined)
       end
 

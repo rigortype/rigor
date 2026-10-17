@@ -13,6 +13,7 @@ require "rigor/analysis/incremental_session"
 #
 # The fixture plugin reads what the analysed source asks for: `policy("x")` reads `x`, `probe("x")` asks
 # `#file?`, `listing("d")` lists `d`, `globbing("d")` globs `d/*.txt`. A file's read set is therefore its text.
+# `crash("")` kills a fork-pool worker (never the spec's own process) on reaching the call.
 RSpec.describe "IncrementalSession: plugin reads join the affected closure (#1553)" do
   before do
     Rigor::Plugin.unregister!
@@ -33,6 +34,7 @@ RSpec.describe "IncrementalSession: plugin reads join the affected closure (#155
   let(:cache_root) { File.join(Dir.pwd, ".rigor", "cache") }
 
   let(:reader_plugin) do
+    parent = Process.pid
     Class.new(Rigor::Plugin::Base) do
       manifest(id: "policy-reader", version: "0.1.0")
 
@@ -50,6 +52,7 @@ RSpec.describe "IncrementalSession: plugin reads join the affected closure (#155
               "missing"
             end
           when :probe then io_boundary.file?(target).to_s
+          when :crash then Process.pid == parent ? nil : exit!(1)
           when :listing then io_boundary.list_directory(target).map { |entry| File.basename(entry) }.sort.join(",")
           when :globbing then io_boundary.glob(target, "*.txt").map { |entry| File.basename(entry) }.sort.join(",")
           end
@@ -146,6 +149,13 @@ RSpec.describe "IncrementalSession: plugin reads join the affected closure (#155
       diagnostics, affected = recheck_after { write("policy.txt", "deny\n") }
       expect(read_messages(diagnostics)).to eq(["policy policy.txt: deny"])
       expect(affected).to eq(Set["lib/charlie.rb"])
+    end
+
+    it "saves the refreshed reads, so the recheck after a read-only edit re-analyses nothing" do
+      recheck_after { write("policy.txt", "deny\n") }
+      diagnostics, affected = recheck_after { nil }
+      expect(affected).to be_empty
+      expect(read_messages(diagnostics)).to eq(["policy policy.txt: deny"])
     end
 
     it "re-analyses the reader when the file is removed" do
@@ -246,11 +256,24 @@ RSpec.describe "IncrementalSession: plugin reads join the affected closure (#155
       expect(persisted_reads).to eq(sequential)
     end
 
-    it "re-analyses the reader when the read file is edited" do
+    it "re-analyses the reader when the read file is edited, and nothing on the run after" do
       incremental_run(workers: 2)
       diagnostics, affected = recheck_after(workers: 2) { write("policy.txt", "deny\n") }
       expect(affected).to eq(Set["lib/charlie.rb"])
       expect(read_messages(diagnostics)).to include("policy policy.txt: deny")
+      _, affected = recheck_after(workers: 2) { nil }
+      expect(affected).to be_empty
+    end
+
+    # The worker holding `charlie.rb` dies before its reads; the coordinator re-analyses that slice in process.
+    it "records the reads of a slice the coordinator re-analysed after its worker died" do
+      incremental_run
+      sequential = persisted_reads
+      FileUtils.rm_rf(cache_root)
+      reader("charlie", 'crash("")', 'policy("policy.txt")', 'listing("lib")')
+      diagnostics, = incremental_run(workers: 2)
+      expect(diagnostics.map(&:rule)).to include("pool-degraded")
+      expect(persisted_reads).to eq(sequential)
     end
   end
 

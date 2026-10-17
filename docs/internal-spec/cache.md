@@ -1108,21 +1108,33 @@ nothing has no key.
   found absent appeared, or a listing or glob's match set moved. The reader's
   text is unchanged, so it joins alone, with no dependents of its own.
 - **Refresh.** A re-analysed file's rows are replaced by this run's, so a read
-  it no longer makes stops guarding it; a removed file's rows are dropped.
+  it no longer makes stops guarding it; a removed file's rows are dropped. A
+  recheck that found a stale row is a change (`Recheck#no_change?` is false), so
+  its snapshot is saved even when no source file moved: the refreshed rows
+  validate on the next recheck, which re-analyses the reader no more.
 - **Pool.** Each fork worker collects the same rows per file and marshals them
   back beside its dependency records, so a pooled run keeps what a sequential
   run keeps.
 - **Paths.** A row names the path the plugin passed, made absolute without
   resolving symlinks, the boundary's own rule; a content row stats through the
   link, so an edit to its target goes stale.
-- **Bounds.** Only reads are credited, the rule `IoBoundary.attributing` states:
-  a value a plugin memoises reaches later files without a read, so only the
-  file whose analysis first made the read joins the closure. A read made outside
-  any file's analysis (in `#prepare`, or by a producer computed there) is
-  credited to no file and moves nothing into this closure.
-- **Cost.** A recheck with no stale row pays one validation per distinct row:
-  a `File.stat` for a content row whose stat tuple did not move, an existence
-  check for a probe row, and a re-glob for a listing row.
+- **Bounds.** This closure covers what a read decides about the reader's own
+  rows, a plugin diagnostic among them. A read that decides a TYPE other files
+  consume must sit behind the ADR-88 plugin fact surface (the plugin's
+  published facts, or its `incremental_state_fingerprint` hook), which
+  invalidates the whole snapshot. Within this closure only reads are credited,
+  the rule `IoBoundary.attributing` states: a value reused without a read
+  reaches later files uncredited, whether the plugin memoised it or the engine's
+  cross-file inferred-return memo reused a return computed while another file
+  was analysed, so only the file whose analysis made the read joins the closure.
+  A read made outside any file's analysis (in `#prepare`, or by a producer
+  computed there) is credited to no file and moves nothing into this closure.
+- **Cost.** Every recheck pays one validation per distinct row: a `File.stat`
+  for a content row whose stat tuple did not move, an existence check for a
+  probe row, and a re-glob for a listing row. A recheck that finds a stale row
+  also re-analyses its readers and rewrites the snapshot once; the next
+  recheck finds none. A null run the run-result slot serves builds no session
+  and validates nothing here.
 
 ### `plugin_fact_digest` — plugin-fact soundness ([ADR-88](../adr/88-incremental-plugin-fact-soundness.md))
 

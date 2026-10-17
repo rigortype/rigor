@@ -8,7 +8,9 @@
 lib/rigor/analysis/check_rules.rb:
   computes: the visibility of a method and its override, for the def.method-visibility-mismatch and override rules
   producers:
-    Rigor::Analysis::CheckRules.visibility_mismatch_diagnostic: grandfathered
+    Rigor::Analysis::CheckRules.instance_visibility_mismatch: the instance-side half of the grandfathered visibility_mismatch_diagnostic, split out by issue #1984; its visibility comparisons are the grandfathered method's, and it adds the method_missing / respond_to_missing? decline; it reads the recorded visibility through Scope and DefinerResolution and derives no declaration context
+    Rigor::Analysis::CheckRules.private_recorded_names: issue #1984, the set of names some class records :private (either side), the table-only gate the singleton visibility rule asks before reading a chain; it derives no declaration context
+    Rigor::Analysis::CheckRules.singleton_visibility_mismatch: issue #1984, the singleton-side half of visibility_mismatch_diagnostic; it compares DefinerResolution's singleton-side :visibility answer with :private and derives no declaration context
     Rigor::Analysis::CheckRules.visibility_reduced?: grandfathered
 lib/rigor/analysis/check_rules/ivar_write_collector.rb:
   computes: the instance-variable writes in each class's instance-method bodies, keyed by qualified name
@@ -38,6 +40,7 @@ lib/rigor/analysis/check_rules/source_arity.rb:
   computes: whether a source-inferred method is public at a call site
   producers:
     Rigor::Analysis::CheckRules::SourceArity#public_at?: grandfathered
+    Rigor::Analysis::CheckRules::SourceArity#singleton_private?: issue #2059, compares DefinerResolution's singleton-side :visibility answer with :private so the arity check leaves a private call to the visibility rule; it derives no declaration context
 lib/rigor/analysis/dependency_source_inference/walker.rb:
   computes: the method catalog of an opt-in gem's source roots, per class and side, its refine bodies' refinements, and the constants its files bind
   producers:
@@ -235,6 +238,7 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#append_envelope_signature: grandfathered
     Rigor::Inference::ScopeIndexer#append_mixin_signature: renders the mixin lists and the unpositioned table into the declaration signature; it derives no declaration context
     Rigor::Inference::ScopeIndexer#apply_alias_def_nodes: grandfathered
+    Rigor::Inference::ScopeIndexer#apply_class_method_visibility: issue #1984, applies a private_class_method / public_class_method call to the class's singleton visibility slots as the grandfathered apply_visibility_call applies private / public to the instance ones; the owner is the visibility walk's prefix and it derives no context
     Rigor::Inference::ScopeIndexer#apply_compact_header_renames!: grandfathered
     Rigor::Inference::ScopeIndexer#apply_dynamic_target_writes: grandfathered
     Rigor::Inference::ScopeIndexer#apply_named_visibility: grandfathered
@@ -243,6 +247,7 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#block_mixes_in?: scans an eval block for a mixin call; it answers a question and derives no declaration context
     Rigor::Inference::ScopeIndexer#build_method_visibility_tables: the grandfathered visibility walk's entry point, moved from build_discovered_method_visibilities (now a projection of it) so the walk also returns ADR-119 WD3's contested visibility slots; it starts the walk at the top level with the same default and adds no context of its own
     Rigor::Inference::ScopeIndexer#census_scan: ADR-121 WD7's census over a def or refine body the method walk does not descend; a nested def, class, module or singleton class only moves the module a `refine` there is charged to to the wildcard, so it derives no declaration context
+    Rigor::Inference::ScopeIndexer#class_method_visibility_parts: issue #1984, the private_class_method / public_class_method twin of visibility_call_parts; it maps the call name to its visibility in the walk's own spellings (receiverless, self., send) and derives no context
     Rigor::Inference::ScopeIndexer#collect_alias_map_block_call?: grandfathered
     Rigor::Inference::ScopeIndexer#collect_alias_map_declaration: grandfathered
     Rigor::Inference::ScopeIndexer#collect_alias_map_meta_new?: grandfathered
@@ -280,6 +285,9 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#collect_singleton_method_defs: grandfathered
     Rigor::Inference::ScopeIndexer#collect_truthy_test_ivars: grandfathered
     Rigor::Inference::ScopeIndexer#constant_mutation_candidates: grandfathered
+    Rigor::Inference::ScopeIndexer#contest_foreign_singleton_visibility: issue #1984, contests the singleton visibility slot a `def Other.x` makes public on each class constant_receiver_candidates gives for the receiver; it derives no context
+    Rigor::Inference::ScopeIndexer#contest_replaced_visibility: issue #1989, contests the visibility slot a define_method or alias replaces (on the instance or, since #1984, the singleton side); the owner is the visibility walk's prefix and it derives no context
+    Rigor::Inference::ScopeIndexer#contest_singleton_rewrites: issue #1984, contests the singleton visibility slots a define_singleton_method or a call on the body's own singleton_class may make public; the owner is the visibility walk's prefix and it derives no context
     Rigor::Inference::ScopeIndexer#declared_ancestor_names: grandfathered
     Rigor::Inference::ScopeIndexer#define_method_written_ivars: lists the ivar names a define_method block body writes (#1768), stopping at a nested def, class or module as gather_ivar_writes does; it records them under the class the walk passes in and derives no declaration context
     Rigor::Inference::ScopeIndexer#detect_multi_write_target_writes: grandfathered
@@ -357,6 +365,7 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#record_collected_method_def: grandfathered
     Rigor::Inference::ScopeIndexer#record_compact_header: grandfathered
     Rigor::Inference::ScopeIndexer#record_compound_ivar_write: grandfathered
+    Rigor::Inference::ScopeIndexer#record_constant_class_method_calls: issue #1984, records a `K.public_class_method(:x)` (or `send` of it) as K's public singleton slot and contests K's singleton slots for a call on `K.singleton_class`, on each class constant_receiver_candidates gives for K; it derives no context
     Rigor::Inference::ScopeIndexer#record_constant_write: grandfathered
     Rigor::Inference::ScopeIndexer#record_cvar_write: grandfathered
     Rigor::Inference::ScopeIndexer#record_data_member_layout: grandfathered
@@ -463,6 +472,7 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#walk_method_visibilities: grandfathered
     Rigor::Inference::ScopeIndexer#walk_methods_and_def_nodes: grandfathered
     Rigor::Inference::ScopeIndexer#walk_mixin_call_children: grandfathered
+    Rigor::Inference::ScopeIndexer#singleton_class_eval_walked?: issue #1984, walks a `singleton_class.class_eval` block as the grandfathered walk_method_visibilities walks a `class << self` body (the same owner prefix, a fresh :public default); it adds no context of its own
     Rigor::Inference::ScopeIndexer#walk_published_constant_ivars: grandfathered
     Rigor::Inference::ScopeIndexer#walk_published_ivar_declaration?: grandfathered
     Rigor::Inference::ScopeIndexer#walk_published_ivar_eval_call?: grandfathered

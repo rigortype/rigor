@@ -91,7 +91,10 @@ module Rigor
       # v20: #1977 — the `--incremental` run-result slot records a `:kind` row, not an existence row, per analysis
       # root, `pre_eval:` entry and project signature root. A pre-20 slot's existence row validates fresh across a
       # directory replaced by a file of the same name, so it must read as a miss once and rebuild.
-      SCHEMA_VERSION = 20
+      # v21: #1984 — the visibility walk records each class's singleton slots (`[:singleton, name]`) in the seed
+      # bundles' `method_visibilities`. A pre-21 bundle carries none for an unchanged file, so cached bundles must read
+      # as misses once and rebuild carrying them.
+      SCHEMA_VERSION = 21
 
       # Per-slot entry value objects. Constructors validate enums / required fields and freeze the resulting
       # struct so no caller can mutate after the entry is in a Descriptor.

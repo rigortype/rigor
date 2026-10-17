@@ -373,7 +373,11 @@ end
 # one of their parameters: an indexed assignment or a `<<` / `merge!`-style call into it, or passing it to a
 # same-file method that does.
 module DeclarationWriterScan
-  WRITE_CALLS = %i[[]= << push unshift concat merge! store add add? update].freeze
+  # The Hash / Set / Array writers, then the visibility table's own (`ScopeIndexer::VisibilityTable#write` and the
+  # contest writers beside it), which write a slot or its contest as `[]=` does (#1984).
+  WRITE_CALLS = %i[
+    []= << push unshift concat merge! store add add? update write wrote contest_slot contest_class
+  ].freeze
   # ADR-119's three roots, then the multi-file entry points: their folds (`finalize_project_index`,
   # `fold_def_tables`, `fold_def_sources`, …) are reachable from no other root. A method another file calls is a
   # root as well, so a new entry point needs no edit here.

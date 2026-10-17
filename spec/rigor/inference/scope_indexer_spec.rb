@@ -3157,7 +3157,7 @@ Unrelated
 
     it "does not file a named visibility call inside `class <<` as instance-side" do
       # `private :x` inside `class <<` (or a receiver-eval body on a singleton self)
-      # marks the SINGLETON method — the instance-visibility table cannot express it.
+      # marks the SINGLETON method, which lands on its `[:singleton, :x]` slot (#1984).
       visibilities = described_class.build_discovered_method_visibilities(parse(<<~RUBY))
         class S
           def x; end
@@ -3168,7 +3168,7 @@ Unrelated
           end
         end
       RUBY
-      expect(visibilities["S"]).to eq({ x: :public })
+      expect(visibilities["S"]).to eq({ x: :public, %i[singleton x] => :private })
     end
 
     it "files `module_function` rows ownerless inside `class <<` + `instance_eval`" do

@@ -122,6 +122,7 @@ module Rigor
         def authoritative?(class_name)
           !load_order_dependent?(class_name) && !object_extension_may_shadow? &&
             @levels.all? { |level| clean_level?(level) && (@kind == :singleton || public_at?(level.class_name)) } &&
+            !(@kind == :singleton && singleton_private?(class_name)) &&
             chain_free_of_hooks?(class_name) &&
             subclasses_agree?(class_name, @envelope)
         end
@@ -346,6 +347,17 @@ module Rigor
           Rigor::Reflection.instance_method_definition(name, @method_name, scope: @scope).nil?
         rescue StandardError
           false
+        end
+
+        # Issue #2059 — a call Ruby rejects as private on the singleton side (`private_class_method :two`, a private
+        # method of a module that extends itself) is `def.method-visibility-mismatch`'s, which reads the same definer;
+        # the arity is not checked. A read that declines leaves the arity to the other conditions.
+        def singleton_private?(class_name)
+          case Inference::DefinerResolution.resolve(@scope, class_name, @method_name, :singleton, question: :visibility)
+          in Inference::DefinerResolution::Known(answer:, owner: _owner) then answer == :private
+          in Inference::DefinerResolution::UNKNOWN then false
+          in Inference::DefinerResolution::ABSENT then false # rubocop:disable Lint/DuplicateBranch
+          end
         end
 
         def public_at?(class_name)

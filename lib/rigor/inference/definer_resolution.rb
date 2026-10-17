@@ -213,7 +213,8 @@ module Rigor
         discovery.possible_method?(owner, method_name, kind) ||
           (!(reads_visibility == :visibility && kind == :instance) &&
            discovery.contested?(nodes, [owner, method_name.to_sym])) ||
-          (reads_visibility && discovery.contested?(:discovered_method_visibilities, [owner, method_name.to_sym])) ||
+          (reads_visibility && discovery.contested?(:discovered_method_visibilities,
+                                                    [owner, visibility_slot(method_name, kind)])) ||
           discovery.contested?(:discovered_parameter_envelopes, [owner, [kind, method_name.to_sym]])
       end
 
@@ -243,18 +244,59 @@ module Rigor
 
       # The first project entry that records the name (a discovered method, an instance `def` the def table
       # holds, or a visibility change such as `private :foo` recorded for it), with its visibility (`:public` where
-      # none was stated).
+      # none was stated). Issue #1984 — a singleton-side entry reads its class's singleton slot
+      # (`private_class_method :new` records `new` there with no `def`), never the instance one.
       def visibility_answer(scope, method_name)
         lambda do |chain, from|
           first_hit(chain, scope, from) do |entry|
             kind = entry.side == :singleton ? :singleton : :instance
-            next unless scope.discovered_method?(entry.name, method_name, kind) ||
-                        (kind == :instance && (scope.user_def_for(entry.name, method_name) ||
-                                               scope.discovered_method_visibility(entry.name, method_name)))
+            recorded = side_visibility(scope, entry.name, method_name, kind)
+            next unless scope.discovered_method?(entry.name, method_name, kind) || recorded ||
+                        (kind == :instance && scope.user_def_for(entry.name, method_name))
 
-            scope.discovered_method_visibility(entry.name, method_name) || :public
+            recorded || :public
           end
         end
+      end
+
+      def side_visibility(scope, owner, method_name, kind)
+        if kind == :singleton
+          scope.discovered_method_visibilities.dig(owner.to_s, visibility_slot(method_name, :singleton)) ||
+            self_extended_copy_visibility(scope, owner, method_name)
+        else
+          scope.discovered_method_visibility(owner, method_name)
+        end
+      end
+
+      # Issue #2059 — a module that `extend`s itself reaches its own instance method from the singleton side, and the
+      # extends fold copies that receiverless `def` onto the module's singleton entry, where no singleton slot records
+      # it: the instance slot's visibility is what Ruby applies (`module ES; extend self; private def x` makes `ES.x`
+      # private). A module function's singleton copy is public whatever its instance copy is, so a `module_function`
+      # row for the name in any file answers nil, as does a contested instance slot.
+      def self_extended_copy_visibility(scope, owner, method_name)
+        node = scope.singleton_def_for(owner, method_name)
+        return nil if node.nil? || !node.receiver.nil?
+        return nil unless scope.discovered_extends[owner.to_s]&.include?(owner.to_s)
+        return nil if scope.discovery.contested?(:discovered_method_visibilities, [owner.to_s, method_name.to_sym])
+        return nil if module_function_row?(scope, owner, method_name)
+
+        scope.discovered_method_visibility(owner, method_name)
+      end
+
+      # Whether any file's deferred ranges carry a `module_function` row (`:both` or `:singleton`) for the name on
+      # `owner` (`ModuleFunctionState`).
+      def module_function_row?(scope, owner, method_name)
+        name = method_name.to_sym
+        scope.discovered_deferred_ranges.each_value.any? do |rows|
+          rows.any? do |(_start, _finish, row_name, kind, row_owner)|
+            row_name == name && row_owner == owner.to_s && kind != :instance
+          end
+        end
+      end
+
+      # The key of a name's slot in the visibility table on `kind`'s side (`ScopeIndexer#visibility_slot`).
+      def visibility_slot(method_name, kind)
+        kind == :singleton ? [:singleton, method_name.to_sym] : method_name.to_sym
       end
 
       def first_hit(chain, scope, from)
@@ -275,7 +317,8 @@ module Rigor
       private_class_method :override_answer, :retro_position, :candidates, :past_fold_copies, :decided,
                            :external_may_answer?, :implicit_object_answers?, :external_lacks?,
                            :outcomes, :collapse, :possible?,
-                           :default_answer, :definer_answer, :visibility_answer, :first_hit
+                           :default_answer, :definer_answer, :visibility_answer, :side_visibility,
+                           :self_extended_copy_visibility, :module_function_row?, :visibility_slot, :first_hit
     end
   end
 end

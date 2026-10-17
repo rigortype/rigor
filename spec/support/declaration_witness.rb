@@ -163,6 +163,9 @@ module DeclarationWitness
         "public" => mod.public_instance_methods(false).map(&:to_s),
         "private" => mod.private_instance_methods(false).map(&:to_s),
         "protected" => mod.protected_instance_methods(false).map(&:to_s),
+        "singleton_public" => meta.public_instance_methods(false).map(&:to_s),
+        "singleton_private" => meta.private_instance_methods(false).map(&:to_s),
+        "singleton_protected" => meta.protected_instance_methods(false).map(&:to_s),
         "instance_locations" => instance_names.to_h { |n| [n.to_s, in_fixture.(own_definition.(mod, n)&.source_location)] },
         "singleton_locations" => singleton_names.to_h { |n| [n.to_s, location_in.(meta, [meta, *singleton_mixins], n)] },
         "class_variables" => mod.class_variables(false).to_h do |cv|
@@ -326,13 +329,18 @@ module DeclarationWitness
         record = runtime.dig("modules", owner)
         next [] unless record
 
-        table.filter_map do |name, visibility|
-          next if contested.include?([owner, name])
+        table.filter_map do |slot, visibility|
+          next if contested.include?([owner, slot])
 
-          actual = %w[public private protected].find { |v| record[v].include?(name.to_s) }
+          # Issue #1984 — a `[:singleton, name]` slot is the class's own singleton method.
+          singleton = slot.is_a?(Array)
+          name = singleton ? slot.last : slot
+          prefix = singleton ? "singleton_" : ""
+          actual = %w[public private protected].find { |v| record["#{prefix}#{v}"].include?(name.to_s) }
           next unless actual && actual != visibility.to_s
 
-          "visibilities: Rigor records #{owner}##{name} as #{visibility}; Ruby makes it #{actual}"
+          separator = singleton ? "." : "#"
+          "visibilities: Rigor records #{owner}#{separator}#{name} as #{visibility}; Ruby makes it #{actual}"
         end
       end
     end

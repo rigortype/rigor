@@ -185,6 +185,27 @@ RSpec.describe "Declaration-fact witness" do
       )
     end
 
+    # Issue #1984 — the singleton slots agree with Ruby's `singleton_class.private_instance_methods(false)` and its
+    # public and protected twins; the `class_eval` block's slot is contested (a block the walk reads as possible).
+    it "agrees with Ruby on the singleton slots" do
+      expect(violations("singleton_visibility", relations: %i[visibilities])).to eq([])
+
+      tables, = DeclarationWitness.rigor_tables(fixture("singleton_visibility"))
+      singleton = tables.discovered_method_visibilities.transform_values do |table|
+        table.select { |slot, _| slot.is_a?(Array) }.transform_keys(&:last)
+      end
+      expect(singleton).to eq(
+        "NamedClassMethod" => { x: :private }, "WrappedClassMethod" => { x: :private },
+        "StringAndListClassMethod" => { s: :private, l: :private }, "PublicAgain" => { x: :public },
+        "SelfDefUnderPrivate" => { x: :public, y: :public },
+        "SingletonBareToggle" => { open: :public, x: :private, r: :private },
+        "SingletonWrapping" => { x: :private, "w=": :private }, "SingletonNamed" => { x: :private },
+        "SingletonPublicAgain" => { x: :public }, "RedefinedAfter" => { x: :public },
+        "SingletonClassEval" => { x: :private }, "PrivateNew" => { new: :private, build: :public }
+      )
+      expect(tables.contested_discovered_method_visibilities).to eq(Set[["SingletonClassEval", %i[singleton x]]])
+    end
+
     it "records nothing for the enclosing class from a factory block no constant names" do
       path = fixture("anonymous_factory_visibility")
       tables, = DeclarationWitness.rigor_tables(path)
@@ -193,7 +214,8 @@ RSpec.describe "Declaration-fact witness" do
       expect(tables.discovered_method_visibilities.slice("LocalFactory", "IvarFactory", "ArgumentFactory",
                                                          "BareFactories"))
         .to eq("LocalFactory" => { c: :public }, "IvarFactory" => { d: :public },
-               "ArgumentFactory" => { e: :public }, "BareFactories" => { f: :public, g: :public, h: :public })
+               "ArgumentFactory" => { e: :public, %i[singleton register] => :public },
+               "BareFactories" => { f: :public, g: :public, h: :public })
     end
   end
 

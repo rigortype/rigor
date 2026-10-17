@@ -192,12 +192,15 @@ members:
     - lib/rigor/protection/discovery_seed.rb
   discovered_method_visibilities:
     reads:
+    - lib/rigor/analysis/check_rules.rb
     - lib/rigor/analysis/runner.rb
     - lib/rigor/inference/definer_resolution.rb
     copies:
     - lib/rigor/inference/parameter_inference_collector.rb
     - lib/rigor/protection/discovery_seed.rb
     justified:
+      lib/rigor/analysis/check_rules.rb:
+      - existence
       lib/rigor/analysis/runner.rb:
       - paired_copy
       lib/rigor/inference/definer_resolution.rb:
@@ -265,7 +268,9 @@ members:
     - lib/rigor/protection/discovery_seed.rb
   discovered_deferred_ranges:
     reads:
+    - lib/rigor/analysis/check_rules.rb
     - lib/rigor/analysis/runner.rb
+    - lib/rigor/inference/definer_resolution.rb
     - lib/rigor/inference/self_call_ivar_writes.rb
     copies:
     - lib/rigor/inference/parameter_inference_collector.rb
@@ -322,6 +327,7 @@ members:
   discovered_extends:
     reads:
     - lib/rigor/analysis/runner.rb
+    - lib/rigor/inference/definer_resolution.rb
     - lib/rigor/inference/last_line/implicit_self.rb
     - lib/rigor/inference/macro_block_self_type.rb
     - lib/rigor/inference/method_dispatcher/rbs_dispatch.rb

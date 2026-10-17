@@ -59,7 +59,6 @@ module Rigor
           discovery = scope.discovery
           [discovery.discovered_classes, discovery.discovered_superclasses, discovery.discovered_includes,
            discovery.discovered_prepends, discovery.discovered_extends, discovery.discovered_methods,
-           discovery.discovered_def_nodes, discovery.discovered_singleton_def_nodes,
            discovery.discovered_parameter_envelopes, discovery.discovered_refinements].any? do |by_name|
             by_name.key?(constant)
           end

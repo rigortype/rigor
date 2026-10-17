@@ -943,6 +943,16 @@ RSpec.describe "resolution in Ruby's ancestor order (#1567, #1568, #1570, #1571)
       expect(diagnostics_for_files(files)).to eq([["c.rb", 2, "call.undefined-method"]])
     end
 
+    # A module RBS does not know (a gem with no signatures) extended ahead of the definer may define the name too: the
+    # read withholds. Ruby defines `Helpers` in the run; the analysed source never declares it.
+    it "withholds when a module RBS does not know is extended ahead of the definer" do
+      body = "class C\n  extend M\n  extend Helpers\nend\n"
+      expect(RubyRun.stdout("#{prelude}module Helpers\n  def to_a = [\"u\"]\nend\n#{body}p C.to_a.first\n"))
+        .to eq("\"u\"\n")
+      source = "#{prelude}#{body}C.to_a.first\n#{control}"
+      expect(diagnostics_for(source)).to eq([[source.lines.size, "call.undefined-method"]])
+    end
+
     # Precision kept: where `M` is nearer than the RBS module, or the RBS module lacks the name, or the class's own
     # `def self.to_a` answers first, the call is still typed from the project definer, so `.first` on its Integer
     # fires (Ruby raises NoMethodError on each).

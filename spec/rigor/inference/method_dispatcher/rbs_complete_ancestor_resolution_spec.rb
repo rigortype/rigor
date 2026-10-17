@@ -143,5 +143,42 @@ RSpec.describe "ADR-43 RBS-complete ancestor resolution" do
       RUBY
       expect(undefined_lines(source, plugin_base_sig)).to eq([3])
     end
+
+    # The project entries ahead of the ancestor are read through the project-wide tables: at dispatch
+    # `discovered_methods` has no row for a module declared in another file. Each shape spreads the definer, the
+    # mixin edge or both over files; `z.rb` is a control that still fires. The `attr_reader` row is a guard: the
+    # project-wide `discovered_methods` already carries an attr row, so it passed before the def-table read.
+    {
+      "the module chain in another file" => {
+        "a.rb" => "module M\n  def contract_value = \"m\"\nend\nmodule A\n  include M\nend\n",
+        "b.rb" => "class Demo < Rigor::Plugin::Base\n  include A\n  def go = contract_value.upcase\nend\n"
+      },
+      "the include in a reopening in a third file" => {
+        "a.rb" => "module M\n  def contract_value = \"m\"\nend\nmodule A\n  include M\nend\n",
+        "b.rb" => "class Demo < Rigor::Plugin::Base\n  def go = contract_value.upcase\nend\n",
+        "c.rb" => "class Demo\n  include A\nend\n"
+      },
+      "the class's own def in a reopening in another file" => {
+        "b.rb" => "class Demo < Rigor::Plugin::Base\n  def go = contract_value.upcase\nend\n",
+        "c.rb" => "class Demo\n  def contract_value = \"d\"\nend\n"
+      },
+      "an attr_reader in a module in another file" => {
+        "a.rb" => "module M\n  attr_reader :contract_value\n  def initialize(*) = @contract_value = \"m\"\nend\n",
+        "b.rb" => "class Demo < Rigor::Plugin::Base\n  include M\n  def go = contract_value.upcase\nend\n"
+      },
+      "a receiver-form Demo.include(M) after the body" => {
+        "a.rb" => "module M\n  def contract_value = \"m\"\nend\n",
+        "b.rb" => "class Demo < Rigor::Plugin::Base\n  def go = contract_value.upcase\nend\nDemo.include(M)\n"
+      }
+    }.each do |shape, files|
+      it "does not bridge past a project definer across files: #{shape}" do
+        program = "#{base_ruby}#{files.sort.map(&:last).join}p Demo.new.go.is_a?(String)\n"
+        expect(RubyRun.stdout(program)).to eq("true\n")
+        diagnostics = analyze(files: files.merge("z.rb" => "\"s\".no_such_method_on_string\n"), sig: plugin_base_sig,
+                              cache_store: nil).diagnostics
+        expect(diagnostics.select { |d| d.rule == "call.undefined-method" }.map { |d| File.basename(d.path) })
+          .to eq(["z.rb"])
+      end
+    end
   end
 end

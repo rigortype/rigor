@@ -187,6 +187,13 @@ RSpec.describe "an instance variable across yield, proc calls, super and blocks 
     expect(analyze(source, sig: sig).diagnostics.map(&:rule)).not_to include("flow.always-truthy-condition")
   end
 
+  it "counts an ivar write in a block on a module object from a method of a Module subclass" do
+    # Ruby: `M2.s` answers `1` — `M2` is a `Meta`, so `self` may be the module object the block runs on.
+    source = "class Meta < Module\n  def s\n    @x = false\n    M2.module_eval { @x = true }\n    " \
+             "@x ? 1 : 2\n  end\nend\n\nM2 = Meta.new\n\nmodule M2\n  def hello = 1\nend\n"
+    expect(analyze(source).diagnostics.map(&:rule)).not_to include("flow.always-truthy-condition")
+  end
+
   it "keeps the write-back for an Object receiver, which is not provably another object (guard)" do
     # Ruby: `false` here, but an `Object` may be `self`; the ADR-56 join / drop stands as on master.
     source = "def m\n  @x = false\n  o = Object.new\n  o.instance_eval { @x = true }\n  v = @x\n  dump_type(v)\nend\n"

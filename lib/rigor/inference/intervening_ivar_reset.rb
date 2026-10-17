@@ -95,8 +95,25 @@ module Rigor
       # Whether `class_name` names a class whose instances are no class or module object, and not a module.
       def plain_class?(class_name, scope)
         name = class_name.to_s.delete_prefix("::")
-        !CLASS_OBJECT_CLASSES.include?(name) && !RefinedDispatch::OwnMethod.module_name?(scope, name)
+        !CLASS_OBJECT_CLASSES.include?(name) && !RefinedDispatch::OwnMethod.module_name?(scope, name) &&
+          !module_subclass?(name, scope)
       end
+
+      # Whether `name` may be a subclass of `Module` (`class Meta < Module`), whose instance is a module object:
+      # the environment orders it `:subclass` or `:equal` to `Module`, or its source superclass chain
+      # (`Scope#superclass_of`) reaches `Module` or `Class`, or one the environment so orders.
+      def module_subclass?(name, scope)
+        environment = scope.environment
+        seen = Set.new
+        while name && seen.add?(name)
+          return true if %w[Module Class].include?(name) ||
+                         %i[subclass equal].include?(environment.class_ordering(name, "Module"))
+
+          name = scope.superclass_of(name)&.to_s&.delete_prefix("::")
+        end
+        false
+      end
+      private_class_method :module_subclass?
       private_class_method :plain_class?
 
       # Issue #1402 — `scope` past a statement call whose receiver or arguments run code the program does not

@@ -194,6 +194,28 @@ RSpec.describe "an instance variable across yield, proc calls, super and blocks 
     expect(analyze(source).diagnostics.map(&:rule)).not_to include("flow.always-truthy-condition")
   end
 
+  it "counts an ivar write in a block on a module object from a method of a namespaced Module subclass" do
+    # Ruby: `M2.s` answers `1` — `NS::Meta < NS::Base < Module`, the superclass written relative to `NS`.
+    source = "module NS\n  class Base < Module\n  end\n\n  class Meta < Base\n    def s\n      @x = false\n      " \
+             "M2.module_eval { @x = true }\n      @x ? 1 : 2\n    end\n  end\nend\n\nM2 = NS::Meta.new\n\n" \
+             "module M2\nend\n"
+    expect(analyze(source).diagnostics.map(&:rule)).not_to include("flow.always-truthy-condition")
+  end
+
+  it "counts an ivar write in a block on a module object from a method of an RBS-declared Module subclass" do
+    source = "class Meta3 < Module\n  def s\n    @x = false\n    M3.module_eval { @x = true }\n    @x ? 1 : 2\n  " \
+             "end\nend\n\nM3 = Meta3.new\n"
+    sig = { "meta.rbs" => "class Meta3 < Module\n  def s: () -> Integer\nend\n\nM3: Meta3\n" }
+    expect(analyze(source, sig: sig).diagnostics.map(&:rule)).not_to include("flow.always-truthy-condition")
+  end
+
+  it "counts an ivar write in a block on a module object from a method of a class whose superclass is unresolved" do
+    # The analysis knows nothing of `ExternalBase`, which may be `Module` or a subclass of it.
+    source = "class Meta4 < ExternalBase\n  def s\n    @x = false\n    M4.module_eval { @x = true }\n    " \
+             "@x ? 1 : 2\n  end\nend\n"
+    expect(analyze(source).diagnostics.map(&:rule)).not_to include("flow.always-truthy-condition")
+  end
+
   it "keeps the write-back for an Object receiver, which is not provably another object (guard)" do
     # Ruby: `false` here, but an `Object` may be `self`; the ADR-56 join / drop stands as on master.
     source = "def m\n  @x = false\n  o = Object.new\n  o.instance_eval { @x = true }\n  v = @x\n  dump_type(v)\nend\n"

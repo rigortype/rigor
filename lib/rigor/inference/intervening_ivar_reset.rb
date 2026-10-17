@@ -101,7 +101,10 @@ module Rigor
 
       # Whether `name` may be a subclass of `Module` (`class Meta < Module`), whose instance is a module object:
       # the environment orders it `:subclass` or `:equal` to `Module`, or its source superclass chain
-      # (`Scope#superclass_of`) reaches `Module` or `Class`, or one the environment so orders.
+      # (`Scope#superclass_of`) reaches `Module` or `Class`, or one the environment so orders. A superclass written
+      # relative to the subclass's namespace (`class Meta < Base` in `module NS`) is resolved through
+      # `Scope#ancestor_name_candidates`; one that names neither a project class nor a class the environment knows
+      # may be anything, `Module` included, so it answers true. A class with no recorded superclass ends the walk.
       def module_subclass?(name, scope)
         environment = scope.environment
         seen = Set.new
@@ -109,11 +112,26 @@ module Rigor
           return true if %w[Module Class].include?(name) ||
                          %i[subclass equal].include?(environment.class_ordering(name, "Module"))
 
-          name = scope.superclass_of(name)&.to_s&.delete_prefix("::")
+          raw = scope.superclass_of(name)
+          return false if raw.nil?
+
+          name = resolved_superclass(name, raw, scope)
+          return true if name.nil?
         end
         false
       end
       private_class_method :module_subclass?
+
+      # The first of `raw`'s candidate names, as written in `subclass`, that is a project class or a class the
+      # environment knows; nil when none is.
+      def resolved_superclass(subclass, raw, scope)
+        environment = scope.environment
+        scope.ancestor_name_candidates(subclass, raw).map { |c| c.to_s.delete_prefix("::") }.find do |candidate|
+          scope.discovered_class_sources.key?(candidate) || scope.discovered_superclasses.key?(candidate) ||
+            environment.class_known?(candidate)
+        end
+      end
+      private_class_method :resolved_superclass
       private_class_method :plain_class?
 
       # Issue #1402 — `scope` past a statement call whose receiver or arguments run code the program does not

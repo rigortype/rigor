@@ -330,6 +330,20 @@ def arm_unwritten_precise
   end
 end
 
+# A name the body writes once and the arm never mentions keeps the join
+# of the entry and that write past the `begin`.
+def arm_single_write_precise
+  x = :a
+  begin
+    x = :b
+    work
+  rescue
+    nil
+  end
+  assert_type(":a | :b", x)
+  x
+end
+
 # And past the `begin`: the nil the body never replaces still reports.
 def arm_unwritten_nil
   x = nil
@@ -356,4 +370,4 @@ end
 p [arm_value, arm_exit_scope, arm_return, arm_return_caller, arm_unmentioned, arm_empty, arm_reference,
    arm_multiple, arm_retry, arm_else, ensure_own_write, ensure_return, ensure_return_caller,
    method_rescue_caller, arm_break_in_loop, arm_in_do_while, arm_next_in_block, arm_nested, arm_modifier,
-   arm_in_operand, arm_in_block, Stage.new.run, arm_narrowing_write, arm_own_nil]
+   arm_in_operand, arm_in_block, Stage.new.run, arm_narrowing_write, arm_single_write_precise, arm_own_nil]

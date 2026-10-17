@@ -1220,10 +1220,11 @@ module Rigor
       # rescue clause does: `[begin; conn = make; work; rescue; conn; end]` holds the connection, not the entry's `nil`.
       def rescue_chain_types(rescue_node, body)
         arm_scope = rescue_arm_scope
-        arm_typer = typer_under(ClauseWidening.widen(arm_scope, ClauseWidening.writes([body])) || arm_scope)
+        writes = ClauseWidening.writes([body])
         types = []
         current = rescue_node
         while current
+          arm_typer = typer_under(ClauseWidening.widen(arm_scope, writes, current.statements) || arm_scope)
           types << arm_typer.send(:statements_or_nil, current.statements)
           current = current.subsequent
         end

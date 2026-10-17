@@ -5,3 +5,4 @@ assertions:
   '2': StandardError
   '3': '"c"'
   '4': '1'
+  '5': ":a | :b"

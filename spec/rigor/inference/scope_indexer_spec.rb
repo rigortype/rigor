@@ -52,10 +52,12 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
         expect(clause_reads(true)).to eq([Rigor::Type::Combinator.untyped] * 2)
       end
 
+      # The `ensure` clause's plain entry is the `begin`'s exit scope, which since issue #1839 joins the rescue
+      # clause's fall-through under its widened entry on every path: the body's `1` and the arm's `Dynamic[top]`.
       it "records the clauses' plain entries by default" do
         expect(clause_reads(false)).to eq(
           [Rigor::Type::Combinator.constant_of(nil), Rigor::Type::Combinator.union(
-            Rigor::Type::Combinator.constant_of(1), Rigor::Type::Combinator.constant_of(nil)
+            Rigor::Type::Combinator.constant_of(1), Rigor::Type::Combinator.untyped
           )]
         )
       end

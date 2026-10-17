@@ -458,6 +458,23 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  # Issue #1839 — a rescue clause's value, the scope it falls through with and a `return`, `next` or `break` it
+  # takes read each name the `begin` body writes as `Dynamic[top]` too, not at the `begin`'s entry binding. The
+  # controls read a local the body never writes; the arm of a retried `begin` reads the retry edge's join instead.
+  describe "fixtures/rescue_arm_exit_scope.rb — a rescue arm's value and exit scope carry the body's writes" do
+    let(:harness) { harness_for("rescue_arm_exit_scope") }
+
+    it "reports nothing but the controls" do
+      reported = harness.diagnostics.reject { |d| d.severity == :info || d.rule.to_s == "call.unresolved-toplevel" }
+      expected = [
+        *marked_lines(harness, "# GENUINE-UNDEFINED").map { |line| [line, "call.undefined-method"] },
+        *marked_lines(harness, "# RETRY-JOIN").map { |line| [line, "call.possible-nil-receiver"] },
+        *marked_lines(harness, "# RETURN-IN-ENSURE").map { |line| [line, "flow.return-in-ensure"] }
+      ]
+      expect(reported.map { |d| [d.line, d.rule.to_s] }).to match_array(expected)
+    end
+  end
+
   describe "fixtures/non_empty_refinement_mutation_widening.rb — a mutator invalidates `non-empty-array`" do
     let(:harness) { harness_for("non_empty_refinement_mutation_widening") }
 

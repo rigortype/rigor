@@ -621,6 +621,7 @@ lib/rigor/sig_gen/generator.rb:
 lib/rigor/sig_gen/observation_collector.rb:
   computes: the qualified class of each observed call site's enclosing declaration
   producers:
+    Rigor::SigGen::ObservationCollector#enclosing_blocks: issue #1389, cuts the chain of example-group blocks a `before` ivar binding can reach at a class / module / singleton-class body; it decides only where an RSpec hook's ivars are visible, never a declaration's qualified name or context
     Rigor::SigGen::ObservationCollector#walk_class_decls: grandfathered
 plugins/rigor-actioncable/lib/rigor/plugin/actioncable/channel_discoverer.rb:
   computes: the ActionCable channel classes and their lexical paths

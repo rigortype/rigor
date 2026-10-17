@@ -23,16 +23,16 @@ def and_assign(raw)
   [if (x &&= String(x)).nil? then 0 else x.upcase end]
 end
 
-# `op_assign(true)` returns ["1,2"].
+# `op_assign(true)` returns [false].
 def op_assign(raw)
-  x = raw ? [1, 2] : [3]
-  [if (x *= ",").empty? then 0 else x.upcase end]
+  x = raw ? 1 : 2
+  [if (x += 0.5).zero? then 0 else x.nan? end]
 end
 
 # `multi_assign(true, "a")` returns ["A"].
 def multi_assign(raw, s)
   x = raw ? 1 : nil
-  [if (x, _ = (s ? String(s) : nil), 1).first.nil? then 0 else x.upcase end]
+  [if ((x, _ = (s ? String(s) : nil), 1); x.nil?) then 0 else x.upcase end]
 end
 
 # The write is in the `elsif` condition only. `elsif_write(true, "a")` returns ["A"].

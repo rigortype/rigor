@@ -86,6 +86,9 @@ ALLOWED_ANCESTRY_WALKERS = {
     "existential over each level's own `extend` edges (does the class record one the chain did not place on its " \
     "level?), read to mark that level of a class object's refinement walk `mixed` and withhold: the tables record " \
     "`class << self; prepend` as an `extend`, whose position the chain cannot know; answers no definer (#1752)",
+  "lib/rigor/inference/refined_dispatch/constructed_class.rb#project_name?" =>
+    "tests only whether the bare constant name is a key of these tables, to give the #1979 " \
+    "constructor-superclass skip up; walks no ancestor chain",
   "plugins/rigor-alba/lib/rigor/plugin/alba/resource_index.rb#resource_chain?" =>
     "existential over the project's own superclass chain (does any ancestor `include Alba::Resource`), read " \
     "from the plugin's cached file scan, which has no Scope or discovery tables to build a chain from; " \

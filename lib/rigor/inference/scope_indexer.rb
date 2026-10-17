@@ -4215,9 +4215,38 @@ module Rigor
       def record_declaration_facts(node, child_prefix, tables)
         if node.is_a?(Prism::ClassNode)
           record_meta_superclass_members(node, child_prefix, tables)
+          record_constructed_superclass(node.superclass, child_prefix.join("::"), tables)
         else
           record_surface_mark(tables, child_prefix.join("::"), Scope::DiscoveryIndex::ENVELOPE_MODULE_MARK)
         end
+      end
+
+      # Issue #1979 — `class K < Data.define(:a)`, `< Struct.new(:a)` or `< Class.new(Parent)`: the superclass table
+      # records `nil` for K, so a subclass walk enumerates it under every class. Each constant the expression names
+      # (the factory's receiver, and `Class.new`'s argument, or `Object` for none) takes a
+      # `[ENVELOPE_CONSTRUCTED_KIND, name]` entry; an expression of any other shape records none.
+      def record_constructed_superclass(superclass, class_name, tables)
+        names = constructed_superclass_names(superclass)
+        names&.each do |name|
+          record_envelope(tables.envelopes, class_name, [Scope::DiscoveryIndex::ENVELOPE_CONSTRUCTED_KIND, name],
+                          Source::ParameterEnvelope::OPAQUE)
+        end
+      end
+
+      def constructed_superclass_names(node)
+        return ["Data"] if meta_call_with_name?(node, :Data, :define)
+        return ["Struct"] if meta_call_with_name?(node, :Struct, :new)
+        return nil unless class_new_call?(node)
+
+        arguments = node.arguments&.arguments || []
+        return %w[Class Object] if arguments.empty?
+        return nil unless arguments.one?
+
+        argument = arguments.first
+        inner = if argument.is_a?(Prism::ConstantReadNode) then [argument.name.to_s]
+                else constructed_superclass_names(argument)
+                end
+        inner && ["Class", *inner]
       end
 
       # The block form of a meta-new constant write: its members, and the module mark `Module.new` earns.

@@ -108,4 +108,22 @@ RSpec.describe "self-call ivar-write proof — incremental" do
       { "e.rb" => "class Base\n  def log(_message) = (@io = STDOUT)\nend\n" }
     )
   end
+
+  # Issue #1979 — a class built on `Data.define` is no subclass of `Holder`, so its `to_s` leaves the proof standing;
+  # an edit that makes its superclass expression name `Holder`, or a write that may shadow `Data`, gives it up.
+  it "re-checks the caller when a constructed class's superclass starts naming self's class" do
+    expect_recheck_to_report(
+      { "b.rb" => "class Base\n  def log(message) = warn(message)\nend\n",
+        "d.rb" => "class Fact < Data.define(:a)\n  def to_s = \"f\"\nend\n" },
+      { "d.rb" => "class Fact < Class.new(Holder)\n  def to_s = \"f\"\nend\n" }
+    )
+  end
+
+  it "re-checks the caller when another file assigns a constant named as a constructed class's receiver" do
+    expect_recheck_to_report(
+      { "b.rb" => "class Base\n  def log(message) = warn(message)\nend\n",
+        "d.rb" => "class Fact < Data.define(:a)\n  def to_s = \"f\"\nend\n", "f.rb" => "module App\nend\n" },
+      { "f.rb" => "module App\n  Data = 1\nend\n" }
+    )
+  end
 end

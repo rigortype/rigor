@@ -231,6 +231,11 @@ module Rigor
       # (the meta-new walk does not route `Parent` through ancestor discovery), so a reader that must place `K` in a
       # hierarchy reads its superclass as unknown, as it reads the `nil` the table records for `class K < <expr>`.
       ENVELOPE_META_SUPERCLASS_MARK = :"<meta-superclass>"
+      # Issue #1979 — the kind of a `[ENVELOPE_CONSTRUCTED_KIND, constant_name]` bucket entry: `class K < <expr>` whose
+      # superclass expression is a core constructor call (`Data.define(...)`, `Struct.new(...)`, `Class.new(...)`)
+      # naming that constant, as the receiver or as `Class.new`'s single bare-constant argument (`Object` for none).
+      # Read only by the #1596 proof's subclass walk (`RefinedDispatch::OwnMethod.each_subclass`).
+      ENVELOPE_CONSTRUCTED_KIND = :constructed_from
       ENVELOPE_MODULE_MARK = :"<module>"
       ENVELOPE_DYNAMIC_MARK = :"<dynamic>"
       ENVELOPE_OBJECT_EXTENDED_MARK = :"<object-extended>"

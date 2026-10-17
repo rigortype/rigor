@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../builtins/cruby_definers"
+require_relative "constructed_class"
 
 module Rigor
   module Inference
@@ -282,10 +283,16 @@ module Rigor
         # declaration with that superclass appearing or vanishing fires (`IncrementalSession#negative_affected`).
         # A class whose superclass the tables do not know may be a subclass of any class, so it joins the walk too
         # (`subclass_of:*`, which any class declaration appearing or vanishing fires).
-        def each_subclass(scope, class_name)
+        #
+        # Issue #1979 — with `possible_only:`, a class whose superclass expression is a core constructor call that
+        # cannot answer `class_name` or a subclass of it (`ConstructedClass.elsewhere?`) is left out, with its
+        # subclasses.
+        def each_subclass(scope, class_name, possible_only: false)
           children = children_by_parent(scope)
           record_subclasses_read(class_name)
-          queue = children.fetch(class_name.to_s, []) + unknown_superclass_classes(scope, class_name)
+          unknown = unknown_superclass_classes(scope, class_name)
+          unknown = unknown.reject { |name| ConstructedClass.elsewhere?(scope, name, class_name) } if possible_only
+          queue = children.fetch(class_name.to_s, []) + unknown
           seen = {}
           until queue.empty?
             subclass = queue.shift

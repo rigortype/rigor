@@ -139,10 +139,11 @@ module Rigor
         # Issue #1596 — gives up when `self`'s class, a project subclass, or a project ancestor or module on either's
         # chain defines a {PROTOCOL_NAMES} method (a `def`, `define_method`, `attr_*` or alias), rewrites its methods
         # beyond the names it spells, or is refined on one; or when either chain holds an external ancestor, whose
-        # own definitions the read cannot see.
+        # own definitions the read cannot see. Issue #1979 — a class built on a core constructor call
+        # (`class Fact < Data.define(:a)`) cannot be `self`'s class or a subclass of it, so the walk leaves it out.
         def no_protocol_override
           classes = [@class_name]
-          RefinedDispatch::OwnMethod.each_subclass(@scope, @class_name) { |subclass| classes << subclass }
+          RefinedDispatch::OwnMethod.each_subclass(@scope, @class_name, possible_only: true) { |subclass| classes << subclass }
           classes.each do |class_name|
             chain = Scope::ResolutionChain.for(@scope, class_name.to_s, :instance, :methods)
             unprovable! if chain.truncated? || chain.wildcard_mixin? || !settled?(chain)
@@ -229,7 +230,7 @@ module Rigor
 
           # A subclass whose superclass the tables do not know is enumerated too, and its chain ends short of the
           # owner; one that reaches no definer of its own leaves the call to its superclass.
-          RefinedDispatch::OwnMethod.each_subclass(@scope, @class_name) do |subclass|
+          RefinedDispatch::OwnMethod.each_subclass(@scope, @class_name, possible_only: true) do |subclass|
             unprovable! unless [owner, nil].include?(definer_ahead(subclass, name, owner))
           end
           def_node

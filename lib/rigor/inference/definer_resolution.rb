@@ -168,14 +168,7 @@ module Rigor
       # external superclass on a singleton chain (`:singleton`, its whole tail) is asked for a singleton method, an
       # extended module (`:instance`) and every instance-side entry for an instance method.
       def external_lacks?(scope, candidates, side, method_name)
-        return Scope::ResolutionChain::Relevance.external_lacks?(scope, candidates, method_name) if side == :instance
-
-        known = candidates.find { |candidate| Rigor::Reflection.rbs_class_known?(candidate, scope: scope) }
-        return false if known.nil?
-
-        Rigor::Reflection.singleton_method_definition(known, method_name, scope: scope).nil?
-      rescue StandardError
-        false
+        Scope::ResolutionChain::Relevance.external_lacks_on?(scope, candidates, side, method_name)
       end
 
       # What a candidate set says, for {Scope::ResolutionChain#settle} to compare across worlds.

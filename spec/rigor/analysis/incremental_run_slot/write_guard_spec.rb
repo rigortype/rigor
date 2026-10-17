@@ -278,4 +278,20 @@ RSpec.describe Rigor::Analysis::IncrementalRunSlot::WriteGuard do
       expect(racy.files.last).to eq(presence)
     end
   end
+
+  # #1959 — the guard re-lists a glob row's directory under its root; a root spelled `fx[1]` was read as a pattern,
+  # matched no directory, and admitted a write that raced a file added under it.
+  it "refuses the write once a file appears under a glob row's root spelled with metacharacters" do
+    at_tick_start
+    write("fx[1]/lib/a.rb", "")
+    root = File.join(Dir.pwd, "fx[1]")
+    rows = Rigor::Cache::Descriptor.new(
+      globs: [Rigor::Cache::Descriptor::GlobEntry.compute(root: root, pattern: "lib/*.rb", mode: :names)]
+    )
+    guard = start
+    expect(guard.admits?(rows)).to be(true)
+
+    write("fx[1]/lib/b.rb", "")
+    expect(guard.admits?(rows)).to be(false)
+  end
 end

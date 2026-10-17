@@ -1004,7 +1004,7 @@ module Rigor
       # plugin code calls `watch:`.
       #
       # @param roots — search roots (relative to the project root, or absolute paths)
-      # @param patterns — glob suffixes joined under each root via `File.join(root, pattern)`.
+      # @param patterns — glob suffixes matched under each root, the root read literally (#1956).
       #   Multiple patterns union into one descriptor (`"**/*.erb", "**/*.html"` etc.).
       def glob_descriptor(roots, *patterns)
         files = collect_glob_files(Array(roots), patterns)

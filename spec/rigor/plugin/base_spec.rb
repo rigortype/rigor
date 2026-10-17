@@ -175,6 +175,19 @@ RSpec.describe Rigor::Plugin::Base do
       end
     end
 
+    # #1956 — the root is a path, not part of the pattern.
+    it "matches under a root spelled with glob metacharacters" do
+      Dir.mktmpdir("rigor-glob-desc-") do |dir|
+        root = File.join(dir, "lib [x]{a}")
+        FileUtils.mkdir_p(root)
+        File.write(File.join(root, "a.rb"), "puts :a\n")
+
+        descriptor = plugin.send(:glob_descriptor, [root], "**/*.rb")
+
+        expect(descriptor.files.map(&:path)).to eq([File.join(root, "a.rb")])
+      end
+    end
+
     it "returns an empty descriptor when no roots exist on disk" do
       descriptor = plugin.send(:glob_descriptor, ["/definitely/does/not/exist"], "**/*.rb")
       expect(descriptor.files).to be_empty

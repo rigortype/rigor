@@ -9,15 +9,18 @@ module Rigor
   # leaves `root` uninterpreted, and joining each match back onto `root` spells the results exactly as the
   # joined glob spelled them for a root without metacharacters: same strings, same order, `root` kept as given
   # (relative, symlinked or with a trailing `/`).
+  #
+  # A leading `/` on `pattern` is dropped: `Dir.glob` ignores `base:` for an absolute pattern, while the joined
+  # spelling read `File.join(root, "/etc/*")` as `root/etc/*`. Every caller keeps that meaning.
   module RootedGlob
     module_function
 
     # @param root — a directory path (String or Pathname), taken literally
     # @param pattern — a `Dir.glob` pattern relative to `root`
     # @return the matches spelled under `root`, in `Dir.glob` order; empty when `root` is not a directory
-    def glob(root, pattern, sort: true)
+    def glob(root, pattern)
       root = root.to_s
-      Dir.glob(pattern.to_s, base: root, sort: sort).map { |relative| File.join(root, relative) }
+      Dir.glob(pattern.to_s.sub(%r{\A/+}, ""), base: root).map { |relative| File.join(root, relative) }
     end
   end
 end

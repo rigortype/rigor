@@ -291,6 +291,13 @@ RSpec.describe Rigor::Plugin::IoBoundary do
       expect(boundary.cache_descriptor.globs).to be_empty
     end
 
+    # #1959 — `Dir.glob` ignores `base:` for an absolute pattern, so `/etc/*` would list /etc as an in-root answer.
+    it "refuses an absolute pattern and records nothing" do
+      expect { boundary.glob(tmpdir, "/etc/*") }
+        .to raise_error(Rigor::Plugin::AccessDeniedError) { |e| expect(e.reason).to eq(:read_outside_scope) }
+      expect(boundary.cache_descriptor.globs).to be_empty
+    end
+
     # #1959 — the root is a path, not part of the pattern: a directory literally named `{..,zz}` expanded into
     # its parent, and its row re-globbed the parent on every validation.
     context "with a root named `{..,zz}`" do

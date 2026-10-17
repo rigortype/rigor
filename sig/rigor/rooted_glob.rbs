@@ -1,5 +1,5 @@
 module Rigor
   module RootedGlob
-    def self?.glob: (untyped, untyped, ?sort: untyped) -> Array[String]
+    def self?.glob: (untyped, untyped) -> Array[String]
   end
 end

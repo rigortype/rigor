@@ -836,6 +836,18 @@ RSpec.describe Rigor::Configuration do
           .to eq([File.join(dir, "lib", "core_ext", "string_ext.rb"), File.join(dir, "lib", "patch.rb")])
       end
     end
+
+    # A literal entry that does not exist must survive expansion, so it still reports `pre-eval.file-not-found`.
+    it "keeps a missing literal entry under a metacharacter config directory" do
+      Dir.mktmpdir do |tmp|
+        dir = File.join(tmp, "ds [x]")
+        FileUtils.mkdir_p(File.join(dir, "lib"))
+        config_path = File.join(dir, ".rigor.yml")
+        File.write(config_path, "pre_eval:\n  - lib/missing.rb\n")
+
+        expect(described_class.load(config_path).pre_eval).to eq([File.join(dir, "lib", "missing.rb")])
+      end
+    end
   end
 
   describe ".discover" do

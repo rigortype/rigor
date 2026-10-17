@@ -104,7 +104,7 @@ module RbsEnvMemo
     def signature_files(root)
       return [root] if File.file?(root)
 
-      Dir.glob(File.join(root, "**", "*.rbs"))
+      Rigor::RootedGlob.glob(root, "**/*.rbs")
     end
 
     # Re-hashing every signature file on each build would give back part of what the memo saves, so a file's

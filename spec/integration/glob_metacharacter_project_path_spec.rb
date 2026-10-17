@@ -68,4 +68,36 @@ RSpec.describe "rigor check under a project path with glob metacharacters (#1956
     File.delete(File.join(dir, "lib", "new.rb"))
     expect(check(dir)).to eq(check(dir, "--no-cache"))
   end
+
+  # `signature_paths:` is walked by the RBS loader, and the cache keys and the `--incremental` snapshot digest the
+  # same tree: each globbed `<sig>/**/*.rbs` with the project path joined in.
+  context "with a signature_paths directory" do
+    let(:dir) do
+      project("sg [x]{a}", files: { "lib/a.rb" => "class Widget\nend\nWidget.new.go.bogus_meth\n",
+                                    "sig/widget.rbs" => "class Widget\n  def go: () -> Integer\nend\n" })
+        .tap { |path| File.write(File.join(path, ".rigor.yml"), "paths:\n  - lib\nsignature_paths:\n  - sig\n") }
+    end
+
+    def edit_signature
+      File.write(File.join(dir, "sig", "widget.rbs"), "class Widget\n  def go: () -> untyped\nend\n")
+    end
+
+    it "loads the project's signature files" do
+      expect(check(dir, "--no-cache")).to eq(["lib/a.rb call.undefined-method"])
+    end
+
+    it "answers a warm run like a cold one after a signature edit" do
+      2.times { check(dir) }
+      edit_signature
+
+      expect(check(dir)).to eq(check(dir, "--no-cache"))
+    end
+
+    it "answers an --incremental run like a cold one after a signature edit" do
+      2.times { check(dir, "--incremental") }
+      edit_signature
+
+      expect(check(dir, "--incremental")).to eq(check(dir, "--no-cache"))
+    end
+  end
 end

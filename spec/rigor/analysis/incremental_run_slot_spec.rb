@@ -462,22 +462,16 @@ RSpec.describe Rigor::Analysis::IncrementalRunSlot do
 
   # Inputs a recheck does not re-derive ride the chain from the full run that recorded them. Recomputing them on a
   # recheck would vouch for the tree the recheck saw while its answer still carries rows computed before the
-  # change, so the probe declines until the next full run: each arm checks it still declines after a full-path
-  # run over the changed tree.
+  # change, so a change to one must not be answered by a recheck at all. Each input below now ends in a full run,
+  # and the slot that run writes answers the changed tree.
   describe "declining until the next full run, for an input a recheck does not re-derive" do
-    # `closure` makes the recheck also re-analyse an analysed file: an empty closure builds no environment and
-    # leaves the runner's baseline rows nil, so only a non-empty one would catch a recheck re-deriving them.
-    def expect_declined_through_a_recheck(config = configuration, paths: nil, closure: false)
-      expect(served(config, paths: paths)).to be_nil
-      write("lib/c.rb", "class Other\n  def go\n    3\n  end\nend\n") if closure
-      _, warm = incremental_run(config, paths: paths)
-      expect(warm).to be(true)
-      expect(served(config, paths: paths)).to be_nil
-    end
-
+    # `closure` makes the run also re-analyse an analysed file: an empty closure builds no environment and leaves
+    # the runner's baseline rows nil, so only a non-empty one would catch a recheck re-deriving them.
     # #1585 / #1554 — a `pre_eval:` file and an auto-detected `sig/` root are part of the snapshot fingerprint, so
     # editing one is a snapshot miss: the run is a full one, not a recheck, and the slot it writes answers the
-    # changed tree. Nothing is left for a recheck to decline on these two inputs.
+    # changed tree. #1583 / #1560 — a discovered-not-analysed file ends the same way by another route: the session
+    # digests it, and a recheck that finds it moved re-baselines. Nothing is left for a recheck to decline on these
+    # three inputs.
     def expect_full_run_after_fingerprint_change(config = configuration, paths: nil, closure: false)
       expect(served(config, paths: paths)).to be_nil
       write("lib/c.rb", "class Other\n  def go\n    3\n  end\nend\n") if closure
@@ -495,7 +489,7 @@ RSpec.describe Rigor::Analysis::IncrementalRunSlot do
           incremental_run(config, paths: %w[lib])
           expect(served(config, paths: %w[lib])).not_to be_nil
           write("ext/helper.rb", "class Helper\n  def go\n    2\n  end\nend\n")
-          expect_declined_through_a_recheck(config, paths: %w[lib], closure: closure)
+          expect_full_run_after_fingerprint_change(config, paths: %w[lib], closure: closure)
         end
 
         it "an auto-detected signature root that appears" do

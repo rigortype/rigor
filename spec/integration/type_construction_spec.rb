@@ -1750,6 +1750,59 @@ RSpec.describe "Rigor type construction (integration)" do
         RUBY
       end
 
+      let(:job_source) do
+        <<~RUBY
+          class Job
+            def initialize = (@name = nil)
+            def prepare = nil
+            def ready? = true
+            def rename = (@name = "n")
+
+            def run
+              return unless @name.nil?
+
+              prepare
+              @name.upcase
+            end
+
+            def cond = (@name.upcase if @name.nil? && ready?)
+          end
+        RUBY
+      end
+
+      let(:jobs_source) do
+        <<~RUBY
+          class Base
+            class StandardError < Job; end
+          end
+
+          class Outer < Base
+            class Named < Class.new(StandardError)
+              def prepare = (@name = "x")
+              def ready? = (@name = "z"; true)
+            end
+          end
+        RUBY
+      end
+
+      let(:reopened_source) do
+        <<~RUBY
+          require "stringio"
+
+          class StandardError
+            def log(message) = warn(message)
+
+            def dump
+              @io = STDOUT
+              return unless @io.is_a?(StringIO)
+
+              log("dumping")
+              @io.string
+            end
+          end
+        RUBY
+      end
+
       def lines_for(other)
         reported(analyze(files: { "lib/holder.rb" => holder_source, "lib/other.rb" => other })).map do |d|
           [d.line, d.rule.to_s]
@@ -1788,11 +1841,49 @@ RSpec.describe "Rigor type construction (integration)" do
         ["a constructed class a Class.new constant write rebinds",
          "class Oops < Class.new(StandardError)\nend\n\nOops = Class.new(Holder) do\n  def to_s = \"o\"\nend\n",
          :given_up],
+        ["a project class a mixin's constant lookup reaches",
+         "module Consts\n  class Data < Holder\n    def self.define(*) = Class.new(self)\n  end\nend\n\n" \
+         "class Outer\n  include Consts\n\n  class Fact < Data.define(:a)\n    def to_s = \"f\"\n  end\nend\n",
+         :given_up],
+        ["a project singleton def of the constructor",
+         "def Data.define(*) = Class.new(Holder)\n\nclass Fact < Data.define(:a)\n  def to_s = \"f\"\nend\n",
+         :given_up],
+        ["a project singleton def of Struct.new",
+         "def Struct.new(*) = Class.new(Holder)\n\nclass Pair < Struct.new(:a)\n  def to_s = \"p\"\nend\n",
+         :given_up],
+        ["a constant the tables do not know",
+         "Object.const_set(:Thing, Class.new(Holder))\n\nclass Sub < Class.new(Thing)\n  def to_s = \"s\"\nend\n",
+         :given_up],
+        ["a project class shadowing Class",
+         "module App\n  class Class\n    def self.new(*) = ::Class.new(Holder)\n  end\n\n  " \
+         "class Sub < Class.new(StandardError)\n    def to_s = \"s\"\n  end\nend\n", :given_up],
         ["no other class", "X = 1\n", :proven]
       ].each do |label, other, verdict|
         it "reads #{label} as #{verdict == :proven ? 'no subclass' : 'a possible subclass'}" do
           expect(lines_for(other)).to eq(expected(verdict))
         end
+      end
+
+      # Ruby resolves `StandardError` in `Named`'s header through `Outer`'s superclass, to `Base::StandardError`, a
+      # `Job`: `Named#prepare` and `Named#ready?` write `@name`, so under Ruby 4.0.5 both reads return "X" or "Z" for
+      # a `Named` and neither may report. The control without `Named` keeps both proofs and reports both reads.
+      it "reads a class built on a constant an enclosing class's ancestor declares as a possible subclass" do
+        lines = lambda do |other|
+          reported(analyze(files: { "lib/job.rb" => job_source, "lib/jobs.rb" => other })).map(&:line)
+        end
+        expect([lines.call(jobs_source), lines.call("X = 1\n")]).to eq([[], [11, 14]])
+      end
+
+      # A project reopening of a core class is `self`'s class here: `KeyError` is a subclass of it, so `Oops#log`
+      # overrides the callee and writes `@io`, and the read after it must not keep the guard. A class built on
+      # `Data.define` is not a `StandardError`, and the proof holds.
+      it "reads a constructed class whose named core class descends from self's class as a possible subclass" do
+        lines = lambda do |other|
+          reported(analyze(files: { "lib/error.rb" => reopened_source, "lib/oops.rb" => other })).map(&:line)
+        end
+        expect([lines.call("class Oops < Class.new(KeyError)\n  def log(_) = (@io = nil)\nend\n"),
+                lines.call("class Oops < Class.new(Data.define(:a))\n  def log(_) = (@io = nil)\nend\n")])
+          .to eq([[11], []])
       end
 
       # A signature makes the environment know `Holder`, so the walk asks it how `Data` relates to `Holder`.

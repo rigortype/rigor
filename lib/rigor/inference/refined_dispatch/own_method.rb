@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../builtins/cruby_definers"
+require_relative "constructed_class"
 
 module Rigor
   module Inference
@@ -284,12 +285,13 @@ module Rigor
         # (`subclass_of:*`, which any class declaration appearing or vanishing fires).
         #
         # Issue #1979 — with `possible_only:`, a class whose superclass expression is a core constructor call that
-        # cannot answer `class_name` or a subclass of it ({constructed_elsewhere?}) is left out, with its subclasses.
+        # cannot answer `class_name` or a subclass of it (`ConstructedClass.elsewhere?`) is left out, with its
+        # subclasses.
         def each_subclass(scope, class_name, possible_only: false)
           children = children_by_parent(scope)
           record_subclasses_read(class_name)
           unknown = unknown_superclass_classes(scope, class_name)
-          unknown = unknown.reject { |name| constructed_elsewhere?(scope, name, class_name) } if possible_only
+          unknown = unknown.reject { |name| ConstructedClass.elsewhere?(scope, name, class_name) } if possible_only
           queue = children.fetch(class_name.to_s, []) + unknown
           seen = {}
           until queue.empty?
@@ -309,38 +311,6 @@ module Rigor
           computed = scope.discovered_superclasses.filter_map { |child, parent| child if parent.nil? }
           meta = scope.discovered_parameter_envelopes.filter_map { |name, bucket| name if bucket.key?(mark) }
           (computed + meta).uniq - [class_name.to_s]
-        end
-
-        # Issue #1979 — whether `name`, a class whose superclass the tables do not know, is `class name < <expr>` with
-        # `<expr>` a core constructor call (`Data.define(...)`, `Struct.new(...)`, `Class.new(<constant>)`) whose
-        # every named constant is a core or standard-library class that is neither `class_name` nor a subclass of it,
-        # that no project file assigns by its last segment, and that no project class declares under any name the
-        # class's nesting can resolve it to. Such a class descends from that core class alone, so it cannot be
-        # `class_name` or one of its subclasses. Any other shape (a `Class.new` constant write, a qualified or
-        # computed argument, a name the project declares) answers false.
-        def constructed_elsewhere?(scope, name, class_name)
-          Scope::ResolutionChain.record_class(scope, name) if Analysis::DependencyRecorder.active?
-          bucket = scope.discovered_parameter_envelopes[name]
-          return false if bucket.nil? || bucket.key?(Scope::DiscoveryIndex::ENVELOPE_META_SUPERCLASS_MARK)
-
-          kind = Scope::DiscoveryIndex::ENVELOPE_CONSTRUCTED_KIND
-          named = bucket.each_key.filter_map { |key| key[1] if key.is_a?(Array) && key[0] == kind }
-          !named.empty? && named.all? { |constant| core_class_apart?(scope, name, constant, class_name) }
-        end
-
-        def core_class_apart?(scope, name, constant, class_name)
-          # A class declaration appearing fires the walk's `subclass_of:*` edge; a constant write needs its own.
-          Analysis::DependencyRecorder.read_name(:constant, constant) if Analysis::DependencyRecorder.active?
-          environment = scope.environment
-          return false unless environment&.class_known?(constant)
-          return false unless scope.shadowing_constant_names(constant).empty?
-
-          candidates = scope.ancestor_name_candidates(name, constant)
-          return false if candidates.any? { |candidate| project_class?(scope, candidate) }
-
-          ordering = environment.class_ordering(constant, class_name.to_s)
-          %i[disjoint superclass].include?(ordering) ||
-            (ordering == :unknown && !environment.class_known?(class_name.to_s))
         end
 
         def record_subclasses_read(class_name)

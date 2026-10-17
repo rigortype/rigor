@@ -1,0 +1,1 @@
+- **[engine]** A module function's instance copy is now recorded private, as Ruby makes it, so a class that includes a `module_function` module and overrides one of its methods privately no longer reports `def.override-visibility-reduced`. ([#2055](https://github.com/rigortype/rigor/pull/2055))

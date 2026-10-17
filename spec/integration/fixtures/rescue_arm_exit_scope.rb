@@ -77,6 +77,7 @@ def arm_empty
   begin
     r = :b
     work
+    r = :c
   rescue
   end
   return 1 if r == :b

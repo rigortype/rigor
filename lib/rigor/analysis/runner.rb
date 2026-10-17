@@ -98,6 +98,16 @@ module Rigor
         pooled.empty? ? @file_dependencies : @file_dependencies.merge(pooled)
       end
 
+      # Issue #1553 — the plugin reads ({Plugin::IoBoundary.attributing}) each file's analysis made this run,
+      # `{path => [row]}`, reconciled from the sequential and pooled halves exactly as {#file_dependencies} is.
+      # Empty unless `record_dependencies: true`; a file whose analysis read nothing has no key. The incremental
+      # session keeps them beside each file's cached rows so a later recheck re-analyses the file once one of
+      # them goes stale.
+      def analysis_reads
+        pooled = @pool_coordinator.collected_analysis_reads
+        pooled.empty? ? @analysis_reads : @analysis_reads.merge(pooled)
+      end
+
       # ADR-103 — the run's propagated effect graph, or {Effects::EffectTable.empty} when collection did
       # not run. Reconciled from the sequential and pooled halves exactly as {#file_dependencies} is, then
       # closed by the post-pool fixpoint in {#assemble_run_diagnostics}.

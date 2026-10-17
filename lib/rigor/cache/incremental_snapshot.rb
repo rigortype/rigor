@@ -176,7 +176,10 @@ module Rigor
       # 39: issue #1984 — the visibility walk records the singleton slots (`[:singleton, name]`) and contests the ones
       # two files disagree on, which a pre-39 bundle carries none of, so a warm run would answer a singleton call a
       # cold run reports.
-      SCHEMA = 39
+      # 40: issue #1553 — the payload gains `plugin_reads`, the plugin reads each analysed file's last analysis made,
+      # which a recheck validates to put a reader of a changed input into the closure. A pre-40 blob carries none,
+      # so its readers would be served stale; the gate rejects it and the next run is cold.
+      SCHEMA = 40
 
       # The persisted per-file state.
       # `cache` maps an analyzed file to its diagnostics.
@@ -240,10 +243,10 @@ module Rigor
                             :missing, :class_decls, :constant_decls, :seed_bundles, :plugin_fact_digest,
                             :return_summaries, :param_table,
                             :effect_collections, :effects_identity, :run_level_rows,
-                            :effect_plugin_digest) do
-        # Defaults to nil so a payload built without it (an older caller, a spec fixture) reads as "unknown",
-        # which the session treats as moved.
-        def initialize(effect_plugin_digest: nil, **rest)
+                            :effect_plugin_digest, :plugin_reads) do
+        # `effect_plugin_digest` defaults to nil so a payload built without it (an older caller, a spec fixture)
+        # reads as "unknown", which the session treats as moved. `plugin_reads` defaults to no reads.
+        def initialize(effect_plugin_digest: nil, plugin_reads: {}, **rest)
           super
         end
       end
@@ -453,7 +456,8 @@ module Rigor
           effect_collections: data[:effect_collections] || {},
           effects_identity: data[:effects_identity],
           run_level_rows: data[:run_level_rows],
-          effect_plugin_digest: data[:effect_plugin_digest]
+          effect_plugin_digest: data[:effect_plugin_digest],
+          plugin_reads: data[:plugin_reads] || {}
         )
       end
       private :payload_from
@@ -479,7 +483,8 @@ module Rigor
           effect_collections: payload.effect_collections,
           effects_identity: payload.effects_identity,
           run_level_rows: payload.run_level_rows,
-          effect_plugin_digest: payload.effect_plugin_digest
+          effect_plugin_digest: payload.effect_plugin_digest,
+          plugin_reads: payload.plugin_reads
         )
         # #1507 — every `--incremental` run that analysed anything rewrites this whole blob, so its deflate is
         # on the edit path; see {Store::DEFLATE_LEVEL}.

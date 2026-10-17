@@ -261,7 +261,7 @@ module Rigor
         absorb(runner, current, analyze_set, removed)
         @param_table = fresh_params
         recheck_result(merged, [changed, added, removed], affected: affected, reused: reused.to_set, runner: runner,
-                       stale_readers: @stale_plugin_readers)
+                                                          stale_readers: @stale_plugin_readers)
       end
 
       # Editor mode option B (#146) — a whole-project recheck with the editor's buffer substituted for one

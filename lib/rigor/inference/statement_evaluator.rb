@@ -1666,8 +1666,8 @@ module Rigor
       # open_conn; Integer(s); rescue; conn.size; end` reads the connection. The engine does not track where the body
       # raises (the precise recorder of #1397 put new false positives on correct code); it widens instead, and
       # deliberately imprecisely. Each name that the clause's entry binds and those clauses write, outside a nested
-      # `def` or class body, and that the clause mentions or they write more than once or in a block or loop
-      # ({ClauseWidening}), reads as `Dynamic[top]`, which reports nothing. A plain join would read `x` as `1?` in `x
+      # `def` or class body, and that the clause mentions or they write more than once ({ClauseWidening}),
+      # reads as `Dynamic[top]`, which reports nothing. A plain join would read `x` as `1?` in `x
       # = 1; begin; foo; x = nil; rescue; x.succ; end`, where it cannot be nil, and a `Dynamic` that keeps the join as
       # its facet still narrows: `x.nil?` on `Dynamic[1 | 2]` leaves a `nil` member for the next call to report. A name
       # written inside a nested `ensure` clause, which also runs on the way out of a raise, is covered by the same

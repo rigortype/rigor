@@ -14,9 +14,10 @@ module Rigor
     # raises; a clause enters with such a name rebound to `Dynamic[top]` instead ({.widen}).
     #
     # Not every name the body writes: one the clause mentions, whose binding the clause reads, and one the body
-    # writes more than once or inside a block or loop, which can hold a value neither the entry nor the body's exit
-    # binds. A name written once and never mentioned leaves the clause at its entry binding, which the join past the
-    # `begin` already pairs with the body's exit binding, the value of that one write.
+    # writes more than once, which can hold a value neither the entry nor the body's exit binds. A name written once
+    # and never mentioned leaves the clause at its entry binding, which the join past the `begin` already pairs with
+    # the body's exit binding, the value of that one write (a write in a block or loop body included: the scope a
+    # block call or loop leaves joins every iteration's).
     module ClauseWidening
       WRITE_NODES = Set[
         *CapturedLocals::LOCAL_WRITE_NODES,
@@ -29,15 +30,10 @@ module Rigor
 
       MENTION_NODES = Set[Prism::LocalVariableReadNode, Prism::InstanceVariableReadNode, *WRITE_NODES].freeze
 
-      # A write under one of these may run more than once.
-      REPEATING_NODES = [
-        Prism::BlockNode, Prism::LambdaNode, Prism::WhileNode, Prism::UntilNode, Prism::ForNode
-      ].freeze
-
       SCOPE_BODY_NODES = [Prism::DefNode, Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode].freeze
 
-      # The names `sources` write: `names` all of them, `repeated` those written more than once or inside a block or
-      # loop, a nested block's included (it may write an outer local). A `def` or class body writes nothing here.
+      # The names `sources` write: `names` all of them, `repeated` those written more than once, a nested block's
+      # included (it may write an outer local). A `def` or class body writes nothing here.
       Writes = Data.define(:names, :repeated)
 
       module_function
@@ -45,7 +41,7 @@ module Rigor
       # The {Writes} of `sources`, or nil for none.
       def writes(sources)
         counts = nil
-        sources.each { |source| counts = count_writes(source, counts, false) if source }
+        sources.each { |source| counts = count_writes(source, counts) if source }
         return nil if counts.nil?
 
         Writes.new(names: counts.keys.to_set, repeated: counts.filter_map { |name, count| name if count > 1 }.to_set)
@@ -68,16 +64,15 @@ module Rigor
         widened.equal?(scope) ? nil : widened
       end
 
-      # `counts` with each write under `node` counted, one under a repeating node counted twice.
-      def count_writes(node, counts, repeating)
+      # `counts` with each write under `node` counted.
+      def count_writes(node, counts)
         return counts if SCOPE_BODY_NODES.any? { |klass| node.is_a?(klass) }
 
         if WRITE_NODES.include?(node.class)
           counts ||= Hash.new(0)
-          counts[node.name] += repeating ? 2 : 1
+          counts[node.name] += 1
         end
-        repeating ||= REPEATING_NODES.any? { |klass| node.is_a?(klass) }
-        node.rigor_each_child { |child| counts = count_writes(child, counts, repeating) }
+        node.rigor_each_child { |child| counts = count_writes(child, counts) }
         counts
       end
 

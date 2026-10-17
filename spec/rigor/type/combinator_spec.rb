@@ -182,7 +182,17 @@ RSpec.describe Rigor::Type::Combinator do
 
     it "widens scalars RBS does not accept as literals to their class name" do
       expect(described_class.constant_of(1.5).erase_to_rbs).to eq("Float")
-      expect(described_class.constant_of(1..10).erase_to_rbs).to eq("Range")
+    end
+
+    # `Range[out E]` is generic and a bare `Range` fails `rbs validate` (#1891).
+    it "widens a Range to Range of its endpoint classes" do
+      expect(described_class.constant_of(1..10).erase_to_rbs).to eq("Range[Integer]")
+      expect(described_class.constant_of("a".."z").erase_to_rbs).to eq("Range[String]")
+      expect(described_class.constant_of(1..).erase_to_rbs).to eq("Range[Integer]")
+      expect(described_class.constant_of(..2.5).erase_to_rbs).to eq("Range[Float]")
+      expect(described_class.constant_of(1..2.5).erase_to_rbs).to eq("Range[Float | Integer]")
+      expect(described_class.constant_of(1.5..2).erase_to_rbs).to eq("Range[Float | Integer]")
+      expect(described_class.constant_of(nil..nil).erase_to_rbs).to eq("Range[untyped]")
     end
 
     it "rejects compound literals" do

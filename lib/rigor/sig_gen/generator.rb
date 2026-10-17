@@ -1438,12 +1438,17 @@ module Rigor
       # same position a method with no declaration at all is in. Over a declaration the author wrote, though, a
       # VALUE literal the body proves (`-> 1`, `-> "x"`, `-> :k`) is an implementation detail the `untyped` was
       # abstracting over, so it is widened to its class (`1 | 2` to `Integer`, `"S" | nil` to `(String | nil)`; #1489).
-      # `nil`, `true` and `false` are honest types and stay, as does a computed `Float`. An `untyped` that is only
-      # the inline reader's synthesis ({#synthesized_declaration?}) is no word of the author's and keeps the
-      # strictest carrier. `declared_return_rbs` carries `"untyped"` so the `[tighter, was: untyped]` print tag
-      # says a declaration existed.
+      # `true` and `false` widen to `bool` (#1891): a predicate's base `-> true` made every subclass override
+      # returning `false` a `def.override-return-widened`. A return that is only `nil` has no such widening — it is
+      # the shape of a template method a subclass fills in — so it is declined and the `untyped` stays. `nil` in a
+      # union (`T?`) and a computed `Float` are honest types and stay. An `untyped` that is only the inline reader's
+      # synthesis ({#synthesized_declaration?}) is no word of the author's and keeps the strictest carrier.
+      # `declared_return_rbs` carries `"untyped"` so the `[tighter, was: untyped]` print tag says a declaration
+      # existed.
       def declared_untyped_candidate(path, def_node, class_name, kind, inferred, method_def, rendered: nil)
         unless synthesized_declaration?(method_def)
+          return equivalent(path, def_node, class_name, kind, inferred, "untyped") if bare_nil?(inferred)
+
           widened = widen_value_literals(inferred)
           unless widened.equal?(inferred)
             # A `rendered` line was spelled from the unwidened type; there is nothing to rebuild it from.
@@ -1463,6 +1468,7 @@ module Rigor
       def widen_value_literals(type)
         case type
         when Type::Constant
+          return widen_boolean_literal if [true, false].include?(type.value)
           return type unless VALUE_LITERAL_CLASSES.any? { |klass| type.value.instance_of?(klass) }
 
           Type::Combinator.nominal_of(type.value.class.name)
@@ -1472,6 +1478,14 @@ module Rigor
         else
           type
         end
+      end
+
+      def widen_boolean_literal
+        Type::Combinator.union(Type::Combinator.constant_of(true), Type::Combinator.constant_of(false))
+      end
+
+      def bare_nil?(type)
+        type.is_a?(Type::Constant) && type.value.nil?
       end
 
       # A declaration only the inline reader's synthesis (a `virtual:` buffer) supplies — ADR-93 gives every `def` an
@@ -1607,11 +1621,13 @@ module Rigor
       end
 
       # `Type::Constant#erase_to_rbs` spells the values RBS writes as literal types (`true` / `false` /
-      # `nil`, an Integer, a Symbol, a String) as that literal and every other carrier as its value's class
-      # name. Asking which of the two branches it took keeps the list of literal-spellable classes from
-      # forking a second copy into this file.
+      # `nil`, an Integer, a Symbol, a String) as that literal and every other carrier as a nominal. Asking
+      # which of the two branches it took keeps the list of literal-spellable classes from forking a second
+      # copy into this file. A Range's nominal carries its element type (`Range[Integer]`, #1891), so it is
+      # excluded by class rather than by comparing the erasure with the class name: like a Float it is a
+      # nominal, not a pinned literal.
       def rbs_literal?(type)
-        type.is_a?(Type::Constant) && type.erase_to_rbs != type.value.class.name
+        type.is_a?(Type::Constant) && !type.value.is_a?(Range) && type.erase_to_rbs != type.value.class.name
       end
 
       # Heuristic added after the third-round self-dogfood: `FallbackTracer#size` body is `@events.size`, where

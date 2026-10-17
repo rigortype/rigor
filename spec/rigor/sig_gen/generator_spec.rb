@@ -1290,18 +1290,20 @@ RSpec.describe Rigor::SigGen::Generator do
       expect(method.rbs).to eq("def f: (Float num) -> [Float, String]")
     end
 
-    # Issue #1489. A VALUE literal the body proves is widened to its class over an authored `untyped`; `nil`,
-    # `true`, `false`, bool, `T?` and a computed `Float` are honest types and are proposed as the base did.
+    # Issue #1489. A VALUE literal the body proves is widened to its class over an authored `untyped`; bool, `T?`
+    # and a computed `Float` are honest types and are proposed as the base did. `true` and `false` widen to bool
+    # (#1891), so a subclass override returning the other one is not `def.override-return-widened`.
     {
       "an Integer literal" => ["(x)", "1", "Integer"],
       "a union of literals" => ["(x)", "rand(2) == 0 ? 1 : 2", "Integer"],
       "a String literal" => ["(x)", %("x"), "String"],
       "a Symbol literal" => ["(x)", ":k", "Symbol"],
       "a literal union with nil" => ["(x)", %(rand(2) == 0 ? "S" : nil), "(String | nil)"],
-      "true" => ["(x)", "true", "true"],
-      "false" => ["(x)", "false", "false"],
-      "nil" => ["(x)", "nil", "nil"],
+      "true" => ["(x)", "true", "(false | true)"],
+      "false" => ["(x)", "false", "(false | true)"],
+      "true or nil" => ["(x)", "rand(2) == 0 ? true : nil", "(false | nil | true)"],
       "a bool" => ["(x)", "x > 0", "(false | true)"],
+      "a Range literal" => ["(x)", "(1..10)", "Range[Integer]"],
       "an Integer or nil" => ["(x)", "rand(2) == 0 ? Integer(gets) : nil", "(Integer | nil)"],
       "a computed Float" => ["(x)", "5 / 2.0", "Float"]
     }.each do |label, (params, body, expected)|
@@ -1316,6 +1318,79 @@ RSpec.describe Rigor::SigGen::Generator do
         expect(method.declared_return_rbs).to eq("untyped")
         expect(method.rbs).to eq("def v: (Integer x) -> #{expected}")
       end
+    end
+
+    # Issue #1891. A return that is only `nil` is a template method's shape; no type wider than `nil` is one
+    # the body proves, so the authored `untyped` stays for the subclass overrides to fill in.
+    it "declines a bare nil return over a declared `-> untyped`" do
+      write_fixture("sig/box.rbs", "class Box\n  def v: (Integer x) -> untyped\nend\n")
+      path = write_fixture("lib/box.rb", "class Box\n  def v(x)\n    nil\n  end\nend\n")
+
+      gen = generator(paths: [path], signature_paths: [File.join(tmpdir, "sig")])
+      method = gen.run.find { |c| c.method_name == :v }
+
+      expect(method.classification).to eq(Rigor::SigGen::Classification::EQUIVALENT)
+      expect(method.declared_return_rbs).to eq("untyped")
+    end
+
+    # A Range erases to the nominal `Range[E]` (#1891), so a union of Range literals over a declared nominal is
+    # proposed as that nominal, as a union of Float literals is, rather than declined as a pinned literal.
+    it "proposes Range[Integer] for a union of Range literals over a declared `-> Object`" do
+      write_fixture("sig/box.rbs", "class Box\n  def g: () -> Object\nend\n")
+      path = write_fixture("lib/box.rb", "class Box\n  def g = rand(2) == 0 ? (1..2) : (3..4)\nend\n")
+
+      gen = generator(paths: [path], signature_paths: [File.join(tmpdir, "sig")])
+      method = gen.run.find { |c| c.method_name == :g }
+
+      expect(method.classification).to eq(Rigor::SigGen::Classification::TIGHTER_RETURN)
+      expect(method.rbs).to eq("def g: () -> Range[Integer]")
+    end
+
+    # The boundary of #1891: an `untyped` only the inline reader synthesizes is no word of the author's, so it keeps
+    # the strictest literal, while the same bodies under a `sig/`-authored `untyped` widen to bool and decline the
+    # bare nil. ADR-93 synthesizes a member for every `def` in an rbs-inline file: an unannotated one (`u`, `un`)
+    # reaches {#declared_untyped_candidate} through that virtual member, and a parameter-only `# @rbs x: Integer`
+    # one (`c`, `n`) is written as its inline declaration, a `new-method`.
+    it "keeps true and nil over a synthesized untyped and widens them over an authored one" do
+      require "rigor-rbs-inline"
+      Rigor::Plugin.register(Rigor::Plugin::RbsInline) unless Rigor::Plugin.registered_for("rbs-inline")
+
+      write_fixture("sig/authored.rbs",
+                    "class Authored\n  def c: (Integer x) -> untyped\n  def n: (Integer x) -> untyped\nend\n")
+      inline = write_fixture("lib/inline.rb", <<~RUBY)
+        class Inline
+          # @rbs x: Integer
+          def c(x) = true
+
+          # @rbs x: Integer
+          def n(x) = nil
+
+          def u = true
+          def un = nil
+        end
+      RUBY
+      authored = write_fixture("lib/authored.rb", "class Authored\n  def c(x) = true\n  def n(x) = nil\nend\n")
+
+      candidates = generator(paths: [inline, authored], signature_paths: [File.join(tmpdir, "sig")],
+                             plugins: [rbs_inline_plugin_entry]).run
+      row = ->(klass, name) { candidates.find { |c| c.class_name == klass && c.method_name == name } }
+
+      expect(row.call("Inline", :c).rbs).to eq("def c: (Integer x) -> true")
+      expect(row.call("Inline", :n).rbs).to eq("def n: (Integer x) -> nil")
+      expect(row.call("Inline", :u).rbs).to eq("def u: () -> true")
+      expect(row.call("Inline", :un).rbs).to eq("def un: () -> nil")
+      expect(row.call("Authored", :c).rbs).to eq("def c: (Integer x) -> (false | true)")
+      expect(row.call("Authored", :n).classification).to eq(Rigor::SigGen::Classification::EQUIVALENT)
+    end
+
+    # Guard: the #1891 widening and decline apply over an authored `untyped` only; this passes with them removed.
+    it "keeps the strictest carrier for true, false and nil when no `.rbs` declares the method" do
+      path = write_fixture("lib/box.rb", "class Box\n  def t = true\n  def n = nil\nend\n")
+
+      candidates = generator(paths: [path]).run
+
+      expect(candidates.find { |c| c.method_name == :t }.rbs).to eq("def t: () -> true")
+      expect(candidates.find { |c| c.method_name == :n }.rbs).to eq("def n: () -> nil")
     end
 
     it "still proposes a tuple and a record shape over a declared `-> untyped`, as the new-method path does" do

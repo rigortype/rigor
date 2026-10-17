@@ -1,0 +1,1 @@
+- **[engine]** A warm `--incremental` run after editing an rbs-inline source that a `rbs.coverage.definition-build-failed` failure names no longer drops the classes that still fail from that row, so it lists the same classes as a cold run. ([#2058](https://github.com/rigortype/rigor/pull/2058))

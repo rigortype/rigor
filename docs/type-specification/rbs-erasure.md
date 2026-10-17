@@ -9,6 +9,7 @@ This document defines the general erasure rules and the hash-shape erasure algor
 - Exact RBS types erase to themselves.
 - Refined types erase to their unrefined base.
 - Unsupported literal kinds erase to their nominal class.
+- A `Range` literal erases to `Range[E]`, `E` the union of its non-nil endpoints' classes (`1..10` to `Range[Integer]`, `1..2.5` to `Range[Integer | Float]`), or `Range[untyped]` when both endpoints are nil. A bare `Range` is not valid RBS, because `Range[out E]` takes a type argument ([#1891](https://github.com/rigortype/rigor/issues/1891)).
 - Integer ranges erase to `Integer`; Float ranges erase to `Float`.
 - A type argument Rigor carries on a class RBS declares without one erases away: `Enumerator::ArithmeticSequence[Integer]`, the sequence `1.step(10, 2)` returns, erases to `Enumerator::ArithmeticSequence` ([#1794](https://github.com/rigortype/rigor/issues/1794)). Only erasure drops it: diagnostic messages, `rigor type-of` and `rigor annotate` print the internal form, which is not valid RBS. Once `rigor sig-gen` has written the erased signature, a caller that reads it sees the RBS `Numeric` elements again; the element survives only where the engine infers the call itself.
 - Complement and difference refinements erase to their current domain type.

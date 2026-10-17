@@ -5,6 +5,7 @@ require "prism"
 require_relative "../../source/node_children"
 require_relative "../../inference/narrowing"
 require_relative "inferred_param_guard"
+require_relative "clause_coverage"
 
 module Rigor
   module Analysis
@@ -36,6 +37,10 @@ module Rigor
       # is code evidence that the subject can hold such an object (`io = STDOUT; case io when StringIO`), and Rigor's
       # reading of the subject's type is what the evidence contradicts. The body scope stays `Bot`, so no call on the
       # subject in it is checked. A subject that is a literal carrier (`x = 1; case x when String`) is still reported.
+      #
+      # Issue #1485 — the same holds for a `:prior_exhaustion` clause: on a subject that is not a literal carrier it is
+      # reported only when every class it names is at or below a class an earlier clause names ({ClauseCoverage}), so
+      # `io = STDOUT; case io when IO … when StringIO` is quiet and `when IO … when File` still reports.
       class UnreachableClauseCollector
         LOOP_OR_BLOCK_NODE_CLASSES = [
           Prism::WhileNode, Prism::UntilNode, Prism::ForNode, Prism::BlockNode
@@ -124,11 +129,13 @@ module Rigor
           return if entry_type.nil? || entry_type.is_a?(Type::Bot) || entry_type.is_a?(Type::Dynamic)
 
           keyword = node.is_a?(Prism::CaseMatchNode) ? "in" : "when"
+          coverage = ClauseCoverage.new(scope, entry_type)
           node.conditions.each do |clause|
             case clause
-            when Prism::WhenNode then collect_when(clause, subject.name)
-            when Prism::InNode then collect_in(clause, subject.name)
+            when Prism::WhenNode then collect_when(clause, subject.name, coverage)
+            when Prism::InNode then collect_in(clause, subject.name, coverage)
             end
+            coverage.record(clause)
           end
           collect_else(node.else_clause, subject.name, keyword)
         end
@@ -138,7 +145,7 @@ module Rigor
           scope&.local(subject_name)
         end
 
-        def collect_when(clause, subject_name)
+        def collect_when(clause, subject_name, coverage)
           return if clause.statements.nil? # empty body → no useful location
           return unless all_constant_conditions?(clause)
 
@@ -149,6 +156,7 @@ module Rigor
           kind = when_clause_kind(clause, subject_name)
           return if kind == :disjoint &&
                     disjoint_nominal_subject?(@scope_index[clause.conditions.first], subject_name, clause.conditions)
+          return if kind == :prior_exhaustion && !coverage.proven?(clause)
 
           @results << Result.new(
             clause: clause, body: clause.statements, subject_name: subject_name,
@@ -187,7 +195,7 @@ module Rigor
         # (prior-exhaustion — true for ANY pattern downstream of a covering set). Non-bare patterns are not
         # narrowed, so their body is `bot` ONLY under prior-exhaustion; they never produce a spurious
         # `:disjoint`.
-        def collect_in(clause, subject_name)
+        def collect_in(clause, subject_name, coverage)
           return if clause.statements.nil?
 
           scope = @scope_index[clause]
@@ -196,6 +204,7 @@ module Rigor
 
           kind = in_clause_kind(clause, subject_name)
           return if kind == :disjoint && disjoint_nominal_pattern?(clause, subject_name)
+          return if kind == :prior_exhaustion && !coverage.proven?(clause)
 
           @results << Result.new(
             clause: clause, body: clause.statements, subject_name: subject_name,

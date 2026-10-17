@@ -317,30 +317,34 @@ Receiver matching is conservative:
   MVP; see slicing).
 - 2026-10-18 (#1389) — a receiver typed `T | nil` whose
   one non-nil member is a `Type::Nominal` or
-  `Type::Singleton` is matched as that member. A call that
-  passes arguments to the target cannot have dispatched on
-  `nil` (`nil.bar(1)` raises `NoMethodError`, `nil&.bar(1)`
-  skips the call), and a Minitest `setup` ivar read in a
-  test method is exactly this shape. Two non-nil members
-  (`Foo | Bar | nil`) or a `Dynamic` member stay
-  unmatched. The receiver's inferred type is unchanged
+  `Type::Singleton` is matched as that member, for a
+  method `nil` does not answer. Such a call cannot have
+  dispatched on `nil` (`nil.bar(1)` raises
+  `NoMethodError`), and a Minitest `setup` ivar read in a
+  test method is exactly this shape. A plain `.` call of a
+  method `NilClass`'s RBS declares (`==`, `respond_to?`,
+  `is_a?`) may have run on `nil`, so it stays unmatched; a
+  `&.` call of one is matched, since `&.` skips `nil`. Two
+  non-nil members (`Foo | Bar | nil`) or a `Dynamic` member
+  stay unmatched. The receiver's inferred type is unchanged
   outside the collector.
 
 Observations from RSpec-style spec files use the same
-mechanism. There is no RSpec-specific recogniser in the
-MVP — the generator only sees them as ordinary call
-sites. Future slices may add RSpec-aware recognisers
-(e.g. recognising `subject(:foo) { … }` as a definition
-or `let(:bar) { … }` as a binding), but the MVP keeps
-that surface inside `rigor-rspec` and out of the core
-generator.
+mechanism. The slice-1 MVP had no RSpec-specific
+recogniser; slice 5 added one to the generator, which
+types `subject` / `let` bindings and
+`described_class.new` receivers.
 
 2026-10-18 (#1389): slice 5's recogniser also binds an
-ivar written by a top-level statement of a `before` block
-to the written value's type, and uses that binding for an
-ivar-read receiver the scope types as `Dynamic` (an ivar
-read inside an `it` block). The scope's own type wins
-whenever it is not `Dynamic`.
+ivar written by a top-level statement of a receiver-less
+`before` block to the written value's type, and uses that
+binding for an ivar-read receiver the scope types as
+`Dynamic` (an ivar read inside an `it` block). The
+binding reaches only reads inside the `before`'s enclosing
+example-group block, and not through a class or module
+body. When the `before`s on that path write the name with
+more than one type, the read is not matched. The scope's
+own type wins whenever it is not `Dynamic`.
 
 ## Boundary with ADR-1 (RBS round-trip)
 

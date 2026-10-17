@@ -757,19 +757,26 @@ The recogniser handles `RSpec.describe Foo`, bare
 `describe Foo` (no `RSpec.` receiver), `subject { … }`,
 `subject(:name) { … }`, `let(:name) { … }`, `let!(:name)`,
 an ivar assigned by a top-level statement of a `before`
-block, and `described_class.new(...)`. Same-name bindings
-across nested scopes are last-wins; the recogniser does not
-re-implement RSpec's full scope rules — the typical
-one-spec-file shape is the target.
+block, and `described_class.new(...)`. Same-name `subject` /
+`let` bindings across nested scopes are last-wins; the
+recogniser does not re-implement RSpec's full scope rules —
+the typical one-spec-file shape is the target. A `before`
+ivar is scoped: it types reads only inside the `describe` /
+`context` block that holds the `before`, and a read that two
+enclosing `before`s assign different classes is not
+observed.
 
 A Minitest suite under `test/` is observed too, with no
 recogniser of its own: a call whose receiver types to one
 class counts. A receiver assigned in `setup` reads as
 `Foo | nil` inside a `test_*` method, since `setup` is not
 `initialize`; a receiver of that shape — one class or class
-object plus `nil` — is observed as that class, because a
-call that dispatches with arguments cannot have been made
-on `nil`. `@foo&.bar(1)` counts the same way. A receiver
+object plus `nil` — is observed as that class when `nil`
+does not answer the method, because such a call cannot
+have been made on `nil`. A call of a method `nil` does
+answer (`==`, `respond_to?`, `is_a?`) is not observed, as
+it may have run on `nil`; with `&.` it is, since `&.` skips
+`nil`. `@foo&.bar(1)` counts the same way. A receiver
 that could be one of two classes (`Foo | Bar | nil`), or
 `untyped | nil`, is still not observed.
 

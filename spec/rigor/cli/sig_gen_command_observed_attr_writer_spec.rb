@@ -128,6 +128,7 @@ RSpec.describe Rigor::CLI::SigGenCommand do
     expect(section(observed_print, "SelfBox")).to include("def count: () -> 0")
   end
 
+  # Guard: without observations nothing reaches the observed-ivar map, before or after #1410.
   it "skips every attr method under --params=untyped" do
     out = sig_gen("--print")
 

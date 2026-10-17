@@ -99,38 +99,38 @@ module Rigor
           !module_subclass?(name, scope)
       end
 
-      # Whether `name` may be a subclass of `Module` (`class Meta < Module`), whose instance is a module object:
-      # the environment orders it `:subclass` or `:equal` to `Module`, or its source superclass chain
-      # (`Scope#superclass_of`) reaches `Module` or `Class`, or one the environment so orders. A superclass written
-      # relative to the subclass's namespace (`class Meta < Base` in `module NS`) is resolved through
-      # `Scope#ancestor_name_candidates`; one that names neither a project class nor a class the environment knows
-      # may be anything, `Module` included, so it answers true. A class with no recorded superclass ends the walk.
+      # Whether `name` may be a subclass of `Module` (`class Meta < Module`), whose instance is a module object.
+      # Read off the class's instance `Scope::ResolutionChain`, which resolves a superclass written relative to the
+      # subclass's namespace (`class Meta < Base` in `module NS`) as Ruby does: true when an entry is one the
+      # environment orders `:subclass` or `:equal` to `Module` (`Module` itself, `Class`, a project class whose
+      # signature declares it, an external superclass), when an external superclass names no class the
+      # environment knows (it may be `Module`), or when the chain is truncated or unsettled.
       def module_subclass?(name, scope)
+        chain = Scope::ResolutionChain.for(scope, name, :instance, :methods)
+        return true if chain.truncated? || chain.unsettled?
+
         environment = scope.environment
-        seen = Set.new
-        while name && seen.add?(name)
-          return true if %w[Module Class].include?(name) ||
-                         %i[subclass equal].include?(environment.class_ordering(name, "Module"))
-
-          raw = scope.superclass_of(name)
-          return false if raw.nil?
-
-          name = resolved_superclass(name, raw, scope)
-          return true if name.nil?
-        end
-        false
+        chain.search(scope) { |entry| module_entry?(entry, environment) || nil } ? true : false
       end
       private_class_method :module_subclass?
 
-      # The first of `raw`'s candidate names, as written in `subclass`, that is a project class
-      # (`Scope#known_user_class?`) or a class the environment knows; nil when none is.
-      def resolved_superclass(subclass, raw, scope)
-        environment = scope.environment
-        scope.ancestor_name_candidates(subclass, raw).map { |c| c.to_s.delete_prefix("::") }.find do |candidate|
-          scope.known_user_class?(candidate) || environment.class_known?(candidate)
-        end
+      # Whether a chain entry makes the class a possible `Module` subclass: a project entry {.module_like?}, or an
+      # external superclass that names no class the environment knows, or one {.module_like?}. An external mixin
+      # (`include Enumerable`) does not.
+      def module_entry?(entry, environment)
+        return module_like?(entry.name.to_s, environment) unless entry.external?
+        return false unless entry.superclass_edge
+
+        known = entry.candidates.map { |candidate| candidate.to_s.delete_prefix("::") }
+                     .select { |candidate| environment.class_known?(candidate) }
+        known.empty? || known.any? { |candidate| module_like?(candidate, environment) }
       end
-      private_class_method :resolved_superclass
+      private_class_method :module_entry?
+
+      def module_like?(name, environment)
+        %i[subclass equal].include?(environment.class_ordering(name, "Module"))
+      end
+      private_class_method :module_like?
       private_class_method :plain_class?
 
       # Issue #1402 — `scope` past a statement call whose receiver or arguments run code the program does not

@@ -53,10 +53,9 @@ RSpec.describe "Declaration-fact witness" do
         .to eq([])
     end
 
-    # Flip this when #1569 is fixed: the instance copy is recorded private, and the list is empty.
-    it "pins the module_function visibility the tables get wrong today" do
-      expect(violations("control_module_function", relations: %i[visibilities]))
-        .to eq(["visibilities: Rigor records Helpers#fmt as public; Ruby makes it private"])
+    # #1569 — the instance copy of a module function is recorded private, as Ruby makes it.
+    it "agrees with Ruby on the module_function visibility (#1569)" do
+      expect(violations("control_module_function", relations: %i[visibilities])).to eq([])
     end
 
     def tables_for(relation, tables)
@@ -128,8 +127,8 @@ RSpec.describe "Declaration-fact witness" do
     end
   end
 
-  # #1968 — a bare visibility call ends the module_function mode. The `visibilities` relation is excluded: Rigor records
-  # a module function's instance copy as public where Ruby makes it private (#1569). The singleton tables still hold
+  # #1968 — a bare visibility call ends the module_function mode. A module function's instance copy is recorded
+  # private (#1569), and a def after the reset with the visibility the reset names. The singleton tables still hold
   # every instance def of these modules through the self-extend edge a bare `module_function` records (#526), which
   # the witness reads as `possible`; the deferred ranges, which do not go through that edge, say which defs are
   # module functions.
@@ -138,6 +137,10 @@ RSpec.describe "Declaration-fact witness" do
     it "agrees with Ruby across every relation but visibilities" do
       expect(violations("module_function_reset", relations: DeclarationWitness::RELATIONS - %i[visibilities]))
         .to eq([])
+    end
+
+    it "agrees with Ruby on the visibilities, the instance copies before each reset private (#1569)" do
+      expect(violations("module_function_reset", relations: %i[visibilities])).to eq([])
     end
 
     # Ruby 4.0.5: `ResetUnreached.f` is a module function, because the `public` under the `if` does not run. Whether

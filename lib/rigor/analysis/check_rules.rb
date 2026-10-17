@@ -4001,6 +4001,9 @@ module Rigor
           # prove a reduction, stay silent.
           return nil if parent_visibility.nil?
           return nil unless visibility_reduced?(parent_visibility, override_visibility)
+          # Issue #1569 — a module function's instance copy is private because `module_function` made it so; the
+          # author's intent is the public singleton copy, so that reduction is not reported.
+          return nil if scope.module_function_def?(class_name, def_node)
 
           build_override_visibility_diagnostic(
             path, def_node, parent_class, parent_visibility, override_visibility

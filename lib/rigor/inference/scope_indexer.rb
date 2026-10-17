@@ -7807,6 +7807,8 @@ module Rigor
       # - **Wrap-around form** (#1911, #1819, #1633): `private def foo` and `private attr_reader :foo` record the
       #   members with the call's visibility and leave the default alone.
       #
+      # A `module_function` call takes each form as `private` does (#1569): Ruby makes the instance copy private.
+      #
       # Top-level (no surrounding class) defs do not contribute — Ruby's top-level visibility nuances (private at
       # top-level marks the method on `Object`) are out of scope for v0.1.2.
       def build_discovered_method_visibilities(root)
@@ -7823,8 +7825,8 @@ module Rigor
       end
 
       # The bare calls that set the running default visibility of the body they run in: the modifiers and
-      # `module_function`, which {#walk_method_visibilities} does not track as a value (#1569) but which moves the
-      # default all the same.
+      # `module_function`, which {#walk_method_visibilities} applies as `private` on the instance side
+      # ({ModuleFunctionState.instance_visibility}, #1569).
       VISIBILITY_TOGGLES = (VISIBILITY_MODIFIERS + %i[module_function]).freeze
 
       # The `{class => {name => visibility}}` accumulator of {#walk_method_visibilities}, which also carries the
@@ -8005,13 +8007,16 @@ module Rigor
           end
           if (parts = visibility_call_parts(node))
             accumulator.toggles += 1 if visibility_toggle_arguments?(parts.last)
+            # A `module_function` call is applied as a `private` one (#1569): it makes the instance copy private.
+            visibility = parts.first
+            visibility = ModuleFunctionState.instance_visibility unless VISIBILITY_MODIFIERS.include?(visibility)
             # The visibility table is instance-side only — `private :x` inside `class <<`
             # (or a receiver-eval body that re-evaluates a singleton self) marks the
             # SINGLETON method, which this table cannot express. The `owner_prefix` check is a
             # guard: an ownerless body (the top level, an anonymous factory block) records nothing,
             # and its calls walk as any other call.
-            if !in_singleton_class && !owner_prefix.empty? && VISIBILITY_MODIFIERS.include?(parts.first)
-              return apply_visibility_call(node, *parts, owner_prefix, current_visibility, accumulator,
+            if !in_singleton_class && !owner_prefix.empty?
+              return apply_visibility_call(node, visibility, parts.last, owner_prefix, current_visibility, accumulator,
                                            defs_singleton: defs_singleton) do |argument|
                 walk_method_visibilities(argument, qualified_prefix, in_singleton_class, current_visibility,
                                          accumulator, def_owner_prefix, singleton_cref: singleton_cref,

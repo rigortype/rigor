@@ -480,6 +480,23 @@ RSpec.describe Rigor::SigGen::Generator do
       expect(generator(paths: [path]).run.filter_map(&:rbs)).to include("def self?.a: () -> 1")
     end
 
+    # #1569 — Ruby 4.0.5: the named forms make `a` and `c` private instance methods (and public singleton ones).
+    # The visibility table records them private, so the default run emits no `def a` / `def c`, which declared
+    # them public; `--include-private` still emits them, and the bare toggle's `def self?.b` is unchanged.
+    it "drops the private instance copy of a named module function by default, and keeps the bare toggle's" do
+      src = "module MF\n  def a = 1\n  module_function :a\n  module_function def c = 3\nend\n" \
+            "module MB\n  module_function\n  def b = 2\nend\n"
+      path = write_fixture("lib/x.rb", src)
+      config = Rigor::Configuration.new(Rigor::Configuration::DEFAULTS.merge("paths" => [path]))
+
+      default = described_class.new(configuration: config, paths: [path]).run.filter_map(&:rbs)
+      with_private = described_class.new(configuration: config, paths: [path], include_private: true)
+                                    .run.filter_map(&:rbs)
+
+      expect(default).to eq(["def self?.b: () -> 2"])
+      expect(with_private).to eq(["def a: () -> 1", "def c: () -> 3", "def self?.b: () -> 2"])
+    end
+
     # #1968 — Ruby 4.0.5: `N.b` is 1 and `b` a private instance method, which is what `def self?.b` declares. A
     # `private` before the toggle used to drop the method.
     it "emits a module function whose region opens after a bare `private`" do

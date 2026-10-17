@@ -121,6 +121,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     match_rebinding_closure?()
     method_chain_narrowing(req:receiver_kind,req:receiver_name,req:method_name)
     method_chain_narrowings()
+    module_function_def?(req:class_name,req:def_node)
     opaque_block_self()
     opaque_block_self?()
     optimistic_ivar(req:name)

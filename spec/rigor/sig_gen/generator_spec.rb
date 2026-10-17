@@ -1333,6 +1333,19 @@ RSpec.describe Rigor::SigGen::Generator do
       expect(method.declared_return_rbs).to eq("untyped")
     end
 
+    # A Range erases to the nominal `Range[E]` (#1891), so a union of Range literals over a declared nominal is
+    # proposed as that nominal, as a union of Float literals is, rather than declined as a pinned literal.
+    it "proposes Range[Integer] for a union of Range literals over a declared `-> Object`" do
+      write_fixture("sig/box.rbs", "class Box\n  def g: () -> Object\nend\n")
+      path = write_fixture("lib/box.rb", "class Box\n  def g = rand(2) == 0 ? (1..2) : (3..4)\nend\n")
+
+      gen = generator(paths: [path], signature_paths: [File.join(tmpdir, "sig")])
+      method = gen.run.find { |c| c.method_name == :g }
+
+      expect(method.classification).to eq(Rigor::SigGen::Classification::TIGHTER_RETURN)
+      expect(method.rbs).to eq("def g: () -> Range[Integer]")
+    end
+
     # The boundary of #1891: an `untyped` only the inline reader synthesizes is no word of the author's, so it keeps
     # the strictest literal, while the same bodies under a `sig/`-authored `untyped` widen to bool and decline the
     # bare nil. ADR-93 synthesizes a member for every `def` in an rbs-inline file: an unannotated one (`u`, `un`)

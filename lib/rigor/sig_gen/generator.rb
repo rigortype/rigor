@@ -1621,13 +1621,13 @@ module Rigor
       end
 
       # `Type::Constant#erase_to_rbs` spells the values RBS writes as literal types (`true` / `false` /
-      # `nil`, an Integer, a Symbol, a String) as that literal and most other carriers as their value's class
-      # name. Asking which of the two branches it took keeps the list of literal-spellable classes from
-      # forking a second copy into this file. A Range is the exception: it erases to `Range[E]` (#1891), which
-      # differs from the class name, so it counts as a literal here and a Range body is not proposed over a
-      # declared nominal.
+      # `nil`, an Integer, a Symbol, a String) as that literal and every other carrier as a nominal. Asking
+      # which of the two branches it took keeps the list of literal-spellable classes from forking a second
+      # copy into this file. A Range's nominal carries its element type (`Range[Integer]`, #1891), so it is
+      # excluded by class rather than by comparing the erasure with the class name: like a Float it is a
+      # nominal, not a pinned literal.
       def rbs_literal?(type)
-        type.is_a?(Type::Constant) && type.erase_to_rbs != type.value.class.name
+        type.is_a?(Type::Constant) && !type.value.is_a?(Range) && type.erase_to_rbs != type.value.class.name
       end
 
       # Heuristic added after the third-round self-dogfood: `FallbackTracer#size` body is `@events.size`, where

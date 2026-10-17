@@ -2769,7 +2769,7 @@ module Rigor
       def every_project_definer(class_name, method_name)
         chain = Scope::ResolutionChain.for(scope, class_name.to_s, :instance, :methods)
         chain.record(scope)
-        return nil if chain.truncated? || chain.opaque_tail?(scope)
+        return nil if bot_exception_blind?(chain)
 
         defs = []
         declined = false
@@ -2786,6 +2786,10 @@ module Rigor
         end
         declined || defs.empty? ? nil : defs.freeze
       end
+
+      # A chain whose definers the exception cannot all see: one cut by the budget, or one whose last class has a
+      # superclass the tables cannot follow (#1624).
+      def bot_exception_blind?(chain) = chain.truncated? || chain.opaque_tail?(scope)
 
       def note_missing_class(segment)
         Analysis::DependencyRecorder.read_missing(:class, segment) if Analysis::DependencyRecorder.active?

@@ -169,23 +169,21 @@ module Rigor
           project_tail_defines?(scope, chain.side, method_name)
       end
 
-      # The implicit tail's classes, as `[instance-side names, singleton-side names]` per chain side: a class object
-      # reaches the instance methods of `Class`, `Module`, `Object`, `Kernel` and `BasicObject` and the singleton
-      # methods of `Object` and `BasicObject`.
-      IMPLICIT_TAIL = {
-        instance: [%w[Object Kernel BasicObject].freeze, [].freeze].freeze,
-        singleton: [%w[Class Module Object Kernel BasicObject].freeze, %w[Object BasicObject].freeze].freeze
-      }.freeze
-      private_constant :IMPLICIT_TAIL
+      # The implicit tail's classes and the side each is read on, per chain side: a class object reaches the instance
+      # methods of `Class`, `Module`, `Object`, `Kernel` and `BasicObject` and the singleton methods of `Object` and
+      # `BasicObject`.
+      CLASS_OBJECT_TAIL = %w[Class Module Object Kernel BasicObject].product([:instance]) +
+                          %w[Object BasicObject].product([:singleton])
+      IMPLICIT_TAIL = Ractor.make_shareable({ instance: %w[Object Kernel BasicObject].product([:instance]),
+                                              singleton: CLASS_OBJECT_TAIL })
+      private_constant :CLASS_OBJECT_TAIL, :IMPLICIT_TAIL
 
       # Whether a project reopening of a tail class records the name: a `def`, whose read files the method edge, or
       # an `attr_*` / `define_method` the existence table holds.
       def project_tail_defines?(scope, side, method_name)
-        instance, singleton = IMPLICIT_TAIL.fetch(side)
-        instance.any? do |name|
-          scope.user_def_for(name, method_name) || scope.discovered_method?(name, method_name, :instance)
-        end || singleton.any? do |name|
-          scope.singleton_def_for(name, method_name) || scope.discovered_method?(name, method_name, :singleton)
+        IMPLICIT_TAIL.fetch(side).any? do |name, kind|
+          (kind == :singleton ? scope.singleton_def_for(name, method_name) : scope.user_def_for(name, method_name)) ||
+            scope.discovered_method?(name, method_name, kind)
         end
       end
 

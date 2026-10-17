@@ -446,20 +446,20 @@ module Rigor
       # superclass table records as `nil`, or a class a constant write creates (`K = Class.new(Base)`,
       # `K = Struct.new(:a)`, `K = Data.define(:a)`), which has no superclass entry. The constructor's methods
       # (`members`, the member readers, a block's `def`s) and everything it inherits live in that unlisted part.
-      # The tables are read raw: a read that reaches the tail has passed the last class and filed its class edge.
+      # Every fact read here is filed under the last class's class edge, which a read reaching the tail has passed.
       def opaque_tail?(scope)
         @memo.fetch(:opaque_tail) do
           last = level_count.positive? ? @level_classes[level_count - 1] : nil
-          @memo[:opaque_tail] = !last.nil? && ResolutionChain.opaque_superclass?(scope.discovery, last)
+          @memo[:opaque_tail] = !last.nil? && ResolutionChain.opaque_superclass?(scope, last)
         end
       end
 
-      def self.opaque_superclass?(discovery, name)
-        superclasses = discovery.discovered_superclasses
+      def self.opaque_superclass?(scope, name)
+        superclasses = scope.discovery.discovered_superclasses
         return superclasses[name].nil? if superclasses.key?(name)
 
-        discovery.discovered_parameter_envelopes[name]&.key?(DiscoveryIndex::ENVELOPE_META_SUPERCLASS_MARK) ||
-          discovery.struct_member_layouts.key?(name) || discovery.data_member_layouts.key?(name)
+        scope.discovery.discovered_parameter_envelopes[name]&.key?(DiscoveryIndex::ENVELOPE_META_SUPERCLASS_MARK) ||
+          !(scope.struct_member_layout(name) || scope.data_member_layout(name)).nil?
       end
 
       # Each complete level up to the first superclass the project does not declare, as `[class_name,

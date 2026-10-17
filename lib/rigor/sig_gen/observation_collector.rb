@@ -100,8 +100,9 @@ module Rigor
         base_scope = base_scope.with_discovery(base_scope.discovery.with(discovered_classes: discovered_classes))
         scope_index = Inference::ScopeIndexer.index(parse_result.value, default_scope: base_scope)
         bindings = collect_rspec_bindings(parse_result.value, scope_index)
+        @before_ivars = collect_before_ivars(parse_result.value, scope_index)
 
-        walk_calls(parse_result.value, scope_index, bindings, observations)
+        walk_calls(parse_result.value, scope_index, bindings, observations, [])
       end
 
       # Pre-walks `@source_paths` to collect every qualified class / module declaration. The result seeds the
@@ -153,22 +154,33 @@ module Rigor
         end
       end
 
-      def walk_calls(node, scope_index, bindings, observations)
+      # `blocks` is the chain of enclosing `BlockNode`s, innermost last, cut at every class / module body — the
+      # example groups a `before` ivar can reach the call from ({#before_ivar_type}).
+      def walk_calls(node, scope_index, bindings, observations, blocks)
         return unless node.is_a?(Prism::Node)
 
-        record_call(node, scope_index, bindings, observations) if node.is_a?(Prism::CallNode)
-        node.rigor_each_child { |child| walk_calls(child, scope_index, bindings, observations) }
+        record_call(node, scope_index, bindings, observations, blocks) if node.is_a?(Prism::CallNode)
+        inner = enclosing_blocks(node, blocks)
+        node.rigor_each_child { |child| walk_calls(child, scope_index, bindings, observations, inner) }
       end
 
-      def record_call(call_node, scope_index, bindings, observations)
+      def enclosing_blocks(node, blocks)
+        case node
+        when Prism::BlockNode then [*blocks, node]
+        when Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode then []
+        else blocks
+        end
+      end
+
+      def record_call(call_node, scope_index, bindings, observations, blocks)
         receiver = call_node.receiver
         return if receiver.nil?
 
         scope = scope_index[call_node] || scope_index[receiver]
         return if scope.nil?
 
-        receiver_type = resolve_receiver_type(receiver, scope, bindings)
-        key = observation_key(call_node, receiver_type)
+        receiver_type = resolve_receiver_type(receiver, scope, bindings, blocks)
+        key = observation_key(call_node, observed_receiver(receiver_type, call_node, scope))
         return if key.nil?
 
         observation = collect_args(call_node, scope)
@@ -182,7 +194,6 @@ module Rigor
       # a call to `MethodCatalog#initialize(path: ...)`. Route the observation under `[class_name, :initialize]`
       # so the initialize-stub renderer can consult it.
       def observation_key(call_node, receiver_type)
-        receiver_type = observed_receiver(receiver_type)
         if receiver_type.is_a?(Type::Singleton) && call_node.name == :new
           [receiver_type.class_name, :initialize]
         elsif receiver_type.is_a?(Type::Nominal)
@@ -192,15 +203,28 @@ module Rigor
 
       # Issue #1389 — a receiver typed `T | nil` whose one non-nil member is a `Nominal` or `Singleton` is observed as
       # that member. A Minitest `setup` ivar read in a test method types as `Foo?` (setup is not `initialize`), and a
-      # call that reaches `Foo#bar` with arguments can only have dispatched on the `Foo` part. The sole member still
+      # call of a method `nil` does not answer can only have reached `Foo#bar` with its arguments: on `nil` it raises
+      # `NoMethodError`, and `&.` skips the call. A method `NilClass`'s RBS declares (`==`, `respond_to?`, `is_a?`)
+      # may have run on `nil` instead, so a plain `.` call of one keeps the union unobserved. The sole member still
       # has to pass {#observation_key}'s `Nominal` / `Singleton` checks, so `untyped | nil` stays unobserved, and a
       # union with two non-nil members (`Foo | Bar | nil`) passes through unchanged. Observation only: the
       # receiver's inferred type elsewhere is untouched.
-      def observed_receiver(receiver_type)
+      def observed_receiver(receiver_type, call_node, scope)
         return receiver_type unless receiver_type.is_a?(Type::Union)
 
         non_nil = receiver_type.members.reject { |member| nil_type?(member) }
-        non_nil.size == 1 ? non_nil.first : receiver_type
+        return receiver_type unless non_nil.size == 1
+        return receiver_type if !call_node.safe_navigation? && nil_answers?(call_node.name, scope)
+
+        non_nil.first
+      end
+
+      # Whether `nil` may answer `method_name`: `NilClass`'s RBS declares it, or that RBS is not available to ask.
+      def nil_answers?(method_name, scope)
+        loader = scope.environment.rbs_loader
+        return true if loader.nil? || loader.instance_definition("NilClass").nil?
+
+        !loader.instance_method(class_name: "NilClass", method_name: method_name).nil?
       end
 
       def nil_type?(type)
@@ -216,22 +240,23 @@ module Rigor
       # - `described_class.new(...)` chain — when the surrounding `describe Foo do … end` resolved `Foo`,
       #   return `Type::Nominal[Foo]`.
       # - Anything else — pass through to `scope.type_of`, matching slice-3 behaviour.
-      def resolve_receiver_type(receiver, scope, bindings)
+      def resolve_receiver_type(receiver, scope, bindings, blocks)
         return resolve_described_class_new(bindings) if described_class_new?(receiver)
         return bindings[receiver.name] if bound_call?(receiver, bindings)
 
         type = safe_type_of(scope, receiver)
-        return bindings[receiver.name] if before_ivar_fallback?(receiver, type, bindings)
+        return type unless receiver.is_a?(Prism::InstanceVariableReadNode) && (type.nil? || type.is_a?(Type::Dynamic))
 
-        type
+        before_ivar_type(receiver.name, blocks) || type
       end
 
       # Issue #1389 — an ivar read inside an `it` block types as `Dynamic` (the block's ivars are not a class's), so
-      # a `before { @foo = Foo.new }` write stands in for it. The scope's own type wins whenever it says anything.
-      def before_ivar_fallback?(receiver, type, bindings)
-        receiver.is_a?(Prism::InstanceVariableReadNode) &&
-          bindings.key?(receiver.name) &&
-          (type.nil? || type.is_a?(Type::Dynamic))
+      # a `before { @foo = Foo.new }` write stands in for it. Only a `before` whose example-group block encloses the
+      # read counts — a sibling `describe`, an un-included `shared_context` or a class body never reaches it — and
+      # when those `before`s write the name with more than one type, no type is answered.
+      def before_ivar_type(name, blocks)
+        types = blocks.flat_map { |block| @before_ivars.dig(block, name) || [] }.uniq
+        types.size == 1 ? types.first : nil
       end
 
       def bound_call?(receiver, bindings)
@@ -283,7 +308,6 @@ module Rigor
 
         recognise_describe(node, bindings)
         recognise_subject_or_let(node, bindings, scope_index)
-        recognise_before_ivars(node, bindings, scope_index)
 
         node.rigor_each_child { |child| walk_rspec_bindings(child, bindings, scope_index) }
       end
@@ -317,10 +341,25 @@ module Rigor
         bindings[name] = body_type if body_type
       end
 
-      # `before { @foo = Foo.new }` / `before(:each) do … end`: binds each ivar the block's top-level statements
-      # write to the written value's type, keyed by the ivar name (`:@foo`, which no `let` name can collide with).
-      # Last-wins like `let`.
-      def recognise_before_ivars(node, bindings, scope_index)
+      # `before { @foo = Foo.new }` / `before(:each) do … end` inside an example-group block: records each ivar the
+      # `before` block's top-level statements write, with the written value's type, under that enclosing group
+      # block — `{ BlockNode => { :@foo => [Type] } }`, keyed by node identity. A receiver-less `before` outside
+      # any block, and `config.before`, record nothing.
+      def collect_before_ivars(root, scope_index)
+        index = {}.compare_by_identity
+        walk_before_ivars(root, nil, index, scope_index)
+        index
+      end
+
+      def walk_before_ivars(node, group, index, scope_index)
+        return unless node.is_a?(Prism::Node)
+
+        record_before_ivars(node, group, index, scope_index) if group
+        inner = enclosing_blocks(node, [group].compact).last
+        node.rigor_each_child { |child| walk_before_ivars(child, inner, index, scope_index) }
+      end
+
+      def record_before_ivars(node, group, index, scope_index)
         return unless node.is_a?(Prism::CallNode) && node.name == :before && node.receiver.nil?
 
         body = block_body_node(node.block)
@@ -330,7 +369,7 @@ module Rigor
 
           scope = scope_index[statement.value] || scope_index[statement]
           type = scope && safe_type_of(scope, statement.value)
-          bindings[statement.name] = type if type
+          ((index[group] ||= {})[statement.name] ||= []) << type if type
         end
       end
 

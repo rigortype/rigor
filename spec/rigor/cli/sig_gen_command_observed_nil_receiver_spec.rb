@@ -30,6 +30,10 @@ RSpec.describe Rigor::CLI::SigGenCommand do
     out.string
   end
 
+  def section(out, class_name)
+    out[/^class #{class_name}\n.*?^end/m].to_s
+  end
+
   before do
     write("lib/foo.rb", <<~RUBY)
       class Foo
@@ -49,8 +53,35 @@ RSpec.describe Rigor::CLI::SigGenCommand do
       class Factory
         def self.m = nil
       end
+      class Account
+        def deposit(x) = 10
+      end
+      class Label
+        def deposit(x) = 20
+      end
+      class Repo
+        def ==(other) = false
+        def respond_to?(name, all = false) = true
+        def is_a?(klass) = true
+        def save(x) = 30
+      end
+      class Widget
+        def spin(x) = 40
+      end
+      class Finder
+        def self.repo(id) = nil
+        def self.widget = nil
+      end
     RUBY
-    write("sig/factory.rbs", "class Factory\n  def self.m: () -> M\nend\n")
+    write("sig/factory.rbs", <<~RBS)
+      class Factory
+        def self.m: () -> M
+      end
+      class Finder
+        def self.repo: (Integer) -> Repo?
+        def self.widget: () -> (Widget | NilClass)
+      end
+    RBS
   end
 
   it "observes a Minitest setup ivar receiver without the rigor-minitest plugin" do
@@ -76,17 +107,119 @@ RSpec.describe Rigor::CLI::SigGenCommand do
   end
 
   it "keeps the scope's own receiver type over a same-name before-block ivar" do
-    write("test/foo_test.rb", <<~RUBY)
-      before { @foo = Bar.new }
-      class FooTest
-        def setup = @foo = Foo.new
-        def test_bar = @foo.bar(1)
+    write("test/foo_spec.rb", <<~RUBY)
+      RSpec.describe Foo do
+        before { @foo = Bar.new }
+        it do
+          @foo = Foo.new
+          @foo.bar(1)
+        end
       end
     RUBY
 
     out = run_observed
     expect(out[/^class Foo\n.*?^end/m]).to include("def bar: (1) -> 1")
     expect(out[/^class Bar\n.*?^end/m]).to include("def bar: (untyped) -> 1")
+  end
+
+  it "credits each nested context's before ivar to its own class" do
+    write("test/target_spec.rb", <<~RUBY)
+      RSpec.describe "target" do
+        context "account" do
+          before { @target = Account.new }
+          it { @target.deposit(10) }
+        end
+        context "label" do
+          before { @target = Label.new }
+          it { @target.deposit("a") }
+        end
+      end
+    RUBY
+
+    out = run_observed
+    expect(section(out, "Account")).to include("def deposit: (10) -> 10")
+    expect(section(out, "Label")).to include('def deposit: ("a") -> 20')
+  end
+
+  it "does not bind a before ivar across sibling describes" do
+    write("test/target_spec.rb", <<~RUBY)
+      RSpec.describe "one" do
+        before { @target = Account.new }
+      end
+      RSpec.describe "two" do
+        it { @target.deposit(10) }
+      end
+    RUBY
+
+    expect(section(run_observed, "Account")).to include("def deposit: (untyped) -> 10")
+  end
+
+  it "does not bind a before ivar into a helper class body in the example group" do
+    write("test/target_spec.rb", <<~RUBY)
+      RSpec.describe "one" do
+        before { @target = Account.new }
+        class Helper
+          def run = @target.deposit(10)
+        end
+      end
+    RUBY
+
+    expect(section(run_observed, "Account")).to include("def deposit: (untyped) -> 10")
+  end
+
+  it "does not observe an ivar two enclosing befores write with different types" do
+    write("test/target_spec.rb", <<~RUBY)
+      RSpec.describe "outer" do
+        before { @target = Account.new }
+        context "inner" do
+          before { @target = Label.new }
+          it { @target.deposit(10) }
+        end
+      end
+    RUBY
+
+    out = run_observed
+    expect(section(out, "Account")).to include("def deposit: (untyped) -> 10")
+    expect(section(out, "Label")).to include("def deposit: (untyped) -> 20")
+  end
+
+  it "does not bind an ivar from a before call that has a receiver" do
+    write("test/target_spec.rb", <<~RUBY)
+      RSpec.describe "one" do
+        hooks.before { @target = Account.new }
+        it { @target.deposit(10) }
+      end
+    RUBY
+
+    expect(section(run_observed, "Account")).to include("def deposit: (untyped) -> 10")
+  end
+
+  it "does not credit a Repo | nil receiver with a call nil answers, which may have run on nil" do
+    write("test/repo_test.rb", <<~RUBY)
+      r = Finder.repo(-1)
+      r == :sym
+      r.respond_to?(:zzz)
+      r.is_a?(String)
+      r.save(1)
+    RUBY
+
+    out = section(run_observed, "Repo")
+    expect(out).to include("def ==: (untyped) -> false")
+    expect(out).to include("def respond_to?: (untyped, ?untyped) -> true")
+    expect(out).to include("def is_a?: (untyped) -> true")
+    expect(out).to include("def save: (1) -> 30")
+  end
+
+  it "credits a safe-navigation call of a method nil answers, since &. skips it on nil" do
+    write("test/repo_test.rb", "r = Finder.repo(-1)\nr&.is_a?(String)\n")
+
+    expect(section(run_observed, "Repo")).to include("def is_a?: (singleton(String)) -> true")
+  end
+
+  it "treats an RBS NilClass member as nil" do
+    write("test/widget_test.rb", "w = Finder.widget\nw.spin(1)\n")
+
+    expect(section(run_observed, "Widget")).to include("def spin: (1) -> 40")
   end
 
   it "observes a safe-navigation call on a Foo | nil receiver" do

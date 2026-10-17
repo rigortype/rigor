@@ -249,6 +249,7 @@ members:
   discovered_superclasses:
     reads:
     - lib/rigor/analysis/check_rules.rb
+    - lib/rigor/analysis/check_rules/rbs_receiver_surface.rb
     - lib/rigor/analysis/check_rules/shadowed_rescue_collector.rb
     - lib/rigor/analysis/check_rules/source_arity.rb
     - lib/rigor/analysis/incremental_session.rb

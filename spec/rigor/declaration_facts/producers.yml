@@ -21,6 +21,9 @@ lib/rigor/analysis/check_rules/ivar_write_collector.rb:
 lib/rigor/analysis/check_rules/lexical_method_sites.rb:
   computes: where a singleton def on a local is in scope
   producers:
+    Rigor::Analysis::CheckRules::LexicalMethodSites: issue #1722, finds the calls that give one local's object singleton methods (o.extend, o.define_singleton_method, an instance_eval block that writes a def) for call.undefined-method's per-file local-scope decline; it derives no declaration context
+    Rigor::Analysis::CheckRules::LexicalMethodSites#defines_on_self?: issue #1722, finds the calls that give one local's object singleton methods (o.extend, o.define_singleton_method, an instance_eval block that writes a def) for call.undefined-method's per-file local-scope decline; it derives no declaration context
+    Rigor::Analysis::CheckRules::LexicalMethodSites#opened_method_name: issue #1722, finds the calls that give one local's object singleton methods (o.extend, o.define_singleton_method, an instance_eval block that writes a def) for call.undefined-method's per-file local-scope decline; it derives no declaration context
     Rigor::Analysis::CheckRules::LexicalMethodSites#walk: grandfathered
 lib/rigor/analysis/check_rules/rule_walk.rb:
   computes: the single AST walk that hosts the check-rule collectors

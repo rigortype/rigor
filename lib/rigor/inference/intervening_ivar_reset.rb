@@ -27,13 +27,18 @@ module Rigor
       # Issue #1402 — the names of a proc's call (`blk.call`, `blk.()`, `blk.yield`), which runs the block the method
       # was given as `yield` does.
       PROC_CALL_NAMES = Set[:call, :yield].freeze
-      # Issue #1402 — the calls whose block runs with `self` bound to the receiver: on a receiver other than `self`,
-      # an instance variable the block writes, and a method it calls without a receiver, are that object's.
+      # Issue #1402 — the calls whose block runs with `self` bound to the receiver: on a receiver that is provably
+      # another object ({.foreign_self_block?}), an instance variable the block writes, and a method it calls
+      # without a receiver, are that object's.
       SELF_REBINDING_BLOCK_CALLS = Set[
         :instance_eval, :instance_exec, :class_eval, :class_exec, :module_eval, :module_exec, :define_method,
         :define_singleton_method
       ].freeze
-      private_constant :NON_RUNNING_NODES, :UNKNOWN_CODE_NODES, :PROC_CALL_NAMES, :SELF_REBINDING_BLOCK_CALLS
+      # The classes whose instances may be a class or module object: `self` typed as one of them may be the
+      # receiver of `Foo.class_eval`.
+      CLASS_OBJECT_CLASSES = Set["Class", "Module", "Object", "BasicObject"].freeze
+      private_constant :NON_RUNNING_NODES, :UNKNOWN_CODE_NODES, :PROC_CALL_NAMES, :SELF_REBINDING_BLOCK_CALLS,
+                       :CLASS_OBJECT_CLASSES
 
       module_function
 
@@ -60,26 +65,94 @@ module Rigor
         PROC_CALL_NAMES.include?(node.name) && node.receiver.is_a?(Prism::LocalVariableReadNode)
       end
 
-      # Issue #1402 — whether `call_node`'s block runs on another object: a {SELF_REBINDING_BLOCK_CALLS} call on an
-      # explicit receiver other than `self`.
-      def foreign_self_block?(call_node)
+      # Issue #1402 — whether `call_node`'s block runs on an object that is provably not `self`: a
+      # {SELF_REBINDING_BLOCK_CALLS} call whose receiver, typed in `scope`, cannot be `self` ({.other_object?}).
+      # A receiver that may be `self` at run time (`obj = self; obj.instance_eval { … }`, a block parameter, an
+      # `Object` or `Dynamic` value, a class the analysis cannot order against `self`'s) is not foreign.
+      def foreign_self_block?(call_node, scope)
         return false unless call_node.is_a?(Prism::CallNode) && SELF_REBINDING_BLOCK_CALLS.include?(call_node.name)
+        return false if self_call?(call_node)
 
-        !self_call?(call_node)
+        other_object?(scope.type_of(call_node.receiver), scope)
+      rescue StandardError
+        false
+      end
+
+      # Whether a value of `type` cannot be `scope`'s `self`. A class object (`Singleton[X]`) is not an instance
+      # of a class other than `Class`, `Module`, `Object` or `BasicObject` (or a module), and is no other class's
+      # object. An instance is no class object unless its class is one of those, and is not an instance of a class
+      # the environment orders `:disjoint` from `self`'s, when neither is a module.
+      def other_object?(type, scope)
+        self_type = scope.self_type
+        case type
+        when Type::Singleton
+          case self_type
+          when Type::Singleton then type.class_name != self_type.class_name
+          when Type::Nominal then !may_be_class_object?(self_type.class_name, scope)
+          else false
+          end
+        when Type::Nominal
+          case self_type
+          when Type::Singleton then !may_be_class_object?(type.class_name, scope)
+          when Type::Nominal then disjoint_classes?(type.class_name, self_type.class_name, scope)
+          else false
+          end
+        else false
+        end
+      end
+
+      def may_be_class_object?(class_name, scope)
+        name = class_name.to_s.delete_prefix("::")
+        return true if CLASS_OBJECT_CLASSES.include?(name)
+
+        environment = scope.environment
+        environment.rbs_module?(name) || %i[subclass equal].include?(environment.class_ordering(name, "Module"))
+      end
+      private_class_method :may_be_class_object?
+
+      def disjoint_classes?(lhs, rhs, scope)
+        environment = scope.environment
+        return false if environment.rbs_module?(lhs.to_s) || environment.rbs_module?(rhs.to_s)
+
+        environment.class_ordering(lhs, rhs) == :disjoint
+      end
+      private_class_method :disjoint_classes?
+
+      # Issue #1402 — `scope` past a statement call whose receiver or arguments run code the program does not
+      # show (`@items << yield`, `puts(yield)`, `log(blk.call)`, `items.each(&blk)`): {.widen} over every narrowed
+      # name, as past a statement `yield`. Every other call in them is the operand walk's.
+      def after_operands(call_node, scope)
+        return scope unless narrowed_ivars?(scope)
+
+        found = []
+        collect_unknown_code(call_node.receiver, found)
+        collect_unknown_code(call_node.arguments, found)
+        block = call_node.block
+        found << block if block.is_a?(Prism::BlockArgumentNode) && block.expression.is_a?(Prism::LocalVariableReadNode)
+        return scope if found.empty?
+
+        widen(scope, mark: true) { nil }
       end
 
       # Issue #1402 — `scope` past a call on another receiver whose literal block may make a {.candidate?} call
       # (`[1].each { reset }`, `items.each { yield }`): {.widen} over the names those calls may write, as
-      # {.after_operand} widens past the calls in a condition. A block that runs on another object
-      # ({.foreign_self_block?}) calls that object's methods and widens nothing. A literal-name
+      # {.after_operand} widens past the calls in a condition. In a block that runs on another object
+      # ({.foreign_self_block?}) only a `yield`, a `super` or a proc's call counts: its implicit-self calls are that
+      # object's, while the method's block runs as it always does. A literal-name
       # `instance_variable_set` on `self` ({ReflectiveIvarWrite.literal_name}) writes the one ivar it names, which
       # the block's captured-binding write-back already joins, so it is not counted.
       def after_block(call_node, scope)
         block = call_node.block
-        return scope unless block.is_a?(Prism::BlockNode) && !foreign_self_block?(call_node)
+        return scope unless block.is_a?(Prism::BlockNode)
         return scope unless narrowed_ivars?(scope)
 
-        calls = candidate_calls(block, false).reject { |call| ReflectiveIvarWrite.literal_name(call) }
+        calls = []
+        if foreign_self_block?(call_node, scope)
+          collect_unknown_code(block, calls)
+        else
+          collect_calls(block, false, calls, scope)
+          calls.reject! { |call| ReflectiveIvarWrite.literal_name(call) }
+        end
         return scope if calls.empty?
 
         widen(scope, mark: true) { proven_writes(calls, scope) }
@@ -128,7 +201,7 @@ module Rigor
       def after_operand(node, scope, run_lambdas: false)
         return scope unless narrowed_ivars?(scope)
 
-        calls = candidate_calls(node, run_lambdas)
+        calls = candidate_calls(node, run_lambdas, scope)
         return scope if calls.empty?
 
         widen(scope, mark: true) { proven_writes(calls, scope) }
@@ -138,7 +211,7 @@ module Rigor
       # `run_lambdas: true`, since its `===` runs a lambda literal's body. A write to it in `node` is the caller's
       # to check.
       def may_write?(node, name, scope, run_lambdas: false)
-        calls = candidate_calls(node, run_lambdas)
+        calls = candidate_calls(node, run_lambdas, scope)
         return false if calls.empty?
 
         proven = proven_writes(calls, scope)
@@ -156,25 +229,41 @@ module Rigor
       end
 
       # The candidate calls under `node`, in source order.
-      def candidate_calls(node, run_lambdas)
+      def candidate_calls(node, run_lambdas, scope)
         found = []
-        collect_calls(node, run_lambdas, found)
+        collect_calls(node, run_lambdas, found, scope)
         found
       end
 
-      def collect_calls(node, run_lambdas, found)
+      # Issue #1402 — a block that runs on another object ({.foreign_self_block?}) contributes only its unknown code
+      # ({.collect_unknown_code}).
+      def collect_calls(node, run_lambdas, found, scope)
         return unless node.is_a?(Prism::Node)
         return if NON_RUNNING_NODES.any? { |klass| node.is_a?(klass) }
         return if !run_lambdas && node.is_a?(Prism::LambdaNode)
 
         found << node if candidate?(node)
         node.compact_child_nodes.each do |child|
-          next if child.is_a?(Prism::BlockNode) && foreign_self_block?(node)
-
-          collect_calls(child, run_lambdas, found)
+          if child.is_a?(Prism::BlockNode) && foreign_self_block?(node, scope)
+            collect_unknown_code(child, found)
+          else
+            collect_calls(child, run_lambdas, found, scope)
+          end
         end
       end
       private_class_method :collect_calls
+
+      # Issue #1402 — the `yield`s, `super`s and proc calls ({.proc_call?}) under `node`, wherever they sit, but
+      # not in a `def`, a class or module body or a lambda literal, which run nothing there.
+      def collect_unknown_code(node, found)
+        return unless node.is_a?(Prism::Node)
+        return if NON_RUNNING_NODES.any? { |klass| node.is_a?(klass) } || node.is_a?(Prism::LambdaNode)
+
+        found << node if UNKNOWN_CODE_NODES.any? { |klass| node.is_a?(klass) } ||
+                         (node.is_a?(Prism::CallNode) && proc_call?(node))
+        node.compact_child_nodes.each { |child| collect_unknown_code(child, found) }
+      end
+      private_class_method :collect_unknown_code
 
       def nil_free?(type)
         Narrowing.narrow_non_nil(type) == type

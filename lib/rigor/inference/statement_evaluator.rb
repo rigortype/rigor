@@ -3520,12 +3520,17 @@ module Rigor
       # Issue #1402 — a proc's call (`blk.call`) is a candidate too, and so is a call on another receiver whose literal
       # block makes one ({InterveningIvarReset.after_block}: `[1].each { reset }`). Both widen as a condition's
       # calls do, marking a binding whose narrowing had ruled `nil` out, since the code they run is far more often
-      # code that leaves the variable alone.
+      # code that leaves the variable alone. A `yield` or proc call in the call's receiver or arguments
+      # (`@items << yield`, `puts(yield)`) widens every narrowed ivar ({InterveningIvarReset.after_operands}).
       def invalidate_ivars_for_intervening_call(call_node, current_scope)
-        return InterveningIvarReset.after_block(call_node, current_scope) unless intervening_call_candidate?(call_node)
-
-        mark = !InterveningIvarReset.self_call?(call_node)
-        InterveningIvarReset.widen(current_scope, mark: mark) { self_call_ivar_writes(call_node) }
+        widened =
+          if intervening_call_candidate?(call_node)
+            mark = !InterveningIvarReset.self_call?(call_node)
+            InterveningIvarReset.widen(current_scope, mark: mark) { self_call_ivar_writes(call_node) }
+          else
+            InterveningIvarReset.after_block(call_node, current_scope)
+          end
+        InterveningIvarReset.after_operands(call_node, widened)
       end
 
       # Issue #1596 — the ivars the implicit-self / `self.` call `call_node` may write, or nil when that is not proven
@@ -5571,10 +5576,11 @@ module Rigor
                                         drop_captured_narrowing(closure_node, post_scope, foreign_self: foreign_self))
       end
 
-      # Issue #1402 — whether `call_node`'s block runs on another object ({InterveningIvarReset.foreign_self_block?}),
-      # so that no instance variable it writes is this scope's ({CapturedLocals.writes}' `foreign_self:`).
+      # Issue #1402 — whether `call_node`'s block runs on an object that is provably not `self`
+      # ({InterveningIvarReset.foreign_self_block?}, its receiver typed where the operands were), so that no instance
+      # variable it writes is this scope's ({CapturedLocals.writes}' `foreign_self:`).
       def foreign_self_block?(call_node)
-        InterveningIvarReset.foreign_self_block?(call_node)
+        InterveningIvarReset.foreign_self_block?(call_node, operand_scope)
       end
 
       # Builds the entry scope for a block body. The block sees the outer scope's locals (Ruby's lexical scoping rule)

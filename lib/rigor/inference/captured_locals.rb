@@ -110,12 +110,15 @@ module Rigor
       #   `base_scope`), except that one still on its class-wide binding does not: ADR-58's declaration seed is
       #   the union of every write in the class, this body's included, so nothing the body stores can move it,
       #   and rebinding it would only drop the declaration mark that keeps its nil from being diagnostic fuel.
-      #   Issue #1402 — a nested block that runs on another object (`o.instance_eval { @x = 1 }`,
-      #   {InterveningIvarReset.foreign_self_block?}) writes that object's ivar, and does not count; one without a
-      #   receiver, or on `self`, does. A nested `def` runs only when called; it still counts, because a call to it
-      #   inside the body writes this one.
-      # @param foreign_self — the block itself runs on another object ({InterveningIvarReset.foreign_self_block?}
-      #   of its call): no ivar it writes is the caller's, so `ivars:` and `non_locals:` collect none.
+      #   Issue #1402 — an instance variable written in a nested block that runs on an object provably not `self`
+      #   (`Other.class_eval { @x = 1 }`, {InterveningIvarReset.foreign_self_block?}, its receiver typed in
+      #   `base_scope`) is that object's, and does not count; one on a receiver that may be `self` does. A class
+      #   variable or global written there counts as anywhere else: Ruby resolves a class variable lexically, and
+      #   a global is the same one whatever `self` is. A nested `def` runs only when called; it still counts,
+      #   because a call to it inside the body writes this one.
+      # @param foreign_self — the block itself runs on an object provably not `self`
+      #   ({InterveningIvarReset.foreign_self_block?} of its call): no instance variable it writes is the caller's.
+      #   Its locals, class variables and globals still count.
       # @param non_locals — the per-element fold's superset of `ivars`: the class variables and globals the body
       #   rebinds count too, on the same terms, and so does an attribute setter called on `self` (`self.w = v`)
       #   as a rebind of the instance variable it is named after, `@w`: the `attr_writer` / `attr_accessor`
@@ -128,7 +131,7 @@ module Rigor
 
         introduced = nil
         names = nil
-        outliving = collects_non_locals?(ivars, non_locals, foreign_self)
+        outliving = non_locals || ivars
         Source::NodeWalker.each_with_ancestors(body) do |descendant, ancestors|
           if LOCAL_WRITE_NODES.include?(descendant.class)
             name = captured_local_write(descendant, ancestors, base_scope) do
@@ -136,36 +139,35 @@ module Rigor
             end
             (names ||= []) << name if name
           elsif outliving
-            found = outliving_writes(descendant, ancestors, base_scope, non_locals)
+            found = outliving_writes(descendant, ancestors, base_scope, non_locals, foreign_self)
             (names ||= []).concat(found) unless found.empty?
           end
         end
         names ? names.uniq : NO_NAMES
       end
 
-      # Whether {.writes} collects non-locals: asked to, for a block that runs on the caller's own `self`.
-      def collects_non_locals?(ivars, non_locals, foreign_self) = !foreign_self && (non_locals || ivars)
-
       # The non-local names `node` writes ({.reflective_unknown_ivars} for an `instance_variable_set` on `self` whose
-      # target no literal names, then {.rebindable_outliving_write}), or none for a write in a nested block that runs
-      # on another object.
-      def outliving_writes(node, ancestors, base_scope, non_locals)
+      # target no literal names, then {.rebindable_outliving_write}), less the instance variables when the write
+      # runs on an object provably not `self` (`foreign_self`, or a nested block {.under_foreign_self_block?}).
+      def outliving_writes(node, ancestors, base_scope, non_locals, foreign_self)
         found = ReflectiveIvarWrite.unknown_target?(node) ? reflective_unknown_ivars(base_scope) : NO_NAMES
         written = rebindable_outliving_write(node, base_scope, non_locals)
         return found if written.nil? && found.empty?
-        return NO_NAMES if under_foreign_self_block?(ancestors)
 
-        written ? found + [written] : found
+        names = written ? found + [written] : found
+        return names unless foreign_self || under_foreign_self_block?(ancestors, base_scope)
+
+        names.reject { |name| ivar_name?(name) }
       end
 
-      # Issue #1402 — whether a block on the path `ancestors` runs on another object: its call is a
-      # {InterveningIvarReset.foreign_self_block?}.
-      def under_foreign_self_block?(ancestors)
+      # Issue #1402 — whether a block on the path `ancestors` runs on an object provably not `self`: its call is a
+      # {InterveningIvarReset.foreign_self_block?}, the receiver typed in `base_scope`.
+      def under_foreign_self_block?(ancestors, base_scope)
         (1...ancestors.size).any? do |index|
           child = ancestors[index]
           parent = ancestors[index - 1]
           child.is_a?(Prism::BlockNode) && parent.is_a?(Prism::CallNode) && parent.block.equal?(child) &&
-            InterveningIvarReset.foreign_self_block?(parent)
+            InterveningIvarReset.foreign_self_block?(parent, base_scope)
         end
       end
 

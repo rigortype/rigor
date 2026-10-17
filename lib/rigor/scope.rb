@@ -1415,7 +1415,10 @@ module Rigor
     # `ModuleFunctionState.prescan_deferred`), or a `:singleton` row for the name after the def
     # (`module_function :x`) whose singleton copy is this def (`ModuleFunctionState.each_singleton_copy`).
     def module_function_def?(class_name, def_node)
-      ranges = source_path && @discovery.discovered_deferred_ranges[source_path]
+      path = source_path
+      return false if path.nil?
+
+      ranges = discovered_deferred_ranges[path]
       return false if ranges.nil?
 
       start = def_node.location.start_offset

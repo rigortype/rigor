@@ -1358,7 +1358,7 @@ every warm run until then. Three residuals stand, stated plainly:
    answer on this shape, so it is a regression there: a false positive against the cold
    answer, lasting until a full run, which under `--fail-on warning` can flip the exit
    code. The failure is real; only the demand is stale. Closing it needs per-file demand
-   attribution in the snapshot. The trade bought by it: the drop lost every class the
+   attribution in the snapshot ([#2060](https://github.com/rigortype/rigor/issues/2060)). The trade bought by it: the drop lost every class the
    edit left failing whose demand sat outside the closure, which is the common shape (an
    inline superclass or mixin failing every subclass).
 

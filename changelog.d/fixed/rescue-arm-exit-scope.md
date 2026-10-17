@@ -1,0 +1,1 @@
+- **[engine]** A rescue clause's value, the scope it falls through with and a `return` from it now see the `begin` body's writes rather than the binding from before the `begin`, so `got = begin; conn = make; work; rescue; conn; end; got.size` no longer reports `undefined method 'size' for nil` on correct code. ([#2062](https://github.com/rigortype/rigor/pull/2062))

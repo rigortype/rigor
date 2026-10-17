@@ -1,0 +1,8 @@
+---
+locals: {}
+assertions:
+  '1': Dynamic[top]
+  '2': StandardError
+  '3': '"c"'
+  '4': '1'
+  '5': ":a | :b"

@@ -5,6 +5,7 @@ require "prism"
 require_relative "../type"
 require_relative "../reflection"
 require_relative "../ast"
+require_relative "clause_widening"
 require_relative "../source/constant_path"
 require_relative "../source/node_children"
 require_relative "../source/node_walker"
@@ -1208,17 +1209,22 @@ module Rigor
             Type::Combinator.constant_of(nil)
           end
 
-        rescue_types = rescue_chain_types(rescue_clause)
+        rescue_types = rescue_chain_types(rescue_clause, node.statements)
         Type::Combinator.union(primary_type, *rescue_types)
       end
 
       # Issue #1360 — the evaluator binds `$!` in a rescue clause it enters; a clause typed here, such as one in a
       # `begin` passed as an argument, reads `$!`, `$@` and `$?` unbound rather than an enclosing clause's.
-      def rescue_chain_types(rescue_node)
-        arm_typer = typer_under(rescue_arm_scope)
+      #
+      # Issue #1839 — it also reads each name the `body` writes as `Dynamic[top]` ({ClauseWidening}), as the evaluator's
+      # rescue clause does: `[begin; conn = make; work; rescue; conn; end]` holds the connection, not the entry's `nil`.
+      def rescue_chain_types(rescue_node, body)
+        arm_scope = rescue_arm_scope
+        writes = ClauseWidening.writes([body])
         types = []
         current = rescue_node
         while current
+          arm_typer = typer_under(ClauseWidening.widen(arm_scope, writes, current.statements) || arm_scope)
           types << arm_typer.send(:statements_or_nil, current.statements)
           current = current.subsequent
         end

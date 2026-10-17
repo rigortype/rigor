@@ -30,6 +30,7 @@ require_relative "guard_rebinding"
 require_relative "self_call_ivar_writes"
 require_relative "intervening_ivar_reset"
 require_relative "match_rebinding"
+require_relative "clause_widening"
 require_relative "element_read_widening"
 require_relative "hash_lookup_mutation"
 require_relative "indexed_narrowing"
@@ -1633,9 +1634,30 @@ module Rigor
 
       # The scope past `node`'s `ensure` clause, entered with `exit_scope`, the `next` and `break` scopes recorded past
       # `jump_marks` carried through it.
+      #
+      # Issue #1839 — the code after the `begin` runs only when the clause finished from a `begin` that did, so the
+      # scope it continues from is the clause's under `exit_scope`. A `return`, `next` or `break` in the clause can
+      # also leave from one that raised, after any prefix of the body: those jumps are taken from the pass under the
+      # widened entry ({#widen_clause_entry}), when a jump sink is installed to collect them ({#jump_sinks_installed?}).
       def eval_begin_ensure(node, exit_scope, jump_marks)
-        carry_jumps_through_ensure(node.ensure_clause, jump_marks)
-        eval_widened_clause(node.ensure_clause, node.ensure_clause.statements, exit_scope, ensure_writes(node)).last
+        clause = node.ensure_clause
+        carry_jumps_through_ensure(clause, jump_marks)
+        jumps = jump_sinks_installed? && clause_jumps?(clause.statements)
+        record_widened = widening_recorded?
+        widened = clause.statements && (jumps || record_widened) &&
+                  widen_clause_entry(exit_scope, ensure_writes(node), clause.statements)
+        return sub_eval(clause, exit_scope).last unless widened
+
+        widened_options = record_widened ? {} : UNRECORDED
+        if jumps
+          sub_eval(clause, widened, **widened_options)
+        else
+          without_jump_sinks { sub_eval(clause, widened, next_scope_sink: nil, **widened_options) }
+        end
+        plain_options = record_widened ? UNRECORDED : {}
+        return sub_eval(clause, exit_scope, **plain_options).last unless jumps
+
+        without_jump_sinks { sub_eval(clause, exit_scope, next_scope_sink: nil, **plain_options) }.last
       end
 
       # Issue #1231 — a rescue clause runs after the body raised from any point in it, and an `ensure` clause after the
@@ -1643,22 +1665,27 @@ module Rigor
       # instance variable those wrote at a value the scope it enters with does not hold: `conn = nil; begin; conn =
       # open_conn; Integer(s); rescue; conn.size; end` reads the connection. The engine does not track where the body
       # raises (the precise recorder of #1397 put new false positives on correct code); it widens instead, and
-      # deliberately imprecisely. Each name the clause mentions ({#clause_mentions}) that its entry binds and those
-      # clauses write, outside a nested `def` or class body, reads as `Dynamic[top]`, which reports nothing. A plain
-      # join would read `x` as `1?` in `x = 1; begin; foo; x = nil; rescue; x.succ; end`, where it cannot be nil, and a
-      # `Dynamic` that keeps the join as its facet still narrows: `x.nil?` on `Dynamic[1 | 2]` leaves a `nil` member
-      # for the next call to report. A name written inside a nested `ensure` clause, which also runs on the way out of
-      # a raise, is covered by the same floor.
+      # deliberately imprecisely. Each name that the clause's entry binds and those clauses write, outside a nested
+      # `def` or class body, and that the clause mentions or they write more than once ({ClauseWidening}),
+      # reads as `Dynamic[top]`, which reports nothing. A plain join would read `x` as `1?` in `x
+      # = 1; begin; foo; x = nil; rescue; x.succ; end`, where it cannot be nil, and a `Dynamic` that keeps the join as
+      # its facet still narrows: `x.nil?` on `Dynamic[1 | 2]` leaves a `nil` member for the next call to report. A name
+      # written inside a nested `ensure` clause, which also runs on the way out of a raise, is covered by the same
+      # floor.
+      #
+      # Issue #1839 — the widening is not for the clause's own reads only: a rescue clause's value, the scope it falls
+      # through with and a `return`, `next` or `break` it takes all come from its widened entry, on every path (an
+      # inferred return included), so `got = begin; conn = make; work; rescue; conn; end` leaves `got` untyped rather
+      # than the entry's `nil`, and a name the clause never mentions but the body writes twice joins the code after the
+      # `begin` untyped rather than at the entry's binding, which misses every write the body made before the last.
       #
       # The names the clauses of `node` read from: the primary body's for a rescue clause, none under a retry `edge`.
       def rescue_writes(node, edge)
-        clause_writes([node.statements]) if node.rescue_clause && edge.nil? && widening_recorded?
+        clause_writes([node.statements]) if node.rescue_clause && edge.nil?
       end
 
       # For the `ensure` clause: the writes of the body, its `else` and every rescue clause.
       def ensure_writes(node)
-        return nil unless widening_recorded?
-
         sources = [node.statements, node.else_clause]
         current = node.rescue_clause
         while current
@@ -1668,83 +1695,54 @@ module Rigor
         clause_writes(sources)
       end
 
-      # The local and instance variable names `sources` write, a nested block's included (it may write an outer local),
-      # or nil for none. A `def` or class body writes nothing here.
-      def clause_writes(sources)
-        writes = nil
-        sources.each { |source| writes = collect_clause_names(source, CLAUSE_WRITE_NODES, nil, writes) if source }
-        writes
+      def clause_writes(sources) = ClauseWidening.writes(sources)
+
+      CLAUSE_JUMP_NODES = Set[Prism::ReturnNode, Prism::NextNode, Prism::BreakNode].freeze
+      private_constant :CLAUSE_JUMP_NODES
+
+      # Whether a `return`, `next` or `break` reached here is collected: a pass {#without_jump_sinks} runs collects
+      # none, so an `ensure` clause inside it, nested at any depth, is evaluated once rather than once per pass of
+      # every enclosing clause holding a jump.
+      def jump_sinks_installed?
+        !@next_scope_sink.nil? || JUMP_SINK_KEYS.any? { |key| Thread.current[key] }
       end
 
-      CLAUSE_WRITE_NODES = Set[
-        *CapturedLocals::LOCAL_WRITE_NODES,
-        Prism::InstanceVariableWriteNode,
-        Prism::InstanceVariableOperatorWriteNode,
-        Prism::InstanceVariableOrWriteNode,
-        Prism::InstanceVariableAndWriteNode,
-        Prism::InstanceVariableTargetNode
-      ].freeze
-      private_constant :CLAUSE_WRITE_NODES
+      # Whether `node` holds a `return`, `next` or `break` outside a nested `def`.
+      def clause_jumps?(node)
+        return false if node.nil? || node.is_a?(Prism::DefNode)
+        return true if CLAUSE_JUMP_NODES.include?(node.class)
 
-      CLAUSE_MENTION_NODES = Set[
-        Prism::LocalVariableReadNode, Prism::InstanceVariableReadNode, *CLAUSE_WRITE_NODES
-      ].freeze
-      private_constant :CLAUSE_MENTION_NODES
-
-      # The names of the `node_classes` nodes under `node` (restricted to `among` when given) added to `found`, outside
-      # a nested `def` or class body.
-      def collect_clause_names(node, node_classes, among, found)
-        return found if SCOPE_BODY_NODES.any? { |klass| node.is_a?(klass) }
-
-        if node_classes.include?(node.class) && (among.nil? || among.include?(node.name))
-          (found ||= Set.new) << node.name
-        end
-        node.rigor_each_child { |child| found = collect_clause_names(child, node_classes, among, found) }
-        found
+        node.rigor_each_child { |child| return true if clause_jumps?(child) }
+        false
       end
 
-      # `clause_scope` with each name of `writes` that `statements` mentions, and `clause_scope` binds, rebound to
-      # `Dynamic[top]`, or nil when none changes.
-      def widen_clause_entry(clause_scope, statements, writes)
-        return nil if writes.nil? || statements.nil? || !widening_recorded?
+      # `clause_scope` entering `clause` with the names of `writes` {ClauseWidening.widen} picks rebound to
+      # `Dynamic[top]`, or nil when none changes. An empty rescue clause is widened too: the scope it falls through
+      # with is its entry.
+      def widen_clause_entry(clause_scope, writes, clause) = ClauseWidening.widen(clause_scope, writes, clause)
 
-        names = collect_clause_names(statements, CLAUSE_MENTION_NODES, writes, nil)
-        return nil if names.nil?
-
-        untyped = Type::Combinator.untyped
-        widened = names.reduce(clause_scope) do |acc, name|
-          kind = name.start_with?("@") ? :ivar : :local
-          current = clause_scope.public_send(VAR_KIND_GETTERS.fetch(kind), name)
-          current.nil? || current == untyped ? acc : rebind_variable(acc, kind, name, untyped)
-        end
-        widened.equal?(clause_scope) ? nil : widened
-      end
-
-      # Whether a widened pass would record anything: only the check path asks for one ({#initialize}'s
-      # `widen_clauses`), and a pass nothing records is skipped, so a nested clause inside an unrecorded pass is
-      # evaluated once.
+      # Whether this pass records the per-node index under a clause's widened entry: only the check path asks for that
+      # ({#initialize}'s `widen_clauses`). Every other recorder keeps the clause's plain entry ({#recording?}).
       def widening_recorded?
-        @widen_clauses && !(@on_enter.nil? && @operand_recorder.nil?)
+        @widen_clauses && recording?
       end
 
-      # `[type, scope]` of a rescue or `ensure` clause entered with `clause_scope`. When {#widen_clause_entry} widens
-      # it, the clause is evaluated twice: under the widened entry for the per-node index, which is what the check
-      # rules read, and under `clause_scope` without recording, for the value and the scope the code after the
-      # `begin` continues from. The widened pass collects no `return`, `next`, `break` or retry-edge scope, so the
-      # widening reaches neither an inferred return nor a loop: it can only take diagnostics away inside the clause.
-      def eval_widened_clause(node, statements, clause_scope, writes)
-        widened = widen_clause_entry(clause_scope, statements, writes)
-        return sub_eval(node, clause_scope) unless widened
-
-        eval_widened_pass(node, widened)
-        sub_eval(node, clause_scope, **UNRECORDED)
+      # Whether this pass records the per-node index at all.
+      def recording?
+        !(@on_enter.nil? && @operand_recorder.nil?)
       end
 
-      # The recorded pass over a widened clause: it reaches no `return`, `next`, `break` or retry-frame sink.
-      def eval_widened_pass(node, widened)
-        return if node.nil?
+      # `[type, scope]` of a rescue clause's `statements` entered with `widened` ({#widen_clause_entry}), the value,
+      # the scope and the jumps the code after the `begin` sees. A recorder that keeps the clause's plain entry
+      # ({#widening_recorded?}) records a second pass under `plain` that reaches no jump sink, so nothing records twice.
+      # The widened pass then records nothing, and a clause nested inside it is evaluated once, so `d` nested clauses
+      # cost `d * (d + 1) / 2` evaluations; every other pass evaluates the clause once.
+      def eval_widened_clause(statements, plain, widened, on_enter:)
+        return [Type::Combinator.constant_of(nil), widened] if statements.nil?
+        return sub_eval(statements, widened, on_enter: on_enter) if widening_recorded? || !recording?
 
-        without_jump_sinks { sub_eval(node, widened, next_scope_sink: nil) }
+        without_jump_sinks { sub_eval(statements, plain, next_scope_sink: nil, on_enter: on_enter) }
+        sub_eval(statements, widened, **UNRECORDED)
       end
 
       # Runs `block` with no `return`, `next`, `break` or retry-frame sink installed.
@@ -1854,6 +1852,10 @@ module Rigor
       # The thread-local sinks a widened clause pass ({#without_jump_sinks}) leaves uninstalled.
       CLAUSE_SINK_KEYS = [RETURN_SINK_KEY, NEXT_SINK_KEY, BREAK_SINK_KEY, BREAK_VALUE_SINK_KEY, RETRY_FRAMES_KEY].freeze
       private_constant :CLAUSE_SINK_KEYS
+
+      # The thread-local sinks a `return`, `next` or `break` is collected into.
+      JUMP_SINK_KEYS = (CLAUSE_SINK_KEYS - [RETRY_FRAMES_KEY]).freeze
+      private_constant :JUMP_SINK_KEYS
 
       # The retry edge of `node`, or nil when no `retry` in its rescue chain targets it. Allocation-free for a `begin`
       # no `retry` targets.
@@ -2132,7 +2134,7 @@ module Rigor
       # runs on the way out (`begin; retry; ensure; tries += 1; end`), or one made before a `retry` the evaluator only
       # types (`log(tries < 5 ? retry : :gave_up)`).
       #
-      # Issue #1231 — `writes` widens the scope each clause enters with, as {#eval_widened_clause} does, before its
+      # Issue #1231 — `writes` widens the scope each clause enters with ({#widen_clause_entry}) before its
       # reference is bound, so `rescue => e` still binds `e` to the exception. It is nil under a retry edge, which
       # already carries every scope the primary body raises from ({#widen_entry_for_retry}).
       def collect_rescue_chain_results(rescue_node, entry_scope, edge: nil, writes: nil)
@@ -2140,11 +2142,11 @@ module Rigor
         results = []
         current = rescue_node
         while current
-          widened = widen_clause_entry(entry_scope, current.statements, writes)
-          eval_widened_pass(current.statements, bind_rescue_reference(current, widened)) if widened
+          widened = widen_clause_entry(entry_scope, writes, current.statements)
           rescue_scope = bind_rescue_reference(current, entry_scope)
           arm = if widened
-                  sub_eval(current.statements, rescue_scope, **UNRECORDED)
+                  eval_widened_clause(current.statements, rescue_scope, bind_rescue_reference(current, widened),
+                                      on_enter: on_enter)
                 else
                   eval_branch_or_nil(current.statements, rescue_scope, on_enter: on_enter)
                 end
@@ -3023,13 +3025,24 @@ module Rigor
         # raise-before-write path for no false positive on the common one.
         arm_entry = ErrorInfo.modifier_entry(join_with_nil_injection(scope, after_expression), node.rescue_expression)
         after_rescue = thread_operand(node.rescue_expression, arm_entry, OperandWalk.new(nil), arm_entry)
-        type = OperandWalk.type_of(scope, node, tracer, walk.types(tracer))
         after = if branch_unconditionally_exits?(node.rescue_expression)
                   after_expression
                 else
                   join_with_nil_injection(after_expression, after_rescue)
                 end
-        [type, after]
+        [rescue_modifier_type(node, walk, arm_entry), after]
+      end
+
+      # Issue #1839 — the value of `expr rescue alt`: the fallback is typed with each name `expr` writes read as
+      # `Dynamic[top]` ({#widen_clause_entry}), as a `begin`'s rescue clause reads it, not at the entry's binding:
+      # `got = (conn = make; work) rescue conn` leaves `got` untyped, not `nil`. The scope past the modifier keeps
+      # the join `arm_entry` starts from, which a `retry` arm relies on.
+      def rescue_modifier_type(node, walk, arm_entry)
+        widened = widen_clause_entry(arm_entry, clause_writes([node.expression]), node.rescue_expression)
+        return OperandWalk.type_of(scope, node, tracer, walk.types(tracer)) unless widened
+
+        Type::Combinator.union(OperandWalk.type_of(scope, node.expression, tracer, walk.types(tracer)),
+                               widened.type_of(node.rescue_expression, tracer: tracer))
       end
 
       # `class Foo; body; end` and `module Foo; body; end`. The class body runs in a fresh scope (Ruby's class scope

@@ -52,12 +52,48 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
         expect(clause_reads(true)).to eq([Rigor::Type::Combinator.untyped] * 2)
       end
 
+      # The `ensure` clause's plain entry is the `begin`'s exit scope, which since issue #1839 joins the rescue
+      # clause's fall-through under its widened entry on every path: the body's `1` and the arm's `Dynamic[top]`.
       it "records the clauses' plain entries by default" do
         expect(clause_reads(false)).to eq(
           [Rigor::Type::Combinator.constant_of(nil), Rigor::Type::Combinator.union(
-            Rigor::Type::Combinator.constant_of(1), Rigor::Type::Combinator.constant_of(nil)
+            Rigor::Type::Combinator.constant_of(1), Rigor::Type::Combinator.untyped
           )]
         )
+      end
+    end
+
+    # Issue #1839 — an `ensure` clause holding a `return` is evaluated twice, once for its jumps and once for the
+    # scope after it. The second pass collects no jump, so a clause nested inside it is evaluated once: `depth`
+    # nested clauses cost `depth * (depth + 1) / 2` evaluations, not `2**depth - 1`.
+    describe "nested ensure clauses holding a jump" do
+      let(:depth) { 20 }
+      let(:program) do
+        inner = "return r if r"
+        depth.times { inner = "begin\n  r = :b\n  work\nensure\n  #{inner}\nend" }
+        parse("def m\n  r = :a\n#{inner}\nend\n")
+      end
+
+      def ensure_evaluations(&)
+        count = 0
+        trace = TracePoint.new(:call) { |tp| count += 1 if tp.method_id == :eval_begin_ensure }
+        trace.enable(&)
+        count
+      end
+
+      it "evaluates them a quadratic number of times on the check path" do
+        count = ensure_evaluations { described_class.index(program, default_scope: default_scope, widen_clauses: true) }
+        expect(count).to be <= depth * (depth + 1) / 2
+      end
+
+      it "evaluates them a quadratic number of times under a return sink" do
+        body = program.statements.body.first.body
+        count = ensure_evaluations do
+          Rigor::Inference::StatementEvaluator.with_return_sink do
+            Rigor::Inference::StatementEvaluator.new(scope: default_scope).evaluate(body)
+          end
+        end
+        expect(count).to be <= depth * (depth + 1) / 2
       end
     end
 

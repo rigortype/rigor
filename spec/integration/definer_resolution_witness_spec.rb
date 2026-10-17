@@ -916,6 +916,100 @@ RSpec.describe Rigor::Inference::DefinerResolution do # rubocop:disable RSpec/Sp
     end
   end
 
+  # #1624 — a superclass the tables cannot follow (an expression, or a class a constant write creates) holds the
+  # constructor's methods and everything the superclass inherits in no entry, so a read that finds no project
+  # definer is Unknown there, never Absent. Ruby's answer is `respond_to?` on the receiver the read stands for.
+  describe "a superclass the tables cannot follow (#1624)" do
+    def ruby_prints(source, expression)
+      RubyRun.stdout("#{source}\nputs(#{expression})\n").chomp
+    end
+
+    def answers(source, reads, klass: "C")
+      scope = scope_for(source)
+      reads.map { |name, side| owner_of(resolve(scope, name, side: side, klass: klass)) }
+    end
+
+    it "is Unknown for a `Struct.new` superclass's members, `keyword_init?`, member reader and block `def self.`" do
+      source = "class C < Struct.new(:a) { def self.z = 1 }; end"
+      expect(ruby_prints(source, "[C.respond_to?(:members), C.respond_to?(:keyword_init?), " \
+                                 "C.new.respond_to?(:a), C.z].inspect")).to eq("[true, true, true, 1]")
+      expect(answers(source, [%i[members singleton], %i[keyword_init? singleton], %i[a instance],
+                              %i[z singleton]])).to all(eq(:unknown))
+    end
+
+    it "is Unknown for a `keyword_init:` Struct's block `def` and a `Data.define` superclass's members" do
+      struct = "class C < Struct.new(:a, keyword_init: true) { def b = 1 }; end"
+      data = "class C < Data.define(:a); end"
+      expect(ruby_prints(struct, "C.new(a: 1).b")).to eq("1")
+      expect(ruby_prints(data, "[C.members, C.new(a: 1).a].inspect")).to eq("[[:a], 1]")
+      expect(answers(struct, [%i[b instance]]) + answers(data, [%i[members singleton], %i[a instance]]))
+        .to all(eq(:unknown))
+    end
+
+    it "is Unknown through `C = Class.new(Base)` and `class C < Class.new(Base) { … }`" do
+      base = "class Base; def self.x = 1; def x = 1; end\n"
+      written = "#{base}C = Class.new(Base)"
+      expression = "#{base}class C < Class.new(Base) { def self.y = 2 }; end"
+      expect(ruby_prints(written, "[C.x, C.new.x].inspect")).to eq("[1, 1]")
+      expect(ruby_prints(expression, "[C.x, C.y, C.new.x].inspect")).to eq("[1, 2, 1]")
+      expect(answers(written, [%i[x singleton], %i[x instance]]) +
+             answers(expression, [%i[x singleton], %i[y singleton], %i[x instance]])).to all(eq(:unknown))
+    end
+
+    it "is Unknown through `K = Struct.new(:a)` and `K = Data.define(:a)`, which have no superclass entry" do
+      struct = "K = Struct.new(:a)"
+      data = "K = Data.define(:a)"
+      expect(ruby_prints(struct, "K.respond_to?(:members)")).to eq("true")
+      expect(ruby_prints(data, "K.respond_to?(:members)")).to eq("true")
+      expect(answers(struct, [%i[members singleton]],
+                     klass: "K") + answers(data, [%i[members singleton]], klass: "K"))
+        .to all(eq(:unknown))
+    end
+
+    it "is Unknown below a method-call or conditional superclass, and for a subclass of such a class" do
+      call = "class Base; def foo = 1; end\ndef pick = Base\nclass C < pick; end"
+      ternary = "class A; def foo = 1; end\nclass B; def foo = 2; end\nclass C < (rand > 2 ? A : B); end"
+      below = "class Q < Struct.new(:a); end\nclass C < Q; end"
+      expect(ruby_prints(call, "C.new.foo")).to eq("1")
+      expect(ruby_prints(ternary, "C.new.foo")).to eq("2")
+      expect(ruby_prints(below, "C.new.respond_to?(:a)")).to eq("true")
+      expect(answers(call, [%i[foo instance]]) + answers(ternary, [%i[foo instance]]) +
+             answers(below, [%i[a instance]])).to all(eq(:unknown))
+    end
+
+    it "keeps a definer ahead of the superclass Known, and a class's own `def` across a reopening file" do
+      source = "class C < Struct.new(:a)\n  def a = :own\nend\n"
+      scope = project_scope("a.rb" => "class C < Struct.new(:a); end\n", "b.rb" => "class C\n  def own = 1\nend\n")
+      expect(ruby_prints(source, "C.new.a")).to eq("own")
+      expect(answers(source, [%i[a instance]])).to eq(["C"])
+      expect([owner_of(resolve(scope, :own)), owner_of(resolve(scope, :a))]).to eq(["C", :unknown])
+    end
+
+    # Guards: a constant superclass, written rooted or through `self::`, and a class with no superclass, keep their
+    # answer; `K = Class.new` with no argument is an `Object` subclass.
+    it "stays Absent where the superclass is a constant or `Object` and nothing defines the name" do
+      sources = ["class B; def x = 1; end\nclass C < ::B; end",
+                 "class P; class B; def x = 1; end; class C < self::B; end; end", "class C; end", "C = Class.new"]
+      klasses = %w[C P::C C C]
+      expect(sources.zip(klasses).map { |source, klass| ruby_prints(source, "#{klass}.new.respond_to?(:zzz)") })
+        .to eq(%w[false false false false])
+      expect(sources.zip(klasses).map { |source, klass| answers(source, [%i[zzz instance]], klass: klass).first })
+        .to all(eq(:absent))
+    end
+
+    # The project's own `Object` is no entry when the class names no superclass, and with a project superclass in
+    # between it is none either: both are Unknown. A singleton `def` on `Object` is no instance method (the control).
+    it "is Unknown where the project reopens `Object` with the name, with or without a superclass in between" do
+      direct = "class Object; def self.ox = 1; def oi = 2; end\nclass C; end"
+      between = "class Object; def self.ox = 1; end\nclass Mid; def m = 1; end\nclass C < Mid; end"
+      expect(ruby_prints(direct, "[C.ox, C.new.oi, C.new.respond_to?(:ox)].inspect")).to eq("[1, 2, false]")
+      expect(ruby_prints(between, "C.ox")).to eq("1")
+      expect(answers(direct, [%i[ox singleton], %i[oi instance]]) + answers(between, [%i[ox singleton]]))
+        .to all(eq(:unknown))
+      expect(answers(direct, [%i[ox instance]])).to eq([:absent])
+    end
+  end
+
   describe "the answer function's contract" do
     it "raises for a hit that is behind the position it was asked from" do
       scope = scope_for("class Base; def foo = 1; end\nclass C < Base; end\n")

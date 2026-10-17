@@ -159,9 +159,34 @@ module Rigor
       end
 
       # The implicit tail after a chain's last project superclass: `Object` (with `Kernel` and `BasicObject`) on the
-      # instance side, `#<Class:Object>` through `Class`, `Module` and `Kernel` on the singleton side.
+      # instance side, `#<Class:Object>` through `Class`, `Module` and `Kernel` on the singleton side. It may answer
+      # where RBS declares the name there, where the last class's superclass is not a constant the tables can follow
+      # (#1624, {Scope::ResolutionChain#opaque_tail?}: `class C < Struct.new(:a)`, `C = Class.new(Base)`), and where
+      # the project itself reopens a tail class with the name (`class Object; def self.x`), which is no entry on the
+      # chain because the class names no superclass.
       def implicit_object_answers?(scope, chain, method_name)
-        !external_lacks?(scope, ["Object"], chain.side, method_name)
+        !external_lacks?(scope, ["Object"], chain.side, method_name) || chain.opaque_tail?(scope) ||
+          project_tail_defines?(scope, chain.side, method_name)
+      end
+
+      # The implicit tail's classes, as `[instance-side names, singleton-side names]` per chain side: a class object
+      # reaches the instance methods of `Class`, `Module`, `Object`, `Kernel` and `BasicObject` and the singleton
+      # methods of `Object` and `BasicObject`.
+      IMPLICIT_TAIL = {
+        instance: [%w[Object Kernel BasicObject].freeze, [].freeze].freeze,
+        singleton: [%w[Class Module Object Kernel BasicObject].freeze, %w[Object BasicObject].freeze].freeze
+      }.freeze
+      private_constant :IMPLICIT_TAIL
+
+      # Whether a project reopening of a tail class records the name: a `def`, whose read files the method edge, or
+      # an `attr_*` / `define_method` the existence table holds.
+      def project_tail_defines?(scope, side, method_name)
+        instance, singleton = IMPLICIT_TAIL.fetch(side)
+        instance.any? do |name|
+          scope.user_def_for(name, method_name) || scope.discovered_method?(name, method_name, :instance)
+        end || singleton.any? do |name|
+          scope.singleton_def_for(name, method_name) || scope.discovered_method?(name, method_name, :singleton)
+        end
       end
 
       # True only for an ancestor RBS knows whose declaration lacks the name, on the side the entry stands for: an
@@ -308,7 +333,7 @@ module Rigor
       end
 
       private_class_method :override_answer, :retro_position, :candidates, :past_fold_copies, :decided,
-                           :external_may_answer?, :implicit_object_answers?, :external_lacks?,
+                           :external_may_answer?, :implicit_object_answers?, :project_tail_defines?, :external_lacks?,
                            :outcomes, :collapse, :possible?,
                            :default_answer, :definer_answer, :visibility_answer, :side_visibility,
                            :self_extended_copy_visibility, :module_function_row?, :visibility_slot, :first_hit

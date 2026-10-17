@@ -1212,6 +1212,33 @@ RSpec.describe "resolution in Ruby's ancestor order (#1567, #1568, #1570, #1571)
       expect(ruby_lookup(source, empty_helper)).to eq("ArgumentError\n")
       expect(diagnostics_for(source)).to eq([[12, "call.possible-nil-receiver"], [15, "call.undefined-method"]])
     end
+
+    # #1624 — a superclass the tables cannot follow declines the exception: `Class.new(Base)` holds `Base#fail_with`,
+    # which returns, in no entry of `Media`'s chain, so the only project definer the chain shows is the conditional
+    # `Raiser`'s. Ruby: without `RIGOR_X` `Base#fail_with` runs and line 12 raises NoMethodError (a true positive);
+    # with it the call raises ArgumentError. Before the fix the call typed `bot` and the report was lost.
+    it "keeps a call Dynamic where the superclass is an expression holding a returning definer" do
+      source = <<~RUBY
+        class Base
+          def fail_with(_) = nil
+        end
+        module Raiser
+          def fail_with(message) = raise(ArgumentError, message)
+        end
+        class Media < Class.new(Base)
+          include Raiser if ENV["RIGOR_X"]
+          def lookup(list)
+            count = [7, 10].find { |n| n <= list.length }
+            fail_with 'no' unless count
+            list[-count..]
+          end
+        end
+        1.upcase
+      RUBY
+      expect(ruby_lookup(source, nil)).to eq("NoMethodError\n")
+      expect(ruby_lookup("ENV[\"RIGOR_X\"] = \"1\"\n#{source}", nil)).to eq("ArgumentError\n")
+      expect(diagnostics_for(source)).to eq([[12, "call.possible-nil-receiver"], [15, "call.undefined-method"]])
+    end
   end
 
   # ABSENT stays Dynamic: nothing on the chain defines `fail_with`, so no definer can make it `bot` and the guard

@@ -2755,11 +2755,12 @@ module Rigor
 
       # The def node of every project entry on `class_name`'s instance chain that defines `method_name`, in any
       # position (the order is what UNKNOWN does not know), or nil where the `bot` exception cannot apply: a cut
-      # chain, no project definer, an entry whose only record of the name has no body (an `attr_*` or a
-      # `define_method` with no `def`), a definer resting on a `possible` or contested fact (another body may be the
-      # one Ruby holds), or an external RBS knows that declares the name. An external RBS does not know is passed
-      # over. Only what the tables hold is read: a `define_method` beside an entry's own `def` of the name, and a
-      # receiver-form `X.include(M)` outside `X`'s body, are not seen (as on the Known path).
+      # chain or one whose last class has a superclass the tables cannot follow (#1624: `class C < Class.new(Base)`
+      # holds `Base`'s definer in no entry), no project definer, an entry whose only record of the name has no body
+      # (an `attr_*` or a `define_method` with no `def`), a definer resting on a `possible` or contested fact (another
+      # body may be the one Ruby holds), or an external RBS knows that declares the name. An external RBS does not
+      # know is passed over. Only what the tables hold is read: a `define_method` beside an entry's own `def` of the
+      # name, and a receiver-form `X.include(M)` outside `X`'s body, are not seen (as on the Known path).
       #
       # ADR-46: the answer depends on every entry, so each files its class edge and its negative class edge (a new
       # file reopening it may add a definer or a mixin), and each project entry's {Scope#user_def_for} files the
@@ -2768,7 +2769,7 @@ module Rigor
       def every_project_definer(class_name, method_name)
         chain = Scope::ResolutionChain.for(scope, class_name.to_s, :instance, :methods)
         chain.record(scope)
-        return nil if chain.truncated?
+        return nil if chain.truncated? || chain.opaque_tail?(scope)
 
         defs = []
         declined = false

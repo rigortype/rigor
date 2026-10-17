@@ -3,6 +3,7 @@
 require "prism"
 
 require_relative "../type"
+require_relative "reflective_ivar_write"
 require_relative "self_call_ivar_writes"
 
 module Rigor
@@ -20,16 +21,68 @@ module Rigor
       # Nodes whose body does not run where it is written, or runs on another `self`: a `def`, and a class or
       # module body, where `@x` is the class's own instance variable.
       NON_RUNNING_NODES = [Prism::DefNode, Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode].freeze
-      private_constant :NON_RUNNING_NODES
+      # Issue #1402 — the nodes that run code the program does not show on `self`'s behalf: `yield` runs the
+      # method's block, and `super` the superclass's method on `self`.
+      UNKNOWN_CODE_NODES = [Prism::YieldNode, Prism::SuperNode, Prism::ForwardingSuperNode].freeze
+      # Issue #1402 — the names of a proc's call (`blk.call`, `blk.()`, `blk.yield`), which runs the block the method
+      # was given as `yield` does.
+      PROC_CALL_NAMES = Set[:call, :yield].freeze
+      # Issue #1402 — the calls whose block runs with `self` bound to the receiver: on a receiver other than `self`,
+      # an instance variable the block writes, and a method it calls without a receiver, are that object's.
+      SELF_REBINDING_BLOCK_CALLS = Set[
+        :instance_eval, :instance_exec, :class_eval, :class_exec, :module_eval, :module_exec, :define_method,
+        :define_singleton_method
+      ].freeze
+      private_constant :NON_RUNNING_NODES, :UNKNOWN_CODE_NODES, :PROC_CALL_NAMES, :SELF_REBINDING_BLOCK_CALLS
 
       module_function
 
-      # True when `node` is a call that may write `self`'s instance variables: an implicit-self or `self.` call.
+      # True when `node` is a call that may write `self`'s instance variables: an implicit-self or `self.` call
+      # ({.self_call?}). Issue #1402 — and a `yield`, a `super`, or a proc's call on a local ({.proc_call?}), which
+      # run code the program does not show; {SelfCallIvarWrites.of} proves no write set for any of them.
       def candidate?(node)
+        return true if UNKNOWN_CODE_NODES.any? { |klass| node.is_a?(klass) }
         return false unless node.is_a?(Prism::CallNode)
 
+        self_call?(node) || proc_call?(node)
+      end
+
+      # Whether `node`, a call, has no receiver or `self` as its receiver.
+      def self_call?(node)
         receiver = node.receiver
         receiver.nil? || receiver.is_a?(Prism::SelfNode)
+      end
+
+      # Issue #1402 — `blk.call` / `blk.()` / `blk.yield` on a local: the method's own `&blk`, or a proc it was
+      # handed, runs code that may call back into `self`, as `yield` does. Read by name, since an unannotated
+      # `&blk` binds `Dynamic`.
+      def proc_call?(node)
+        PROC_CALL_NAMES.include?(node.name) && node.receiver.is_a?(Prism::LocalVariableReadNode)
+      end
+
+      # Issue #1402 — whether `call_node`'s block runs on another object: a {SELF_REBINDING_BLOCK_CALLS} call on an
+      # explicit receiver other than `self`.
+      def foreign_self_block?(call_node)
+        return false unless call_node.is_a?(Prism::CallNode) && SELF_REBINDING_BLOCK_CALLS.include?(call_node.name)
+
+        !self_call?(call_node)
+      end
+
+      # Issue #1402 — `scope` past a call on another receiver whose literal block may make a {.candidate?} call
+      # (`[1].each { reset }`, `items.each { yield }`): {.widen} over the names those calls may write, as
+      # {.after_operand} widens past the calls in a condition. A block that runs on another object
+      # ({.foreign_self_block?}) calls that object's methods and widens nothing. A literal-name
+      # `instance_variable_set` on `self` ({ReflectiveIvarWrite.literal_name}) writes the one ivar it names, which
+      # the block's captured-binding write-back already joins, so it is not counted.
+      def after_block(call_node, scope)
+        block = call_node.block
+        return scope unless block.is_a?(Prism::BlockNode) && !foreign_self_block?(call_node)
+        return scope unless narrowed_ivars?(scope)
+
+        calls = candidate_calls(block, false).reject { |call| ReflectiveIvarWrite.literal_name(call) }
+        return scope if calls.empty?
+
+        widen(scope, mark: true) { proven_writes(calls, scope) }
       end
 
       # `scope` with each instance variable narrowed below its class-ivar seed widened back over the seed. The block
@@ -115,7 +168,11 @@ module Rigor
         return if !run_lambdas && node.is_a?(Prism::LambdaNode)
 
         found << node if candidate?(node)
-        node.compact_child_nodes.each { |child| collect_calls(child, run_lambdas, found) }
+        node.compact_child_nodes.each do |child|
+          next if child.is_a?(Prism::BlockNode) && foreign_self_block?(node)
+
+          collect_calls(child, run_lambdas, found)
+        end
       end
       private_class_method :collect_calls
 

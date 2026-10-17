@@ -6,6 +6,7 @@ require_relative "../source/node_walker"
 require_relative "block_parameter_binder"
 require_relative "element_read_widening"
 require_relative "index_write_widening"
+require_relative "intervening_ivar_reset"
 require_relative "mutation_widening"
 require_relative "optimistic_origin"
 require_relative "receiver_alias"
@@ -109,35 +110,63 @@ module Rigor
       #   `base_scope`), except that one still on its class-wide binding does not: ADR-58's declaration seed is
       #   the union of every write in the class, this body's included, so nothing the body stores can move it,
       #   and rebinding it would only drop the declaration mark that keeps its nil from being diagnostic fuel.
-      #   A nested block that rebinds `self` (`o.instance_eval`) writes another object's ivar, and a nested
-      #   `def` runs only when called; both still count, because an `instance_eval` without a receiver, or a
-      #   call to that `def` inside the body, does write this one.
+      #   Issue #1402 — a nested block that runs on another object (`o.instance_eval { @x = 1 }`,
+      #   {InterveningIvarReset.foreign_self_block?}) writes that object's ivar, and does not count; one without a
+      #   receiver, or on `self`, does. A nested `def` runs only when called; it still counts, because a call to it
+      #   inside the body writes this one.
+      # @param foreign_self — the block itself runs on another object ({InterveningIvarReset.foreign_self_block?}
+      #   of its call): no ivar it writes is the caller's, so `ivars:` and `non_locals:` collect none.
       # @param non_locals — the per-element fold's superset of `ivars`: the class variables and globals the body
       #   rebinds count too, on the same terms, and so does an attribute setter called on `self` (`self.w = v`)
       #   as a rebind of the instance variable it is named after, `@w`: the `attr_writer` / `attr_accessor`
       #   convention stores there, and no write node shows it. A hand-written setter storing elsewhere is not
       #   seen.
       # @return the captured names the body writes, each once, in first-write order.
-      def writes(block_node, base_scope, ivars: false, non_locals: false)
+      def writes(block_node, base_scope, ivars: false, non_locals: false, foreign_self: false)
         body = block_node.body
         return NO_NAMES if body.nil?
 
         introduced = nil
         names = nil
-        outliving = non_locals || ivars
+        outliving = collects_non_locals?(ivars, non_locals, foreign_self)
         Source::NodeWalker.each_with_ancestors(body) do |descendant, ancestors|
-          name =
-            if LOCAL_WRITE_NODES.include?(descendant.class)
-              captured_local_write(descendant, ancestors, base_scope) { introduced ||= introduced_locals(block_node) }
-            elsif outliving
-              if ReflectiveIvarWrite.unknown_target?(descendant)
-                (names ||= []).concat(reflective_unknown_ivars(base_scope))
-              end
-              rebindable_outliving_write(descendant, base_scope, non_locals)
+          if LOCAL_WRITE_NODES.include?(descendant.class)
+            name = captured_local_write(descendant, ancestors, base_scope) do
+              introduced ||= introduced_locals(block_node)
             end
-          (names ||= []) << name if name
+            (names ||= []) << name if name
+          elsif outliving
+            found = outliving_writes(descendant, ancestors, base_scope, non_locals)
+            (names ||= []).concat(found) unless found.empty?
+          end
         end
         names ? names.uniq : NO_NAMES
+      end
+
+      # Whether {.writes} collects non-locals: asked to, for a block that runs on the caller's own `self`.
+      def collects_non_locals?(ivars, non_locals, foreign_self) = !foreign_self && (non_locals || ivars)
+
+      # The non-local names `node` writes ({.reflective_unknown_ivars} for an `instance_variable_set` on `self` whose
+      # target no literal names, then {.rebindable_outliving_write}), or none for a write in a nested block that runs
+      # on another object.
+      def outliving_writes(node, ancestors, base_scope, non_locals)
+        found = ReflectiveIvarWrite.unknown_target?(node) ? reflective_unknown_ivars(base_scope) : NO_NAMES
+        written = rebindable_outliving_write(node, base_scope, non_locals)
+        return found if written.nil? && found.empty?
+        return NO_NAMES if under_foreign_self_block?(ancestors)
+
+        written ? found + [written] : found
+      end
+
+      # Issue #1402 — whether a block on the path `ancestors` runs on another object: its call is a
+      # {InterveningIvarReset.foreign_self_block?}.
+      def under_foreign_self_block?(ancestors)
+        (1...ancestors.size).any? do |index|
+          child = ancestors[index]
+          parent = ancestors[index - 1]
+          child.is_a?(Prism::BlockNode) && parent.is_a?(Prism::CallNode) && parent.block.equal?(child) &&
+            InterveningIvarReset.foreign_self_block?(parent)
+        end
       end
 
       # Issue #1889 — every ivar `base_scope` binds: an `instance_variable_set` on `self` whose target no literal

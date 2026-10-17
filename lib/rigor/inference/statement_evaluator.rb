@@ -367,7 +367,18 @@ module Rigor
         # Default: the node is treated as a pure expression. Type it through the existing expression typer (which
         # observes the current scope's locals) and leave the scope unchanged, but for the match globals a call in it
         # may rebind (`super(line.sub(re, ""))`, issue #1365).
-        [@scope.type_of(node, tracer: @tracer), forget_rebound_specials(@scope, node)]
+        after = reset_ivars_past_unknown_code(node, forget_rebound_specials(@scope, node))
+        [@scope.type_of(node, tracer: @tracer), after]
+      end
+
+      # Issue #1402 — `after`, past a statement `yield` or `super`, with each narrowed instance variable widened over
+      # its class-ivar seed ({InterveningIvarReset.after_operand}): the block `yield` runs, and the superclass method
+      # `super` runs on `self`, may write any of them, as an implicit-self call may. Inside an operand the statement
+      # that holds it answers instead.
+      def reset_ivars_past_unknown_code(node, after)
+        return after if @in_operand || !InterveningIvarReset.candidate?(node)
+
+        InterveningIvarReset.after_operand(node, after)
       end
 
       # Issue #1429 — a compound write or a `for` loop calls a method its syntax does not spell (`r += r` calls `r.+`,
@@ -3505,10 +3516,16 @@ module Rigor
       # is one that could plausibly mutate ivars on the enclosing class (implicit-self or explicit `self.foo`).
       # External- receiver calls (`obj.method`) cannot reach the caller's ivars; they pass through unchanged.
       # Issue #1596 — where the call is proven to write only some ivars ({#self_call_ivar_writes}), only those widen.
+      #
+      # Issue #1402 — a proc's call (`blk.call`) is a candidate too, and so is a call on another receiver whose literal
+      # block makes one ({InterveningIvarReset.after_block}: `[1].each { reset }`). Both widen as a condition's
+      # calls do, marking a binding whose narrowing had ruled `nil` out, since the code they run is far more often
+      # code that leaves the variable alone.
       def invalidate_ivars_for_intervening_call(call_node, current_scope)
-        return current_scope unless intervening_call_candidate?(call_node)
+        return InterveningIvarReset.after_block(call_node, current_scope) unless intervening_call_candidate?(call_node)
 
-        InterveningIvarReset.widen(current_scope) { self_call_ivar_writes(call_node) }
+        mark = !InterveningIvarReset.self_call?(call_node)
+        InterveningIvarReset.widen(current_scope, mark: mark) { self_call_ivar_writes(call_node) }
       end
 
       # Issue #1596 — the ivars the implicit-self / `self.` call `call_node` may write, or nil when that is not proven
@@ -4021,7 +4038,7 @@ module Rigor
         classification = classify_closure_escape(node)
         return post_scope if classification == :non_escaping
 
-        post_scope = escaping_closure_captures(node.block, post_scope)
+        post_scope = escaping_closure_captures(node.block, post_scope, foreign_self: foreign_self_block?(node))
         post_scope.with_fact(
           Analysis::FactStore::Fact.new(
             bucket: :dynamic_origin,
@@ -4325,8 +4342,8 @@ module Rigor
       # callback that runs later writes the very ivar the continuation reads (`@clicked = false; button.on_click {
       # @clicked = true }` left `if @clicked` folding always-falsey). One still on its ADR-58 declaration seed is
       # left alone ({CapturedLocals.writes}): that seed already holds whatever the callback stores.
-      def drop_captured_narrowing(block_node, base_scope)
-        names = CapturedLocals.writes(block_node, base_scope, ivars: true)
+      def drop_captured_narrowing(block_node, base_scope, foreign_self: false)
+        names = CapturedLocals.writes(block_node, base_scope, ivars: true, foreign_self: foreign_self)
         return base_scope if names.empty?
 
         names.reduce(base_scope) { |acc, name| bind_capture(acc, name, Type::Combinator.untyped) }
@@ -4356,13 +4373,27 @@ module Rigor
         return post_scope unless block.is_a?(Prism::BlockNode)
         return post_scope unless classify_closure_escape(call_node) == :non_escaping
 
-        names = CapturedLocals.writes(block, scope, ivars: true)
+        names = CapturedLocals.writes(block, scope, ivars: true, foreign_self: foreign_self_block?(call_node))
         return post_scope if names.empty?
 
         break_pass = block_break_pass(block)
-        result = converge_captures_by_kind(call_node, block, names, break_pass)
+        marks = {}
+        result = with_capture_exit_marks(marks) { converge_captures_by_kind(call_node, block, names, break_pass) }
         result = join_block_break_bindings(call_node, block, result, break_pass)
-        result.reduce(post_scope) { |acc, (name, type)| bind_capture(acc, name, type) }
+        result.reduce(post_scope) { |acc, (name, type)| bind_capture(acc, name, type, optimistic: marks[name]) }
+      end
+
+      # Issue #1402 — runs the write-back's passes with `marks` collecting the ADR-101 optimistic mark a pass's exit
+      # holds for each rebound name ({#block_exit_bindings}), as the per-element fold collects them
+      # (`ExpressionTyper#captured_exit_bindings`). A later pass enters on that mark, and the continuation binds it:
+      # `x = false; pairs.each { x = pairs.first&.empty? }` stored the miss's `nil` at run time, and without the mark
+      # `x.nil?` folded to `false` where the inline `pairs.first&.empty?.nil?` answers `bool`.
+      def with_capture_exit_marks(marks)
+        outer = @capture_exit_marks
+        @capture_exit_marks = marks
+        yield
+      ensure
+        @capture_exit_marks = outer
       end
 
       # The {BodyFixpoint} continuation of `names`, seeded from their pre-call bindings.
@@ -4421,7 +4452,12 @@ module Rigor
       # Binds a name from `CapturedLocals.writes`. An ivar goes through {CapturedLocals.bind}, which keeps its issue
       # #286 optimistic mark. A local keeps the plain `with_local` these seams have always used, so a block that
       # rebinds no ivar leaves the locals exactly as before.
-      def bind_capture(scope, name, type)
+      #
+      # Issue #1402 — `optimistic` is a mark a write-back pass's exit held ({#with_capture_exit_marks}); a name that has
+      # one binds through {CapturedLocals.bind} whatever its kind, which adds it.
+      def bind_capture(scope, name, type, optimistic: nil)
+        return CapturedLocals.bind(scope, name, type, optimistic: optimistic) if optimistic
+
         CapturedLocals.ivar_name?(name) ? CapturedLocals.bind(scope, name, type) : scope.with_local(name, type)
       end
 
@@ -5285,7 +5321,20 @@ module Rigor
       def block_exit_bindings(call_node, block, bindings, names)
         entry = with_repeated_or_write_marks(call_node, block, block_pass_entry(call_node, block, bindings))
         _type, exit_scope = sub_eval(block, entry)
+        record_capture_exit_marks(exit_scope, names)
         names.to_h { |name| [name, CapturedLocals.bound_type(exit_scope, name)] }
+      end
+
+      # Issue #1402 — records into {#with_capture_exit_marks}' table the mark `exit_scope` holds for each of `names`;
+      # the first mark a name takes stays.
+      def record_capture_exit_marks(exit_scope, names)
+        marks = @capture_exit_marks
+        return if marks.nil?
+
+        names.each do |name|
+          mark = CapturedLocals.optimistic_mark(exit_scope, name)
+          marks[name] ||= mark if mark
+        end
       end
 
       # The entry scope of one write-back pass: the block's entry with each written outer local or ivar bound to
@@ -5296,7 +5345,9 @@ module Rigor
       def block_pass_entry(call_node, block, bindings)
         entry = build_block_entry_scope(call_node, block)
         capture_pass_bindings(block, bindings).reduce(entry) do |acc, (name, type)|
-          bindings.key?(name) ? bind_capture(acc, name, type) : acc.with_mutated_local(name, type)
+          next acc.with_mutated_local(name, type) unless bindings.key?(name)
+
+          bind_capture(acc, name, type, optimistic: @capture_exit_marks&.[](name))
         end
       end
 
@@ -5400,7 +5451,7 @@ module Rigor
       def unproven_rebind_bindings(call_node, block, classification)
         return NO_CAPTURE_BINDINGS if call_node.receiver && classification == :non_escaping
 
-        names = CapturedLocals.writes(block, scope, ivars: true)
+        names = CapturedLocals.writes(block, scope, ivars: true, foreign_self: foreign_self_block?(call_node))
         return NO_CAPTURE_BINDINGS if names.empty?
 
         untyped = Type::Combinator.untyped
@@ -5515,8 +5566,15 @@ module Rigor
       # The continuation effects of an escaping closure body: the outer locals it can rebind drop their narrowing, and
       # the ones it content-mutates are floored. Shared by the two spellings — a block on an escaping call
       # ({#record_closure_escape_if_any}) and a lambda literal ({#eval_lambda}) — so they cannot drift.
-      def escaping_closure_captures(closure_node, post_scope)
-        widen_escaping_content_captures(closure_node, drop_captured_narrowing(closure_node, post_scope))
+      def escaping_closure_captures(closure_node, post_scope, foreign_self: false)
+        widen_escaping_content_captures(closure_node,
+                                        drop_captured_narrowing(closure_node, post_scope, foreign_self: foreign_self))
+      end
+
+      # Issue #1402 — whether `call_node`'s block runs on another object ({InterveningIvarReset.foreign_self_block?}),
+      # so that no instance variable it writes is this scope's ({CapturedLocals.writes}' `foreign_self:`).
+      def foreign_self_block?(call_node)
+        InterveningIvarReset.foreign_self_block?(call_node)
       end
 
       # Builds the entry scope for a block body. The block sees the outer scope's locals (Ruby's lexical scoping rule)

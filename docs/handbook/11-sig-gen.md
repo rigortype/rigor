@@ -734,7 +734,7 @@ output it got before.
 ## RSpec-aware observations
 
 When the observed test roots hold an RSpec suite, the
-generator recognises three RSpec-shaped binding patterns
+generator recognises four RSpec-shaped binding patterns
 and uses them to type receivers that would otherwise
 degrade to `Dynamic[top]`:
 
@@ -742,10 +742,12 @@ degrade to `Dynamic[top]`:
 RSpec.describe Calc do
   subject { Calc.new }         # binds :subject → Nominal[Calc]
   let(:other) { Calc.new }     # binds :other   → Nominal[Calc]
+  before { @calc = Calc.new }  # binds @calc    → Nominal[Calc]
 
   it "..." do
     subject.greet("Alice")     # observed: Calc#greet receives String
     other.greet("Bob")         # observed: same
+    @calc.greet("Carol")       # observed: same
     described_class.new.add(1, 2)  # observed: Calc#add receives Integer, Integer
   end
 end
@@ -754,17 +756,22 @@ end
 The recogniser handles `RSpec.describe Foo`, bare
 `describe Foo` (no `RSpec.` receiver), `subject { … }`,
 `subject(:name) { … }`, `let(:name) { … }`, `let!(:name)`,
-and `described_class.new(...)`. Same-name `let` bindings
+an ivar assigned by a top-level statement of a `before`
+block, and `described_class.new(...)`. Same-name bindings
 across nested scopes are last-wins; the recogniser does not
 re-implement RSpec's full scope rules — the typical
 one-spec-file shape is the target.
 
 A Minitest suite under `test/` is observed too, with no
 recogniser of its own: a call whose receiver types to one
-class counts. A receiver assigned in `setup` is the gap —
-inside a `test_*` method it reads as `Foo | nil`, and such
-a call is not observed yet
-([#1389](https://github.com/rigortype/rigor/issues/1389)).
+class counts. A receiver assigned in `setup` reads as
+`Foo | nil` inside a `test_*` method, since `setup` is not
+`initialize`; a receiver of that shape — one class or class
+object plus `nil` — is observed as that class, because a
+call that dispatches with arguments cannot have been made
+on `nil`. `@foo&.bar(1)` counts the same way. A receiver
+that could be one of two classes (`Foo | Bar | nil`), or
+`untyped | nil`, is still not observed.
 
 The recogniser is part of the generator itself; you do not
 need to install `rigor-rspec` to benefit from it. If you

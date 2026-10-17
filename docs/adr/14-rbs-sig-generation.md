@@ -315,6 +315,16 @@ Receiver matching is conservative:
 - `define_method`-bound names are treated like `def`s
   with no callable body (the generator skips them in the
   MVP; see slicing).
+- 2026-10-18 (#1389) — a receiver typed `T | nil` whose
+  one non-nil member is a `Type::Nominal` or
+  `Type::Singleton` is matched as that member. A call that
+  passes arguments to the target cannot have dispatched on
+  `nil` (`nil.bar(1)` raises `NoMethodError`, `nil&.bar(1)`
+  skips the call), and a Minitest `setup` ivar read in a
+  test method is exactly this shape. Two non-nil members
+  (`Foo | Bar | nil`) or a `Dynamic` member stay
+  unmatched. The receiver's inferred type is unchanged
+  outside the collector.
 
 Observations from RSpec-style spec files use the same
 mechanism. There is no RSpec-specific recogniser in the
@@ -324,6 +334,13 @@ sites. Future slices may add RSpec-aware recognisers
 or `let(:bar) { … }` as a binding), but the MVP keeps
 that surface inside `rigor-rspec` and out of the core
 generator.
+
+2026-10-18 (#1389): slice 5's recogniser also binds an
+ivar written by a top-level statement of a `before` block
+to the written value's type, and uses that binding for an
+ivar-read receiver the scope types as `Dynamic` (an ivar
+read inside an `it` block). The scope's own type wins
+whenever it is not `Dynamic`.
 
 ## Boundary with ADR-1 (RBS round-trip)
 
@@ -729,3 +746,7 @@ override anywhere — has no wider declaration to find.
   telemetry names the withheld cases. The rules are normative in
   [`effect-labels.md`](../type-specification/effect-labels.md) § Emission;
   [ADR-103](103-effect-labels.md) WD9 is the working decision.
+- 2026-10-18 — #1389 matched a `T | nil` observation receiver as its one
+  `Nominal` / `Singleton` member, and bound `before`-block ivars for RSpec
+  observations. See the dated entries in § "How caller-side observations are
+  collected".

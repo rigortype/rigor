@@ -33,6 +33,7 @@ module Rigor
     #   `let` / `subject` bindings ride on slice 5's optional `rigor-rspec` integration.
     # - Calls whose receiver does not type as a `Type::Nominal` (e.g. `(some_dynamic).bar(...)`) are skipped —
     #   the collector cannot attribute them to a specific class.
+    # - A `T | nil` receiver with one `Nominal` / `Singleton` non-nil member counts as that member (#1389).
     # - Zero-argument calls give no observation; methods are matched by `(class_name, method_name)` only.
     class ObservationCollector # rubocop:disable Metrics/ClassLength
       # @param paths — observe paths (files /
@@ -181,11 +182,29 @@ module Rigor
       # a call to `MethodCatalog#initialize(path: ...)`. Route the observation under `[class_name, :initialize]`
       # so the initialize-stub renderer can consult it.
       def observation_key(call_node, receiver_type)
+        receiver_type = observed_receiver(receiver_type)
         if receiver_type.is_a?(Type::Singleton) && call_node.name == :new
           [receiver_type.class_name, :initialize]
         elsif receiver_type.is_a?(Type::Nominal)
           [receiver_type.class_name, call_node.name]
         end
+      end
+
+      # Issue #1389 — a receiver typed `T | nil` whose one non-nil member is a `Nominal` or `Singleton` is observed as
+      # that member. A Minitest `setup` ivar read in a test method types as `Foo?` (setup is not `initialize`), and a
+      # call that reaches `Foo#bar` with arguments can only have dispatched on the `Foo` part. The sole member still
+      # has to pass {#observation_key}'s `Nominal` / `Singleton` checks, so `untyped | nil` stays unobserved, and a
+      # union with two non-nil members (`Foo | Bar | nil`) passes through unchanged. Observation only: the
+      # receiver's inferred type elsewhere is untouched.
+      def observed_receiver(receiver_type)
+        return receiver_type unless receiver_type.is_a?(Type::Union)
+
+        non_nil = receiver_type.members.reject { |member| nil_type?(member) }
+        non_nil.size == 1 ? non_nil.first : receiver_type
+      end
+
+      def nil_type?(type)
+        (type.is_a?(Type::Constant) && type.value.nil?) || (type.is_a?(Type::Nominal) && type.class_name == "NilClass")
       end
 
       # ADR-14 slice 5 — RSpec-aware receiver typing. Resolves a CallNode receiver against the collected
@@ -201,7 +220,18 @@ module Rigor
         return resolve_described_class_new(bindings) if described_class_new?(receiver)
         return bindings[receiver.name] if bound_call?(receiver, bindings)
 
-        safe_type_of(scope, receiver)
+        type = safe_type_of(scope, receiver)
+        return bindings[receiver.name] if before_ivar_fallback?(receiver, type, bindings)
+
+        type
+      end
+
+      # Issue #1389 — an ivar read inside an `it` block types as `Dynamic` (the block's ivars are not a class's), so
+      # a `before { @foo = Foo.new }` write stands in for it. The scope's own type wins whenever it says anything.
+      def before_ivar_fallback?(receiver, type, bindings)
+        receiver.is_a?(Prism::InstanceVariableReadNode) &&
+          bindings.key?(receiver.name) &&
+          (type.nil? || type.is_a?(Type::Dynamic))
       end
 
       def bound_call?(receiver, bindings)
@@ -253,6 +283,7 @@ module Rigor
 
         recognise_describe(node, bindings)
         recognise_subject_or_let(node, bindings, scope_index)
+        recognise_before_ivars(node, bindings, scope_index)
 
         node.rigor_each_child { |child| walk_rspec_bindings(child, bindings, scope_index) }
       end
@@ -284,6 +315,23 @@ module Rigor
 
         body_type = type_block_body(node.block, scope_index)
         bindings[name] = body_type if body_type
+      end
+
+      # `before { @foo = Foo.new }` / `before(:each) do … end`: binds each ivar the block's top-level statements
+      # write to the written value's type, keyed by the ivar name (`:@foo`, which no `let` name can collide with).
+      # Last-wins like `let`.
+      def recognise_before_ivars(node, bindings, scope_index)
+        return unless node.is_a?(Prism::CallNode) && node.name == :before && node.receiver.nil?
+
+        body = block_body_node(node.block)
+        statements = body.is_a?(Prism::StatementsNode) ? body.body : [body].compact
+        statements.each do |statement|
+          next unless statement.is_a?(Prism::InstanceVariableWriteNode)
+
+          scope = scope_index[statement.value] || scope_index[statement]
+          type = scope && safe_type_of(scope, statement.value)
+          bindings[statement.name] = type if type
+        end
       end
 
       def binding_name_for(call_node)

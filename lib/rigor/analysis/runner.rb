@@ -609,6 +609,19 @@ module Rigor
         expand_paths(paths).fetch(:files)
       end
 
+      # Issue #1583 — the project files a run over `paths` would DISCOVER without analysing them (#684's
+      # widening), by globbing only. Empty whenever the run would not widen, which includes every run over
+      # the configured `paths:`. {IncrementalSession} digests them, because an edit to one moves the
+      # diagnostics of the files it does analyse.
+      def discovery_only_file_set(paths = @configuration.paths)
+        expansion = expand_paths(paths)
+        widened = project_discovery_expansion(paths, expansion)
+        return [] if widened.nil?
+
+        analysed = expansion.fetch(:files).to_set
+        widened.fetch(:files).reject { |path| analysed.include?(path) }
+      end
+
       # ADR-46 §2 — inverts {#file_dependencies} into the reverse edge the incremental step walks:
       # `dependents[X] = { A : A read a declaration / body from X }`. On an edit to X, the body tier
       # (slice 2) re-analyses `{X} ∪ dependents[X]` and serves every other file from the per-file cache.
@@ -1832,8 +1845,14 @@ module Rigor
       # on what else was on the command line.
       #
       # Excluded, each because its expansion is already the one it means: the LSP `prebuilt:` path (which
-      # seeds discovery from a snapshot), editor `buffer:` mode, `run_source`'s in-memory single file, and
-      # ADR-46's `analyze_only` subset mode (which already passes the full expansion and filters later).
+      # seeds discovery from a snapshot), editor `buffer:` mode, and `run_source`'s in-memory single file.
+      #
+      # Issue #1583 — ADR-46's `analyze_only` subset mode widens like a full run. It was excluded on the
+      # reading that it "already passes the full expansion", which holds only when the incremental session
+      # runs over the configured `paths:`. `rigor check --incremental lib/b.rb` passes the argument's
+      # expansion, so its rechecks (and `--verify-incremental`'s partitions) discovered the argument alone
+      # while its baseline discovered the project, and `lib/b.rb`'s report on a sibling's constant came and
+      # went with the run kind.
       #
       # Issue #1556 — the widened set holds each FILE once. `.rigor.yml`'s `paths:` load as absolute paths and a
       # path argument usually does not, so `rigor check lib` widened discovery over both spellings of every file:
@@ -1871,8 +1890,7 @@ module Rigor
       end
 
       def widen_discovery_to_project?(paths)
-        @prebuilt.nil? && @buffer.nil? && @in_memory_sources.nil? && @analyze_only.nil? &&
-          paths != @configuration.paths
+        @prebuilt.nil? && @buffer.nil? && @in_memory_sources.nil? && paths != @configuration.paths
       end
 
       # ADR-46 — the dependency-recording and subset-analysis modes read the discovery tables OUTSIDE the

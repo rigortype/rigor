@@ -1008,7 +1008,7 @@ never in. A session that cannot reuse an existing snapshot therefore
 declines rather than running a baseline — nothing it computed could warm
 the next keystroke anyway.
 
-### `Payload` (current `SCHEMA = 40`)
+### `Payload` (current `SCHEMA = 41`)
 
 ```
 Payload :: Data[
@@ -1023,7 +1023,8 @@ Payload :: Data[
   effect_collections, effects_identity,       # ADR-103 the effects sidecar and its own identity (see below)
   run_level_rows,                             # the two run-level rows a narrowed run replays (see below)
   effect_plugin_digest,                       # #1898 the plugin effect-fact digest the collections were stamped under
-  plugin_reads                                # #1553 path -> the plugin reads its last analysis made (see below)
+  plugin_reads,                               # #1553 path -> the plugin reads its last analysis made (see below)
+  discovery_digests                           # #1583 discovered-not-analysed path -> packed stat digest (see below)
 ]
 ```
 
@@ -1087,9 +1088,41 @@ bundle a `source_rbs_digest`
 seed bundle a `siblings` Hash, the `possible_*` / `contested_*` halves of the
 discovery-index pairs (ADR-119 WD1, [`inference-engine.md`](inference-engine.md)
 § "Discovery Index"), every one empty until a producer admits a possible fact;
-`40` added `plugin_reads` ([#1553](https://github.com/rigortype/rigor/issues/1553), below).
+`40` added `plugin_reads` ([#1553](https://github.com/rigortype/rigor/issues/1553), below);
+`41` added `discovery_digests` ([#1583](https://github.com/rigortype/rigor/issues/1583), below).
 A blob from an older schema mismatches the `SCHEMA` gate and loads as `nil` — a
 clean cold rebuild, never a migration.
+
+### `discovery_digests` — path arguments under a configured path ([#1583](https://github.com/rigortype/rigor/issues/1583))
+
+A run over path arguments that differ from the configured `paths:` widens
+its cross-file discovery to the configured paths as well
+([#684](https://github.com/rigortype/rigor/issues/684)), so
+`rigor check lib/b.rb` resolves a constant `lib/a.rb` defines. Every run an
+`IncrementalSession` makes widens the same way: the baseline, a recheck's
+`analyze_only:` closure run, and a `--verify-incremental` partition
+(`reanalyze_subset`). Before #1583 only the baseline did, so a recheck or a
+partition over `lib/b.rb` discovered `lib/b.rb` alone and answered
+differently from the full run.
+
+A discovered-not-analysed file feeds the index the analysed files resolve
+against, but it has no per-file row, edge or digest of its own. The session
+records each one's ADR-87 packed stat-digest entry
+(`Runner#discovery_only_file_set`) in `discovery_digests` at every baseline.
+A recheck re-globs that set first and re-baselines the session when a member
+was edited, added or removed: such files are not tracked per symbol, so the
+closure cannot be narrowed. The re-baseline analyses the argument set alone
+(its banner reads as a cold run) and persists the new digests, so the next
+unchanged run is warm again. An edit under another configured path
+(`paths: [lib, ext]`, `rigor check --incremental lib`, an `ext/` edit;
+[#1560](https://github.com/rigortype/rigor/issues/1560)) takes the same route.
+
+A session over the configured paths (no arguments, or arguments equal to
+`paths:`) discovers nothing beyond what it analyses: `discovery_digests` is
+empty and the check globs nothing. A session over arguments pays one extra
+glob of the configured paths and one `File::Stat` per discovered file on
+each warm run, plus the discovery fold over those files that the widened
+recheck now makes (seed-bundle served, no re-parse of an unchanged file).
 
 ### `plugin_reads` — plugin reads in the closure ([#1553](https://github.com/rigortype/rigor/issues/1553))
 

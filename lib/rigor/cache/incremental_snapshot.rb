@@ -179,7 +179,10 @@ module Rigor
       # 40: issue #1553 — the payload gains `plugin_reads`, the plugin reads each analysed file's last analysis made,
       # which a recheck validates to put a reader of a changed input into the closure. A pre-40 blob carries none,
       # so its readers would be served stale; the gate rejects it and the next run is cold.
-      SCHEMA = 40
+      # 41: issue #1583 — the payload gains `discovery_digests`, the packed digest of each file a run over path
+      # arguments discovered without analysing, which a recheck compares to re-baseline when one moved. A pre-41
+      # blob carries none; the gate rejects it and the next run is cold.
+      SCHEMA = 41
 
       # The persisted per-file state.
       # `cache` maps an analyzed file to its diagnostics.
@@ -234,6 +237,9 @@ module Rigor
       # Issues #796 / #794 — the run-level rows a narrowed run replays instead of re-deriving; see
       # docs/internal-spec/cache.md § "Run-level rows the snapshot carries" for why exactly these two are
       # fresh under the fingerprint and why no other `.rigor.yml`-level row may join them.
+      # Issue #1583 — `discovery_digests` maps each file a run over path arguments discovered but did not analyse
+      # (#684's widening to the configured `paths:`) to its ADR-87 packed stat-digest entry; `{}` on a run over
+      # the configured paths. A recheck that finds one moved, or the set changed, re-baselines.
       # Issue #1898 — `effect_plugin_digest` is {Rigor::Effects::PluginFacts#digest} at the run that collected
       # `effect_collections` (nil when collection was off). A plugin stamps its attributions and edges into a file's
       # collection, and `effects_identity` is plugin-blind (it is compared before any plugin loads), so the session
@@ -243,10 +249,11 @@ module Rigor
                             :missing, :class_decls, :constant_decls, :seed_bundles, :plugin_fact_digest,
                             :return_summaries, :param_table,
                             :effect_collections, :effects_identity, :run_level_rows,
-                            :effect_plugin_digest, :plugin_reads) do
+                            :effect_plugin_digest, :plugin_reads, :discovery_digests) do
         # `effect_plugin_digest` defaults to nil so a payload built without it (an older caller, a spec fixture)
-        # reads as "unknown", which the session treats as moved. `plugin_reads` defaults to no reads.
-        def initialize(effect_plugin_digest: nil, plugin_reads: {}, **rest)
+        # reads as "unknown", which the session treats as moved. `plugin_reads` defaults to no reads, and
+        # `discovery_digests` to no discovery-only files.
+        def initialize(effect_plugin_digest: nil, plugin_reads: {}, discovery_digests: {}, **rest)
           super
         end
       end
@@ -457,7 +464,8 @@ module Rigor
           effects_identity: data[:effects_identity],
           run_level_rows: data[:run_level_rows],
           effect_plugin_digest: data[:effect_plugin_digest],
-          plugin_reads: data[:plugin_reads] || {}
+          plugin_reads: data[:plugin_reads] || {},
+          discovery_digests: data.fetch(:discovery_digests, {})
         )
       end
       private :payload_from
@@ -484,7 +492,8 @@ module Rigor
           effects_identity: payload.effects_identity,
           run_level_rows: payload.run_level_rows,
           effect_plugin_digest: payload.effect_plugin_digest,
-          plugin_reads: payload.plugin_reads
+          plugin_reads: payload.plugin_reads,
+          discovery_digests: payload.discovery_digests
         )
         # #1507 — every `--incremental` run that analysed anything rewrites this whole blob, so its deflate is
         # on the edit path; see {Store::DEFLATE_LEVEL}.

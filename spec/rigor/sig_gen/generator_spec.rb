@@ -1333,6 +1333,7 @@ RSpec.describe Rigor::SigGen::Generator do
       expect(method.declared_return_rbs).to eq("untyped")
     end
 
+    # Guard: the #1891 widening and decline apply over an authored `untyped` only; this passes with them removed.
     it "keeps the strictest carrier for true, false and nil when no `.rbs` declares the method" do
       path = write_fixture("lib/box.rb", "class Box\n  def t = true\n  def n = nil\nend\n")
 

@@ -631,7 +631,8 @@ module Rigor
 
             verb = args.first
             name = verb.unescaped if verb.is_a?(Prism::SymbolNode) || verb.is_a?(Prism::StringNode)
-            MIXINS.include?(name&.to_sym) ? args.drop(1) : nil
+            # Compared as strings: `to_sym` raises on a literal that is not valid in its encoding (`send("\xFF")`).
+            MIXINS.any? { |mixin| mixin.name == name } ? args.drop(1) : nil
           end
 
           def mixin_reference(arg, nesting)

@@ -15,43 +15,52 @@ The session handoff (ADR-98). It answers ONE question: what should the next sess
 Transient; replaced wholesale. Backlog lives in GitHub Issues, release planning in Milestones.
 If this file disagrees with an ADR, the CHANGELOG, or an issue, this file is the one that is wrong.
 
-## State at 2026-10-15 (master after #1913)
+## State at 2026-10-17 (master after #2051)
 
-**`v0.4.3` is released** (2026-10-15, tag `v0.4.3` = `8ad379542`, RubyGems and GitHub Release), a
-stabilization release: 41 merged PRs since `v0.4.2` (plus release PR #1912), every `v0.4.3` milestone issue closed, the
-milestone closed. The perf-gate corpus now is `v0.4.3` (#1913); on the `v0.4.2` corpus the `v0.4.3`
-engine measured +0.63% allocations, within band.
+**`v0.4.4` is released** (tag `v0.4.4`). The **`v0.4.5` milestone** has 51 open issues. A
+v0.4.5 batch landed 20 PRs on master between #1999 and #2051. Each went through an Opus review,
+and several needed fix rounds. The batch also ran lanes through the new push tooling:
 
-Fanned-out subagent work now follows `docs/agents/parallel-lanes.md` (#1903): premise check, a design
-pass with an edge-case table for semantic changes, an overlap map, the lane and reviewer contracts
-(mutation table, honest gates, claims limited to what specs pin), and landing on a merged master.
+- **`bin/lane-push`** (#2022) is the only push path for a lane's branch. It rebases onto a freshly
+  fetched `origin/master`, runs `verify-changed` on the rebased tree, and refuses untracked files.
+  It pushes with an explicit refspec and a lease. It accepts the branch's own earlier pushes through
+  the reflog, and it refuses a remote commit the branch never had.
+- `verify-changed` now runs every "flip this when #N" pinned example on an engine change
+  (`tool/pin_examples.rb`, about 9 s).
+- `RIGOR_REGENERATE_GATES=1` regenerates `producers.yml` and the admission census in place, and is
+  a no-op on an unchanged tree (#2041).
+- `docs/agents/parallel-lanes.md` now lists the three shapes behind this batch's severe rounds:
+  - a block that changes `self`;
+  - a sibling file defining the same name;
+  - a statement that may not run.
+
+  Step 7 re-gates a landing when either side touches the engine. The maintainer's rule: a branch
+  need not contain `origin/master` to merge, but every push rebases onto it.
 
 ## Next
 
-1. **`v0.4.4` milestone** (54 open, created 2026-10-15 by a triage session). Most of the review
-   follow-ups filed during the `v0.4.3` batch sit there (#1885, #1889, #1891, #1895, #1898, #1900,
-   #1902). Re-check each premise on master before it enters a batch (parallel-lanes step 1).
-2. **#1651 gates `v0.5.0`**: recover ADR-119 C2-b1's typing loss or accept it. Measured levers:
-   #1649 (only together with #1650, which needs an ADR-2 design), #1608, then C2-b2 and C2-d (#1604).
-3. **Stale `--incremental` answers** still open: #1647, #1654, #1661, #1833, #1553, #1559, #1560.
-4. **Decisions waiting on the maintainer:** #1676 (emit top-level defs as `class Object; private def`),
-   #120 (an ADR for a default-capable `--incremental`), #1829 / #1814 / #1815 (refinement edges).
+1. **`v0.4.5` milestone** (51 open). Re-check each premise on master before it enters a batch.
+   Run at most two lanes at once; lens work runs in parallel sessions.
+   Follow-ups this batch filed: #2002, #2005–#2013, #2018, #2020, #2021, #2023, #2025–#2027,
+   #2030, #2031, #2033, #2034, #2037–#2040, #2042, #2044, #2046, #2048, #2050, #2052, #2053.
+2. **#2021 blocks `verify-changed` on any branch that touches `rails_i18n.rb`**: `rigor check` on
+   that file alone misreads its nested `Effects`. Until it is fixed, lanes push with
+   `bin/lane-push --no-verify="#2021: …"` and leave the gate to CI.
+3. **#2053**: `verify-changed` misses `ancestry_walker_detection_spec` on engine changes (CI caught
+   it on #2051).
+4. **Gated on the maintainer** (unchanged): #1651 / `v0.5.0`, #1676, #120, #1829 / #1814 / #1815.
 
-## In flight
+## In flight (not this handoff's lanes)
 
-- **#1828** (Draft since 2026-10-11, a refinement session's): a gem module read in full counts as a
-  known refining module. Not this handoff's lane; leave it to its owner.
-- **#1771** (Draft, reference only): five review passes each found a false positive from reading
-  "no project file defines the name" as proof. #1715 records the shapes and two non-absence designs.
-  Do not resume #1771 as is.
-- **#1788** waits for an alba release that ships its `sig/` (merged upstream as
-  okuramasafumi/alba#575, unreleased as of alba v4.0.0).
+- #2015 (lens), #1828 (refinement session), #1771 (reference only; do not resume as is).
 
 ## What bit
 
-- Specs that pass with the fix removed were the most common review finding (7 PRs in the `v0.4.3`
-  batch); the lane contract's mutation table exists for this.
-- Severe review rounds came from semantics the coordinator had not tabulated (symlinked paths,
-  `Complex`, a half-fixed root cause); writing the edge-case table first is the fix.
-- The `lens_spec` spec-order failure: see `docs/agents/measurement.md` § "Specs and gates that pass
-  without checking".
+- Three PRs reached round 3 with a severe finding: #2000, #2016, #2036. #2036's last finding was
+  in code added in round 1. The maintainer chose to drop that item (#2046) rather than open round 4.
+- Removing a narrowing can itself report: on a nilable subject, "narrows nothing" keeps the nil
+  (#2036 item 3). Check the nil path whenever a change widens a type.
+- Two regressions only showed up on the real tree, not in fixtures:
+  - #2035 crashed `rigor unused` on Rigor itself with an invalid-encoding `send` literal (fixed by #2047);
+  - #2049's `base:` glob ignored the base for an absolute pattern.
+  Run the command on this repository, not only on fixtures.

@@ -218,6 +218,13 @@ RSpec.describe "an instance variable across yield, proc calls, super and blocks 
     expect(analyze(source).diagnostics.map(&:rule)).not_to include("flow.always-truthy-condition")
   end
 
+  it "keeps a class that includes an unknown module plain: a mixin does not make it a Module subclass" do
+    # Ruby: `Other5.class_eval { @x = 1 }` sets the class object's `@x`; the instance's stays `"s"`.
+    source = "class Other5\nend\n\nclass P5\n  include ExternalMixin\n\n  def m\n    @x = \"s\"\n    " \
+             "Other5.class_eval { @x = 1 }\n    v = @x\n    dump_type(v)\n  end\nend\n"
+    expect(dumped(source)).to eq(['dump_type: "s"'])
+  end
+
   it "keeps the write-back for an Object receiver, which is not provably another object (guard)" do
     # Ruby: `false` here, but an `Object` may be `self`; the ADR-56 join / drop stands as on master.
     source = "def m\n  @x = false\n  o = Object.new\n  o.instance_eval { @x = true }\n  v = @x\n  dump_type(v)\nend\n"

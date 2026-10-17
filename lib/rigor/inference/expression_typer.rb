@@ -2583,6 +2583,10 @@ module Rigor
 
         def_node, owner = resolve_singleton_def_with_owner(receiver.class_name, method_name)
         return nil if def_node.nil?
+        # Issue #1936 — a contested slot holds a `def` a later definer may have replaced
+        # (`singleton_class.alias_method :x, :y` after `def self.x`), or one that may not have run: its body is not
+        # proven to be the method Ruby calls, so the call falls through to `Dynamic`.
+        return nil if scope.discovery.contested?(:discovered_singleton_def_nodes, [owner, method_name.to_sym])
 
         result = infer_user_method_return(def_node, receiver, arg_types, yield_type: block_type)
         return result if result.nil?

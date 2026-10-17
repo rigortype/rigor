@@ -4859,6 +4859,18 @@ module Rigor
       # The singleton walk's accumulator: the `{class => {name => DefNode}}` table, plus the contested slots, which
       # follow each slot's writer ({#follow_slot_writer}'s rule).
       class SingletonDefTable < Hash
+        # Issue #1936 — contests the slots of `names` (every slot of `class_name` for `:all`) that an earlier write
+        # filled: a later non-`def` definer replaced the `def` they hold. The slot keeps the `def`, as
+        # {ScopeIndexer#supersede_def_nodes} keeps the instance one, and a later write clears the contest.
+        def supersede(class_name, names)
+          slot = self[class_name]
+          return if slot.nil?
+
+          (names == :all ? slot.keys : names).each do |name|
+            (@contested ||= Set.new) << [class_name, name] if slot.key?(name)
+          end
+        end
+
         def track(certainty)
           @certainty = certainty
           @contested = nil
@@ -5158,7 +5170,7 @@ module Rigor
       # own `def` leaves additionally split on {INSTANCE_EVAL_CALLS}, whose `def`s bind on the
       # receiver's singleton rather than the receiver.
       def receiver_eval_call?(node)
-        node.block.is_a?(Prism::BlockNode) && RECEIVER_EVAL_CALLS.include?(node.name)
+        node.is_a?(Prism::CallNode) && node.block.is_a?(Prism::BlockNode) && RECEIVER_EVAL_CALLS.include?(node.name)
       end
 
       # A `class_eval` / `module_eval` / `class_exec` / `module_exec` block is NOT deferred: it runs
@@ -5541,7 +5553,10 @@ module Rigor
                                    def_owner_prefix = nil, singleton_cref: false,
                                    defs_singleton: false)
         return unless node.is_a?(Prism::Node)
-        if node.is_a?(Prism::CallNode) && receiver_eval_call?(node)
+
+        supersede_singleton_def_nodes(node, qualified_prefix, in_singleton_class, defs_singleton, accumulator,
+                                      def_owner_prefix)
+        if receiver_eval_call?(node)
           return walk_eval_singleton_defs(node, qualified_prefix, in_singleton_class, accumulator,
                                           def_owner_prefix, singleton_cref: singleton_cref,
                                                             defs_singleton: defs_singleton)
@@ -5894,6 +5909,79 @@ module Rigor
         class_name = qualified_prefix.join("::")
         write_singleton_slot(accumulator, class_name, def_node.name, def_node, def_node,
                              possible: !declared && module_function_on == :uncertain)
+      end
+
+      # Issue #1936 — the singleton twin of {#supersede_def_nodes}: a definer that is not a `def` replaces the
+      # singleton method an earlier `def self.x` of the walk installed, so the slot is contested and the typing read
+      # declines instead of re-typing the replaced body. The definers, each written on the class's own singleton
+      # class: `singleton_class.alias_method` / `define_method` / `remove_method` / `undef_method` / `attr_*` and its
+      # `class_eval` family and `send` (bare, `self.` or a constant's `singleton_class`), `define_singleton_method`,
+      # and in a `class << self` body the receiverless calls of the same names with `alias` and `undef`. Certain or
+      # possible alike; a call whose rewritten names are not all literal contests every slot the owner holds so far.
+      # Under an `instance_eval` split (`defs_singleton`) only `alias` and `undef` bind on the singleton; its calls
+      # stay instance-side.
+      def supersede_singleton_def_nodes(node, qualified_prefix, in_singleton_class, defs_singleton, accumulator,
+                                        def_owner_prefix)
+        return unless accumulator.is_a?(SingletonDefTable) && defs_singleton != :unnameable
+
+        owner_prefix = def_owner_prefix || qualified_prefix
+        current = owner_prefix.empty? ? nil : owner_prefix.join("::")
+        owner, names =
+          case node
+          when Prism::AliasMethodNode, Prism::UndefNode
+            [current, singleton_keyword_names(node)] if in_singleton_class || defs_singleton == true
+          when Prism::CallNode
+            singleton_call_target(node, qualified_prefix, current, in_singleton_class)
+          end
+        accumulator.supersede(owner, names) if owner && names
+      end
+
+      def singleton_keyword_names(node)
+        return literal_names_or_all(node.names) if node.is_a?(Prism::UndefNode)
+
+        names = Source::AliasNames.keyword_names(node)
+        names ? names.first(1) : :all
+      end
+
+      # `[owner, names]` for a singleton definer call {#supersede_singleton_def_nodes} reads, or nil.
+      def singleton_call_target(node, qualified_prefix, current, in_singleton_class)
+        receiver = node.receiver
+        if !in_singleton_class && singleton_class_of_receiver?(receiver)
+          [singleton_class_owner(node, receiver.receiver, qualified_prefix, current), singleton_naming_call_names(node)]
+        elsif receiver.nil? || receiver.is_a?(Prism::SelfNode)
+          [current, in_singleton_class ? singleton_naming_call_names(node) : define_singleton_method_names(node)]
+        end
+      end
+
+      # The singleton names a naming call on the singleton class replaces, `:all` where they are not all literal,
+      # or nil for another call. `attr_writer` replaces only `x=`, `attr_reader` only `x`. A `class_eval`-family or
+      # `send` call may replace any name, so it is `:all`.
+      def singleton_naming_call_names(node)
+        arguments = node.arguments&.arguments || []
+        case node.name
+        when *SURFACE_EVAL_CALLS, *SURFACE_SEND_CALLS then :all
+        when :alias_method then literal_names_or_all(arguments.first(1))
+        when :define_method then define_singleton_method_names(node, :define_method)
+        when :remove_method, :undef_method then literal_names_or_all(arguments)
+        when *ATTR_MACROS
+          names = literal_names_or_all(arguments)
+          return names if names == :all
+
+          names.flat_map do |base|
+            [(base unless node.name == :attr_writer), (:"#{base}=" unless node.name == :attr_reader)].compact
+          end
+        end
+      end
+
+      def define_singleton_method_names(node, call = :define_singleton_method)
+        return nil unless node.name == call
+
+        literal_names_or_all(node.arguments&.arguments&.first(1) || [])
+      end
+
+      def literal_names_or_all(arguments)
+        names = arguments.map { |argument| literal_method_name(argument) }
+        names.empty? || names.any?(&:nil?) ? :all : names
       end
 
       # One singleton slot write, through {SingletonDefTable#write} when the walk tracks certainty.
@@ -8258,7 +8346,8 @@ module Rigor
         return if owner.nil?
 
         singleton_class_rewritten_names(node).each do |method_name|
-          names = [method_name]
+          # `attr_writer :x` defines `x=` alone (#1936), so `x` keeps its own `def`.
+          names = node.name == :attr_writer ? [] : [method_name]
           names << :"#{method_name}=" if %i[attr_writer attr_accessor].include?(node.name)
           names.each do |name|
             record_envelope(tables.envelopes, owner, [:singleton, name], Source::ParameterEnvelope::OPAQUE)

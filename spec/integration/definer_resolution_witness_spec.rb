@@ -834,16 +834,12 @@ RSpec.describe Rigor::Inference::DefinerResolution do # rubocop:disable RSpec/Sp
         expect(singleton(scope_for(source), "C", :bar)).to eq(:unknown)
       end
 
-      # A same-class redefinition after an own `def self.x`, or a plain hook defining on the includer: Ruby's owner
-      # is `#<Class:C>` as the read says, but the body Ruby runs is not the `def` the read answers.
+      # A plain hook defining on the includer: Ruby's owner is `#<Class:C>` as the read says, but the body Ruby runs
+      # is not the `def` the read answers.
       {
-        "`define_singleton_method` after it" =>
-          "class C; def self.x = :own; define_singleton_method(:x) { :late }; end",
         "a plain `self.included` hook defining on the includer" =>
           "module H; def h = 1; def self.included(b) = b.define_singleton_method(:x) { :late }; end\n" \
-          "class C; def self.x = :own; include H; end",
-        "`class << self; attr_accessor :x`" =>
-          "class C; def self.x = :own; class << self; attr_accessor :x; end; end; C.x = :late"
+          "class C; def self.x = :own; include H; end"
       }.each do |label, source|
         it "pins an own def read past #{label} (wrong body: Ruby runs the later definition)" do
           expect(ruby_singleton("#{source}\n", "C", :x)).to eq([%w[#<Class:C>], "#<Class:C>", ":late"])
@@ -854,8 +850,13 @@ RSpec.describe Rigor::Inference::DefinerResolution do # rubocop:disable RSpec/Sp
       # Closed by #1752: a surface call on `singleton_class` (`class_eval`) leaves the singleton side unpositioned, so
       # the read declines instead of answering the wrong body. Since #1906 an `alias_method` or `define_method` whose
       # names are literals (Strings included) makes only the name it rewrites opaque and contested, which declines
-      # the same read.
+      # the same read. Since #1936 a later `define_singleton_method(:x)` or `class << self; attr_accessor :x` contests
+      # the own `def`'s singleton slot, which declines it too.
       {
+        "`define_singleton_method` after it" =>
+          "class C; def self.x = :own; define_singleton_method(:x) { :late }; end",
+        "`class << self; attr_accessor :x`" =>
+          "class C; def self.x = :own; class << self; attr_accessor :x; end; end; C.x = :late",
         "`singleton_class.class_eval { def x }`" =>
           "class C; def self.x = :own; singleton_class.class_eval { def x = :late }; end",
         "a singleton `alias_method`" =>

@@ -2856,7 +2856,13 @@ Unrelated
       source = "module Tools\n  def label\n    \"tool\"\n  end\nend\n" \
                "class C\n  class << self\n    class_eval { include Tools }\n  end\nend\n" \
                "C.label\n"
-      expect(last_statement_type(source).describe).to eq('"tool"')
+      program = parse(source)
+      scope = described_class.index(program, default_scope: default_scope)[program.statements.body.last]
+      expect(scope.singleton_def_for("C", :label)&.name).to eq(:label)
+      # The edge is recorded unpositioned (a surface call on the singleton class), so the folded slot is contested
+      # and the call types `Dynamic` rather than the copied body (#1936); Ruby answers "tool".
+      expect(scope.discovery.contested?(:discovered_singleton_def_nodes, ["C", :label])).to be(true)
+      expect(last_statement_type(source).describe).to eq("Dynamic[top]")
     end
 
     it "does not fold `extend` inside `class << self`'s eval block — it lands on the metaclass" do

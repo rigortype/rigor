@@ -2905,12 +2905,23 @@ module Rigor
 
         # Issue #1984 — the singleton side reads only the reached definer: a private singleton method may be inherited
         # (`private_class_method :new` on a superclass) or come from an extended module, so there is no own-table
-        # gate as on the instance side.
+        # gate as on the instance side. It reports only:
+        #
+        # - a constant receiver (`K.x`, `A::K.x`): `self.class.x` or a local may hold a subclass that makes the name
+        #   public again (`public_class_method :new`, a template-method `def self.x`);
+        # - a call inside a `def` ({#load_time_call?}): code that runs while the files load (a class body's
+        #   `ALL = [K.new]` before its `private_class_method :new`) may run before the call is private;
+        # - no class on the chain may have had every singleton name made public (`K.public_class_method(*names)`,
+        #   `K.singleton_class.class_eval { … }`; {#singleton_wildcard_contested?}).
         def singleton_visibility_mismatch(path, call_node, scope, receiver_type, lexical_sites)
           class_name = receiver_type.class_name
+          return nil unless call_node.receiver.is_a?(Prism::ConstantReadNode) ||
+                            call_node.receiver.is_a?(Prism::ConstantPathNode)
           return nil unless private_singleton_candidate?(scope, call_node.name)
+          return nil if load_time_call?(scope, call_node)
           return nil unless reached_definer_visibility(scope, class_name, call_node.name, :singleton) == :private
           return nil if missing_hook_on_chain?(scope, class_name, :singleton)
+          return nil if singleton_wildcard_contested?(scope, class_name)
           return nil if refined_method_in_effect?(class_name, call_node, scope, :singleton, lexical_sites)
 
           build_visibility_mismatch_diagnostic(path, call_node, "singleton(#{class_name})")
@@ -2937,6 +2948,31 @@ module Rigor
         def private_recorded_names(tables)
           tables.each_value.with_object(Set.new) do |table, names|
             table.each { |slot, visibility| names << (slot.is_a?(Array) ? slot.last : slot) if visibility == :private }
+          end
+        end
+
+        # Issue #1984 — whether the call is outside every `def` of its file that the deferred ranges name (a `def` in a
+        # class body or at the top level; one nested in a block is not named, so a call there counts as load time
+        # too). Such code may run while the files load, before a later `private_class_method` or in a load order
+        # where the private declaration has not run yet.
+        def load_time_call?(scope, call_node)
+          rows = scope.discovered_deferred_ranges[scope.source_path]
+          return true if rows.nil?
+
+          offset = call_node.location.start_offset
+          rows.none? { |(start, finish, name, _kind, _owner)| !name.nil? && start <= offset && offset < finish }
+        end
+
+        SINGLETON_WILDCARD_SLOT = [:singleton, :*].freeze
+        private_constant :SINGLETON_WILDCARD_SLOT
+
+        # Issue #1984 — whether a project class on `class_name`'s singleton chain has its wildcard singleton slot
+        # contested: a call the walk saw may have made any of its singleton methods public.
+        def singleton_wildcard_contested?(scope, class_name)
+          discovery = scope.discovery
+          chain = Scope::ResolutionChain.for(scope, class_name.to_s, :singleton, :methods)
+          chain.entries.any? do |entry|
+            !entry.external? && discovery.contested?(:discovered_method_visibilities, [entry.name, SINGLETON_WILDCARD_SLOT])
           end
         end
 

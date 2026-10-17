@@ -573,7 +573,10 @@ module Rigor
             "Method is `:protected` (subclass tracking is deferred).",
             "A `method_missing` or `respond_to_missing?` on the receiver's chain, on the side the call reaches, " \
             "may answer the call (Ruby sends a private call to `method_missing`).",
-            "The visibility rests on a statement that may not run, or on files that disagree about it."
+            "The visibility rests on a statement that may not run, or on files that disagree about it.",
+            "On a class object: the receiver is not a constant (`self.class.x` may be a subclass that " \
+            "re-publicises the name), or the call is not inside a `def` (load-time code may run before the " \
+            "method is made private)."
           ],
           suppression: "`# rigor:disable method-visibility-mismatch`.",
           severity_authored: :error,

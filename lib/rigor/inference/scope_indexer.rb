@@ -7873,10 +7873,13 @@ module Rigor
         end
 
         # Contests every slot of `class_name` on `side` recorded so far (`private(*names)` may name any of them).
+        # Issue #1984 — on the singleton side it also contests the class's wildcard slot
+        # ({ScopeIndexer::SINGLETON_WILDCARD_SLOT}): the names may be ones another file records.
         def contest_class(class_name, side = :instance)
           self[class_name]&.each_key do |slot|
             contest_slot(class_name, slot) if slot.is_a?(Array) == (side == :singleton)
           end
+          contest_slot(class_name, SINGLETON_WILDCARD_SLOT) if side == :singleton
         end
 
         # Issue #1984 — records `visibility` in the slot of `name` on `side` ({ScopeIndexer.visibility_slot}) and
@@ -8006,6 +8009,7 @@ module Rigor
                                 current_visibility, accumulator)
           return current_visibility
         when Prism::CallNode
+          record_constant_class_method_calls(node, qualified_prefix, accumulator)
           if receiver_eval_call?(node)
             walk_eval_visibilities(node, qualified_prefix, in_singleton_class, current_visibility,
                                    accumulator, def_owner_prefix, singleton_cref: singleton_cref,
@@ -8192,6 +8196,48 @@ module Rigor
           end
         end
         true
+      end
+
+      # Issue #1984 — the slot a contest stands on for every singleton name of a class: a call that may make any of
+      # them public (`K.public_class_method(*names)`, `K.singleton_class.class_eval { … }`).
+      SINGLETON_WILDCARD_SLOT = [:singleton, :*].freeze
+
+      # Issue #1984 — a class method visibility call written on a constant (`K.public_class_method(:x)`,
+      # `K.send(:public_class_method, :x)`), anywhere: each literal name is recorded public on every class the
+      # constant may name, so a reopening's or another file's `private_class_method` disagrees with it and is
+      # contested. A `K.private_class_method` is not read (the rule only declines more where it is missing). Any call
+      # on `K.singleton_class` (`send(:public, :x)`, `class_eval { … }`), or a `public_class_method` whose names are
+      # not literal, contests every singleton name of the class.
+      def record_constant_class_method_calls(node, qualified_prefix, accumulator)
+        receiver = node.receiver
+        if singleton_class_of_receiver?(receiver) && constant_receiver?(receiver.receiver)
+          return each_constant_class(receiver.receiver, qualified_prefix) { |name| accumulator.contest_class(name, :singleton) }
+        end
+        return unless constant_receiver?(receiver)
+
+        name = node.name
+        arguments = node.arguments&.arguments || EMPTY_VISIBILITY_ARGUMENTS
+        if VISIBILITY_SEND_CALLS.include?(name) || name == :public_send
+          name = Source::Literals.symbol_or_string(arguments.first)
+          arguments = arguments.drop(1)
+        end
+        return unless name == :public_class_method
+
+        names = arguments.flat_map { |arg| arg.is_a?(Prism::ArrayNode) ? arg.elements : [arg] }
+                         .map { |arg| Source::Literals.symbol_or_string(arg) }
+        each_constant_class(receiver, qualified_prefix) do |class_name|
+          next accumulator.contest_class(class_name, :singleton) if names.any?(&:nil?)
+
+          names.each { |method_name| accumulator.write(class_name, method_name, :singleton, :public, node, toggled: false) }
+        end
+      end
+
+      def constant_receiver?(node)
+        node.is_a?(Prism::ConstantReadNode) || node.is_a?(Prism::ConstantPathNode)
+      end
+
+      def each_constant_class(receiver, qualified_prefix, &)
+        constant_receiver_candidates(receiver, qualified_prefix).each(&)
       end
 
       # Issue #1984 — the side a body's members land on: `:singleton` in a `class << self` body or a `class_eval` on

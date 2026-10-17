@@ -165,9 +165,12 @@ RSpec.describe "the method-visibility table over visibility calls (#1911, #1819,
   end
 
   # Issue #1984 — a splat names members of its own side only: `private(*names)` the instance slots,
-  # `private_class_method(*names)` and `private(*names)` in `class << self` the singleton ones.
+  # `private_class_method(*names)` and `private(*names)` in `class << self` the singleton ones, with the class's
+  # wildcard singleton slot (`[:singleton, :*]`), since the names may be ones another file records.
   it "contests only the splatted side's slots" do
-    expect(tables(<<~RUBY).last).to eq(Set[["I", :i], ["S", %i[singleton s]], ["C", %i[singleton s]]])
+    expected = Set[["I", :i], ["S", %i[singleton s]], ["S", %i[singleton *]], ["C", %i[singleton s]],
+                   ["C", %i[singleton *]]]
+    expect(tables(<<~RUBY).last).to eq(expected)
       class I
         def self.s = 1
         def i = 1

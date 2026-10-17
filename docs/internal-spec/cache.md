@@ -919,8 +919,9 @@ full run, so the snapshot can never wedge or stale an analysis.
    with `#read_file`, whose row carries the edit.
 2. **Per-file digests (drive the decision).** When the fingerprint matches,
    the `Payload` is loaded unconditionally and its per-file content digests
-   determine the changed set `ΔF`; the affected closure `ΔF ∪ dependents[ΔF]`
-   is re-analysed and the rest served from `Payload#cache`.
+   determine the changed set `ΔF`; the affected closure `ΔF ∪ dependents[ΔF]`,
+   joined by every file a plugin read of which went stale (`plugin_reads`,
+   below), is re-analysed and the rest served from `Payload#cache`.
 
 ### Output order
 
@@ -1007,7 +1008,7 @@ never in. A session that cannot reuse an existing snapshot therefore
 declines rather than running a baseline — nothing it computed could warm
 the next keystroke anyway.
 
-### `Payload` (current `SCHEMA = 38`)
+### `Payload` (current `SCHEMA = 40`)
 
 ```
 Payload :: Data[
@@ -1020,7 +1021,9 @@ Payload :: Data[
   return_summaries,                           # ADR-89 observed-key return summaries (see below)
   param_table,                                # ADR-67 WD6c the inferred-param seed table the run analysed under
   effect_collections, effects_identity,       # ADR-103 the effects sidecar and its own identity (see below)
-  run_level_rows                              # the two run-level rows a narrowed run replays (see below)
+  run_level_rows,                             # the two run-level rows a narrowed run replays (see below)
+  effect_plugin_digest,                       # #1898 the plugin effect-fact digest the collections were stamped under
+  plugin_reads                                # #1553 path -> the plugin reads its last analysis made (see below)
 ]
 ```
 
@@ -1083,9 +1086,43 @@ bundle a `source_rbs_digest`
 ([#1536](https://github.com/rigortype/rigor/issues/1536), below); `35` gave each
 seed bundle a `siblings` Hash, the `possible_*` / `contested_*` halves of the
 discovery-index pairs (ADR-119 WD1, [`inference-engine.md`](inference-engine.md)
-§ "Discovery Index"), every one empty until a producer admits a possible fact.
+§ "Discovery Index"), every one empty until a producer admits a possible fact;
+`40` added `plugin_reads` ([#1553](https://github.com/rigortype/rigor/issues/1553), below).
 A blob from an older schema mismatches the `SCHEMA` gate and loads as `nil` — a
 clean cold rebuild, never a migration.
+
+### `plugin_reads` — plugin reads in the closure ([#1553](https://github.com/rigortype/rigor/issues/1553))
+
+A plugin read made while a file is analysed is an input of that file's cached
+rows, and no ADR-46 edge records it: the edges record type and declaration
+reads. `plugin_reads` maps each analysed file to the rows
+`Plugin::IoBoundary.attributing` collected while it was analysed (the
+`FileEntry` rows of `#read_file`, of a `#file?` / `#directory?` probe and of a
+read that found the path absent, and the `GlobEntry` rows of `#list_directory`
+and `#glob`), as each read observed its input. A file whose analysis read
+nothing has no key.
+
+- **Closure.** A recheck validates every distinct row once, however many files
+  made it, and every file holding a row that no longer validates joins the
+  affected closure: the read file was edited or removed, a path a read or probe
+  found absent appeared, or a listing or glob's match set moved. The reader's
+  text is unchanged, so it joins alone, with no dependents of its own.
+- **Refresh.** A re-analysed file's rows are replaced by this run's, so a read
+  it no longer makes stops guarding it; a removed file's rows are dropped.
+- **Pool.** Each fork worker collects the same rows per file and marshals them
+  back beside its dependency records, so a pooled run keeps what a sequential
+  run keeps.
+- **Paths.** A row names the path the plugin passed, made absolute without
+  resolving symlinks, the boundary's own rule; a content row stats through the
+  link, so an edit to its target goes stale.
+- **Bounds.** Only reads are credited, the rule `IoBoundary.attributing` states:
+  a value a plugin memoises reaches later files without a read, so only the
+  file whose analysis first made the read joins the closure. A read made outside
+  any file's analysis (in `#prepare`, or by a producer computed there) is
+  credited to no file and moves nothing into this closure.
+- **Cost.** A recheck with no stale row pays one validation per distinct row:
+  a `File.stat` for a content row whose stat tuple did not move, an existence
+  check for a probe row, and a re-glob for a listing row.
 
 ### `plugin_fact_digest` — plugin-fact soundness ([ADR-88](../adr/88-incremental-plugin-fact-soundness.md))
 

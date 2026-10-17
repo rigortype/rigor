@@ -170,8 +170,13 @@ module Rigor
         return analyze_with_effects(path) unless @record_dependencies
 
         diagnostics = nil
-        record = DependencyRecorder.record_for(path) { diagnostics = analyze_with_effects(path) }
+        reads = []
+        record = Plugin::IoBoundary.attributing(reads) do
+          DependencyRecorder.record_for(path) { diagnostics = analyze_with_effects(path) }
+        end
         @file_dependencies[path] = record
+        # Issue #1553 — the plugin reads this file's analysis made, as `Runner#analyze_file` keeps them.
+        (@analysis_reads ||= {})[path] = reads unless reads.empty?
         diagnostics
       end
 
@@ -307,6 +312,12 @@ module Rigor
       # exactly as the sequential recording path would.
       def drain_dependencies
         @file_dependencies
+      end
+
+      # Issue #1553 — the plugin reads ({Plugin::IoBoundary.attributing}) each `#analyze` call's file made (empty
+      # unless `record_dependencies:` was set). The rows are value objects of frozen Strings, so they marshal back.
+      def drain_analysis_reads
+        @analysis_reads || {}
       end
 
       # ADR-103 WD12 — the per-file {Effects::FileCollection}s this session collected (empty unless the

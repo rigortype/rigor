@@ -8,6 +8,7 @@ require_relative "../project_environment"
 require_relative "../scope"
 require_relative "../reflection"
 require_relative "../type"
+require_relative "../inference/reflective_ivar_write"
 require_relative "../source/constant_path"
 require_relative "../source/literals"
 require_relative "../source/node_children"
@@ -1901,7 +1902,8 @@ module Rigor
         other_writes = Hash.new { |h, k| h[k] = Set.new }
         collect_other_ivar_writes(root, [], false, other_writes)
         result.to_h do |class_name, map|
-          [class_name, map.reject { |attr_name, _| other_writes[class_name].include?(:"@#{attr_name}") }]
+          others = other_writes[class_name]
+          [class_name, others.include?(ANY_IVAR) ? {} : map.reject { |attr_name, _| others.include?(:"@#{attr_name}") }]
         end
       end
 
@@ -1909,12 +1911,14 @@ module Rigor
         Prism::InstanceVariableWriteNode, Prism::InstanceVariableOperatorWriteNode,
         Prism::InstanceVariableOrWriteNode, Prism::InstanceVariableAndWriteNode, Prism::InstanceVariableTargetNode
       ].freeze
-      private_constant :IVAR_WRITE_NODES
+      ANY_IVAR = :*
+      private_constant :IVAR_WRITE_NODES, :ANY_IVAR
 
       # Records into `other_writes[class_name]` every instance ivar a class writes other than through an
       # `initialize`'s `@ivar = param_name`: the ivars an implicit-self `attr_writer` / `attr_accessor` names,
-      # and every write inside an instance `def` or a block. `def self.x`, a `class << self` body and a bare
-      # class-body write set the class object's ivars and do not count.
+      # and every write inside an instance `def` or a block, an `instance_variable_set` on `self` included
+      # ({#written_ivar}). `def self.x`, a `class << self` body and a bare class-body write set the class
+      # object's ivars and do not count.
       def collect_other_ivar_writes(node, prefix, in_block, other_writes)
         return unless node.is_a?(Prism::Node)
 
@@ -1934,8 +1938,10 @@ module Rigor
           in_block = true
         when Prism::CallNode
           record_attr_writer_ivars(node, prefix, other_writes)
-        when *IVAR_WRITE_NODES
-          other_writes[prefix.join("::")] << node.name if in_block && !prefix.empty?
+        end
+        if in_block && !prefix.empty?
+          name = written_ivar(node)
+          other_writes[prefix.join("::")] << name if name
         end
 
         node.rigor_each_child { |child| collect_other_ivar_writes(child, prefix, in_block, other_writes) }
@@ -1957,19 +1963,30 @@ module Rigor
         if def_node.name == :initialize && def_node.parameters
           scan_ivar_param_assignments(def_node.body, build_init_param_index(def_node.parameters).keys.to_set, observed)
         end
-        each_ivar_write(def_node.body) do |write|
-          next if write.is_a?(Prism::InstanceVariableWriteNode) && write.value.is_a?(Prism::LocalVariableReadNode) &&
-                  observed[write.name] == write.value.name
+        each_node(def_node.body) do |node|
+          name = written_ivar(node)
+          next if name.nil?
+          next if node.is_a?(Prism::InstanceVariableWriteNode) && node.value.is_a?(Prism::LocalVariableReadNode) &&
+                  observed[name] == node.value.name
 
-          other_writes[prefix.join("::")] << write.name
+          other_writes[prefix.join("::")] << name
         end
       end
 
-      def each_ivar_write(node, &)
+      # The ivar `node` writes: a write node's name, an `instance_variable_set` on `self`'s literal name, or
+      # `ANY_IVAR` for one whose name the analysis cannot read ({Inference::ReflectiveIvarWrite}).
+      def written_ivar(node)
+        return node.name if IVAR_WRITE_NODES.any? { |klass| node.is_a?(klass) }
+        return nil unless Inference::ReflectiveIvarWrite.self_write?(node)
+
+        Inference::ReflectiveIvarWrite.literal_name(node) || ANY_IVAR
+      end
+
+      def each_node(node, &)
         return unless node.is_a?(Prism::Node)
 
-        yield node if IVAR_WRITE_NODES.any? { |klass| node.is_a?(klass) }
-        node.rigor_each_child { |child| each_ivar_write(child, &) }
+        yield node
+        node.rigor_each_child { |child| each_node(child, &) }
       end
 
       def collect_init_ivar_obs(node, prefix, result)

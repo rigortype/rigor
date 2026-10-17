@@ -87,6 +87,23 @@ RSpec.describe Rigor::CLI::SigGenCommand do
         attr_reader :count
         def self.make(c) = @count = c
       end
+
+      class SetBox
+        def initialize(count, label)
+          @count = count
+          @label = label
+        end
+        attr_reader :count, :label
+        def bump(n) = instance_variable_set(:@count, n)
+      end
+
+      class OptsBox
+        def initialize(count, opts)
+          @count = count
+          opts.each { |k, v| instance_variable_set(:"@\#{k}", v) }
+        end
+        attr_reader :count
+      end
     RUBY
     write("test/boxes_test.rb", <<~RUBY)
       Box.new(0)
@@ -95,6 +112,8 @@ RSpec.describe Rigor::CLI::SigGenCommand do
       RBox.new(0)
       ResetBox.new(0)
       SelfBox.new(0)
+      SetBox.new(0, "a")
+      OptsBox.new(0, {})
     RUBY
   end
 
@@ -126,6 +145,17 @@ RSpec.describe Rigor::CLI::SigGenCommand do
 
   it "keeps the observed type when the other write is the class object's own ivar" do
     expect(section(observed_print, "SelfBox")).to include("def count: () -> 0")
+  end
+
+  it "skips the reader of a field an instance_variable_set on self names, and keeps its sibling" do
+    set_box = section(observed_print, "SetBox")
+
+    expect(set_box).not_to include("def count:")
+    expect(set_box).to include(%(def label: () -> "a"))
+  end
+
+  it "skips every observed reader of a class whose instance_variable_set name is computed" do
+    expect(section(observed_print, "OptsBox")).not_to include("def count:")
   end
 
   # Guard: without observations nothing reaches the observed-ivar map, before or after #1410.

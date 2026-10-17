@@ -4590,16 +4590,17 @@ end
       expect(described_class.build_discovered_includes(program)).to eq("C" => ["T"])
     end
 
-    it "leaves the `Recv.include(Mod)` call form unrecorded" do
-      # Deliberately out of scope: no ordering question is open for it, and recording it would change what
-      # every consumer says about the class (see the walk's comment).
+    it "records the `Recv.include(Mod)` and `Recv.send(:include, Mod)` call forms in the include table only" do
+      # Issue #1722 — the call form is the same ancestry edge as an in-body `include`, as `Recv.prepend(Mod)` is.
       program = parse(<<~RUBY)
         module T; end
+        module U; end
         class C; end
         C.include(T)
+        C.send(:include, U)
       RUBY
       expect(described_class.build_discovered_prepends(program)).to be_empty
-      expect(described_class.build_discovered_includes(program)).to be_empty
+      expect(described_class.build_discovered_includes(program)).to eq("C" => %w[U T])
     end
 
     it "resolves an unqualified call-form receiver through the nesting the file declares" do

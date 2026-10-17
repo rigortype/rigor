@@ -1,0 +1,442 @@
+# frozen_string_literal: true
+
+# Issue #1722 — `call.undefined-method` on core-class receivers (a literal, a plain `Integer` / `String`, and a union
+# of one class's literals) where the program gives the receiver the method in a way the RBS lookup cannot see:
+#
+# 1. a source `method_missing` on the class or an RBS ancestor;
+# 2. `C.include(M)` / `C.prepend(M)` / `C.send(:include, M)` outside the class body, or a mixin of an RBS ancestor;
+# 3. singleton methods given to the object a local holds (`s.extend(M)`, `define_singleton_method`,
+#    `s.singleton_class.class_eval`, `s.instance_eval { def }`, `class << s`);
+# 4. a value typed `String` through a signature that holds a project subclass defining the method.
+#
+# Each row runs the fixture under Ruby and under `rigor check`. Every call is a `t(:label) { ... }` line, so a firing
+# maps back to its label. A label Ruby answers in some world (an `env` the row lists) must stay silent; a label Ruby
+# raises on in every world must fire, unless the row lists it under `declines` (a reading the rule makes
+# conservatively). The helper carries a `call.wrong-arity` sentinel in a method Ruby never calls, so a run that
+# analysed nothing cannot pass; most rows also carry an undefined-method control (a `ctl_` label).
+
+require "spec_helper"
+require "fileutils"
+require "tmpdir"
+
+require "rigor/analysis/runner"
+require "rigor/configuration"
+
+RSpec.describe "call.undefined-method on core receivers the program extends (#1722)" do
+  helper = <<~'RUBY'
+    def t(label)
+      result = yield
+      puts "#{label}: OK #{result.inspect}"
+    rescue NoMethodError
+      puts "#{label}: NoMethodError"
+    end
+
+    def sentinel = 1.succ(1)
+  RUBY
+
+  rows = {
+    "a method_missing on the class, with respond_to_missing?" => {
+      "main.rb" => <<~RUBY
+        class Integer
+          def method_missing(*) = 1
+          def respond_to_missing?(*) = true
+        end
+        #{helper}
+        t(:lit) { 1.zzz }
+        t(:plain) { Integer("1").zzz }
+        t(:union) { (ARGV.empty? ? 1 : 2).zzz }
+        t(:ctl_str) { "a".zzz }
+      RUBY
+    },
+    "a method_missing on the class without respond_to_missing?" => {
+      "main.rb" => <<~RUBY
+        class Integer
+          def method_missing(*) = 1
+        end
+        #{helper}
+        t(:lit) { 1.zzz }
+        t(:union) { (ARGV.empty? ? 1 : 2).zzz }
+        t(:ctl_str) { "a".zzz }
+      RUBY
+    },
+    "a respond_to_missing? alone" => {
+      "main.rb" => <<~RUBY
+        class Integer
+          def respond_to_missing?(*) = true
+        end
+        #{helper}
+        t(:ctl_lit) { 1.zzz }
+      RUBY
+    },
+    "a method_missing on Comparable" => {
+      "main.rb" => <<~RUBY
+        module Comparable
+          def method_missing(*) = 1
+        end
+        #{helper}
+        t(:lit) { 1.zzz }
+        t(:str) { "a".zzz }
+        t(:ctl_array) { [1].zzz }
+      RUBY
+    },
+    "a method_missing on Numeric" => {
+      "main.rb" => <<~RUBY
+        class Numeric
+          def method_missing(*) = 1
+        end
+        #{helper}
+        t(:lit) { 1.zzz }
+        t(:float) { 1.5.zzz }
+        t(:ctl_str) { "a".zzz }
+      RUBY
+    },
+    "a method_missing on Object, which a class object reaches too" => {
+      "main.rb" => <<~RUBY
+        class Object
+          def method_missing(*) = 1
+        end
+        #{helper}
+        t(:lit) { 1.zzz }
+        t(:str) { "a".zzz }
+        t(:cls) { Integer.zzz }
+      RUBY
+    },
+    "a method_missing on Kernel" => {
+      "main.rb" => <<~RUBY
+        module Kernel
+          def method_missing(*) = 1
+        end
+        #{helper}
+        t(:lit) { 1.zzz }
+        t(:str) { "a".zzz }
+      RUBY
+    },
+    "a method_missing on BasicObject" => {
+      "main.rb" => <<~RUBY
+        class BasicObject
+          def method_missing(*) = 1
+        end
+        #{helper}
+        t(:lit) { 1.zzz }
+        t(:str) { "a".zzz }
+      RUBY
+    },
+    "a method_missing in a module the class includes" => {
+      "main.rb" => <<~RUBY
+        module Hook
+          def method_missing(*) = 1
+        end
+        class Integer
+          include Hook
+        end
+        #{helper}
+        t(:lit) { 1.zzz }
+        t(:ctl_str) { "a".zzz }
+      RUBY
+    },
+    "a method_missing in another file" => {
+      "lib.rb" => <<~RUBY,
+        class Integer
+          def method_missing(*) = 1
+        end
+      RUBY
+      "main.rb" => <<~RUBY
+        require_relative "lib"
+        #{helper}
+        t(:lit) { 1.zzz }
+        t(:union) { (ARGV.empty? ? 1 : 2).zzz }
+        t(:ctl_str) { "a".zzz }
+      RUBY
+    },
+    "a method_missing under an if" => {
+      env: [{}, { "HOOK" => "1" }],
+      "main.rb" => <<~RUBY
+        class Integer
+          if ENV["HOOK"]
+            def method_missing(*) = 1
+          end
+        end
+        #{helper}
+        t(:lit) { 1.zzz }
+        t(:ctl_str) { "a".zzz }
+      RUBY
+    },
+    "Integer.include(Ext) at the top level" => {
+      "main.rb" => <<~RUBY
+        module Ext
+          def zzz_incl = 1
+        end
+        Integer.include(Ext)
+        #{helper}
+        t(:lit) { 1.zzz_incl }
+        t(:plain) { Integer("1").zzz_incl }
+        t(:union) { (ARGV.empty? ? 1 : 2).zzz_incl }
+        t(:ctl_lit) { 1.nope }
+        t(:ctl_str) { "a".zzz_incl }
+      RUBY
+    },
+    "Integer.include(Ext) in a method that may not run" => {
+      env: [{}, { "SETUP" => "1" }],
+      "main.rb" => <<~RUBY
+        module Ext
+          def zzz_incl = 1
+        end
+        def setup = Integer.include(Ext)
+        setup if ENV["SETUP"]
+        #{helper}
+        t(:lit) { 1.zzz_incl }
+        t(:ctl_lit) { 1.nope }
+      RUBY
+    },
+    "Integer.include(Ext) in another file" => {
+      "lib.rb" => <<~RUBY,
+        module Ext
+          def zzz_incl = 1
+        end
+        Integer.include(Ext)
+      RUBY
+      "main.rb" => <<~RUBY
+        require_relative "lib"
+        #{helper}
+        t(:lit) { 1.zzz_incl }
+        t(:union) { (ARGV.empty? ? 1 : 2).zzz_incl }
+        t(:ctl_lit) { 1.nope }
+      RUBY
+    },
+    "Integer.prepend(Ext)" => {
+      "main.rb" => <<~RUBY
+        module Ext
+          def zzz_pre = 1
+        end
+        Integer.prepend(Ext)
+        #{helper}
+        t(:lit) { 1.zzz_pre }
+        t(:union) { (ARGV.empty? ? 1 : 2).zzz_pre }
+        t(:ctl_lit) { 1.nope }
+      RUBY
+    },
+    "Integer.send(:include, Ext)" => {
+      "main.rb" => <<~RUBY
+        module Ext
+          def zzz_send = 1
+        end
+        Integer.send(:include, Ext)
+        #{helper}
+        t(:lit) { 1.zzz_send }
+        t(:union) { (ARGV.empty? ? 1 : 2).zzz_send }
+        t(:ctl_lit) { 1.nope }
+      RUBY
+    },
+    "String.class_eval { def }" => {
+      "main.rb" => <<~RUBY
+        String.class_eval { def zzz_ce = 1 }
+        #{helper}
+        t(:lit) { "a".zzz_ce }
+        t(:union) { (ARGV.empty? ? "a" : "b").zzz_ce }
+        t(:ctl_lit) { "a".nope }
+      RUBY
+    },
+    "Comparable.include(Ext)" => {
+      "main.rb" => <<~RUBY
+        module Ext
+          def zzz_cmp = 1
+        end
+        Comparable.include(Ext)
+        #{helper}
+        t(:lit) { 1.zzz_cmp }
+        t(:str) { "a".zzz_cmp }
+        t(:ctl_array) { [1].zzz_cmp }
+      RUBY
+    },
+    "an include into an unrelated class" => {
+      "main.rb" => <<~RUBY
+        module Ext
+          def zzz_incl = 1
+        end
+        Array.include(Ext)
+        #{helper}
+        t(:arr) { [1].zzz_incl }
+        t(:ctl_str) { "a".zzz_incl }
+        t(:ctl_int) { 1.zzz }
+      RUBY
+    },
+    "extend on the receiver local" => {
+      "main.rb" => <<~RUBY
+        module M
+          def m = 1
+        end
+        #{helper}
+        s = ARGV.empty? ? "a" : "b"
+        s.extend(M)
+        t(:union) { s.m }
+        l = "a"
+        l.extend(M)
+        t(:lit) { l.m }
+        pl = String.new("x")
+        pl.extend(M)
+        t(:plain) { pl.m }
+        t(:ctl_other) { "c".m }
+      RUBY
+    },
+    "extend on the receiver local under an if" => {
+      env: [{}, { "EXT" => "1" }],
+      "main.rb" => <<~RUBY
+        module M
+          def m = 1
+        end
+        #{helper}
+        s = "a"
+        s.extend(M) if ENV["EXT"]
+        t(:lit) { s.m }
+        t(:ctl_other) { "c".m }
+      RUBY
+    },
+    "extend on a different local" => {
+      "main.rb" => <<~RUBY
+        module M
+          def m = 1
+        end
+        #{helper}
+        s = "a"
+        o = "b"
+        o.extend(M)
+        t(:ctl_lit) { s.m }
+      RUBY
+    },
+    "dup and clone of an extended local" => {
+      # `clone` copies the singleton class and `dup` does not. `s = s.dup` keeps the name the extend was written on,
+      # which the rule reads as extended.
+      declines: %w[self_dup],
+      "main.rb" => <<~RUBY
+        module M
+          def m = 1
+        end
+        #{helper}
+        s = "a"
+        s.extend(M)
+        d = s.dup
+        t(:ctl_dup) { d.m }
+        k = s.clone
+        t(:clone) { k.m }
+        s = s.dup
+        t(:self_dup) { s.m }
+      RUBY
+    },
+    "the other singleton spellings on a local" => {
+      "main.rb" => <<~RUBY
+        #{helper}
+        v = "a"
+        v.define_singleton_method(:vv) { 1 }
+        t(:dsm) { v.vv }
+        t(:ctl_dsm) { v.vx }
+        w = "a"
+        w.singleton_class.class_eval { def ww = 1 }
+        t(:sc_eval) { w.ww }
+        z = "a"
+        z.instance_eval { def zz = 1 }
+        t(:ie_def) { z.zz }
+        c = "a"
+        class << c
+          def cc = 1
+        end
+        t(:sclass) { c.cc }
+        f = "a"
+        f.instance_eval { @x = 1 }
+        t(:ctl_ie) { f.zz }
+      RUBY
+    },
+    "a union of two classes" => {
+      # Each arm is asked: one arm answering keeps the union silent, as Ruby answers in one world.
+      env: [{}, { "STR" => "1" }],
+      "main.rb" => <<~RUBY
+        class Integer
+          def method_missing(*) = 1
+        end
+        module M
+          def m = 1
+        end
+        #{helper}
+        t(:mm) { (ENV["STR"] ? "a" : 1).zzz }
+        u = ENV["STR"] ? [1] : "a"
+        u.extend(M)
+        t(:extend) { u.m }
+        t(:ctl_union) { (ENV["STR"] ? "a" : [1]).zzz }
+      RUBY
+    },
+    "a String subclass returned through a String signature" => {
+      # The union's `""` arm raises and its `String` arm, a `MyStr`, answers: not every arm lacks the method.
+      env: [{}, { "ARG" => "1" }],
+      "my_str.rb" => <<~RUBY,
+        class MyStr < String
+          def zzz_sub = 1
+        end
+      RUBY
+      "box.rbs" => <<~RBS,
+        class Box
+          def make: () -> String
+        end
+      RBS
+      "main.rb" => <<~RUBY
+        require_relative "my_str"
+        class Box
+          def make = MyStr.new("q")
+        end
+        #{helper}
+        m = Box.new.make
+        t(:plain) { m.zzz_sub }
+        t(:union) { (ENV["ARG"] ? Box.new.make : "").zzz_sub }
+        t(:ctl_none) { m.nope_none }
+        t(:ctl_lit) { "a".zzz_sub }
+      RUBY
+    }
+  }
+
+  around do |example|
+    Dir.mktmpdir("rigor-core-receiver-") { |dir| Dir.chdir(dir) { example.run } }
+  end
+
+  def write_fixture(files)
+    FileUtils.mkdir_p(%w[lib sig])
+    files.each do |name, source|
+      File.write(File.join(name.end_with?(".rbs") ? "sig" : "lib", name), source)
+    end
+  end
+
+  # `[undefined-method labels, wrong-arity sentinel count]`.
+  def rigor_firings
+    configuration = Rigor::Configuration.new(
+      Rigor::Configuration::DEFAULTS.merge("paths" => %w[lib], "signature_paths" => %w[sig], "workers" => 0)
+    )
+    source = File.readlines(File.join("lib", "main.rb"))
+    diagnostics = guarded_run(Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil), %w[lib])
+                  .diagnostics
+    undefined = diagnostics.select { |diagnostic| diagnostic.qualified_rule == "call.undefined-method" }
+    labels = undefined.map do |diagnostic|
+      source[diagnostic.line - 1][/t\(:(\w+)\)/, 1] || "#{File.basename(diagnostic.path)}:#{diagnostic.line}"
+    end
+    [labels, diagnostics.count { |diagnostic| diagnostic.qualified_rule == "call.wrong-arity" }]
+  end
+
+  # `{label => [outcome per world]}`.
+  def ruby_outcomes(worlds)
+    worlds.each_with_object(Hash.new { |hash, key| hash[key] = [] }) do |env, out|
+      stdout, stderr, status = RubyRun.capture("-e", "ENV.update(#{env.inspect}); load 'lib/main.rb'")
+      raise "Ruby failed on the fixture: #{stderr}" unless status.success?
+
+      stdout.scan(/^(\w+): (OK|NoMethodError)/) { |label, outcome| out[label] << outcome }
+    end
+  end
+
+  rows.each do |title, row|
+    it "answers as Ruby does for #{title}" do
+      write_fixture(row.reject { |key, _| key.is_a?(Symbol) })
+      outcomes = ruby_outcomes(row.fetch(:env, [{}]))
+      always_raises = outcomes.select { |_, results| results.all?("NoMethodError") }.keys
+      labels, sentinels = rigor_firings
+
+      expect(outcomes.keys.grep(/\Actl_/) - always_raises).to eq([])
+      expect(sentinels).to eq(1)
+      expect(labels).to match_array(always_raises - row.fetch(:declines, []))
+    end
+  end
+end

@@ -378,6 +378,68 @@ RSpec.describe "call.undefined-method on core receivers the program extends (#17
         t(:ctl_str) { "a".dyn }
       RUBY
     },
+    "an open-surface module mixed into Object, Kernel or BasicObject" => {
+      # A hook, a `"*"` mixin or a Concern opens a mixin's surface on any other ancestor; on these roots only a module
+      # that defines the name answers (#1697), so every call here fires as Ruby raises.
+      "vendor/concern.rb" => <<~RUBY,
+        module ActiveSupport
+          module Concern
+          end
+        end
+      RUBY
+      "main.rb" => <<~RUBY
+        require_relative "../vendor/concern"
+        module Helpers
+          module ClassMethods
+          end
+
+          def self.included(base) = base.extend(ClassMethods)
+        end
+        module Starred
+          MODS = [Comparable].freeze
+          MODS.each { |m| include m }
+        end
+        module Concerned
+          extend ActiveSupport::Concern
+        end
+        Object.include(Helpers)
+        Kernel.include(Starred)
+        BasicObject.include(Concerned)
+        #{helper}
+        t(:ctl_lit) { 1.nope }
+        t(:ctl_str) { "a".nope }
+      RUBY
+    },
+    "a module RBS does not know mixed into Kernel or Object" => {
+      "vendor/some_gem.rb" => <<~RUBY,
+        module SomeGem
+          module Unknown
+          end
+
+          module Other
+          end
+        end
+      RUBY
+      "main.rb" => <<~RUBY
+        require_relative "../vendor/some_gem"
+        module Wrapper
+          include SomeGem::Unknown
+        end
+        Kernel.include(Wrapper)
+        Object.include(SomeGem::Other)
+        #{helper}
+        t(:ctl_lit) { 1.nope }
+      RUBY
+    },
+    "an empty project module mixed into Integer" => {
+      "main.rb" => <<~RUBY
+        module Empty
+        end
+        Integer.include(Empty)
+        #{helper}
+        t(:ctl_lit) { 1.dyn }
+      RUBY
+    },
     "a project module mixed into Kernel and BasicObject" => {
       "main.rb" => <<~RUBY
         module KExt

@@ -20,10 +20,11 @@ module Rigor
       #   read the class's own chain through `discovered_methods`, which holds no plain `def` written in another
       #   file than the one being checked; this reads the def table too for a project module, and walks the
       #   ancestors RBS lists after the class. A cross-file `def` on an RBS-declared class or module itself stays
-      #   ADR-17's monkey-patch report ({.mixin_defines?}). A project module whose `included` / `extended` hook may
-      #   define methods on its includer answers any name. On `Object`, `Kernel` and `BasicObject` a project or
-      #   RBS-declared module answers as anywhere else, but one neither declares does not: #1697's reading
-      #   (`Inference::ObjectMixins`) is that such a module mixed into every object does not silence the rule.
+      #   ADR-17's monkey-patch report ({.mixin_defines?}). A mixin with an open surface — a project module with a
+      #   recorded `included` / `extended` / … hook, a `"*"` mixin or `ActiveSupport::Concern`, or one neither RBS nor
+      #   the project declares — answers any name, except on `Object`, `Kernel` and `BasicObject`: there only a
+      #   module that defines the name answers, #1697's reading (`Inference::ObjectMixins`) of a module mixed into
+      #   every object.
       # - **A project subclass** ({.subclass_may_define?}). A value typed by its class's name through a signature
       #   (`#: () -> String`) may be an instance of any subclass, so a method a project subclass defines may be
       #   the one that runs.
@@ -45,7 +46,7 @@ module Rigor
             DependencyRecorder.read_last_segment(:class, name) if DependencyRecorder.active?
             next false unless scope.known_user_class?(name)
 
-            chain_answers?(scope, name, method_name, unknown_answers: !OBJECT_ROOTS.include?(name))
+            chain_answers?(scope, name, method_name, open_mixins: !OBJECT_ROOTS.include?(name))
           end
         end
 
@@ -88,16 +89,18 @@ module Rigor
         end
 
         # A search of `name`'s project chain for an entry that may answer: a project entry that defines
-        # `method_name` or a `method_missing`, a project module whose hook may define methods on its includer, or
-        # an external mixin RBS declares `method_name` on — or, when `unknown_answers`, one RBS does not know. A
-        # chain cut at its budget may hold an answer past the cut.
-        def chain_answers?(scope, name, method_name, unknown_answers:)
+        # `method_name` or a `method_missing`, or an external mixin RBS declares `method_name` on. When
+        # `open_mixins` (every ancestor but `Object`, `Kernel` and `BasicObject`, #1697), also a mixin whose surface
+        # is open: a project module SingletonHookDecline reads as hook-capable, or an external neither RBS nor the
+        # project declares. A chain cut at its budget may hold an answer past the cut.
+        def chain_answers?(scope, name, method_name, open_mixins:)
           chain = Scope::ResolutionChain.for(scope, name, :instance, :methods)
           found = chain.search(scope, side: :instance) do |entry|
             if entry.external?
-              external_may_answer?(scope, entry, method_name, unknown_answers)
+              external_may_answer?(scope, entry, method_name, open_mixins)
             else
-              project_defines?(scope, entry.name, MISSING_HOOK) || mixin_defines?(scope, entry, method_name)
+              project_defines?(scope, entry.name, MISSING_HOOK) ||
+                mixin_defines?(scope, entry, method_name, open_mixins)
             end
           end
           found || chain.truncated?
@@ -121,27 +124,33 @@ module Rigor
         # rule reports it with the `pre_eval:` advice, so on such an entry only what `discovered_methods` carries
         # answers. A project module's own `def` answers from any file.
         #
-        # A project module's hook (`def self.included(base) = base.class_eval { def x }`, `base.send(:define_method,
-        # …)`) defines methods on whatever mixes it in, so a module {Inference::SingletonHookDecline} reads as
-        # hook-capable may answer any name.
-        def mixin_defines?(scope, entry, method_name)
+        # When `open_mixins`, a project module {Inference::SingletonHookDecline} reads as hook-capable — one that
+        # records an `included` / `extended` / … hook (`def self.included(base) = base.class_eval { def x }`), lists
+        # a `"*"` mixin, or extends `ActiveSupport::Concern` — may answer any name.
+        def mixin_defines?(scope, entry, method_name, open_mixins)
           owner = entry.name
           if Rigor::Reflection.rbs_class_known?(owner, scope: scope)
             scope.discovered_method?(owner, method_name, :instance)
           else
             project_defines?(scope, owner, method_name) ||
-              Inference::SingletonHookDecline.entry_hook_capable?(scope, entry)
+              (open_mixins && Inference::SingletonHookDecline.entry_hook_capable?(scope, entry))
           end
         end
 
-        def external_may_answer?(scope, entry, method_name, unknown_answers)
+        # An external the project declares (a module with no `def`, which the chain does not hold as a project entry)
+        # is known, and answers only through RBS.
+        def external_may_answer?(scope, entry, method_name, open_mixins)
           candidates = entry.candidates
-          return unknown_answers if candidates.empty?
+          return open_mixins if candidates.empty?
           return true if candidates.any? do |candidate|
             Rigor::Reflection.instance_method_definition(candidate, method_name, scope: scope)
           end
 
-          unknown_answers && candidates.none? { |candidate| Rigor::Reflection.rbs_class_known?(candidate, scope: scope) }
+          open_mixins && candidates.none? { |candidate| declared?(scope, candidate) }
+        end
+
+        def declared?(scope, name)
+          scope.discovered_classes.key?(name) || Rigor::Reflection.rbs_class_known?(name, scope: scope)
         end
 
         def each_subclass(scope, class_name)

@@ -36,6 +36,7 @@ RSpec.describe "an instance variable across yield, proc calls, super and blocks 
   def klass(methods)
     <<~RUBY
       class Other
+        def self.reset = (@y = :class)
       end
 
       class C
@@ -101,32 +102,32 @@ RSpec.describe "an instance variable across yield, proc calls, super and blocks 
   end
 
   it "does not count an ivar write or a self-call in a block on an object provably not self" do
-    # Ruby: `@o.instance_eval { @x = 1 }` sets `@o`'s `@x`, and `@x` stays `"s"`; a `reset` in the block is
-    # `@o`'s method. `Other` and `C` are both declared, so the environment orders them `:disjoint`.
-    expect(dumped(klass("def m\n  @x = \"s\"\n  @o.instance_eval { @x = 1 }\n  v = @x\n  dump_type(v)\nend\n")))
+    # Ruby: `Other.instance_eval { @x = 1 }` sets the class object's `@x`, and `@x` stays `"s"`; a `reset` in the
+    # block is `Other.reset`.
+    expect(dumped(klass("def m\n  @x = \"s\"\n  Other.instance_eval { @x = 1 }\n  v = @x\n  dump_type(v)\nend\n")))
       .to eq(['dump_type: "s"'])
     expect(dumped(klass("def m\n  @x = \"s\"\n  Other.class_eval { @x = 1 }\n  v = @x\n  dump_type(v)\nend\n")))
       .to eq(['dump_type: "s"'])
     # Ruby: `self.class.class_eval { @x = 1 }` sets the class object's `@x`.
     expect(dumped(klass("def m\n  @x = \"s\"\n  self.class.class_eval { @x = 1 }\n  v = @x\n  dump_type(v)\nend\n")))
       .to eq(['dump_type: "s"'])
-    expect(dumped(klass("def m\n  @y = false\n  @o.instance_eval { reset }\n  v = @y\n  dump_type(v)\nend\n")))
+    expect(dumped(klass("def m\n  @y = false\n  Other.instance_eval { reset }\n  v = @y\n  dump_type(v)\nend\n")))
       .to eq(["dump_type: false"])
   end
 
   it "does not count an ivar write or a self-call in a nested block on an object provably not self" do
-    nested = "def m\n  @x = \"s\"\n  [1].each { |i| @o.instance_eval { @x = i } }\n  v = @x\n  dump_type(v)\nend\n"
+    nested = "def m\n  @x = \"s\"\n  [1].each { |i| Other.instance_eval { @x = i } }\n  v = @x\n  dump_type(v)\nend\n"
     expect(dumped(klass(nested))).to eq(['dump_type: "s"'])
-    nested_call = "def m\n  @y = false\n  [1].each { |i| @o.instance_eval { reset } }\n  v = @y\n  dump_type(v)\nend\n"
+    nested_call = "def m\n  @y = false\n  [1].each { Other.instance_eval { reset } }\n  v = @y\n  dump_type(v)\nend\n"
     expect(dumped(klass(nested_call))).to eq(["dump_type: false"])
   end
 
   it "counts a global or class variable written in a nested block on another object" do
     # Ruby: both answer `[1, 2]`; a global is global and a class variable resolves lexically, whatever `self` is.
-    global = "def m\n  $t = 0\n  r = [1, 2].map { @o.instance_eval { $t += 1 }; $t }\n  " \
+    global = "def m\n  $t = 0\n  r = [1, 2].map { Other.instance_eval { $t += 1 }; $t }\n  " \
              "if r.first == r.last\n    1\n  end\nend\n"
     expect(rules(klass(global))).not_to include("flow.always-truthy-condition")
-    cvar = "def m\n  @@k = 0\n  r = [1, 2].map { @o.instance_eval { @@k += 1 }; @@k }\n  " \
+    cvar = "def m\n  @@k = 0\n  r = [1, 2].map { Other.instance_eval { @@k += 1 }; @@k }\n  " \
            "if r.first == r.last\n    1\n  end\nend\n"
     expect(rules(klass(cvar))).not_to include("flow.always-truthy-condition")
   end
@@ -177,6 +178,15 @@ RSpec.describe "an instance variable across yield, proc calls, super and blocks 
     expect(rules(klass(source))).not_to include("call.possible-nil-receiver")
   end
 
+  it "keeps the write-back for an instance receiver, whose class may be a subclass of self's" do
+    # Ruby: `d.peer_eval(d)` answers `1` — `D` is a source-only subclass of `C`, which the RBS environment
+    # cannot order against it.
+    source = "class C\n  def peer_eval(peer)\n    @x = false\n    peer.instance_eval { @x = true }\n    " \
+             "@x ? 1 : 2\n  end\nend\n\nclass D < C\nend\n"
+    sig = { "a.rbs" => "class C\n  def peer_eval: (D) -> Integer\nend\n" }
+    expect(analyze(source, sig: sig).diagnostics.map(&:rule)).not_to include("flow.always-truthy-condition")
+  end
+
   it "keeps the write-back for an Object receiver, which is not provably another object (guard)" do
     # Ruby: `false` here, but an `Object` may be `self`; the ADR-56 join / drop stands as on master.
     source = "def m\n  @x = false\n  o = Object.new\n  o.instance_eval { @x = true }\n  v = @x\n  dump_type(v)\nend\n"
@@ -185,9 +195,9 @@ RSpec.describe "an instance variable across yield, proc calls, super and blocks 
 
   it "counts a yield or a proc call in a block on another object, which runs the method's block" do
     # Ruby: each answers `true`.
-    expect(dumped(klass("def m\n  @y = false\n  @o.instance_eval { yield }\n  v = @y\n  dump_type(v)\nend\n")))
+    expect(dumped(klass("def m\n  @y = false\n  Other.instance_eval { yield }\n  v = @y\n  dump_type(v)\nend\n")))
       .to eq(["dump_type: bool"])
-    source = "def m(&blk)\n  @y = false\n  @o.instance_exec(1) { |a| blk.call }\n  v = @y\n  dump_type(v)\nend\n"
+    source = "def m(&blk)\n  @y = false\n  Other.instance_exec(1) { |a| blk.call }\n  v = @y\n  dump_type(v)\nend\n"
     expect(dumped(klass(source))).to eq(["dump_type: bool"])
   end
 
@@ -236,12 +246,12 @@ RSpec.describe "an instance variable across yield, proc calls, super and blocks 
   end
 
   it "does not count an ivar write in a block on another object nested in an escaping closure" do
-    source = "def m\n  @x = \"s\"\n  f = -> { @o.instance_eval { @x = 1 } }\n  v = @x\n  dump_type(v)\nend\n"
+    source = "def m\n  @x = \"s\"\n  f = -> { Other.instance_eval { @x = 1 } }\n  v = @x\n  dump_type(v)\nend\n"
     expect(dumped(klass(source))).to eq(['dump_type: "s"'])
   end
 
   it "counts a yield in a block on another object nested in a block" do
-    source = "def m\n  @y = false\n  [1].each { @o.instance_eval { yield } }\n  v = @y\n  dump_type(v)\nend\n"
+    source = "def m\n  @y = false\n  [1].each { Other.instance_eval { yield } }\n  v = @y\n  dump_type(v)\nend\n"
     expect(dumped(klass(source))).to eq(["dump_type: bool"])
   end
 

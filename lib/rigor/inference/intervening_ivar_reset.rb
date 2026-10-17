@@ -81,21 +81,15 @@ module Rigor
 
       # Whether a value of `type` cannot be `scope`'s `self`. Only an instance method of a class answers: `self` is
       # then an instance of that class (one other than `Class`, `Module`, `Object` and `BasicObject`, and no module,
-      # declared in source or RBS), and a class object (`Singleton[X]`, `self.class`, a constant naming a class or
-      # module) is not one; nor is an instance of a class the environment orders `:disjoint` from it, neither being
-      # a module. Where `self` is a class object, or a module's instance (`module_function`, `extend self`), any
-      # receiver may be `self` — a subclass, the module itself — and none is foreign.
+      # declared in source or RBS), and a class object (`Singleton[X]`: `self.class`, a constant naming a class or
+      # module) is not one. Where `self` is a class object, or a module's instance (`module_function`, `extend
+      # self`), any receiver may be `self` — a subclass, the module itself — and none is foreign. An instance
+      # receiver is never foreign: its class may be a subclass of `self`'s that the environment cannot order.
       def other_object?(type, scope)
         self_type = scope.self_type
         return false unless self_type.is_a?(Type::Nominal) && plain_class?(self_type.class_name, scope)
 
-        case type
-        when Type::Singleton then true
-        when Type::Nominal
-          plain_class?(type.class_name, scope) &&
-            scope.environment.class_ordering(type.class_name, self_type.class_name) == :disjoint
-        else false
-        end
+        type.is_a?(Type::Singleton)
       end
 
       # Whether `class_name` names a class whose instances are no class or module object, and not a module.

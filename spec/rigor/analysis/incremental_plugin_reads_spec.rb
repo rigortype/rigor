@@ -167,6 +167,7 @@ RSpec.describe "IncrementalSession: plugin reads join the affected closure (#155
       expect(read_messages(diagnostics)).to eq(["probe flag.txt: true"])
     end
 
+    # A guard: no line of the #1553 fix makes it fail. It pins that a fresh read adds nothing to the closure.
     it "re-analyses nothing when the read file is left alone" do
       _, affected = recheck_after { reader("alpha", "2") }
       expect(affected).to eq(Set["lib/alpha.rb"])
@@ -264,7 +265,8 @@ RSpec.describe "IncrementalSession: plugin reads join the affected closure (#155
     expect(read_messages(diagnostics)).to eq(["policy linked.txt: deny"])
   end
 
-  # A plain `rigor check` records no dependencies and keeps no session: its answer is the cold one.
+  # A guard: a plain `rigor check` records no dependencies and keeps no session, so no line of the #1553 fix
+  # reaches it. It pins that its warm answer is still the cold one.
   it "leaves a non-incremental warm run unchanged" do
     reader("charlie", 'policy("policy.txt")')
     store = Rigor::Cache::Store.new(root: cache_root)

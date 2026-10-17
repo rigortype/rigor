@@ -63,6 +63,40 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
       end
     end
 
+    # Issue #1839 — an `ensure` clause holding a `return` is evaluated twice, once for its jumps and once for the
+    # scope after it. The second pass collects no jump, so a clause nested inside it is evaluated once: `depth`
+    # nested clauses cost `depth * (depth + 1) / 2` evaluations, not `2**depth - 1`.
+    describe "nested ensure clauses holding a jump" do
+      let(:depth) { 20 }
+      let(:program) do
+        inner = "return r if r"
+        depth.times { inner = "begin\n  r = :b\n  work\nensure\n  #{inner}\nend" }
+        parse("def m\n  r = :a\n#{inner}\nend\n")
+      end
+
+      def ensure_evaluations(&)
+        count = 0
+        trace = TracePoint.new(:call) { |tp| count += 1 if tp.method_id == :eval_begin_ensure }
+        trace.enable(&)
+        count
+      end
+
+      it "evaluates them a quadratic number of times on the check path" do
+        count = ensure_evaluations { described_class.index(program, default_scope: default_scope, widen_clauses: true) }
+        expect(count).to be <= depth * (depth + 1) / 2
+      end
+
+      it "evaluates them a quadratic number of times under a return sink" do
+        body = program.statements.body.first.body
+        count = ensure_evaluations do
+          Rigor::Inference::StatementEvaluator.with_return_sink do
+            Rigor::Inference::StatementEvaluator.new(scope: default_scope).evaluate(body)
+          end
+        end
+        expect(count).to be <= depth * (depth + 1) / 2
+      end
+    end
+
     it "returns an identity-comparing Hash whose default is default_scope" do
       _, idx = index_for("1")
       expect(idx).to be_a(Hash)

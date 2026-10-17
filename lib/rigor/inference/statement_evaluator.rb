@@ -1638,11 +1638,11 @@ module Rigor
       # Issue #1839 — the code after the `begin` runs only when the clause finished from a `begin` that did, so the
       # scope it continues from is the clause's under `exit_scope`. A `return`, `next` or `break` in the clause can
       # also leave from one that raised, after any prefix of the body: those jumps are taken from the pass under the
-      # widened entry ({#widen_clause_entry}).
+      # widened entry ({#widen_clause_entry}), when a jump sink is installed to collect them ({#jump_sinks_installed?}).
       def eval_begin_ensure(node, exit_scope, jump_marks)
         clause = node.ensure_clause
         carry_jumps_through_ensure(clause, jump_marks)
-        jumps = clause_jumps?(clause.statements)
+        jumps = jump_sinks_installed? && clause_jumps?(clause.statements)
         record_widened = widening_recorded?
         widened = clause.statements && (jumps || record_widened) &&
                   widen_clause_entry(exit_scope, ensure_writes(node), clause.statements)
@@ -1700,6 +1700,13 @@ module Rigor
       CLAUSE_JUMP_NODES = Set[Prism::ReturnNode, Prism::NextNode, Prism::BreakNode].freeze
       private_constant :CLAUSE_JUMP_NODES
 
+      # Whether a `return`, `next` or `break` reached here is collected: a pass {#without_jump_sinks} runs collects
+      # none, so an `ensure` clause inside it, nested at any depth, is evaluated once rather than once per pass of
+      # every enclosing clause holding a jump.
+      def jump_sinks_installed?
+        !@next_scope_sink.nil? || JUMP_SINK_KEYS.any? { |key| Thread.current[key] }
+      end
+
       # Whether `node` holds a `return`, `next` or `break` outside a nested `def`.
       def clause_jumps?(node)
         return false if node.nil? || node.is_a?(Prism::DefNode)
@@ -1727,8 +1734,9 @@ module Rigor
 
       # `[type, scope]` of a rescue clause's `statements` entered with `widened` ({#widen_clause_entry}), the value,
       # the scope and the jumps the code after the `begin` sees. A recorder that keeps the clause's plain entry
-      # ({#widening_recorded?}) records a second pass under `plain` that reaches no jump sink, so nothing records twice
-      # and nesting stays polynomial: an unrecorded pass evaluates the clause once.
+      # ({#widening_recorded?}) records a second pass under `plain` that reaches no jump sink, so nothing records twice.
+      # The widened pass then records nothing, and a clause nested inside it is evaluated once, so `d` nested clauses
+      # cost `d * (d + 1) / 2` evaluations; every other pass evaluates the clause once.
       def eval_widened_clause(statements, plain, widened, on_enter:)
         return [Type::Combinator.constant_of(nil), widened] if statements.nil?
         return sub_eval(statements, widened, on_enter: on_enter) if widening_recorded? || !recording?
@@ -1844,6 +1852,10 @@ module Rigor
       # The thread-local sinks a widened clause pass ({#without_jump_sinks}) leaves uninstalled.
       CLAUSE_SINK_KEYS = [RETURN_SINK_KEY, NEXT_SINK_KEY, BREAK_SINK_KEY, BREAK_VALUE_SINK_KEY, RETRY_FRAMES_KEY].freeze
       private_constant :CLAUSE_SINK_KEYS
+
+      # The thread-local sinks a `return`, `next` or `break` is collected into.
+      JUMP_SINK_KEYS = (CLAUSE_SINK_KEYS - [RETRY_FRAMES_KEY]).freeze
+      private_constant :JUMP_SINK_KEYS
 
       # The retry edge of `node`, or nil when no `retry` in its rescue chain targets it. Allocation-free for a `begin`
       # no `retry` targets.

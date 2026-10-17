@@ -105,7 +105,7 @@ lib/rigor/inference/clause_widening.rb:
   computes: the local and instance variable names a begin body writes that a rescue or ensure clause reads as untyped
   producers:
     Rigor::Inference::ClauseWidening: lists the nested def, class, module and singleton class nodes its searches stop at (#1231, #1839); it derives no declaration context
-    Rigor::Inference::ClauseWidening#count_writes: stops a search for the local and instance variable names a begin body writes at a nested def, class, module or singleton class (#1231, #1839); it derives no declaration context
+    Rigor::Inference::ClauseWidening#count_writes: stops a search for the local and instance variable names a begin body, its else clause, its rescue clauses or a rescue modifier's expression write at a nested def, class, module or singleton class (#1231, #1839); it derives no declaration context
     Rigor::Inference::ClauseWidening#mentions: stops a search for the names a rescue or ensure clause mentions at a nested def, class, module or singleton class (#1231, #1839); it derives no declaration context
 lib/rigor/inference/declaration_walk/traversal.rb:
   computes: the shared declaration walk that hands each ScopeIndexer collector its self, cref and nesting

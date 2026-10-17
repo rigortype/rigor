@@ -193,11 +193,15 @@ module Rigor
       end
 
       # Issue #1583 — the discovered-not-analysed files of a run over this session's paths
-      # ({Runner#discovery_only_file_set}).
+      # ({Runner#discovery_only_file_set}). Asked of a runner WITHOUT the editor buffer: a buffered run does not
+      # widen, so a buffered session (editor mode option B, #146) would read an empty set against the snapshot's
+      # and re-baseline on every keystroke. Globbing without it keeps the comparison the one the snapshot's
+      # writer made, so a sibling edit still declines option B and an unchanged project still serves it.
       def current_discovery_only_files
         return [] if @paths.nil?
 
-        build_runner.discovery_only_file_set(@paths)
+        Runner.new(configuration: @configuration, cache_store: nil, environment: @environment)
+              .discovery_only_file_set(@paths)
       end
       private :discovery_moved?, :record_baseline_digests, :restore_digests, :current_discovery_only_files
 

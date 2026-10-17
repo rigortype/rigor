@@ -474,6 +474,9 @@ module Rigor
         @project_struct_member_layouts = {}.freeze
         # Issue #684 — set per run by {#project_discovery_expansion}; nil on every path that does not widen.
         @project_discovery_expansion = nil
+        # Issue #1583 — whether this run widened its discovery to the configured paths, even when the widening
+        # added no file; {#discovery_glob_entries} lists the configured roots for every such run.
+        @discovery_widened = false
         # ADR-67 WD6a — the call-site parameter-inference table, populated by the opt-in pre-pass in
         # `assemble_run_diagnostics` when `parameter_inference:` is enabled, then seeded onto every per-file
         # scope (sequential + fork-worker) through `project_scope_seed_tables`. Empty by default, so the gate-off
@@ -528,6 +531,7 @@ module Rigor
 
         expansion = expand_paths(paths)
         @project_discovery_expansion = project_discovery_expansion(paths, expansion)
+        @discovery_widened = widen_discovery_to_project?(paths)
         @snapshots.reset_for_run
         # Per-run reset of the deferred-discovery memo (see `#ensure_project_discovery`).
         @project_discovery_done = false
@@ -814,6 +818,7 @@ module Rigor
         @project_discovery_done = false
         # This entry point supplies its own expansion; it never widens (see {#project_discovery_expansion}).
         @project_discovery_expansion = nil
+        @discovery_widened = false
         @run_generation = Object.new.freeze
         run_project_pre_passes(expansion: expansion)
         ensure_project_discovery(expansion)
@@ -1414,7 +1419,7 @@ module Rigor
         # #979 — the signature ROOTS' listings, one glob row each. `rbs_descriptor.files` covers only the
         # `.rbs` files that existed while the run read them, so without these a signature file written after
         # the run left the slot validating fresh and the warm run answered without it.
-        globs = rbs_descriptor.globs + template_unit_glob_entries
+        globs = rbs_descriptor.globs + template_unit_glob_entries + discovery_glob_entries
         boundary = plugin_boundary_rows
         entries.concat(boundary.files)
         globs.concat(boundary.globs).concat(producer_watch_glob_entries)
@@ -1594,9 +1599,11 @@ module Rigor
       end
 
       # One names-mode listing row per directory the discovery widening globbed, so a file appearing there is seen
-      # as well as an edit to one that existed.
+      # as well as an edit to one that existed. Issue #1583 — keyed on the widening decision, not on what it
+      # added: a run over `lib/b.rb` alone in `lib` widens to nothing, and a `lib/a.rb` created afterwards must
+      # still move the answer of the run-result cache and the `--incremental` slot.
       def discovery_glob_entries
-        return [] if @project_discovery_expansion.nil?
+        return [] unless @discovery_widened
 
         @configuration.paths.select { |root| File.directory?(root) }.map do |root|
           Cache::Descriptor::GlobEntry.compute(root: root, pattern: PathExpansion::RUBY_GLOB, mode: :names)

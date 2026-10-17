@@ -2,11 +2,14 @@
 
 require "spec_helper"
 require "fileutils"
+require "json"
+require "stringio"
 require "tmpdir"
 
 require "rigor/analysis/incremental_session"
 require "rigor/analysis/runner"
 require "rigor/cache/incremental_snapshot"
+require "rigor/cli/check_command"
 require "rigor/configuration"
 
 # Issue #1583 — `rigor check --incremental lib/b.rb` under `paths: [lib]`. A run over path arguments discovers the
@@ -49,7 +52,7 @@ RSpec.describe "--incremental over path arguments under a configured path (#1583
   def incremental_rows
     root = File.join(Dir.pwd, ".rigor", "cache")
     snapshot = Rigor::Cache::IncrementalSnapshot.new(root: root)
-    fingerprint = Rigor::Cache::IncrementalSnapshot.fingerprint(configuration: configuration, roots: paths)
+    fingerprint = Rigor::Cache::IncrementalSnapshot.fingerprint(configuration: configuration, roots: paths || configured)
     diagnostics, warm = guarded_run_incremental(session, snapshot: snapshot, fingerprint: fingerprint)
     [rows(diagnostics), warm]
   end
@@ -122,6 +125,67 @@ RSpec.describe "--incremental over path arguments under a configured path (#1583
       expect(incremental_rows).to eq([[["lib/b.rb", 2]], true])
       expect(Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil)
         .discovery_only_file_set(paths)).to eq([])
+    end
+  end
+
+  # `rigor check --incremental` with no argument: the session has no paths of its own and asks for no discovery set.
+  context "when run without path arguments" do
+    let(:paths) { nil }
+
+    it "stays warm on a run that changed nothing" do
+      expect(incremental_rows).to eq([[["lib/b.rb", 2]], false])
+      expect(incremental_rows).to eq([[["lib/b.rb", 2]], true])
+    end
+  end
+
+  # The CLI adds two caches the session examples above do not reach: the `--incremental` run-result slot, which
+  # answers an unchanged run without loading the engine, and the plain run-result cache. Each validates the
+  # configured roots' listing, so a discovered file that appears moves the answer even when the widening had
+  # discovered nothing before it.
+  describe "through the CLI" do
+    def check(*argv)
+      out = StringIO.new
+      err = StringIO.new
+      Rigor::CLI::CheckCommand.new(
+        argv: ["--no-ci-detect", "--no-stats", "--no-baseline", "--format", "json", *argv], out: out, err: err
+      ).run
+      [cli_rows(out.string), err.string]
+    end
+
+    def cli_rows(json)
+      JSON.parse(json).fetch("diagnostics").select { |d| d.fetch("rule") == "call.undefined-method" }
+          .map { |d| [d.fetch("path"), d.fetch("line")] }
+    end
+
+    before do
+      File.write(".rigor.yml", "paths:\n  - lib\n")
+      File.delete("lib/a.rb")
+    end
+
+    it "re-checks an --incremental argument when a discovered file appears after the slot was written" do
+      expect(check("--incremental", "lib/b.rb").first).to eq([])
+      expect(check("--incremental", "lib/b.rb").first).to eq([])
+      File.write("lib/a.rb", "LIMIT = 3\n")
+      expect(check("--no-cache", "lib/b.rb").first).to eq([["lib/b.rb", 2]])
+      expect(check("--incremental", "lib/b.rb").first).to eq([["lib/b.rb", 2]])
+    end
+
+    it "re-checks a cached argument when a discovered file appears" do
+      expect(check("lib/b.rb").first).to eq([])
+      expect(check("lib/b.rb").first).to eq([])
+      File.write("lib/a.rb", "LIMIT = 3\n")
+      expect(check("lib/b.rb").first).to eq([["lib/b.rb", 2]])
+    end
+
+    # Editor mode option B (#146): a buffered session does not widen, so it must not read the snapshot's
+    # discovery-only files as removed and re-baseline.
+    it "serves editor mode from the snapshot an argument run wrote" do
+      File.write("lib/a.rb", "LIMIT = 3\n")
+      check("--incremental", "lib/b.rb")
+      File.write("buf.rb", "def m\n  LIMIT.upcase\nend\n# unsaved\n")
+      _, err = check("--incremental", "--tmp-file=buf.rb", "--instead-of=lib/b.rb", "lib/b.rb")
+      expect(err).to include("editor mode")
+      expect(err).not_to include("no reusable snapshot")
     end
   end
 end

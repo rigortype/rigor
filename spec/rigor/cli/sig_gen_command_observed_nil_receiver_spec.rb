@@ -167,6 +167,64 @@ RSpec.describe Rigor::CLI::SigGenCommand do
     expect(section(run_observed, "Account")).to include("def deposit: (untyped) -> 10")
   end
 
+  it "does not bind a before ivar into a Class.new block's method" do
+    write("test/target_spec.rb", <<~RUBY)
+      RSpec.describe "one" do
+        before { @target = Account.new }
+        it do
+          fake = Class.new { def go = @target.deposit(10) }
+          fake.new.go
+        end
+      end
+    RUBY
+
+    expect(section(run_observed, "Account")).to include("def deposit: (untyped) -> 10")
+  end
+
+  it "does not bind a before ivar into an instance_eval block on another object" do
+    write("test/target_spec.rb", <<~RUBY)
+      RSpec.describe "one" do
+        before { @target = Account.new }
+        it { Object.new.instance_eval { @target.deposit(10) } }
+      end
+    RUBY
+
+    expect(section(run_observed, "Account")).to include("def deposit: (untyped) -> 10")
+  end
+
+  it "binds a before ivar into a def written directly in the example group" do
+    write("test/target_spec.rb", <<~RUBY)
+      RSpec.describe "one" do
+        before { @target = Account.new }
+        def pay = @target.deposit(10)
+        it { pay }
+      end
+    RUBY
+
+    expect(section(run_observed, "Account")).to include("def deposit: (10) -> 10")
+  end
+
+  it "keeps a context nested in an iteration block, without the befores outside it" do
+    write("test/target_spec.rb", <<~RUBY)
+      RSpec.describe "one" do
+        before { @label = Label.new }
+        [1, 2].each do |n|
+          context "inner" do
+            before { @target = Account.new }
+            it do
+              @target.deposit(10)
+              @label.deposit("a")
+            end
+          end
+        end
+      end
+    RUBY
+
+    out = run_observed
+    expect(section(out, "Account")).to include("def deposit: (10) -> 10")
+    expect(section(out, "Label")).to include("def deposit: (untyped) -> 20")
+  end
+
   it "does not observe an ivar two enclosing befores write with different types" do
     write("test/target_spec.rb", <<~RUBY)
       RSpec.describe "outer" do

@@ -324,7 +324,12 @@ Receiver matching is conservative:
   test method is exactly this shape. A plain `.` call of a
   method `NilClass`'s RBS declares (`==`, `respond_to?`,
   `is_a?`) may have run on `nil`, so it stays unmatched; a
-  `&.` call of one is matched, since `&.` skips `nil`. Two
+  `&.` call of one is matched, since `&.` skips `nil`. The
+  check knows only the methods the loaded RBS gives
+  `NilClass` and its ancestors (`Object`, `Kernel`): a
+  method a library adds to `nil` (ActiveSupport's `try`,
+  `as_json`) counts only when that library's RBS is
+  loaded. Two
   non-nil members (`Foo | Bar | nil`) or a `Dynamic` member
   stay unmatched. The receiver's inferred type is unchanged
   outside the collector.
@@ -341,8 +346,11 @@ ivar written by a top-level statement of a receiver-less
 binding for an ivar-read receiver the scope types as
 `Dynamic` (an ivar read inside an `it` block). The
 binding reaches only reads inside the `before`'s enclosing
-example-group block, and not through a class or module
-body. When the `before`s on that path write the name with
+example-group block, through nested group, example
+(`it`, …) and hook blocks only: any other block or lambda
+(`Class.new { … }`, `instance_eval { … }`, `each { … }`), a
+class or module body, and a `def` that is not a direct
+statement of a group block cut it. When the `before`s on that path write the name with
 more than one type, the read is not matched. The scope's
 own type wins whenever it is not `Dynamic`.
 

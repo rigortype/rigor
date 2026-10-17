@@ -154,22 +154,53 @@ module Rigor
         end
       end
 
-      # `blocks` is the chain of enclosing `BlockNode`s, innermost last, cut at every class / module body — the
-      # example groups a `before` ivar can reach the call from ({#before_ivar_type}).
+      # `blocks` is the chain of enclosing RSpec group / example / hook blocks, innermost last — the blocks a
+      # `before` ivar can reach the call from ({#before_ivar_type}). See {#enclosing_blocks} for where it is cut.
       def walk_calls(node, scope_index, bindings, observations, blocks)
         return unless node.is_a?(Prism::Node)
 
         record_call(node, scope_index, bindings, observations, blocks) if node.is_a?(Prism::CallNode)
-        inner = enclosing_blocks(node, blocks)
-        node.rigor_each_child { |child| walk_calls(child, scope_index, bindings, observations, inner) }
+        node.rigor_each_child do |child|
+          walk_calls(child, scope_index, bindings, observations, enclosing_blocks(node, child, blocks))
+        end
       end
 
-      def enclosing_blocks(node, blocks)
-        case node
-        when Prism::BlockNode then [*blocks, node]
-        when Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode then []
+      # Group, example and hook calls whose block runs with the example's ivars. `RSpec.` may prefix a group call.
+      RSPEC_GROUP_CALLS = %i[
+        describe context feature shared_examples shared_examples_for shared_context
+      ].freeze
+      RSPEC_EXAMPLE_OR_HOOK_CALLS = %i[
+        it specify example scenario its before prepend_before append_before
+      ].freeze
+      private_constant :RSPEC_GROUP_CALLS, :RSPEC_EXAMPLE_OR_HOOK_CALLS
+
+      # The chain `child` of `parent` sees. A group / example / hook call's block extends it; every other block or
+      # lambda (`Class.new { … }`, `instance_eval { … }`, `define_method(:m) { … }`, `each { … }`), a class / module /
+      # singleton-class body, and a `def` that is not a direct statement of a group block cut it, since their `self`
+      # may be another object.
+      def enclosing_blocks(parent, child, blocks)
+        case child
+        when Prism::BlockNode then rspec_scope_call?(parent) ? [*blocks, child] : []
+        when Prism::LambdaNode, Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode then []
+        when Prism::DefNode then group_statement?(child, blocks.last) ? blocks : []
         else blocks
         end
+      end
+
+      def rspec_scope_call?(node)
+        return false unless node.is_a?(Prism::CallNode)
+        return rspec_group_receiver?(node.receiver) if RSPEC_GROUP_CALLS.include?(node.name)
+
+        node.receiver.nil? && RSPEC_EXAMPLE_OR_HOOK_CALLS.include?(node.name)
+      end
+
+      def rspec_group_receiver?(receiver)
+        receiver.nil? || (receiver.is_a?(Prism::ConstantReadNode) && receiver.name == :RSpec)
+      end
+
+      def group_statement?(node, block)
+        body = block&.body
+        body.is_a?(Prism::StatementsNode) && body.body.any? { |statement| statement.equal?(node) }
       end
 
       def record_call(call_node, scope_index, bindings, observations, blocks)
@@ -343,20 +374,21 @@ module Rigor
 
       # `before { @foo = Foo.new }` / `before(:each) do … end` inside an example-group block: records each ivar the
       # `before` block's top-level statements write, with the written value's type, under that enclosing group
-      # block — `{ BlockNode => { :@foo => [Type] } }`, keyed by node identity. A receiver-less `before` outside
-      # any block, and `config.before`, record nothing.
+      # block — `{ BlockNode => { :@foo => [Type] } }`, keyed by node identity. A `before` outside every group
+      # block ({#enclosing_blocks}), and `config.before`, record nothing.
       def collect_before_ivars(root, scope_index)
         index = {}.compare_by_identity
-        walk_before_ivars(root, nil, index, scope_index)
+        walk_before_ivars(root, [], index, scope_index)
         index
       end
 
-      def walk_before_ivars(node, group, index, scope_index)
+      def walk_before_ivars(node, blocks, index, scope_index)
         return unless node.is_a?(Prism::Node)
 
-        record_before_ivars(node, group, index, scope_index) if group
-        inner = enclosing_blocks(node, [group].compact).last
-        node.rigor_each_child { |child| walk_before_ivars(child, inner, index, scope_index) }
+        record_before_ivars(node, blocks.last, index, scope_index) if blocks.last
+        node.rigor_each_child do |child|
+          walk_before_ivars(child, enclosing_blocks(node, child, blocks), index, scope_index)
+        end
       end
 
       def record_before_ivars(node, group, index, scope_index)

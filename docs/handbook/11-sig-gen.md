@@ -762,7 +762,10 @@ block, and `described_class.new(...)`. Same-name `subject` /
 recogniser does not re-implement RSpec's full scope rules —
 the typical one-spec-file shape is the target. A `before`
 ivar is scoped: it types reads only inside the `describe` /
-`context` block that holds the `before`, and a read that two
+`context` block that holds the `before`, through nested
+`describe` / `context` / `it` / hook blocks but not through
+any other block (`Class.new { … }`, `instance_eval { … }`,
+`each { … }`), and a read that two
 enclosing `before`s assign different classes is not
 observed.
 
@@ -776,7 +779,11 @@ does not answer the method, because such a call cannot
 have been made on `nil`. A call of a method `nil` does
 answer (`==`, `respond_to?`, `is_a?`) is not observed, as
 it may have run on `nil`; with `&.` it is, since `&.` skips
-`nil`. `@foo&.bar(1)` counts the same way. A receiver
+`nil`. Which methods `nil` answers comes from the loaded
+RBS for `NilClass`, `Object` and `Kernel`, so a method a
+library adds to `nil` (ActiveSupport's `try`, `as_json`)
+counts only when that library's RBS is loaded.
+`@foo&.bar(1)` counts the same way. A receiver
 that could be one of two classes (`Foo | Bar | nil`), or
 `untyped | nil`, is still not observed.
 

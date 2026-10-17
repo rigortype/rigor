@@ -199,6 +199,26 @@ def arm_break_in_loop
   2
 end
 
+# A `next` out of an `ensure` clause inside a loop leaves after any
+# prefix of the body.
+def ensure_next_in_loop
+  r = :a
+  i = 0
+  while i < 1
+    i += 1
+    begin
+      r = :b
+      work
+      r = :c
+    ensure
+      next
+    end
+  end
+  return 1 if r == :b
+
+  2
+end
+
 # A `begin … end while` with a rescue clause.
 def arm_in_do_while
   r = :a
@@ -380,5 +400,5 @@ end
 
 p [arm_value, arm_exit_scope, arm_return, arm_return_caller, arm_unmentioned, arm_empty, arm_reference,
    arm_multiple, arm_retry, arm_else, ensure_own_write, ensure_return, ensure_return_caller,
-   method_rescue_caller, arm_break_in_loop, arm_in_do_while, arm_next_in_block, arm_nested, arm_modifier,
+   method_rescue_caller, arm_break_in_loop, ensure_next_in_loop, arm_in_do_while, arm_next_in_block, arm_nested, arm_modifier,
    arm_block_write, arm_in_operand, arm_in_block, Stage.new.run, arm_narrowing_write, arm_single_write_precise, arm_own_nil]

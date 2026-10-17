@@ -1502,8 +1502,11 @@ reachable. The durable requirement on plugin code is therefore:
   to `Ractor.make_shareable` for every loaded plugin class
   ([#1956](https://github.com/rigortype/rigor/issues/1956)). rigor-ffi
   shares its binding-recognizer table the same way. `make_shareable`
-  isolates each block in place. A block that refers to an unshareable
-  outer local variable cannot be isolated. The coordinator then declines
+  isolates each block in place. Three shapes of block cannot be isolated:
+  one that reads an outer local variable holding an unshareable value and
+  one whose `self` is unshareable (both raise `Ractor::IsolationError`),
+  and one that assigns an outer local variable (it raises
+  `ArgumentError`). For any of them the coordinator declines
   the pool before any worker spawns, with a `pool-degraded` row naming
   the plugin class, and analyses the run sequentially. The fork backend
   and `--workers 0` never share declarations, so their blocks are

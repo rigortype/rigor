@@ -109,9 +109,13 @@ named with its reason in the allowlist of
 The plugin classes the constructor materialises from `plugin_blueprints`
 are bound the same way. Their DSL declarations live in class ivars and
 hold author blocks, so the Ractor coordinator **MUST** make them
-shareable on the main Ractor before spawning the pool. If a plugin's
-blocks cannot be isolated, it **MUST** decline the pool with a
-`pool-degraded` row instead of spawning workers that die reading them
+shareable on the main Ractor before spawning the pool. A block cannot be
+isolated when it reads an outer local holding an unshareable value or has
+an unshareable `self` (`Ractor::IsolationError`), or when it assigns an
+outer local (`ArgumentError`). For any of the three the coordinator
+**MUST** decline the pool with a `pool-degraded` row instead of
+spawning workers that die reading them, and **MUST NOT** let the error
+escape the run
 ([#1956](https://github.com/rigortype/rigor/issues/1956); the contract is in
 [`plugin.md`](plugin.md#concurrency-and-value-object-shareability-adr-15)).
 

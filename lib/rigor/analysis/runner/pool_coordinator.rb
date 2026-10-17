@@ -1088,10 +1088,12 @@ module Rigor
         # Issue #1956 — makes every blueprint's plugin class declarations Ractor-shareable (see
         # {Plugin::Base.share_declarations_for_ractors!}). Returns nil on success, or the `pool-degraded`
         # reason naming the first plugin whose declarations hold a Proc that cannot be isolated.
+        # `make_shareable` raises `Ractor::IsolationError` for a Proc that reads an unshareable outer local or
+        # whose `self` is unshareable, and `ArgumentError` for one that assigns an outer local.
         def share_plugin_declarations_for_ractors
           plugin_registry.blueprints.each do |blueprint|
             Object.const_get(blueprint.klass_name).send(:share_declarations_for_ractors!)
-          rescue Ractor::IsolationError => e
+          rescue Ractor::IsolationError, ArgumentError => e
             return "plugin #{blueprint.klass_name} declares a block the Ractor backend cannot share " \
                    "(#{e.message}); use the fork backend for this plugin set"
           end

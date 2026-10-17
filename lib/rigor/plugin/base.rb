@@ -492,10 +492,10 @@ module Rigor
         # coordinator calls this on the main Ractor for each loaded plugin class before it spawns a worker.
         # It fills each memo and makes it shareable, which turns the worker's `||=` into a read of a
         # shareable value. `Ractor.make_shareable` isolates a Proc in place; the isolated Proc runs the same
-        # body under `instance_exec`. A Proc that refers to an unshareable outer local, or whose `self` is
-        # unshareable, cannot be isolated: the `Ractor::IsolationError` propagates, and the coordinator
-        # declines the pool with its message instead of letting every worker die. The fork backend and
-        # `--workers 0` never call this.
+        # body under `instance_exec`. A Proc that reads an unshareable outer local or whose `self` is
+        # unshareable raises `Ractor::IsolationError`; one that assigns an outer local raises `ArgumentError`.
+        # Either propagates, and the coordinator declines the pool with its message instead of letting every
+        # worker die. The fork backend and `--workers 0` never call this.
         def share_declarations_for_ractors!
           Ractor.make_shareable(@manifest) if defined?(@manifest) && @manifest
           Ractor.make_shareable(producers)

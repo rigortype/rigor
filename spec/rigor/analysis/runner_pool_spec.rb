@@ -243,44 +243,55 @@ RSpec.describe "Rigor::Analysis::Runner with Ractor pool (Phase 4b)" do
       Rigor::Plugin.unregister!
     end
 
-    # Issue #1956 — a declaration Proc that refers to an unshareable outer local cannot be isolated. The
-    # coordinator finds that on the main Ractor, before any worker spawns, and declines the pool with a
-    # row naming the plugin; the run is analysed sequentially rather than losing every worker.
-    it "declines the Ractor pool with a pool-degraded row when a plugin block cannot be shared (#1956)" do # rubocop:disable RSpec/ExampleLength
-      original = ENV.fetch("RIGOR_POOL_BACKEND", nil)
-      ENV["RIGOR_POOL_BACKEND"] = "ractor"
-      Rigor::Plugin.unregister!
-      captured = +"unshareable"
-      plugin_class = Class.new(Rigor::Plugin::Base) do
-        manifest(id: "pool-unshareable", version: "0.1.0")
-        dynamic_return(methods: [:never_called]) { |_call_node, _scope| captured.then { nil } }
-      end
-      stub_const("RunnerPoolUnshareablePlugin", plugin_class)
-
-      Dir.mktmpdir do |dir|
-        path = File.join(dir, "code.rb")
-        File.write(path, "x = 1\n")
-        configuration = Rigor::Configuration.new("paths" => [path], "plugins" => ["rigor-pool-unshareable"])
-        requirer = lambda do |_name|
-          Rigor::Plugin.register(plugin_class)
-          true
+    # Issue #1956 — a declaration Proc that touches an outer local cannot be isolated: one that reads an
+    # unshareable local makes `Ractor.make_shareable` raise `Ractor::IsolationError`, one that assigns a local
+    # makes it raise `ArgumentError`. The coordinator finds either on the main Ractor, before any worker spawns,
+    # and declines the pool with a row naming the plugin; the run is analysed sequentially rather than crashing.
+    {
+      "reads an unshareable outer local" => :read,
+      "assigns an outer local" => :write
+    }.each do |shape, kind|
+      it "declines the Ractor pool with a pool-degraded row when a plugin block #{shape} (#1956)" do # rubocop:disable RSpec/ExampleLength
+        original = ENV.fetch("RIGOR_POOL_BACKEND", nil)
+        ENV["RIGOR_POOL_BACKEND"] = "ractor"
+        Rigor::Plugin.unregister!
+        captured = +"unshareable"
+        calls = 0
+        plugin_class = Class.new(Rigor::Plugin::Base) do
+          manifest(id: "pool-unshareable", version: "0.1.0")
+          if kind == :read
+            dynamic_return(methods: [:never_called]) { |_call_node, _scope| captured.then { nil } }
+          else
+            dynamic_return(methods: [:never_called]) { |_call_node, _scope| (calls += 1).then { nil } }
+          end
         end
-        result = Dir.chdir(dir) do
-          runner = Rigor::Analysis::Runner.new(
-            configuration: configuration,
-            cache_store: Rigor::Cache::Store.new(root: File.join(dir, ".rigor")),
-            plugin_requirer: requirer, workers: 2
-          )
-          guarded_run(runner)
-        end
+        stub_const("RunnerPoolUnshareablePlugin", plugin_class)
 
-        degraded = result.diagnostics.select { |d| d.rule == "pool-degraded" }
-        expect(degraded.size).to eq(1)
-        expect(degraded.first.message).to include("RunnerPoolUnshareablePlugin", "cannot share")
+        Dir.mktmpdir do |dir|
+          path = File.join(dir, "code.rb")
+          File.write(path, "x = 1\n")
+          configuration = Rigor::Configuration.new("paths" => [path], "plugins" => ["rigor-pool-unshareable"])
+          requirer = lambda do |_name|
+            Rigor::Plugin.register(plugin_class)
+            true
+          end
+          result = Dir.chdir(dir) do
+            runner = Rigor::Analysis::Runner.new(
+              configuration: configuration,
+              cache_store: Rigor::Cache::Store.new(root: File.join(dir, ".rigor")),
+              plugin_requirer: requirer, workers: 2
+            )
+            guarded_run(runner)
+          end
+
+          degraded = result.diagnostics.select { |d| d.rule == "pool-degraded" }
+          expect(degraded.size).to eq(1)
+          expect(degraded.first.message).to include("RunnerPoolUnshareablePlugin", "cannot share")
+        end
+      ensure
+        Rigor::Plugin.unregister!
+        original.nil? ? ENV.delete("RIGOR_POOL_BACKEND") : (ENV["RIGOR_POOL_BACKEND"] = original)
       end
-    ensure
-      Rigor::Plugin.unregister!
-      original.nil? ? ENV.delete("RIGOR_POOL_BACKEND") : (ENV["RIGOR_POOL_BACKEND"] = original)
     end
 
     it "preserves original path order even when workers complete out of order" do

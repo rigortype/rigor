@@ -82,6 +82,23 @@ RSpec.describe "a singleton name a later definer rewrites is not typed from the 
     RUBY
   end
 
+  # A rewritten name the walk cannot read may be any of the owner's names, so every earlier def is contested.
+  it "types every earlier def Dynamic after a rewrite whose name is not a literal" do
+    expect(dumps(<<~RUBY)).to eq(["Dynamic[top]"] * 2)
+      class Q; def self.x = "s"; def self.z = "z"; def self.y = 1; n = :x; singleton_class.alias_method n, :y; end
+      Rigor.dump_type(Q.x) # 1
+      Rigor.dump_type(Q.z) # "z"
+    RUBY
+  end
+
+  it "contests only the new name of a class << self alias" do
+    expect(dumps(<<~RUBY)).to eq(["Dynamic[top]", '"z"'])
+      class A13; def self.x = "s"; def self.z = "z"; def self.y = 1; class << self; alias x y; end; end
+      Rigor.dump_type(A13.x) # 1
+      Rigor.dump_type(A13.z) # "z"
+    RUBY
+  end
+
   # Ruby: ArgumentError — `attr_writer :x` defines `x=` alone, so `x` keeps its one-argument def.
   it "keeps checking the arity of a def an attr_writer of the name leaves in place" do
     expect(rows(<<~RUBY, "call.wrong-arity")).to eq([2])

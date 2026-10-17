@@ -2768,33 +2768,22 @@ RSpec.describe "Rigor type construction (integration)" do
       end
     end
 
-    # Issue #1223 — the statement walk typed a call's receiver and arguments, a literal, an interpolation
-    # and a `rescue` modifier as pure expressions, so a write nested in one never reached the scope after
-    # the statement, straight-line or through ADR-56's block write-back, and a jump nested in one never
-    # reached the block's jump join.
-    # Issue #1963 — across files: another file's unpublished constant reads `Dynamic[top]` and may alias a class, so it
-    # keeps narrowing by its spelling, and an alias drops the subject's `nil` as its class does.
-    describe "fixtures/value_constant_cross_file/ — constants another file binds", type: :runner do
-      it "reports nothing on an aliased class guard or a value constant" do
-        dir = File.join(__dir__, "fixtures/value_constant_cross_file")
-        files = %w[cfg.rb use.rb].to_h { |name| [name, File.read(File.join(dir, name))] }
+    # Issue #1963 — guards: a constant `when` test or `===` receiver, a class alias from another file or a value
+    # constant, leaves a nilable subject's read in the clause quiet.
+    describe "fixtures/constant_case_guards/ — constant case-equality guards on a nilable subject", type: :runner do
+      it "reports nothing on the clause reads" do
+        dir = File.join(__dir__, "fixtures/constant_case_guards")
+        files = %w[defs.rb use.rb].to_h { |name| [name, File.read(File.join(dir, name))] }
         result = analyze(files: files)
         reported = result.diagnostics.reject { |d| d.severity == :info || d.rule.to_s == "call.unresolved-toplevel" }
         expect(reported.map { |d| [d.path.to_s, d.line, d.message] }).to eq([])
       end
     end
 
-    # Issue #1963 — a value constant in a `when` test or as a `===` receiver is no class guard, and a constant
-    # aliasing a class narrows by that class.
-    describe "fixtures/value_constant_when.rb — value constants as case-equality receivers" do
-      let(:harness) { harness_for("value_constant_when") }
-
-      it "produces no assert_type mismatches" do
-        mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
-        expect(mismatches).to be_empty
-      end
-    end
-
+    # Issue #1223 — the statement walk typed a call's receiver and arguments, a literal, an interpolation
+    # and a `rescue` modifier as pure expressions, so a write nested in one never reached the scope after
+    # the statement, straight-line or through ADR-56's block write-back, and a jump nested in one never
+    # reached the block's jump join.
     describe "fixtures/argument_local_write.rb — a write inside a call operand or a literal" do
       let(:harness) { harness_for("argument_local_write") }
 

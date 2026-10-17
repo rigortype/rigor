@@ -1290,18 +1290,20 @@ RSpec.describe Rigor::SigGen::Generator do
       expect(method.rbs).to eq("def f: (Float num) -> [Float, String]")
     end
 
-    # Issue #1489. A VALUE literal the body proves is widened to its class over an authored `untyped`; `nil`,
-    # `true`, `false`, bool, `T?` and a computed `Float` are honest types and are proposed as the base did.
+    # Issue #1489. A VALUE literal the body proves is widened to its class over an authored `untyped`; bool, `T?`
+    # and a computed `Float` are honest types and are proposed as the base did. `true` and `false` widen to bool
+    # (#1891), so a subclass override returning the other one is not `def.override-return-widened`.
     {
       "an Integer literal" => ["(x)", "1", "Integer"],
       "a union of literals" => ["(x)", "rand(2) == 0 ? 1 : 2", "Integer"],
       "a String literal" => ["(x)", %("x"), "String"],
       "a Symbol literal" => ["(x)", ":k", "Symbol"],
       "a literal union with nil" => ["(x)", %(rand(2) == 0 ? "S" : nil), "(String | nil)"],
-      "true" => ["(x)", "true", "true"],
-      "false" => ["(x)", "false", "false"],
-      "nil" => ["(x)", "nil", "nil"],
+      "true" => ["(x)", "true", "(false | true)"],
+      "false" => ["(x)", "false", "(false | true)"],
+      "true or nil" => ["(x)", "rand(2) == 0 ? true : nil", "(false | nil | true)"],
       "a bool" => ["(x)", "x > 0", "(false | true)"],
+      "a Range literal" => ["(x)", "(1..10)", "Range[Integer]"],
       "an Integer or nil" => ["(x)", "rand(2) == 0 ? Integer(gets) : nil", "(Integer | nil)"],
       "a computed Float" => ["(x)", "5 / 2.0", "Float"]
     }.each do |label, (params, body, expected)|
@@ -1316,6 +1318,28 @@ RSpec.describe Rigor::SigGen::Generator do
         expect(method.declared_return_rbs).to eq("untyped")
         expect(method.rbs).to eq("def v: (Integer x) -> #{expected}")
       end
+    end
+
+    # Issue #1891. A return that is only `nil` is a template method's shape; no type wider than `nil` is one
+    # the body proves, so the authored `untyped` stays for the subclass overrides to fill in.
+    it "declines a bare nil return over a declared `-> untyped`" do
+      write_fixture("sig/box.rbs", "class Box\n  def v: (Integer x) -> untyped\nend\n")
+      path = write_fixture("lib/box.rb", "class Box\n  def v(x)\n    nil\n  end\nend\n")
+
+      gen = generator(paths: [path], signature_paths: [File.join(tmpdir, "sig")])
+      method = gen.run.find { |c| c.method_name == :v }
+
+      expect(method.classification).to eq(Rigor::SigGen::Classification::EQUIVALENT)
+      expect(method.declared_return_rbs).to eq("untyped")
+    end
+
+    it "keeps the strictest carrier for true, false and nil when no `.rbs` declares the method" do
+      path = write_fixture("lib/box.rb", "class Box\n  def t = true\n  def n = nil\nend\n")
+
+      candidates = generator(paths: [path]).run
+
+      expect(candidates.find { |c| c.method_name == :t }.rbs).to eq("def t: () -> true")
+      expect(candidates.find { |c| c.method_name == :n }.rbs).to eq("def n: () -> nil")
     end
 
     it "still proposes a tuple and a record shape over a declared `-> untyped`, as the new-method path does" do

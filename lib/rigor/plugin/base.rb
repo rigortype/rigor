@@ -113,6 +113,7 @@ module Rigor
           validate_producer_watch!(watch)
           validate_producer_generation_cap!(id, generation_cap)
           @producers ||= {}
+          @producers_snapshot = nil
           @producers[id.to_sym] = {
             block: block, watch: watch, serialize: serialize, deserialize: deserialize,
             generation_cap: generation_cap
@@ -145,9 +146,11 @@ module Rigor
 
         # Frozen snapshot of the producer table. Inherited producers from a superclass are intentionally NOT
         # surfaced — Plugin::Base subclasses do not chain producers, and the loader instantiates one subclass
-        # per registration.
+        # per registration. Memoised, and reset by {.producer}, so {.share_declarations_for_ractors!} has one
+        # snapshot to make shareable.
+        # rubocop:disable-next Naming/MemoizedInstanceVariableName -- `@producers` is the mutable store; see dynamic_returns
         def producers
-          (@producers || {}).dup.freeze
+          @producers_snapshot ||= (@producers || {}).dup.freeze
         end
 
         # ADR-37 slice 1 — declares a node-scoped diagnostic rule. The engine owns a single AST walk per file
@@ -184,14 +187,17 @@ module Rigor
           end
 
           @node_rules ||= []
+          @node_rules_snapshot = nil
           @node_rules << { node_type: node_type, block: block }.freeze
           node_type
         end
 
         # Frozen snapshot of the declared node rules, in declaration order. Not inherited from a superclass —
-        # like {.producers}, the loader instantiates one subclass per registration.
+        # like {.producers}, the loader instantiates one subclass per registration. Memoised and reset like
+        # {.producers}, for the same reason.
+        # rubocop:disable-next Naming/MemoizedInstanceVariableName -- `@node_rules` is the mutable store; see dynamic_returns
         def node_rules
-          (@node_rules || []).dup.freeze
+          @node_rules_snapshot ||= (@node_rules || []).dup.freeze
         end
 
         # ADR-37 slice 1c — declares a per-file context builder for a two-pass (collect-then-validate)
@@ -327,6 +333,7 @@ module Rigor
           validate_dynamic_return_file_methods!(file_methods, methods)
 
           @dynamic_returns ||= []
+          @dynamic_returns_snapshot = nil
           @dynamic_returns << {
             receivers: normalize_dynamic_return_receivers(receivers),
             methods: normalize_dynamic_return_methods(methods),
@@ -466,6 +473,7 @@ module Rigor
           end
 
           @narrowing_facts_rules ||= []
+          @narrowing_facts_rules_snapshot = nil
           @narrowing_facts_rules << { methods: methods.map(&:to_sym).freeze, block: block }.freeze
           nil
         end
@@ -477,6 +485,27 @@ module Rigor
         def narrowing_facts_rules
           @narrowing_facts_rules_snapshot ||= (@narrowing_facts_rules || []).dup.freeze
         end
+
+        # Issue #1956 — a Ractor worker may read a class ivar only when its value is deeply shareable, and
+        # may not write one at all. Every declaration a worker reads off the plugin class (the manifest, the
+        # four memoised snapshots above, the node-file-context block) holds author Procs, so the Ractor
+        # coordinator calls this on the main Ractor for each loaded plugin class before it spawns a worker.
+        # It fills each memo and makes it shareable, which turns the worker's `||=` into a read of a
+        # shareable value. `Ractor.make_shareable` isolates a Proc in place; the isolated Proc runs the same
+        # body under `instance_exec`. A Proc that refers to an unshareable outer local, or whose `self` is
+        # unshareable, cannot be isolated: the `Ractor::IsolationError` propagates, and the coordinator
+        # declines the pool with its message instead of letting every worker die. The fork backend and
+        # `--workers 0` never call this.
+        def share_declarations_for_ractors!
+          Ractor.make_shareable(@manifest) if defined?(@manifest) && @manifest
+          Ractor.make_shareable(producers)
+          Ractor.make_shareable(node_rules)
+          Ractor.make_shareable(dynamic_returns)
+          Ractor.make_shareable(narrowing_facts_rules)
+          Ractor.make_shareable(@node_file_context_block) if node_file_context_block
+          nil
+        end
+        private :share_declarations_for_ractors!
       end
 
       attr_reader :services, :config

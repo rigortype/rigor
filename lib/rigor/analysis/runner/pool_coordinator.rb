@@ -656,6 +656,16 @@ module Rigor
                      source_files: source_files
             )
           end
+          # Issue #1956 — every worker reads its plugin classes' declarations (manifest, rules, producers)
+          # from class ivars, which a non-main Ractor may read only when the value is shareable. Share them
+          # here, on the main Ractor; a plugin whose Proc cannot be isolated declines the pool with the reason
+          # instead of killing every worker.
+          unshareable = share_plugin_declarations_for_ractors
+          if unshareable
+            return analyze_files_sequentially_fallback(files, reason: unshareable,
+                                                              source_files: source_files)
+          end
+
           # Issue #798 — the SAME gap the fork pool had: this coordinator never analyses a file itself, so
           # without an explicit read the project-signature state (`synthesized-namespace`,
           # `quarantined-signature`, `environment-build-failed`, the conformance results) has no producer.
@@ -1073,6 +1083,19 @@ module Rigor
           )
           warm_env.rbs_loader&.prewarm
           warm_env
+        end
+
+        # Issue #1956 — makes every blueprint's plugin class declarations Ractor-shareable (see
+        # {Plugin::Base.share_declarations_for_ractors!}). Returns nil on success, or the `pool-degraded`
+        # reason naming the first plugin whose declarations hold a Proc that cannot be isolated.
+        def share_plugin_declarations_for_ractors
+          plugin_registry.blueprints.each do |blueprint|
+            Object.const_get(blueprint.klass_name).send(:share_declarations_for_ractors!)
+          rescue Ractor::IsolationError => e
+            return "plugin #{blueprint.klass_name} declares a block the Ractor backend cannot share " \
+                   "(#{e.message}); use the fork backend for this plugin set"
+          end
+          nil
         end
 
         # ADR-15 Phase 4b.x — pool-mode safety net. When pool mode is configured but a precondition fails

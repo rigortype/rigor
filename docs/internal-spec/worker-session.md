@@ -106,6 +106,15 @@ named with its reason in the allowlist of
 `spec/rigor/ractor_readiness_spec.rb`, whose sweep fails on any other
 ([#1064](https://github.com/rigortype/rigor/issues/1064)).
 
+The plugin classes the constructor materialises from `plugin_blueprints`
+are bound the same way. Their DSL declarations live in class ivars and
+hold author blocks, so the Ractor coordinator **MUST** make them
+shareable on the main Ractor before spawning the pool. If a plugin's
+blocks cannot be isolated, it **MUST** decline the pool with a
+`pool-degraded` row instead of spawning workers that die reading them
+([#1956](https://github.com/rigortype/rigor/issues/1956); the contract is in
+[`plugin.md`](plugin.md#concurrency-and-value-object-shareability-adr-15)).
+
 The rule also binds what the constructor's `Environment` build reads from
 outside Rigor. Bundler's `Gemfile.lock` parser reads RubyGems module state
 a non-main Ractor may not touch, so a worker **MUST NOT** resolve the

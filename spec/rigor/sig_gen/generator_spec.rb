@@ -1333,9 +1333,11 @@ RSpec.describe Rigor::SigGen::Generator do
       expect(method.declared_return_rbs).to eq("untyped")
     end
 
-    # The boundary of #1891: an `untyped` only the inline reader synthesizes (ADR-93, `# @rbs x: Integer` with no
-    # return clause) is no word of the author's, so it keeps the strictest literal, while the same bodies under a
-    # `sig/`-authored `untyped` widen to bool and decline the bare nil.
+    # The boundary of #1891: an `untyped` only the inline reader synthesizes is no word of the author's, so it keeps
+    # the strictest literal, while the same bodies under a `sig/`-authored `untyped` widen to bool and decline the
+    # bare nil. ADR-93 synthesizes a member for every `def` in an rbs-inline file: an unannotated one (`u`, `un`)
+    # reaches {#declared_untyped_candidate} through that virtual member, and a parameter-only `# @rbs x: Integer`
+    # one (`c`, `n`) is written as its inline declaration, a `new-method`.
     it "keeps true and nil over a synthesized untyped and widens them over an authored one" do
       require "rigor-rbs-inline"
       Rigor::Plugin.register(Rigor::Plugin::RbsInline) unless Rigor::Plugin.registered_for("rbs-inline")
@@ -1348,6 +1350,9 @@ RSpec.describe Rigor::SigGen::Generator do
 
           # @rbs x: Integer
           def n(x) = nil
+
+          def u = true
+          def un = nil
         end
       RUBY
       authored = write_fixture("lib/authored.rb", "class Authored\n  def c(x) = true\n  def n(x) = nil\nend\n")
@@ -1358,6 +1363,8 @@ RSpec.describe Rigor::SigGen::Generator do
 
       expect(row.call("Inline", :c).rbs).to eq("def c: (Integer x) -> true")
       expect(row.call("Inline", :n).rbs).to eq("def n: (Integer x) -> nil")
+      expect(row.call("Inline", :u).rbs).to eq("def u: () -> true")
+      expect(row.call("Inline", :un).rbs).to eq("def un: () -> nil")
       expect(row.call("Authored", :c).rbs).to eq("def c: (Integer x) -> (false | true)")
       expect(row.call("Authored", :n).classification).to eq(Rigor::SigGen::Classification::EQUIVALENT)
     end

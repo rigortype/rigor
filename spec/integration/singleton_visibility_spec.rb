@@ -113,7 +113,7 @@ RSpec.describe "def.method-visibility-mismatch on singleton calls (#1984)", type
     RUBY
   end
 
-  # Ruby: `Maybe.x` and `Toggled.x` depend on `rand`; the walk cannot place either, so the rule declines.
+  # Ruby: `Maybe.x`, `Toggled.x` and `Possibly.x` depend on `rand`; the walk cannot place them, so the rule declines.
   it "declines where a reversal or a toggle may not run" do
     expect(mismatches(<<~RUBY)).to eq([])
       class Maybe
@@ -126,8 +126,13 @@ RSpec.describe "def.method-visibility-mismatch on singleton calls (#1984)", type
           def x = 1
         end
       end
+      class Possibly
+        def self.x = 1
+        private_class_method :x if rand > 1
+      end
       Maybe.x
       Toggled.x
+      Possibly.x
     RUBY
   end
 

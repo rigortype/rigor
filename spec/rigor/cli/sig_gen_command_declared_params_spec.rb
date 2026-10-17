@@ -192,6 +192,19 @@ RSpec.describe Rigor::CLI::SigGenCommand do
     expect(sig_file).to eq("class C\n  def a: (Integer x) -> Integer\n  def b: () -> String\nend\n")
   end
 
+  # Issue #1891. `true` / `false` over a declared `untyped` are written as bool and a bare `nil` keeps the
+  # `untyped`, so a subclass override returning `false` or a String is not `def.override-return-widened`; a Range
+  # carries its element type, which a bare `Range` (`::Range expects parameters [out E]`) failed `rbs validate` on.
+  it "writes bool, keeps untyped over nil, and writes a Range with its element type under `--write --overwrite`" do
+    write("sig/c.rbs", "class C\n  def e?: () -> untyped\n  def h: () -> untyped\n  def r: () -> untyped\nend\n")
+    write("lib/c.rb", "class C\n  def e? = true\n  def h = nil\n  def r = (1..10)\nend\n")
+
+    expect(sig_gen("--write", "--overwrite").first).to eq(0)
+    expect(sig_file).to eq(
+      "class C\n  def e?: () -> (false | true)\n  def h: () -> untyped\n  def r: () -> Range[Integer]\nend\n"
+    )
+  end
+
   # An effect annotation is added only to a declaration that carries none (ADR-103 WD9). An annotation on the
   # overload counts, or the kept `%a{pure}` would get a second one above the line.
   it "adds no effect annotation above a declaration whose overload is already annotated" do

@@ -78,7 +78,8 @@ module Rigor
       # `RbsTypeTranslator#translate_literal` already maps the parsed RBS Literal back to `Constant`.
       # Scalar carriers without RBS Literal support (Float, Range, Rational, Complex, Regexp, Pathname)
       # keep their pre-existing widen-to-class-name behaviour because RBS rejects their literal spellings
-      # as syntax errors.
+      # as syntax errors. `Range` is generic (`Range[out E]`), and a bare `Range` fails `rbs validate`, so
+      # it carries the class of its endpoints, or `untyped` when both are nil (#1891).
       def erase_to_rbs
         case value
         when true then "true"
@@ -86,6 +87,7 @@ module Rigor
         when nil then "nil"
         when Integer then value.to_s
         when Symbol, String then value.inspect
+        when Range then "Range[#{range_element_rbs}]"
         else value.class.name
         end
       end
@@ -105,6 +107,13 @@ module Rigor
 
       def inspect
         "#<Rigor::Type::Constant #{describe(:short)}>"
+      end
+
+      private
+
+      def range_element_rbs
+        classes = [value.begin, value.end].compact.map { |endpoint| endpoint.class.name }.uniq.sort
+        classes.empty? ? "untyped" : classes.join(" | ")
       end
     end
   end

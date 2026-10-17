@@ -111,3 +111,10 @@ class UncertainToggle
   public if RUBY_VERSION > "3"
   attr_reader :ut
 end
+
+class ConditionalBlockToggle
+  if true
+    private {}
+  end
+  def a = 1
+end

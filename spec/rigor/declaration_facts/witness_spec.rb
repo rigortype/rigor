@@ -181,12 +181,15 @@ RSpec.describe "Declaration-fact witness" do
 
       expect(tables.contested_discovered_method_visibilities).to eq(
         Set[["EmptySplatToggle", :a], ["SplatNames", :zz], ["SplatNames", :a], ["SingletonWrapped", :x],
-            ["ConditionalWrapped", :x], ["NestedWrapped", :x], ["UncertainToggle", :ut]]
+            ["ConditionalWrapped", :x], ["NestedWrapped", :x], ["UncertainToggle", :ut], ["ConditionalBlockToggle", :a]]
       )
     end
 
     # Issue #1984 — the singleton slots agree with Ruby's `singleton_class.private_instance_methods(false)` and its
     # public and protected twins; the `class_eval` block's slot is contested (a block the walk reads as possible).
+    # #1633 — in `class << self`, `public def` under a bare `private` is public and the toggles written on `self`,
+    # sent or given a block are applied; a toggle that may not run or may expand to none (`if true; private {}; end`,
+    # `private(*[])`) leaves the def after it contested, recorded public.
     it "agrees with Ruby on the singleton slots" do
       expect(violations("singleton_visibility", relations: %i[visibilities])).to eq([])
 
@@ -201,9 +204,16 @@ RSpec.describe "Declaration-fact witness" do
         "SingletonBareToggle" => { open: :public, x: :private, r: :private },
         "SingletonWrapping" => { x: :private, "w=": :private }, "SingletonNamed" => { x: :private },
         "SingletonPublicAgain" => { x: :public }, "RedefinedAfter" => { x: :public },
-        "SingletonClassEval" => { x: :private }, "PrivateNew" => { new: :private, build: :public }
+        "SingletonClassEval" => { x: :private }, "PrivateNew" => { new: :private, build: :public },
+        "SingletonPublicUnderPrivate" => { open: :public, x: :private }, "SingletonSentToggle" => { x: :private },
+        "SingletonUnderscoreSentToggle" => { x: :private }, "SingletonSelfToggle" => { x: :private },
+        "SingletonBlockToggle" => { x: :private }, "SingletonEmptySplatToggle" => { x: :public },
+        "SingletonConditionalToggle" => { x: :public }
       )
-      expect(tables.contested_discovered_method_visibilities).to eq(Set[["SingletonClassEval", %i[singleton x]]])
+      expect(tables.contested_discovered_method_visibilities).to eq(
+        Set[["SingletonClassEval", %i[singleton x]], ["SingletonEmptySplatToggle", %i[singleton x]],
+            ["SingletonEmptySplatToggle", %i[singleton *]], ["SingletonConditionalToggle", %i[singleton x]]]
+      )
     end
 
     it "records nothing for the enclosing class from a factory block no constant names" do

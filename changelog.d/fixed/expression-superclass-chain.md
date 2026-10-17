@@ -1,1 +1,0 @@
-- **[engine]** A guard such as `fail_with "no" unless count` no longer narrows when the class's superclass is an expression (`class Media < Class.new(Base)`, `< Struct.new(…)`) whose ancestry may define a returning `fail_with`, so the `call.possible-nil-receiver` behind it is reported again. ([#2082](https://github.com/rigortype/rigor/pull/2082))

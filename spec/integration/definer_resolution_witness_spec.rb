@@ -1008,6 +1008,26 @@ RSpec.describe Rigor::Inference::DefinerResolution do # rubocop:disable RSpec/Sp
         .to all(eq(:unknown))
       expect(answers(direct, [%i[ox instance]])).to eq([:absent])
     end
+
+    # Each tail class and each way a reopening records a name, one read apiece: `Kernel` and `BasicObject` on the
+    # instance side; `Class`, `Module`, `Kernel` and `BasicObject` instance methods on the singleton side (a class
+    # object is a `Class`); an `attr_reader`, a `define_method` and a `class << self` `attr_reader` on `Object`, which
+    # record no `def`.
+    it "is Unknown for a name any implicit tail class records, by `def`, `attr_reader` or `define_method`" do
+      source = <<~RUBY
+        module Kernel; def kk = 1; end
+        class BasicObject; def bb = 2; end
+        class Class; def cc = 3; end
+        class Module; def mm = 4; end
+        class Object; attr_reader :ar; define_method(:dm) { 5 }; class << self; attr_reader :sa; end; end
+        class C; end
+      RUBY
+      expect(ruby_prints(source, "[C.new.kk, C.new.bb, C.cc, C.mm, C.kk, C.bb, C.new.ar, C.new.dm, C.sa].inspect"))
+        .to eq("[1, 2, 3, 4, 1, 2, nil, 5, nil]")
+      reads = [%i[kk instance], %i[bb instance], %i[cc singleton], %i[mm singleton], %i[kk singleton],
+               %i[bb singleton], %i[ar instance], %i[dm instance], %i[sa singleton]]
+      expect(reads.zip(answers(source, reads)).to_h).to eq(reads.to_h { |read| [read, :unknown] })
+    end
   end
 
   describe "the answer function's contract" do

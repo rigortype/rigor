@@ -14,7 +14,7 @@ module Rigor
       #   closure) is clean: (i) a project entry, or an external one RBS knows whose declaration lacks `n`
       #   (the test `SourceArity#external_mixin_lacks_method?` applies); (ii) no project entry carries the dynamic
       #   mark, lists `"*"` on the instance side or the mark's, or records `method_missing`; (iii) no project
-      #   entry records `n` in `discovered_methods` (either kind) or in `discovered_method_visibilities`.
+      #   entry records `n` in `discovered_methods` (either kind) or in `discovered_method_visibilities` (either side).
       # - A multi-file mark names no entry: it is discharged when at most one of the node's edges' closures is
       #   not clean. A mark that is both listed and multi-file must pass both rules.
       # - An ambiguous spelling (`:arity` only: several project modules a compact-header collision left as the
@@ -145,7 +145,8 @@ module Rigor
 
           def records_name?(owner)
             @scope.discovered_method?(owner, @name, :instance) || @scope.discovered_method?(owner, @name, :singleton) ||
-              !@scope.discovered_method_visibility(owner, @name).nil?
+              !@scope.discovered_method_visibility(owner, @name).nil? ||
+              @scope.discovered_method_visibilities[owner]&.key?([:singleton, @name])
           end
 
           # An ancestor the project does not declare: only a module RBS knows, whose declaration lacks the name,

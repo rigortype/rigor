@@ -1,0 +1,175 @@
+# frozen_string_literal: true
+
+require "spec_helper"
+
+# Issue #1984 — `def.method-visibility-mismatch` on a class-object receiver (`K.x`) reads the singleton side of the
+# visibility table: `private_class_method`, `class << self` with `private`, and their reversals. Each row's comment is
+# Ruby 4.0.5's answer for the call (`ruby -e`), NoMethodError being the private call Ruby rejects.
+RSpec.describe "def.method-visibility-mismatch on singleton calls (#1984)", type: :runner do
+  def mismatches(source = nil, files: {})
+    analyze(source, files: files).diagnostics.select { |d| d.rule == "def.method-visibility-mismatch" }
+                                 .map { |d| [File.basename(d.path), d.line] }
+  end
+
+  def rules(source)
+    analyze(source).diagnostics.map { |d| [d.rule, d.line] }
+  end
+
+  # Ruby: each `K.x` raises NoMethodError (private method 'x' called for class K).
+  {
+    "private_class_method :x" => "class K; def self.x = 1; private_class_method :x; end",
+    "private_class_method def self.x" => "class K; private_class_method def self.x = 1; end",
+    "a string name" => "class K; def self.x = 1; private_class_method \"x\"; end",
+    "a list of names" => "class K; def self.x = 1; private_class_method [:x]; end",
+    "a bare private in class << self" => "class K\n  class << self\n    private\n    def x = 1\n  end\nend",
+    "a wrapping private in class << self" => "class K\n  class << self\n    private def x = 1\n  end\nend",
+    "a named private in class << self" => "class K\n  class << self\n    def x = 1\n    private :x\n  end\nend",
+    "an attr under a bare private in class << self" =>
+      "class K\n  class << self\n    private\n    attr_reader :x\n  end\nend"
+  }.each do |label, declaration|
+    it "reports K.x after #{label}" do
+      expect(mismatches("#{declaration}\nK.x\n")).to eq([["code.rb", declaration.count("\n") + 2]])
+    end
+  end
+
+  # Ruby: `Base.new`, `Base.y` (whose body calls `Base.x` explicitly) and `Sub.x` (the inherited private `Base.x`)
+  # raise NoMethodError.
+  it "reports `private_class_method :new`, an explicit receiver inside the class, and an inherited private method" do
+    expect(mismatches(<<~RUBY)).to eq([["code.rb", 4], ["code.rb", 8], ["code.rb", 9]])
+      class Base
+        private_class_method :new
+        def self.x = 1
+        def self.y = Base.x
+        private_class_method :x
+      end
+      class Sub < Base; end
+      Base.new
+      Sub.x
+    RUBY
+  end
+
+  # Ruby: each `K.x` returns normally.
+  {
+    "a def self.x under a bare private" => "class K; private; def self.x = 1; end",
+    "a def self.x under a bare protected" => "class K; protected; def self.x = 1; end",
+    "a later public_class_method" => "class K; private_class_method def self.x = 1; public_class_method :x; end",
+    "a later def self.x" => "class K; private_class_method def self.x = 1; def self.x = 2; end",
+    "a later define_singleton_method" =>
+      "class K; private_class_method def self.x = 1; define_singleton_method(:x) { 3 }; end",
+    "singleton_class.send(:public, :x)" =>
+      "class K; private_class_method def self.x = 1; singleton_class.send(:public, :x); end",
+    "singleton_class.class_eval { public :x }" =>
+      "class K; private_class_method def self.x = 1; singleton_class.class_eval { public :x }; end",
+    "a later public :x in class << self" =>
+      "class K; private_class_method def self.x = 1; class << self; public :x; end; end",
+    "an instance_eval def" => "class K; private_class_method def self.x = 1; end\nK.instance_eval { def x = 5 }",
+    "a def K.x outside the class" => "class K; private_class_method def self.x = 1; end\ndef K.x = 6",
+    "a subclass's public_class_method" =>
+      "class P; private_class_method def self.x = 1; end\nclass K < P; public_class_method :x; end",
+    "a module_function" => "module K; module_function; def x = 1; end"
+  }.each do |label, declaration|
+    it "is quiet on K.x after #{label}" do
+      expect(mismatches("#{declaration}\nK.x\n")).to eq([])
+    end
+  end
+
+  # Ruby: an implicit `x`, `self.x` and `send(:x)` inside the class reach the private method.
+  it "is quiet on calls the class makes on itself" do
+    expect(mismatches(<<~RUBY)).to eq([])
+      class K
+        def self.x = 1
+        private_class_method :x
+        def self.implicit = x
+        def self.on_self = self.x
+        def self.sent = send(:x)
+      end
+      K.implicit
+      K.on_self
+      K.sent
+    RUBY
+  end
+
+  # Ruby: `Hooked.x` and `Ghost.new.ip` reach `method_missing`, which answers; `Answering.x` raises NoMethodError (a
+  # `respond_to_missing?` alone does not answer the call) and is still declined, as the issue asks.
+  it "declines where a method_missing or respond_to_missing? sits on the chain, on either side" do
+    expect(mismatches(<<~RUBY)).to eq([])
+      class Hooked
+        private_class_method def self.x = 1
+        def self.method_missing(name, *) = name
+      end
+      class Answering
+        def self.x = 1
+        private_class_method :x
+        def self.respond_to_missing?(*) = true
+      end
+      class Ghost
+        private def ip = 1
+        def method_missing(name, *) = name
+      end
+      Hooked.x
+      Answering.x
+      Ghost.new.ip
+    RUBY
+  end
+
+  # Ruby: `Maybe.x` and `Toggled.x` depend on `rand`; the walk cannot place either, so the rule declines.
+  it "declines where a reversal or a toggle may not run" do
+    expect(mismatches(<<~RUBY)).to eq([])
+      class Maybe
+        private_class_method def self.x = 1
+        public_class_method :x if rand > 1
+      end
+      class Toggled
+        class << self
+          private if rand > 1
+          def x = 1
+        end
+      end
+      Maybe.x
+      Toggled.x
+    RUBY
+  end
+
+  # Ruby: loading `a.rb` then `b.rb` makes `Split.x` public, the other order private; file order is not load order,
+  # so the slot two files disagree on is contested in either order. `Lone.x` is private wherever it is called from.
+  it "declines a singleton slot two files disagree on, and reports one file's slot from another file" do
+    pair = { "Split" => "private_class_method def self.x = 1", "Split " => "class << self; public :x; end" }
+    [%w[a.rb b.rb], %w[b.rb a.rb]].each do |first, second|
+      files = {
+        first => "class Split\n  #{pair.fetch('Split')}\nend\nclass Lone\n  private_class_method def self.x = 1\nend\n",
+        second => "class Split\n  #{pair.fetch('Split ')}\nend\n",
+        "z.rb" => "Split.x\nLone.x\n"
+      }
+      expect(mismatches(files: files)).to eq([["z.rb", 2]])
+    end
+  end
+
+  # Issue #2059 — Ruby raises NoMethodError (private method) on `Pcm.two(1)` and `Es.two(1)`, so the private call is
+  # reported rather than `call.wrong-arity`; `Helpers.two(1)` is a module function's public copy and raises
+  # ArgumentError, which stays `call.wrong-arity`.
+  it "reports the private call, not the arity, on a private singleton method" do
+    expect(rules(<<~RUBY).select { |rule, _| rule.start_with?("call.wrong-arity", "def.method-visibility") })
+      class Pcm; def self.two(a, b) = a; private_class_method :two; end
+      module Es; extend self; private def two(a, b) = a; end
+      module Helpers; module_function; def two(a, b) = a; end
+      Pcm.two(1)
+      Es.two(1)
+      Helpers.two(1)
+    RUBY
+      .to eq([["def.method-visibility-mismatch", 4], ["def.method-visibility-mismatch", 5], ["call.wrong-arity", 6]])
+  end
+
+  # #2059's third shape. Ruby raises NoMethodError (private method) on `UsesExt.ex(1)`, a private method of an
+  # extended module: the private call is reported and the arity is not. The singleton read can still decline on the
+  # extends fold's copy (`SingletonHookDecline.copy_kind` answers `:stray` when the copy is not the module's own
+  # node), and then the arity is reported instead; never neither, since both rules read the same answer.
+  it "reports a private method of an extended module as the private call" do
+    files = {
+      "ext.rb" => "module Ext\n  private def ex(a, b) = a\nend\nclass UsesExt\n  extend Ext\nend\n",
+      "call.rb" => "UsesExt.ex(1)\n"
+    }
+    found = analyze(files: files).diagnostics.map { |d| [d.rule, File.basename(d.path), d.line] }
+    expect(found.select { |rule, _| rule.start_with?("call.wrong-arity", "def.method-visibility") })
+      .to eq([["def.method-visibility-mismatch", "call.rb", 1]])
+  end
+end

@@ -561,14 +561,19 @@ module Rigor
           summary: "Explicit-receiver call to a method declared `private` in source.",
           fires_when: [
             "Call is `receiver.method(...)` with explicit non-self receiver.",
-            "Receiver type resolves to `Type::Nominal[X]`.",
-            "X is a user-defined class whose source carries the method under `private`."
+            "Receiver type resolves to `Type::Nominal[X]`, or to the class object `singleton(X)`.",
+            "X is a user-defined class whose source carries the method under `private`; for a class object, " \
+            "the singleton method the call reaches is private (`private_class_method`, `class << self` with " \
+            "`private`, or a private method of a module X extends)."
           ],
           does_not_fire_when: [
             "Implicit-self call (no receiver) — always allowed for private.",
             "Receiver is `self` (Ruby 2.7+ permits `self.private_method`).",
             "Receiver class is RBS-known but not user-source-defined (RBS-side visibility is deferred).",
-            "Method is `:protected` (subclass tracking is deferred)."
+            "Method is `:protected` (subclass tracking is deferred).",
+            "A `method_missing` or `respond_to_missing?` on the receiver's chain, on the side the call reaches, " \
+            "may answer the call (Ruby sends a private call to `method_missing`).",
+            "The visibility rests on a statement that may not run, or on files that disagree about it."
           ],
           suppression: "`# rigor:disable method-visibility-mismatch`.",
           severity_authored: :error,

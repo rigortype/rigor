@@ -278,7 +278,8 @@ module Rigor
         # Issue #898 — and the same walk's table is now kept, merged over the cross-file seed the way
         # `includes` is: `Narrowing` asks it what a class object's singleton ancestry holds.
         siblings = per_file_siblings(seeded_scope.discovery.sibling_tables, file_tables[0], file_tables[2],
-                                     file_singleton, file_visibilities)
+                                     file_singleton, file_visibilities,
+                                     seed_visibilities: default_scope.discovered_method_visibilities)
         extends, methods_table, unpositioned =
           merge_and_fold_extends(default_scope, root, def_nodes, singleton_def_nodes, seeded_scope, siblings,
                                  mixin_unpositioned)
@@ -331,10 +332,11 @@ module Rigor
       # `def_nodes`, singleton defs and visibilities win every slot they write, so the seed's contest on those keys
       # is replaced by the file's ({#fold_slot_contests}); the envelopes are joined, so their contests union. The
       # possible methods were folded already ({#seed_discovered_methods}).
-      def per_file_siblings(siblings, file_def_nodes, file_siblings, file_singleton, file_visibilities)
+      def per_file_siblings(siblings, file_def_nodes, file_siblings, file_singleton, file_visibilities,
+                            seed_visibilities: {})
         file_singleton_def_nodes, file_singleton_contested = file_singleton
-        siblings[:contested_discovered_method_visibilities] = fold_slot_contests(
-          siblings[:contested_discovered_method_visibilities], *file_visibilities
+        siblings[:contested_discovered_method_visibilities] = fold_visibility_contests(
+          siblings[:contested_discovered_method_visibilities], seed_visibilities, *file_visibilities
         )
         siblings[:contested_discovered_def_nodes] = fold_slot_contests(
           siblings[:contested_discovered_def_nodes], file_def_nodes, file_siblings[:contested_discovered_def_nodes]
@@ -7870,9 +7872,19 @@ module Rigor
           (@contested ||= Set.new) << [class_name, name].freeze
         end
 
-        # Contests every slot of `class_name` recorded so far (`private(*names)` may name any of them).
-        def contest_class(class_name)
-          self[class_name]&.each_key { |name| contest_slot(class_name, name) }
+        # Contests every slot of `class_name` on `side` recorded so far (`private(*names)` may name any of them).
+        def contest_class(class_name, side = :instance)
+          self[class_name]&.each_key do |slot|
+            contest_slot(class_name, slot) if slot.is_a?(Array) == (side == :singleton)
+          end
+        end
+
+        # Issue #1984 — records `visibility` in the slot of `name` on `side` ({ScopeIndexer.visibility_slot}) and
+        # settles its contest as {#wrote} does.
+        def write(class_name, name, side, visibility, node, toggled:)
+          slot = ScopeIndexer.visibility_slot(name, side)
+          (self[class_name] ||= {})[slot] = visibility
+          wrote(class_name, slot, node, toggled: toggled)
         end
 
         # Runs the block with the running default uncertain, so a `def` it records is contested.
@@ -7989,7 +8001,8 @@ module Rigor
             return current_visibility
           end
         when Prism::DefNode
-          record_def_visibility(node, owner_prefix, in_singleton_class || defs_singleton,
+          contest_foreign_singleton_visibility(node, qualified_prefix, owner_prefix, in_singleton_class, accumulator)
+          record_def_visibility(node, owner_prefix, visibility_side(in_singleton_class, defs_singleton),
                                 current_visibility, accumulator)
           return current_visibility
         when Prism::CallNode
@@ -8010,28 +8023,45 @@ module Rigor
             # A `module_function` call is applied as a `private` one (#1569): it makes the instance copy private.
             visibility = parts.first
             visibility = ModuleFunctionState.instance_visibility unless VISIBILITY_MODIFIERS.include?(visibility)
-            # The visibility table is instance-side only — `private :x` inside `class <<`
-            # (or a receiver-eval body that re-evaluates a singleton self) marks the
-            # SINGLETON method, which this table cannot express. The `owner_prefix` check is a
-            # guard: an ownerless body (the top level, an anonymous factory block) records nothing,
-            # and its calls walk as any other call.
-            if !in_singleton_class && !owner_prefix.empty?
+            # Issue #1984 — inside `class << self` (or a `class_eval` on the singleton class) the call marks the
+            # SINGLETON methods, recorded under their `[:singleton, name]` slots. `module_function` is no method of
+            # a singleton class, so it is walked as any other call there. The `owner_prefix` check is a guard: an
+            # ownerless body (the top level, an anonymous factory block) records nothing, and its calls walk as
+            # any other call.
+            # An `instance_eval` body's call (`:eval`) runs on the receiver as a module: the instance side.
+            side = visibility_side(in_singleton_class, defs_singleton)
+            side = :instance if side == :eval
+            if side && !owner_prefix.empty? && (side == :instance || VISIBILITY_MODIFIERS.include?(parts.first))
               return apply_visibility_call(node, visibility, parts.last, owner_prefix, current_visibility, accumulator,
-                                           defs_singleton: defs_singleton) do |argument|
+                                           side: side, defs_singleton: defs_singleton) do |argument|
                 walk_method_visibilities(argument, qualified_prefix, in_singleton_class, current_visibility,
                                          accumulator, def_owner_prefix, singleton_cref: singleton_cref,
                                                                         defs_singleton: defs_singleton)
               end
             end
           end
-          unless in_singleton_class || defs_singleton
-            record_attr_visibility(node, owner_prefix, current_visibility, accumulator, toggled: true)
-            contest_replaced_visibility(replaced_by_call(node), owner_prefix, accumulator)
+          if !in_singleton_class && !owner_prefix.empty?
+            class_method_parts = class_method_visibility_parts(node)
+            if class_method_parts
+              apply_class_method_visibility(node, *class_method_parts, owner_prefix, accumulator) do |argument|
+                walk_method_visibilities(argument, qualified_prefix, in_singleton_class, current_visibility,
+                                         accumulator, def_owner_prefix, singleton_cref: singleton_cref,
+                                                                        defs_singleton: defs_singleton)
+              end
+              return current_visibility
+            end
+            contest_singleton_rewrites(node, owner_prefix, accumulator)
+          end
+          side = visibility_side(in_singleton_class, defs_singleton)
+          if %i[instance singleton].include?(side)
+            record_attr_visibility(node, owner_prefix, current_visibility, accumulator, toggled: true, side: side)
+            contest_replaced_visibility(replaced_by_call(node), owner_prefix, accumulator, side: side)
           end
         when Prism::AliasMethodNode
-          unless in_singleton_class || defs_singleton
+          side = visibility_side(in_singleton_class, defs_singleton)
+          if %i[instance singleton].include?(side)
             contest_replaced_visibility(Array(Source::AliasNames.keyword_names(node)&.first), owner_prefix,
-                                        accumulator)
+                                        accumulator, side: side)
           end
           return current_visibility
         end
@@ -8117,6 +8147,9 @@ module Rigor
                                    singleton_cref: singleton_cref,
                                    defs_singleton: defs_singleton)
         end
+        return if singleton_class_eval_walked?(node, qualified_prefix, in_singleton_class, accumulator,
+                                               def_owner_prefix, singleton_cref, defs_singleton)
+
         node.arguments&.arguments&.each do |arg|
           walk_method_visibilities(arg, qualified_prefix, in_singleton_class, current_visibility,
                                    accumulator, def_owner_prefix, singleton_cref: singleton_cref,
@@ -8141,63 +8174,130 @@ module Rigor
         end
       end
 
-      # `toggled` when the def reads the running default (a statement), false for one a visibility call wraps.
-      def record_def_visibility(def_node, qualified_prefix, in_singleton_class, current_visibility, accumulator,
-                                toggled: true)
-        return if def_node.receiver.is_a?(Prism::SelfNode) || in_singleton_class
-        return if qualified_prefix.empty?
+      # Issue #1984 — `singleton_class.class_eval do … end` in a class body (or `module_eval` / `class_exec` /
+      # `module_exec`) runs its block as a `class << self` body does: its `def`s and visibility calls land on the
+      # class's singleton slots. True when it walked the block so.
+      def singleton_class_eval_walked?(node, qualified_prefix, in_singleton_class, accumulator,
+                                       def_owner_prefix, singleton_cref, defs_singleton)
+        return false if in_singleton_class || defs_singleton || INSTANCE_EVAL_CALLS.include?(node.name)
+        return false unless own_singleton_class?(node.receiver) && node.arguments.nil?
+
+        owner_prefix = def_owner_prefix || qualified_prefix
+        return false if owner_prefix.empty?
+
+        if node.block.body
+          accumulator.body do
+            walk_method_visibilities(node.block.body, qualified_prefix, true, :public, accumulator, owner_prefix,
+                                     singleton_cref: singleton_cref)
+          end
+        end
+        true
+      end
+
+      # Issue #1984 — the side a body's members land on: `:singleton` in a `class << self` body or a `class_eval` on
+      # the singleton class, `:eval` in an `instance_eval` body on a class (its `def`s are singleton methods, its
+      # visibility calls instance-side), `:instance` in a class body, and nil where the singleton cannot be named.
+      def visibility_side(in_singleton_class, defs_singleton)
+        return defs_singleton == :unnameable ? nil : :singleton if in_singleton_class
+        return :eval if defs_singleton
+
+        :instance
+      end
+
+      # Issue #1984 — the key of `name`'s slot in a class's visibility table: the name on the instance side,
+      # `[:singleton, name]` on the singleton side (the envelope table's spelling).
+      def visibility_slot(name, side)
+        side == :singleton ? [:singleton, name].freeze : name
+      end
+
+      # Records the visibility a `def` gets ({#visibility_side} `side`):
+      #
+      # - a receiverless `def` takes `current_visibility` on its side; `toggled` when that is the running default
+      #   (a statement), false for one a visibility call wraps;
+      # - issue #1984 — `def self.x` (or `def K.x` in `K`'s body) is a public singleton method whatever the running
+      #   default is (`private; def self.x` is public), and writes nothing in a singleton body (it defines a method
+      #   of the singleton's singleton);
+      # - an `instance_eval` body's `def` (`:eval`) replaces a singleton method with a visibility the walk does not
+      #   read, so its singleton slot is contested.
+      def record_def_visibility(def_node, qualified_prefix, side, current_visibility, accumulator, toggled: true)
+        return if side.nil? || qualified_prefix.empty?
 
         class_name = qualified_prefix.join("::")
-        accumulator[class_name] ||= {}
-        accumulator[class_name][def_node.name] = current_visibility
-        accumulator.wrote(class_name, def_node.name, def_node, toggled: toggled)
+        if side == :eval
+          accumulator.contest_slot(class_name, visibility_slot(def_node.name, :singleton))
+        elsif def_node.receiver.nil?
+          accumulator.write(class_name, def_node.name, side, current_visibility, def_node, toggled: toggled)
+        elsif side == :instance && self_singleton_def?(def_node, qualified_prefix)
+          accumulator.write(class_name, def_node.name, :singleton, :public, def_node, toggled: false)
+        end
+      end
+
+      def self_singleton_def?(def_node, qualified_prefix)
+        def_node.receiver.is_a?(Prism::SelfNode) || def_receiver_targets_lexical_self?(def_node.receiver,
+                                                                                       qualified_prefix)
+      end
+
+      # Issue #1984 — `def Other.x` whose receiver is not the lexical self (`def_owner`) makes `Other.x` public in
+      # whatever order the files load, so each class the constant may name has its singleton slot contested.
+      def contest_foreign_singleton_visibility(def_node, qualified_prefix, def_owner, in_singleton_class, accumulator)
+        receiver = def_node.receiver
+        return unless receiver.is_a?(Prism::ConstantReadNode) || receiver.is_a?(Prism::ConstantPathNode)
+        return if !in_singleton_class && def_receiver_targets_lexical_self?(receiver, def_owner)
+
+        constant_receiver_candidates(receiver, qualified_prefix).each do |name|
+          accumulator.contest_slot(name, visibility_slot(def_node.name, :singleton))
+        end
       end
 
       # Applies one `private` / `protected` / `public` call ({#visibility_call_parts}) written on the body's self
-      # and returns the running default after it:
+      # and returns the running default after it. `side` is the side its names land on: `:singleton` in a
+      # `class << self` body (issue #1984), `:instance` elsewhere.
       #
       # - no arguments — the call's visibility becomes the default for subsequent defs.
       # - `private :foo, :bar`, `private %i[foo bar]` — back-patch the named methods in the accumulator; the
       #   default does NOT change for this form.
       # - Issues #1911, #1819, #1633 — `private def foo` (endless or not) and `private attr_reader :foo` define
       #   the members with the call's visibility, whatever the running default is (`private; public def foo` is
-      #   public); `private def self.foo` changes the instance method `foo`, if one exists, so its slot is
-      #   contested.
-      # - a splat (`private(*names)`) may name any member or none (a bare toggle), so the class's slots this file
-      #   wrote so far are contested, and the statement loop reads the default after it as uncertain
+      #   public); `private def self.foo` changes the method `foo` of the side, if one exists, so its slot is
+      #   contested, and defines a public singleton `foo` (a singleton-singleton one in a `class << self` body).
+      # - a splat (`private(*names)`) may name any member or none (a bare toggle), so the class's slots on the side
+      #   this file wrote so far are contested, and the statement loop reads the default after it as uncertain
       #   ({#visibility_toggle_arguments?}).
       # - any other argument (`private memoize def foo`, `private delegate(...)`) is walked with the default
       #   uncertain, so a `def` under it is contested: the call's visibility reaches it through a return value
       #   the walk does not read.
       #
       # `walk` walks an argument the call does not consume itself.
-      def apply_visibility_call(call_node, name, args, qualified_prefix, current_visibility, accumulator,
-                                defs_singleton: false, &walk)
+      def apply_visibility_call(call_node, name, args, qualified_prefix, current_visibility, accumulator, # rubocop:disable Metrics/ParameterLists
+                                side: :instance, defs_singleton: false, &walk)
         return name if args.empty?
 
         class_name = qualified_prefix.join("::")
-        accumulator.contest_class(class_name) if args.any?(Prism::SplatNode)
+        accumulator.contest_class(class_name, side) if args.any?(Prism::SplatNode)
         args.each do |arg|
           apply_visibility_argument(arg, name, call_node, qualified_prefix, accumulator,
-                                    defs_singleton: defs_singleton, &walk)
+                                    side: side, defs_singleton: defs_singleton, &walk)
         end
         current_visibility
       end
 
-      def apply_visibility_argument(arg, name, call_node, qualified_prefix, accumulator, defs_singleton:, &walk)
+      def apply_visibility_argument(arg, name, call_node, qualified_prefix, accumulator, side:, defs_singleton:, &walk)
         case arg
         when Prism::DefNode
           if arg.receiver.nil?
-            record_def_visibility(arg, qualified_prefix, defs_singleton, name, accumulator, toggled: false)
+            def_side = side == :instance && defs_singleton ? :eval : side
+            record_def_visibility(arg, qualified_prefix, def_side, name, accumulator, toggled: false)
           else
-            accumulator.contest_slot(qualified_prefix.join("::"), arg.name)
+            accumulator.contest_slot(qualified_prefix.join("::"), visibility_slot(arg.name, side))
+            record_def_visibility(arg, qualified_prefix, defs_singleton ? :eval : side, name, accumulator,
+                                  toggled: false)
           end
         when Prism::SymbolNode, Prism::StringNode, Prism::ArrayNode
-          apply_named_visibility(arg, name, qualified_prefix, call_node, accumulator, &walk)
+          apply_named_visibility(arg, name, qualified_prefix, call_node, accumulator, side: side, &walk)
         else
           # An `instance_eval` body's wrapped attr is walked like any other argument and records nothing.
           if !defs_singleton && attr_visibility_call?(arg)
-            record_attr_visibility(arg, qualified_prefix, name, accumulator, toggled: false)
+            record_attr_visibility(arg, qualified_prefix, name, accumulator, toggled: false, side: side)
           else
             accumulator.uncertainly { walk.call(arg) }
           end
@@ -8206,21 +8306,99 @@ module Rigor
 
       # `private :foo` / `private "foo"` / `private %i[foo bar]`: each literal name the call's visibility. An array
       # element that is not a literal name is walked like any other argument.
-      def apply_named_visibility(arg, visibility, qualified_prefix, call_node, accumulator, &walk)
+      def apply_named_visibility(arg, visibility, qualified_prefix, call_node, accumulator, side: :instance, &walk)
         elements = arg.is_a?(Prism::ArrayNode) ? arg.elements : [arg]
         class_name = qualified_prefix.join("::")
         elements.each do |element|
           name = visibility_target_name(element)
           next accumulator.uncertainly { walk.call(element) } if name.nil?
 
-          accumulator[class_name] ||= {}
-          accumulator[class_name][name] = visibility
-          accumulator.wrote(class_name, name, call_node, toggled: false)
+          accumulator.write(class_name, name, side, visibility, call_node, toggled: false)
         end
       end
 
       def visibility_target_name(arg)
         Source::Literals.symbol_or_string(arg)
+      end
+
+      CLASS_METHOD_VISIBILITIES = { private_class_method: :private, public_class_method: :public }.freeze
+      private_constant :CLASS_METHOD_VISIBILITIES
+
+      # Issue #1984 — `[visibility, arguments]` for a `private_class_method` / `public_class_method` call written on
+      # the body's self, in the spellings {#visibility_call_parts} reads (receiverless, `self.`, `send` with a
+      # literal name); nil for any other call.
+      def class_method_visibility_parts(node)
+        return nil unless node.is_a?(Prism::CallNode)
+        return nil unless node.receiver.nil? || node.receiver.is_a?(Prism::SelfNode)
+
+        name = node.name
+        arguments = node.arguments&.arguments || EMPTY_VISIBILITY_ARGUMENTS
+        if VISIBILITY_SEND_CALLS.include?(name)
+          name = Source::Literals.symbol_or_string(arguments.first)
+          arguments = arguments.drop(1)
+        end
+        visibility = CLASS_METHOD_VISIBILITIES[name]
+        visibility && [visibility, arguments]
+      end
+
+      # Issue #1984 — applies `private_class_method` / `public_class_method` to the class's singleton slots. It sets
+      # no running default (with no arguments it does nothing). A literal name (`:x`, `"x"`, `[:x]`) and a wrapped
+      # `def self.x` take the call's visibility; a wrapped receiverless `def x` defines an instance method (walked as
+      # a statement) and names the singleton `x` the walk does not see, as does any other receiver, so that slot is
+      # contested; a splat or any other argument may name any singleton method, so every singleton slot the file
+      # wrote so far for the class is contested, and the argument is walked.
+      def apply_class_method_visibility(call_node, visibility, args, qualified_prefix, accumulator, &walk)
+        class_name = qualified_prefix.join("::")
+        args.each do |arg|
+          case arg
+          when Prism::DefNode
+            if arg.receiver && self_singleton_def?(arg, qualified_prefix)
+              accumulator.write(class_name, arg.name, :singleton, visibility, call_node, toggled: false)
+            else
+              walk.call(arg)
+              accumulator.contest_slot(class_name, visibility_slot(arg.name, :singleton))
+            end
+          when Prism::SymbolNode, Prism::StringNode, Prism::ArrayNode
+            apply_named_visibility(arg, visibility, qualified_prefix, call_node, accumulator, side: :singleton) do |el|
+              accumulator.contest_class(class_name, :singleton)
+              walk.call(el)
+            end
+          else
+            accumulator.contest_class(class_name, :singleton)
+            walk.call(arg)
+          end
+        end
+      end
+
+      SINGLETON_DEFINING_CALLS = %i[define_singleton_method].freeze
+      private_constant :SINGLETON_DEFINING_CALLS
+
+      # Issue #1984 — calls in a class body that change a singleton method's visibility in a way the walk does not
+      # read, so the singleton slots they may reach are contested: `define_singleton_method(:x)` (a fresh public
+      # method; a computed name contests every singleton slot of the class), and any call on `singleton_class`
+      # (`singleton_class.send(:public, :x)`, `singleton_class.define_method(:x)`), whose literal arguments name
+      # the slots and whose other arguments may name any.
+      def contest_singleton_rewrites(node, qualified_prefix, accumulator)
+        on_singleton_class = own_singleton_class?(node.receiver)
+        return unless on_singleton_class || node.receiver.nil? || node.receiver.is_a?(Prism::SelfNode)
+        return unless on_singleton_class || SINGLETON_DEFINING_CALLS.include?(node.name)
+
+        class_name = qualified_prefix.join("::")
+        arguments = node.arguments&.arguments || EMPTY_VISIBILITY_ARGUMENTS
+        arguments = arguments.first(1) if SINGLETON_DEFINING_CALLS.include?(node.name)
+        arguments.each do |argument|
+          name = Source::Literals.symbol_or_string(argument)
+          if name
+            accumulator.contest_slot(class_name, visibility_slot(name, :singleton))
+          else
+            accumulator.contest_class(class_name, :singleton)
+          end
+        end
+      end
+
+      # `singleton_class` or `self.singleton_class`: the body's own singleton class.
+      def own_singleton_class?(receiver)
+        singleton_class_of_receiver?(receiver) && (receiver.receiver.nil? || receiver.receiver.is_a?(Prism::SelfNode))
       end
 
       # Issue #1911 — an `attr_reader` / `attr_writer` / `attr_accessor` call written on the body's self records
@@ -8237,16 +8415,21 @@ module Rigor
 
       # Issue #1989 — a `define_method` or an alias that replaces a method whose visibility slot this walk recorded
       # gives the name a visibility the walk does not read (the running default for `define_method`, the old
-      # name's for an alias), so the slot is contested rather than left asserting the replaced `def`'s.
-      def contest_replaced_visibility(names, qualified_prefix, accumulator)
+      # name's for an alias), so the slot is contested rather than left asserting the replaced `def`'s. Issue #1984
+      # — on the singleton side the slot is contested whether or not this file recorded it, since another file may
+      # have.
+      def contest_replaced_visibility(names, qualified_prefix, accumulator, side: :instance)
         return if names.empty? || qualified_prefix.empty?
 
         class_name = qualified_prefix.join("::")
         recorded = accumulator[class_name]
-        names.each { |name| accumulator.contest_slot(class_name, name) if recorded&.key?(name) }
+        names.each do |name|
+          slot = visibility_slot(name, side)
+          accumulator.contest_slot(class_name, slot) if side == :singleton || recorded&.key?(slot)
+        end
       end
 
-      def record_attr_visibility(call_node, qualified_prefix, visibility, accumulator, toggled:)
+      def record_attr_visibility(call_node, qualified_prefix, visibility, accumulator, toggled:, side: :instance)
         return unless attr_visibility_call?(call_node)
         return if qualified_prefix.empty?
 
@@ -8256,9 +8439,7 @@ module Rigor
           members << base unless call_node.name == :attr_writer
           members << :"#{base}=" unless call_node.name == :attr_reader
           members.each do |member|
-            accumulator[class_name] ||= {}
-            accumulator[class_name][member] = visibility
-            accumulator.wrote(class_name, member, call_node, toggled: toggled)
+            accumulator.write(class_name, member, side, visibility, call_node, toggled: toggled)
           end
         end
       end
@@ -9281,7 +9462,7 @@ module Rigor
             when :contested_discovered_singleton_def_nodes
               fold_slot_contests(target.fetch(name), singleton_def_nodes, table)
             when :contested_discovered_method_visibilities
-              fold_slot_contests(target.fetch(name), method_visibilities, table)
+              fold_visibility_contests(target.fetch(name), acc[:method_visibilities], method_visibilities, table)
             else union_sibling_value(target.fetch(name), table)
             end
         end
@@ -9352,6 +9533,30 @@ module Rigor
 
         result = stale.nil? || stale.empty? ? sitting.dup : sitting - stale
         result.merge(file_contested)
+      end
+
+      # The visibility table's {#fold_slot_contests}, where `recorded` is the table the file folds into as it stood.
+      # Issue #1984 — a singleton slot (`[:singleton, name]`) does not follow its writer: file order is not load
+      # order, so two files that give it different visibilities (`private_class_method :x` here,
+      # `class << self; public :x; end` in a reopening) leave it contested, and a contest on it stays whichever
+      # file folds later. The instance slots fold as before.
+      def fold_visibility_contests(sitting, recorded, file_slots, file_contested)
+        stale = sitting.select { |class_name, name| !name.is_a?(Array) && file_slots[class_name]&.key?(name) }
+        disagreeing = singleton_visibility_disagreements(recorded, file_slots)
+        return sitting if stale.empty? && file_contested.empty? && disagreeing.empty?
+
+        (sitting - stale).merge(file_contested).merge(disagreeing)
+      end
+
+      def singleton_visibility_disagreements(recorded, file_slots)
+        file_slots.flat_map do |class_name, table|
+          sitting = recorded[class_name]
+          next [] if sitting.nil?
+
+          table.filter_map do |slot, visibility|
+            [class_name, slot] if slot.is_a?(Array) && sitting.key?(slot) && sitting[slot] != visibility
+          end
+        end
       end
 
       def union_paths(sitting, arriving)
@@ -9857,8 +10062,9 @@ module Rigor
       def merge_class_keyed_index_tables(acc, root, file_methods, certainty)
         file_visibilities, file_contested = build_method_visibility_tables(root, certainty: certainty)
         siblings = acc[:siblings]
-        siblings[:contested_discovered_method_visibilities] = fold_slot_contests(
-          siblings[:contested_discovered_method_visibilities], file_visibilities, file_contested
+        siblings[:contested_discovered_method_visibilities] = fold_visibility_contests(
+          siblings[:contested_discovered_method_visibilities], acc[:method_visibilities], file_visibilities,
+          file_contested
         )
         file_visibilities.each do |class_name, table|
           (acc[:method_visibilities][class_name] ||= {}).merge!(table)

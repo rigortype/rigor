@@ -173,7 +173,10 @@ module Rigor
       # 38: issue #1898 — the payload gains `effect_plugin_digest`, the plugin effect-fact digest the collections were
       # stamped under, which a recheck now checks before its served collections reach the envelope pass. A pre-38
       # blob carries none, so the gate rejects it and the next run is cold.
-      SCHEMA = 38
+      # 39: issue #1984 — the visibility walk records the singleton slots (`[:singleton, name]`) and contests the ones
+      # two files disagree on, which a pre-39 bundle carries none of, so a warm run would answer a singleton call a
+      # cold run reports.
+      SCHEMA = 39
 
       # The persisted per-file state.
       # `cache` maps an analyzed file to its diagnostics.

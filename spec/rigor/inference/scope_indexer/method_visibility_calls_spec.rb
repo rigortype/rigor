@@ -100,8 +100,9 @@ RSpec.describe "the method-visibility table over visibility calls (#1911, #1819,
     RUBY
   end
 
+  # Ruby: `K.x` is public (the `def self.x` is a public singleton method; `private` reaches the instance `x`).
   it "contests the instance slot a wrapped `def self.x` names" do
-    expect(tables(<<~RUBY)).to eq([{ "K" => { x: :public } }, Set[["K", :x]]])
+    expect(tables(<<~RUBY)).to eq([{ "K" => { x: :public, %i[singleton x] => :public } }, Set[["K", :x]]])
       class K
         def x = 1
         private def self.x = 1
@@ -142,8 +143,11 @@ RSpec.describe "the method-visibility table over visibility calls (#1911, #1819,
     RUBY
   end
 
+  # Issue #1984 — what they record lands on the singleton slots. Ruby: `K.s`, `K.c` private, `K.sr` public.
   it "records nothing instance-side for `class << self`, `private_class_method` or an instance_eval body" do
-    expect(table(<<~RUBY)).to eq("K" => { a: :private })
+    expected = { "K" => { a: :private, %i[singleton s] => :private, %i[singleton sr] => :public,
+                          %i[singleton c] => :private } }
+    expect(table(<<~RUBY)).to eq(expected)
       class K
         class << self
           private def s = 1
@@ -244,8 +248,9 @@ RSpec.describe "the method-visibility table over visibility calls (#1911, #1819,
       RUBY
     end
 
+    # Issue #1984 — `private_class_method :d` records the singleton slot. Ruby: `M.d` is private.
     it "leaves the instance slot alone at extend self and private_class_method" do
-      expect(tables(<<~RUBY)).to eq([{ "M" => { d: :private } }, Set[]])
+      expect(tables(<<~RUBY)).to eq([{ "M" => { d: :private, %i[singleton d] => :private } }, Set[]])
         module M
           extend self
           module_function

@@ -710,7 +710,7 @@ module Rigor
       # the gate could not see. {#run_incremental} re-analyses the project and {#run_buffer_recheck} declines,
       # the way each treats a moved plugin fact surface. A run that changed nothing is exempt: under an
       # untrusted gate every earlier edit already re-analysed the whole project, so the snapshot it serves is
-      # whole, and a null run stays one.
+      # whole, and a null run stays one. A recheck that found a stale plugin read (#1553) is a change.
       def source_rbs_unverified?(result)
         source_rbs_gate.untrusted? && !result.no_change? && !result.reused.empty?
       end

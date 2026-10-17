@@ -77,7 +77,14 @@ RSpec.describe "effect.envelope-exceeded across a plugin effect-fact change" do
 
       adapter("async")
       to_async = guarded_recheck(session)
-      expect(to_async.rebaselined).to be(true)
+      # rigor-activejob reads `config/application.rb` once per process. A fork worker credits that read to each
+      # file of its slice (#1553), so a pooled recheck may re-analyse every file as a stale reader instead of
+      # re-baselining over the served collections; the sequential run credits it to no file and re-baselines.
+      if workers.zero?
+        expect(to_async.rebaselined).to be(true)
+      else
+        expect(to_async.rebaselined || to_async.reused.empty?).to be(true)
+      end
       expect(envelope_rows(to_async.diagnostics)).to eq(cold_rows).and be_empty
 
       adapter("inline")
@@ -136,7 +143,13 @@ RSpec.describe "effect.envelope-exceeded across a plugin effect-fact change" do
 
         expect(primed.size).to eq(1)
         expect(null_err).to include("--incremental warm")
-        expect(async_err).to include("--incremental cold")
+        # A pooled run may answer warm, re-analysing every file as a stale reader of the adapter config (see the
+        # session-level example above).
+        if workers.zero?
+          expect(async_err).to include("--incremental cold")
+        else
+          expect(async_err).to include("--incremental cold").or include("re-analysed 2 of 2 files")
+        end
         expect(to_async).to eq(cold_async).and be_empty
         expect(to_inline).to eq(check("--no-cache").first).and eq(primed)
       end

@@ -1112,16 +1112,21 @@ nothing has no key.
   recheck that found a stale row is a change (`Recheck#no_change?` is false), so
   its snapshot is saved even when no source file moved: the refreshed rows
   validate on the next recheck, which re-analyses the reader no more.
-- **Pool.** Each fork worker collects the same rows per file and marshals them
-  back beside its dependency records, so a pooled run keeps what a sequential
-  run keeps.
+- **Pool.** Each fork worker collects its rows per file and marshals them
+  back beside its dependency records. A read a plugin makes once per process
+  is credited to whichever file triggers it first in that process. Each worker
+  is a process of its own, so a pooled run can credit such a read to a file in
+  every worker where the sequential run credits it to one file, or to none
+  when the read happened before the per-file loop. That over-includes readers
+  in the closure, which is conservative.
 - **Paths.** A row names the path the plugin passed, made absolute without
   resolving symlinks, the boundary's own rule; a content row stats through the
   link, so an edit to its target goes stale.
 - **Bounds.** This closure covers what a read decides about the reader's own
   rows, a plugin diagnostic among them. A read that decides a TYPE other files
   consume must sit behind the ADR-88 plugin fact surface (the plugin's
-  published facts, or its `incremental_state_fingerprint` hook), which
+  published facts, its producer values, or its `incremental_state_fingerprint`
+  hook), which
   invalidates the whole snapshot. Within this closure only reads are credited,
   the rule `IoBoundary.attributing` states: a value reused without a read
   reaches later files uncredited, whether the plugin memoised it or the engine's
@@ -1259,7 +1264,8 @@ from its comments — every `#:` / `# @rbs` annotation under the auto-wired
   edit whose recheck had left files out, `run_incremental` re-analyses the
   project and `run_buffer_recheck` declines. A run that changed nothing stays a
   null run, since every edit under the untrusted gate already re-analysed the
-  whole project. The contract a synthesizer must keep is in
+  whole project. A recheck that found a stale plugin read (`plugin_reads`,
+  above) counts as a change, so it too re-analyses the project. The contract a synthesizer must keep is in
   [`plugin.md`](plugin.md).
 
 ### `effect_collections` / `effects_identity` — the effects sidecar ([ADR-103](../adr/103-effect-labels.md) WD13)

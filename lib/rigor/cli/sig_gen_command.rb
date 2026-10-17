@@ -55,7 +55,8 @@ module Rigor
         configuration = Configuration.load(options.fetch(:config))
         paths = @argv.empty? ? configuration.paths : @argv
 
-        observations = collect_observations(configuration, options)
+        observation_roots = observation_roots(configuration, options)
+        observations = collect_observations(configuration, options, observation_roots)
         generator = SigGen::Generator.new(configuration: configuration, paths: paths,
                                           observations: observations,
                                           include_private: options.fetch(:include_private),
@@ -68,7 +69,7 @@ module Rigor
                  when :write then dispatch_write(candidates, configuration, options)
                  when :check then dispatch_check(candidates, configuration, options)
                  else
-                   dispatch_print_or_diff(candidates, mode, options)
+                   dispatch_print_or_diff(candidates, mode, options, observation_roots)
                    0
                  end
         report_skipped(candidates, options)
@@ -219,12 +220,13 @@ module Rigor
         unresolvable.sort.each { |class_name, superclass| @err.puts("  #{class_name} < #{superclass}") }
       end
 
-      def dispatch_print_or_diff(candidates, mode, options)
+      def dispatch_print_or_diff(candidates, mode, options, observation_roots)
         SigGen::Renderer.new(out: @out).render(
           candidates: candidates,
           mode: mode,
           format: options.fetch(:format),
-          selection: options.fetch(:selection)
+          selection: options.fetch(:selection),
+          observation: observation_report(observation_roots, options)
         )
       end
 
@@ -289,11 +291,9 @@ module Rigor
       # specified, observe the project's test roots: `test_paths:`, or whichever of `spec/` and `test/` exist. With no
       # root at all the run still succeeds, but says so — otherwise every parameter stays `untyped` with nothing
       # naming the reason.
-      def collect_observations(configuration, options)
+      def collect_observations(configuration, options, observe_paths)
         return {} if options.fetch(:params) != "observed"
 
-        observe_paths = options.fetch(:observe)
-        observe_paths = configuration.resolved_test_paths if observe_paths.empty?
         if observe_paths.empty?
           warn_no_test_roots(configuration)
         else
@@ -302,15 +302,36 @@ module Rigor
         SigGen::ObservationCollector.new(configuration: configuration, paths: observe_paths).collect
       end
 
-      # A declared root that does not exist is read as empty, so name it: `sig-gen` is the only command that reads
-      # the test roots, and without this the run looks exactly like one whose tests pass no typed arguments.
+      # The roots `--params=observed` reads: `--observe=PATH...` when given, else the project's test roots.
+      def observation_roots(configuration, options)
+        return [] if options.fetch(:params) != "observed"
+
+        observe_paths = options.fetch(:observe)
+        observe_paths.empty? ? configuration.resolved_test_paths : observe_paths
+      end
+
+      # #1398 — the same fact the stderr notes carry, as data for `--format=json` (and the MCP tool, whose
+      # stderr nobody reads). Absent under `--params=untyped`, where no root is read. Paths are spelled as
+      # {#observation_roots} yields them: `--observe=PATH` as typed, `test_paths:` as the configuration
+      # resolved them, an auto-detected `spec/` / `test/` absolute.
+      def observation_report(observe_paths, options)
+        return nil if options.fetch(:params) != "observed"
+
+        present, missing = observe_paths.uniq.partition { |path| SigGen::ObservationCollector.readable_root?(path) }
+        { paths: present, missing: missing }
+      end
+
+      # A declared root that does not exist (or is not a directory or `.rb` file) is read as empty, so name it:
+      # `sig-gen` is the only command that reads the test roots, and without this the run looks exactly like one
+      # whose tests pass no typed arguments.
       def warn_missing_test_roots(observe_paths)
-        missing = observe_paths.reject { |path| File.exist?(path) }
+        missing = observe_paths.reject { |path| SigGen::ObservationCollector.readable_root?(path) }
         return if missing.empty?
 
         consequence = missing.size == observe_paths.size ? "; every parameter stays untyped" : ""
         @err.puts("rigor sig-gen: no call sites are observed from #{missing.map(&:inspect).join(', ')}, " \
-                  "which does not exist#{consequence}. Check `test_paths:` or --observe=PATH.")
+                  "which does not exist or is not a directory or `.rb` file#{consequence}. " \
+                  "Check `test_paths:` or --observe=PATH.")
       end
 
       def warn_no_test_roots(configuration)

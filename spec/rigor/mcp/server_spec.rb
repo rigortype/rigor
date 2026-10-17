@@ -2,6 +2,8 @@
 
 require "json"
 require "stringio"
+require "tmpdir"
+require "fileutils"
 require "rigor/mcp"
 require "rigor/cli"
 
@@ -252,9 +254,34 @@ RSpec.describe Rigor::MCP::Server do
   end
 
   describe "rigor_sig_gen" do
+    def text_of(resp)
+      resp.dig("result", "content", 0, "text")
+    end
+
     it "threads --params= into argv when a params argument is provided" do
       argv = server.send(:build_argv, "rigor_sig_gen", { "params" => "observed" })
       expect(argv).to include("--params=observed")
+    end
+
+    # #1398 — an MCP client never sees stderr, so the "no test root observed" reason rides in the response.
+    it "carries the observation report in the response under params=observed" do
+      Dir.mktmpdir do |dir|
+        File.write(File.join(dir, ".rigor.yml"), "paths:\n  - lib\ntest_paths:\n  - tests\n")
+        FileUtils.mkdir_p(File.join(dir, "lib"))
+        File.write(File.join(dir, "lib", "calc.rb"), "class Calc\n  def m(x) = 1\nend\n")
+
+        resp = tool_call("rigor_sig_gen", { "params" => "observed", "paths" => [File.join(dir, "lib")],
+                                            "config" => File.join(dir, ".rigor.yml") })
+
+        expect(JSON.parse(text_of(resp)).fetch("observation"))
+          .to eq("paths" => [], "missing" => [File.join(dir, "tests")])
+      end
+    end
+
+    it "omits the observation report under the default params policy" do
+      resp = tool_call("rigor_sig_gen", { "paths" => ["lib"] })
+
+      expect(JSON.parse(text_of(resp))).not_to have_key("observation")
     end
   end
 

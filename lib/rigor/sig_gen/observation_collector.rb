@@ -63,6 +63,12 @@ module Rigor
         observations.transform_values(&:freeze).freeze
       end
 
+      # Whether `arg` names something {#collect} reads: a directory, or a `.rb` file. The CLI's
+      # `observation` report splits roots on this, so "observed" means what the collector does (#1398).
+      def self.readable_root?(arg)
+        File.directory?(arg) || (File.file?(arg) && arg.end_with?(".rb"))
+      end
+
       private
 
       # Issue #821 — same universe as the generator and as `rigor check`; see
@@ -76,7 +82,7 @@ module Rigor
         args.flat_map do |arg|
           if File.directory?(arg)
             RootedGlob.glob(arg, "**/*.rb")
-          elsif File.file?(arg) && arg.end_with?(".rb")
+          elsif self.class.readable_root?(arg)
             [arg]
           else
             []

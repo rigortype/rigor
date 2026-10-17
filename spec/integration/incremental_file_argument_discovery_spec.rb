@@ -52,7 +52,8 @@ RSpec.describe "--incremental over path arguments under a configured path (#1583
   def incremental_rows
     root = File.join(Dir.pwd, ".rigor", "cache")
     snapshot = Rigor::Cache::IncrementalSnapshot.new(root: root)
-    fingerprint = Rigor::Cache::IncrementalSnapshot.fingerprint(configuration: configuration, roots: paths || configured)
+    roots = paths || configured
+    fingerprint = Rigor::Cache::IncrementalSnapshot.fingerprint(configuration: configuration, roots: roots)
     diagnostics, warm = guarded_run_incremental(session, snapshot: snapshot, fingerprint: fingerprint)
     [rows(diagnostics), warm]
   end

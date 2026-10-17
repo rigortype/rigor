@@ -1117,6 +1117,13 @@ unchanged run is warm again. An edit under another configured path
 (`paths: [lib, ext]`, `rigor check --incremental lib`, an `ext/` edit;
 [#1560](https://github.com/rigortype/rigor/issues/1560)) takes the same route.
 
+The set is globbed by a runner without the editor buffer. A buffered run
+does not widen its discovery, so editor mode option B
+([#146](https://github.com/rigortype/rigor/issues/146)) compares the same
+set the snapshot's writer recorded: an unchanged project serves option B,
+and a discovery-only edit makes the recheck re-baseline, which option B
+declines (falling back to option A).
+
 A session over the configured paths (no arguments, or arguments equal to
 `paths:`) discovers nothing beyond what it analyses: `discovery_digests` is
 empty and the check globs nothing. A session over arguments pays one extra
@@ -1509,7 +1516,8 @@ guarantee, is [ADR-45](../adr/45-unchanged-project-fast-path.md) WD2; this is th
   (taken when the run ends: the template files and one `:names` row per claimed glob, and
   a `:kind` row per analysis root and `pre_eval:` entry); the chain's `baseline` and
   `pinned` (`Runner#baseline_dependency_rows`: the signature tree and a `:kind` row per
-  signature root, the discovered-not-analysed files and a listing row per discovery root,
+  signature root, the discovered-not-analysed files and a listing row per discovery root on
+  every run that widened, whether or not the widening added a file (#1583),
   the `pre_eval:` files outside the analysed set; `pinned` holds the signature files
   outside the project's own signature roots, which the key's engine slot or lockfiles
   identify, and `baseline` the rest); and
@@ -1924,6 +1932,7 @@ ADR-45 `analysis.run-diagnostics` slot:
 | `:stat` file, per discovered-not-analyzed file | `discovery_file_entries` ([#684](https://github.com/rigortype/rigor/issues/684)) | an edit to a file a widened run only discovered |
 | `:stat` file, per `pre_eval:` file | `pre_eval_file_entries` ([#352](https://github.com/rigortype/rigor/issues/352)) | an edit to an ADR-17 pre-evaluated file |
 | `:stat` file, per **template** file the run READ — the ones that produced a unit AND the ones that failed | `template_unit_file_entries` ([#392](https://github.com/rigortype/rigor/issues/392)) | an edit to a `.erb` / `.rbx` / … a plugin claimed, including one whose transform raised or whose bytes could not be read |
+| names glob, per configured root, on a run that widened its discovery | `discovery_glob_entries` ([#1583](https://github.com/rigortype/rigor/issues/1583)) | a file APPEARING under a configured path a run over path arguments discovers, including when the widening had added no file before it |
 | names glob, per claimed `template_globs:` pattern | `template_unit_glob_entries` (#392) | a template APPEARING under or vanishing from a claimed glob |
 | `:stat` file, per `.rbs` under every signature root and under Rigor's own `data/` trees (`vendored_gem_sigs/`, `core_overlay/`, `capability_roles/`) | `RunDescriptor#files` → `RbsDescriptor.file_entries` | an edit to a signature file the run read |
 | names glob, per signature root (`**/*.rbs`) | `RunDescriptor#globs` (#979) | a `.rbs` APPEARING under or vanishing from a signature root |

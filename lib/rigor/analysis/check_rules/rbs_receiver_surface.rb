@@ -2,6 +2,7 @@
 
 require_relative "../../reflection"
 require_relative "../dependency_recorder"
+require_relative "../../inference/singleton_hook_decline"
 
 module Rigor
   module Analysis
@@ -19,9 +20,10 @@ module Rigor
       #   read the class's own chain through `discovered_methods`, which holds no plain `def` written in another
       #   file than the one being checked; this reads the def table too for a project module, and walks the
       #   ancestors RBS lists after the class. A cross-file `def` on an RBS-declared class or module itself stays
-      #   ADR-17's monkey-patch report ({.mixin_defines?}). `Object`, `Kernel` and `BasicObject` are asked for a
-      #   `method_missing` only: `Inference::ObjectMixins` owns what the project mixes into `Object`, and its
-      #   reading (#1697) is that an unknown module there does not silence the rule.
+      #   ADR-17's monkey-patch report ({.mixin_defines?}). A project module whose `included` / `extended` hook may
+      #   define methods on its includer answers any name. On `Object`, `Kernel` and `BasicObject` a project or
+      #   RBS-declared module answers as anywhere else, but one neither declares does not: #1697's reading
+      #   (`Inference::ObjectMixins`) is that such a module mixed into every object does not silence the rule.
       # - **A project subclass** ({.subclass_may_define?}). A value typed by its class's name through a signature
       #   (`#: () -> String`) may be an instance of any subclass, so a method a project subclass defines may be
       #   the one that runs.
@@ -43,7 +45,7 @@ module Rigor
             DependencyRecorder.read_last_segment(:class, name) if DependencyRecorder.active?
             next false unless scope.known_user_class?(name)
 
-            chain_answers?(scope, name, method_name, mixins: !OBJECT_ROOTS.include?(name))
+            chain_answers?(scope, name, method_name, unknown_answers: !OBJECT_ROOTS.include?(name))
           end
         end
 
@@ -60,7 +62,7 @@ module Rigor
               !scope.singleton_def_for(name, MISSING_HOOK).nil? ||
                 scope.discovered_method?(name, MISSING_HOOK, :singleton)
             else
-              scope.known_user_class?(name) && chain_answers?(scope, name, MISSING_HOOK, mixins: false)
+              scope.known_user_class?(name) && hook_on_chain?(scope, name)
             end
           end
         end
@@ -86,18 +88,26 @@ module Rigor
         end
 
         # A search of `name`'s project chain for an entry that may answer: a project entry that defines
-        # `method_name` or a `method_missing`, and — when `mixins` — an external mixin RBS declares `method_name`
-        # on, or one RBS does not know. A chain cut at its budget may hold an answer past the cut.
-        def chain_answers?(scope, name, method_name, mixins:)
+        # `method_name` or a `method_missing`, a project module whose hook may define methods on its includer, or
+        # an external mixin RBS declares `method_name` on — or, when `unknown_answers`, one RBS does not know. A
+        # chain cut at its budget may hold an answer past the cut.
+        def chain_answers?(scope, name, method_name, unknown_answers:)
           chain = Scope::ResolutionChain.for(scope, name, :instance, :methods)
           found = chain.search(scope, side: :instance) do |entry|
             if entry.external?
-              mixins && external_may_answer?(scope, entry, method_name)
-            elsif project_defines?(scope, entry.name, MISSING_HOOK)
-              true
+              external_may_answer?(scope, entry, method_name, unknown_answers)
             else
-              mixins && mixin_defines?(scope, entry.name, method_name)
+              project_defines?(scope, entry.name, MISSING_HOOK) || mixin_defines?(scope, entry, method_name)
             end
+          end
+          found || chain.truncated?
+        end
+
+        # The singleton side's question of an instance chain: does a project entry on it define `method_missing`?
+        def hook_on_chain?(scope, name)
+          chain = Scope::ResolutionChain.for(scope, name, :instance, :methods)
+          found = chain.search(scope, side: :instance) do |entry|
+            !entry.external? && project_defines?(scope, entry.name, MISSING_HOOK)
           end
           found || chain.truncated?
         end
@@ -110,22 +120,28 @@ module Rigor
         # Comparable; def x`) in another file than the call is a monkey-patch Rigor does not apply cross-file, and the
         # rule reports it with the `pre_eval:` advice, so on such an entry only what `discovered_methods` carries
         # answers. A project module's own `def` answers from any file.
-        def mixin_defines?(scope, owner, method_name)
+        #
+        # A project module's hook (`def self.included(base) = base.class_eval { def x }`, `base.send(:define_method,
+        # …)`) defines methods on whatever mixes it in, so a module {Inference::SingletonHookDecline} reads as
+        # hook-capable may answer any name.
+        def mixin_defines?(scope, entry, method_name)
+          owner = entry.name
           if Rigor::Reflection.rbs_class_known?(owner, scope: scope)
             scope.discovered_method?(owner, method_name, :instance)
           else
-            project_defines?(scope, owner, method_name)
+            project_defines?(scope, owner, method_name) ||
+              Inference::SingletonHookDecline.entry_hook_capable?(scope, entry)
           end
         end
 
-        def external_may_answer?(scope, entry, method_name)
+        def external_may_answer?(scope, entry, method_name, unknown_answers)
           candidates = entry.candidates
-          return true if candidates.empty?
+          return unknown_answers if candidates.empty?
           return true if candidates.any? do |candidate|
             Rigor::Reflection.instance_method_definition(candidate, method_name, scope: scope)
           end
 
-          candidates.none? { |candidate| Rigor::Reflection.rbs_class_known?(candidate, scope: scope) }
+          unknown_answers && candidates.none? { |candidate| Rigor::Reflection.rbs_class_known?(candidate, scope: scope) }
         end
 
         def each_subclass(scope, class_name)

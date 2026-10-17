@@ -818,7 +818,8 @@ module Rigor
           return nil if method_def
 
           return nil if last_resort_surface_answers?(receiver_type, class_name, call_node, scope, kind, lexical_sites)
-          return nil if subclass_instance_may_answer?(rendered_receiver, class_name, call_node.name, scope)
+          return nil if subclass_instance_may_answer?(rendered_receiver, class_name, call_node.name, scope,
+                                                      call_node.receiver)
 
           definition_site = project_definition_site(scope, class_name, call_node.name, kind)
           # Issue #735 — the site is evidence, and whose RBS this is decides what it is evidence OF. On a
@@ -974,19 +975,28 @@ module Rigor
 
         # Issue #1722 — a receiver typed by its class's name, rather than by a literal, may hold an instance of a
         # subclass (a `#: () -> String` signature admits a `MyStr < String`), so a method a project subclass
-        # defines, or a subclass's `method_missing`, may be the one that runs. A literal (`"a"`, `1`, a union of
-        # them) is exactly its class and keeps firing. Instance side only.
-        def subclass_instance_may_answer?(receiver_type, class_name, method_name, scope)
+        # defines, or a subclass's `method_missing`, may be the one that runs. A value the engine built from a
+        # literal is exactly its class and keeps firing: a literal type (`"a"`, `1`, a union of them), a shape
+        # carrier (`{a: 1}`, `[1, 2]`, `{}`, `[]`, and what folds to one), or a receiver written as a literal
+        # (`"a#{x}b"`, which types as plain `String`). A local holding an interpolated String types as plain
+        # `String` with no origin, so it still declines. Instance side only.
+        def subclass_instance_may_answer?(receiver_type, class_name, method_name, scope, receiver_node = nil)
           return false if receiver_type.is_a?(Type::Singleton)
-          return false if exact_literal_receiver?(receiver_type)
+          return false if exact_literal_receiver?(receiver_type) || LITERAL_RECEIVER_NODES.include?(receiver_node.class)
 
           RbsReceiverSurface.subclass_may_define?(scope, class_name, method_name)
         end
 
-        def exact_literal_receiver?(receiver_type)
-          return receiver_type.members.all?(Type::Constant) if receiver_type.is_a?(Type::Union)
+        EXACT_TYPES = [Type::Constant, Type::Tuple, Type::HashShape].freeze
+        LITERAL_RECEIVER_NODES = [
+          Prism::StringNode, Prism::InterpolatedStringNode, Prism::XStringNode, Prism::InterpolatedXStringNode,
+          Prism::ArrayNode, Prism::HashNode, Prism::RegularExpressionNode, Prism::InterpolatedRegularExpressionNode
+        ].to_set.freeze
+        private_constant :EXACT_TYPES, :LITERAL_RECEIVER_NODES
 
-          receiver_type.is_a?(Type::Constant)
+        def exact_literal_receiver?(receiver_type)
+          members = receiver_type.is_a?(Type::Union) ? receiver_type.members : [receiver_type]
+          members.all? { |member| EXACT_TYPES.any? { |kind| member.is_a?(kind) } }
         end
 
         # Issue #1697 — a module the project mixes into `Object` (a top-level `include M`, or `include M` in

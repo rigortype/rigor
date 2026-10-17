@@ -340,9 +340,111 @@ RSpec.describe "call.undefined-method on core receivers the program extends (#17
           def cc = 1
         end
         t(:sclass) { c.cc }
+        g = "a"
+        g.instance_eval("def gg = 1")
+        t(:ie_string) { g.gg }
         f = "a"
         f.instance_eval { @x = 1 }
         t(:ctl_ie) { f.zz }
+      RUBY
+    },
+    "a hook in a project module mixed into Integer" => {
+      "main.rb" => <<~RUBY
+        module Hooky
+          def self.included(base)
+            base.class_eval { def dyn = 1 }
+            base.send(:define_method, :dyn2) { 2 }
+          end
+        end
+        Integer.include(Hooky)
+        #{helper}
+        t(:dyn) { 1.dyn }
+        t(:dyn2) { (ARGV.empty? ? 1 : 2).dyn2 }
+        t(:ctl_str) { "a".dyn }
+      RUBY
+    },
+    "a hook in a project module included in the class body" => {
+      "main.rb" => <<~RUBY
+        module Hooky2
+          def self.included(base)
+            base.class_eval { def dyn = 1 }
+          end
+        end
+        class Integer
+          include Hooky2
+        end
+        #{helper}
+        t(:dyn) { 1.dyn }
+        t(:ctl_str) { "a".dyn }
+      RUBY
+    },
+    "a project module mixed into Kernel and BasicObject" => {
+      "main.rb" => <<~RUBY
+        module KExt
+          def kzz = 1
+        end
+        module KExt2
+          def kzz2 = 1
+        end
+        module BExt
+          def bzz = 1
+        end
+        Kernel.include(KExt)
+        module Kernel
+          include KExt2
+        end
+        BasicObject.include(BExt)
+        #{helper}
+        t(:kernel) { 1.kzz }
+        t(:kernel_body) { "a".kzz2 }
+        t(:basic) { (ARGV.empty? ? 1 : 2).bzz }
+        t(:ctl_lit) { 1.nope }
+      RUBY
+    },
+    "a module RBS does not know mixed into Comparable" => {
+      # The module lives outside the analysed paths, so neither RBS nor the project declares it.
+      "vendor/other_gem.rb" => <<~RUBY,
+        module OtherGem
+          module Mod
+            def zzz = 1
+          end
+        end
+      RUBY
+      "main.rb" => <<~RUBY
+        require_relative "../vendor/other_gem"
+        Comparable.include(OtherGem::Mod)
+        #{helper}
+        t(:str) { "s".zzz }
+        t(:ctl_array) { [1].zzz }
+      RUBY
+    },
+    "literal and shape receivers beside project subclasses" => {
+      # A value built from a literal is exactly its class. A local holding an interpolated String types as plain
+      # `String` with no origin, so it declines.
+      declines: %w[interp_local],
+      "subs.rb" => <<~RUBY,
+        class HSub < Hash
+          def hsub = 1
+        end
+        class ASub < Array
+          def asub = 1
+        end
+        class SSub < String
+          def ssub = 1
+        end
+      RUBY
+      "main.rb" => <<~RUBY
+        require_relative "subs"
+        #{helper}
+        t(:ctl_hash) { { a: 1 }.hsub }
+        h = {}
+        t(:ctl_hash_local) { h.hsub }
+        t(:ctl_array) { [1, 2].asub }
+        t(:ctl_empty) { [].asub }
+        t(:ctl_map) { [1, 2].map { |x| x }.asub }
+        t(:ctl_interp) { "a\#{ARGV.size}b".ssub }
+        i = "a\#{ARGV.size}b"
+        t(:interp_local) { i.ssub }
       RUBY
     },
     "a union of two classes" => {
@@ -388,6 +490,27 @@ RSpec.describe "call.undefined-method on core receivers the program extends (#17
         t(:ctl_none) { m.nope_none }
         t(:ctl_lit) { "a".zzz_sub }
       RUBY
+    },
+    "a String subclass with a method_missing returned through a String signature" => {
+      "my_str.rb" => <<~RUBY,
+        class MyStr < String
+          def method_missing(*) = 1
+        end
+      RUBY
+      "box.rbs" => <<~RBS,
+        class Box
+          def make: () -> String
+        end
+      RBS
+      "main.rb" => <<~RUBY
+        require_relative "my_str"
+        class Box
+          def make = MyStr.new("q")
+        end
+        #{helper}
+        t(:plain) { Box.new.make.anything }
+        t(:ctl_lit) { "a".anything }
+      RUBY
     }
   }
 
@@ -398,7 +521,12 @@ RSpec.describe "call.undefined-method on core receivers the program extends (#17
   def write_fixture(files)
     FileUtils.mkdir_p(%w[lib sig])
     files.each do |name, source|
-      File.write(File.join(name.end_with?(".rbs") ? "sig" : "lib", name), source)
+      path = if name.include?("/") then name
+             elsif name.end_with?(".rbs") then File.join("sig", name)
+             else File.join("lib", name)
+             end
+      FileUtils.mkdir_p(File.dirname(path))
+      File.write(path, source)
     end
   end
 

@@ -109,6 +109,13 @@ module Rigor
         nesting&.first
       end
 
+      # Issue #1722 — the hook-capable test for one chain entry, asked by `call.undefined-method` of a project module
+      # mixed into a core class: a module whose `self.included(base)` hook writes `base.class_eval { def x }` gives
+      # the includer methods no table records.
+      def entry_hook_capable?(scope, entry, flavor = :methods)
+        Context.new(scope, flavor).capable?(entry)
+      end
+
       def tested_levels(chain, from, bound)
         starts = chain.level_starts
         size = chain.entries.size

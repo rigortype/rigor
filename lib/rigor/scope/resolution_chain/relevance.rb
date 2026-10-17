@@ -84,6 +84,20 @@ module Rigor
           false
         end
 
+        # {.external_lacks?} on the side an entry stands for: an external superclass on a singleton chain
+        # (`:singleton`, its whole tail) is asked for a singleton method, an extended module (`:instance`) and every
+        # instance-side entry for an instance method.
+        def external_lacks_on?(scope, candidates, side, name)
+          return external_lacks?(scope, candidates, name) if side == :instance
+
+          known = candidates.find { |candidate| Rigor::Reflection.rbs_class_known?(candidate, scope: scope) }
+          return false if known.nil?
+
+          Rigor::Reflection.singleton_method_definition(known, name, scope: scope).nil?
+        rescue StandardError
+          false
+        end
+
         # One verdict's working state: the scope, the resolver, and the edges the tests read.
         class Context
           attr_reader :mark, :edges

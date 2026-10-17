@@ -103,6 +103,9 @@ module Rigor
         @cache = {}              # analyzed path => [Diagnostic]
         @sources = {}            # analyzed path => Set<source path it read from>
         @digests = {}            # analyzed path => ADR-87 packed stat-digest entry at last analysis
+        # Issue #1583 — discovered-not-analysed path => the same packed entry, for a run over path arguments that
+        # #684 widened to the configured `paths:`. Empty on every run over the configured paths.
+        @discovery_digests = {}
         @analyzed = []           # the project files analyzed last round
         @dependents = {}         # inverted @sources (file-level)
         # ADR-46 slice 4 — symbol-granularity tracking.
@@ -158,6 +161,49 @@ module Rigor
       def project_files
         current_files
       end
+
+      # Issue #1583 (and #1560) — whether a file the run discovers but does not analyse was edited, added or
+      # removed since the snapshot. Such a file feeds the cross-file index the analysed files resolve against
+      # (a constant, a method, an ancestor), but no recorded edge or digest of the analysed set sees it move.
+      # A move re-baselines the session: discovery-only files are not tracked per symbol, so the closure
+      # cannot be narrowed, and the full analysis is over the argument set alone. A session over the
+      # configured `paths:` discovers nothing beyond what it analyses and pays nothing here.
+      def discovery_moved?
+        current = current_discovery_only_files
+        return true unless current.size == @discovery_digests.size
+
+        current.any? do |path|
+          entry = @discovery_digests[path]
+          entry.nil? || !Cache::FileDigest.stat_fresh?(path, entry)
+        end
+      rescue StandardError
+        true
+      end
+
+      # A baseline's freshness entries: each analysed file's, and (issue #1583) each discovered-not-analysed file's.
+      def record_baseline_digests
+        @digests = @analyzed.to_h { |path| [path, pack_digest(path)] }
+        @discovery_digests = current_discovery_only_files.to_h { |path| [path, pack_digest(path)] }
+        forget_unbound_digests
+      end
+
+      def restore_digests(payload)
+        @digests = payload.digests
+        @discovery_digests = payload.discovery_digests # Issue #1583 — `{}` in a payload built without it.
+      end
+
+      # Issue #1583 — the discovered-not-analysed files of a run over this session's paths
+      # ({Runner#discovery_only_file_set}). Asked of a runner WITHOUT the editor buffer: a buffered run does not
+      # widen, so a buffered session (editor mode option B, #146) would read an empty set against the snapshot's
+      # and re-baseline on every keystroke. Globbing without it keeps the comparison the one the snapshot's
+      # writer made, so a sibling edit still declines option B and an unchanged project still serves it.
+      def current_discovery_only_files
+        return [] if @paths.nil?
+
+        Runner.new(configuration: @configuration, cache_store: nil, environment: @environment)
+              .discovery_only_file_set(@paths)
+      end
+      private :discovery_moved?, :record_baseline_digests, :restore_digests, :current_discovery_only_files
 
       # The per-file discovery bundles of the last run, keyed by path (ADR-85 WD2).
       attr_reader :seed_bundles
@@ -225,8 +271,7 @@ module Rigor
         @effect_plugin_digest = effect_plugin_digest_of(runner)
         @cache = per_file(runner.per_file_diagnostics)
         @plugin_reads = plugin_reads_of(runner, @analyzed)
-        @digests = @analyzed.to_h { |path| [path, pack_digest(path)] }
-        forget_unbound_digests
+        record_baseline_digests
         @run_level_rows = runner.run_level_rows
         diagnostics
       end
@@ -240,6 +285,8 @@ module Rigor
         added = current - previous
         removed = previous - current
         changed = changed_paths(current & previous)
+        return rebaseline_recheck(changed, added, removed) if discovery_moved?
+
         # ADR-67 WD6c lift — recompute the whole-project inferred-param table BEFORE deciding the closure,
         # and diff it against the snapshot's copy: an entry that moved (because a caller's argument type
         # changed, a caller appeared, or one vanished) invalidates the CALLEE's file and its symbol
@@ -930,7 +977,7 @@ module Rigor
         @analyzed = payload.analyzed
         @cache = payload.cache
         @sources = payload.sources
-        @digests = payload.digests
+        restore_digests(payload)
         # ADR-85 WD2 — restore the per-file discovery bundles if present (absent in a pre-#85 snapshot → empty,
         # so the recheck's discovery re-walks every file: a cold-quality index, always sound). The SCHEMA bump
         # makes a genuinely stale-shaped bundle unreadable rather than mis-folded.
@@ -985,7 +1032,8 @@ module Rigor
           effects_identity: @effects_identity,
           run_level_rows: @run_level_rows,
           effect_plugin_digest: @effect_plugin_digest,
-          plugin_reads: @plugin_reads
+          plugin_reads: @plugin_reads,
+          discovery_digests: @discovery_digests
         )
       end
 

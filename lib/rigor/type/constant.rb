@@ -112,7 +112,7 @@ module Rigor
       private
 
       def range_element_rbs
-        classes = [value.begin, value.end].compact.map { |endpoint| endpoint.class.name }.uniq
+        classes = [value.begin, value.end].compact.map { |endpoint| endpoint.class.name }.uniq.sort
         classes.empty? ? "untyped" : classes.join(" | ")
       end
     end

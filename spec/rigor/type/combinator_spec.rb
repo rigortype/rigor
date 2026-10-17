@@ -190,7 +190,8 @@ RSpec.describe Rigor::Type::Combinator do
       expect(described_class.constant_of("a".."z").erase_to_rbs).to eq("Range[String]")
       expect(described_class.constant_of(1..).erase_to_rbs).to eq("Range[Integer]")
       expect(described_class.constant_of(..2.5).erase_to_rbs).to eq("Range[Float]")
-      expect(described_class.constant_of(1..2.5).erase_to_rbs).to eq("Range[Integer | Float]")
+      expect(described_class.constant_of(1..2.5).erase_to_rbs).to eq("Range[Float | Integer]")
+      expect(described_class.constant_of(1.5..2).erase_to_rbs).to eq("Range[Float | Integer]")
       expect(described_class.constant_of(nil..nil).erase_to_rbs).to eq("Range[untyped]")
     end
 

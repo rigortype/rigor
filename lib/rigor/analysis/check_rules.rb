@@ -2963,7 +2963,7 @@ module Rigor
           rows.none? { |(start, finish, name, _kind, _owner)| !name.nil? && start <= offset && offset < finish }
         end
 
-        SINGLETON_WILDCARD_SLOT = [:singleton, :*].freeze
+        SINGLETON_WILDCARD_SLOT = %i[singleton *].freeze
         private_constant :SINGLETON_WILDCARD_SLOT
 
         # Issue #1984 — whether a project class on `class_name`'s singleton chain has its wildcard singleton slot
@@ -2972,7 +2972,8 @@ module Rigor
           discovery = scope.discovery
           chain = Scope::ResolutionChain.for(scope, class_name.to_s, :singleton, :methods)
           chain.entries.any? do |entry|
-            !entry.external? && discovery.contested?(:discovered_method_visibilities, [entry.name, SINGLETON_WILDCARD_SLOT])
+            !entry.external? && discovery.contested?(:discovered_method_visibilities,
+                                                     [entry.name, SINGLETON_WILDCARD_SLOT])
           end
         end
 

@@ -8200,7 +8200,7 @@ module Rigor
 
       # Issue #1984 — the slot a contest stands on for every singleton name of a class: a call that may make any of
       # them public (`K.public_class_method(*names)`, `K.singleton_class.class_eval { … }`).
-      SINGLETON_WILDCARD_SLOT = [:singleton, :*].freeze
+      SINGLETON_WILDCARD_SLOT = %i[singleton *].freeze
 
       # Issue #1984 — a class method visibility call written on a constant (`K.public_class_method(:x)`,
       # `K.send(:public_class_method, :x)`), anywhere: each literal name is recorded public on every class the
@@ -8211,9 +8211,27 @@ module Rigor
       def record_constant_class_method_calls(node, qualified_prefix, accumulator)
         receiver = node.receiver
         if singleton_class_of_receiver?(receiver) && constant_receiver?(receiver.receiver)
-          return each_constant_class(receiver.receiver, qualified_prefix) { |name| accumulator.contest_class(name, :singleton) }
+          each_constant_class(receiver.receiver, qualified_prefix) do |class_name|
+            accumulator.contest_class(class_name, :singleton)
+          end
+          return
         end
-        return unless constant_receiver?(receiver)
+        names = constant_public_class_method_names(node)
+        return if names.nil?
+
+        each_constant_class(receiver, qualified_prefix) do |class_name|
+          next accumulator.contest_class(class_name, :singleton) if names.any?(&:nil?)
+
+          names.each do |method_name|
+            accumulator.write(class_name, method_name, :singleton, :public, node, toggled: false)
+          end
+        end
+      end
+
+      # The names a `K.public_class_method(…)` (or `K.send(:public_class_method, …)`) call on a constant names, a nil
+      # for each one that is not a literal; nil for any other call.
+      def constant_public_class_method_names(node)
+        return nil unless constant_receiver?(node.receiver)
 
         name = node.name
         arguments = node.arguments&.arguments || EMPTY_VISIBILITY_ARGUMENTS
@@ -8221,15 +8239,10 @@ module Rigor
           name = Source::Literals.symbol_or_string(arguments.first)
           arguments = arguments.drop(1)
         end
-        return unless name == :public_class_method
+        return nil unless name == :public_class_method
 
-        names = arguments.flat_map { |arg| arg.is_a?(Prism::ArrayNode) ? arg.elements : [arg] }
-                         .map { |arg| Source::Literals.symbol_or_string(arg) }
-        each_constant_class(receiver, qualified_prefix) do |class_name|
-          next accumulator.contest_class(class_name, :singleton) if names.any?(&:nil?)
-
-          names.each { |method_name| accumulator.write(class_name, method_name, :singleton, :public, node, toggled: false) }
-        end
+        arguments.flat_map { |arg| arg.is_a?(Prism::ArrayNode) ? arg.elements : [arg] }
+                 .map { |arg| Source::Literals.symbol_or_string(arg) }
       end
 
       def constant_receiver?(node)

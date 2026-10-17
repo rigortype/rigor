@@ -96,7 +96,8 @@ RSpec.describe "def.method-visibility-mismatch on singleton calls (#1984)", type
   {
     "K.public_class_method(*names)" => "NAMES = [:x]\nK.public_class_method(*NAMES)\n",
     "K.singleton_class.class_eval { public :x }" => "K.singleton_class.class_eval { public :x }\n",
-    "define_method in a reopening's class << self" => "class K\n  class << self\n    define_method(:x) { 2 }\n  end\nend\n",
+    "define_method in a reopening's class << self" =>
+      "class K\n  class << self\n    define_method(:x) { 2 }\n  end\nend\n",
     "an alias in a reopening's class << self" =>
       "class K\n  class << self\n    def y = 2\n    alias x y\n  end\nend\n"
   }.each do |label, rewrite|
@@ -240,7 +241,8 @@ RSpec.describe "def.method-visibility-mismatch on singleton calls (#1984)", type
                    "class Lone\n  private_class_method def self.x = 1\nend\ndef here = Split.x\n"
     public_side = "class Split\n  def self.x = 2\nend\n"
     [%w[a.rb b.rb], %w[b.rb a.rb]].each do |private_file, public_file|
-      files = { private_file => private_side, public_file => public_side, "z.rb" => "def a = Split.x\ndef b = Lone.x\n" }
+      files = { private_file => private_side, public_file => public_side,
+                "z.rb" => "def a = Split.x\ndef b = Lone.x\n" }
       expect(mismatches(files: files)).to eq([["z.rb", 2]])
     end
   end

@@ -86,6 +86,10 @@ RSpec.describe Rigor::CLI::SigGenCommand do
         end
         attr_reader :count
         def self.make(c) = @count = c
+        class << self
+          attr_accessor :count
+          def reset = @count = nil
+        end
       end
 
       class DefineBox
@@ -156,7 +160,7 @@ RSpec.describe Rigor::CLI::SigGenCommand do
     expect(section(observed_print, "RBox")).to include("def count: () -> 0")
   end
 
-  it "keeps the observed type when the other write is the class object's own ivar" do
+  it "keeps the observed type when the other writes are the class object's own ivar" do
     expect(section(observed_print, "SelfBox")).to include("def count: () -> 0")
   end
 

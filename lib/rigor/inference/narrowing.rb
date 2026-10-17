@@ -3152,7 +3152,7 @@ module Rigor
           name = Source::ConstantPath.rooted?(node) ? bare_name : resolve_class_name_lexically(bare_name, scope)
           return name if class_known_to_scope?(scope, name)
 
-          constant_value_class_name(scope.type_of(node), name) && bound_constant_class_name(bare_name, name, scope)
+          constant_value_class_name(scope.type_of(node), name)
         end
         public :lexical_class_name
 
@@ -3168,24 +3168,6 @@ module Rigor
           else
             value_constant_type?(type) ? nil : name
           end
-        end
-
-        # Issue #1963 — a constant this reference cannot read through its own value names no class when the project
-        # or a signature binds it to a value {Reflection.constant_type_for} reads (a same-file or published literal,
-        # an RBS constant): nil for such a binding, the class of one that reads as a class object, and `name`, the
-        # spelling, otherwise. Another file's constant whose value is not published reads `Dynamic[top]` and keeps
-        # the spelling, as before: it may alias a class (`Error = Lib::Failure`), and nothing here reads which.
-        def bound_constant_class_name(bare_name, name, scope)
-          candidates = lexical_constant_candidates(bare_name, scope)
-          bound = candidates.lazy.filter_map { |candidate| Reflection.constant_type_for(candidate, scope: scope) }.first
-          return name if bound.nil?
-
-          named = bound.is_a?(Type::Singleton) && !Type::AnonymousClassName.match?(bound.class_name)
-          named ? bound.class_name : nil
-        end
-
-        def lexical_constant_candidates(bare_name, scope)
-          [*lexical_nesting_for(scope).map { |prefix| "#{prefix}::#{bare_name}" }, bare_name]
         end
 
         VALUE_CONSTANT_TYPES = [

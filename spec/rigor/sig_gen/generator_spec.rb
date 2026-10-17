@@ -1333,6 +1333,35 @@ RSpec.describe Rigor::SigGen::Generator do
       expect(method.declared_return_rbs).to eq("untyped")
     end
 
+    # The boundary of #1891: an `untyped` only the inline reader synthesizes (ADR-93, `# @rbs x: Integer` with no
+    # return clause) is no word of the author's, so it keeps the strictest literal, while the same bodies under a
+    # `sig/`-authored `untyped` widen to bool and decline the bare nil.
+    it "keeps true and nil over a synthesized untyped and widens them over an authored one" do
+      require "rigor-rbs-inline"
+      Rigor::Plugin.register(Rigor::Plugin::RbsInline) unless Rigor::Plugin.registered_for("rbs-inline")
+
+      write_fixture("sig/authored.rbs", "class Authored\n  def c: (Integer x) -> untyped\n  def n: (Integer x) -> untyped\nend\n")
+      inline = write_fixture("lib/inline.rb", <<~RUBY)
+        class Inline
+          # @rbs x: Integer
+          def c(x) = true
+
+          # @rbs x: Integer
+          def n(x) = nil
+        end
+      RUBY
+      authored = write_fixture("lib/authored.rb", "class Authored\n  def c(x) = true\n  def n(x) = nil\nend\n")
+
+      candidates = generator(paths: [inline, authored], signature_paths: [File.join(tmpdir, "sig")],
+                             plugins: [rbs_inline_plugin_entry]).run
+      row = ->(klass, name) { candidates.find { |c| c.class_name == klass && c.method_name == name } }
+
+      expect(row.call("Inline", :c).rbs).to eq("def c: (Integer x) -> true")
+      expect(row.call("Inline", :n).rbs).to eq("def n: (Integer x) -> nil")
+      expect(row.call("Authored", :c).rbs).to eq("def c: (Integer x) -> (false | true)")
+      expect(row.call("Authored", :n).classification).to eq(Rigor::SigGen::Classification::EQUIVALENT)
+    end
+
     # Guard: the #1891 widening and decline apply over an authored `untyped` only; this passes with them removed.
     it "keeps the strictest carrier for true, false and nil when no `.rbs` declares the method" do
       path = write_fixture("lib/box.rb", "class Box\n  def t = true\n  def n = nil\nend\n")

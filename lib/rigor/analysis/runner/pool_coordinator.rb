@@ -57,6 +57,8 @@ module Rigor
           # slice's cross-file reads, marshalled back into `#collected_dependencies` for the runner's graph.
           @record_dependencies = record_dependencies
           @collected_dependencies = {}
+          # Issue #1553 — each worker's per-file plugin reads, marshalled back beside its dependency records.
+          @collected_analysis_reads = {}
           # ADR-103 WD13 — effect collection, derived from the configuration exactly as `Runner` and
           # `WorkerSession` derive it. A worker's per-file collections marshal back into
           # `#collected_effects`, so a pooled run's effect graph is the sequential run's graph.
@@ -110,6 +112,10 @@ module Rigor
         # `record_dependencies:` and a pool run occurred). The runner folds these into its `file_dependencies`
         # so the incremental session's dependency graph is refreshed whether analysis ran sequential or pooled.
         attr_reader :collected_dependencies
+
+        # Issue #1553 — the per-file plugin reads the fork pool's workers recorded this run (empty unless
+        # `record_dependencies:` and a pool run occurred), folded into `Runner#analysis_reads`.
+        attr_reader :collected_analysis_reads
 
         # ADR-103 WD12 — the per-file {Effects::FileCollection}s the fork pool captured this run (empty
         # unless the configuration carries an `effects:` block and a pool run occurred). The runner merges
@@ -907,7 +913,7 @@ module Rigor
             merge_run_disclosures(session.drain_run_disclosures)
             # The degraded slice was re-analysed on the parent session, so its dependency records live there,
             # not in a child payload — fold them in alongside the successful children's.
-            @collected_dependencies.merge!(session.drain_dependencies) if @record_dependencies
+            collect_dependencies(session.drain_dependencies, session.drain_analysis_reads) if @record_dependencies
             @collected_effects.merge!(session.drain_effects) if @record_effects
           end
 
@@ -944,6 +950,7 @@ module Rigor
           results = slice.to_h { |path| [path, session.analyze(path)] }
           payload = { results: results, reporters: session.drain_reporters,
                       dependencies: session.drain_dependencies,
+                      analysis_reads: session.drain_analysis_reads,
                       disclosures: session.drain_run_disclosures,
                       refusals: session.drain_trust_refusals }
           # ADR-103 WD13 — the effects slot exists only on a collecting run, so a normal `--workers N` run
@@ -982,13 +989,21 @@ module Rigor
               merge_run_disclosures(payload.fetch(:disclosures, []))
               refusals = payload.fetch(:refusals, [])
               refusals_by_slice ? refusals_by_slice[child[:index]] = refusals : merge_trust_refusals(refusals)
-              @collected_dependencies.merge!(payload.fetch(:dependencies, {})) if @record_dependencies
+              if @record_dependencies
+                collect_dependencies(payload.fetch(:dependencies, {}), payload.fetch(:analysis_reads, {}))
+              end
               @collected_effects.merge!(payload.fetch(:effects, {})) if @record_effects
             else
               degraded.concat(child[:slice])
             end
           end
           degraded
+        end
+
+        # ADR-46 / issue #1553 — fold one worker's dependency records and per-file plugin reads.
+        def collect_dependencies(dependencies, analysis_reads)
+          @collected_dependencies.merge!(dependencies)
+          @collected_analysis_reads.merge!(analysis_reads)
         end
 
         # @return the child's `{results:, reporters:}` payload, or nil when the child exited

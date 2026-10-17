@@ -100,7 +100,6 @@ module Rigor
         # normal `--workers N` run leaves it false and pays nothing (the recorder's disabled fast path).
         @record_dependencies = record_dependencies
         @file_dependencies = {}
-        @analysis_reads = {} # issue #1553 — {path => [row]}, drained by {#drain_analysis_reads}
         # ADR-103 WD13 — effect collection, derived from the configuration exactly as `Runner` derives it,
         # so a worker and the parent agree without a flag to keep in sync. Records marshal back through
         # {#drain_effects}.
@@ -177,7 +176,7 @@ module Rigor
         end
         @file_dependencies[path] = record
         # Issue #1553 — the plugin reads this file's analysis made, as `Runner#analyze_file` keeps them.
-        @analysis_reads[path] = reads unless reads.empty?
+        (@analysis_reads ||= {})[path] = reads unless reads.empty?
         diagnostics
       end
 
@@ -318,7 +317,7 @@ module Rigor
       # Issue #1553 — the plugin reads ({Plugin::IoBoundary.attributing}) each `#analyze` call's file made (empty
       # unless `record_dependencies:` was set). The rows are value objects of frozen Strings, so they marshal back.
       def drain_analysis_reads
-        @analysis_reads
+        @analysis_reads || {}
       end
 
       # ADR-103 WD12 — the per-file {Effects::FileCollection}s this session collected (empty unless the

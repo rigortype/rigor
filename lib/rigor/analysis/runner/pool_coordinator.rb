@@ -57,8 +57,6 @@ module Rigor
           # slice's cross-file reads, marshalled back into `#collected_dependencies` for the runner's graph.
           @record_dependencies = record_dependencies
           @collected_dependencies = {}
-          # Issue #1553 — each worker's per-file plugin reads, marshalled back beside its dependency records.
-          @collected_analysis_reads = {}
           # ADR-103 WD13 — effect collection, derived from the configuration exactly as `Runner` and
           # `WorkerSession` derive it. A worker's per-file collections marshal back into
           # `#collected_effects`, so a pooled run's effect graph is the sequential run's graph.
@@ -114,8 +112,11 @@ module Rigor
         attr_reader :collected_dependencies
 
         # Issue #1553 — the per-file plugin reads the fork pool's workers recorded this run (empty unless
-        # `record_dependencies:` and a pool run occurred), folded into `Runner#analysis_reads`.
-        attr_reader :collected_analysis_reads
+        # `record_dependencies:` and a pool run occurred), folded into `Runner#analysis_reads`. Each worker's are
+        # marshalled back beside its dependency records.
+        def collected_analysis_reads
+          @collected_analysis_reads ||= {}
+        end
 
         # ADR-103 WD12 — the per-file {Effects::FileCollection}s the fork pool captured this run (empty
         # unless the configuration carries an `effects:` block and a pool run occurred). The runner merges
@@ -1003,7 +1004,7 @@ module Rigor
         # ADR-46 / issue #1553 — fold one worker's dependency records and per-file plugin reads.
         def collect_dependencies(dependencies, analysis_reads)
           @collected_dependencies.merge!(dependencies)
-          @collected_analysis_reads.merge!(analysis_reads)
+          collected_analysis_reads.merge!(analysis_reads)
         end
 
         # @return the child's `{results:, reporters:}` payload, or nil when the child exited

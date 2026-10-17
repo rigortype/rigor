@@ -848,10 +848,118 @@ RSpec.describe "resolution in Ruby's ancestor order (#1567, #1568, #1570, #1571)
     end
 
     # UNKNOWN at C2-b1, so `C.new.to_a` types `Dynamic` and line 15 is silent (Ruby: `"a"`, a String, so `first` exists;
-    # master's `M#to_a` Integer made it a false positive). #1572 later types it from `Enumerable` (an Array of String
-    # elements) instead of `Dynamic`; line 16 is the control that this source still analyses.
-    it "UNKNOWN at C2-b1; #1572 later types it from Enumerable" do
+    # master's `M#to_a` Integer made it a false positive). The instance typing site withholds rather than typing the
+    # call from `Enumerable`'s declaration; line 16 is the control that this source still analyses.
+    it "UNKNOWN at C2-b1: the instance typing site withholds" do
       expect(diagnostics_for(source)).to eq([[16, "call.undefined-method"]])
+    end
+  end
+
+  # #1572's singleton side. The singleton typing site reads `Scope#singleton_def_through_ancestors`, which passes
+  # external entries over, so an RBS-known module extended ahead of a project definer typed the call from the project
+  # `M#to_a` (1) and `.first` fired. It now withholds (`Dynamic`) where an external entry ahead of the definer may
+  # answer: RBS does not know it, or declares the name in it. Each shape's Ruby run prints "a" (`Enumerable#to_a`);
+  # the last line of each source is a control on the same file that still fires.
+  describe "an RBS-known module extended after a project module (#1572, singleton side)" do
+    let(:prelude) do
+      <<~RUBY
+        module M
+          def to_a = 1
+        end
+      RUBY
+    end
+    let(:control) { "Struct.new(:x).new(1).x.upcase\n" }
+
+    {
+      "extend M; extend Enumerable" => <<~RUBY,
+        class C
+          extend M
+          extend Enumerable
+          def self.each = yield("a")
+        end
+      RUBY
+      "class << self; include M; include Enumerable" => <<~RUBY,
+        class C
+          class << self
+            include M
+            include Enumerable
+            def each = yield("a")
+          end
+        end
+      RUBY
+      "extend Enumerable, M (Ruby inserts Enumerable first)" => <<~RUBY,
+        class C
+          extend Enumerable, M
+          def self.each = yield("a")
+        end
+      RUBY
+      "the superclass extends M, the class extends Enumerable" => <<~RUBY,
+        class Base
+          extend M
+        end
+        class C < Base
+          extend Enumerable
+          def self.each = yield("a")
+        end
+      RUBY
+      "a project module that includes Enumerable, extended after M" => <<~RUBY,
+        module A
+          include Enumerable
+        end
+        class C
+          extend M
+          extend A
+          def self.each = yield("a")
+        end
+      RUBY
+      "a module that extends M then Enumerable" => <<~RUBY
+        module C
+          extend M
+          extend Enumerable
+          def self.each = yield("a")
+        end
+      RUBY
+    }.each do |shape, body|
+      context shape do
+        let(:source) { "#{prelude}#{body}C.to_a.first\n#{control}" }
+
+        it "runs Enumerable#to_a under Ruby" do
+          expect(RubyRun.stdout("#{prelude}#{body}p C.to_a.first\n")).to eq("\"a\"\n")
+        end
+
+        it "withholds instead of typing the call from M#to_a" do
+          expect(diagnostics_for(source)).to eq([[source.lines.size, "call.undefined-method"]])
+        end
+      end
+    end
+
+    it "withholds when the module that extends Enumerable reopens the class in another file" do
+      files = {
+        "a.rb" => "#{prelude}class C\n  extend M\n  def self.each = yield(\"a\")\nend\n",
+        "b.rb" => "class C\n  extend Enumerable\nend\n",
+        "c.rb" => "C.to_a.first\n#{control}"
+      }
+      expect(RubyRun.stdout("#{files['a.rb']}#{files['b.rb']}p C.to_a.first\n")).to eq("\"a\"\n")
+      expect(diagnostics_for_files(files)).to eq([["c.rb", 2, "call.undefined-method"]])
+    end
+
+    # Precision kept: where `M` is nearer than the RBS module, or the RBS module lacks the name, or the class's own
+    # `def self.to_a` answers first, the call is still typed from the project definer, so `.first` on its Integer
+    # fires (Ruby raises NoMethodError on each).
+    {
+      "extend Enumerable; extend M (M is nearer)" => "class C\n  extend Enumerable\n  extend M\n  " \
+                                                     "def self.each = yield(\"a\")\nend\n",
+      "extend M; extend Comparable (Comparable lacks to_a)" => "class C\n  extend M\n  extend Comparable\nend\n",
+      "the class's own def self.to_a" => "class C\n  extend M\n  extend Enumerable\n  def self.to_a = 2\n  " \
+                                         "def self.each = yield(\"a\")\nend\n"
+    }.each do |shape, body|
+      it "still types the project definer: #{shape}" do
+        source = "#{prelude}#{body}C.to_a.first\n#{control}"
+        _out, err, status = RubyRun.capture("-e", "#{prelude}#{body}C.to_a.first")
+        expect([status.success?, err[/NoMethodError/]]).to eq([false, "NoMethodError"])
+        line = source.lines.size - 1
+        expect(diagnostics_for(source)).to eq([[line, "call.undefined-method"], [line + 1, "call.undefined-method"]])
+      end
     end
   end
 

@@ -526,10 +526,40 @@ module Rigor
             registry = environment&.plugin_registry
             each_source_ancestor_candidate(scope, class_name) do |candidate|
               return nil if scope.discovered_method?(candidate, method_name, kind)
-              return candidate if ALLOWED_RBS_COMPLETE_ANCESTORS.include?(candidate) ||
-                                  registry&.rbs_complete_ancestor?(candidate)
+              next unless ALLOWED_RBS_COMPLETE_ANCESTORS.include?(candidate) ||
+                          registry&.rbs_complete_ancestor?(candidate)
+
+              return shadowed_in_ruby_order?(scope, class_name, kind, method_name, candidate) ? nil : candidate
             end
             nil
+          end
+
+          # Issue #1572 — the walk above is breadth-first, so it reaches the superclass before a module an included
+          # module includes, which Ruby's order puts ahead of it (`class P < Rigor::Plugin::Base; include A` with `A`
+          # including `M` calls `M#prepare`, not `Base#prepare`), and it passes over RBS-known modules. True when the
+          # bridged `ancestor` is not what Ruby calls: on `class_name`'s {Scope::ResolutionChain} in Ruby's order, a
+          # project entry ahead of it records the name, an external entry ahead of it is a module RBS knows and
+          # declares the name in, or the chain does not hold it. An RBS-unknown external ahead is passed over, as the
+          # breadth-first walk always did. Reading the chain's entries files no ADR-46 edge, as the walk files none.
+          def shadowed_in_ruby_order?(scope, class_name, kind, method_name, ancestor)
+            entries = Scope::ResolutionChain.for(scope, class_name.to_s, kind, :methods).entries
+            stop = entries.index do |entry|
+              entry.external? ? entry.candidates.include?(ancestor) : entry.name == ancestor
+            end
+            return true if stop.nil?
+
+            entries.first(stop).any? do |entry|
+              if entry.external?
+                rbs_declares_ahead?(scope, entry, method_name)
+              else
+                scope.discovered_method?(entry.name, method_name, entry.side)
+              end
+            end
+          end
+
+          def rbs_declares_ahead?(scope, entry, method_name)
+            entry.candidates.any? { |candidate| Rigor::Reflection.rbs_class_known?(candidate, scope: scope) } &&
+              !Scope::ResolutionChain::Relevance.external_lacks_on?(scope, entry.candidates, entry.side, method_name)
           end
 
           # Issue #527 slice 1 — the RBS instance definition a Ruby-source class inherits from a CORE or

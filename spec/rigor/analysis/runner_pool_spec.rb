@@ -213,7 +213,12 @@ RSpec.describe "Rigor::Analysis::Runner with Ractor pool (Phase 4b)" do
         $LOAD_PATH.unshift(lib) unless $LOAD_PATH.include?(lib)
         require gem_name
       end
-      classes = [Rigor::Plugin::FFI, Rigor::Plugin::DrySchema, Rigor::Plugin::RbNaCl]
+      # A manifest-borne callable is the author's to make shareable; a lambda is not, until shared.
+      synthesizing = Class.new(Rigor::Plugin::Base) do
+        manifest(id: "pool-synthesizer", version: "0.1.0", source_rbs_synthesizer: ->(*) {})
+      end
+      stub_const("RunnerPoolSynthesizerPlugin", synthesizing)
+      classes = [Rigor::Plugin::FFI, Rigor::Plugin::DrySchema, Rigor::Plugin::RbNaCl, synthesizing]
       classes.each { |klass| klass.send(:share_declarations_for_ractors!) }
       Rigor::Environment::ClassRegistry.default
       configuration = Rigor::Configuration.new(Rigor::Configuration::DEFAULTS)

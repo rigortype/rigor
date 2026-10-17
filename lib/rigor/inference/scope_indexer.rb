@@ -278,8 +278,7 @@ module Rigor
         # Issue #898 — and the same walk's table is now kept, merged over the cross-file seed the way
         # `includes` is: `Narrowing` asks it what a class object's singleton ancestry holds.
         siblings = per_file_siblings(seeded_scope.discovery.sibling_tables, file_tables[0], file_tables[2],
-                                     file_singleton, file_visibilities,
-                                     seed_visibilities: default_scope.discovered_method_visibilities)
+                                     file_singleton, file_visibilities)
         extends, methods_table, unpositioned =
           merge_and_fold_extends(default_scope, root, def_nodes, singleton_def_nodes, seeded_scope, siblings,
                                  mixin_unpositioned)
@@ -332,11 +331,12 @@ module Rigor
       # `def_nodes`, singleton defs and visibilities win every slot they write, so the seed's contest on those keys
       # is replaced by the file's ({#fold_slot_contests}); the envelopes are joined, so their contests union. The
       # possible methods were folded already ({#seed_discovered_methods}).
-      def per_file_siblings(siblings, file_def_nodes, file_siblings, file_singleton, file_visibilities,
-                            seed_visibilities: {})
+      def per_file_siblings(siblings, file_def_nodes, file_siblings, file_singleton, file_visibilities)
         file_singleton_def_nodes, file_singleton_contested = file_singleton
+        # The seed's singleton contests stay ({#fold_visibility_contests}); it already holds a disagreement between
+        # this file and another.
         siblings[:contested_discovered_method_visibilities] = fold_visibility_contests(
-          siblings[:contested_discovered_method_visibilities], seed_visibilities, *file_visibilities
+          siblings[:contested_discovered_method_visibilities], {}, *file_visibilities
         )
         siblings[:contested_discovered_def_nodes] = fold_slot_contests(
           siblings[:contested_discovered_def_nodes], file_def_nodes, file_siblings[:contested_discovered_def_nodes]

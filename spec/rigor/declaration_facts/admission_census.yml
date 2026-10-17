@@ -195,7 +195,6 @@ members:
     - lib/rigor/analysis/check_rules.rb
     - lib/rigor/analysis/runner.rb
     - lib/rigor/inference/definer_resolution.rb
-    - lib/rigor/scope/resolution_chain/relevance.rb
     copies:
     - lib/rigor/inference/parameter_inference_collector.rb
     - lib/rigor/protection/discovery_seed.rb
@@ -210,8 +209,6 @@ members:
       - paired_copy
       lib/rigor/protection/discovery_seed.rb:
       - paired_copy
-      lib/rigor/scope/resolution_chain/relevance.rb:
-      - existence
   discovered_parameter_envelopes:
     reads:
     - lib/rigor/analysis/check_rules.rb

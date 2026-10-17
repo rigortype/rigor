@@ -66,7 +66,8 @@ RSpec.describe "def.method-visibility-mismatch on singleton calls (#1984)", type
     "a def K.x outside the class" => "class K; private_class_method def self.x = 1; end\ndef K.x = 6",
     "a subclass's public_class_method" =>
       "class P; private_class_method def self.x = 1; end\nclass K < P; public_class_method :x; end",
-    "a module_function" => "module K; module_function; def x = 1; end"
+    "a module_function" => "module K; module_function; def x = 1; end",
+    "a module_function in a module that extends itself" => "module K; extend self; module_function; def x = 1; end"
   }.each do |label, declaration|
     it "is quiet on K.x after #{label}" do
       expect(mismatches("#{declaration}\nK.x\n")).to eq([])

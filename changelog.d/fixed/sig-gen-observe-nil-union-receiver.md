@@ -1,0 +1,1 @@
+- **[sig-gen]** `rigor sig-gen --params=observed` now observes a call on a receiver typed `Foo | nil`, such as a Minitest `setup` ivar read in a test method, and on an ivar an RSpec `before` block assigns. ([#2081](https://github.com/rigortype/rigor/pull/2081))

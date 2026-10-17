@@ -141,6 +141,42 @@ RSpec.describe "an instance variable across yield, proc calls, super and blocks 
     expect(rules(klass(via_tap))).not_to include("flow.always-truthy-condition")
   end
 
+  it "counts an ivar write in a block on a module or class object from a module's or a class object's method" do
+    # Ruby: each answers `1` — `self` is the module itself, or `D` when called as `D.ie`.
+    always_falsey = lambda do |source|
+      rules(source).include?("flow.always-truthy-condition")
+    end
+    module_function_form = "module Util\n  module_function\n\n  def f\n    @u = false\n    " \
+                           "Util.module_eval { @u = true }\n    @u ? 1 : 2\n  end\nend\n"
+    expect(always_falsey.call(module_function_form)).to be(false)
+    extend_self_form = "module Ext\n  extend self\n\n  def g\n    @u = false\n    Ext.module_eval { @u = true }\n    " \
+                       "@u ? 1 : 2\n  end\nend\n"
+    expect(always_falsey.call(extend_self_form)).to be(false)
+    %w[instance_eval class_eval].each do |name|
+      singleton_form = "class C2\n  def self.m\n    @cx = false\n    D2.#{name} { @cx = true }\n    " \
+                       "@cx ? 1 : 2\n  end\nend\n\nclass D2 < C2\nend\n"
+      expect(always_falsey.call(singleton_form)).to be(false)
+    end
+  end
+
+  it "counts an ivar write in a block on a class object from a method of Object, whose self may be that class" do
+    # Ruby: `Other.zz_probe` answers `true`.
+    source = "class Object\n  def zz_probe\n    @q = false\n    Other.class_eval { @q = true }\n    " \
+             "@q ? 1 : 2\n  end\nend\n"
+    expect(rules(klass("") + source)).not_to include("flow.always-truthy-condition")
+  end
+
+  it "widens an ivar past a block argument naming a local proc" do
+    # Ruby: `[1].each(&blk)` runs the block, which may call `reset`.
+    expect(dumped(klass("def m(&blk)\n  @y = false\n  [1].each(&blk)\n  v = @y\n  dump_type(v)\nend\n")))
+      .to eq(["dump_type: bool"])
+  end
+
+  it "keeps a nil-free narrowing from feeding the nil-receiver rule past a yield in an argument" do
+    source = "def m\n  @tag = \"x\"\n  @items << yield\n  t = @tag\n  t.upcase\nend\n"
+    expect(rules(klass(source))).not_to include("call.possible-nil-receiver")
+  end
+
   it "keeps the write-back for an Object receiver, which is not provably another object (guard)" do
     # Ruby: `false` here, but an `Object` may be `self`; the ADR-56 join / drop stands as on master.
     source = "def m\n  @x = false\n  o = Object.new\n  o.instance_eval { @x = true }\n  v = @x\n  dump_type(v)\nend\n"

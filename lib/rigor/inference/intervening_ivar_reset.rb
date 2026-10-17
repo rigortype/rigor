@@ -4,6 +4,7 @@ require "prism"
 
 require_relative "../type"
 require_relative "reflective_ivar_write"
+require_relative "refined_dispatch/own_method"
 require_relative "self_call_ivar_writes"
 
 module Rigor
@@ -34,8 +35,8 @@ module Rigor
         :instance_eval, :instance_exec, :class_eval, :class_exec, :module_eval, :module_exec, :define_method,
         :define_singleton_method
       ].freeze
-      # The classes whose instances may be a class or module object: `self` typed as one of them may be the
-      # receiver of `Foo.class_eval`.
+      # The classes whose instances may be a class or module object: a `self` of one of them may be the receiver of
+      # `Foo.class_eval`, and an instance of one of them may be a `self` that is a class object.
       CLASS_OBJECT_CLASSES = Set["Class", "Module", "Object", "BasicObject"].freeze
       private_constant :NON_RUNNING_NODES, :UNKNOWN_CODE_NODES, :PROC_CALL_NAMES, :SELF_REBINDING_BLOCK_CALLS,
                        :CLASS_OBJECT_CLASSES
@@ -78,45 +79,31 @@ module Rigor
         false
       end
 
-      # Whether a value of `type` cannot be `scope`'s `self`. A class object (`Singleton[X]`) is not an instance
-      # of a class other than `Class`, `Module`, `Object` or `BasicObject` (or a module), and is no other class's
-      # object. An instance is no class object unless its class is one of those, and is not an instance of a class
-      # the environment orders `:disjoint` from `self`'s, when neither is a module.
+      # Whether a value of `type` cannot be `scope`'s `self`. Only an instance method of a class answers: `self` is
+      # then an instance of that class (one other than `Class`, `Module`, `Object` and `BasicObject`, and no module,
+      # declared in source or RBS), and a class object (`Singleton[X]`, `self.class`, a constant naming a class or
+      # module) is not one; nor is an instance of a class the environment orders `:disjoint` from it, neither being
+      # a module. Where `self` is a class object, or a module's instance (`module_function`, `extend self`), any
+      # receiver may be `self` — a subclass, the module itself — and none is foreign.
       def other_object?(type, scope)
         self_type = scope.self_type
+        return false unless self_type.is_a?(Type::Nominal) && plain_class?(self_type.class_name, scope)
+
         case type
-        when Type::Singleton
-          case self_type
-          when Type::Singleton then type.class_name != self_type.class_name
-          when Type::Nominal then !may_be_class_object?(self_type.class_name, scope)
-          else false
-          end
+        when Type::Singleton then true
         when Type::Nominal
-          case self_type
-          when Type::Singleton then !may_be_class_object?(type.class_name, scope)
-          when Type::Nominal then disjoint_classes?(type.class_name, self_type.class_name, scope)
-          else false
-          end
+          plain_class?(type.class_name, scope) &&
+            scope.environment.class_ordering(type.class_name, self_type.class_name) == :disjoint
         else false
         end
       end
 
-      def may_be_class_object?(class_name, scope)
+      # Whether `class_name` names a class whose instances are no class or module object, and not a module.
+      def plain_class?(class_name, scope)
         name = class_name.to_s.delete_prefix("::")
-        return true if CLASS_OBJECT_CLASSES.include?(name)
-
-        environment = scope.environment
-        environment.rbs_module?(name) || %i[subclass equal].include?(environment.class_ordering(name, "Module"))
+        !CLASS_OBJECT_CLASSES.include?(name) && !RefinedDispatch::OwnMethod.module_name?(scope, name)
       end
-      private_class_method :may_be_class_object?
-
-      def disjoint_classes?(lhs, rhs, scope)
-        environment = scope.environment
-        return false if environment.rbs_module?(lhs.to_s) || environment.rbs_module?(rhs.to_s)
-
-        environment.class_ordering(lhs, rhs) == :disjoint
-      end
-      private_class_method :disjoint_classes?
+      private_class_method :plain_class?
 
       # Issue #1402 — `scope` past a statement call whose receiver or arguments run code the program does not
       # show (`@items << yield`, `puts(yield)`, `log(blk.call)`, `items.each(&blk)`): {.widen} over every narrowed

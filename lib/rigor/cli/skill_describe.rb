@@ -3,6 +3,7 @@
 require "yaml"
 
 require_relative "../plugin_gap_advisory"
+require_relative "../rooted_glob"
 
 module Rigor
   class CLI
@@ -78,7 +79,7 @@ module Rigor
         vscode = File.join(@root, ".vscode")
         return :none unless File.directory?(vscode)
 
-        files = Dir.glob(File.join(vscode, "*.json"))
+        files = RootedGlob.glob(vscode, "*.json")
         return :unwired if files.empty?
 
         files.any? { |path| file_mentions_rigor?(path) } ? :wired : :unwired
@@ -103,7 +104,7 @@ module Rigor
       end
 
       def ci_config_files
-        files = Dir.glob(File.join(@root, ".github", "workflows", "*.{yml,yaml}"))
+        files = RootedGlob.glob(@root, ".github/workflows/*.{yml,yaml}")
         gitlab = File.join(@root, ".gitlab-ci.yml")
         files << gitlab if File.file?(gitlab)
         files

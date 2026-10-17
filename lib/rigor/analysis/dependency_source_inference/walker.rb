@@ -6,6 +6,7 @@ require_relative "return_type_heuristic"
 require_relative "../../source/constant_path"
 require_relative "../../source/node_children"
 require_relative "../../inference/scope_indexer"
+require_relative "../../rooted_glob"
 
 module Rigor
   module Analysis
@@ -127,7 +128,7 @@ module Rigor
         def walk_root(root_dir, harvest, budget) # rubocop:disable Naming/PredicateMethod
           return false unless File.directory?(root_dir)
 
-          Dir.glob(File.join(root_dir, "**", "*.rb")).each do |path|
+          RootedGlob.glob(root_dir, "**/*.rb").each do |path|
             harvest_file(path, harvest, budget)
             return true if harvest.catalog.size >= budget
           end

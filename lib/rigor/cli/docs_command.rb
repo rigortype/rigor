@@ -2,6 +2,7 @@
 
 require_relative "command"
 require_relative "doc_links"
+require_relative "../rooted_glob"
 
 module Rigor
   class CLI
@@ -186,8 +187,8 @@ module Rigor
       # `install.md` sits at the docs root (category `guide`); the rest are manual / handbook chapters.
       def discover_docs
         paths = [File.join(DOCS_ROOT, "install.md")]
-        paths += Dir.glob(File.join(MANUAL_ROOT, "**", "*.md")) # Dir.glob is already sorted
-        paths += Dir.glob(File.join(HANDBOOK_ROOT, "**", "*.md"))
+        paths += RootedGlob.glob(MANUAL_ROOT, "**/*.md") # Dir.glob is already sorted
+        paths += RootedGlob.glob(HANDBOOK_ROOT, "**/*.md")
         paths.select { |path| File.file?(path) }.map { |path| doc_entry(path) }
       end
 

@@ -291,6 +291,54 @@ RSpec.describe Rigor::Plugin::IoBoundary do
       expect(boundary.cache_descriptor.globs).to be_empty
     end
 
+    # #1959 — a leading `/` reads under the root, as the joined spelling read it; it never lists the real /etc.
+    it "reads an absolute pattern under the root and records only that" do
+      FileUtils.mkdir_p(File.join(tmpdir, "etc"))
+      File.write(File.join(tmpdir, "etc", "hosts-fixture"), "")
+
+      expect(boundary.glob(tmpdir, "/etc/*")).to eq([File.join(tmpdir, "etc", "hosts-fixture")])
+      expect(boundary.cache_descriptor.globs.map { |row| [row.root, row.pattern] })
+        .to eq([[File.absolute_path(tmpdir), "/etc/*"]])
+      expect(boundary.cache_descriptor.fresh?).to be(true)
+    end
+
+    # #1959 — the root is a path, not part of the pattern: a directory literally named `{..,zz}` expanded into
+    # its parent, and its row re-globbed the parent on every validation.
+    context "with a root named `{..,zz}`" do
+      let(:root) { File.join(tmpdir, "proj", "{..,zz}") }
+
+      before do
+        FileUtils.mkdir_p(File.join(root, "sub"))
+        File.write(File.join(root, "in.rb"), "")
+        File.write(File.join(root, "sub", "deep.rb"), "")
+        File.write(File.join(tmpdir, "proj", "sibling.rb"), "")
+      end
+
+      it "answers what a literal Dir.children walk of the root answers" do
+        literal = [File.join(root, "in.rb"), File.join(root, "sub", "deep.rb")]
+
+        expect(boundary.glob(root, "**/*.rb")).to eq(literal)
+      end
+
+      it "reads stale when a match appears under the root, and not when one appears beside it" do
+        boundary.glob(root, "**/*.rb")
+        File.write(File.join(tmpdir, "proj", "beside.rb"), "")
+        expect(boundary.cache_descriptor.fresh?).to be(true)
+
+        File.write(File.join(root, "sub", "new.rb"), "")
+        expect(boundary.cache_descriptor.fresh?).to be(false)
+      end
+    end
+
+    it "does not read a root `fx[1]` as a pattern matching `fx1`" do
+      %w[fx1 fx[1]].each { |name| FileUtils.mkdir_p(File.join(tmpdir, name)) }
+      File.write(File.join(tmpdir, "fx1", "sibling.rb"), "")
+      File.write(File.join(tmpdir, "fx[1]", "own.rb"), "")
+
+      expect(boundary.glob(File.join(tmpdir, "fx[1]"), "*.rb")).to eq([File.join(tmpdir, "fx[1]", "own.rb")])
+      expect(boundary.list_directory(File.join(tmpdir, "fx[1]"))).to eq([File.join(tmpdir, "fx[1]", "own.rb")])
+    end
+
     it "answers truthfully outside the trusted-read scope and records nothing there" do
       outside = Dir.mktmpdir("rigor-io-boundary-outside-")
       File.write(File.join(outside, "x.rb"), "")

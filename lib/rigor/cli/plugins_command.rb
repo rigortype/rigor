@@ -13,6 +13,7 @@ require_relative "../reflection"
 require_relative "../type/combinator"
 require_relative "plugins_renderer"
 require_relative "command"
+require_relative "../rooted_glob"
 
 module Rigor
   class CLI
@@ -297,7 +298,7 @@ module Rigor
       def rbs_file_count(dir)
         return 0 unless File.directory?(dir)
 
-        Dir.glob(File.join(dir, "**", "*.rbs")).size
+        RootedGlob.glob(dir, "**/*.rbs").size
       end
 
       def entry_gem_name(entry)

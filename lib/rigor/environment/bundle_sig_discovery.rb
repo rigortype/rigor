@@ -3,6 +3,7 @@
 require "yaml"
 
 require_relative "../config_path"
+require_relative "../rooted_glob"
 
 module Rigor
   class Environment
@@ -91,8 +92,8 @@ module Rigor
         # all (`Bundler::Source::Path#path` is the user's own `path:` directory, used in place), so there is
         # no bundle-relative location to walk. A `path:`-sourced gem's `sig/` is only reachable by adding it
         # directly to the project's `signature_paths:` — which already works today and needs no discovery.
-        all = (Dir.glob(resolved.join("ruby", "*", "gems", "*", "sig")) +
-               Dir.glob(resolved.join("ruby", "*", "bundler", "gems", "*", "sig"))).map { |d| Pathname.new(d) }
+        all = (RootedGlob.glob(resolved, "ruby/*/gems/*/sig") +
+               RootedGlob.glob(resolved, "ruby/*/bundler/gems/*/sig")).map { |d| Pathname.new(d) }
         filtered = all.reject { |sig_dir| skip_gems.include?(gem_name_from_sig_path(sig_dir)) }
         return filtered if locked_gems.nil? || locked_gems.empty?
 

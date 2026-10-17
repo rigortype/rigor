@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "rbs"
+require_relative "../rooted_glob"
 
 module Rigor
   class Environment
@@ -132,7 +133,7 @@ module Rigor
       end
 
       def signature_files(roots)
-        roots.flat_map { |root| Dir.glob(File.join(root.to_s, "*.rbs")).sort }
+        roots.flat_map { |root| RootedGlob.glob(root, "*.rbs").sort }
       end
 
       def shell_buffer

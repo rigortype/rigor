@@ -10,6 +10,7 @@ require_relative "../source/constant_path"
 require_relative "../source/literals"
 require_relative "../source/node_children"
 require_relative "../inference/scope_indexer"
+require_relative "../rooted_glob"
 
 module Rigor
   module SigGen
@@ -74,7 +75,7 @@ module Rigor
       def resolve_paths(args)
         args.flat_map do |arg|
           if File.directory?(arg)
-            Dir.glob(File.join(arg, "**/*.rb"), sort: true)
+            RootedGlob.glob(arg, "**/*.rb")
           elsif File.file?(arg) && arg.end_with?(".rb")
             [arg]
           else

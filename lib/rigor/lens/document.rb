@@ -5,6 +5,7 @@ require "json"
 require_relative "../version"
 require_relative "../cache/engine_source"
 require_relative "../analysis/run_cache_key"
+require_relative "../rooted_glob"
 
 module Rigor
   module Lens
@@ -60,7 +61,7 @@ module Rigor
       end
 
       def signature_digest
-        listing = signature_roots.flat_map { |root| Dir.glob(File.join(root, "**", "*.rbs")) }.sort.map do |path|
+        listing = signature_roots.flat_map { |root| RootedGlob.glob(root, "**/*.rbs") }.sort.map do |path|
           "#{relative(path)}\t#{Lens.digest(File.binread(path))}\n"
         end
         Lens.digest(listing.join)

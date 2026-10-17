@@ -11,6 +11,7 @@ module Rigor
       # carried no row at all and was served after any edit, an analysed file's included, until `--no-cache`.
       class Discoverer
         RUBY_GLOB = "**/*.rb"
+        SKIPPED_DIRECTORIES = %w[vendor .git].freeze
 
         def self.discover(root:, io:)
           new(root: root, io: io).discover
@@ -67,20 +68,25 @@ module Rigor
 
         private
 
+        # One `:names` `**/*.rb` row over the root, `vendor/` included: a per-entry walk that skipped it recorded
+        # names only, so a top-level entry that changed kind under the same name went unseen. The boundary
+        # answers absolute paths; they are spelled back under `@root` as `Dir.glob` spells them.
         def ruby_files
           return [] unless @root && @io.directory?(@root.to_s)
 
-          boundary_glob.reject { |p| p.include?("/vendor/") || p.include?("/.git/") }
-        end
-
-        # One `:names` `**/*.rb` row over the root, `vendor/` included: a per-entry walk that skipped it recorded
-        # names only, so a top-level entry that changed kind under the same name went unseen. The boundary
-        # answers absolute paths; they are spelled back under `@root` as `Dir.glob` spells them, so the filter
-        # above sees the same strings it always did.
-        def boundary_glob
           root = @root.to_s
           prefix = "#{File.absolute_path(root)}/"
-          @io.glob(root, RUBY_GLOB).map { |path| File.join(root, path.delete_prefix(prefix)) }
+          @io.glob(root, RUBY_GLOB).filter_map do |path|
+            relative = path.delete_prefix(prefix)
+            File.join(root, relative) unless skipped?(relative)
+          end
+        end
+
+        # #1956 — the skip reads the path relative to the root, a `vendor` or `.git` directory segment at any
+        # depth under it. Matching `/vendor/` in the whole path also dropped every file of a project that itself
+        # lives under some `…/vendor/…` directory, and the catalog came out empty.
+        def skipped?(relative)
+          relative.split("/")[0...-1].intersect?(SKIPPED_DIRECTORIES)
         end
 
         # The glob's rows record which files match; this read's row carries an edit.

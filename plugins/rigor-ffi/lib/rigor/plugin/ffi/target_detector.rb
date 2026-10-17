@@ -26,7 +26,7 @@ module Rigor
         def extconf_uses_ffx?(root, io = nil)
           return false if root.nil?
 
-          extconfs = io ? io.glob(root.to_s, EXTCONF_GLOB) : Dir.glob(File.join(root.to_s, EXTCONF_GLOB))
+          extconfs = io ? io.glob(root.to_s, EXTCONF_GLOB) : Dir.glob(EXTCONF_GLOB, base: root.to_s).map { |path| File.join(root.to_s, path) }
           extconfs.any? do |extconf|
             read_text(extconf, io).include?("FFX.create_makefile")
           rescue SystemCallError

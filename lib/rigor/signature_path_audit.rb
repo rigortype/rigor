@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "rooted_glob"
+
 module Rigor
   # Classifies each configured `signature_paths:` entry by what it actually contributes to
   # the RBS environment, so a caller can warn when a configured path resolves to nothing.
@@ -90,7 +92,7 @@ module Rigor
       return Entry.new(path: path, status: :missing, rbs_file_count: 0) unless File.exist?(path)
       return Entry.new(path: path, status: :not_directory, rbs_file_count: 0) unless File.directory?(path)
 
-      count = Dir.glob(File.join(path, "**", "*.rbs")).size
+      count = RootedGlob.glob(path, "**/*.rbs").size
       Entry.new(path: path, status: count.zero? ? :empty : :ok, rbs_file_count: count)
     end
 
@@ -204,7 +206,7 @@ module Rigor
     private_class_method :listed?
 
     def self.canonical_rbs_files(dir)
-      Dir.glob(File.join(dir, "**", "*.rbs")).filter_map { |file| canonical_path(file) }
+      RootedGlob.glob(dir, "**/*.rbs").filter_map { |file| canonical_path(file) }
     end
     private_class_method :canonical_rbs_files
 

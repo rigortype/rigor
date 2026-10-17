@@ -8,6 +8,7 @@ require_relative "configuration/dependencies"
 require_relative "configuration/severity_profile"
 require_relative "config_path"
 require_relative "configuration_error"
+require_relative "rooted_glob"
 require_relative "effects/entry_points"
 require_relative "effects/label"
 require_relative "effects/method_key"
@@ -995,9 +996,34 @@ module Rigor
     # this entry" so a templated `**` pattern in a fresh project doesn't generate an error per match-less
     # pattern.
     def expand_pre_eval_entries(entries)
-      entries.flat_map do |entry|
-        glob_pattern?(entry) ? Dir.glob(entry, sort: true) : [entry]
-      end.uniq.freeze
+      entries.flat_map { |entry| expand_pre_eval_entry(entry) }.uniq.freeze
+    end
+
+    # #1956 — a relative entry arrives joined onto the config file's directory, so the metacharacters the
+    # check above sees may be that directory's own (`ds [x]/`). The leading run of segments that name existing
+    # directories is read literally and only the rest is globbed under it: a literal entry under such a
+    # directory stays a literal path, and a pattern matches what it matches under a plain directory.
+    def expand_pre_eval_entry(entry)
+      return [entry] unless glob_pattern?(entry)
+
+      base, pattern = literal_directory_prefix(entry)
+      return [entry] unless glob_pattern?(pattern)
+
+      base ? RootedGlob.glob(base, pattern) : Dir.glob(entry, sort: true)
+    end
+
+    def literal_directory_prefix(entry)
+      segments = entry.split("/")
+      count = (1...segments.size).take_while { |n| File.directory?(join_segments(segments.take(n))) }.size
+      return [nil, entry] if count.zero?
+
+      [join_segments(segments.take(count)), segments.drop(count).join("/")]
+    end
+
+    # `"/a".split("/")` leads with an empty segment, which spells the filesystem root.
+    def join_segments(segments)
+      path = segments.join("/")
+      path.empty? ? "/" : path
     end
 
     def glob_pattern?(path)

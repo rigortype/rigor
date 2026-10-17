@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "../rooted_glob"
+
 module Rigor
   module Analysis
     # ADR-87 WD4 — project file-set expansion shared by the {Analysis::Runner} (miss path) and the
@@ -27,7 +29,7 @@ module Rigor
       end
 
       def directory_files(dir, exclude_patterns, base: Dir.pwd)
-        reject_excluded(Dir.glob(File.join(dir, RUBY_GLOB)), exclude_patterns, base: base)
+        reject_excluded(RootedGlob.glob(dir, RUBY_GLOB), exclude_patterns, base: base)
       end
 
       # `exclude_patterns` are matched with `File.fnmatch?` WITHOUT `FNM_PATHNAME`, so `**`/`*` span separators

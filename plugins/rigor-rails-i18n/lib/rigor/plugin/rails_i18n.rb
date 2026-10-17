@@ -176,7 +176,7 @@ module Rigor
           # ADR-45 WD1b (#613) — boundary-probed: a root that appears later invalidates the warm run.
           next [] unless io_boundary.directory?(absolute)
 
-          Dir.glob(File.join(absolute, "**", "*.{erb,haml,slim}"))
+          Dir.glob("**/*.{erb,haml,slim}", base: absolute).map { |path| File.join(absolute, path) }
         end.sort
       end
 

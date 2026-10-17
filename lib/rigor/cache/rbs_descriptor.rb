@@ -5,6 +5,7 @@ require "digest"
 require_relative "descriptor"
 require_relative "engine_source"
 require_relative "file_digest"
+require_relative "../rooted_glob"
 
 module Rigor
   module Cache
@@ -110,7 +111,7 @@ module Rigor
         roots.flat_map do |root|
           next [] unless root.directory?
 
-          Dir.glob(root.join("**", "*.rbs")).map do |path|
+          RootedGlob.glob(root, "**/*.rbs").map do |path|
             digest = FileDigest.hexdigest(path)
             if comparator == :stat
               Descriptor::FileEntry.stat(path: path, digest: digest)

@@ -3,6 +3,7 @@
 require "digest"
 
 require_relative "access_denied_error"
+require_relative "../rooted_glob"
 
 module Rigor
   module Plugin
@@ -189,7 +190,7 @@ module Rigor
       # @return the absolute paths directly under `path` in `Dir.glob` order; empty when not a directory
       def list_directory(path)
         absolute = File.absolute_path(path.to_s)
-        entries = Dir.glob(File.join(absolute, "*"))
+        entries = RootedGlob.glob(absolute, "*")
         unless @policy.allow_read?(absolute)
           record_refusal(absolute)
           return entries
@@ -209,8 +210,13 @@ module Rigor
       #
       # The pattern must stay under `root`, since the policy is checked against `root` alone: a `..` segment, a
       # brace (`{..,x}`) or a backslash escape (`.\\./`) raises {AccessDeniedError} (`:read_outside_scope`).
-      # The last two are refused outright because `Dir.glob` can spell `..` with them. Out of policy, `root` is
-      # globbed truthfully and contributes no row, as in {#list_directory}.
+      # The last two are refused outright because `Dir.glob` can spell `..` with them. A leading `/` is read under
+      # `root`, as the joined spelling always read it (`/lib/**/*.rb` is `root/lib/**/*.rb`). Out of policy, `root`
+      # is globbed truthfully and contributes no row, as in {#list_directory}.
+      #
+      # `root` is read literally (#1959): {RootedGlob} escapes its glob metacharacters before the join, so a root
+      # spelled `fx[1]` or a directory named `{..,zz}` neither matches a sibling nor leaves itself.
+      # {#list_directory} lists the same way, and {Cache::Descriptor::GlobEntry} re-globs the row the same way.
       #
       # @param root — project directory; relative paths expand against the working directory
       # @param pattern — a `Dir.glob` pattern relative to `root`, such as `"ext/**/extconf.rb"`
@@ -227,7 +233,7 @@ module Rigor
           )
         end
 
-        entries = Dir.glob(File.join(absolute, pattern))
+        entries = RootedGlob.glob(absolute, pattern)
         unless @policy.allow_read?(absolute)
           record_refusal(absolute)
           return entries

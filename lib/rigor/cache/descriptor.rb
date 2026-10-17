@@ -4,6 +4,7 @@ require "digest"
 require "json"
 require_relative "../value_semantics"
 require_relative "file_digest"
+require_relative "../rooted_glob"
 
 module Rigor
   module Cache
@@ -365,7 +366,7 @@ module Rigor
         # posture as {Descriptor#file_entry_fresh?}. `Dir.glob` returns sorted entries by default so the row
         # order — and therefore the signature — is stable.
         def self.signature_for(root:, pattern:, mode: :stat)
-          paths = Dir.glob(File.join(root, pattern))
+          paths = RootedGlob.glob(root, pattern)
           return Digest::SHA256.hexdigest(paths.map { |path| "#{path}#{ROW_SEPARATOR}" }.join) if mode == :names
 
           strict = FileDigest.strict_validation?

@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "command"
+require_relative "../rooted_glob"
 
 module Rigor
   class CLI
@@ -227,7 +228,7 @@ module Rigor
         return [] unless File.directory?(dir)
 
         # `Dir.glob` returns lexicographically sorted paths (Ruby 3.0+), so the `NN-` prefixes already drive read order.
-        Dir.glob(File.join(dir, "*.md"))
+        RootedGlob.glob(dir, "*.md")
       end
 
       def name_error(name)

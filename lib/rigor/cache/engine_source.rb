@@ -4,6 +4,7 @@ require "digest"
 
 require_relative "../version"
 require_relative "descriptor"
+require_relative "../rooted_glob"
 
 module Rigor
   module Cache
@@ -195,8 +196,8 @@ module Rigor
       # Sorted, de-duplicated absolute paths of every engine `.rb` file and {DATA_GLOBS} data file, across
       # the directories that exist. `plugins/*/sig/**/*.rbs` overlaps nothing else but is de-duplicated anyway.
       def source_files(root)
-        sources = SOURCE_DIRECTORIES.flat_map { |relative| Dir.glob(File.join(root, relative, "**", "*.rb")) }
-        data = DATA_GLOBS.flat_map { |pattern| Dir.glob(File.join(root, pattern)) }
+        sources = SOURCE_DIRECTORIES.flat_map { |relative| RootedGlob.glob(root, File.join(relative, "**", "*.rb")) }
+        data = DATA_GLOBS.flat_map { |pattern| RootedGlob.glob(root, pattern) }
         (sources + data).uniq.sort
       end
     end

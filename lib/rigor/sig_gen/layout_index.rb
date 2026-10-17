@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "rbs"
+require_relative "../rooted_glob"
 
 module Rigor
   module SigGen
@@ -94,7 +95,7 @@ module Rigor
           base = Pathname(dir)
           next unless base.directory?
 
-          Dir.glob(File.join(base.to_s, "**/*.rbs"), sort: true).each do |rbs_file|
+          RootedGlob.glob(base, "**/*.rbs").each do |rbs_file|
             index_file(Pathname(rbs_file), accumulator)
           end
         end

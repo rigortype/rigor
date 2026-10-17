@@ -165,7 +165,7 @@ module Rigor
               absolute = File.expand_path(root)
               next [] unless io_boundary.directory?(absolute)
 
-              Dir.glob(File.join(absolute, "**", pattern)).map { |path| path.delete_prefix(root_prefix) }
+              Dir.glob("**/#{pattern}", base: absolute).map { |path| File.join(absolute, path).delete_prefix(root_prefix) }
             end
           end
 

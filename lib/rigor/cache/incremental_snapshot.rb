@@ -10,6 +10,7 @@ require_relative "../analysis/shadow_harness"
 require_relative "../analysis/run_cache_key"
 require_relative "../environment"
 require_relative "../analysis/path_expansion"
+require_relative "../rooted_glob"
 
 module Rigor
   module Cache
@@ -367,7 +368,7 @@ module Rigor
       # checkouts.
       def self.digest_signature_paths(signature_paths)
         globbed = Array(signature_paths).flat_map do |entry|
-          File.directory?(entry) ? Dir.glob(File.join(entry, "**", "*.rbs")) : [entry]
+          File.directory?(entry) ? RootedGlob.glob(entry, "**/*.rbs") : [entry]
         end
         files = globbed.select { |path| File.file?(path) }.sort
         digest = Digest::SHA256.new

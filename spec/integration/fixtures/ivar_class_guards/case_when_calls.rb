@@ -245,3 +245,55 @@ class LambdaCall
     end
   end
 end
+
+# A `when` test whose call the proof cannot clear: a narrowing that kept `nil` widens without the mark, so the read
+# after it still reports where Ruby 4.0.5 raises (`NilTagged.new.after_return`). A lambda literal's body runs as the
+# test's `===`, so a call in it that assigns the variable ends a narrowing to `nil`: `LambdaReset.new.in_if` and
+# `LambdaReset.new.after_return` return "S".
+class NilTagged
+  attr_reader :items
+
+  def initialize
+    @tag = nil
+    @items = [1]
+  end
+
+  def name_tag = (@tag = "t")
+  def ready? = items.any?
+
+  def after_return
+    return if @tag
+
+    case 1
+    when ready? then 0
+    end
+    t = @tag
+    t.upcase # FIRES-1446 call.possible-nil-receiver
+  end
+end
+
+class LambdaReset
+  def initialize
+    @x = nil
+  end
+
+  def reset!
+    @x = "s"
+  end
+
+  def in_if
+    if @x.nil?
+      case 1
+      when ->(_) { reset!; true } then @x.upcase # QUIET-1446
+      end
+    end
+  end
+
+  def after_return
+    return if @x
+
+    case 1
+    when ->(_) { reset!; true } then @x.upcase # QUIET-1446
+    end
+  end
+end

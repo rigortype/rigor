@@ -1456,12 +1456,12 @@ module Rigor
       end
 
       # The scope a `when` test leaves. The instance variables its implicit-self calls may write are widened first,
-      # with the declaration mark ({InterveningIvarReset.after_operand}), so a call the proof cannot clear forgets
-      # a narrowing without making a `nil` reportable. The test is then evaluated, which binds its writes and drops
-      # the narrowing of a variable a lambda literal captures and writes ({#eval_lambda}). A guard's narrowing that
-      # a lambda body may rebind is restored as a call's would be, since its `===` runs the body.
+      # a lambda literal's body included, since its `===` runs it ({InterveningIvarReset.after_operand}, which
+      # marks a binding whose narrowing had ruled `nil` out). The test is then evaluated, which binds its writes
+      # and drops the narrowing of a variable a lambda literal captures and writes ({#eval_lambda}). A guard's
+      # narrowing that a lambda body may rebind is restored as a call's would be, since its `===` runs the body.
       def run_when_test(condition, before)
-        before = InterveningIvarReset.after_operand(condition, before)
+        before = InterveningIvarReset.after_operand(condition, before, run_lambdas: true)
         _type, after = sub_eval(condition, before)
         body = when_lambda_body(condition)
         return after unless body && after.guard_narrowed? && GuardRebinding.may_rebind?(body, after)

@@ -174,3 +174,24 @@ end
 class ShowerPeer
   def ok? = true
 end
+
+# A narrowing that kept `nil` widens without the mark, so a read Ruby makes on `nil` still reports: under Ruby 4.0.5
+# `NilTag.new.after_nil_guard` raises NoMethodError on the read.
+class NilTag
+  attr_reader :items
+
+  def initialize
+    @tag = nil
+    @items = [1]
+  end
+
+  def name_tag = (@tag = "t")
+  def ready? = items.any?
+
+  def after_nil_guard
+    if @tag.nil? && ready?
+      t = @tag
+      t.upcase # FIRES-1446 call.possible-nil-receiver
+    end
+  end
+end

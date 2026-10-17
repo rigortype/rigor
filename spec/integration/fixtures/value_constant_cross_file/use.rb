@@ -1,32 +1,27 @@
-require "rigor/testing"
-include Rigor::Testing
+# Issue #1963 — another file's constant whose value is not published reads `Dynamic[top]` here, and may alias a
+# class (`App::Error = Lib::Failure`), so a `when` test or `===` receiver naming it keeps narrowing by its spelling, as
+# before: the alias reads drop the subject's `nil`, as the class they alias does, and stay quiet. Under Ruby 4.0.5
+# `alias_when(true)` and `alias_receiver(true)` return "m", `use(1)` returns 2 (from `CHECK`) and `use(0)` returns
+# "X" (from `NAME`).
+def alias_when(flag)
+  err = flag ? Lib::Failure.new("m") : nil
+  case err
+  when App::Error then err.message
+  end
+end
 
-# Issue #1963 — a constant `cfg.rb` binds with a value names no class here, although its value reads `Dynamic[top]`
-# across files: no `when` test narrows `v`, rather than narrowing it to a class called `Cfg::NAME`. `Cfg::TEXT`,
-# which holds `String`, narrows nothing either. Under Ruby 4.0.5 `use(1)` returns 1 (from `CHECK`), `use(0)` returns
-# "x" (from `NAME`), `use_text(0)` returns "x" and `Cfg.inner(0)` returns "x".
+def alias_receiver(flag)
+  err = flag ? Lib::Failure.new("m") : nil
+  err.message if App::Error === err
+end
+
 def use(n)
   v = n.zero? ? "x" : 1
   case v
-  when Cfg::NAME then assert_type('"x" | 1', v)
-  when Cfg::PATTERN then assert_type('"x" | 1', v)
-  when Cfg::CHECK then assert_type('"x" | 1', v)
-  when Cfg::RANGE then assert_type('"x" | 1', v)
-  end
-end
-
-def use_text(n)
-  v = n.zero? ? "x" : 1
-  case v
-  when Cfg::TEXT then assert_type('"x" | 1', v)
-  end
-end
-
-module Cfg
-  def self.inner(n)
-    v = n.zero? ? "x" : 1
-    case v
-    when NAME then assert_type('"x" | 1', v)
-    end
+  when Cfg::NAME then v.upcase
+  when Cfg::PATTERN then v.upcase
+  when Cfg::CHECK then v + 1
+  when Cfg::RANGE then v + 1
+  when Cfg::TEXT then v.upcase
   end
 end

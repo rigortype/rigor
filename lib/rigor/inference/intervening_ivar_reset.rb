@@ -35,8 +35,10 @@ module Rigor
       # `scope` with each instance variable narrowed below its class-ivar seed widened back over the seed. The block
       # answers the names the call may write, or nil for any; it runs at most once, and only when an instance
       # variable is narrowed, since a proof costs a read of the callee. An instance variable whose binding carries
-      # the declaration mark keeps it (issue #1889). With `mark: true` every widened binding takes the mark, so a
-      # `nil` the seed brings back is not fuel for `call.possible-nil-receiver` (ADR-58), as a declared one is not.
+      # the declaration mark keeps it (issue #1889). With `mark: true` a binding whose narrowing had ruled `nil` out
+      # takes the mark when widened, so a `nil` only the seed brings back is not fuel for
+      # `call.possible-nil-receiver` (ADR-58), as a declared one is not. A narrowing that kept `nil`
+      # (`return if @tag`, `@tag.nil?`) widens unmarked, so a read the program really makes on `nil` still reports.
       def widen(scope, mark: false)
         seed = class_ivar_seed(scope)
         return scope if seed.nil? || seed.empty?
@@ -55,22 +57,25 @@ module Rigor
 
           joined = Type::Combinator.union(local_type, seed_type)
           widened = widened.with_ivar(name, joined)
-          marked = mark || scope.declaration_sourced?(:ivar, name)
+          marked = (mark && nil_free?(local_type)) || scope.declaration_sourced?(:ivar, name)
           marked ? widened.seed_declaration_sourced_ivar(name, joined) : widened
         end
       end
 
       # Issue #1963 — `scope` past the calls `node`, a condition operand, makes: {.widen} over the names every
       # candidate call in it may write, or every name when one of them is not proven. A call's literal block may run,
-      # so its calls count; a `def`, a class or module body and a lambda literal run nothing on this `self` there.
+      # so its calls count; a `def`, a class or module body and (unless `run_lambdas`) a lambda literal run nothing
+      # on this `self` there.
       #
-      # The widened bindings take the declaration mark ({.widen}'s `mark:`): the reset forgets the narrowing without
-      # making the variable newly nil-reportable, since a call the proof cannot clear is far more often one that
-      # leaves the variable alone (`if @tag && items.any?` then `t = @tag; t.upcase`) than one that assigns `nil`.
-      def after_operand(node, scope)
+      # A binding whose narrowing ruled `nil` out takes the declaration mark when widened ({.widen}'s `mark:`): the
+      # reset forgets the narrowing without making the variable newly nil-reportable, since a call the proof cannot
+      # clear is far more often one that leaves the variable alone (`if @tag && items.any?` then `t = @tag;
+      # t.upcase`) than one that assigns `nil`. A `when` test passes `run_lambdas: true`, since its `===` runs a
+      # lambda literal's body.
+      def after_operand(node, scope, run_lambdas: false)
         return scope unless narrowed_ivars?(scope)
 
-        calls = candidate_calls(node, false)
+        calls = candidate_calls(node, run_lambdas)
         return scope if calls.empty?
 
         widen(scope, mark: true) { proven_writes(calls, scope) }
@@ -113,6 +118,11 @@ module Rigor
         node.compact_child_nodes.each { |child| collect_calls(child, run_lambdas, found) }
       end
       private_class_method :collect_calls
+
+      def nil_free?(type)
+        Narrowing.narrow_non_nil(type) == type
+      end
+      private_class_method :nil_free?
 
       # Whether any instance variable is bound narrower than its class-ivar seed: the only state {.widen} changes.
       def narrowed_ivars?(scope)

@@ -1605,7 +1605,7 @@ RSpec.describe "Rigor type construction (integration)" do
     # The number of `# QUIET-1446` lines each entry carries.
     quiet_counts = {
       "guards.rb" => 7, "invalidation.rb" => 1, "bot_receivers.rb" => 5, "writes.rb" => 2, "self_calls.rb" => 27,
-      "condition_calls.rb" => 16, "case_when_calls.rb" => 17
+      "condition_calls.rb" => 16, "case_when_calls.rb" => 19
     }.freeze
 
     def fixture_source(name) = File.read(File.join(__dir__, "fixtures/ivar_class_guards", name))
@@ -2772,10 +2772,10 @@ RSpec.describe "Rigor type construction (integration)" do
     # and a `rescue` modifier as pure expressions, so a write nested in one never reached the scope after
     # the statement, straight-line or through ADR-56's block write-back, and a jump nested in one never
     # reached the block's jump join.
-    # Issue #1963 — the same across files: a constant another file binds with a value names no class, although its
-    # value reads `Dynamic[top]` here.
-    describe "fixtures/value_constant_cross_file/ — value constants another file binds", type: :runner do
-      it "narrows no `when` subject by a value constant" do
+    # Issue #1963 — across files: another file's unpublished constant reads `Dynamic[top]` and may alias a class, so it
+    # keeps narrowing by its spelling, and an alias drops the subject's `nil` as its class does.
+    describe "fixtures/value_constant_cross_file/ — constants another file binds", type: :runner do
+      it "reports nothing on an aliased class guard or a value constant" do
         dir = File.join(__dir__, "fixtures/value_constant_cross_file")
         files = %w[cfg.rb use.rb].to_h { |name| [name, File.read(File.join(dir, name))] }
         result = analyze(files: files)

@@ -3170,23 +3170,18 @@ module Rigor
           end
         end
 
-        # Issue #1963 — a constant whose value this reference cannot read (one another file binds reads
-        # `Dynamic[top]` here) still names no class when the project or a signature binds the name with a write
-        # rather than declaring a class or module: nil for such a binding (the project's constant-write census,
-        # `Scope#bound_constant_names`, or a value {Reflection.constant_type_for} reads), the class of a binding
-        # that reads as a class object, and `name` for a name nothing binds. The candidates walk the lexical
-        # nesting as the class walk does; a census name the census could not place (`*::NAME`) counts for all.
+        # Issue #1963 — a constant this reference cannot read through its own value names no class when the project
+        # or a signature binds it to a value {Reflection.constant_type_for} reads (a same-file or published literal,
+        # an RBS constant): nil for such a binding, the class of one that reads as a class object, and `name`, the
+        # spelling, otherwise. Another file's constant whose value is not published reads `Dynamic[top]` and keeps
+        # the spelling, as before: it may alias a class (`Error = Lib::Failure`), and nothing here reads which.
         def bound_constant_class_name(bare_name, name, scope)
           candidates = lexical_constant_candidates(bare_name, scope)
           bound = candidates.lazy.filter_map { |candidate| Reflection.constant_type_for(candidate, scope: scope) }.first
-          if bound
-            named = bound.is_a?(Type::Singleton) && !Type::AnonymousClassName.match?(bound.class_name)
-            return named ? bound.class_name : nil
-          end
-          written = scope.bound_constant_names(bare_name)
-          return name if written.empty?
+          return name if bound.nil?
 
-          written.any? { |census| census.start_with?("*::") || candidates.include?(census) } ? nil : name
+          named = bound.is_a?(Type::Singleton) && !Type::AnonymousClassName.match?(bound.class_name)
+          named ? bound.class_name : nil
         end
 
         def lexical_constant_candidates(bare_name, scope)

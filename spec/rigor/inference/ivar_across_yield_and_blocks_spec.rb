@@ -165,9 +165,9 @@ RSpec.describe "an instance variable across yield, proc calls, super and blocks 
 
   it "keeps a nil-free narrowing from feeding the nil-receiver rule past a proc call or a block's yield" do
     # `@tag`'s seed is `String | nil`; the widened binding takes the ADR-58 mark, as past a condition's call.
-    proc_call = "def m(&blk)\n  @tag = \"x\"\n  blk.call\n  @tag.upcase\nend\n"
+    proc_call = "def m(&blk)\n  @tag = \"x\"\n  blk.call\n  t = @tag\n  t.upcase\nend\n"
     expect(rules(klass(proc_call))).not_to include("call.possible-nil-receiver")
-    block_yield = "def m\n  @tag = \"x\"\n  [1].each { yield }\n  @tag.upcase\nend\n"
+    block_yield = "def m\n  @tag = \"x\"\n  [1].each { yield }\n  t = @tag\n  t.upcase\nend\n"
     expect(rules(klass(block_yield))).not_to include("call.possible-nil-receiver")
   end
 
@@ -192,10 +192,21 @@ RSpec.describe "an instance variable across yield, proc calls, super and blocks 
   end
 
   it "enters a later write-back pass on the optimistic mark an earlier pass's exit took" do
-    # Ruby: with `pairs` answering `[["a", 1]]`, then `[["a", 1]]`, then `[]`, the second iteration reads the
-    # miss's `nil` the first stored, and `x.nil?` answers `true` there.
-    source = "def m\n  x = false\n  pairs.each { |a| puts(\"miss\") if x.nil?; x = pairs.first&.empty? }\nend\n"
-    expect(rules(klass(source))).not_to include("flow.always-truthy-condition")
+    # Ruby: with `pairs` answering `[["a", 1], ["b", 2]]` and then `[]`, the second iteration reads the miss's `nil`
+    # the first stored, so `y` ends `true`.
+    source = "def m\n  y = nil\n  x = false\n  pairs.each { |a| y = x.nil?; x = pairs.first&.empty? }\n  " \
+             "dump_type(y)\nend\n"
+    expect(dumped(klass(source))).to contain_exactly(match(/TrueClass|bool/))
+  end
+
+  it "does not count an ivar write in a block on another object nested in an escaping closure" do
+    source = "def m\n  @x = \"s\"\n  f = -> { @o.instance_eval { @x = 1 } }\n  v = @x\n  dump_type(v)\nend\n"
+    expect(dumped(klass(source))).to eq(['dump_type: "s"'])
+  end
+
+  it "counts a yield in a block on another object nested in a block" do
+    source = "def m\n  @y = false\n  [1].each { @o.instance_eval { yield } }\n  v = @y\n  dump_type(v)\nend\n"
+    expect(dumped(klass(source))).to eq(["dump_type: bool"])
   end
 
   it "widens an ivar past a super, which runs the superclass method on self" do

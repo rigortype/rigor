@@ -3638,6 +3638,59 @@ end
       end
     end
 
+    def inline_sig_incremental_runner(config, dir)
+      cache_root = File.join(dir, ".rigor", "cache")
+      snapshot = Rigor::Cache::IncrementalSnapshot.new(root: cache_root)
+      lambda do
+        guarded_run_incremental(inline_session(config, dir, cache_root),
+                                snapshot: snapshot, fingerprint: fingerprint(config, dir))
+      end
+    end
+
+    # `Base extend`s an undefined module, so only the SINGLETON sides of `Base` and `Child` fail, and
+    # `user.rb` demands only `Child`'s. Re-deriving `Child` must ask for its singleton side too.
+    it "re-derives a stale class whose singleton side alone fails (#1929)" do
+      Dir.mktmpdir do |dir|
+        FileUtils.mkdir_p(File.join(dir, "sig"))
+        File.write(File.join(dir, "helper.rb"),
+                   "class Base\n  extend Nope\n\n  #: () -> Integer\n  def self.bar = 1\nend\n")
+        File.write(File.join(dir, "sig", "child.rbs"), "class Child < Base\n  def self.baz: () -> Integer\nend\n")
+        File.write(File.join(dir, "user.rb"), "Child.baz\n")
+        config = inline_sig_config(dir)
+        run = inline_sig_incremental_runner(config, dir)
+
+        cold, = run.call
+        File.write(File.join(dir, "helper.rb"), "# edited\n", mode: "a")
+        edited, warm = run.call
+        full = inline_full_run(config)
+
+        expect(warm).to be(true)
+        expect(definition_rows(cold).first).to include("failed to build: Base, Child.")
+        expect([definition_rows(edited), definition_rows(full)]).to eq([definition_rows(cold)] * 2)
+      end
+    end
+
+    # Deleting `helper.rb` removes `Base`'s inline declaration; a full run then reports `Child` alone, failing
+    # on the missing `Base`, where the replayed tuples name the deleted file's buffer and `Missing`.
+    it "re-derives the classes whose tuple names a deleted inline source (#1929)" do
+      Dir.mktmpdir do |dir|
+        write_missing_superclass_fixture(dir)
+        config = inline_sig_config(dir)
+        run = inline_sig_incremental_runner(config, dir)
+
+        cold, = run.call
+        File.delete(File.join(dir, "helper.rb"))
+        deleted, warm = run.call
+        full = inline_full_run(config)
+
+        expect(warm).to be(true)
+        expect(definition_rows(cold).first).to include("failed to build: Base, Child.")
+        expect(definition_rows(full).first)
+          .to include("failed to build: Child. First failure: RBS::NoSuperclassFoundError on `Base`.")
+        expect(definition_rows(deleted)).to eq(definition_rows(full))
+      end
+    end
+
     context "when the HKT registry scan raises (#794)" do
       before do
         allow(Rigor::Inference::HktRegistry).to receive(:scan_rbs_loader).and_raise(NameError, "simulated scan bug")

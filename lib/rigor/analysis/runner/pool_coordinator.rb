@@ -265,7 +265,9 @@ module Rigor
           # `env` rather than `resolve.call`: read the demand the snapshots above just made when they built
           # an environment, and force nothing when they did not.
           record_definition_build_failures(env&.rbs_loader&.definition_build_failures)
-          record_hkt_scan_failure(hkt_scan_outcome(resolve.call)) unless replayed_restored_run_level_rows?
+          # An empty closure analyses no file, so only a deleted file's buffer can make a tuple stale here.
+          replayed = replayed_restored_run_level_rows?(closure: [], redemand_env: resolve)
+          record_hkt_scan_failure(hkt_scan_outcome(resolve.call)) unless replayed
           prepare_rows
         end
 
@@ -374,7 +376,9 @@ module Rigor
         #
         # Such a failure is not replayed as it stands; {#redemand_stale_failures} re-derives it instead
         # (#1929), so the row asserts no collision the current signatures do not have. A failure whose
-        # buffers name no file this run touches still replays.
+        # buffers name no file this run touches still replays. A buffer whose file no longer exists is stale
+        # too: deleting an inline source a tuple names would otherwise replay the deleted declaration's
+        # failure, where a full run reports what the remaining signatures give.
         def stale_replayed_failure?(failure, closure)
           return false if closure.nil?
 
@@ -384,7 +388,10 @@ module Rigor
           closure_paths = closure.to_set { |path| File.absolute_path(path.to_s) }
           Array(buffers).any? do |name|
             path = virtual_buffer_path(name)
-            !path.nil? && closure_paths.include?(File.absolute_path(path))
+            next false if path.nil?
+
+            absolute = File.absolute_path(path)
+            closure_paths.include?(absolute) || !File.exist?(absolute)
           end
         end
 

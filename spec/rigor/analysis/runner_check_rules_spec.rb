@@ -1839,6 +1839,98 @@ RSpec.describe Rigor::Analysis::Runner do
         expect(clause_diags(result).map(&:message)).to contain_exactly(include("already covered"))
       end
 
+      # Issue #1485 — a clause an earlier clause exhausted is reported on a non-literal subject only when every class it
+      # names is at or below a class an earlier clause names, since the subject's type may be narrower than what the
+      # program holds. Each row's arm runs under Ruby 4.0.5 with the object named: a `StringIO` is not an `IO`, a
+      # `Tempfile` is a `Delegator`, `Third.new` includes `Greet` without being an `Other`, `StandardError.new` is
+      # not a `MyErr`, and `1.5` is no `Integer`.
+      def prior_exhaustion_source(body)
+        <<~RUBY
+          require "stringio"
+          require "tempfile"
+          module Greet; end
+          class Other
+            include Greet
+            def hi = 1
+          end
+          class Third
+            include Greet
+            def hi = 3
+          end
+          class Base
+            def b = 1
+          end
+          class Child < Base; end
+          class MyErr < StandardError; end
+          class MyOther < StandardError; end
+          class MyTmp < Tempfile; end
+          io = STDOUT
+          #{body}
+        RUBY
+      end
+
+      {
+        "`when StringIO` after `when IO` (StringIO.new)" => "case io\nwhen IO then 1\nwhen StringIO then 2\nend",
+        "the same `case` as a write's value (StringIO.new)" => "v = case io when IO then 1 when StringIO then 2 end",
+        "`in StringIO` after `in IO` (StringIO.new)" => "case io\nin IO then 1\nin StringIO then 2\nend",
+        "`in StringIO => s` after `in IO` (StringIO.new)" => "case io\nin IO then 1\nin StringIO => s then s\nend",
+        "a non-class `in` after `in IO` (StringIO.new)" => "case io\nin IO then 1\nin [a] then a\nend",
+        "`when Integer, StringIO` after `when IO` (StringIO.new)" =>
+          "case io\nwhen IO then 1\nwhen Integer, StringIO then 2\nend",
+        "`when Tempfile` after `when IO` (Tempfile.new)" => "case io\nwhen IO then 1\nwhen Tempfile then 2\nend",
+        "`when MyTmp < Tempfile` after `when IO` (MyTmp.new)" => "case io\nwhen IO then 1\nwhen MyTmp then 2\nend",
+        "`when Greet` after `when Other` (Third.new)" =>
+          "o = Other.new\ncase o\nwhen Other then 1\nwhen Greet then 2\nend",
+        "`when StandardError` after `when MyErr` (StandardError.new)" =>
+          "e = MyErr.new\ncase e\nwhen MyErr then 1\nwhen StandardError then 2\nend"
+      }.each do |label, body|
+        it "does not report #{label}" do
+          expect(clause_diags(analyze(prior_exhaustion_source(body)))).to be_empty
+        end
+      end
+
+      it "does not report a clause an earlier one exhausted when the subject is a signature-typed parameter (1.5)" do
+        source = "class Writer\n  def count(n)\n    case n\n    when Integer then 1\n    when Float then 2\n    " \
+                 "end\n  end\nend\n"
+        sig = "class Writer\n  def count: (Integer n) -> Integer?\nend\n"
+        expect(clause_diags(analyze(files: { "lib/writer.rb" => source }, sig: { "writer.rbs" => sig }))).to be_empty
+      end
+
+      # A `Nominal` of `NilClass` (a parameter the signature types `NilClass`) is the value `nil` itself, so it counts
+      # as literal and the clause after its exhaustion still reports.
+      it "still reports a clause an earlier one exhausted on a `NilClass`-typed parameter" do
+        source = "class Writer\n  def pick(x)\n    case x\n    when NilClass, Integer then 1\n    " \
+                 "when String then 2\n    end\n  end\nend\n"
+        sig = "class Writer\n  def pick: (NilClass x) -> Integer?\nend\n"
+        diags = clause_diags(analyze(files: { "lib/writer.rb" => source }, sig: { "writer.rbs" => sig }))
+        expect(diags.map(&:message)).to contain_exactly(include("unreachable `when String'"))
+      end
+
+      # Ruby 4.0.5 never runs these arms: the earlier clause matches every object the later one could, whatever the
+      # subject holds.
+      {
+        "a repeated `when IO`" => ["case io\nwhen IO then 1\nwhen IO then 2\nend", "when IO"],
+        "`when File` after `when IO, nil`" => ["case io\nwhen IO, nil then 1\nwhen File then 2\nend", "when File"],
+        "`in File` after `in IO => i`" => ["case io\nin IO => i then i\nin File then 2\nend", "in File"],
+        "`in File | IO` after `in IO`" => ["case io\nin IO then 1\nin File | IO then 2\nend", "in File | IO"],
+        "`when Array` after `when Enumerable`" =>
+          ["list = ARGV\ncase list\nwhen Enumerable then 1\nwhen Array then 2\nend", "when Array"],
+        "`when Integer` after `when Numeric`" =>
+          ["n = Integer(ARGV.first)\ncase n\nwhen Numeric then 1\nwhen Integer then 2\nend", "when Integer"],
+        "`when Child` after `when Base`" =>
+          ["b = Base.new\ncase b\nwhen Base then 1\nwhen Child then 2\nend", "when Child"],
+        "`when Third` after `when Other, Greet`" =>
+          ["o = Other.new\ncase o\nwhen Other, Greet then 1\nwhen Third then 2\nend", "when Third"],
+        "`when MyOther < StandardError` after `when MyErr, StandardError`" =>
+          ["e = MyErr.new\ncase e\nwhen MyErr, StandardError then 1\nwhen MyOther then 2\nend", "when MyOther"]
+      }.each do |label, (body, clause)|
+        it "still reports #{label}" do
+          diags = clause_diags(analyze(prior_exhaustion_source(body)))
+          expect(diags.map(&:message))
+            .to contain_exactly(include("unreachable `#{clause}'").and(include("already covered")))
+        end
+      end
+
       it "does not fire on non-constant clauses (`when nil` / ranges are out of WD1 scope)" do
         result = analyze(<<~RUBY)
           x = 1

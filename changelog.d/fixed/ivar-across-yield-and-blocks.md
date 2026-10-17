@@ -1,0 +1,1 @@
+- **[engine]** An instance variable no longer keeps its pre-call value across `yield`, `super`, a call of the method's block parameter, or a block whose body calls a method on `self`, so a condition on it after such a call no longer reports `flow.always-truthy-condition` on correct code. ([#2077](https://github.com/rigortype/rigor/pull/2077))

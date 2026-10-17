@@ -181,6 +181,22 @@ RSpec.describe "the method-visibility table over visibility calls (#1911, #1819,
     RUBY
   end
 
+  # Issue #1984 — Ruby makes each `x` public again (`define_singleton_method`, `singleton_class.send(:public, :x)`,
+  # an `instance_eval` def and `def K.x` define or mark it public); the walk reads none of them, so it contests the
+  # singleton slot instead of keeping the private it recorded.
+  it "contests the singleton slots a rewrite the walk does not read" do
+    expected = Set[["D", %i[singleton x]], ["S", %i[singleton x]], ["S", %i[singleton public]],
+                   ["E", %i[singleton x]], ["F", %i[singleton x]]]
+    expect(tables(<<~RUBY).last).to eq(expected)
+      class D; private_class_method def self.x = 1; define_singleton_method(:x) { 2 }; end
+      class S; private_class_method def self.x = 1; singleton_class.send(:public, :x); end
+      class E; private_class_method def self.x = 1; end
+      E.instance_eval { def x = 2 }
+      class F; private_class_method def self.x = 1; end
+      def F.x = 2
+    RUBY
+  end
+
   it "records wrapped defs and attrs in a meta-new block" do
     expect(table(<<~RUBY)).to eq("W" => { sx: :private, sr: :private, sy: :public })
       W = Struct.new(:m) do

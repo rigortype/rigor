@@ -203,8 +203,10 @@ RSpec.describe "an instance variable across yield, proc calls, super and blocks 
   end
 
   it "counts an ivar write in a block on a module object from a method of an RBS-declared Module subclass" do
-    source = "class Meta3 < Module\n  def s\n    @x = false\n    M3.module_eval { @x = true }\n    @x ? 1 : 2\n  " \
-             "end\nend\n\nM3 = Meta3.new\n"
+    # The reopening below spells no superclass; only the signature says `Meta3 < Module`, so only the
+    # environment's ordering can tell.
+    source = "class Meta3\n  def s\n    @x = false\n    M3.module_eval { @x = true }\n    @x ? 1 : 2\n  " \
+             "end\nend\n\nM3 = Meta3.new\n\nmodule M3\nend\n"
     sig = { "meta.rbs" => "class Meta3 < Module\n  def s: () -> Integer\nend\n\nM3: Meta3\n" }
     expect(analyze(source, sig: sig).diagnostics.map(&:rule)).not_to include("flow.always-truthy-condition")
   end
@@ -212,7 +214,7 @@ RSpec.describe "an instance variable across yield, proc calls, super and blocks 
   it "counts an ivar write in a block on a module object from a method of a class whose superclass is unresolved" do
     # The analysis knows nothing of `ExternalBase`, which may be `Module` or a subclass of it.
     source = "class Meta4 < ExternalBase\n  def s\n    @x = false\n    M4.module_eval { @x = true }\n    " \
-             "@x ? 1 : 2\n  end\nend\n"
+             "@x ? 1 : 2\n  end\nend\n\nM4 = Meta4.new\n\nmodule M4\nend\n"
     expect(analyze(source).diagnostics.map(&:rule)).not_to include("flow.always-truthy-condition")
   end
 

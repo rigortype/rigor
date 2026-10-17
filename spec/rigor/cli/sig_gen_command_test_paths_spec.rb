@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "fileutils"
+require "json"
 require "tmpdir"
 
 require "rigor/cli"
@@ -96,5 +97,71 @@ RSpec.describe Rigor::CLI::SigGenCommand do
 
     expect(out).to include("def m: (untyped) -> 1")
     expect(err).to include("`test_paths:` is empty")
+  end
+
+  # #1398 — the stderr notes are invisible to `--format=json` consumers (and to the MCP tool), so the same fact
+  # is data: a top-level `observation` key, additive to `candidates`.
+  describe "the JSON `observation` report" do
+    def observation(*argv, config: "paths:\n  - lib\n")
+      _status, out, err = run("--format=json", *argv, config: config)
+      [JSON.parse(out), err]
+    end
+
+    it "lists the observed roots and no missing ones" do
+      write("checks/calc_check.rb", "Calc.new.m(42)\n")
+
+      payload, = observation(config: "paths:\n  - lib\ntest_paths:\n  - checks\n")
+
+      expect(payload.fetch("observation")).to eq("paths" => [File.join(root, "checks")], "missing" => [])
+      expect(payload.fetch("candidates")).not_to be_empty
+    end
+
+    it "splits a declared root that does not exist from the ones that do" do
+      write("spec/calc_spec.rb", "Calc.new.m(42)\n")
+
+      payload, = observation(config: "paths:\n  - lib\ntest_paths:\n  - spec\n  - tests\n")
+
+      expect(payload.fetch("observation")).to eq("paths" => [File.join(root, "spec")],
+                                                 "missing" => [File.join(root, "tests")])
+    end
+
+    it "reports an empty `paths` when there is no test root at all" do
+      payload, err = observation
+
+      expect(payload.fetch("observation")).to eq("paths" => [], "missing" => [])
+      expect(err).to include("no test roots to observe")
+    end
+
+    it "reports an auto-detected root as an absolute path" do
+      write("test/calc_test.rb", "Calc.new.m(42)\n")
+
+      payload, = observation
+
+      expect(payload.fetch("observation").fetch("paths")).to eq([File.join(File.realpath(root), "test")])
+    end
+
+    it "reports --observe=PATH as typed" do
+      write("spec/calc_spec.rb", "Calc.new.m(42)\n")
+
+      payload, = observation("--observe=spec", "--observe=nowhere")
+
+      expect(payload.fetch("observation")).to eq("paths" => ["spec"], "missing" => ["nowhere"])
+    end
+
+    it "is absent under --params=untyped" do
+      write(".rigor.yml", "paths:\n  - lib\n")
+      out = StringIO.new
+      described_class.new(argv: ["--print", "--format=json", "--config=#{File.join(root, '.rigor.yml')}"],
+                          out: out, err: StringIO.new).run
+
+      expect(JSON.parse(out.string).keys).to eq(["candidates"])
+    end
+
+    it "keeps the stderr note in text mode" do
+      _status, out, err = run
+
+      expect(out).not_to include("observation")
+      expect(err).to include("no test roots to observe")
+    end
   end
 end

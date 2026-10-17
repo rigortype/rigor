@@ -391,6 +391,12 @@ Generate RBS skeleton signatures inferred from Ruby source files.
 project's test roots: the configured `test_paths:`, or whichever of
 `spec/` and `test/` exist.
 
+Under `params: "observed"` the response also carries a top-level
+`observation` object, `{"paths": [...], "missing": [...]}`: the test
+roots that were read and the declared ones that do not exist. Both
+empty means no test root was found, so every parameter stays `untyped`.
+The key is absent under the default `untyped` policy.
+
 **Returns:** JSON — the same as `rigor sig-gen --print --format json`.
 
 ```json

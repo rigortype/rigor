@@ -27,9 +27,11 @@ module Rigor
       # @param selection — subset of
       #   {Classification} constants to include; an empty
       #   array means "all emittable classifications".
-      def render(candidates:, mode:, format:, selection:)
+      # @param observation — `{ paths:, missing: }` under `--params=observed`, else `nil`; JSON carries it
+      #   as the top-level `observation` key (#1398).
+      def render(candidates:, mode:, format:, selection:, observation: nil)
         case format
-        when "json" then render_json(filter(candidates, selection, with_skipped: true))
+        when "json" then render_json(filter(candidates, selection, with_skipped: true), observation)
         when "text"
           filtered = filter(candidates, selection)
           mode == :diff ? render_diff(filtered) : render_print(filtered)
@@ -122,8 +124,9 @@ module Rigor
         end
       end
 
-      def render_json(candidates)
+      def render_json(candidates, observation = nil)
         payload = { candidates: candidates.map(&:to_h) }
+        payload[:observation] = observation if observation
         @out.puts(JSON.pretty_generate(payload))
       end
 

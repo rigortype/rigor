@@ -88,6 +88,14 @@ RSpec.describe Rigor::CLI::SigGenCommand do
         def self.make(c) = @count = c
       end
 
+      class DefineBox
+        def initialize(count)
+          @count = count
+        end
+        attr_reader :count
+        define_method(:reset) { @count = nil }
+      end
+
       class SetBox
         def initialize(count, label)
           @count = count
@@ -112,6 +120,7 @@ RSpec.describe Rigor::CLI::SigGenCommand do
       RBox.new(0)
       ResetBox.new(0)
       SelfBox.new(0)
+      DefineBox.new(0)
       SetBox.new(0, "a")
       OptsBox.new(0, {})
     RUBY
@@ -137,6 +146,10 @@ RSpec.describe Rigor::CLI::SigGenCommand do
 
     expect(reset_box).to include("def reset: () -> nil")
     expect(reset_box).not_to include("def count:")
+  end
+
+  it "skips the reader of a field a define_method block writes" do
+    expect(section(observed_print, "DefineBox")).not_to include("def count:")
   end
 
   it "keeps the observed type for a reader whose only write is the constructor's" do

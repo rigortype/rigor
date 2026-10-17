@@ -1342,7 +1342,8 @@ RSpec.describe Rigor::SigGen::Generator do
       require "rigor-rbs-inline"
       Rigor::Plugin.register(Rigor::Plugin::RbsInline) unless Rigor::Plugin.registered_for("rbs-inline")
 
-      write_fixture("sig/authored.rbs", "class Authored\n  def c: (Integer x) -> untyped\n  def n: (Integer x) -> untyped\nend\n")
+      write_fixture("sig/authored.rbs",
+                    "class Authored\n  def c: (Integer x) -> untyped\n  def n: (Integer x) -> untyped\nend\n")
       inline = write_fixture("lib/inline.rb", <<~RUBY)
         class Inline
           # @rbs x: Integer

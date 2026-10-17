@@ -42,6 +42,7 @@ require_relative "receiver_alias"
 require_relative "repeated_or_writes"
 require_relative "singleton_object_constant"
 require_relative "refined_dispatch"
+require_relative "singleton_external_ahead"
 require_relative "stored_block_call"
 require_relative "struct_fold_safety"
 require_relative "unknown_store_widening"
@@ -2607,6 +2608,10 @@ module Rigor
       # `discovered_def_nodes` / `discovered_superclasses` / `discovered_includes`, and this walk reads a
       # fourth table those three do not imply. Keying on what the answer actually depends on is the #682
       # lesson — a memo that outlives its inputs serves one scope's answer to another.
+      #
+      # It is the TYPING read only, so it also withholds (`[nil, nil]`, the call types `Dynamic`) where an external
+      # ancestor may answer ahead of the definer found (#1572: `extend M; extend Enumerable` makes `C.to_a`
+      # `Enumerable#to_a`, which the reader passes over). The existence reads keep the reader's own answer.
       def resolve_singleton_def_with_owner(class_name, method_name)
         by_singleton = (class_graph_buckets[:singleton_def] ||= {}.compare_by_identity)
         cache = (by_singleton[scope.discovered_singleton_def_nodes] ||= {})
@@ -2614,7 +2619,10 @@ module Rigor
         key = method_name.to_sym
         return table[key] if table.key?(key)
 
-        table[key] = scope.singleton_def_through_ancestors(class_name, method_name)
+        found = scope.singleton_def_through_ancestors(class_name, method_name)
+        owner = found.last
+        found = [nil, nil] if owner && SingletonExternalAhead.withhold?(scope, class_name, method_name, owner)
+        table[key] = found
       end
 
       # The project-side singleton-method band: a `Foo.bar` call resolved against a `class << …` / `def self.…`

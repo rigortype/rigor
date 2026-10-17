@@ -526,10 +526,58 @@ module Rigor
             registry = environment&.plugin_registry
             each_source_ancestor_candidate(scope, class_name) do |candidate|
               return nil if scope.discovered_method?(candidate, method_name, kind)
-              return candidate if ALLOWED_RBS_COMPLETE_ANCESTORS.include?(candidate) ||
-                                  registry&.rbs_complete_ancestor?(candidate)
+              next unless ALLOWED_RBS_COMPLETE_ANCESTORS.include?(candidate) ||
+                          registry&.rbs_complete_ancestor?(candidate)
+
+              return shadowed_in_ruby_order?(scope, class_name, kind, method_name, candidate) ? nil : candidate
             end
             nil
+          end
+
+          # Issue #1572 — the walk above is breadth-first, so it reaches the superclass before a module an included
+          # module includes, which Ruby's order puts ahead of it (`class P < Rigor::Plugin::Base; include A` with `A`
+          # including `M` calls `M#prepare`, not `Base#prepare`), and it passes over RBS-known modules. True when the
+          # bridged `ancestor` is not what Ruby calls: on `class_name`'s {Scope::ResolutionChain} in Ruby's order, a
+          # project entry ahead of it records the name ({#project_records_name?}), an external entry ahead of it is a
+          # module RBS knows and declares the name in, or the chain does not hold it. An RBS-unknown external ahead is
+          # passed over, as the breadth-first walk always did. An unsettled chain withholds too: a mixin edge the
+          # tables cannot place (a receiver-form `Demo.include(M)` after the body, an edge in a conditional, a block or
+          # a hook) may put a definer ahead of the ancestor.
+          def shadowed_in_ruby_order?(scope, class_name, kind, method_name, ancestor)
+            chain = Scope::ResolutionChain.for(scope, class_name.to_s, kind, :methods)
+            return true if chain.unsettled?
+
+            entries = chain.entries
+            stop = entries.index do |entry|
+              entry.external? ? entry.candidates.include?(ancestor) : entry.name == ancestor
+            end
+            return true if stop.nil?
+
+            entries.first(stop).any? do |entry|
+              if entry.external?
+                rbs_declares_ahead?(scope, entry, method_name)
+              else
+                project_records_name?(scope, entry.name, method_name, entry.side)
+              end
+            end
+          end
+
+          # Whether the project entry `owner` holds the name on `kind`'s side. `discovered_methods` carries the
+          # `attr_*` and `define_method` rows project-wide, but at dispatch it has no row for a `def` in a module
+          # declared in another file, so a `def` is also asked of the project-wide def tables. ADR-46:
+          # `user_def_for` / `singleton_def_for` file the method edge, positive or negative, so a file that adds or
+          # removes the `def` on an entry ahead of the ancestor re-checks the call.
+          def project_records_name?(scope, owner, method_name, kind)
+            return true if scope.discovered_method?(owner, method_name, kind)
+
+            return !scope.singleton_def_for(owner, method_name).nil? if kind == :singleton
+
+            !scope.user_def_for(owner, method_name).nil?
+          end
+
+          def rbs_declares_ahead?(scope, entry, method_name)
+            entry.candidates.any? { |candidate| Rigor::Reflection.rbs_class_known?(candidate, scope: scope) } &&
+              !Scope::ResolutionChain::Relevance.external_lacks_on?(scope, entry.candidates, entry.side, method_name)
           end
 
           # Issue #527 slice 1 — the RBS instance definition a Ruby-source class inherits from a CORE or

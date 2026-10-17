@@ -1174,6 +1174,26 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  # Issue #1924 — an unentered `if` / `elsif` / `unless` / ternary applies no write its condition makes.
+  describe "fixtures/unentered_if_condition_writes.rb — an unentered conditional widens its condition's writes" do
+    let(:harness) { harness_for("unentered_if_condition_writes") }
+
+    it "reads a written bound local as Dynamic[top] in the branches and keeps a no-write narrowing" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+
+    it "reports a possible nil receiver only where the condition does not rule `nil` out" do
+      nil_receivers = harness.diagnostics.select { |d| d.rule == "call.possible-nil-receiver" }
+      expect(nil_receivers.map(&:line)).to eq(marked_lines(harness, "# GENUINE-NIL"))
+    end
+
+    it "reports an undefined method only on the write's own `nil`" do
+      undefined = harness.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(undefined.map(&:line)).to eq(marked_lines(harness, "# GENUINE-UNDEFINED"))
+    end
+  end
+
   # Issue #1484 — a subject `case` the evaluator does not enter narrows its clauses as its statement form does.
   describe "fixtures/subject_case_value_position.rb — a value-position subject `case` narrows its clauses" do
     let(:harness) { harness_for("subject_case_value_position") }

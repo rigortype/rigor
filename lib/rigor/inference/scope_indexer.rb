@@ -11318,18 +11318,26 @@ module Rigor
         scope.local(name).nil? ? scope : scope.with_local(name, Type::Combinator.untyped)
       end
 
+      # Issue #1924 — an `if` / `elsif` / `unless` / ternary the evaluator did not enter (`[if (x ||= "d").empty?
+      # then 0 else x.upcase end]`) applies no write its condition makes, so its edges are taken from a scope where
+      # every bound local the condition writes reads `Dynamic[top]` ({#widen_condition_writes}), as
+      # {#propagate_subjectless_case} takes a `when` condition's. The condition itself reads the scope before it.
       def propagate_if_branches(node, table, current_scope)
-        truthy_scope, falsey_scope = Narrowing.predicate_scopes(node.predicate, current_scope)
+        truthy_scope, falsey_scope = conditional_edges(node.predicate, current_scope)
         propagate(node.predicate, table, current_scope) if node.predicate
         propagate(node.statements, table, truthy_scope) if node.statements
         propagate(node.subsequent, table, falsey_scope) if node.subsequent
       end
 
       def propagate_unless_branches(node, table, current_scope)
-        truthy_scope, falsey_scope = Narrowing.predicate_scopes(node.predicate, current_scope)
+        truthy_scope, falsey_scope = conditional_edges(node.predicate, current_scope)
         propagate(node.predicate, table, current_scope) if node.predicate
         propagate(node.statements, table, falsey_scope) if node.statements
         propagate(node.else_clause, table, truthy_scope) if node.else_clause
+      end
+
+      def conditional_edges(predicate, scope)
+        Narrowing.predicate_scopes(predicate, widen_condition_writes(predicate, scope))
       end
 
       # Issue #1495 — a `case` without a subject the evaluator did not enter (`[case; when x.nil? then 0; else x.size

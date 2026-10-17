@@ -29,7 +29,7 @@ RSpec.describe "def.override-visibility-reduced over a module_function's instanc
     RUBY
   end
 
-  # Ruby: `Helpers#fmt` is public, so the private override reduces it.
+  # A guard: the control without `module_function`. Ruby: `Helpers#fmt` is public, so the private override reduces it.
   it "still reports the private override of a public module method" do
     expect(reduced(<<~RUBY)).to eq([["code.rb", 9]])
       module Helpers
@@ -75,7 +75,8 @@ RSpec.describe "def.override-visibility-reduced over a module_function's instanc
     RUBY
   end
 
-  # Ruby: a `public` under a condition may not run, so the walk does not answer public.
+  # A guard: the slot after a reset that may not run was contested before #1569 too. Ruby: the `public` does not run
+  # here, so `Maybe#fmt` is private, and the walk does not answer public.
   it "is quiet after a bare public that may not run" do
     expect(reduced(<<~RUBY)).to eq([])
       module Maybe

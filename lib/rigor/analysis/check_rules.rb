@@ -2951,10 +2951,12 @@ module Rigor
           end
         end
 
-        # Issue #1984 — whether the call is outside every `def` of its file that the deferred ranges name (a `def` in a
-        # class body or at the top level; one nested in a block is not named, so a call there counts as load time
-        # too). Such code may run while the files load, before a later `private_class_method` or in a load order
-        # where the private declaration has not run yet.
+        # Issue #1984 — whether the call is outside every `def` the file's deferred ranges name. A `def` is named
+        # wherever it is written in a class body, at the top level or in a `class_eval` block, so a call in it is not
+        # load time and may be reported. The top level, class bodies, and blocks and lambdas that are not such a `def`
+        # (a `map { … }` or `define_method` block, a `-> { }`) are load time and decline: such code may run while the
+        # files load, before a later `private_class_method` or in a load order where the private declaration has not
+        # run yet.
         def load_time_call?(scope, call_node)
           rows = scope.discovered_deferred_ranges[scope.source_path]
           return true if rows.nil?

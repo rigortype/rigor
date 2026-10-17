@@ -122,6 +122,11 @@ RSpec.describe "def.method-visibility-mismatch on singleton calls (#1984)", type
         HEARTS = Suit.new("h")
         private_class_method :new
       end
+      class Mapped
+        def initialize(n); end
+        ALL = [1, 2].map { |n| Mapped.new(n) }
+        private_class_method :new
+      end
       class Sing2
         def self.x = 1
         V = Sing2.x

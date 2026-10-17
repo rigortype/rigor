@@ -170,12 +170,89 @@ RSpec.describe "the method-visibility table over visibility calls (#1911, #1819,
     RUBY
   end
 
-  it "keeps the named module_function form as before (#1569 owns its visibility)" do
-    expect(table(<<~RUBY)).to eq("M" => { mf: :public, after: :public })
-      module M
-        module_function def mf = 1
-        def after = 1
-      end
-    RUBY
+  # #1569 — Ruby makes a module function's instance copy private; the table is instance-side only, so the public
+  # singleton copy is not in it. Each expected table is Ruby 4.0.5's `private_instance_methods(false)` answer.
+  describe "module_function (#1569)" do
+    it "records `module_function def x` private and leaves the default after it" do
+      expect(table(<<~RUBY)).to eq("M" => { mf: :private, after: :public })
+        module M
+          module_function def mf = 1
+          def after = 1
+        end
+      RUBY
+    end
+
+    it "records the defs and attr members after a bare module_function private" do
+      expect(tables(<<~RUBY)).to eq([{ "M" => { a: :private, r: :private } }, Set[]])
+        module M
+          module_function
+          def a = 1
+          attr_reader :r
+        end
+      RUBY
+    end
+
+    it "records a name `module_function :x` names private at the call, and a later def with the default" do
+      expect(table(<<~RUBY)).to eq("M" => { a: :private, b: :public, c: :private })
+        module M
+          def a = 1
+          def b = 1
+          def c = 1
+          module_function :a, "c"
+          def b = 2
+        end
+      RUBY
+    end
+
+    it "applies the module_function forms written on self or sent with a literal name" do
+      expect(table(<<~RUBY)).to eq("M" => { a: :private }, "N" => { b: :private })
+        module M
+          self.module_function
+          def a = 1
+        end
+        module N
+          send(:module_function)
+          def b = 1
+        end
+      RUBY
+    end
+
+    it "ends the private default at a bare public or protected, and records `public def` public" do
+      expect(table(<<~RUBY)).to eq("M" => { x: :public, y: :private, z: :public }, "P" => { w: :protected })
+        module M
+          module_function
+          public def x = 1
+          def y = 1
+          public
+          def z = 1
+        end
+        module P
+          module_function
+          protected
+          def w = 1
+        end
+      RUBY
+    end
+
+    it "contests a def after a bare public that may not run, rather than recording it public" do
+      expect(tables(<<~RUBY)).to eq([{ "M" => { k: :private } }, Set[["M", :k]]])
+        module M
+          module_function
+          public if ENV["X"]
+          def k = 1
+        end
+      RUBY
+    end
+
+    it "leaves the instance slot alone at extend self and private_class_method" do
+      expect(tables(<<~RUBY)).to eq([{ "M" => { d: :private } }, Set[]])
+        module M
+          extend self
+          module_function
+          def d = 1
+          private_class_method :d
+        end
+      RUBY
+    end
   end
 end

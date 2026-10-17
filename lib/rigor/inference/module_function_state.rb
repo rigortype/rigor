@@ -9,9 +9,9 @@ module Rigor
     # The one home for what a receiverless `module_function` call does to the methods around it
     # ([#1507](https://github.com/rigortype/rigor/issues/1507),
     # [#1197](https://github.com/rigortype/rigor/issues/1197)). Four readers used to compute it in four
-    # places. They disagree with each other and, in places, with Ruby. Each entry point below reproduces
-    # one reader's answer exactly: this module gives the readings one place to live, and does not yet make
-    # them agree. A change to one reading lands here, beside the other three.
+    # places, and the method-visibility table reads it too. They disagree with each other and, in places, with
+    # Ruby. Each entry point below reproduces one reader's answer exactly: this module gives the readings one
+    # place to live, and does not yet make them agree. A change to one reading lands here, beside the others.
     #
     # In Ruby a bare `module_function` call turns the body's module_function mode on, and a later bare
     # `public`, `private` or `protected` ({.visibility_reset?}) turns it off again (#1968). A named call
@@ -32,8 +32,13 @@ module Rigor
     # - sig-gen (`SigGen::Generator#walk_statements`) reads {.each_sig_gen_statement} and
     #   {.sig_gen_module_function?}. A bare call covers the later statements of its own statement list and
     #   what nests in them, up to a reset; after an uncertain one {.sig_gen_uncertain?} says so.
+    # - The method-visibility table (`ScopeIndexer#walk_method_visibilities`) reads {.instance_visibility}. It
+    #   applies a `module_function` call as it applies a `private` one, bare or named: the call makes the instance
+    #   copy private (#1569), and a later bare `public`, `private` or `protected` sets the running default as it
+    #   would anyway, so the reset needs no reading of its own. A call or reset that may not run leaves the slots
+    #   after it contested, as any visibility call there does.
     #
-    # A fifth reader does not come here yet: `rigor-activerecord`'s `ModelDiscoverer#table_name_decorators`
+    # Another reader does not come here yet: `rigor-activerecord`'s `ModelDiscoverer#table_name_decorators`
     # (`plugins/rigor-activerecord/lib/rigor/plugin/activerecord/model_discoverer.rb`) reads a module body's
     # direct statements for its table-name readers. It also accepts `self.module_function`, and there a bare
     # call covers the instance methods written before it as well as after it, while a named call takes only a
@@ -53,6 +58,11 @@ module Rigor
       def call?(node)
         node.name == :module_function && node.receiver.nil?
       end
+
+      # The visibility a `module_function` call gives the instance method of each name it covers, bare or named:
+      # Ruby makes the instance copy private and adds a public singleton copy, which the instance-side
+      # method-visibility table does not hold (#1569).
+      def instance_visibility = :private
 
       # The toggle form: a `module_function` call with no arguments.
       def bare?(node)

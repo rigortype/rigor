@@ -96,6 +96,11 @@ def first_bound(s)
   [if (z = String(s)).empty? then 0 else assert_type("Dynamic[top]", z).upcase end]
 end
 
+# Nor does a later condition narrow it from one: `z.nil?` never holds, and `first_bound_elsif("a")` returns [1].
+def first_bound_elsif(s)
+  [if (z = String(s)).empty? then 0 elsif z.nil? then z.upcase else 1 end]
+end
+
 # Control: a condition that writes no local still narrows. `no_write("a")` returns ["A"].
 def no_write(raw)
   x = raw ? String(raw) : nil

@@ -1938,8 +1938,15 @@ module Rigor
     # Issue #992 — one class's `discovered_parameter_envelopes` bucket (`{[kind, method_name] => envelope}` plus
     # the class-wide marks), or an empty Hash. Records the ADR-46 class edge first: a verdict read off the
     # bucket depends on every file that declares the class, and a `memoize :f` added to one of them moves it.
+    #
+    # Issue #1833 — and the name edge `mark:<last segment>`: a file that does not declare the class may still mark it
+    # (`x.singleton_class.prepend(Comparable)`, `o.extend(Helper)` in a method body, a `refine` block), and
+    # `IncrementalSession#mark_affected` fires the key when such a mark appears or vanishes.
     def parameter_envelopes_of(class_name)
-      record_class_dependency(class_name) if Analysis::DependencyRecorder.active?
+      if Analysis::DependencyRecorder.active?
+        record_class_dependency(class_name)
+        Analysis::DependencyRecorder.read_last_segment(:mark, class_name.to_s)
+      end
       @discovery.discovered_parameter_envelopes[class_name.to_s] || EMPTY_PARAMETER_ENVELOPES
     end
 

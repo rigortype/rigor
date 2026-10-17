@@ -1289,7 +1289,27 @@ module Rigor
         keys.concat(class_move_keys(moved_classes))
         keys.concat(moved_constants.map { |name| "constant:#{name.split('::').last}" })
         Incremental.negative_closure(keys, @negative_dependents) | refinement_affected(changed + removed, summary) |
-          defined_name_affected(changed + removed, summary) | global_write_reporters
+          defined_name_affected(changed + removed, summary) | mark_affected(changed + removed, summary) |
+          global_write_reporters
+      end
+
+      # Issue #1833 — the consumers whose answer read a class mark that moved in this edit. A reader of a class's
+      # envelope bucket records `mark:<last segment>` (`Scope#parameter_envelopes_of`), whichever way it answered, so
+      # a file that adds or drops only a mark (`x.singleton_class.prepend(Comparable)`, `o.extend(Helper)` in a
+      # method body, a `refine` block's refined mark) re-checks it although the file declares nothing it read. A
+      # reader that scans every bucket for an object-extended module (`SourceArity#object_extension_may_shadow?`)
+      # records `mark:*`, which fires when an object-extended mark moves. The before-state is each touched file's
+      # seed bundle, the after-state the scan's merged table.
+      def mark_affected(paths, summary)
+        before = paths.map { |path| @seed_bundles.dig(path, :parameter_envelopes) }
+        after = [summary && summary[:def_index][:parameter_envelopes]]
+        moved = Incremental.changed_class_marks(before, after)
+        return Set.new if moved.empty?
+
+        keys = moved.map { |(class_name, _mark)| "mark:#{class_name.split('::').last}" }.uniq
+        extended = Scope::DiscoveryIndex::ENVELOPE_OBJECT_EXTENDED_MARK
+        keys << "mark:*" if moved.any? { |(_class_name, mark)| mark == extended }
+        Incremental.negative_closure(keys, @negative_dependents)
       end
 
       # The negative keys a class-declaration diff fires: `class:<last segment>` for a class name, and (issue #1820)

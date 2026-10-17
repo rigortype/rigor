@@ -246,8 +246,10 @@ module Rigor
         end
 
         # A module some method body hands to `obj.extend` sits ahead of the object's class, so if it defines
-        # the name at all, that object answers with the module's definition.
+        # the name at all, that object answers with the module's definition. Every bucket is read, so the answer
+        # records `mark:*`, which an object-extended mark appearing or vanishing anywhere fires (issue #1833).
         def object_extension_may_shadow?
+          Analysis::DependencyRecorder.read_name(:mark, "*") if Analysis::DependencyRecorder.active?
           @scope.discovered_parameter_envelopes.any? do |_name, bucket|
             bucket.key?(Scope::DiscoveryIndex::ENVELOPE_OBJECT_EXTENDED_MARK) && bucket.key?([:instance, @method_name])
           end

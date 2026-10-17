@@ -311,7 +311,7 @@ module Rigor
       def affected_closure(changed, added, removed, param_files = Set.new, param_pairs = Set.new)
         return whole_project_closure(changed, added) if source_rbs_gate.moved?(@seed_bundles, changed, added, removed)
 
-        gated_closure(changed, added, removed, param_files, param_pairs)
+        (gated_closure(changed, added, removed, param_files, param_pairs) | plugin_read_affected).freeze
       end
 
       # {#affected_closure} for an edit whose synthesized RBS is byte-identical in every file it touched.
@@ -352,7 +352,7 @@ module Rigor
                   negative_affected(scan, removed, new_fps, new_class_decls, new_constant_decls, summary)
         closure = param_seed_closure(closure, param_files)
         removed.each { |path| closure |= @dependents[path] || Set.new }
-        (closure | plugin_read_affected).freeze
+        closure.freeze
       end
 
       # Issue #1553 — every analysed file whose last analysis made a plugin read that no longer validates: a file
@@ -938,7 +938,7 @@ module Rigor
         restore_structural_declarations(payload)
         @return_summaries  = payload.return_summaries || {}
         @param_table       = payload.param_table || {} # ADR-67 WD6c lift — the seeds the cache was built under.
-        @plugin_reads      = payload.plugin_reads || {} # Issue #1553.
+        @plugin_reads      = payload.plugin_reads # Issue #1553 — `{}` in a payload built without it.
         # Issues #796 / #794 — absent (nil) in a snapshot written before schema 22 is impossible (the SCHEMA
         # gate rejects one), so nil here means the writing run genuinely had nothing to say.
         @run_level_rows    = payload.run_level_rows

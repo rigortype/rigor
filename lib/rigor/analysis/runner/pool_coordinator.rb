@@ -197,13 +197,17 @@ module Rigor
             if pool_mode?
               dispatch_pool(files, source_files: source_files)
             else
-              analyze_files_sequentially(
-                files, environment || resolve_sequential_environment(source_files: source_files)
-              )
+              environment ||= resolve_sequential_environment(source_files: source_files)
+              analyze_files_sequentially(files, environment)
             end
           # Issues #796 / #794 — a narrowed run's own demand set is a SUBSET of the full run's, so the two
-          # rows below are folded in after it, whichever backend produced the per-file stream.
-          replayed_restored_run_level_rows?(closure: files)
+          # rows below are folded in after it, whichever backend produced the per-file stream. Issue #1929 —
+          # the sequential run's environment re-derives a stale replayed failure; a pool run has none on
+          # this side and resolves one only when a stale failure needs it.
+          redemand_env = lambda do
+            environment ||= resolve_sequential_environment(source_files: source_files)
+          end
+          replayed_restored_run_level_rows?(closure: files, redemand_env: redemand_env)
           result
         end
 
@@ -319,16 +323,44 @@ module Rigor
         # of its own — and so no environment.
         #
         # @param closure — the files this run analyses; see {#stale_replayed_failure?}.
-        def replayed_restored_run_level_rows?(closure: nil)
+        # @param redemand_env — resolves the environment {#redemand_stale_failures} re-derives a stale
+        #   failure in; nil (the empty closure, which has no stale failure) re-derives nothing.
+        def replayed_restored_run_level_rows?(closure: nil, redemand_env: nil)
           rows = @restored_run_level_rows
           return false if rows.nil?
 
-          replayable = Array(rows.definition_build_failures).reject do |failure|
+          stale, replayable = Array(rows.definition_build_failures).partition do |failure|
             stale_replayed_failure?(failure, closure)
           end
           record_definition_build_failures(replayable)
+          redemand_stale_failures(stale, redemand_env)
           record_hkt_scan_failure(rows.hkt_scan_failure)
           true
+        end
+
+        # Issue #1929 — a stale replayed failure is RE-DERIVED, not dropped. Dropping it was right for the
+        # class whose collision the edit removed, and wrong for every class the edit left failing: the file
+        # that demanded such a class usually sits outside the recheck's closure (the edited file only
+        # contributes a conflicting buffer, such as a missing superclass every subclass inherits), so
+        # nothing in the recheck asks for it again, and the row lost classes a cold run reports. The class
+        # is asked for again in this run's environment ({Environment::RbsLoader#redemand_definition}), so
+        # it is reported exactly when it still fails, with the tuple the current signatures give it.
+        #
+        # A class this run's own analysis already reported is skipped; its tuple is current. The residue:
+        # a class whose only demand was in an edited file that no longer makes it, and which still fails,
+        # stays reported until a full run. The failure itself is real, unlike the dropped-collision case
+        # this replaced.
+        def redemand_stale_failures(stale, redemand_env)
+          return if stale.empty? || redemand_env.nil?
+
+          reported = @snapshots.definition_build_failures.to_set(&:first)
+          pending = stale.map(&:first).reject { |name| reported.include?(name) }
+          return if pending.empty?
+
+          loader = redemand_env.call&.rbs_loader
+          return if loader.nil?
+
+          record_definition_build_failures(pending.filter_map { |name| loader.redemand_definition(name) })
         end
 
         # A replayed definition-build failure the snapshot's own fingerprint cannot vouch for. The
@@ -340,11 +372,9 @@ module Rigor
         # closure, its analysis demands nothing that would re-derive the row, and the run reports a
         # collision between files that no longer collide.
         #
-        # The narrowed run cannot re-derive the row either (#696 forbids Rigor demanding a definition the
-        # analysis did not), so the honest answer is to DROP it and under-report rather than assert a
-        # diagnostic on a program that may now be correct — false positives outrank worst-case reading. The
-        # cost is bounded to the row's own conflicting buffers: a collision between two files neither of
-        # which this run touches still replays.
+        # Such a failure is not replayed as it stands; {#redemand_stale_failures} re-derives it instead
+        # (#1929), so the row asserts no collision the current signatures do not have. A failure whose
+        # buffers name no file this run touches still replays.
         def stale_replayed_failure?(failure, closure)
           return false if closure.nil?
 

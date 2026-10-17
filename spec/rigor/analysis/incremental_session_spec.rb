@@ -3553,6 +3553,91 @@ end
       end
     end
 
+    # Issue #1929 — `helper.rb` declares `Base < Missing` inline, so `Base` and its `sig/` subclass `Child`
+    # both fail with a tuple naming `helper.rb`'s virtual buffer. Only `user.rb` demands `Child`. A recheck
+    # after a comment edit to `helper.rb` analyses `helper.rb` alone, finds both replayed tuples stale, and
+    # used to drop them; its own analysis re-demanded `Base` but not `Child`, so `Child` left the row.
+    def write_missing_superclass_fixture(dir)
+      FileUtils.mkdir_p(File.join(dir, "sig"))
+      File.write(File.join(dir, "helper.rb"), "class Base < Missing\n  #: () -> Integer\n  def bar = 1\nend\n")
+      File.write(File.join(dir, "sig", "child.rbs"), "class Child < Base\n  def foo: () -> Integer\nend\n")
+      File.write(File.join(dir, "user.rb"), "Child.new.foo\n")
+    end
+
+    def inline_sig_config(dir)
+      Rigor::Configuration.new(
+        "paths" => [dir], "signature_paths" => [File.join(dir, "sig")],
+        "plugins" => [{ "gem" => "rigor-rbs-inline", "id" => "rbs-inline",
+                        "config" => { "require_magic_comment" => false } }]
+      )
+    end
+
+    def inline_session(config, dir, cache_root, workers: 0)
+      store = cache_root && Rigor::Cache::Store.new(root: cache_root)
+      described_class.new(configuration: config, paths: [dir], cache_store: store, workers: workers,
+                          plugin_requirer: inline_requirer)
+    end
+
+    [0, 2].each do |workers|
+      it "keeps a still-failing class after editing the inline source its tuple names (#1929, workers: #{workers})" do
+        Dir.mktmpdir do |dir|
+          write_missing_superclass_fixture(dir)
+          config = inline_sig_config(dir)
+          cache_root = File.join(dir, ".rigor", "cache")
+          snapshot = Rigor::Cache::IncrementalSnapshot.new(root: cache_root)
+          run = lambda do
+            guarded_run_incremental(inline_session(config, dir, cache_root, workers: workers),
+                                    snapshot: snapshot, fingerprint: fingerprint(config, dir))
+          end
+
+          cold, = run.call
+          File.write(File.join(dir, "helper.rb"), "# edited\n", mode: "a")
+          edited, warm = run.call
+          full = inline_full_run(config)
+
+          expect(warm).to be(true)
+          expect(definition_rows(cold).first).to include("failed to build: Base, Child.")
+          expect([definition_rows(edited), definition_rows(full)]).to eq([definition_rows(cold)] * 2)
+        end
+      end
+    end
+
+    it "agrees with the full-run oracle on a --verify-incremental partition of the edited source (#1929)" do
+      Dir.mktmpdir do |dir|
+        write_missing_superclass_fixture(dir)
+        config = inline_sig_config(dir)
+        session = inline_session(config, dir, nil)
+        guarded_baseline(session)
+
+        partition = guarded_reanalyze_subset(session, [File.join(dir, "helper.rb")])
+        full = inline_full_run(config)
+
+        expect(definition_rows(full).first).to include("failed to build: Base, Child.")
+        expect(definition_rows(partition)).to eq(definition_rows(full))
+      end
+    end
+
+    it "drops the stale classes once the edit gives the inline source a resolvable superclass (#1929)" do
+      Dir.mktmpdir do |dir|
+        write_missing_superclass_fixture(dir)
+        config = inline_sig_config(dir)
+        cache_root = File.join(dir, ".rigor", "cache")
+        snapshot = Rigor::Cache::IncrementalSnapshot.new(root: cache_root)
+        run = lambda do
+          guarded_run_incremental(inline_session(config, dir, cache_root),
+                                  snapshot: snapshot, fingerprint: fingerprint(config, dir))
+        end
+
+        run.call
+        File.write(File.join(dir, "helper.rb"), "class Base\n  #: () -> Integer\n  def bar = 1\nend\n")
+        fixed, warm = run.call
+
+        expect(warm).to be(true)
+        expect(definition_rows(fixed)).to be_empty
+        expect(definition_rows(inline_full_run(config))).to be_empty
+      end
+    end
+
     context "when the HKT registry scan raises (#794)" do
       before do
         allow(Rigor::Inference::HktRegistry).to receive(:scan_rbs_loader).and_raise(NameError, "simulated scan bug")

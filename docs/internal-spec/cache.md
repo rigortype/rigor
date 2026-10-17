@@ -1276,12 +1276,20 @@ Exactly two live here, and the list is closed:
   Digesting the third would mean running every synthesizer over every source file, which
   is an environment build in all but name — and the fingerprint exists to gate the
   snapshot load BEFORE one. So a duplicate declaration can be removed from a `.rb` file
-  without moving the fingerprint, and a replayed row would outlive its cause. The replay
-  therefore DROPS any entry whose conflicting buffers name a `virtual:` buffer of a file
-  in this run's closure (`PoolCoordinator#stale_replayed_failure?`): the edited file is
-  exactly the one whose contribution may no longer collide, this run cannot re-derive the
-  row (#696 forbids the demand), and under-reporting beats asserting a diagnostic on a
-  program that may now be correct.
+  without moving the fingerprint, and a replayed row would outlive its cause. An entry
+  whose conflicting buffers name a `virtual:` buffer of a file in this run's closure
+  (`PoolCoordinator#stale_replayed_failure?`) is therefore not replayed as it stands but
+  RE-DERIVED ([#1929](https://github.com/rigortype/rigor/issues/1929)): unless this run's
+  own analysis already reported the class, `PoolCoordinator#redemand_stale_failures` asks
+  for its definition again in this run's environment (`RbsLoader#redemand_definition`,
+  both sides), and reports it, with its current tuple, exactly when it still fails. That
+  demand stands in for the previous full run's analysis, which made it; it is not a new
+  Rigor-owned demand in #696's sense. A pooled run has no coordinator-side environment
+  after dispatch and resolves one only when a stale entry needs it. Dropping the entry
+  instead, as #796 did, lost every class the edit left failing whose demanding file sat
+  outside the closure — a missing superclass in the edited file fails every subclass, and
+  the subclasses' demands live elsewhere — so a warm row listed fewer classes than a cold
+  one.
 
   [#997](https://github.com/rigortype/rigor/issues/997) added a fifth element to each
   per-class tuple — `unresolved_type_name_detail`, `nil` for every failure kind but
@@ -1327,22 +1335,16 @@ run. Three residuals stand, stated plainly:
    still reports. Nothing in the fingerprint moved. This is the price of #796's option 1
    — the alternative (replaying the prior demand SET against a freshly resolved
    environment) buys the same answer for exactly the cost this section exists to avoid.
-2. **A virtual-RBS change outside the closure drop.** The drop above covers the shape
-   that matters (the collision is fixed in a file the run analyses) and the fingerprint
+2. **A virtual-RBS change outside the closure re-derivation.** The re-derivation above
+   covers the shape that matters (the edit is in a file the run analyses) and the fingerprint
    covers `sig:`; what neither covers is a virtual-RBS edit that changes the row without
    touching a named conflicting buffer, or the `hkt_scan_failure` tuple, which names no
    buffers at all. Both survive until a full run.
-3. **The drop itself under-reports, and the loss persists.** A collision between two
-   virtual buffers, one of which this run's closure contains, loses its row rather than
-   risking a false positive — and because `absorb` persists the reduced set, every
-   warm run thereafter keeps losing it until the fingerprint next moves (`sig:`, a
-   lockfile, the configuration, the engine) or the cache is wiped; a `--no-cache` run
-   reports the row but does not rewrite the snapshot, and `--verify-incremental` says
-   OK, since it never reads the snapshot. The shape that reaches it is a virtual buffer
-   with no demanding Ruby behind it (an embedded `# @rbs!` block, or a synthesizer other
-   than rbs-inline): a `#:`-annotated class body re-demands its own definition on every
-   run and never loses the row. A false negative, not a false positive, and the answer
-   master gave on the edit run before #796; the durable half is the price of option 1.
+3. **A re-derived class whose demand left with the edit.** A stale entry is re-derived
+   without knowing which file demanded it. When the only demand was in the edited file and
+   the edit removed it while the class still fails, the recheck keeps reporting the class
+   and a full run does not — residual 1's shape, reached by an edit instead of a deletion.
+   The failure is real; only the demand is stale.
 
 `--verify-incremental` does not bind any of this: `IncrementalSession#reanalyze_subset`
 replays the rows off the SAME process's freshly computed baseline, so it verifies the

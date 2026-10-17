@@ -1917,6 +1917,25 @@ module Rigor
         (@state[:definition_build_failures] || []).dup.freeze
       end
 
+      # Issue #1929 — re-ask for `class_name`'s definition on behalf of a PREVIOUS run's analysis, which
+      # demanded it and found it failing. An `--incremental` recheck replays that run's failures, and one
+      # whose conflicting buffer is a file the recheck re-synthesized cannot be replayed as it stands (the
+      # edit may have fixed it), while the file that demanded the class may sit outside the recheck's
+      # closure and never ask again. Re-asking here re-derives the answer over the current signatures: a
+      # class that still fails is reported with its current tuple, one that now builds is not.
+      #
+      # A real demand, not {#during_internal_demand}: it stands in for the analysis's own, which is what
+      # #696 binds the reported set to. Both sides are asked, since the replayed tuple does not record which
+      # side the analysis demanded ({#report_definition_build_failure} builds both anyway).
+      #
+      # @return the class's current tuple, or nil when it now builds.
+      def redemand_definition(class_name)
+        key = class_name.to_s.delete_prefix("::")
+        instance_definition(key)
+        singleton_definition(key)
+        definition_build_failures.find { |failure| failure.first == key }
+      end
+
       # Virtual (inline-synthesized) contributions dropped by the collision quarantine
       # ({.resolve_quarantining_virtual_collisions}): buffer names absent from the built env even though the
       # entry's content is non-empty and parses (a parse failure is the synthesizer's own WD6 skip, reported

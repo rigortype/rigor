@@ -9,6 +9,7 @@ require "zlib"
 
 require_relative "../version"
 require_relative "descriptor"
+require_relative "../rooted_glob"
 
 module Rigor
   module Cache
@@ -176,7 +177,7 @@ module Rigor
           subdir = File.join(root, child)
           next nil unless File.directory?(subdir)
 
-          entries = Dir.glob(File.join(subdir, "**", "*.entry"))
+          entries = RootedGlob.glob(subdir, "**/*.entry")
           next nil if entries.empty?
 
           { id: child, entries: entries.size, bytes: entries.sum { |e| File.size(e) } }
@@ -709,7 +710,7 @@ module Rigor
 
       def cleanup_stale_temp_files
         cutoff = Time.now - STALE_TEMP_FILE_AGE_SECONDS
-        Dir.glob(File.join(@root, "**", "*.tmp.*")).each do |path|
+        RootedGlob.glob(@root, "**/*.tmp.*").each do |path|
           next unless File.file?(path)
           next if File.mtime(path) > cutoff
 
@@ -771,7 +772,7 @@ module Rigor
       # Returns an array of `{ path:, producer:, mtime:, bytes: }` hashes for every `.entry` file under the
       # cache root, skipping unreadable entries.
       def collect_entry_stats
-        Dir.glob(File.join(@root, "**", "*.entry")).filter_map do |path|
+        RootedGlob.glob(@root, "**/*.entry").filter_map do |path|
           stat = File.stat(path)
           producer = producer_id_for_entry(path)
           next nil if producer.nil?

@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "lockfile_resolver"
+require_relative "../rooted_glob"
 
 module Rigor
   class Environment
@@ -47,7 +48,7 @@ module Rigor
         base = Pathname.new(bundle_path)
         return {} unless base.directory?
 
-        Dir.glob(base.join("ruby", "*", "gems", "*")).each_with_object({}) do |dir, acc|
+        RootedGlob.glob(base, "ruby/*/gems/*").each_with_object({}) do |dir, acc|
           name, version, platform = split_install_dirname(File.basename(dir))
           next unless name
 

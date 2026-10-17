@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "../rooted_glob"
+
 module Rigor
   class CLI
     # Base class for the `rigor <subcommand>` command objects.
@@ -26,7 +28,7 @@ module Rigor
         paths = []
         args.each do |arg|
           if File.directory?(arg)
-            paths.concat(Dir.glob(File.join(arg, "**/*.rb")))
+            paths.concat(RootedGlob.glob(arg, "**/*.rb"))
           elsif File.file?(arg)
             paths << arg
           else

@@ -13,6 +13,7 @@ require_relative "../cache/engine_source"
 # plugin class body can be evaluated before anything else pulled the cache layer in.
 require_relative "../cache/store"
 require_relative "../source/node_walker"
+require_relative "../rooted_glob"
 
 module Rigor
   module Plugin
@@ -1163,7 +1164,7 @@ module Rigor
           absolute = File.absolute_path(root.to_s)
           next [] unless File.directory?(absolute)
 
-          patterns.flat_map { |pattern| Dir.glob(File.join(absolute, pattern.to_s)) }
+          patterns.flat_map { |pattern| RootedGlob.glob(absolute, pattern) }
         end
         matched.uniq.sort.select { |path| File.file?(path) }
       end

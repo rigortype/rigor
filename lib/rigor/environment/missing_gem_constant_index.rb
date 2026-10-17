@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "prism"
+require_relative "../rooted_glob"
 
 module Rigor
   class Environment
@@ -71,7 +72,7 @@ module Rigor
         base = Pathname.new(bundle_path)
         return {} unless base.directory?
 
-        Dir.glob(base.join("ruby", "*", "gems", "*")).each_with_object({}) do |dir, acc|
+        RootedGlob.glob(base, "ruby/*/gems/*").each_with_object({}) do |dir, acc|
           acc[File.basename(dir)] ||= dir
         end
       end
@@ -114,7 +115,7 @@ module Rigor
         base = Pathname.new(bundle_path)
         return {} unless base.directory?
 
-        Dir.glob(base.join("ruby", "*", "bundler", "gems", "*")).each_with_object({}) do |dir, acc|
+        RootedGlob.glob(base, "ruby/*/bundler/gems/*").each_with_object({}) do |dir, acc|
           name = gemspec_gem_name(dir)
           acc[name] ||= dir if name
         end
@@ -124,7 +125,7 @@ module Rigor
       # exactly one. Bundler requires a git-sourced gem to ship one, so "not exactly one" means this is not
       # the shape we think it is — and a guess from the directory basename is what this exists to avoid.
       def gemspec_gem_name(dir)
-        specs = Dir.glob(File.join(dir, "*.gemspec"))
+        specs = RootedGlob.glob(dir, "*.gemspec")
         return nil unless specs.size == 1
 
         File.basename(specs.first, ".gemspec")

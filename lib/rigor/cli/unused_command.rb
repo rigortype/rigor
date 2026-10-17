@@ -15,6 +15,7 @@ require_relative "../cache/store"
 require_relative "options"
 require_relative "command"
 require_relative "../project_environment"
+require_relative "../rooted_glob"
 
 module Rigor
   class CLI
@@ -291,7 +292,7 @@ module Rigor
         Array(configuration.signature_paths).flat_map do |dir|
           next [] unless File.directory?(dir)
 
-          Dir.glob(File.join(dir, "**/*.rbs")).flat_map { |file| Analysis::Reachability::SignatureScan.call(file) }
+          RootedGlob.glob(dir, "**/*.rbs").flat_map { |file| Analysis::Reachability::SignatureScan.call(file) }
         end
       end
 

@@ -820,6 +820,22 @@ RSpec.describe Rigor::Configuration do
         expect(configuration.pre_eval.size).to eq(1)
       end
     end
+
+    # #1956 — the config file's directory is joined in front of a relative entry, and its own `[` / `{` were read
+    # as glob syntax.
+    it "reads the config directory literally when it holds glob metacharacters" do
+      Dir.mktmpdir do |tmp|
+        dir = File.join(tmp, "ds [x]{a}")
+        FileUtils.mkdir_p(File.join(dir, "lib", "core_ext"))
+        File.write(File.join(dir, "lib", "core_ext", "string_ext.rb"), "class String; end\n")
+        File.write(File.join(dir, "lib", "patch.rb"), "# noop\n")
+        config_path = File.join(dir, ".rigor.yml")
+        File.write(config_path, "pre_eval:\n  - lib/core_ext/**/*.rb\n  - lib/patch.rb\n")
+
+        expect(described_class.load(config_path).pre_eval)
+          .to eq([File.join(dir, "lib", "core_ext", "string_ext.rb"), File.join(dir, "lib", "patch.rb")])
+      end
+    end
   end
 
   describe ".discover" do

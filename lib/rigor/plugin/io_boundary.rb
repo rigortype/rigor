@@ -3,6 +3,7 @@
 require "digest"
 
 require_relative "access_denied_error"
+require_relative "../rooted_glob"
 
 module Rigor
   module Plugin
@@ -189,7 +190,7 @@ module Rigor
       # @return the absolute paths directly under `path` in `Dir.glob` order; empty when not a directory
       def list_directory(path)
         absolute = File.absolute_path(path.to_s)
-        entries = Dir.glob(File.join(absolute, "*"))
+        entries = RootedGlob.glob(absolute, "*")
         unless @policy.allow_read?(absolute)
           record_refusal(absolute)
           return entries
@@ -212,6 +213,10 @@ module Rigor
       # The last two are refused outright because `Dir.glob` can spell `..` with them. Out of policy, `root` is
       # globbed truthfully and contributes no row, as in {#list_directory}.
       #
+      # `root` is read literally (#1959): the pattern is globbed against `base: root`, so a root spelled with
+      # glob metacharacters (`fx[1]`, a directory named `{..,zz}`) neither matches a sibling nor leaves itself.
+      # {#list_directory} lists the same way, and {Cache::Descriptor::GlobEntry} re-globs the row the same way.
+      #
       # @param root — project directory; relative paths expand against the working directory
       # @param pattern — a `Dir.glob` pattern relative to `root`, such as `"ext/**/extconf.rb"`
       # @return the absolute matching paths in `Dir.glob` order
@@ -227,7 +232,7 @@ module Rigor
           )
         end
 
-        entries = Dir.glob(File.join(absolute, pattern))
+        entries = RootedGlob.glob(absolute, pattern)
         unless @policy.allow_read?(absolute)
           record_refusal(absolute)
           return entries

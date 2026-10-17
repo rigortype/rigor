@@ -116,7 +116,7 @@ module Rigor
               absolute = File.expand_path(root)
               next [] unless @io_boundary.directory?(absolute)
 
-              Dir.glob(File.join(absolute, "**", "*.rb"))
+              Dir.glob("**/*.rb", base: absolute).map { |path| File.join(absolute, path) }
             end
           end
 

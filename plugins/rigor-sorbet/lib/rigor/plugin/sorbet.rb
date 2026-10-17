@@ -504,8 +504,8 @@ module Rigor
             # must not vary by machine / run. `Dir.glob` sorts its results by default on Ruby 3.0+, so the fold
             # order is already stable (the slice-1 comment's "filesystem order" caveat predates that default);
             # this walk relies on it rather than re-sorting.
-            Dir.glob(File.join(absolute, "**", "*#{ext}")).each do |path|
-              harvest_file(canonicalize(path), catalog, sigil_by_path, parse_errors_by_path)
+            Dir.glob("**/*#{ext}", base: absolute).each do |relative|
+              harvest_file(canonicalize(File.join(absolute, relative)), catalog, sigil_by_path, parse_errors_by_path)
             end
           end
         elsif io_boundary.file?(absolute) && extensions.any? { |ext| absolute.end_with?(ext) }

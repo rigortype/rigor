@@ -150,7 +150,7 @@ module Rigor
         # (immediately superseded) presence row.
         def config_files(io_boundary, root)
           application = File.join(root, CONFIG_PATHS.first)
-          environments = Dir.glob(File.join(root, CONFIG_PATHS.last, "*.rb"))
+          environments = Dir.glob("#{CONFIG_PATHS.last}/*.rb", base: root).map { |path| File.join(root, path) }
           ([application] + environments).select { |path| io_boundary.file?(path) }
         rescue StandardError
           []

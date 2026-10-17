@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "yaml"
+require_relative "../../rooted_glob"
 
 module Rigor
   module Inference
@@ -49,7 +50,7 @@ module Rigor
         end
 
         # Every catalogue file under {DATA_ROOT}, in a stable order.
-        def self.topic_paths = Dir[File.join(DATA_ROOT, "*.yml")]
+        def self.topic_paths = RootedGlob.glob(DATA_ROOT, "*.yml")
 
         def initialize(path:, mutating_selectors: {})
           @path = path

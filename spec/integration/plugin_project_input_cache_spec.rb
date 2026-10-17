@@ -118,6 +118,22 @@ RSpec.describe "run-result caches over a plugin's own project inputs (#1803)" do
         expect_both_caches_to_match_cold("b.rb call.undefined-method")
       end
     end
+
+    # #1959 — the walk's row re-globs its root on every validation; a root spelled with glob metacharacters matched
+    # nothing there, so the row never moved.
+    context "with a project path holding glob metacharacters" do
+      around do |example|
+        FileUtils.mkdir_p("ffi [x]{a}")
+        Dir.chdir("ffi [x]{a}") { example.run }
+      end
+
+      it "drops both run-result caches once an excluded file attaches a function" do
+        prime
+        File.write("lib/gen/a.rb", "module L\n  attach_function :foo, [], :int\nend\n")
+
+        expect_both_caches_to_match_cold("b.rb call.undefined-method")
+      end
+    end
   end
 
   # rigor-dry-validation refines a Contract's `params` block through rigor-dry-schema's walker, so its

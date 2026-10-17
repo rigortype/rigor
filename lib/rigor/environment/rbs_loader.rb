@@ -10,6 +10,7 @@ require_relative "member_consistency"
 require_relative "required_features"
 require_relative "gated_signature_guard"
 require_relative "gated_signature_plan"
+require_relative "../rooted_glob"
 
 module Rigor
   class Environment
@@ -549,7 +550,7 @@ module Rigor
             path = Pathname(path) unless path.is_a?(Pathname)
             next [] unless path.directory?
 
-            Dir.glob(path.join("**", "*.rbs")).map { |p| File.expand_path(p) }
+            RootedGlob.glob(path, "**/*.rbs").map { |p| File.expand_path(p) }
           end.to_set
         end
 

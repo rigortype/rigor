@@ -7,6 +7,7 @@ require_relative "../incremental_run_slot"
 require_relative "../dependency_source_inference/gem_resolver"
 require_relative "../../cache/file_digest"
 require_relative "../../cache/incremental_snapshot"
+require_relative "../../rooted_glob"
 
 module Rigor
   module Analysis
@@ -254,8 +255,8 @@ module Rigor
 
         def globs_unchanged?(entries, strict:)
           entries.none? do |entry|
-            listed = Dir.glob(File.join(entry.root, File.dirname(entry.pattern), ""))
-            matched = entry.mode == :stat ? Dir.glob(File.join(entry.root, entry.pattern)) : []
+            listed = RootedGlob.glob(entry.root, File.join(File.dirname(entry.pattern), ""))
+            matched = entry.mode == :stat ? RootedGlob.glob(entry.root, entry.pattern) : []
             (listed + matched).any? { |path| changed?(path, strict: strict) }
           end
         end

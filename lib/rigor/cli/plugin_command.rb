@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "command"
+require_relative "../rooted_glob"
 
 module Rigor
   class CLI
@@ -204,7 +205,7 @@ module Rigor
         candidate = File.join(dir, "lib", "#{plugin.fetch(:name)}.rb")
         return candidate if File.file?(candidate)
 
-        Dir.glob(File.join(dir, "lib", "*.rb")).min
+        RootedGlob.glob(dir, "lib/*.rb").min
       end
 
       def docker_note

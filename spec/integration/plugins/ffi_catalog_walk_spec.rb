@@ -41,6 +41,38 @@ RSpec.describe "rigor-ffi catalog walk (#1803)" do
     expect(walk).to include(File.join(root, "lib/sub/d.rb"), File.join(root, "dir.rb"))
   end
 
+  # #1956 — the `vendor/` skip reads the path under the root: matching `/vendor/` in the absolute path emptied the
+  # catalog of every project that lives under some `…/vendor/…` directory.
+  context "with a project root under a `vendor` directory" do
+    let(:project) { File.join(root, "vendor", "proj") }
+    let(:declaration) { "module L\n  extend FFI::Library\n  attach_function :foo, [], :int\nend\n" }
+
+    def catalog
+      Rigor::Plugin::FFI::Discoverer.discover(root: project, io: boundary)
+    end
+
+    it "catalogs the project's own files" do
+      write("vendor/proj/lib/a.rb", declaration)
+
+      expect(catalog.functions.keys.map(&:to_s)).to eq(["foo"])
+    end
+
+    it "still skips the project's own vendor/ directory (guard)" do
+      write("vendor/proj/vendor/bundle/a.rb", declaration)
+
+      expect(catalog.functions).to be_empty
+    end
+  end
+
+  # #1959 — the walk globs relative to the root, so a root spelled with glob metacharacters is read literally.
+  it "walks a root named `fx[1]` and not its sibling `fx1`" do
+    write("fx1/sibling.rb")
+    write("fx[1]/own.rb")
+    walk = Rigor::Plugin::FFI::Discoverer.new(root: File.join(root, "fx[1]"), io: boundary).send(:ruby_files)
+
+    expect(walk).to eq([File.join(root, "fx[1]", "own.rb")])
+  end
+
   context "with a primed walk" do
     before do
       write("lib/a.rb")

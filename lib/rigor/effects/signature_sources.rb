@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "../rooted_glob"
+
 module Rigor
   module Effects
     # Everything an effect envelope may be written in, as `[buffer name, RBS source]` pairs
@@ -55,7 +57,7 @@ module Rigor
       # @param signature_paths — the configured roots; empty / nil takes the default.
       # @param virtual_rbs — the loader's virtual entries.
       def collect(signature_paths:, virtual_rbs: nil)
-        files = roots(signature_paths).flat_map { |root| Dir.glob(File.join(root.to_s, "**", "*.rbs")).sort }
+        files = roots(signature_paths).flat_map { |root| RootedGlob.glob(root, "**/*.rbs").sort }
         sources = files.filter_map do |path|
           [path, File.read(path)]
         rescue StandardError

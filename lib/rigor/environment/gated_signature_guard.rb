@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "rbs"
+require_relative "../rooted_glob"
 
 module Rigor
   class Environment
@@ -15,7 +16,7 @@ module Rigor
       # @param dir — the vendored directory (Pathname).
       # @return the absolute-less names (`"Prime::PseudoPrimeGenerator"`) of every class and module it declares.
       def type_names(dir)
-        Dir.glob(File.join(dir.to_s, "*.rbs")).flat_map do |file|
+        RootedGlob.glob(dir, "*.rbs").flat_map do |file|
           _, _, decls = RBS::Parser.parse_signature(File.read(file))
           names(decls, nil)
         rescue RBS::BaseError, SystemCallError

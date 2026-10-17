@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "box"
+require_relative "../rooted_glob"
 
 module Rigor
   module Plugin
@@ -74,8 +75,8 @@ module Rigor
       # requiring the gem, which is what the caller is about to do.
       def bundle_require_paths(bundle_root)
         bundle_gem_dirs(bundle_root).flat_map do |gem_home|
-          specs = Dir.glob(File.join(gem_home, "specifications", "*.gemspec"))
-                     .filter_map { |file| Gem::Specification.load(file) }
+          specs = RootedGlob.glob(gem_home, "specifications/*.gemspec")
+                            .filter_map { |file| Gem::Specification.load(file) }
           specs.group_by(&:name)
                .flat_map { |_, versions| versions.max_by(&:version).full_require_paths }
         end
@@ -88,7 +89,7 @@ module Rigor
         return [] if bundle_root.nil? || bundle_root.to_s.empty?
 
         root = bundle_root.to_s
-        (Dir.glob(File.join(root, "ruby", "*")) + [root])
+        (RootedGlob.glob(root, "ruby/*") + [root])
           .select { |dir| File.directory?(File.join(dir, "specifications")) }
       end
 

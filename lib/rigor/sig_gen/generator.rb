@@ -25,6 +25,7 @@ require_relative "inline_declarations"
 require_relative "layout_index"
 require_relative "method_candidate"
 require_relative "writer"
+require_relative "../rooted_glob"
 
 module Rigor
   module SigGen
@@ -447,7 +448,7 @@ module Rigor
       def resolve_paths(args)
         args.flat_map do |arg|
           if File.directory?(arg)
-            Dir.glob(File.join(arg, "**/*.rb"), sort: true)
+            RootedGlob.glob(arg, "**/*.rb")
           elsif File.file?(arg) && arg.end_with?(".rb")
             [arg]
           else

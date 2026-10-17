@@ -54,7 +54,7 @@ module Rigor
             if @io_boundary.file?(absolute)
               [absolute]
             elsif @io_boundary.directory?(absolute)
-              Dir.glob(File.join(absolute, "**", "*.rb"))
+              Dir.glob("**/*.rb", base: absolute).map { |path| File.join(absolute, path) }
             else
               []
             end

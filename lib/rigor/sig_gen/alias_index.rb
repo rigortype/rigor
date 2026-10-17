@@ -2,6 +2,7 @@
 
 require_relative "../inference/rbs_type_translator"
 require_relative "type_elaborator"
+require_relative "../rooted_glob"
 
 module Rigor
   module SigGen
@@ -101,7 +102,7 @@ module Rigor
           dir = path.is_a?(Pathname) ? path : Pathname(path.to_s)
           next [] unless dir.directory?
 
-          Dir.glob(dir.join("**", "*.rbs").to_s).map { |p| File.expand_path(p) }
+          RootedGlob.glob(dir, "**/*.rbs").map { |p| File.expand_path(p) }
         end.to_set
       end
 

@@ -109,7 +109,7 @@ module Rigor
       def scannable_paths
         @scannable_paths ||= services.configuration.paths.flat_map do |entry|
           if io_boundary.directory?(entry)
-            Dir.glob(File.join(entry, "**", "*.rb"), sort: true)
+            Dir.glob("**/*.rb", base: entry).map { |path| File.join(entry, path) }
           elsif io_boundary.file?(entry) && entry.end_with?(".rb")
             [entry]
           else

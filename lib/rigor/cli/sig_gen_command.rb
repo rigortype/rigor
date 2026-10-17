@@ -321,15 +321,17 @@ module Rigor
         { paths: present, missing: missing }
       end
 
-      # A declared root that does not exist (or is not a directory or `.rb` file) is read as empty, so name it: `sig-gen` is the only command that reads
-      # the test roots, and without this the run looks exactly like one whose tests pass no typed arguments.
+      # A declared root that does not exist (or is not a directory or `.rb` file) is read as empty, so name it:
+      # `sig-gen` is the only command that reads the test roots, and without this the run looks exactly like one
+      # whose tests pass no typed arguments.
       def warn_missing_test_roots(observe_paths)
         missing = observe_paths.reject { |path| SigGen::ObservationCollector.readable_root?(path) }
         return if missing.empty?
 
         consequence = missing.size == observe_paths.size ? "; every parameter stays untyped" : ""
         @err.puts("rigor sig-gen: no call sites are observed from #{missing.map(&:inspect).join(', ')}, " \
-                  "which does not exist or is not a directory or `.rb` file#{consequence}. Check `test_paths:` or --observe=PATH.")
+                  "which does not exist or is not a directory or `.rb` file#{consequence}. " \
+                  "Check `test_paths:` or --observe=PATH.")
       end
 
       def warn_no_test_roots(configuration)

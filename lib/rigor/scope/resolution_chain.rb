@@ -440,6 +440,28 @@ module Rigor
         @entries[@level_starts[index]...finish]
       end
 
+      # Issue #1624 — whether the chain's last class has a superclass the tables cannot name, so ancestors the chain
+      # does not list follow it where a chain otherwise ends in the implicit `Object`: a superclass written as an
+      # expression (`class K < Struct.new(:a)`, `< Data.define(:a)`, `< Class.new(Base)`, `< pick_base`), which the
+      # superclass table records as `nil`, or a class a constant write creates (`K = Class.new(Base)`,
+      # `K = Struct.new(:a)`, `K = Data.define(:a)`), which has no superclass entry. The constructor's methods
+      # (`members`, the member readers, a block's `def`s) and everything it inherits live in that unlisted part.
+      # Every fact read here is filed under the last class's class edge, which a read reaching the tail has passed.
+      def opaque_tail?(scope)
+        @memo.fetch(:opaque_tail) do
+          last = level_count.positive? ? @level_classes[level_count - 1] : nil
+          @memo[:opaque_tail] = !last.nil? && ResolutionChain.opaque_superclass?(scope, last)
+        end
+      end
+
+      def self.opaque_superclass?(scope, name)
+        superclasses = scope.discovery.discovered_superclasses
+        return superclasses[name].nil? if superclasses.key?(name)
+
+        scope.discovery.discovered_parameter_envelopes[name]&.key?(DiscoveryIndex::ENVELOPE_META_SUPERCLASS_MARK) ||
+          !(scope.struct_member_layout(name) || scope.data_member_layout(name)).nil?
+      end
+
       # Each complete level up to the first superclass the project does not declare, as `[class_name,
       # modules, externals]`: the level's class, the project modules around it (each once), and the candidate
       # lists of the ancestors in it the project does not declare — the shape `call.wrong-arity` reads.

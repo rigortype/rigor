@@ -222,6 +222,27 @@ module Rigor
         key.is_a?(Symbol) || (key.is_a?(Array) && key.first == Scope::DiscoveryIndex::ENVELOPE_REMOVED_KIND)
       end
 
+      # Issue #1661 — the names of the classes and modules whose unpositioned mixin edges
+      # (`Scope::DiscoveryIndex#unpositioned_mixins`, `"*"` included) appeared or vanished in the files an edit
+      # touched. A file can taint a module it does not otherwise change the chain of (`module Comparable;
+      # include(*MODS); end`, `Comparable.include(x) if c`), and an external chain entry has no declaring file
+      # for a reader's edge to name. `before` and `after` are lists of `{class => {side => [names]}}` tables,
+      # diffed as unions like {changed_class_marks}. Returns a frozen Set of class names.
+      def changed_unpositioned_owners(before, after)
+        moved = unpositioned_edges(before) ^ unpositioned_edges(after)
+        moved.to_set { |(owner, _side, _name)| owner }.freeze
+      end
+
+      def unpositioned_edges(tables)
+        edges = Set.new
+        tables.each do |table|
+          table&.each do |owner, sides|
+            sides.each { |side, names| names.each { |name| edges << [owner, side, name].freeze } }
+          end
+        end
+        edges
+      end
+
       # Issue #644 — the qualified constant names whose PUBLICATION could have moved in this edit: the names
       # whose per-file census descriptor differs between the before- and after-state of any file in `paths`.
       # The value-constant twin of {appeared_classes}, and deliberately NOT its analogue — a class either

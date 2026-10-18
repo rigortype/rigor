@@ -1300,16 +1300,42 @@ module Rigor
       # reader that scans every bucket for an object-extended module (`SourceArity#object_extension_may_shadow?`)
       # records `mark:*`, which fires when an object-extended mark moves. The before-state is each touched file's
       # seed bundle, the after-state the scan's merged table.
+      #
+      # Issue #1661 — and `mixin:<qualified name>` for a class or module whose unpositioned mixin edges moved
+      # ({Incremental.changed_unpositioned_owners}): an external chain entry records it for each name it can denote
+      # (`ResolutionChain#record_hooks`), so a new file that taints `Comparable` with `include(*MODS)` re-checks the
+      # readers of a chain through it. It is not `mark:`, which a plain reopening of a module moves (the bucket's
+      # module mark) and which would re-check every reader of `Kernel` on any `module Kernel` reopening.
       def mark_affected(paths, summary)
+        def_index = summary && summary[:def_index]
         before = paths.map { |path| @seed_bundles.dig(path, :parameter_envelopes) }
-        after = [summary && summary[:def_index][:parameter_envelopes]]
-        moved = Incremental.changed_class_marks(before, after)
-        return Set.new if moved.empty?
+        moved = Incremental.changed_class_marks(before, [def_index && def_index[:parameter_envelopes]])
+        tainted = Incremental.changed_unpositioned_owners(
+          paths.map { |path| @seed_bundles.dig(path, :unpositioned_mixins) },
+          [def_index && def_index[:unpositioned_mixins]]
+        )
+        return Set.new if moved.empty? && tainted.empty?
 
         keys = moved.map { |(class_name, _mark)| "mark:#{class_name.split('::').last}" }.uniq
+        keys.concat(mixin_keys(tainted))
         extended = Scope::DiscoveryIndex::ENVELOPE_OBJECT_EXTENDED_MARK
         keys << "mark:*" if moved.any? { |(_class_name, mark)| mark == extended }
         Incremental.negative_closure(keys, @negative_dependents)
+      end
+
+      # Issue #1661 — the `mixin:` keys an owner of a moved unpositioned edge fires. The table keys a receiver-form
+      # owner by the spelling written (`class File; Constants.include(*MODS); end` is `"Constants"`), not the constant
+      # Ruby resolves it to, while the chain files the qualified candidate (`mixin:File::Constants`). The table does
+      # not carry the nesting, and every lexical-prefix candidate of the owner ends in `::<owner>`, so the owner fires
+      # its own key and every recorded `mixin:` key ending in `::<owner>`. A relative spelling over-fires to the
+      # readers of every module sharing its trailing segments; a qualified one fires only its suffix matches.
+      def mixin_keys(owners)
+        keys = owners.map { |name| "mixin:#{name}" }
+        suffixes = owners.map { |name| "::#{name}" }
+        @negative_dependents.each_key do |key|
+          keys << key if key.start_with?("mixin:") && suffixes.any? { |suffix| key.end_with?(suffix) }
+        end
+        keys.uniq
       end
 
       # The negative keys a class-declaration diff fires: `class:<last segment>` for a class name, and (issue #1820)

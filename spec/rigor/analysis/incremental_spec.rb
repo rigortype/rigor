@@ -127,6 +127,21 @@ RSpec.describe Rigor::Analysis::Incremental do
     end
   end
 
+  describe ".changed_unpositioned_owners" do
+    it "reports the owners whose unpositioned mixin edges moved on any side" do
+      before = [{ "Comparable" => { include: ["*"] }, "C" => { extend: ["M"] } }, nil]
+      after = [{ "C" => { extend: %w[M N] }, "D" => { include: ["P"] } }]
+
+      expect(described_class.changed_unpositioned_owners(before, after)).to eq(Set["Comparable", "C", "D"])
+    end
+
+    # Guard: the union diff, which no line removal on its own breaks.
+    it "reports nothing when an edge moves between two touched files" do
+      expect(described_class.changed_unpositioned_owners([{ "C" => { include: ["*"] } }, {}],
+                                                         [{ "C" => { include: ["*"] } }])).to eq(Set.new)
+    end
+  end
+
   describe ".negative_closure" do
     it "unions the negative-dependents of the satisfied keys" do
       negdeps = { "toplevel:helper" => Set["a.rb", "c.rb"], "method:Post#archive" => Set["d.rb"] }

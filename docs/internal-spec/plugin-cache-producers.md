@@ -291,7 +291,14 @@ directory and not a symlinked one, so a top-level `gen` that changes
 kind under the same name changes what it reads. It reads only regular
 files, and a symlink only where it resolves to one: a directory named
 `*.rb` is walked and not read, and a fifo, socket or device is not read at
-all ([#2113](https://github.com/rigortype/rigor/issues/2113)). `rigor-dry-schema`,
+all ([#2113](https://github.com/rigortype/rigor/issues/2113)). Known gap: a path that exists but is not a regular file (a fifo, a socket, a
+directory named `*.rb`, or a symlink to one of these) records no existence row,
+because `#file?` records nothing for a present non-file. A nested match is covered
+only by the `:names` row, a name-only membership fingerprint, so a nested fifo or
+empty directory that later becomes a regular file under the same name leaves the
+walk fresh, and a warm run keeps serving the catalog without that file's
+declarations. A top-level entry that changes kind is caught by the `:kinds` row,
+but a top-level symlink whose target changes kind is not. Follow-up issue to be filed. `rigor-dry-schema`,
 `rigor-dry-validation` and `rigor-graphql` listed their `paths:`
 directories with `Dir.glob`, so a new file that `exclude:` keeps
 out of analysis, and which they scan all the same, reached no cache

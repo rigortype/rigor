@@ -37,12 +37,17 @@ RSpec.describe "rigor-ffi catalog walk (#1803)" do
     %w[z.rb a.rb lib-x.rb lib/c.rb lib/sub/d.rb lib/b/e.rb dir.rb/f.rb app/vendor/g.rb vendor/bundle/h.rb
        real/r.rb .git/hooks/i.rb].each { |path| write(path) }
     File.symlink(File.join(root, "real"), File.join(root, "link"))
+    # #2113 — a top-level `*.rb` symlink is read only where it resolves to a regular file.
+    File.symlink(File.join(root, "z.rb"), File.join(root, "alias.rb"))
+    File.symlink(File.join(root, "real"), File.join(root, "x.rb"))
     # #2113 — a directory named `dir.rb` is walked, never read, so the expectation keeps regular files only.
     expected = Dir.glob(File.join(root, "**/*.rb")).reject { |p| p.include?("/vendor/") || p.include?("/.git/") }
                   .select { |p| File.file?(p) }
 
     expect(walk).to eq(expected)
-    expect(walk).to include(File.join(root, "lib/sub/d.rb"), File.join(root, "dir.rb/f.rb"))
+    expect(walk).to include(File.join(root, "lib/sub/d.rb"), File.join(root, "dir.rb/f.rb"),
+                            File.join(root, "alias.rb"))
+    expect(walk).not_to include(File.join(root, "x.rb"))
   end
 
   # #1956 — the `vendor/` skip reads the path under the root: matching `/vendor/` in the absolute path emptied the

@@ -190,6 +190,30 @@ module Rigor
 
         STRING_FOLD_BYTE_LIMIT = 4096
 
+        # #2115 — the numeric twin of `STRING_FOLD_BYTE_LIMIT`. A folded Integer (and each Integer part of a
+        # folded Rational / Complex) is at most this many bits, the largest bit length whose decimal
+        # rendering still fits in `STRING_FOLD_BYTE_LIMIT` digits: `2 ** 13_605` folds, `2 ** 13_606`
+        # (bit length 13_607) does not. Computing `2 ** 100_000_000` takes Ruby milliseconds, but
+        # rendering it in decimal — which describing, sorting and printing the `Constant` does — takes
+        # minutes. `**` / `pow` / `<<` / `>>` also check their operands before invoking, so the big value
+        # is never computed.
+        INTEGER_FOLD_BIT_LIMIT = (STRING_FOLD_BYTE_LIMIT * Math.log2(10)).floor
+
+        # #2115 — the most elements a fold walks out of a `Constant<Range>` receiver. A method that
+        # enumerates the range (`to_a`, `to_set`, `all?`, `include?` on a String range, …) declines when
+        # the range holds more elements, or is endless (`1..Float::INFINITY`); a method that reads only
+        # the endpoints (`RANGE_ENDPOINT_METHODS`) still folds whatever the range's size.
+        RANGE_ENUMERATION_LIMIT = 1024
+
+        # The `Range` methods whose CRuby body reads the endpoints without walking the elements, so they
+        # stay foldable on a range past `RANGE_ENUMERATION_LIMIT`. `include?` / `member?` join them on a
+        # numeric range, where CRuby answers them by `cover?`.
+        RANGE_ENDPOINT_METHODS = Set[
+          :begin, :end, :exclude_end?, :cover?, :===, :size, :to_s, :inspect, :==, :eql?, :hash
+        ].freeze
+        RANGE_COVER_METHODS = Set[:include?, :member?].freeze
+        private_constant :RANGE_ENDPOINT_METHODS, :RANGE_COVER_METHODS
+
         # Input cartesian product hard cap. Keeps fold cost bounded even when the receiver and argument are
         # both `Union[Constant…]`. 5 × 5 = 25 inputs is permitted; 6 × 6 = 36 is not. The user-facing payoff
         # (a precise small enum) drops off fast past this range and CRuby method invocation cost adds up.
@@ -649,45 +673,34 @@ module Rigor
         def range_constant_unary(range, method_name)
           case method_name
           when :to_a, :entries then range_to_a_tuple(range)
-          when :first, :min then range_endpoint_constant(range, :first)
-          when :last, :max then range_endpoint_constant(range, :last)
-          when :count, :size, :length then Type::Combinator.constant_of(range.to_a.size)
-          when :minmax then range_minmax_tuple(range)
+          # #2115 — `Range#min` / `#max` / `#minmax` / `#size` are O(1) on Integer endpoints in CRuby, so
+          # none of these materialises the range. `first` / `last` keep the element reading (`nil` when
+          # empty, the last element before an exclusive end) they had when they read `to_a`.
+          when :first, :min then Type::Combinator.constant_of(range.min)
+          when :last, :max then Type::Combinator.constant_of(range.max)
+          when :count, :size, :length then Type::Combinator.constant_of(range.size)
+          when :minmax then Type::Combinator.tuple_of(*range.minmax.map { |v| Type::Combinator.constant_of(v) })
           # `range.sum` is closed-form (Gauss) for an integer range, so a huge range still costs O(1) and
-          # yields a single Integer — no materialisation, no cap needed. Endless ranges are already excluded
-          # by the Integer-endpoint guard in the caller.
-          when :sum then Type::Combinator.constant_of(range.sum)
+          # yields a single Integer — no materialisation; only `INTEGER_FOLD_BIT_LIMIT` applies. Endless
+          # ranges are already excluded by the Integer-endpoint guard in the caller.
+          when :sum then range_sum_constant(range)
           end
+        end
+
+        # The Gauss sum of a range of large endpoints can still pass `INTEGER_FOLD_BIT_LIMIT`.
+        def range_sum_constant(range)
+          sum = range.sum
+          foldable_constant_value?(sum) ? Type::Combinator.constant_of(sum) : nil
         end
 
         def range_to_a_tuple(range)
+          # `Range#size` is O(1) on Integer endpoints: check the cardinality before materialising.
+          return nil if range.size > RANGE_TO_A_LIMIT
+
           values = range.to_a
           return Type::Combinator.tuple_of if values.empty?
-          return nil if values.size > RANGE_TO_A_LIMIT
 
           Type::Combinator.tuple_of(*values.map { |v| Type::Combinator.constant_of(v) })
-        end
-
-        def range_endpoint_constant(range, edge)
-          values = range.to_a
-          return Type::Combinator.constant_of(nil) if values.empty?
-
-          Type::Combinator.constant_of(edge == :first ? values.first : values.last)
-        end
-
-        def range_minmax_tuple(range)
-          values = range.to_a
-          if values.empty?
-            return Type::Combinator.tuple_of(
-              Type::Combinator.constant_of(nil),
-              Type::Combinator.constant_of(nil)
-            )
-          end
-
-          Type::Combinator.tuple_of(
-            Type::Combinator.constant_of(values.first),
-            Type::Combinator.constant_of(values.last)
-          )
         end
 
         # `(1..10).first(3)` / `.take(3)` / `.last(3)` — the 1-arg head / tail forms. `first`/`last` already
@@ -1607,6 +1620,7 @@ module Rigor
         # `flat_map`.
         def invoke_binary(receiver_value, method_name, arg_value)
           return nil unless safe?(receiver_value, method_name, arg_value)
+          return nil if range_enumeration_blow_up?(receiver_value, method_name)
 
           result = receiver_value.public_send(method_name, arg_value)
           foldable_constant_value?(result) ? [result] : nil
@@ -1630,6 +1644,7 @@ module Rigor
         def invoke_unary(receiver_value, method_name)
           return nil unless unary_safe?(receiver_value, method_name)
           return nil if string_unary_blow_up?(receiver_value, method_name)
+          return nil if range_enumeration_blow_up?(receiver_value, method_name)
 
           result = receiver_value.public_send(method_name)
           foldable_constant_value?(result) ? [result] : nil
@@ -1775,7 +1790,43 @@ module Rigor
           # with the widened class.
           return false if value.is_a?(Float) && value.nan?
           return false if value.is_a?(Complex) && complex_nan?(value)
+          return false if oversized_number?(value)
 
+          true
+        end
+
+        # True when an Integer, or an Integer part of a Rational / Complex, is past `INTEGER_FOLD_BIT_LIMIT`.
+        def oversized_number?(value)
+          case value
+          when Integer then value.bit_length > INTEGER_FOLD_BIT_LIMIT
+          when Rational then oversized_number?(value.numerator) || oversized_number?(value.denominator)
+          when Complex then oversized_number?(value.real) || oversized_number?(value.imaginary)
+          else false
+          end
+        end
+
+        # #2115 — true when `receiver_value` is a `Range` the method would walk element by element and the
+        # range holds more than `RANGE_ENUMERATION_LIMIT` elements (an endless one never stops).
+        def range_enumeration_blow_up?(receiver_value, method_name)
+          return false unless receiver_value.is_a?(Range)
+          return false if RANGE_ENDPOINT_METHODS.include?(method_name)
+          return false if RANGE_COVER_METHODS.include?(method_name) && numeric_range?(receiver_value)
+
+          !range_within_enumeration_budget?(receiver_value)
+        end
+
+        def numeric_range?(range)
+          range.begin.is_a?(Numeric) || range.end.is_a?(Numeric)
+        end
+
+        # Takes at most `RANGE_ENUMERATION_LIMIT + 1` elements (`Range#first(n)` stops there, endless or
+        # not). A range that cannot iterate at all (a Float, Time or `nil` begin) raises, and so does every
+        # enumerating method on it before doing any work, so it counts as within budget: the invoke's own
+        # rescue declines an enumerating fold, and `(t0..t1).include?(t)`, which CRuby answers by `cover?`,
+        # keeps folding.
+        def range_within_enumeration_budget?(range)
+          range.first(RANGE_ENUMERATION_LIMIT + 1).size <= RANGE_ENUMERATION_LIMIT
+        rescue TypeError, RangeError
           true
         end
 
@@ -1792,8 +1843,53 @@ module Rigor
           return false unless allowed
           return false if integer_division_by_zero?(receiver_value, method_name, arg_value)
           return false if string_blow_up?(receiver_value, method_name, arg_value)
+          return false if numeric_blow_up?(receiver_value, method_name, arg_value)
 
           true
+        end
+
+        # #2115 — `**` / `pow` / `<<` / `>>` whose result would be past `INTEGER_FOLD_BIT_LIMIT`, checked
+        # from the operands so the huge value is never computed. `foldable_constant_value?` applies the same
+        # bound to every other result after the fact.
+        def numeric_blow_up?(receiver_value, method_name, arg_value)
+          return false unless arg_value.is_a?(Integer)
+
+          case method_name
+          when :**, :pow then power_blow_up?(receiver_value, arg_value)
+          when :<<, :>> then shift_blow_up?(receiver_value, method_name, arg_value)
+          else false
+          end
+        end
+
+        # A lower bound on the result's bit length is `floor(log2 |base|) * |exponent|`; past the limit the
+        # result is declined anyway. A Float base (or Float part) stays in Float arithmetic and never grows.
+        def power_blow_up?(base, exponent)
+          bits = power_base_bits(base)
+          !bits.nil? && bits * exponent.abs > INTEGER_FOLD_BIT_LIMIT
+        end
+
+        # `floor(log2 |base|)` for an Integer, the larger of its terms' for a Rational. A Complex part
+        # counts one bit more: `(1+1i) ** n` grows although neither part is past 1.
+        def power_base_bits(base)
+          case base
+          when Integer then base.abs.bit_length - 1
+          when Rational then [base.numerator.abs.bit_length, base.denominator.bit_length].max - 1
+          when Complex then complex_power_base_bits(base)
+          end
+        end
+
+        def complex_power_base_bits(base)
+          parts = [base.real, base.imaginary]
+          return nil unless parts.all? { |part| part.is_a?(Integer) || part.is_a?(Rational) }
+
+          parts.map { |part| power_base_bits(part) + 1 }.max
+        end
+
+        def shift_blow_up?(receiver_value, method_name, arg_value)
+          return false unless receiver_value.is_a?(Integer) && !receiver_value.zero?
+
+          shift = method_name == :<< ? arg_value : -arg_value
+          receiver_value.bit_length + shift > INTEGER_FOLD_BIT_LIMIT
         end
 
         def ops_for(receiver_value)

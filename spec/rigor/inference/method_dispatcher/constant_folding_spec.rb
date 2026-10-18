@@ -327,6 +327,12 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
       expect(fold(1..3, :first, [20]).elements.map(&:value)).to eq([1, 2, 3])
     end
 
+    it "folds the n-arg head/tail of an empty or exclusive range as Ruby does" do
+      # Ruby 4.0.5: `(5..1).first(2)` => [], `(1...10).last(2)` => [8, 9].
+      expect(fold(5..1, :first, [2]).elements).to eq([])
+      expect(fold(1...10, :last, [2]).elements.map(&:value)).to eq([8, 9])
+    end
+
     it "lifts Range#min(n) / #max(n) to a Tuple (min ascending, max descending)" do
       expect(fold(1..10, :min, [3]).elements.map(&:value)).to eq([1, 2, 3])
       expect(fold(1..10, :max, [3]).elements.map(&:value)).to eq([10, 9, 8])
@@ -1578,10 +1584,38 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
         end
       end
 
-      it "yields Constant[nil] for an empty range's first/last/min/max" do
-        empty = constant_of(5...5)
-        expect(fold_types(empty, :first)).to eq(constant_of(nil))
-        expect(fold_types(empty, :last)).to eq(constant_of(nil))
+      # Ruby 4.0.5 witnesses: `(5...5).first` => 5, `(5...5).last` => 5, `(5..1).first` => 5,
+      # `(5..1).last` => 1. The no-arg first/last read the endpoints; emptiness does not matter.
+      it "reads the endpoints for an empty or reversed range's first/last" do
+        expect(fold_types(constant_of(5...5), :first)).to eq(constant_of(5))
+        expect(fold_types(constant_of(5...5), :last)).to eq(constant_of(5))
+        expect(fold_types(constant_of(5..1), :first)).to eq(constant_of(5))
+        expect(fold_types(constant_of(5..1), :last)).to eq(constant_of(1))
+      end
+
+      # Ruby 4.0.5 witnesses: `(5..1).min` => nil, `(5..1).max` => nil, `(5...5).min` => nil,
+      # `(5...5).max` => nil. min/max do depend on emptiness.
+      it "yields Constant[nil] for an empty range's min/max" do
+        expect(fold_types(constant_of(5..1), :min)).to eq(constant_of(nil))
+        expect(fold_types(constant_of(5..1), :max)).to eq(constant_of(nil))
+        expect(fold_types(constant_of(5...5), :min)).to eq(constant_of(nil))
+        expect(fold_types(constant_of(5...5), :max)).to eq(constant_of(nil))
+      end
+
+      # Ruby 4.0.5 witnesses: `(1...10).last` => 10 (the end, exclusive or not), `(1...10).max` => 9.
+      it "reads the end for an exclusive range's last and the element before it for max" do
+        expect(fold_types(constant_of(1...10), :last)).to eq(constant_of(10))
+        expect(fold_types(constant_of(1...10), :max)).to eq(constant_of(9))
+        expect(fold_types(constant_of(1...10), :first)).to eq(constant_of(1))
+        expect(fold_types(constant_of(1...10), :min)).to eq(constant_of(1))
+      end
+
+      # Ruby 4.0.5: `(1..).last` raises RangeError ("cannot get the last element of endless range") and
+      # `(..5).first` raises RangeError ("cannot get the first element of beginless range"). The fold
+      # must not turn either into a value.
+      it "declines the no-arg first/last that Ruby raises on for an endless or beginless range" do
+        expect(fold_types(constant_of(1..), :last)).to be_nil
+        expect(fold_types(constant_of(..5), :first)).to be_nil
       end
 
       it "yields the empty Tuple for an empty range's to_a" do

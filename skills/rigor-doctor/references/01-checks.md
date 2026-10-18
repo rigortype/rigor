@@ -80,14 +80,18 @@ Make sure a single `rigortype` is on the load path.
 
 ### `plugin_gap` — the stack has a plugin that is not enabled
 
-Read from the `DEPENDENCIES` section of `Gemfile.lock`.
+Read from the `DEPENDENCIES` section of `Gemfile.lock`, plus the Rails
+components a direct `rails` stands for. A `plugins:` entry counts as
+listing its plugin even with `enabled: false`. Skipped when no
+`.rigor.yml` or `.rigor.dist.yml` is discovered in the current directory.
 
 - `fail` — the project depends on gems that bundled plugins model, and
-  **none** of those plugins is enabled: framework calls will not resolve.
-  Add the plugins for the stack to `plugins:` (the `rigor-plugin-tune`
-  skill does this).
+  `plugins:` lists **no** bundled plugin at all: framework calls will not
+  resolve. Add the plugins for the stack to `plugins:` (the
+  `rigor-plugin-tune` skill does this). Listing any bundled plugin, even
+  an unrelated one, turns this into the per-plugin warnings below.
 - `warn` — one per plugin that models a direct dependency but is not
-  enabled. Enable it, or leave it out deliberately; declining a plugin is
+  listed. Add it, or leave it out deliberately; declining a plugin is
   a legitimate choice.
 
 ### `gemfile_install` — Rigor is a project dependency
@@ -98,10 +102,15 @@ Read from the `DEPENDENCIES` section of `Gemfile.lock`.
 
 ### `bundle_layout` — gem-shipped signatures are not discovered
 
-`warn` when a `Gemfile.lock` exists but Rigor cannot locate the installed
-bundle (the gems live in the active Ruby's default gem home). Gems that
-ship their own `sig/` are then not loaded. Point Rigor at the install
-root with `bundler.bundle_path:`, install into `vendor/bundle`, or supply
+`warn` when a `Gemfile.lock` exists in the current directory but Rigor
+cannot locate the installed bundle — typically the gems live in the
+active Ruby's default gem home. Gems that ship their own `sig/` are then
+not loaded. Rigor looks only where the project records the bundle: a
+`bundler.bundle_path:` in `.rigor.yml` is used alone and must exist;
+without one, and unless `bundler.auto_detect: false`, it reads
+`.bundle/config`'s `BUNDLE_PATH`, then an in-tree `vendor/bundle`, then
+the global Bundler config. Point Rigor at the install root with
+`bundler.bundle_path:`, install into `vendor/bundle`, or supply
 signatures with `rbs collection install` instead.
 
 ## Not covered by `rigor doctor`: is the analysis seeing your code?

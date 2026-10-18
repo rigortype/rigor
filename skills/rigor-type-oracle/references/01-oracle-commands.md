@@ -212,7 +212,8 @@ rigor explain [<rule>]
 | `--format=text\|json` | Default `text`. |
 
 With no argument it lists every rule. With a rule id, a legacy alias, or
-a family prefix (`call`, `flow`, `assert`, `dump`, `def`) it prints the
+a family prefix (`call`, `flow`, `def`, `assert`, `dump`, `global`,
+`suppression`, `static`, `effect`) it prints the
 rule's firing conditions, the severity per profile, the evidence tier,
 and how to suppress it.
 

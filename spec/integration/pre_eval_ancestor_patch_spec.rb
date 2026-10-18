@@ -131,10 +131,10 @@ RSpec.describe "a pre_eval: patch on an ancestor reaches its descendants (#1708)
       expect(rules(result)).to eq([])
     end
 
-    it "wins over the patch through an attr_reader the project declares" do
+    it "wins over the patch through a define_method the project writes" do
       result = run_project("ext/core.rb" => nil_patch,
-                           "lib/int.rb" => "class Integer; attr_reader :nn; end\n",
-                           "lib/use.rb" => "rand(3).nn.upcase\n")
+                           "lib/int.rb" => "class Integer; define_method(:nn) { \"s\" }; end\n",
+                           "lib/use.rb" => use.call("rand(3).nn"))
 
       expect(rules(result)).to eq([])
     end

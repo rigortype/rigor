@@ -5,6 +5,7 @@ require "prism"
 require_relative "../source/literals"
 require_relative "../source/node_children"
 require_relative "module_function_state"
+require_relative "project_patched_mixins"
 
 module Rigor
   module Inference
@@ -80,14 +81,15 @@ module Rigor
         STATEMENT = Object.new.freeze
 
         # @return the visibility of each `def` (by identity) the file's bodies give one other than public:
-        #   `:private`, `:protected` or `:module_function`; and {STATEMENT} for each call that is a direct statement.
+        #   `:private`, `:protected` or `:module_function`; and {STATEMENT} for each call that is a direct statement,
+        #   and for the include an idempotence guard runs ({Mixins.guarded}).
         def defs(root)
           found = {}.compare_by_identity
           # The file's top level, and through {.read_body} every class, module or `class <<` body written as a direct
           # statement of it or of another body so read: the bodies that run whenever the file loads. A body nested in
           # a conditional, a block or a method may not run, so none of its calls or toggles is read and its `def`s
           # are public.
-          read_body(root.statements, found) if root.is_a?(Prism::ProgramNode)
+          read_body(root.statements, found, top_level: true) if root.is_a?(Prism::ProgramNode)
           found
         end
 
@@ -133,7 +135,15 @@ module Rigor
           end
         end
 
-        def read_body(body, found) # rubocop:disable Metrics/PerceivedComplexity
+        # The include an idempotence guard runs (`X.include(M) unless X.include?(M)`) is read as a direct statement.
+        def mark_guarded(stmt, found, top_level)
+          guarded = Mixins.guarded(stmt, top_level)
+          found[guarded] = STATEMENT if guarded
+        end
+        private_class_method :mark_guarded
+
+        # `top_level` is true for the file's own statements only; a body it reads is a class or module body.
+        def read_body(body, found, top_level: false) # rubocop:disable Metrics/PerceivedComplexity
           default = :public
           direct_statements(body).each do |stmt|
             found[stmt] = STATEMENT if stmt.is_a?(Prism::CallNode)
@@ -147,6 +157,7 @@ module Rigor
             elsif BODIES.any? { |kind| stmt.is_a?(kind) }
               read_body(stmt.body, found)
             else
+              mark_guarded(stmt, found, top_level)
               default = :public if bare_call_nested?(stmt)
               mark_nested(stmt, default, found)
             end

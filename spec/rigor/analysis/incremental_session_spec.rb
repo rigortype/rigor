@@ -1962,26 +1962,28 @@ end
     end
 
     it "re-checks a reader that holds no edge at all to the annotated file" do
-      # `Holder.new.name` resolves through the synthesized `attr_reader` alone, and that read records nothing:
-      # User has no edge of any kind to holder.rb, so no dependent set can reach it. This is why a moved
-      # synthesized output re-analyses the project rather than the file's dependents.
+      # `Holder.new.label` resolves through the `@rbs!` declaration holder_types.rb synthesizes, and nothing in
+      # holder_types.rb is read as Ruby: User has no edge of any kind to it, so no dependent set can reach it. This
+      # is why a moved synthesized output re-analyses the project rather than the file's dependents. (An
+      # `attr_reader :name #: String` holder no longer serves: the reader's `discovered_method?` hit records the
+      # class edge to the file, #2121.)
       Dir.mktmpdir do |dir|
-        holder = File.join(dir, "holder.rb")
-        write_holder = lambda do |type|
-          File.write(holder, "class Holder\n  attr_reader :name #: #{type}\n\n  " \
-                             "def initialize\n    @name = \"x\"\n  end\nend\n")
+        File.write(File.join(dir, "holder.rb"), "class Holder\n  def label\n    \"x\"\n  end\nend\n")
+        types = File.join(dir, "holder_types.rb")
+        write_types = lambda do |type|
+          File.write(types, "class Holder\n  # @rbs!\n  #   def label: () -> #{type}\nend\n")
         end
-        write_holder.call("String")
+        write_types.call("String")
         user = File.join(dir, "user.rb")
-        File.write(user, "class User\n  def go\n    Rigor.dump_type(Holder.new.name)\n  end\nend\n")
+        File.write(user, "class User\n  def go\n    Rigor.dump_type(Holder.new.label)\n  end\nend\n")
         config = inline_config([dir])
         session = inline_session(config, [dir])
         expect(messages_for(guarded_baseline(session), "user.rb")).to eq(["dump_type: String"])
-        expect(session.instance_variable_get(:@dependents)[holder].to_a).not_to include(user)
+        expect(session.instance_variable_get(:@dependents)[types].to_a).not_to include(user)
 
-        write_holder.call("Integer")
+        write_types.call("Integer")
 
-        expect_rechecked(guarded_recheck(session), config, [dir], %w[holder.rb user.rb], "user.rb",
+        expect_rechecked(guarded_recheck(session), config, [dir], %w[holder_types.rb user.rb], "user.rb",
                          "dump_type: Integer")
       end
     end

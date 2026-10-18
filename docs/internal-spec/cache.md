@@ -1075,6 +1075,22 @@ check's other readers record the key too, and one of them is broad:
 a `backtrace` definition appearing or vanishing anywhere re-checks every
 file with a `rescue`. That is a known cost.
 
+`Scope#discovered_method?` records the key too, on a HIT only, together
+with the class edge to every file that declares the class
+([#2121](https://github.com/rigortype/rigor/issues/2121)). Its table
+holds the members no `def` symbol edge covers — an `attr_*`, an `alias` /
+`alias_method`, a `define_method` (a cross-file `def` is withheld from
+it) — so before this a caller that the table answered, such as a
+`call.undefined-method` silenced by an `attr_accessor` on a core class,
+recorded no read of it, and deleting the member re-analysed only the
+edited file. The class edge re-checks the caller when a declaring file's
+declaration signature moves (the member moved to another class of the
+same file, which leaves the file's defined names unchanged); the name
+key re-checks it when the member was declared from a file that does not
+declare the class (`Mutex.class_eval { attr_accessor :a }`). A miss
+records nothing there: the readers that act on one record their own
+negative edges.
+
 The `mark:<last segment>` key in `missing` is recorded by
 `Scope#parameter_envelopes_of` whichever way the reader answers
 ([#1833](https://github.com/rigortype/rigor/issues/1833)): a file can add a

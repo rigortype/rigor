@@ -101,10 +101,15 @@ module RbsEnvMemo
     # The path is part of the digest alongside its content: two sig roots holding the same bytes under
     # different names are different inputs to `add_project_signatures`, which reports diagnostics against
     # the file name it read.
+    #
+    # Issue #2121 — and it is the ABSOLUTE path, because that is the name the build gives each buffer
+    # (`RbsLoader.project_sig_files`), and `RbsLoader#project_declared_class?` attributes a declaration to the
+    # project by it. Keyed on a relative `sig/box.rbs`, an example in another tmpdir got an environment whose
+    # `Box` was no longer the project's, and checked its calls under the rules for a bundled class.
     def signature_files(root)
-      return [root] if File.file?(root)
+      return [File.expand_path(root)] if File.file?(root)
 
-      Rigor::RootedGlob.glob(root, "**/*.rbs")
+      Rigor::RootedGlob.glob(root, "**/*.rbs").map { |path| File.expand_path(path) }
     end
 
     # Re-hashing every signature file on each build would give back part of what the memo saves, so a file's

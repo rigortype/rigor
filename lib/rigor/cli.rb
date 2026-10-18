@@ -250,8 +250,9 @@ module Rigor
         #                ships (run `rigor explain <rule>` for what
         #                each one catches):
         #{rule_ids_comment}
-        #                A bare family token (`call`, `flow`,
-        #                `assert`, `dump`, `def`) wildcards every
+        #                A bare family token (`call`, `flow`, `def`,
+        #                `assert`, `dump`, `global`, `suppression`,
+        #                `static`, `effect`, `pre-eval`) wildcards every
         #                rule under that prefix. Legacy unprefixed
         #                names (`undefined-method`, …) still
         #                resolve. In-source

@@ -1180,7 +1180,8 @@ Runs a scoped analysis and audits:
   that plugin ([ADR-96](../adr/96-plugin-target-gems.md)). An entry
   with `enabled: false` counts as listed. Each missing plugin is a
   warning, since leaving one out can be deliberate; it is a failure
-  only when `plugins:` lists none of the bundled plugins at all.
+  only when `plugins:` lists none of the bundled plugins that model
+  gems (those declaring `target_gems:`).
   Skipped when no `.rigor.yml` or `.rigor.dist.yml` is discovered in
   the current directory.
 - **Gemfile install** — whether Rigor itself resolves as one of the

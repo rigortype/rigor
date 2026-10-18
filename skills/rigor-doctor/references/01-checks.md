@@ -78,7 +78,7 @@ Make sure a single `rigortype` is on the load path.
 - `warn` — the baseline file failed to load. Check the `baseline:` path
   in the config.
 
-### `plugin_gap` — the stack has a plugin that is not enabled
+### `plugin_gap` — the stack has a plugin that is not listed
 
 Read from the `DEPENDENCIES` section of `Gemfile.lock`, plus the Rails
 components a direct `rails` stands for. A `plugins:` entry counts as
@@ -86,13 +86,16 @@ listing its plugin even with `enabled: false`. Skipped when no
 `.rigor.yml` or `.rigor.dist.yml` is discovered in the current directory.
 
 - `fail` — the project depends on gems that bundled plugins model, and
-  `plugins:` lists **no** bundled plugin at all: framework calls will not
-  resolve. Add the plugins for the stack to `plugins:` (the
-  `rigor-plugin-tune` skill does this). Listing any bundled plugin, even
-  an unrelated one, turns this into the per-plugin warnings below.
+  `plugins:` lists **none** of the bundled plugins that model gems (those
+  declaring `target_gems:`; `rigor-rbs-inline` does not count): framework
+  calls will not resolve. Add the plugins for the stack to `plugins:` (the
+  `rigor-plugin-tune` skill does this). Once any such plugin is listed,
+  the remaining gaps are reported as the per-plugin warnings below.
 - `warn` — one per plugin that models a direct dependency but is not
-  listed. Add it, or leave it out deliberately; declining a plugin is
-  a legitimate choice.
+  listed. Add it, or decline it deliberately — declining is a legitimate
+  choice, and the way to record it is a `plugins:` entry with
+  `enabled: false`. Do not enable an unrelated plugin only to silence
+  this check.
 
 ### `gemfile_install` — Rigor is a project dependency
 

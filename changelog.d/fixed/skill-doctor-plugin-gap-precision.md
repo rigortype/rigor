@@ -1,0 +1,1 @@
+- **[docs]** The `rigor-doctor` and `rigor-type-oracle` skills now match `rigor explain`'s rule families and the conditions under which `rigor doctor`'s plugin-gap and bundle-layout checks warn or fail. ([#2144](https://github.com/rigortype/rigor/pull/2144))

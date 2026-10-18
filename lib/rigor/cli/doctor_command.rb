@@ -364,7 +364,7 @@ module Rigor
           status: :warn,
           message: "#{gap.locked_gems.join(', ')} #{gap.locked_gems.one? ? 'is a dependency' : 'are dependencies'} " \
                    "of this project and #{gap.plugin_gem} models it, but it is not enabled",
-          hint: "Add `#{gap.plugin_gem}` to `.rigor.yml` `plugins:`, or leave it out deliberately."
+          hint: "Add `#{gap.plugin_gem}` to `.rigor.yml` `plugins:`, or decline it with an `enabled: false` entry."
         }
       end
 

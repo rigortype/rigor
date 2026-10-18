@@ -2,6 +2,8 @@
 
 require "prism"
 
+require_relative "../source/node_children"
+
 module Rigor
   module Inference
     # The constructs whose body `return` leaves only that body, not the enclosing method. A `return` anywhere else —
@@ -37,6 +39,20 @@ module Rigor
           name = sent.unescaped.to_sym
         end
         DEFINE_CALLS.include?(name) || (name == :lambda && kernel_receiver?(call_node.receiver))
+      end
+
+      # True when a `return` under `node` exits the enclosing method: one reachable without crossing a barrier node
+      # or a barrier call's block. Allocation-free and early-exiting, for a caller that asks it of every block body.
+      def exits_method?(node)
+        return false if node.nil? || node?(node)
+        return true if node.is_a?(Prism::ReturnNode)
+
+        barrier_block = node.block if node.is_a?(Prism::CallNode) && block_call?(node)
+        node.rigor_each_child do |child|
+          next if child.equal?(barrier_block)
+          return true if exits_method?(child)
+        end
+        false
       end
 
       # True when a `lambda` call on `receiver` reaches `Kernel#lambda`: no receiver, `self`, `Kernel` or `::Kernel`.

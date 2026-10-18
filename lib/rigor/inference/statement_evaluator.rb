@@ -10,6 +10,7 @@ require_relative "../source/node_children"
 require_relative "../source/constant_path"
 require_relative "anonymous_meta_class"
 require_relative "definer_resolution"
+require_relative "block_call_timing"
 require_relative "block_repetition"
 require_relative "block_parameter_binder"
 require_relative "body_fixpoint"
@@ -3348,6 +3349,7 @@ module Rigor
         # scope; the spec MUST in § "Fact stability and mutation" names captured locals a first-class invalidation
         # category. (The escaping / unknown path already widened to Dynamic[top] via `record_closure_escape_if_any`.)
         post_scope = write_back_block_captures(node, post_scope)
+        collect_repeated_block_returns(node, post_scope)
         statement_call = !call_type.nil? && !@in_operand
         post_scope = apply_post_return_narrowing(node, post_scope) if statement_call
         # Flow-folding G1 / G2 — widen a local- or instance-variable binding when the call is an in-place mutator on it
@@ -4390,6 +4392,53 @@ module Rigor
         return base_scope if names.empty?
 
         names.reduce(base_scope) { |acc, name| bind_capture(acc, name, Type::Combinator.untyped) }
+      end
+
+      # Issue #2123 — the `return`s a repeating block reaches only on a later run. Every pass above enters with a
+      # captured local or ivar the body rebinds at a binding some run can hold, but not at every such binding: the
+      # statement pass enters at the call-site binding, and the ADR-56 write-back's capped fixpoint widens its last
+      # assumption without running a pass from it. So `seen = 0; items.each { return false if (seen += 1) > 3 }; true`
+      # read `seen` as at most `3` on every pass, the `return` was never reached, the method inferred `true`, and a
+      # caller's `if` on it folded always-falsey on correct code.
+      #
+      # While a method's return sink is active, a block that may repeat ({#repeating_block_class}), rebinds a capture,
+      # and holds a `return` that exits the method ({ReturnBarrier.exits_method?}) gets one more unrecorded pass, with
+      # each rebound name bound to its pre-call binding joined with its continuation `post_scope` holds. The
+      # continuation covers every run count, so it covers the binding any run enters with. The pass only adds to the
+      # return sink: its `next` / `break` arms go to sinks it discards, it records no scope, and the method's
+      # fall-through and earlier `return`s are kept, so the inferred return type only widens.
+      def collect_repeated_block_returns(call_node, post_scope)
+        return if Thread.current[RETURN_SINK_KEY].nil?
+
+        block = call_node.block
+        return unless repeated_block_return_candidate?(call_node, block)
+
+        names = CapturedLocals.writes(block, scope, ivars: true, foreign_self: foreign_self_block?(call_node))
+        return if names.empty?
+
+        bindings = names.to_h do |name|
+          [name, Type::Combinator.union(*[scope, post_scope].filter_map { |s| CapturedLocals.bound_type(s, name) })]
+        end
+        entry = with_repeated_or_write_marks(call_node, block, block_pass_entry(call_node, block, bindings))
+        StatementEvaluator.with_next_sink do
+          StatementEvaluator.with_break_value_sink do
+            collect_break_scopes { sub_eval(block, entry, **UNRECORDED, next_scope_sink: nil) }
+          end
+        end
+      rescue StandardError
+        nil
+      end
+
+      # Whether `block` is an ordinary block (not a return barrier or a class-body block) whose body may `return` from
+      # the method and which `call_node` may run more than once: {#repeating_block_class}'s rule, or `Kernel#loop`,
+      # which that rule leaves out and which runs its block until it breaks or raises.
+      def repeated_block_return_candidate?(call_node, block)
+        return false unless block.is_a?(Prism::BlockNode)
+        return false unless ReturnBarrier.exits_method?(block.body)
+        return false if return_barrier_block?(call_node) || refined_class_context(call_node)
+        return false if AnonymousMetaClass.name_for(call_node, scope.source_path)
+
+        BlockCallTiming.kernel_loop?(call_node) || !repeating_block_class(call_node).nil?
       end
 
       # ADR-56 slice A. For a `:non_escaping` block, fold the continuation binding of every outer local the body can

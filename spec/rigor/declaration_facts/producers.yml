@@ -612,6 +612,7 @@ lib/rigor/sig_gen/generator.rb:
   computes: the defs, attribute readers and ivar observations sig-gen emits per qualified class
   producers:
     Rigor::SigGen::Generator#collect_init_ivar_obs: grandfathered
+    Rigor::SigGen::Generator#collect_other_ivar_writes: issue #1410, collects the ivars a class writes besides its initialize's `@ivar = param` (attr writers, instance-def and block writes, instance_variable_set on self) so --params=observed withdraws a constructor-observed attr type; it groups by the same declaration_prefix collect_init_ivar_obs uses and skips a class << self body as the class object's ivars, deriving no declaration context of its own
     Rigor::SigGen::Generator#descend_into_namespace?: grandfathered
     Rigor::SigGen::Generator#record_superclass: grandfathered
     Rigor::SigGen::Generator#scan_ivar_param_assignments: grandfathered

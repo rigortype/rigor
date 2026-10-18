@@ -110,6 +110,7 @@ RSpec.describe Rigor::Inference::ProjectSeedTables do
                  Rigor::Scope::DiscoveryIndex::SIBLINGS.values
 
       expect(unseeded).to match_array(per_file_members)
+      expect(per_file_members & runner_seed(paths).keys).to be_empty
     end
   end
 

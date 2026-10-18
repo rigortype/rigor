@@ -33,7 +33,10 @@ module Rigor
         global_write_census: :discovered_global_write_census
       }.freeze
 
-      # The tables `Runner#project_scope_seed_tables` can seed that {.from_index} leaves out, and why.
+      # The tables `Runner#project_scope_seed_tables` can seed that {.from_index} leaves out, and why. Parity is over
+      # the table LIST: the runner's opt-in additions to a table's content are not reproduced here.
+      # `discovered_refinements` is the project's alone (the runner unions in the refinements of gems under
+      # `dependencies.source_inference:`), and no `discovery_seed:` base is merged in (the runner can start from one).
       NOT_SEEDED = {
         run_generation: "the identity token of a check run's return memo; these paths run no check",
         constant_sources: "read only by dependency recording, which only an incremental check run turns on",

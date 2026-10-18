@@ -17,9 +17,10 @@ prefix.
 ## First: ratify the approval queue
 
 Before any other step, report the approval queue and let the user decide each
-entry. Agents make decisions below the "serious" line on their own and record
-them in `approval-queue.d/` (`docs/agents/contribution-flow.md` § "Decisions and
-the approval queue", ADR-123); a release ships only decisions the user ratified.
+entry. Agents make every decision that list does not call serious on their own
+and record it in `approval-queue.d/` (`docs/agents/contribution-flow.md`
+§ "Decisions and the approval queue", ADR-123); a release ships only decisions
+the user ratified.
 
 ```sh
 git fetch origin
@@ -33,9 +34,10 @@ git ls-tree --name-only origin/master approval-queue.d/   # README.md alone mean
    then its background, the options with their trade-offs, the decision's
    reasoning and how to undo it. Translate faithfully and keep every link; do
    not shorten the trade-offs away, they are what the user is judging.
-3. **Ask for each entry** with `AskUserQuestion` (up to four entries per call),
-   options **Ratify**, **Revise** and **Revert**, in the user's language; the
-   user can answer anything else in free text. Do not recommend an option.
+3. **Ask for each entry** with options **Ratify**, **Revise** and **Revert**,
+   in the user's language: under Claude Code with `AskUserQuestion` (up to
+   four entries per call, free text always allowed), elsewhere as a numbered
+   question in chat. Do not recommend an option.
 4. **Ratified** entries are deleted on the release branch once it is cut
    (below), in one commit `Ratify approval queue entries` whose body lists
    each entry's title and PR link: that commit is the record of the

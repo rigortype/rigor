@@ -1659,6 +1659,8 @@ module Rigor
                   widen_clause_entry(exit_scope, ensure_writes(node), clause.statements)
         return sub_eval(clause, exit_scope).last unless widened
 
+        record_operand_clause(clause.statements, widened) if record_widened
+
         widened_options = record_widened ? {} : UNRECORDED
         if jumps
           sub_eval(clause, widened, **widened_options)
@@ -1731,6 +1733,20 @@ module Rigor
       # `Dynamic[top]`, or nil when none changes. An empty rescue clause is widened too: the scope it falls through
       # with is its entry.
       def widen_clause_entry(clause_scope, writes, clause) = ClauseWidening.widen(clause_scope, writes, clause)
+
+      # Issue #1839 — an operand evaluator ({#thread_operand}) records only the later operands its walk takes, so the
+      # index's walk hands a clause it evaluated the scope of the `begin`'s nearest recorded ancestor, which binds
+      # each name the body writes as the `begin` found it: `puts(begin; conn = make; work; rescue; conn.size; end)`
+      # read `conn` as `nil`. On the check path it records the clause's `statements` under the `widened` entry, with
+      # `$!`, `$@` and `$?` unbound as the walk leaves them for a clause the evaluator did not enter; the
+      # walk fills the clause's nodes from there. The clause's later operands are recorded by its own pass. An
+      # evaluator that records its nodes itself skips this: its pass over the clause records `statements` right
+      # after, and the index keeps the last visit, so the `@on_enter` test is a guard no example can fail.
+      def record_operand_clause(statements, widened)
+        return unless statements && widened && @on_enter.nil? && @operand_recorder && widening_recorded?
+
+        @operand_recorder.call(statements, widened.forget_error_info.forget_last_status)
+      end
 
       # Whether this pass records the per-node index under a clause's widened entry: only the check path asks for that
       # ({#initialize}'s `widen_clauses`). Every other recorder keeps the clause's plain entry ({#recording?}).
@@ -2154,6 +2170,7 @@ module Rigor
         current = rescue_node
         while current
           widened = widen_clause_entry(entry_scope, writes, current.statements)
+          record_operand_clause(current.statements, widened)
           rescue_scope = bind_rescue_reference(current, entry_scope)
           arm = if widened
                   eval_widened_clause(current.statements, rescue_scope, bind_rescue_reference(current, widened),
@@ -3034,26 +3051,47 @@ module Rigor
         # u.strip`, where the raise almost always comes from `Float` after it. Neither the arm nor anything in it
         # is recorded or typed from there, which keeps it where it was before #1256: an ADR-5 trade of the rare
         # raise-before-write path for no false positive on the common one.
-        arm_entry = ErrorInfo.modifier_entry(join_with_nil_injection(scope, after_expression), node.rescue_expression)
-        after_rescue = thread_operand(node.rescue_expression, arm_entry, OperandWalk.new(nil), arm_entry)
+        #
+        # Issue #1839 — the arm enters with each name `expr` writes that it mentions, or that `expr` writes more
+        # than once, read as `Dynamic[top]` ({#widen_clause_entry}), as a `begin`'s rescue clause does: the raise
+        # may come after any of those writes. The scope past the modifier joins that entry through the arm.
+        fallback = node.rescue_expression
+        writes = clause_writes([node.expression])
+        record_modifier_fallback(fallback, writes, walk)
+        joined = join_with_nil_injection(scope, after_expression)
+        widened = widen_clause_entry(joined, writes, fallback)
+        arm_entry = ErrorInfo.modifier_entry(widened || joined, fallback)
+        after_rescue = thread_operand(fallback, arm_entry, OperandWalk.new(nil), arm_entry)
         after = if branch_unconditionally_exits?(node.rescue_expression)
                   after_expression
                 else
                   join_with_nil_injection(after_expression, after_rescue)
                 end
-        [rescue_modifier_type(node, walk, arm_entry), after]
+        [rescue_modifier_type(node, walk, widened && arm_entry), after]
       end
 
-      # Issue #1839 — the value of `expr rescue alt`: the fallback is typed with each name `expr` writes read as
-      # `Dynamic[top]` ({#widen_clause_entry}), as a `begin`'s rescue clause reads it, not at the entry's binding:
-      # `got = (conn = make; work) rescue conn` leaves `got` untyped, not `nil`. The scope past the modifier keeps
-      # the join `arm_entry` starts from, which a `retry` arm relies on.
-      def rescue_modifier_type(node, walk, arm_entry)
-        widened = widen_clause_entry(arm_entry, clause_writes([node.expression]), node.rescue_expression)
-        return OperandWalk.type_of(scope, node, tracer, walk.types(tracer)) unless widened
+      # Issue #1839 — the walk records nothing in the fallback, so the index's walk hands it the modifier's own entry,
+      # which binds each name `expr` writes as the modifier found it: `conn = nil; (conn = make; work) rescue
+      # conn.size` read `conn` as `nil`. The fallback is recorded under that entry with the names `writes`
+      # {ClauseWidening.widen} picks read as `Dynamic[top]`, and `$!`, `$@` and `$?` unbound as the walk leaves them,
+      # when the widening changes it and the check path asks for it ({#widening_recorded?}). A name `expr` first
+      # binds keeps the entry's reading, for the trade above.
+      def record_modifier_fallback(fallback, writes, walk)
+        return unless walk.recorder && @widen_clauses
+
+        widened = widen_clause_entry(scope, writes, fallback)
+        walk.recorder.call(fallback, widened.forget_error_info.forget_last_status) if widened
+      end
+
+      # Issue #1839 — the value of `expr rescue alt`: the fallback is typed from `widened_entry`, its entry with each
+      # name `expr` writes read as `Dynamic[top]` ({#widen_clause_entry}), as a `begin`'s rescue clause reads it, not
+      # at the entry's binding: `got = (conn = make; work) rescue conn` leaves `got` untyped, not `nil`. Nil when the
+      # widening changes nothing, and the modifier is typed whole.
+      def rescue_modifier_type(node, walk, widened_entry)
+        return OperandWalk.type_of(scope, node, tracer, walk.types(tracer)) unless widened_entry
 
         Type::Combinator.union(OperandWalk.type_of(scope, node.expression, tracer, walk.types(tracer)),
-                               widened.type_of(node.rescue_expression, tracer: tracer))
+                               widened_entry.type_of(node.rescue_expression, tracer: tracer))
       end
 
       # `class Foo; body; end` and `module Foo; body; end`. The class body runs in a fresh scope (Ruby's class scope

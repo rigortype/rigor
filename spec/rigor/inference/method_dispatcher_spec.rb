@@ -563,6 +563,81 @@ RSpec.describe Rigor::Inference::MethodDispatcher do
       end
     end
 
+    # Issue #1708 — a `pre_eval:` patch on an ancestor answers the descendant receiver, nearest ancestor first.
+    describe "a `pre_eval:` patch on an ancestor (#1708)" do
+      def patch(class_name, name, value)
+        Rigor::Inference::ProjectPatchedMethods::Entry.new(
+          class_name: class_name, method_name: name, kind: :instance, source_path: "ext/core.rb", source_line: 1,
+          return_type: Rigor::Type::Combinator.constant_of(value)
+        )
+      end
+
+      def dispatch_patched(entries, receiver, name)
+        env = Rigor::Environment.for_project(
+          project_patched_methods: Rigor::Inference::ProjectPatchedMethods.new(entries: entries)
+        )
+        described_class.dispatch(receiver_type: receiver, method_name: name, arg_types: [], environment: env,
+                                 scope: Rigor::Scope.empty(environment: env))
+      end
+
+      def patched(value) = Rigor::Type::Combinator.dynamic(Rigor::Type::Combinator.constant_of(value))
+
+      let(:integer) { Rigor::Type::Combinator.nominal_of("Integer") }
+
+      it "answers an Integer receiver from a patch on Numeric, Comparable, Object or Kernel" do
+        entries = [patch("Numeric", :nn, :numeric), patch("Comparable", :cc, :comparable),
+                   patch("Object", :zz, :object), patch("Kernel", :kk, :kernel)]
+
+        expect(%i[nn cc zz kk].map { |name| dispatch_patched(entries, integer, name) })
+          .to eq(%i[numeric comparable object kernel].map { |value| patched(value) })
+      end
+
+      it "answers from the nearest patched ancestor" do
+        entries = [patch("Object", :near, :object), patch("Numeric", :near, :numeric)]
+
+        expect(dispatch_patched(entries, integer, :near)).to eq(patched(:numeric))
+      end
+
+      # Ruby: `rand(3).succ` under `class Object; def succ = :object` is still an Integer. Guard: the ancestor tier sits
+      # below RBS, so this passes without the fix.
+      it "leaves a method the receiver's own RBS declares to that RBS" do
+        result = dispatch_patched([patch("Object", :succ, :object)], integer, :succ)
+
+        expect(result).to eq(integer)
+      end
+
+      # Guard, the ADR-17 order: a farther module's RBS answers ahead of a nearer patch. Ruby runs the patch
+      # (`1.send(:puts)` is :object under `class Object; def puts(*) = :object`).
+      it "leaves a method a farther module's RBS declares to that RBS" do
+        expect(dispatch_patched([patch("Object", :puts, :object)], integer, :puts))
+          .to eq(Rigor::Type::Combinator.constant_of(nil))
+      end
+
+      it "answers a class object from an Object instance patch" do
+        result = dispatch_patched([patch("Object", :zz, :object)], Rigor::Type::Combinator.singleton_of("Integer"), :zz)
+
+        expect(result).to eq(patched(:object))
+      end
+
+      # Guard: passes without the fix.
+      # Guard: the tier reads the project's source defs off the scope, so it does not run without one.
+      it "does not answer without a scope" do
+        env = Rigor::Environment.for_project(
+          project_patched_methods: Rigor::Inference::ProjectPatchedMethods.new(entries: [patch("Object", :zz, :object)])
+        )
+
+        expect(described_class.dispatch(receiver_type: integer, method_name: :zz, arg_types: [], environment: env))
+          .to be_nil
+      end
+
+      it "does not answer from a patch on a class that is not an ancestor" do
+        result = dispatch_patched([patch("Hash", :only_hash, :hash)], Rigor::Type::Combinator.nominal_of("Array"),
+                                  :only_hash)
+
+        expect(result).to be_nil
+      end
+    end
+
     describe "boundary-cross recording on RBS dispatch (ADR-10 slice 5c)" do
       let(:reporter) { Rigor::Analysis::DependencySourceInference::BoundaryCrossReporter.new }
 

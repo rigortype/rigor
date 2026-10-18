@@ -258,6 +258,22 @@ module Rigor
           return discovered_result
         end
 
+        # Issue #1708 — a `pre_eval:` patch on one of the receiver's ancestors (`class Object; def zz`,
+        # `module Enumerable; def sum_by`). Below the RBS tier, whose decline means no nearer RBS declares the
+        # method, and below the tiers that answer the receiver's own patch or a gem catalogue entry. A nearer
+        # `def` in the project's source (on an RBS-known receiver, which the discovered-method tier leaves to
+        # user-method inference) stops the walk: see {#project_source_defines?}. That probe reads the scope's def
+        # index, so a single-file scope (`type-of`, `annotate`, an LSP buffer) cannot see a `def` in another file.
+        ancestor_patched =
+          if !skip_project_patched && scope
+            try_project_patched_method(receiver_type, method_name, arg_types, block_type, environment,
+                                       through_ancestors: scope)
+          end
+        if ancestor_patched
+          scope&.record_dynamic_origin(call_node, DynamicOrigin::EXTERNAL_GEM_WITHOUT_RBS)
+          return ancestor_patched
+        end
+
         # ADR-5 robustness — synthesized-stub-type tier. When the receiver is a type Rigor
         # invented to make an otherwise-unbuildable project signature resolve (a
         # missing-namespace module, or a stub for a referenced-but-undeclared type like an
@@ -644,7 +660,11 @@ module Rigor
       # `def to_url; "hello"; end` patched onto `String` now resolves `s.to_url` to
       # `Dynamic[Nominal[String]]` instead of the pre-3a `Dynamic[Top]`. Falls back to
       # `Dynamic[Top]` when the heuristic declined (non-literal tail expression).
-      def try_project_patched_method(receiver_type, method_name, arg_types, block_type, environment)
+      #
+      # `through_ancestors:` (issue #1708), a scope, searches the receiver's ancestors as well, through
+      # {ProjectPatchedMethods#lookup_through_ancestors}, stopping at a nearer project-source `def`.
+      def try_project_patched_method(receiver_type, method_name, arg_types, block_type, environment,
+                                     through_ancestors: nil)
         registry = environment&.project_patched_methods
         return nil if registry.nil? || registry.empty?
 
@@ -652,12 +672,45 @@ module Rigor
         return nil if class_name.nil?
 
         kind = receiver_type.is_a?(Type::Singleton) ? :singleton : :instance
-        entry = registry.lookup(class_name: class_name, method_name: method_name, kind: kind)
+        entry =
+          if through_ancestors
+            registry.lookup_through_ancestors(
+              class_name: class_name, method_name: method_name, kind: kind, rbs_loader: environment.rbs_loader,
+              source_defines: ->(owner, side) { project_source_defines?(through_ancestors, owner, method_name, side) }
+            )
+          else
+            registry.lookup(class_name: class_name, method_name: method_name, kind: kind)
+          end
         return nil if entry.nil?
         return Type::Combinator.dynamic(entry.return_type) if entry.return_type
 
         aliased = project_patched_alias_target(entry, receiver_type, arg_types, block_type, environment)
         aliased ? Type::Combinator.dynamic(aliased) : Type::Combinator.untyped
+      end
+
+      # Issue #1708 — does the project's own source define `method_name` on `owner` (`side` as the ancestor walk
+      # reaches it), or on a module the project prepends to or includes into it? Ruby runs that `def` ahead of a
+      # patch on a farther ancestor: `class Integer; def nn = "s"` beats `class Object; def nn = nil` in a
+      # `pre_eval:` file. The owner's level of its {Scope::ResolutionChain} (its prepends, itself, its includes
+      # and their own mixins, or a class object's singleton and its extends) holds those definers; whether one
+      # of them defines the name does not depend on their order, so the chain is searched without settling it.
+      def project_source_defines?(scope, owner, method_name, side)
+        return false unless scope.known_user_class?(owner)
+
+        chain = Scope::ResolutionChain.for(scope, owner, side, :methods)
+        own_level_end = chain.level_starts[1] || chain.entries.size
+        found = chain.search(scope, 0, own_level_end) do |entry|
+          !entry.external? && source_def?(scope, entry.name, method_name, entry.side)
+        end
+        !found.nil?
+      end
+
+      def source_def?(scope, owner, method_name, side)
+        if side == :singleton
+          scope.discovered_method?(owner, method_name, :singleton) || !scope.singleton_def_for(owner, method_name).nil?
+        else
+          scope.discovered_method?(owner, method_name, :instance) || !scope.user_def_for(owner, method_name).nil?
+        end
       end
 
       # Issue #1702 — an alias in a `pre_eval:` patch whose old name no earlier patch binding defines

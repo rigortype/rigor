@@ -94,6 +94,8 @@ heavy job at a time.
   no rbs-inline source-RBS synthesis), it parses a single file with a single-file scope index (so
   every cross-file declaration reads `Dynamic[top]` — `class Foo` coming back `Dynamic[top]` is the
   tell), and it cannot see discovery-seeded joins (so a both-arms-`Dynamic` A/B proves nothing).
+  A cross-file `def` is not merely absent but can be overridden: a `pre_eval:` patch on an ancestor
+  types the call even where another file's nearer `def` wins under `check` (#1708).
   Attribute check-path behaviour with `check --no-cache --workers=0` plus a same-file positive
   control.
 - **`check` does not load stdlib RBS the project never required**, so `Time.now` is `Dynamic` under

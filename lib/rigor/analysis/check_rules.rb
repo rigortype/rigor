@@ -954,6 +954,7 @@ module Rigor
         #   (see {#ancestry_declares_method?} for why that placement is load-bearing, not tidiness).
         def last_resort_surface_answers?(receiver_type, class_name, call_node, scope, kind, lexical_sites = nil)
           return true if lexically_defined_method?(class_name, call_node, scope, kind, lexical_sites)
+          return true if project_patched_through_ancestors?(scope, class_name, call_node.name, kind)
           return true if module_mixin_receiver?(receiver_type, scope)
           return true if mixin_self_class_receiver?(call_node, scope)
           return true if unknown_mixin_includer?(class_name, scope)
@@ -1135,6 +1136,19 @@ module Rigor
           !registry.lookup(class_name: class_name.to_s, method_name: method_name.to_sym, kind: kind).nil?
         end
 
+        # Issue #1708 — {#project_patched_method?} asked through the receiver's ancestors: a `pre_eval:` patch on
+        # `Object`, `Numeric` or `Enumerable` gives an `Integer` or `Array` the method. Asked only once the
+        # receiver's RBS has come back without the method, so a nearer class's own declaration still decides arity
+        # and argument types; {#source_declared_method?} stays exact for the rules that read it for those.
+        def project_patched_through_ancestors?(scope, class_name, method_name, kind)
+          environment = scope.environment
+          registry = environment&.project_patched_methods
+          return false if registry.nil? || registry.empty?
+
+          !registry.lookup_through_ancestors(class_name: class_name.to_s, method_name: method_name.to_sym, kind: kind,
+                                             rbs_loader: environment.rbs_loader).nil?
+        end
+
         # ADR-34 — `call.unresolved-toplevel`. Fires on an
         # implicit-self call (no explicit receiver) at toplevel
         # scope (`scope.toplevel?`, i.e. outside any class /
@@ -1181,6 +1195,8 @@ module Rigor
           return nil if scope.top_level_def_for(name)
           return nil if source_declared_method?(scope, "Object", name, :instance)
           return nil if Rigor::Reflection.instance_method_definition("Object", name, scope: scope)
+          # Issue #1708 — `main` is an Object, so a `pre_eval:` patch on `Kernel` or `BasicObject` defines the name too.
+          return nil if project_patched_through_ancestors?(scope, "Object", name, :instance)
           return nil if main_singleton_method?(name, scope)
           return nil if Inference::ObjectMixins.may_define?(scope, name, receiver: :implicit)
           # `Target.class_eval { def added = 1; def use_added = added }` files the defs on Target
@@ -2183,6 +2199,7 @@ module Rigor
           return true unless Rigor::Reflection.rbs_class_known?(class_name, scope: scope)
           return true unless definition_available?(member, class_name, scope)
           return true if lookup_method(member, class_name, method_name, scope)
+          return true if project_patched_through_ancestors?(scope, class_name, method_name, :instance)
 
           # Issue #723 — the arm's own RBS does not have it; its project ancestry still might. Last, for
           # the reason {#ancestry_declares_method?} carries: this is the probe that walks the class graph.

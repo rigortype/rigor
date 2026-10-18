@@ -94,7 +94,8 @@ listing its plugin even with `enabled: false`. Skipped when no
 - `warn` — one per plugin that models a direct dependency but is not
   listed. Add it, or decline it deliberately — declining is a legitimate
   choice, and the way to record it is a `plugins:` entry with
-  `enabled: false`. Do not list a plugin only to silence this check.
+  `enabled: false`. Do not enable an unrelated plugin only to silence
+  this check.
 
 ### `gemfile_install` — Rigor is a project dependency
 

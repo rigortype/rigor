@@ -19,38 +19,47 @@ RSpec.describe "approval-queue.d entries (ADR-123)" do
   pr_link = %r{\A\[#\d+\]\(https://github\.com/rigortype/rigor/pull/\d+\)\z}
   slug = /\A[a-z0-9][a-z0-9._-]*\.md\z/
 
-  # Offense strings for one entry, or [] when it conforms.
-  define_method(:entry_offenses) do |name, content|
-    offenses = []
-    offenses << "#{name}: slug must be lowercase [a-z0-9._-] ending in .md" unless name.match?(slug)
-    lines = content.lines(chomp: true)
-    offenses << "#{name}: first line must be `# <the decision>`" unless lines.first&.match?(/\A# \S/)
+  field_rules = {
+    "PR" => ->(v) { v == "none" || v.match?(pr_link) },
+    "Issue" => ->(v) { v == "none" || v.match?(link) },
+    "Class" => ->(v) { classes.include?(v) },
+    "Precedent" => ->(v) { v == "none — sets one" || v.match?(link) },
+    "Decided" => ->(v) { v.match?(/\A\d{4}-\d{2}-\d{2}\z/) }
+  }.freeze
 
+  # Offense strings for the `- **Field:** value` lines.
+  define_method(:field_offenses) do |name, lines|
     fields = lines.filter_map { |line| line.match(/\A- \*\*(\w+):\*\* (.+)\z/)&.captures }.to_h
-    fields.transform_values!(&:strip)
-    {
-      "PR" => ->(v) { v == "none" || v.match?(pr_link) },
-      "Issue" => ->(v) { v == "none" || v.match?(link) },
-      "Class" => ->(v) { classes.include?(v) },
-      "Precedent" => ->(v) { v == "none — sets one" || v.match?(link) },
-      "Decided" => ->(v) { v.match?(/\A\d{4}-\d{2}-\d{2}\z/) }
-    }.each do |field, valid|
-      value = fields[field]
+    field_rules.filter_map do |field, valid|
+      value = fields[field]&.strip
       if value.nil?
-        offenses << "#{name}: missing `- **#{field}:** …`"
+        "#{name}: missing `- **#{field}:** …`"
       elsif !valid.call(value)
-        offenses << "#{name}: `#{field}: #{value}` does not match approval-queue.d/README.md"
+        "#{name}: `#{field}: #{value}` does not match approval-queue.d/README.md"
       end
     end
+  end
 
+  # Offense strings for the `## ` sections: exactly the four, in order, none empty.
+  define_method(:section_offenses) do |name, lines|
     headings = lines.each_index.select { |i| lines[i].start_with?("## ") }
     found = headings.map { |i| lines[i].delete_prefix("## ").strip }
+    offenses = []
     offenses << "#{name}: sections must be exactly #{sections.join(' / ')}, in order" unless found == sections
     headings.each_with_index do |start, n|
       body = lines[(start + 1)...(headings[n + 1] || lines.size)]
       offenses << "#{name}: section `#{lines[start]}` is empty" if body.all? { |line| line.strip.empty? }
     end
     offenses
+  end
+
+  # Offense strings for one entry, or [] when it conforms.
+  define_method(:entry_offenses) do |name, content|
+    lines = content.lines(chomp: true)
+    offenses = []
+    offenses << "#{name}: slug must be lowercase [a-z0-9._-] ending in .md" unless name.match?(slug)
+    offenses << "#{name}: first line must be `# <the decision>`" unless lines.first&.match?(/\A# \S/)
+    offenses + field_offenses(name, lines) + section_offenses(name, lines)
   end
 
   # Offense strings for the release rule: on a `release/**` pull request, the queue must be empty.
@@ -134,7 +143,7 @@ RSpec.describe "approval-queue.d entries (ADR-123)" do
   end
 
   describe "the live directory" do
-    entry_paths = Dir.glob("#{APPROVAL_QUEUE_DIR}/*").reject { |path| File.basename(path) == "README.md" }
+    let(:entry_paths) { Dir.glob("#{APPROVAL_QUEUE_DIR}/*").reject { |path| File.basename(path) == "README.md" } }
 
     it "keeps its README (the directory stays tracked and self-describing)" do
       expect(File).to exist(File.join(APPROVAL_QUEUE_DIR, "README.md"))

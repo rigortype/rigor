@@ -128,8 +128,8 @@ module Rigor
             properties: {
               rule: {
                 type: "string",
-                description: "Rule ID, legacy alias, or family prefix (call, flow, assert, dump, def). " \
-                             "Omit to list every rule."
+                description: "Rule ID, legacy alias, or family prefix (call, flow, def, assert, dump, global, " \
+                             "suppression, static, effect). Omit to list every rule."
               }
             }
           }

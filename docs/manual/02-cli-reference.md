@@ -1173,9 +1173,13 @@ Runs a scoped analysis and audits:
 - **Plugin load errors** — whether every configured plugin loaded.
 - **Baseline drift** — whether the current diagnostics have drifted
   from the saved baseline.
-- **Plugin gap** — whether `Gemfile.lock` contains dependencies that
-  bundled plugins model (Rails, Devise, Pundit, Sidekiq, ...) while those
-  plugins are not enabled (ADR-96).
+- **Plugin gap** — whether the project's direct dependencies (the
+  `DEPENDENCIES` section of `Gemfile.lock`, never transitive gems)
+  include gems a bundled plugin models — Rails, Devise, Pundit,
+  Sidekiq, ... — while that plugin is not enabled
+  ([ADR-96](../adr/96-plugin-target-gems.md)). Each missing plugin is
+  a warning, since leaving one out can be deliberate; it is a failure
+  only when the project enables none of the bundled plugins at all.
 - **Gemfile install** — whether Rigor itself resolves as one of the
   project's dependencies, which
   [Installing Rigor](01-installation.md) tells you not to do. Only a
@@ -1188,9 +1192,13 @@ Runs a scoped analysis and audits:
   versioned together, so a copy from another installation can run
   the engine with a mismatched plugin. A warning, not a failure;
   third-party plugins from your own bundle are never flagged.
-- **Bundle layout** — whether gems are installed in the active Ruby's
-  default gem home where Rigor cannot locate them, preventing gem-shipped
-  `sig/` discovery without `bundler.bundle_path:` or `vendor/bundle`.
+- **Bundle layout** — whether the project's gems are installed in the
+  active Ruby's default gem home, which Rigor cannot locate, so no
+  gem-shipped `sig/` is discovered. Rigor finds a bundle only where the
+  project records it: `bundler.bundle_path:` in `.rigor.yml`,
+  `.bundle/config`'s `BUNDLE_PATH`, an in-tree `vendor/bundle`, or the
+  global Bundler config. A warning, not a failure: the default layout
+  is correct, and most gems ship no `sig/`.
 
 Text output prints `[PASS]`, `[FAIL]`, or `[WARN]` per check plus a
 routed hint (e.g. "Run `rigor baseline regenerate`"). JSON output

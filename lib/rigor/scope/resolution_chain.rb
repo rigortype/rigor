@@ -303,12 +303,14 @@ module Rigor
       # module is declared its sites carry later edits and the removal. #1661 — each name also files `mixin:<name>`,
       # which `IncrementalSession#mark_affected` fires when the module's unpositioned mixin edges move: a new file
       # that taints it (`module Comparable; include(*MODS); end`) without a hook. The key is the qualified candidate,
-      # the spelling the chain resolves a project entry by and the unpositioned table keys an owner under, so a taint
-      # on a project `Foo::Base` re-checks no reader of an external `Lib::Base`. An ambiguous spelling has no
-      # candidate and files none: no project module can resolve it, so no taint can mark it. The edges are a function
-      # of the chain alone, so a consumer files them once per chain ({Analysis::DependencyRecorder.file_chain_once},
-      # #1590). A hook written another way — an instance `def included` in a module extended onto the external, a
-      # `define_singleton_method(:included)` — satisfies no such key and is not seen.
+      # the spelling the chain resolves a project entry by. The unpositioned table may key the owner by a relative
+      # spelling (`Constants` inside `class File`), so the producer also fires every recorded `mixin:` key ending in
+      # `::<owner>` (`IncrementalSession#mixin_keys`); a taint on a project `Foo::Base` still re-checks no reader of
+      # an external `Lib::Base`. An ambiguous spelling has no candidate and files none: no project module can resolve
+      # it, so no taint can mark it. The edges are a function of the chain alone, so a consumer files them once per
+      # chain ({Analysis::DependencyRecorder.file_chain_once}, #1590). A hook written another way — an instance `def
+      # included` in a module extended onto the external, a `define_singleton_method(:included)` — satisfies no such
+      # key and is not seen.
       def record_hooks(scope)
         externals = (@memo[:externals] ||= @entries.select(&:external?).freeze)
         return if externals.empty?

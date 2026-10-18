@@ -143,6 +143,36 @@ RSpec.describe "unrecordable mixins — incremental" do
     end
   end
 
+  # The unpositioned table keys a receiver-form owner by the spelling written (`Constants` inside `class File`), while
+  # the chain files the qualified candidate, so the owner also fires every recorded key ending in `::Constants`.
+  {
+    "File::Constants" => "class File; Constants.include(*MODS); end\n",
+    "IO::WaitReadable" => "class IO; WaitReadable.include(*MODS); end\n"
+  }.each do |qualified, taint|
+    describe "a relative spelling of #{qualified} in its reopened namespace" do
+      let(:files) do
+        { "a.rb" => "class C\n  include #{qualified}\n  def foo(x) = x\nend\n", "b.rb" => "C.new.foo\n",
+          "p.rb" => "module P; end\nMODS = [P]\n" }
+      end
+
+      it "re-checks the reader when the file appears" do
+        baseline, warm, cold = warm_and_cold(files, "x.rb" => taint)
+
+        expect(baseline).to eq(reported)
+        expect(cold).to eq([])
+        expect(warm).to eq(cold)
+      end
+
+      it "re-checks the reader when an edit adds the taint to a file that names no module" do
+        baseline, warm, cold = warm_and_cold(files.merge("x.rb" => "X = 1\n"), "x.rb" => taint)
+
+        expect(baseline).to eq(reported)
+        expect(cold).to eq([])
+        expect(warm).to eq(cold)
+      end
+    end
+  end
+
   # Guard (of the key choice): the external entry's edge is the module's unpositioned-mixin set, not `mark:` or a class
   # edge, so a file reopening `Comparable` with an ordinary method re-checks no reader of a chain through it.
   it "re-checks no reader when a new file reopens the external module without a taint" do

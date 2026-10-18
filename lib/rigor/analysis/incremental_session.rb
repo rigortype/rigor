@@ -1317,10 +1317,25 @@ module Rigor
         return Set.new if moved.empty? && tainted.empty?
 
         keys = moved.map { |(class_name, _mark)| "mark:#{class_name.split('::').last}" }.uniq
-        keys.concat(tainted.map { |name| "mixin:#{name.delete_prefix('::')}" }.uniq)
+        keys.concat(mixin_keys(tainted))
         extended = Scope::DiscoveryIndex::ENVELOPE_OBJECT_EXTENDED_MARK
         keys << "mark:*" if moved.any? { |(_class_name, mark)| mark == extended }
         Incremental.negative_closure(keys, @negative_dependents)
+      end
+
+      # Issue #1661 — the `mixin:` keys an owner of a moved unpositioned edge fires. The table keys a receiver-form
+      # owner by the spelling written (`class File; Constants.include(*MODS); end` is `"Constants"`), not the constant
+      # Ruby resolves it to, while the chain files the qualified candidate (`mixin:File::Constants`). The table does
+      # not carry the nesting, and every lexical-prefix candidate of the owner ends in `::<owner>`, so the owner fires
+      # its own key and every recorded `mixin:` key ending in `::<owner>`. A relative spelling over-fires to the
+      # readers of every module sharing its trailing segments; a qualified one fires only its suffix matches.
+      def mixin_keys(owners)
+        keys = owners.map { |name| "mixin:#{name}" }
+        suffixes = owners.map { |name| "::#{name}" }
+        @negative_dependents.each_key do |key|
+          keys << key if key.start_with?("mixin:") && suffixes.any? { |suffix| key.end_with?(suffix) }
+        end
+        keys.uniq
       end
 
       # The negative keys a class-declaration diff fires: `class:<last segment>` for a class name, and (issue #1820)

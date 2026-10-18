@@ -678,9 +678,12 @@ module Rigor
         entry = project_patched_entry(registry, class_name, method_name, kind, environment,
                                       scope: scope, through_ancestors: through_ancestors)
         return nil if entry.nil?
-        return nil unless registry.callable?(entry, explicit: explicit_non_self_receiver?(call_node),
-                                                    self_type: scope ? scope.self_type : :unknown,
-                                                    rbs_loader: environment.rbs_loader)
+
+        verdict = registry.callable?(entry, explicit: explicit_non_self_receiver?(call_node),
+                                            self_type: scope ? scope.self_type : :unknown,
+                                            rbs_loader: environment.rbs_loader)
+        return nil if verdict == false
+        return Type::Combinator.untyped if verdict.nil?
         return Type::Combinator.dynamic(entry.return_type) if entry.return_type
 
         aliased = project_patched_alias_target(entry, receiver_type, arg_types, block_type, environment)

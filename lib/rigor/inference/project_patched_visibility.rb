@@ -25,9 +25,9 @@ module Rigor
       #   call of its own, which may or may not run: then it and every `def` after it are public, the reading that
       #   answers more calls.
       #
-      # A `def` this does not reach (one in a block, a `rescue` clause, or a body nothing names) is public. A named
-      # call with Symbol arguments (`private :x`) is the scanner's to apply, since it may name a `def` of an earlier
-      # file ({.pending}).
+      # A `def` this does not reach (one in a block, a `rescue` clause, or a body nested in a conditional, a block or a
+      # method, which may not run) is public. A named call with Symbol arguments (`private :x`) is the scanner's to
+      # apply, since it may name a `def` of an earlier file ({.pending}).
       module Visibility
         # The receiverless calls that set an instance `def`'s visibility, and what they set. `module_function` makes
         # the instance method private and adds a public singleton copy.
@@ -43,6 +43,10 @@ module Rigor
           Prism::LambdaNode
         ].freeze
         private_constant :OPAQUE
+
+        # The bodies {.read_body} reads when they are a direct statement of a body it reads.
+        BODIES = [Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode].freeze
+        private_constant :BODIES
 
         # A named visibility call (`private :x`, `module_function :x`, `private_class_method :x`) in a body, which
         # {ProjectPatchedScanner.resolve_aliases} applies to the binding its name has when it runs. `visibility` is
@@ -79,7 +83,11 @@ module Rigor
         #   `:private`, `:protected` or `:module_function`; and {STATEMENT} for each call that is a direct statement.
         def defs(root)
           found = {}.compare_by_identity
-          collect_bodies(root, found)
+          # The file's top level, and through {.read_body} every class, module or `class <<` body written as a direct
+          # statement of it or of another body so read: the bodies that run whenever the file loads. A body nested in
+          # a conditional, a block or a method may not run, so none of its calls or toggles is read and its `def`s
+          # are public.
+          read_body(root.statements, found) if root.is_a?(Prism::ProgramNode)
           found
         end
 
@@ -125,19 +133,7 @@ module Rigor
           end
         end
 
-        def collect_bodies(node, found)
-          return unless node.is_a?(Prism::Node)
-
-          if node.is_a?(Prism::ClassNode) || node.is_a?(Prism::ModuleNode) || node.is_a?(Prism::SingletonClassNode)
-            read_body(node.body, found)
-          elsif node.is_a?(Prism::ProgramNode)
-            read_body(node.statements, found)
-          end
-          node.rigor_each_child { |child| collect_bodies(child, found) }
-        end
-        private_class_method :collect_bodies
-
-        def read_body(body, found)
+        def read_body(body, found) # rubocop:disable Metrics/PerceivedComplexity
           default = :public
           direct_statements(body).each do |stmt|
             found[stmt] = STATEMENT if stmt.is_a?(Prism::CallNode)
@@ -148,6 +144,8 @@ module Rigor
               mark_arguments(stmt, visibility, side, found)
             elsif stmt.is_a?(Prism::DefNode)
               mark(stmt, default, found) if stmt.receiver.nil?
+            elsif BODIES.any? { |kind| stmt.is_a?(kind) }
+              read_body(stmt.body, found)
             else
               default = :public if bare_call_nested?(stmt)
               mark_nested(stmt, default, found)

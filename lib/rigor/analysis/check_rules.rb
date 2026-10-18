@@ -1159,13 +1159,15 @@ module Rigor
 
         # Issue #1708 — whether `call_node` may reach the patch `entry`: Ruby raises NoMethodError for a private
         # patch called with an explicit receiver other than `self` (`1.kp` on `module Kernel; private def kp`), and
-        # for a protected one called from outside its owner's instances. No call node is the permissive answer.
+        # for a protected one called from outside its owner's instances. No call node, and a declined verdict (another
+        # definer the call may reach, {Inference::ProjectPatchedMethods#callable?}), are the permissive answer.
         def patch_callable?(registry, entry, scope, call_node)
           return true if call_node.nil?
 
           receiver = call_node.receiver
-          registry.callable?(entry, explicit: !receiver.nil? && !receiver.is_a?(Prism::SelfNode),
-                                    self_type: scope.self_type, rbs_loader: scope.environment.rbs_loader)
+          verdict = registry.callable?(entry, explicit: !receiver.nil? && !receiver.is_a?(Prism::SelfNode),
+                                              self_type: scope.self_type, rbs_loader: scope.environment.rbs_loader)
+          verdict != false
         end
 
         # ADR-34 — `call.unresolved-toplevel`. Fires on an

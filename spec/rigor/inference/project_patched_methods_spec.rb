@@ -85,5 +85,18 @@ RSpec.describe Rigor::Inference::ProjectPatchedMethods do
       expect(registry.lookup_through_ancestors(class_name: "Foo", method_name: :bm, kind: :instance, rbs_loader: nil)
                      &.class_name).to eq("B")
     end
+
+    # Ruby raises ArgumentError (cyclic prepend detected) at the second prepend, as for the include cycle above.
+    it "finds the module's method through a prepend cycle without recursing forever" do
+      prepend = ->(owner, name) { described_class::Mixin.new(owner: owner, module_name: name, kind: :prepend) }
+      registry = described_class.new(
+        entries: [entry_klass.new(class_name: "B", method_name: :bm, kind: :instance, source_path: "b.rb",
+                                  source_line: 1)],
+        mixins: [prepend.call("Foo", "A"), prepend.call("A", "B"), prepend.call("B", "A")]
+      )
+
+      expect(registry.lookup_through_ancestors(class_name: "Foo", method_name: :bm, kind: :instance, rbs_loader: nil)
+                     &.class_name).to eq("B")
+    end
   end
 end

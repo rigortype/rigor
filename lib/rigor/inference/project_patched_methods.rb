@@ -32,10 +32,14 @@ module Rigor
       # `private def x`, a `def` after a bare `private` in the same body, a later `private :x`, and the instance copy
       # a `module_function` makes are `:private` ({#callable?} reads it). An alias takes its old name's visibility,
       # as Ruby's does; one whose old name no patch binds is `:public`.
+      #
+      # `farther` is set only on an entry {#lookup_through_ancestors} returns: the other definers of the name farther
+      # on the walk (entries, or {SOURCE_DEFINER} for a project-source `def`), which {#callable?} reads before it
+      # refuses the call.
       Entry = Data.define(:class_name, :method_name, :kind, :source_path, :source_line, :return_type, :alias_of,
-                          :visibility) do
+                          :visibility, :farther) do
         def initialize(class_name:, method_name:, kind:, source_path:, source_line:, return_type: nil, alias_of: nil,
-                       visibility: :public)
+                       visibility: :public, farther: nil)
           super
         end
       end
@@ -102,35 +106,61 @@ module Rigor
       # named visibility call on an owner the walk passes before the body (`public :kp` in `class Integer`, an
       # override) gives the entry it returns that visibility, and that owner for {#callable?}'s protected check.
       # @return the entry, or `nil` when no ancestor's patch declares the method ahead of a source `def`.
-      def lookup_through_ancestors(class_name:, method_name:, kind:, rbs_loader:, source_defines: nil)
+      def lookup_through_ancestors(class_name:, method_name:, kind:, rbs_loader:, source_defines: nil) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
         return nil if empty?
 
         override = nil
+        found = nil
+        farther = []
         ancestor_keys(class_name.to_s, kind, rbs_loader).each do |owner, side|
-          return nil if source_defines&.call(owner, side)
+          if source_defines&.call(owner, side)
+            return nil if found.nil?
+
+            farther << SOURCE_DEFINER
+            break
+          end
 
           entry = @by_key[[owner, method_name, side]]
-          return override ? entry.with(class_name: override.first, visibility: override.last) : entry if entry
-
-          visibility = @overrides[[owner, method_name, side]]
-          override ||= [owner, visibility] if visibility
+          if found
+            farther << entry if entry
+          elsif entry
+            found = override ? entry.with(class_name: override.first, visibility: override.last) : entry
+          elsif (visibility = @overrides[[owner, method_name, side]])
+            override ||= [owner, visibility]
+          end
         end
-        nil
+        farther.empty? || found.nil? ? found : found.with(farther: farther.freeze)
       end
+
+      # A project-source `def` of the name farther on the walk than the entry it returns, in {Entry#farther}.
+      SOURCE_DEFINER = Object.new.freeze
 
       # Issue #1708 — whether Ruby lets a call reach `entry`. A public method answers any call; a private one only a
       # call with no receiver or with `self` as it (`explicit` is false for those); a protected one also a call from
       # a method whose `self` is an instance of the entry's owner. `self_type` is the caller's `self` (`nil` at the
       # top level, where it is `main`, an Object); a `self` this cannot name (the default) may be one, so a
       # protected entry answers it.
+      #
+      # It never refuses a call some other definer of the name may answer: the walk's order is an approximation
+      # (a module two owners mix in is spliced at the nearer one, where Ruby keeps the first include and skips the
+      # second), so when {Entry#farther} holds a definer the call may reach (a project-source `def`, or an entry this
+      # would let it reach), it answers nil: decline, neither refused nor typed from `entry`.
+      # @return true (the call reaches `entry`), false (Ruby refuses it), or nil (declined).
       def callable?(entry, explicit:, self_type: :unknown, rbs_loader: nil)
         return true unless explicit
 
-        case entry.visibility
-        when :private, :module_function then false
-        when :protected then self_kind_of?(self_type, entry.class_name, rbs_loader)
-        else true
+        allowed =
+          case entry.visibility
+          when :private, :module_function then false
+          when :protected then self_kind_of?(self_type, entry.class_name, rbs_loader)
+          else true
+          end
+        return true if allowed
+
+        reachable = (entry.farther || []).any? do |other|
+          other.equal?(SOURCE_DEFINER) || callable?(other, explicit: true, self_type: self_type, rbs_loader: rbs_loader)
         end
+        reachable ? nil : false # rubocop:disable Style/ReturnNilInPredicateMethodDefinition
       end
 
       def empty?

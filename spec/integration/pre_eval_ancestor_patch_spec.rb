@@ -234,6 +234,49 @@ RSpec.describe "a pre_eval: patch on an ancestor reaches its descendants (#1708)
       expect(rules(result)).to eq([])
     end
 
+    # Review of #2107 — a class body nested in a conditional may not run, so neither its named call nor its toggle
+    # applies. Ruby: the condition is false, so `1.bx` and `1.by` are 1.
+    it "does not apply the visibility a class body nested in a conditional gives" do
+      result = run_project({ "ext/a.rb" => "class Integer; def bx = 1; def by = 1; end\n", "ext/b.rb" => <<~PATCH,
+        if ENV["NEVER_SET_B"]; class Integer; private :bx; end; end
+        if ENV["NEVER_SET_B"]; class Integer; private; def by = 2; end; end
+      PATCH
+                             "lib/a.rb" => "1.bx # => 1\n1.by # => 1\n" }, { "pre_eval" => ["ext/a.rb", "ext/b.rb"] })
+
+      # b.rb's `def by` is still a pre-eval.duplicate-declaration of a.rb's; only the call diagnostics are asserted.
+      expect(rules(result).reject { |_, _, rule| rule.start_with?("pre-eval.") }).to eq([])
+    end
+
+    # Ruby: `Integer.include(A)` after `Numeric.include(A)` changes nothing, so `1.am` reaches Numeric#am (2). The walk
+    # splices A after Integer, ahead of Numeric#am, so it declines rather than refuses the private A#am.
+    it "declines rather than refuses a private patch when another definer on the chain may answer" do
+      result = run_project("ext/core.rb" => <<~PATCH, "lib/a.rb" => "1.am # => 2\n")
+        module A; private def am = 1; end
+        class Numeric; def am = 2; end
+        Numeric.include(A); Integer.include(A)
+      PATCH
+
+      expect(rules(result)).to eq([])
+    end
+
+    # Ruby: Integer's `public :oz` is the nearest copy, so `1.oz` is 1; `1.po` raises NoMethodError (protected method
+    # 'po'), as the copy Numeric's `protected :po` makes belongs to Numeric and main is no Numeric; `1.bm` raises
+    # NoMethodError (private method 'bm'), the copy `module_function :bm` makes in Mf2.
+    it "applies the nearest override, with its own owner and module_function as private" do
+      result = run_project("ext/core.rb" => <<~PATCH, "lib/a.rb" => "1.oz\n1.po\n1.bm\n")
+        class Object; def oz = 1; end
+        class Numeric; private :oz; end
+        class Integer; public :oz; end
+        class Object; def po = 1; end
+        class Numeric; protected :po; end
+        module Base; def bm = 1; end
+        module Mf2; include Base; module_function :bm; end
+        class Numeric; include Mf2; end
+      PATCH
+
+      expect(rules(result)).to eq([["a.rb", 2, "call.undefined-method"], ["a.rb", 3, "call.undefined-method"]])
+    end
+
     # Ruby copies the inherited method onto the class with the visibility the call names.
     it "gives a class's named public call precedence over the private patch it inherits" do
       result = run_project("ext/core.rb" => <<~PATCH, "lib/a.rb" => "1.kp2 # => 1\n1.hid # => 2\n")

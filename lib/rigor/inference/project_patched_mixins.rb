@@ -59,15 +59,27 @@ module Rigor
         # call as `unless` or as `if !`; the guard only skips a second include, so the call is read as a direct
         # statement would be (#2109). The guard names the call's own receiver and module; any other condition, or a
         # guard naming another receiver or module, leaves the call unread.
-        def guarded(node)
+        #
+        # `top_level` says the conditional is a direct statement of the file's top level, where a receiverless call
+        # includes into Object; see {guarded_call?}. The `CALLS` check is defensive: the scanner applies a call's mixin
+        # edge only when {Mixins.pending} reads it as include or prepend, so a call of another name changes nothing.
+        def guarded(node, top_level)
           return nil unless node.is_a?(Prism::UnlessNode) || node.is_a?(Prism::IfNode)
 
           call = guarded_body(node)
-          return nil unless call.is_a?(Prism::CallNode) && CALLS.include?(call.name) && call.arguments
+          return nil unless call.is_a?(Prism::CallNode) && CALLS.include?(call.name) && guarded_call?(call, top_level)
 
           guard = when_undefined(node)
           call if guard && guards?(guard, call)
         end
+
+        # Whether `call` takes exactly one module, and is not receiverless at the file's top level. Such an include's
+        # guard would be `include?` on main, which Ruby does not define: the guard raises, so it is not read as an
+        # include into Object. A receiverless call in a class or module body names that body's own module.
+        def guarded_call?(call, top_level)
+          call.arguments&.arguments&.size == 1 && !(top_level && call.receiver.nil?)
+        end
+        private_class_method :guarded_call?
 
         # The sole statement of an `unless` or `if` body, or nil when the conditional has an else branch or another
         # body.
@@ -96,7 +108,7 @@ module Rigor
         private_class_method :unwrap
 
         # Whether `guard` is `X.include?(M)`, `X.ancestors.include?(M)` or `X < M`, where `X` and `M` are the receiver
-        # and the sole argument of `call`.
+        # and the argument of `call`; {guarded} passes only a call with exactly one argument.
         def guards?(guard, call)
           return false unless guard.is_a?(Prism::CallNode) && guard.arguments&.arguments&.size == 1
 

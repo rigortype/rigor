@@ -89,7 +89,7 @@ module Rigor
           # statement of it or of another body so read: the bodies that run whenever the file loads. A body nested in
           # a conditional, a block or a method may not run, so none of its calls or toggles is read and its `def`s
           # are public.
-          read_body(root.statements, found) if root.is_a?(Prism::ProgramNode)
+          read_body(root.statements, found, top_level: true) if root.is_a?(Prism::ProgramNode)
           found
         end
 
@@ -136,13 +136,14 @@ module Rigor
         end
 
         # The include an idempotence guard runs (`X.include(M) unless X.include?(M)`) is read as a direct statement.
-        def mark_guarded(stmt, found)
-          guarded = Mixins.guarded(stmt)
+        def mark_guarded(stmt, found, top_level)
+          guarded = Mixins.guarded(stmt, top_level)
           found[guarded] = STATEMENT if guarded
         end
         private_class_method :mark_guarded
 
-        def read_body(body, found) # rubocop:disable Metrics/PerceivedComplexity
+        # `top_level` is true for the file's own statements only; a body it reads is a class or module body.
+        def read_body(body, found, top_level: false) # rubocop:disable Metrics/PerceivedComplexity
           default = :public
           direct_statements(body).each do |stmt|
             found[stmt] = STATEMENT if stmt.is_a?(Prism::CallNode)
@@ -156,7 +157,7 @@ module Rigor
             elsif BODIES.any? { |kind| stmt.is_a?(kind) }
               read_body(stmt.body, found)
             else
-              mark_guarded(stmt, found)
+              mark_guarded(stmt, found, top_level)
               default = :public if bare_call_nested?(stmt)
               mark_nested(stmt, default, found)
             end

@@ -52,14 +52,15 @@ RSpec.describe "rigor-sinatra integration" do
     RUBY
   end
 
-  it "registers a manifest with Tier A block_as_methods covering the nine Sinatra verbs" do
+  it "registers a manifest with Tier A block_as_methods covering the nine Sinatra verbs, filters and error handlers" do
     manifest = plugin_class.manifest
     expect(manifest.id).to eq("sinatra")
     expect(manifest.block_as_methods.size).to eq(1)
     entry = manifest.block_as_methods.first
     expect(entry).to be_a(Rigor::Plugin::Macro::BlockAsMethod)
     expect(entry.receiver_constraint).to eq("Sinatra::Base")
-    expect(entry.method_names).to eq(%i[get post put delete head options patch link unlink])
+    expect(entry.method_names)
+      .to eq(%i[get post put delete head options patch link unlink before after error not_found])
     expect(entry.self_type).to eq(:receiver_instance)
   end
 

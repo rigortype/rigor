@@ -29,7 +29,9 @@ module Rigor
     # ## Reach
     #
     # All nine class-level HTTP verb methods Sinatra exposes: `get`, `post`, `put`, `delete`, `head`,
-    # `options`, `patch`, `link`, `unlink` (`lib/sinatra/base.rb:1531-1553`). Both modular-style subclasses
+    # `options`, `patch`, `link`, `unlink` (`lib/sinatra/base.rb:1531-1553`), plus the `before` / `after`
+    # filters (`add_filter`) and the `error` / `not_found` handlers, whose blocks `compile!` turns into
+    # instance methods through the same `generate_method` (issue #1768). Both modular-style subclasses
     # of `Sinatra::Base` and `Sinatra::Application` (classic top-level style, when used via `class App <
     # Sinatra::Application`) match because the receiver constraint accepts every subclass.
     #
@@ -57,7 +59,7 @@ module Rigor
         block_as_methods: [
           Rigor::Plugin::Macro::BlockAsMethod.new(
             receiver_constraint: "Sinatra::Base",
-            method_names: %i[get post put delete head options patch link unlink]
+            method_names: %i[get post put delete head options patch link unlink before after error not_found]
           )
         ]
       )

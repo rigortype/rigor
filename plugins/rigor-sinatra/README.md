@@ -24,7 +24,7 @@ class Sinatra < Rigor::Plugin::Base
     block_as_methods: [
       Rigor::Plugin::Macro::BlockAsMethod.new(
         receiver_constraint: "Sinatra::Base",
-        method_names: %i[get post put delete head options patch link unlink]
+        method_names: %i[get post put delete head options patch link unlink before after error not_found]
       )
     ]
   )
@@ -93,7 +93,9 @@ plugins:
 ```
 
 No plugin-specific config keys. The match table is fixed at the
-manifest level — the nine Sinatra HTTP verb methods, against any
+manifest level — the nine Sinatra HTTP verb methods plus the
+`before` / `after` filters and the `error` / `not_found` handlers
+(each block becomes an instance method through `generate_method`), against any
 class inheriting from `Sinatra::Base`.
 
 ## Running the demo

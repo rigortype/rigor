@@ -185,7 +185,11 @@ The narrowing applies wherever the block-carrying call sits: a statement, an
 assignment's value, or a value position the evaluator does not enter (a call
 argument, a keyword argument, a receiver chain), where the scope indexer's
 unentered-block walk applies the same match
-([`inference-engine.md`](inference-engine.md)).
+([`inference-engine.md`](inference-engine.md)). A `:receiver_instance`
+block in a class body is also an instance method body for the ADR-58 ivar
+census: its `@x` writes join the class's instance-ivar union as a `def`
+body's do ([#1768](https://github.com/rigortype/rigor/issues/1768);
+[`inference-engine.md`](inference-engine.md)).
 
 | Field | Type | Notes |
 | --- | --- | --- |

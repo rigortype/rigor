@@ -288,7 +288,10 @@ directory other than `vendor/`, so neither a warm validation nor a
 ([#1959](https://github.com/rigortype/rigor/issues/1959)); the listing
 row carries each entry's kind because the walk descends a real
 directory and not a symlinked one, so a top-level `gen` that changes
-kind under the same name changes what it reads. `rigor-dry-schema`,
+kind under the same name changes what it reads. It reads only regular
+files, and a symlink only where it resolves to one: a directory named
+`*.rb` is walked and not read, and a fifo, socket or device is not read at
+all ([#2113](https://github.com/rigortype/rigor/issues/2113)). `rigor-dry-schema`,
 `rigor-dry-validation` and `rigor-graphql` listed their `paths:`
 directories with `Dir.glob`, so a new file that `exclude:` keeps
 out of analysis, and which they scan all the same, reached no cache

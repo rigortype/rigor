@@ -614,6 +614,19 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
       expect(fold(1, :<<, [64]).value).to eq(2**64)
     end
 
+    it "unions a widened result with the constants of a mixed receiver union" do
+      combinator = Rigor::Type::Combinator
+      receiver = combinator.union(combinator.constant_of(2**13_000), combinator.constant_of(5))
+      result = described_class.try_dispatch(cc(receiver: receiver, method_name: :*,
+                                               args: [combinator.constant_of(2**13_000)]))
+      expect(result).to eq(combinator.union(combinator.constant_of(5 * (2**13_000)), nominal("Integer")))
+    end
+
+    it "widens a unary result past the bit limit to Integer" do
+      expect(fold((2**13_606) - 1, :succ)).to eq(nominal("Integer"))
+      expect(fold((2**13_606) - 2, :succ).value).to eq((2**13_606) - 1)
+    end
+
     # The paths that do not go through the invoke helpers (`divmod`'s Tuple lift, `String#%`, the Array lifts) keep
     # declining a value past the limit: `foldable_constant_value?` carries the same bound.
     it "declines a divmod whose remainder is past the bit limit" do

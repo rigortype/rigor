@@ -1,1 +1,1 @@
-- **[engine]** A range literal whose endpoints Ruby cannot build (`1.."a"`) no longer aborts the file with an "internal analyzer error"; it types as a plain `Range`. ([#2114](https://github.com/rigortype/rigor/pull/2114))
+- **[engine]** A range literal whose endpoints Ruby cannot build (`1.."a"`) no longer aborts the file with an "internal analyzer error"; it types as `Range[Integer | String]`, a Range of the endpoint classes. ([#2114](https://github.com/rigortype/rigor/pull/2114))

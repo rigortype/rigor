@@ -2019,7 +2019,13 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
         type = scope.type_of(parse_expression(source))
 
         expect(type).not_to be_a(Rigor::Type::Constant)
-        expect(type.class_name).to eq("Range")
+        expect(type).to eq(
+          Rigor::Type::Combinator.nominal_of(
+            "Range",
+            type_args: [Rigor::Type::Combinator.union(Rigor::Type::Combinator.nominal_of("Integer"),
+                                                      Rigor::Type::Combinator.nominal_of("String"))]
+          )
+        )
       end
     end
 

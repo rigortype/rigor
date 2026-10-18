@@ -7,6 +7,10 @@ require "tmpdir"
 require "rigor/analysis/runner"
 require "rigor/configuration"
 
+SINATRA_CENSUS_PLUGIN_LIB = File.expand_path("../../plugins/rigor-sinatra/lib", __dir__)
+$LOAD_PATH.unshift(SINATRA_CENSUS_PLUGIN_LIB) unless $LOAD_PATH.include?(SINATRA_CENSUS_PLUGIN_LIB)
+require "rigor-sinatra"
+
 # Issue #1768 — the ADR-58 class-ivar census skipped writes inside an ADR-16 `block_as_methods:` block. A plugin entry
 # with the default `:receiver_instance` binding declares that `get "/" do … end` in a subclass of its receiver
 # constraint runs as an instance method of that class (Sinatra's `generate_method`), so the block's `@x = …` is the
@@ -33,6 +37,15 @@ RSpec.describe "the ADR-58 ivar census counts block_as_methods instance blocks" 
       module Sinatra
         class Base
           def self.get: (String) ?{ () -> untyped } -> void
+          def self.post: (String) ?{ () -> untyped } -> void
+          def self.before: (*untyped) ?{ () -> untyped } -> void
+          def self.after: (*untyped) ?{ () -> untyped } -> void
+          def self.error: (*untyped) ?{ () -> untyped } -> void
+          def self.not_found: () ?{ () -> untyped } -> void
+          def self.helpers: () ?{ () -> untyped } -> void
+
+          def session: () -> Hash[String, untyped]
+          def redirect: (String) -> void
         end
       end
 
@@ -42,12 +55,12 @@ RSpec.describe "the ADR-58 ivar census counts block_as_methods instance blocks" 
   end
   let(:nil_call) { [["app.rb", 10, "call.undefined-method"]] }
 
-  def diagnostics_for(files, plugin: block_plugin, workers: 0)
+  def diagnostics_for(files, plugin: block_plugin, workers: 0, plugin_name: "rigor-censusroutes")
     Rigor::Plugin.unregister!
     Dir.mktmpdir do |dir|
       lib = write_project(dir, files)
       configuration = Rigor::Configuration.new(
-        Rigor::Configuration::DEFAULTS.merge("paths" => [lib], "plugins" => plugin ? ["rigor-censusroutes"] : [])
+        Rigor::Configuration::DEFAULTS.merge("paths" => [lib], "plugins" => plugin ? [plugin_name] : [])
       )
       Dir.chdir(dir) do
         runner = Rigor::Analysis::Runner.new(
@@ -158,5 +171,82 @@ RSpec.describe "the ADR-58 ivar census counts block_as_methods instance blocks" 
       end
     RUBY
     expect(diagnostics_for({ "app.rb" => source })).to be_empty
+  end
+
+  # A block-pass argument is not a literal block: the census has no body to walk and must not fail on the call.
+  it "leaves a route given a block-pass argument alone" do
+    source = app.sub(%(  get "/" do\n    @user = "alice"\n  end), %(  H = proc { 1 }\n  get "/", &H))
+    expect(diagnostics_for({ "app.rb" => source })).to eq([["app.rb", 9, "call.undefined-method"]])
+  end
+
+  describe "under the bundled rigor-sinatra plugin" do
+    def sinatra_diagnostics(source)
+      diagnostics_for({ "app.rb" => source }, plugin: Rigor::Plugin::Sinatra, plugin_name: "rigor-sinatra")
+    end
+
+    def filtered_app(reader)
+      <<~RUBY
+        class User
+          def self.find(_id) = new
+          def name = "alice"
+        end
+
+        class App < Sinatra::Base
+          before do
+            @user = User.find(session["uid"])
+          end
+
+          post "/logout" do
+            session.clear
+            @user = nil
+            redirect "/"
+          end
+
+          get "/" do
+            username
+          end
+
+        #{reader.gsub(/^/, '  ')}
+        end
+      RUBY
+    end
+
+    # Sinatra's `before` filter runs on the app instance (`add_filter` -> `compile!` -> `generate_method`), so the
+    # census must see its write next to the logout route's `@user = nil`.
+    it "counts a before filter's write beside a route's nil reset (a def reader)" do
+      expect(sinatra_diagnostics(filtered_app("def username = @user.name"))).to be_empty
+    end
+
+    it "counts it for a reader defined in a helpers block" do
+      expect(sinatra_diagnostics(filtered_app("helpers do\n  def username = @user.name\nend"))).to be_empty
+    end
+
+    {
+      "a before filter with a path" => %(before "/admin/*" do),
+      "an after filter" => "after do",
+      "an error handler for an exception class" => "error KeyError do",
+      "a not_found handler" => "not_found do"
+    }.each do |shape, opener|
+      it "counts the write in #{shape}" do
+        source = <<~RUBY
+          class User
+            def name = "alice"
+          end
+
+          class App < Sinatra::Base
+            def initialize
+              @user = nil
+            end
+
+            #{opener}
+              @user = User.new
+            end
+
+            def username = @user.name
+          end
+        RUBY
+        expect(sinatra_diagnostics(source)).to be_empty
+      end
+    end
   end
 end

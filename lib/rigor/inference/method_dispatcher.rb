@@ -689,19 +689,28 @@ module Rigor
       end
 
       # Issue #1708 — does the project's own source define `method_name` on `owner` (`side` as the ancestor walk
-      # reaches it), or on a module the project includes into it? Ruby runs that `def` ahead of a patch on a
-      # farther ancestor: `class Integer; def nn = "s"` beats `class Object; def nn = nil` in a `pre_eval:` file.
+      # reaches it), or on a module the project prepends to or includes into it? Ruby runs that `def` ahead of a
+      # patch on a farther ancestor: `class Integer; def nn = "s"` beats `class Object; def nn = nil` in a
+      # `pre_eval:` file. The owner's level of its {Scope::ResolutionChain} (its prepends, itself, its includes
+      # and their own mixins, or a class object's singleton and its extends) holds those definers; whether one
+      # of them defines the name does not depend on their order, so the chain is searched without settling it.
       def project_source_defines?(scope, owner, method_name, side)
+        return false unless scope.known_user_class?(owner)
+
+        chain = Scope::ResolutionChain.for(scope, owner, side, :methods)
+        own_level_end = chain.level_starts[1] || chain.entries.size
+        found = chain.search(scope, 0, own_level_end) do |entry|
+          !entry.external? && source_def?(scope, entry.name, method_name, entry.side)
+        end
+        !found.nil?
+      end
+
+      def source_def?(scope, owner, method_name, side)
         if side == :singleton
           scope.discovered_method?(owner, method_name, :singleton) || !scope.singleton_def_for(owner, method_name).nil?
         else
-          source_instance_def?(scope, owner, method_name) ||
-            scope.includes_of(owner).any? { |mixin| source_instance_def?(scope, mixin.to_s, method_name) }
+          scope.discovered_method?(owner, method_name, :instance) || !scope.user_def_for(owner, method_name).nil?
         end
-      end
-
-      def source_instance_def?(scope, owner, method_name)
-        scope.discovered_method?(owner, method_name, :instance) || !scope.user_def_for(owner, method_name).nil?
       end
 
       # Issue #1702 — an alias in a `pre_eval:` patch whose old name no earlier patch binding defines

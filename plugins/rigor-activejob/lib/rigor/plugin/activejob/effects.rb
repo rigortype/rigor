@@ -146,12 +146,12 @@ module Rigor
 
         # ADR-45 WD1b (#613) — `config/application.rb` is probed at a fixed path, so its ABSENCE is what
         # shapes "no adapter" on a project that has none yet; the probe goes through the boundary to record
-        # that. The globbed `config/environments/*.rb` entries exist by enumeration and only pick up the
-        # (immediately superseded) presence row.
+        # that. The `config/environments/*.rb` listing goes through `#glob` (#1803), whose row records the
+        # directory's membership; each listed entry only picks up the (immediately superseded) presence row.
         def config_files(io_boundary, root)
           application = File.join(root, CONFIG_PATHS.first)
           environments_dir = File.join(root, CONFIG_PATHS.last)
-          environments = Dir.glob("*.rb", base: environments_dir).map { |path| File.join(environments_dir, path) }
+          environments = io_boundary.glob(environments_dir, "*.rb")
           ([application] + environments).select { |path| io_boundary.file?(path) }
         rescue StandardError
           []

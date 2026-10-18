@@ -287,12 +287,12 @@ out of analysis, and which they scan all the same, reached no cache
 `rigor-actionpack`'s render-locals index listed `app/helpers` and
 the `view_search_paths:` roots the same way, so a helper, or a
 template under a root its template globs do not claim, reached no
-cache either. A listing needs no row of its own when another row
-already covers it: the view-assigns walk lists the tree the
-`:controller_index` `watch:` glob records on every run, and the
-queue adapter `rigor-activejob` reads from `config/environments`
-shapes effect attributions that reach every cache through
-`Effects::PluginFacts#digest`. A
+cache either. Its view-assigns walk and `rigor-activejob`'s
+`config/environments` listing list through `#glob` too, although
+another row already covered each: the `:controller_index` `watch:`
+glob, and `Effects::PluginFacts#digest`, which carries the queue
+adapter. A row that happens to cover a listing is not the listing's
+own row. A
 membership-only `#glob` row needs a `#read_file` of each match the
 answer depends on. `spec/docs/plugin_io_boundary_spec.rb` is a
 lexical check of the common spellings (`File.read`, `Dir.glob`,

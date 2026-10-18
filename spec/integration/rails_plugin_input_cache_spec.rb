@@ -152,8 +152,8 @@ RSpec.describe "run-result caches over the Rails plugins' project indexes (#1803
       end
     end
 
-    # Guard: the view-assigns walk lists the controller roots, which the `:controller_index` producer's `watch:`
-    # glob already records on every run, so this row held before #1803's fix.
+    # Guard: the view-assigns walk lists through `IoBoundary#glob`, but this row passes without that too,
+    # because the `:controller_index` producer's `watch:` glob records the same controller roots on every run.
     it "drops every cache once a controller assigns the ivar" do
       prime
       write("app/controllers/users_controller.rb",
@@ -164,9 +164,9 @@ RSpec.describe "run-result caches over the Rails plugins' project indexes (#1803
     end
   end
 
-  # Guard: the queue adapter shapes rigor-activejob's effect attributions and edges, which `init` builds, so it
-  # reaches every cache through `Effects::PluginFacts#digest`, recomputed on each run; this row held before
-  # #1803's fix.
+  # Guard: the `config/environments` listing goes through `IoBoundary#glob`, but these rows pass without that
+  # too: the queue adapter shapes the effect attributions and edges `init` builds, so it reaches every cache
+  # through `Effects::PluginFacts#digest`, recomputed on each run.
   describe "rigor-activejob's queue adapter" do
     let(:environment) { "config/environments/development.rb" }
 

@@ -1739,7 +1739,9 @@ module Rigor
       # each name the body writes as the `begin` found it: `puts(begin; conn = make; work; rescue; conn.size; end)`
       # read `conn` as `nil`. On the check path it records the clause's `statements` under the `widened` entry, with
       # `$!`, `$@` and `$?` unbound as the walk leaves them for a clause the evaluator did not enter; the
-      # walk fills the clause's nodes from there. The clause's later operands are recorded by its own pass.
+      # walk fills the clause's nodes from there. The clause's later operands are recorded by its own pass. An
+      # evaluator that records its nodes itself skips this: its pass over the clause records `statements` right
+      # after, and the index keeps the last visit, so the `@on_enter` test is a guard no example can fail.
       def record_operand_clause(statements, widened)
         return unless statements && widened && @on_enter.nil? && @operand_recorder && widening_recorded?
 

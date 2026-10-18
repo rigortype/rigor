@@ -203,7 +203,8 @@ module Rigor
       end
 
       # Issue #1959 — the KIND-aware listing. Returns each entry directly under `path` with what it is, a symlink
-      # not followed ({Cache::Descriptor::GlobEntry.lstat_kind}: `:file`, `:directory`, `:symlink` or `:other`),
+      # not followed ({Cache::Descriptor::GlobEntry.lstat_kind}: `:file`, `:directory`, `:symlink` or `:other`, and
+      # `:absent` for an entry that vanished between the listing and its `lstat`),
       # and records one `:kinds` {Cache::Descriptor::GlobEntry} over `path/*`. The row reads stale when an entry
       # appears, disappears, or keeps its name and changes kind; NOT when an entry's bytes or stat tuple move, nor
       # when anything below a subdirectory changes. It is the row for a walk that decides per top-level entry

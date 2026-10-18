@@ -87,7 +87,8 @@ shape as v8's for #577.
 
 `:kinds` ([#1959](https://github.com/rigortype/rigor/issues/1959)) hashes
 each matching path with its `File.lstat` kind (`GlobEntry.lstat_kind`:
-`:file`, `:directory`, `:symlink`, `:other`), reading no content, so it
+`:file`, `:directory`, `:symlink`, `:other`, or `:absent` for a path that
+vanished between the glob and the `lstat`), reading no content, so it
 moves when the set changes or when a path keeps its name and changes
 kind, and not on a `touch` or an edit. `IoBoundary#list_directory_kinds`
 records it over `path/*` for a walk that decides per top-level entry

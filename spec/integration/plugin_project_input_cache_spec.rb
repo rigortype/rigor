@@ -125,14 +125,18 @@ RSpec.describe "run-result caches over a plugin's own project inputs (#1803)" do
         end
       end
 
+      # The last column marks a guard: the `**/*.rb` row under a directory that became a file, or the listing's
+      # new name, already moves without the kind, so those rows pass on a names-only listing too.
       [
-        ["a file", :file, :directory, true],
-        ["a directory", :directory, :file, false],
-        ["a symlink", :symlink, :directory, true],
-        ["a directory", :directory, :symlink, false],
-        ["a missing entry", nil, :directory, true]
-      ].each do |was, from, to, attached|
-        it "drops both run-result caches when #{was} named gen becomes a #{to}" do
+        ["a file", :file, :directory, true, false],
+        ["a directory", :directory, :file, false, true],
+        ["a symlink", :symlink, :directory, true, false],
+        ["a directory", :directory, :symlink, false, false],
+        ["a missing entry", nil, :directory, true, true]
+      ].each do |was, from, to, attached, guard|
+        label = guard ? " (guard)" : ""
+
+        it "drops both run-result caches when #{was} named gen becomes a #{to}#{label}" do
           replace("gen", from)
           prime
           replace("gen", to)
@@ -140,7 +144,7 @@ RSpec.describe "run-result caches over a plugin's own project inputs (#1803)" do
           expect_modes_to_match_cold([["--incremental"], []], attached: attached)
         end
 
-        it "drops the producer's own entry under --workers 2 when #{was} named gen becomes a #{to}" do
+        it "drops the producer's own entry under --workers 2 when #{was} named gen becomes a #{to}#{label}" do
           replace("gen", from)
           2.times { check("--workers", "2") }
           replace("gen", to)
@@ -151,10 +155,11 @@ RSpec.describe "run-result caches over a plugin's own project inputs (#1803)" do
     end
 
     # #1959 — `vendor/` and `.git/` are not walked, so a change there leaves the catalog and both run-result
-    # caches served: a `bundle install` into an in-tree `vendor/bundle` no longer re-analyses the project.
+    # caches served: a `bundle install` into an in-tree `vendor/bundle` no longer invalidates them. The `.git/`
+    # row is a guard: `*` and `**` never listed a dot directory, so it passed before the per-entry walk too.
     context "with a change under a skipped directory" do
-      %w[vendor/bundle/gems/x/lib .git/hooks].each do |directory|
-        it "serves both caches past a binding added under #{directory.split('/').first}/" do
+      { "vendor/bundle/gems/x/lib" => "", ".git/hooks" => " (guard)" }.each do |directory, label|
+        it "serves both caches past a binding added under #{directory.split('/').first}/#{label}" do
           FileUtils.mkdir_p(directory)
           File.write("#{directory}/keep.rb", "")
           prime

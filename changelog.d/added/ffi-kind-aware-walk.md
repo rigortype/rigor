@@ -1,0 +1,1 @@
+- **[plugins]** `IoBoundary#list_directory_kinds(path)` lists a directory's entries with their `lstat` kind (file, directory, symlink), and its cache row also reads stale when an entry changes kind under the same name. ([#2112](https://github.com/rigortype/rigor/pull/2112))

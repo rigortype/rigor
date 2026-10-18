@@ -4,8 +4,8 @@
 # `File` / `Dir` / `Prism.parse_file` records no cache dependency, so the run-result caches (ADR-45) and
 # `--incremental` (ADR-46) have no edge back to the file it derived its contribution from, and a warm run
 # keeps serving the pre-edit answer until `--no-cache`. `Rigor::Plugin::IoBoundary` (`#read_file`, `#file?`,
-# `#directory?`, `#list_directory`, `#glob`) records the row; a producer's `watch:` glob records it for the
-# reads its block makes.
+# `#directory?`, `#list_directory`, `#list_directory_kinds`, `#glob`) records the row; a producer's `watch:` glob
+# records it for the reads its block makes.
 #
 # This is a lexical check of the common spellings, not a proof: it reads each non-comment line of
 # `plugins/*/lib` for the calls {DIRECT_FILESYSTEM_CALL} spells, and does not see a receiver held in a

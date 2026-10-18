@@ -4,6 +4,7 @@ class Rigor::Plugin::IoBoundary
   def file?: (untyped) -> bool
   def directory?: (untyped) -> bool
   def list_directory: (untyped) -> Array[String]
+  def list_directory_kinds: (untyped) -> Hash[String, untyped]
   # Records a `:names` glob row (membership only); a caller needing a match's content `read_file`s it. A `..`
   # segment, a brace or a backslash in `pattern` raises `AccessDeniedError`.
   def glob: (untyped root, untyped pattern) -> Array[String]

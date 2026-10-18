@@ -13,6 +13,8 @@ require "rigor/cli/check_command"
   require gem_name
 end
 
+FFI_CACHE_BINDING = "module L\n  attach_function :foo, [], :int\nend\n"
+
 # Issue #1803 — the run-result caches (the `--incremental` slot and the plain `rigor check` entry) answer a
 # run whose analysed files are unchanged without loading a plugin, so a project file a plugin reads reaches
 # them only as a row of the plugin's IoBoundary. Each plugin here read some of its input with plain `Dir.glob`
@@ -59,6 +61,14 @@ RSpec.describe "run-result caches over a plugin's own project inputs (#1803)" do
     expect(rules(check.first)).to eq(cold)
   end
 
+  # Each mode in `modes` (a list of flag lists) answers what `--no-cache` answers, and that answer holds the
+  # catalog-attached `foo`'s finding exactly when `attached`.
+  def expect_modes_to_match_cold(modes, attached:)
+    cold = rules(check("--no-cache").first)
+    expect(cold.include?("b.rb call.undefined-method")).to be(attached)
+    modes.each { |flags| expect(rules(check(*flags).first)).to eq(cold) }
+  end
+
   describe "rigor-ffi's :ffi_catalog" do
     before do
       Rigor::Plugin.register(Rigor::Plugin::FFI)
@@ -92,30 +102,84 @@ RSpec.describe "run-result caches over a plugin's own project inputs (#1803)" do
       expect(Rigor::Analysis::IncrementalSession).not_to have_received(:new)
     end
 
-    # A top-level entry that changes kind under the same name: the walk's glob row sees the `.rb` files the new
-    # directory holds. `paths:` is `lib`, so only the catalog sees those files.
-    context "with a top-level entry that becomes a directory" do
-      def make_directory(name)
+    # #1959 — the walk lists the root's top-level entries with their kinds, then globs each real directory but
+    # `vendor/` on its own. A top-level entry that keeps its name and changes kind changes what the walk reads,
+    # so the listing row must move. `paths:` is `lib`, so only the catalog sees these files.
+    context "with a top-level entry that changes kind" do
+      # The symlink points outside the project at a directory holding the binding: `**` never followed a
+      # symlinked directory, so the binding reaches the catalog only while the name is a real directory, and the
+      # paths the walk would list under the name are the same either way.
+      let(:outside) { Dir.mktmpdir("rigor-ffi-outside-") }
+
+      before { File.write(File.join(outside, "a.rb"), FFI_CACHE_BINDING) }
+      after { FileUtils.rm_rf(outside) }
+
+      def replace(name, kind)
         FileUtils.rm_rf(name)
-        FileUtils.mkdir_p(name)
-        File.write("#{name}/a.rb", "module L\n  attach_function :foo, [], :int\nend\n")
+        case kind
+        when :directory
+          FileUtils.mkdir_p(name)
+          File.write("#{name}/a.rb", FFI_CACHE_BINDING)
+        when :file then File.write(name, "not ruby\n")
+        when :symlink then File.symlink(outside, name)
+        end
       end
 
-      it "drops both run-result caches when a file becomes a directory" do
-        File.write("gen", "not ruby\n")
-        prime
-        make_directory("gen")
+      # The last column marks a guard: the `**/*.rb` row under a directory that became a file, or the listing's
+      # new name, already moves without the kind, so those rows pass on a names-only listing too.
+      [
+        ["a file", :file, :directory, true, false],
+        ["a directory", :directory, :file, false, true],
+        ["a symlink", :symlink, :directory, true, false],
+        ["a directory", :directory, :symlink, false, false],
+        ["a missing entry", nil, :directory, true, true]
+      ].each do |was, from, to, attached, guard|
+        label = guard ? " (guard)" : ""
 
-        expect_both_caches_to_match_cold("b.rb call.undefined-method")
+        it "drops both run-result caches when #{was} named gen becomes a #{to}#{label}" do
+          replace("gen", from)
+          prime
+          replace("gen", to)
+
+          expect_modes_to_match_cold([["--incremental"], []], attached: attached)
+        end
+
+        it "drops the producer's own entry under --workers 2 when #{was} named gen becomes a #{to}#{label}" do
+          replace("gen", from)
+          2.times { check("--workers", "2") }
+          replace("gen", to)
+
+          expect_modes_to_match_cold([["--workers", "2"]], attached: attached)
+        end
+      end
+    end
+
+    # #1959 — `vendor/` and `.git/` are not walked, so a change there leaves the catalog and both run-result
+    # caches served: a `bundle install` into an in-tree `vendor/bundle` no longer invalidates them. The `.git/`
+    # row is a guard: `*` and `**` never listed a dot directory, so it passed before the per-entry walk too.
+    context "with a change under a skipped directory" do
+      { "vendor/bundle/gems/x/lib" => "", ".git/hooks" => " (guard)" }.each do |directory, label|
+        it "serves both caches past a binding added under #{directory.split('/').first}/#{label}" do
+          FileUtils.mkdir_p(directory)
+          File.write("#{directory}/keep.rb", "")
+          prime
+          allow(Rigor::Plugin::FFI::Discoverer).to receive(:discover).and_call_original
+          File.write("#{directory}/a.rb", FFI_CACHE_BINDING)
+
+          expect(rules(check("--incremental").first)).to eq([])
+          expect(rules(check.first)).to eq([])
+          expect(Rigor::Plugin::FFI::Discoverer).not_to have_received(:discover)
+          expect(rules(check("--no-cache").first)).to eq([])
+        end
       end
 
-      it "drops both run-result caches when a symlink becomes a directory" do
-        FileUtils.mkdir_p("elsewhere")
-        File.symlink("elsewhere", "tools")
+      # The skip reads every directory segment under the root, as the whole-root walk's did.
+      it "still skips a vendor/ directory below the top level" do
         prime
-        make_directory("tools")
+        FileUtils.mkdir_p("tools/vendor")
+        File.write("tools/vendor/a.rb", FFI_CACHE_BINDING)
 
-        expect_both_caches_to_match_cold("b.rb call.undefined-method")
+        expect_modes_to_match_cold([["--incremental"], []], attached: false)
       end
     end
 

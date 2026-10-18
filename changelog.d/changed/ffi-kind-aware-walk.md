@@ -1,0 +1,1 @@
+- **[plugins]** rigor-ffi no longer walks an in-tree `vendor/` to validate its cached FFI catalog, so a warm run over a project with a large `vendor/bundle` stays fast and a `bundle install` there no longer makes rigor-ffi invalidate the cache. ([#2112](https://github.com/rigortype/rigor/pull/2112))

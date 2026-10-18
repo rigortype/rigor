@@ -332,7 +332,12 @@ module Rigor
         # tuple moves, so a `git checkout`, a `bundle install` or a CI cache restored over a fresh checkout
         # keeps the file rows fresh while it would move every glob signature, turning every such run into a
         # full re-analysis. `:names` also reads no stat at all, so it costs a `Dir.glob` and nothing else.
-        VALID_MODES = %i[stat names].freeze
+        #
+        # `:kinds` (#1959) is `:names` plus each match's `File.lstat` file type: the set moves it, and so does a
+        # path that keeps its name and changes kind (a file `gen` replaced by a directory `gen/`, a symlinked
+        # directory replaced by a real one). It reads one `lstat` per match and no content, so a `touch` or an
+        # edit leaves it fresh.
+        VALID_MODES = %i[stat names kinds].freeze
 
         attr_reader :root, :pattern, :value
 
@@ -364,13 +369,15 @@ module Rigor
         # The aggregate signature the entry's `value` carries: SHA-256 over the sorted per-file rows. In the
         # default (`:stat`) mode a row is the file's `(path, size, mtime_ns, ctime_ns, inode)` tuple — NO
         # content read; in strict mode a row is `(path, content-sha256)`, restoring the pre-ADR-87 authority.
-        # In `:names` mode a row is the path alone, stat-free, so only the matching SET moves the signature.
+        # In `:names` mode a row is the path alone, stat-free, so only the matching SET moves the signature; in
+        # `:kinds` mode it is the path and its {.lstat_kind}.
         # Per-file stat failures (a file vanishing between the glob and the stat) drop the row — same race
         # posture as {Descriptor#file_entry_fresh?}. `Dir.glob` returns sorted entries by default so the row
         # order — and therefore the signature — is stable.
         def self.signature_for(root:, pattern:, mode: :stat)
           paths = RootedGlob.glob(root, pattern)
           return Digest::SHA256.hexdigest(paths.map { |path| "#{path}#{ROW_SEPARATOR}" }.join) if mode == :names
+          return kinds_signature(paths) if mode == :kinds
 
           strict = FileDigest.strict_validation?
           rows = paths.filter_map do |path|
@@ -389,10 +396,29 @@ module Rigor
           Digest::SHA256.hexdigest(rows.join)
         end
 
+        # #1959 — what `path` itself is, a symlink not followed: `:file`, `:directory`, `:symlink` or `:other`, and
+        # `:absent` for a path that vanished between the glob and the `lstat`.
+        def self.lstat_kind(path)
+          case File.lstat(path).ftype
+          when "file" then :file
+          when "directory" then :directory
+          when "link" then :symlink
+          else :other
+          end
+        rescue SystemCallError
+          :absent
+        end
+
+        def self.kinds_signature(paths)
+          rows = paths.map { |path| "#{path}#{FIELD_SEPARATOR}#{lstat_kind(path)}#{ROW_SEPARATOR}" }
+          Digest::SHA256.hexdigest(rows.join)
+        end
+        private_class_method :kinds_signature
+
         # ADR-87 WD2 — fresh iff re-globbing + re-stat-ing reproduces the recorded signature. Zero file-content
-        # bytes are read in the default mode, and no stat at all in `:names`. Any failure reads as stale
-        # (recompute), never a crash. A stored signature recorded under the opposite validation mode simply
-        # mismatches and recomputes.
+        # bytes are read in the default mode, no stat at all in `:names`, and one `lstat` per match in `:kinds`.
+        # Any failure reads as stale (recompute), never a crash. A stored signature recorded under the opposite
+        # validation mode simply mismatches and recomputes.
         def self.fresh?(entry)
           signature_for(root: entry.root, pattern: entry.pattern, mode: entry.mode) == entry.value
         rescue StandardError

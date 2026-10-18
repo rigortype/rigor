@@ -576,7 +576,8 @@ RSpec.describe Rigor::Inference::MethodDispatcher do
         env = Rigor::Environment.for_project(
           project_patched_methods: Rigor::Inference::ProjectPatchedMethods.new(entries: entries)
         )
-        described_class.dispatch(receiver_type: receiver, method_name: name, arg_types: [], environment: env)
+        described_class.dispatch(receiver_type: receiver, method_name: name, arg_types: [], environment: env,
+                                 scope: Rigor::Scope.empty(environment: env))
       end
 
       def patched(value) = Rigor::Type::Combinator.dynamic(Rigor::Type::Combinator.constant_of(value))
@@ -603,6 +604,13 @@ RSpec.describe Rigor::Inference::MethodDispatcher do
         result = dispatch_patched([patch("Object", :succ, :object)], integer, :succ)
 
         expect(result).to eq(integer)
+      end
+
+      # Guard, the ADR-17 order: a farther module's RBS answers ahead of a nearer patch. Ruby runs the patch
+      # (`1.send(:puts)` is :object under `class Object; def puts(*) = :object`).
+      it "leaves a method a farther module's RBS declares to that RBS" do
+        expect(dispatch_patched([patch("Object", :puts, :object)], integer, :puts))
+          .to eq(Rigor::Type::Combinator.constant_of(nil))
       end
 
       it "answers a class object from an Object instance patch" do

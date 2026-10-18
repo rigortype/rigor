@@ -63,14 +63,18 @@ module Rigor
       # declare is searched as itself only, as {#lookup} searches it.
       #
       # It answers only which patch the chain holds. A method a nearer ancestor's RBS declares wins over the patch
-      # in Ruby, so the callers ask once that RBS has come back without the method.
-      # @return the entry, or `nil` when no ancestor's patch declares the method.
-      def lookup_through_ancestors(class_name:, method_name:, kind:, rbs_loader:)
+      # in Ruby, so the callers ask once that RBS has come back without the method. A nearer method the project's
+      # own source defines wins too: when `source_defines` (called with each `owner, side` the walk passes before
+      # it finds a patch) answers true, the walk stops with no entry, and the call is left to what types that
+      # method. An owner holding both a patch and a source `def` answers the patch, as {#lookup} does.
+      # @return the entry, or `nil` when no ancestor's patch declares the method ahead of a source `def`.
+      def lookup_through_ancestors(class_name:, method_name:, kind:, rbs_loader:, source_defines: nil)
         return nil if empty?
 
         ancestor_keys(class_name.to_s, kind, rbs_loader).each do |owner, side|
           entry = @by_key[[owner, method_name, side]]
           return entry if entry
+          return nil if source_defines&.call(owner, side)
         end
         nil
       end

@@ -259,13 +259,14 @@ module Rigor
         end
 
         # Issue #1708 — a `pre_eval:` patch on one of the receiver's ancestors (`class Object; def zz`,
-        # `module Enumerable; def sum_by`). Below the discovered-method tier, so a `def` the project, a gem
-        # catalogue or the receiver's own patch gives a nearer class answers first; the RBS tier, which already
-        # declined, is the nearer-ancestor RBS a patch never overrides.
+        # `module Enumerable; def sum_by`). Below the RBS tier, whose decline means no nearer RBS declares the
+        # method, and below the tiers that answer the receiver's own patch or a gem catalogue entry. A nearer
+        # `def` in the project's source (on an RBS-known receiver, which the discovered-method tier leaves to
+        # user-method inference) stops the walk: see {#project_source_defines?}.
         ancestor_patched =
-          unless skip_project_patched
+          if !skip_project_patched && scope
             try_project_patched_method(receiver_type, method_name, arg_types, block_type, environment,
-                                       through_ancestors: true)
+                                       through_ancestors: scope)
           end
         if ancestor_patched
           scope&.record_dynamic_origin(call_node, DynamicOrigin::EXTERNAL_GEM_WITHOUT_RBS)
@@ -659,10 +660,10 @@ module Rigor
       # `Dynamic[Nominal[String]]` instead of the pre-3a `Dynamic[Top]`. Falls back to
       # `Dynamic[Top]` when the heuristic declined (non-literal tail expression).
       #
-      # `through_ancestors:` (issue #1708) searches the receiver's ancestors as well, through
-      # {ProjectPatchedMethods#lookup_through_ancestors}.
+      # `through_ancestors:` (issue #1708), a scope, searches the receiver's ancestors as well, through
+      # {ProjectPatchedMethods#lookup_through_ancestors}, stopping at a nearer project-source `def`.
       def try_project_patched_method(receiver_type, method_name, arg_types, block_type, environment,
-                                     through_ancestors: false)
+                                     through_ancestors: nil)
         registry = environment&.project_patched_methods
         return nil if registry.nil? || registry.empty?
 
@@ -672,8 +673,10 @@ module Rigor
         kind = receiver_type.is_a?(Type::Singleton) ? :singleton : :instance
         entry =
           if through_ancestors
-            registry.lookup_through_ancestors(class_name: class_name, method_name: method_name, kind: kind,
-                                              rbs_loader: environment.rbs_loader)
+            registry.lookup_through_ancestors(
+              class_name: class_name, method_name: method_name, kind: kind, rbs_loader: environment.rbs_loader,
+              source_defines: ->(owner, side) { project_source_defines?(through_ancestors, owner, method_name, side) }
+            )
           else
             registry.lookup(class_name: class_name, method_name: method_name, kind: kind)
           end
@@ -682,6 +685,22 @@ module Rigor
 
         aliased = project_patched_alias_target(entry, receiver_type, arg_types, block_type, environment)
         aliased ? Type::Combinator.dynamic(aliased) : Type::Combinator.untyped
+      end
+
+      # Issue #1708 — does the project's own source define `method_name` on `owner` (`side` as the ancestor walk
+      # reaches it), or on a module the project includes into it? Ruby runs that `def` ahead of a patch on a
+      # farther ancestor: `class Integer; def nn = "s"` beats `class Object; def nn = nil` in a `pre_eval:` file.
+      def project_source_defines?(scope, owner, method_name, side)
+        if side == :singleton
+          scope.discovered_method?(owner, method_name, :singleton) || !scope.singleton_def_for(owner, method_name).nil?
+        else
+          source_instance_def?(scope, owner, method_name) ||
+            scope.includes_of(owner).any? { |mixin| source_instance_def?(scope, mixin.to_s, method_name) }
+        end
+      end
+
+      def source_instance_def?(scope, owner, method_name)
+        scope.discovered_method?(owner, method_name, :instance) || !scope.user_def_for(owner, method_name).nil?
       end
 
       # Issue #1702 — an alias in a `pre_eval:` patch whose old name no earlier patch binding defines

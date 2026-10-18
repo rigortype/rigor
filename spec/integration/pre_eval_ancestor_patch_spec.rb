@@ -83,6 +83,52 @@ RSpec.describe "a pre_eval: patch on an ancestor reaches its descendants (#1708)
     expect(rules(result)).to eq([["a.rb", 1, "call.undefined-method"], ["a.rb", 2, "call.wrong-arity"]])
   end
 
+  # Review of #2098 — a method the project's own source defines on a nearer class wins over the ancestor's patch,
+  # in Ruby and in the type the call reads, so the patch's `nil` must not narrow `res` to 1. Ruby: each `res` is
+  # "s" and `res.upcase` runs.
+  describe "a nearer method the project's source defines" do
+    let(:nil_patch) { "class Object; def nn = nil; def self.sn = nil; end\n" }
+    let(:use) { ->(call) { "res = #{call}.nil? ? 1 : \"s\"\nres.upcase\n" } }
+
+    it "wins over the patch on a core receiver the project reopens" do
+      result = run_project("ext/core.rb" => nil_patch, "lib/int.rb" => "class Integer; def nn = \"s\"; end\n",
+                           "lib/use.rb" => use.call("rand(3).nn"))
+
+      expect(rules(result)).to eq([])
+    end
+
+    it "wins over the patch on a class the project's sig/ declares" do
+      result = run_project("ext/core.rb" => nil_patch,
+                           "sig/foo.rbs" => "class Foo\n  def initialize: () -> void\nend\n",
+                           "lib/foo.rb" => "class Foo; def nn = \"s\"; end\n", "lib/use.rb" => use.call("Foo.new.nn"))
+
+      expect(rules(result)).to eq([])
+    end
+
+    it "wins over the patch through a module the project includes into the receiver's class" do
+      result = run_project("ext/core.rb" => nil_patch,
+                           "lib/m.rb" => "module M; def nn = \"s\"; end\nclass Integer; include M; end\n",
+                           "lib/use.rb" => use.call("rand(3).nn"))
+
+      expect(rules(result)).to eq([])
+    end
+
+    it "wins over the patch on the singleton side" do
+      result = run_project("ext/core.rb" => nil_patch, "lib/int.rb" => "class Integer; def self.sn = \"s\"; end\n",
+                           "lib/use.rb" => use.call("Integer.sn"))
+
+      expect(rules(result)).to eq([])
+    end
+  end
+
+  # Flip this when the pre_eval: scanner records visibility (review of #2098): Ruby raises NoMethodError
+  # (private method 'kp' called for an instance of Integer), and before #1708 the call reported.
+  it "does not yet report a private patch on Kernel called with an explicit receiver" do
+    result = run_project("ext/core.rb" => "module Kernel; private def kp = 1; end\n", "lib/a.rb" => "1.kp\n")
+
+    expect(rules(result)).to eq([])
+  end
+
   describe "a module a pre_eval: file mixes into an ancestor" do
     let(:mixin_patch) { <<~RUBY }
       module NumExt; def inc_m = :inc; end

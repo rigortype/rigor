@@ -1,0 +1,130 @@
+#!/usr/bin/env bash
+# Add a reviewed, green pull request to master's merge queue and wait for the
+# verdict (ADR-123).
+#
+# `gh pr merge` enqueues through GitHub's auto-merge API, which this
+# repository keeps disabled, so it fails with "Auto merge is not allowed".
+# This calls the merge queue's own mutation instead, and folds in the traps
+# contribution-flow.md § "GitHub and git traps" describes:
+#
+#   1. it queues only the head that was reviewed: <sha> is passed to GitHub as
+#      the expected head, so a commit pushed after the review is refused;
+#   2. it checks that head's "CI required" passed, which an administrator's
+#      token would otherwise be allowed to skip;
+#   3. without a merge queue on master nothing would test the merged result,
+#      so it refuses and leaves the merge to the user;
+#   4. a PR the queue drops stays OPEN exactly as a queued one does, so it
+#      polls `isInMergeQueue` and re-reads once before calling it dropped.
+#
+# Running it again on a PR that is already queued only waits. A wait outlasts
+# an agent's foreground command limit (the queue batches for up to five
+# minutes, and CI takes about twelve), so run it in the background, or with
+# --no-wait and then again without it.
+#
+# Exit status: 0 merged (the merge commit is printed); 1 refused, dropped
+# from the queue, closed, or GitHub unreadable for ten polls in a row; 2
+# usage error. --no-wait returns 0 once the PR is queued.
+#
+# Usage: bin/land-pr <number> <reviewed-head-sha> [--no-wait]
+
+set -uo pipefail
+
+interval="${LAND_PR_INTERVAL:-60}"
+[[ "$interval" =~ ^[0-9]+$ ]] || { echo "land-pr: LAND_PR_INTERVAL must be a whole number of seconds" >&2; exit 2; }
+number=""
+sha=""
+wait=1
+usage() {
+  echo "land-pr: $* (usage: bin/land-pr <number> <reviewed-head-sha> [--no-wait])" >&2
+  exit 2
+}
+for arg in "$@"; do
+  case "$arg" in
+    --no-wait) wait=0 ;;
+    -h | --help)
+      awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"
+      exit 0
+      ;;
+    *)
+      if [[ -z "$number" && "$arg" =~ ^[0-9]+$ ]]; then
+        number="$arg"
+      elif [[ -z "$sha" && "$arg" =~ ^[0-9a-f]{40}$ ]]; then
+        sha="$arg"
+      else
+        usage "unexpected argument: $arg"
+      fi
+      ;;
+  esac
+done
+[[ -n "$number" ]] || usage "give the pull request number"
+[[ -n "$sha" ]] || usage "give the full 40-character head SHA that was reviewed"
+
+die() {
+  echo "land-pr: $*" >&2
+  exit 1
+}
+
+# Print the PR's fields, tab-separated, in the order given.
+pr_fields() {
+  gh api graphql -F n="$number" \
+    -f query='query($n:Int!){repository(owner:"rigortype",name:"rigor"){pullRequest(number:$n){'"$1"'}}}' \
+    --jq ".data.repository.pullRequest | [$2] | @tsv"
+}
+
+info="$(pr_fields 'id isDraft state isMergeQueueEnabled isInMergeQueue baseRefName headRefOid
+  commits(last:1){nodes{commit{oid statusCheckRollup{contexts(first:100){nodes{... on CheckRun{name conclusion}}}}}}}' \
+  '.id, .isDraft, .state, .isMergeQueueEnabled, .isInMergeQueue, .baseRefName, .headRefOid,
+   ([.commits.nodes[0].commit.statusCheckRollup.contexts.nodes[]? | select(.name == "CI required") | .conclusion]
+    | if length == 0 then "MISSING" else (map(tostring) | join(",")) end),
+   (.commits.nodes[0].commit.oid // "")')" ||
+  die "cannot read PR #$number"
+IFS=$'\t' read -r id draft state queue queued base head ci checked <<<"$info"
+# The check belongs to the last commit GitHub lists; count it only when that is the head.
+[[ "$checked" == "$head" ]] || ci="MISSING"
+[[ "$state" == OPEN ]] || die "PR #$number is $state, not open"
+[[ "$base" == master ]] || die "PR #$number does not target master"
+[[ "$draft" == false ]] || die "PR #$number is a draft; run gh pr ready first"
+[[ "$queue" == true ]] ||
+  die "master has no merge queue, so nothing would test the merged result; stop and tell the user"
+[[ "$head" == "$sha" ]] ||
+  die "PR #$number's head is $head, not the reviewed $sha; review the new commits first"
+
+if [[ "$queued" == true ]]; then
+  echo "land-pr: #$number is already queued at $head; waiting"
+else
+  [[ "$ci" == SUCCESS ]] || die "\"CI required\" on $head is $ci, not SUCCESS; wait for it or fix it"
+  gh api graphql -f id="$id" -f sha="$sha" \
+    -f query='mutation($id:ID!,$sha:GitObjectID!){enqueuePullRequest(input:{pullRequestId:$id,expectedHeadOid:$sha}){mergeQueueEntry{position}}}' \
+    --jq '"land-pr: #'"$number"' queued at '"$sha"', position \(.data.enqueuePullRequest.mergeQueueEntry.position)"' ||
+    die "GitHub refused to queue #$number at $sha"
+fi
+
+((wait)) || exit 0
+failures=0
+suspect=0
+while :; do
+  sleep "$interval"
+  if ! status="$(pr_fields 'state isInMergeQueue mergeCommit{oid}' '.state, .isInMergeQueue, (.mergeCommit.oid // "")')"; then
+    ((++failures < 10)) || die "GitHub unreadable for 10 polls; #$number may still be queued, run this again later"
+    continue
+  fi
+  failures=0
+  IFS=$'\t' read -r state queued oid <<<"$status"
+  case "$state" in
+    MERGED)
+      [[ -n "$oid" ]] || continue
+      echo "land-pr: #$number merged as $oid"
+      exit 0
+      ;;
+    OPEN)
+      if [[ "$queued" == true ]]; then
+        suspect=0
+        continue
+      fi
+      # Read once more before calling it dropped: the state may lag the merge.
+      ((++suspect >= 2)) || continue
+      die "#$number left the queue unmerged (a failed merge_group run in gh run list --event merge_group, a new push, or a manual removal)"
+      ;;
+    *) die "#$number is $state" ;;
+  esac
+done

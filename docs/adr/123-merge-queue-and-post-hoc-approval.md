@@ -33,13 +33,14 @@ checks.
 
 ## Decision
 
-**1. PRs land through a merge queue on `master`.** `gh pr merge` on a green, reviewed PR adds it
-to the queue; the queue runs the full CI (`CI required`) on the PR merged onto `master` and the
-entries ahead of it, and merges only when that run passes. A PR need not be rebased onto the latest
-`master` before it is queued; it is re-pushed only when it is `CONFLICTING` or the queue drops it.
+**1. PRs land through a merge queue on `master`.** `bin/land-pr` adds a green, reviewed PR to the
+queue (`gh pr merge` cannot: it enqueues through the auto-merge API, which the repository keeps
+off); the queue runs the full CI (`CI required`) on the PR merged onto `master` and the entries
+ahead of it, and merges only when that run passes. A PR need not be rebased onto the latest `master`
+before it is queued; it is re-pushed only when it is `CONFLICTING` or the queue drops it.
 `bin/lane-push` still rebases at each push, which keeps conflicts surfacing early and costs nothing
-extra. *Criterion: check the result that will land, once, instead of approximating it by
-re-gating every branch in series.*
+extra. *Criterion: check the result that will land, once, instead of approximating it by re-gating
+every branch in series.*
 
 **2. Decisions below a stated line are made by precedent and ratified afterwards.** A decision
 that is not *serious* (the list in `contribution-flow.md` § "Decisions and the approval queue") is
@@ -73,6 +74,7 @@ point after which undoing costs users something, so it is where post-hoc approva
 - **WD5 — the queue's settings.** Merge method "merge commit", required check `CI required`,
   groups of up to five, all entries green. The repository administrator role may bypass, which keeps
   Markdown-only commits straight to `master` possible; agents do not use `gh pr merge --admin`.
+  Auto-merge stays off, so a PR enters the queue only when an agent or the maintainer queues it.
 
 ## Rejected alternatives
 

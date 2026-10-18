@@ -387,6 +387,41 @@ RSpec.describe "a pre_eval: patch on an ancestor reaches its descendants (#1708)
       expect(rules(result)).to eq([])
     end
 
+    # Ruby 4.0.5: the guard only skips a second include of the module, so `1.gm` is `:gm` whichever spelling runs it.
+    # Issue #2109: a guarded include is read as a direct statement; a guard naming another receiver or module, or any
+    # other condition, leaves the include unread.
+    {
+      "unless X.include?(M)" => "Numeric.include(GM) unless Numeric.include?(GM)",
+      "unless X < M" => "Numeric.include(GM) unless Numeric < GM",
+      "unless X.ancestors.include?(M)" => "Numeric.include(GM) unless Numeric.ancestors.include?(GM)",
+      "if !X.include?(M)" => "Numeric.include(GM) if !Numeric.include?(GM)",
+      "if !(X < M)" => "Numeric.include(GM) if !(Numeric < GM)",
+      "prepend unless X.include?(M)" => "Numeric.prepend(GM) unless Numeric.include?(GM)",
+      "prepend unless X < M" => "Numeric.prepend(GM) unless Numeric < GM",
+      "prepend if !X.ancestors.include?(M)" => "Numeric.prepend(GM) if !Numeric.ancestors.include?(GM)"
+    }.each do |spelling, line|
+      it "reads the include a guard written #{spelling} runs" do
+        result = run_project("ext/core.rb" => "module GM; def gm = :gm; end\n#{line}\n",
+                             "lib/a.rb" => "1.gm # => :gm\n")
+
+        expect(rules(result)).to eq([])
+      end
+    end
+
+    {
+      "with another receiver" => "Numeric.include(GM) unless Integer.include?(GM)",
+      "with another module" => "Numeric.include(GM) unless Numeric.include?(OM)",
+      "with the opposite polarity" => "Numeric.include(GM) if Numeric.include?(GM)",
+      "under an unrelated condition" => 'Numeric.include(GM) if ENV["X"]'
+    }.each do |label, line|
+      it "leaves an include guarded #{label} unread" do
+        result = run_project("ext/core.rb" => "module GM; def gm = :gm; end\nmodule OM; end\n#{line}\n",
+                             "lib/a.rb" => "1.gm\n")
+
+        expect(rules(result)).to eq([["a.rb", 1, "call.undefined-method"]])
+      end
+    end
+
     # Ruby: OB, included last, is searched first, so `rand(3).om` is "s"; read the other way, `res` would be 1.
     it "searches the most recently included module first" do
       result = run_project("ext/core.rb" => <<~PATCH, "lib/a.rb" => "res = rand(3).om.nil? ? 1 : \"s\"\nres.upcase\n")

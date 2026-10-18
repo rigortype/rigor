@@ -5,6 +5,7 @@ require "prism"
 require_relative "../source/literals"
 require_relative "../source/node_children"
 require_relative "module_function_state"
+require_relative "project_patched_mixins"
 
 module Rigor
   module Inference
@@ -80,7 +81,8 @@ module Rigor
         STATEMENT = Object.new.freeze
 
         # @return the visibility of each `def` (by identity) the file's bodies give one other than public:
-        #   `:private`, `:protected` or `:module_function`; and {STATEMENT} for each call that is a direct statement.
+        #   `:private`, `:protected` or `:module_function`; and {STATEMENT} for each call that is a direct statement,
+        #   and for the include an idempotence guard runs ({Mixins.guarded}).
         def defs(root)
           found = {}.compare_by_identity
           # The file's top level, and through {.read_body} every class, module or `class <<` body written as a direct
@@ -133,6 +135,13 @@ module Rigor
           end
         end
 
+        # The include an idempotence guard runs (`X.include(M) unless X.include?(M)`) is read as a direct statement.
+        def mark_guarded(stmt, found)
+          guarded = Mixins.guarded(stmt)
+          found[guarded] = STATEMENT if guarded
+        end
+        private_class_method :mark_guarded
+
         def read_body(body, found) # rubocop:disable Metrics/PerceivedComplexity
           default = :public
           direct_statements(body).each do |stmt|
@@ -147,6 +156,7 @@ module Rigor
             elsif BODIES.any? { |kind| stmt.is_a?(kind) }
               read_body(stmt.body, found)
             else
+              mark_guarded(stmt, found)
               default = :public if bare_call_nested?(stmt)
               mark_nested(stmt, default, found)
             end

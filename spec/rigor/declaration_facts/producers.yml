@@ -215,6 +215,7 @@ lib/rigor/inference/project_patched_mixins.rb:
   computes: the include / prepend edges the pre_eval files write (#1708)
   producers:
     Rigor::Inference::ProjectPatchedScanner::Mixins: issue #1708, records the include / prepend edges a pre_eval: file writes (Numeric.include(M), include M in a body, a top-level include into Object) for the pre_eval: registry's ancestor walk only; it writes no discovery table and derives no declaration context
+    Rigor::Inference::ProjectPatchedScanner::Mixins#guarded: issue #2109, recognises only the idempotence-guard shape around a pre_eval include/prepend (`X.include(M) unless X.include?(M)` / `X < M` / `X.ancestors.include?(M)`, and `if !…`) whose receiver and module match the guarded call; it derives no declaration context of its own
     Rigor::Inference::ProjectPatchedScanner::Mixins#pending: issue #1708, records the include / prepend edges a pre_eval: file writes (Numeric.include(M), include M in a body, a top-level include into Object) for the pre_eval: registry's ancestor walk only; it writes no discovery table and derives no declaration context
 lib/rigor/inference/project_patched_scanner.rb:
   computes: the def and def self methods each class declares in the pre_eval files (ADR-17), and their visibility (#1708)

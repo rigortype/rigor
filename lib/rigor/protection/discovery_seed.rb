@@ -2,6 +2,7 @@
 
 require_relative "../inference/parameter_inference_collector"
 require_relative "../inference/scope_indexer"
+require_relative "../inference/project_seed_tables"
 
 module Rigor
   module Protection
@@ -80,47 +81,19 @@ module Rigor
         seed_tables(index).freeze
       end
 
-      # The whole-project discovery tables, from the single-walk combined pass (one parse per file, both
-      # collectors driven over the same tree) that {Analysis::Runner::ProjectPrePasses#discover} uses. Empty
-      # tables are dropped so an empty seed stays `{}` and every consumer's "seed nothing" branch keeps working.
-      #
-      # `discovered_class_sources` is carried as the runner carries it on every run: Tier 2 never records edges,
-      # but an ancestor-order reader asks whether a class is declared in more than one file. The mixin tables
-      # (`discovered_includes`, `discovered_prepends`, `discovered_extends`) ride the same fold, so a singleton
-      # `extend` reads the same from a per-file scope under coverage and protection as it does under `check`.
+      # The whole-project discovery tables, from the single-walk combined pass (one parse per file) that
+      # {Analysis::Runner::ProjectPrePasses#discover} uses, mapped by the one list {Inference::ProjectSeedTables}
+      # keeps (issue #1614). Empty tables are dropped so an empty seed stays `{}` and every consumer's "seed nothing"
+      # branch keeps working.
       def discovery_tables(paths)
         seed_tables(Inference::ScopeIndexer.discovered_project_index_for_paths(paths))
       end
 
-      # Maps a `{ classes:, def_index: }` discovery index onto the {Scope::DiscoveryIndex} slot names both
-      # consumers take. Shared by the whole-walk ({#discovery_tables}) and bundle-fold ({#tables_for_buffer})
-      # producers so a mutant's seed and the parent's seed can never disagree about shape.
+      # Maps a `{ classes:, def_index: }` discovery index onto the {Scope::DiscoveryIndex} slot names both consumers
+      # take. Shared by the whole-walk ({#discovery_tables}) and bundle-fold ({#tables_for_buffer}) producers so a
+      # mutant's seed and the parent's seed can never disagree about shape.
       def seed_tables(index)
-        def_index = index.fetch(:def_index)
-        tables = { discovered_classes: index.fetch(:classes) }
-        %i[
-          def_nodes def_nestings singleton_def_nodes def_sources singleton_def_sources superclasses includes
-          extends prepends unpositioned_mixins class_sources
-          method_visibilities methods parameter_envelopes data_member_layouts struct_member_layouts
-          deferred_ranges refinements global_write_census
-        ].each do |slot|
-          tables[seed_key(slot)] = def_index.fetch(slot)
-        end
-        # ADR-119 WD1 — the pairs travel as one: an unpaired empty table is dropped here, a pair only when both
-        # halves are empty (`compact_pairs`), so a non-empty sibling is never stranded by an empty member.
-        tables.merge!(def_index.fetch(:siblings))
-        Scope::DiscoveryIndex.compact_pairs(
-          tables.reject { |name, table| !Scope::DiscoveryIndex.paired?(name) && (table.nil? || table.empty?) }
-        )
-      end
-
-      UNPREFIXED_SLOTS = %i[data_member_layouts struct_member_layouts unpositioned_mixins].freeze
-      private_constant :UNPREFIXED_SLOTS
-
-      # The def-index slot names match the {Scope::DiscoveryIndex} ones under a `discovered_` prefix, except the
-      # two member-layout tables and the unpositioned-mixin table, which carry the same name on both sides.
-      def seed_key(slot)
-        UNPREFIXED_SLOTS.include?(slot) ? slot : :"discovered_#{slot}"
+        Inference::ProjectSeedTables.from_index(index)
       end
     end
   end

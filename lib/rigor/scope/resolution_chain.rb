@@ -300,9 +300,12 @@ module Rigor
       # `Kernel` or `Enumerable` on any reopening. So each candidate name files the negative method edge of every
       # {Relevance::HOOKS} name on its singleton side (`method:Comparable.included`, the key a new `def
       # self.included` satisfies); a file adding any other method to the module re-checks nothing, and once the
-      # module is declared its sites carry later edits and the removal. #1661 — each name also files `mixin:<last
-      # segment>`, which `IncrementalSession#mark_affected` fires when the module's unpositioned mixin edges move: a
-      # new file that taints it (`module Comparable; include(*MODS); end`) without a hook. The edges are a function
+      # module is declared its sites carry later edits and the removal. #1661 — each name also files `mixin:<name>`,
+      # which `IncrementalSession#mark_affected` fires when the module's unpositioned mixin edges move: a new file
+      # that taints it (`module Comparable; include(*MODS); end`) without a hook. The key is the qualified candidate,
+      # the spelling the chain resolves a project entry by and the unpositioned table keys an owner under, so a taint
+      # on a project `Foo::Base` re-checks no reader of an external `Lib::Base`. An ambiguous spelling has no
+      # candidate and files none: no project module can resolve it, so no taint can mark it. The edges are a function
       # of the chain alone, so a consumer files them once per chain ({Analysis::DependencyRecorder.file_chain_once},
       # #1590). A hook written another way — an instance `def included` in a module extended onto the external, a
       # `define_singleton_method(:included)` — satisfies no such key and is not seen.
@@ -402,9 +405,9 @@ module Rigor
         @hook_keys[name] ||= Relevance::HOOKS.map { |hook| "method:#{name}.#{hook}".freeze }.freeze
       end
 
-      # {hook_keys} plus the `mixin:<last segment>` key an external entry files for its unpositioned mixins (#1661).
+      # {hook_keys} plus the `mixin:<name>` key an external entry files for its unpositioned mixins (#1661).
       def self.external_keys(name)
-        @external_keys[name] ||= (hook_keys(name) + ["mixin:#{name.split('::').last}".freeze]).freeze
+        @external_keys[name] ||= (hook_keys(name) + ["mixin:#{name}".freeze]).freeze
       end
 
       def record_head(scope, start, side)

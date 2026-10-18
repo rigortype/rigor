@@ -3,11 +3,11 @@
 require "spec_helper"
 require "tmpdir"
 
-# Issue #1661 — a file that taints a module with a mixin the tables cannot name (`"*"` in
-# `Scope::DiscoveryIndex#unpositioned_mixins`) makes an arity reader of a chain through that module decline. When the
-# module is external (RBS-known, declared by no project file), the reader's chain edges name no declaring file, so
-# before the `mark:<last segment>` edge on external entries a warm recheck kept the reader's old report. The oracle is
-# a full `--no-cache` run of the same tree, as in `class_mark_incremental_spec.rb`.
+# Issue #1661 — a file that taints a module with a mixin the tables cannot position (an entry of
+# `Scope::DiscoveryIndex#unpositioned_mixins`, `"*"` or a named edge) makes an arity reader of a chain through that
+# module decline. When the module is external (RBS-known, declared by no project file), the reader's chain edges name
+# no declaring file, so before the `mixin:<qualified name>` edge on external entries a warm recheck kept the reader's
+# old report. The oracle is a full `--no-cache` run of the same tree, as in `class_mark_incremental_spec.rb`.
 RSpec.describe "unrecordable mixins — incremental" do
   def configuration(dir) = Rigor::Configuration.new("paths" => [dir])
 
@@ -47,7 +47,7 @@ RSpec.describe "unrecordable mixins — incremental" do
 
   def base_files(mod)
     files = { "a.rb" => "class C\n  include #{mod}\n  def foo(x) = x\nend\n", "b.rb" => "C.new.foo\n",
-              "p.rb" => "module P; end\n" }
+              "p.rb" => "module P; end\nmodule Q; def foo = 1; end\n" }
     files["m.rb"] = "module #{mod}; end\n" unless mod == "Comparable"
     files
   end
@@ -96,7 +96,10 @@ RSpec.describe "unrecordable mixins — incremental" do
     "a conditional receiver-form include" => ->(mod) { "x = P\n#{mod}.include(x) if ENV[\"X\"]\n" },
     "an include inside a loop" => ->(mod) { "module #{mod}; [P].each { |m| include m }; end\n" },
     "an include sent by name" => ->(mod) { "module #{mod}; send(:include, P); end\n" },
-    "an instance included hook" => ->(mod) { "module #{mod}; def included(base) = base.prepend(P); end\n" }
+    "an instance included hook" => ->(mod) { "module #{mod}; def included(base) = base.prepend(P); end\n" },
+    # A named edge in a block, unpositioned but no `"*"`, in a file that declares nothing: it moves no envelope mark,
+    # so only the `mixin:` key re-checks the reader.
+    "an include in a class_eval block" => ->(mod) { "#{mod}.class_eval { include Q }\n" }
   }.each do |form, source|
     describe "#{form} on an external module" do
       let(:mod) { "Comparable" }
@@ -111,6 +114,32 @@ RSpec.describe "unrecordable mixins — incremental" do
       let(:taint) { source.call(mod) }
 
       it_behaves_like "a tainting file"
+    end
+  end
+
+  # The key is the qualified name: a taint on a project `Foo::Constants` re-checks no reader of a chain through the
+  # RBS-known `File::Constants`, and a taint on `File::Constants` itself still does.
+  describe "a qualified external module" do
+    let(:files) do
+      { "a.rb" => "class C\n  include File::Constants\n  def foo(x) = x\nend\n", "b.rb" => "C.new.foo\n",
+        "p.rb" => "module P; end\n" }
+    end
+
+    it "re-checks no reader when the taint lands on another module of the same last segment" do
+      baseline, warm, cold, affected =
+        warm_and_cold(files, "x.rb" => "module Foo; module Constants; end; end\nFoo::Constants.include(yext)\n")
+
+      expect(baseline).to eq(reported)
+      expect(warm).to eq(cold)
+      expect(affected).not_to include("b.rb")
+    end
+
+    it "re-checks the reader when the taint lands on the module itself" do
+      baseline, warm, cold = warm_and_cold(files, "x.rb" => "x = P\nFile::Constants.include(x) if ENV[\"X\"]\n")
+
+      expect(baseline).to eq(reported)
+      expect(cold).to eq([])
+      expect(warm).to eq(cold)
     end
   end
 

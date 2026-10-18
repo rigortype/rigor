@@ -1301,7 +1301,7 @@ module Rigor
       # records `mark:*`, which fires when an object-extended mark moves. The before-state is each touched file's
       # seed bundle, the after-state the scan's merged table.
       #
-      # Issue #1661 — and `mixin:<last segment>` for a class or module whose unpositioned mixin edges moved
+      # Issue #1661 — and `mixin:<qualified name>` for a class or module whose unpositioned mixin edges moved
       # ({Incremental.changed_unpositioned_owners}): an external chain entry records it for each name it can denote
       # (`ResolutionChain#record_hooks`), so a new file that taints `Comparable` with `include(*MODS)` re-checks the
       # readers of a chain through it. It is not `mark:`, which a plain reopening of a module moves (the bucket's
@@ -1317,7 +1317,7 @@ module Rigor
         return Set.new if moved.empty? && tainted.empty?
 
         keys = moved.map { |(class_name, _mark)| "mark:#{class_name.split('::').last}" }.uniq
-        keys.concat(tainted.map { |name| "mixin:#{name.split('::').last}" }.uniq)
+        keys.concat(tainted.map { |name| "mixin:#{name.delete_prefix('::')}" }.uniq)
         extended = Scope::DiscoveryIndex::ENVELOPE_OBJECT_EXTENDED_MARK
         keys << "mark:*" if moved.any? { |(_class_name, mark)| mark == extended }
         Incremental.negative_closure(keys, @negative_dependents)

@@ -483,7 +483,7 @@ rigor explain [options] [rule]
 
 `rule` is a rule ID (`call.undefined-method`), a legacy alias,
 or a family wildcard (`call`, `flow`, `def`, `assert`, `dump`, `global`,
-`suppression`, `static`, `effect`, `pre-eval`).
+`suppression`, `static`, `effect`).
 `--format=text|json` selects the output format. Exit `64` for an unknown rule.
 
 It also answers the `sig.skipped.*` identifiers `rigor sig-gen`

@@ -155,4 +155,32 @@ RSpec.describe "class marks — incremental" do
       it_behaves_like "a mark-only file", reported_without_mark: [["use.rb", 2]]
     end
   end
+
+  # Issue #1833 — a dynamic mark on a NAMESPACE CANDIDATE of the superclass written in a `class Sub < Foo` header.
+  # Inside `module N`, the walker records `module N; Foo.send(:define_method, …); end` on BOTH `N::Foo` and `Foo`,
+  # and the `:arity` resolver resolves `Foo` to `N::Foo` first because its bucket now `declares_surface?`. `N::Foo`
+  # has no declaring file, so the chain truncates and `SourceArity` stays silent. The silent verdict recorded no
+  # `mark:<last segment>` edge, so a warm run after the mark file vanished kept its old answer.
+  describe "a dynamic mark on a namespace candidate of a header's superclass" do
+    let(:base) do
+      { "foo.rb" => "class Foo\n  def run(a) = a\nend\n",
+        "n.rb" => "module N\n  class Sub < Foo\n  end\nend\n",
+        "use.rb" => "N::Sub.new.run(1, 2)\n" }
+    end
+    let(:mark) { "module N\n  Foo.send(:define_method, :zz) { }\nend\n" }
+
+    it_behaves_like "a mark-only file", reported_without_mark: [["use.rb", 1]]
+  end
+
+  # The same flip through a mixin level: `include Foo` inside `module N` resolves to the mark-only `N::Foo`.
+  describe "a removed-name mark on a namespace candidate of an included module" do
+    let(:base) do
+      { "foo.rb" => "module Foo\n  def run(a) = a\nend\n",
+        "n.rb" => "module N\n  class Sub\n    include Foo\n  end\nend\n",
+        "use.rb" => "N::Sub.new.run(1, 2)\n" }
+    end
+    let(:mark) { "module N\n  Foo.remove_method(:zz)\nend\n" }
+
+    it_behaves_like "a mark-only file", reported_without_mark: [["use.rb", 1]]
+  end
 end

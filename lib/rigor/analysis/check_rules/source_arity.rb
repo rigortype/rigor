@@ -101,6 +101,19 @@ module Rigor
           # {#decline_unless_recorded_nowhere}): it settles by definitions, as an `ABSENT` read does.
           return settle_by_walk if @unknown
 
+          # Issue #1833 — a level the `:arity` resolver took to be the project's on a mark alone (a namespace
+          # candidate a marks-only file rewrites) stands only while that mark does, and no definition appearing or
+          # vanishing can overturn it. Only such levels file the edge: the walk's other mark reads would re-check
+          # the call whenever an unrelated namespace reuses an ancestor's last segment.
+          @levels.each do |level|
+            ([level.class_name] + level.modules).each do |name|
+              next if @scope.known_user_class?(name)
+              next unless Scope::DiscoveryIndex.declares_surface?(@scope.discovered_parameter_envelopes[name])
+
+              Analysis::DependencyRecorder.read_last_segment(:mark, name)
+            end
+          end
+
           @owner_entries.each do |name, kind|
             if kind == :singleton
               @scope.user_singleton_def_site_for(name, @method_name)
@@ -294,7 +307,9 @@ module Rigor
         end
 
         # A bucket of class marks alone (issue #1820: `x.singleton_class.prepend(Comparable)`) does not make a name
-        # the project's.
+        # the project's. The bucket is read directly rather than through `parameter_envelopes_of`: a `mark:<last>`
+        # edge recorded here fires on marks a correctly-fitting call does not depend on, so the dependency on
+        # a mark that could flip this resolution is kept at `settle_by_definitions` instead (issue #1833).
         def project_class?(name)
           @scope.known_user_class?(name) ||
             Scope::DiscoveryIndex.declares_surface?(@scope.discovered_parameter_envelopes[name])

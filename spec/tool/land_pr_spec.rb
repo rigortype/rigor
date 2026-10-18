@@ -20,8 +20,8 @@ RSpec.describe "bin/land-pr" do
   after { FileUtils.rm_rf(root) }
 
   # The PR as the first query reads it: id, draft, state, queue on master, queued, base, head, CI required.
-  def info(draft: false, state: "OPEN", queue: true, queued: false, head: sha, check: "SUCCESS")
-    ["PR_id", draft, state, queue, queued, "master", head, check].join("\t")
+  def info(draft: false, state: "OPEN", queue: true, queued: false, head: sha, check: "SUCCESS", checked: head)
+    ["PR_id", draft, state, queue, queued, "master", head, check, checked].join("\t")
   end
 
   def poll(state, queued: false, oid: "")
@@ -65,6 +65,16 @@ RSpec.describe "bin/land-pr" do
     expect(out).to include("merged as #{'b' * 40}")
     expect(calls).to match(/enqueuePullRequest.*expectedHeadOid/)
     expect(calls).to include("sha=#{sha}")
+  end
+
+  it "reads CI required from the head commit and the PR's fields by name" do
+    run_land_pr("42", sha, "--no-wait", replies: [[info, 0], ["queued", 0]])
+    expect(calls).to include("statusCheckRollup", 'select(.name == "CI required")', "headRefOid", "isMergeQueueEnabled")
+  end
+
+  it "refuses when the green check belongs to a commit other than the head, before queueing" do
+    _, code = run_land_pr("42", sha, replies: [[info(checked: "d" * 40), 0]])
+    expect([code, enqueued?]).to eq([1, false])
   end
 
   it "refuses a head other than the reviewed one, before queueing" do

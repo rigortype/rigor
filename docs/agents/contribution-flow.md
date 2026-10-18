@@ -85,7 +85,7 @@ Each of these fails silently: the command succeeds and reports something plausib
 - **The merge queue.** Queue a PR with `bin/land-pr N <reviewed-head-sha>`, not `gh pr merge`: gh
   enqueues through the auto-merge API, which this repository keeps off, and fails with "Auto merge
   is not allowed". `bin/land-pr` queues only the head that was reviewed (a commit pushed since is
-  refused), checks that head's `CI required` passed, and refuses when `master` has no merge queue
+  refused; pass the SHA the reviewer reported on, never one read back from the PR), checks that head's `CI required` passed, and refuses when `master` has no merge queue
   (nothing would then test the merged result; stop and tell the user). It then polls once a minute
   until the PR merges (exit 0, merge commit printed) or leaves the queue (exit 1), and it is that
   PR's one watcher. A wait outlasts a foreground command (the queue batches for up to five minutes

@@ -31,5 +31,6 @@ the review of #2138 found that agents get wrong by hand.
 
 ## To undo
 
-Turn auto-merge on in the repository settings, point `contribution-flow.md`, the release-prep skill
-and ADR-123 back at `gh pr merge <N> --merge`, and delete `bin/land-pr`.
+Turn auto-merge on in the repository settings, point `contribution-flow.md`, `parallel-lanes.md`,
+the release-prep skill and ADR-123 back at `gh pr merge <N> --merge`, and delete `bin/land-pr` and
+`spec/tool/land_pr_spec.rb`.

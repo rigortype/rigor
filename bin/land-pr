@@ -30,6 +30,7 @@
 set -uo pipefail
 
 interval="${LAND_PR_INTERVAL:-60}"
+[[ "$interval" =~ ^[0-9]+$ ]] || { echo "land-pr: LAND_PR_INTERVAL must be a whole number of seconds" >&2; exit 2; }
 number=""
 sha=""
 wait=1
@@ -71,12 +72,15 @@ pr_fields() {
 }
 
 info="$(pr_fields 'id isDraft state isMergeQueueEnabled isInMergeQueue baseRefName headRefOid
-  commits(last:1){nodes{commit{statusCheckRollup{contexts(first:100){nodes{... on CheckRun{name conclusion}}}}}}}' \
+  commits(last:1){nodes{commit{oid statusCheckRollup{contexts(first:100){nodes{... on CheckRun{name conclusion}}}}}}}' \
   '.id, .isDraft, .state, .isMergeQueueEnabled, .isInMergeQueue, .baseRefName, .headRefOid,
    ([.commits.nodes[0].commit.statusCheckRollup.contexts.nodes[]? | select(.name == "CI required") | .conclusion]
-    | if length == 0 then "MISSING" else (map(tostring) | join(",")) end)')" ||
+    | if length == 0 then "MISSING" else (map(tostring) | join(",")) end),
+   (.commits.nodes[0].commit.oid // "")')" ||
   die "cannot read PR #$number"
-IFS=$'\t' read -r id draft state queue queued base head ci <<<"$info"
+IFS=$'\t' read -r id draft state queue queued base head ci checked <<<"$info"
+# The check belongs to the last commit GitHub lists; count it only when that is the head.
+[[ "$checked" == "$head" ]] || ci="MISSING"
 [[ "$state" == OPEN ]] || die "PR #$number is $state, not open"
 [[ "$base" == master ]] || die "PR #$number does not target master"
 [[ "$draft" == false ]] || die "PR #$number is a draft; run gh pr ready first"

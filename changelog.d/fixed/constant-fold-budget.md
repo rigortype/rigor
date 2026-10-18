@@ -1,0 +1,1 @@
+- **[engine]** `rigor check` no longer hangs on a constant fold whose value is huge or endless, such as `2 ** 100_000_000`, `(1..Float::INFINITY).to_a` or `("a".."zzzzz").to_a`: an Integer result past 13,606 bits and a Range method that would walk more than 1024 elements now widen to the method's declared return type. ([#2122](https://github.com/rigortype/rigor/pull/2122))

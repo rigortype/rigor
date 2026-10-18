@@ -15,7 +15,14 @@ The session handoff (ADR-98). It answers ONE question: what should the next sess
 Transient; replaced wholesale. Backlog lives in GitHub Issues, release planning in Milestones.
 If this file disagrees with an ADR, the CHANGELOG, or an issue, this file is the one that is wrong.
 
-## State at 2026-10-19 (master after #2130)
+## State at 2026-10-19 (master after #2143)
+
+**The landing flow changed (ADR-123, #2138, #2143).** `master` has a merge-queue ruleset; land with
+`bin/land-pr N <reviewed-head-sha>` in the background (not `gh pr merge`, which fails: auto-merge is
+off). No pre-merge re-gate when master moves. Non-serious decisions (precedented gate rows, open
+readings, scope splits) are made without asking and recorded in `approval-queue.d/` (three entries
+now); release prep reports them for ratification. Read contribution-flow.md § "Decisions and the
+approval queue" before the next batch.
 
 **`v0.4.4` is released.** The **`v0.4.5` milestone** stands at 26 open / 41 closed. A second
 v0.4.5 batch landed about 40 PRs on master between #2062 and #2130, each through an Opus review
@@ -32,7 +39,7 @@ and the `bin/lane-push` flow (up to four lanes at once).
    The `scope.rbs` provenance pin moved 113 → 112 **with the maintainer's approval**.
    **The Opus review was stopped mid-way — start it again** (cost of the new file-level class
    edge on `--incremental` is unmeasured; check cold `rigor check` is byte-identical).
-   Rebase with `bin/lane-push` before merging (master moved).
+   Land it through the queue; it needs no rebase unless it conflicts.
 2. **#2088 (Draft, `Refs #1956`)** — held until #1064 (CRuby Bus Error in the Ractor pool) is
    fixed: on a real project it moves plugin runs from a degraded-but-complete result to a crash.
    Its first four commits still say `Fixes #1956`: reword at the next rebase or squash-merge.
@@ -59,9 +66,11 @@ and the `bin/lane-push` flow (up to four lanes at once).
 
 - Route contained lanes (a crash guard, a marker re-point, a spec-only fix) to **Haiku**; Ruby
   semantics, cache soundness and reviews to **Opus**. The maintainer restated this on 2026-10-18.
-- A lane STOPS at any ADR-119 gate / census / producers / provenance-pin move and the coordinator
-  asks the maintainer. Approved this batch: producers rows for #2081, #2093, #2086, #2107, #2130;
-  census rows for #2086 and #2103; the #2132 pin. Never reshape code to dodge a gate.
+- A lane STOPS at any ADR-119 gate / census / producers / provenance-pin move and reports to the
+  coordinator, who now decides by precedent (approved precedents: producers rows for #2081, #2093,
+  #2086, #2107, #2130; census rows for #2086 and #2103; the #2132 pin) and adds an approval-queue
+  entry; a row with no same-kind precedent still goes to the maintainer. Never reshape code to
+  dodge a gate.
 - After round 3 a narrow severe finding lands through one fix-only check; this batch also used a
   short coordinator-narrowed check for one-line conservative fixes (#2077).
 - `make verify-changed` does not run `ancestry_walker_detection_spec` or `producers_spec` on every

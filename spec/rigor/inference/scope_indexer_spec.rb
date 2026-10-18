@@ -63,6 +63,49 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
       end
     end
 
+    # Issue #1839 — an operand evaluator records none of a `begin`'s nodes, so a widened rescue or `ensure` clause
+    # of one in an operand position, and a rescue modifier's fallback, are recorded under their widened entries
+    # explicitly, on the check path only, with the enclosing clause's `$!` unbound as the index walk leaves it.
+    describe "widen_clauses: in an operand position" do
+      let(:source) do
+        <<~RUBY
+          begin
+            work
+          rescue ArgumentError
+            conn = nil
+            take(v = 1, begin; conn = 1; work; rescue; [conn, $!]; ensure; conn; end, v)
+            link = nil
+            (link = 2; work) rescue [link, $!]
+          end
+        RUBY
+      end
+
+      def operand_reads(widen_clauses)
+        program = parse(source)
+        idx = described_class.index(program, default_scope: default_scope, widen_clauses: widen_clauses)
+        reads = []
+        collect_reads(program, reads)
+        reads.map do |read|
+          read.is_a?(Prism::GlobalVariableReadNode) ? idx[read].global(:$!) : idx[read].local(read.name)
+        end
+      end
+
+      def collect_reads(node, reads)
+        reads << node if node.is_a?(Prism::GlobalVariableReadNode) ||
+                         (node.is_a?(Prism::LocalVariableReadNode) && %i[conn link].include?(node.name))
+        node.compact_child_nodes.each { |child| collect_reads(child, reads) }
+      end
+
+      it "records the clauses' and the fallback's widened entries when set" do
+        untyped = Rigor::Type::Combinator.untyped
+        expect(operand_reads(true)).to eq([untyped, nil, untyped, untyped, nil])
+      end
+
+      it "records neither by default" do
+        expect(operand_reads(false).map { |type| type&.describe }).to eq(["nil", nil, "nil", "nil", nil])
+      end
+    end
+
     # Issue #1839 — an `ensure` clause holding a `return` is evaluated twice, once for its jumps and once for the
     # scope after it. The second pass collects no jump, so a clause nested inside it is evaluated once: `depth`
     # nested clauses cost `depth * (depth + 1) / 2` evaluations, not `2**depth - 1`.

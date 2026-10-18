@@ -147,6 +147,13 @@ RSpec.describe Rigor::CLI::SigGenCommand do
         attr_reader :count
       end
 
+      class LamShadow
+        def initialize(count)
+          ->(count) { @count = count }.call(1)
+        end
+        attr_reader :count
+      end
+
       class BlockBox
         def initialize(count)
           [1].each { @count = count }
@@ -190,6 +197,7 @@ RSpec.describe Rigor::CLI::SigGenCommand do
       SendBox.new(0)
       PublicSendBox.new(0)
       ShadowBox.new("s")
+      LamShadow.new(0)
       BlockBox.new(0)
       OpBox.new(0, 0, 0, 0)
       TwiceBox.new(0, 1)
@@ -254,6 +262,10 @@ RSpec.describe Rigor::CLI::SigGenCommand do
 
   it "does not credit a block parameter that shadows the constructor parameter" do
     expect(section(observed_print, "ShadowBox")).not_to include("def count:")
+  end
+
+  it "does not credit a lambda parameter that shadows the constructor parameter" do
+    expect(section(observed_print, "LamShadow")).not_to include("def count")
   end
 
   it "credits the constructor parameter read from inside a block" do

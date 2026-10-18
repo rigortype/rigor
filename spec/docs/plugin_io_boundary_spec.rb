@@ -93,21 +93,23 @@ ALLOWED_PLUGIN_FILESYSTEM_CALLS = {
   "plugins/rigor-rails-i18n/lib/rigor/plugin/rails_i18n/locale_loader.rb" => [{ "Dir.glob" => 1 },
                                                                               WATCHED_PRODUCER_WALK],
   "plugins/rigor-rails-routes/lib/rigor/plugin/rails_routes.rb" => [{ "Dir.glob" => 1 }, WATCHED_PRODUCER_WALK],
-  "plugins/rigor-sidekiq/lib/rigor/plugin/sidekiq/worker_discoverer.rb" => [{ "Dir.glob" => 1 }, WATCHED_PRODUCER_WALK]
+  "plugins/rigor-sidekiq/lib/rigor/plugin/sidekiq/worker_discoverer.rb" => [{ "Dir.glob" => 1 }, WATCHED_PRODUCER_WALK],
+  # #1803 — the view-assigns walk lists `controller_search_paths`, the tree the `:controller_index` producer's
+  # `watch:` glob covers on every run, whether or not the producer computed; each file it uses is read through
+  # the boundary. `spec/integration/rails_plugin_input_cache_spec.rb` pins the row.
+  "plugins/rigor-actionpack/lib/rigor/plugin/actionpack/view_assigns.rb" =>
+    [{ "Dir.glob" => 1 }, "lists the tree the `:controller_index` watch glob records every run"],
+  # #1803 — the `config/environments/*.rb` listing behind queue-adapter detection feeds the attributions and
+  # edges `init` builds, so it reaches every cache through `Effects::PluginFacts#digest`, recomputed each run;
+  # each listed file is read through the boundary. `spec/integration/rails_plugin_input_cache_spec.rb` pins it.
+  "plugins/rigor-activejob/lib/rigor/plugin/activejob/effects.rb" =>
+    [{ "Dir.glob" => 1 }, "the adapter it finds is part of the plugin-facts digest every run recomputes"]
 }.freeze
 
 # Known gaps: direct calls that DO need a row and do not have one yet, left to follow-up issues. Each shapes a
 # plugin answer from a directory listing the boundary never saw, so a file appearing there is not seen by the
 # run-result caches. Listed so the gate stays green until they are converted, not because they are sound.
-KNOWN_PLUGIN_ROW_GAPS = {
-  # The controller / `app/helpers` / view walks behind the render-locals and view-assigns indexes: their
-  # files are read through the boundary, but the listing is not recorded outside the `:controller_index` watch.
-  "plugins/rigor-actionpack/lib/rigor/plugin/actionpack/render_locals.rb" => { "Dir.glob" => 1 },
-  "plugins/rigor-actionpack/lib/rigor/plugin/actionpack/view_assigns.rb" => { "Dir.glob" => 1 },
-  # The `config/environments/*.rb` listing behind queue-adapter detection (`rigor effects` attributions and
-  # edges); each listed file is read through the boundary, the listing is not.
-  "plugins/rigor-activejob/lib/rigor/plugin/activejob/effects.rb" => { "Dir.glob" => 1 }
-}.freeze
+KNOWN_PLUGIN_ROW_GAPS = {}.freeze
 
 RSpec.describe "plugin project reads go through the IoBoundary" do
   let(:repo_root) { File.expand_path("../..", __dir__) }

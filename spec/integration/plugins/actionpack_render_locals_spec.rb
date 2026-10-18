@@ -25,10 +25,11 @@ $LOAD_PATH.unshift(RENDER_LOCALS_ACTIVERECORD_LIB) unless $LOAD_PATH.include?(RE
 require "rigor-actionpack"
 require "rigor-activerecord"
 
-# The two calls the parent-side builders make on the plugin IO boundary.
+# The three calls the parent-side builders make on the plugin IO boundary.
 RENDER_LOCALS_BOUNDARY = Struct.new(:root) do
   def directory?(path) = File.directory?(path)
   def read_file(path) = File.read(path)
+  def glob(root, pattern) = Dir.glob(pattern, base: root).map { |path| File.join(root, path) }
 end
 
 RENDER_LOCALS_MODELS = <<~RUBY

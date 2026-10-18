@@ -1078,8 +1078,8 @@ whose marks moved; `mark:*` fires when an object-extended mark moves, for
 the reader that scans every bucket for one. The seed bundles already
 carry the envelope tables, so no row moves and `SCHEMA` is unchanged.
 
-The `mixin:<last segment>` key in `missing` is recorded for every
-candidate name of every external entry on a resolution chain that a
+The `mixin:<qualified name>` key in `missing` is recorded for every
+qualified candidate name of every external entry on a resolution chain that a
 `settle` verdict files beyond its answer, beside the entry's hook keys
 ([#1661](https://github.com/rigortype/rigor/issues/1661)): a new file can
 taint an RBS-known module with a mixin the tables cannot position
@@ -1090,7 +1090,14 @@ The same producer (`IncrementalSession#mark_affected`) diffs the
 `unpositioned_mixins` tables of the changed, added and removed files
 between their seed bundles and the recheck scan
 (`Incremental.changed_unpositioned_owners`) and fires the key for every
-class or module whose unpositioned edges moved. It is a separate key from
+class or module whose unpositioned edges moved. The table keys a
+receiver-form owner by the spelling written (`class File;
+Constants.include(*MODS); end` lands under `Constants`) and carries no
+nesting, so an owner fires its own key and every recorded `mixin:` key
+ending in `::<owner>` (`IncrementalSession#mixin_keys`): a relative
+spelling over-fires to every module sharing its trailing segments, and a
+qualified owner such as `Foo::Base` fires no reader of an external
+`ActiveRecord::Base`. It is a separate key from
 `mark:` because a plain reopening (`module Comparable; def zz = 1; end`)
 moves the module's envelope bucket mark, and `mark:Comparable` on an
 external entry would re-check every reader of the chain on any reopening.

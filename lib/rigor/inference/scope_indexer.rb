@@ -521,11 +521,12 @@ module Rigor
       end
 
       # Folds the class-body writes {#collect_class_body_ivar_writes} held under {CLASS_BODY_WRITES} into the
-      # `init_writes` exemption, except for an ivar a `define_method` block of the class writes (#1768). Such an ivar
-      # had no census entry before the block's writes were counted, so the exemption never applied to it; a
-      # class-body `@x = nil` writes the class object's ivar and says nothing about whether an instance's `@x` is set,
-      # and exempting it would seed `@x` non-nil from the block's write alone (`if @x` folding always-truthy on an
-      # instance whose `@x` is unset). It keeps the read-before-write `nil` instead, which only widens.
+      # `init_writes` exemption, except for an ivar a `define_method` block, or a `block_as_methods:` block bound to the
+      # receiver's instance ({#method_body_block_call?}), of the class writes (#1768). Such an ivar had no census entry
+      # before the block's writes were counted, so the exemption never applied to it; a class-body `@x = nil` writes
+      # the class object's ivar and says nothing about whether an instance's `@x` is set, and exempting it would seed
+      # `@x` non-nil from the block's write alone (`if @x` folding always-truthy on an instance whose `@x` is unset).
+      # It keeps the read-before-write `nil` instead, which only widens.
       def exempt_class_body_writes!(init_writes, define_method_writes)
         (init_writes.delete(CLASS_BODY_WRITES) || {}).each do |class_name, ivars|
           kept = ivars - (define_method_writes[class_name] || EMPTY_GUARDED_IVARS)
@@ -1095,14 +1096,19 @@ module Rigor
       # `owner` is empty in a `class << self` body (the call defines a class method there) and in an
       # anonymous factory body, and the block contributes nothing there. A `define_method` inside a `def`
       # body is already reached by that body's walk ({#gather_ivar_writes} enters blocks).
+      #
+      # An ADR-16 `block_as_methods:` call whose entry binds the receiver's instance (`get "/" do … end` in a
+      # `Sinatra::Base` subclass under rigor-sinatra) takes the same arm: the plugin declares that its block runs as an
+      # instance method of the receiver class, and `MacroBlockSelfType` narrows the block's `self` to that instance.
       def collect_define_method_block_ivars(node, owner, default_scope, accumulator, mutated_ivars)
         return if owner.empty?
-        return unless define_method_block_call?(node)
+
+        class_name = owner.join("::")
+        return unless method_body_block_call?(node, class_name, default_scope)
 
         block = node.block
         return unless block.body
 
-        class_name = owner.join("::")
         body_scope = census_body_scope(default_scope, owner, Type::Combinator.nominal_of(class_name))
         gather_ivar_writes(block.body, body_scope, class_name, accumulator, EMPTY_GUARDED_IVARS, mutated_ivars)
         written = (accumulator[DEFINE_METHOD_WRITES] ||= {})[class_name] ||= Set.new
@@ -1248,6 +1254,25 @@ module Rigor
       # method body of the class the walk is in (#1768).
       def define_method_block_call?(node)
         DefineMethodBlockSelf.define_method_on_lexical_self?(node) && node.block.is_a?(Prism::BlockNode)
+      end
+
+      # A call with a literal block on the implicit or `self` receiver whose block is an instance method body of
+      # `class_name`, the class the walk is in (#1768): `define_method`, or a call an ADR-16 `block_as_methods:` entry
+      # declares runs its block as an instance method of the receiver class ({MacroBlockSelfType}). The entry is
+      # matched on `Singleton[class_name]`, the receiver such a call has in the class body, through the same
+      # receiver-ancestry match the evaluator narrows the block's `self` with, so the census counts exactly the blocks
+      # whose `self` is narrowed to the instance.
+      #
+      # The class-body walk ({#collect_class_body_ivar_writes}) still records a `block_as_methods:` block's writes as
+      # class-body writes, and {#exempt_class_body_writes!} takes back every ivar such a block writes.
+      def method_body_block_call?(node, class_name, scope)
+        return true if define_method_block_call?(node)
+        return false unless node.block.is_a?(Prism::BlockNode)
+        return false unless scope && (node.receiver.nil? || node.receiver.is_a?(Prism::SelfNode))
+
+        MacroBlockSelfType.runs_as_receiver_instance_method?(
+          scope: scope, call_node: node, receiver_type: Type::Combinator.singleton_of(class_name)
+        )
       end
 
       def detect_read_before_write(node, seen_writes, read_first)

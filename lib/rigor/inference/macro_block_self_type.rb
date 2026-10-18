@@ -47,6 +47,25 @@ module Rigor
       # same call, another plugin's included, is not consulted. A `:lexical` entry (issue #1667) keeps the caller's
       # `self`, so its `self_type` is the calling scope's.
       def match_for(scope:, call_node:, receiver_type:)
+        entry = first_matching_entry(scope, call_node, receiver_type)
+        return nil if entry.nil?
+
+        receiver_name = singleton_receiver_class_name(receiver_type) || nominal_receiver_class_name(receiver_type)
+        entry_match(entry, receiver_name, scope, scope.environment)
+      end
+
+      # Whether `call_node`'s block runs as an instance method of the receiver class (issue #1768): its first matching
+      # entry binds `:receiver_instance`, so the block body's `self` is the instance {#match_for} narrows to and its
+      # `@x` writes are that instance's ivars, as a `def` body's are. A `:lexical` or named-`self_type` entry runs the
+      # block on another object, and no entry means no narrowing.
+      def runs_as_receiver_instance_method?(scope:, call_node:, receiver_type:)
+        entry = first_matching_entry(scope, call_node, receiver_type)
+        !entry.nil? && entry.self_type == Plugin::Macro::BlockAsMethod::SELF_TYPE_RECEIVER_INSTANCE
+      end
+
+      # The first registered entry that matches `call_node` on `receiver_type`, in (plugin registration, declaration)
+      # order, or nil.
+      def first_matching_entry(scope, call_node, receiver_type)
         return nil if receiver_type.nil?
 
         environment = scope&.environment
@@ -61,12 +80,7 @@ module Rigor
         # (plugin registration, declaration) order; the method-name membership is guaranteed
         # by the table key.
         entries = registry.contribution_index.block_entries_for(call_node.name)
-        entries.each do |entry|
-          next unless entry_matches?(entry, singleton_name, nominal_name, call_node, scope, environment)
-
-          return entry_match(entry, singleton_name || nominal_name, scope, environment)
-        end
-        nil
+        entries.find { |entry| entry_matches?(entry, singleton_name, nominal_name, call_node, scope, environment) }
       end
 
       # The {Match} a matching entry contributes: a `:lexical` one keeps the calling scope's `self`, unknown where the

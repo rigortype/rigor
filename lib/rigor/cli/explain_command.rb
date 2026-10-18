@@ -10,7 +10,7 @@ require_relative "command"
 module Rigor
   class CLI
     # Executes `rigor explain <rule>`. Prints the catalog entry for one canonical rule id, a legacy alias, or a family
-    # wildcard (`call`, `flow`, `assert`, `dump`, `def`).
+    # wildcard (`call`, `flow`, `def`, `assert`, `dump`, `global`, `suppression`, `static`, `effect`).
     #
     # Without arguments lists every rule's id and one-line summary.
     #
@@ -74,7 +74,8 @@ module Rigor
         end
         @out.puts("")
         @out.puts("Run `rigor explain <rule>` for the full description.")
-        @out.puts("Family wildcards (`call`, `flow`, `assert`, `dump`, `def`) print every rule under that prefix.")
+        @out.puts("Family wildcards (#{Analysis::CheckRules::RULE_FAMILIES.map { |f| "`#{f}`" }.join(', ')}) " \
+                  "print every rule under that prefix.")
         @out.puts("")
         @out.puts("`rigor sig-gen` skip reasons:")
         @out.puts("")

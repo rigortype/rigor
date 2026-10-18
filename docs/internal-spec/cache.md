@@ -43,7 +43,7 @@ GemEntry        :: { name: String, requirement: String, locked: String? }
 PluginEntry     :: { id: String, version: String, config_hash: String? }
 ConfigEntry     :: { key: String, value_hash: String }
 DependencyEntry :: { gem_name: String, gem_version: String, mode: :disabled|:when_missing|:full }
-GlobEntry       :: { root: String, pattern: String, value: String, mode: :stat|:names }
+GlobEntry       :: { root: String, pattern: String, value: String, mode: :stat|:names|:kinds }
 ```
 
 Each entry is constructed via keyword arguments and frozen
@@ -84,6 +84,16 @@ descriptors byte-identical — the field itself moves no producer's key.
 Every key did move once with `SCHEMA_VERSION` 9, which the storage layer
 mixes into each key; that one-time miss is the #979 migration, the same
 shape as v8's for #577.
+
+`:kinds` ([#1959](https://github.com/rigortype/rigor/issues/1959)) hashes
+each matching path with its `File.lstat` kind (`GlobEntry.lstat_kind`:
+`:file`, `:directory`, `:symlink`, `:other`), reading no content, so it
+moves when the set changes or when a path keeps its name and changes
+kind, and not on a `touch` or an edit. `IoBoundary#list_directory_kinds`
+records it over `path/*` for a walk that decides per top-level entry
+whether to descend: a file `gen` replaced by a directory `gen/`, or a
+symlinked directory replaced by a real one, changes what such a walk
+reads while every name stays put, and a `:names` row would stay fresh.
 
 The `:stat` comparator is the ADR-87 WD1 stat-then-digest tier for
 individual `FileEntry` slots. Its `value` packs `"<digest> <size>

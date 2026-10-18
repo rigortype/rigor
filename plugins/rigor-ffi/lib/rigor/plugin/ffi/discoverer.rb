@@ -11,6 +11,7 @@ module Rigor
       # carried no row at all and was served after any edit, an analysed file's included, until `--no-cache`.
       class Discoverer
         RUBY_GLOB = "**/*.rb"
+        RUBY_FILE = "*.rb"
         SKIPPED_DIRECTORIES = %w[vendor .git].freeze
 
         def self.discover(root:, io:)
@@ -68,17 +69,30 @@ module Rigor
 
         private
 
-        # One `:names` `**/*.rb` row over the root, `vendor/` included: a per-entry walk that skipped it recorded
-        # names only, so a top-level entry that changed kind under the same name went unseen. The boundary
-        # answers absolute paths; they are spelled back under `@root` as `Dir.glob` spells them.
+        # #1959 — one `:kinds` listing row over the root's top-level entries, then one `:names` `**/*.rb` row per
+        # real directory among them other than `vendor/`. A single `**/*.rb` row over the root re-walked an in-tree
+        # `vendor/bundle` on every warm validation and read stale on every `bundle install`. The listing carries
+        # each entry's kind and not just its name: the walk descends a directory but not a symlinked one (`**` never
+        # followed it), so a file `gen` that becomes a directory `gen/`, or a symlink that becomes a real
+        # directory, changes what it reads while every name stays put.
+        #
+        # The answer is `Dir.glob("**/*.rb")` minus the skipped paths, in its order: entry by entry, a top-level
+        # name matching `*.rb` (a directory so named included), then that directory's matches. The boundary answers
+        # absolute paths; they are spelled back under `@root` as `Dir.glob` spells them.
         def ruby_files
           return [] unless @root && @io.directory?(@root.to_s)
 
           root = @root.to_s
           prefix = "#{File.absolute_path(root)}/"
-          @io.glob(root, RUBY_GLOB).filter_map do |path|
-            relative = path.delete_prefix(prefix)
-            File.join(root, relative) unless skipped?(relative)
+          @io.list_directory_kinds(root).flat_map do |path, kind|
+            name = path.delete_prefix(prefix)
+            own = File.fnmatch?(RUBY_FILE, name) ? [File.join(root, name)] : []
+            next own unless kind == :directory && !SKIPPED_DIRECTORIES.include?(name)
+
+            own + @io.glob(path, RUBY_GLOB).filter_map do |nested|
+              relative = nested.delete_prefix(prefix)
+              File.join(root, relative) unless skipped?(relative)
+            end
           end
         end
 

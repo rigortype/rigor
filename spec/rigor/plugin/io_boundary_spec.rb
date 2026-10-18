@@ -350,6 +350,74 @@ RSpec.describe Rigor::Plugin::IoBoundary do
     end
   end
 
+  # #1959 — the row a walk that descends per top-level entry needs: a name that stays put while its kind changes
+  # changes what the walk reads.
+  describe "#list_directory_kinds" do
+    let(:root) { File.join(tmpdir, "proj") }
+    let(:target) { File.join(tmpdir, "target") }
+
+    def path(name) = File.join(root, name)
+
+    before do
+      FileUtils.mkdir_p([path("dir"), target])
+      File.write(path("file.rb"), "a")
+      File.symlink(target, path("link"))
+      File.write(path(".hidden"), "")
+    end
+
+    it "answers each entry's lstat kind in Dir.glob order and records one :kinds row" do
+      expect(boundary.list_directory_kinds(root))
+        .to eq(path("dir") => :directory, path("file.rb") => :file, path("link") => :symlink)
+      expect(boundary.cache_descriptor.globs.map { |row| [row.root, row.pattern, row.mode] })
+        .to eq([[File.absolute_path(root), "*", :kinds]])
+      expect(boundary.cache_descriptor.fresh?).to be(true)
+    end
+
+    # Replaces the entry `name` with a `kind` under the same name; a symlink points at the same target `link` does.
+    def replace(name, kind)
+      FileUtils.rm_rf(path(name))
+      case kind
+      when :directory then FileUtils.mkdir_p(path(name))
+      when :file then File.write(path(name), "")
+      when :symlink then File.symlink(target, path(name))
+      end
+    end
+
+    [
+      ["a file", "file.rb", :directory],
+      ["a directory", "dir", :file],
+      ["a symlink", "link", :directory],
+      ["a directory", "dir", :symlink],
+      ["a missing entry", "new", :directory]
+    ].each do |was, name, kind|
+      it "reads stale once #{was} under the same name becomes a #{kind}" do
+        boundary.list_directory_kinds(root)
+        replace(name, kind)
+
+        expect(boundary.cache_descriptor.fresh?).to be(false)
+      end
+    end
+
+    it "stays fresh when an entry is touched or rewritten, or a file appears below a subdirectory" do
+      boundary.list_directory_kinds(root)
+      File.utime(Time.now + 60, Time.now + 60, path("file.rb"))
+      File.write(path("file.rb"), "changed")
+      File.write(path("dir/deep.rb"), "")
+
+      expect(boundary.cache_descriptor.fresh?).to be(true)
+    end
+
+    it "answers truthfully outside the trusted-read scope and records nothing there" do
+      outside = Dir.mktmpdir("rigor-io-boundary-outside-")
+      File.write(File.join(outside, "x.rb"), "")
+
+      expect(boundary.list_directory_kinds(outside)).to eq(File.join(outside, "x.rb") => :file)
+      expect(boundary.cache_descriptor.globs).to be_empty
+    ensure
+      FileUtils.rm_rf(outside)
+    end
+  end
+
   describe "#open_url" do
     it "denies every URL while the network policy is :disabled" do
       expect { boundary.open_url("https://example.invalid/api") }.to raise_error(

@@ -47,7 +47,8 @@ plugins:
 - **AST literal walking**: Recognizes `attach_function`, `callback`, `typedef`, `enum`, `bitmask`, and `layout` in every
   `.rb` under the project root outside a `vendor/` or `.git/` directory beneath it, `exclude:`d files included. The
   walk lists and reads them through the plugin's `IoBoundary`, so a new file or an edit rebuilds the cached catalog
-  ([#1803](https://github.com/rigortype/rigor/issues/1803)).
+  ([#1803](https://github.com/rigortype/rigor/issues/1803)). It does not walk `vendor/`, so a `bundle install`
+  into an in-tree `vendor/bundle` leaves the cached catalog served ([#1959](https://github.com/rigortype/rigor/issues/1959)).
 - **25-symbol primitive set**: Type combinator mapping for all standard FFI primitive types.
 - **Universal pointer widening**: `:pointer` parameter inputs accept `FFI::Pointer | FFI::MemoryPointer | FFI::AutoPointer | FFI::Buffer | Integer | String | nil`.
 - **Nominal pointer typedefs**: Opaque pointer aliases (`_ptr$`, `_handle$`) become nominal types honoring the robustness principle.

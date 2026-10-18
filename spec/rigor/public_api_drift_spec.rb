@@ -566,6 +566,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     file?(req:path)
     glob(req:root,req:pattern)
     list_directory(req:path)
+    list_directory_kinds(req:path)
     open_url(req:url)
     plugin_id()
     policy()

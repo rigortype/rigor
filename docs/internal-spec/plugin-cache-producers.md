@@ -120,7 +120,9 @@ served past the file's appearance; `#list_directory(path)` records a
 fingerprint for a producer that answers "which of these candidate
 files exists here?", one row per consulted directory instead of one
 per candidate path, and stale on any addition, removal or edit under
-it. Those `GlobEntry` rows join the producer's evaluated `watch:`
+it; `#list_directory_kinds(path)` records a `:kinds` `GlobEntry` over
+`path/*` that reads stale when an entry appears, vanishes or changes kind
+(#1959). Those `GlobEntry` rows join the producer's evaluated `watch:`
 globs in the dependency descriptor; `#open_url(url)` records a `ConfigEntry`
 keyed `"url:#{url}"` whose `value_hash` is the response body's
 SHA-256. A `ConfigEntry` (URL read) in the dependency descriptor
@@ -271,7 +273,7 @@ a plugin that needs distinct per-failure messages keeps a bespoke
 
 **Every project file a plugin reads, lists or probes MUST reach a
 row**: through the boundary (`#read_file`, `#file?`,
-`#directory?`, `#list_directory`, `#glob`) or, for the reads of a
+`#directory?`, `#list_directory`, `#list_directory_kinds`, `#glob`) or, for the reads of a
 producer block, through a `watch:` glob covering the file. A plain
 `File.read`, `Dir.glob` or `Prism.parse_file` records nothing, in
 `#prepare` as much as in a producer block. The run-result caches
@@ -279,7 +281,14 @@ answer a run whose analysed files are unchanged without loading the
 plugin, and a producer entry with no row is served after any edit.
 `rigor-ffi`'s `:ffi_catalog` declared no `watch:` and parsed every
 `.rb` with `Prism.parse_file`, so it kept its first catalog across
-edits to analysed files too. `rigor-dry-schema`,
+edits to analysed files too. Its walk now lists the project root with
+`#list_directory_kinds` and globs `**/*.rb` under each real top-level
+directory other than `vendor/`, so neither a warm validation nor a
+`bundle install` into an in-tree `vendor/bundle` walks that tree
+([#1959](https://github.com/rigortype/rigor/issues/1959)); the listing
+row carries each entry's kind because the walk descends a real
+directory and not a symlinked one, so a top-level `gen` that changes
+kind under the same name changes what it reads. `rigor-dry-schema`,
 `rigor-dry-validation` and `rigor-graphql` listed their `paths:`
 directories with `Dir.glob`, so a new file that `exclude:` keeps
 out of analysis, and which they scan all the same, reached no cache

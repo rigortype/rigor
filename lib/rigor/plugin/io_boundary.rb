@@ -34,6 +34,8 @@ module Rigor
     #   for a plugin that asks "which of these N candidate files exists here?" — rigor-actionpack tries
     #   nine template extensions per `render` call — where N per-path probe rows would put thousands of
     #   validations on every warm run and one listing row puts one per directory.
+    # - `#list_directory_kinds(path)` — the KIND-aware listing (#1959): each entry with its `lstat` kind, and one
+    #   `:kinds` row that moves when an entry appears, vanishes or changes kind under the same name.
     # - `#open_url(url)` — fetches the URL when the policy permits it (`network_policy: :allowlist` plus an
     #   `allowed_url_hosts` match) and raises {AccessDeniedError} otherwise. v0.1.2 ships the allowlist
     #   surface; the default project policy still has `network_policy: :disabled` so plugins that want network
@@ -197,6 +199,33 @@ module Rigor
         end
 
         record_glob_entry(absolute, "*")
+        entries
+      end
+
+      # Issue #1959 — the KIND-aware listing. Returns each entry directly under `path` with what it is, a symlink
+      # not followed ({Cache::Descriptor::GlobEntry.lstat_kind}: `:file`, `:directory`, `:symlink` or `:other`),
+      # and records one `:kinds` {Cache::Descriptor::GlobEntry} over `path/*`. The row reads stale when an entry
+      # appears, disappears, or keeps its name and changes kind; NOT when an entry's bytes or stat tuple move, nor
+      # when anything below a subdirectory changes. It is the row for a walk that decides per top-level entry
+      # whether to descend: rigor-ffi skips `vendor/` and does not follow a symlinked directory, so a file `gen`
+      # replaced by a directory `gen/`, or a symlink replaced by a real directory, changes what it reads while
+      # every name stays put. {#list_directory}'s `:stat` row leaves directories out, and {#glob}'s `:names` row
+      # reads names alone.
+      #
+      # Like {#list_directory}, dot entries are not listed, and an out-of-policy directory is listed truthfully
+      # and contributes no row.
+      #
+      # @param path — project directory; relative paths expand against the working directory
+      # @return a Hash from each absolute entry path, in `Dir.glob` order, to its kind; empty when not a directory
+      def list_directory_kinds(path)
+        absolute = File.absolute_path(path.to_s)
+        entries = RootedGlob.glob(absolute, "*").to_h { |entry| [entry, Cache::Descriptor::GlobEntry.lstat_kind(entry)] }
+        unless @policy.allow_read?(absolute)
+          record_refusal(absolute)
+          return entries
+        end
+
+        record_glob_entry(absolute, "*", mode: :kinds)
         entries
       end
 
@@ -396,8 +425,8 @@ module Rigor
         self.class.attribute(entry)
       end
 
-      # ADR-45 WD1c (#629) — the listing row for {#list_directory} (and the `:names` row for {#glob}),
-      # deduplicated per (root, pattern, mode) slot.
+      # ADR-45 WD1c (#629) — the listing row for {#list_directory} (and the `:names` row for {#glob} and the
+      # `:kinds` row for {#list_directory_kinds}), deduplicated per (root, pattern, mode) slot.
       # Recomputed on each call rather than `||=`d, so a directory listed again after a mid-run mutation
       # carries the signature of the state the LAST reader saw.
       def record_glob_entry(root, pattern, mode: :stat)

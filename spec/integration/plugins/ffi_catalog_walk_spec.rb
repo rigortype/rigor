@@ -3,6 +3,7 @@
 require "spec_helper"
 require "fileutils"
 require "tmpdir"
+require "timeout"
 
 FFI_CATALOG_WALK_PLUGIN_LIB = File.expand_path("../../../plugins/rigor-ffi/lib", __dir__)
 $LOAD_PATH.unshift(FFI_CATALOG_WALK_PLUGIN_LIB) unless $LOAD_PATH.include?(FFI_CATALOG_WALK_PLUGIN_LIB)
@@ -36,10 +37,17 @@ RSpec.describe "rigor-ffi catalog walk (#1803)" do
     %w[z.rb a.rb lib-x.rb lib/c.rb lib/sub/d.rb lib/b/e.rb dir.rb/f.rb app/vendor/g.rb vendor/bundle/h.rb
        real/r.rb .git/hooks/i.rb].each { |path| write(path) }
     File.symlink(File.join(root, "real"), File.join(root, "link"))
+    # #2113 — a top-level `*.rb` symlink is read only where it resolves to a regular file.
+    File.symlink(File.join(root, "z.rb"), File.join(root, "alias.rb"))
+    File.symlink(File.join(root, "real"), File.join(root, "x.rb"))
+    # #2113 — a directory named `dir.rb` is walked, never read, so the expectation keeps regular files only.
     expected = Dir.glob(File.join(root, "**/*.rb")).reject { |p| p.include?("/vendor/") || p.include?("/.git/") }
+                  .select { |p| File.file?(p) }
 
     expect(walk).to eq(expected)
-    expect(walk).to include(File.join(root, "lib/sub/d.rb"), File.join(root, "dir.rb"))
+    expect(walk).to include(File.join(root, "lib/sub/d.rb"), File.join(root, "dir.rb/f.rb"),
+                            File.join(root, "alias.rb"))
+    expect(walk).not_to include(File.join(root, "x.rb"))
   end
 
   # #1956 — the `vendor/` skip reads the path under the root: matching `/vendor/` in the absolute path emptied the
@@ -72,6 +80,43 @@ RSpec.describe "rigor-ffi catalog walk (#1803)" do
     walk = Rigor::Plugin::FFI::Discoverer.new(root: File.join(root, "fx[1]"), io: boundary).send(:ruby_files)
 
     expect(walk).to eq([File.join(root, "fx[1]", "own.rb")])
+  end
+
+  # #2113 — `*.rb` names a fifo as readily as a file, and reading a fifo blocks until a writer opens it. The walk
+  # lists it by name but must neither read it nor let it stop the rest of the catalog.
+  context "with a fifo named *.rb" do
+    def declaration(name)
+      "module L_#{name}\n  extend FFI::Library\n  attach_function :#{name}, [], :int\nend\n"
+    end
+
+    before do
+      write("ok.rb", declaration("outer"))
+      write("lib/inner.rb", declaration("inner"))
+      File.mkfifo(File.join(root, "pipe.rb"))
+      File.mkfifo(File.join(root, "lib", "pipe.rb"))
+    end
+
+    it "does not list a top-level or a nested fifo" do
+      expect(walk).to contain_exactly(File.join(root, "ok.rb"), File.join(root, "lib/inner.rb"))
+    end
+
+    # A regression reads the fifo here and blocks; the bound turns that hang into a failure.
+    it "catalogs the rest of the project without reading a fifo" do
+      catalog = Timeout.timeout(10) { Rigor::Plugin::FFI::Discoverer.discover(root: root, io: boundary) }
+
+      expect(catalog.functions.keys.map(&:to_s)).to contain_exactly("outer", "inner")
+    end
+  end
+
+  # #2113 — a top-level directory named `x.rb` is matched by `*.rb` too. It is walked like any directory; reading it
+  # raises EISDIR, which aborted the whole catalog.
+  it "walks a top-level directory named x.rb and keeps the rest of the catalog" do
+    write("x.rb/in.rb", "module L_inner\n  extend FFI::Library\n  attach_function :inner, [], :int\nend\n")
+    write("other.rb", "module L_outer\n  extend FFI::Library\n  attach_function :outer, [], :int\nend\n")
+
+    expect(walk).to contain_exactly(File.join(root, "x.rb/in.rb"), File.join(root, "other.rb"))
+    catalog = Rigor::Plugin::FFI::Discoverer.discover(root: root, io: boundary)
+    expect(catalog.functions.keys.map(&:to_s)).to contain_exactly("inner", "outer")
   end
 
   context "with a primed walk" do

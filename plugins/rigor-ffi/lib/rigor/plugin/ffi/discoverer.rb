@@ -76,9 +76,10 @@ module Rigor
         # followed it), so a file `gen` that becomes a directory `gen/`, or a symlink that becomes a real
         # directory, changes what it reads while every name stays put.
         #
-        # The answer is `Dir.glob("**/*.rb")` minus the skipped paths, in its order: entry by entry, a top-level
-        # name matching `*.rb` (a directory so named included), then that directory's matches. The boundary answers
-        # absolute paths; they are spelled back under `@root` as `Dir.glob` spells them.
+        # The answer is `Dir.glob("**/*.rb")` minus the skipped paths and minus every match that is not a regular
+        # file (#2113), in its order: entry by entry, a top-level name matching `*.rb`, then that directory's
+        # matches. A directory so named is walked, never read. The boundary answers absolute paths; they are spelled
+        # back under `@root` as `Dir.glob` spells them.
         def ruby_files
           return [] unless @root && @io.directory?(@root.to_s)
 
@@ -86,14 +87,22 @@ module Rigor
           prefix = "#{File.absolute_path(root)}/"
           @io.list_directory_kinds(root).flat_map do |path, kind|
             name = path.delete_prefix(prefix)
-            own = File.fnmatch?(RUBY_FILE, name) ? [File.join(root, name)] : []
+            own = File.fnmatch?(RUBY_FILE, name) && readable_file?(path, kind) ? [File.join(root, name)] : []
             next own unless kind == :directory && !SKIPPED_DIRECTORIES.include?(name)
 
             own + @io.glob(path, RUBY_GLOB).filter_map do |nested|
               relative = nested.delete_prefix(prefix)
-              File.join(root, relative) unless skipped?(relative)
+              File.join(root, relative) if !skipped?(relative) && @io.file?(nested)
             end
           end
+        end
+
+        # #2113 — `*.rb` names a directory too, and a fifo, socket or device can carry the name. Only a regular file
+        # is read: `read_file` on a directory raises `EISDIR` and aborts the whole walk, and on a fifo it blocks
+        # until a writer appears. A top-level entry is judged by its `lstat` kind, and a symlink by what it
+        # resolves to; a nested match is judged by `file?` (which follows a symlink as `File.file?` does).
+        def readable_file?(path, kind)
+          kind == :file || (kind == :symlink && @io.file?(path))
         end
 
         # #1956 — the skip reads the path relative to the root, a `vendor` or `.git` directory segment at any

@@ -1213,13 +1213,28 @@ module Rigor
     # wrong-arity rules consult this map to suppress diagnostics for methods the user has defined dynamically,
     # even when no RBS sig describes them.
     # A name defined on both sides of one class records {DiscoveryIndex::METHOD_KIND_BOTH} and matches either kind.
+    #
+    # Issue #2121 — a hit is an ADR-46 read. The table carries what no `def` symbol edge covers — an `attr_*`, an
+    # `alias` or a `define_method` (a cross-file `def` is withheld from it) — so an answer that read a hit records
+    # the class edge to the files declaring `class_name` and the name edge `defines:<method_name>`: deleting the
+    # `attr_accessor` re-checks the caller it silenced, whether or not the deleting file declares the class. A miss
+    # records nothing here; the readers that act on one record their own negative edges.
     def discovered_method?(class_name, method_name, kind)
       table = @discovery.discovered_methods[class_name.to_s]
       return false unless table
 
       recorded = table[method_name.to_sym]
-      recorded == kind || recorded == DiscoveryIndex::METHOD_KIND_BOTH
+      return false unless recorded == kind || recorded == DiscoveryIndex::METHOD_KIND_BOTH
+
+      record_discovered_method(class_name, method_name) if Analysis::DependencyRecorder.active?
+      true
     end
+
+    def record_discovered_method(class_name, method_name)
+      record_class_dependency(class_name)
+      Analysis::DependencyRecorder.read_name(:defines, method_name)
+    end
+    private :record_discovered_method
 
     # ADR-34 § "Decision" — predicate identifying a toplevel-shaped scope (no enclosing `class` / `module` body).
     # True at the top of a file AND inside a top-level `def` body (since toplevel defs leave `self_type` nil per

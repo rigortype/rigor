@@ -156,11 +156,7 @@ RSpec.describe "attr members declared through self. or send (#2097)", type: :run
     expect(cold_rows(rule: "flow.always-truthy-condition")).to eq([])
   end
 
-  # `:fresh_rbs_env` (#2121): the spec-only `RbsEnvMemo` keys a build on the relative `sig/box.rbs` and its
-  # bytes, so an earlier example's environment answers this one's; under it the warm run reuses `lib/use.rb`
-  # after the removal, with the implicit-self `attr_*` as with these spellings. `RIGOR_SPEC_NO_ENV_MEMO=1`
-  # gives the rows below either way.
-  describe "an incremental recheck", :fresh_rbs_env do
+  describe "an incremental recheck" do
     let(:paths) { %w[lib/box.rb lib/use.rb] }
 
     def incremental_rows

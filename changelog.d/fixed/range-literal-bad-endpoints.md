@@ -1,0 +1,1 @@
+- **[engine]** A range literal whose endpoints Ruby cannot build (`1.."a"`) no longer aborts the file with an "internal analyzer error"; it types as a plain `Range`. ([#2114](https://github.com/rigortype/rigor/pull/2114))

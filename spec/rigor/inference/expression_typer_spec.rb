@@ -2012,6 +2012,23 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       expect(type).to eq(Rigor::Type::Combinator.constant_of(1.5..2.5))
     end
 
+    # Ruby raises `ArgumentError: bad value for range` building these at runtime; the analyzer must
+    # decline the fold rather than crash (issue #2070).
+    ["(1..\"a\")", "(\"a\"..1)", "(1...\"a\")"].each do |source|
+      it "does not fold the unbuildable range #{source} to a Constant" do
+        type = scope.type_of(parse_expression(source))
+
+        expect(type).not_to be_a(Rigor::Type::Constant)
+        expect(type.class_name).to eq("Range")
+      end
+    end
+
+    # Guard: passes with or without the rescue.
+    it "still folds the valid endless static range and leaves an explicit nil endpoint as before" do
+      expect(scope.type_of(parse_expression("(1.0..)"))).to eq(Rigor::Type::Combinator.constant_of(1.0..))
+      expect(scope.type_of(parse_expression("(1.0..nil)")).class_name).to eq("Range")
+    end
+
     it "types exclusive static integer RangeNode as Constant<Range>" do
       type = scope.type_of(parse_expression("(1...5)"))
 

@@ -34,7 +34,10 @@ reshaping code, and lanes that collided or started on a premise master had alrea
    `class << self`), where a body-level reading must not count what the block says; a sibling file
    that defines the same name, where file order is not load order; and a statement that may not run
    (inside an `if`, a loop or a block), which must leave the answer uncertain rather than flip it to
-   the opposite certain one. Done when every shape the review would probe has a row.
+   the opposite certain one. Two more did in the v0.4.5 batch: a check that declines must answer the
+   narrowest sound type, not fall through to a wider one (a declined `**` reached RBS `Numeric`,
+   #2122); and a rule about "another object" must probe a receiver that may be `self` (#2077, four
+   rounds). Done when every shape the review would probe has a row.
 3. **Map overlap, then batch.** List the modules each issue will touch, and include open PRs from
    other sessions (`gh pr list --state open`, then their files): an issue whose mechanism one of
    them changes waits for it to land or for its owner to hand over the lane. Two issues that change
@@ -44,30 +47,34 @@ reshaping code, and lanes that collided or started on a premise master had alrea
    (`spec/rigor/declaration_facts/admission_census.yml`, `producers.yml`, ADR-119's errata) also land
    one after another, each regenerating it at its rebase.
 4. **Route by difficulty.** Ruby semantics, cache and incremental soundness, and anything from step 2
-   go to the strongest model; contained CLI, config and plugin changes to the middle tier;
-   mechanical edits, wording and docs to the small model. Review is always the strongest model.
+   go to the strongest model. A contained lane (a crash guard, a marker re-point, a CLI field, a
+   config or plugin change, a spec- or doc-only change) goes to the small model; the middle tier
+   only when a lane needs more than that, with the reason in the brief. Review is always the
+   strongest model.
 5. **Brief the lane** with the issue, its worktree (`bin/rigor-worktree <branch> origin/master`, plus
    `--with-references` when a gate the lane runs reads `references/`; see the
    [`rigor-worktree`](../../.claude/skills/rigor-worktree/SKILL.md) skill), any decision the
    coordinator settled, the reporter's name, email and handle for a fix of an external report, and
-   the [lane contract](#lane-contract).
+   the [lane contract](#lane-contract). Settle the decisions you can foresee before the lane starts,
+   per contribution-flow.md § "Decisions and the approval queue".
 6. **Review when the Draft PR lands**, with the [reviewer contract](#reviewer-contract), and triage
    per contribution-flow.md step 3, including the "Engine allocations (advisory)" summary. Send each
    fix back to the lane that wrote the change with SendMessage, so it keeps its context; route a
    severe fix in intricate logic to the strongest model instead. Delta rounds go to the same
    reviewer with SendMessage and follow contribution-flow.md steps 4–5: three rounds at most; after
    round 3, a narrow severe finding with a conservative fix lands only through one fix-only delta
-   check that finds nothing severe, and a non-converging design goes to the user.
-7. **Land in order.** A branch need not contain `origin/master` to merge; it is rebased at each push.
-   Before merging, fetch and list the files master changed since the branch's merge base (`git diff
-   --name-only <merge-base> origin/master`). When either that list or the PR touches `lib/`, `sig/`,
-   `data/` or `.rigor.dist.yml`, or the two share a file, have the lane push again through
-   `bin/lane-push`, which rebases and reruns the gate: an engine change on either side can move the
-   other side's specs through files neither shares, as a fix that flips a pinned answer does.
-   Otherwise merge. Check `mergeable` before waiting on CI: a `CONFLICTING` PR starts no run, so
-   send it back to its lane to run `bin/lane-push` and resolve the rebase it stops on. When the lane
-   has ended, run `bin/lane-push` in its worktree yourself. After the batch, watch the resulting
-   master CI run.
+   check that finds nothing severe, and a non-converging design goes to the user. When a lane stops
+   at a gate or an open choice, decide it per contribution-flow.md § "Decisions and the approval
+   queue" and send the lane the decision with its approval-queue entry to commit; only a serious
+   decision goes to the user.
+7. **Land through the merge queue.** Queue each PR as soon as it may land (contribution-flow.md
+   step 6); the queue runs CI on it merged onto `master` and the PRs ahead of it, which is the check
+   of how changes in different files interact (an engine fix on one side flipping a pinned answer
+   on the other). So a PR is not re-pushed because `master` moved. Check `mergeable` first: a
+   `CONFLICTING` PR starts no CI and cannot enter the queue, so send it back to its lane to run
+   `bin/lane-push` and resolve the rebase it stops on; when the lane has ended, run `bin/lane-push`
+   in its worktree yourself. A PR the queue drops goes back to its lane like a review finding. After
+   the batch, watch the resulting master CI run.
    Watching is bounded by GitHub's API budgets (REST and GraphQL are separate 5000-an-hour budgets
    per user; `gh pr view` spends GraphQL), which a batch of watchers exhausts, and every watcher then
    dies with HTTP 403. Read the verdict per contribution-flow.md § "GitHub and git traps", at most
@@ -97,7 +104,10 @@ A lane brief restates these:
   lane that edits comments leaves `# rigor:` and `# rubocop:` lines alone; in fixtures they are
   suppression directives.
 - **Gate.** `make verify-changed` in the foreground, re-run after the last edit. Never `make
-  verify`, `make check` or the whole suite.
+  verify`, `make check` or the whole suite. A lane that touches dispatch, scope resolution or the
+  discovery tables also runs `spec/rigor/scope/ancestry_walker_detection_spec.rb` and
+  `spec/rigor/declaration_facts/producers_spec.rb`, which `verify-changed` does not always pick
+  (#2053).
 - **Mutation table.** For every new or changed example, name the line of the fix whose removal makes
   it fail, and run that removal: commit first, mutate, restore with `git checkout HEAD -- <path>`.
   Inside the Flake `sed` is GNU, so `sed -i ''` edits nothing; mutate with `perl -pi -e` and show
@@ -108,7 +118,8 @@ A lane brief restates these:
 - **Honest gates.** When a provenance pin, residue count or other gate moves, stop and report the
   row and what `rigor sig-gen --print` proposes. Adding a `# sig-gen gap:` or `# authored:` marker,
   extending `spec/rigor/sig_gen/gap_issues.yml`, or moving a pin needs the brief's authorisation,
-  which the coordinator gives only for a row the user or a `ready-for-agent` issue settled;
+  which the coordinator gives for a row the user, a `ready-for-agent` issue or a precedent settled
+  (contribution-flow.md § "Decisions and the approval queue");
   the marker rules are ADR-107 and its G3 gate, the hand-edit rule is
   [`type-authoring.md`](type-authoring.md) § "RBS". Code keeps the shape it would have without the
   gate. Keep each rewritten spec's original assertion.

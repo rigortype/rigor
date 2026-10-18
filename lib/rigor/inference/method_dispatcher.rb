@@ -262,10 +262,10 @@ module Rigor
         # `module Enumerable; def sum_by`). Below the RBS tier, whose decline means no nearer RBS declares the
         # method, and below the tiers that answer the receiver's own patch or a gem catalogue entry. A nearer
         # `def` in the project's source (on an RBS-known receiver, which the discovered-method tier leaves to
-        # user-method inference) stops the walk: see {#project_source_defines?}. That probe needs the project-wide
-        # def index, so a single-file scope (`type-of`, `annotate`, an LSP buffer) never reads this tier.
+        # user-method inference) stops the walk: see {#project_source_defines?}. That probe reads the scope's def
+        # index, so a single-file scope (`type-of`, `annotate`, an LSP buffer) cannot see a `def` in another file.
         ancestor_patched =
-          if !skip_project_patched && project_wide_scope?(scope)
+          if !skip_project_patched && scope
             try_project_patched_method(receiver_type, method_name, arg_types, block_type, environment,
                                        through_ancestors: scope)
           end
@@ -698,12 +698,6 @@ module Rigor
           source_instance_def?(scope, owner, method_name) ||
             scope.includes_of(owner).any? { |mixin| source_instance_def?(scope, mixin.to_s, method_name) }
         end
-      end
-
-      # Issue #1708 — whether `scope` carries the whole project's def index rather than one file's: the presence
-      # fact `call.wrong-arity` reads for the same reason (`DiscoveryIndex::ENVELOPE_PROJECT_WIDE`).
-      def project_wide_scope?(scope)
-        !scope.nil? && scope.discovered_parameter_envelopes.key?(Scope::DiscoveryIndex::ENVELOPE_PROJECT_WIDE)
       end
 
       def source_instance_def?(scope, owner, method_name)

@@ -1,0 +1,1 @@
+- **[plugins]** rigor-actionpack now notices a helper added under `app/helpers`, or a template added under a `view_search_paths:` root its template globs do not claim, so a cached or `--incremental` `rigor check` no longer serves the template diagnostics from before the file appeared. ([#2102](https://github.com/rigortype/rigor/pull/2102))

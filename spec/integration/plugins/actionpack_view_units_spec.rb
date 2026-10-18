@@ -68,11 +68,12 @@ VIEW_UNITS_CARD_ERB = <<~ERB
   </div>
 ERB
 
-# The two calls {ViewAssigns::Builder} makes on the plugin IO boundary. A real boundary needs the
-# service container; this needs a directory and a file.
+# The three calls {ViewAssigns::Builder} makes on the plugin IO boundary. A real boundary needs the
+# service container; this needs a directory, a listing and a file.
 VIEW_ASSIGNS_BOUNDARY = Struct.new(:root) do
   def directory?(path) = File.directory?(path)
   def read_file(path) = File.read(path)
+  def glob(root, pattern) = Dir.glob(pattern, base: root).map { |path| File.join(root, path) }
 end
 
 RSpec.describe "plugins/rigor-actionpack — ERB template units (#393)" do

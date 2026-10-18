@@ -99,15 +99,7 @@ ALLOWED_PLUGIN_FILESYSTEM_CALLS = {
 # Known gaps: direct calls that DO need a row and do not have one yet, left to follow-up issues. Each shapes a
 # plugin answer from a directory listing the boundary never saw, so a file appearing there is not seen by the
 # run-result caches. Listed so the gate stays green until they are converted, not because they are sound.
-KNOWN_PLUGIN_ROW_GAPS = {
-  # The controller / `app/helpers` / view walks behind the render-locals and view-assigns indexes: their
-  # files are read through the boundary, but the listing is not recorded outside the `:controller_index` watch.
-  "plugins/rigor-actionpack/lib/rigor/plugin/actionpack/render_locals.rb" => { "Dir.glob" => 1 },
-  "plugins/rigor-actionpack/lib/rigor/plugin/actionpack/view_assigns.rb" => { "Dir.glob" => 1 },
-  # The `config/environments/*.rb` listing behind queue-adapter detection (`rigor effects` attributions and
-  # edges); each listed file is read through the boundary, the listing is not.
-  "plugins/rigor-activejob/lib/rigor/plugin/activejob/effects.rb" => { "Dir.glob" => 1 }
-}.freeze
+KNOWN_PLUGIN_ROW_GAPS = {}.freeze
 
 RSpec.describe "plugin project reads go through the IoBoundary" do
   let(:repo_root) { File.expand_path("../..", __dir__) }

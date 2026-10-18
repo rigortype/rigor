@@ -159,13 +159,18 @@ module Rigor
 
           # Project-relative paths, the spelling `#template_units_for_file` is handed and the spelling the
           # compiled cache is keyed by.
+          #
+          # #1803 — listed through the boundary's `#glob`, which records each root's membership: a helper
+          # added under `app/helpers`, or a template under a `view_search_paths:` root the template globs do
+          # not claim, is analysed by nobody, and without the row the run-result caches kept serving the
+          # index built before it appeared.
           def self.source_files(io_boundary, roots, pattern)
             root_prefix = "#{Dir.pwd}#{File::SEPARATOR}"
             roots.flat_map do |root|
               absolute = File.expand_path(root)
               next [] unless io_boundary.directory?(absolute)
 
-              Dir.glob("**/#{pattern}", base: absolute).map { |path| File.join(absolute, path).delete_prefix(root_prefix) }
+              io_boundary.glob(absolute, "**/#{pattern}").map { |path| path.delete_prefix(root_prefix) }
             end
           end
 

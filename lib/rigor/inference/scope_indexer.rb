@@ -6915,32 +6915,34 @@ module Rigor
       # differently for the two spellings of one edge.
       def record_mixin_call(node, qualified_prefix, current_class, accumulator)
         taint_opaque_eval(node, current_class, accumulator)
-        kind, _arguments, via_send = mixin_call_view(node)
-        return if kind.nil?
+        view = mixin_call_view(node)
+        return if view.nil? || view.first.nil?
 
+        kind = view.first
         current_class ||= toplevel_include_owner(node, qualified_prefix, current_class, accumulator)
         effects = mixin_effects(node, kind, qualified_prefix, current_class, accumulator, in_singleton: false)
                   .select { |_owner, side| side == :include }
         return if effects.empty?
-        return if !via_send && instance_mixin_recorded?(node, qualified_prefix, current_class, accumulator)
+        return if instance_mixin_recorded?(node, view, qualified_prefix, current_class, accumulator)
 
         # A mixin call the tables cannot hold still reshapes the ancestry: taint the whole owner side.
         effects.each { |owner, side| accumulator.taint(owner, side) }
       end
 
       # Records the instance-side edges of a call {#mixin_call_recorded?} accepts. False when it recorded
-      # nothing — the caller then taints the owner instead.
-      def instance_mixin_recorded?(node, qualified_prefix, current_class, accumulator)
-        return false unless mixin_call_recorded?(node, current_class)
+      # nothing — the caller then taints the owner instead. `view` is {#mixin_call_view}'s, so
+      # `Integer.send(:include, Ext)` records `Ext` as `Integer.include(Ext)` does (issue #1722).
+      def instance_mixin_recorded?(node, view, qualified_prefix, current_class, accumulator)
+        kind, arguments, via_send = view
+        return false unless mixin_call_recorded?(node, kind, via_send, current_class)
 
-        arguments = node.arguments&.arguments || []
         targets = arguments.filter_map { |arg| Source::ConstantPath.qualified_name(arg) }
         return false if targets.empty?
 
         owner = node.receiver.nil? ? current_class : prepend_call_receiver(node, qualified_prefix)
         return false if owner.nil?
 
-        write_mixin_targets(accumulator, owner, targets, prepend: node.name == :prepend)
+        write_mixin_targets(accumulator, owner, targets, prepend: kind == :prepend)
         accumulator.note(node, owner, :include, targets, complete: targets.size == arguments.size)
         true
       end
@@ -7088,15 +7090,17 @@ module Rigor
       end
 
       # Whether a mixin call contributes to the tables at all: a receiverless `include` / `prepend` needs an
-      # enclosing declaration to file the edge under, and the RECEIVER form is recorded for `prepend` only
-      # — `Base.include(Loud)` is deliberately still unrecorded. Nothing needs it (this issue orders
-      # `prepend`, and the receiver form of `include` has no ordering question to answer) while recording
-      # it would widen what every consumer says about a class, which is scope this change does not own.
-      def mixin_call_recorded?(node, current_class)
-        return false unless MIXIN_CALL_NAMES.include?(node.name)
-        return !current_class.nil? if node.receiver.nil?
+      # enclosing declaration to file the edge under, and the RECEIVER form (`Base.prepend(Loud)`, issue #1123;
+      # `Integer.include(Ext)` and `Integer.send(:include, Ext)`, issue #1722) files it under the class the
+      # receiver names. A receiver-form edge is unpositioned wherever it is written ({MixinAccumulator#note}), so
+      # a reader that depends on ORDER declines on it, while the set-shaped readers (undefined-method
+      # suppression, arity, visibility) see the module as they see an in-body `include`. A receiverless `send`
+      # stays a taint: the walk does not resolve its `self`.
+      def mixin_call_recorded?(node, kind, via_send, current_class)
+        return false unless MIXIN_CALL_NAMES.include?(kind)
+        return !via_send && !current_class.nil? if node.receiver.nil?
 
-        node.name == :prepend
+        true
       end
 
       # Issue #1697 — a receiverless `include M` written as a statement of the file's own top level is

@@ -99,7 +99,12 @@ module Rigor
             "Rigor's bundled overlays name (`OpenStruct`, whose fields are per-instance singleton methods; " \
             "`ActiveSupport::Duration` and `ActiveSupport::Concern` when their gem overlay loads). Both sides " \
             "of the class are open, and an inherited Object / Kernel signature no longer decides " \
-            "`call.wrong-arity` or `call.argument-type-mismatch` on it."
+            "`call.wrong-arity` or `call.argument-type-mismatch` on it.",
+            "The program may answer the call another way (#1722): a `method_missing` on the receiver's class or an " \
+            "ancestor; a module mixed into either that defines the method (`Integer.include(Ext)` counts wherever " \
+            "it is written); singleton methods given to the receiver local (`s.extend(M)`, " \
+            "`define_singleton_method`, `class << s`); or, for a receiver typed by its class's name rather than a " \
+            "literal, a project subclass that defines the method."
           ],
           suppression: "`# rigor:disable call.undefined-method` on the call line, " \
                        "or `disable: [\"call.undefined-method\"]` in `.rigor.yml`.",

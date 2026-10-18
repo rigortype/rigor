@@ -58,6 +58,13 @@ RSpec.describe Rigor::Inference::ScopeIndexer::MixinAccumulator do
       expect(unpositioned(source)).to eq("Base" => { include: ["M"] })
     end
 
+    # Issue #1722 — the receiver form of `include`, and its `send` spelling, record their edge as `prepend`'s does.
+    it "flags the receiver form of include and of send(:include), keyed by the receiver", :aggregate_failures do
+      expect(unpositioned("class Base; end\nBase.include(M)\n")).to eq("Base" => { include: ["M"] })
+      expect(unpositioned("class Base; end\nBase.send(:include, M)\n")).to eq("Base" => { include: ["M"] })
+      expect(unpositioned("class C\n  include A\n  C.include(B)\nend\n")).to eq("C" => { include: ["B"] })
+    end
+
     it "flags an extend inside a method on the extend side only" do
       source = "class C\n  include A\n  def self.boot\n    extend M\n  end\nend\n"
 
@@ -196,7 +203,6 @@ RSpec.describe Rigor::Inference::ScopeIndexer::MixinAccumulator do
       "__send__(:prepend, B)" => :include,
       "self.include B" => :include,
       "self.prepend B" => :include,
-      "C.include(B)" => :include,
       "include(Module.new { include B })" => :include,
       "send(:extend, B)" => :extend,
       "self.extend B" => :extend,
@@ -268,10 +274,6 @@ RSpec.describe Rigor::Inference::ScopeIndexer::MixinAccumulator do
       source = "module M\n  def self.included(base) = nil\n  def other(base)\n    base.include X\n  end\nend\n"
 
       expect(unpositioned(source)).to eq({})
-    end
-
-    it "taints the receiver's class for a named-class call form anywhere" do
-      expect(unpositioned("class Base; end\nBase.include(M)\n")).to eq("Base" => { include: ["*"] })
     end
   end
 

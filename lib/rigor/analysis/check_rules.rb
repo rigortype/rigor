@@ -29,6 +29,7 @@ require_relative "check_rules/void_value_use_collector"
 require_relative "check_rules/self_closedness_scanner"
 require_relative "check_rules/source_arity"
 require_relative "check_rules/lexical_method_sites"
+require_relative "check_rules/rbs_receiver_surface"
 require_relative "check_rules/special_global_setters"
 require_relative "check_rules/ruby_deprecations"
 
@@ -817,6 +818,8 @@ module Rigor
           return nil if method_def
 
           return nil if last_resort_surface_answers?(receiver_type, class_name, call_node, scope, kind, lexical_sites)
+          return nil if subclass_instance_may_answer?(rendered_receiver, class_name, call_node.name, scope,
+                                                      call_node.receiver)
 
           definition_site = project_definition_site(scope, class_name, call_node.name, kind)
           # Issue #735 — the site is evidence, and whose RBS this is decides what it is evidence OF. On a
@@ -955,8 +958,45 @@ module Rigor
           return true if mixin_self_class_receiver?(call_node, scope)
           return true if unknown_mixin_includer?(class_name, scope)
           return true if object_mixin_may_define?(receiver_type, class_name, call_node.name, scope)
+          return true if ancestry_declares_method?(scope, class_name, call_node.name, kind)
 
-          ancestry_declares_method?(scope, class_name, call_node.name, kind)
+          rbs_ancestor_may_answer?(class_name, call_node.name, scope, kind)
+        end
+
+        # Issue #1722 — a `method_missing`, or a project mixin, on one of the class's RBS ancestors
+        # ({RbsReceiverSurface}). Last for {#ancestry_declares_method?}'s reason: it walks the class graph.
+        def rbs_ancestor_may_answer?(class_name, method_name, scope, kind)
+          if kind == :singleton
+            RbsReceiverSurface.singleton_hook?(scope, class_name)
+          else
+            RbsReceiverSurface.ancestor_may_answer?(scope, class_name, method_name)
+          end
+        end
+
+        # Issue #1722 — a receiver typed by its class's name, rather than by a literal, may hold an instance of a
+        # subclass (a `#: () -> String` signature admits a `MyStr < String`), so a method a project subclass
+        # defines, or a subclass's `method_missing`, may be the one that runs. A value the engine built from a
+        # literal is exactly its class and keeps firing: a literal type (`"a"`, `1`, a union of them), a shape
+        # carrier (`{a: 1}`, `[1, 2]`, `{}`, `[]`, and what folds to one), or a receiver written as a literal
+        # (`"a#{x}b"`, which types as plain `String`). A local holding an interpolated String types as plain
+        # `String` with no origin, so it still declines. Instance side only.
+        def subclass_instance_may_answer?(receiver_type, class_name, method_name, scope, receiver_node = nil)
+          return false if receiver_type.is_a?(Type::Singleton)
+          return false if exact_literal_receiver?(receiver_type) || LITERAL_RECEIVER_NODES.include?(receiver_node.class)
+
+          RbsReceiverSurface.subclass_may_define?(scope, class_name, method_name)
+        end
+
+        EXACT_TYPES = [Type::Constant, Type::Tuple, Type::HashShape].freeze
+        LITERAL_RECEIVER_NODES = [
+          Prism::StringNode, Prism::InterpolatedStringNode, Prism::XStringNode, Prism::InterpolatedXStringNode,
+          Prism::ArrayNode, Prism::HashNode, Prism::RegularExpressionNode, Prism::InterpolatedRegularExpressionNode
+        ].to_set.freeze
+        private_constant :EXACT_TYPES, :LITERAL_RECEIVER_NODES
+
+        def exact_literal_receiver?(receiver_type)
+          members = receiver_type.is_a?(Type::Union) ? receiver_type.members : [receiver_type]
+          members.all? { |member| EXACT_TYPES.any? { |kind| member.is_a?(kind) } }
         end
 
         # Issue #1697 — a module the project mixes into `Object` (a top-level `include M`, or `include M` in
@@ -2196,10 +2236,28 @@ module Rigor
           # `compose_codepoints` typed `Hash | Hash` for an `Array`, flagging
           # `.pack`). Require at least two distinct arm classes.
           return nil if members.map { |member| concrete_class_name(member) }.uniq.size < 2
-          return nil if members.any? { |member| method_present_anywhere?(member, call_node.name, scope) }
-          return nil if refined_on_some_arm?(members, call_node, scope, lexical_sites)
+          return nil if union_may_answer?(members, call_node, scope, lexical_sites)
 
           build_undefined_method_diagnostic(path, call_node, receiver_type)
+        end
+
+        # Whether some arm of a non-nil union of classes may answer the call, which keeps the union rule silent.
+        def union_may_answer?(members, call_node, scope, lexical_sites)
+          return true if members.any? { |member| method_present_anywhere?(member, call_node.name, scope) }
+          return true if members.any? { |member| arm_surface_may_answer?(member, call_node.name, scope) }
+          # Issue #1722 — `def o.m`, `o.extend(M)` and their kin give the one object the method, whatever its class.
+          return true if lexical_sites&.singleton_local_def?(call_node)
+
+          refined_on_some_arm?(members, call_node, scope, lexical_sites)
+        end
+
+        # Issue #1722 — the scalar rule's RBS-ancestor and subclass declines, asked of one arm. Kept out of
+        # {#method_present_anywhere?}, which `call.possible-nil-receiver` also asks: there a "present" answer is
+        # what lets the rule fire, and a `method_missing` on `Object` answers on the `nil` arm too.
+        def arm_surface_may_answer?(member, method_name, scope)
+          class_name = concrete_class_name(member)
+          rbs_ancestor_may_answer?(class_name, method_name, scope, :instance) ||
+            subclass_instance_may_answer?(member, class_name, method_name, scope)
         end
 
         # ADR-121 WD7 — a refinement in effect (or one Rigor cannot read) may define the name on one arm's class.

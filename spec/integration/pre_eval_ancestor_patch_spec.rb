@@ -131,7 +131,8 @@ RSpec.describe "a pre_eval: patch on an ancestor reaches its descendants (#1708)
       expect(rules(result)).to eq([])
     end
 
-    # Ruby: the reader answers nil, so `res` is "s"; the patch's :sym would make it 1.
+    # Ruby: the reader answers nil, so `res` is "s"; the patch's :sym would make it 1. Guard: an earlier tier types the
+    # reader, so this passes with the walk's source probe removed; no reachable call pins its `discovered_method?` arm.
     it "wins over the patch through an attr_reader the project declares" do
       result = run_project("ext/core.rb" => "class Object; def na = :sym; end\n",
                            "lib/int.rb" => "class Integer; attr_reader :na; end\n",

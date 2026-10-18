@@ -4412,9 +4412,11 @@ module Rigor
       # While a method's return sink is active, a block that may repeat ({#repeating_block_class}), rebinds a capture,
       # and holds a `return` that exits the method ({ReturnBarrier.exits_method?}) gets one more unrecorded pass, with
       # each rebound name bound to its pre-call binding joined with its continuation `post_scope` holds. The
-      # continuation covers every run count, so it covers the binding any run enters with. The pass only adds to the
-      # return sink: its `next` / `break` arms go to sinks it discards, it records no scope, and the method's
-      # fall-through and earlier `return`s are kept, so the inferred return type only widens.
+      # continuation covers every run count, so it covers the binding any run enters with. The pass records no
+      # scope, and the method's fall-through and earlier `return`s are kept, so the inferred return type only widens.
+      # The fresh `next`, `break`-value and `break`-scope sinks are defensive: every consumer of those sinks filters by
+      # jump-node identity, so no example tells them apart from the outer sinks today. So is the `rescue`: a raise here
+      # keeps the arms the earlier passes collected rather than taking out the method.
       def collect_repeated_block_returns(call_node, post_scope)
         return if Thread.current[RETURN_SINK_KEY].nil?
 
@@ -4439,7 +4441,8 @@ module Rigor
 
       # Whether `block` is an ordinary block (not a return barrier or a class-body block) whose body may `return` from
       # the method and which `call_node` may run more than once: {#repeating_block_class}'s rule, or `Kernel#loop`,
-      # which that rule leaves out and which runs its block until it breaks or raises.
+      # which that rule leaves out and which runs its block until it breaks or raises. The barrier, refinement and
+      # anonymous-class checks are defensive guards: no such call repeats under that rule today.
       def repeated_block_return_candidate?(call_node, block)
         return false unless block.is_a?(Prism::BlockNode)
         return false unless ReturnBarrier.exits_method?(block.body)

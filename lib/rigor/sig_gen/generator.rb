@@ -2082,9 +2082,10 @@ module Rigor
       def scan_ivar_param_assignments(node, param_names, result, credited = nil, scopes = 0)
         return unless node.is_a?(Prism::Node)
 
-        if param_assignment?(node, param_names, scopes)
-          result[node.name] ||= node.value.name
-          credited << node if credited && result[node.name] == node.value.name
+        ivar, param = param_assignment(node, param_names, scopes)
+        if ivar
+          result[ivar] ||= param
+          credited << node if credited && result[ivar] == param
         end
 
         return if node.is_a?(Prism::DefNode) ||
@@ -2095,9 +2096,15 @@ module Rigor
         node.rigor_each_child { |c| scan_ivar_param_assignments(c, param_names, result, credited, scopes) }
       end
 
-      def param_assignment?(node, param_names, scopes)
-        node.is_a?(Prism::InstanceVariableWriteNode) && node.value.is_a?(Prism::LocalVariableReadNode) &&
-          node.value.depth == scopes && param_names.include?(node.value.name)
+      # `[ivar, param]` for `@ivar = param` whose read reaches the method's own parameter `param`, else nil.
+      def param_assignment(node, param_names, scopes)
+        return nil unless node.is_a?(Prism::InstanceVariableWriteNode)
+
+        read = node.value
+        return nil unless read.is_a?(Prism::LocalVariableReadNode) && read.depth == scopes
+        return nil unless param_names.include?(read.name)
+
+        [node.name, read.name]
       end
 
       def build_attr_candidates(call_name, class_name, attr_name, ivar_type, ctx)

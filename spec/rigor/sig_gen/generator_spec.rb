@@ -1810,10 +1810,9 @@ RSpec.describe Rigor::SigGen::Generator do
       )
     end
 
-    # The observation fallback replaces the writer's own untyped contribution with the observed constructor
-    # literal, so the writer accepts only `0` — wrong, and stricter than a hand-written setter, which is skipped.
-    # Flip this when #1410 is fixed.
-    it "emits reader + writer candidates for attr_accessor from initialize-param observations" do
+    # #1410 — a writer stores whatever its caller passes, so the observed constructor literal describes neither
+    # side: both are skipped, as a hand-written setter is, rather than rendered as `(0) -> 0` / `() -> 0`.
+    it "skips the reader and writer of an attr_accessor despite initialize-param observations" do
       path = write_fixture("lib/box.rb", <<~RUBY)
         class Box
           def initialize(count)
@@ -1828,9 +1827,9 @@ RSpec.describe Rigor::SigGen::Generator do
       candidates = described_class.new(configuration: config, paths: [path], observations: observations)
                                   .run.select { |c| %i[count count=].include?(c.method_name) }
 
-      expect(candidates.map { |c| [c.method_name, c.rbs] }).to contain_exactly(
-        [:count, "def count: () -> 0"],
-        [:count=, "def count=: (0) -> 0"]
+      expect(candidates.map { |c| [c.method_name, c.skip_reason] }).to contain_exactly(
+        %i[count untyped_return],
+        %i[count= untyped_return]
       )
     end
 

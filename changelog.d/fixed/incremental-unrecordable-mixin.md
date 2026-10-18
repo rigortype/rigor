@@ -1,0 +1,1 @@
+- **[cache]** `rigor check --incremental` now re-checks the affected calls when a new file gives a module the project does not declare a mixin Rigor cannot place, such as `module Comparable; include(*MODS); end`, so a warm run reports what a full run reports. ([#2096](https://github.com/rigortype/rigor/pull/2096))

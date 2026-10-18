@@ -106,7 +106,7 @@ https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install
 ```
 
 Ready-made prompts — 日本語, 简体中文, 繁體中文, 한국어, Español,
-Português, Français, Deutsch, Italiano, Tiếng Việt, ภาษาไทย,
+Português (Brasil), Português, Français, Deutsch, Italiano, Tiếng Việt, ภาษาไทย,
 Bahasa Indonesia, Polski, Українська, Русский, Română, Türkçe,
 العربية, فارسی — are in
 the [installation guide](https://rigor.typedduck.fail/manual/01-installation/#set-up-in-your-language).
@@ -256,9 +256,9 @@ Mozilla Public License Version 2.0. See [`LICENSE`](LICENSE).
 
 ## Sponsors
 
-Rigor is built and maintained by one person, who has spent the better
-part of the last month — nearly every spare hour of personal time — on
-this project. Sustainable development depends on sustainable funding.
+Rigor is built and maintained by one person, who has put nearly every
+spare hour of personal time into it since development began in April
+2026. Sustainable development depends on sustainable funding.
 
 **The current monthly budget is well short of the $200 minimum needed
 to keep this pace going; $600 or more would let me work on it

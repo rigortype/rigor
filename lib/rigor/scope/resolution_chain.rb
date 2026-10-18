@@ -300,9 +300,11 @@ module Rigor
       # `Kernel` or `Enumerable` on any reopening. So each candidate name files the negative method edge of every
       # {Relevance::HOOKS} name on its singleton side (`method:Comparable.included`, the key a new `def
       # self.included` satisfies); a file adding any other method to the module re-checks nothing, and once the
-      # module is declared its sites carry later edits and the removal. The edges are a function of the chain alone,
-      # so a consumer files them once per chain ({Analysis::DependencyRecorder.file_chain_once}, #1590). A hook
-      # written another way — an instance `def included` in a module extended onto the external, a
+      # module is declared its sites carry later edits and the removal. #1661 — each name also files `mixin:<last
+      # segment>`, which `IncrementalSession#mark_affected` fires when the module's unpositioned mixin edges move: a
+      # new file that taints it (`module Comparable; include(*MODS); end`) without a hook. The edges are a function
+      # of the chain alone, so a consumer files them once per chain ({Analysis::DependencyRecorder.file_chain_once},
+      # #1590). A hook written another way — an instance `def included` in a module extended onto the external, a
       # `define_singleton_method(:included)` — satisfies no such key and is not seen.
       def record_hooks(scope)
         externals = (@memo[:externals] ||= @entries.select(&:external?).freeze)
@@ -310,7 +312,7 @@ module Rigor
 
         Analysis::DependencyRecorder.file_chain_once(self, :hooks, scope.discovery) do
           externals.each do |entry|
-            entry.candidates.each { |name| Analysis::DependencyRecorder.read_keys(ResolutionChain.hook_keys(name)) }
+            entry.candidates.each { |name| Analysis::DependencyRecorder.read_keys(ResolutionChain.external_keys(name)) }
           end
         end
       end
@@ -393,10 +395,16 @@ module Rigor
       end
 
       @hook_keys = {}
+      @external_keys = {}
 
       # The frozen `method:Name.hook` negative keys of `name`'s {Relevance::HOOKS}, built once per name.
       def self.hook_keys(name)
         @hook_keys[name] ||= Relevance::HOOKS.map { |hook| "method:#{name}.#{hook}".freeze }.freeze
+      end
+
+      # {hook_keys} plus the `mixin:<last segment>` key an external entry files for its unpositioned mixins (#1661).
+      def self.external_keys(name)
+        @external_keys[name] ||= (hook_keys(name) + ["mixin:#{name.split('::').last}".freeze]).freeze
       end
 
       def record_head(scope, start, side)

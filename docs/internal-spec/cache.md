@@ -1078,6 +1078,25 @@ whose marks moved; `mark:*` fires when an object-extended mark moves, for
 the reader that scans every bucket for one. The seed bundles already
 carry the envelope tables, so no row moves and `SCHEMA` is unchanged.
 
+The `mixin:<last segment>` key in `missing` is recorded for every
+candidate name of every external entry on a resolution chain that a
+`settle` verdict files beyond its answer, beside the entry's hook keys
+([#1661](https://github.com/rigortype/rigor/issues/1661)): a new file can
+taint an RBS-known module with a mixin the tables cannot position
+(`module Comparable; include(*MODS); end`, `Comparable.include(x) if c`,
+an `include` in a block), which makes a reader of the chain decline, and
+the external entry has no declaring file for the reader's edge to name.
+The same producer (`IncrementalSession#mark_affected`) diffs the
+`unpositioned_mixins` tables of the changed, added and removed files
+between their seed bundles and the recheck scan
+(`Incremental.changed_unpositioned_owners`) and fires the key for every
+class or module whose unpositioned edges moved. It is a separate key from
+`mark:` because a plain reopening (`module Comparable; def zz = 1; end`)
+moves the module's envelope bucket mark, and `mark:Comparable` on an
+external entry would re-check every reader of the chain on any reopening.
+The seed bundles already carry the table, so no row moves and `SCHEMA` is
+unchanged.
+
 Schema history worth pinning: `6` stored the seed bundles as
 `(node_id, name, fingerprint)` def-node handles (ADR-85); `8` added each
 bundle's comment-stripped `code_fingerprint` for the B1 comment-only gate;

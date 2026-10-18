@@ -261,7 +261,8 @@ named rules on that line:
 config.merge(extra)  # rigor:disable call.undefined-method
 ```
 
-It accepts qualified IDs, family wildcards (`call`), a
+It accepts qualified IDs, family wildcards (`call`, `flow`, `def`, `assert`,
+`dump`, `global`, `suppression`, `static`, `effect`, `pre-eval`), a
 comma- or space-separated list, or `all`. A plugin's diagnostic
 is reached only by its qualified ID as printed in brackets
 (`plugin.shoulda-matchers.unknown-column`) or by the plugin's

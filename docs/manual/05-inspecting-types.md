@@ -2,8 +2,8 @@
 
 Rigor's analysis is invisible by default — it only speaks up to
 report a diagnostic. When you want to *see* what type the
-engine assigns an expression, there are four tools: two source
-helpers and two CLI commands.
+engine assigns an expression, there are six tools: two source
+helpers and four CLI commands.
 
 ## `dump_type` — print a type from source
 

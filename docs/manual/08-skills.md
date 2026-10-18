@@ -87,6 +87,10 @@ is not repeated here.)
 - **`rigor-monkeypatch-resolve`** — resolves an `undefined-method`
   cluster that is really your project's own monkey-patches by wiring the
   defining files into `pre_eval:`.
+- **`rigor-unused-adjudicate`** — adjudicates a `rigor unused` report
+  safely before proposing dead-code removals, checking framework roots
+  and false-positive shapes. See
+  [Removing dead code with `rigor unused`](18-removing-dead-code.md).
 - **`rigor-type-oracle`** — sources every type an agent writes from
   Rigor (`type-of` / `annotate` / `sig-gen`) instead of from reading the
   code, and reports the gaps rather than filling them. It is triggered by
@@ -119,6 +123,9 @@ is not repeated here.)
   repository to teach Rigor an application DSL or metaprogramming
   pattern it cannot infer. Reach for it when no bundled plugin covers a
   framework or DSL your project depends on.
+- **`rigor-plugin-review`** — audits an existing Rigor plugin against
+  the current authoring contract and produces a prioritized upgrade
+  path. The review/upgrade counterpart to `rigor-plugin-author`.
 
 ## Discovering skills from the CLI
 

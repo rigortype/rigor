@@ -434,4 +434,69 @@ end
       end
     end
   end
+
+  # Issue #1708 — the visibility each patch leaves and the mixin edges the files write. Each Ruby 4.0.5 witness is the
+  # comment beside its line.
+  describe ".scan visibility and mixins (#1708)" do
+    def scan_sources(sources)
+      Dir.mktmpdir do |dir|
+        paths = sources.each_with_index.map do |source, index|
+          File.join(dir, "ext#{index}.rb").tap { |path| File.write(path, source) }
+        end
+        yield described_class.scan(paths)
+      end
+    end
+
+    def visibility(registry, class_name, name, kind = :instance)
+      registry.lookup(class_name: class_name, method_name: name, kind: kind)&.visibility
+    end
+
+    it "reads the singleton-side forms" do
+      scan_sources([<<~RUBY]) do |outcome|
+        class C; class << self; private; def sx = 1; end; end # C.sx: NoMethodError (private method 'sx')
+        class C; private_class_method def self.pc = 1; end   # C.pc: NoMethodError (private method 'pc')
+        class C; private; def self.ds = 1; end                # C.ds => 1
+      RUBY
+        registry = outcome.registry
+        expect(%i[sx pc ds].map { |name| visibility(registry, "C", name, :singleton) })
+          .to eq(%i[private private public])
+      end
+    end
+
+    it "applies a later `private :x` to the binding another file made, without a duplicate declaration" do
+      # C.new.x: NoMethodError (private method 'x').
+      scan_sources(["class C; def x = 1; end\n", "class C; private :x; end\n"]) do |outcome|
+        expect(visibility(outcome.registry, "C", :x)).to eq(:private)
+        expect(outcome.diagnostics).to eq([])
+      end
+    end
+
+    it "makes `module_function :y` a private instance method and a public singleton copy" do
+      # Mf.y => 1; Object.new.extend(Mf).y: NoMethodError (private method 'y').
+      scan_sources(["module Mf; def y = 1; module_function :y; end\n"]) do |outcome|
+        expect([visibility(outcome.registry, "Mf", :y), visibility(outcome.registry, "Mf", :y, :singleton)])
+          .to eq(%i[private public])
+      end
+    end
+
+    # Ruby: `maybe` is public when the `public` runs and private when it does not. The scanner cannot tell, so it reads
+    # the def as public, the reading that answers more calls.
+    it "reads a def after a toggle that may not run as public" do
+      scan_sources(["class C; private; if $cond; public; end; def maybe = 1; end\n"]) do |outcome|
+        expect(visibility(outcome.registry, "C", :maybe)).to eq(:public)
+      end
+    end
+
+    it "records include and prepend edges, resolving a module's name through the lexical prefix" do
+      scan_sources([<<~RUBY]) do |outcome|
+        module Ext; module NumExt; def nm = :nm; end; Numeric.include(NumExt); end # 1.nm => :nm
+        module P; end
+        class Numeric; prepend P; end
+        class C; class << self; include SE; end; end # an extend: C.se => 1, C.new.se raises
+      RUBY
+        edges = outcome.registry.mixins.map { |mixin| [mixin.owner, mixin.module_name, mixin.kind] }
+        expect(edges).to eq([["Numeric", "Ext::NumExt", :include], ["Numeric", "P", :prepend]])
+      end
+    end
+  end
 end

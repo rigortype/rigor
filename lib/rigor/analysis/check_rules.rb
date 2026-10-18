@@ -802,7 +802,7 @@ module Rigor
           # rule must not surface a false `undefined-method`
           # for them.
           kind = receiver_type.is_a?(Type::Singleton) ? :singleton : :instance
-          return nil if source_declared_method?(scope, class_name, call_node.name, kind)
+          return nil if source_declared_method?(scope, class_name, call_node.name, kind, call_node: call_node)
 
           return nil unless Rigor::Reflection.rbs_class_known?(class_name, scope: scope)
 
@@ -954,7 +954,8 @@ module Rigor
         #   (see {#ancestry_declares_method?} for why that placement is load-bearing, not tidiness).
         def last_resort_surface_answers?(receiver_type, class_name, call_node, scope, kind, lexical_sites = nil)
           return true if lexically_defined_method?(class_name, call_node, scope, kind, lexical_sites)
-          return true if project_patched_through_ancestors?(scope, class_name, call_node.name, kind)
+          return true if project_patched_through_ancestors?(scope, class_name, call_node.name, kind,
+                                                            call_node: call_node)
           return true if module_mixin_receiver?(receiver_type, scope)
           return true if mixin_self_class_receiver?(call_node, scope)
           return true if unknown_mixin_includer?(class_name, scope)
@@ -1099,10 +1100,13 @@ module Rigor
         # Both paths sit at the same dispatcher precedence; the
         # check must hold them together so neither rule fires a
         # false positive.
-        def source_declared_method?(scope, class_name, method_name, kind)
+        #
+        # `call_node:` (issue #1708), when given, is the call asking: a private or protected `pre_eval:` patch
+        # it may not reach does not count ({#patch_callable?}).
+        def source_declared_method?(scope, class_name, method_name, kind, call_node: nil)
           return true if scope.discovered_method?(class_name, method_name, kind)
 
-          project_patched_method?(scope, class_name, method_name, kind)
+          project_patched_method?(scope, class_name, method_name, kind, call_node: call_node)
         end
 
         # Issue #723 — the same question as {#source_declared_method?}, asked through the project's own
@@ -1128,25 +1132,40 @@ module Rigor
         # inference (between plugins and dependency-source).
         # Returns false when the environment carries no registry
         # (legacy path) or the lookup misses.
-        def project_patched_method?(scope, class_name, method_name, kind)
+        def project_patched_method?(scope, class_name, method_name, kind, call_node: nil)
           environment = scope.environment
           registry = environment&.project_patched_methods
           return false if registry.nil? || registry.empty?
 
-          !registry.lookup(class_name: class_name.to_s, method_name: method_name.to_sym, kind: kind).nil?
+          entry = registry.lookup(class_name: class_name.to_s, method_name: method_name.to_sym, kind: kind)
+          !entry.nil? && patch_callable?(registry, entry, scope, call_node)
         end
 
         # Issue #1708 — {#project_patched_method?} asked through the receiver's ancestors: a `pre_eval:` patch on
         # `Object`, `Numeric` or `Enumerable` gives an `Integer` or `Array` the method. Asked only once the
         # receiver's RBS has come back without the method, so a nearer class's own declaration still decides arity
         # and argument types; {#source_declared_method?} stays exact for the rules that read it for those.
-        def project_patched_through_ancestors?(scope, class_name, method_name, kind)
+        #
+        # `call_node:` as {#source_declared_method?} reads it.
+        def project_patched_through_ancestors?(scope, class_name, method_name, kind, call_node: nil)
           environment = scope.environment
           registry = environment&.project_patched_methods
           return false if registry.nil? || registry.empty?
 
-          !registry.lookup_through_ancestors(class_name: class_name.to_s, method_name: method_name.to_sym, kind: kind,
-                                             rbs_loader: environment.rbs_loader).nil?
+          entry = registry.lookup_through_ancestors(class_name: class_name.to_s, method_name: method_name.to_sym,
+                                                    kind: kind, rbs_loader: environment.rbs_loader)
+          !entry.nil? && patch_callable?(registry, entry, scope, call_node)
+        end
+
+        # Issue #1708 — whether `call_node` may reach the patch `entry`: Ruby raises NoMethodError for a private
+        # patch called with an explicit receiver other than `self` (`1.kp` on `module Kernel; private def kp`), and
+        # for a protected one called from outside its owner's instances. No call node is the permissive answer.
+        def patch_callable?(registry, entry, scope, call_node)
+          return true if call_node.nil?
+
+          receiver = call_node.receiver
+          registry.callable?(entry, explicit: !receiver.nil? && !receiver.is_a?(Prism::SelfNode),
+                                    self_type: scope.self_type, rbs_loader: scope.environment.rbs_loader)
         end
 
         # ADR-34 — `call.unresolved-toplevel`. Fires on an

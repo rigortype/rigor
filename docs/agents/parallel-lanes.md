@@ -67,8 +67,9 @@ reshaping code, and lanes that collided or started on a premise master had alrea
    at a gate or an open choice, decide it per contribution-flow.md § "Decisions and the approval
    queue" and send the lane the decision with its approval-queue entry to commit; only a serious
    decision goes to the user.
-7. **Land through the merge queue.** Queue each PR as soon as it may land (contribution-flow.md
-   step 6); the queue runs CI on it merged onto `master` and the PRs ahead of it, which is the check
+7. **Land through the merge queue.** Confirm `master` has one first (contribution-flow.md § "GitHub
+   and git traps"); without it this step does not apply, and a PR behind `master` waits for the
+   user. Queue each PR as soon as it may land (contribution-flow.md step 6); the queue runs CI on it merged onto `master` and the PRs ahead of it, which is the check
    of how changes in different files interact (an engine fix on one side flipping a pinned answer
    on the other). So a PR is not re-pushed because `master` moved. Check `mergeable` first: a
    `CONFLICTING` PR starts no CI and cannot enter the queue, so send it back to its lane to run

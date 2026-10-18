@@ -515,7 +515,9 @@ gh pr create --draft --base master --head release/x.y.z \
 gh run list --branch release/x.y.z --workflow CI --limit 3 --json databaseId,headSha
 gh run view <run-id> --json status,conclusion,headSha   # repeat until status is "completed"
 gh pr ready <pr>                 # only on the user's explicit word, CI green, no stop instruction
-gh pr merge <pr> --merge --delete-branch   # queues it; the queue merges with a merge commit
+gh pr merge <pr> --merge   # queues it; the queue merges with a merge commit
+# then poll per contribution-flow.md § "GitHub and git traps" until MERGED,
+# and delete release/x.y.z only after that
 ```
 
 The release PR is created `--draft` like every other PR, but lands by this
@@ -529,10 +531,10 @@ hand-off from review to landing.
   notes above). Merge once `ci.yml` is green and any advisory failure is
   explained.
 - **Rebase- or merge-commit, never squash.** Keep the `Bump up version to
-  x.y.z` commit intact so the tag in "Publish" lands on it. The merge queue
-  on `master` merges with a merge commit, which keeps it. If `master`
-  advanced, rebase the branch first and re-push — and **re-read the sealed
-  section afterwards**. `merge=union` means a `[Unreleased]` entry that landed
+  x.y.z` commit intact. The merge queue on `master` merges with a merge
+  commit, which keeps it; the tag in "Publish" goes on that merge commit. The
+  branch need not contain the latest `master`; if it conflicts, rebase it and
+  re-push — and **re-read the sealed section afterwards**. `merge=union` means a `[Unreleased]` entry that landed
   on `master` during release prep is folded in silently rather than raising a
   conflict, so it can arrive under the wrong heading or after the section was
   already sealed.
@@ -549,8 +551,15 @@ RubyGems, and none of that can be undone.
 ```sh
 git switch master && git pull
 ls approval-queue.d/   # README.md alone; otherwise back to "First: ratify the approval queue"
+gh pr view <release-pr> --json mergeCommit --jq .mergeCommit.oid   # must equal:
+git rev-parse HEAD
 nix develop --command bundle exec rake release
 ```
+
+The merge queue keeps merging other PRs after the release PR, and `rake
+release` tags and builds whatever `HEAD` is. When `HEAD` is no longer the
+release PR's merge commit, stop and ask the user how to publish: the tag must
+not cover changes the sealed CHANGELOG does not.
 
 `rake release` verifies a clean working tree, tags the release as `vx.y.z`,
 pushes the tag to `origin`, publishes the gem to RubyGems, AND creates the

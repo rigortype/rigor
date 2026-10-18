@@ -12,8 +12,9 @@ approval queue"; the reasoning is [ADR-123](../docs/adr/123-merge-queue-and-post
   and asks them to ratify, revise or revert it. A ratified entry is deleted in the release branch;
   a revised or reverted one is deleted by the PR that changes the decision. A release ships only
   when this directory holds nothing but this README.
-- **Gate**: `spec/docs/approval_queue_spec.rb` checks the format below, and fails a `release/**`
-  pull request while any entry remains.
+- **Gate**: `spec/docs/approval_queue_spec.rb` checks the format below and fails a `release/**`
+  pull request while any entry remains; CI's change detection fails any run, the merge queue's
+  included, that changes `lib/rigor/version.rb` while an entry remains.
 
 ## Entry format
 
@@ -56,6 +57,7 @@ What a revert or follow-up would change, and anything that has come to depend on
   - `open-choice`: a behaviour or spec reading the issue left open;
   - `scope`: splitting, deferring or closing part of an issue;
   - `process`: a change to the development flow, its tooling or its documents.
-- **Precedent** — the merged PR (or the entry still in this queue) whose decision this one follows,
-  as a full link; or `none — sets one` when no earlier decision fits.
+- **Precedent** — the merged PR whose decision the user approved or ratified, or the ADR, that this
+  one follows, as a full link; or `none — sets one` when no earlier decision fits. An entry still in
+  this queue is not a precedent, and a `gate-row` always names one (without one it is serious).
 - **Decided** — the date, `YYYY-MM-DD`.

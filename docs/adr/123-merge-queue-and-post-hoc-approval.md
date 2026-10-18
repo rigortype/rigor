@@ -67,7 +67,9 @@ point after which undoing costs users something, so it is where post-hoc approva
   an outcome a `ready-for-agent` issue already stated is not a decision anyone must ratify.
 - **WD4 — the gate.** `spec/docs/approval_queue_spec.rb` holds the entry format (validator pinned
   by inline examples, as ADR-105 WD4) and fails on a `release/**` pull request while any entry
-  remains.
+  remains. CI's change detection fails any run that changes `lib/rigor/version.rb` while an entry
+  remains, the merge-queue run included, which no branch-name check can see. The serious list
+  covers its own edits, so the line cannot be moved by precedent.
 - **WD5 — the queue's settings.** Merge method "merge commit", required check `CI required`,
   groups of up to five, all entries green. The repository administrator role may bypass, which keeps
   Markdown-only commits straight to `master` possible; agents do not use `gh pr merge --admin`.
@@ -83,8 +85,8 @@ point after which undoing costs users something, so it is where post-hoc approva
 
 ## Consequences
 
-- A merged PR's CI has run on what master became, not on an older base; the post-merge master run
-  stays as a second check.
+- A merged PR's CI has run on what master became, not on an older base. The post-merge master run
+  still runs, but a newer push can replace a pending one, so it is not a check on every merge.
 - Every queued PR runs CI twice (on the PR and in the queue); grouping amortises the second run.
 - A lane no longer stops for a precedented gate row; the maintainer reviews such rows in one
   sitting at release time, with the trade-offs written down.

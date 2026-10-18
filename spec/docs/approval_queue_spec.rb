@@ -17,20 +17,21 @@ RSpec.describe "approval-queue.d entries (ADR-123)" do
   sections = ["Background", "Options and trade-offs", "Decision", "To undo"].freeze
   link = %r{\A\[#\d+\]\(https://github\.com/rigortype/rigor/(?:pull|issues)/\d+\)\z}
   pr_link = %r{\A\[#\d+\]\(https://github\.com/rigortype/rigor/pull/\d+\)\z}
+  adr_link = %r{\A\[ADR-\d+\]\(\.\./docs/adr/\d+-[a-z0-9-]+\.md\)\z}
   slug = /\A[a-z0-9][a-z0-9._-]*\.md\z/
 
   field_rules = {
     "PR" => ->(v) { v == "none" || v.match?(pr_link) },
     "Issue" => ->(v) { v == "none" || v.match?(link) },
     "Class" => ->(v) { classes.include?(v) },
-    "Precedent" => ->(v) { v == "none — sets one" || v.match?(link) },
+    "Precedent" => ->(v) { v == "none — sets one" || v.match?(link) || v.match?(adr_link) },
     "Decided" => ->(v) { v.match?(/\A\d{4}-\d{2}-\d{2}\z/) }
   }.freeze
 
   # Offense strings for the `- **Field:** value` lines.
   define_method(:field_offenses) do |name, lines|
     fields = lines.filter_map { |line| line.match(/\A- \*\*(\w+):\*\* (.+)\z/)&.captures }.to_h
-    field_rules.filter_map do |field, valid|
+    offenses = field_rules.filter_map do |field, valid|
       value = fields[field]&.strip
       if value.nil?
         "#{name}: missing `- **#{field}:** …`"
@@ -38,6 +39,11 @@ RSpec.describe "approval-queue.d entries (ADR-123)" do
         "#{name}: `#{field}: #{value}` does not match approval-queue.d/README.md"
       end
     end
+    # A gate row with no precedent is a serious decision (contribution-flow.md), never a queued one.
+    if fields["Class"]&.strip == "gate-row" && fields["Precedent"]&.strip == "none — sets one"
+      offenses << "#{name}: a gate-row needs a precedent; without one it is serious, so ask first"
+    end
+    offenses
   end
 
   # Offense strings for the `## ` sections: exactly the four, in order, none empty.
@@ -102,9 +108,34 @@ RSpec.describe "approval-queue.d entries (ADR-123)" do
       expect(entry_offenses("guard-shape.md", good)).to be_empty
     end
 
-    it "accepts `none` for the PR and `none — sets one` for the precedent" do
+    it "accepts `none` for the PR and `none — sets one` for a process precedent" do
       content = good.sub(/PR:\*\* .+$/, "PR:** none").sub(/Precedent:\*\* .+$/, "Precedent:** none — sets one")
+                    .sub("gate-row", "process")
       expect(entry_offenses("guard-shape.md", content)).to be_empty
+    end
+
+    it "accepts an ADR as the precedent" do
+      content = good.sub(/Precedent:\*\* .+$/, "Precedent:** [ADR-119](../docs/adr/119-discovery-fact-certainty.md)")
+      expect(entry_offenses("guard-shape.md", content)).to be_empty
+    end
+
+    it "rejects a precedent that is neither a link nor `none — sets one`" do
+      expect(entry_offenses("guard-shape.md",
+                            good.sub(/Precedent:\*\* .+$/, "Precedent:** see #2093"))).not_to be_empty
+    end
+
+    it "rejects a gate row that sets its own precedent" do
+      content = good.sub(/Precedent:\*\* .+$/, "Precedent:** none — sets one")
+      expect(entry_offenses("guard-shape.md", content)).not_to be_empty
+    end
+
+    it "rejects a date that is not YYYY-MM-DD" do
+      expect(entry_offenses("guard-shape.md", good.sub("2026-10-19", "19 Oct 2026"))).not_to be_empty
+    end
+
+    it "rejects a link to another repository" do
+      content = good.sub("rigortype/rigor/pull/2093", "rigortype/other/pull/2093")
+      expect(entry_offenses("guard-shape.md", content)).not_to be_empty
     end
 
     it "rejects a missing field" do

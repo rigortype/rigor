@@ -90,6 +90,19 @@ jobs:
           fi
           echo "Changed files:"
           printf '%s\n' "$changed"
+          # A release ships only ratified decisions (ADR-123): a change to
+          # the version, which only release prep makes, fails while
+          # approval-queue.d/ holds any entry. This runs in the merge queue
+          # too, where the release PR meets entries that landed after its
+          # own pull_request run.
+          if grep -qx 'lib/rigor/version.rb' <<<"$changed"; then
+            pending=$(find approval-queue.d -type f ! -name README.md 2>/dev/null)
+            if [ -n "$pending" ]; then
+              echo "::error::The version changes while the approval queue holds entries; ratify, revise or revert them first (rigor-release-prep):"
+              printf '%s\n' "$pending"
+              exit 1
+            fi
+          fi
           non_md=$(printf '%s\n' "$changed" | grep -vE '\.md$' || true)
           if [ -n "$non_md" ]; then
             echo "Non-Markdown files changed — running the full suite."
@@ -856,8 +869,9 @@ jobs:
           ruby-version: "4.0"
           bundler-cache: true
 
-      # In the merge queue the base is master's tip and the head the queued
-      # merge, so this compares master with what it is about to become.
+      # In the merge queue the base is the commit the entry is queued onto
+      # and the head the queued merge, so this compares what master is
+      # about to be with and without the PR.
       - name: Compare the merge base's firings with the PR's
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}

@@ -26,6 +26,7 @@ require_relative "../effects/identity"
 require_relative "../effects/propagator"
 require_relative "../inference/parameter_inference_collector"
 require_relative "../inference/pre_eval_constants"
+require_relative "../inference/project_seed_tables"
 require_relative "../inference/scope_indexer"
 require_relative "../inference/synthetic_method_scanner"
 require_relative "../inference/project_patched_scanner"
@@ -2457,50 +2458,21 @@ module Rigor
         tables[:published_constant_names] = names unless names.empty?
       end
 
-      # Issue #617 — the censused names that bind, grouped by last segment (`Scope#bound_constant_names`). A
-      # name some write other than a memo `||=` touches always binds. A memo-only name binds once memos of its
-      # segment span two files: either may load first and set the constant the other then reads, so only a
-      # memo no other file shares keeps the idiom's reading. Files are counted expanded, because discovery can
-      # walk one file under two spellings (`lib/b.rb`, `./lib/b.rb`).
+      # Issue #617 / #1290 — the binding and shadowing constant names, by last segment; derived by
+      # {Inference::ProjectSeedTables}, which the seed paths that run no `check` share.
       def constant_writer_index
-        @constant_writer_index ||= begin
-          memo_files = memo_files_by_segment
-          @project_constant_writes.each_with_object({}) do |(name, by_path), index|
-            segment = name.split("::").last
-            next if memo_only?(by_path) && memo_files.fetch(segment).size < 2
-
-            (index[segment] ||= []) << name
-          end.each_value(&:freeze).freeze
-        end
+        @constant_writer_index ||= Inference::ProjectSeedTables.constant_writers(@project_constant_writes)
       end
 
-      # Issue #1290 — the censused names some write other than a memo `||=` assigns, grouped by last segment
-      # (`Scope#shadowing_constant_names`): the ones that exist whether or not an outer constant of the name
-      # does, and so stop the lexical ladder above it. A memo-only name is left out however many files memoize
-      # it, unlike in {#constant_writer_index}: `X ||= v` resolves `X` through the very lookup whose lower rung
-      # the stop would replace, so wherever that rung answers, the memo finds it and never creates the name.
       def constant_shadower_index
-        @constant_shadower_index ||= @project_constant_writes.each_with_object({}) do |(name, by_path), index|
-          (index[name.split("::").last] ||= []) << name unless memo_only?(by_path)
-        end.each_value(&:freeze).freeze
+        @constant_shadower_index ||= Inference::ProjectSeedTables.constant_shadowers(@project_constant_writes)
       end
-
-      def memo_files_by_segment
-        @project_constant_writes.each_with_object({}) do |(name, by_path), files|
-          set = (files[name.split("::").last] ||= Set.new)
-          by_path.each { |path, descriptor| set << File.absolute_path(path) if memo_descriptor?(descriptor) }
-        end
-      end
-
-      def memo_only?(by_path) = by_path.each_value.all? { |descriptor| memo_descriptor?(descriptor) }
-      def memo_descriptor?(descriptor) = descriptor == Inference::ScopeIndexer::CONSTANT_MEMO
 
       # Issue #644 — the LAST SEGMENTS of the published table, the run-wide half of
       # `Scope#published_constant?`. Seeded on EVERY run (unlike `constant_sources`, which only a recording
       # run needs) because {CheckRules::PublishedConstantGuard} asks the question on every `if` / `unless`.
       def published_constant_name_set
-        @published_constant_name_set ||=
-          @project_constant_values.keys.to_set { |name| name.split("::").last }.freeze
+        @published_constant_name_set ||= Inference::ProjectSeedTables.published_constant_names(@project_constant_values)
       end
 
       # Issue #644 — the seeded `in_source_constants` table, joining the two cross-file constant producers.

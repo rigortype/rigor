@@ -312,8 +312,7 @@ RSpec.describe "DiscoveryIndex sibling pairing (ADR-119 WD1)" do
       collector = Rigor::Inference::ParameterInferenceCollector.new(
         files: project.keys, environment: Rigor::Environment.default
       )
-      allow(indexer).to receive_messages(discovered_def_index_for_paths: index.fetch(:def_index),
-                                         discovered_classes_for_paths: index.fetch(:classes))
+      allow(indexer).to receive(:discovered_project_index_for_paths).and_return(index)
       collector.send(:build_seed_scope, collector.send(:discovery_seed_tables), {})
     end
 

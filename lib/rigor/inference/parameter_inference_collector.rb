@@ -3,6 +3,7 @@
 require "prism"
 
 require_relative "scope_indexer"
+require_relative "project_seed_tables"
 require_relative "fork_map"
 require_relative "../source/node_walker"
 
@@ -238,39 +239,16 @@ module Rigor
         base.with_discovery(base.discovery.with(**tables))
       end
 
+      # Issue #1614 — the tables a `check` run seeds, from the one list {ProjectSeedTables} keeps for every path that
+      # runs no `check`, so an argument types here as it does in the file `check` analyses.
       def discovery_seed_tables
-        classes = ScopeIndexer.discovered_classes_for_paths(@files)
-        def_index = ScopeIndexer.discovered_def_index_for_paths(@files)
-        tables = {}
-        tables[:discovered_classes] = classes unless classes.empty?
-        DISCOVERY_FIELD.each do |index_key, field|
-          table = def_index.fetch(index_key)
-          tables[field] = table unless table.empty? && !Scope::DiscoveryIndex.paired?(field)
-        end
-        # ADR-119 WD1 — the pairs travel together: a pair is dropped only when both halves are empty. A sibling whose
-        # member this collector does not seed completes to that member's empty value, which the base scope holds.
-        Scope::DiscoveryIndex.compact_pairs(tables.merge(def_index.fetch(:siblings)))
+        ProjectSeedTables.for_paths(@files)
       rescue StandardError => e
         # Discovery is best-effort; a malformed corner of the project must not crash the
         # protection scan. Without discovery the collector simply resolves fewer call sites. A broken
         # walk contract is not such a corner, and an empty seed would hide it.
         e.is_a?(DeclarationWalk::ContractError) ? raise : {}
       end
-
-      DISCOVERY_FIELD = {
-        def_nodes: :discovered_def_nodes,
-        singleton_def_nodes: :discovered_singleton_def_nodes,
-        def_sources: :discovered_def_sources,
-        superclasses: :discovered_superclasses,
-        header_nestings: :discovered_header_nestings,
-        includes: :discovered_includes, unpositioned_mixins: :unpositioned_mixins,
-        class_sources: :discovered_class_sources,
-        method_visibilities: :discovered_method_visibilities,
-        methods: :discovered_methods,
-        data_member_layouts: :data_member_layouts,
-        struct_member_layouts: :struct_member_layouts, deferred_ranges: :discovered_deferred_ranges
-      }.freeze
-      private_constant :DISCOVERY_FIELD
 
       # Built once over the whole project and inherited by the fork workers via copy-on-write; a frozen Set
       # for O(1) membership in the {#record_call} hot loop.

@@ -88,7 +88,7 @@ jobs:
           # too, where the release PR meets entries that landed after its
           # own pull_request run. A diff that errors counts as a change.
           if ! git diff --quiet "$BASE_SHA...$HEAD_SHA" -- lib/rigor/version.rb; then
-            pending=$(find approval-queue.d -type f ! -name README.md 2>/dev/null)
+            pending=$(find approval-queue.d -type f ! -name README.md 2>/dev/null || true)
             if [ -n "$pending" ]; then
               echo "::error::The version may change while the approval queue holds entries; ratify, revise or revert them first (rigor-release-prep):"
               printf '%s\n' "$pending"

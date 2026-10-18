@@ -67,15 +67,16 @@ reshaping code, and lanes that collided or started on a premise master had alrea
    at a gate or an open choice, decide it per contribution-flow.md § "Decisions and the approval
    queue" and send the lane the decision with its approval-queue entry to commit; only a serious
    decision goes to the user.
-7. **Land through the merge queue.** Confirm `master` has one first (contribution-flow.md § "GitHub
-   and git traps"); without it this step does not apply, and a PR behind `master` waits for the
-   user. Queue each PR as soon as it may land (contribution-flow.md step 6); the queue runs CI on it merged onto `master` and the PRs ahead of it, which is the check
-   of how changes in different files interact (an engine fix on one side flipping a pinned answer
-   on the other). So a PR is not re-pushed because `master` moved. Check `mergeable` first: a
-   `CONFLICTING` PR starts no CI and cannot enter the queue, so send it back to its lane to run
-   `bin/lane-push` and resolve the rebase it stops on; when the lane has ended, run `bin/lane-push`
-   in its worktree yourself. A PR the queue drops goes back to its lane like a review finding. After
-   the batch, watch the resulting master CI run.
+7. **Land through the merge queue** with `bin/land-pr N <reviewed-head-sha>` in the background, as
+   soon as the PR may land (contribution-flow.md step 6 and § "GitHub and git traps"); it refuses
+   when `master` has no queue, and a PR behind `master` then waits for the user. It is the PR's
+   watcher, so start no other. The queue runs CI on the PR merged onto `master` and the PRs ahead of
+   it, which is the check of how changes in different files interact (an engine fix on one side
+   flipping a pinned answer on the other). So a PR is not re-pushed because `master` moved. Check
+   `mergeable` first: a `CONFLICTING` PR starts no CI and cannot enter the queue, so send it back to
+   its lane to run `bin/lane-push` and resolve the rebase it stops on; when the lane has ended, run
+   `bin/lane-push` in its worktree yourself. A PR the queue drops goes back to its lane like a
+   review finding. After the batch, watch the resulting master CI run.
    Watching is bounded by GitHub's API budgets (REST and GraphQL are separate 5000-an-hour budgets
    per user; `gh pr view` spends GraphQL), which a batch of watchers exhausts, and every watcher then
    dies with HTTP 403. Read the verdict per contribution-flow.md § "GitHub and git traps", at most

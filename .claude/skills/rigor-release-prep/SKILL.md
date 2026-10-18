@@ -516,8 +516,9 @@ gh pr create --draft --base master --head release/x.y.z \
 gh run list --branch release/x.y.z --workflow CI --limit 3 --json databaseId,headSha
 gh run view <run-id> --json status,conclusion,headSha   # repeat until status is "completed"
 gh pr ready <pr>                 # only on the user's explicit word, CI green, no stop instruction
-bin/land-pr <pr>   # queues it and waits; the queue merges with a merge commit
-# delete release/x.y.z only after it prints the merge commit
+bin/land-pr <pr> <reviewed-head-sha>   # in the background: queues it and waits;
+# the queue merges with a merge commit. Delete release/x.y.z only after it
+# prints that merge commit.
 ```
 
 The release PR is created `--draft` like every other PR, but lands by this

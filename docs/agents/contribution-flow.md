@@ -60,8 +60,8 @@ Each of these fails silently: the command succeeds and reports something plausib
   a merge. `gh pr view --json merged` is not a field; read `state`, `mergedAt` or `mergeCommit`.
 - **Stacked PRs.** A child merged while its base is still the parent branch reports MERGED, but its
   commits land on that branch, never reach `master`, and its `Fixes` never fires. Deleting a parent
-  branch closes its stacked child instead of retargeting it. So merge the parent without
-  `--delete-branch`, retarget each child yourself (`gh pr edit <child> --base master`), delete the
+  branch closes its stacked child instead of retargeting it. So land the parent (`bin/land-pr`
+  deletes no branch), retarget each child yourself (`gh pr edit <child> --base master`), delete the
   parent branch only after the parent reads `MERGED` and its merge commit is an ancestor of
   `origin/master` (a queued parent is not merged yet, and deleting a queued PR's branch closes it),
   then merge the child. Prove each landing against `origin/master` (see "Cleanup after a merge"
@@ -80,16 +80,19 @@ Each of these fails silently: the command succeeds and reports something plausib
   `master`, and `git merge-base --is-ancestor <mergeCommit.oid> origin/master` must exit 0. This holds
   for merge-commit, `--rebase` and `--squash` landings alike; after a rebase or squash the head SHA
   itself is never an ancestor, and a child merged into its parent branch fails on `baseRefName`.
-  Never chain the removal after `bin/land-pr` with `;`: a refused merge still runs the rest of the
-  line.
-- **The merge queue.** Queue a PR with `bin/land-pr N`, not `gh pr merge`: gh enqueues through the
-  auto-merge API, which this repository keeps off, and fails with "Auto merge is not allowed".
-  `bin/land-pr` refuses when `master` has no merge queue (nothing would then test the merged result;
-  stop and tell the user), queues the PR, and polls once a minute until it merges (exit 0, merge
-  commit printed) or leaves the queue (exit 1). A dropped PR stays `OPEN` exactly as a queued one
-  does, which is why it reads `isInMergeQueue` rather than the state; read the failed run in `gh run
-  list --event merge_group` and fix it on the branch. Never `gh pr merge --admin`: it skips the
-  queue and its check.
+  Chain the removal after `bin/land-pr` only with `&&`, never `;` (a refused merge still runs the
+  rest of the line), and never after `--no-wait`, which exits 0 while the PR is still queued.
+- **The merge queue.** Queue a PR with `bin/land-pr N <reviewed-head-sha>`, not `gh pr merge`: gh
+  enqueues through the auto-merge API, which this repository keeps off, and fails with "Auto merge
+  is not allowed". `bin/land-pr` queues only the head that was reviewed (a commit pushed since is
+  refused), checks that head's `CI required` passed, and refuses when `master` has no merge queue
+  (nothing would then test the merged result; stop and tell the user). It then polls once a minute
+  until the PR merges (exit 0, merge commit printed) or leaves the queue (exit 1), and it is that
+  PR's one watcher. A wait outlasts a foreground command (the queue batches for up to five minutes
+  and CI takes about twelve), so run it in the background; run again on a queued PR, it only waits.
+  A dropped PR stays `OPEN` exactly as a queued one does: read the failed run in `gh run list
+  --event merge_group`, or the new push or manual removal that took it out, and fix it on the
+  branch. Never `gh pr merge --admin`: it skips the queue and its check.
 - **Mergeability lags a push.** When `git merge-base --is-ancestor origin/master origin/<branch>`
   confirms the branch contains master, a "Head branch is out of date" refusal clears on its own;
   retry with backoff rather than merging `master` in again.
@@ -147,8 +150,8 @@ Once the change is implemented and `make verify-changed` passes:
    stays Draft for the user. A non-severe finding from that check is fixed only in wording or specs;
    anything that would change behaviour is filed as an issue. Other fixes made after round 3 land
    without another round.
-6. **Merge through the queue** (`gh pr ready`, then `bin/land-pr N`; see § "GitHub and git
-   traps") once CI is green on the head commit and the review has stopped, and
+6. **Merge through the queue** (`gh pr ready`, then `bin/land-pr N <reviewed-head-sha>`; see
+   § "GitHub and git traps") once CI is green on the head commit and the review has stopped, and
    when the landing point is settled: a `ready-for-agent` issue, a user request that states the
    expected outcome, or every decision the PR embodies made under § "Decisions and the approval
    queue" below. A PR need not contain the latest `master` to be queued; the queue tests the merged

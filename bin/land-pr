@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+# Add a ready, green pull request to master's merge queue and wait for the
+# verdict (ADR-123).
+#
+# `gh pr merge` enqueues through GitHub's auto-merge API, which this
+# repository keeps disabled, so it fails with "Auto merge is not allowed".
+# This calls the merge queue's own mutation instead, and folds in the two
+# traps contribution-flow.md § "GitHub and git traps" describes:
+#
+#   1. without a merge queue on master nothing would test the merged result,
+#      so it refuses and leaves the merge to the user;
+#   2. a PR the queue drops stays OPEN exactly as a queued one does, so it
+#      polls `isInMergeQueue` (once a minute) and reports which happened.
+#
+# Exit status: 0 merged (the merge commit is printed), 1 dropped from the
+# queue or refused, 2 usage error. --no-wait returns once the PR is queued.
+#
+# Usage: bin/land-pr <number> [--no-wait]
+
+set -uo pipefail
+
+number=""
+wait=1
+for arg in "$@"; do
+  case "$arg" in
+    --no-wait) wait=0 ;;
+    -h | --help)
+      awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"
+      exit 0
+      ;;
+    *[!0-9]* | "")
+      echo "land-pr: unknown argument: $arg (see --help)" >&2
+      exit 2
+      ;;
+    *) number="$arg" ;;
+  esac
+done
+[[ -n "$number" ]] || { echo "land-pr: give the pull request number (see --help)" >&2; exit 2; }
+
+die() {
+  echo "land-pr: $*" >&2
+  exit 1
+}
+
+# Print the PR's fields, tab-separated, in the order given.
+pr_fields() {
+  local query="$1" jq="$2"
+  gh api graphql -F n="$number" \
+    -f query='query($n:Int!){repository(owner:"rigortype",name:"rigor"){pullRequest(number:$n){'"$query"'}}}' \
+    --jq ".data.repository.pullRequest | [$jq] | @tsv"
+}
+
+info="$(pr_fields 'id isDraft state isMergeQueueEnabled baseRefName' \
+  '.id, .isDraft, .state, .isMergeQueueEnabled, .baseRefName')" || die "cannot read PR #$number"
+IFS=$'\t' read -r id draft state queue base <<<"$info"
+[[ "$base" == master ]] || die "PR #$number does not target master"
+[[ "$state" == OPEN ]] || die "PR #$number is $state, not open"
+[[ "$draft" == false ]] || die "PR #$number is a draft; run gh pr ready first"
+[[ "$queue" == true ]] ||
+  die "master has no merge queue, so nothing would test the merged result; stop and tell the user"
+
+gh api graphql -f id="$id" \
+  -f query='mutation($id:ID!){enqueuePullRequest(input:{pullRequestId:$id}){mergeQueueEntry{position}}}' \
+  --jq '"land-pr: #'"$number"' queued at position \(.data.enqueuePullRequest.mergeQueueEntry.position)"' ||
+  die "GitHub refused to queue #$number (CI not green, or the PR conflicts)"
+
+((wait)) || exit 0
+while :; do
+  sleep 60
+  status="$(pr_fields 'state isInMergeQueue mergeCommit{oid}' '.state, .isInMergeQueue, (.mergeCommit.oid // "")')" || continue
+  IFS=$'\t' read -r state queued oid <<<"$status"
+  case "$state" in
+    MERGED)
+      echo "land-pr: #$number merged as $oid"
+      exit 0
+      ;;
+    OPEN)
+      [[ "$queued" == true ]] && continue
+      die "#$number left the queue unmerged; read the failed run in: gh run list --event merge_group"
+      ;;
+    *) die "#$number is $state" ;;
+  esac
+done

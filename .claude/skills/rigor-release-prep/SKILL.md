@@ -516,10 +516,8 @@ gh pr create --draft --base master --head release/x.y.z \
 gh run list --branch release/x.y.z --workflow CI --limit 3 --json databaseId,headSha
 gh run view <run-id> --json status,conclusion,headSha   # repeat until status is "completed"
 gh pr ready <pr>                 # only on the user's explicit word, CI green, no stop instruction
-# confirm master has a merge queue first (contribution-flow.md § "GitHub and git traps")
-gh pr merge <pr> --merge   # queues it; the queue merges with a merge commit
-# then poll per contribution-flow.md § "GitHub and git traps" until MERGED,
-# and delete release/x.y.z only after that
+bin/land-pr <pr>   # queues it and waits; the queue merges with a merge commit
+# delete release/x.y.z only after it prints the merge commit
 ```
 
 The release PR is created `--draft` like every other PR, but lands by this

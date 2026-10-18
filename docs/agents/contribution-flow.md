@@ -63,9 +63,9 @@ Each of these fails silently: the command succeeds and reports something plausib
   branch closes its stacked child instead of retargeting it. So merge the parent without
   `--delete-branch`, retarget each child yourself (`gh pr edit <child> --base master`), delete the
   parent branch only after the parent reads `MERGED` and its merge commit is an ancestor of
-  `origin/master` (with the merge queue, `gh pr merge` returns while the parent is still queued, and
-  deleting a queued PR's branch closes it), then merge the child. Prove each landing against `origin/master`
-  (see "Cleanup after a merge" below), not by the PR state.
+  `origin/master` (a queued parent is not merged yet, and deleting a queued PR's branch closes it),
+  then merge the child. Prove each landing against `origin/master` (see "Cleanup after a merge"
+  below), not by the PR state.
 - **A head ref that vanished.** When an open PR's head branch was renamed or deleted, the PR closes
   and `gh pr reopen` fails until the ref exists again: push the old SHA back to the old name, reopen,
   and retarget a stacked child with `gh pr edit --base master`.
@@ -80,20 +80,16 @@ Each of these fails silently: the command succeeds and reports something plausib
   `master`, and `git merge-base --is-ancestor <mergeCommit.oid> origin/master` must exit 0. This holds
   for merge-commit, `--rebase` and `--squash` landings alike; after a rebase or squash the head SHA
   itself is never an ancestor, and a child merged into its parent branch fails on `baseRefName`.
-  Never chain the removal after `gh pr merge` with `;`: a refused merge still runs the rest of the
+  Never chain the removal after `bin/land-pr` with `;`: a refused merge still runs the rest of the
   line.
-- **The merge queue.** First confirm `master` has one: `gh api graphql -f query='{repository(owner:
-  "rigortype",name:"rigor"){pullRequest(number:N){isMergeQueueEnabled}}}'`. While it reads `false`,
-  `gh pr merge` merges at once and nothing tests the merged result, so do not merge a PR whose
-  branch does not contain `origin/master` (`git merge-base --is-ancestor origin/master
-  origin/<branch>` fails): stop and tell the user. With a queue, `gh pr merge N --merge` adds the PR and
-  returns before anything merges; it may warn that the queue sets the merge method. The queue runs
-  CI on a `gh-readonly-queue/master/…` ref, and a failed run removes the PR, which then stays `OPEN`
-  exactly as a queued one does. So poll, at most once a minute, `gh api graphql -f
-  query='{repository(owner:"rigortype",name:"rigor"){pullRequest(number:N){state isInMergeQueue}}}'`
-  until `state` is `MERGED`; `OPEN` with `isInMergeQueue` false means it was dropped: read the
-  failed run in `gh run list --event merge_group` and fix it on the branch. Never `gh pr merge
-  --admin`: it skips the queue and its check.
+- **The merge queue.** Queue a PR with `bin/land-pr N`, not `gh pr merge`: gh enqueues through the
+  auto-merge API, which this repository keeps off, and fails with "Auto merge is not allowed".
+  `bin/land-pr` refuses when `master` has no merge queue (nothing would then test the merged result;
+  stop and tell the user), queues the PR, and polls once a minute until it merges (exit 0, merge
+  commit printed) or leaves the queue (exit 1). A dropped PR stays `OPEN` exactly as a queued one
+  does, which is why it reads `isInMergeQueue` rather than the state; read the failed run in `gh run
+  list --event merge_group` and fix it on the branch. Never `gh pr merge --admin`: it skips the
+  queue and its check.
 - **Mergeability lags a push.** When `git merge-base --is-ancestor origin/master origin/<branch>`
   confirms the branch contains master, a "Head branch is out of date" refusal clears on its own;
   retry with backoff rather than merging `master` in again.
@@ -151,8 +147,8 @@ Once the change is implemented and `make verify-changed` passes:
    stays Draft for the user. A non-severe finding from that check is fixed only in wording or specs;
    anything that would change behaviour is filed as an issue. Other fixes made after round 3 land
    without another round.
-6. **Merge through the queue** (`gh pr ready`, then `gh pr merge --merge`, which queues it; see
-   § "GitHub and git traps") once CI is green on the head commit and the review has stopped, and
+6. **Merge through the queue** (`gh pr ready`, then `bin/land-pr N`; see § "GitHub and git
+   traps") once CI is green on the head commit and the review has stopped, and
    when the landing point is settled: a `ready-for-agent` issue, a user request that states the
    expected outcome, or every decision the PR embodies made under § "Decisions and the approval
    queue" below. A PR need not contain the latest `master` to be queued; the queue tests the merged

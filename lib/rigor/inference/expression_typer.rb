@@ -1286,9 +1286,21 @@ module Rigor
       def type_of_range(node)
         left_static, left = static_range_endpoint(node.left)
         right_static, right = static_range_endpoint(node.right)
-        return Type::Combinator.constant_of(Range.new(left, right, node.exclude_end?)) if left_static && right_static
+        if left_static && right_static
+          range = static_range_value(left, right, node.exclude_end?)
+          return Type::Combinator.constant_of(range) if range
+        end
 
         nominal_range_for_endpoints(node.left, node.right)
+      end
+
+      # The `Range` the static endpoints denote, or nil when Ruby would refuse to build it (`1.."a"`,
+      # `"a"..1` raise `ArgumentError: bad value for range`). The literal is a runtime error,
+      # not a constant, so the fold declines and the caller types it as a plain Range.
+      def static_range_value(left, right, exclude_end)
+        Range.new(left, right, exclude_end)
+      rescue ArgumentError
+        nil
       end
 
       # Derives `Nominal[Range, [T]]` from the endpoint expression types when at least one endpoint is

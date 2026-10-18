@@ -75,7 +75,8 @@ RSpec.describe "a pre_eval: patch on an ancestor reaches its descendants (#1708)
   end
 
   # `[1].only_hash` raises NoMethodError: Hash is not an Array ancestor. `1.to_s(1, 2, 3)` raises ArgumentError:
-  # Integer#to_s is nearer than the Object patch.
+  # Integer#to_s is nearer than the Object patch. Guard: passes without the fix; it fails if the ancestor walk is
+  # read for a non-ancestor or where a nearer class's own method is checked.
   it "still reports a patch on a class that is not an ancestor, and checks a nearer class's own method" do
     result = run_project("ext/core.rb" => patch, "lib/a.rb" => "[1].only_hash\n1.to_s(1, 2, 3)\n")
 

@@ -597,7 +597,8 @@ RSpec.describe Rigor::Inference::MethodDispatcher do
         expect(dispatch_patched(entries, integer, :near)).to eq(patched(:numeric))
       end
 
-      # Ruby: `rand(3).succ` under `class Object; def succ = :object` is still an Integer.
+      # Ruby: `rand(3).succ` under `class Object; def succ = :object` is still an Integer. Guard: the ancestor tier sits
+      # below RBS, so this passes without the fix.
       it "leaves a method the receiver's own RBS declares to that RBS" do
         result = dispatch_patched([patch("Object", :succ, :object)], integer, :succ)
 
@@ -610,6 +611,7 @@ RSpec.describe Rigor::Inference::MethodDispatcher do
         expect(result).to eq(patched(:object))
       end
 
+      # Guard: passes without the fix.
       it "does not answer from a patch on a class that is not an ancestor" do
         result = dispatch_patched([patch("Hash", :only_hash, :hash)], Rigor::Type::Combinator.nominal_of("Array"),
                                   :only_hash)

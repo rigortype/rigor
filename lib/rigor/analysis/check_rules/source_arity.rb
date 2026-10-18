@@ -101,11 +101,18 @@ module Rigor
           # {#decline_unless_recorded_nowhere}): it settles by definitions, as an `ABSENT` read does.
           return settle_by_walk if @unknown
 
-          # Issue #1833 — a mark on a namespace candidate of a class name the walk resolves can flip the chain
-          # shape and so the verdict (`DiscoveryIndex.declares_surface?` reads a mark bucket as a project class):
-          # keep the `mark:<last segment>` and `mark:*` edges the withheld walk recorded even when the verdict
-          # is silent, since no definition appearing or vanishing can overturn such a flip.
-          Analysis::DependencyRecorder.replay_missing(@withheld, prefix: "mark:")
+          # Issue #1833 — a level the `:arity` resolver took to be the project's on a mark alone (a namespace
+          # candidate a marks-only file rewrites) stands only while that mark does, and no definition appearing or
+          # vanishing can overturn it. Only such levels file the edge: the walk's other mark reads would re-check
+          # the call whenever an unrelated namespace reuses an ancestor's last segment.
+          @levels.each do |level|
+            ([level.class_name] + level.modules).each do |name|
+              next if @scope.known_user_class?(name)
+              next unless Scope::DiscoveryIndex.declares_surface?(@scope.discovered_parameter_envelopes[name])
+
+              Analysis::DependencyRecorder.read_last_segment(:mark, name)
+            end
+          end
 
           @owner_entries.each do |name, kind|
             if kind == :singleton

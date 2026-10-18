@@ -258,6 +258,20 @@ module Rigor
           return discovered_result
         end
 
+        # Issue #1708 — a `pre_eval:` patch on one of the receiver's ancestors (`class Object; def zz`,
+        # `module Enumerable; def sum_by`). Below the discovered-method tier, so a `def` the project, a gem
+        # catalogue or the receiver's own patch gives a nearer class answers first; the RBS tier, which already
+        # declined, is the nearer-ancestor RBS a patch never overrides.
+        ancestor_patched =
+          unless skip_project_patched
+            try_project_patched_method(receiver_type, method_name, arg_types, block_type, environment,
+                                       through_ancestors: true)
+          end
+        if ancestor_patched
+          scope&.record_dynamic_origin(call_node, DynamicOrigin::EXTERNAL_GEM_WITHOUT_RBS)
+          return ancestor_patched
+        end
+
         # ADR-5 robustness — synthesized-stub-type tier. When the receiver is a type Rigor
         # invented to make an otherwise-unbuildable project signature resolve (a
         # missing-namespace module, or a stub for a referenced-but-undeclared type like an
@@ -644,7 +658,11 @@ module Rigor
       # `def to_url; "hello"; end` patched onto `String` now resolves `s.to_url` to
       # `Dynamic[Nominal[String]]` instead of the pre-3a `Dynamic[Top]`. Falls back to
       # `Dynamic[Top]` when the heuristic declined (non-literal tail expression).
-      def try_project_patched_method(receiver_type, method_name, arg_types, block_type, environment)
+      #
+      # `through_ancestors:` (issue #1708) searches the receiver's ancestors as well, through
+      # {ProjectPatchedMethods#lookup_through_ancestors}.
+      def try_project_patched_method(receiver_type, method_name, arg_types, block_type, environment,
+                                     through_ancestors: false)
         registry = environment&.project_patched_methods
         return nil if registry.nil? || registry.empty?
 
@@ -652,7 +670,13 @@ module Rigor
         return nil if class_name.nil?
 
         kind = receiver_type.is_a?(Type::Singleton) ? :singleton : :instance
-        entry = registry.lookup(class_name: class_name, method_name: method_name, kind: kind)
+        entry =
+          if through_ancestors
+            registry.lookup_through_ancestors(class_name: class_name, method_name: method_name, kind: kind,
+                                              rbs_loader: environment.rbs_loader)
+          else
+            registry.lookup(class_name: class_name, method_name: method_name, kind: kind)
+          end
         return nil if entry.nil?
         return Type::Combinator.dynamic(entry.return_type) if entry.return_type
 

@@ -55,11 +55,43 @@ module Rigor
         @by_key[[class_name, method_name, kind]]
       end
 
+      # Issue #1708 — the entry a `kind` receiver of `class_name` reaches through its ancestors, searched in Ruby's
+      # order: a patch on `Object`, `Kernel`, `Numeric`, `Comparable` or `Enumerable` answers an `Integer`, `Array`
+      # or `String` receiver, and a patch on a nearer ancestor wins over one on a farther. A class object's chain
+      # is its singleton classes, then `Class`, `Module`, `Object`, `Kernel` and `BasicObject`, so `def zz` in
+      # `class Object` answers `Integer.zz` too. The ancestors are the class's RBS ones; a class RBS does not
+      # declare is searched as itself only, as {#lookup} searches it.
+      #
+      # It answers only which patch the chain holds. A method a nearer ancestor's RBS declares wins over the patch
+      # in Ruby, so the callers ask once that RBS has come back without the method.
+      # @return the entry, or `nil` when no ancestor's patch declares the method.
+      def lookup_through_ancestors(class_name:, method_name:, kind:, rbs_loader:)
+        return nil if empty?
+
+        ancestor_keys(class_name.to_s, kind, rbs_loader).each do |owner, side|
+          entry = @by_key[[owner, method_name, side]]
+          return entry if entry
+        end
+        nil
+      end
+
       def empty?
         @by_key.empty?
       end
 
       EMPTY = new.freeze
+
+      private
+
+      def ancestor_keys(class_name, kind, rbs_loader)
+        if kind == :singleton
+          pairs = rbs_loader ? rbs_loader.singleton_ancestors_for(class_name) : []
+          pairs.empty? ? [[class_name, :singleton]] : pairs.map { |side, owner| [owner, side] }
+        else
+          names = rbs_loader ? rbs_loader.ancestor_names_for(class_name) : []
+          (names.empty? ? [class_name] : names).map { |owner| [owner, :instance] }
+        end
+      end
     end
   end
 end

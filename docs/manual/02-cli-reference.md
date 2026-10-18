@@ -1199,11 +1199,12 @@ Runs a scoped analysis and audits:
   `Gemfile.lock` in the current directory was installed into; when it
   cannot (typically gems in the active Ruby's default gem home), no
   gem-shipped `sig/` is discovered. Rigor finds a bundle only where the
-  project records it: an existing `bundler.bundle_path:` in
-  `.rigor.yml`, or — unless `bundler.auto_detect: false` —
-  `.bundle/config`'s `BUNDLE_PATH`, an in-tree `vendor/bundle`, or the
-  global Bundler config. A warning, not a failure: the default layout
-  is correct, and most gems ship no `sig/`.
+  project records it. A `bundler.bundle_path:` in `.rigor.yml` is used
+  alone and must exist. Without one — and unless
+  `bundler.auto_detect: false` — Rigor reads `.bundle/config`'s
+  `BUNDLE_PATH`, then an in-tree `vendor/bundle`, then the global
+  Bundler config. A warning, not a failure: the default layout is
+  correct, and most gems ship no `sig/`.
 
 Text output prints `[PASS]`, `[FAIL]`, or `[WARN]` per check plus a
 routed hint (e.g. "Run `rigor baseline regenerate`"). JSON output

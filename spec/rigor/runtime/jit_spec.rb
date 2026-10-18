@@ -166,12 +166,19 @@ RSpec.describe Rigor::Runtime::Jit do
 
     it "honours a deadline recorded by a real .enable_after call" do
       stub_yjit_off
+      # The real call records a deadline 30s after `started`, so whatever is left at re-arm time is below 30
+      # and at least 30 minus the wall time that passed since `started`. Bounding by the measured elapsed
+      # time (rather than a fixed tolerance around 30) keeps the check meaningful on a slow, loaded runner.
+      started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       described_class.enable_after(30).kill
       allow(described_class).to receive(:enable_after)
 
       described_class.rearm_after_fork
+      elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
 
-      expect(described_class).to have_received(:enable_after).with(be_within(0.25).of(30))
+      expect(described_class).to have_received(:enable_after).with(
+        satisfy { |left| left < 30 && left >= 30 - elapsed - 0.01 }
+      )
     end
 
     it "enables YJIT immediately when the deadline passed while forking" do

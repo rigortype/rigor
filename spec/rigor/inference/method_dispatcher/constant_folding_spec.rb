@@ -566,6 +566,121 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
     end
   end
 
+  # #2115 — the numeric and Range twins of STRING_FOLD_BYTE_LIMIT. Folding `2 ** 100_000_000` took Ruby milliseconds,
+  # but describing the folded Constant rendered it in decimal and hung the analyzer; `(1..Float::INFINITY)` folds
+  # walked an endless range. A declined fold returns nil and dispatch falls through to the RBS envelope.
+  describe "INTEGER_FOLD_BIT_LIMIT and RANGE_ENUMERATION_LIMIT enforcement (#2115)" do
+    it "keeps the bit limit at the largest bit length whose decimal rendering fits STRING_FOLD_BYTE_LIMIT digits" do
+      limit = described_class::INTEGER_FOLD_BIT_LIMIT
+      expect(((2**limit) - 1).to_s.size).to be <= described_class::STRING_FOLD_BYTE_LIMIT
+      expect((2**(limit + 1)).to_s.size).to be > described_class::STRING_FOLD_BYTE_LIMIT
+    end
+
+    it "folds an Integer power up to the bit limit, 2 ** 64 included" do
+      expect(fold(2, :**, [64]).value).to eq(18_446_744_073_709_551_616)
+      expect(fold(2, :**, [13_605]).value).to eq(2**13_605)
+    end
+
+    # A result past the limit is not dropped: the fold answers its class, so `(2 ** 20_000).even?` resolves on
+    # `Integer` instead of RBS `Integer#**`'s declared `Numeric`.
+    def nominal(name) = Rigor::Type::Combinator.nominal_of(name)
+
+    it "widens an Integer result past the bit limit to Integer" do
+      expect(fold(2, :**, [13_606])).to eq(nominal("Integer"))
+      expect(fold(2, :**, [100_000_000])).to eq(nominal("Integer"))
+      expect(fold(2**13_000, :*, [2**13_000])).to eq(nominal("Integer"))
+    end
+
+    it "widens a negative Integer power past the bit limit to Rational" do
+      expect(fold(2, :**, [-13_606])).to eq(nominal("Rational"))
+      expect(fold(2, :**, [-100_000_000])).to eq(nominal("Rational"))
+      expect(fold(2, :**, [-3]).value).to eq(Rational(1, 8))
+    end
+
+    it "widens a Rational result whose denominator is past the bit limit to Rational" do
+      expect(fold(Rational(1, 2**13_000), :*, [Rational(1, 2**13_000)])).to eq(nominal("Rational"))
+      expect(fold(Rational(1, 3), :**, [100_000_000])).to eq(nominal("Rational"))
+    end
+
+    it "widens a Complex result whose real or imaginary part is past the bit limit to Complex" do
+      expect(fold(Complex(2**13_000, 0), :*, [2**13_000])).to eq(nominal("Complex"))
+      expect(fold(Complex(0, 2**13_000), :*, [2**13_000])).to eq(nominal("Complex"))
+      expect(fold(Complex(1, 1), :**, [100_000_000])).to eq(nominal("Complex"))
+    end
+
+    it "widens a shift past the bit limit to Integer and folds one within it" do
+      expect(fold(1, :<<, [100_000_000])).to eq(nominal("Integer"))
+      expect(fold(1, :>>, [-100_000_000])).to eq(nominal("Integer"))
+      expect(fold(1, :<<, [64]).value).to eq(2**64)
+    end
+
+    it "unions a widened result with the constants of a mixed receiver union" do
+      combinator = Rigor::Type::Combinator
+      receiver = combinator.union(combinator.constant_of(2**13_000), combinator.constant_of(5))
+      result = described_class.try_dispatch(cc(receiver: receiver, method_name: :*,
+                                               args: [combinator.constant_of(2**13_000)]))
+      expect(result).to eq(combinator.union(combinator.constant_of(5 * (2**13_000)), nominal("Integer")))
+    end
+
+    it "widens a unary result past the bit limit to Integer" do
+      expect(fold((2**13_606) - 1, :succ)).to eq(nominal("Integer"))
+      expect(fold((2**13_606) - 2, :succ).value).to eq((2**13_606) - 1)
+    end
+
+    # The paths that do not go through the invoke helpers (`divmod`'s Tuple lift, `String#%`, the Array lifts) keep
+    # declining a value past the limit: `foldable_constant_value?` carries the same bound.
+    it "declines a divmod whose remainder is past the bit limit" do
+      expect(fold(Rational(1, 2**13_000), :divmod, [Rational(1, 3**8_300)])).to be_nil
+      expect(fold(7, :divmod, [2])).to be_a(Rigor::Type::Tuple)
+    end
+
+    # The result gate alone would also widen these, but only after computing a value `3 ** 100_000_000` takes Ruby
+    # seconds to build, so the class is read from the operands.
+    it "reads the class of `**` / `pow` / `<<` / `>>` from their operands before computing the result" do
+      expect(described_class.numeric_blow_up_class(3, :**, 100_000_000)).to eq("Integer")
+      expect(described_class.numeric_blow_up_class(3, :pow, -100_000_000)).to eq("Rational")
+      expect(described_class.numeric_blow_up_class(Rational(1, 3), :**, 100_000_000)).to eq("Rational")
+      expect(described_class.numeric_blow_up_class(Complex(1, 1), :**, 100_000_000)).to eq("Complex")
+      expect(described_class.numeric_blow_up_class(1, :<<, 100_000_000)).to eq("Integer")
+      expect(described_class.numeric_blow_up_class(1, :>>, -100_000_000)).to eq("Integer")
+      expect(described_class.numeric_blow_up_class(2, :**, 64)).to be_nil
+      expect(described_class.numeric_blow_up_class(2.0, :**, 100_000_000)).to be_nil
+    end
+
+    it "declines a Range method that walks more than RANGE_ENUMERATION_LIMIT elements" do
+      expect(fold(1..1024, :to_set).value.size).to eq(1024)
+      expect(fold(1..1025, :to_set)).to be_nil
+      expect(fold(1..Float::INFINITY, :to_set)).to be_nil
+      expect(fold("a".."zzz", :include?, ["b"])).to be_nil
+      expect(fold("a".."e", :include?, ["c"]).value).to be(true)
+    end
+
+    it "keeps folding the endpoint-only Range methods past the enumeration limit" do
+      expect(fold(1..Float::INFINITY, :include?, [5]).value).to be(true)
+      expect(fold(1..Float::INFINITY, :size).value).to eq(Float::INFINITY)
+      expect(fold("a".."zzzzz", :cover?, ["b"]).value).to be(true)
+      expect(fold(Time.at(0)..Time.at(10), :include?, [Time.at(5)]).value).to be(true)
+      expect(fold(nil..5, :include?, [3]).value).to be(true)
+    end
+
+    it "folds the Integer-endpoint Range unary family without materialising the range" do
+      expect_any_instance_of(Range).not_to receive(:to_a) # rubocop:disable RSpec/AnyInstance
+      expect(fold(1..1_000_000_000, :first).value).to eq(1)
+      expect(fold(1...1_000_000_000, :max).value).to eq(999_999_999)
+      expect(fold(1..1_000_000_000, :count).value).to eq(1_000_000_000)
+      expect(fold(1..1_000_000_000, :to_a)).to be_nil
+      expect(fold(1..1_000_000_000, :minmax)).to eq(
+        Rigor::Type::Combinator.tuple_of(Rigor::Type::Combinator.constant_of(1),
+                                         Rigor::Type::Combinator.constant_of(1_000_000_000))
+      )
+    end
+
+    it "widens a Range#sum past the bit limit to Integer" do
+      expect(fold(1..(2**13_605), :sum)).to eq(nominal("Integer"))
+      expect(fold(1..10, :sum).value).to eq(55)
+    end
+  end
+
   # STRING_FOLD_BYTE_LIMIT (4096) keeps a literal-string fold from materialising an unbounded result in the analyzer.
   # The three guarded paths are `*` by a count (count > limit), `*` by bytesize (receiver.bytesize * count > limit), and
   # `+` concat (left.bytesize + right.bytesize > limit). A declined fold returns nil so dispatch falls through to the

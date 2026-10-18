@@ -239,6 +239,26 @@ module Rigor
         [result, capture.snapshot]
       end
 
+      # Issue #1833 — replays only the `missing` entries of `read_set` whose key starts with `prefix` into the
+      # current consumer's accumulator and every open capture, and does not mark the set as held: a later full
+      # {replay} of the same set still fills the remaining entries. {SourceArity#settle_by_definitions} uses it
+      # to always keep mark-key edges (`mark:<last>`, `mark:*`) a withheld walk recorded even when the arity
+      # verdict is silent, because a mark on a namespace candidate can flip the chain's shape and so the
+      # verdict — the kinds a definition appearing or vanishing alone cannot overturn.
+      def replay_missing(read_set, prefix:)
+        accumulator = Thread.current[KEY]
+        return if accumulator.nil? || read_set.nil? || read_set.equal?(EMPTY_READ_SET)
+
+        captures = Thread.current[CAPTURE_KEY]
+        missing = accumulator.missing
+        read_set.missing.each do |entry|
+          next unless entry.start_with?(prefix)
+
+          tee_missing(captures, entry) if captures && !captures.empty?
+          missing << entry
+        end
+      end
+
       # ADR-84 WD2 — replays a {ReadSet} into the current consumer's accumulator as if each read happened
       # here, applying the same per-consumer self-read filter as {read_site}, and tees into every active
       # capture so an enclosing capture window stays transitive when a memo hit substitutes for a body walk.

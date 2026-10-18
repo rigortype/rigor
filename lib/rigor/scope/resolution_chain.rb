@@ -563,8 +563,12 @@ module Rigor
             @discovery.discovered_superclasses.key?(name) || @discovery.discovered_includes.key?(name) ||
               @discovery.discovered_classes.key?(name)
           when :arity
+            # Issue #1833 — route through `parameter_envelopes_of` to record the `mark:<last segment>` name edge
+            # beside the class edge: a file that adds or drops only a dynamic or removed-name mark on a candidate
+            # (`module N; Foo.remove_method(:zz); end` beside `module N; class Sub < Foo; end; end`) declares nothing
+            # a direct bucket read sees change, so without the edge the warm answer froze.
             @scope.known_user_class?(name) ||
-              DiscoveryIndex.declares_surface?(@discovery.discovered_parameter_envelopes[name])
+              DiscoveryIndex.declares_surface?(@scope.parameter_envelopes_of(name))
           else
             @scope.known_user_class?(name)
           end

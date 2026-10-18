@@ -101,6 +101,12 @@ module Rigor
           # {#decline_unless_recorded_nowhere}): it settles by definitions, as an `ABSENT` read does.
           return settle_by_walk if @unknown
 
+          # Issue #1833 — a mark on a namespace candidate of a class name the walk resolves can flip the chain
+          # shape and so the verdict (`DiscoveryIndex.declares_surface?` reads a mark bucket as a project class):
+          # keep the `mark:<last segment>` and `mark:*` edges the withheld walk recorded even when the verdict
+          # is silent, since no definition appearing or vanishing can overturn such a flip.
+          Analysis::DependencyRecorder.replay_missing(@withheld, prefix: "mark:")
+
           @owner_entries.each do |name, kind|
             if kind == :singleton
               @scope.user_singleton_def_site_for(name, @method_name)
@@ -295,9 +301,14 @@ module Rigor
 
         # A bucket of class marks alone (issue #1820: `x.singleton_class.prepend(Comparable)`) does not make a name
         # the project's.
+        #
+        # Issue #1833 — the bucket is read through `parameter_envelopes_of` so the `mark:<last segment>` name edge
+        # is recorded beside the class edge: a dynamic or removed-name mark on a namespace candidate
+        # (`module N; Foo.send(:define_method, :zz) { }; end`) moves this verdict without the class's declaring
+        # files moving, which the class edge alone could not see.
         def project_class?(name)
           @scope.known_user_class?(name) ||
-            Scope::DiscoveryIndex.declares_surface?(@scope.discovered_parameter_envelopes[name])
+            Scope::DiscoveryIndex.declares_surface?(@scope.parameter_envelopes_of(name))
         end
 
         # A module's methods reach the receiver as instance methods whichever side the receiver is on.

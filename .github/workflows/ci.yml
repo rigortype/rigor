@@ -82,6 +82,19 @@ jobs:
             echo "nix=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+          # A release ships only ratified decisions (ADR-123): a change to
+          # the version, which only release prep makes, fails while
+          # approval-queue.d/ holds any entry. This runs in the merge queue
+          # too, where the release PR meets entries that landed after its
+          # own pull_request run. A diff that errors counts as a change.
+          if ! git diff --quiet "$BASE_SHA...$HEAD_SHA" -- lib/rigor/version.rb; then
+            pending=$(find approval-queue.d -type f ! -name README.md 2>/dev/null)
+            if [ -n "$pending" ]; then
+              echo "::error::The version may change while the approval queue holds entries; ratify, revise or revert them first (rigor-release-prep):"
+              printf '%s\n' "$pending"
+              exit 1
+            fi
+          fi
           if ! changed=$(git diff --name-only "$BASE_SHA...$HEAD_SHA"); then
             echo "diff failed — failing safe to the full suite."
             echo "code=true" >> "$GITHUB_OUTPUT"
@@ -90,19 +103,6 @@ jobs:
           fi
           echo "Changed files:"
           printf '%s\n' "$changed"
-          # A release ships only ratified decisions (ADR-123): a change to
-          # the version, which only release prep makes, fails while
-          # approval-queue.d/ holds any entry. This runs in the merge queue
-          # too, where the release PR meets entries that landed after its
-          # own pull_request run.
-          if grep -qx 'lib/rigor/version.rb' <<<"$changed"; then
-            pending=$(find approval-queue.d -type f ! -name README.md 2>/dev/null)
-            if [ -n "$pending" ]; then
-              echo "::error::The version changes while the approval queue holds entries; ratify, revise or revert them first (rigor-release-prep):"
-              printf '%s\n' "$pending"
-              exit 1
-            fi
-          fi
           non_md=$(printf '%s\n' "$changed" | grep -vE '\.md$' || true)
           if [ -n "$non_md" ]; then
             echo "Non-Markdown files changed — running the full suite."

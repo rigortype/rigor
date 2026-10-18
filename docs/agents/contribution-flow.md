@@ -84,8 +84,9 @@ Each of these fails silently: the command succeeds and reports something plausib
   line.
 - **The merge queue.** First confirm `master` has one: `gh api graphql -f query='{repository(owner:
   "rigortype",name:"rigor"){pullRequest(number:N){isMergeQueueEnabled}}}'`. While it reads `false`,
-  `gh pr merge` merges at once and nothing tests the merged result, so do not merge a PR whose base
-  is behind `master`: stop and tell the user. With a queue, `gh pr merge N --merge` adds the PR and
+  `gh pr merge` merges at once and nothing tests the merged result, so do not merge a PR whose
+  branch does not contain `origin/master` (`git merge-base --is-ancestor origin/master
+  origin/<branch>` fails): stop and tell the user. With a queue, `gh pr merge N --merge` adds the PR and
   returns before anything merges; it may warn that the queue sets the merge method. The queue runs
   CI on a `gh-readonly-queue/master/…` ref, and a failed run removes the PR, which then stays `OPEN`
   exactly as a queued one does. So poll, at most once a minute, `gh api graphql -f

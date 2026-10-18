@@ -50,7 +50,8 @@ git ls-tree --name-only origin/master approval-queue.d/   # README.md alone mean
 6. **The release ships with the queue empty.** Before opening the release PR,
    and again before publishing, list `approval-queue.d/` on the release branch
    and on `origin/master`: an entry that landed on `master` after step 3 goes
-   through steps 2–5 too. `spec/docs/approval_queue_spec.rb` fails the release
+   through steps 2–5 too; rebase the release branch onto `origin/master` to
+   pick it up before deleting it there. `spec/docs/approval_queue_spec.rb` fails the release
    PR's CI while its branch holds an entry, but it cannot see an entry that
    reaches `master` afterwards.
 
@@ -515,6 +516,7 @@ gh pr create --draft --base master --head release/x.y.z \
 gh run list --branch release/x.y.z --workflow CI --limit 3 --json databaseId,headSha
 gh run view <run-id> --json status,conclusion,headSha   # repeat until status is "completed"
 gh pr ready <pr>                 # only on the user's explicit word, CI green, no stop instruction
+# confirm master has a merge queue first (contribution-flow.md § "GitHub and git traps")
 gh pr merge <pr> --merge   # queues it; the queue merges with a merge commit
 # then poll per contribution-flow.md § "GitHub and git traps" until MERGED,
 # and delete release/x.y.z only after that

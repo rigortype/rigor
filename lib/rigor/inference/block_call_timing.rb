@@ -72,6 +72,12 @@ module Rigor
 
       module_function
 
+      # Whether `call_node` is spelled to reach the private `Kernel#loop` (see {.loop_may_complete?}), which runs its
+      # block until it breaks or raises.
+      def kernel_loop?(call_node)
+        call_node.name == :loop && kernel_spelled_receiver?(call_node.receiver)
+      end
+
       # Issue #1107 — whether a `loop` call can complete normally although its declared return is `bot`.
       #
       # `Kernel#loop` is `() { () -> void } -> bot` in core RBS, yet it rescues a `StopIteration` its block
@@ -86,7 +92,7 @@ module Rigor
       # promise. A project redefinition of `loop` itself is not excluded: widening its `bot` costs precision,
       # never a false positive.
       def loop_may_complete?(call_node)
-        return false unless call_node.name == :loop && kernel_spelled_receiver?(call_node.receiver)
+        return false unless kernel_loop?(call_node)
 
         block = call_node.block
         return false if block.nil?

@@ -39,4 +39,27 @@ RSpec.describe Rigor::Inference::ReturnBarrier do
       end
     end
   end
+
+  describe ".exits_method?" do
+    def body(source)
+      Prism.parse(source).value.statements
+    end
+
+    ["return", "x if (return 1)", "each { return }", "each { each { return 1 } }", "proc { return }.call"].each do |src|
+      it "is true for `#{src}`" do
+        expect(described_class.exits_method?(body(src))).to be(true)
+      end
+    end
+
+    ["x", "-> { return }", "lambda { return }", "define_method(:x) { return }", "def m = (return 1)",
+     "each { next 1 }"].each do |src|
+      it "is false for `#{src}`" do
+        expect(described_class.exits_method?(body(src))).to be(false)
+      end
+    end
+
+    it "is false for nil" do
+      expect(described_class.exits_method?(nil)).to be(false)
+    end
+  end
 end

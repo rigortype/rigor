@@ -577,7 +577,15 @@ RSpec.describe Rigor::Inference::MethodDispatcher do
           project_patched_methods: Rigor::Inference::ProjectPatchedMethods.new(entries: entries)
         )
         described_class.dispatch(receiver_type: receiver, method_name: name, arg_types: [], environment: env,
-                                 scope: Rigor::Scope.empty(environment: env))
+                                 scope: project_wide_scope(env))
+      end
+
+      # The tier reads the project's sources, so it answers only for a scope seeded with the project-wide def index.
+      def project_wide_scope(env)
+        base = Rigor::Scope.empty(environment: env)
+        wide = { Rigor::Scope::DiscoveryIndex::ENVELOPE_PROJECT_WIDE => {} }
+        base.with_discovery(base.discovery.with(discovered_parameter_envelopes: wide,
+                                                contested_discovered_parameter_envelopes: {}))
       end
 
       def patched(value) = Rigor::Type::Combinator.dynamic(Rigor::Type::Combinator.constant_of(value))
@@ -620,6 +628,27 @@ RSpec.describe Rigor::Inference::MethodDispatcher do
       end
 
       # Guard: passes without the fix.
+      # A single-file scope (`type-of`, an LSP buffer) cannot see a nearer `def` in another file.
+      it "does not answer for a scope without the project-wide def index" do
+        env = Rigor::Environment.for_project(
+          project_patched_methods: Rigor::Inference::ProjectPatchedMethods.new(entries: [patch("Object", :zz, :object)])
+        )
+        result = described_class.dispatch(receiver_type: integer, method_name: :zz, arg_types: [], environment: env,
+                                          scope: Rigor::Scope.empty(environment: env))
+
+        expect(result).to be_nil
+      end
+
+      # Guard: the tier needs a scope at all; passes without the project-wide check.
+      it "does not answer without a scope" do
+        env = Rigor::Environment.for_project(
+          project_patched_methods: Rigor::Inference::ProjectPatchedMethods.new(entries: [patch("Object", :zz, :object)])
+        )
+
+        expect(described_class.dispatch(receiver_type: integer, method_name: :zz, arg_types: [], environment: env))
+          .to be_nil
+      end
+
       it "does not answer from a patch on a class that is not an ancestor" do
         result = dispatch_patched([patch("Hash", :only_hash, :hash)], Rigor::Type::Combinator.nominal_of("Array"),
                                   :only_hash)

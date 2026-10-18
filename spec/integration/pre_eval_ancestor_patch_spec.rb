@@ -113,6 +113,32 @@ RSpec.describe "a pre_eval: patch on an ancestor reaches its descendants (#1708)
       expect(rules(result)).to eq([])
     end
 
+    it "wins over the patch through a module the project prepends to the patched owner" do
+      result = run_project("ext/core.rb" => nil_patch,
+                           "lib/p.rb" => "module P; def nn = \"s\"; end\nclass Object; prepend P; end\n",
+                           "lib/use.rb" => use.call("rand(3).nn"))
+
+      expect(rules(result)).to eq([])
+    end
+
+    # A `lib/` reopen of the patched owner itself, loaded after the `pre_eval:` file, replaces the patch. The walk
+    # stops at any owner with a source `def`, so a module the project includes into that owner (which Ruby reaches
+    # AFTER the owner's patch) stops it too: conservative, the call is left to user-method inference.
+    it "wins over the patch when the project reopens the patched owner" do
+      result = run_project("ext/core.rb" => nil_patch, "lib/o.rb" => "class Object; def nn = \"s\"; end\n",
+                           "lib/use.rb" => use.call("rand(3).nn"))
+
+      expect(rules(result)).to eq([])
+    end
+
+    it "wins over the patch through an attr_reader the project declares" do
+      result = run_project("ext/core.rb" => nil_patch,
+                           "lib/int.rb" => "class Integer; attr_reader :nn; end\n",
+                           "lib/use.rb" => "rand(3).nn.upcase\n")
+
+      expect(rules(result)).to eq([])
+    end
+
     it "wins over the patch on the singleton side" do
       result = run_project("ext/core.rb" => nil_patch, "lib/int.rb" => "class Integer; def self.sn = \"s\"; end\n",
                            "lib/use.rb" => use.call("Integer.sn"))

@@ -475,6 +475,24 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  # Issue #1839 — a `begin … rescue` in an operand position, and a rescue modifier's fallback, read each name the
+  # body writes as `Dynamic[top]`, as a statement-level rescue clause does. The controls read a name the body never
+  # writes; the retried `begin` pins a gap of the operand position.
+  describe "fixtures/rescue_operand_position.rb — an operand-position rescue clause reads the body's writes" do
+    let(:harness) { harness_for("rescue_operand_position") }
+
+    it "reports nothing but the controls" do
+      reported = harness.diagnostics.reject { |d| d.severity == :info || d.rule.to_s == "call.unresolved-toplevel" }
+      expected = [
+        *marked_lines(harness, "# GENUINE-UNDEFINED").map { |line| [line, "call.undefined-method"] },
+        *marked_lines(harness, "# RETRY-OPERAND").flat_map do |line|
+          [[line, "call.undefined-method"], [line, "flow.always-truthy-condition"]]
+        end
+      ]
+      expect(reported.map { |d| [d.line, d.rule.to_s] }).to match_array(expected)
+    end
+  end
+
   describe "fixtures/non_empty_refinement_mutation_widening.rb — a mutator invalidates `non-empty-array`" do
     let(:harness) { harness_for("non_empty_refinement_mutation_widening") }
 

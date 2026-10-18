@@ -1,0 +1,1 @@
+- **[engine]** An instance-variable write inside a plugin-declared route block (`get "/" do @user = "alice" end` under rigor-sinatra) now counts toward the class's instance-variable typing, so a sibling method no longer reports a call on `nil` for an ivar `initialize` sets to `nil`. ([#2099](https://github.com/rigortype/rigor/pull/2099))

@@ -14,6 +14,47 @@ include the full `nix develop --command` prefix so each line is directly
 runnable from outside the Flake shell. Inside the Flake shell, drop the
 prefix.
 
+## First: ratify the approval queue
+
+Before any other step, report the approval queue and let the user decide each
+entry. Agents make every decision that list does not call serious on their own
+and record it in `approval-queue.d/` (`docs/agents/contribution-flow.md`
+§ "Decisions and the approval queue", ADR-123); a release ships only decisions
+the user ratified.
+
+```sh
+git fetch origin
+git ls-tree --name-only origin/master approval-queue.d/   # README.md alone means empty
+```
+
+1. **Empty** (only `README.md`): say so in one line and go on to the branch.
+2. **Otherwise, report every entry in the user's language** — the language
+   they write to you in, not the repository's English. Read each file from
+   `origin/master` and, per entry, give its decision, PR, class and precedent,
+   then its background, the options with their trade-offs, the decision's
+   reasoning and how to undo it. Translate faithfully and keep every link; do
+   not shorten the trade-offs away, they are what the user is judging.
+3. **Ask for each entry** with options **Ratify**, **Revise** and **Revert**,
+   in the user's language: under Claude Code with `AskUserQuestion` (up to
+   four entries per call, free text always allowed), elsewhere as a numbered
+   question in chat. Do not recommend an option.
+4. **Ratified** entries are deleted on the release branch once it is cut
+   (below), in one commit `Ratify approval queue entries` whose body lists
+   each entry's title and PR link: that commit is the record of the
+   ratification.
+5. **Revise or Revert**: the change lands as an ordinary PR (contribution-flow
+   § "Landing a pull request") that changes or reverts the decision and
+   deletes its entry. File an issue for it when the user does not want it done
+   now. Either way the release waits: tell the user so, and continue the other
+   steps only if they want the release prepared while the PR lands.
+6. **The release ships with the queue empty.** Before opening the release PR,
+   and again before publishing, list `approval-queue.d/` on the release branch
+   and on `origin/master`: an entry that landed on `master` after step 3 goes
+   through steps 2–5 too; rebase the release branch onto `origin/master` to
+   pick it up before deleting it there. `spec/docs/approval_queue_spec.rb` fails the release
+   PR's CI while its branch holds an entry, but it cannot see an entry that
+   reaches `master` afterwards.
+
 ## Branch: `release/x.y.z`
 
 Release work happens on a dedicated `release/x.y.z` branch, not directly on
@@ -475,7 +516,10 @@ gh pr create --draft --base master --head release/x.y.z \
 gh run list --branch release/x.y.z --workflow CI --limit 3 --json databaseId,headSha
 gh run view <run-id> --json status,conclusion,headSha   # repeat until status is "completed"
 gh pr ready <pr>                 # only on the user's explicit word, CI green, no stop instruction
-gh pr merge <pr> --rebase --delete-branch
+# confirm master has a merge queue first (contribution-flow.md § "GitHub and git traps")
+gh pr merge <pr> --merge   # queues it; the queue merges with a merge commit
+# then poll per contribution-flow.md § "GitHub and git traps" until MERGED,
+# and delete release/x.y.z only after that
 ```
 
 The release PR is created `--draft` like every other PR, but lands by this
@@ -489,9 +533,10 @@ hand-off from review to landing.
   notes above). Merge once `ci.yml` is green and any advisory failure is
   explained.
 - **Rebase- or merge-commit, never squash.** Keep the `Bump up version to
-  x.y.z` commit intact so the tag in "Publish" lands on it. If `master`
-  advanced, rebase the branch first and re-push — and **re-read the sealed
-  section afterwards**. `merge=union` means a `[Unreleased]` entry that landed
+  x.y.z` commit intact. The merge queue on `master` merges with a merge
+  commit, which keeps it; the tag in "Publish" goes on that merge commit. The
+  branch need not contain the latest `master`; if it conflicts, rebase it and
+  re-push — and **re-read the sealed section afterwards**. `merge=union` means a `[Unreleased]` entry that landed
   on `master` during release prep is folded in silently rather than raising a
   conflict, so it can arrive under the wrong heading or after the section was
   already sealed.
@@ -507,8 +552,16 @@ RubyGems, and none of that can be undone.
 
 ```sh
 git switch master && git pull
+ls approval-queue.d/   # README.md alone; otherwise back to "First: ratify the approval queue"
+gh pr view <release-pr> --json mergeCommit --jq .mergeCommit.oid   # must equal:
+git rev-parse HEAD
 nix develop --command bundle exec rake release
 ```
+
+The merge queue keeps merging other PRs after the release PR, and `rake
+release` tags and builds whatever `HEAD` is. When `HEAD` is no longer the
+release PR's merge commit, stop and ask the user how to publish: the tag must
+not cover changes the sealed CHANGELOG does not.
 
 `rake release` verifies a clean working tree, tags the release as `vx.y.z`,
 pushes the tag to `origin`, publishes the gem to RubyGems, AND creates the
@@ -580,6 +633,9 @@ head state.
 
 ## Quick Checklist
 
+- The approval queue was reported to the user in their language first, every
+  entry was ratified, revised or reverted, and `approval-queue.d/` held only
+  its README on the release branch and on `master` before publishing.
 - Working tree starts clean or every pending change is understood.
 - `Rigor::VERSION` (`lib/rigor/version.rb`) and `Gemfile.lock` agree on the
   new version.

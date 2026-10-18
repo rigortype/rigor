@@ -136,6 +136,7 @@ This directory contains the Architecture Decision Records (ADRs) for Rigor. Each
 | ADR-120 | [`--incremental` as the default local `check` route](120-incremental-by-default.md) | Proposed (awaiting the maintainer; the flip waits on WD7's gates) |
 | ADR-121 | [Typing calls through Ruby refinements, and `Proc#refined`](121-ruby-refinement-typing.md) | Accepted (implemented 2026-10-10 under #1670; open: #1669 and the carry-overs) |
 | ADR-122 | [Precision-monotonic RBS refinement and layout-stable code emission](122-precision-monotonic-rbs-refinement.md) | Proposed (addresses #1487, #1488, and #1489) |
+| ADR-123 | [Merge-queue landing and post-hoc approval](123-merge-queue-and-post-hoc-approval.md) | Accepted (merge-queue ruleset on `master` enabled 2026-10-19; approval queue and its release gate landed with the ADR) |
 
 ## Adding a New ADR
 

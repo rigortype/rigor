@@ -62,7 +62,9 @@ Each of these fails silently: the command succeeds and reports something plausib
   commits land on that branch, never reach `master`, and its `Fixes` never fires. Deleting a parent
   branch closes its stacked child instead of retargeting it. So merge the parent without
   `--delete-branch`, retarget each child yourself (`gh pr edit <child> --base master`), delete the
-  parent branch only after that, then merge the child. Prove each landing against `origin/master`
+  parent branch only after the parent reads `MERGED` and its merge commit is an ancestor of
+  `origin/master` (with the merge queue, `gh pr merge` returns while the parent is still queued, and
+  deleting a queued PR's branch closes it), then merge the child. Prove each landing against `origin/master`
   (see "Cleanup after a merge" below), not by the PR state.
 - **A head ref that vanished.** When an open PR's head branch was renamed or deleted, the PR closes
   and `gh pr reopen` fails until the ref exists again: push the old SHA back to the old name, reopen,
@@ -80,6 +82,18 @@ Each of these fails silently: the command succeeds and reports something plausib
   itself is never an ancestor, and a child merged into its parent branch fails on `baseRefName`.
   Never chain the removal after `gh pr merge` with `;`: a refused merge still runs the rest of the
   line.
+- **The merge queue.** First confirm `master` has one: `gh api graphql -f query='{repository(owner:
+  "rigortype",name:"rigor"){pullRequest(number:N){isMergeQueueEnabled}}}'`. While it reads `false`,
+  `gh pr merge` merges at once and nothing tests the merged result, so do not merge a PR whose
+  branch does not contain `origin/master` (`git merge-base --is-ancestor origin/master
+  origin/<branch>` fails): stop and tell the user. With a queue, `gh pr merge N --merge` adds the PR and
+  returns before anything merges; it may warn that the queue sets the merge method. The queue runs
+  CI on a `gh-readonly-queue/master/…` ref, and a failed run removes the PR, which then stays `OPEN`
+  exactly as a queued one does. So poll, at most once a minute, `gh api graphql -f
+  query='{repository(owner:"rigortype",name:"rigor"){pullRequest(number:N){state isInMergeQueue}}}'`
+  until `state` is `MERGED`; `OPEN` with `isInMergeQueue` false means it was dropped: read the
+  failed run in `gh run list --event merge_group` and fix it on the branch. Never `gh pr merge
+  --admin`: it skips the queue and its check.
 - **Mergeability lags a push.** When `git merge-base --is-ancestor origin/master origin/<branch>`
   confirms the branch contains master, a "Head branch is out of date" refusal clears on its own;
   retry with backoff rather than merging `master` in again.
@@ -94,7 +108,8 @@ Once the change is implemented and `make verify-changed` passes:
    the head commit, not the branch (how: § "GitHub and git traps"). The changelog fragment needs the
    PR link, so it is a second push.
 2. **Start the adversarial review at the same time**, not after CI: the two are independent, and a
-   later push re-runs CI anyway. The reviewer is a fresh agent that did not write the change, on the
+   later push re-runs CI anyway, and the merge queue runs it once more on the merged result. The
+   reviewer is a fresh agent that did not write the change, on the
    strongest model the harness offers — Claude Opus 5.5 under Claude Code; elsewhere a model of that
    class, such as Claude Opus 4.6 at high effort. A harness that offers neither uses its strongest
    model at its highest effort; one that cannot start a separate agent says so in the PR and leaves
@@ -110,7 +125,8 @@ Once the change is implemented and `make verify-changed` passes:
    or answered with the reason in a PR comment like any other. Fix correctness defects and test gaps.
    Fix text and nits without calling for another round. File scope expansion as issues rather than
    growing the PR. Answer a finding you reject with the reason in a PR comment; rejecting a *severe*
-   finding is a decision for the user, so the PR stays Draft. Severity is the reviewer's ranking, not
+   finding is a serious decision (§ "Decisions and the approval queue"), so the PR stays Draft.
+   Severity is the reviewer's ranking, not
    the implementer's. Severe means what AGENTS.md's false-positive rule weighs: a diagnostic on correct
    code, a wrong inferred type, a crash, a gate that passes without checking, or guidance that would
    lead an agent into a wrong irreversible or gate-skipping action (a merge, a push, a publish, a
@@ -135,23 +151,64 @@ Once the change is implemented and `make verify-changed` passes:
    stays Draft for the user. A non-severe finding from that check is fixed only in wording or specs;
    anything that would change behaviour is filed as an issue. Other fixes made after round 3 land
    without another round.
-6. **Merge** (`gh pr ready`, then `gh pr merge --merge`) once CI is green on the head commit and the
-   review has stopped — when the landing point was settled before the work began: a
-   `ready-for-agent` issue, or a user request that states the expected outcome. A PR that changes a
-   skill also needs its `waza` review comment; until one is posted it stays Draft. When the PR instead
-   embodies a decision nobody has made, leave it Draft and put the decision to the user: a
-   `ready-for-human` issue, a trade-off between designs, an ADR, a spec edit that picks what the
-   issue left open (writing down behaviour the issue already stated is settled), or a severe finding
-   you rejected. Anything not settled by one of the former stays Draft; naming an issue adopts its
-   outcome only when it is `ready-for-agent`. A skill with its own landing rule
-   (`rigor-release-prep`, `rigor-dependency-update`) keeps that rule; the review in steps 2–5 still
-   runs.
+6. **Merge through the queue** (`gh pr ready`, then `gh pr merge --merge`, which queues it; see
+   § "GitHub and git traps") once CI is green on the head commit and the review has stopped, and
+   when the landing point is settled: a `ready-for-agent` issue, a user request that states the
+   expected outcome, or every decision the PR embodies made under § "Decisions and the approval
+   queue" below. A PR need not contain the latest `master` to be queued; the queue tests the merged
+   result. Re-push it (`bin/lane-push`) only when it is `CONFLICTING`, which starts no CI and
+   cannot enter the queue, or when the queue drops it. A PR that changes a skill also needs its
+   `waza` review comment; until one is posted it stays Draft. A PR carrying a serious decision
+   stays Draft until the user makes it. A skill with its own landing rule (`rigor-release-prep`,
+   `rigor-dependency-update`) keeps that rule; the review in steps 2–5 still runs.
+
+## Decisions and the approval queue
+
+Work regularly needs a decision nobody has made yet: a gate row, a reading the issue left open, a
+part of an issue to defer. Make the ones below the line yourself, following precedent, land them,
+and record each for the user to ratify at release time; stop and ask before landing only the
+serious ones. The reasoning is [ADR-123](../adr/123-merge-queue-and-post-hoc-approval.md).
+
+**Serious — ask the user first; the PR stays Draft until they answer:**
+
+- a release, a version bump, publishing, or anything `rake release` does;
+- a default users see change behaviour under: a rule on or off by default, a default severity, a
+  default flag or config value (#120);
+- a breaking change to a public contract: a CLI option, exit code or output format, a
+  configuration key, the plugin API;
+- a new cache format, native code, or a new runtime dependency (ADR-31);
+- a new ADR decision, or an amendment that reverses an Accepted one;
+- a gate that checks less: deleting or loosening a check, skipping the review, `--no-verify`
+  without a pre-existing issue, or an allow-list row or a residue pin moving up where no precedent
+  of the same kind exists (the same gate file, for the same kind of reason);
+- this section itself, the approval-queue gate (`spec/docs/approval_queue_spec.rb` and its CI
+  step), or the ratification step in `rigor-release-prep`;
+- repository, organisation or CI settings: required checks, rulesets, secrets, permissions;
+- rejecting a severe review finding, or a design still not converging after round 3 (§ "Landing a
+  pull request" steps 3 and 5);
+- a `ready-for-human` issue, or anything the user said to bring back to them.
+
+**Everything else — decide, land, record.** Follow the closest precedent: a ratified entry, a
+merged PR whose decision the user approved, or an ADR. An entry still waiting in the queue is not
+a precedent. Where none fits and the decision is not serious, take your own recommendation and say
+it sets a precedent; a `gate-row` never sets one, because a gate row without a precedent is
+serious. Then add an entry under
+[`approval-queue.d/`](../../approval-queue.d/README.md) in the same PR: why a decision was needed,
+the options and their trade-offs, the precedent, and how to undo it. Write it for a reader who was
+not there. Tell the user about the decision in your report as well; the entry is what remains
+when the session is gone.
+
+No entry is needed for a decision that only tightens (a residue pin moving down, a check that now
+checks more) or that writes down an outcome a `ready-for-agent` issue already stated.
 
 ## Release Cadence
 
 - The only release path is the user's explicit `/rigor-release-prep` invocation. A date or release
   goal is context only; otherwise leave versioned metadata and `[Unreleased]` untouched.
 - Never run `bundle exec rake release` without explicit authorization: it tags, pushes, and publishes.
+- A release ships only ratified decisions: `/rigor-release-prep` reports
+  [`approval-queue.d/`](../../approval-queue.d/README.md) first, and the release waits until it holds
+  nothing but its README.
 - Release prep alone changes `Rigor::VERSION`, released `CHANGELOG.md` sections, `Gemfile.lock`, and
   the README status line. Version components are single-digit and carry recursively (`0.0.9` → `0.1.0`).
 - At landing, put one user-facing sentence and its full PR link in

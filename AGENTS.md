@@ -73,9 +73,11 @@ GitHub Markdown, branch, draft-PR, changelog-fragment, release, and reporter-cre
 
 Unless the user asks otherwise or it is a small docs fix pushed straight to `master`, a change
 request ends at its landing, not at a local diff: push a Draft PR, run CI and an independent
-adversarial review in parallel, apply what they find, and merge when the landing point was settled
-in advance. The loop, its round rule, and the reviewer model are in § "Landing a pull request"
-there.
+adversarial review in parallel, apply what they find, and queue it in the merge queue when the
+landing point is settled. The loop, its round rule, and the reviewer model are in § "Landing a pull
+request" there. A decision nobody has made is yours to make by precedent unless that file's
+§ "Decisions and the approval queue" calls it serious: land it with an entry in
+[`approval-queue.d/`](approval-queue.d/README.md), which the user ratifies before the next release.
 
 ## Implementation Guidelines
 

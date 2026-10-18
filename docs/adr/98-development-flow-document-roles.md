@@ -136,6 +136,8 @@ Negative:
 
 ## Relationship to other ADRs
 
+- **[ADR-123](123-merge-queue-and-post-hoc-approval.md)** adds a fifth flow surface,
+  `approval-queue.d/`: decisions an agent made by precedent, drained by release prep.
 - **[ADR-97](97-adr-index-budgets.md)** — the sibling decision, one week
   apart: ADR-97 fixed what index *entries* may carry; this fixes what the flow
   *documents* may carry. Both rest on the same two criteria (fixed budgets for

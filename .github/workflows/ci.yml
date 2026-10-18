@@ -15,6 +15,11 @@ on:
     paths-ignore:
       - "**/*.md"
   pull_request:
+  # The merge queue on master (ADR-123) runs this workflow on each queued
+  # PR merged onto master and the entries ahead of it, and merges only when
+  # "CI required" passes there. That run is the check of what will land;
+  # the pull_request run before it is the check the review reads.
+  merge_group:
 
 # A release or feature branch is validated through its pull request (the
 # `pull_request` event), so release/** is deliberately NOT listed under
@@ -61,8 +66,8 @@ jobs:
       - name: Detect non-Markdown changes
         id: detect
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
         run: |
           # `nix` gates the Nix package build below: the paths whose change
           # can move the package's gem resolution or its derivation, plus
@@ -71,11 +76,24 @@ jobs:
           # `code` because the build is unrelated to most PRs and compiles
           # Ruby cold, so it should not run on every code PR.
           nix_inputs='^(nix/|flake\.nix$|flake\.lock$|\.github/workflows/ci\.yml$|lib/rigor/version\.rb$)'
-          if [ "${{ github.event_name }}" != "pull_request" ]; then
+          if [ "${{ github.event_name }}" != "pull_request" ] && [ "${{ github.event_name }}" != "merge_group" ]; then
             echo "Non-PR event — running the full suite."
             echo "code=true" >> "$GITHUB_OUTPUT"
             echo "nix=true" >> "$GITHUB_OUTPUT"
             exit 0
+          fi
+          # A release ships only ratified decisions (ADR-123): a change to
+          # the version, which only release prep makes, fails while
+          # approval-queue.d/ holds any entry. This runs in the merge queue
+          # too, where the release PR meets entries that landed after its
+          # own pull_request run. A diff that errors counts as a change.
+          if ! git diff --quiet "$BASE_SHA...$HEAD_SHA" -- lib/rigor/version.rb; then
+            pending=$(find approval-queue.d -type f ! -name README.md 2>/dev/null || true)
+            if [ -n "$pending" ]; then
+              echo "::error::The version may change while the approval queue holds entries; ratify, revise or revert them first (rigor-release-prep):"
+              printf '%s\n' "$pending"
+              exit 1
+            fi
           fi
           if ! changed=$(git diff --name-only "$BASE_SHA...$HEAD_SHA"); then
             echo "diff failed — failing safe to the full suite."
@@ -835,7 +853,7 @@ jobs:
   arity-differential:
     name: Arity differential
     needs: changes
-    if: github.event_name == 'pull_request' && needs.changes.outputs.code == 'true'
+    if: (github.event_name == 'pull_request' || github.event_name == 'merge_group') && needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -851,10 +869,13 @@ jobs:
           ruby-version: "4.0"
           bundler-cache: true
 
+      # In the merge queue the base is the commit the entry is queued onto
+      # and the head the queued merge, so this compares what master is
+      # about to be with and without the PR.
       - name: Compare the merge base's firings with the PR's
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
         run: |
           merge_base=$(git merge-base "$BASE_SHA" "$HEAD_SHA")
           fixtures=spec/integration/fixtures/arity_differential

@@ -79,7 +79,7 @@ per-PR file additions, which cannot conflict.*
 | `merge=union` alone (PR #500) | Falsified at the operative layer: GitHub ignores merge drivers for PR mergeability. |
 | Auto-drain bot (rebase + push each DIRTY PR) | Keeps the Θ(N) serialized CI cost, and keep-both code conflicts need human judgment — a mechanical resolver corrupted `expression_typer.rb` during this very campaign. |
 | Reconstruct entries at the cut | Re-litigates #500: wording and PR link are cheapest at landing; v0.3.6's reconstruction dominated its prep. |
-| GitHub merge queue | A CONFLICTING PR cannot enter the queue; the root cause is untouched. |
+| GitHub merge queue | A CONFLICTING PR cannot enter the queue; the root cause is untouched. (Still true for conflicts; [ADR-123](123-merge-queue-and-post-hoc-approval.md) adopts the queue for the other cost, semantic interaction between clean merges.) |
 | Commit-trailer changelog (GitLab style) | Returns link derivation to cut-time enumeration — the exact cost #500 removed. |
 
 ## Consequences

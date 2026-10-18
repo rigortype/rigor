@@ -605,9 +605,12 @@ list is the current state):
   `attr_reader` from the constructor parameter its ivar
   is assigned from (`Box.new(0)` gives
   `def count: () -> 0`) only when that assignment is the
-  ivar's only write: an attr writer, a hand-written
-  setter, or a write in any other instance method leaves
-  both reader and writer skipped. The
+  ivar's only write in the class's body in that file: an
+  attr writer, a hand-written setter, or a write in any
+  other instance method leaves both reader and writer
+  skipped. A writer declared in another file, in a
+  superclass or module, or through `class_eval` from
+  outside is not seen. The
   generator emits the long-form `def name: () -> T`
   spelling so the writer's merge path applies unchanged;
   existing short-form `attr_reader name: T` declarations

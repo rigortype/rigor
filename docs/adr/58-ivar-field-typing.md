@@ -310,7 +310,8 @@ already paid each part of it:
   `@logger = Logger.new` no longer yields `def logger: () -> Logger`,
   and `@count = 0` no longer yields `def count=: (0) -> 0`. Only an ivar
   assigned from a constructor parameter is still typed, and only under
-  `--params=observed`; since #1410 only when nothing else writes it.
+  `--params=observed`; since #1410 only when nothing else in the class's
+  own body in that file writes it.
 - **RBS-declared readers.** A writer-only ivar read before any write
   seeds `Dynamic[top] | nil`, so `def x_value = @x` against a declared
   `-> Integer` now reports `def.return-type-mismatch` ("inferred

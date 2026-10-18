@@ -116,6 +116,65 @@ RSpec.describe Rigor::CLI::SigGenCommand do
         end
         attr_reader :count
       end
+
+      class SelfAttrBox
+        def initialize(count)
+          @count = count
+        end
+        self.attr_accessor :count
+      end
+
+      class SendBox
+        def initialize(count)
+          @count = count
+        end
+        attr_reader :count
+        send(:attr_writer, :count)
+      end
+
+      class PublicSendBox
+        def initialize(count)
+          @count = count
+        end
+        attr_reader :count
+        public_send(:attr_accessor, :count)
+      end
+
+      class ShadowBox
+        def initialize(count)
+          [1].each { |count| @count = count }
+        end
+        attr_reader :count
+      end
+
+      class BlockBox
+        def initialize(count)
+          [1].each { @count = count }
+        end
+        attr_reader :count
+      end
+
+      class OpBox
+        def initialize(a, b, c, d)
+          @a = a
+          @b = b
+          @c = c
+          @d = d
+        end
+        attr_reader :a, :b, :c, :d
+        def bump = @a += 1
+        def fill = @b ||= 1
+        def keep = @c &&= 1
+        def pair = (@d, @e = 5, 6)
+      end
+
+      class TwiceBox
+        def initialize(a, b)
+          @v = a
+          @v = b
+        end
+        attr_reader :v
+      end
     RUBY
     write("test/boxes_test.rb", <<~RUBY)
       Box.new(0)
@@ -127,6 +186,13 @@ RSpec.describe Rigor::CLI::SigGenCommand do
       DefineBox.new(0)
       SetBox.new(0, "a")
       OptsBox.new(0, {})
+      SelfAttrBox.new(0)
+      SendBox.new(0)
+      PublicSendBox.new(0)
+      ShadowBox.new("s")
+      BlockBox.new(0)
+      OpBox.new(0, 0, 0, 0)
+      TwiceBox.new(0, 1)
     RUBY
   end
 
@@ -173,6 +239,35 @@ RSpec.describe Rigor::CLI::SigGenCommand do
 
   it "skips every observed reader of a class whose instance_variable_set name is computed" do
     expect(section(observed_print, "OptsBox")).not_to include("def count:")
+  end
+
+  it "skips a self.attr_accessor" do
+    expect(section(observed_print, "SelfAttrBox")).not_to include("def count")
+  end
+
+  it "skips a reader whose writer is declared through send or public_send" do
+    out = observed_print
+
+    expect(section(out, "SendBox")).not_to include("def count:")
+    expect(section(out, "PublicSendBox")).not_to include("def count")
+  end
+
+  it "does not credit a block parameter that shadows the constructor parameter" do
+    expect(section(observed_print, "ShadowBox")).not_to include("def count:")
+  end
+
+  it "credits the constructor parameter read from inside a block" do
+    expect(section(observed_print, "BlockBox")).to include("def count: () -> 0")
+  end
+
+  it "skips readers of fields an op-assign or multiple assignment in another method writes" do
+    op_box = section(observed_print, "OpBox")
+
+    expect(op_box).not_to match(/def [abcd]: /)
+  end
+
+  it "skips a reader of a field initialize writes twice" do
+    expect(section(observed_print, "TwiceBox")).not_to include("def v:")
   end
 
   # Guard: without observations nothing reaches the observed-ivar map, before or after #1410.

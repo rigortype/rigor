@@ -1935,14 +1935,29 @@ module Rigor
         node.rigor_each_child { |child| collect_other_ivar_writes(child, prefix, in_block, other_writes) }
       end
 
-      # An implicit-self `attr_writer` / `attr_accessor`'s ivars, or the ivar a write in a block sets.
+      # The ivars an `attr_writer` / `attr_accessor` on `self` names, or the ivar a write in a block sets.
       def record_class_level_write(node, prefix, in_block, other_writes)
         writes = other_writes[prefix.join("::")]
-        if node.is_a?(Prism::CallNode) && node.receiver.nil? && %i[attr_writer attr_accessor].include?(node.name)
-          Source::Literals.symbol_arguments(node).each { |name| writes << :"@#{name}" }
-        end
+        attr_writer_names(node).each { |name| writes << :"@#{name}" }
         name = written_ivar(node) if in_block
         writes << name if name
+      end
+
+      ATTR_WRITER_DECLARATIONS = %i[attr_writer attr_accessor].freeze
+      SEND_NAMES = %i[send public_send __send__].freeze
+      private_constant :ATTR_WRITER_DECLARATIONS, :SEND_NAMES
+
+      # The literal names `attr_writer :x` / `attr_accessor :x` declares when called on `self`, implicitly or as
+      # `self.`, or through `send` / `public_send` / `__send__` with the declaration's name as a literal first
+      # argument (`send(:attr_writer, :x)`). Any other call declares none this check sees.
+      def attr_writer_names(node)
+        return [] unless node.is_a?(Prism::CallNode) && (node.receiver.nil? || node.receiver.is_a?(Prism::SelfNode))
+
+        names = Source::Literals.symbol_arguments(node)
+        return names if ATTR_WRITER_DECLARATIONS.include?(node.name)
+        return [] unless SEND_NAMES.include?(node.name)
+
+        ATTR_WRITER_DECLARATIONS.include?(Source::Literals.symbol_arg(node, 0)) ? names.drop(1) : []
       end
 
       # Every ivar write in an instance `def` counts, except, in `initialize`, the `@ivar = param_name` write
@@ -1950,17 +1965,14 @@ module Rigor
       def record_def_ivar_writes(def_node, prefix, other_writes)
         return if def_node.body.nil? || def_node.receiver || prefix.empty?
 
-        observed = {}
+        credited = Set.new.compare_by_identity
         if def_node.name == :initialize && def_node.parameters
-          scan_ivar_param_assignments(def_node.body, build_init_param_index(def_node.parameters).keys.to_set, observed)
+          params = build_init_param_index(def_node.parameters).keys.to_set
+          scan_ivar_param_assignments(def_node.body, params, {}, credited)
         end
         each_node(def_node.body) do |node|
           name = written_ivar(node)
-          next if name.nil?
-          next if node.is_a?(Prism::InstanceVariableWriteNode) && node.value.is_a?(Prism::LocalVariableReadNode) &&
-                  observed[name] == node.value.name
-
-          other_writes[prefix.join("::")] << name
+          other_writes[prefix.join("::")] << name if name && !credited.include?(node)
         end
       end
 
@@ -2063,21 +2075,29 @@ module Rigor
 
       # Walk a def body for direct `@ivar = local_var` assignments where `local_var` is one of the listed
       # parameter names. Records ivar_name (Symbol with `@` prefix) → param_name. Does not recurse into nested
-      # defs / classes / modules.
-      def scan_ivar_param_assignments(node, param_names, result)
+      # defs / classes / modules. A read counts only when it reaches the method's own parameter: its
+      # `LocalVariableReadNode#depth` equals the number of blocks / lambdas between it and the method, so a
+      # block parameter of the same name (`each { |count| @count = count }`) is not the constructor argument
+      # (#1410). `credited`, when given, collects every write node the result is keyed on.
+      def scan_ivar_param_assignments(node, param_names, result, credited = nil, scopes = 0)
         return unless node.is_a?(Prism::Node)
 
-        if node.is_a?(Prism::InstanceVariableWriteNode) &&
-           node.value.is_a?(Prism::LocalVariableReadNode) &&
-           param_names.include?(node.value.name)
+        if param_assignment?(node, param_names, scopes)
           result[node.name] ||= node.value.name
+          credited << node if credited && result[node.name] == node.value.name
         end
 
         return if node.is_a?(Prism::DefNode) ||
                   node.is_a?(Prism::ClassNode) ||
                   node.is_a?(Prism::ModuleNode)
 
-        node.rigor_each_child { |c| scan_ivar_param_assignments(c, param_names, result) }
+        scopes += 1 if node.is_a?(Prism::BlockNode) || node.is_a?(Prism::LambdaNode)
+        node.rigor_each_child { |c| scan_ivar_param_assignments(c, param_names, result, credited, scopes) }
+      end
+
+      def param_assignment?(node, param_names, scopes)
+        node.is_a?(Prism::InstanceVariableWriteNode) && node.value.is_a?(Prism::LocalVariableReadNode) &&
+          node.value.depth == scopes && param_names.include?(node.value.name)
       end
 
       def build_attr_candidates(call_name, class_name, attr_name, ivar_type, ctx)

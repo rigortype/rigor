@@ -679,10 +679,14 @@ module Rigor
           case method_name
           when :to_a, :entries then range_to_a_tuple(range)
           # #2115 — `Range#min` / `#max` / `#minmax` / `#size` are O(1) on Integer endpoints in CRuby, so
-          # none of these materialises the range. `first` / `last` keep the element reading (`nil` when
-          # empty, the last element before an exclusive end) they had when they read `to_a`.
-          when :first, :min then Type::Combinator.constant_of(range.min)
-          when :last, :max then Type::Combinator.constant_of(range.max)
+          # none of these materialises the range. The no-arg `first` / `last` read the endpoints, not the
+          # elements: `first` is `begin` and `last` is `end` whether the range is empty, reversed or
+          # exclusive (`(5..1).first` is 5, `(1...10).last` is 10). Only `min` / `max` depend on emptiness
+          # and exclusivity (`(5..1).min` is nil, `(1...10).max` is 9).
+          when :first then Type::Combinator.constant_of(range.begin)
+          when :last then Type::Combinator.constant_of(range.end)
+          when :min then Type::Combinator.constant_of(range.min)
+          when :max then Type::Combinator.constant_of(range.max)
           when :count, :size, :length then Type::Combinator.constant_of(range.size)
           when :minmax then Type::Combinator.tuple_of(*range.minmax.map { |v| Type::Combinator.constant_of(v) })
           # `range.sum` is closed-form (Gauss) for an integer range, so a huge range still costs O(1) and

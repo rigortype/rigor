@@ -63,12 +63,23 @@ RSpec.describe "Return arms of a repeating block", type: :runner do
 
   {
     "times" => "5.times { return :ret if (n += 1) > 5 }",
-    "a nested block" => "ARGV.each { [1, 2].each { return :ret if (n += 1) > 5 } }",
     "Kernel#loop" => "loop { return :ret if (n += 1) > 5 }"
   }.each do |label, block|
     it "joins the arm of #{label}" do
       expect(dumped_type("def m\n  n = 0\n  #{block}\n  :fall\nend\ndump_type(m)")).to eq(":fall | :ret")
     end
+  end
+
+  # A guard: the passes over the nested block already reached this arm before the fix.
+  it "joins the arm of a nested block" do
+    expect(dumped_type(<<~RUBY)).to eq(":fall | :ret")
+      def m
+        n = 0
+        ARGV.each { [1, 2].each { return :ret if (n += 1) > 5 } }
+        :fall
+      end
+      dump_type(m)
+    RUBY
   end
 
   it "joins a bare return as nil" do

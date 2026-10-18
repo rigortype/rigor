@@ -70,4 +70,33 @@ RSpec.describe Rigor::Inference::ProjectPatchedMethods do
       expect(described_class::EMPTY.empty?).to be(true)
     end
   end
+
+  # Issue #1708 — Ruby raises ArgumentError (cyclic include detected) at `module B; include A; end` once A includes B,
+  # but the scanner records both edges, so the walk must end.
+  describe "#lookup_through_ancestors with an include cycle" do
+    it "finds the module's method without recursing forever" do
+      mixin = ->(owner, name) { described_class::Mixin.new(owner: owner, module_name: name, kind: :include) }
+      registry = described_class.new(
+        entries: [entry_klass.new(class_name: "B", method_name: :bm, kind: :instance, source_path: "b.rb",
+                                  source_line: 1)],
+        mixins: [mixin.call("Foo", "A"), mixin.call("A", "B"), mixin.call("B", "A")]
+      )
+
+      expect(registry.lookup_through_ancestors(class_name: "Foo", method_name: :bm, kind: :instance, rbs_loader: nil)
+                     &.class_name).to eq("B")
+    end
+
+    # Ruby raises ArgumentError (cyclic prepend detected) at the second prepend, as for the include cycle above.
+    it "finds the module's method through a prepend cycle without recursing forever" do
+      prepend = ->(owner, name) { described_class::Mixin.new(owner: owner, module_name: name, kind: :prepend) }
+      registry = described_class.new(
+        entries: [entry_klass.new(class_name: "B", method_name: :bm, kind: :instance, source_path: "b.rb",
+                                  source_line: 1)],
+        mixins: [prepend.call("Foo", "A"), prepend.call("A", "B"), prepend.call("B", "A")]
+      )
+
+      expect(registry.lookup_through_ancestors(class_name: "Foo", method_name: :bm, kind: :instance, rbs_loader: nil)
+                     &.class_name).to eq("B")
+    end
+  end
 end

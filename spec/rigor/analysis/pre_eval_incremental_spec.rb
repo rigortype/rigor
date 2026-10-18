@@ -95,6 +95,33 @@ RSpec.describe "pre_eval and auto-detected sig — incremental fingerprint" do
     end
   end
 
+  # Ruby 4.0.5: `1.kp` raises NoMethodError once `kp` is private, and `1.inc_m` runs once Numeric includes NumExt.
+  describe "a pre_eval: file's visibility and mixins (#1708)" do
+    it "re-checks when only a visibility or an include changes, matching a cold run" do
+      Dir.mktmpdir do |tmp|
+        lib = File.join(tmp, "lib")
+        support = File.join(tmp, "support")
+        Dir.mkdir(lib)
+        Dir.mkdir(support)
+        pre = File.join(support, "pre.rb")
+        File.write(File.join(lib, "a.rb"), "1.kp\n1.inc_m\n")
+        File.write(pre, "module Kernel; def kp = 1; end\nmodule NumExt; def inc_m = :inc; end\n")
+
+        config = Rigor::Configuration.new("paths" => [lib], "pre_eval" => [pre])
+        snapshot = Rigor::Cache::IncrementalSnapshot.new(root: File.join(tmp, ".cache"))
+
+        diags1, = process_run(config, [lib], snapshot: snapshot, fingerprint: fingerprint(config, [lib]))
+        expect(diags1).to eq([["a.rb", 2]])
+
+        File.write(pre, "module Kernel; private def kp = 1; end\nmodule NumExt; def inc_m = :inc; end\n" \
+                        "Numeric.include(NumExt)\n")
+        diags2, = process_run(config, [lib], snapshot: snapshot, fingerprint: fingerprint(config, [lib]))
+        expect(diags2).to eq(cold_run(config))
+        expect(diags2).to eq([["a.rb", 1]])
+      end
+    end
+  end
+
   describe "an auto-detected sig/ directory (#1554)" do
     it "re-checks when the auto-detected sig/*.rbs changes, matching a cold run" do
       Dir.mktmpdir do |tmp|

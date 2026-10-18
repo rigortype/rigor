@@ -636,6 +636,39 @@ RSpec.describe Rigor::Inference::MethodDispatcher do
 
         expect(result).to be_nil
       end
+
+      # Ruby 4.0.5: `1.kp` raises NoMethodError (private method 'kp' called for an instance of Integer) under
+      # `module Kernel; private def kp`, as `1.ip` does under `class Integer; private def ip`, and `1.np` (protected)
+      # does at the top level; `self.kp` and a bare `kp` run.
+      describe "a patch's visibility" do
+        def call_node(source) = Prism.parse(source).value.statements.body.first
+
+        def dispatch_at(entries, name, source)
+          env = Rigor::Environment.for_project(
+            project_patched_methods: Rigor::Inference::ProjectPatchedMethods.new(entries: entries)
+          )
+          described_class.dispatch(receiver_type: integer, method_name: name, arg_types: [], environment: env,
+                                   call_node: call_node(source), scope: Rigor::Scope.empty(environment: env))
+        end
+
+        let(:entries) do
+          [patch("Kernel", :kp, :kernel).with(visibility: :private),
+           patch("Integer", :ip, :own).with(visibility: :private),
+           patch("Numeric", :np, :numeric).with(visibility: :protected)]
+        end
+
+        it "does not answer a private or protected patch on an explicit receiver" do
+          expect([dispatch_at(entries, :kp, "1.kp"), dispatch_at(entries, :ip, "1.ip"),
+                  dispatch_at(entries, :np, "1.np")])
+            .to eq([nil, nil, nil])
+        end
+
+        it "answers a private patch on self or no receiver" do
+          expect([dispatch_at(entries, :kp, "self.kp"), dispatch_at(entries, :kp, "kp"),
+                  dispatch_at(entries, :ip, "ip")])
+            .to eq([patched(:kernel), patched(:kernel), patched(:own)])
+        end
+      end
     end
 
     describe "boundary-cross recording on RBS dispatch (ADR-10 slice 5c)" do

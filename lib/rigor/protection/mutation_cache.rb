@@ -209,7 +209,13 @@ module Rigor
         def table_digest(project_scan)
           payload = {
             "synthetic" => project_scan.synthetic_method_index.to_h,
-            "patched" => patched_rows(project_scan.project_patched_methods)
+            "patched" => patched_rows(project_scan.project_patched_methods),
+            "patched_mixins" => project_scan.project_patched_methods.mixins.map do |mixin|
+              mixin.to_h.values.map(&:to_s)
+            end,
+            "patched_overrides" => project_scan.project_patched_methods.overrides.map do |key, visibility|
+              [*key, visibility].map(&:to_s)
+            end
           }
           Digest::SHA256.hexdigest(JSON.generate(payload))
         rescue StandardError
@@ -221,7 +227,7 @@ module Rigor
         def patched_rows(patched)
           patched.by_key.map do |(class_name, method_name, kind), entry|
             [class_name.to_s, method_name.to_s, kind.to_s, entry.source_path.to_s, entry.source_line,
-             entry.return_type&.describe(:short).to_s, entry.alias_of.to_s]
+             entry.return_type&.describe(:short).to_s, entry.alias_of.to_s, entry.visibility.to_s]
           end.sort
         end
 

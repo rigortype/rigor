@@ -4,6 +4,8 @@ require "prism"
 
 require_relative "project_patched_methods"
 require_relative "project_patched_definedness_guard"
+require_relative "project_patched_visibility"
+require_relative "project_patched_mixins"
 require_relative "../analysis/dependency_source_inference/return_type_heuristic"
 require_relative "../source/alias_names"
 require_relative "../source/constant_path"
@@ -20,7 +22,7 @@ module Rigor
     # only needs `class C; def m; end; end` shape recognition, not full inference. Parse errors degrade
     # to a fail-soft `:warning` `pre-eval.parse-error` diagnostic accumulated alongside the registry;
     # per ADR-17 § "Failure modes" a parse failure in a pre-eval file MUST NOT abort the rest of the run.
-    module ProjectPatchedScanner
+    module ProjectPatchedScanner # rubocop:disable Metrics/ModuleLength
       # Frozen scan outcome carrying the populated registry and the per-file warnings the runner emits
       # at run start.
       class Result < Data.define(:registry, :diagnostics)
@@ -57,10 +59,13 @@ module Rigor
         diagnostics = []
         census = Set.new
         paths.each { |path| scan_file(path, collected, diagnostics, buffer, census) }
-        entries = resolve_aliases(collected)
+        pending_mixins, collected = collected.partition { |item| item.is_a?(Mixins::Pending) }
+        overrides = {}
+        entries = resolve_aliases(collected, overrides)
         diagnostics.concat(duplicate_declaration_diagnostics(entries))
         Result.new(
-          registry: ProjectPatchedMethods.new(entries: entries, write_census: census.freeze),
+          registry: ProjectPatchedMethods.new(entries: entries, write_census: census.freeze, overrides: overrides,
+                                              mixins: Mixins.resolve(pending_mixins, entries)),
           diagnostics: diagnostics
         )
       end
@@ -105,32 +110,50 @@ module Rigor
       # idiom (`def foo`, `alias_method :foo_without_x, :foo`, `alias_method :foo, :foo_with_x`) leaves `foo` the
       # alias. Bindings of one name in DIFFERENT files are what `pre-eval.duplicate-declaration` reports, and the
       # registry keeps the last of those, as Ruby does.
-      def resolve_aliases(collected)
+      #
+      # A {Visibility::Pending} (issue #1708) changes the visibility of the binding its name has when it runs, in the
+      # file that bound it, so it is not a second declaration; a name no earlier patch binds on the class is one it
+      # inherits, recorded in `overrides` ({Visibility.apply}). `module_function :x` also binds the public singleton
+      # copy.
+      def resolve_aliases(collected, overrides = {})
         bound = {}
+        homes = {}
         per_file = collected.group_by(&:source_path).values.map do |items|
           final = {}
           items.each do |item|
+            if item.is_a?(Visibility::Pending)
+              next Visibility.apply(item, bound, homes, overrides) { |copy| bind(copy, bound, homes, final) }
+            end
+
             entry = item.is_a?(PendingAlias) ? alias_entry(item, bound) : item
             entry = entry.entry if entry.is_a?(GuardedDef)
             key = [entry.class_name, entry.method_name, entry.kind]
             next if item.is_a?(GuardedDef) && bound.key?(key)
 
-            bound[key] = entry
-            final.delete(key)
-            final[key] = entry
+            bind(entry, bound, homes, final)
           end
-          final.values
+          final
         end
-        per_file.flatten(1)
+        per_file.flat_map(&:values)
       end
       private_class_method :resolve_aliases
+
+      def bind(entry, bound, homes, final)
+        key = [entry.class_name, entry.method_name, entry.kind]
+        bound[key] = entry
+        homes[key] = final
+        final.delete(key)
+        final[key] = entry
+      end
+      private_class_method :bind
 
       def alias_entry(item, bound)
         target = bound[[item.class_name, item.old_name, item.kind]]
         ProjectPatchedMethods::Entry.new(
           class_name: item.class_name, method_name: item.new_name, kind: item.kind,
           source_path: item.source_path, source_line: item.source_line,
-          return_type: target&.return_type, alias_of: target ? target.alias_of : item.old_name
+          return_type: target&.return_type, alias_of: target ? target.alias_of : item.old_name,
+          visibility: target ? target.visibility : :public
         )
       end
       private_class_method :alias_entry
@@ -148,8 +171,7 @@ module Rigor
           return
         end
 
-        Thread.current[:rigor_guarded_defs] = DefinednessGuard.defs(parse_result.value)
-        walk_node(parse_result.value, [], false, path, entries)
+        walk_file(parse_result.value, path, entries)
         # Issue #1367 — the file's `global.*` write facts: a patch file may alias a special or give a class the
         # method a setter asks for, as any project file may.
         census.merge(GlobalWriteCensus.scan(parse_result.value))
@@ -164,8 +186,18 @@ module Rigor
         )
       ensure
         Thread.current[:rigor_guarded_defs] = nil
+        Thread.current[:rigor_def_visibilities] = nil
       end
       private_class_method :scan_file
+
+      # Walks one parsed file with its definedness guards and `def` visibilities (issue #1708) in reach of
+      # {record_def_node}.
+      def walk_file(root, path, entries)
+        Thread.current[:rigor_guarded_defs] = DefinednessGuard.defs(root)
+        Thread.current[:rigor_def_visibilities] = Visibility.defs(root)
+        walk_node(root, [], false, path, entries)
+      end
+      private_class_method :walk_file
 
       def parse_error_diagnostic(path, errors)
         first = errors.first
@@ -205,6 +237,11 @@ module Rigor
         when Prism::CallNode
           record_alias(node, Source::AliasNames.alias_method_call_names(node), qualified_prefix,
                        in_singleton_class, source_path, entries)
+          if Thread.current[:rigor_def_visibilities]&.[](node).equal?(Visibility::STATEMENT)
+            pending = Visibility.pending(node, qualified_prefix, in_singleton_class, source_path)
+            entries << pending if pending
+            entries.concat(Mixins.pending(node, qualified_prefix, in_singleton_class))
+          end
           walk_children(node, qualified_prefix, in_singleton_class, source_path, entries)
         else
           walk_children(node, qualified_prefix, in_singleton_class, source_path, entries)
@@ -251,7 +288,9 @@ module Rigor
           source_path: source_path, source_line: line,
           return_type: return_type
         )
+        entry, *copies = Visibility.applied(entry, Thread.current[:rigor_def_visibilities]&.[](node) || :public)
         entries << (Thread.current[:rigor_guarded_defs]&.key?(node) ? GuardedDef.new(entry: entry) : entry)
+        entries.concat(copies)
       end
       private_class_method :record_def_node
 

@@ -220,7 +220,8 @@ module Rigor
         # `call.undefined-method`.
         patched_result =
           unless skip_project_patched
-            try_project_patched_method(receiver_type, method_name, arg_types, block_type, environment)
+            try_project_patched_method(receiver_type, method_name, arg_types, block_type, environment,
+                                       call_node: call_node, scope: scope)
           end
         if patched_result
           scope&.record_dynamic_origin(call_node, DynamicOrigin::EXTERNAL_GEM_WITHOUT_RBS)
@@ -267,7 +268,7 @@ module Rigor
         ancestor_patched =
           if !skip_project_patched && scope
             try_project_patched_method(receiver_type, method_name, arg_types, block_type, environment,
-                                       through_ancestors: scope)
+                                       call_node: call_node, scope: scope, through_ancestors: true)
           end
         if ancestor_patched
           scope&.record_dynamic_origin(call_node, DynamicOrigin::EXTERNAL_GEM_WITHOUT_RBS)
@@ -661,10 +662,12 @@ module Rigor
       # `Dynamic[Nominal[String]]` instead of the pre-3a `Dynamic[Top]`. Falls back to
       # `Dynamic[Top]` when the heuristic declined (non-literal tail expression).
       #
-      # `through_ancestors:` (issue #1708), a scope, searches the receiver's ancestors as well, through
-      # {ProjectPatchedMethods#lookup_through_ancestors}, stopping at a nearer project-source `def`.
-      def try_project_patched_method(receiver_type, method_name, arg_types, block_type, environment,
-                                     through_ancestors: nil)
+      # `through_ancestors:` (issue #1708), with a scope, searches the receiver's ancestors as well, through
+      # {ProjectPatchedMethods#lookup_through_ancestors}, stopping at a nearer project-source `def`. A private or
+      # protected patch Ruby would not let the call reach ({ProjectPatchedMethods#callable?}) answers nothing, so
+      # `1.kp` on `module Kernel; private def kp` reads as the undefined call it is.
+      def try_project_patched_method(receiver_type, method_name, arg_types, block_type, environment, # rubocop:disable Metrics/ParameterLists
+                                     call_node: nil, scope: nil, through_ancestors: false)
         registry = environment&.project_patched_methods
         return nil if registry.nil? || registry.empty?
 
@@ -672,20 +675,28 @@ module Rigor
         return nil if class_name.nil?
 
         kind = receiver_type.is_a?(Type::Singleton) ? :singleton : :instance
-        entry =
-          if through_ancestors
-            registry.lookup_through_ancestors(
-              class_name: class_name, method_name: method_name, kind: kind, rbs_loader: environment.rbs_loader,
-              source_defines: ->(owner, side) { project_source_defines?(through_ancestors, owner, method_name, side) }
-            )
-          else
-            registry.lookup(class_name: class_name, method_name: method_name, kind: kind)
-          end
+        entry = project_patched_entry(registry, class_name, method_name, kind, environment,
+                                      scope: scope, through_ancestors: through_ancestors)
         return nil if entry.nil?
+
+        verdict = registry.callable?(entry, explicit: explicit_non_self_receiver?(call_node),
+                                            self_type: scope ? scope.self_type : :unknown,
+                                            rbs_loader: environment.rbs_loader)
+        return nil if verdict == false
+        return Type::Combinator.untyped if verdict.nil?
         return Type::Combinator.dynamic(entry.return_type) if entry.return_type
 
         aliased = project_patched_alias_target(entry, receiver_type, arg_types, block_type, environment)
         aliased ? Type::Combinator.dynamic(aliased) : Type::Combinator.untyped
+      end
+
+      def project_patched_entry(registry, class_name, method_name, kind, environment, scope:, through_ancestors:)
+        return registry.lookup(class_name: class_name, method_name: method_name, kind: kind) unless through_ancestors
+
+        registry.lookup_through_ancestors(
+          class_name: class_name, method_name: method_name, kind: kind, rbs_loader: environment.rbs_loader,
+          source_defines: ->(owner, side) { project_source_defines?(scope, owner, method_name, side) }
+        )
       end
 
       # Issue #1708 — does the project's own source define `method_name` on `owner` (`side` as the ancestor walk

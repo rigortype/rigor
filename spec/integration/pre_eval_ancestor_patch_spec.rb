@@ -149,12 +149,151 @@ RSpec.describe "a pre_eval: patch on an ancestor reaches its descendants (#1708)
     end
   end
 
-  # Flip this when the pre_eval: scanner records visibility (review of #2098): Ruby raises NoMethodError
-  # (private method 'kp' called for an instance of Integer), and before #1708 the call reported.
-  it "does not yet report a private patch on Kernel called with an explicit receiver" do
-    result = run_project("ext/core.rb" => "module Kernel; private def kp = 1; end\n", "lib/a.rb" => "1.kp\n")
+  # Review of #2098 — a private, protected or module_function patch answers only the calls Ruby lets reach it. Each
+  # Ruby 4.0.5 witness is the comment beside its call; before #1708 the explicit-receiver calls reported, and #2098
+  # had made the ancestor walk accept them.
+  describe "a patch's visibility" do
+    let(:visibility_patch) { <<~RUBY }
+      module Kernel; private def kp = 1; end
+      class Object; private def pz = 1; end
+      module Kernel; module_function def kmf = 3; end
+      class Numeric; protected def np = 2; end
+      class Object; def pq = 1; private :pq; end
+      class Numeric; private; def nprv = 1; end
+      class Integer; private def ip = 1; end
+    RUBY
 
-    expect(rules(result)).to eq([])
+    it "reports a private, protected or module_function patch called with an explicit receiver" do
+      result = run_project("ext/core.rb" => visibility_patch, "lib/a.rb" => <<~RUBY)
+        1.kp     # NoMethodError: private method 'kp' called for an instance of Integer
+        1.pz     # NoMethodError: private method 'pz'
+        1.kmf    # NoMethodError: private method 'kmf'
+        1.np     # NoMethodError: protected method 'np' (main is no Numeric)
+        "a".pq   # NoMethodError: private method 'pq' (private :pq after the def)
+        1.5.nprv # NoMethodError: private method 'nprv' (a def after a bare private)
+        1.ip     # NoMethodError: private method 'ip' (the receiver's own class)
+      RUBY
+
+      expect(rules(result)).to eq((1..7).map { |line| ["a.rb", line, "call.undefined-method"] })
+    end
+
+    # Partial guard: without the fix every call here is answered too; it fails only if self. or a bare call is read as
+    # an explicit receiver, or the protected owner check refuses an instance of the owner.
+    it "does not report the same patches called on self, or protected from an instance of the owner" do
+      result = run_project("ext/core.rb" => visibility_patch, "lib/a.rb" => <<~RUBY)
+        kp         # => 1
+        kmf        # => 3
+        Kernel.kmf # => 3, module_function's public singleton copy
+        self.pz    # => 1
+        class Integer
+          def gi = [2.np, nprv, ip, self.kp] # => [2, 1, 1, 1]
+        end
+      RUBY
+
+      expect(rules(result)).to eq([])
+    end
+
+    it "follows the binding Ruby calls: a nearer public patch, a later public :x, and an alias's own visibility" do
+      result = run_project("ext/core.rb" => <<~PATCH, "lib/a.rb" => <<~RUBY)
+        module Kernel; private def ov = 1; end
+        class Object; def ov = 2; end
+        class Object; private def q = 1; end
+        class Object; public :q; end
+        class Object; private; def a1 = 1; alias b1 a1; end
+        class Object; def a2 = 1; private; alias b2 a2; end
+      PATCH
+        1.ov # => 2
+        1.q  # => 1
+        1.b2 # => 1, an alias keeps a2's public visibility
+        1.b1 # NoMethodError: private method 'b1', as a1 is
+      RUBY
+
+      expect(rules(result)).to eq([["a.rb", 4, "call.undefined-method"]])
+    end
+
+    # Ruby raises NoMethodError (protected method 'np' called for an instance of Integer): `Foo` is no Numeric. Guard:
+    # a class RBS does not know may be anything, so a protected patch answers a call from it; it passes without the fix.
+    it "does not report a protected patch called from a class RBS does not know" do
+      result = run_project("ext/core.rb" => visibility_patch, "lib/a.rb" => "class Foo; def go = 1.np; end\n")
+
+      expect(rules(result)).to eq([])
+    end
+
+    # Review of #2107 — a named call that may not run, or that runs on another class, changes nothing.
+    it "applies a named visibility call only where it runs on the body's class" do
+      result = run_project("ext/core.rb" => <<~PATCH, "lib/a.rb" => <<~RUBY)
+        class Array; def ax = 1; private :ax if ENV["NEVER_SET_X"]; end
+        class Array; def ay = 2; Helper = Class.new(Array) do private :ay end; end
+        class String; def sz = 3; define_method(:dm) { private :sz }; end
+      PATCH
+        [1].ax # => 1
+        [1].ay # => 2, the private :ay made Helper#ay private
+        "a".sz # => 3
+      RUBY
+
+      expect(rules(result)).to eq([])
+    end
+
+    # Review of #2107 — a class body nested in a conditional may not run, so neither its named call nor its toggle
+    # applies. Ruby: the condition is false, so `1.bx` and `1.by` are 1.
+    it "does not apply the visibility a class body nested in a conditional gives" do
+      result = run_project({ "ext/a.rb" => "class Integer; def bx = 1; def by = 1; end\n", "ext/b.rb" => <<~PATCH,
+        if ENV["NEVER_SET_B"]; class Integer; private :bx; end; end
+        if ENV["NEVER_SET_B"]; class Integer; private; def by = 2; end; end
+      PATCH
+                             "lib/a.rb" => "1.bx # => 1\n1.by # => 1\n" }, { "pre_eval" => ["ext/a.rb", "ext/b.rb"] })
+
+      # b.rb's `def by` is still a pre-eval.duplicate-declaration of a.rb's; only the call diagnostics are asserted.
+      expect(rules(result).reject { |_, _, rule| rule.start_with?("pre-eval.") }).to eq([])
+    end
+
+    # Ruby: `Integer.include(A)` after `Numeric.include(A)` changes nothing, so `1.am` reaches Numeric#am (2). The walk
+    # splices A after Integer, ahead of Numeric#am, so it declines rather than refuses the private A#am.
+    it "declines rather than refuses a private patch when another definer on the chain may answer" do
+      result = run_project("ext/core.rb" => <<~PATCH, "lib/a.rb" => "1.am # => 2\n")
+        module A; private def am = 1; end
+        class Numeric; def am = 2; end
+        Numeric.include(A); Integer.include(A)
+      PATCH
+
+      expect(rules(result)).to eq([])
+    end
+
+    # Ruby: Integer's `public :oz` is the nearest copy, so `1.oz` is 1; `1.po` raises NoMethodError (protected method
+    # 'po'), as the copy Numeric's `protected :po` makes belongs to Numeric and main is no Numeric; `1.bm` raises
+    # NoMethodError (private method 'bm'), the copy `module_function :bm` makes in Mf2.
+    it "applies the nearest override, with its own owner and module_function as private" do
+      result = run_project("ext/core.rb" => <<~PATCH, "lib/a.rb" => "1.oz\n1.po\n1.bm\n")
+        class Object; def oz = 1; end
+        class Numeric; private :oz; end
+        class Integer; public :oz; end
+        class Object; def po = 1; end
+        class Numeric; protected :po; end
+        module Base; def bm = 1; end
+        module Mf2; include Base; module_function :bm; end
+        class Numeric; include Mf2; end
+      PATCH
+
+      expect(rules(result)).to eq([["a.rb", 2, "call.undefined-method"], ["a.rb", 3, "call.undefined-method"]])
+    end
+
+    # Ruby copies the inherited method onto the class with the visibility the call names.
+    it "gives a class's named public call precedence over the private patch it inherits" do
+      result = run_project("ext/core.rb" => <<~PATCH, "lib/a.rb" => "1.kp2 # => 1\n1.hid # => 2\n")
+        module Kernel; private def kp2 = 1; end
+        class Integer; public :kp2; end
+        module Hid; private def hid = 2; end
+        class Numeric; include Hid; public :hid; end
+      PATCH
+
+      expect(rules(result)).to eq([])
+    end
+
+    it "reports under the fork pool" do
+      result = run_project({ "ext/core.rb" => visibility_patch, "lib/a.rb" => "1.kp\n1.np\n" }, { "workers" => 2 })
+
+      expect(rules(result)).to eq([["a.rb", 1, "call.undefined-method"], ["a.rb", 2, "call.undefined-method"]])
+    end
   end
 
   describe "a module a pre_eval: file mixes into an ancestor" do
@@ -175,11 +314,114 @@ RSpec.describe "a pre_eval: patch on an ancestor reaches its descendants (#1708)
       expect(rules(result)).to eq([])
     end
 
-    # Flip this when the pre_eval: scanner records `include` / `prepend` edges (#1708): Ruby runs both calls.
-    it "is still reported when the pre_eval: file is outside the analysed paths" do
+    it "is not reported when the pre_eval: file is outside the analysed paths" do
       result = run_project("ext/core.rb" => mixin_patch, "lib/a.rb" => mixin_calls)
 
-      expect(rules(result)).to eq([["a.rb", 1, "call.undefined-method"], ["a.rb", 2, "call.undefined-method"]])
+      expect(rules(result)).to eq([])
+    end
+
+    it "reaches the module through every spelling and owner" do
+      result = run_project({ "ext/core.rb" => <<~PATCH, "ext/mods.rb" => <<~MODS, "lib/a.rb" => <<~RUBY },
+        class Numeric; include InBody; end
+        Comparable.include(CmpExt)
+        Object.include(ObjExt)
+        module Outer; module Inner; def inner_m = :inner; end; ::Numeric.include(Inner); end
+      PATCH
+        module InBody; def body_m = :body; end
+        module CmpExt; def cmp_m = :cmp; end
+        module ObjExt; def obj_m = :obj; end
+      MODS
+        1.body_m    # => :body
+        1.5.body_m  # => :body
+        1.cmp_m     # => :cmp
+        "a".cmp_m   # => :cmp
+        [1].obj_m   # => :obj
+        Integer.obj_m # => :obj, Integer is an Object
+        rand(3).inner_m # => :inner
+      RUBY
+                           { "pre_eval" => ["ext/mods.rb", "ext/core.rb"] })
+
+      expect(rules(result)).to eq([])
+    end
+
+    # Ruby: P#pm runs ahead of Numeric#pm, and Numeric#im ahead of I#im, so each `res` is "s" and `res.upcase` runs.
+    # Read in the wrong order, the other method's nil makes `res` 1.
+    it "searches a prepended module ahead of the owner and an included one after it" do
+      result = run_project("ext/core.rb" => <<~PATCH, "lib/a.rb" => <<~RUBY)
+        class Numeric; def pm = nil; def im = "s"; end
+        module P; def pm = "s"; end
+        module I; def im = nil; end
+        Numeric.prepend(P)
+        Numeric.include(I)
+      PATCH
+        res = rand(3).pm.nil? ? 1 : "s"
+        res.upcase
+        res2 = rand(3).im.nil? ? 1 : "s"
+        res2.upcase
+      RUBY
+
+      expect(rules(result)).to eq([])
+    end
+
+    # Ruby raises ArgumentError: Integer#abs is nearer than the module Numeric includes. Guard: the RBS tier answers
+    # first, with or without the mixin edge.
+    it "leaves a method the receiver's RBS declares to the RBS" do
+      result = run_project("ext/core.rb" => "module AbsExt; def abs(a) = a; end\nNumeric.include(AbsExt)\n",
+                           "lib/a.rb" => "1.abs(1)\n")
+
+      expect(rules(result)).to eq([["a.rb", 1, "call.wrong-arity"]])
+    end
+
+    # Ruby: `1.m8` raises NoMethodError; the include gave M8 to the class Class.new built, not to Integer.
+    it "ignores an include written in a block that builds another class" do
+      patch = "module M8; def m8 = 1; end\nclass Integer; H = Class.new { include M8 }; end\n"
+      result = run_project("ext/core.rb" => patch, "lib/a.rb" => "1.m8\n")
+
+      expect(rules(result)).to eq([["a.rb", 1, "call.undefined-method"]])
+    end
+
+    it "includes a top-level include into Object" do
+      result = run_project("ext/core.rb" => "module TopExt; def top_m = :top; end\ninclude TopExt\n",
+                           "lib/a.rb" => "1.top_m # => :top\nInteger.top_m # => :top\n")
+
+      expect(rules(result)).to eq([])
+    end
+
+    # Ruby: OB, included last, is searched first, so `rand(3).om` is "s"; read the other way, `res` would be 1.
+    it "searches the most recently included module first" do
+      result = run_project("ext/core.rb" => <<~PATCH, "lib/a.rb" => "res = rand(3).om.nil? ? 1 : \"s\"\nres.upcase\n")
+        module OA; def om = nil; end
+        module OB; def om = "s"; end
+        Numeric.include(OA)
+        Numeric.include(OB)
+      PATCH
+
+      expect(rules(result)).to eq([])
+    end
+
+    # Ruby: `Integer.include(Comparable)` changes nothing, as Integer's ancestors hold Comparable already, so
+    # `rand(3).zq` is Numeric's "s"; `Numeric.prepend(Comparable)` puts Comparable ahead of Numeric, so `rand(3).zp`
+    # is Comparable's "s". Either read the other way makes `res` 1.
+    it "skips an include of a module the RBS chain holds and splices a prepend of one" do
+      use = ->(name) { "res = rand(3).#{name}.nil? ? 1 : \"s\"\nres.upcase\n" }
+      included = run_project("ext/core.rb" => <<~PATCH, "lib/a.rb" => use.call("zq"))
+        class Numeric; def zq = "s"; end
+        module Comparable; def zq = nil; end
+        Integer.include(Comparable)
+      PATCH
+      prepended = run_project("ext/core.rb" => <<~PATCH, "lib/a.rb" => use.call("zp"))
+        class Numeric; def zp = nil; end
+        module Comparable; def zp = "s"; end
+        Numeric.prepend(Comparable)
+      PATCH
+
+      expect([rules(included), rules(prepended)]).to eq([[], []])
+    end
+
+    it "is not reported under the fork pool" do
+      result = run_project({ "ext/core.rb" => mixin_patch, "lib/a.rb" => mixin_calls }, { "workers" => 2 })
+
+      expect(rules(result)).to eq([])
     end
   end
 end

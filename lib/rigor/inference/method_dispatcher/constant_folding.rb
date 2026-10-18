@@ -214,6 +214,11 @@ module Rigor
         RANGE_COVER_METHODS = Set[:include?, :member?].freeze
         private_constant :RANGE_ENDPOINT_METHODS, :RANGE_COVER_METHODS
 
+        # A result `INTEGER_FOLD_BIT_LIMIT` keeps from becoming a `Constant`: the fold still knows its class,
+        # and answers `Nominal[class_name]` for it. Falling through to RBS instead would read `Integer#**`'s
+        # declared `Numeric`, on which `(2 ** 20_000).even?` is an undefined method.
+        WidenedResult = Data.define(:class_name)
+
         # Input cartesian product hard cap. Keeps fold cost bounded even when the receiver and argument are
         # both `Union[Constant…]`. 5 × 5 = 25 inputs is permitted; 6 × 6 = 36 is not. The user-facing payoff
         # (a precise small enum) drops off fast past this range and CRuby method invocation cost adds up.
@@ -687,10 +692,13 @@ module Rigor
           end
         end
 
-        # The Gauss sum of a range of large endpoints can still pass `INTEGER_FOLD_BIT_LIMIT`.
+        # The Gauss sum of a range of large endpoints can still pass `INTEGER_FOLD_BIT_LIMIT`; it is then
+        # an `Integer` (both endpoints are).
         def range_sum_constant(range)
           sum = range.sum
-          foldable_constant_value?(sum) ? Type::Combinator.constant_of(sum) : nil
+          return Type::Combinator.nominal_of("Integer") if oversized_number?(sum)
+
+          Type::Combinator.constant_of(sum)
         end
 
         def range_to_a_tuple(range)
@@ -1188,6 +1196,17 @@ module Rigor
         # "Integer-ness" was already implied by the inputs (so the widening fallback only fires for
         # arithmetic over integers).
         def build_constant_type(values, source: nil)
+          widened, values = values.partition { |value| value.is_a?(WidenedResult) }
+          return build_scalar_constant_type(values, source) if widened.empty?
+
+          nominals = widened.map(&:class_name).uniq.map { |name| Type::Combinator.nominal_of(name) }
+          return Type::Combinator.union(*nominals) if values.empty?
+
+          constants = build_scalar_constant_type(values, source)
+          constants && Type::Combinator.union(constants, *nominals)
+        end
+
+        def build_scalar_constant_type(values, source)
           return nil if values.empty?
 
           unique = values.uniq
@@ -1622,8 +1641,10 @@ module Rigor
           return nil unless safe?(receiver_value, method_name, arg_value)
           return nil if range_enumeration_blow_up?(receiver_value, method_name)
 
-          result = receiver_value.public_send(method_name, arg_value)
-          foldable_constant_value?(result) ? [result] : nil
+          widened = numeric_blow_up_class(receiver_value, method_name, arg_value)
+          return [WidenedResult.new(widened)] if widened
+
+          fold_result(receiver_value.public_send(method_name, arg_value))
         rescue StandardError
           nil
         end
@@ -1634,8 +1655,7 @@ module Rigor
         def invoke_ternary(receiver_value, method_name, av0, av1)
           return nil unless ternary_method_allowed?(receiver_value, method_name)
 
-          result = receiver_value.public_send(method_name, av0, av1)
-          foldable_constant_value?(result) ? [result] : nil
+          fold_result(receiver_value.public_send(method_name, av0, av1))
         rescue StandardError
           nil
         end
@@ -1646,10 +1666,17 @@ module Rigor
           return nil if string_unary_blow_up?(receiver_value, method_name)
           return nil if range_enumeration_blow_up?(receiver_value, method_name)
 
-          result = receiver_value.public_send(method_name)
-          foldable_constant_value?(result) ? [result] : nil
+          fold_result(receiver_value.public_send(method_name))
         rescue StandardError
           nil
+        end
+
+        # `[result]` for a foldable value, `[WidenedResult]` for a number past `INTEGER_FOLD_BIT_LIMIT`, nil
+        # for anything else.
+        def fold_result(result)
+          return [WidenedResult.new(result.class.name)] if oversized_number?(result)
+
+          foldable_constant_value?(result) ? [result] : nil
         end
 
         def unary_safe?(receiver_value, method_name)
@@ -1820,13 +1847,14 @@ module Rigor
         end
 
         # Takes at most `RANGE_ENUMERATION_LIMIT + 1` elements (`Range#first(n)` stops there, endless or
-        # not). A range that cannot iterate at all (a Float, Time or `nil` begin) raises, and so does every
+        # not). A range that cannot iterate at all (a Float or Time begin) raises, and so does every
         # enumerating method on it before doing any work, so it counts as within budget: the invoke's own
         # rescue declines an enumerating fold, and `(t0..t1).include?(t)`, which CRuby answers by `cover?`,
-        # keeps folding.
+        # keeps folding. A beginless range raises `RangeError` here, which the invoke's own rescue turns into
+        # a declined fold, as the enumerating method itself would raise.
         def range_within_enumeration_budget?(range)
           range.first(RANGE_ENUMERATION_LIMIT + 1).size <= RANGE_ENUMERATION_LIMIT
-        rescue TypeError, RangeError
+        rescue TypeError
           true
         end
 
@@ -1843,22 +1871,29 @@ module Rigor
           return false unless allowed
           return false if integer_division_by_zero?(receiver_value, method_name, arg_value)
           return false if string_blow_up?(receiver_value, method_name, arg_value)
-          return false if numeric_blow_up?(receiver_value, method_name, arg_value)
 
           true
         end
 
-        # #2115 — `**` / `pow` / `<<` / `>>` whose result would be past `INTEGER_FOLD_BIT_LIMIT`, checked
-        # from the operands so the huge value is never computed. `foldable_constant_value?` applies the same
-        # bound to every other result after the fact.
-        def numeric_blow_up?(receiver_value, method_name, arg_value)
-          return false unless arg_value.is_a?(Integer)
+        # #2115 — the result's class name when `**` / `pow` / `<<` / `>>` would produce a number past
+        # `INTEGER_FOLD_BIT_LIMIT`, read from the operands so the huge value is never computed; nil
+        # otherwise. `fold_result` applies the same bound to every other result after the fact.
+        def numeric_blow_up_class(receiver_value, method_name, arg_value)
+          return nil unless arg_value.is_a?(Integer)
 
           case method_name
-          when :**, :pow then power_blow_up?(receiver_value, arg_value)
-          when :<<, :>> then shift_blow_up?(receiver_value, method_name, arg_value)
-          else false
+          when :**, :pow then power_blow_up_class(receiver_value, arg_value)
+          when :<<, :>> then "Integer" if shift_blow_up?(receiver_value, method_name, arg_value)
           end
+        end
+
+        # An Integer base to a negative power is a Rational (`2 ** -3 == (1/8)`); a Rational or Complex
+        # base keeps its class.
+        def power_blow_up_class(base, exponent)
+          return nil unless power_blow_up?(base, exponent)
+          return base.class.name unless base.is_a?(Integer)
+
+          exponent.negative? ? "Rational" : "Integer"
         end
 
         # A lower bound on the result's bit length is `floor(log2 |base|) * |exponent|`; past the limit the

@@ -581,37 +581,57 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
       expect(fold(2, :**, [13_605]).value).to eq(2**13_605)
     end
 
-    it "declines an Integer result past the bit limit" do
-      expect(fold(2, :**, [13_606])).to be_nil
-      expect(fold(2, :**, [100_000_000])).to be_nil
-      expect(fold(2**13_000, :*, [2**13_000])).to be_nil
+    # A result past the limit is not dropped: the fold answers its class, so `(2 ** 20_000).even?` resolves on
+    # `Integer` instead of RBS `Integer#**`'s declared `Numeric`.
+    def nominal(name) = Rigor::Type::Combinator.nominal_of(name)
+
+    it "widens an Integer result past the bit limit to Integer" do
+      expect(fold(2, :**, [13_606])).to eq(nominal("Integer"))
+      expect(fold(2, :**, [100_000_000])).to eq(nominal("Integer"))
+      expect(fold(2**13_000, :*, [2**13_000])).to eq(nominal("Integer"))
     end
 
-    it "declines a Rational result whose denominator is past the bit limit" do
-      expect(fold(2, :**, [-13_606])).to be_nil
+    it "widens a negative Integer power past the bit limit to Rational" do
+      expect(fold(2, :**, [-13_606])).to eq(nominal("Rational"))
+      expect(fold(2, :**, [-100_000_000])).to eq(nominal("Rational"))
       expect(fold(2, :**, [-3]).value).to eq(Rational(1, 8))
     end
 
-    it "declines a Complex result whose part is past the bit limit" do
-      expect(fold(Complex(2**13_000, 0), :*, [2**13_000])).to be_nil
+    it "widens a Rational result whose denominator is past the bit limit to Rational" do
+      expect(fold(Rational(1, 2**13_000), :*, [Rational(1, 2**13_000)])).to eq(nominal("Rational"))
+      expect(fold(Rational(1, 3), :**, [100_000_000])).to eq(nominal("Rational"))
     end
 
-    it "declines a shift past the bit limit and folds one within it" do
-      expect(fold(1, :<<, [100_000_000])).to be_nil
-      expect(fold(1, :>>, [-100_000_000])).to be_nil
+    it "widens a Complex result whose real or imaginary part is past the bit limit to Complex" do
+      expect(fold(Complex(2**13_000, 0), :*, [2**13_000])).to eq(nominal("Complex"))
+      expect(fold(Complex(0, 2**13_000), :*, [2**13_000])).to eq(nominal("Complex"))
+      expect(fold(Complex(1, 1), :**, [100_000_000])).to eq(nominal("Complex"))
+    end
+
+    it "widens a shift past the bit limit to Integer and folds one within it" do
+      expect(fold(1, :<<, [100_000_000])).to eq(nominal("Integer"))
+      expect(fold(1, :>>, [-100_000_000])).to eq(nominal("Integer"))
       expect(fold(1, :<<, [64]).value).to eq(2**64)
     end
 
-    # The result gate alone would also decline these, but only after computing a value `3 ** 100_000_000` takes Ruby
-    # seconds to build, so the call is refused from its operands.
-    it "refuses `**` / `pow` / `<<` / `>>` from their operands before computing the result" do
-      expect(described_class.safe?(3, :**, 100_000_000)).to be(false)
-      expect(described_class.safe?(3, :pow, -100_000_000)).to be(false)
-      expect(described_class.safe?(Complex(1, 1), :**, 100_000_000)).to be(false)
-      expect(described_class.safe?(1, :<<, 100_000_000)).to be(false)
-      expect(described_class.safe?(1, :>>, -100_000_000)).to be(false)
-      expect(described_class.safe?(2, :**, 64)).to be(true)
-      expect(described_class.safe?(2.0, :**, 100_000_000)).to be(true)
+    # The paths that do not go through the invoke helpers (`divmod`'s Tuple lift, `String#%`, the Array lifts) keep
+    # declining a value past the limit: `foldable_constant_value?` carries the same bound.
+    it "declines a divmod whose remainder is past the bit limit" do
+      expect(fold(Rational(1, 2**13_000), :divmod, [Rational(1, 3**8_300)])).to be_nil
+      expect(fold(7, :divmod, [2])).to be_a(Rigor::Type::Tuple)
+    end
+
+    # The result gate alone would also widen these, but only after computing a value `3 ** 100_000_000` takes Ruby
+    # seconds to build, so the class is read from the operands.
+    it "reads the class of `**` / `pow` / `<<` / `>>` from their operands before computing the result" do
+      expect(described_class.numeric_blow_up_class(3, :**, 100_000_000)).to eq("Integer")
+      expect(described_class.numeric_blow_up_class(3, :pow, -100_000_000)).to eq("Rational")
+      expect(described_class.numeric_blow_up_class(Rational(1, 3), :**, 100_000_000)).to eq("Rational")
+      expect(described_class.numeric_blow_up_class(Complex(1, 1), :**, 100_000_000)).to eq("Complex")
+      expect(described_class.numeric_blow_up_class(1, :<<, 100_000_000)).to eq("Integer")
+      expect(described_class.numeric_blow_up_class(1, :>>, -100_000_000)).to eq("Integer")
+      expect(described_class.numeric_blow_up_class(2, :**, 64)).to be_nil
+      expect(described_class.numeric_blow_up_class(2.0, :**, 100_000_000)).to be_nil
     end
 
     it "declines a Range method that walks more than RANGE_ENUMERATION_LIMIT elements" do
@@ -627,6 +647,7 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
       expect(fold(1..Float::INFINITY, :size).value).to eq(Float::INFINITY)
       expect(fold("a".."zzzzz", :cover?, ["b"]).value).to be(true)
       expect(fold(Time.at(0)..Time.at(10), :include?, [Time.at(5)]).value).to be(true)
+      expect(fold(nil..5, :include?, [3]).value).to be(true)
     end
 
     it "folds the Integer-endpoint Range unary family without materialising the range" do
@@ -641,8 +662,8 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
       )
     end
 
-    it "declines a Range#sum past the bit limit" do
-      expect(fold(1..(2**13_605), :sum)).to be_nil
+    it "widens a Range#sum past the bit limit to Integer" do
+      expect(fold(1..(2**13_605), :sum)).to eq(nominal("Integer"))
       expect(fold(1..10, :sum).value).to eq(55)
     end
   end

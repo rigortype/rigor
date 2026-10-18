@@ -194,8 +194,7 @@ module Rigor
         # A module some code `prepend`s to an object's singleton class (or `extend`s an object with in a method
         # body), which puts it ahead of the object's class even where the class already includes it.
         def object_prepended?(scope, name)
-          scope.discovered_parameter_envelopes[name]&.key?(Scope::DiscoveryIndex::ENVELOPE_OBJECT_EXTENDED_MARK) ||
-            false
+          scope.parameter_envelopes_of(name).key?(Scope::DiscoveryIndex::ENVELOPE_OBJECT_EXTENDED_MARK)
         end
 
         # Is some in-effect row under a class no table declares by any spelling of it (the keys sharing its last

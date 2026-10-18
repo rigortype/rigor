@@ -1064,6 +1064,20 @@ check's other readers record the key too, and one of them is broad:
 a `backtrace` definition appearing or vanishing anywhere re-checks every
 file with a `rescue`. That is a known cost.
 
+The `mark:<last segment>` key in `missing` is recorded by
+`Scope#parameter_envelopes_of` whichever way the reader answers
+([#1833](https://github.com/rigortype/rigor/issues/1833)): a file can add a
+class mark (`Scope::DiscoveryIndex`'s object-extended or refined mark, a
+`[:removed, name]` entry) to a class it does not declare, so neither the
+reader's edge to the declaring files nor `class:` sees the mark appear or
+vanish. Its producer (`IncrementalSession#mark_affected`) diffs the marks
+of the changed, added and removed files between their seed bundles and
+the recheck scan's merged envelope table
+(`Incremental.changed_class_marks`), and fires the key for every class
+whose marks moved; `mark:*` fires when an object-extended mark moves, for
+the reader that scans every bucket for one. The seed bundles already
+carry the envelope tables, so no row moves and `SCHEMA` is unchanged.
+
 Schema history worth pinning: `6` stored the seed bundles as
 `(node_id, name, fingerprint)` def-node handles (ADR-85); `8` added each
 bundle's comment-stripped `code_fingerprint` for the B1 comment-only gate;

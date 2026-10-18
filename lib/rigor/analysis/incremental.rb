@@ -194,6 +194,34 @@ module Rigor
         moved.freeze
       end
 
+      # Issue #1833 — the `[class name, mark]` pairs that appeared in or vanished from the class marks of the files an
+      # edit touched: a Symbol key of a `discovered_parameter_envelopes` bucket (the class-wide marks of
+      # `Scope::DiscoveryIndex`) or a `[ENVELOPE_REMOVED_KIND, name]` entry. A file may mark a class it does not declare
+      # (`x.singleton_class.prepend(Comparable)`, `o.extend(Helper)` in a method body), so neither the class-declaration
+      # diff nor a reader's edge to the declaring files sees such a mark appear or vanish.
+      #
+      # `before` and `after` are lists of envelope tables (`{class name => bucket}`): the touched files' seed-bundle
+      # tables before the edit, and the merged table of the re-parsed files after it. The diff is of their unions, which
+      # moves whenever the project's union of marks moves (the untouched files contribute the same marks to both).
+      # Returns a frozen Set of frozen `[class name, mark]` pairs.
+      def changed_class_marks(before, after)
+        (class_marks(before) ^ class_marks(after)).freeze
+      end
+
+      def class_marks(tables)
+        marks = Set.new
+        tables.each do |table|
+          table&.each do |class_name, bucket|
+            bucket.each_key { |key| marks << [class_name, key].freeze if class_mark?(key) }
+          end
+        end
+        marks
+      end
+
+      def class_mark?(key)
+        key.is_a?(Symbol) || (key.is_a?(Array) && key.first == Scope::DiscoveryIndex::ENVELOPE_REMOVED_KIND)
+      end
+
       # Issue #644 — the qualified constant names whose PUBLICATION could have moved in this edit: the names
       # whose per-file census descriptor differs between the before- and after-state of any file in `paths`.
       # The value-constant twin of {appeared_classes}, and deliberately NOT its analogue — a class either

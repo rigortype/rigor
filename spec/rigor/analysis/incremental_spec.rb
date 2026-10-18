@@ -107,6 +107,26 @@ RSpec.describe Rigor::Analysis::Incremental do
     end
   end
 
+  # Issue #1833.
+  describe ".changed_class_marks" do
+    let(:extended) { Rigor::Scope::DiscoveryIndex::ENVELOPE_OBJECT_EXTENDED_MARK }
+
+    it "reports the class marks and removed entries that moved, and no per-method entry" do
+      before = [{ "Comparable" => { extended => :opaque } }]
+      after = [{ "Comparable" => { %i[instance go] => [0, 0, false] },
+                 "String" => { %i[removed center] => :opaque } }]
+
+      expect(described_class.changed_class_marks(before, after))
+        .to eq(Set[["Comparable", extended], ["String", %i[removed center]]])
+    end
+
+    # Guard: the union diff, which no line removal on its own breaks.
+    it "reports nothing when a mark moves between two touched files" do
+      expect(described_class.changed_class_marks([{ "C" => { extended => :opaque } }, nil],
+                                                 [{ "C" => { extended => :opaque } }])).to eq(Set.new)
+    end
+  end
+
   describe ".negative_closure" do
     it "unions the negative-dependents of the satisfied keys" do
       negdeps = { "toplevel:helper" => Set["a.rb", "c.rb"], "method:Post#archive" => Set["d.rb"] }

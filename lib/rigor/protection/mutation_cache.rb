@@ -212,6 +212,9 @@ module Rigor
             "patched" => patched_rows(project_scan.project_patched_methods),
             "patched_mixins" => project_scan.project_patched_methods.mixins.map do |mixin|
               mixin.to_h.values.map(&:to_s)
+            end,
+            "patched_overrides" => project_scan.project_patched_methods.overrides.map do |key, visibility|
+              [*key, visibility].map(&:to_s)
             end
           }
           Digest::SHA256.hexdigest(JSON.generate(payload))

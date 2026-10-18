@@ -60,10 +60,11 @@ module Rigor
         census = Set.new
         paths.each { |path| scan_file(path, collected, diagnostics, buffer, census) }
         pending_mixins, collected = collected.partition { |item| item.is_a?(Mixins::Pending) }
-        entries = resolve_aliases(collected)
+        overrides = {}
+        entries = resolve_aliases(collected, overrides)
         diagnostics.concat(duplicate_declaration_diagnostics(entries))
         Result.new(
-          registry: ProjectPatchedMethods.new(entries: entries, write_census: census.freeze,
+          registry: ProjectPatchedMethods.new(entries: entries, write_census: census.freeze, overrides: overrides,
                                               mixins: Mixins.resolve(pending_mixins, entries)),
           diagnostics: diagnostics
         )
@@ -111,16 +112,17 @@ module Rigor
       # registry keeps the last of those, as Ruby does.
       #
       # A {Visibility::Pending} (issue #1708) changes the visibility of the binding its name has when it runs, in the
-      # file that bound it, so it is not a second declaration; a name no earlier patch binds is a method the class
-      # had already, which the registry does not hold. `module_function :x` also binds the public singleton copy.
-      def resolve_aliases(collected)
+      # file that bound it, so it is not a second declaration; a name no earlier patch binds on the class is one it
+      # inherits, recorded in `overrides` ({Visibility.apply}). `module_function :x` also binds the public singleton
+      # copy.
+      def resolve_aliases(collected, overrides = {})
         bound = {}
         homes = {}
         per_file = collected.group_by(&:source_path).values.map do |items|
           final = {}
           items.each do |item|
             if item.is_a?(Visibility::Pending)
-              next Visibility.apply(item, bound, homes) { |copy| bind(copy, bound, homes, final) }
+              next Visibility.apply(item, bound, homes, overrides) { |copy| bind(copy, bound, homes, final) }
             end
 
             entry = item.is_a?(PendingAlias) ? alias_entry(item, bound) : item
@@ -235,9 +237,11 @@ module Rigor
         when Prism::CallNode
           record_alias(node, Source::AliasNames.alias_method_call_names(node), qualified_prefix,
                        in_singleton_class, source_path, entries)
-          pending = Visibility.pending(node, qualified_prefix, in_singleton_class, source_path)
-          entries << pending if pending
-          entries.concat(Mixins.pending(node, qualified_prefix, in_singleton_class))
+          if Thread.current[:rigor_def_visibilities]&.[](node).equal?(Visibility::STATEMENT)
+            pending = Visibility.pending(node, qualified_prefix, in_singleton_class, source_path)
+            entries << pending if pending
+            entries.concat(Mixins.pending(node, qualified_prefix, in_singleton_class))
+          end
           walk_children(node, qualified_prefix, in_singleton_class, source_path, entries)
         else
           walk_children(node, qualified_prefix, in_singleton_class, source_path, entries)

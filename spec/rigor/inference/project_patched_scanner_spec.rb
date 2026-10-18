@@ -487,6 +487,20 @@ end
       end
     end
 
+    # Ruby: each `x` stays public (the private call does not run, or runs on another class), and `1.kp` returns 1:
+    # `public :kp` copies the inherited private method onto Integer as public.
+    it "applies only a body's direct named calls, and records one on an inherited method as an override" do
+      scan_sources([<<~RUBY]) do |outcome|
+        class C; def x = 1; private :x if $never; end
+        class D; def x = 1; K = Class.new(D) { private :x }; end
+        class Integer; public :kp; end
+      RUBY
+        registry = outcome.registry
+        expect([visibility(registry, "C", :x), visibility(registry, "D", :x)]).to eq(%i[public public])
+        expect(registry.overrides).to eq({ ["Integer", :kp, :instance] => :public })
+      end
+    end
+
     it "records include and prepend edges, resolving a module's name through the lexical prefix" do
       scan_sources([<<~RUBY]) do |outcome|
         module Ext; module NumExt; def nm = :nm; end; Numeric.include(NumExt); end # 1.nm => :nm

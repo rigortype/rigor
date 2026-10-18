@@ -69,8 +69,14 @@ module Rigor
           )
         end
 
+        # The value {.defs} records for a call written as a direct statement of a body or of the file's top level, the
+        # only calls whose named visibility change ({.pending}) or mixin edge ({Mixins.pending}) the scanner applies to
+        # the body's class. A call nested in a conditional, a block, a method body or a `Class.new` may not run, or
+        # runs on another class, so it changes nothing: the reading that answers more calls.
+        STATEMENT = Object.new.freeze
+
         # @return the visibility of each `def` (by identity) the file's bodies give one other than public:
-        #   `:private`, `:protected` or `:module_function`.
+        #   `:private`, `:protected` or `:module_function`; and {STATEMENT} for each call that is a direct statement.
         def defs(root)
           found = {}.compare_by_identity
           collect_bodies(root, found)
@@ -79,14 +85,16 @@ module Rigor
 
         # Applies a {Pending} change to the binding each of its names has: `bound` maps `[class_name, name, kind]` to
         # that binding and `homes` to the per-file table holding it, which is updated in place, so the change is not a
-        # second declaration. A name nothing bound is a method the class had already, which the registry does not
-        # hold. Yields each copy that binds (`module_function :x`'s singleton), at the call's line, for the caller to
+        # second declaration. A name the class does not bind is one it inherits (`public :kp` in `class Integer` over
+        # `module Kernel; private def kp`), which Ruby copies onto the class with the new visibility: `overrides` gets
+        # `key => visibility` for {ProjectPatchedMethods#lookup_through_ancestors} to apply to the body it finds farther
+        # on. Yields each copy that binds (`module_function :x`'s singleton), at the call's line, for the caller to
         # bind.
-        def apply(pending, bound, homes)
+        def apply(pending, bound, homes, overrides)
           pending.names.each do |name|
             key = [pending.class_name, name, pending.kind]
             entry = bound[key]
-            next if entry.nil?
+            next overrides[key] = pending.visibility if entry.nil?
 
             changed, *copies = applied(entry, pending.visibility)
             bound[key] = homes[key][key] = changed
@@ -122,6 +130,8 @@ module Rigor
 
           if node.is_a?(Prism::ClassNode) || node.is_a?(Prism::ModuleNode) || node.is_a?(Prism::SingletonClassNode)
             read_body(node.body, found)
+          elsif node.is_a?(Prism::ProgramNode)
+            read_body(node.statements, found)
           end
           node.rigor_each_child { |child| collect_bodies(child, found) }
         end
@@ -130,6 +140,7 @@ module Rigor
         def read_body(body, found)
           default = :public
           direct_statements(body).each do |stmt|
+            found[stmt] = STATEMENT if stmt.is_a?(Prism::CallNode)
             visibility, side = call(stmt)
             if visibility && ModuleFunctionState.bare?(stmt)
               default = visibility if side == :instance

@@ -287,4 +287,26 @@ RSpec.describe Rigor::Protection::MutationCache do
 
     expect(cache.reason).to eq(described_class::NO_SNAPSHOT)
   end
+
+  # Issue #1708 — the pre_eval: registry's visibility, mixin edges and inherited-visibility overrides change what
+  # `call.undefined-method` reports, so each must move the table digest by itself.
+  describe "the pre_eval: table digest" do
+    def digest_of(**registry_args)
+      entry = Rigor::Inference::ProjectPatchedMethods::Entry.new(
+        class_name: "Kernel", method_name: :kp, kind: :instance, source_path: "ext.rb", source_line: 1,
+        visibility: registry_args.delete(:visibility) || :public
+      )
+      registry = Rigor::Inference::ProjectPatchedMethods.new(entries: [entry], **registry_args)
+      scan = Rigor::Analysis::ProjectScan.new(**project_scan.to_h, project_patched_methods: registry)
+      described_class.send(:table_digest, scan)
+    end
+
+    it "moves when only a visibility, a mixin edge or an override changes" do
+      mixin = Rigor::Inference::ProjectPatchedMethods::Mixin.new(owner: "Numeric", module_name: "M", kind: :include)
+      digests = [digest_of, digest_of(visibility: :private), digest_of(mixins: [mixin]),
+                 digest_of(overrides: { ["Integer", :kp, :instance] => :public })]
+
+      expect(digests.uniq.size).to eq(4)
+    end
+  end
 end

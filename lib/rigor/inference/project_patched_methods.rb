@@ -45,7 +45,7 @@ module Rigor
       # written, with no lexical resolution, as a patch's class name is.
       Mixin = Data.define(:owner, :module_name, :kind)
 
-      attr_reader :by_key, :write_census, :mixins
+      attr_reader :by_key, :write_census, :mixins, :overrides
 
       # Each owner's prepended and included modules, the most recent first.
       def self.mixins_by_owner(mixins)
@@ -62,7 +62,10 @@ module Rigor
       # @param write_census — issue #1367: the `pre_eval:` files' {GlobalWriteCensus}, which the `global.*` write
       #   rules join with the project's, since a patch file is loaded ahead of the code it patches.
       # @param mixins — issue #1708: the {Mixin} edges the `pre_eval:` files write, in the order they run.
-      def initialize(entries: [], write_census: GlobalWriteCensus::EMPTY, mixins: [])
+      # @param overrides — issue #1708: `[class_name, method_name, kind] => visibility` for a named visibility call
+      #   (`public :kp` in `class Integer`) on a method the class inherits rather than binds, which Ruby copies onto
+      #   the class with that visibility.
+      def initialize(entries: [], write_census: GlobalWriteCensus::EMPTY, mixins: [], overrides: {})
         @by_key = entries.each_with_object({}) do |entry, acc|
           key = [entry.class_name, entry.method_name, entry.kind]
           acc[key] = entry
@@ -70,6 +73,7 @@ module Rigor
         @write_census = write_census.frozen? ? write_census : write_census.dup.freeze
         @mixins = mixins.dup.freeze
         @mixins_of = ProjectPatchedMethods.mixins_by_owner(@mixins)
+        @overrides = overrides.dup.freeze
         freeze
       end
 
@@ -94,16 +98,22 @@ module Rigor
       # patch, or a module the project prepends to it), unlike {#lookup}, which answers the patch.
       #
       # A module the `pre_eval:` files include into or prepend to an owner on the way ({Mixin}) is searched where Ruby
-      # puts it: prepends ahead of the owner, includes after it, the most recent first, each with its own mixins.
+      # puts it: prepends ahead of the owner, includes after it, the most recent first, each with its own mixins. A
+      # named visibility call on an owner the walk passes before the body (`public :kp` in `class Integer`, an
+      # override) gives the entry it returns that visibility, and that owner for {#callable?}'s protected check.
       # @return the entry, or `nil` when no ancestor's patch declares the method ahead of a source `def`.
       def lookup_through_ancestors(class_name:, method_name:, kind:, rbs_loader:, source_defines: nil)
         return nil if empty?
 
+        override = nil
         ancestor_keys(class_name.to_s, kind, rbs_loader).each do |owner, side|
           return nil if source_defines&.call(owner, side)
 
           entry = @by_key[[owner, method_name, side]]
-          return entry if entry
+          return override ? entry.with(class_name: override.first, visibility: override.last) : entry if entry
+
+          visibility = @overrides[[owner, method_name, side]]
+          override ||= [owner, visibility] if visibility
         end
         nil
       end
@@ -117,7 +127,7 @@ module Rigor
         return true unless explicit
 
         case entry.visibility
-        when :private then false
+        when :private, :module_function then false
         when :protected then self_kind_of?(self_type, entry.class_name, rbs_loader)
         else true
         end
@@ -160,20 +170,29 @@ module Rigor
       # The RBS ancestor pairs with each instance-side owner's `pre_eval:` mixins spliced in. A module already on
       # the chain is not added again, as Ruby skips a module the ancestors already hold.
       def with_mixins(pairs)
-        seen = pairs.filter_map { |owner, side| owner if side == :instance }.to_set
+        chain = pairs.filter_map { |owner, side| owner if side == :instance }.to_set
+        seen = Set.new
         pairs.flat_map do |owner, side|
-          side == :instance ? expand_mixins(owner, seen).map { |name| [name, :instance] } : [[owner, side]]
+          side == :instance ? expand_mixins(owner, chain, seen).map { |name| [name, :instance] } : [[owner, side]]
         end
       end
 
       # `owner` with the modules the patches prepend to it ahead and the ones they include after, each expanded the
-      # same way: the order Ruby's `ancestors` lists them in.
-      def expand_mixins(owner, seen)
+      # same way: the order Ruby's `ancestors` lists them in. An include of a module the RBS chain already holds
+      # changes nothing, as Ruby skips it (`Integer.include(Comparable)`); a prepend of one is spliced ahead all the
+      # same, as Ruby adds it again (`Integer.prepend(Comparable)`). `seen` holds the modules already spliced, so a
+      # module is spliced once, at the nearest owner that mixes it in, and an include cycle ends. Ruby skips
+      # `Integer.include(A)` run after `Numeric.include(A)`, leaving A after Numeric; the registry, which does not read
+      # the order the two edges ran in, splices A after Integer either way.
+      def expand_mixins(owner, chain, seen)
         edges = @mixins_of[owner]
         return [owner] if edges.nil?
 
-        around = ->(names) { names.flat_map { |name| seen.add?(name) ? expand_mixins(name, seen) : [] } }
-        around.call(edges[:prepend]) + [owner] + around.call(edges[:include])
+        ahead = edges[:prepend].flat_map { |name| seen.add?(name) ? expand_mixins(name, chain, seen) : [] }
+        after = edges[:include].flat_map do |name|
+          !chain.include?(name) && seen.add?(name) ? expand_mixins(name, chain, seen) : []
+        end
+        ahead + [owner] + after
       end
     end
   end

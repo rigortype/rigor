@@ -224,7 +224,7 @@ rigor type-scan PATH...
 `--show-recognized` includes fully-covered classes,
 `--threshold=RATIO` makes the command exit non-zero when the
 unrecognized-node ratio exceeds `RATIO`, and `--format=text|json`
-selects the output format.
+selects the output format. `--config=PATH` overrides config discovery.
 
 ## `rigor effects`
 
@@ -354,6 +354,8 @@ accept `--config=PATH`, `--format=text|json` and `--full`;
 configured one — `--baseline <(git show
 origin/main:.rigor-effects.yml)` in a bot),
 `--strict-tolerated` and `--no-tolerated-effects`.
+`explain` additionally accepts `--symbol=KEY` to explain one
+specific unit instead of the changed ones.
 
 The file records two tables. `methods:` holds each method's
 **direct** summary — what its own body does, block literals
@@ -476,12 +478,13 @@ Print the catalogue entry for a diagnostic rule, or list every
 rule when called with no argument.
 
 ```sh
-rigor explain [rule]
+rigor explain [options] [rule]
 ```
 
 `rule` is a rule ID (`call.undefined-method`), a legacy alias,
-or a family wildcard (`call`, `flow`, `def`, `assert`, `dump`).
-`--format=json` is available. Exit `64` for an unknown rule.
+or a family wildcard (`call`, `flow`, `def`, `assert`, `dump`, `global`,
+`suppression`, `static`, `effect`, `pre-eval`).
+`--format=text|json` selects the output format. Exit `64` for an unknown rule.
 
 It also answers the `sig.skipped.*` identifiers `rigor sig-gen`
 prints when it declines to write a signature — `rigor explain
@@ -495,11 +498,13 @@ Compare the current diagnostics against a saved baseline JSON
 and report only what is new.
 
 ```sh
-rigor diff <baseline.json> [paths...]
+rigor diff [options] <baseline.json> [paths...]
 ```
 
 `--current=PATH` compares against a saved diagnostics JSON
-instead of running a fresh check. Exit `1` when new
+instead of running a fresh check. `--format=text|json` selects the
+output format (default `text`), and `--config=PATH` passes a custom
+configuration to the implicit check. Exit `1` when new
 diagnostics appear.
 
 ## `rigor sig-gen`
@@ -620,7 +625,8 @@ rigor baseline <generate|regenerate|dump|drift|prune> [options]
 
 `generate` and `regenerate` accept `--output=PATH` and
 `--match-mode=rule|message`; `dump`, `drift`, and `prune` accept
-`--baseline=PATH` to read a non-default baseline file.
+`--baseline=PATH` to read a non-default baseline file. `dump`
+also accepts `--format=text|json` for machine-readable output.
 
 ## `rigor triage`
 
@@ -1167,8 +1173,9 @@ Runs a scoped analysis and audits:
 - **Plugin load errors** — whether every configured plugin loaded.
 - **Baseline drift** — whether the current diagnostics have drifted
   from the saved baseline.
-- **Rails plugin gap** — whether `Gemfile.lock` contains Rails gems
-  but no Rails plugin is enabled.
+- **Plugin gap** — whether `Gemfile.lock` contains dependencies that
+  bundled plugins model (Rails, Devise, Pundit, Sidekiq, ...) while those
+  plugins are not enabled (ADR-96).
 - **Gemfile install** — whether Rigor itself resolves as one of the
   project's dependencies, which
   [Installing Rigor](01-installation.md) tells you not to do. Only a
@@ -1181,6 +1188,9 @@ Runs a scoped analysis and audits:
   versioned together, so a copy from another installation can run
   the engine with a mismatched plugin. A warning, not a failure;
   third-party plugins from your own bundle are never flagged.
+- **Bundle layout** — whether gems are installed in the active Ruby's
+  default gem home where Rigor cannot locate them, preventing gem-shipped
+  `sig/` discovery without `bundler.bundle_path:` or `vendor/bundle`.
 
 Text output prints `[PASS]`, `[FAIL]`, or `[WARN]` per check plus a
 routed hint (e.g. "Run `rigor baseline regenerate`"). JSON output
@@ -1241,6 +1251,7 @@ diagnostics about Rigor's own inference cutoffs and memory — see
 | `0` | Success — no diagnostic at or above the exit threshold (`error` by default; `rigor check --fail-on=SEVERITY` lowers it to `warning` or `info`). |
 | `1` | Diagnostics found at or above the threshold, or a per-command failure (parse error, missing file, new diagnostics on `diff`, effect drift on `effects check`). |
 | `64` | Usage error — unknown command, bad flag, malformed argument, or a value in `.rigor.yml` the loader cannot proceed on. |
+| `70` | Internal fatal error — `SystemStackError` or `NoMemoryError` inside the analysis; Rigor could not finish the run, so its report on disk is empty rather than clean. |
 
 `rigor triage` is the exception: it is advisory and always
 exits `0`.

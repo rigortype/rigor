@@ -5,7 +5,8 @@ application DSL that plain inference cannot see — Rails route
 helpers, RSpec `let` bindings, dry-rb struct attributes, and
 so on. This page is about *activating* plugins. Writing one is
 covered by [`examples/`](../../examples/README.md) and the
-[`rigor-plugin-author` skill](08-skills.md).
+[`rigor-plugin-author` skill](08-skills.md); reviewing and modernising
+an existing plugin is [`rigor-plugin-review`](08-skills.md).
 
 ## Activating a plugin
 

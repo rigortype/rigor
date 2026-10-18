@@ -73,7 +73,7 @@ a diagnostic another layer has already suppressed.
 | --- | --- |
 | `rigor baseline generate` | Write a fresh baseline from the current diagnostics. Refuses to clobber an existing file without `--force`. |
 | `rigor baseline regenerate` | Rewrite unconditionally — run it after fixing diagnostics so the file shrinks. |
-| `rigor baseline dump` | Print the baseline, filterable with `--rule` and `--file`. |
+| `rigor baseline dump` | Print the baseline, filterable with `--rule` and `--file` (`--format=json` for tooling). |
 | `rigor baseline drift` | Show how buckets have moved — `--only=over` for buckets that grew, `reducible` for ones you have already improved past, `cleared` for empty ones. |
 | `rigor baseline prune` | Drop buckets that match nothing any more. `--dry-run` previews. |
 

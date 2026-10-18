@@ -6,7 +6,9 @@ into a finite list of specific questions. It does not answer them.
 
 The command reference — every flag, every output section — is in
 [CLI reference](02-cli-reference.md#rigor-unused). This chapter is the
-workflow around it.
+workflow around it. For an AI coding agent, the bundled
+[`rigor-unused-adjudicate`](08-skills.md) skill walks through this
+adjudication workflow step by step.
 
 **Before you start** you need a working `rigor check` setup: a config
 file with `paths:`, and the plugins for your framework enabled. See

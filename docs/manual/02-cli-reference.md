@@ -1173,9 +1173,16 @@ Runs a scoped analysis and audits:
 - **Plugin load errors** — whether every configured plugin loaded.
 - **Baseline drift** — whether the current diagnostics have drifted
   from the saved baseline.
-- **Plugin gap** — whether `Gemfile.lock` contains dependencies that
-  bundled plugins model (Rails, Devise, Pundit, Sidekiq, ...) while those
-  plugins are not enabled (ADR-96).
+- **Plugin gap** — whether the project's direct dependencies (the
+  `DEPENDENCIES` section of `Gemfile.lock`, plus the Rails components
+  a direct `rails` stands for) include gems a bundled plugin models —
+  Rails, Devise, Pundit, Sidekiq, ... — while `plugins:` does not list
+  that plugin ([ADR-96](../adr/96-plugin-target-gems.md)). An entry
+  with `enabled: false` counts as listed. Each missing plugin is a
+  warning, since leaving one out can be deliberate; it is a failure
+  only when `plugins:` lists none of the bundled plugins at all.
+  Skipped when no `.rigor.yml` or `.rigor.dist.yml` is discovered in
+  the current directory.
 - **Gemfile install** — whether Rigor itself resolves as one of the
   project's dependencies, which
   [Installing Rigor](01-installation.md) tells you not to do. Only a
@@ -1188,9 +1195,16 @@ Runs a scoped analysis and audits:
   versioned together, so a copy from another installation can run
   the engine with a mismatched plugin. A warning, not a failure;
   third-party plugins from your own bundle are never flagged.
-- **Bundle layout** — whether gems are installed in the active Ruby's
-  default gem home where Rigor cannot locate them, preventing gem-shipped
-  `sig/` discovery without `bundler.bundle_path:` or `vendor/bundle`.
+- **Bundle layout** — whether Rigor can locate the bundle a
+  `Gemfile.lock` in the current directory was installed into; when it
+  cannot (typically gems in the active Ruby's default gem home), no
+  gem-shipped `sig/` is discovered. Rigor finds a bundle only where the
+  project records it. A `bundler.bundle_path:` in `.rigor.yml` is used
+  alone and must exist. Without one — and unless
+  `bundler.auto_detect: false` — Rigor reads `.bundle/config`'s
+  `BUNDLE_PATH`, then an in-tree `vendor/bundle`, then the global
+  Bundler config. A warning, not a failure: the default layout is
+  correct, and most gems ship no `sig/`.
 
 Text output prints `[PASS]`, `[FAIL]`, or `[WARN]` per check plus a
 routed hint (e.g. "Run `rigor baseline regenerate`"). JSON output

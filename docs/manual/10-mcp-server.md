@@ -437,7 +437,7 @@ Look up the description of one or all Rigor diagnostic rules.
 
 Accepted values: a canonical rule ID (`call.undefined-method`), a
 legacy alias (`undefined-method`), or a family prefix (`call`, `flow`,
-`assert`, `dump`, `def`).
+`def`, `assert`, `dump`, `global`, `suppression`, `static`, `effect`).
 
 **Returns:** JSON — an array of rule catalog entries.
 

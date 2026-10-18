@@ -1,8 +1,8 @@
 # ADR-123 — Merge-queue landing and post-hoc approval
 
 Status: **Accepted, 2026-10-19.** `ci.yml` answers the `merge_group` event and the flow documents
-describe queue landing; the queue itself is a repository ruleset on `master`, which the
-maintainer enables after this lands. The approval queue (`approval-queue.d/`, gated by
+describe queue landing; the queue itself is the `master merge queue` ruleset on `master`,
+enabled with the maintainer's approval on the same day. The approval queue (`approval-queue.d/`, gated by
 `spec/docs/approval_queue_spec.rb`) and the `rigor-release-prep` ratification step land with
 this ADR.
 

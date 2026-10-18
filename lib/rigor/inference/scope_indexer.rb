@@ -873,7 +873,7 @@ module Rigor
 
           owner = def_owner || qualified_prefix
           collect_initializer_block_ivars(node, owner, default_scope, accumulator, mutated_ivars, init_writes)
-          record_attr_writer_ivars(node, owner, accumulator) if ATTR_WRITER_MACROS.include?(node.name)
+          record_attr_writer_ivars(node, owner, accumulator) if ATTR_WRITER_MACROS.include?(attr_macro(node))
           collect_define_method_block_ivars(node, owner, default_scope, accumulator, mutated_ivars)
           false
         else
@@ -4314,7 +4314,7 @@ module Rigor
       # descent.
       def record_call_node_methods(node, qualified_prefix, in_singleton_class, methods_acc, source_path)
         record_define_method(node, qualified_prefix, in_singleton_class, methods_acc) if node.name == :define_method
-        record_attr_methods(node, qualified_prefix, in_singleton_class, methods_acc) if ATTR_MACROS.include?(node.name)
+        record_attr_methods(node, qualified_prefix, in_singleton_class, methods_acc) if attr_macro(node)
         record_module_attr_methods(node, qualified_prefix, methods_acc) if MODULE_ATTR_MACROS.key?(node.name)
         record_alias_method_call(node, qualified_prefix, in_singleton_class, methods_acc)
         record_surface_evidence(node, qualified_prefix, methods_acc)
@@ -4831,11 +4831,11 @@ module Rigor
       # each reader (and `x=` writer) an `attr_*` call declares, a literal `define_method(:x)`, and the new name of
       # an `alias_method :x, :y` call. A non-literal name replaces nothing Rigor can name.
       def call_superseded_names(call_node)
-        if ATTR_MACROS.include?(call_node.name)
+        if (macro = attr_macro(call_node))
           names = []
           each_attr_macro_name(call_node) do |base|
-            names << base unless call_node.name == :attr_writer
-            names << :"#{base}=" unless call_node.name == :attr_reader
+            names << base unless macro == :attr_writer
+            names << :"#{base}=" unless macro == :attr_reader
           end
           names
         elsif call_node.name == :define_method
@@ -8518,23 +8518,24 @@ module Rigor
       end
 
       def record_attr_visibility(call_node, qualified_prefix, visibility, accumulator, toggled:, side: :instance)
-        return unless attr_visibility_call?(call_node)
-        return if qualified_prefix.empty?
+        macro = attr_macro(call_node)
+        return if macro.nil? || qualified_prefix.empty?
 
         class_name = qualified_prefix.join("::")
         each_attr_macro_name(call_node) do |base|
           members = []
-          members << base unless call_node.name == :attr_writer
-          members << :"#{base}=" unless call_node.name == :attr_reader
+          members << base unless macro == :attr_writer
+          members << :"#{base}=" unless macro == :attr_reader
           members.each do |member|
             accumulator.write(class_name, member, side, visibility, call_node, toggled: toggled)
           end
         end
       end
 
-      # A receiverless `attr_reader` / `attr_writer` / `attr_accessor` call ({#record_attr_visibility}).
+      # An `attr_reader` / `attr_writer` / `attr_accessor` call on the body's self ({#attr_macro},
+      # {#record_attr_visibility}). Ruby 4.0.5 gives every spelling the running default visibility.
       def attr_visibility_call?(node)
-        node.is_a?(Prism::CallNode) && node.receiver.nil? && ATTR_MACROS.include?(node.name)
+        !attr_macro(node).nil?
       end
 
       # Registers the alias name in the `discovered_methods` table so `undefined-method` diagnostics are not emitted for
@@ -8993,8 +8994,9 @@ module Rigor
         return if qualified_prefix.empty?
 
         kind = in_singleton_class ? :singleton : :instance
-        reader = call_node.name != :attr_writer
-        writer = call_node.name != :attr_reader
+        macro = attr_macro(call_node)
+        reader = macro != :attr_writer
+        writer = macro != :attr_reader
         class_name = qualified_prefix.join("::")
         each_attr_macro_name(call_node) do |base|
           record_method(accumulator, class_name, base, kind) if reader
@@ -9002,16 +9004,32 @@ module Rigor
         end
       end
 
-      # Yields each name an `attr_*` call declares: a Symbol or String literal argument. A non-literal one
-      # (`attr_writer(*names)`) names nothing Rigor can read.
+      # Yields each name an `attr_*` call declares ({#attr_macro}): a Symbol or String literal argument. A
+      # non-literal one (`attr_writer(*names)`, `send(:attr_writer, name)`) names nothing Rigor can read.
       def each_attr_macro_name(call_node)
-        return unless call_node.receiver.nil? # only the implicit-self macro defines on the lexical class
-        return if call_node.arguments.nil?
+        return if attr_macro(call_node).nil? || call_node.arguments.nil?
 
-        call_node.arguments.arguments.each do |arg|
+        arguments = call_node.arguments.arguments
+        arguments = arguments.drop(1) if SURFACE_SEND_CALLS.include?(call_node.name)
+        arguments.each do |arg|
           base = literal_method_name(arg)
           yield base unless base.nil?
         end
+      end
+
+      # Issue #2097 — the {ATTR_MACROS} entry a call declares members with on the lexical class, or nil. The
+      # call is on the body's self, implicitly or as `self.` (`self.attr_accessor :x`), and names the macro
+      # directly or as the literal first argument of `send` / `public_send` / `__send__`
+      # (`send(:attr_accessor, :x)`); the same spellings `SigGen::Generator#attr_writer_names` reads. Any
+      # other receiver defines on another object.
+      def attr_macro(call_node)
+        return nil unless call_node.is_a?(Prism::CallNode)
+        return nil unless call_node.receiver.nil? || call_node.receiver.is_a?(Prism::SelfNode)
+        return call_node.name if ATTR_MACROS.include?(call_node.name)
+        return nil unless SURFACE_SEND_CALLS.include?(call_node.name)
+
+        macro = literal_method_name(call_node.arguments&.arguments&.first)
+        macro if ATTR_MACROS.include?(macro)
       end
 
       # Issue #736 — the module-level accessor macros, which introduce methods on BOTH sides of the class.

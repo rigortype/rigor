@@ -1,1 +1,0 @@
-- **[docs]** Document exit code 70, missing CLI flags, generalised doctor checks, and bundled skills in the user manual. ([#2135](https://github.com/rigortype/rigor/pull/2135))

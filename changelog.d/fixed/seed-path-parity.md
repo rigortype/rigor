@@ -1,1 +1,0 @@
-- **[engine]** `rigor coverage`, the protection scan and `parameter_inference:` now see the cross-file tables `rigor check` sees, so a constant another file writes no longer reads as `Dynamic` there and a parameter whose call sites pass one is inferred. ([#2103](https://github.com/rigortype/rigor/pull/2103))

@@ -1,1 +1,0 @@
-- **[cli]** `rigor lens` reads a `Data` / `Struct` field named `initialize_copy` (or another name Ruby forces private) as private or unknown instead of public. ([#1997](https://github.com/rigortype/rigor/pull/1997))

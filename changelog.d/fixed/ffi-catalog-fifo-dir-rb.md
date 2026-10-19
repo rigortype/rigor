@@ -1,1 +1,0 @@
-- **[plugins]** rigor-ffi no longer hangs on a fifo named `*.rb` in the project, and a top-level directory named `x.rb` no longer empties its FFI catalog; only regular files are read. ([#2118](https://github.com/rigortype/rigor/pull/2118))

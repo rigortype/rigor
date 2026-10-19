@@ -13,6 +13,118 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ## [Unreleased]
 
+## [0.4.5] - 2026-10-19
+
+v0.4.5 continues the stabilization of the 0.4 line, and its main thread is keeping `rigor check --incremental` in step with a full run. A warm run now re-checks the calls that a removed `attr_*` / `alias_method` / `define_method`, a file that only marks a class, a plugin's file read or a root that changes between a directory and a file used to leave stale. It also removes false positives around instance variables across `yield`, loops and `rescue` clauses, and lets `pre_eval:` patches reach the descendants of the class they patch. `severity_overrides:` now names a plugin's diagnostics by their qualified ID, and the analyzer no longer hangs or aborts on huge constant folds, unbuildable ranges or project paths with glob metacharacters.
+
+### Added
+
+- **[rigor check]** `def.method-visibility-mismatch` now reports a call such as `K.x` to a singleton method made private by `private_class_method` or by `private` inside `class << self` ([#2061](https://github.com/rigortype/rigor/pull/2061)).
+  - It stays quiet where a project `method_missing` may answer the private call.
+- **[rigor sig-gen]** The JSON output of `rigor sig-gen --params=observed` (`--print`, `--diff` and the MCP `rigor_sig_gen` tool) now carries an `observation` key that names the observed test roots and the declared ones that do not exist ([#2076](https://github.com/rigortype/rigor/pull/2076)).
+  - A consumer that never reads stderr can now tell why every parameter stayed `untyped`.
+- **[plugin contract]** `IoBoundary#list_directory_kinds(path)` lists a directory's entries with their `lstat` kind (file, directory or symlink), and its cached result goes stale when an entry changes kind under the same name ([#2112](https://github.com/rigortype/rigor/pull/2112)).
+
+### Changed
+
+- **[config]** `severity_overrides:` now names a plugin's diagnostic by its qualified ID, `plugin.<id>.<rule>` or `plugin.<id>` for the whole plugin, instead of its bare rule ([#2000](https://github.com/rigortype/rigor/pull/2000)).
+  - `load-error: off` no longer silences every plugin's own `load-error`, and a family wildcard such as `rspec: warning` no longer re-stamps a plugin's dotted rules.
+  - The plugin loader's rows answer to `plugin_loader.load-error` first and to the bare `load-error` after it.
+  - `rigor check` warns about an override key that reaches no row: a bare plugin rule, a plugin family key such as `rspec`, `all`, or a `plugin.<id>` key for a plugin that `plugins:` does not configure. `rigor doctor` reports such a warning as `[FAIL]` and exits 1, where it exited 0 before.
+- **[plugins/rigor-ffi]** rigor-ffi no longer walks an in-tree `vendor/` to validate its cached catalog, so a warm run over a project with a large `vendor/bundle` stays fast and a `bundle install` there no longer invalidates the cache ([#2112](https://github.com/rigortype/rigor/pull/2112)).
+- **[rigor lens]** `rigor lens` now reports the type the rbs-inline plugin gives an unannotated constant, such as `Array[untyped]` for `[]`, instead of `unavailable` ([#1998](https://github.com/rigortype/rigor/pull/1998)).
+- **[rigor check]** `rigor check` builds the project's subclass map once per run instead of once per instance-variable proof, which cuts about 2.5% of the allocations on a codebase the size of Rigor's own ([#2146](https://github.com/rigortype/rigor/pull/2146)).
+
+### Fixed
+
+- **[rigor check]** `rigor check --incremental` now re-checks a call that a project `attr_*`, `alias_method` or `define_method` answered when that declaration is removed ([#2121](https://github.com/rigortype/rigor/issues/2121), [#2132](https://github.com/rigortype/rigor/pull/2132)).
+- **[rigor check]** `rigor check --incremental` now re-checks the affected calls when a file adds or removes only a class mark: an `extend` in a method body, a `singleton_class.prepend` on an object, a `refine` block, or a dynamic or removed-name mark on a namespace candidate ([#1833](https://github.com/rigortype/rigor/issues/1833), [#2089](https://github.com/rigortype/rigor/pull/2089)).
+  - A marks-only file such as `module N; Foo.send(:define_method, :zz) { }; end` beside `module N; class Sub < Foo; end; end` now re-checks the `call.wrong-arity` call it silences, through a superclass or a mixed-in module ([#2136](https://github.com/rigortype/rigor/pull/2136)).
+- **[rigor check]** `rigor check --incremental` now re-checks the affected calls when a file adds or edits an `include` that Rigor cannot place into a module only RBS declared, such as `include(*MODS)`, an `include` inside a block or loop, or `send(:include, M)` ([#2096](https://github.com/rigortype/rigor/pull/2096)).
+- **[rigor check]** `rigor check --incremental` now re-checks callers when another file renames, adds or removes a `def Const.x` written outside the class body ([#2043](https://github.com/rigortype/rigor/pull/2043)).
+- **[rigor check]** `rigor check --incremental` now re-checks a file whose analysis read another file through a plugin (an `IoBoundary` read, probe, directory listing or glob) when that file is edited, removed or created ([#2072](https://github.com/rigortype/rigor/pull/2072)).
+- **[rigor check]** `rigor check --incremental` now re-answers when an analysis root, a `pre_eval:` entry or a signature root such as `sig/` changes between a directory and a file ([#1977](https://github.com/rigortype/rigor/issues/1977), [#2024](https://github.com/rigortype/rigor/pull/2024)).
+  - It used to serve the previous run's path errors, diagnostics and `--fail-on` exit code.
+- **[rigor check]** `rigor check --incremental` over a file or directory inside a configured path now reports what a full run over the same arguments reports, including findings that depend on another file of the configured paths ([#2084](https://github.com/rigortype/rigor/pull/2084)).
+  - It re-checks those findings when the other file is edited, added or removed, and `--verify-incremental` no longer fails on such an argument.
+  - A cached `rigor check <file>` also re-checks when a new file appears under the configured paths.
+- **[rigor check]** A warm `--incremental` run after editing or deleting an rbs-inline source that a `rbs.coverage.definition-build-failed` row names now lists the same failing classes as a cold run ([#2058](https://github.com/rigortype/rigor/pull/2058)).
+- **[rigor check]** `rigor coverage`, the protection scan and `parameter_inference:` now see the cross-file tables `rigor check` sees, so a constant another file writes no longer reads as `Dynamic` there ([#2103](https://github.com/rigortype/rigor/pull/2103)).
+  - A parameter whose call sites pass such a constant is now inferred.
+- **[rigor check]** `rigor check` no longer hangs on a constant fold whose value is huge or endless, such as `2 ** 100_000_000`, `(1..Float::INFINITY).to_a` or `("a".."zzzzz").to_a` ([#2122](https://github.com/rigortype/rigor/pull/2122)).
+  - A number past 13,606 bits is typed by its class (`Integer`, `Rational` or `Complex`), and a Range method that would walk more than 1024 elements widens to the method's declared return type.
+- **[rigor check]** A range literal whose endpoints Ruby cannot build, such as `1.."a"`, no longer aborts the file with an internal analyzer error and types as `Range[Integer | String]` ([#2114](https://github.com/rigortype/rigor/pull/2114)).
+- **[rigor check]** A project whose path holds glob metacharacters, such as `ds [x]` or `ds{a}`, is now analysed like any other ([#2049](https://github.com/rigortype/rigor/pull/2049)).
+  - `rigor check` used to find no files there, or to read a sibling directory the path matched as a pattern.
+  - rigor-ffi now builds its catalog for a project that lives under a `vendor/` directory.
+- **[inference]** An `attr_*` written as `self.attr_accessor :x` or through `send`, `public_send` or `__send__` with literal names now defines its methods as the receiverless form does, so a `sig/` that declares the class without them no longer reports `call.undefined-method` on calls to them ([#2120](https://github.com/rigortype/rigor/pull/2120)).
+- **[inference]** An `attr_reader`, `attr_accessor` or `define_method` written after a `def` of the same name in the same file now replaces the `def` for typing, so a call on its result no longer reports `call.undefined-method` ([#2003](https://github.com/rigortype/rigor/pull/2003)).
+  - An `alias_method` or `alias` that points the name at an attr reader does the same.
+- **[inference]** A class method replaced after its `def self.x` is no longer typed from the replaced `def`, so a call on its result no longer reports on correct code ([#2045](https://github.com/rigortype/rigor/pull/2045)).
+  - This covers `singleton_class.alias_method`, `define_method`, `remove_method`, `attr_*` or `class_eval`, `define_singleton_method`, and a `class << self` body's `attr_*`, `alias_method` or `alias`.
+  - `singleton_class.attr_writer :x` no longer hides an arity error on a `def self.x`.
+- **[inference]** A module function's instance copy is now recorded private, as Ruby makes it, so a class that includes the module and overrides one of its methods privately no longer reports `def.override-visibility-reduced` ([#2055](https://github.com/rigortype/rigor/pull/2055)).
+  - `rigor sig-gen` no longer writes a public `def x` for `module_function :x` or `module_function def x`, and emits that private method only with `--include-private`.
+  - A singleton-side call to a method whose instance copy is private, such as `M.two(1)` beside `def self.two(a, b)` and `private def two(a, b)`, now reports `call.wrong-arity`, as Ruby raises `ArgumentError` there.
+- **[inference]** `call.undefined-method` no longer reports a core-class receiver, such as a literal, a plain `Integer` or `String`, or a union of one class's literals, when the program gives it the method another way ([#2086](https://github.com/rigortype/rigor/pull/2086)).
+  - The covered ways are a `method_missing` on the class or an ancestor, a receiver-form `Integer.include(Ext)` or a mixin of an ancestor, singleton methods on the receiver local (`s.extend(M)`, `define_singleton_method`, `class << s`), and a project subclass reached through a signature that returns the class.
+- **[inference]** A class-method call no longer reports `call.undefined-method` when an RBS-known module that the class extends after a project module defines the method first, as `extend M; extend Enumerable` makes `C.to_a` `Enumerable#to_a` ([#2073](https://github.com/rigortype/rigor/pull/2073)).
+  - A call on a subclass of an RBS-complete ancestor such as `Rigor::Plugin::Base` is no longer typed from that ancestor when a module Ruby reaches first defines the name.
+- **[inference]** An instance variable no longer keeps its pre-call value past a `yield`, a `super` or a call of a local proc (`blk.call`, `blk.()`), so a later condition on it no longer reports `flow.always-truthy-condition` ([#2077](https://github.com/rigortype/rigor/pull/2077)).
+  - This holds wherever the call appears (a statement, a condition, another call's receiver or arguments, or a block), and past a block on another receiver whose body calls a method on `self`.
+  - In an instance method, a block run on a class object (`Other.class_eval { … }`, `self.class.instance_eval { … }`) no longer changes the instance's own instance variables.
+- **[inference]** An instance variable that a `while` or `until` body rebinds is now widened across iterations as a local is, so a condition on it after the loop, or a read before the write, no longer reports `flow.always-truthy-condition` or `call.undefined-method` ([#2029](https://github.com/rigortype/rigor/pull/2029)).
+- **[inference]** An `instance_variable_set` on `self` now counts as a write in the class's instance-variable typing, so a reader in another method no longer types the variable as an earlier literal ([#2017](https://github.com/rigortype/rigor/pull/2017)).
+- **[inference]** An instance-variable write inside a plugin-declared route block, such as `get "/" do @user = "alice" end` under rigor-sinatra, now counts toward the class's instance-variable typing ([#2099](https://github.com/rigortype/rigor/pull/2099)).
+  - A sibling method no longer reports a call on `nil` for an instance variable that `initialize` or another route sets to `nil`.
+  - rigor-sinatra now also covers `before` and `after` filters and `error` and `not_found` handlers.
+  - As for a `def` writer, an RBS-declared non-nil reader of such an instance variable can now report `def.return-type-mismatch`.
+- **[inference]** A call inside a condition that assigns an instance variable now ends the narrowing an earlier part of the condition made on it, so `@x.upcase if @x.nil? && reset!` no longer reports `call.undefined-method` ([#2036](https://github.com/rigortype/rigor/pull/2036)).
+  - The same holds across `case` / `when` tests, and a `when` test that runs code is now evaluated before the clauses after it.
+- **[inference]** A class guard's narrowing of an instance variable again survives a call proven not to write it when another class in the project is built on `Data.define`, `Struct.new` or `Class.new` of a core class and defines a method such as `to_s` or `==` ([#2051](https://github.com/rigortype/rigor/pull/2051)).
+- **[inference]** A rescue clause's value, the scope it falls through with and a `return` from it now see the `begin` body's writes, so `got = begin; conn = make; work; rescue; conn; end; got.size` no longer reports `undefined method 'size' for nil` ([#2062](https://github.com/rigortype/rigor/pull/2062)).
+- **[inference]** A `begin … rescue` in an operand position and a rescue modifier's fallback now see the body's writes, so `take(begin; conn = make; work; rescue; conn.size; end)` no longer reports `undefined method 'size' for nil` ([#2111](https://github.com/rigortype/rigor/pull/2111)).
+  - The operand positions are a call argument, a hash value, an array element, an interpolation and a method-chain receiver, outside a `return`, `next`, `break` or `yield` value.
+- **[inference]** An `if`, `elsif`, `unless` or ternary in a value position no longer reads a local its condition writes as the type it held before the write, so `[if (x ||= "d").empty? then 0 else x.upcase end]` no longer reports `call.possible-nil-receiver` ([#2054](https://github.com/rigortype/rigor/pull/2054)).
+- **[inference]** A `return` inside a block its call may run more than once, such as `each`, `times` or `loop`, now joins the enclosing method's inferred return type even when only a later run reaches it ([#2126](https://github.com/rigortype/rigor/pull/2126)).
+  - A caller's condition on the result of `seen = 0; items.each { return false if (seen += 1) > 3 }; true` is no longer reported by `flow.always-truthy-condition`.
+- **[inference]** `s.match?(/\A\d+\z/)`, `/re/ === s` and `case s when /re/` no longer narrow a Symbol or untyped `s` to a String, so a Symbol method called on it past the match is no longer reported ([#1999](https://github.com/rigortype/rigor/pull/1999)).
+  - The `else` arm of `case s when /re/` keeps `String` in the subject's type.
+- **[inference]** `flow.unreachable-clause` no longer reports a `when` or `in` clause as covered when the earlier clauses covered only the type Rigor read for the subject, as it did for `when StringIO` after `when IO` on `io = STDOUT` ([#2068](https://github.com/rigortype/rigor/pull/2068)).
+  - A clause whose class is below an earlier clause's, such as `when File` after `when IO`, still reports.
+- **[inference]** A Range literal's `first` and `last` without an argument now fold to its endpoints as Ruby does, so `(5..1).first` is `5` and `(1...10).last` is `10` instead of `nil` and `9` ([#2129](https://github.com/rigortype/rigor/pull/2129)).
+- **[inference]** A `pre_eval:` patch on an ancestor class or module (`class Object`, `class Numeric`, `module Enumerable`, `module Kernel`) now reaches receivers of its descendants, so `rand(3).zz`, `[1].sum_by` and `Integer.zz` no longer report `call.undefined-method` ([#2098](https://github.com/rigortype/rigor/pull/2098)).
+  - A receiver typed by its class, such as `rand(3).zz`, now types from the patch.
+- **[inference]** A module that `pre_eval:` files outside `paths:` define and include into or prepend to a class (`Numeric.include(M)`, `class Numeric; include M; end`) now answers receivers of that class, so `1.m` no longer reports `call.undefined-method` ([#2107](https://github.com/rigortype/rigor/pull/2107)).
+  - A `private` or `protected` `pre_eval:` patch called with an explicit receiver is now reported, as Ruby raises `NoMethodError`.
+- **[inference]** A module that a `pre_eval:` file includes or prepends under an `include?` or `<` guard, such as `Numeric.include(M) unless Numeric.include?(M)`, now answers its methods as Ruby does ([#2109](https://github.com/rigortype/rigor/issues/2109), [#2130](https://github.com/rigortype/rigor/pull/2130)).
+- **[rigor sig-gen]** Over a `-> untyped` declared in `sig/`, `rigor sig-gen` now writes a `true` or `false` return as `bool` and keeps `untyped` over a return that is only `nil`, so a subclass override no longer reports `def.override-return-widened` ([#2069](https://github.com/rigortype/rigor/pull/2069)).
+  - A Range literal is written as `Range[Integer]` (or `Range[untyped]`) instead of a bare `Range`, which `rbs validate` rejects.
+- **[rigor sig-gen]** Under `--params=observed`, an `attr_accessor`, an `attr_writer` or a field another method of the class writes is no longer typed as the literal the constructor call sites passed ([#2093](https://github.com/rigortype/rigor/pull/2093)).
+  - `Box.new(0)` used to propose `def count=: (0) -> 0`, which rejects `box.count = 5`. The reader and writer are now skipped, as a hand-written setter is.
+- **[rigor sig-gen]** `rigor sig-gen --params=observed` now observes a call on a receiver typed `Foo | nil`, such as a Minitest `setup` instance variable read in a test method, and on an instance variable an RSpec `before` block assigns ([#2081](https://github.com/rigortype/rigor/pull/2081)).
+- **[rigor sig-gen]** `rigor sig-gen --write` now treats an `alias` in `sig/` as declaring its name instead of inserting a duplicate `def` beside it ([#2028](https://github.com/rigortype/rigor/pull/2028)).
+  - It lists each proposal it skipped rather than printing nothing.
+  - Under `--format json`, a skip outside the first signature path carries its candidates in `skipped`, with `write_skip_reason: "outside_sig_root"`.
+- **[rigor sig-gen]** `rigor sig-gen` no longer writes `def self?.x` for a method defined after a bare `public`, `private` or `protected` that follows a bare `module_function`, where Ruby ends the module-function mode ([#2016](https://github.com/rigortype/rigor/pull/2016)).
+  - It now writes `def self?.x` for a module function whose `module_function` follows a bare `private`.
+  - A method after such a call that may not run (under an `if` or in a block) is skipped with the new reason `sig.skipped.uncertain-module-function`, counted in the skip summary on stderr.
+- **[rigor lens]** `rigor lens` now spells a declared block's type as RBS, such as `(::Integer) -> void`, instead of an object representation ([#1995](https://github.com/rigortype/rigor/pull/1995)).
+- **[rigor lens]** `rigor lens` now reads a block declared by `# @rbs &block:` alone instead of dropping it ([#2001](https://github.com/rigortype/rigor/pull/2001)).
+  - The unannotated `&block` of a partly annotated method now reads as undeclared rather than as an authored `(?) -> untyped`.
+- **[rigor lens]** `rigor lens` now reads a `Data` or `Struct` field named `initialize_copy`, or another name Ruby forces private, as private or unknown instead of public ([#1997](https://github.com/rigortype/rigor/pull/1997)).
+- **[rigor unused]** `rigor unused` no longer lists a constant as unused when a literal `const_get` on `self` reaches it through an `include`, `prepend` or `extend` on a receiver it can name ([#2035](https://github.com/rigortype/rigor/pull/2035)).
+  - This covers `K.include(Mix)` in an initializer and its `send` spellings, `K = Class.new(Base)`, and a method an eval block defines.
+  - Where the receiver cannot be named, the included module's own literal lookups are kept.
+- **[plugins/rigor-ffi]** rigor-ffi no longer hangs on a fifo named `*.rb` in the project, and a top-level directory named `x.rb` no longer empties its catalog ([#2118](https://github.com/rigortype/rigor/pull/2118)).
+- **[plugins/rigor-rails-i18n]** rigor-rails-i18n now reports `plugin.rails-i18n.load-error` for a broken `config/locales/*.yml` on every run while the file stays broken ([#2019](https://github.com/rigortype/rigor/pull/2019)).
+  - A warm run after a config edit and a `--workers` run used to drop the row.
+- **[plugins/rigor-actionpack]** rigor-actionpack now notices a helper added under `app/helpers`, or a template added under a `view_search_paths:` root its template globs do not claim, so a cached or `--incremental` run no longer serves stale template diagnostics ([#2102](https://github.com/rigortype/rigor/pull/2102)).
+- **[docs]** The user manual now documents exit code 70, the missing CLI flags, the generalised `rigor doctor` checks and the bundled skills ([#2135](https://github.com/rigortype/rigor/pull/2135)).
+  - It also lists every rule family the MCP `rigor_explain` tool accepts, and when `rigor doctor`'s plugin-gap and bundle-layout checks warn or fail ([#2141](https://github.com/rigortype/rigor/pull/2141)).
+  - The rigor-rspec manual gains a table of the matchers that narrow a local ([#2032](https://github.com/rigortype/rigor/pull/2032)).
+  - The bundled `rigor-doctor` and `rigor-type-oracle` skills now match `rigor explain`'s rule families and those `rigor doctor` checks ([#2144](https://github.com/rigortype/rigor/pull/2144)).
+
 ## [0.4.4] - 2026-10-16
 
 v0.4.4 continues the stabilization of the 0.4 line. Most of its fixes remove false positives from flow narrowing: `case` / `when` (subjectless, `when nil`, and a `case` used as a value), `=~` guards, instance variables across self-calls and `define_method` blocks, and `def`s wrapped in a visibility call. It also closes several stale-answer gaps in the run-result and incremental caches, and lets `disable:` reach a plugin's diagnostics by their qualified ID. The experimental `rigor lens` command now covers constants, aliases, module functions and `Data.define` / `Struct.new` classes, and is available over MCP.
@@ -458,7 +570,8 @@ v0.4.0 opens the 0.4 line by bringing Rails views into the analysis: rigor-actio
 - **[skills]** The shipped agent skills no longer give commands that fail or advice that is out of date, such as a bare `rigor diff` or a `< 0.2.0` version pin ([#1222](https://github.com/rigortype/rigor/pull/1222)).
 - **[playground]** Tab indents in the playground editor, which also shows how to move focus back out, and the dark theme's cursor is visible again ([#990](https://github.com/rigortype/rigor/pull/990)).
 
-[Unreleased]: https://github.com/rigortype/rigor/compare/v0.4.4...HEAD
+[Unreleased]: https://github.com/rigortype/rigor/compare/v0.4.5...HEAD
+[0.4.5]: https://github.com/rigortype/rigor/compare/v0.4.4...v0.4.5
 [0.4.4]: https://github.com/rigortype/rigor/compare/v0.4.3...v0.4.4
 [0.4.3]: https://github.com/rigortype/rigor/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/rigortype/rigor/compare/v0.4.1...v0.4.2

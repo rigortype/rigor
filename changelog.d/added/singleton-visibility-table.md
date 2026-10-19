@@ -1,1 +1,0 @@
-- **[check]** `def.method-visibility-mismatch` now reports a call such as `K.x` to a singleton method made private by `private_class_method` or `private` inside `class << self`, and stays quiet where a project `method_missing` may answer a private call. ([#2061](https://github.com/rigortype/rigor/pull/2061))

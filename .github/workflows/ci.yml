@@ -1129,8 +1129,10 @@ jobs:
     # through the queue or a full push run) but not for another branch. A
     # fork's run gets no OIDC token, so only a same-repository head attests.
     # A run into another branch executes that branch's workflow and could
-    # sign anything; the queue rejects it because that workflow's commit is
-    # merged with another base, so its tree is not the queued tree.
+    # sign anything. The queue accepts only a signer whose own commit has the
+    # queued tree, so such a run either ran another ci.yml (another tree) or
+    # ran this one, whose base_ref condition here refuses it. The tree check
+    # relies on that condition: keep it.
     if: always() && github.event_name == 'pull_request' && github.base_ref == 'master' && github.event.pull_request.head.repo.full_name == github.repository && needs.required.result == 'success' && needs.changes.outputs.tree != ''
     runs-on: ubuntu-latest
     permissions:
@@ -1147,7 +1149,8 @@ jobs:
       # Not attesting only costs the queue a full run, so a failure here
       # does not fail the job.
       - name: Attest the tested tree
-        uses: actions/attest-build-provenance@v4
+        # Pinned by commit: the only job here that can mint an OIDC token.
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         continue-on-error: true
         with:
           subject-path: ${{ runner.temp }}/tested-tree

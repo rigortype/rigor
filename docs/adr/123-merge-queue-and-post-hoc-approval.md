@@ -58,9 +58,11 @@ and recomputes the second from the PRs open when it is read. The attestation's c
 by GitHub and names the commit whose workflow file ran. The queue reuses a result only when that
 commit's tree is the queued tree, the run was a `pull_request` run, and the signer was that commit's
 own `ci.yml`. The workflow that attested is then the workflow that lands, and it attests only a run
-into `master` that passed `CI required`. A run into another branch ran a commit merged with another
-base, so its tree differs and its attestation is ignored. A fork's run gets no signing token and does
-not attest.
+into `master` that passed `CI required`. A run into another branch either ran another tree, whose
+attestation is ignored, or ran the queued tree's own `ci.yml`, whose condition refuses a base other
+than `master`; the tree check relies on that condition. The tree binds the files, not inputs outside
+them (actions referenced by tag, the runner image, repository variables), as with any CI result. A
+fork's run gets no signing token and does not attest.
 
 A head equality would not do either: a check run attaches to the head, while the run tested a
 merge, which differs when the PR's base was another branch or `master` was rewound. In the v0.4.5

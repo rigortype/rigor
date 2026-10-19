@@ -30,21 +30,24 @@ The issue proposed a guard based on PR association. Two reviews and the live API
   and the absence of a record proves nothing.
 - **Sign the tested tree with an artifact attestation and accept only a signer whose own commit has
   the queued tree.** GitHub issues the certificate, and it names the workflow commit
-  (`workflow_sha`), the event and the signer workflow. A run into another branch ran a commit merged
-  with another base, so its tree differs.
+  (`workflow_sha`), the event and the signer workflow. A run into another branch either ran another
+  tree or ran the queued tree's own `ci.yml`, which refuses to attest a base other than `master`.
   - Costs: the `tested-tree` job gains `id-token: write` and `attestations: write`, plus a
-    dependency on `actions/attest-build-provenance@v4` and Sigstore's public-good instance. The
-    `changes` job trades `pull-requests: read` and `checks: read` for `attestations: read`.
+    dependency on `actions/attest-build-provenance` (v4.2.2, pinned by commit) and Sigstore's
+    public-good instance. The `changes` job trades `pull-requests: read` and `checks: read` for
+    `attestations: read`.
   - A fork's run gets no signing token and does not attest, so a fork PR always runs the full queue
     CI.
   - Any verification failure, including Sigstore being unreachable, runs the full CI.
 
 ## Decision
 
-Signed attestation. It keeps #2151's saving and rejects the forgery by construction rather than by
-an absence check. Every way it fails runs the full suite, which is #2151's own rule (never skip on
-doubt). The maintainer asked for an improvement before a revert. A design consultation and the
-adversarial review of #2155 chose this option; the review rounds are recorded in that PR.
+Signed attestation. It keeps #2151's saving and rejects the forgery through who signed, not through
+the absence of a record. Every way it fails runs the full suite, which is #2151's own rule (never skip
+on doubt). The maintainer asked for one more design before a revert, and a design consultation
+proposed this one. The adversarial review of #2155 ruled out the alternatives above and found no
+bypass of this one. The PR body shows its assumptions checked on this PR's own attestation. The
+attest action is pinned by commit, because its job is the repository's first with `id-token: write`.
 
 ## To undo
 
@@ -58,5 +61,5 @@ Nothing else depends on the attestations. Attestations already published stay in
 attestation store, and they are harmless once nothing reads them.
 
 A separate gap is not covered here. The ruleset requires a `CI required` context from any source.
-Whether a writer can post it on a merge-group commit before the real run finishes is being tracked
-as its own issue.
+Whether a writer can post it on a merge-group commit before the real run finishes is
+[#2157](https://github.com/rigortype/rigor/issues/2157).

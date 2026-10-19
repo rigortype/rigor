@@ -133,7 +133,25 @@ jobs:
                 --jq '[.check_runs[] | select(.app.slug == "github-actions" and .conclusion == "success")] | length' \
                 2>/dev/null | grep -E '^[0-9]+$' || echo 0)
             fi
+            # The Tested tree check is written by a pull_request run, and a run
+            # into another branch executes that branch's workflow, which could
+            # write it for a tree it never tested with master. So reuse only
+            # when the head belongs to no other PR, the queued PR still targets
+            # master, and it was never retargeted. A failed lookup
+            # leaves its value unset or "unknown" and falls through.
+            clean=0
             if [ "${passed:-0}" -ge 1 ] 2>/dev/null; then
+              head_pulls=$(gh api --paginate "repos/$REPO/commits/$pr_head/pulls" \
+                --jq '.[] | "\(.number) \(.base.ref)"' 2>/dev/null) || head_pulls=""
+              retargets=$(gh api --paginate "repos/$REPO/issues/$pr/timeline" \
+                --jq '.[] | select(.event == "base_ref_changed") | .event' 2>/dev/null) || retargets="unknown"
+              if [ "$head_pulls" = "$pr master" ] && [ -z "$retargets" ]; then
+                clean=1
+              else
+                echo "Head $pr_head is not solely PR #$pr into master, or PR #$pr was retargeted or unverifiable (pulls: '${head_pulls:-lookup failed}', retargets: '${retargets:-none}'): not reusing."
+              fi
+            fi
+            if [ "$clean" -eq 1 ]; then
               echo "PR #$pr head $pr_head passed CI required on this very tree ($group_tree): reusing it."
               {
                 echo "reused=true"
@@ -1113,7 +1131,8 @@ jobs:
     # base's code passed CI, which holds for master (every code change came
     # through the queue or a full push run) but not for another branch. A run
     # into another branch executes that branch's workflow, which this
-    # condition cannot bind; the queue-side guard for that is #2154.
+    # condition cannot bind; the changes job's reuse block checks that the
+    # head is no other PR's and that the queued PR was never retargeted.
     if: always() && github.event_name == 'pull_request' && github.base_ref == 'master' && needs.required.result == 'success' && needs.changes.outputs.tree != ''
     runs-on: ubuntu-latest
     steps:

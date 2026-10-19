@@ -123,8 +123,16 @@ jobs:
             if [ -n "$pr_head" ]; then
               pr_tree=$(git rev-parse "$pr_head^{tree}" 2>/dev/null || true)
             fi
+            # The head must also contain the queue's base: then the PR's own
+            # run tested this very tree (its merge with any earlier base was a
+            # fast-forward too), and equal trees cannot come from master
+            # commits that cancel out in content.
+            contains_base=false
+            if [ -n "$pr_head" ] && git merge-base --is-ancestor "$BASE_SHA" "$pr_head" 2>/dev/null; then
+              contains_base=true
+            fi
             passed=0
-            if [ -n "$group_tree" ] && [ "$group_tree" = "$pr_tree" ]; then
+            if [ "$contains_base" = true ] && [ -n "$group_tree" ] && [ "$group_tree" = "$pr_tree" ]; then
               passed=$(gh api "repos/$REPO/commits/$pr_head/check-runs?check_name=CI%20required&per_page=100" \
                 --jq '[.check_runs[] | select(.app.slug == "github-actions" and .conclusion == "success")] | length' \
                 2>/dev/null || echo 0)
@@ -138,7 +146,7 @@ jobs:
               } >> "$GITHUB_OUTPUT"
               exit 0
             fi
-            echo "No reusable result (PR '${pr:-?}', head '${pr_head:-?}', group tree '${group_tree:-?}', PR tree '${pr_tree:-?}'): running the suite."
+            echo "No reusable result (PR '${pr:-?}', head '${pr_head:-?}', contains base: $contains_base, group tree '${group_tree:-?}', PR tree '${pr_tree:-?}'): running the suite."
           fi
           if ! changed=$(git diff --name-only "$BASE_SHA...$HEAD_SHA"); then
             echo "diff failed — failing safe to the full suite."

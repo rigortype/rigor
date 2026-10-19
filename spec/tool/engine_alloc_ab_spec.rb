@@ -48,7 +48,7 @@ RSpec.describe "tool/engine_alloc_ab.rb (#1507)" do
     it "states an improvement without the regression mark" do
       text = EngineAllocAB.summary(revs, run(42_000_000), run(40_000_000),
                                    EngineAllocAB.compare(run(42_000_000), run(40_000_000), 1.0), 1.0)
-      expect(text).to include("**Δ −2,000,000 (−4.76%)**")
+      expect(text).to include("**Δ -2,000,000 (-4.76%)**")
       expect(text).not_to include("Above the band")
     end
   end

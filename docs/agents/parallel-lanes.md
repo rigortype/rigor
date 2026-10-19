@@ -164,6 +164,10 @@ carries the base commit, the PR and its issue, the Environment bullet of the lan
   shapes as fixtures, run that tree's `bundle exec exe/rigor check --no-cache` with a same-file
   positive control, and compare against Ruby; read [`measurement.md`](measurement.md) first.
   Re-run the edge-case table from coordinator step 2 when the brief has one.
+- **Run the precision half too.** For a change to how the engine records ADR-46 dependencies, run
+  every `spec/rigor/analysis/*incremental*_spec.rb` that asserts a reader is NOT re-checked
+  (`not_to include` on `affected`), not only the new fixture's file: #2136 passed two reviews and
+  failed CI twice on those. `verify-changed` runs them for such an edit.
 - **Prove the specs.** Remove each part of the fix and report which examples fail; an example that
   survives every removal is a finding.
 - **Name the class, not one instance.** When a finding is one spelling of a wider shape (every

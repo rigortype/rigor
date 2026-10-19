@@ -20,6 +20,24 @@ RSpec.describe "changelog.d fragment conformance (ADR-105)" do
   repo_link = %r{\[#\d+\]\(https://github\.com/rigortype/rigor/(?:pull|issues)/\d+\)}
   slug = /\A[a-z0-9][a-z0-9._-]*\.md\z/
 
+  # The entry line is the release note's bullet: one sentence, no em-dash clause (rigor-release-prep's rules).
+  # A code span reads as the capitalised word `C`, so a sentence opening with one still counts; a link and the
+  # Latin abbreviations drop out, so `1.."a"`, a link's text or `e.g. String` cannot read as a sentence break. A
+  # period is the only break: a `?` or `!` here is far more often a Ruby method name than a sentence end.
+  define_method(:entry_prose_offenses) do |relative, entry|
+    prose = entry.to_s.gsub(/`[^`]*`/, "C").gsub(/\[[^\]]*\]\([^)]*\)/, "x")
+    prose = prose.gsub(/\b(?:e\.?g|i\.e|vs|etc|cf|approx|a\.k\.a|dr|mr|u\.s)\./i, "abbr")
+    prose = prose.gsub(/(?<=\d)–(?=\d)/, "-") # a numeric range (`1–3`) is not a clause
+    offenses = []
+    if prose.match?(/—|–| -- /)
+      offenses << "#{relative}: the entry line carries a dash clause; move it to a `  - ` child item"
+    end
+    if prose.match?(/[A-Za-z0-9)"']\.[*"']* +[A-Z0-9]/)
+      offenses << "#{relative}: the entry line holds more than one sentence; move the rest to `  - ` child items"
+    end
+    offenses
+  end
+
   # Offense strings for one fragment, or [] when it conforms. `relative` is the path under
   # changelog.d/ (e.g. "fixed/my-branch.md").
   define_method(:fragment_offenses) do |relative, content|
@@ -34,6 +52,7 @@ RSpec.describe "changelog.d fragment conformance (ADR-105)" do
     if lines.empty? || !lines.first.match?(entry_line)
       offenses << "#{relative}: first line must be a `- **[subsystem]** …` bullet on ONE line"
     end
+    offenses.concat(entry_prose_offenses(relative, lines.first))
     lines.drop(1).each do |line|
       unless line.match?(child_line)
         offenses << "#{relative}: `#{line}` — only `  - ` child items may follow (no wrapping)"
@@ -67,6 +86,39 @@ RSpec.describe "changelog.d fragment conformance (ADR-105)" do
     it "rejects an unknown section directory and a top-level file" do
       expect(fragment_offenses("performance/my-branch.md", good)).not_to be_empty
       expect(fragment_offenses("my-branch.md", good)).not_to be_empty
+    end
+
+    it "rejects an em-dash clause on the entry line" do
+      dashed = "- **[engine]** A fix — and why. ([#42](https://github.com/rigortype/rigor/pull/42))\n"
+      expect(fragment_offenses("fixed/my-branch.md", dashed)).not_to be_empty
+    end
+
+    it "rejects a second sentence on the entry line, and keeps it for a child item" do
+      two = "- **[engine]** A fix. It also does more. ([#42](https://github.com/rigortype/rigor/pull/42))\n"
+      expect(fragment_offenses("fixed/my-branch.md", two)).not_to be_empty
+      expect(fragment_offenses("fixed/my-branch.md", "#{good}  - It also does more. And more.\n")).to be_empty
+    end
+
+    it "rejects the second-sentence shapes a capital-letter test alone misses" do
+      ["Fix the RBS. It loads now.", 'Report "x". It is fine.', "**Integer.** Then more.",
+       "A fix. `rigor check` now passes.", "A fix. 3 rules move.", "A fix – and why."].each do |prose|
+        entry = "- **[engine]** #{prose} ([#42](https://github.com/rigortype/rigor/pull/42))\n"
+        expect(fragment_offenses("fixed/my-branch.md", entry)).not_to be_empty, prose
+      end
+    end
+
+    it "does not read a code span, a link or an abbreviation as a sentence break" do
+      code = "- **[engine]** `a. B` and `1..\"a\"`, e.g. this one, now type " \
+             "([#42](https://github.com/rigortype/rigor/pull/42), [#43. X](https://github.com/rigortype/rigor/issues/43)).\n"
+      expect(fragment_offenses("fixed/my-branch.md", code)).to be_empty
+      ["Accept e.g. String and Array as keys.", "Read i.e. Integer here.", "Compare Array vs. Hash shapes.",
+       "Skip globs, etc. Ruby files stay.", "Narrow ivars; Ruby 3.4 needs it.",
+       "Keep `empty?` and any? And all? apart.", "Ship it in v0.4.5.", "Type Foo.bar calls.",
+       "Accept E.g. String keys.", "Cut approx. 30% of allocations.", "Read a.k.a. Alias names.",
+       "Fold 1–3 element tuples."].each do |prose|
+        entry = "- **[engine]** #{prose} ([#42](https://github.com/rigortype/rigor/pull/42))\n"
+        expect(fragment_offenses("fixed/my-branch.md", entry)).to be_empty, prose
+      end
     end
 
     it "rejects an uppercase slug" do

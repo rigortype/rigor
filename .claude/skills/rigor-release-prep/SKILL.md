@@ -59,12 +59,19 @@ git ls-tree --name-only origin/master approval-queue.d/   # README.md alone mean
 
 Release work happens on a dedicated `release/x.y.z` branch, not directly on
 `master` ([ADR-50](../../../docs/adr/50-release-engineering-and-stability-strategy.md)).
-Cut it from an up-to-date `master`:
+Cut it from an up-to-date `master`, in its own worktree:
 
 ```sh
-git switch master && git pull
-git switch -c release/x.y.z
+git fetch origin
+nix develop --command bin/rigor-worktree release/x.y.z origin/master
+cd <the path it prints after "Worktree ready:">   # run every step below here
 ```
+
+The worktree lands under `rigor-wt/` with its own bundle. Do not prepare a release in the shared
+main clone, whose branch other sessions switch, nor in an app-created `.claude/worktrees/` folder:
+in v0.4.5's cut that folder was removed mid-session and the shell lost its working directory. The
+branch tracks `origin/master`, so push it only with an explicit refspec
+(`git push origin release/x.y.z:refs/heads/release/x.y.z`).
 
 Every step below — the metadata edits, the local verify, the version-bump
 commit — lands on this branch. Pushing it runs `release-gate.yml` (perf
@@ -549,7 +556,15 @@ After the release PR merges, publish from an up-to-date `master` via the
 user explicitly authorizes publishing: it tags, pushes, and publishes to
 RubyGems, and none of that can be undone.
 
+Publish is the one step that runs in the main clone, on `master`: the release worktree cannot check
+out `master` while the main clone holds it, and `rake release` tags whatever `HEAD` is. It is the
+one moment the shared clone's branch matters, so check `git status` there before switching. Leave the
+release worktree before removing it, so the shell keeps a working directory:
+
 ```sh
+main="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
+cd "$main" && git worktree remove "<the release worktree's path>"
+git status --short --branch   # the shared clone: stop if another session left work here
 git switch master && git pull
 ls approval-queue.d/   # README.md alone; otherwise back to "First: ratify the approval queue"
 gh pr view <release-pr> --json mergeCommit --jq .mergeCommit.oid   # must equal:
@@ -611,7 +626,8 @@ until the last step: the first commit sets `"calibrated": false`, which passes
 every run, so it must never sit at the head of a PR that could merge.
 
 ```sh
-git switch -c bench-corpus-vX.Y.Z vX.Y.Z
+nix develop --command bin/rigor-worktree bench-corpus-vX.Y.Z vX.Y.Z
+cd <the path it prints after "Worktree ready:">
 # bench/baseline.json: "corpus": "vX.Y.Z", "calibrated": false
 git commit -am "Advance the perf-gate corpus to vX.Y.Z"
 git push origin HEAD:refs/heads/bench-corpus-vX.Y.Z

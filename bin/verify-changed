@@ -18,7 +18,9 @@
 #      that CI failures most often came from on untouched files (~45s), and every
 #      example that pins a known-wrong answer with "flip this when #N" (~7s): an
 #      engine change can fix #N in passing, and the pin then fails in a file the
-#      branch never touched (#2003);
+#      branch never touched (#2003); and, for a lib/ edit that touches how the
+#      engine records ADR-46 dependencies, the incremental specs that assert a
+#      reader is not re-checked (~90s), which no mirror spec names (#2136);
 #   4. `spec/docs/` always — seconds, and it is where the Markdown gates live;
 #   5. `rigor check --fail-on=warning` on the changed lib files and the lib
 #      mirrors of changed sig/ files — the CI self-check caught a
@@ -126,6 +128,17 @@ declaration_fact_specs=(
   spec/rigor/declaration_facts/producers_spec.rb
   spec/rigor/declaration_facts/witness_spec.rb
 )
+# An edit to how the engine records ADR-46 dependencies can over-invalidate
+# files no spec of the edited file names: #2136 failed CI twice on
+# incremental specs that assert a reader is NOT re-checked
+# (`expect(...affected).not_to include`, or an exact `affected` set). Such an
+# edit runs every incremental spec carrying such a precision assertion
+# (10 files, ~95s), chosen by content so a new one joins on its own. The
+# trigger is a changed line naming the recorder's surface, or a changed or
+# deleted file of the incremental machinery itself.
+dependency_recording_re='DependencyRecorder|parameter_envelopes_of|record_class_dependency|read_last_segment|read_missing|read_name\(|withhold|settle_by_(definitions|walk)|subclass_of|\(:mark,|"mark:'
+precision_assertion_re='affected[^ ]*\)?\.not_to include|not_to include\(File\.join|affected[^ ]*\)\.to (eq|be_empty|contain_exactly)|result\)\.not_to include'
+dependency_edit=""
 engine_drift_specs=(
   spec/integration/precision_snapshot_spec.rb
   spec/integration/type_construction_spec.rb
@@ -170,6 +183,20 @@ for path in ${changed[@]+"${changed[@]}"}; do
       mirror="spec/${path#lib/}"
       add_mirror_spec "${mirror%.rb}_spec.rb"
       check_files+="$path"$'\n'
+      case "$path" in
+        lib/rigor/analysis/incremental*.rb | lib/rigor/analysis/incremental*/*.rb | lib/rigor/analysis/dependency_recorder.rb)
+          dependency_edit=1
+          ;;
+        *)
+          if git ls-files --error-unmatch "$path" >/dev/null 2>&1; then
+            # No -q: grep must drain the diff, or a large one dies of SIGPIPE
+            # and pipefail drops the match.
+            git diff "$merge_base" -- "$path" | grep -E "^[+-].*($dependency_recording_re)" >/dev/null && dependency_edit=1
+          else
+            grep -qE "$dependency_recording_re" "$path" && dependency_edit=1
+          fi
+          ;;
+      esac
       ;;
     tool/*.rb)
       mirror="spec/${path}"
@@ -214,10 +241,24 @@ for path in ${deleted[@]+"${deleted[@]}"}; do
       ;;
   esac
   case "$path" in
+    lib/rigor/analysis/incremental*.rb | lib/rigor/analysis/incremental*/*.rb | lib/rigor/analysis/dependency_recorder.rb)
+      dependency_edit=1
+      ;;
+    lib/*.rb)
+      git show "$merge_base:$path" 2>/dev/null | grep -E "$dependency_recording_re" >/dev/null && dependency_edit=1
+      ;;
+  esac
+  case "$path" in
     *.md) ;;
     *) uncovered+="$path (deleted: its dependents are not checked locally)"$'\n' ;;
   esac
 done
+
+if [[ -n "$dependency_edit" ]]; then
+  while IFS= read -r spec; do add_spec "$spec"; done < <(
+    grep -lE "$precision_assertion_re" spec/rigor/analysis/*incremental*_spec.rb
+  )
+fi
 
 # `run_on <step name> <list> <command...>`: append the list's entries to the
 # command and run it as a step, or skip the step when the list is empty.

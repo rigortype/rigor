@@ -160,7 +160,9 @@ module EngineAllocAB
     number.abs.to_s.reverse.scan(/\d{1,3}/).join(",").reverse
   end
 
-  def sign(number) = number.negative? ? "−" : "+"
+  # ASCII, not U+2212: the summary is read back by scripts that sum PR deltas, and a `[+-]` pattern missed every
+  # improvement.
+  def sign(number) = number.negative? ? "-" : "+"
 
   def signed(number)
     "#{sign(number)}#{delimit(number)}"

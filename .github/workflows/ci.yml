@@ -829,6 +829,7 @@ jobs:
           bundler-cache: true
 
       - name: Compare the merge base's engine with the PR's
+        id: ab
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
@@ -836,9 +837,54 @@ jobs:
           # The merge base, not the base branch's tip: a PR branched from
           # an older master would otherwise be charged with every engine
           # change merged since.
+          # The default run shell is `bash -e` without pipefail: keep a failed
+          # engine run failing the step through the tee below.
+          set -o pipefail
           merge_base=$(git merge-base "$BASE_SHA" "$HEAD_SHA")
           bundle exec ruby tool/engine_alloc_ab.rb --base "$merge_base" --head "$HEAD_SHA" \
-            --summary "$GITHUB_STEP_SUMMARY"
+            --summary "$GITHUB_STEP_SUMMARY" | tee "$RUNNER_TEMP/engine-alloc-ab.txt"
+          if grep -q "nothing to measure" "$RUNNER_TEMP/engine-alloc-ab.txt"; then
+            echo "measured=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "measured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # The per-PR delta above warns only when one PR passes its own band, so a
+      # cycle of small rises reaches the release gate unseen: v0.4.5's cut met
+      # +3.4% against a +2% band, built from 39 PRs of which one had warned.
+      # This runs the release gate's own measurement (tool/bench.rb over the
+      # corpus bench/baseline.json names) on this checkout, which is the PR
+      # merged onto master, and reports the cumulative allocation drift since
+      # the baseline. Advisory: it warns from 1.5% and never fails the job.
+      # It is skipped when the A/B found the engine unchanged.
+      - name: Compare with the release gate's baseline
+        if: steps.ab.outputs.measured == 'true'
+        run: |
+          set +e
+          out=$(bundle exec ruby tool/bench.rb --target lib --reps 1 2>&1)
+          set -e
+          # bench.rb prints an OK line flush left on stdout and a FAIL line
+          # indented on stderr, so the pattern allows leading spaces.
+          line=$(printf '%s\n' "$out" | grep -E '^ *(OK|FAIL) +lib allocations:' | head -1 | sed -E 's/^ +//' || true)
+          if [ -z "$line" ]; then
+            echo "The release gate printed no allocations verdict (an uncalibrated baseline prints none):"
+            printf '%s\n' "$out" | tail -20
+            exit 0
+          fi
+          now=$(sed -nE 's/.*allocations: ([0-9]+).*/\1/p' <<<"$line")
+          base=$(sed -nE 's/.*baseline ([0-9]+).*/\1/p' <<<"$line")
+          pct=$(awk -v n="$now" -v b="$base" 'BEGIN { printf "%+.2f", (n - b) * 100 / b }')
+          {
+            echo "### Release-gate allocations (advisory)"
+            echo
+            echo "This PR merged onto master allocates $now against the release baseline's $base: **${pct}%** (the gate fails above +2%)."
+            echo
+            echo "\`$line\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "$line ($pct%)"
+          if awk -v p="$pct" 'BEGIN { exit !(p + 0 >= 1.5) }'; then
+            echo "::warning title=Release gate allocations::Merged onto master, this PR allocates ${pct}% over the release baseline (the release gate fails above +2%). See the job summary."
+          fi
 
   # ── Cross-commit `call.wrong-arity` differential (ADR-119 WD2) ───
   # The merge base's engine and the PR's each analyse the arity fixtures;

@@ -74,3 +74,19 @@ review is never skipped silently.
 
 Never run `waza dev --auto`: it injects boilerplate that is often false. The hand-written `name:` and
 `description:` pair is the binding surface.
+
+## Testing a description's routing without a nested login
+
+`skill-creator`'s `run_eval` / `run_loop` and `waza dev --copilot` need a working nested `claude -p`
+or Copilot login. Without one they fail in misleading ways: `run_loop` scored every query "not
+triggered" and then crashed (September 2026, building `rigor-worktree`). The fallback that works is a
+routing classification by independent subagents:
+
+- give each of three subagents every skill's `name:` and `description:` and the query set, and ask
+  which one skill, if any, each query would make an agent consult;
+- count the fire rate per query (0 to 3; a majority counts as fired);
+- keep the query set adversarial, with near-misses that belong to a sibling skill, since the judges
+  know it is a routing test and score cleaner than production.
+
+`run_loop` never writes `SKILL.md`: it prints the best description as JSON, which you apply by hand.
+It also finds the project root from the current directory, not from `--skill-path`.

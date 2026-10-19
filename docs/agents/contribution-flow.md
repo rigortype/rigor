@@ -40,6 +40,11 @@ a changelog entry. It is the conditional detail pointed to by `AGENTS.md`.
   build on it until its owner hands over the lane. A green gate is not a handoff.
 - A bug-report fix credits the reporter with `Co-Authored-By: Name <email>` on every fix commit,
   including fragments, and `thank you @handle!` in the changelog. Ask for a missing email; never guess.
+  Give the credit when committing, never as a task, checklist item or "must" in a plan or handoff:
+  listing an acknowledgement as work to do reads as discourteous to the reporter.
+- Commit with the repository's configured identity. Never pass `--author=` or set `GIT_AUTHOR_*` /
+  `GIT_COMMITTER_*`: in September 2026 subagent commits carried the maintainer's private address and
+  had to be rewritten (#628). Lane briefs repeat this.
 - Put each `Fixes #N` on its own line. GitHub parses only the first reference in a comma-separated
   `Fixes #a, #b, #c`, silently leaving the rest open, and a later session reads them as backlog.
 - A spec that pins behaviour you believe is wrong carries an in-place `flip this when #N is fixed`
@@ -204,7 +209,10 @@ checks more) or that writes down an outcome a `ready-for-agent` issue already st
 ## Release Cadence
 
 - The only release path is the user's explicit `/rigor-release-prep` invocation. A date or release
-  goal is context only; otherwise leave versioned metadata and `[Unreleased]` untouched.
+  goal is context only; otherwise leave versioned metadata and `[Unreleased]` untouched. The rule is
+  about rhythm: when every landed batch was followed by a version bump (v0.0.5 to v0.0.8), releases
+  came too close together to each carry user-visible value, and a release cut without being asked
+  (0.3.8, read from "release by 11 o'clock") was a trust failure, not a process slip.
 - Never run `bundle exec rake release` without explicit authorization: it tags, pushes, and publishes.
 - A release ships only ratified decisions: `/rigor-release-prep` reports
   [`approval-queue.d/`](../../approval-queue.d/README.md) first, and the release waits until it holds

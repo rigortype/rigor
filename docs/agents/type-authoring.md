@@ -40,6 +40,18 @@ The normative reasons are [ADR-107](../adr/107-checked-types-and-typeless-commen
 [ADR-108](../adr/108-type-provenance-for-agents.md), and
 [ADR-14](../adr/14-rbs-sig-generation.md).
 
+## Spelling a refinement
+
+When a refinement denotes a set that a Ruby literal's own predicate already accepts, spell it with that
+literal and define it by that predicate: `Integer[1..10]` and `Float[0.0...1.0]` by `Range#cover?`, not
+PHPStan's `int<1, 10>` ([ADR-1](../adr/1-types.md), [ADR-109](../adr/109-ruby-native-range-notation.md)).
+Before importing a PHPStan, TypeScript or Python spelling, check whether Ruby has a literal for the set
+and whether ADR-1's rejected alternatives already ruled on it. The imported `int<min, max>` shipped five
+days after ADR-1 rejected it and stood for four months: it could not round-trip (`int<0, max>` printed
+but did not parse) or extend to `Float` (`min` reads as `Float::MIN`). When a docs sweep finds the spec
+and the code disagreeing, check which side ADR-1 took before siding with the code. A display string a
+user may copy into a `%a{rigor:v1:…}` payload must parse back.
+
 ## Tighten the gate with the fix
 
 The pattern to copy is the alba maintainer's Steep ratchet

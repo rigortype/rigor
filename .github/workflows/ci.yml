@@ -829,6 +829,7 @@ jobs:
           bundler-cache: true
 
       - name: Compare the merge base's engine with the PR's
+        id: ab
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
@@ -838,7 +839,12 @@ jobs:
           # change merged since.
           merge_base=$(git merge-base "$BASE_SHA" "$HEAD_SHA")
           bundle exec ruby tool/engine_alloc_ab.rb --base "$merge_base" --head "$HEAD_SHA" \
-            --summary "$GITHUB_STEP_SUMMARY"
+            --summary "$GITHUB_STEP_SUMMARY" | tee "$RUNNER_TEMP/engine-alloc-ab.txt"
+          if grep -q "nothing to measure" "$RUNNER_TEMP/engine-alloc-ab.txt"; then
+            echo "measured=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "measured=true" >> "$GITHUB_OUTPUT"
+          fi
 
       # The per-PR delta above warns only when one PR passes its own band, so a
       # cycle of small rises reaches the release gate unseen: v0.4.5's cut met
@@ -847,12 +853,16 @@ jobs:
       # corpus bench/baseline.json names) on this checkout, which is the PR
       # merged onto master, and reports the cumulative allocation drift since
       # the baseline. Advisory: it warns from 1.5% and never fails the job.
+      # It is skipped when the A/B found the engine unchanged.
       - name: Compare with the release gate's baseline
+        if: steps.ab.outputs.measured == 'true'
         run: |
           set +e
           out=$(bundle exec ruby tool/bench.rb --target lib --reps 1 2>&1)
           set -e
-          line=$(printf '%s\n' "$out" | grep -E '^(OK|FAIL) +lib allocations:' | head -1 || true)
+          # bench.rb prints an OK line flush left on stdout and a FAIL line
+          # indented on stderr, so the pattern allows leading spaces.
+          line=$(printf '%s\n' "$out" | grep -E '^ *(OK|FAIL) +lib allocations:' | head -1 | sed -E 's/^ +//' || true)
           if [ -z "$line" ]; then
             echo "The release gate printed no allocations verdict (an uncalibrated baseline prints none):"
             printf '%s\n' "$out" | tail -20

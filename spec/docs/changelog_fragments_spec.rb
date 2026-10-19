@@ -21,14 +21,17 @@ RSpec.describe "changelog.d fragment conformance (ADR-105)" do
   slug = /\A[a-z0-9][a-z0-9._-]*\.md\z/
 
   # The entry line is the release note's bullet: one sentence, no em-dash clause (rigor-release-prep's rules).
-  # Code spans and links are dropped first, so `1.."a"` or a link's text cannot read as a sentence break.
+  # A code span reads as the capitalised word `C`, so a sentence opening with one still counts; a link and the
+  # Latin abbreviations drop out, so `1.."a"`, a link's text or `e.g. String` cannot read as a sentence break. A
+  # period is the only break: a `?` or `!` here is far more often a Ruby method name than a sentence end.
   define_method(:entry_prose_offenses) do |relative, entry|
-    prose = entry.to_s.gsub(/`[^`]*`/, "x").gsub(/\[[^\]]*\]\([^)]*\)/, "x")
+    prose = entry.to_s.gsub(/`[^`]*`/, "C").gsub(/\[[^\]]*\]\([^)]*\)/, "x")
+    prose = prose.gsub(/\b(?:e\.g|i\.e|vs|etc|cf)\./, "abbr")
     offenses = []
-    if prose.include?("—")
-      offenses << "#{relative}: the entry line carries an em-dash clause; move it to a `  - ` child item"
+    if prose.match?(/—|–| -- /)
+      offenses << "#{relative}: the entry line carries a dash clause; move it to a `  - ` child item"
     end
-    if prose.match?(/[a-z0-9)x][.;!?] +[A-Z]/)
+    if prose.match?(/[A-Za-z0-9)"']\.[*"']* +[A-Z0-9]/)
       offenses << "#{relative}: the entry line holds more than one sentence; move the rest to `  - ` child items"
     end
     offenses
@@ -95,10 +98,24 @@ RSpec.describe "changelog.d fragment conformance (ADR-105)" do
       expect(fragment_offenses("fixed/my-branch.md", "#{good}  - It also does more. And more.\n")).to be_empty
     end
 
+    it "rejects the second-sentence shapes a capital-letter test alone misses" do
+      ["Fix the RBS. It loads now.", 'Report "x". It is fine.', "**Integer.** Then more.",
+       "A fix. `rigor check` now passes.", "A fix. 3 rules move.", "A fix – and why."].each do |prose|
+        entry = "- **[engine]** #{prose} ([#42](https://github.com/rigortype/rigor/pull/42))\n"
+        expect(fragment_offenses("fixed/my-branch.md", entry)).not_to be_empty, prose
+      end
+    end
+
     it "does not read a code span, a link or an abbreviation as a sentence break" do
       code = "- **[engine]** `a. B` and `1..\"a\"`, e.g. this one, now type " \
              "([#42](https://github.com/rigortype/rigor/pull/42), [#43. X](https://github.com/rigortype/rigor/issues/43)).\n"
       expect(fragment_offenses("fixed/my-branch.md", code)).to be_empty
+      ["Accept e.g. String and Array as keys.", "Read i.e. Integer here.", "Compare Array vs. Hash shapes.",
+       "Skip globs, etc. Ruby files stay.", "Narrow ivars; Ruby 3.4 needs it.",
+       "Keep `empty?` and any? And all? apart.", "Ship it in v0.4.5.", "Type Foo.bar calls."].each do |prose|
+        entry = "- **[engine]** #{prose} ([#42](https://github.com/rigortype/rigor/pull/42))\n"
+        expect(fragment_offenses("fixed/my-branch.md", entry)).to be_empty, prose
+      end
     end
 
     it "rejects an uppercase slug" do

@@ -1110,9 +1110,10 @@ jobs:
     # always(): a job skipped anywhere upstream of `required` (Docs check on a
     # code PR) would otherwise skip this one implicitly. Only a PR into master
     # attests: a Markdown-only run skips the code suite on the ground that its
-    # base's code passed CI, which holds for master (every commit came through
-    # the queue) but not for another branch, and a run into another branch
-    # uses that branch's workflow, which never lands.
+    # base's code passed CI, which holds for master (every code change came
+    # through the queue or a full push run) but not for another branch. A run
+    # into another branch executes that branch's workflow, which this
+    # condition cannot bind; the queue-side guard for that is #2154.
     if: always() && github.event_name == 'pull_request' && github.base_ref == 'master' && needs.required.result == 'success' && needs.changes.outputs.tree != ''
     runs-on: ubuntu-latest
     steps:

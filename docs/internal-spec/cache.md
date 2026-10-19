@@ -1104,10 +1104,10 @@ negative edges.
 The `visibility:<class>#<method name>` key in `missing` is recorded by
 `Scope#discovered_method_visibility` whichever way it answers
 ([#2134](https://github.com/rigortype/rigor/issues/2134)), for the class
-and method it reads, on either side. `DefinerResolution`'s
-contested-slot check records nothing of its own: it runs only on a hit
-whose answer read the same slot through that method. The singleton
-rule's other reads of the table record it too: its wildcard-slot contest check records
+and method it reads, on either side, and by `DefinerResolution`'s
+contested-slot check for a question that reads the visibility (an
+answer block may answer from RBS without reading the slot). The
+singleton rule's other reads of the table record it too: its wildcard-slot contest check records
 `visibility:<entry>#*` for each project entry of the chain, and its
 project-wide "is the name private anywhere" gate
 (`CheckRules#private_singleton_candidate?`) records `visibility:*#<method

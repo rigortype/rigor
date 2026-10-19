@@ -145,8 +145,8 @@ RSpec.describe "incremental edges for a source-recorded method visibility (#2134
     expect_toggle(files, before: "\n", after: "Widget.public_class_method(*NAMES)\n", first: singleton, second: [])
   end
 
-  # `def.override-return-widened` stops at a parent's private method; the relevance read of the parent's visibility
-  # is what re-checks it.
+  # `def.override-return-widened` stops at a parent's private method. Here `def.override-visibility-reduced` reads
+  # `Parent#foo`'s visibility in the same file first, which files the key.
   it "re-checks a widened override when a class_eval block starts making the parent's method private" do
     write("sig/x.rbs",
           "class Parent\n  def foo: () -> Integer\nend\nclass Child < Parent\n  def foo: () -> String\nend\n")
@@ -154,6 +154,19 @@ RSpec.describe "incremental edges for a source-recorded method visibility (#2134
       { "lib/parent.rb" => "class Parent\n  def foo = 1\nend\n",
         "lib/child.rb" => "class Child < Parent\n  def foo = \"a\"\nend\n" },
       before: "\n", after: "Parent.class_eval do\n  private :foo\nend\n",
+      first: [["def.override-return-widened", "lib/child.rb", 2]], second: []
+    )
+  end
+
+  # `respond_to_missing?` is implicitly private, so `def.override-visibility-reduced` skips it and only the return
+  # rule's contested-slot check in `DefinerResolution` reads the parent's slot: a conditional `private` contests it.
+  it "re-checks a widened override whose only read of the parent's slot is its contest" do
+    write("sig/x.rbs", "class Parent\n  def respond_to_missing?: (Symbol, bool) -> bool\nend\n" \
+                       "class Child < Parent\n  def respond_to_missing?: (Symbol, bool) -> String\nend\n")
+    expect_toggle(
+      { "lib/parent.rb" => "class Parent\n  def respond_to_missing?(name, all = false) = false\nend\n",
+        "lib/child.rb" => "class Child < Parent\n  def respond_to_missing?(name, all = false) = \"a\"\nend\n" },
+      before: "\n", after: "Parent.class_eval do\n  private :respond_to_missing? if ENV[\"X\"]\nend\n",
       first: [["def.override-return-widened", "lib/child.rb", 2]], second: []
     )
   end

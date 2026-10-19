@@ -412,6 +412,8 @@ module Rigor
       # the name private passes `"*"` as the class; the key fires when any entry of the name moves. A wildcard
       # slot (`[:singleton, :*]`) is `*` as the method name.
       def read_visibility(class_name, method_name)
+        return if Thread.current[KEY].nil?
+
         read_name(:visibility, "#{class_name}##{method_name}")
       end
 

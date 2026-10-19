@@ -122,8 +122,9 @@ RSpec.describe "incremental edges for a source-recorded method visibility (#2134
   # The singleton rule first asks whether any class records the name private; while none does, it reads no chain,
   # so only the `visibility:*#build` key re-checks the call when a file makes the extended module's method private,
   # or drops a `public :build` that hid another file's `private :build`.
-  let(:extended_files) do
-    { "lib/factory.rb" => "module Factory\n  def build = 1\nend\n", "lib/widget.rb" => "class Widget\n  extend Factory\nend\n",
+  def extended_files
+    { "lib/factory.rb" => "module Factory\n  def build = 1\nend\n",
+      "lib/widget.rb" => "class Widget\n  extend Factory\nend\n",
       "lib/use.rb" => "def make\n  Widget.build\nend\n" }
   end
 
@@ -147,10 +148,13 @@ RSpec.describe "incremental edges for a source-recorded method visibility (#2134
   # `def.override-return-widened` stops at a parent's private method; the relevance read of the parent's visibility
   # is what re-checks it.
   it "re-checks a widened override when a class_eval block starts making the parent's method private" do
-    write("sig/x.rbs", "class Parent\n  def foo: () -> Integer\nend\nclass Child < Parent\n  def foo: () -> String\nend\n")
+    write("sig/x.rbs",
+          "class Parent\n  def foo: () -> Integer\nend\nclass Child < Parent\n  def foo: () -> String\nend\n")
     expect_toggle(
-      { "lib/parent.rb" => "class Parent\n  def foo = 1\nend\n", "lib/child.rb" => "class Child < Parent\n  def foo = \"a\"\nend\n" },
-      before: "\n", after: "Parent.class_eval do\n  private :foo\nend\n", first: [["def.override-return-widened", "lib/child.rb", 2]], second: []
+      { "lib/parent.rb" => "class Parent\n  def foo = 1\nend\n",
+        "lib/child.rb" => "class Child < Parent\n  def foo = \"a\"\nend\n" },
+      before: "\n", after: "Parent.class_eval do\n  private :foo\nend\n",
+      first: [["def.override-return-widened", "lib/child.rb", 2]], second: []
     )
   end
 end

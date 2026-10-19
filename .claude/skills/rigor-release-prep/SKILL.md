@@ -59,12 +59,18 @@ git ls-tree --name-only origin/master approval-queue.d/   # README.md alone mean
 
 Release work happens on a dedicated `release/x.y.z` branch, not directly on
 `master` ([ADR-50](../../../docs/adr/50-release-engineering-and-stability-strategy.md)).
-Cut it from an up-to-date `master`:
+Cut it from an up-to-date `master`, in its own worktree:
 
 ```sh
-git switch master && git pull
-git switch -c release/x.y.z
+git fetch origin
+nix develop --command bin/rigor-worktree release/x.y.z origin/master
 ```
+
+The worktree lands under `rigor-wt/` with its own bundle. Do not prepare a release in the shared
+main clone, whose branch other sessions switch, nor in an app-created `.claude/worktrees/` folder:
+in v0.4.5's cut that folder was removed mid-session and the shell lost its working directory. The
+branch tracks `origin/master`, so push it only with an explicit refspec
+(`git push origin release/x.y.z:refs/heads/release/x.y.z`).
 
 Every step below — the metadata edits, the local verify, the version-bump
 commit — lands on this branch. Pushing it runs `release-gate.yml` (perf

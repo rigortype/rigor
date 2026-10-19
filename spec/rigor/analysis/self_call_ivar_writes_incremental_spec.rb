@@ -146,7 +146,7 @@ RSpec.describe "self-call ivar-write proof — incremental" do
   # Issue #2137 — a `refine` of a class on the chain (here the caller's own, ahead of the owner `Base`) marks it
   # rewritten from a file that declares nothing the chain reads, and keeps the file's declared classes, so no class key
   # fires: only the `mark:` edge `rewritten?` files re-checks the caller.
-  let(:refining) { "module R\n  refine Holder do\n    def helper = 1\n  end\nend\n" }
+  def refining = "module R\n  refine Holder do\n    def helper = 1\n  end\nend\n"
 
   it "re-checks the caller when a file whose declarations stay starts refining the caller's class" do
     expect_recheck_to_report(

@@ -1107,7 +1107,9 @@ jobs:
   tested-tree:
     name: Tested tree ${{ needs.changes.outputs.tree }}
     needs: [changes, required]
-    if: github.event_name == 'pull_request' && needs.required.result == 'success' && needs.changes.outputs.tree != ''
+    # always(): a job skipped anywhere upstream of `required` (Docs check on a
+    # code PR) would otherwise skip this one implicitly.
+    if: always() && github.event_name == 'pull_request' && needs.required.result == 'success' && needs.changes.outputs.tree != ''
     runs-on: ubuntu-latest
     steps:
       - name: Attest the tested tree

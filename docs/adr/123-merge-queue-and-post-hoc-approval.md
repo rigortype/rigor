@@ -49,9 +49,14 @@ skips the suite, so the result that will land is still checked once. Only a run 
 a Markdown-only run skips the code suite because its base's code already passed CI, which holds for
 every code change on `master` and not for another branch. A run into another branch also executes
 that branch's workflow, which this condition cannot bind; a writer could use one to emit a matching
-check name. So the queue reuses a result only when the head is the head of no other PR, the queued PR
-still targets `master`, and that PR was never retargeted (its timeline has no `base_ref_changed`); any
-failed lookup runs the full CI. A head equality would not do: a check run
+check name, and a PR association does not exclude it, because the API omits a closed PR from a
+commit's PRs. So the queue follows the check to the run that wrote it and reuses the result only when
+that run is a `pull_request` run of `ci.yml` on the head whose only PR is the queued one, into
+`master`; the head must also be the head of no other open PR, and the PR must never have been
+retargeted (its timeline has no `base_ref_changed`). The run's PR list comes back empty for a merged
+PR (#2151's run), so a lookup after the PR closes falls through; a queued PR is open. Any failed
+lookup runs the full CI. A head equality would not
+do: a check run
 attaches to the head, while the run tested a merge, which differs when the PR's base was another
 branch or `master` was rewound. In the v0.4.5 cycle every landing queued a head that already
 contained `master`, and the queue reran an identical 11-minute CI each time. Any other tree (`master`

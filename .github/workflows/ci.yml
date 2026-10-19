@@ -127,28 +127,35 @@ jobs:
               pr_head=$(gh api "repos/$REPO/pulls/$pr" --jq .head.sha 2>/dev/null | grep -E '^[0-9a-f]{40}$' || true)
             fi
             group_tree=$(git rev-parse --verify -q "$HEAD_SHA^{tree}" || true)
-            passed=0
+            suites=""
             if [ -n "$pr_head" ] && [ -n "$group_tree" ]; then
-              passed=$(gh api "repos/$REPO/commits/$pr_head/check-runs?check_name=Tested%20tree%20$group_tree&per_page=100" \
-                --jq '[.check_runs[] | select(.app.slug == "github-actions" and .conclusion == "success")] | length' \
-                2>/dev/null | grep -E '^[0-9]+$' || echo 0)
+              suites=$(gh api "repos/$REPO/commits/$pr_head/check-runs?check_name=Tested%20tree%20$group_tree&per_page=100" \
+                --jq '[.check_runs[] | select(.app.slug == "github-actions" and .conclusion == "success") | .check_suite.id] | unique | .[]' \
+                2>/dev/null) || suites=""
             fi
-            # The Tested tree check is written by a pull_request run, and a run
-            # into another branch executes that branch's workflow, which could
-            # write it for a tree it never tested with master. So reuse only
-            # when the head belongs to no other PR, the queued PR still targets
-            # master, and it was never retargeted. A failed lookup
-            # leaves its value unset or "unknown" and falls through.
+            passed=$(grep -cE '^[0-9]+$' <<<"$suites" || true)
+            # The Tested tree check is written by the run of its check suite. A
+            # run into another branch executes that branch's workflow, and a
+            # closed PR into another branch is not listed by commits/{head}/pulls,
+            # so PR association proves nothing. Reuse only when that run is a
+            # pull_request run of ci.yml on this head whose only PR is #N into
+            # master, the head belongs to no other PR, and #N was never retargeted.
+            # Any failed lookup falls through to the suite.
             clean=0
-            if [ "${passed:-0}" -ge 1 ] 2>/dev/null; then
+            if [ "${passed:-0}" -eq 1 ] 2>/dev/null; then
+              suite=$(head -n 1 <<<"$suites")
+              runs=$(gh api --paginate "repos/$REPO/actions/runs?check_suite_id=$suite" \
+                --jq '.workflow_runs[] | "\(.event) \(.path) \(.head_sha) \([.pull_requests[]? | "\(.number):\(.base.ref)"] | join(","))"' \
+                2>/dev/null) || runs="lookup failed"
               head_pulls=$(gh api --paginate "repos/$REPO/commits/$pr_head/pulls" \
                 --jq '.[] | "\(.number) \(.base.ref)"' 2>/dev/null) || head_pulls=""
               retargets=$(gh api --paginate "repos/$REPO/issues/$pr/timeline" \
                 --jq '.[] | select(.event == "base_ref_changed") | .event' 2>/dev/null) || retargets="unknown"
-              if [ "$head_pulls" = "$pr master" ] && [ -z "$retargets" ]; then
+              if [ "$runs" = "pull_request .github/workflows/ci.yml $pr_head $pr:master" ] \
+                && [ "$head_pulls" = "$pr master" ] && [ -z "$retargets" ]; then
                 clean=1
               else
-                echo "Head $pr_head is not solely PR #$pr into master, or PR #$pr was retargeted or unverifiable (pulls: '${head_pulls:-lookup failed}', retargets: '${retargets:-none}'): not reusing."
+                echo "Check suite $suite was not a pull_request run of ci.yml on $pr_head into master for PR #$pr (run: '${runs:-none}'), or the head is shared or #$pr was retargeted (pulls: '${head_pulls:-lookup failed}', retargets: '${retargets:-none}'): not reusing."
               fi
             fi
             if [ "$clean" -eq 1 ]; then
@@ -1131,8 +1138,9 @@ jobs:
     # base's code passed CI, which holds for master (every code change came
     # through the queue or a full push run) but not for another branch. A run
     # into another branch executes that branch's workflow, which this
-    # condition cannot bind; the changes job's reuse block checks that the
-    # head is no other PR's and that the queued PR was never retargeted.
+    # condition cannot bind; the changes job's reuse block therefore checks
+    # that this check's own run was a pull_request run of ci.yml for the
+    # queued PR into master.
     if: always() && github.event_name == 'pull_request' && github.base_ref == 'master' && needs.required.result == 'success' && needs.changes.outputs.tree != ''
     runs-on: ubuntu-latest
     steps:

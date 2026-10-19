@@ -102,8 +102,9 @@ silently".
   outlasts a foreground command (the queue batches for up to five minutes and CI takes about
   twelve), so run it in the background; run again on a queued PR, it only waits. When the merged
   tree is one the PR's own run passed `CI required` on (its `Tested tree <tree>` check; usually
-  because the head already contained `master`; the PR must still target `master`, never have been
-  retargeted, and be the only PR on its head), the queue run reuses that result and finishes in
+  because the head already contained `master`; the check must come from this PR's own
+  `pull_request` run into `master`, the PR must never have been retargeted, and no other open PR may
+  share its head), the queue run reuses that result and finishes in
   about a minute ([ADR-123](../adr/123-merge-queue-and-post-hoc-approval.md), amended 2026-10-19);
   otherwise it runs the full CI. A dropped PR stays
   `OPEN` exactly as a queued one does: read the failed run in `gh run list --event merge_group`, or

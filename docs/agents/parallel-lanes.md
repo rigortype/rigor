@@ -60,8 +60,8 @@ reshaping code, and lanes that collided or started on a premise master had alrea
    `--with-references` when a gate the lane runs reads `references/`; see the
    [`rigor-worktree`](../../.claude/skills/rigor-worktree/SKILL.md) skill), any decision the
    coordinator settled, the related issues and any approach already withdrawn (a withdrawn approach
-   comes back unless the brief says so), the reporter's name, email and handle for a fix of an external report, and
-   the [lane contract](#lane-contract). Settle the decisions you can foresee before the lane starts,
+   comes back unless the brief says so), the reporter's name, email and handle for a fix of an
+   external report, and the [lane contract](#lane-contract). Settle the decisions you can foresee before the lane starts,
    per contribution-flow.md § "Decisions and the approval queue".
 6. **Review when the Draft PR lands**, with the [reviewer contract](#reviewer-contract), and triage
    per contribution-flow.md step 3, including the "Engine allocations (advisory)" summary. Send each

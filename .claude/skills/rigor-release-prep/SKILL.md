@@ -564,6 +564,7 @@ release worktree before removing it, so the shell keeps a working directory:
 ```sh
 main="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
 cd "$main" && git worktree remove "<the release worktree's path>"
+git status --short --branch   # the shared clone: stop if another session left work here
 git switch master && git pull
 ls approval-queue.d/   # README.md alone; otherwise back to "First: ratify the approval queue"
 gh pr view <release-pr> --json mergeCommit --jq .mergeCommit.oid   # must equal:

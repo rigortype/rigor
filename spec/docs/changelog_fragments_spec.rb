@@ -26,7 +26,7 @@ RSpec.describe "changelog.d fragment conformance (ADR-105)" do
   # period is the only break: a `?` or `!` here is far more often a Ruby method name than a sentence end.
   define_method(:entry_prose_offenses) do |relative, entry|
     prose = entry.to_s.gsub(/`[^`]*`/, "C").gsub(/\[[^\]]*\]\([^)]*\)/, "x")
-    prose = prose.gsub(/\b(?:e\.?g|i\.e|vs|etc|cf|approx|a\.k\.a|dr|mr|ms|u\.s)\./i, "abbr")
+    prose = prose.gsub(/\b(?:e\.?g|i\.e|vs|etc|cf|approx|a\.k\.a|dr|mr|u\.s)\./i, "abbr")
     prose = prose.gsub(/(?<=\d)–(?=\d)/, "-") # a numeric range (`1–3`) is not a clause
     offenses = []
     if prose.match?(/—|–| -- /)

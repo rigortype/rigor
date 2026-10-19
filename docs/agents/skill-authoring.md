@@ -89,4 +89,7 @@ routing classification by independent subagents:
   know it is a routing test and score cleaner than production.
 
 `run_loop` never writes `SKILL.md`: it prints the best description as JSON, which you apply by hand.
-It also finds the project root from the current directory, not from `--skill-path`.
+It also finds the project root from the current directory, not from `--skill-path`, so run it from the
+repo root, and move the real skill aside for the run or `run_eval` reads a false negative;
+[`rigor-worktree/evals/README.md`](../../.claude/skills/rigor-worktree/evals/README.md) shows the
+invocation and why.

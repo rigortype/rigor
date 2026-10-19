@@ -38,7 +38,9 @@ extra-experimental-features = nix-command flakes
 Where that is not set, insert `--extra-experimental-features 'nix-command flakes'` after `nix`. Use an
 interactive `nix develop` shell when useful. The Flake owns Ruby 4.0.5 and the vendored
 `vendor/bundle`; `make setup` is the first-time setup. For isolated work, read
-[`rigor-worktree`](.claude/skills/rigor-worktree/SKILL.md). CI is the exception: it installs Ruby
+[`rigor-worktree`](.claude/skills/rigor-worktree/SKILL.md). Shell traps that fail silently (zsh, `grep
+-q` under `pipefail`) are in [`measurement.md`](docs/agents/measurement.md) § "Shell commands that answer
+wrong silently". CI is the exception: it installs Ruby
 with `ruby/setup-ruby` and runs the targets `make verify` chains, plus further acceptance gates.
 
 ## Validation
@@ -93,7 +95,7 @@ request" there. A decision nobody has made is yours to make by precedent unless 
 
 ## Types and Comments
 
-When writing or asserting a type, or a comment that could be read as one, load
+When writing or asserting a type, a comment that could be read as one, or the spelling of a refinement, load
 [`docs/agents/type-authoring.md`](docs/agents/type-authoring.md). It contains the provenance,
 typeless-comment, inline-annotation, and gate rules.
 

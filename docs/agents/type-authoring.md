@@ -42,8 +42,8 @@ The normative reasons are [ADR-107](../adr/107-checked-types-and-typeless-commen
 
 ## Spelling a refinement
 
-When a refinement denotes a set that a Ruby literal's own predicate already accepts, spell it with that
-literal and define it by that predicate: `Integer[1..10]` and `Float[0.0...1.0]` by `Range#cover?`, not
+When designing the spelling of a new refinement, and the set it denotes is one a Ruby literal's own
+predicate already accepts, spell it with that literal and define it by that predicate: `Integer[1..10]` and `Float[0.0...1.0]` by `Range#cover?`, not
 PHPStan's `int<1, 10>` ([ADR-1](../adr/1-types.md), [ADR-109](../adr/109-ruby-native-range-notation.md)).
 Before importing a PHPStan, TypeScript or Python spelling, check whether Ruby has a literal for the set
 and whether ADR-1's rejected alternatives already ruled on it. The imported `int<min, max>` shipped five

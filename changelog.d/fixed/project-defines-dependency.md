@@ -1,0 +1,1 @@
+- **[engine]** `rigor check --incremental` now re-checks a `call.deprecated-ruby2-keywords` call when a project file starts or stops defining a method of the same name, instead of serving the previous verdict. ([#2156](https://github.com/rigortype/rigor/pull/2156))

@@ -1075,6 +1075,16 @@ check's other readers record the key too, and one of them is broad:
 a `backtrace` definition appearing or vanishing anywhere re-checks every
 file with a `rescue`. That is a known cost.
 
+`CheckRules::RubyDeprecations#project_defines?` records the key the same
+way, whichever way it answers
+([#2133](https://github.com/rigortype/rigor/issues/2133)): a
+`call.deprecated-ruby2-keywords` report is silenced while any file
+defines a method of the called name anywhere (on any class, on either
+side, or at the top level), so a file that starts
+or stops defining it must re-check the call. Before this the rule read
+the tables without recording the key, and the edit re-analysed only the
+defining file.
+
 `Scope#discovered_method?` records the key too, on a HIT only, together
 with the class edge to every file that declares the class
 ([#2121](https://github.com/rigortype/rigor/issues/2121)). Its table

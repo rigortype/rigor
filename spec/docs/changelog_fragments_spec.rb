@@ -20,6 +20,20 @@ RSpec.describe "changelog.d fragment conformance (ADR-105)" do
   repo_link = %r{\[#\d+\]\(https://github\.com/rigortype/rigor/(?:pull|issues)/\d+\)}
   slug = /\A[a-z0-9][a-z0-9._-]*\.md\z/
 
+  # The entry line is the release note's bullet: one sentence, no em-dash clause (rigor-release-prep's rules).
+  # Code spans and links are dropped first, so `1.."a"` or a link's text cannot read as a sentence break.
+  define_method(:entry_prose_offenses) do |relative, entry|
+    prose = entry.to_s.gsub(/`[^`]*`/, "x").gsub(/\[[^\]]*\]\([^)]*\)/, "x")
+    offenses = []
+    if prose.include?("—")
+      offenses << "#{relative}: the entry line carries an em-dash clause; move it to a `  - ` child item"
+    end
+    if prose.match?(/[a-z0-9)x][.;!?] +[A-Z]/)
+      offenses << "#{relative}: the entry line holds more than one sentence; move the rest to `  - ` child items"
+    end
+    offenses
+  end
+
   # Offense strings for one fragment, or [] when it conforms. `relative` is the path under
   # changelog.d/ (e.g. "fixed/my-branch.md").
   define_method(:fragment_offenses) do |relative, content|
@@ -34,15 +48,7 @@ RSpec.describe "changelog.d fragment conformance (ADR-105)" do
     if lines.empty? || !lines.first.match?(entry_line)
       offenses << "#{relative}: first line must be a `- **[subsystem]** …` bullet on ONE line"
     end
-    # The entry line is the release note's bullet: one sentence, no em-dash clause (rigor-release-prep's rules).
-    # Code spans and links are dropped first, so `1.."a"` or a link's text cannot read as a sentence break.
-    prose = lines.first.to_s.gsub(/`[^`]*`/, "x").gsub(/\[[^\]]*\]\([^)]*\)/, "x")
-    if prose.include?("—")
-      offenses << "#{relative}: the entry line carries an em-dash clause; move it to a `  - ` child item"
-    end
-    if prose.match?(/[a-z0-9)x][.;!?] +[A-Z]/)
-      offenses << "#{relative}: the entry line holds more than one sentence; move the rest to `  - ` child items"
-    end
+    offenses.concat(entry_prose_offenses(relative, lines.first))
     lines.drop(1).each do |line|
       unless line.match?(child_line)
         offenses << "#{relative}: `#{line}` — only `  - ` child items may follow (no wrapping)"

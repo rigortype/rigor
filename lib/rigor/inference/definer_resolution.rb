@@ -221,15 +221,15 @@ module Rigor
       # alone where a later `attr_*` replaced the `def`: the attr writes the name's visibility slot, so the reader's
       # visibility is certain. A `define_method` or alias that replaced it contests the visibility slot as well, which
       # this question does read.
+      #
+      # Issue #2134 — the visibility contest read here files no edge of its own: a hit exists only once the answer
+      # function read the same slot through `Scope#discovered_method_visibility`, which files
+      # `visibility:<owner>#<name>`.
       def possible?(scope, hit, method_name, reads_visibility)
         discovery = scope.discovery
         owner = hit.owner
         kind = hit.side == :singleton ? :singleton : :instance
         nodes = kind == :singleton ? :discovered_singleton_def_nodes : :discovered_def_nodes
-        # Issue #2134 — the visibility contest is a read of the slot too.
-        if reads_visibility && Analysis::DependencyRecorder.active?
-          Analysis::DependencyRecorder.read_visibility(owner, method_name)
-        end
         discovery.possible_method?(owner, method_name, kind) ||
           (!(reads_visibility == :visibility && kind == :instance) &&
            discovery.contested?(nodes, [owner, method_name.to_sym])) ||

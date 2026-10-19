@@ -1973,11 +1973,18 @@ module Rigor
     # a wrapping `private def` / `private attr_reader` call, else the surrounding `private` / `protected` / `public`
     # modifier state, plus any post-hoc `private :name, ...` named-argument calls. Consumed by the
     # `def.method-visibility-mismatch` rule so explicit-non-self calls to a private method surface a diagnostic.
-    def discovered_method_visibility(class_name, method_name)
+    # `singleton: true` reads the class's singleton slot for the name (`[:singleton, name]`).
+    #
+    # Issue #2134 — every answer is an ADR-46 read of the slot, so it records `visibility:<class>#<method_name>`
+    # whichever way it answers ({Analysis::DependencyRecorder.read_visibility}). A `private :foo` can be written from
+    # a reopening or a `class_eval` block in a file the reader has no other edge to, and adding or removing it must
+    # re-check the reader.
+    def discovered_method_visibility(class_name, method_name, singleton: false)
+      Analysis::DependencyRecorder.read_visibility(class_name, method_name) if Analysis::DependencyRecorder.active?
       table = @discovery.discovered_method_visibilities[class_name.to_s]
       return nil unless table
 
-      table[method_name.to_sym]
+      table[singleton ? [:singleton, method_name.to_sym] : method_name.to_sym]
     end
 
     # Closes the "`params[:f] ||= []; params[:f] << x`" precision gap (ROADMAP § Type-language / engine —

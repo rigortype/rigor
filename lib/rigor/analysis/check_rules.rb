@@ -3032,6 +3032,7 @@ module Rigor
         # `Widget.new` would read, and file the dependency edges of, the whole singleton chain. The set is memoised per
         # discovery index.
         def private_singleton_candidate?(scope, name)
+          DependencyRecorder.read_visibility("*", name) if DependencyRecorder.active?
           discovery = scope.discovery
           slot = Thread.current[PRIVATE_NAMES_MEMO]
           unless slot && slot[0].equal?(discovery)
@@ -3070,6 +3071,7 @@ module Rigor
           discovery = scope.discovery
           chain = Scope::ResolutionChain.for(scope, class_name.to_s, :singleton, :methods)
           chain.entries.any? do |entry|
+            DependencyRecorder.read_visibility(entry.name, SINGLETON_WILDCARD_SLOT.last) unless entry.external?
             !entry.external? && discovery.contested?(:discovered_method_visibilities,
                                                      [entry.name, SINGLETON_WILDCARD_SLOT])
           end

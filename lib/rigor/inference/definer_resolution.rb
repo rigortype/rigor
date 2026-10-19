@@ -277,7 +277,7 @@ module Rigor
 
       def side_visibility(scope, owner, method_name, kind)
         if kind == :singleton
-          scope.discovered_method_visibilities.dig(owner.to_s, visibility_slot(method_name, :singleton)) ||
+          scope.discovered_method_visibility(owner, method_name, singleton: true) ||
             self_extended_copy_visibility(scope, owner, method_name)
         else
           scope.discovered_method_visibility(owner, method_name)

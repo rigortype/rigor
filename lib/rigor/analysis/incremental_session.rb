@@ -1271,7 +1271,8 @@ module Rigor
       # top-level def, `method:C#m` otherwise), then unions the recorded negative-dependents of those keys.
       # Issue #1120 — plus the consumers of any refinement name the edit moved ({#refinement_affected}). Issue #1367 —
       # and every file whose last result holds a `global.*` diagnostic ({#global_write_reporters}). Issue #1459 — and
-      # the consumers of any method name a file started or stopped defining ({#defined_name_affected}).
+      # the consumers of any method name a file started or stopped defining ({#defined_name_affected}). Issue #2134 —
+      # and the consumers of any visibility slot a file moved ({#visibility_name_affected}).
       def negative_affected(changed, removed, new_fingerprints, new_class_decls, new_constant_decls, summary = nil)
         appeared_methods = Incremental.appeared_symbols(changed, @symbol_fingerprints, new_fingerprints)
         # Issue #639 — a class DISAPPEARING satisfies the `class:` kind too, now that a resolved bare
@@ -1289,7 +1290,8 @@ module Rigor
         keys.concat(class_move_keys(moved_classes))
         keys.concat(moved_constants.map { |name| "constant:#{name.split('::').last}" })
         Incremental.negative_closure(keys, @negative_dependents) | refinement_affected(changed + removed, summary) |
-          defined_name_affected(changed + removed, summary) | mark_affected(changed + removed, summary) |
+          defined_name_affected(changed + removed, summary) | visibility_name_affected(changed + removed, summary) |
+          mark_affected(changed + removed, summary) |
           global_write_reporters
       end
 
@@ -1377,6 +1379,23 @@ module Rigor
         return Set.new if names.empty?
 
         Incremental.negative_closure(names.map { |name| "defines:#{name}" }, @negative_dependents)
+      end
+
+      # Issue #2134 — the consumers whose answer read a class's visibility slot for a method, or its contest, for each
+      # slot whose entries a file in `paths` added, dropped or changed (`Scope#discovered_method_visibility`). The
+      # before-state is each file's seed bundle, the after-state the scan's per-file entries. A `private :foo` in a
+      # reopening or a `class_eval` block moves no `def`, so neither the symbol fingerprints nor the defined-name diff
+      # sees it.
+      def visibility_name_affected(paths, summary)
+        after = (summary && summary[:visibility_entries]) || {}
+        before = paths.to_h do |path|
+          bundle = @seed_bundles[path]
+          [path, bundle && Inference::ScopeIndexer.visibility_entries(bundle)]
+        end
+        slots = Incremental.changed_visibility_slots(paths, before, after)
+        return Set.new if slots.empty?
+
+        Incremental.negative_closure(slots.map { |slot| "visibility:#{slot}" }, @negative_dependents)
       end
 
       # The qualified class/module names declared in the pre-parsed `index` (shared with

@@ -279,9 +279,9 @@ module Rigor
 
         # Whether the project rewrites `class_name`'s method table beyond the names it spells, or refines it.
         #
-        # Issue #2137 — read through `Scope#parameter_envelopes_of`, which files the `mark:` edge: a dynamic rewrite
-        # or a `refine` of the class can come from a file that declares nothing the chain reads, and adding or
-        # removing it must re-check the reader.
+        # Issue #2137 — read through `Scope#parameter_envelopes_of`, which files the `mark:` edge: a `refine` of the
+        # class from a file whose declared classes do not change fires no class key, and adding or removing it must
+        # re-check the reader.
         def rewritten?(class_name)
           Scope::DiscoveryIndex.rewritten_surface?(@scope.parameter_envelopes_of(class_name))
         end

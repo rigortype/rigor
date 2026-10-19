@@ -1,0 +1,1 @@
+- **[rigor check]** `rigor check` builds the project's subclass map once per run instead of once per instance-variable proof, which cuts about 2.5% of the allocations on a codebase the size of Rigor's own ([#2146](https://github.com/rigortype/rigor/pull/2146)).

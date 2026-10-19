@@ -1,0 +1,1 @@
+- **[engine]** `rigor check --incremental` now re-checks a `def.override-visibility-reduced` verdict when another file adds or drops a `private :foo` (in a reopening or a `class_eval` block) on the parent class, instead of serving the previous verdict. ([#2159](https://github.com/rigortype/rigor/pull/2159))

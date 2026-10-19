@@ -44,11 +44,14 @@ RSpec.describe "incremental edges for a deprecation silenced by a project defini
     rows(guarded_run(runner, %w[lib]).diagnostics).sort
   end
 
-  def incremental_rows
+  # `paths: nil` with the configured roots is the CLI's shape (`rigor check --incremental` with no arguments), under
+  # which an added or deleted file keeps the run warm.
+  def incremental_rows(session_paths = paths)
     root = File.join(Dir.pwd, ".rigor", "cache")
     snapshot = Rigor::Cache::IncrementalSnapshot.new(root: root)
-    fingerprint = Rigor::Cache::IncrementalSnapshot.fingerprint(configuration: configuration, roots: paths)
-    session = Rigor::Analysis::IncrementalSession.new(configuration: configuration, paths: paths,
+    fingerprint = Rigor::Cache::IncrementalSnapshot.fingerprint(configuration: configuration,
+                                                                roots: session_paths || %w[lib])
+    session = Rigor::Analysis::IncrementalSession.new(configuration: configuration, paths: session_paths,
                                                       cache_store: Rigor::Cache::Store.new(root: root))
     diagnostics, warm = guarded_run_incremental(session, snapshot: snapshot, fingerprint: fingerprint)
     [rows(diagnostics).sort, warm]
@@ -62,6 +65,25 @@ RSpec.describe "incremental edges for a deprecation silenced by a project defini
     write("lib/other.rb", after)
     expect(incremental_rows).to eq([second, true])
     expect(cold_rows).to eq(second)
+  end
+
+  it "reports the call again when the file whose singleton def silenced it is deleted" do
+    write("lib/other.rb", "class Other\n  def self.ruby2_keywords_hash?(value) = value\nend\n")
+    write("lib/use.rb", use)
+    expect(incremental_rows(nil)).to eq([[], false])
+
+    File.delete("lib/other.rb")
+    expect(incremental_rows(nil)).to eq([reported, true])
+    expect(cold_rows).to eq(reported)
+  end
+
+  it "silences the call when a file with a top-level def of the name is added" do
+    write("lib/use.rb", use)
+    expect(incremental_rows(nil)).to eq([reported, false])
+
+    write("lib/other.rb", "def ruby2_keywords_hash?(value) = value\n")
+    expect(incremental_rows(nil)).to eq([[], true])
+    expect(cold_rows).to eq([])
   end
 
   {

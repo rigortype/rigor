@@ -1079,7 +1079,8 @@ file with a `rescue`. That is a known cost.
 way, whichever way it answers
 ([#2133](https://github.com/rigortype/rigor/issues/2133)): a
 `call.deprecated-ruby2-keywords` report is silenced while any file
-defines a method of the called name, on any class, so a file that starts
+defines a method of the called name anywhere (on any class, on either
+side, or at the top level), so a file that starts
 or stops defining it must re-check the call. Before this the rule read
 the tables without recording the key, and the edit re-analysed only the
 defining file.

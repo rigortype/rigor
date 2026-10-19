@@ -68,6 +68,22 @@ RSpec.describe "self-call ivar-write proof — incremental" do
     end
   end
 
+  # The reverse of {#expect_recheck_to_report}: the baseline reports the read, `edit` restores the proof, and the warm
+  # run must go quiet as the full run does.
+  def expect_recheck_to_clear(files, edit)
+    Dir.mktmpdir do |dir|
+      write_files(dir, files.merge("a.rb" => caller_source))
+      session = session_for(dir)
+      expect(undefined_methods(guarded_baseline(session))).to eq([["a.rb", 10]])
+      expect(full_run(dir)).to eq([["a.rb", 10]])
+
+      write_files(dir, edit)
+      recheck = guarded_recheck(session)
+      expect(recheck.affected).to include(File.join(dir, "a.rb"))
+      expect([undefined_methods(recheck.diagnostics), full_run(dir)]).to eq([[], []])
+    end
+  end
+
   def write_files(dir, files)
     files.each { |name, source| File.write(File.join(dir, name), source) }
   end
@@ -124,6 +140,33 @@ RSpec.describe "self-call ivar-write proof — incremental" do
       { "b.rb" => "class Base\n  def log(message) = warn(message)\nend\n",
         "d.rb" => "class Fact < Data.define(:a)\n  def to_s = \"f\"\nend\n", "f.rb" => "module App\nend\n" },
       { "f.rb" => "module App\n  Data = 1\nend\n" }
+    )
+  end
+
+  # Issue #2137 — a `refine` of a class on the chain marks it rewritten from a file that declares nothing the chain
+  # reads, and keeps the file's declared classes, so no class key fires: only the `mark:` edge re-checks the caller.
+  let(:refining) { "module R\n  refine Base do\n    def helper = 1\n  end\nend\n" }
+
+  it "re-checks the caller when a file whose declarations stay starts refining a class on the chain" do
+    expect_recheck_to_report(
+      { "b.rb" => "class Base\n  def log(message) = warn(message)\nend\n", "x.rb" => "module R\nend\n" },
+      { "x.rb" => refining }
+    )
+  end
+
+  it "re-checks the caller when a file whose declarations stay stops refining a class on the chain" do
+    expect_recheck_to_clear(
+      { "b.rb" => "class Base\n  def log(message) = warn(message)\nend\n", "x.rb" => refining },
+      { "x.rb" => "module R\nend\n" }
+    )
+  end
+
+  # A guard: a dynamic rewrite on a namespace candidate (`Base` and `App::Base` from inside `module App`) moves the
+  # file's class declarations, whose `class:Base` key the chain read already records.
+  it "re-checks the caller when a file starts rewriting a namespace candidate of a class on the chain" do
+    expect_recheck_to_report(
+      { "b.rb" => "class Base\n  def log(message) = warn(message)\nend\n", "x.rb" => "module App\nend\n" },
+      { "x.rb" => "module App\n  NAME = :helper\n  Base.define_method(NAME) { 1 }\nend\n" }
     )
   end
 end

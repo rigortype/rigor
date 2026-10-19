@@ -240,12 +240,11 @@ module Rigor
         # one file, with one `def` of the name there (a reopening or a `class_eval` body in the same file is a second
         # one), and no `define_method`, `attr_*` or alias of it, nor a rewrite no literal names (`T.define_method`,
         # `T.send(:define_method, …)`, `T.class_eval` with a computed name), nor a definition the walk could not prove
-        # runs (a possible or contested one, as `DefinerResolution` reads them). The class edge files every declaring
-        # file.
+        # runs (a possible or contested one, as `DefinerResolution` reads them). `Scope#parameter_envelopes_of` files
+        # the class edge to every declaring file and, issue #2137, the `mark:` edge for a file that only marks it.
         def single_definition(owner, name)
-          Scope::ResolutionChain.record_class(@scope, owner) if Analysis::DependencyRecorder.active?
+          bucket = @scope.parameter_envelopes_of(owner)
           unprovable! if possible_definition?(owner, name)
-          bucket = @scope.discovered_parameter_envelopes[owner] || {}
           unprovable! if bucket[[:instance, name]] == Source::ParameterEnvelope::OPAQUE
           unprovable! if (@scope.discovered_class_sources[owner]&.size || 0) > 1
           unprovable! if definition_count(owner, name) > 1
@@ -279,9 +278,12 @@ module Rigor
         end
 
         # Whether the project rewrites `class_name`'s method table beyond the names it spells, or refines it.
+        #
+        # Issue #2137 — read through `Scope#parameter_envelopes_of`, which files the `mark:` edge: a dynamic rewrite
+        # or a `refine` of the class can come from a file that declares nothing the chain reads, and adding or
+        # removing it must re-check the reader.
         def rewritten?(class_name)
-          bucket = @scope.discovered_parameter_envelopes[class_name]
-          !bucket.nil? && Scope::DiscoveryIndex.rewritten_surface?(bucket)
+          Scope::DiscoveryIndex.rewritten_surface?(@scope.parameter_envelopes_of(class_name))
         end
 
         # The first project class or module on `class_name`'s settled instance chain that defines `name`, stopping

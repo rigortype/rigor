@@ -1,1 +1,0 @@
-- **[engine]** A Range literal's `first` and `last` with no argument fold to its endpoints as Ruby does, so `(5..1).first` is `5` and `(1...10).last` is `10`, where Rigor folded them to `nil` and `9`. ([#2129](https://github.com/rigortype/rigor/pull/2129))

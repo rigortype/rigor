@@ -1,1 +1,0 @@
-- **[engine]** An instance variable a `while` / `until` body rebinds (`@n = i + 1`) is now widened across iterations as a local is, so a condition on it after the loop (`@n == 3`), or a read before the write in the body, no longer reports `flow.always-truthy-condition` or `call.undefined-method` on correct code. ([#2029](https://github.com/rigortype/rigor/pull/2029))

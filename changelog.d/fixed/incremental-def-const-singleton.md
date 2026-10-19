@@ -1,1 +1,0 @@
-- **[engine]** `rigor check --incremental` now re-checks callers when another file renames, adds or removes a `def Const.x` written outside the class body, so a warm run no longer keeps the arity diagnostics the old definition produced. ([#2043](https://github.com/rigortype/rigor/pull/2043))

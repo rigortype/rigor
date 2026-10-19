@@ -1,1 +1,0 @@
-- **[rigor check]** `rigor check --incremental` now re-checks a file whose analysis read another file through a plugin (an `IoBoundary` read, probe, directory listing or glob) when that file is edited, removed or created, instead of serving the stale result until the next full run ([#2072](https://github.com/rigortype/rigor/pull/2072)).

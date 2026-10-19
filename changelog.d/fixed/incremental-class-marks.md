@@ -1,1 +1,0 @@
-- **[cache]** `rigor check --incremental` now re-checks the affected calls when a file adds or removes only an `extend` in a method body, a `singleton_class.prepend` on an object, or a `refine` block, so a warm run reports what a full run reports. ([#2089](https://github.com/rigortype/rigor/pull/2089))

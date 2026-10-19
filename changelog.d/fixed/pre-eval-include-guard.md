@@ -1,1 +1,0 @@
-- **[pre_eval]** A module a `pre_eval:` file includes or prepends under an `include?` or `<` guard (`Numeric.include(M) unless Numeric.include?(M)`) now answers its methods, as Ruby does, instead of reporting `call.undefined-method` ([#2109](https://github.com/rigortype/rigor/issues/2109), [#2130](https://github.com/rigortype/rigor/pull/2130)).

@@ -1,1 +1,0 @@
-- **[cli]** `rigor lens` spells a declared block's type as RBS (`(::Integer) -> void`) instead of an object representation such as `#<RBS::Types::Function:0x…>`. ([#1995](https://github.com/rigortype/rigor/pull/1995))

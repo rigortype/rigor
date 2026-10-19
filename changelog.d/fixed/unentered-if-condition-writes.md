@@ -1,1 +1,0 @@
-- **[engine]** An `if`, `elsif`, `unless` or ternary inside an array element, a call argument or another value position no longer reads a local its condition writes as the type it held before the write, so `[if (x ||= "d").empty? then 0 else x.upcase end]` no longer reports `call.possible-nil-receiver` on correct code. ([#2054](https://github.com/rigortype/rigor/pull/2054))

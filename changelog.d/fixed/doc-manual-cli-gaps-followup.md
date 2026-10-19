@@ -1,1 +1,0 @@
-- **[docs]** List every rule family the MCP `rigor_explain` tool accepts, and document when `rigor doctor`'s plugin-gap and bundle-layout checks warn or fail. ([#2141](https://github.com/rigortype/rigor/pull/2141))

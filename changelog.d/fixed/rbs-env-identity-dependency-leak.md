@@ -1,1 +1,0 @@
-- **[engine]** `rigor check --incremental` now re-checks a call that a project `attr_*`, `alias_method` or `define_method` answered when that declaration is removed, instead of serving the stale silent result. ([#2132](https://github.com/rigortype/rigor/pull/2132))

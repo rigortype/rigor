@@ -42,10 +42,12 @@ before it is queued; it is re-pushed only when it is `CONFLICTING` or the queue 
 extra. *Criterion: check the result that will land, once, instead of approximating it by re-gating
 every branch in series.*
 
-*Amended 2026-10-19 (maintainer's decision).* A `pull_request` run that passes `CI required` attests
-the tree it tested, the head merged with its base at that moment, as a `Tested tree <tree>` check on
-the PR head. A queue run whose merged tree carries such a check reuses that result and skips the
-suite, so the result that will land is still checked once. A head equality would not do: a check
+*Amended 2026-10-19 (maintainer's decision).* A `pull_request` run into `master` that passes `CI
+required` attests the tree it tested, the head merged with `master` at that moment, as a `Tested tree
+<tree>` check on the PR head. A queue run whose merged tree carries such a check reuses that result and
+skips the suite, so the result that will land is still checked once. Only a run into `master` attests:
+a Markdown-only run skips the code suite because its base's code already passed CI, which holds for
+`master` and not for another branch, and a run into another branch uses that branch's workflow. A head equality would not do: a check
 run attaches to the head, while the run tested a merge, which differs when the PR's base was another
 branch or `master` was rewound. In the v0.4.5 cycle every landing queued a head that already
 contained `master`, and the queue reran an identical 11-minute CI each time. Any other tree (`master`

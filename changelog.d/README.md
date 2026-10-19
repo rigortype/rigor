@@ -11,7 +11,8 @@ edits serialize otherwise-independent PRs — the full story is
 - **Content**: one bullet line in the standard entry grammar —
   `- **[subsystem]** One user-facing sentence. ([#N](https://github.com/rigortype/rigor/pull/N))`
   — optionally followed by `  - ` child items. Write it right after `gh pr create`, when the PR
-  number exists. Full entry rules: the `rigor-release-prep` skill.
+  number exists. The bullet line is one sentence with no em-dash clause: put the why, the how and
+  the extra cases in child items. Full entry rules: the `rigor-release-prep` skill.
 - Release prep consolidates every fragment into `CHANGELOG.md` at the cut and deletes it; only
   release prep writes `[Unreleased]`.
 - **Gate**: `spec/docs/changelog_fragments_spec.rb`.

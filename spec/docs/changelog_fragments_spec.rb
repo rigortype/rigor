@@ -34,6 +34,15 @@ RSpec.describe "changelog.d fragment conformance (ADR-105)" do
     if lines.empty? || !lines.first.match?(entry_line)
       offenses << "#{relative}: first line must be a `- **[subsystem]** …` bullet on ONE line"
     end
+    # The entry line is the release note's bullet: one sentence, no em-dash clause (rigor-release-prep's rules).
+    # Code spans and links are dropped first, so `1.."a"` or a link's text cannot read as a sentence break.
+    prose = lines.first.to_s.gsub(/`[^`]*`/, "x").gsub(/\[[^\]]*\]\([^)]*\)/, "x")
+    if prose.include?("—")
+      offenses << "#{relative}: the entry line carries an em-dash clause; move it to a `  - ` child item"
+    end
+    if prose.match?(/[a-z0-9)x][.;!?] +[A-Z]/)
+      offenses << "#{relative}: the entry line holds more than one sentence; move the rest to `  - ` child items"
+    end
     lines.drop(1).each do |line|
       unless line.match?(child_line)
         offenses << "#{relative}: `#{line}` — only `  - ` child items may follow (no wrapping)"
@@ -67,6 +76,23 @@ RSpec.describe "changelog.d fragment conformance (ADR-105)" do
     it "rejects an unknown section directory and a top-level file" do
       expect(fragment_offenses("performance/my-branch.md", good)).not_to be_empty
       expect(fragment_offenses("my-branch.md", good)).not_to be_empty
+    end
+
+    it "rejects an em-dash clause on the entry line" do
+      dashed = "- **[engine]** A fix — and why. ([#42](https://github.com/rigortype/rigor/pull/42))\n"
+      expect(fragment_offenses("fixed/my-branch.md", dashed)).not_to be_empty
+    end
+
+    it "rejects a second sentence on the entry line, and keeps it for a child item" do
+      two = "- **[engine]** A fix. It also does more. ([#42](https://github.com/rigortype/rigor/pull/42))\n"
+      expect(fragment_offenses("fixed/my-branch.md", two)).not_to be_empty
+      expect(fragment_offenses("fixed/my-branch.md", "#{good}  - It also does more. And more.\n")).to be_empty
+    end
+
+    it "does not read a code span, a link or an abbreviation as a sentence break" do
+      code = "- **[engine]** `a. B` and `1..\"a\"`, e.g. this one, now type " \
+             "([#42](https://github.com/rigortype/rigor/pull/42), [#43. X](https://github.com/rigortype/rigor/issues/43)).\n"
+      expect(fragment_offenses("fixed/my-branch.md", code)).to be_empty
     end
 
     it "rejects an uppercase slug" do

@@ -306,10 +306,32 @@ module Rigor
 
         def unknown_superclass_classes(scope, class_name)
           Analysis::DependencyRecorder.read_name(:subclass_of, "*") if Analysis::DependencyRecorder.active?
-          mark = Scope::DiscoveryIndex::ENVELOPE_META_SUPERCLASS_MARK
-          computed = scope.discovered_superclasses.filter_map { |child, parent| child if parent.nil? }
-          meta = scope.discovered_parameter_envelopes.filter_map { |name, bucket| name if bucket.key?(mark) }
-          (computed + meta).uniq - [class_name.to_s]
+          table = subclass_memo(scope)
+          all = table[:unknown] ||= begin
+            mark = Scope::DiscoveryIndex::ENVELOPE_META_SUPERCLASS_MARK
+            computed = scope.discovered_superclasses.filter_map { |child, parent| child if parent.nil? }
+            meta = scope.discovered_parameter_envelopes.filter_map { |name, bucket| name if bucket.key?(mark) }
+            (computed + meta).uniq.freeze
+          end
+          name = class_name.to_s
+          all.include?(name) ? all - [name] : all
+        end
+
+        SUBCLASS_MEMO_KEY = :__rigor_own_method_subclasses__
+        private_constant :SUBCLASS_MEMO_KEY
+
+        # One thread-local slot keyed on the scope's discovery index (a frozen `Data`) and environment, the only
+        # inputs `children_by_parent` and the unknown-superclass list read; neither files a dependency edge
+        # (`each_subclass` files its own `subclass_of:` edges on every call), so a hit drops none.
+        def subclass_memo(scope)
+          slot = Thread.current[SUBCLASS_MEMO_KEY]
+          discovery = scope.discovery
+          environment = scope.environment
+          unless slot && slot[0].equal?(discovery) && slot[1].equal?(environment)
+            slot = [discovery, environment, {}]
+            Thread.current[SUBCLASS_MEMO_KEY] = slot
+          end
+          slot[2]
         end
 
         def record_subclasses_read(class_name)
@@ -319,10 +341,11 @@ module Rigor
         end
 
         def children_by_parent(scope)
-          scope.discovered_superclasses.each_with_object({}) do |(child, raw_parent), children|
-            parent = scope.ancestor_name_candidates(child, raw_parent).find { |name| known_class?(scope, name) }
-            (children[parent] ||= []) << child if parent
-          end
+          subclass_memo(scope)[:children] ||=
+            scope.discovered_superclasses.each_with_object({}) do |(child, raw_parent), children|
+              parent = scope.ancestor_name_candidates(child, raw_parent).find { |name| known_class?(scope, name) }
+              (children[parent] ||= []) << child if parent
+            end.each_value(&:freeze).freeze
         end
 
         def known_class?(scope, name)

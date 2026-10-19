@@ -259,9 +259,11 @@ module Rigor
         end
 
         def definition_count(owner, name)
-          @scope.discovered_deferred_ranges.sum do |_path, rows|
-            rows.count { |row| row[2] == name && row[3] == :instance && row[4] == owner }
+          count = 0
+          @scope.discovered_deferred_ranges.each_value do |rows|
+            count += rows.count { |row| row[2] == name && row[3] == :instance && row[4] == owner }
           end
+          count
         end
 
         # Whether `chain`'s own order stands with no second world: no order mark and no fork. `ResolutionChain#settle`
@@ -327,8 +329,10 @@ module Rigor
           return nil if loader.nil? || !loader.core_or_stdlib_class?(type.class_name)
 
           segment = node.name.to_s
+          suffix = "::#{segment}"
           project = [@scope.discovered_classes, @scope.in_source_constants]
-          return nil if project.any? { |table| table.each_key.any? { |name| name.to_s.split("::").last == segment } }
+          ends_with_segment = ->(name) { (name = name.to_s) == segment || name.end_with?(suffix) }
+          return nil if project.any? { |table| table.each_key.any?(&ends_with_segment) }
 
           type
         end

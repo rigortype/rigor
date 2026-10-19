@@ -54,7 +54,7 @@ jobs:
     name: Detect code changes
     runs-on: ubuntu-latest
     # pull-requests and checks: read let a merge_group run look up the queued
-    # PR's head and its "CI required" result (the reuse block below).
+    # PR's head and the trees its CI passed on (the reuse block below).
     permissions:
       contents: read
       pull-requests: read
@@ -63,12 +63,20 @@ jobs:
       code: ${{ steps.detect.outputs.code }}
       nix: ${{ steps.detect.outputs.nix }}
       reused: ${{ steps.detect.outputs.reused }}
+      tree: ${{ steps.tree.outputs.tree }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
         with:
           submodules: false
           fetch-depth: 0
+
+      # The tree every job of this run checks out (GITHUB_SHA: on a
+      # pull_request, the merge with the base as it stood when the event
+      # fired). The tested-tree job below names its check after it.
+      - name: Record the tested tree
+        id: tree
+        run: echo "tree=$(git rev-parse --verify -q "$GITHUB_SHA^{tree}" || true)" >> "$GITHUB_OUTPUT"
 
       - name: Detect non-Markdown changes
         id: detect
@@ -106,39 +114,27 @@ jobs:
             fi
           fi
           # Maintainer decision (2026-10-19): a queue entry whose merged tree
-          # is byte-identical to its PR head's tree, where "CI required"
-          # already passed, would rerun the same check on the same files
-          # (the PR head contained master, so the queue merged nothing in).
-          # It reuses that result and skips the suite. Any other group
-          # (master moved, several PRs batched, a lookup that fails) runs in
-          # full: never skip on doubt.
+          # a pull_request run of its PR already passed "CI required" on
+          # would rerun the same check on the same files. Such a run attests
+          # the tree it tested with a "Tested tree <tree>" check on the PR
+          # head (the tested-tree job below), so the queue reuses the result
+          # when that check exists for this group's tree, and skips the
+          # suite. Anything else runs in full: never skip on doubt.
           if [ "${{ github.event_name }}" = "merge_group" ]; then
             pr=$(sed -nE 's#.*/pr-([0-9]+)-[0-9a-f]+$#\1#p' <<<"$GROUP_REF")
             pr_head=""
             if [ -n "$pr" ]; then
-              pr_head=$(gh api "repos/$REPO/pulls/$pr" --jq .head.sha 2>/dev/null || true)
+              pr_head=$(gh api "repos/$REPO/pulls/$pr" --jq .head.sha 2>/dev/null | grep -E '^[0-9a-f]{40}$' || true)
             fi
-            group_tree=$(git rev-parse "$HEAD_SHA^{tree}" 2>/dev/null || true)
-            pr_tree=""
-            if [ -n "$pr_head" ]; then
-              pr_tree=$(git rev-parse "$pr_head^{tree}" 2>/dev/null || true)
-            fi
-            # The head must also contain the queue's base: then the PR's own
-            # run tested this very tree (its merge with any earlier base was a
-            # fast-forward too), and equal trees cannot come from master
-            # commits that cancel out in content.
-            contains_base=false
-            if [ -n "$pr_head" ] && git merge-base --is-ancestor "$BASE_SHA" "$pr_head" 2>/dev/null; then
-              contains_base=true
-            fi
+            group_tree=$(git rev-parse --verify -q "$HEAD_SHA^{tree}" || true)
             passed=0
-            if [ "$contains_base" = true ] && [ -n "$group_tree" ] && [ "$group_tree" = "$pr_tree" ]; then
-              passed=$(gh api "repos/$REPO/commits/$pr_head/check-runs?check_name=CI%20required&per_page=100" \
+            if [ -n "$pr_head" ] && [ -n "$group_tree" ]; then
+              passed=$(gh api "repos/$REPO/commits/$pr_head/check-runs?check_name=Tested%20tree%20$group_tree&per_page=100" \
                 --jq '[.check_runs[] | select(.app.slug == "github-actions" and .conclusion == "success")] | length' \
-                2>/dev/null || echo 0)
+                2>/dev/null | grep -E '^[0-9]+$' || echo 0)
             fi
             if [ "${passed:-0}" -ge 1 ] 2>/dev/null; then
-              echo "PR #$pr head $pr_head passed CI required on the same tree ($group_tree): reusing it."
+              echo "PR #$pr head $pr_head passed CI required on this very tree ($group_tree): reusing it."
               {
                 echo "reused=true"
                 echo "code=false"
@@ -146,7 +142,7 @@ jobs:
               } >> "$GITHUB_OUTPUT"
               exit 0
             fi
-            echo "No reusable result (PR '${pr:-?}', head '${pr_head:-?}', contains base: $contains_base, group tree '${group_tree:-?}', PR tree '${pr_tree:-?}'): running the suite."
+            echo "No reusable result (PR '${pr:-?}', head '${pr_head:-?}', group tree '${group_tree:-?}'): running the suite."
           fi
           if ! changed=$(git diff --name-only "$BASE_SHA...$HEAD_SHA"); then
             echo "diff failed — failing safe to the full suite."
@@ -1099,3 +1095,22 @@ jobs:
             fi
           done
           exit $failed
+
+  # ── Attestation for the merge queue (ADR-123, amended 2026-10-19) ───
+  # A pull_request run that passed "CI required" records the tree it tested
+  # as a check named "Tested tree <tree>" on the PR head. A merge_group run
+  # whose merged tree has such a check reuses that result (the changes job
+  # above). The name carries the tree because a check run attaches to the
+  # PR head, while the run tested the head merged with its base: a head can
+  # have passed on another tree (another base, a retargeted PR). Not a
+  # required check; it only exists after "CI required" succeeded.
+  tested-tree:
+    name: Tested tree ${{ needs.changes.outputs.tree }}
+    needs: [changes, required]
+    if: github.event_name == 'pull_request' && needs.required.result == 'success' && needs.changes.outputs.tree != ''
+    runs-on: ubuntu-latest
+    steps:
+      - name: Attest the tested tree
+        env:
+          TREE: ${{ needs.changes.outputs.tree }}
+        run: echo "CI required passed on tree $TREE"

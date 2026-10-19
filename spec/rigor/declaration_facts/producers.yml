@@ -50,10 +50,6 @@ lib/rigor/analysis/dependency_source_inference/walker.rb:
     Rigor::Analysis::DependencySourceInference::Walker#collect_bound_constants: qualifies a constant write by the lexical nesting of the class and module headers around it, as walk_node qualifies a def, so a refine key is matched by the name the write binds rather than by its last segment (#1814); it records no declaration fact
     Rigor::Analysis::DependencySourceInference::Walker#walk_node: grandfathered
     Rigor::Analysis::DependencySourceInference::Walker#walk_refine_declarations: a dispatcher over a refine body; it hands each nested class or module back to walk_node under the prefix it was given and derives no declaration context itself
-lib/rigor/analysis/incremental.rb:
-  computes: which visibility slots a changed file moved, to choose the readers an --incremental recheck re-checks (#2134)
-  producers:
-    Rigor::Analysis::Incremental#changed_visibility_slots: diffs the visibility entries the indexer already wrote (ScopeIndexer.visibility_entries over a seed bundle and the recheck scan), and compares an entry with :private only to fire the "private anywhere" key the singleton visibility gate records, as CheckRules.private_recorded_names reads it; it records no declaration fact and derives no context
 lib/rigor/analysis/incremental_session.rb:
   computes: which constants a changed file rewrote the singleton side of, to choose the readers an --incremental recheck re-checks (#1906)
   producers:

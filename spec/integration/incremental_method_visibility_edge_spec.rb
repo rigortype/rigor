@@ -29,7 +29,8 @@ RSpec.describe "incremental edges for a source-recorded method visibility (#2134
   end
 
   def rows(diagnostics)
-    rules = %w[def.method-visibility-mismatch def.override-visibility-reduced call.wrong-arity]
+    rules = %w[def.method-visibility-mismatch def.override-visibility-reduced def.override-return-widened
+               call.wrong-arity]
     diagnostics.select { |d| rules.include?(d.rule) }.map { |d| [d.rule, d.path, d.line] }
   end
 
@@ -116,5 +117,40 @@ RSpec.describe "incremental edges for a source-recorded method visibility (#2134
     it "re-checks a wrong-arity call when #{form} starts making the method protected" do
       expect_toggle(arity_files, before: "\n", after: protected_source, first: arity, second: [])
     end
+  end
+
+  # The singleton rule first asks whether any class records the name private; while none does, it reads no chain,
+  # so only the `visibility:*#build` key re-checks the call when a file makes the extended module's method private,
+  # or drops a `public :build` that hid another file's `private :build`.
+  let(:extended_files) do
+    { "lib/factory.rb" => "module Factory\n  def build = 1\nend\n", "lib/widget.rb" => "class Widget\n  extend Factory\nend\n",
+      "lib/use.rb" => "def make\n  Widget.build\nend\n" }
+  end
+
+  it "re-checks a singleton call when a reopening of the extended module starts making the method private" do
+    expect_toggle(extended_files, before: "\n", after: "module Factory\n  private :build\nend\n",
+                                  first: [], second: singleton)
+  end
+
+  it "re-checks a singleton call when a file drops the public call that hid a private one" do
+    files = extended_files.merge("lib/factory.rb" => "module Factory\n  def build = 1\n  private :build\nend\n")
+    expect_toggle(files, before: "module Factory\n  public :build\nend\n", after: "\n", first: [], second: singleton)
+  end
+
+  # A splat may make every singleton name public, which contests the wildcard slot from a file that declares nothing.
+  it "re-checks a singleton call when a file starts contesting the class's wildcard slot" do
+    files = { "lib/widget.rb" => "class Widget\n  private_class_method :new\nend\n",
+              "lib/use.rb" => "def make\n  Widget.new\nend\n" }
+    expect_toggle(files, before: "\n", after: "Widget.public_class_method(*NAMES)\n", first: singleton, second: [])
+  end
+
+  # `def.override-return-widened` stops at a parent's private method; the relevance read of the parent's visibility
+  # is what re-checks it.
+  it "re-checks a widened override when a class_eval block starts making the parent's method private" do
+    write("sig/x.rbs", "class Parent\n  def foo: () -> Integer\nend\nclass Child < Parent\n  def foo: () -> String\nend\n")
+    expect_toggle(
+      { "lib/parent.rb" => "class Parent\n  def foo = 1\nend\n", "lib/child.rb" => "class Child < Parent\n  def foo = \"a\"\nend\n" },
+      before: "\n", after: "Parent.class_eval do\n  private :foo\nend\n", first: [["def.override-return-widened", "lib/child.rb", 2]], second: []
+    )
   end
 end

@@ -409,7 +409,7 @@ module Rigor
       # Issue #2134 — {read_name} for a read of `class_name`'s visibility slots for `method_name`, on either side, or
       # of their contest: `visibility:<class>#<method>`. `IncrementalSession#visibility_name_affected` fires the key
       # when a file's visibility entry or contest for the slot moves. A reader that asks whether ANY class records
-      # the name private passes `"*"` as the class; the key fires when a private entry of the name moves. A wildcard
+      # the name private passes `"*"` as the class; the key fires when any entry of the name moves. A wildcard
       # slot (`[:singleton, :*]`) is `*` as the method name.
       def read_visibility(class_name, method_name)
         read_name(:visibility, "#{class_name}##{method_name}")

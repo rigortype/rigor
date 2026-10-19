@@ -19,19 +19,20 @@ RSpec.describe Rigor::Analysis::Incremental do
     end
   end
 
-  # Issue #2134 — the visibility producer: a slot key per moved entry or contest, and `*#name` only for a private one.
+  # Issue #2134 — the visibility producer: a slot key and a `*#name` key per moved entry or contest.
   describe ".changed_visibility_slots" do
     def entries(*rows) = Set.new(rows)
 
-    it "fires the class slot of an entry whose visibility changed, and the private wildcard key" do
+    it "fires the class slot of an entry whose visibility changed, and the any-class key" do
       before = { "a.rb" => entries(["Foo", :bar, :public]) }
       after = { "a.rb" => entries(["Foo", :bar, :private]) }
       expect(described_class.changed_visibility_slots(["a.rb"], before, after)).to eq(Set["Foo#bar", "*#bar"])
     end
 
-    it "reads a singleton slot and a contest by method name and does not fire `*` for a public entry" do
+    it "reads a singleton slot and a contest by method name, whatever the visibility" do
       after = { "a.rb" => entries(["Foo", %i[singleton new], :public], [:contested, "Foo", %i[singleton *]]) }
-      expect(described_class.changed_visibility_slots(["a.rb"], {}, after)).to eq(Set["Foo#new", "Foo#*"])
+      expect(described_class.changed_visibility_slots(["a.rb"], {}, after))
+        .to eq(Set["Foo#new", "*#new", "Foo#*", "*#*"])
     end
 
     it "fires nothing for a file whose entries did not move" do

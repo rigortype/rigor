@@ -226,6 +226,10 @@ module Rigor
         owner = hit.owner
         kind = hit.side == :singleton ? :singleton : :instance
         nodes = kind == :singleton ? :discovered_singleton_def_nodes : :discovered_def_nodes
+        # Issue #2134 — the visibility contest is a read of the slot too.
+        if reads_visibility && Analysis::DependencyRecorder.active?
+          Analysis::DependencyRecorder.read_visibility(owner, method_name)
+        end
         discovery.possible_method?(owner, method_name, kind) ||
           (!(reads_visibility == :visibility && kind == :instance) &&
            discovery.contested?(nodes, [owner, method_name.to_sym])) ||

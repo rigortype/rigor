@@ -50,12 +50,18 @@ reshaping code, and lanes that collided or started on a premise master had alrea
    go to the strongest model. A contained lane (a crash guard, a marker re-point, a CLI field, a
    config or plugin change, a spec- or doc-only change) goes to the small model; the middle tier
    only when a lane needs more than that, with the reason in the brief. Review is always the
-   strongest model.
+   strongest model. Two batches measured why (ADR-119 PR C, about 20 PRs; v0.4.3, 27 PRs): severe
+   review rounds cluster in Ruby-semantics logic whichever model wrote it, so semantics goes to the
+   strongest model with Ruby-run witnesses; the small model's misses are posture, not logic (dropping
+   an assertion, raising a pin, shaping code for a gate, scope creep), which the lane contract below
+   names, and its fix-round count matched the middle tier's. Lane wall time is Nix and RSpec, not the
+   model.
 5. **Brief the lane** with the issue, its worktree (`bin/rigor-worktree <branch> origin/master`, plus
    `--with-references` when a gate the lane runs reads `references/`; see the
    [`rigor-worktree`](../../.claude/skills/rigor-worktree/SKILL.md) skill), any decision the
-   coordinator settled, the reporter's name, email and handle for a fix of an external report, and
-   the [lane contract](#lane-contract). Settle the decisions you can foresee before the lane starts,
+   coordinator settled, the related issues and any approach already withdrawn (a withdrawn approach
+   comes back unless the brief says so), the reporter's name, email and handle for a fix of an
+   external report, and the [lane contract](#lane-contract). Settle the decisions you can foresee before the lane starts,
    per contribution-flow.md § "Decisions and the approval queue".
 6. **Review when the Draft PR lands**, with the [reviewer contract](#reviewer-contract), and triage
    per contribution-flow.md step 3, including the "Engine allocations (advisory)" summary. Send each
@@ -97,14 +103,16 @@ A lane brief restates these:
 
 - **Scope.** You implement and open a Draft PR; the coordinator reviews and lands it. Leave the
   review, `gh pr ready`, the merge and other PRs to the coordinator, whatever `AGENTS.md` says about
-  landing.
+  landing. Change only what the issue asks; report anything wider for the coordinator to file.
 - **Environment.** Every command through `nix develop --command`, stdin from `/dev/null` for rspec
   and `rigor`, this worktree's own `bundle exec exe/rigor` as the oracle, `references/` read-only,
   scratch files under the worktree's `tmp/`. No `git stash`, no `git submodule deinit`, no
   `pkill`/`killall`; stop only processes you started, and leave none running when you report. No
-  version bump, no edit to `CHANGELOG.md` or its `[Unreleased]` section, never `rake release`. A
-  lane that edits comments leaves `# rigor:` and `# rubocop:` lines alone; in fixtures they are
-  suppression directives.
+  version bump, no edit to `CHANGELOG.md` or its `[Unreleased]` section, never `rake release`. Commit
+  with the configured identity: never `--author=`, `GIT_AUTHOR_*` or `GIT_COMMITTER_*`. A lane that
+  edits comments leaves `# rigor:` and `# rubocop:` lines alone; in fixtures they are suppression
+  directives. A lane that runs Rigor against a survey target gets one of its own
+  ([`measurement.md`](measurement.md) § "Running against a survey project").
 - **Gate.** `make verify-changed` in the foreground, re-run after the last edit. Never `make
   verify`, `make check` or the whole suite. A lane that touches dispatch, scope resolution or the
   discovery tables also runs `spec/rigor/scope/ancestry_walker_detection_spec.rb` and

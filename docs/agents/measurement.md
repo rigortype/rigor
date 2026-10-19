@@ -27,6 +27,15 @@ nix develop --command bash -c '
 
 From a worktree, substitute the worktree in all three places once its `vendor/bundle` exists.
 
+**A target under measurement is exclusive state.** Its `.rigor.yml`, `.rigor/cache` and
+`.rigor-effects.yml` live in the target's directory, and `rigor effects update` writes into cwd. Two
+agents on one target corrupt each other silently: in August 2026 an agent writing a manual chapter
+used the same checkout for real CLI output, wrote its own `.rigor.yml` and deleted `.rigor/cache`
+mid-run, so a whole interleaved A/B batch ran cold under both arms and was void. Give every agent that
+runs Rigor in a target its own target, measuring or not, or have it `rsync` a private copy first, and
+say so in every brief: agents do not know about each other. When a collision is found late, rerun the
+batch rather than trust it.
+
 ## Corpus before/after diff
 
 To claim "no new firings across the corpus" for an engine change, the SAME engine must analyse each
@@ -154,6 +163,36 @@ The same failure inside the suite: a green example that would stay green with th
 - **A failure that passes when its file runs alone is spec order.** Rerun the pair with `--order
   defined` to find the spec that polluted shared state; v0.4.3's `lens_spec` failed only after a spec
   that required the plugin directly, which left the plugin loader's gem-to-id memo unrecorded.
+
+## Shell commands that answer wrong silently
+
+These hold for any shell work, not only measurement; `AGENTS.md` points here. The command runs and its
+output looks right, but it acted on the wrong input or measured the wrong thing.
+
+- **When the agent shell is zsh** (`$ZSH_VERSION` is set):
+  - an unquoted `$VAR` does not word-split, so `for f in $FILES` iterates once and `rspec $FILES` gets
+    one argument; use an array or `${=VAR}`;
+  - `${PIPESTATUS[0]}` is empty (zsh's is `$pipestatus`, 1-based); run the guarded command unpiped and
+    test `$?`;
+  - `"$B:lib/path"` applies the `:l` modifier and eats a letter; write `"${B}:lib/path"`;
+  - an unquoted glob in an argument (`--include=*_spec.rb`) aborts with `no matches found`, so
+    `files=$(…)` comes back empty and a later `rspec $files` runs the whole suite; quote globs meant for
+    the tool and guard `[ -n "$files" ]` before a targeted run;
+  - `echo ===` fails; quote it;
+  - a multi-line snippet written for bash runs as written only under `bash -c` or from a script file.
+- **`cmd | grep -q` under `pipefail` reports no match on large inputs**: grep exits at the first match,
+  the producer dies of SIGPIPE (141), and the pipeline fails. Use `grep … >/dev/null` or `grep -c` so
+  grep drains its input (#2150 hit this in `verify-changed`).
+- **`rg -r` is `--replace`**, not recursive: `rg -rn PATTERN` rewrites every match to the literal `n`.
+  rg is recursive by default.
+- **An unquoted heredoc runs every backtick span** in the script as a command, so a Python or Ruby
+  edit whose strings hold Markdown code is mangled before it runs. Quote it (`<<'EOF'`) and pass values
+  through the environment.
+- **`timeout N` must wrap the command inside `--command`**; wrapping `nix develop` itself lets the
+  shell setup eat the budget.
+- Inside the Flake, `sed` is GNU sed: [`parallel-lanes.md`](parallel-lanes.md) § "Mutation table".
+
+`gh` traps are in [`contribution-flow.md`](contribution-flow.md) § "GitHub and git traps".
 
 ## Controls, benchmarks and the instrument
 

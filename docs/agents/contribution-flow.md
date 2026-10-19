@@ -40,6 +40,12 @@ a changelog entry. It is the conditional detail pointed to by `AGENTS.md`.
   build on it until its owner hands over the lane. A green gate is not a handoff.
 - A bug-report fix credits the reporter with `Co-Authored-By: Name <email>` on every fix commit,
   including fragments, and `thank you @handle!` in the changelog. Ask for a missing email; never guess.
+  Give the credit when committing. A plan, brief or handoff may say that a fix traces to a report and
+  pass the trailer on, but never lists the credit as a task, checklist item or "must": that reads as
+  discourteous to the reporter. Trace an AI-filed issue back to the human report it came from.
+- Commit with the repository's configured identity. Never pass `--author=` or set `GIT_AUTHOR_*` /
+  `GIT_COMMITTER_*`: in September 2026 subagent commits carried the maintainer's private address and
+  had to be rewritten (#628). Lane briefs repeat this.
 - Put each `Fixes #N` on its own line. GitHub parses only the first reference in a comma-separated
   `Fixes #a, #b, #c`, silently leaving the rest open, and a later session reads them as backlog.
 - A spec that pins behaviour you believe is wrong carries an in-place `flip this when #N is fixed`
@@ -50,7 +56,11 @@ a changelog entry. It is the conditional detail pointed to by `AGENTS.md`.
 ## GitHub and git traps
 
 Each of these fails silently: the command succeeds and reports something plausible and wrong.
+General shell traps are in [`measurement.md`](measurement.md) § "Shell commands that answer wrong
+silently".
 
+- **An empty PR body.** `gh pr edit N --body "$var"` with an empty `$var` blanks the body. Pass
+  `--body-file`, or guard `[ -n "$var" ]`.
 - **CI verdict.** `gh pr checks --watch` exits 1 with "no checks reported" when a push cancels the
   earlier run, and it watches only the check set present when it started. Read the head commit's run
   instead: find its id in `gh run list --branch <branch>` by matching `headSha` (`gh run list
@@ -204,7 +214,11 @@ checks more) or that writes down an outcome a `ready-for-agent` issue already st
 ## Release Cadence
 
 - The only release path is the user's explicit `/rigor-release-prep` invocation. A date or release
-  goal is context only; otherwise leave versioned metadata and `[Unreleased]` untouched.
+  goal is context only; otherwise leave versioned metadata and `[Unreleased]` untouched, and end by
+  saying the cut is one `/rigor-release-prep` away. The gate exists for rhythm: when every landed
+  batch was followed by a version bump (v0.0.5 to v0.0.8), releases came too close together to each
+  carry user-visible value. A release cut without being asked (0.3.8, read from "release by 11
+  o'clock") is a trust failure, not a process slip.
 - Never run `bundle exec rake release` without explicit authorization: it tags, pushes, and publishes.
 - A release ships only ratified decisions: `/rigor-release-prep` reports
   [`approval-queue.d/`](../../approval-queue.d/README.md) first, and the release waits until it holds

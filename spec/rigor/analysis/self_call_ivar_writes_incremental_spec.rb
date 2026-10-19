@@ -143,18 +143,19 @@ RSpec.describe "self-call ivar-write proof — incremental" do
     )
   end
 
-  # Issue #2137 — a `refine` of a class on the chain marks it rewritten from a file that declares nothing the chain
-  # reads, and keeps the file's declared classes, so no class key fires: only the `mark:` edge re-checks the caller.
-  let(:refining) { "module R\n  refine Base do\n    def helper = 1\n  end\nend\n" }
+  # Issue #2137 — a `refine` of a class on the chain (here the caller's own, ahead of the owner `Base`) marks it
+  # rewritten from a file that declares nothing the chain reads, and keeps the file's declared classes, so no class key
+  # fires: only the `mark:` edge `rewritten?` files re-checks the caller.
+  let(:refining) { "module R\n  refine Holder do\n    def helper = 1\n  end\nend\n" }
 
-  it "re-checks the caller when a file whose declarations stay starts refining a class on the chain" do
+  it "re-checks the caller when a file whose declarations stay starts refining the caller's class" do
     expect_recheck_to_report(
       { "b.rb" => "class Base\n  def log(message) = warn(message)\nend\n", "x.rb" => "module R\nend\n" },
       { "x.rb" => refining }
     )
   end
 
-  it "re-checks the caller when a file whose declarations stay stops refining a class on the chain" do
+  it "re-checks the caller when a file whose declarations stay stops refining the caller's class" do
     expect_recheck_to_clear(
       { "b.rb" => "class Base\n  def log(message) = warn(message)\nend\n", "x.rb" => refining },
       { "x.rb" => "module R\nend\n" }

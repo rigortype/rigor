@@ -1101,6 +1101,36 @@ declare the class (`Mutex.class_eval { attr_accessor :a }`). A miss
 records nothing there: the readers that act on one record their own
 negative edges.
 
+The `visibility:<class>#<method name>` key in `missing` is recorded by
+`Scope#discovered_method_visibility` whichever way it answers
+([#2134](https://github.com/rigortype/rigor/issues/2134)), for the class
+and method it reads, on either side, and by `DefinerResolution`'s
+contested-slot check for a question that reads the visibility (an
+answer block may answer from RBS without reading the slot). The
+singleton rule's other reads of the table record it too: its wildcard-slot contest check records
+`visibility:<entry>#*` for each project entry of the chain, and its
+project-wide "is the name private anywhere" gate
+(`CheckRules#private_singleton_candidate?`) records `visibility:*#<method
+name>`. A `private :foo` can be written from a reopening or from a
+`Parent.class_eval` block in a file the reader has no other edge to, so
+before this a verdict that read it was not re-checked when that file
+added or dropped the modifier: `def.override-visibility-reduced` and
+`def.override-return-widened` reading a parent's visibility, and a
+singleton `def.method-visibility-mismatch` whose gate found no private
+entry of the name and so read no chain. Its producer diffs each changed, added or removed file's
+visibility entries — every `[class, slot, visibility]` of its
+`method_visibilities` table and every `[class, slot]` of its
+`contested_discovered_method_visibilities` sibling
+(`ScopeIndexer.visibility_entries`) — between the file's seed bundle and
+the recheck scan (`Incremental.changed_visibility_slots`). It fires
+`visibility:<class>#<name>` for every entry that moved, with a singleton
+slot `[:singleton, name]` read as `name`, and `visibility:*#<name>` for
+every moved entry: the table merges last-writer-wins, so dropping a
+`public :foo` can uncover another file's `private :foo`. Keying on the class keeps an
+edit to one class's visibility from re-checking every reader of the
+method name. The seed bundles already carry both tables, so no row moves
+and `SCHEMA` is unchanged.
+
 The `mark:<last segment>` key in `missing` is recorded by
 `Scope#parameter_envelopes_of` whichever way the reader answers
 ([#1833](https://github.com/rigortype/rigor/issues/1833)): a file can add a

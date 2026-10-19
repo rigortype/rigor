@@ -132,6 +132,24 @@ module Rigor
         moved.freeze
       end
 
+      # Issue #2134 — the `<class>#<method>` slots whose visibility entries or contests moved in this edit: one for
+      # every entry that appeared in or vanished from a file's {Inference::ScopeIndexer.visibility_entries}, a
+      # singleton slot's `[:singleton, name]` read as `name` (the wildcard slot as `*`), plus `*#<method>`, which the
+      # "is the name private anywhere" readers record. That key fires for an entry of any visibility: the merge is
+      # last-writer-wins, so dropping a `public :foo` can uncover another file's `private :foo`. `paths` MUST include
+      # removed files.
+      def changed_visibility_slots(paths, before, after)
+        moved = Set.new
+        paths.each do |path|
+          ((before[path] || Set.new) ^ (after[path] || Set.new)).each do |entry|
+            class_name, slot = entry.first == :contested ? entry.drop(1) : entry
+            name = slot.is_a?(Array) ? slot.last : slot
+            moved << "#{class_name}##{name}" << "*##{name}"
+          end
+        end
+        moved.freeze
+      end
+
       # Issue #1120 — the method names whose refinements moved in this edit. A consumer whose answer consulted the
       # refinement table recorded a `refinement:<method>` edge whichever way it answered, because the answer is a
       # function of the whole project's refinements of that name. `paths` MUST include removed files, whose whole

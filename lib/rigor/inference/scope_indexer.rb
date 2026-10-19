@@ -9153,14 +9153,17 @@ module Rigor
       # {#discovered_project_index_incremental}'s changed-file branch) yields the live def nodes the signature
       # reads their parameter structure from. Issue #1120 — and each file's own refinement table, which the merged
       # def-index cannot attribute back to a file, so the session can diff it against the file's seed bundle.
-      # Issue #1459 — and each file's {#defined_method_names}, diffed the same way.
-      # @return `{ def_index:, code_fingerprints:, declaration_signatures:, refinements:, defined_method_names: }`.
+      # Issue #1459 — and each file's {#defined_method_names}, diffed the same way. Issue #2134 — and each file's
+      # {#visibility_entries}.
+      # @return `{ def_index:, code_fingerprints:, declaration_signatures:, refinements:, defined_method_names:,
+      #   visibility_entries: }`.
       def scan_summary_for_paths(paths, buffer: nil)
         acc = new_def_index_accumulator
         code_fingerprints = {}
         declaration_signatures = {}
         refinements = {}
         defined_method_names = {}
+        visibility_entries = {}
         paths.each do |path|
           physical = buffer ? buffer.resolve(path) : path
           source = File.read(physical)
@@ -9171,6 +9174,7 @@ module Rigor
           declaration_signatures[path] = declaration_signature(file_index)
           refinements[path] = file_index[:refinements] if file_index[:refinements]
           defined_method_names[path] = defined_method_names(file_index)
+          visibility_entries[path] = visibility_entries(file_index)
         rescue DeclarationWalk::ContractError
           raise # a broken walk contract, not an unreadable file: skipping it would hide the failure
         rescue StandardError
@@ -9178,7 +9182,7 @@ module Rigor
         end
         { def_index: finalize_def_index(acc), code_fingerprints: code_fingerprints,
           declaration_signatures: declaration_signatures, refinements: refinements,
-          defined_method_names: defined_method_names }
+          defined_method_names: defined_method_names, visibility_entries: visibility_entries }
       end
 
       # Issue #1459 — every method name one file's index defines, on any class or module and either side: the keys of
@@ -9193,6 +9197,19 @@ module Rigor
           file_index[key]&.each_value { |table| names.merge(table.keys) }
         end
         names.freeze
+      end
+
+      # Issue #2134 — one file's contributions to the visibility table and its contested sibling, as a Set of
+      # `[class, slot, visibility]` entries and `[:contested, class, slot]` contests, where a slot is a method name or
+      # `[:singleton, name]`. Takes a live file index or a seed bundle, which hold the same two keys.
+      def visibility_entries(file_index)
+        entries = Set.new
+        file_index[:method_visibilities]&.each do |class_name, table|
+          table.each { |slot, visibility| entries << [class_name, slot, visibility] }
+        end
+        contested = (file_index[:siblings] || {})[:contested_discovered_method_visibilities]
+        contested&.each { |(class_name, slot)| entries << [:contested, class_name, slot] }
+        entries.freeze
       end
 
       # ADR-89 WD1 — a per-file digest of every cross-file DECLARATION surface an ancestry / file-level

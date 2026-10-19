@@ -19,6 +19,28 @@ RSpec.describe Rigor::Analysis::Incremental do
     end
   end
 
+  # Issue #2134 — the visibility producer: a slot key and a `*#name` key per moved entry or contest.
+  describe ".changed_visibility_slots" do
+    def entries(*rows) = Set.new(rows)
+
+    it "fires the class slot of an entry whose visibility changed, and the any-class key" do
+      before = { "a.rb" => entries(["Foo", :bar, :public]) }
+      after = { "a.rb" => entries(["Foo", :bar, :private]) }
+      expect(described_class.changed_visibility_slots(["a.rb"], before, after)).to eq(Set["Foo#bar", "*#bar"])
+    end
+
+    it "reads a singleton slot and a contest by method name, whatever the visibility" do
+      after = { "a.rb" => entries(["Foo", %i[singleton new], :public], [:contested, "Foo", %i[singleton *]]) }
+      expect(described_class.changed_visibility_slots(["a.rb"], {}, after))
+        .to eq(Set["Foo#new", "*#new", "Foo#*", "*#*"])
+    end
+
+    it "fires nothing for a file whose entries did not move" do
+      same = { "a.rb" => entries(["Foo", :bar, :private]) }
+      expect(described_class.changed_visibility_slots(["a.rb"], same, same)).to be_empty
+    end
+  end
+
   describe ".changed_files" do
     it "compares per-file diagnostics structurally, not by object identity" do
       diag = instance_double(Rigor::Analysis::Diagnostic, to_h: { "rule" => "x", "line" => 1 })

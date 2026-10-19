@@ -1144,6 +1144,10 @@ the recheck scan's merged envelope table
 whose marks moved; `mark:*` fires when an object-extended mark moves, for
 the reader that scans every bucket for one. The seed bundles already
 carry the envelope tables, so no row moves and `SCHEMA` is unchanged.
+`Inference::SelfCallIvarWrites` reads the chain's buckets through it too
+([#2137](https://github.com/rigortype/rigor/issues/2137)): a `refine` of
+a class on the chain, from a file whose declared classes do not change,
+fires no class key, so before this the ivar-write proof kept its answer.
 
 The `mixin:<qualified name>` key in `missing` is recorded for every
 qualified candidate name of every external entry on a resolution chain that a

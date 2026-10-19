@@ -1,0 +1,1 @@
+- **[engine]** `rigor check --incremental` now re-checks a call whose instance-variable narrowing rests on the self-call ivar-write proof when another file adds or removes a `refine` of a class on that call's chain, instead of serving the previous verdict. ([#2162](https://github.com/rigortype/rigor/pull/2162))

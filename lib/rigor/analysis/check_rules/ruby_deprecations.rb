@@ -3,6 +3,7 @@
 require "prism"
 
 require_relative "rule_ids"
+require_relative "../dependency_recorder"
 require_relative "../diagnostic"
 require_relative "../../inference/version_guard"
 require_relative "../../source/constant_path"
@@ -243,7 +244,13 @@ module Rigor
 
         # Whether a project or `pre_eval:` file defines a method called `name` anywhere — on any class, on either
         # side, or at the top level. Asked once per name per file.
+        #
+        # Issue #2133 — the answer reads every project file's tables whole, so it records a `defines:<name>` edge
+        # whichever way it answers, as {Inference::BlockCallTiming.project_defines_anywhere?} does: an edit that makes
+        # a file start or stop defining the name re-checks the call. A `pre_eval:` patch moves the snapshot's own
+        # fingerprint.
         def project_defines?(scope, name)
+          Analysis::DependencyRecorder.read_missing(:defines, name) if Analysis::DependencyRecorder.active?
           return true if scope.discovered_methods.any? { |_owner, table| table.key?(name) }
           return true if scope.discovered_def_nodes.any? { |_owner, table| table.key?(name) }
 

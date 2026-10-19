@@ -184,7 +184,9 @@ for path in ${changed[@]+"${changed[@]}"}; do
       add_mirror_spec "${mirror%.rb}_spec.rb"
       check_files+="$path"$'\n'
       case "$path" in
-        lib/rigor/analysis/incremental*.rb | lib/rigor/analysis/dependency_recorder.rb) dependency_edit=1 ;;
+        lib/rigor/analysis/incremental*.rb | lib/rigor/analysis/incremental*/*.rb | lib/rigor/analysis/dependency_recorder.rb)
+          dependency_edit=1
+          ;;
         *)
           if git ls-files --error-unmatch "$path" >/dev/null 2>&1; then
             # No -q: grep must drain the diff, or a large one dies of SIGPIPE
@@ -239,6 +241,9 @@ for path in ${deleted[@]+"${deleted[@]}"}; do
       ;;
   esac
   case "$path" in
+    lib/rigor/analysis/incremental*.rb | lib/rigor/analysis/incremental*/*.rb | lib/rigor/analysis/dependency_recorder.rb)
+      dependency_edit=1
+      ;;
     lib/*.rb)
       git show "$merge_base:$path" 2>/dev/null | grep -E "$dependency_recording_re" >/dev/null && dependency_edit=1
       ;;

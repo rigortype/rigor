@@ -64,7 +64,7 @@ Cut it from an up-to-date `master`, in its own worktree:
 ```sh
 git fetch origin
 nix develop --command bin/rigor-worktree release/x.y.z origin/master
-cd ../rigor-wt/release-x.y.z   # the slug bin/rigor-worktree prints; run every step below here
+cd <the path it prints after "Worktree ready:">   # run every step below here
 ```
 
 The worktree lands under `rigor-wt/` with its own bundle. Do not prepare a release in the shared
@@ -557,10 +557,13 @@ user explicitly authorizes publishing: it tags, pushes, and publishes to
 RubyGems, and none of that can be undone.
 
 Publish is the one step that runs in the main clone, on `master`: the release worktree cannot check
-out `master` while the main clone holds it, and `rake release` tags whatever `HEAD` is. Remove the
-release worktree first (`git worktree remove ../rigor-wt/release-x.y.z`), then in the main clone:
+out `master` while the main clone holds it, and `rake release` tags whatever `HEAD` is. It is the
+one moment the shared clone's branch matters, so check `git status` there before switching. Leave the
+release worktree before removing it, so the shell keeps a working directory:
 
 ```sh
+main="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
+cd "$main" && git worktree remove "<the release worktree's path>"
 git switch master && git pull
 ls approval-queue.d/   # README.md alone; otherwise back to "First: ratify the approval queue"
 gh pr view <release-pr> --json mergeCommit --jq .mergeCommit.oid   # must equal:
@@ -623,7 +626,7 @@ every run, so it must never sit at the head of a PR that could merge.
 
 ```sh
 nix develop --command bin/rigor-worktree bench-corpus-vX.Y.Z vX.Y.Z
-cd ../rigor-wt/bench-corpus-vX.Y.Z
+cd <the path it prints after "Worktree ready:">
 # bench/baseline.json: "corpus": "vX.Y.Z", "calibrated": false
 git commit -am "Advance the perf-gate corpus to vX.Y.Z"
 git push origin HEAD:refs/heads/bench-corpus-vX.Y.Z

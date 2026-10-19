@@ -26,7 +26,8 @@ RSpec.describe "changelog.d fragment conformance (ADR-105)" do
   # period is the only break: a `?` or `!` here is far more often a Ruby method name than a sentence end.
   define_method(:entry_prose_offenses) do |relative, entry|
     prose = entry.to_s.gsub(/`[^`]*`/, "C").gsub(/\[[^\]]*\]\([^)]*\)/, "x")
-    prose = prose.gsub(/\b(?:e\.g|i\.e|vs|etc|cf)\./, "abbr")
+    prose = prose.gsub(/\b(?:e\.?g|i\.e|vs|etc|cf|approx|a\.k\.a|dr|mr|ms|u\.s)\./i, "abbr")
+    prose = prose.gsub(/(?<=\d)–(?=\d)/, "-") # a numeric range (`1–3`) is not a clause
     offenses = []
     if prose.match?(/—|–| -- /)
       offenses << "#{relative}: the entry line carries a dash clause; move it to a `  - ` child item"
@@ -112,7 +113,9 @@ RSpec.describe "changelog.d fragment conformance (ADR-105)" do
       expect(fragment_offenses("fixed/my-branch.md", code)).to be_empty
       ["Accept e.g. String and Array as keys.", "Read i.e. Integer here.", "Compare Array vs. Hash shapes.",
        "Skip globs, etc. Ruby files stay.", "Narrow ivars; Ruby 3.4 needs it.",
-       "Keep `empty?` and any? And all? apart.", "Ship it in v0.4.5.", "Type Foo.bar calls."].each do |prose|
+       "Keep `empty?` and any? And all? apart.", "Ship it in v0.4.5.", "Type Foo.bar calls.",
+       "Accept E.g. String keys.", "Cut approx. 30% of allocations.", "Read a.k.a. Alias names.",
+       "Fold 1–3 element tuples."].each do |prose|
         entry = "- **[engine]** #{prose} ([#42](https://github.com/rigortype/rigor/pull/42))\n"
         expect(fragment_offenses("fixed/my-branch.md", entry)).to be_empty, prose
       end

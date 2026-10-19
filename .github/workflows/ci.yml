@@ -837,6 +837,9 @@ jobs:
           # The merge base, not the base branch's tip: a PR branched from
           # an older master would otherwise be charged with every engine
           # change merged since.
+          # The default run shell is `bash -e` without pipefail: keep a failed
+          # engine run failing the step through the tee below.
+          set -o pipefail
           merge_base=$(git merge-base "$BASE_SHA" "$HEAD_SHA")
           bundle exec ruby tool/engine_alloc_ab.rb --base "$merge_base" --head "$HEAD_SHA" \
             --summary "$GITHUB_STEP_SUMMARY" | tee "$RUNNER_TEMP/engine-alloc-ab.txt"

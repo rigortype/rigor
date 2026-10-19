@@ -22,10 +22,12 @@ If this file disagrees with an ADR, the CHANGELOG, or an issue, this file is the
 milestone has 0 open issues (45 closed); the triage before the release kept only #1833 and moved
 the rest to the new **`v0.4.6` milestone**, which now holds the open work.
 
-**The perf-gate corpus advanced to `v0.4.5`** (branch `bench-corpus-v0.4.5`, recalibrated from the
-tag). The release gate first failed on allocations (+3.4% over corpus v0.4.4): per-PR attribution
-showed #2051 rebuilding the subclass map on every ivar proof, and #2146 memoised it, bringing the
-gate back to +0.79% without re-baselining. The new baseline's `note` carries the numbers.
+**The perf-gate corpus advances to `v0.4.5`** with #2149 (recalibrated from a branch cut at the
+tag). The release gate first failed on allocations (+3.4% over corpus v0.4.4). The largest per-PR
+share was #2051 (+618k of +1.89M), which amplified a subclass-map rebuild on every ivar proof;
+#2146 memoised the map, bringing the gate back to +0.79% without re-baselining. The baseline's
+`note` carries the numbers. Its wall_s (56.5s) came from a fast runner: a `wall_s`-only red cut is
+noise, rerun it (rigor-release-prep), never recalibrate for wall.
 
 **The landing flow (ADR-123).** `master` has a merge-queue ruleset; land with
 `bin/land-pr N <reviewed-head-sha>` in the background (`gh pr merge` fails: auto-merge is off).
@@ -53,7 +55,7 @@ reports for ratification; it holds only its README after the v0.4.5 ratification
 3. **#2147** — editor publish drops the self-call ivar-write proof across files and reports a false
    `call.undefined-method` that the CLI does not.
 4. The rest of `v0.4.6`: ready-for-agent #1956, #1891, #1817, #1768, #1557; needs-triage #1934;
-   the sig-gen `ready-for-human` cluster (#1148–#1157, #1167, #1183).
+   the sig-gen `ready-for-human` cluster (#1148–#1155, #1157, #1167, #1183).
 5. Lane candidates from the previous batch still open: engine false positives #2071, #2074, #2075,
    #2083, #2087, #2090, #2091, #2092, #2094, #2104, #2108, #2127, #2128; incremental / cache #2100,
    #2119, #2105; sig-gen #2085, #2095; robustness #2125, #2116; tooling #2101, #2131, #2021, #2053.
@@ -69,8 +71,9 @@ reports for ratification; it holds only its README after the v0.4.5 ratification
   precedent still goes to the maintainer. Never reshape code to dodge a gate.
 - `make verify-changed` does not run `ancestry_walker_detection_spec` or `producers_spec` on every
   change (#2053): lanes touching dispatch or discovery must run them by hand before pushing.
-- An engine PR's "Engine allocations (advisory)" summary is a finding even when green; a per-call
-  rebuild (#2051) is what pushed the v0.4.5 gate out of band.
+- An engine PR's "Engine allocations (advisory)" summary is a finding even when green. A red cut is
+  usually several PRs' deltas summed: attribute each before blaming one (v0.4.5: #2051 was only
+  the largest share).
 
 ## What bit
 

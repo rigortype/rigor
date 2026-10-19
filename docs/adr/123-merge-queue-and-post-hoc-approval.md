@@ -42,6 +42,13 @@ before it is queued; it is re-pushed only when it is `CONFLICTING` or the queue 
 extra. *Criterion: check the result that will land, once, instead of approximating it by re-gating
 every branch in series.*
 
+*Amended 2026-10-19 (maintainer's decision).* When the queue's merged tree is byte-identical to the
+queued PR head's tree and `CI required` already passed on that head, the queue run reuses that result
+and skips the suite: the PR head contained `master`, so the result that will land is the one already
+checked. In the v0.4.5 cycle every landing was of this kind, and the queue reran an identical 11-minute
+CI each time. A group that merges anything in (`master` moved, several PRs batched) and any lookup
+that fails run the full CI as before. The approval-queue check still runs in every queue run.
+
 **2. Decisions below a stated line are made by precedent and ratified afterwards.** A decision
 that is not *serious* (the list in `contribution-flow.md` § "Decisions and the approval queue") is
 made by the coordinator, following the closest precedent, and lands with its PR. The PR carries an

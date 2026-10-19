@@ -8,6 +8,7 @@ require "rigor/configuration"
 require "rigor/analysis/project_scan"
 require "rigor/analysis/dependency_source_inference"
 require "rigor/inference/synthetic_method_index"
+require "rigor/analysis/buffer_binding"
 
 RSpec.describe Rigor::LanguageServer::ProjectContext do
   let(:configuration) { Rigor::Configuration.new("paths" => []) }
@@ -349,6 +350,61 @@ RSpec.describe Rigor::LanguageServer::ProjectContext do
 
       expect(context.cache_store).not_to equal(store)
       expect(context.cache_store.root).to eq(File.join(project_dir, "other-cache"))
+    end
+  end
+
+  # Issue #2147 — the per-buffer publish's cross-file seed: the project's files walked once per generation, the
+  # buffer's own file re-walked from its bytes.
+  describe "#discovery_seed_for" do
+    def buffer_for(path, bytes, dir)
+      physical = File.join(dir, "buffer.rb")
+      File.write(physical, bytes)
+      Rigor::Analysis::BufferBinding.new(logical_path: path, physical_path: physical)
+    end
+
+    it "seeds the classes other files declare, and the buffer's declarations over its file on disk" do
+      Dir.mktmpdir("rigor-lsp-seed-") do |dir|
+        lib = File.join(dir, "lib")
+        FileUtils.mkdir_p(lib)
+        File.write(File.join(lib, "b.rb"), "class Base\nend\n")
+        File.write(File.join(lib, "a.rb"), "class OnDisk\nend\n")
+        context = described_class.new(configuration: Rigor::Configuration.new("paths" => [lib]))
+
+        seed = context.discovery_seed_for(buffer_for(File.join(lib, "a.rb"), "class InBuffer\nend\n", dir))
+        expect(seed[:discovered_classes].keys).to include("Base", "InBuffer")
+        expect(seed[:discovered_classes].keys).not_to include("OnDisk")
+      end
+    end
+
+    it "walks the project once per generation, however many publishes fold it" do
+      Dir.mktmpdir("rigor-lsp-seed-") do |dir|
+        lib = File.join(dir, "lib")
+        FileUtils.mkdir_p(lib)
+        File.write(File.join(lib, "a.rb"), "class A\nend\n")
+        context = described_class.new(configuration: Rigor::Configuration.new("paths" => [lib]))
+        binding = buffer_for(File.join(lib, "a.rb"), "class A\nend\n", dir)
+        allow(Rigor::Protection::DiscoverySeed).to receive(:bundles).and_call_original
+
+        context.prepare_discovery_seed
+        2.times { context.discovery_seed_for(binding) }
+        expect(Rigor::Protection::DiscoverySeed).to have_received(:bundles).once
+      end
+    end
+
+    it "sees a file added on disk only after #invalidate!" do
+      Dir.mktmpdir("rigor-lsp-seed-") do |dir|
+        lib = File.join(dir, "lib")
+        FileUtils.mkdir_p(lib)
+        File.write(File.join(lib, "a.rb"), "class A\nend\n")
+        context = described_class.new(configuration: Rigor::Configuration.new("paths" => [lib]))
+        binding = buffer_for(File.join(lib, "a.rb"), "class A\nend\n", dir)
+        context.discovery_seed_for(binding)
+
+        File.write(File.join(lib, "c.rb"), "class Added\nend\n")
+        expect(context.discovery_seed_for(binding)[:discovered_classes].keys).not_to include("Added")
+        context.invalidate!
+        expect(context.discovery_seed_for(binding)[:discovered_classes].keys).to include("Added")
+      end
     end
   end
 end

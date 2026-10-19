@@ -7,6 +7,8 @@ require_relative "../analysis/runner"
 require_relative "../analysis/incremental_session"
 require_relative "../cache/incremental_snapshot"
 require_relative "../effects/identity"
+require_relative "../analysis/path_expansion"
+require_relative "../protection/discovery_seed"
 
 module Rigor
   module LanguageServer
@@ -112,6 +114,31 @@ module Rigor
         @project_scan ||= build_project_scan
       end
 
+      # Issue #2147 — the cross-file discovery tables a per-buffer publish seeds its `Runner` with
+      # (`discovery_seed:`, #260). A `prebuilt:` runner runs no discovery pass of its own, so without them every
+      # class another file declares reads as an external ancestor and a publish answers differently from
+      # `rigor check` over the same tree. The per-file bundles are walked once per generation; each publish
+      # re-folds them with `buffer`'s file re-walked from the buffer's bytes
+      # ({Protection::DiscoverySeed.tables_for_buffer}), so the buffer's own declarations win over its on-disk
+      # ones, and a file whose bytes on disk moved since the bundles were built is re-walked too (its digest no
+      # longer matches).
+      #
+      # The buffer's file is matched by its real path and handed to the fold under the buffer's own spelling: the
+      # binding substitutes bytes only for a path spelled exactly as its logical path (the URI's absolute path),
+      # while the configured paths may be relative (`lib`, the default) or reach the file through a symlink.
+      def discovery_seed_for(buffer)
+        Protection::DiscoverySeed.tables_for_buffer(paths: discovery_paths_for(buffer), bundles: discovery_bundles,
+                                                    buffer: buffer)
+      end
+
+      # Builds what {#discovery_seed_for} reads once per generation, so a fork batch's children inherit it instead
+      # of each walking the project.
+      def prepare_discovery_seed
+        discovery_bundles
+        discovery_real_paths
+        nil
+      end
+
       # Whole-project diagnostics for one save round (#246). The first call primes an in-process
       # {Analysis::IncrementalSession} — seeded from the on-disk snapshot a terminal
       # `rigor check --incremental` may have left, and otherwise from a full baseline; every later call is a
@@ -189,6 +216,9 @@ module Rigor
         @environment_features = nil
         @disk_feature_files = nil
         @project_scan = nil
+        @discovery_paths = nil
+        @discovery_real_paths = nil
+        @discovery_bundles = nil
         # The session's per-file cache was computed against the old environment / project scan, so it cannot
         # outlive them. The next save round primes a fresh one.
         @incremental_session = nil
@@ -228,6 +258,39 @@ module Rigor
           environment: environment,
           cache_store: cache_store
         )
+      end
+
+      # The configured project files, expanded as `rigor check` expands its configured paths.
+      def discovery_paths
+        @discovery_paths ||= Array(@configuration.paths).flat_map do |path|
+          next [path] unless File.directory?(path)
+
+          Analysis::PathExpansion.directory_files(path, @configuration.exclude_patterns,
+                                                  base: @configuration.exclude_base)
+        end.freeze
+      end
+
+      # Every entry that reaches the buffer's file is respelled, so a file configured under two roots (`lib` and a
+      # symlink to it) is not folded from disk through the second.
+      def discovery_paths_for(buffer)
+        real = real_path(buffer.logical_path)
+        discovery_paths.each_with_index.map do |path, index|
+          discovery_real_paths[index] == real ? buffer.logical_path : path
+        end
+      end
+
+      def discovery_real_paths
+        @discovery_real_paths ||= discovery_paths.map { |path| real_path(path) }.freeze
+      end
+
+      def real_path(path)
+        File.realpath(path)
+      rescue SystemCallError
+        File.expand_path(path)
+      end
+
+      def discovery_bundles
+        @discovery_bundles ||= Protection::DiscoverySeed.bundles(paths: discovery_paths)
       end
 
       def build_project_scan

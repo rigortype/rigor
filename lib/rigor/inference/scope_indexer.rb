@@ -5122,14 +5122,14 @@ module Rigor
                                                                      defs_singleton: defs_singleton)
       end
 
-      DEFINER_NAME_CALLS = Set[:define_method, :define_singleton_method].freeze
+      DEFINER_NAME_CALLS = Set[:define_method, :define_singleton_method, :alias_method].freeze
       DEFINER_SEND_CALLS = Set[:send, :__send__, :public_send].freeze
       private_constant :DEFINER_NAME_CALLS, :DEFINER_SEND_CALLS
 
-      # Issue #2184 — a `define_method` / `define_singleton_method` call with a literal name, on any receiver and
-      # through `send` too, records an ownerless, kindless row over the name literal: no owner or side is claimed, so
-      # no ordering scan matches it and the literal contains no call. It only tells a by-name reader that the project
-      # gives the name a body no def table holds. A computed name records nothing.
+      # Issue #2184 — a `define_method` / `define_singleton_method` / `alias_method` call with a literal (new) name,
+      # on any receiver and through `send` too, records an ownerless, kindless row over the name literal: no owner or
+      # side is claimed, so no ordering scan matches it and the literal contains no call. It only tells a by-name
+      # reader that the project gives the name a body no def table holds. A computed name records nothing.
       def record_definer_name_row(node, ranges)
         arguments = node.arguments&.arguments || []
         if DEFINER_SEND_CALLS.include?(node.name)

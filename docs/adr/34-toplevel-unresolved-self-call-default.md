@@ -417,11 +417,13 @@ original WD3 framing left implicit.
   false negative is cheaper than reading one receiver's class and
   missing the definition Ruby dispatches to.
 - 2026-10-21 — the same reading covers definitions no def table
-  holds: a `define_singleton_method` / `define_method` name, a
-  `def` inside a block or a method body, and a `method_missing`,
-  which answers for every name; the block of a `define_method` /
+  holds: a `define_singleton_method` / `define_method` /
+  `alias_method` name, a `def` inside a block or a method body,
+  and a `method_missing`, which answers for a callee the
+  receiver's type does not resolve; the block of a `define_method` /
   `define_singleton_method` call is a method body and is not judged
   as top level either
   ([#2184](https://github.com/rigortype/rigor/issues/2184)). A
-  project whose `method_missing` hands its block on, `super`
-  included, silences the rule in every block.
+  `method_missing` that hands its block on, `super` included,
+  silences the rule in a block whose receiver Rigor cannot type or
+  whose class lacks the callee.

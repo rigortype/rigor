@@ -107,8 +107,8 @@ module Rigor
         module_function
 
         # Does `call_node` sit inside a block that some project definition of its callee may run under another `self`?
-        def inside_rebound_block?(call_node, scope, sites)
-          sites.enclosing(call_node).any? { |block_call| callee_may_rebind?(block_call, scope, sites) }
+        def inside_rebound_block?(call_node, scope, sites, scope_index = nil)
+          sites.enclosing(call_node).any? { |block_call| callee_may_rebind?(block_call, scope, sites, scope_index) }
         end
 
         # The node whose span is the block `call` passes: its literal block, or a lambda / proc literal passed with `&`.
@@ -133,11 +133,54 @@ module Rigor
           node.name == :new && node.receiver.is_a?(Prism::ConstantReadNode) && node.receiver.name == :Proc
         end
 
-        def callee_may_rebind?(block_call, scope, sites)
+        def callee_may_rebind?(block_call, scope, sites, scope_index = nil)
           name = callee_name(block_call)
           return true if name.nil? || METHOD_BODY_BLOCK_CALLS.include?(name)
+          return true if answer(name, scope, sites)
+          # Ruby reaches `method_missing` only for a name the receiver lacks.
+          return false if resolves_on_receiver?(block_call, name, scope, scope_index)
 
-          answer(name, scope, sites) || answer(:method_missing, scope, sites)
+          answer(:method_missing, scope, sites)
+        end
+
+        # Whether the receiver's type names a class whose RBS or project table gives it `name`, on every member of a
+        # union. A receiverless call at the top level asks `Object`, `main`'s class. Any other type cannot say.
+        def resolves_on_receiver?(block_call, name, scope, scope_index)
+          receiver = block_call.receiver
+          return scope.toplevel? && class_defines?("Object", :instance, name, scope) if receiver.nil?
+
+          receiver_scope = scope_index&.[](receiver) || scope
+          type_resolves?(receiver_scope.type_of(receiver), name, scope)
+        rescue StandardError
+          false
+        end
+
+        def type_resolves?(type, name, scope)
+          case type
+          when Type::Union then type.members.all? { |member| type_resolves?(member, name, scope) }
+          when Type::Singleton then class_defines?(type.class_name, :singleton, name, scope)
+          else
+            class_name = receiver_class_name(type)
+            !class_name.nil? && class_defines?(class_name, :instance, name, scope)
+          end
+        end
+
+        def receiver_class_name(type)
+          case type
+          when Type::Nominal, Type::StructInstance, Type::DataInstance then type.class_name&.to_s
+          when Type::Tuple then "Array"
+          when Type::HashShape then "Hash"
+          when Type::Constant then type.value.class.name
+          end
+        end
+
+        def class_defines?(class_name, side, name, scope)
+          rbs = if side == :singleton
+                  Rigor::Reflection.singleton_method_definition(class_name, name, scope: scope)
+                else
+                  Rigor::Reflection.instance_method_definition(class_name, name, scope: scope)
+                end
+          !rbs.nil? || scope.discovered_method?(class_name, name, side)
         end
 
         def answer(name, scope, sites)

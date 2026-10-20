@@ -199,6 +199,8 @@ RSpec.describe "call.unresolved-toplevel inside a block a project callee rebinds
       Ext.singleton_class.define_method(:sdm) { |&b| module_eval(&b) }
       Ext.singleton_class.send(:define_method, :snd) { |&b| module_eval(&b) }
       Ext.define_singleton_method(:dsp, proc { |&b| module_eval(&b) })
+      Ext.singleton_class.alias_method :aka, :dsm
+      Ext.singleton_class.send(:alias_method, :aka2, :dsm)
 
       module Cond
         def self.helper = :ok
@@ -209,6 +211,7 @@ RSpec.describe "call.unresolved-toplevel inside a block a project callee rebinds
   end
   let(:definer_uses) do
     ["Ext.dsm { helper }", "Ext.sdm { helper }", "Ext.snd { helper }", "Ext.dsp { helper }",
+     "Ext.aka { helper }", "Ext.aka2 { helper }",
      "Cond.define { helper }", "Ext.define_singleton_method(:inner) { helper }; Ext.inner",
      "Tgt.define_method(:im) { helper }; Tgt.new.im", "Ext.yields { helper }", "helper", "undefined_ctl"]
   end
@@ -398,6 +401,29 @@ RSpec.describe "call.unresolved-toplevel inside a block a project callee rebinds
     expect(ruby_lines(%w[ext.rb], "REBIND" => "1")).to match_array(controls)
     # ext.rb:13 is `module_eval` in the proc `dsp` is defined from, a block passed as a value, which #2186 covers.
     expect(toplevel_lines).to match_array(controls + [["ext.rb", 13]])
+  end
+
+  # Ruby reaches a method_missing only for a name the receiver lacks: `Array#each` and `Integer#times` are RBS
+  # methods, so a project method_missing, here one that passes its block on through `super`, cannot run their blocks.
+  it "keeps reporting in a block whose callee resolves on its receiver, whatever method_missing the project has" do
+    uses = ["[1, 2].each { |x| helper }", "2.times { helper }", "Ext.anything { helper }", "undefined_ctl"]
+    write_files(
+      "ext.rb" => <<~RUBY,
+        class Config
+          def method_missing(name, *args) = name == :foo ? 1 : super
+        end
+
+        module Ext
+          def self.helper = :ok
+          def self.method_missing(*, &b) = module_eval(&b)
+        end
+      RUBY
+      "use.rb" => "#{uses.join("\n")}\n"
+    )
+
+    expected = use_lines(uses, "[1, 2].each { |x| helper }", "2.times { helper }", "undefined_ctl")
+    expect(ruby_lines(%w[ext.rb])).to match_array(expected)
+    expect(toplevel_lines).to match_array(expected)
   end
 
   it "declines on any callee when a project method_missing may hand its block on" do

@@ -11966,8 +11966,8 @@ module Rigor
       # A test that calls a method may rebind an instance-variable or global subject before the body reads it
       # (`when String then 1 when reset! then @x.upcase`, where `reset!` writes `@x`), and the walk cannot tell. From
       # the first such test on, the subject reads `Dynamic[top]` on both edges ({#forget_called_subject}). The
-      # evaluator forgets a global subject there too (issue #2211). A `case` / `when` the evaluator did not enter is evaluated
-      # ({#evaluate_unentered_flow}); this walk handles only a clause that evaluation does not visit.
+      # evaluator forgets a global subject there too (issue #2211). A `case` / `when` the evaluator did not enter is
+      # evaluated ({#evaluate_unentered_flow}); this walk handles only a clause that evaluation does not visit.
       def propagate_subject_case(node, table, current_scope)
         subject = node.predicate
         propagate(subject, table, current_scope)

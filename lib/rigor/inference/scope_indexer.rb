@@ -11693,7 +11693,7 @@ module Rigor
       # (`||`), as {StatementEvaluator#eval_and_or} does; the left operand and everything after the operator keep the
       # scope the operator started in. Like the walk of an `if`, it applies no write the left operand makes, so the
       # edge is taken from a scope where every bound local the left operand writes reads `Dynamic[top]`
-      # ({#widen_condition_writes}). A right operand the evaluator recorded keeps its own scope.
+      # ({#widen_condition_writes}). A right operand the evaluator recorded keeps its own scope, so no edge is computed.
       def propagate_and_or(node, table, current_scope)
         propagate(node.left, table, current_scope)
         right = node.right

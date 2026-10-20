@@ -276,8 +276,9 @@ RSpec.describe "plugins/rigor-activejob" do
   end
 
   # The recurring schedule is watched as `[".", *recurring_paths]`. A schedule path that holds glob metacharacters
-  # must be watched as that literal file: read as a pattern, `recurring[1].yml` matches `recurring1.yml`, so an
-  # edit to the real schedule leaves the cache entry fresh and the next process publishes the old roots.
+  # must be watched as that literal file. Read as a pattern, `recurring[1].yml` matches `recurring1.yml` instead: a
+  # decoy file of that name then moves the watch digest, so the cache entry is invalidated on every run it exists in
+  # (spurious invalidation). Stale roots are not the failure: the schedule's own read records the file itself.
   describe "the recurring schedule cache with a bracketed file name" do
     let(:schedule_path) { "config/recurring[1].yml" }
     let(:cache_root) { Dir.mktmpdir("rigor-activejob-cache-") }
@@ -341,8 +342,9 @@ RSpec.describe "plugins/rigor-activejob" do
       end
     end
 
-    # Regression guard: this passes without the watch fix too, because the schedule read records the file in the
-    # descriptor, so the warm run's stale check still catches the edit. It pins the behaviour the fix must keep.
+    # Regression guard: this passes without the watch fix too, because the schedule's own read records the file in the
+    # descriptor, so an edit to it is caught. It pins the roots the warm run must publish; the fix's own effect
+    # (no spurious invalidation by a decoy file) is pinned by the watch-entry example above.
     it "publishes the edited schedule's roots from a warm cache, as a cold run does (regression guard)" do
       Dir.mktmpdir do |raw_project|
         Dir.chdir(File.realpath(raw_project)) do

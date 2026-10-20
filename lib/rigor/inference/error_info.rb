@@ -118,6 +118,7 @@ module Rigor
         node.rigor_each_child { |child| found ||= calls_set_backtrace?(child) }
         found
       end
+
       # True when `node` reads `$@` anywhere in it, a block included. An empty clause (nil) reads nothing.
       def backtrace_read?(node)
         return false unless node.is_a?(Prism::Node)

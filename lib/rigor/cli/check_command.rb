@@ -282,10 +282,10 @@ module Rigor
 
       # Issue #1967 — the partition check above re-analyses an unchanged tree, so every served row is still right and a
       # missing invalidation edge goes unseen. Here each of `--verify-incremental-edits` sampled files is emptied
-      # through an editor buffer (never on disk), and the warm recheck of the baseline ({IncrementalSession#replay_edit})
-      # must equal a full analysis of the edited tree: a dependent the recheck failed to re-analyse is served from the
-      # baseline and differs. Emptying a file removes everything it defines, so this replays the removal direction of
-      # every edge the file is a source of; it does not replay an addition.
+      # through an editor buffer (never on disk), and the warm recheck of the baseline
+      # ({IncrementalSession#replay_edit}) must equal a full analysis of the edited tree: a dependent the recheck
+      # failed to re-analyse is served from the baseline and differs. Emptying a file removes everything it defines,
+      # so this replays the removal direction of every edge the file is a source of; it does not replay an addition.
       def verify_edit_replays(session, configuration, paths, options)
         sample = edit_replay_sample(session.analyzed_files, options.fetch(:verify_incremental_edits))
         declined = 0
@@ -786,7 +786,9 @@ module Rigor
           end
           opts.on("--verify-incremental-edits=N", Integer,
                   "with --verify-incremental, also replay an edit (emptying the file) on N sampled files") do |value|
-            raise OptionParser::InvalidArgument, "--verify-incremental-edits=#{value} (must be 0 or more)" if value.negative?
+            if value.negative?
+              raise OptionParser::InvalidArgument, "--verify-incremental-edits=#{value} (must be 0 or more)"
+            end
 
             options[:verify_incremental] = true
             options[:verify_incremental_edits] = value

@@ -22,17 +22,31 @@ RSpec.describe Rigor::CLI do
 
   around do |example|
     Dir.mktmpdir("rigor-verify-edits-") do |dir|
-      @dir = File.realpath(dir)
-      File.write(File.join(@dir, ".rigor.yml"), "paths:\n  - lib\n")
-      FileUtils.mkdir_p(File.join(@dir, "lib"))
-      File.write(File.join(@dir, "lib", "use.rb"), "$stdout = 1\n")
-      File.write(File.join(@dir, "lib", "other.rb"), "class Other\n  def write(*) = nil\nend\n")
-      Dir.chdir(@dir) { example.run }
+      Dir.chdir(File.realpath(dir)) do
+        File.write(".rigor.yml", "paths:\n  - lib\n")
+        FileUtils.mkdir_p("lib")
+        File.write("lib/use.rb", "$stdout = 1\n")
+        File.write("lib/other.rb", "class Other\n  def write(*) = nil\nend\n")
+        example.run
+      end
     end
   end
 
   def verify(*extra)
-    run_cli("check", "--verify-incremental", "--no-stats", "--config", File.join(@dir, ".rigor.yml"), *extra)
+    run_cli("check", "--verify-incremental", "--no-stats", "--config", File.join(Dir.pwd, ".rigor.yml"), *extra)
+  end
+
+  # Wraps every session's {Rigor::Analysis::IncrementalSession#replay_edit} so its recheck's rows pass through
+  # `transform` first.
+  def wrap_replay_edit(&transform)
+    allow(Rigor::Analysis::IncrementalSession).to receive(:new).and_wrap_original do |original, *args, **kwargs|
+      original.call(*args, **kwargs).tap do |session|
+        allow(session).to receive(:replay_edit).and_wrap_original do |method, *method_args|
+          result = method.call(*method_args)
+          result&.with(diagnostics: transform.call(result.diagnostics))
+        end
+      end
+    end
   end
 
   it "replays an edit of each sampled file and reports OK when every recheck matches a full run" do
@@ -45,15 +59,11 @@ RSpec.describe Rigor::CLI do
   end
 
   it "fails and names the edited file when a recheck after the edit differs from a full run" do
-    original = Rigor::Analysis::IncrementalSession.instance_method(:replay_edit)
-    allow_any_instance_of(Rigor::Analysis::IncrementalSession).to receive(:replay_edit) do |session, buffer|
-      result = original.bind_call(session, buffer)
-      result&.with(diagnostics: result.diagnostics.reject { |row| row.path.end_with?("use.rb") })
-    end
+    wrap_replay_edit { |rows| rows.reject { |row| row.path.end_with?("use.rb") } }
 
     status, _out, err = verify("--verify-incremental-edits", "2")
 
-    expect(err).to match(%r{--verify-incremental FAILED — the recheck after emptying \S*lib/other\.rb differs from a full run\.})
+    expect(err).to match(%r{FAILED — the recheck after emptying \S*lib/other\.rb differs from a full run\.})
     expect(err).to include("incremental-only: 0, full-only: 1")
     expect(status).to eq(1)
   end

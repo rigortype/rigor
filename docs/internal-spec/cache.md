@@ -1146,13 +1146,19 @@ declared classes unchanged. The seed bundles already carry the
 The `global_census:<entry>` keys in `missing` are recorded by the
 `global.*` write rules (`CheckRules#global_aliased?`,
 `#program_may_answer?` and `#refined_writer_in_effect?`) for each
-`Inference::GlobalWriteCensus` entry they ask about, whichever way it
-answers ([#2158](https://github.com/rigortype/rigor/issues/2158)):
+`Inference::GlobalWriteCensus` entry they ask about
+([#2158](https://github.com/rigortype/rigor/issues/2158)):
 `global_census:alias:<global>`, `global_census:defines:<method>` for the
 setter's method and each hatch, `global_census:defines_any`,
 `global_census:refines:write`, `global_census:refines_any`, and one
-`global_census:main_mixin` for every top-level mixin, since the reader
-reads them all (`GlobalWriteCensus.dependency_key`). The census is a
+`global_census:main_mixin` for every top-level mixin
+(`GlobalWriteCensus.dependency_key`). A question over several entries
+(`CheckRules#census_holds_any?`) records only the entries present when
+one is, since the answer stays until every one of them vanishes, and
+every entry when none is. The shared `main_mixin` key is a deliberate
+precision trade-off: the reader asks about every top-level mixin, so a
+mixin appearing or vanishing anywhere re-checks every write that reached
+that step. The census is a
 fact of the whole program: a `write` or hatch defined in any spelling on
 any receiver silences a write, and so does an alias of the variable or a
 top-level mixin of a module RBS does not rule out. Before this a file

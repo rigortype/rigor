@@ -25,7 +25,7 @@ RSpec.describe "incremental edges for the global write census (#2158)" do
   end
 
   def mismatches(diagnostics)
-    found = diagnostics.select { |d| d.rule == "global.write-type-mismatch" }
+    found = diagnostics.select { |d| d.rule.start_with?("global.") }
     found.map { |d| [File.basename(d.path), d.line] }.sort
   end
 
@@ -43,15 +43,15 @@ RSpec.describe "incremental edges for the global write census (#2158)" do
   def reported = [["use.rb", 1]]
   def bare = "class Other\nend\n"
 
-  # Writes `use.rb` and `other.rb` (`before`), takes a baseline, rewrites `other.rb` to `after`, and expects the warm
-  # recheck to re-analyse `use.rb` and answer as a full run does.
-  def expect_edit(before:, after:, first:, second:, use: "$stdout = 1\n")
+  # Writes `use.rb`, `files` and the edited file (`before`), takes a baseline, rewrites the edited file to `after`,
+  # and expects the warm recheck to re-analyse `use.rb` and answer as a full run does.
+  def expect_edit(before:, after:, first:, second:, use: "$stdout = 1\n", files: {}, edited: "other.rb")
     Dir.mktmpdir do |dir|
-      write_files(dir, "use.rb" => use, "other.rb" => before)
+      write_files(dir, files.merge("use.rb" => use, edited => before))
       session = session_for(dir)
       expect([mismatches(guarded_baseline(session)), full_run(dir)]).to eq([first, first])
 
-      write_files(dir, "other.rb" => after)
+      write_files(dir, edited => after)
       recheck = guarded_recheck(session)
       expect(recheck.affected).to include(File.join(dir, "use.rb"))
       expect([mismatches(recheck.diagnostics), full_run(dir)]).to eq([second, second])
@@ -66,7 +66,9 @@ RSpec.describe "incremental edges for the global write census (#2158)" do
     "an alias of the variable" => "alias $stdout $my_out\n",
     "a computed define_method" => "class Other\n  NAME = :w\n  define_method(NAME) { nil }\nend\n",
     "a def of method_missing" => "class Other\n  def method_missing(*) = nil\nend\n",
-    "a top-level mixin of a module RBS does not know" => "include Writable\n"
+    "a top-level include of a module RBS does not know" => "include Writable\n",
+    "a top-level prepend of a module RBS does not know" => "prepend Writable\n",
+    "a top-level extend of a module RBS does not know" => "extend Writable\n"
   }.each do |form, silencing|
     it "reports the write again when #{form} is removed" do
       expect_edit(before: silencing, after: bare, first: [], second: reported)
@@ -77,18 +79,36 @@ RSpec.describe "incremental edges for the global write census (#2158)" do
     end
   end
 
-  # Guards: a refinement that adds `write` declines the write only where a `using` is in effect, so `use.rb` activates
-  # the module `other.rb` declares, with or without the refinement. The `using` already files an edge to the file that
-  # declares the module, so these pass without the `global_census:refines*` keys.
-  def using_write = "using R\n$stdout = 1\n"
-  def refining_write = "module R\n  refine Integer do\n    def write(*) = nil\n  end\nend\n"
+  # A refinement that may add `write` declines the write where any `using` is in effect, whichever class it refines,
+  # so `use.rb` activates a module (`R`) that refines something else from a file that never changes; only the
+  # `global_census:refines*` keys re-check the write when `q.rb` starts or stops refining `write`.
+  def using_r = "using R\n$stdout = 1\n"
+  def r_file = { "r.rb" => "module R\n  refine(Integer) { nil }\nend\n" }
+  def q_bare = "module Q\nend\n"
 
-  it "reports the write again when a refinement adding write is removed" do
-    expect_edit(use: using_write, before: refining_write, after: "module R\nend\n", first: [], second: [["use.rb", 2]])
+  {
+    "a refinement defining write" => "module Q\n  refine String do\n    def write(*) = nil\n  end\nend\n",
+    "a refinement with a computed define_method" =>
+      "module Q\n  refine String do\n    NAME = :w\n    define_method(NAME) { nil }\n  end\nend\n"
+  }.each do |form, refining|
+    it "reports the write under a using again when #{form} is removed" do
+      expect_edit(use: using_r, files: r_file, edited: "q.rb", before: refining, after: q_bare, first: [],
+                  second: [["use.rb", 2]])
+    end
+
+    it "silences the write under a using when #{form} is added" do
+      expect_edit(use: using_r, files: r_file, edited: "q.rb", before: q_bare, after: refining,
+                  first: [["use.rb", 2]], second: [])
+    end
   end
 
-  it "silences the write when a refinement adding write is added" do
-    expect_edit(use: using_write, before: "module R\nend\n", after: refining_write, first: [["use.rb", 2]], second: [])
+  # `global.readonly-write` reads the census's aliases too.
+  it "reports a read-only write again when the alias that exempted it is removed" do
+    expect_edit(use: "$: = 1\n", before: "alias $foo $:\n", after: bare, first: [], second: reported)
+  end
+
+  it "exempts a read-only write when an alias of it is added" do
+    expect_edit(use: "$: = 1\n", before: bare, after: "alias $foo $:\n", first: reported, second: [])
   end
 
   # The precision half: an edit that leaves the file's census as it was fires no `global_census:` key, and the
@@ -103,6 +123,22 @@ RSpec.describe "incremental edges for the global write census (#2158)" do
       recheck = guarded_recheck(session)
       expect(recheck.affected).not_to include(File.join(dir, "use.rb"))
       expect(mismatches(recheck.diagnostics)).to eq([])
+    end
+  end
+
+  # A silenced write records only the census entries that silence it, since only their vanishing flips the answer:
+  # another file starting to define a hatch re-checks none of them.
+  it "does not re-check writes another definition already silences when a file starts defining a hatch" do
+    Dir.mktmpdir do |dir|
+      users = (1..5).to_h { |i| ["use#{i}.rb", "$stdout = #{i}\n"] }
+      write_files(dir, users.merge("other.rb" => "class Other\n  def write(*) = nil\nend\n", "more.rb" => bare))
+      session = session_for(dir)
+      expect(mismatches(guarded_baseline(session))).to eq([])
+
+      write_files(dir, "more.rb" => "class Other\n  def respond_to?(*) = true\nend\n")
+      recheck = guarded_recheck(session)
+      expect((recheck.affected & users.keys.map { |name| File.join(dir, name) }).to_a).to eq([])
+      expect([mismatches(recheck.diagnostics), full_run(dir)]).to eq([[], []])
     end
   end
 end

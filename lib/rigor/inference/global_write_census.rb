@@ -81,8 +81,9 @@ module Rigor
       def main_mixins(census) = census.filter_map { |entry| entry[1] if entry[0] == :main_mixin }
 
       # Issue #2158 — the `global_census:` dependency key a census entry moves, without the kind prefix: `alias:$x`,
-      # `defines:write`, `refines:write`, `defines_any`, `refines_any`, and `main_mixin` for every top-level mixin
-      # (its reader reads them all). The rules that read the census record these keys
+      # `defines:write`, `refines:write`, `defines_any`, `refines_any`, and `main_mixin` for every top-level mixin: its
+      # reader asks about each, and one shared key is a deliberate precision trade-off (a mixin moving anywhere
+      # re-checks every write that read them). The rules that read the census record these keys
       # (`CheckRules#record_global_census`), and `Analysis::Incremental.changed_global_census_keys` fires them for
       # every entry that appeared in or vanished from a file's census.
       def dependency_key(entry)

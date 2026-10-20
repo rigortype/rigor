@@ -27,8 +27,11 @@ fix needed a new key family, which no earlier decision covered.
 - **A new `global_census:<entry>` key family.** Its producer diffs each changed, added or removed file's census
   between its seed bundle and the recheck scan, and fires the key of every entry that appeared or vanished. The
   seed bundles already carry the census, so no row moves and `SCHEMA` is unchanged. This covers every entry
-  kind. The cost is one more name-keyed producer, and a recheck that also fires on census entries in files no
-  reader depends on, which is cheap because the census is small.
+  kind. The cost is one more name-keyed producer. A silenced write records only the entries that silence it, so
+  another file defining a further hatch re-checks nothing; the remaining over-invalidation is the one shared
+  `global_census:main_mixin` key, under which any top-level mixin appearing or vanishing re-checks every write
+  that read the mixins, and the `defines:`/`refines:` keys of a write the census does not silence, which any file
+  defining one of the six names re-checks.
 - **Re-check every file with a census-reading write on any census change.** No key is needed, but every file
   holding a checked special-global write would re-check whenever any census moved. That is over-invalidation of
   the kind #2136's reviews rejected, and it still needs a per-file census diff to know that something moved.
@@ -39,10 +42,12 @@ The new key family. It is the only option that makes every probed form, and the 
 entries, answer warm as cold, while an edit that leaves a file's census unchanged re-checks nothing (pinned by
 the precision example in `spec/integration/incremental_global_census_edge_spec.rb`). #2136 is the closest
 precedent: a dependency key for a whole-program table whose producer diffs per-file seed-bundle data, with no
-cache format change. The coordinator approved this option before implementation. The producer's read of the seed
+cache format change. The coordinating agent chose this option before implementation, under the maintainer's post-hoc-approval rule. The producer's read of the seed
 bundle's census adds `lib/rigor/analysis/incremental_session.rb` to the `discovered_global_write_census` reads in
 `spec/rigor/declaration_facts/admission_census.yml`, as the session's seed-bundle reads of `discovered_def_nodes`
-and `discovered_singleton_def_nodes` already are.
+and `discovered_singleton_def_nodes` already are. It adds no `spec/rigor/declaration_facts/producers.yml` row:
+the per-file summary helper (`ScopeIndexer.file_summary`) returns a Hash and writes no table, so the producer
+tripwire does not list it.
 
 ## To undo
 

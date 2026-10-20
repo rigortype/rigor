@@ -2796,15 +2796,24 @@ module Rigor
         end
 
         # Issue #2158 — a read of the whole-program census records the `global_census:` key of each entry it asks
-        # about, whichever way it answers ({Inference::GlobalWriteCensus.dependency_key}): a file that starts or
-        # stops writing the entry (a `def write`, an `alias $stdout $x`, a computed `define_method`) re-checks the
-        # write. A `pre_eval:` file moves the snapshot's own fingerprint.
+        # about ({Inference::GlobalWriteCensus.dependency_key}): a file that starts or stops writing the entry (a `def
+        # write`, an `alias $stdout $x`, a computed `define_method`) re-checks the write. A `pre_eval:` file moves the
+        # snapshot's own fingerprint.
         def record_global_census(*entries)
           return unless DependencyRecorder.active?
 
           entries.each do |entry|
             DependencyRecorder.read_name(:global_census, Inference::GlobalWriteCensus.dependency_key(entry))
           end
+        end
+
+        # Whether the census holds any of `entries`, recording only what can flip the answer: the entries present
+        # when it holds one (the answer stays true until every one of them vanishes, and another appearing changes
+        # nothing), every entry when it holds none.
+        def census_holds_any?(census, entries)
+          present = entries.select { |entry| census.include?(entry) }
+          record_global_census(*(present.empty? ? entries : present))
+          !present.empty?
         end
 
         # A literal is rejected when its class is none the setter takes and, for a setter that also converts
@@ -2854,12 +2863,14 @@ module Rigor
         end
 
         def program_may_answer?(ancestors, names, census, scope)
-          record_global_census(Inference::GlobalWriteCensus::DEFINES_ANY, *names.map { |name| [:defines, name] })
-          return true if Inference::GlobalWriteCensus.defines_any_of?(census, names)
+          defines = [Inference::GlobalWriteCensus::DEFINES_ANY, *names.map { |name| [:defines, name] }]
+          return true if census_holds_any?(census, defines)
 
           dynamic_mark = Scope::DiscoveryIndex::ENVELOPE_DYNAMIC_MARK
           return true if ancestors.any? { |owner| scope.parameter_envelopes_of(owner).key?(dynamic_mark) }
 
+          # One key for every top-level mixin, a deliberate trade-off: the reader asks about each, so a mixin
+          # appearing or vanishing anywhere re-checks every write that reached this step.
           record_global_census(%i[main_mixin *])
           main_mixins = Inference::GlobalWriteCensus.main_mixins(census)
           main_mixins.any? { |mixin| rbs_mixin_may_answer?(mixin, names, scope) } ||
@@ -2902,8 +2913,7 @@ module Rigor
         # active refinement on Ruby 4.0.5; a refined `respond_to_missing?` or `respond_to?`, and every implicit
         # conversion, do not, so a refinement that adds only those leaves the write reported.
         def refined_writer_in_effect?(census, node, scope, lexical_sites)
-          record_global_census(Inference::GlobalWriteCensus::REFINES_ANY, %i[refines write])
-          Inference::GlobalWriteCensus.refines_write?(census) &&
+          census_holds_any?(census, [Inference::GlobalWriteCensus::REFINES_ANY, %i[refines write]]) &&
             (lexical_sites.nil? || !scope.declared_refinements.empty? ||
               lexical_sites.refinements.any_at?(node.location.start_offset))
         end

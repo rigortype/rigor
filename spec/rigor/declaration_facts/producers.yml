@@ -434,7 +434,6 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#record_module_function: writes the bare module_function edge under the owner the walk passes in; it computes no declaration context
     Rigor::Inference::ScopeIndexer#record_module_function_names: grandfathered
     Rigor::Inference::ScopeIndexer#record_multi_write_ivars: grandfathered
-    Rigor::Inference::ScopeIndexer#record_per_file_summary: issue #2158, split out of scan_summary_for_paths; it files the per-file tables a finished file index already holds (refinements, defined names, visibility entries, global write census) under the path for the --incremental diff, and decides no owner or side
     Rigor::Inference::ScopeIndexer#record_published_constant_ivar: grandfathered
     Rigor::Inference::ScopeIndexer#record_reflective_ivar_write: the instance_variable_set arm of the ivar census walk (#1931); it reads the class gather_ivar_writes passes in, as record_ivar_write does, and decides only whether the call is an implicit or self instance_variable_set with a literal name, deriving no declaration context of its own
     Rigor::Inference::ScopeIndexer#record_self_surface_evidence: grandfathered

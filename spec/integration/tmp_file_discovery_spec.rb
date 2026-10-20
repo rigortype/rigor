@@ -112,4 +112,35 @@ RSpec.describe "editor --tmp-file mode discovers the project (#2165)", type: :ru
       expect(guarded_run(runner, ["lib/a.rb"]).diagnostics.map(&:rule)).to include("call.undefined-method")
     end
   end
+
+  # #2191 — a new buffer file, absent from disk, whose argument names the logical path under another spelling
+  # (relative against absolute, or through a symlinked root) must be accepted as the same file. Each example compares
+  # the run with the argument spelled as the logical path, which is the baseline that already works.
+  describe "a new buffer file under another spelling (#2191)" do
+    let(:new_source) { "x = 1\nx.nosuchmethod\n" }
+    let(:logical) { File.expand_path("lib/new.rb") }
+
+    def run_new(argument)
+      File.write("buffer.rb", new_source)
+      binding = Rigor::Analysis::BufferBinding.new(logical_path: logical, physical_path: File.expand_path("buffer.rb"))
+      runner = Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil, buffer: binding)
+      guarded_run(runner, [argument]).diagnostics.map { |d| [d.path, d.rule, d.message] }
+    end
+
+    it "is not reported as a missing file when the argument is relative and the logical path absolute" do
+      baseline = run_new(logical)
+
+      expect(baseline.map { |_, rule, _| rule }).to include("call.undefined-method")
+      expect(run_new("lib/new.rb")).to eq(baseline)
+    end
+
+    it "is not reported as a missing file when it is reached through a symlinked root" do
+      File.symlink(Dir.pwd, "link")
+      linked = File.join(Dir.pwd, "link", "lib", "new.rb")
+      baseline = run_new(logical)
+
+      expect(run_new(linked)).to eq(baseline)
+      expect(run_new(linked).map { |_, _, message| message }).not_to include("no such file or directory")
+    end
+  end
 end

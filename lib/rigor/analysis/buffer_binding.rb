@@ -24,6 +24,20 @@ module Rigor
       def display_path(path)
         path == physical_path ? logical_path : path
       end
+
+      # The file's identity for comparing two spellings of one path: its real path, resolved through its directory
+      # when the file is absent from disk (a new buffer's file), so a symlinked root or parent spells it as it spells
+      # an existing file. Two accepted limits: a missing name is compared as written, so a name that differs only in
+      # case is not matched; and a `..` in a missing path is resolved textually, not through the filesystem.
+      def self.real_path(path)
+        File.realpath(path)
+      rescue SystemCallError
+        absolute = File.absolute_path(path)
+        parent = File.dirname(absolute)
+        return absolute if parent == absolute
+
+        File.join(real_path(parent), File.basename(absolute))
+      end
     end
   end
 end

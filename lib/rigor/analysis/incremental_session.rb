@@ -1681,17 +1681,10 @@ module Rigor
       def rebind_buffer(files)
         return if @buffer.nil? || files.include?(@buffer.logical_path)
 
-        target = real_path(@buffer.logical_path)
-        return if target.nil?
+        target = BufferBinding.real_path(@buffer.logical_path)
 
-        match = files.find { |path| real_path(path) == target }
+        match = files.find { |path| BufferBinding.real_path(path) == target }
         @buffer = BufferBinding.new(logical_path: match, physical_path: @buffer.physical_path) if match
-      end
-
-      def real_path(path)
-        File.realpath(path)
-      rescue StandardError
-        nil
       end
 
       # True when `path`'s recorded stat entry proves it unchanged since the last analysis. Any stat / parse

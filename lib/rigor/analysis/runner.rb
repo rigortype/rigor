@@ -1902,16 +1902,12 @@ module Rigor
       def buffer_spelled(expansion)
         return expansion if @buffer.nil?
 
-        target = real_path_of(@buffer.logical_path)
+        target = Analysis::BufferBinding.real_path(@buffer.logical_path)
         files = expansion.fetch(:files)
-        spelled = files.map { |path| real_path_of(path) == target ? @buffer.logical_path : path }.uniq
+        spelled = files.map do |path|
+          Analysis::BufferBinding.real_path(path) == target ? @buffer.logical_path : path
+        end.uniq
         spelled == files ? expansion : expansion.merge(files: spelled)
-      end
-
-      def real_path_of(path)
-        File.realpath(path)
-      rescue SystemCallError
-        File.absolute_path(path)
       end
 
       # Each file once, in project order, under the spelling the analysis uses when it is analysed.
@@ -2292,10 +2288,19 @@ module Rigor
         PathExpansion.diagnostics(bad, any_files: any_files)
       end
 
+      # #2191 — the buffer's logical path is accepted under any spelling that names the same file (relative, absolute,
+      # or through a symlinked root), since the discovery set respells it to the logical path (`buffer_spelled`).
       def accept_as_ruby_file?(path)
         (File.file?(path) && path.end_with?(".rb")) ||
-          (@buffer && path == @buffer.logical_path) ||
+          buffer_path?(path) ||
           @in_memory_sources&.key?(path)
+      end
+
+      def buffer_path?(path)
+        return false if @buffer.nil?
+
+        path == @buffer.logical_path ||
+          Analysis::BufferBinding.real_path(path) == Analysis::BufferBinding.real_path(@buffer.logical_path)
       end
 
       # Reads + parses the source at `path`. Under editor mode (`@buffer` set) reads bytes from

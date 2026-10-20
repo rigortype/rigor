@@ -543,10 +543,7 @@ module Rigor
       # clauses narrow the variable as they narrow a bare read of it: `case (x = s ? String(s) : nil) when String then
       # x.upcase end` reads `x` as `String`. A single-statement `(…)` is unwrapped.
       def case_subject_slot(subject, scope)
-        while subject.is_a?(Prism::ParenthesesNode) && subject.body.is_a?(Prism::StatementsNode) &&
-              subject.body.body.size == 1
-          subject = subject.body.body.first
-        end
+        subject = unwrap_case_subject(subject)
         case subject
         when Prism::LocalVariableWriteNode
           variable_slot(:local, subject.name, scope.local(subject.name), CASE_SUBJECT_KINDS)
@@ -556,6 +553,16 @@ module Rigor
         end
       end
       private_class_method :case_subject_slot
+
+      # `subject` with each single-statement `(…)` around it removed: the node {.case_subject_slot} narrows through,
+      # which `StatementEvaluator#when_test_rebinds_subject?` reads the same way.
+      def unwrap_case_subject(subject)
+        while subject.is_a?(Prism::ParenthesesNode) && subject.body.is_a?(Prism::StatementsNode) &&
+              subject.body.body.size == 1
+          subject = subject.body.body.first
+        end
+        subject
+      end
 
       # Returns `[body_scope, falsey_scope]` for one clause of a `case` with a subject: a `when` clause narrows
       # through {.case_when_scopes}, and an `in` clause only for a bare class pattern ({.bare_class_pattern_node}),

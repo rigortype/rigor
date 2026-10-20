@@ -1511,16 +1511,20 @@ module Rigor
       # reads: its binding moved, the test writes it, or — for an instance variable — a call in the test may write
       # it ({InterveningIvarReset.may_write?}), or — for a global or constant — the test may run code that rebinds
       # one ({GuardRebinding.may_rebind?}).
+      #
+      # A subject that writes a local or instance variable (`case (@x = v)`) is read as that variable, as
+      # {Narrowing.case_when_scopes} narrows it (issue #2211).
       def when_test_rebinds_subject?(subject, condition, before, after)
+        subject = case_subject_variable(subject)
         name = case_subject_name(subject)
         return false if name.nil?
         return true unless case_subject_binding(subject, before) == case_subject_binding(subject, after)
         return true if OperandEffects.written_variables(condition).include?(name)
 
         case subject
-        when Prism::InstanceVariableReadNode
+        when Prism::InstanceVariableReadNode, Prism::InstanceVariableWriteNode
           InterveningIvarReset.may_write?(condition, name, before, run_lambdas: true)
-        when Prism::LocalVariableReadNode
+        when Prism::LocalVariableReadNode, Prism::LocalVariableWriteNode
           false
         else
           body = when_lambda_body(condition)
@@ -1541,9 +1545,16 @@ module Rigor
         scope.with_global(subject.name, Type::Combinator.untyped)
       end
 
+      # The subject node the rebinding test reads: a parenthesised one unwrapped, and a local or instance variable
+      # write kept as the variable it writes.
+      def case_subject_variable(subject)
+        Narrowing.unwrap_case_subject(subject)
+      end
+
       def case_subject_name(subject)
         case subject
-        when Prism::LocalVariableReadNode, Prism::InstanceVariableReadNode, Prism::GlobalVariableReadNode
+        when Prism::LocalVariableReadNode, Prism::InstanceVariableReadNode, Prism::GlobalVariableReadNode,
+             Prism::LocalVariableWriteNode, Prism::InstanceVariableWriteNode
           subject.name
         when Prism::ConstantReadNode, Prism::ConstantPathNode
           Narrowing.constant_key(subject)
@@ -1552,8 +1563,8 @@ module Rigor
 
       def case_subject_binding(subject, scope)
         case subject
-        when Prism::LocalVariableReadNode then scope.local(subject.name)
-        when Prism::InstanceVariableReadNode then scope.ivar(subject.name)
+        when Prism::LocalVariableReadNode, Prism::LocalVariableWriteNode then scope.local(subject.name)
+        when Prism::InstanceVariableReadNode, Prism::InstanceVariableWriteNode then scope.ivar(subject.name)
         when Prism::GlobalVariableReadNode then scope.global(subject.name)
         else scope.constant_narrowing(Narrowing.constant_key(subject))
         end

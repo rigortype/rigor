@@ -1,0 +1,2 @@
+- **[rigor sig-gen]** `rigor sig-gen` now exits 1 when no path it is given is readable, as `rigor check` does, including the default `paths: [lib]` when there is no `lib/`, where it used to print "No candidates" and exit 0 ([#2204](https://github.com/rigortype/rigor/pull/2204)).
+  - A `--config` that names no usable file (missing, a directory, unreadable, or empty) now exits 64 on every command, and the MCP tools return `isError: true`, where Rigor used to run with the default configuration.

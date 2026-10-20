@@ -6,6 +6,7 @@ require "optionparser"
 require_relative "../bleeding_edge"
 require_relative "../configuration"
 require_relative "command"
+require_relative "options"
 
 module Rigor
   class CLI
@@ -44,7 +45,7 @@ module Rigor
             options[:format] = fmt
           end
           opt.on("--config=PATH", "Path to a .rigor.yml (default: auto-discovery).") do |path|
-            options[:config] = path
+            options[:config] = Options.config_path(path)
           end
         end.parse!(@argv)
         options

@@ -3,6 +3,7 @@
 require "optionparser"
 
 require_relative "../configuration"
+require_relative "../analysis/path_expansion"
 require_relative "../effects/config_envelopes"
 require_relative "../effects/registry"
 require_relative "options"
@@ -55,6 +56,9 @@ module Rigor
         configuration = Configuration.load(options.fetch(:config))
         paths = @argv.empty? ? configuration.paths : @argv
 
+        path_errors = path_diagnostics(paths, configuration)
+        report_path_errors(path_errors, options)
+
         observation_roots = observation_roots(configuration, options)
         observations = collect_observations(configuration, options, observation_roots)
         generator = SigGen::Generator.new(configuration: configuration, paths: paths,
@@ -69,15 +73,20 @@ module Rigor
                  when :write then dispatch_write(candidates, configuration, options)
                  when :check then dispatch_check(candidates, configuration, options)
                  else
-                   dispatch_print_or_diff(candidates, mode, options, observation_roots)
+                   dispatch_print_or_diff(candidates, mode, options, observation_roots, path_errors)
                    0
                  end
+        status = 1 if path_errors.any?(&:error?)
+        report_run_notes(candidates, generator, options)
+        status
+      end
+
+      def report_run_notes(candidates, generator, options)
         report_skipped(candidates, options)
         report_inline_declared(candidates, options)
         report_withheld_annotations(candidates, options)
         report_unrenderable(generator.unrenderable)
         report_unresolvable_superclasses(generator.unresolvable_superclasses)
-        status
       end
 
       private
@@ -220,13 +229,38 @@ module Rigor
         unresolvable.sort.each { |class_name, superclass| @err.puts("  #{class_name} < #{superclass}") }
       end
 
-      def dispatch_print_or_diff(candidates, mode, options, observation_roots)
+      # #1991 — the path errors `rigor check` reports for the arguments: a path that is neither a directory nor a
+      # `.rb` file. Warned about beside files that will be read, an error when nothing will be, as `check` grades it.
+      def path_diagnostics(paths, configuration)
+        bad = Analysis::PathExpansion.unusable(paths)
+        return [] if bad.empty?
+
+        any_files = !Analysis::PathExpansion.ruby_files(paths, configuration.exclude_patterns,
+                                                        base: configuration.exclude_base).empty?
+        Analysis::PathExpansion.diagnostics(bad, any_files: any_files)
+      end
+
+      # Without this a missing path was read as empty, so the run said "No candidates" and exited 0 (#1991). JSON
+      # print/diff carries the errors in its payload (see {#path_errors_in_payload?}); every other form says them on
+      # stderr, as `rigor check` does.
+      def report_path_errors(path_errors, options)
+        return if path_errors_in_payload?(options)
+
+        path_errors.each { |diagnostic| @err.puts(diagnostic.to_s) }
+      end
+
+      def path_errors_in_payload?(options)
+        options.fetch(:format) == "json" && %w[print diff].include?(options.fetch(:mode))
+      end
+
+      def dispatch_print_or_diff(candidates, mode, options, observation_roots, path_errors)
         SigGen::Renderer.new(out: @out).render(
           candidates: candidates,
           mode: mode,
           format: options.fetch(:format),
           selection: options.fetch(:selection),
-          observation: observation_report(observation_roots, options)
+          observation: observation_report(observation_roots, options),
+          diagnostics: path_errors_in_payload?(options) ? path_errors : []
         )
       end
 

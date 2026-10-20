@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "command"
+require_relative "options"
 require_relative "../runtime/jit"
 
 require "optionparser"
@@ -54,7 +55,7 @@ module Rigor
           end
           opts.on("--config=PATH",
                   "Session-level default config path (individual tool calls may override)") do |value|
-            options[:config] = value
+            options[:config] = Options.config_path(value)
           end
         end
         parser.parse!(@argv)

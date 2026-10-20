@@ -235,7 +235,7 @@ module Rigor
       end
 
       def build_argv(name, args) # rubocop:disable Metrics/MethodLength,Metrics/CyclomaticComplexity,Metrics/AbcSize,Metrics/PerceivedComplexity
-        effective_config = args["config"] || @config_path
+        effective_config = present_config(args["config"]) || @config_path
 
         case name
         when "rigor_check"
@@ -288,6 +288,14 @@ module Rigor
           argv << "--config=#{effective_config}" if effective_config
           argv + ["--", *Array(args["paths"])]
         end
+      end
+
+      # A per-call `config` that is blank names no file, so the session default applies rather than `--config=`
+      # reaching the CLI as an empty path (which the CLI refuses).
+      def present_config(value)
+        return value unless value.is_a?(String) && value.strip.empty?
+
+        nil
       end
 
       def success(id, result)

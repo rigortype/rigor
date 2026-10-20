@@ -2276,10 +2276,8 @@ module Rigor
           # client editing a brand-new file.
           elsif accept_as_ruby_file?(path)
             files << path
-          elsif File.exist?(path)
-            bad << [path, "not a Ruby file (expected `.rb` or a directory)"]
           else
-            bad << [path, "no such file or directory"]
+            bad << [path, PathExpansion.unusable_message(path)]
           end
         end
         { files: files, roots: Array(paths).map(&:to_s), errors: path_expansion_errors(bad, any_files: files.any?) }
@@ -2289,27 +2287,15 @@ module Rigor
       # app lib` with no `lib/` (the 20260620 field trial's strap case) analyses `app` instead of aborting
       # on exit 1. A bad path that leaves NOTHING to analyse stays an error so a lone typo (`rigor check
       # typo.rb`) is not silently masked (the regression the path-error check was added to catch in the
-      # first place).
+      # first place). The wording and grading live in {PathExpansion.diagnostics}, shared with `sig-gen` (#1991).
       def path_expansion_errors(bad, any_files:)
-        severity = any_files ? :warning : :error
-        suffix = any_files ? " (skipped)" : ""
-        bad.map { |path, message| path_error(path, "#{message}#{suffix}", severity: severity) }
+        PathExpansion.diagnostics(bad, any_files: any_files)
       end
 
       def accept_as_ruby_file?(path)
         (File.file?(path) && path.end_with?(".rb")) ||
           (@buffer && path == @buffer.logical_path) ||
           @in_memory_sources&.key?(path)
-      end
-
-      def path_error(path, message, severity: :error)
-        Diagnostic.new(
-          path: path,
-          line: 1,
-          column: 1,
-          message: message,
-          severity: severity
-        )
       end
 
       # Reads + parses the source at `path`. Under editor mode (`@buffer` set) reads bytes from

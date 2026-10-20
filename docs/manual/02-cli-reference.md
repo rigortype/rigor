@@ -30,7 +30,7 @@ the `paths:` list from the configuration file.
 
 | Option | Effect |
 | --- | --- |
-| `--config=PATH` | Use a specific config file instead of auto-discovery. |
+| `--config=PATH` | Use a specific config file instead of auto-discovery. A path that does not exist is an error (exit 64), not a run with the defaults. |
 | `--format=FORMAT` | Output format. Default `text`. Also `json` (structured stream), plus the CI-native renderings `sarif`, `github`, `gitlab`, `checkstyle`, `junit`, and `teamcity` — see [Running Rigor in CI](11-ci.md). |
 | `--no-ci-detect` | Disable CI auto-detection — by default `text` output also emits the running CI's native annotations / hint (`RIGOR_CI_DETECT=0` does the same). See [Running Rigor in CI § auto-detection](11-ci.md). |
 | `--explain` | Surface fail-soft fallback events as `info` diagnostics. |
@@ -534,6 +534,12 @@ rigor sig-gen [paths]
 | `--no-cache` | Do not read or write the analysis cache. Only effect collection uses it. |
 | `--format=text\|json` | Output format. |
 
+A `paths` argument that does not exist, or is neither a directory nor a `.rb` file, is reported the way
+`rigor check` reports it: on stderr as `path:1:1: error: …`, or under `diagnostics` in `--print` and `--diff`
+JSON output. When no argument is readable this exits `1`, under every mode, `--write` and `--check` included.
+The configured default `paths:` count too, so `paths: [lib]` with no `lib/` directory exits `1`. A `--config`
+that names no file, is a directory, or is empty is a usage error and exits `64`.
+
 `--print`, `--diff`, `--write` and `--check` are mutually exclusive.
 `--check` fails exactly when `--write` would create, change or
 refuse a file, so a tighter return `--write` declines without
@@ -642,7 +648,7 @@ rigor triage [paths]
 
 `--top=N` sets the hotspot count (default 10); `--hints-only`,
 `--selectors-only`, and `--no-hints` select which sections print.
-`triage` is advisory and always exits `0` — it never gates a build.
+`triage` is advisory and exits `0` once it runs — it never gates a build; a usage error exits `64`.
 
 By default the distribution, selectors, and hotspots sections count
 only the **actionable** diagnostics (`error` + `warning`). `info`
@@ -1270,8 +1276,9 @@ diagnostics about Rigor's own inference cutoffs and memory — see
 | `64` | Usage error — unknown command, bad flag, malformed argument, or a value in `.rigor.yml` the loader cannot proceed on. |
 | `70` | Internal fatal error — `SystemStackError` or `NoMemoryError` inside the analysis; Rigor could not finish the run, so its report on disk is empty rather than clean. |
 
-`rigor triage` is the exception: it is advisory and always
-exits `0`.
+`rigor triage` is the exception: it is advisory and exits `0`
+whenever it runs to completion. A usage error, such as a
+`--config` that names no file, still exits `64`.
 
 A configuration mistake prints one `rigor:` line naming the key
 and nothing else — no backtrace, on every command:

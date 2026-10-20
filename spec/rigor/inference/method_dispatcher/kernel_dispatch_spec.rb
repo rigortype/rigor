@@ -302,6 +302,7 @@ RSpec.describe Rigor::Inference::MethodDispatcher::KernelDispatch do
       expect(fmt(:format, constant_of("%0200000000d"), int_const)).to eq(literal_string)
       expect(fmt(:sprintf, constant_of("%.5000f"), constant_of(1.0))).to eq(literal_string)
       expect(fmt(:format, constant_of("%*d"), constant_of(2e8), int_const)).to eq(literal_string)
+      expect(fmt(:format, constant_of("%*d"), constant_of(Complex(200_000_000, 0)), int_const)).to eq(literal_string)
       expect(described_class).not_to have_received(:format)
     end
 

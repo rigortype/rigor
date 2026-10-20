@@ -822,14 +822,32 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
         -> { fold("x", :*, [200_000_000r]) },
         -> { fold("x", :ljust, [200_000_000.0]) },
         -> { fold("x", :rjust, [200_000_000r, "ab"]) },
-        -> { fold_types(constant_of("%*d"), :%, [Rigor::Type::Combinator.tuple_of(constant_of(2e8), constant_of(1))]) }
+        -> { fold_types(constant_of("%*d"), :%, [Rigor::Type::Combinator.tuple_of(constant_of(2e8), constant_of(1))]) },
+        -> { fold("x", :*, [Complex(200_000_000, 0)]) },
+        -> { fold("x", :*, [Complex(200_000_000r, 0)]) },
+        -> { fold("x", :ljust, [Complex(200_000_000.0, 0)]) },
+        -> { fold("x", :center, [Complex(200_000_000, 0), "ab"]) },
+        -> { fold_types(constant_of("%*d"), :%, [Rigor::Type::Combinator.tuple_of(constant_of(Complex(2e8, 0)), constant_of(1))]) }
       ].each do |call|
         seconds, bytes = cost { expect(call.call).to be_nil }
         expect(seconds).to be < 0.5
         expect(bytes).to be < 1_000_000
       end
       expect(fold("x", :*, [3.0]).value).to eq("xxx")
+      expect(["x" * Complex(3, 0), "x" * Complex(3.5, 0)]).to eq(%w[xxx xxx])
+      expect(fold("x", :*, [Complex(3, 0)]).value).to eq("xxx")
+      expect { "x" * Complex(3, 0.0) }.to raise_error(RangeError)
+      expect(fold("x", :*, [Complex(3, 0.0)])).to be_nil
+      # An inexact-zero imaginary part raises before any string is built, so that member is skipped, not oversized.
+      expect { "x" * Complex(200_000_000, 0.0) }.to raise_error(RangeError)
+      expect(fold_types(constant_of("x"), :*, [union_of(2, Complex(200_000_000, 0.0))])).to eq(constant_of("xx"))
       expect(fold("x", :*, [Float::INFINITY])).to be_nil
+    end
+
+    # A negative count raises, so that member is skipped as any raising one is; the rest of the union still folds.
+    it "skips a negative repeat count and folds the other members" do
+      expect { "x" * -1 }.to raise_error(ArgumentError)
+      expect(fold_types(constant_of("x"), :*, [union_of(2, -1)])).to eq(constant_of("xx"))
     end
 
     it "declines Integer#to_s(base) past the limit" do

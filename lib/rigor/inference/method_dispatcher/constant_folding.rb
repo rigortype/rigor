@@ -2053,14 +2053,22 @@ module Rigor
         end
 
         # The Integer a width or count operand stands for. Ruby converts a Float or Rational one with `NUM2LONG`
-        # (`"x" * 2.9` is `"xx"`, `"x".ljust(2e9)` pads to two billion), so the prechecks read it the same way; a
-        # non-finite Float raises in Ruby, and any other operand is left to the call, so both answer nil.
+        # (`"x" * 2.9` is `"xx"`, `"x".ljust(2e9)` pads to two billion), and a Complex one whose imaginary part is an
+        # exact zero through its real part (`"x" * Complex(3, 0)` is `"xxx"`; `Complex(3, 0.0)` raises), so the
+        # prechecks read it the same way. Those are every Numeric class a `Constant` carries. A non-finite Float
+        # raises in Ruby, and any other operand is left to the call, so both answer nil.
         def integer_operand(value)
           case value
           when Integer then value
           when Float then value.finite? ? value.to_i : nil
           when Rational then value.to_i
+          when Complex then exact_real_operand(value)
           end
+        end
+
+        def exact_real_operand(value)
+          imaginary = value.imaginary
+          imaginary.is_a?(Integer) && imaginary.zero? ? integer_operand(value.real) : nil
         end
 
         def string_concat_blow_up?(receiver_value, arg_value)
@@ -2069,9 +2077,9 @@ module Rigor
         end
 
         def string_repeat_blow_up?(receiver_value, arg_value)
+          # A negative count raises (`ArgumentError`), so the call itself skips that member, as any raising one is.
           count = integer_operand(arg_value)
-          return false if count.nil?
-          return true if count.negative?
+          return false if count.nil? || count.negative?
 
           receiver_value.bytesize * count > STRING_FOLD_BYTE_LIMIT
         end

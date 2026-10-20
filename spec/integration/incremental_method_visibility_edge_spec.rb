@@ -191,4 +191,23 @@ RSpec.describe "incremental edges for a source-recorded method visibility (#2134
   it "re-checks a self-extended singleton call when a reopening swaps module_function back for private" do
     expect_toggle(self_extended_files, before: module_function_two, after: private_two, first: arity, second: mismatch)
   end
+
+  # The `:both` row a `module_function def` writes (`ModuleFunctionState.deferred_module_function?`), against a
+  # `private def` of the same body: the file's def, visibility entries and declared classes stay as they were.
+  def extending_files
+    { "lib/es.rb" => "module Es\n  extend self\nend\n", "lib/use.rb" => "def b = Es.two(1)\n" }
+  end
+
+  def private_def_two = "module Es\n  private def two(a, b) = a\nend\n"
+  def module_function_def_two = "module Es\n  module_function def two(a, b) = a\nend\n"
+
+  it "re-checks a self-extended singleton call when a private def becomes a module_function def" do
+    expect_toggle(extending_files, before: private_def_two, after: module_function_def_two, first: mismatch,
+                                   second: arity)
+  end
+
+  it "re-checks a self-extended singleton call when a module_function def becomes a private def" do
+    expect_toggle(extending_files, before: module_function_def_two, after: private_def_two, first: arity,
+                                   second: mismatch)
+  end
 end

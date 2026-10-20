@@ -29,6 +29,7 @@ require_relative "check_rules/void_value_use_collector"
 require_relative "check_rules/self_closedness_scanner"
 require_relative "check_rules/source_arity"
 require_relative "check_rules/lexical_method_sites"
+require_relative "check_rules/rebinding_block_callees"
 require_relative "check_rules/rbs_receiver_surface"
 require_relative "check_rules/special_global_setters"
 require_relative "check_rules/ruby_deprecations"
@@ -1227,6 +1228,9 @@ module Rigor
           return nil if call_inside_receiver_eval_ranges?(eval_ranges, call_node)
           # ADR-121 WD7 — a refinement of `Object` (or one Rigor cannot read) in effect here may define the name.
           return nil if refined_method_in_effect?("Object", call_node, scope, :instance, lexical_sites)
+          # Issue #1817 — a block handed to a project method that may `module_eval` / `instance_exec` it runs under
+          # another `self`, so a call in it is not a top-level one ({RebindingBlockCallees}).
+          return nil if lexical_sites && RebindingBlockCallees.inside_rebound_block?(call_node, scope, lexical_sites.block_calls)
 
           build_unresolved_toplevel_diagnostic(path, call_node)
         end

@@ -4,6 +4,7 @@
 # context itself instead of going through DeclarationWalk::Context or ModuleFunctionState. `grandfathered`
 # marks the entries present when the tripwire landed; they converge as bugs are filed. A new entry must say
 # why; `RIGOR_REGENERATE_GATES=1` adds new entries as TODO, which the spec fails on.
+# A reason containing a space and a hash must be quoted, or folded with `>-`, or YAML reads the rest as a comment.
 
 lib/rigor/analysis/check_rules.rb:
   computes: the visibility of a method and its override, for the def.method-visibility-mismatch and override rules

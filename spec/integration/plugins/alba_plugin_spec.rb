@@ -108,9 +108,12 @@ RSpec.describe "rigor-alba integration" do
       expect(unresolved(run_alba(source))).to be_empty
     end
 
+    # Line 1 (`Alba.serialize { … }`) is silent without the plugin too: `DefinedByMacro`'s
+    # `define_method(:serialize)` is a project `serialize` whose body Rigor cannot read, and #1817's
+    # rebinding-callee decline reads a block's callee by name. The `hashify` lines carry the control.
     it "fires call.unresolved-toplevel for each DSL call without the plugin" do
       rows = unresolved(run_alba(source, enabled: false))
-      expect(rows.map(&:line)).to eq([1, 3, 4])
+      expect(rows.map(&:line)).to eq([3, 4])
     end
 
     # The `render json: Alba.serialize(x) { ... }` shape: a block on a call in argument position (#1690).
@@ -121,7 +124,8 @@ RSpec.describe "rigor-alba integration" do
         puts(Alba.hashify(1) { attributes :id })
       RUBY
       expect(unresolved(run_alba(argument_source))).to be_empty
-      expect(unresolved(run_alba(argument_source, enabled: false)).map(&:line)).to eq([2, 3])
+      # Line 2 is a `serialize` block, silent without the plugin as above.
+      expect(unresolved(run_alba(argument_source, enabled: false)).map(&:line)).to eq([3])
     end
   end
 

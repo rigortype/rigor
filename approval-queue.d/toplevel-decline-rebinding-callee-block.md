@@ -20,6 +20,8 @@
 
 Read by name. ADR-34's revision history already chose the false negative over the false positive twice for this rule (#1383's `main` singleton methods inside top-level blocks, #1697's opaque `Object` mixins), and `BlockCallTiming.project_defines_anywhere?` reads project tables by name for the same reason. This entry also sets a precedent for how the rule finds a block's callee.
 
+`spec/integration/plugins/alba_plugin_spec.rb`'s plugin-off controls lose their `Alba.serialize { … }` lines for this reason: the fixture project defines `serialize` through `define_method` on an unrelated class, so a block passed to any `serialize` declines. The `Alba.hashify` lines keep the control.
+
 ## To undo
 
 Remove `CheckRules::RebindingBlockCallees` and the `lexically_declined_toplevel_call?` arm that calls it in `check_rules.rb`, the `block_calls` accessor in `lexical_method_sites.rb`, the two spec files, the census rows, and the sentence in `docs/internal-spec/inference-engine.md`. To switch to receiver typing instead, keep the hand-off reading (`def_may_rebind?`) and replace `project_may_rebind?`'s by-name loop. Nothing else depends on it.

@@ -180,15 +180,18 @@ RSpec.describe "self-call ivar-write proof — incremental" do
     "String#warn" => ["def log(message) = warn(message)", "refine String do\n    def warn(*) = 1\n  end"],
     "IO#write" => ["def log(message) = STDERR.write(message)", "refine IO do\n    def write(*) = 1\n  end"]
   }.each do |label, (callee, refine)|
-    files = { "b.rb" => "class Base\n  #{callee}\nend\n", "x.rb" => "module R\nend\n" }
-    refining_name = "module R\n  #{refine}\nend\n"
-
     it "re-checks the caller when a file whose declarations stay starts refining #{label}" do
-      expect_recheck_to_report(files, { "x.rb" => refining_name })
+      expect_recheck_to_report(
+        { "b.rb" => "class Base\n  #{callee}\nend\n", "x.rb" => "module R\nend\n" },
+        { "x.rb" => "module R\n  #{refine}\nend\n" }
+      )
     end
 
     it "re-checks the caller when a file whose declarations stay stops refining #{label}" do
-      expect_recheck_to_clear(files.merge("x.rb" => refining_name), { "x.rb" => "module R\nend\n" })
+      expect_recheck_to_clear(
+        { "b.rb" => "class Base\n  #{callee}\nend\n", "x.rb" => "module R\n  #{refine}\nend\n" },
+        { "x.rb" => "module R\nend\n" }
+      )
     end
   end
 end

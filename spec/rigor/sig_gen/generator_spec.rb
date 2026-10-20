@@ -369,6 +369,77 @@ RSpec.describe Rigor::SigGen::Generator do
     end
   end
 
+  # Ruby keeps the last definition of a name, so sig-gen writes one entry per method slot: a `def` and an
+  # `attr_reader` of the same name, or a `module_function` name redefined after a reset, gave RBS a duplicate
+  # method definition (#2008, #2023). Each example builds the written declaration with RBS's DefinitionBuilder
+  # over the core signatures, and checks the kept entry against what Ruby returns.
+  describe "#run on a name defined twice in one class (#2008, #2023)" do
+    def rbs_definition_error(source, name)
+      loader = RBS::EnvironmentLoader.new
+      env = RBS::Environment.from_loader(loader)
+      RBS::Parser.parse_signature(RBS::Buffer.new(name: "x.rbs", content: source)).then do |buffer, dirs, decls|
+        env.add_source(RBS::Source::RBS.new(buffer, dirs, decls))
+      end
+      builder = RBS::DefinitionBuilder.new(env: env.resolve_type_names)
+      type_name = RBS::TypeName.parse("::#{name}")
+      builder.build_instance(type_name)
+      builder.build_singleton(type_name)
+      nil
+    rescue RBS::BaseError => e
+      e.class
+    end
+
+    def written(source, name)
+      path = write_fixture("lib/x.rb", source)
+      candidates = generator(paths: [path]).run.select { |c| c.class_name == name && c.rbs }
+      candidates.map(&:rbs)
+    end
+
+    {
+      "a def then an attr_reader" => [
+        "class K\n  def x = 1\n  attr_reader :x\n  def initialize = (@x = \"s\")\nend\n",
+        "K", ['def x: () -> "s"'], -> { it.new.x }, "s"
+      ],
+      "an attr_reader then a def" => [
+        "class K\n  attr_reader :x\n  def x = 1\n  def initialize = (@x = \"s\")\nend\n",
+        "K", ["def x: () -> 1"], -> { it.new.x }, 1
+      ],
+      "an attr_accessor then a def of the reader" => [
+        "class K\n  attr_accessor :x\n  def x = 1\n  def initialize = (@x = \"s\")\nend\n",
+        "K", ["def x: () -> 1"], -> { it.new.x }, 1
+      ],
+      "a module function redefined public after a reset" => [
+        "module M\n  module_function\n  def label = 1\n  public\n  def label = \"x\"\nend\n",
+        "M", ["def self.label: () -> 1", 'def label: () -> "x"'],
+        -> { [it.label, Object.new.extend(it).label] }, [1, "x"]
+      ],
+      "a module function redefined private after a reset" => [
+        "module M\n  module_function\n  def a = 1\n  private\n  def a = \"x\"\nend\n",
+        "M", ["def self.a: () -> 1"], -> { [it.a, it.private_method_defined?(:a)] }, [1, true]
+      ],
+      "a module function redefined as a module function" => [
+        "module M\n  module_function\n  def b = 1\n  def b = \"x\"\nend\n",
+        "M", ['def self?.b: () -> "x"'], lambda(&:b), "x"
+      ]
+    }.each do |label, (source, name, expected, witness, runtime)|
+      it "writes one entry per method slot for #{label}" do
+        sandbox = Module.new
+        sandbox.module_eval(source)
+
+        expect(witness.call(sandbox.const_get(name))).to eq(runtime)
+        rbs = written(source, name)
+        expect(rbs).to match_array(expected)
+        keyword = source.start_with?("module") ? "module" : "class"
+        expect(rbs_definition_error("#{keyword} #{name}\n#{rbs.map { |l| "  #{l}\n" }.join}end\n", name)).to be_nil
+      end
+    end
+
+    it "fails RBS's definition build on the duplicate entries the fix removes (the oracle's positive control)" do
+      expect(rbs_definition_error("class K\n  def x: () -> 1\n  def x: () -> String\nend\n", "K"))
+        .to eq(RBS::DuplicatedMethodDefinitionError)
+    end
+  end
+
   describe "namespace kind + module_function tracking (gap #3 a/b)" do
     it "records `:module` vs `:class` for every walked segment" do
       src = "module Outer\n  class Inner\n    def m; 1; end\n  end\nend\n"

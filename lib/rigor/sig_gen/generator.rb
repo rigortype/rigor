@@ -99,7 +99,7 @@ module Rigor
         # candidates from one file don't leak into another; initialising empty here gives downstream consumers
         # (`build_candidate`, `method_def_prefix`) a never-nil invariant without per-call-site defensive guards.
         @namespace_kinds = {}
-        @module_function_methods = Set.new
+        @module_function_methods = Set.new.compare_by_identity
         @uncertain_module_function_defs = Set.new.compare_by_identity
         @class_shells = Set.new
         @class_superclasses = {}
@@ -472,6 +472,8 @@ module Rigor
         @meta_layouts = collect_meta_layouts(scope_index)
         register_meta_classes
         defs = collect_method_definitions(parse_result.value, scope_index)
+        last_definers = last_definer_offsets(parse_result.value, defs)
+        defs = live_definitions(defs, last_definers)
         # Candidate construction freezes the per-file maps above (see {#build_candidate}), so every registration
         # pass has to be finished before the first `build_candidate` call. Meta members lead the RETURNED order —
         # a value class's members and constructors read first, ahead of the methods its block body defines.
@@ -487,13 +489,59 @@ module Rigor
         end
         obs_ivar_map = build_observed_ivar_map(parse_result.value)
         meta_candidates + candidates_from_defs +
-          collect_attr_candidates(parse_result.value, path, scope_index, obs_ivar_map)
+          collect_attr_candidates(parse_result.value, path, scope_index, obs_ivar_map, last_definers)
+      end
+
+      # Ruby keeps the LAST definition of a name: a `def x` followed by `attr_reader :x` (or the reverse) defines
+      # `x` once, and a second `def x` after a `module_function` reset replaces only the instance method. Writing
+      # one entry per definition gave RBS a duplicate method definition (#2008, #2023), so every definer of a
+      # `(class, kind, name)` slot is ranked by source offset, and only the last one in a file is written. A
+      # module function defines two slots, its singleton copy and its instance method.
+      #
+      # @return `{ [class_name, kind, method_name] => start_offset }` of each slot's last definer.
+      def last_definer_offsets(root, defs)
+        last = {}
+        record = lambda do |key, offset|
+          last[key] = offset if last[key].nil? || offset > last[key]
+        end
+        defs.each do |def_node, class_name, kind|
+          next if class_name.nil?
+
+          definer_slots(def_node, class_name, kind).each { |slot| record.call(slot, def_node.location.start_offset) }
+        end
+        ctx = AttrWalkContext.new(definers: [])
+        walk_attr_calls(root, [], false, ctx)
+        ctx.definers.each { |key, offset| record.call(key, offset) }
+        last
+      end
+
+      def definer_slots(def_node, class_name, kind)
+        slots = [[class_name, kind, def_node.name]]
+        slots << [class_name, :singleton, def_node.name] if @module_function_methods.include?(def_node)
+        slots
+      end
+
+      # The `defs` whose definition Ruby keeps. A module function whose instance method a later definition
+      # replaced keeps only its singleton copy (`M.label` still returns the first body), so it is written as
+      # `def self.label`. One whose singleton copy was replaced keeps only a private instance method, which
+      # sig-gen does not write, so it is dropped.
+      def live_definitions(defs, last)
+        defs.filter_map do |def_node, class_name, kind|
+          next [def_node, class_name, kind] if class_name.nil?
+
+          slots = definer_slots(def_node, class_name, kind)
+          live = slots.select { |slot| last[slot] == def_node.location.start_offset }
+          next [def_node, class_name, kind] if live.size == slots.size
+          next nil unless live == [[class_name, :singleton, def_node.name]]
+
+          [def_node, class_name, :singleton]
+        end
       end
 
       # The per-file scratch state {#analyse_file} starts each file with.
       def reset_file_maps
         @namespace_kinds = {}
-        @module_function_methods = Set.new
+        @module_function_methods = Set.new.compare_by_identity
         @uncertain_module_function_defs = Set.new.compare_by_identity
         @class_shells = Set.new
         @class_superclasses = {}
@@ -511,9 +559,10 @@ module Rigor
       # - `@namespace_kinds[qualified_name]` records whether each segment came from `class Foo` (`:class`) or
       #   `module Foo` (`:module`). Used by the writer's `wrap_in_modules` step to emit the right keyword for
       #   each intermediate segment AND the leaf.
-      # - `@module_function_methods` records `(class_name, method_name)` pairs where a `module_function` (no
-      #   args) call preceded the `def` inside a module body. The renderer emits `def self?.name` for these, the
-      #   RBS spelling that matches the dual instance + singleton dispatch the runtime produces.
+      # - `@module_function_methods` records the `def` nodes a `module_function` (no args) call preceded inside
+      #   a module body. The renderer emits `def self?.name` for these, the RBS spelling that matches the dual
+      #   instance + singleton dispatch the runtime produces. It is keyed by node, not by name: a later `def` of
+      #   the same name after a reset is an ordinary method (#2023).
       def collect_method_definitions(root, scope_index)
         @declared_types = scope_index[root].declared_types
         @walk_root = root
@@ -742,7 +791,7 @@ module Rigor
         kind = node.receiver.is_a?(Prism::SelfNode) || in_singleton_class ? :singleton : :instance
         class_name = prefix.join("::")
         if Inference::ModuleFunctionState.sig_gen_module_function?(module_function_active, kind)
-          @module_function_methods << [class_name, node.name]
+          @module_function_methods << node
         elsif Inference::ModuleFunctionState.sig_gen_uncertain?(module_function_active, kind)
           @uncertain_module_function_defs << node
         end
@@ -784,9 +833,9 @@ module Rigor
 
       # Returns "def self." (kind: :singleton), "def self?." (instance method declared inside a
       # `module_function` region — both instance + singleton dispatch at runtime), or "def " (plain instance).
-      def method_def_prefix(class_name, method_name, kind)
+      def method_def_prefix(def_node, kind)
         return "def self." if kind == :singleton
-        return "def self?." if @module_function_methods.include?([class_name, method_name])
+        return "def self?." if @module_function_methods.include?(def_node)
 
         "def "
       end
@@ -802,7 +851,7 @@ module Rigor
       def visibility_excludes?(def_node, class_name, kind, scope_index)
         return false if kind == :singleton
         return false if @include_private
-        return false if @module_function_methods.include?([class_name, def_node.name])
+        return false if @module_function_methods.include?(def_node)
 
         scope = scope_index[def_node] || scope_index.each_value.first
         return false if scope.nil?
@@ -1040,7 +1089,7 @@ module Rigor
 
         scope = scope_index[def_node]
         method_def = lookup_existing_method(class_name, def_node.name, kind, scope&.environment, scope)
-        head = "#{method_def_prefix(class_name, def_node.name, kind)}#{def_node.name}: "
+        head = "#{method_def_prefix(def_node, kind)}#{def_node.name}: "
         if return_defaulted
           return mixed_provenance_candidate(path, def_node, class_name, kind, scope_index, inline, method_def, head)
         end
@@ -1374,7 +1423,7 @@ module Rigor
         returned = paren_wrap_union(elaborated_rbs(inferred, owner: class_name))
         annotations = overload.annotations.map { |a| "#{a.location&.source || "%a{#{a.string}}"} " }.join
         visibility = member.respond_to?(:visibility) && member.visibility ? "#{member.visibility} " : ""
-        "#{visibility}#{method_def_prefix(class_name, def_node.name, kind)}#{def_node.name}: " \
+        "#{visibility}#{method_def_prefix(def_node, kind)}#{def_node.name}: " \
           "#{annotations}#{spell_with_return(overload.method_type, returned)}"
       end
 
@@ -1734,7 +1783,7 @@ module Rigor
       def render_rbs_line(def_node, inferred, class_name, kind)
         params = def_node.parameters
         head = "(#{render_param_list(params, class_name, def_node.name)})#{block_signature_suffix(params)}"
-        prefix = method_def_prefix(class_name, def_node.name, kind)
+        prefix = method_def_prefix(def_node, kind)
         "#{prefix}#{def_node.name}: #{head} -> #{paren_wrap_union(elaborated_rbs(inferred, owner: class_name))}"
       end
 
@@ -1838,12 +1887,15 @@ module Rigor
       # Per-file context the attr_* walker threads through its recursive descent. Keeps parameter lists in
       # check. `obs_ivar_map` carries the observation-derived fallback types built by
       # {#build_observed_ivar_map}; it is empty when sig-gen is invoked without `--params=observed`.
-      AttrWalkContext = Struct.new(:path, :scope_index, :obs_ivar_map, :out, keyword_init: true)
+      # `last_definers` is {#last_definer_offsets}' map, which drops an attribute a later `def` replaces. A
+      # context with `definers` only records each attribute's slot and offset for that map, and builds nothing.
+      AttrWalkContext = Struct.new(:path, :scope_index, :obs_ivar_map, :out, :last_definers, :definers,
+                                   keyword_init: true)
       private_constant :AttrWalkContext
 
-      def collect_attr_candidates(root, path, scope_index, obs_ivar_map = {})
+      def collect_attr_candidates(root, path, scope_index, obs_ivar_map = {}, last_definers = {})
         ctx = AttrWalkContext.new(path: path, scope_index: scope_index,
-                                  obs_ivar_map: obs_ivar_map, out: [])
+                                  obs_ivar_map: obs_ivar_map, out: [], last_definers: last_definers)
         walk_attr_calls(root, [], false, ctx)
         ctx.out
       end
@@ -1888,12 +1940,30 @@ module Rigor
         class_name = prefix.join("::")
         symbol_names = extract_symbol_arguments(call_node)
         return if symbol_names.empty?
+        return record_attr_definers(call_node, class_name, symbol_names, ctx) if ctx.definers
 
         ivar_lookup = ivar_type_lookup(ctx.scope_index, class_name, ctx.obs_ivar_map)
+        offset = call_node.location.start_offset
         symbol_names.each do |attr_name|
           ivar_type = ivar_lookup.call(attr_name)
-          ctx.out.concat(build_attr_candidates(call_node.name, class_name, attr_name, ivar_type, ctx))
+          candidates = build_attr_candidates(call_node.name, class_name, attr_name, ivar_type, ctx)
+          ctx.out.concat(candidates.reject { |c| superseded_attr?(ctx, class_name, c.method_name, offset) })
         end
+      end
+
+      def record_attr_definers(call_node, class_name, symbol_names, ctx)
+        offset = call_node.location.start_offset
+        symbol_names.each do |attr_name|
+          ATTR_KINDS.fetch(call_node.name).each do |variant|
+            method_name = variant == :writer ? :"#{attr_name}=" : attr_name
+            ctx.definers << [[class_name, :instance, method_name], offset]
+          end
+        end
+      end
+
+      def superseded_attr?(ctx, class_name, method_name, offset)
+        last = ctx.last_definers[[class_name, :instance, method_name]]
+        !last.nil? && last > offset
       end
 
       def extract_symbol_arguments(call_node)

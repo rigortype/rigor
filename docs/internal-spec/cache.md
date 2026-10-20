@@ -1149,6 +1149,17 @@ carry the envelope tables, so no row moves and `SCHEMA` is unchanged.
 a class on the chain, from a file whose declared classes do not change,
 fires no class key, so before this the ivar-write proof kept its answer.
 
+`Inference::SelfCallIvarWrites`' `refined?` records the `refinement:<method
+name>` and `refinement:*` keys whichever way it answers
+([#2163](https://github.com/rigortype/rigor/issues/2163)), as every consumer
+of the refinement table must (the producer is
+`IncrementalSession#refinement_affected`): the proof gives up when a
+`refine` block anywhere defines a name the callee calls, on any class. A
+refined class off the chain (`Kernel`, `String`, `IO`) carries no `mark:`
+the chain read files, so before this a file that started or stopped
+refining the name, with its declarations unchanged, left the caller on its
+previous answer.
+
 The `mixin:<qualified name>` key in `missing` is recorded for every
 qualified candidate name of every external entry on a resolution chain that a
 `settle` verdict files beyond its answer, beside the entry's hook keys

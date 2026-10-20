@@ -59,7 +59,7 @@ RSpec.describe "the ADR-58 ivar census takes an RBS-declared ivar type (#1406)" 
   end
 
   it "keeps the census entry under a declaration with a type variable" do
-    rbs = "class K[T]\n  @x: T\n  def initialize: (String x) -> void\nend\n"
+    rbs = "class K[T]\n  @x: Array[T]\n  def initialize: (String x) -> void\nend\n"
 
     expect(census(ctor, rbs, :@x)).to eq("String")
   end
@@ -71,7 +71,7 @@ RSpec.describe "the ADR-58 ivar census takes an RBS-declared ivar type (#1406)" 
     expect(census(source, rbs, :@x)).to eq("String?")
   end
 
-  it "adds no entry for an ivar the file does not write" do
+  it "adds no entry for an ivar the file does not write (a guard)" do
     expect(census("class K\n  def r = 1\nend\n", "class K\n  @x: String\nend\n", :@x)).to be_nil
   end
 

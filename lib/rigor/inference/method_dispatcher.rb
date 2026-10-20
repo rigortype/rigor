@@ -1070,9 +1070,29 @@ module Rigor
         scope = context.scope
         return false if scope.nil?
 
-        !ExternalAncestorResolution.resolve(receiver_type.class_name, context.method_name, :instance,
-                                            scope: scope, environment: environment,
-                                            record_dependencies: false).nil?
+        memo = external_ancestor_memo(scope, environment)
+        key = [receiver_type.class_name, context.method_name]
+        return memo[key] if memo.key?(key)
+
+        memo[key] = !ExternalAncestorResolution.resolve(receiver_type.class_name, context.method_name, :instance,
+                                                        scope: scope, environment: environment,
+                                                        record_dependencies: false).nil?
+      end
+
+      EXTERNAL_ANCESTOR_MEMO_KEY = :__rigor_user_class_fallback_external_ancestor__
+      private_constant :EXTERNAL_ANCESTOR_MEMO_KEY
+
+      # One slot per discovery index and environment, as `RbsDispatch#ancestor_memo_slot` keeps its own: the answer
+      # reads only the frozen discovery tables and the RBS environment, and its walk is withheld from dependency
+      # recording, so it may be served again for the same pair.
+      def external_ancestor_memo(scope, environment)
+        discovery = scope.discovery
+        slot = Thread.current[EXTERNAL_ANCESTOR_MEMO_KEY]
+        unless slot && slot[0].equal?(discovery) && slot[1].equal?(environment)
+          slot = [discovery, environment, {}]
+          Thread.current[EXTERNAL_ANCESTOR_MEMO_KEY] = slot
+        end
+        slot[2]
       end
 
       # True when the call node carries an explicit receiver that is not the literal `self`.

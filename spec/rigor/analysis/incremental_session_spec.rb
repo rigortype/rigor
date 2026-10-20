@@ -954,6 +954,110 @@ end
       end
     end
 
+    # #2191 — a new buffer file, absent from disk, named under another spelling by the run's arguments. Pre-fix the
+    # argument was admitted by the runner but the binding's real path came back nil, so the run reported the file as
+    # missing and lost the buffer's diagnostic. The baseline spells the argument as the logical path.
+    describe "a new buffer file absent from disk (#2191)" do
+      let(:new_source) { "class NewThing\n  def go\n    1.nosuchmethod\n  end\nend\n" }
+
+      def write_new_file_project(dir, logical:)
+        FileUtils.mkdir_p(File.join(dir, "lib"))
+        File.write(File.join(dir, "lib", "foo.rb"), "class Foo\n  def a = 1\nend\n")
+        buffer = File.join(dir, "buffer_new.rb")
+        File.write(buffer, new_source)
+        Rigor::Analysis::BufferBinding.new(logical_path: logical, physical_path: buffer)
+      end
+
+      # `[rule, message]` of the buffer run whose arguments are the new file, then `lib/foo.rb`. The path is left out:
+      # `rebind_buffer` re-spells the binding onto the argument's own spelling, so the diagnostic's path is the
+      # argument's and the comparison is on what the buffer says.
+      def new_file_rows(dir, buffer, argument)
+        config = editor_config(dir)
+        snapshot = Rigor::Cache::IncrementalSnapshot.new(root: File.join(dir, ".cache"))
+        fp = fingerprint(config, analysis_root(dir))
+        warm_snapshot(config, dir, snapshot, fp)
+        session = described_class.new(configuration: config, paths: [argument, File.join(dir, "lib", "foo.rb")],
+                                      environment: shared_environment, buffer: buffer)
+        guarded_run_buffer_recheck(session, snapshot: snapshot, fingerprint: fp).diagnostics.map do |d|
+          [d.rule, d.message]
+        end
+      end
+
+      it "reports the buffer's own diagnostic under the logical spelling, with no missing file (positive control)" do
+        Dir.mktmpdir do |dir|
+          logical = File.join(dir, "lib", "new.rb")
+          rows = new_file_rows(dir, write_new_file_project(dir, logical: logical), logical)
+
+          expect(rows.map(&:first)).to include("call.undefined-method")
+          expect(rows.map(&:last)).not_to include(a_string_matching(/no such file/i))
+        end
+      end
+
+      it "accepts the argument spelled relative to the working directory, as the baseline" do
+        Dir.mktmpdir do |dir|
+          Dir.chdir(dir) do
+            logical = File.join(dir, "lib", "new.rb")
+            baseline = new_file_rows(dir, write_new_file_project(dir, logical: logical), logical)
+
+            expect(new_file_rows(dir, write_new_file_project(dir, logical: logical), "lib/new.rb")).to eq(baseline)
+            expect(baseline).not_to be_empty
+          end
+        end
+      end
+
+      it "accepts the argument through a `..` detour, as the baseline" do
+        Dir.mktmpdir do |dir|
+          Dir.chdir(dir) do
+            logical = File.join(dir, "lib", "new.rb")
+            baseline = new_file_rows(dir, write_new_file_project(dir, logical: logical), logical)
+
+            expect(new_file_rows(dir, write_new_file_project(dir, logical: logical),
+                                 "lib/../lib/new.rb")).to eq(baseline)
+          end
+        end
+      end
+
+      it "accepts the argument through a symlinked root, as the baseline" do
+        Dir.mktmpdir do |dir|
+          Dir.chdir(dir) do
+            File.symlink(dir, "link")
+            logical = File.join(dir, "lib", "new.rb")
+            baseline = new_file_rows(dir, write_new_file_project(dir, logical: logical), logical)
+
+            linked = File.join(dir, "link", "lib", "new.rb")
+            expect(new_file_rows(dir, write_new_file_project(dir, logical: logical), linked)).to eq(baseline)
+          end
+        end
+      end
+
+      it "accepts a new file in a directory that does not exist yet, as the baseline" do
+        Dir.mktmpdir do |dir|
+          Dir.chdir(dir) do
+            logical = File.join(dir, "lib", "sub", "new.rb")
+            baseline = new_file_rows(dir, write_new_file_project(dir, logical: logical), logical)
+
+            expect(new_file_rows(dir, write_new_file_project(dir, logical: logical), "lib/sub/new.rb")).to eq(baseline)
+            expect(baseline).not_to be_empty
+          end
+        end
+      end
+
+      it "accepts a new file under a symlinked parent directory, as the baseline" do
+        Dir.mktmpdir do |dir|
+          Dir.chdir(dir) do
+            FileUtils.mkdir_p(%w[real lib])
+            File.symlink(File.join(dir, "real"), File.join(dir, "lib", "sub"))
+            logical = File.join(dir, "lib", "sub", "new.rb")
+            baseline = new_file_rows(dir, write_new_file_project(dir, logical: logical), logical)
+
+            expect(new_file_rows(dir, write_new_file_project(dir, logical: logical),
+                                 File.join(dir, "real", "new.rb"))).to eq(baseline)
+            expect(baseline).not_to be_empty
+          end
+        end
+      end
+    end
+
     it "leaves the closure empty when the buffer's bytes match the file on disk" do
       Dir.mktmpdir do |dir|
         write_editor_project(dir)

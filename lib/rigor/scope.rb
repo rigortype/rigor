@@ -1941,8 +1941,9 @@ module Rigor
     # declaration-level fact of the whole file, which is also the granularity
     # `ScopeIndexer#append_constant_signature` moves the declaration signature at.
     #
-    # `constant_sources` is seeded only when dependency recording is on, so on every ordinary run the table
-    # is empty and this is one Hash miss; the caller additionally gates on the recorder being active.
+    # `constant_sources` is seeded when dependency recording is on and in the editor publish's discovery seed
+    # (ADR-124), where the recorder is inactive; elsewhere the table is empty and this is one Hash miss. The caller
+    # gates on the recorder being active.
     def record_constant_dependency(name)
       sites = @discovery.constant_sources[name]
       return if sites.nil?

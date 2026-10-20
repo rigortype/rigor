@@ -128,7 +128,7 @@ module Rigor
       # while the configured paths may be relative (`lib`, the default) or reach the file through a symlink.
       def discovery_seed_for(buffer)
         Protection::DiscoverySeed.tables_for_buffer(paths: discovery_paths_for(buffer), bundles: discovery_bundles,
-                                                    buffer: buffer)
+                                                    buffer: buffer, constant_sources: true)
       end
 
       # Builds what {#discovery_seed_for} reads once per generation, so a fork batch's children inherit it instead

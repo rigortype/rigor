@@ -89,6 +89,50 @@ RSpec.describe Rigor::Inference::ScopeIndexer::LayeredDefNestings do
     end
   end
 
+  # Issue #1557 — the reader's signature names the layered table beside the Hash, rather than a Hash alone, and
+  # the class's own signature declares exactly what it answers, so neither can drift from the runtime unseen.
+  describe "the signature" do
+    def sig_env
+      @sig_env ||= begin
+        require "rbs"
+        loader = RBS::EnvironmentLoader.new
+        loader.add(path: Pathname("sig"))
+        RBS::Environment.from_loader(loader).resolve_type_names
+      end
+    end
+
+    def members_of(class_name)
+      sig_env.class_decls.fetch(RBS::TypeName.parse(class_name)).each_decl.flat_map(&:members)
+    end
+
+    let(:alias_name) { RBS::TypeName.parse("::Rigor::Scope::DiscoveryIndex::def_nestings") }
+
+    it "types the discovery reader and the `with` keyword as a Hash or the layered table" do
+      members = members_of("::Rigor::Scope::DiscoveryIndex")
+      reader = members.find { |m| m.is_a?(RBS::AST::Members::AttrReader) && m.name == :discovered_def_nestings }
+      with = members.find { |m| m.is_a?(RBS::AST::Members::MethodDefinition) && m.name == :with }
+      keyword = with.overloads.first.method_type.type.optional_keywords.fetch(:discovered_def_nestings)
+
+      expect([reader.type.to_s, keyword.type.to_s]).to eq([alias_name.to_s, alias_name.to_s])
+      expect(sig_env.type_alias_decls.fetch(alias_name).decl.type.to_s)
+        .to eq("::Hash[untyped, ::Array[::String]] | ::Rigor::Inference::ScopeIndexer::LayeredDefNestings")
+    end
+
+    # A missing chain answers nil, which `ExpressionTyper#recorded_def_nesting`'s rehydration fallback relies on.
+    it "declares exactly the instance methods the layered table answers, with their types" do
+      methods = members_of("::Rigor::Inference::ScopeIndexer::LayeredDefNestings")
+                .grep(RBS::AST::Members::MethodDefinition).select { |m| m.kind == :instance }
+                .to_h { |m| [m.name, m.overloads.map { |o| o.method_type.to_s }] }
+
+      expect(methods.keys - [:initialize]).to match_array(described_class.public_instance_methods(false))
+      expect(methods).to eq(
+        initialize: ["(::Hash[untyped, ::Array[::String]] file, #{alias_name} seed) -> void"],
+        "[]": ["(untyped def_node) -> ::Array[::String]?"],
+        empty?: ["() -> bool"]
+      )
+    end
+  end
+
   # End to end through `ScopeIndexer.index`: the analysed file's scope answers both its own `def` and one the
   # cross-file seed recorded from another file, by node identity.
   describe "the indexed scope's discovery" do

@@ -231,9 +231,9 @@ RSpec.describe "incremental edges for a source-recorded method visibility (#2134
     end
   end
 
-  # Issue #2209 — a reopening that only drops the `*` row changes no visibility entry of `two`, and the declined call
-  # read nothing past the row, so only the `visibility:Es#*` key the row's reader files re-checks it. Adding the row
-  # is a guard: the reported call reads `Es#*` for the singleton wildcard slot too.
+  # Issue #2209 — a reopening that adds or drops only the `*` row changes no visibility entry of `two`. The row's
+  # reader files `visibility:Es#*` for it. Guards: the reopening's other edges (the `Es` declaration it writes)
+  # already re-check the call, so both pass without that key.
   def unreadable_spelling = "module Es\n  n = :two\n  send(:module_function, n)\nend\n"
 
   it "re-checks a self-extended singleton call when a reopening drops a module_function spelling it cannot read" do

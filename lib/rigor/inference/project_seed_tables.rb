@@ -39,7 +39,8 @@ module Rigor
       # `dependencies.source_inference:`), and no `discovery_seed:` base is merged in (the runner can start from one).
       NOT_SEEDED = {
         run_generation: "the identity token of a check run's return memo; these paths run no check",
-        constant_sources: "read only by dependency recording, which only an incremental check run turns on",
+        constant_sources: "read by dependency recording and the #663 pre_eval retraction; a seed carries it only " \
+                          "when asked (DiscoverySeed.tables_for_buffer(constant_sources: true), the editor publish)",
         param_inferred_types: "the parameter-inference output itself; each caller adds its own " \
                               "(DiscoverySeed.build, coverage under parameter_inference:, the collector's last round)"
       }.freeze

@@ -2493,13 +2493,15 @@ module Rigor
         pre_eval.merge(literal).freeze
       end
 
+      # The project's literal constant table: this run's, or the one a `discovery_seed:` carries (ADR-124).
       def literal_seed_constants
         return @project_constant_values unless @project_constant_values.empty? && @discovery_seed
 
         @discovery_seed.fetch(:in_source_constants, @project_constant_values)
       end
 
-      # The per-name writer paths the #663 retraction reads: this run's census, or a `discovery_seed:`.s (ADR-124).
+      # The per-name writer paths the #663 retraction reads: this run's census, or the one a `discovery_seed:` carries
+      # (ADR-124).
       def constant_writer_sources
         return @project_constant_sources unless @project_constant_sources.empty? && @discovery_seed
 

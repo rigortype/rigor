@@ -8,7 +8,7 @@
 
 ## Background
 
-ADR-124 seeds the editor publish's `prebuilt:` runner with the project's discovery tables. Under `pre_eval:` the runner still discarded the seed's literal constant table and could not retract a listed constant another file also assigns, because it read only its own (empty) tables. The fix reads `in_source_constants` and `constant_sources` from the seed when the run has none of its own, and makes the seed carry `constant_sources`. `spec/rigor/declaration_facts/admission_census_spec.rb` then requires four rows: `in_source_constants` read by `lib/rigor/analysis/runner.rb`, `constant_sources` read by `lib/rigor/protection/discovery_seed.rb`, and `constant_sources` copied by `discovery_seed.rb` and `lib/rigor/language_server/project_context.rb`.
+ADR-124 seeds the editor publish's `prebuilt:` runner with the project's discovery tables. Under `pre_eval:` the runner still discarded the seed's literal constant table and could not retract a listed constant another file also assigns, because it read only its own (empty) tables. The fix reads `in_source_constants` and `constant_sources` from the seed when the run has none of its own, and makes the seed carry `constant_sources`. `spec/rigor/declaration_facts/admission_census_spec.rb` then requires four rows: `in_source_constants` read by `lib/rigor/analysis/runner.rb`, `constant_sources` read by `lib/rigor/protection/discovery_seed.rb`, and `constant_sources` copied by `discovery_seed.rb` and recorded against `lib/rigor/language_server/project_context.rb`, where the census matches the `constant_sources: true` keyword that asks the seed for the table rather than a copy of it.
 
 ## Options and trade-offs
 

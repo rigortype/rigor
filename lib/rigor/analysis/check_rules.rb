@@ -1226,13 +1226,20 @@ module Rigor
           # body is morally a class body, so ADR-34 stays silent there — including on a genuinely
           # undefined name inside the block. Ranges are computed once per file.
           return nil if call_inside_receiver_eval_ranges?(eval_ranges, call_node)
-          # ADR-121 WD7 — a refinement of `Object` (or one Rigor cannot read) in effect here may define the name.
-          return nil if refined_method_in_effect?("Object", call_node, scope, :instance, lexical_sites)
-          # Issue #1817 — a block handed to a project method that may `module_eval` / `instance_exec` it runs under
-          # another `self`, so a call in it is not a top-level one ({RebindingBlockCallees}).
-          return nil if lexical_sites && RebindingBlockCallees.inside_rebound_block?(call_node, scope, lexical_sites.block_calls)
+          return nil if lexically_declined_toplevel_call?(call_node, scope, lexical_sites)
 
           build_unresolved_toplevel_diagnostic(path, call_node)
+        end
+
+        # The `call.unresolved-toplevel` declines that read the file's syntax, asked last because they walk it.
+        def lexically_declined_toplevel_call?(call_node, scope, lexical_sites)
+          # ADR-121 WD7 — a refinement of `Object` (or one Rigor cannot read) in effect here may define the name.
+          return true if refined_method_in_effect?("Object", call_node, scope, :instance, lexical_sites)
+          return false if lexical_sites.nil?
+
+          # Issue #1817 — a block handed to a project method that may `module_eval` / `instance_exec` it runs under
+          # another `self`, so a call in it is not a top-level one ({RebindingBlockCallees}).
+          RebindingBlockCallees.inside_rebound_block?(call_node, scope, lexical_sites.block_calls)
         end
 
         # Issue #1383 — RBS core declares `main`'s private singleton methods on

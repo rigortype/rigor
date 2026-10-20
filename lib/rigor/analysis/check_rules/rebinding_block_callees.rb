@@ -39,7 +39,7 @@ module Rigor
         # Receiverless calls that can reach a local by name.
         BINDING_CALLS = %i[binding eval].freeze
         PREDICATE_PARENTS = [Prism::IfNode, Prism::UnlessNode, Prism::WhileNode, Prism::UntilNode].freeze
-        # `proc { … }`, `lambda { … }` and `Proc.new { … }` passed with `&` are the block of the call they are passed to.
+        # `proc { … }`, `lambda { … }` and `Proc.new { … }` passed with `&` are the block of the call they go to.
         PROC_LITERAL_CALLS = %i[proc lambda].freeze
         private_constant :SEND_CALLS, :PLAIN_PROC_CALLS, :BINDING_CALLS, :PREDICATE_PARENTS, :PROC_LITERAL_CALLS
 
@@ -118,8 +118,7 @@ module Rigor
 
           first = call.arguments&.arguments&.first
           case first
-          when Prism::SymbolNode then first.unescaped.to_sym
-          when Prism::StringNode then first.unescaped.to_sym
+          when Prism::SymbolNode, Prism::StringNode then first.unescaped.to_sym
           end
         end
 
@@ -129,10 +128,22 @@ module Rigor
         def project_may_rebind?(name, scope)
           DependencyRecorder.read_missing(:defines, name) if DependencyRecorder.active?
           return true if patched_anywhere?(name, scope)
-          return true if def_table_may_rebind?(scope.discovered_def_nodes, name) { |owner| instance_def(scope, owner, name) }
-          return true if def_table_may_rebind?(scope.discovered_singleton_def_nodes, name) { |owner| singleton_def(scope, owner, name) }
 
-          bodiless_definition?(name, scope)
+          slots = 0
+          readers = {
+            scope.discovered_def_nodes => ->(owner) { instance_def(scope, owner, name) },
+            scope.discovered_singleton_def_nodes => ->(owner) { scope.singleton_def_for(owner, name) }
+          }
+          readers.each do |tables, reader|
+            tables.each do |owner, table|
+              next unless table.key?(name)
+
+              slots += 1
+              node = reader.call(owner)
+              return true if !node.is_a?(Prism::DefNode) || def_may_rebind?(node)
+            end
+          end
+          unread_definition?(name, scope, slots) || bodiless_definition?(name, scope)
         end
 
         def instance_def(scope, owner, name)
@@ -141,15 +152,16 @@ module Rigor
           scope.user_def_for(owner, name)
         end
 
-        def singleton_def(scope, owner, name) = scope.singleton_def_for(owner, name)
-
-        def def_table_may_rebind?(tables, name)
-          tables.any? do |owner, table|
-            next false unless table.key?(name)
-
-            node = yield(owner)
-            !node.is_a?(Prism::DefNode) || def_may_rebind?(node)
+        # A def table keeps one body per class and side, so a second `def` of the name for the same slot (in a
+        # sibling file, whose order is not load order, or in the other arm of an `if`) is one the tables never
+        # showed. Every `def` outside a deferred body has a row in the deferred-range table, and a `module_function`
+        # row fills both sides: more rows than slots read means a body went unread.
+        def unread_definition?(name, scope, slots)
+          rows = 0
+          scope.discovered_deferred_ranges.each_value do |list|
+            list.each { |(_start, _stop, row_name, kind, _owner)| rows += (kind == :both ? 2 : 1) if row_name == name }
           end
+          rows > slots
         end
 
         # A name some class gives a method with no `def` body Rigor holds (`attr_*`, `alias_method`, `define_method`).
@@ -175,16 +187,21 @@ module Rigor
 
         # `block_name` is the def's named `&` parameter, or nil.
         def escapes?(node, parent, block_name)
-          case node
-          when Prism::ForwardingSuperNode then return true unless node.block.is_a?(Prism::BlockNode)
-          when Prism::SuperNode then return true if node.block.nil?
-          when Prism::BlockArgumentNode then return true if node.expression.nil?
-          when Prism::ForwardingArgumentsNode then return true
-          when Prism::LocalVariableReadNode
-            return true if node.name == block_name && !plain_read?(node, parent)
-          when Prism::CallNode then return true if node.receiver.nil? && BINDING_CALLS.include?(node.name)
-          end
+          return true if hands_block_on?(node, parent, block_name)
+
           node.compact_child_nodes.any? { |child| escapes?(child, node, block_name) }
+        end
+
+        def hands_block_on?(node, parent, block_name)
+          case node
+          when Prism::ForwardingSuperNode then !node.block.is_a?(Prism::BlockNode)
+          when Prism::SuperNode then node.block.nil?
+          when Prism::BlockArgumentNode then node.expression.nil?
+          when Prism::ForwardingArgumentsNode then true
+          when Prism::LocalVariableReadNode then node.name == block_name && !plain_read?(node, parent)
+          when Prism::CallNode then node.receiver.nil? && BINDING_CALLS.include?(node.name)
+          else false
+          end
         end
 
         def plain_read?(node, parent)

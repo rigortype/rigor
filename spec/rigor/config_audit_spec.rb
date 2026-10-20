@@ -135,7 +135,18 @@ RSpec.describe Rigor::ConfigAudit do
       expect(warnings.select { |w| w.kind == :disabled_rule }).to be_empty
     end
 
-    it "does NOT flag a legacy unprefixed alias" do
+    # `severity_overrides:` does not map a legacy alias to its canonical id, so `undefined-method: "off"` reaches no
+    # row. The audit names the canonical id instead of accepting the key silently (#2005).
+    it "flags a legacy unprefixed alias as a severity_overrides key and names its canonical id" do
+      warnings = audit("severity_overrides" => { "undefined-method" => "off" })
+
+      override = warnings.find { |w| w.kind == :severity_override }
+      expect(override).not_to be_nil
+      expect(override.message).to include("the override has no effect")
+      expect(override.message).to include("call.undefined-method")
+    end
+
+    it "does NOT flag a legacy unprefixed alias in disable:" do
       warnings = audit("disable" => ["undefined-method"])
 
       expect(warnings.select { |w| w.kind == :disabled_rule }).to be_empty

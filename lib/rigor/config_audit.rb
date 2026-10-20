@@ -182,6 +182,11 @@ module Rigor
 
     def self.override_key_problem(key, plugin_ids)
       return "is not a recognized rule id; the override has no effect" if key == "all"
+      # #2005 — `disable:` expands a legacy alias to its canonical id, but the severity resolver matches canonical ids
+      # only, so an alias key reaches no row. Name the canonical id rather than accept the key.
+      if (canonical = Analysis::CheckRules::LEGACY_RULE_ALIASES[key])
+        return "is a legacy alias of `#{canonical}`; the override has no effect, so write `#{canonical}`"
+      end
       return nil unless Array(Analysis::CheckRules.resolve_rule_token(key)).empty?
 
       if key.start_with?(Analysis::CheckRules::PLUGIN_FAMILY_PREFIX)

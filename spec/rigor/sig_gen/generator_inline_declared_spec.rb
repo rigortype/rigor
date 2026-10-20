@@ -475,15 +475,37 @@ RSpec.describe Rigor::SigGen::Generator do
 
   # Issue #1489. A parameter-only inline annotation over a sig/ `-> untyped` reaches the declared-untyped path
   # with a `rendered` line spelled from the unwidened body; widening cannot rebuild it, so nothing is proposed
-  # rather than `-> 1`.
+  # rather than `-> 1`. A literal nested in a tuple or a record is declined the same way (#1891), even beside a typed
+  # element: `[1, x]` used to be proposed as `-> [1, Integer]`.
   it "proposes no literal return for a parameter-only inline annotation over a sig/ `-> untyped`" do
-    write_fixture("sig/m.rbs", "class M\n  def m: (Integer x) -> untyped\nend\n")
-    path = write_fixture("lib/m.rb", "class M\n  # @rbs x: Integer\n  def m(x)\n    1\n  end\nend\n")
+    write_fixture("sig/m.rbs", <<~RBS)
+      class M
+        def m: (Integer x) -> untyped
+        def t: (Integer x) -> untyped
+        def r: (Integer x) -> untyped
+      end
+    RBS
+    path = write_fixture("lib/m.rb", <<~RUBY)
+      class M
+        # @rbs x: Integer
+        def m(x)
+          1
+        end
 
-    m = find(run_generator(path, sig: true), :m)
+        # @rbs x: Integer
+        def t(x) = [1, x]
 
-    expect(m.classification).to eq(Rigor::SigGen::Classification::EQUIVALENT)
-    expect(m.rbs).to be_nil
+        # @rbs x: Integer
+        def r(x) = { a: 1, b: x }
+      end
+    RUBY
+
+    candidates = run_generator(path, sig: true)
+
+    %i[m t r].each do |name|
+      expect(find(candidates, name).classification).to eq(Rigor::SigGen::Classification::EQUIVALENT)
+      expect(find(candidates, name).rbs).to be_nil
+    end
   end
 
   it "treats a sig/ copy that only spells names absolutely as current" do

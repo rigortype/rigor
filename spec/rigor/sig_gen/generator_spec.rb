@@ -1377,6 +1377,7 @@ RSpec.describe Rigor::SigGen::Generator do
 
           def u = true
           def un = nil
+          def ut = [1, true]
         end
       RUBY
       authored = write_fixture("lib/authored.rb", "class Authored\n  def c(x) = true\n  def n(x) = nil\nend\n")
@@ -1389,6 +1390,7 @@ RSpec.describe Rigor::SigGen::Generator do
       expect(row.call("Inline", :n).rbs).to eq("def n: (Integer x) -> nil")
       expect(row.call("Inline", :u).rbs).to eq("def u: () -> true")
       expect(row.call("Inline", :un).rbs).to eq("def un: () -> nil")
+      expect(row.call("Inline", :ut).rbs).to eq("def ut: () -> [1, true]")
       expect(row.call("Authored", :c).rbs).to eq("def c: (Integer x) -> (false | true)")
       expect(row.call("Authored", :n).classification).to eq(Rigor::SigGen::Classification::EQUIVALENT)
     end
@@ -1401,6 +1403,27 @@ RSpec.describe Rigor::SigGen::Generator do
 
       expect(candidates.find { |c| c.method_name == :t }.rbs).to eq("def t: () -> true")
       expect(candidates.find { |c| c.method_name == :n }.rbs).to eq("def n: () -> nil")
+    end
+
+    # Only a covariant core generic's arguments widen (#1891): under an `in` parameter `Sink[Integer]` is no
+    # supertype of the body's `Sink[1]`, so the declared type argument is proposed as it is.
+    it "widens the arguments of a covariant generic and leaves a contravariant one's alone" do
+      write_fixture("sig/box.rbs", <<~RBS)
+        class Sink[in T]
+        end
+        class Box
+          def mk_sink: () -> Sink[1]
+          def mk_arr: () -> Array[1]
+          def s: () -> untyped
+          def a: () -> untyped
+        end
+      RBS
+      path = write_fixture("lib/box.rb", "class Box\n  def s = mk_sink\n  def a = mk_arr\nend\n")
+
+      candidates = generator(paths: [path], signature_paths: [File.join(tmpdir, "sig")]).run
+
+      expect(candidates.find { |c| c.method_name == :s }.rbs).to eq("def s: () -> Sink[1]")
+      expect(candidates.find { |c| c.method_name == :a }.rbs).to eq("def a: () -> Array[Integer]")
     end
 
     # Guard: a nested literal keeps its strictest carrier where no `.rbs` declares the method, as a top-level one does.

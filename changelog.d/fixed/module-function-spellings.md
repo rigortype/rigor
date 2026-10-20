@@ -1,0 +1,2 @@
+- **[engine]** `self.module_function :name` and `send(:module_function, :name)` in a reopening of a module that `extend`s itself now make the singleton call public, instead of `def.method-visibility-mismatch` reporting it as private. ([#2245](https://github.com/rigortype/rigor/pull/2245))
+  - A spelling whose names Rigor cannot read, such as `send(:module_function, *names)`, makes the rule decline for every name of the module.

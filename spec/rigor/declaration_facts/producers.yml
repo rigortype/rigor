@@ -192,6 +192,10 @@ lib/rigor/inference/method_dispatcher/rbs_dispatch.rb:
   computes: whether an RBS-declared method is private
   producers:
     Rigor::Inference::MethodDispatcher::RbsDispatch.method_private?: grandfathered
+lib/rigor/inference/module_function_state/spellings.rb:
+  computes: which module_function spellings other than the receiverless call the deferred-ranges prescan reads (#2209)
+  producers:
+    Rigor::Inference::ModuleFunctionState::Spellings#arguments: names the `self.module_function` and `send` / `__send__` (:module_function, ...) spellings on no receiver or `self` whose rows the deferred-ranges prescan records (#2209); it lives in ModuleFunctionState, the home this census routes module_function readings to, and takes the owner the prescan passes in
 lib/rigor/inference/object_mixins.rb:
   computes: 'how the modules the project mixes into Object answer a method name (issue #1697)'
   producers:

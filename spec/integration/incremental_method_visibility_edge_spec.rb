@@ -213,6 +213,39 @@ RSpec.describe "incremental edges for a source-recorded method visibility (#2134
     expect_toggle(self_extended_files, before: module_function_two, after: private_two, first: arity, second: mismatch)
   end
 
+  # Issue #2209 — the `self.` and `send` spellings write the same row, and a spelling whose names the prescan cannot
+  # read writes the owner's `*` row, which the reader files `visibility:Es#*` for. Neither rule reports under that
+  # row: the call's definer is uncertain.
+  {
+    "self.module_function :two" => ["module Es\n  self.module_function :two\nend\n", :arity],
+    "send(:module_function, n)" => ["module Es\n  n = :two\n  send(:module_function, n)\nend\n", nil]
+  }.each do |spelling, (reopening, swapped)|
+    it "re-checks a self-extended singleton call when a reopening swaps private for #{spelling}" do
+      after_rows = swapped ? arity : []
+      expect_toggle(self_extended_files, before: private_two, after: reopening, first: mismatch, second: after_rows)
+    end
+
+    it "re-checks a self-extended singleton call when a reopening swaps #{spelling} back for private" do
+      before_rows = swapped ? arity : []
+      expect_toggle(self_extended_files, before: reopening, after: private_two, first: before_rows, second: mismatch)
+    end
+  end
+
+  # Issue #2209 — a reopening that adds or drops only the `*` row changes no visibility entry of `two`. The row's
+  # reader files `visibility:Es#*` for it. Guards: the reopening's other edges (the `Es` declaration it writes)
+  # already re-check the call, so both pass without that key.
+  def unreadable_spelling = "module Es\n  n = :two\n  send(:module_function, n)\nend\n"
+
+  it "re-checks a self-extended singleton call when a reopening drops a module_function spelling it cannot read" do
+    expect_toggle(self_extended_files, before: unreadable_spelling, after: "module Es\nend\n", first: [],
+                                       second: mismatch)
+  end
+
+  it "re-checks a self-extended singleton call when a reopening starts a module_function spelling it cannot read" do
+    expect_toggle(self_extended_files, before: "module Es\nend\n", after: unreadable_spelling, first: mismatch,
+                                       second: [])
+  end
+
   # The `:both` row a `module_function def` writes (`ModuleFunctionState.deferred_module_function?`), against a
   # `private def` of the same body: the file's def, visibility entries and declared classes stay as they were.
   def extending_files

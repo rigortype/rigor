@@ -22,11 +22,6 @@ module Rigor
         return CLI::EXIT_USAGE if options.nil?
 
         config = options.fetch(:config)
-        if config && !File.file?(config)
-          usage_error("no configuration file at #{config}")
-          return CLI::EXIT_USAGE
-        end
-
         configuration = Configuration.load(config)
         config_path = options.fetch(:config) || Configuration.discover
         # The working directory: Rigor auto-detects sig/ and the lockfiles there (lens.md § Serialization).
@@ -56,6 +51,11 @@ module Rigor
         options
       rescue OptionParser::ParseError => e
         usage_error(e.message)
+      rescue Rigor::ConfigurationError => e
+        # The shared --config check (CLI::Options.config_path). Mapped here the way Rigor::CLI#run maps it, so a
+        # direct LensCommand run exits with the usage code too.
+        @err.puts("rigor: #{e.message}")
+        nil
       end
 
       def usage_error(message)

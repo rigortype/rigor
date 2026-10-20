@@ -2791,7 +2791,20 @@ module Rigor
 
         # Whether any project or `pre_eval:` file aliases `name`, on either side, which can make it another variable.
         def global_aliased?(scope, name)
+          record_global_census(Inference::GlobalWriteCensus.alias_entry(name))
           Inference::GlobalWriteCensus.aliased?(global_write_census(scope), name)
+        end
+
+        # Issue #2158 — a read of the whole-program census records the `global_census:` key of each entry it asks
+        # about, whichever way it answers ({Inference::GlobalWriteCensus.dependency_key}): a file that starts or
+        # stops writing the entry (a `def write`, an `alias $stdout $x`, a computed `define_method`) re-checks the
+        # write. A `pre_eval:` file moves the snapshot's own fingerprint.
+        def record_global_census(*entries)
+          return unless DependencyRecorder.active?
+
+          entries.each do |entry|
+            DependencyRecorder.read_name(:global_census, Inference::GlobalWriteCensus.dependency_key(entry))
+          end
         end
 
         # A literal is rejected when its class is none the setter takes and, for a setter that also converts
@@ -2841,11 +2854,13 @@ module Rigor
         end
 
         def program_may_answer?(ancestors, names, census, scope)
+          record_global_census(Inference::GlobalWriteCensus::DEFINES_ANY, *names.map { |name| [:defines, name] })
           return true if Inference::GlobalWriteCensus.defines_any_of?(census, names)
 
           dynamic_mark = Scope::DiscoveryIndex::ENVELOPE_DYNAMIC_MARK
           return true if ancestors.any? { |owner| scope.parameter_envelopes_of(owner).key?(dynamic_mark) }
 
+          record_global_census(%i[main_mixin *])
           main_mixins = Inference::GlobalWriteCensus.main_mixins(census)
           main_mixins.any? { |mixin| rbs_mixin_may_answer?(mixin, names, scope) } ||
             mixin_may_answer?(ancestors, names, scope)
@@ -2887,6 +2902,7 @@ module Rigor
         # active refinement on Ruby 4.0.5; a refined `respond_to_missing?` or `respond_to?`, and every implicit
         # conversion, do not, so a refinement that adds only those leaves the write reported.
         def refined_writer_in_effect?(census, node, scope, lexical_sites)
+          record_global_census(Inference::GlobalWriteCensus::REFINES_ANY, %i[refines write])
           Inference::GlobalWriteCensus.refines_write?(census) &&
             (lexical_sites.nil? || !scope.declared_refinements.empty? ||
               lexical_sites.refinements.any_at?(node.location.start_offset))

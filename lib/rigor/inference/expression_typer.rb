@@ -1272,11 +1272,22 @@ module Rigor
         Type::Combinator.bot
       end
 
-      # `while` and `until` loops produce nil unless interrupted by `break VALUE`; the expression value of
-      # `break VALUE` is not yet modeled (scope break-path propagation landed in `eval_loop`). Returning
-      # Constant[nil] is safe and matches Ruby semantics for the common case.
-      def type_of_loop(_node)
-        Type::Combinator.constant_of(nil)
+      # A `while` / `until` / `for` loop in value position. Like {#type_of_conditional}, it delegates to the
+      # statement evaluator, which owns the loop's value: `nil` or a `while` / `until` loop's `break` values
+      # (issue #2031), and a `for` loop's collection or its `break` values (issue #1216).
+      #
+      # A `while` / `until` loop no `break` leaves is `nil` without evaluating its body, as
+      # {StatementEvaluator#loop_value} answers it: a loop that is a call's receiver or argument is typed again by
+      # every narrowing and rule that types that operand, and evaluating it each time re-ran the passes of every loop
+      # nested in it.
+      def type_of_loop(node)
+        return Type::Combinator.constant_of(nil) if break_free_condition_loop?(node)
+
+        LoopValueRecord.fetch(node, scope) || scope.evaluate(node, tracer: tracer).first
+      end
+
+      def break_free_condition_loop?(node)
+        !node.is_a?(Prism::ForNode) && !block_level_jump?(node.statements, Prism::BreakNode)
       end
 
       def type_of_lambda(_node)

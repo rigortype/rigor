@@ -2865,13 +2865,14 @@ RSpec.describe Rigor::CLI do
       expect(out).not_to include("Dynamic")
     end
 
-    it "annotates a `for` loop's `end` line as nil, not Dynamic[top]" do
+    it "annotates a `for` loop's `end` line with the collection it answers, not Dynamic[top]" do
       path = write_fixture("a.rb", "for i in 1..3\n  puts i\nend\n")
 
       _status, out, _err = run_cli("annotate", "--no-color", path)
 
       lines = out.lines
-      expect(lines[2]).to include("end").and include("#=> nil")
+      # Issue #1216 — `for` is `(1..3).each { … }`, which answers the range.
+      expect(lines[2]).to include("end").and include("#=> 1..3")
       expect(out).not_to include("Dynamic")
     end
 

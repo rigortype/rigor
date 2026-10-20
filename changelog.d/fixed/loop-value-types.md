@@ -1,0 +1,2 @@
+- **[engine]** A `for` loop's value is now the collection it iterated and a `while` / `until` loop ended by `break value` answers that value, instead of `nil`, so `r = for i in [1, 2]; end; r.size` no longer reports an undefined method. ([#2242](https://github.com/rigortype/rigor/pull/2242))
+  - A `for` over a collection whose `each` is not known to answer itself (a project class, an `Enumerator`, an untyped value) types its value as untyped, and a literal `while true` loop answers only its `break` values.

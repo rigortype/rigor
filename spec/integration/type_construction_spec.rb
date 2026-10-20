@@ -1257,6 +1257,26 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  # Issues #1216 and #2031 — a `for` loop answers its collection, and a loop a `break` ends answers its value.
+  describe "fixtures/loop_value.rb — a loop's value" do
+    let(:harness) { harness_for("loop_value") }
+
+    it "types a for loop as its collection and a loop as its break values" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches.map { |d| "#{d.line}: #{d.message}" }).to be_empty
+    end
+
+    it "reports an undefined method only on a loop that answers nil" do
+      undefined = harness.diagnostics.select { |d| d.rule.start_with?("call.") }
+      expect(undefined.map(&:line)).to eq(marked_lines(harness, "# GENUINE-UNDEFINED"))
+    end
+
+    it "reports no constant condition on the size of a collection the loop body mutated" do
+      flow = harness.diagnostics.select { |d| d.rule.start_with?("flow.") }
+      expect(flow.map { |d| "#{d.line}: #{d.rule}" }).to be_empty
+    end
+  end
+
   # Issue #2196 — a core superclass's method is not answered from `Kernel`'s private method of the same name.
   describe "fixtures/core_subclass_kernel_shadow.rb — a core subclass does not read Kernel#select" do
     let(:harness) { harness_for("core_subclass_kernel_shadow") }

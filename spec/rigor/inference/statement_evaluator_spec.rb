@@ -1070,12 +1070,62 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       expect(post.local(:y).members.map(&:value)).to contain_exactly("hi", nil)
     end
 
+    # Issue #1216 — `for` is `coll.each { … }`, and Array#each answers its receiver, so `r.size` is 2 in Ruby.
+    it "types a for loop as the collection it iterated, where a while loop types nil" do
+      for_type, for_post = evaluate("r = for i in [1, 2]; end")
+      while_type, = evaluate("i = 0\nwhile i < 2; i += 1; end")
+      collection, = evaluate("[1, 2]")
+      expect(for_type).to eq(collection)
+      expect(for_post.local(:r)).to eq(collection)
+      expect(while_type).to eq(Rigor::Type::Combinator.constant_of(nil))
+    end
+
+    it "types a for loop over a collection not known to answer itself from each as Dynamic[top]" do
+      type, = evaluate("for i in unknown; end")
+      expect(type).to eq(Rigor::Type::Combinator.untyped)
+    end
+
+    it "joins a for loop's break value into its collection" do
+      type, = evaluate("for i in [1, 2]; break :b; end")
+      collection, = evaluate("[1, 2]")
+      expect(type).to eq(Rigor::Type::Combinator.union(collection, Rigor::Type::Combinator.constant_of(:b)))
+    end
+
+    # Issue #2031 — Ruby gives a while / until expression the value of the `break` that ends it.
+    it "joins a while loop's break value with nil" do
+      type, = evaluate(<<~RUBY)
+        i = 0
+        while i < 10
+          i += 1
+          break "four" if i == 4
+        end
+      RUBY
+      nil_type = Rigor::Type::Combinator.constant_of(nil)
+      expect(type).to eq(Rigor::Type::Combinator.union(nil_type, Rigor::Type::Combinator.constant_of("four")))
+    end
+
+    it "joins an until loop's break value with nil" do
+      type, = evaluate("n = 0\nuntil n > 3; n += 1; break :b if n == 2; end")
+      nil_type = Rigor::Type::Combinator.constant_of(nil)
+      expect(type).to eq(Rigor::Type::Combinator.union(nil_type, Rigor::Type::Combinator.constant_of(:b)))
+    end
+
+    it "types a literal while true loop as its break values alone" do
+      type, = evaluate("while true; break 1; end")
+      expect(type).to eq(Rigor::Type::Combinator.constant_of(1))
+    end
+
+    it "leaves a while loop nil when the only break belongs to a nested block" do
+      type, = evaluate("c = cond\nwhile c; [1].each { break 2 }; c = false; end")
+      expect(type).to eq(Rigor::Type::Combinator.constant_of(nil))
+    end
+
     it "for-loop binds the index in the post-loop scope (nil-injected)" do
       type, post = evaluate(<<~RUBY)
         for i in [1, 2, 3]
         end
       RUBY
-      expect(type).to eq(Rigor::Type::Combinator.constant_of(nil))
+      expect(type).to eq(evaluate("[1, 2, 3]").first)
       # `i` is bound only inside the body, so the no-iteration join path nil-injects it into the post-loop scope. The
       # element type comes from the Tuple[1, 2, 3] carrier.
       i_type = post.local(:i)

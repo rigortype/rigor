@@ -39,8 +39,16 @@ module Rigor
         SEND_CALLS = %i[send __send__ public_send].freeze
         # Reading the block through these runs it with its own `self`, or does not run it.
         PLAIN_PROC_CALLS = %i[call yield [] === ! arity lambda? parameters nil?].freeze
-        # Receiverless calls that can reach a local by name.
-        BINDING_CALLS = %i[binding eval].freeze
+        # Calls, on any receiver, that can reach a local by name: a `Binding`, a string `eval`, and the string forms of
+        # the `*_eval` family (with an argument), whose code runs in the caller's scope.
+        BINDING_CALLS = %i[binding eval local_variable_get].freeze
+        STRING_EVAL_CALLS = %i[instance_eval class_eval module_eval].freeze
+        # Issue #2186 — a block given to `call` / `()` / `bind_call` on a Method object goes to the method it names:
+        # `Ext.method(:me).call { … }` is `Ext.me { … }`.
+        METHOD_OBJECT_CALLS = %i[call yield === [] bind_call].freeze
+        METHOD_READERS = %i[method public_method singleton_method instance_method public_instance_method].freeze
+        METHOD_WRAPPERS = %i[bind unbind to_proc curry].freeze
+        private_constant :STRING_EVAL_CALLS, :METHOD_OBJECT_CALLS, :METHOD_READERS, :METHOD_WRAPPERS
         PREDICATE_PARENTS = [Prism::IfNode, Prism::UnlessNode, Prism::WhileNode, Prism::UntilNode].freeze
         # `proc { … }`, `lambda { … }` and `Proc.new { … }` passed with `&` are the block of the call they go to.
         PROC_LITERAL_CALLS = %i[proc lambda].freeze
@@ -53,7 +61,18 @@ module Rigor
         # file's memo of callee answers. Built on the first ask, so a file whose would-fire calls all decline earlier
         # never walks. One file is one ADR-46 consumer, so an answer's dependency edges, recorded on its first ask,
         # hold for every later call in the file that reuses it.
+        #
+        # Issue #2186 — a proc literal that is a value rather than a call's block (`blk = proc { … }`) adds a row for
+        # each call that receives it as `&blk`, when every other read of that local only calls or tests it. Any other
+        # proc value (stored, passed positionally, read another way, or in a file that may read locals by name through
+        # `binding` / `eval` / `local_variable_get` or a computed `send`) cannot be followed to the call that runs it,
+        # so its row is {UNKNOWN}, which declines. A block's span runs to the end of the last heredoc that opens inside
+        # it: Prism puts a heredoc's body after the block's closing brace, but Ruby runs its interpolation inside the
+        # block.
         class Sites
+          # The target of a row whose block Rigor cannot follow to the call that runs it.
+          UNKNOWN = :unknown
+
           attr_reader :answers
 
           def initialize(root)
@@ -63,8 +82,8 @@ module Rigor
             @def_rows = nil
           end
 
-          # The block-passing calls whose block contains `node`. Rows are sorted by start, so the scan stops at the
-          # first block that starts after `node`.
+          # The block-passing calls (or {UNKNOWN}) whose block contains `node`. Rows are sorted by start, so the scan
+          # stops at the first block that starts after `node`.
           def enclosing(node)
             build
             start = node.location.start_offset
@@ -89,18 +108,68 @@ module Rigor
             return if @rows
 
             @rows = []
-            collect(@root) unless @root.nil?
-            # `collect` records a call before its receiver and arguments, so a block call chained on another
-            # (`m { }.then { }`) comes after the call whose block starts later.
+            @heredoc_ends = {}.compare_by_identity
+            @proc_values = []
+            @local_reads = Hash.new { |hash, name| hash[name] = [] }
+            @block_passes = Hash.new { |hash, name| hash[name] = [] }
+            @reads_locals_by_name = false
+            unless @root.nil?
+              collect(@root, nil)
+              @proc_values.each { |body, parent| value_targets(parent).each { |target| add_row(body, target) } }
+            end
+            # A block call chained on another (`m { }.then { }`) is met after the call whose block starts later.
             @rows.sort_by!(&:first)
           end
 
-          def collect(node)
-            if node.is_a?(Prism::CallNode)
-              body = RebindingBlockCallees.block_body(node.block)
-              @rows << [body.location.start_offset, body.location.end_offset, node] if body
+          # Walks children first and answers the end offset of the last heredoc that opens in `node`'s subtree.
+          def collect(node, parent)
+            last = RebindingBlockCallees.heredoc_end(node)
+            node.compact_child_nodes.each do |child|
+              child_end = collect(child, node)
+              last = child_end if child_end && (last.nil? || child_end > last)
             end
-            node.compact_child_nodes.each { |child| collect(child) }
+            @heredoc_ends[node] = last if last
+            note(node, parent)
+            last
+          end
+
+          def note(node, parent)
+            case node
+            when Prism::CallNode then note_call(node, parent)
+            when Prism::LambdaNode then @proc_values << [node, parent] unless parent.is_a?(Prism::BlockArgumentNode)
+            when Prism::LocalVariableReadNode
+              @local_reads[node.name] << [node, parent] unless parent.is_a?(Prism::BlockArgumentNode)
+            end
+          end
+
+          def note_call(node, parent)
+            block = node.block
+            body = RebindingBlockCallees.block_body(block)
+            add_row(body, node) if body
+            if block.is_a?(Prism::BlockArgumentNode) && block.expression.is_a?(Prism::LocalVariableReadNode)
+              @block_passes[block.expression.name] << node
+            end
+            value = RebindingBlockCallees.proc_literal(node)
+            @proc_values << [value, parent] if value && !parent.is_a?(Prism::BlockArgumentNode)
+            target = RebindingBlockCallees.send_target(node)
+            @reads_locals_by_name = true if target.nil? || BINDING_CALLS.include?(target)
+          end
+
+          # The calls a proc value assigned to a local reaches as `&local`, or {UNKNOWN}.
+          def value_targets(parent)
+            return [UNKNOWN] if @reads_locals_by_name || !parent.is_a?(Prism::LocalVariableWriteNode)
+
+            name = parent.name
+            followed = @local_reads[name].all? do |read, read_parent|
+              RebindingBlockCallees.plain_read?(read, read_parent)
+            end
+            followed ? @block_passes[name] : [UNKNOWN]
+          end
+
+          def add_row(body, target)
+            stop = body.location.end_offset
+            heredoc = @heredoc_ends[body]
+            @rows << [body.location.start_offset, heredoc && heredoc > stop ? heredoc : stop, target]
           end
         end
 
@@ -108,7 +177,18 @@ module Rigor
 
         # Does `call_node` sit inside a block that some project definition of its callee may run under another `self`?
         def inside_rebound_block?(call_node, scope, sites, scope_index = nil)
-          sites.enclosing(call_node).any? { |block_call| callee_may_rebind?(block_call, scope, sites, scope_index) }
+          sites.enclosing(call_node).any? do |block_call|
+            block_call == Sites::UNKNOWN || callee_may_rebind?(block_call, scope, sites, scope_index)
+          end
+        end
+
+        # The end offset of a heredoc `node` opens, or nil.
+        def heredoc_end(node)
+          case node
+          when Prism::StringNode, Prism::InterpolatedStringNode, Prism::XStringNode, Prism::InterpolatedXStringNode
+            closing = node.closing_loc
+            closing.end_offset if closing && node.opening_loc&.slice&.start_with?("<<")
+          end
         end
 
         # The node whose span is the block `call` passes: its literal block, or a lambda / proc literal passed with `&`.
@@ -190,12 +270,30 @@ module Rigor
           answers[name] = project_may_rebind?(name, scope, sites)
         end
 
-        # The method the block reaches: the call's own name, or the literal name a `send` family call dispatches to.
-        # nil when a `send` names its method with anything but a literal, or with a String that is no valid name.
+        # The method the block reaches: the call's own name, the literal name a `send` family call dispatches to, or
+        # the method a Method object names. nil when a `send` names its method with anything but a literal, or with a
+        # String that is no valid name, and for a `call` on anything but a literal `method(:name)`.
         def callee_name(call)
+          return method_object_name(call.receiver) if METHOD_OBJECT_CALLS.include?(call.name)
+
+          send_target(call)
+        end
+
+        def method_object_name(receiver)
+          receiver = receiver.receiver while receiver.is_a?(Prism::CallNode) && METHOD_WRAPPERS.include?(receiver.name)
+          return nil unless receiver.is_a?(Prism::CallNode) && METHOD_READERS.include?(receiver.name)
+
+          literal_name(receiver.arguments&.arguments&.first)
+        end
+
+        # The call's own name, or the literal name a `send` family call dispatches to (nil when it is not one).
+        def send_target(call)
           return call.name unless SEND_CALLS.include?(call.name)
 
-          first = call.arguments&.arguments&.first
+          literal_name(call.arguments&.arguments&.first)
+        end
+
+        def literal_name(first)
           case first
           when Prism::SymbolNode, Prism::StringNode
             text = first.unescaped
@@ -294,9 +392,19 @@ module Rigor
           when Prism::BlockArgumentNode then node.expression.nil?
           when Prism::ForwardingArgumentsNode then true
           when Prism::LocalVariableReadNode then node.name == block_name && !plain_read?(node, parent)
-          when Prism::CallNode then node.receiver.nil? && BINDING_CALLS.include?(node.name)
+          when Prism::CallNode then reaches_locals?(node)
           else false
           end
+        end
+
+        # Issue #2186 — a call that can reach the block local by name, on any receiver and through `send`:
+        # `Kernel.eval("module_eval(&b)")`, `send(:binding).local_variable_get(:b)`, `instance_eval("module_eval(&b)")`.
+        # A `send` whose method name is not a literal may be any of them.
+        def reaches_locals?(call)
+          name = send_target(call)
+          return true if name.nil? || BINDING_CALLS.include?(name)
+
+          STRING_EVAL_CALLS.include?(name) && !call.arguments.nil?
         end
 
         def plain_read?(node, parent)

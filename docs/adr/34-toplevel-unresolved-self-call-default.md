@@ -427,3 +427,11 @@ original WD3 framing left implicit.
   `method_missing` that hands its block on, `super` included,
   silences the rule in a block whose receiver Rigor cannot type or
   whose class lacks the callee.
+- 2026-10-21 — a block reached through a local
+  (`blk = proc { … }; Ext.me(&blk)`), a Method object
+  (`Ext.method(:me).call { … }`) or a heredoc that opens in it is
+  read the same way, and a callee that can reach its block local
+  through a `binding`, a string `eval` or a computed `send` counts
+  as a hand-off. A proc value Rigor cannot follow to the call that
+  runs it declines
+  ([#2186](https://github.com/rigortype/rigor/issues/2186)).

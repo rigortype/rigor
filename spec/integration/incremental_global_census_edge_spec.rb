@@ -77,8 +77,9 @@ RSpec.describe "incremental edges for the global write census (#2158)" do
     end
   end
 
-  # A refinement that adds `write` declines the write only where a `using` is in effect, so `use.rb` activates the
-  # module `other.rb` declares, with or without the refinement.
+  # Guards: a refinement that adds `write` declines the write only where a `using` is in effect, so `use.rb` activates
+  # the module `other.rb` declares, with or without the refinement. The `using` already files an edge to the file that
+  # declares the module, so these pass without the `global_census:refines*` keys.
   def using_write = "using R\n$stdout = 1\n"
   def refining_write = "module R\n  refine Integer do\n    def write(*) = nil\n  end\nend\n"
 

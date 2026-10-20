@@ -274,4 +274,96 @@ RSpec.describe "plugins/rigor-activejob" do
       expect(rows.first.message).to include("failed to discover jobs")
     end
   end
+
+  # The recurring schedule is watched as `[".", *recurring_paths]`. A schedule path that holds glob metacharacters
+  # must be watched as that literal file: read as a pattern, `recurring[1].yml` matches `recurring1.yml`, so an
+  # edit to the real schedule leaves the cache entry fresh and the next process publishes the old roots.
+  describe "the recurring schedule cache with a bracketed file name" do
+    let(:schedule_path) { "config/recurring[1].yml" }
+    let(:cache_root) { Dir.mktmpdir("rigor-activejob-cache-") }
+
+    after do
+      Rigor::Plugin.unregister!
+      FileUtils.rm_rf(cache_root)
+    end
+
+    def write_schedule(job)
+      FileUtils.mkdir_p(File.dirname(schedule_path))
+      File.write(schedule_path, "nightly:\n  class: #{job}\n")
+    end
+
+    # A fresh `Cache::Store` at the same root is the stand-in for a second `rigor check` process.
+    def run_activejob(cache_store:)
+      Rigor::Plugin.unregister!
+      captured = nil
+      allow(Rigor::Plugin::Services).to receive(:new).and_wrap_original do |original, **kwargs|
+        services = original.call(**kwargs)
+        captured = services.fact_store
+        services
+      end
+      configuration = Rigor::Configuration.new(
+        Rigor::Configuration::DEFAULTS.merge(
+          "paths" => ["demo.rb"],
+          "plugins" => [{ "gem" => "rigor-activejob", "config" => { "recurring_paths" => [schedule_path] } }]
+        )
+      )
+      runner = Rigor::Analysis::Runner.new(
+        configuration: configuration, cache_store: cache_store,
+        plugin_requirer: lambda { |_name|
+          Rigor::Plugin.register(Rigor::Plugin::Activejob)
+          true
+        }
+      )
+      guarded_run(runner)
+      captured&.read(plugin_id: "activejob", name: :reachability_roots)
+    end
+
+    def recurring_stats(cache_store)
+      cache_store.stats[:by_producer].fetch("plugin.activejob.recurring_jobs", { hits: 0, misses: 0, writes: 0 })
+    end
+
+    it "watches the schedule file the bracketed path names" do
+      Dir.mktmpdir do |raw_project|
+        Dir.chdir(File.realpath(raw_project)) do
+          File.write("demo.rb", "x = 1\n")
+          write_schedule("WelcomeEmailJob")
+          watched = []
+          allow(Rigor::Cache::Descriptor::GlobEntry).to receive(:compute).and_wrap_original do |original, **kwargs|
+            watched << kwargs
+            original.call(**kwargs)
+          end
+          run_activejob(cache_store: Rigor::Cache::Store.new(root: cache_root))
+
+          schedule = File.join(Dir.pwd, schedule_path)
+          covers = watched.map { |kwargs| Rigor::RootedGlob.glob(kwargs[:root], kwargs[:pattern]) }
+          expect(covers).to include([schedule])
+        end
+      end
+    end
+
+    it "publishes the edited schedule's roots from a warm cache, as a cold run does" do
+      Dir.mktmpdir do |raw_project|
+        Dir.chdir(File.realpath(raw_project)) do
+          DEFAULT_JOBS.each do |path, source|
+            FileUtils.mkdir_p(File.dirname(path))
+            File.write(path, source)
+          end
+          File.write("demo.rb", "x = 1\n")
+          write_schedule("WelcomeEmailJob")
+          first_store = Rigor::Cache::Store.new(root: cache_root)
+          expect(run_activejob(cache_store: first_store)).to eq(["WelcomeEmailJob"])
+
+          write_schedule("ReportJob")
+          second_store = Rigor::Cache::Store.new(root: cache_root)
+          warm = run_activejob(cache_store: second_store)
+          cold = run_activejob(cache_store: nil)
+
+          expect(warm).to eq(["ReportJob"])
+          expect(warm).to eq(cold)
+          expect(recurring_stats(second_store)[:misses]).to be >= 1
+          expect(recurring_stats(second_store)[:hits]).to eq(0)
+        end
+      end
+    end
+  end
 end

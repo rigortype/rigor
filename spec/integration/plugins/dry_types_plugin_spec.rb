@@ -181,7 +181,7 @@ RSpec.describe "rigor-dry-types integration" do
     # `cache_root` — a fresh store with an empty in-process memo is the faithful stand-in for a second
     # `rigor check` process reading the same on-disk cache, the only configuration in which a missing watch
     # entry surfaces as stale output. Returns `[alias_table_or_nil, cache_store]`.
-    def run_dry_types(project_dir:, models_dir:, cache_root:)
+    def run_dry_types(project_dir:, models_dir:, cache_root:, paths: [models_dir])
       Rigor::Plugin.unregister!
       captured_fact_store = nil
       allow(Rigor::Plugin::Services).to receive(:new).and_wrap_original do |original, **kwargs|
@@ -193,7 +193,7 @@ RSpec.describe "rigor-dry-types integration" do
       cache_store = Rigor::Cache::Store.new(root: cache_root)
       configuration = Rigor::Configuration.new(
         Rigor::Configuration::DEFAULTS.merge(
-          "paths" => [models_dir],
+          "paths" => paths,
           "plugins" => ["rigor-dry-types"]
         )
       )
@@ -275,6 +275,47 @@ RSpec.describe "rigor-dry-types integration" do
         RUBY
         second, second_store = run_dry_types(project_dir: project_dir, models_dir: models_dir, cache_root: cache_root)
         expect(second.fetch("Types::Email")).to eq("String")
+        expect(producer_stats(second_store)[:misses]).to be >= 1
+        expect(producer_stats(second_store)[:hits]).to eq(0)
+      end
+    end
+
+    # A single-file `paths:` entry is watched by its own name. A name holding glob metacharacters must be watched
+    # as that literal file: read as a pattern, `types[1].rb` matches `types1.rb`, which does not exist, so an
+    # edit to the real file leaves the watch digest unchanged and the next process serves the stale table.
+    it "watches a single-file `paths:` entry whose name holds glob metacharacters as that file" do
+      with_project do |project_dir, models_dir, cache_root|
+        types_path = File.join(models_dir, "types[1].rb")
+        File.write(types_path, types_module(underlying: "String"))
+        watched = []
+        allow(Rigor::Cache::Descriptor::GlobEntry).to receive(:compute).and_wrap_original do |original, **kwargs|
+          watched << kwargs
+          original.call(**kwargs)
+        end
+        run_dry_types(project_dir: project_dir, models_dir: models_dir, cache_root: cache_root, paths: [types_path])
+
+        covers = watched.select { |kwargs| kwargs[:root] == models_dir }.map do |kwargs|
+          Rigor::RootedGlob.glob(kwargs[:root], kwargs[:pattern])
+        end
+        expect(covers).to include([types_path])
+      end
+    end
+
+    it "recomputes when a single-file `paths:` entry whose name holds glob metacharacters changes" do
+      with_project do |project_dir, models_dir, cache_root|
+        types_path = File.join(models_dir, "types[1].rb")
+        File.write(types_path, types_module(underlying: "String"))
+        first, first_store = run_dry_types(
+          project_dir: project_dir, models_dir: models_dir, cache_root: cache_root, paths: [types_path]
+        )
+        expect(first.fetch("Types::Email")).to eq("String")
+        expect(producer_stats(first_store)[:writes]).to be >= 1
+
+        File.write(types_path, types_module(underlying: "Integer"))
+        second, second_store = run_dry_types(
+          project_dir: project_dir, models_dir: models_dir, cache_root: cache_root, paths: [types_path]
+        )
+        expect(second.fetch("Types::Email")).to eq("Integer")
         expect(producer_stats(second_store)[:misses]).to be >= 1
         expect(producer_stats(second_store)[:hits]).to eq(0)
       end

@@ -120,16 +120,17 @@ module Rigor
 
       # The `watch:` glob tuples covering the scan's entire input — one `[root, pattern]` per project `paths:`
       # entry. A directory entry watches its whole `**/*.rb` subtree; a single-file `.rb` entry watches
-      # exactly that file (`[dir, basename]`). Roots are expanded to absolute paths by
-      # `Plugin::Base#watch_glob_entries`, so a relative CLI path (`app/models`) re-validates against the same
-      # tree from the project root on the next run. Co-extensive with {#scannable_paths}: every `.rb` the scan
-      # would read is watched, so any edit / addition / removal under those paths invalidates the cache.
+      # exactly that file (`[dir, basename]`, with the basename escaped so `[`, `{`, `*` or `?` match literally).
+      # Roots are expanded to absolute paths by `Plugin::Base#watch_glob_entries`, so a relative CLI path
+      # (`app/models`) re-validates against the same tree from the project root on the next run. Co-extensive
+      # with {#scannable_paths}: every `.rb` the scan would read is watched, so any edit / addition / removal
+      # under those paths invalidates the cache.
       def alias_watch_globs
         services.configuration.paths.filter_map do |entry|
           if io_boundary.directory?(entry)
             [entry, "**/*.rb"]
           elsif io_boundary.file?(entry) && entry.end_with?(".rb")
-            [File.dirname(entry), File.basename(entry)]
+            [File.dirname(entry), Rigor::RootedGlob.literal(File.basename(entry))]
           end
         end
       end

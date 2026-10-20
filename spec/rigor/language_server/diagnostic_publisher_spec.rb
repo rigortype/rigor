@@ -719,7 +719,6 @@ RSpec.describe Rigor::LanguageServer::DiagnosticPublisher do
     end
   end
 
-  # #246 — the save round. Analysis scope is the whole project; the PUBLISH SET is the open, clean buffers.
   describe "#republish_open" do
     it "publishes every open buffer from its own bytes" do
       Dir.mktmpdir("rigor-lsp-republish-") do |dir|
@@ -738,6 +737,7 @@ RSpec.describe Rigor::LanguageServer::DiagnosticPublisher do
     end
   end
 
+  # #246 — the save round. Analysis scope is the whole project; the PUBLISH SET is the open, clean buffers.
   describe "#publish_project" do
     # `widget.rb` returns a String and `other.rb` calls `upcase` on it — clean. Editing widget's return to an
     # Integer makes the diagnostic appear in OTHER.rb, which is the whole point: a single-file publish for
@@ -793,8 +793,35 @@ RSpec.describe Rigor::LanguageServer::DiagnosticPublisher do
 
         Dir.chdir(dir) { publisher_for(context_for(dir)).publish_project(widget) }
 
-        expect(diagnostics_for(other)).to eq([])
+        # Every payload, not only the last: the round's on-disk answer must never reach a dirty buffer.
+        other_payloads = writer.payloads.select { |p| p.dig(:params, :uri) == other }
+        expect(other_payloads.map { |p| p.dig(:params, :diagnostics) }).to eq([[]])
         expect(diagnostics_for(widget)).to eq([])
+      end
+    end
+
+    # The re-publish joins the buffer's own debounced publishes, which `PublishBatcher` serialises, so it cannot
+    # land an older analysis after a newer edit's.
+    it "re-publishes a dirty buffer through #publish_for" do
+      Dir.mktmpdir("rigor-lsp-round-route-") do |dir|
+        write_project(dir, "1")
+        widget = "file://#{File.join(dir, 'widget.rb')}"
+        other  = "file://#{File.join(dir, 'other.rb')}"
+        buffer_table.open(uri: widget, bytes: File.read(File.join(dir, "widget.rb")), version: 1)
+        buffer_table.open(uri: other, bytes: "class Other\nend\n", version: 1)
+        buffer_table.change(uri: other, bytes: "class Other\nend\n", version: 2)
+        publisher = publisher_for(context_for(dir))
+        # A plain recorder, not an rspec-mocks spy: a spy's failure message inspects the publisher, whose project
+        # context reaches the whole environment, and never finishes.
+        routed = []
+        publisher.define_singleton_method(:publish_for) do |uri|
+          routed << uri
+          super(uri)
+        end
+
+        Dir.chdir(dir) { publisher.publish_project(widget) }
+
+        expect(routed).to eq([other])
       end
     end
 
@@ -830,6 +857,27 @@ RSpec.describe Rigor::LanguageServer::DiagnosticPublisher do
         buffer_table.open(uri: widget, bytes: File.read(File.join(dir, "widget.rb")), version: 1)
         context = context_for(dir)
         # A watched-file change lands mid-analysis: the world these diagnostics describe is gone.
+        allow(context).to receive(:project_diagnostics).and_wrap_original do |original, *args|
+          result = original.call(*args)
+          context.invalidate!
+          result
+        end
+
+        Dir.chdir(dir) { publisher_for(context).publish_project(widget) }
+
+        expect(writer.payloads).to be_empty
+      end
+    end
+
+    it "re-publishes no dirty buffer from a round whose context was invalidated" do
+      Dir.mktmpdir("rigor-lsp-round-gen-dirty-") do |dir|
+        write_project(dir, "1")
+        widget = "file://#{File.join(dir, 'widget.rb')}"
+        other  = "file://#{File.join(dir, 'other.rb')}"
+        buffer_table.open(uri: widget, bytes: File.read(File.join(dir, "widget.rb")), version: 1)
+        buffer_table.open(uri: other, bytes: "class Other\nend\n", version: 1)
+        buffer_table.change(uri: other, bytes: "class Other\nend\n", version: 2)
+        context = context_for(dir)
         allow(context).to receive(:project_diagnostics).and_wrap_original do |original, *args|
           result = original.call(*args)
           context.invalidate!

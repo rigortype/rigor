@@ -100,7 +100,8 @@ module Rigor
         publish_batch(eligible)
       end
 
-      # Runs one whole-project save round and publishes to the publish set (#246). Called from `didSave`.
+      # Runs one whole-project save round and publishes to the publish set (#246), then re-publishes each dirty buffer
+      # from its own bytes (ADR-124). Called from `didSave`.
       #
       # Analysis scope is the whole project; the PUBLISH SET is the open buffers that are not dirty, plus the
       # buffer that was just saved. A dirty buffer is excluded because only its own `didChange` analysis has
@@ -198,8 +199,10 @@ module Rigor
 
       # The dirty buffers the round may not speak for, re-published from their own bytes (ADR-124). The save that
       # started the round may have moved a declaration a dirty buffer's markers read across files, and nothing
-      # else re-analyses that buffer until its next change or save.
-      def republish_dirty = publish_many(@buffer_table.uris.select { |uri| @buffer_table.dirty?(uri) })
+      # else re-analyses that buffer until its next change or save. Each goes through {#publish_for}, so the
+      # debouncer and `PublishBatcher` order it against the buffer's own `didChange` publishes: a re-publish run
+      # here, beside them, could land its older bytes' markers after a newer edit's.
+      def republish_dirty = @buffer_table.uris.each { |uri| publish_for(uri) if @buffer_table.dirty?(uri) }
 
       # The URIs this round may speak for: every open buffer whose bytes are the ones on disk. The just-saved
       # URI qualifies by definition (the client wrote it), and is named explicitly so a client that sends

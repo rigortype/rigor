@@ -1,9 +1,10 @@
 # frozen_string_literal: true
 
 # Issue #1924 — an `if` / `elsif` / `unless` / ternary in a value position the evaluator does not enter (an array
-# element, a call argument, a hash value, an interpolation, a receiver) narrows its branches by its condition's edges
-# but applies no write the condition makes. A bound local the condition writes reads `Dynamic[top]` on those edges,
-# so neither its old type nor a narrowing of it reaches the branches. Each comment gives what Ruby 4.0.5 answers.
+# element, a call argument, a hash value, an interpolation, a receiver) narrows its branches by its condition's edges,
+# and a write the condition makes reaches them, so neither a local's old type nor a narrowing of it does. Since #2056
+# the scope index evaluates such a conditional as the statement form does, so the written local reads its new value
+# (#1924 first read it as `Dynamic[top]`). Each comment gives what Ruby 4.0.5 answers.
 
 # `or_assign("a")` returns ["A"], `or_assign(nil)` ["D"].
 def or_assign(raw)
@@ -85,15 +86,15 @@ def receiver(raw)
   (if (x ||= "d").empty? then "" else x.upcase end).size
 end
 
-# The widened local reads `Dynamic[top]` in the branch; a local the condition binds first is not given a binding.
+# The written local reads the written value in the branch, whether it was bound before the condition or not.
 # `widened(true, "a")` and `first_bound("a")` each return ["A"].
 def widened(raw, s)
   x = raw ? 1 : nil
-  [if (x = String(s)).empty? then 0 else assert_type("Dynamic[top]", x).upcase end]
+  [if (x = String(s)).empty? then 0 else assert_type("String", x).upcase end]
 end
 
 def first_bound(s)
-  [if (z = String(s)).empty? then 0 else assert_type("Dynamic[top]", z).upcase end]
+  [if (z = String(s)).empty? then 0 else assert_type("String", z).upcase end]
 end
 
 # Nor does a later condition narrow it from one: `z.nil?` never holds, and `first_bound_elsif("a")` returns [1].

@@ -1209,11 +1209,11 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
-  # Issue #1924 — an unentered `if` / `elsif` / `unless` / ternary applies no write its condition makes.
-  describe "fixtures/unentered_if_condition_writes.rb — an unentered conditional widens its condition's writes" do
+  # Issue #1924 — an unentered `if` / `elsif` / `unless` / ternary applies the writes its condition makes (#2056).
+  describe "fixtures/unentered_if_condition_writes.rb — an unentered conditional applies its condition's writes" do
     let(:harness) { harness_for("unentered_if_condition_writes") }
 
-    it "reads a written bound local as Dynamic[top] in the branches and keeps a no-write narrowing" do
+    it "reads a written local's new value in the branches and keeps a no-write narrowing" do
       mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
       expect(mismatches).to be_empty
     end
@@ -1238,14 +1238,22 @@ RSpec.describe "Rigor type construction (integration)" do
       expect(mismatches.map { |d| "#{d.line}: #{d.message}" }).to be_empty
     end
 
-    it "reports a possible nil receiver only past the right operand" do
+    # STATEMENT-FORM-NIL marks a value form and its statement twin that both report: the statement form's reading,
+    # not this walk's.
+    it "reports a possible nil receiver only past the right operand, and where the statement form does" do
       nil_receivers = harness.diagnostics.select { |d| d.rule == "call.possible-nil-receiver" }
-      expect(nil_receivers.map(&:line)).to eq(marked_lines(harness, "# GENUINE-NIL"))
+      expected = (marked_lines(harness, "# GENUINE-NIL") + marked_lines(harness, "# STATEMENT-FORM-NIL")).sort
+      expect(nil_receivers.map(&:line)).to eq(expected)
     end
 
-    it "reports an undefined method on `||`'s falsey edge" do
+    it "reports an undefined method on `||`'s falsey edge and past a write of nil" do
       undefined = harness.diagnostics.select { |d| d.rule == "call.undefined-method" }
       expect(undefined.map(&:line)).to eq(marked_lines(harness, "# GENUINE-UNDEFINED"))
+    end
+
+    it "reports an always-truthy test after a write in the right operand where the statement form does" do
+      truthy = harness.diagnostics.select { |d| d.rule == "flow.always-truthy-condition" }
+      expect(truthy.map(&:line)).to eq(marked_lines(harness, "# ALWAYS-TRUTHY"))
     end
   end
 

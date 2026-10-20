@@ -198,11 +198,14 @@ module Rigor
         seeded_scope = seed_struct_fold_safe(seeded_scope, root).with_match_frame(root)
 
         on_enter = ->(node, scope) { table[node] = scope }
-        StatementEvaluator.new(scope: seeded_scope, on_enter: on_enter,
-                               converged_loop_recording: converged_loop_recording,
-                               widen_clauses: widen_clauses).evaluate(root)
+        evaluate = lambda do |node, scope|
+          StatementEvaluator.new(scope: scope, on_enter: on_enter,
+                                 converged_loop_recording: converged_loop_recording,
+                                 widen_clauses: widen_clauses).evaluate(node)
+        end
+        evaluate.call(root, seeded_scope)
 
-        propagate(root, table, seeded_scope)
+        with_unentered_evaluator(evaluate) { propagate(root, table, seeded_scope) }
         table
       end
 
@@ -11433,6 +11436,7 @@ module Rigor
             table[node] = parent_scope
             parent_scope
           end
+        evaluate_unentered_flow(node, table, current_scope)
 
         case node
         when Prism::IfNode
@@ -11462,16 +11466,52 @@ module Rigor
         end
       end
 
+      # Issues #2196 and #2056 — the constructs whose parts run under a narrowing their own condition or left operand
+      # makes, keyed to the part {StatementEvaluator} records first when it enters one.
+      UNENTERED_FLOW_ENTRY = {
+        Prism::AndNode => :left, Prism::OrNode => :left,
+        Prism::IfNode => :predicate, Prism::UnlessNode => :predicate,
+        Prism::WhileNode => :predicate, Prism::UntilNode => :predicate
+      }.freeze
+      private_constant :UNENTERED_FLOW_ENTRY
+
+      UNENTERED_EVALUATOR_KEY = :rigor_scope_index_unentered_evaluator
+      private_constant :UNENTERED_EVALUATOR_KEY
+
+      # Issues #2196 and #2056 — an `&&` / `||` / `and` / `or`, an `if` / `unless` / ternary or a `while` / `until`
+      # in a value position (an array element, a hash value, a call argument, an interpolation, a multi-value
+      # `return`) is typed by `ExpressionTyper` and never entered, so no part of it was recorded and this walk handed
+      # every part one scope. A walk that narrows by the condition's edges cannot follow a write inside the narrowed
+      # part (`[c && (c = c.size; c.even?)]`, `[x || (set!; @x.upcase)]`) nor one inside a block in an earlier
+      # conjunct (`[x.nil? && [1].each { x = "d" } && x.upcase]`). Such a construct is evaluated here instead, from
+      # the scope this walk reached it with, under the index's own recorder, so each part is recorded with the scope
+      # the statement form records it with. What it does not visit (a dead arm) is walked as before.
+      def evaluate_unentered_flow(node, table, current_scope)
+        entry = UNENTERED_FLOW_ENTRY[node.class]
+        return if entry.nil?
+
+        part = node.public_send(entry)
+        return if part.nil? || table.key?(part)
+
+        Thread.current[UNENTERED_EVALUATOR_KEY]&.call(node, current_scope)
+      end
+
+      def with_unentered_evaluator(evaluate)
+        outer = Thread.current[UNENTERED_EVALUATOR_KEY]
+        Thread.current[UNENTERED_EVALUATOR_KEY] = evaluate
+        yield
+      ensure
+        Thread.current[UNENTERED_EVALUATOR_KEY] = outer
+      end
+
       SELF_OPENING_BODIES = [Prism::DefNode, Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode].freeze
       private_constant :SELF_OPENING_BODIES
 
       # Issue #1717 — a `def` / `class` / `module` body opens its own `self`, so an enclosing unentered block's
       # unknown-`self` mark ({Scope#block_self_unknown?}) stops at it, as the evaluator's fresh body scope does.
-      # A `case` narrows its clauses ({#propagate_subjectless_case}, {#propagate_subject_case}) and an `&&` / `||` its
-      # right operand ({#propagate_and_or}). Every other node hands its children the scope as is.
+      # A `case` narrows its clauses ({#propagate_subjectless_case}, {#propagate_subject_case}). Every other node
+      # hands its children the scope as is.
       def propagate_children(node, table, current_scope)
-        return propagate_and_or(node, table, current_scope) if node.is_a?(Prism::AndNode) || node.is_a?(Prism::OrNode)
-
         if node.is_a?(Prism::CaseNode) || node.is_a?(Prism::CaseMatchNode)
           return propagate_subjectless_case(node, table, current_scope) if node.predicate.nil?
 
@@ -11686,21 +11726,6 @@ module Rigor
         propagate(node.predicate, table, current_scope) if node.predicate
         propagate(node.statements, table, falsey_scope) if node.statements
         propagate(node.else_clause, table, truthy_scope) if node.else_clause
-      end
-
-      # Issue #2196 — an `&&` / `||` / `and` / `or` the evaluator did not enter (`[c && c + 1]`, `foo(c && c + 1)`,
-      # `"#{c && c + 1}"`) evaluates its right operand under its left operand's truthy edge (`&&`) or falsey edge
-      # (`||`), as {StatementEvaluator#eval_and_or} does; the left operand and everything after the operator keep the
-      # scope the operator started in. Like the walk of an `if`, it applies no write the left operand makes, so the
-      # edge is taken from a scope where every bound local the left operand writes reads `Dynamic[top]`
-      # ({#widen_condition_writes}). A right operand the evaluator recorded keeps its own scope, so no edge is computed.
-      def propagate_and_or(node, table, current_scope)
-        propagate(node.left, table, current_scope)
-        right = node.right
-        return propagate(right, table, current_scope) if table.key?(right)
-
-        truthy_scope, falsey_scope = conditional_edges(node.left, current_scope)
-        propagate(right, table, node.is_a?(Prism::AndNode) ? truthy_scope : falsey_scope)
       end
 
       def conditional_edges(predicate, scope)

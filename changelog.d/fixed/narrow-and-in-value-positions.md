@@ -1,1 +1,2 @@
-- **[engine]** An `&&` or `||` written as an array element, hash value, call argument or interpolation now narrows its right operand as the statement form does, so `[column && (column + 1)]` no longer reports `call.possible-nil-receiver`. ([#2202](https://github.com/rigortype/rigor/pull/2202))
+- **[engine]** An `&&`, `||`, `if`, ternary or `while` written as an array element, hash value, call argument or interpolation is now checked as its statement form is, so `[column && (column + 1)]` no longer reports `call.possible-nil-receiver`. ([#2202](https://github.com/rigortype/rigor/pull/2202))
+  - A write or call inside the construct is followed too: `[c && (c = c.size; c.even?)]` and `[x || (x = "d"; x.upcase)]` no longer report, and `[c && (c = nil; c + 1)]` still does.

@@ -2,6 +2,7 @@
 
 require "prism"
 
+require_relative "../analysis/dependency_recorder"
 require_relative "../source/node_children"
 require_relative "../source/parameter_envelope"
 require_relative "../type"
@@ -186,7 +187,16 @@ module Rigor
 
         # Whether a `refine` block anywhere in the project defines `name`, on any class: a `using` in effect where the
         # read code sits may route the call to it (`refine Kernel do def warn …`), whatever the receiver.
+        #
+        # Issue #2163 — the answer reads every file's refinements whole, and a refined class off the chain (`Kernel`,
+        # `IO`, `String`) is no `mark:` the chain read files, so it records `refinement:<name>` and `refinement:*`
+        # whichever way it answers, as `InEffectRefinements` consumers do: a file that starts or stops refining the
+        # name re-checks the reader.
         def refined?(name)
+          if Analysis::DependencyRecorder.active?
+            Analysis::DependencyRecorder.read_name(:refinement, name)
+            Analysis::DependencyRecorder.read_name(:refinement, Scope::DiscoveryIndex::REFINEMENT_WILDCARD)
+          end
           @scope.discovered_refinements.any? { |_refined, methods| methods.key?(name) }
         end
 

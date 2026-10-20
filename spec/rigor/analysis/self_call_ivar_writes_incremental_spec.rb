@@ -170,4 +170,25 @@ RSpec.describe "self-call ivar-write proof — incremental" do
       { "x.rb" => "module App\n  NAME = :helper\n  Base.define_method(NAME) { 1 }\nend\n" }
     )
   end
+
+  # Issue #2163 — a `refine` of a class off the chain (`Kernel`, `String`, `IO`) that defines a name the callee calls
+  # may route that call to the refine body, so the proof gives up. No chain read covers such a class: only the
+  # `refinement:` edge `refined?` files re-checks the caller when a file whose declarations stay starts or stops
+  # refining the name.
+  {
+    "Kernel#warn" => ["def log(message) = warn(message)", "refine Kernel do\n    def warn(*) = 1\n  end"],
+    "String#warn" => ["def log(message) = warn(message)", "refine String do\n    def warn(*) = 1\n  end"],
+    "IO#write" => ["def log(message) = STDERR.write(message)", "refine IO do\n    def write(*) = 1\n  end"]
+  }.each do |label, (callee, refine)|
+    files = { "b.rb" => "class Base\n  #{callee}\nend\n", "x.rb" => "module R\nend\n" }
+    refining_name = "module R\n  #{refine}\nend\n"
+
+    it "re-checks the caller when a file whose declarations stay starts refining #{label}" do
+      expect_recheck_to_report(files, { "x.rb" => refining_name })
+    end
+
+    it "re-checks the caller when a file whose declarations stay stops refining #{label}" do
+      expect_recheck_to_clear(files.merge("x.rb" => refining_name), { "x.rb" => "module R\nend\n" })
+    end
+  end
 end

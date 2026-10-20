@@ -90,21 +90,55 @@ RSpec.describe "the ADR-58 ivar census counts define_method block writes" do
     end
   end
 
-  describe "writes that do not reach an instance" do
+  # Ruby does run a literal lambda or proc argument on the instance, so these two rows are false positives the census
+  # misses (#2169). Flip them when #2169 is fixed.
+  describe "callable arguments the census does not read" do
     {
       "a define_method with a lambda argument" => %(define_method(:set, -> { @x = "a" })),
-      "a define_method with a block-pass lambda" => %(define_method(:set, &-> { @x = "a" })),
+      "a define_method with a block-pass lambda" => %(define_method(:set, &-> { @x = "a" }))
+    }.each do |shape, body|
+      it "leaves the census alone for #{shape}" do
+        expect(census(box(body))).to eq("nil")
+      end
+    end
+
+    # Ruby does install this block as Box's instance method, so this is a false positive (#2167). The census counts
+    # exactly the blocks whose `self` `DefineMethodBlockSelf` narrows, and that match is a literal `define_method`
+    # (#963). Flip this when #2167 is fixed.
+    it "does not count a send(:define_method) block" do
+      expect(census(box(%(send(:define_method, :set) { @x = "a" })))).to eq("nil")
+    end
+  end
+
+  describe "writes that do not reach an instance" do
+    {
       "a define_method reusing an UnboundMethod" => %(define_method(:other, instance_method(:initialize))),
       "a class_eval block in the class body" => %(class_eval { @x = "a" }),
       "a singleton_class.define_method block" => %(singleton_class.define_method(:set) { @x = "a" }),
       "a define_singleton_method block" => %(define_singleton_method(:set) { @x = "a" }),
       "a define_method in a class << self body" => %(class << self\n  define_method(:set) { @x = "a" }\nend),
+      "a define_method in a singleton_class.class_eval block" =>
+        %(singleton_class.class_eval do\n  define_method(:set) { @x = "a" }\nend),
+      "a define_method on another receiver" => %(Other.define_method(:set) { @x = "a" }),
       "an anonymous Class.new body" => %(Class.new { define_method(:set) { @x = "a" } }),
       "a named Class.new body" => %(K = Class.new { define_method(:set) { @x = "a" } }),
       "an ordinary block in the class body" => %(tap { @x = "a" })
     }.each do |shape, body|
       it "leaves the census alone for #{shape}" do
         expect(census(box(body))).to eq("nil")
+      end
+    end
+
+    # Ruby writes these on another object, so `@x` stays nil on Box's instance; the census still counts them, which
+    # widens the type and only misses a report (#2166). Flip this when #2166 is fixed.
+    {
+      "an instance_exec on another object" => %(Object.new.instance_exec { @x = "a" }),
+      "a Class.new body" => %(Class.new { @x = "a" }),
+      "a Struct.new block" => %(Struct.new(:a) { @x = "a" }),
+      "a Data.define block" => %(Data.define(:a) { @x = "a" })
+    }.each do |shape, inner|
+      it "still counts a write in #{shape} inside a define_method block" do
+        expect(census(box(%(define_method(:set) { #{inner} })))).to eq(%("a"?))
       end
     end
 

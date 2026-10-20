@@ -1,0 +1,1 @@
+- **[engine]** A method the project defines on a class that only its rbs-inline annotations declare (an `alias_method`, or a `def` in another file of the class) no longer reports `call.undefined-method` with the ADR-17 `pre_eval:` advice, since the class is now the project's own as a `sig/`-declared class is. ([#2172](https://github.com/rigortype/rigor/pull/2172))

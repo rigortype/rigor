@@ -26,34 +26,53 @@ RSpec.describe "call.unresolved-toplevel in a rebinding callee's block — incre
     rows(diagnostics)
   end
 
-  it "re-checks the caller when the callee's body changes and when a same-named callee appears or goes" do
+  let(:fires) { [["use.rb", 1]] }
+  let(:yields) { "module Ext\n  def self.define = yield\nend\n" }
+  let(:rebinding_other) { "class Other\n  def define(&blk) = instance_exec(&blk)\nend\n" }
+
+  around do |example|
     Dir.mktmpdir do |tmp|
-      lib = File.join(tmp, "lib")
-      Dir.mkdir(lib)
-      ext = File.join(lib, "ext.rb")
-      other = File.join(lib, "other.rb")
-      File.write(ext, "module Ext\n  def self.define = yield\nend\n")
-      File.write(File.join(lib, "use.rb"), "Ext.define { helper }\n")
-      config = Rigor::Configuration.new("paths" => [lib])
-      snapshot = Rigor::Cache::IncrementalSnapshot.new(root: File.join(tmp, ".cache"))
-      fires = [["use.rb", 1]]
-
-      expect(process_run(config, [lib], snapshot)).to eq(fires)
-
-      File.write(ext, "module Ext\n  def self.define(&blk) = module_eval(&blk)\nend\n")
-      expect(cold_run(config)).to eq([])
-      expect(process_run(config, [lib], snapshot)).to eq([])
-
-      File.write(ext, "module Ext\n  def self.define = yield\nend\n")
-      expect(cold_run(config)).to eq(fires)
-      expect(process_run(config, [lib], snapshot)).to eq(fires)
-
-      File.write(other, "class Other\n  def define(&blk) = instance_exec(&blk)\nend\n")
-      expect(cold_run(config)).to eq([])
-      expect(process_run(config, [lib], snapshot)).to eq([])
-
-      File.delete(other)
-      expect(process_run(config, [lib], snapshot)).to eq(fires)
+      @lib = File.join(tmp, "lib")
+      Dir.mkdir(@lib)
+      File.write(File.join(@lib, "ext.rb"), yields)
+      File.write(File.join(@lib, "use.rb"), "Ext.define { helper }\n")
+      @config = Rigor::Configuration.new("paths" => [@lib])
+      @snapshot = Rigor::Cache::IncrementalSnapshot.new(root: File.join(tmp, ".cache"))
+      example.run
     end
+  end
+
+  def warm = process_run(@config, [@lib], @snapshot)
+
+  it "re-checks the caller when the callee's body starts and stops rebinding" do
+    ext = File.join(@lib, "ext.rb")
+    expect(warm).to eq(fires)
+
+    File.write(ext, "module Ext\n  def self.define(&blk) = module_eval(&blk)\nend\n")
+    expect(cold_run(@config)).to eq([])
+    expect(warm).to eq([])
+
+    File.write(ext, yields)
+    expect(cold_run(@config)).to eq(fires)
+    expect(warm).to eq(fires)
+  end
+
+  it "re-checks the caller when another file starts or stops defining a rebinding callee of the same name" do
+    other = File.join(@lib, "other.rb")
+    File.write(other, "class Other\nend\n")
+    expect(warm).to eq(fires)
+
+    # Edits of an existing file, then the file's removal.
+    File.write(other, rebinding_other)
+    expect(cold_run(@config)).to eq([])
+    expect(warm).to eq([])
+
+    File.write(other, "class Other\nend\n")
+    expect(warm).to eq(fires)
+
+    File.write(other, rebinding_other)
+    expect(warm).to eq([])
+    File.delete(other)
+    expect(warm).to eq(fires)
   end
 end

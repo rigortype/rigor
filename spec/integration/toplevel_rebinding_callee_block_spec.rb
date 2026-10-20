@@ -19,61 +19,73 @@ RSpec.describe "call.unresolved-toplevel inside a block a project callee rebinds
   # The callees live in their own file, so the rule reads them through the cross-file project tables.
   let(:callees) do
     <<~RUBY
-      class Target
-        def helper = :target_helper
-      end
+        class Target
+          def helper = :target_helper
+        end
 
-      module Ext
-        def self.helper = :ext_helper
-        def self.me(&b) = module_eval(&b)
-        def self.ce(&b) = class_eval(&b)
-        def self.ie(&b) = instance_eval(&b)
-        def self.ix(&b) = instance_exec(&b)
-        def self.cx(&b) = class_exec(&b)
-        def self.mx(&b) = module_exec(&b)
-        def self.yields = yield
-        def self.calls(&b) = b.call
-        def self.guarded(&b) = (b.call if b)
-        def self.other(&b) = Target.new.instance_exec(&b)
+        module Ext
+          def self.helper = :ext_helper
+          def self.me(&b) = module_eval(&b)
+          def self.ce(&b) = class_eval(&b)
+          def self.ie(&b) = instance_eval(&b)
+          def self.ix(&b) = instance_exec(&b)
+          def self.cx(&b) = class_exec(&b)
+          def self.mx(&b) = module_exec(&b)
+          def self.yields = yield
+          def self.calls(&b) = b.call
+          def self.guarded(&b) = (b.call if b)
+        def self.anded(&b) = b && b.call
+          def self.other(&b) = Target.new.instance_exec(&b)
 
-        def self.cond(flag, &b)
-          if flag
-            module_eval(&b)
-          else
-            b.call
+          def self.cond(flag, &b)
+            if flag
+              module_eval(&b)
+            else
+              b.call
+            end
+          end
+
+          def self.anon(&) = module_eval(&)
+        def self.bnd(&b) = module_eval(&binding.local_variable_get(:b))
+          def self.fwd(...) = module_eval(...)
+
+          def self.stored(&b)
+            @b = b
+            module_eval(&@b)
+          end
+
+          class << self
+            define_method(:dm) { |&b| module_eval(&b) }
+            alias_method :al, :ix
           end
         end
 
-        def self.anon(&) = module_eval(&)
-      def self.bnd(&b) = module_eval(&binding.local_variable_get(:b))
-        def self.fwd(...) = module_eval(...)
-
-        def self.stored(&b)
-          @b = b
-          module_eval(&@b)
+        class Base
+          def self.dsl(&b) = instance_eval(&b)
+          def self.helper = :base_helper
         end
 
-        class << self
-          define_method(:dm) { |&b| module_eval(&b) }
-          alias_method :al, :ix
+        class Kid < Base
+          def self.dsl = super
         end
+
+        class Kid2 < Base
+          def self.dsl = super()
+        end
+
+        # `super` hands the block to a core method that rebinds it: Struct.new and Data.define class_eval it.
+      class Rec < Struct
+        def self.helper = :rec_helper
+        def self.new(*args) = super
       end
 
-      class Base
-        def self.dsl(&b) = instance_eval(&b)
-        def self.helper = :base_helper
-      end
-
-      class Kid < Base
-        def self.dsl = super
-      end
-
-      class Kid2 < Base
-        def self.dsl = super()
+      class Dat < Data
+        def self.helper = :dat_helper
+        def self.define(*args) = super(*args)
       end
 
       def with_ext(&b) = Ext.module_eval(&b)
-      def top_helper = :top_helper
+        def top_helper = :top_helper
     RUBY
   end
 
@@ -89,6 +101,7 @@ RSpec.describe "call.unresolved-toplevel inside a block a project callee rebinds
       "Ext.yields { helper }",
       "Ext.calls { helper }",
       "Ext.guarded { helper }",
+      "Ext.anded { helper }",
       "Ext.other { helper }",
       "Ext.cond(true) { helper }",
       "Ext.send(:me) { helper }",
@@ -107,6 +120,8 @@ RSpec.describe "call.unresolved-toplevel inside a block a project callee rebinds
       "Ext.ix(&proc { helper })",
       "Kid.dsl { helper }",
       "Kid2.dsl { helper }",
+      "Rec.new(:a) { helper }",
+      "Dat.define(:a) { helper }",
       "with_ext { helper }",
       "[1].each { helper }",
       "helper"
@@ -165,7 +180,7 @@ RSpec.describe "call.unresolved-toplevel inside a block a project callee rebinds
     expected = ruby_name_error_lines
 
     # Non-vacuity: Ruby rebinds most rows and leaves `self` as main on the plain-call ones.
-    plain = ["Ext.yields { helper }", "Ext.calls { helper }", "Ext.guarded { helper }",
+    plain = ["Ext.yields { helper }", "Ext.calls { helper }", "Ext.guarded { helper }", "Ext.anded { helper }",
              "Ext.public_send(:yields) { helper }", "[1].each { helper }", "helper"]
     expect(expected).to match_array(plain.map { |row| ["use.rb", line_of(row)] })
     expect(toplevel_lines).to match_array(expected)

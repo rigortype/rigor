@@ -30,9 +30,12 @@ module Rigor
       # and an MCP caller would get a result for it with no sign anything was missing. Auto-discovery, with no
       # `--config` given, is not affected.
       def config_path(value)
-        return value if File.exist?(value)
+        raise ConfigurationError, "empty config path" if value.strip.empty?
+        raise ConfigurationError, "config path is a directory: #{value}" if File.directory?(value)
+        raise ConfigurationError, "config file not found: #{value}" unless File.exist?(value)
+        raise ConfigurationError, "config file not readable: #{value}" unless File.readable?(value)
 
-        raise ConfigurationError, "config file not found: #{value}"
+        value
       end
 
       # Defines the `--tmp-file` / `--instead-of` editor-mode flag pair on `parser`, writing into `options`.

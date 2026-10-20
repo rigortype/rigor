@@ -361,6 +361,17 @@ RSpec.describe Rigor::MCP::Server do
   end
 
   describe "config_path session default" do
+    # A blank per-call `config` names no file: the session default applies, and `--config=` never reaches the CLI.
+    it "is used when the per-call config is blank" do
+      s = described_class.new(config_path: "/tmp/session.yml", err: StringIO.new)
+
+      ["", "   "].each do |blank|
+        argv = s.send(:build_argv, "rigor_check", { "paths" => ["lib/"], "config" => blank })
+        expect(argv).to include("--config=/tmp/session.yml")
+        expect(argv).not_to include("--config=")
+      end
+    end
+
     it "is threaded into build_argv as a --config flag" do
       s = described_class.new(config_path: "/tmp/fake.yml", err: StringIO.new)
       # We test the private helper directly to avoid needing a real config file.

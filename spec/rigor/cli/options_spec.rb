@@ -4,6 +4,7 @@ require "spec_helper"
 require "stringio"
 require "optionparser"
 require "tmpdir"
+require "fileutils"
 require "rigor/cli/options"
 
 RSpec.describe Rigor::CLI::Options do
@@ -31,6 +32,39 @@ RSpec.describe Rigor::CLI::Options do
       expect { parser.parse!(["--config=missing.yml"]) }
         .to raise_error(Rigor::ConfigurationError, "config file not found: missing.yml")
       expect(options).not_to have_key(:config)
+    end
+
+    # The other ways a --config can name no usable file each get their own message.
+    it "says why a --config names no usable file" do
+      Dir.mktmpdir do |dir|
+        Dir.chdir(dir) do
+          FileUtils.mkdir_p("conf.d")
+          File.write("locked.yml", "")
+          allow(File).to receive(:readable?).and_call_original
+          allow(File).to receive(:readable?).with("locked.yml").and_return(false)
+
+          {
+            "--config=" => "empty config path",
+            "--config=conf.d" => "config path is a directory: conf.d",
+            "--config=locked.yml" => "config file not readable: locked.yml"
+          }.each do |argument, message|
+            parser = OptionParser.new { |opts| described_class.add_config(opts, {}) }
+            expect { parser.parse!([argument]) }.to raise_error(Rigor::ConfigurationError, message)
+          end
+        end
+      end
+    end
+
+    it "keeps a readable file it is given" do
+      Dir.mktmpdir do |dir|
+        Dir.chdir(dir) do
+          File.write("ok.yml", "")
+          options = {}
+          OptionParser.new { |opts| described_class.add_config(opts, options) }.parse!(["--config=ok.yml"])
+
+          expect(options[:config]).to eq("ok.yml")
+        end
+      end
     end
   end
 

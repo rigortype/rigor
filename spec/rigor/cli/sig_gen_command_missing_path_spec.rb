@@ -33,6 +33,27 @@ RSpec.describe Rigor::CLI::SigGenCommand do
     expect(status).to eq(1)
   end
 
+  it "carries the missing path in the JSON payload under --diff too" do
+    status, out, err = run_sig_gen("--diff", "--format=json", "--", "missing.rb")
+
+    expect(JSON.parse(out).fetch("diagnostics")).to contain_exactly(
+      include("path" => "missing.rb", "severity" => "error", "message" => "no such file or directory")
+    )
+    expect(err).to be_empty
+    expect(status).to eq(1)
+  end
+
+  # A file that exists but is not `.rb` is a path error too, worded as check words it. The mutant
+  # `next if File.exist?(path)` in PathExpansion.unusable would skip it, and this example would fail.
+  it "reports an existing non-Ruby file as not a Ruby file" do
+    File.write("notes.txt", "not ruby\n")
+
+    status, _out, err = run_sig_gen("--", "notes.txt")
+
+    expect(err).to include("notes.txt:1:1: error: not a Ruby file (expected `.rb` or a directory)")
+    expect(status).to eq(1)
+  end
+
   it "carries the missing path in the JSON payload, as a diagnostic check would give it" do
     status, out, err = run_sig_gen("--print", "--format=json", "--", "missing.rb")
 

@@ -1,0 +1,1 @@
+- **[engine]** `/re/ === x` and `case x when /re/` now keep a subject that may respond to `to_str`, such as a String subclass, a `to_str` class or `Object`, on the match arm, instead of reading it as `Dynamic[top]`, `bot` or `String | Symbol` there. ([#2256](https://github.com/rigortype/rigor/pull/2256))

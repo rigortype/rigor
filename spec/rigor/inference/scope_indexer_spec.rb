@@ -1384,7 +1384,10 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
       expect(def_node.name).to eq(:greet)
     end
 
-    it "resolves alias that appears before the def (forward reference)" do
+    # Issue #2006 — an alias copies what its old name holds AT the alias. Here that is nothing this file defines:
+    # Ruby 4.0.5 raises NameError at the alias unless `greet` is inherited or loaded earlier, and then the alias
+    # copies that method, never the later `def`. So the new name gets no def node of this file.
+    it "does not resolve an alias that appears before the def (forward reference) to the later def" do
       program = parse(<<~RUBY)
         class Greeter
           alias say_hello greet
@@ -1393,9 +1396,8 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
       RUBY
       idx = described_class.index(program, default_scope: default_scope)
       outer_scope = idx[program]
-      def_node = outer_scope.user_def_for("Greeter", :say_hello)
-      expect(def_node).to be_a(Prism::DefNode)
-      expect(def_node.name).to eq(:greet)
+      expect(outer_scope.user_def_for("Greeter", :greet)).to be_a(Prism::DefNode)
+      expect(outer_scope.user_def_for("Greeter", :say_hello)).to be_nil
     end
 
     describe "class-ivar widening on observed mutation" do

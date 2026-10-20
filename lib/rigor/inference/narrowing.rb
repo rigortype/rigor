@@ -2786,8 +2786,10 @@ module Rigor
         end
 
         # True when a class `member` dispatches through declares `to_str`, or is declared by no signature
-        # ({#class_lacks_method?} answers false for it). An open-surface class (`Object`, `BasicObject`) or a
-        # module is neither: its instances may be anything, so the member is not read as one that converts.
+        # ({#class_lacks_method?} answers false for it). `Object`, `BasicObject` and a module String or Symbol
+        # includes (`Kernel`, `Comparable`) are read as their String and Symbol parts instead: their instances may be
+        # anything, and the String they most often are keeps a String method on the arm from reporting. Any other
+        # module is kept whole, since a matching value may include it; so is one of those that declares `to_str`.
         def converts_with_to_str?(member, scope)
           targets = ProjectMethodOwnership.targets(member)
           return false if targets.nil? || targets.empty?
@@ -2795,11 +2797,23 @@ module Rigor
           targets.any? { |class_name, kind| class_converts_with_to_str?(class_name, kind, scope) }
         end
 
+        # The modules String's or Symbol's own ancestry includes, read from the running Ruby.
+        STRING_SYMBOL_MODULES = (String.ancestors + Symbol.ancestors).reject { |mod| mod.is_a?(Class) }
+                                                                      .filter_map(&:name).uniq.freeze
+        private_constant :STRING_SYMBOL_MODULES
+
         def class_converts_with_to_str?(class_name, kind, scope)
           return false if kind == :instance && OPEN_SURFACE_CLASSES.include?(class_name)
-          return false if kind == :instance && scope.environment.rbs_module?(class_name)
+          if kind == :instance && scope.environment.rbs_module?(class_name)
+            return module_declares_to_str?(class_name, scope) || !STRING_SYMBOL_MODULES.include?(class_name)
+          end
 
           !class_lacks_method?(class_name, :to_str, kind, scope)
+        end
+
+        def module_declares_to_str?(module_name, scope)
+          ProjectMethodOwnership.defines?(module_name, :to_str, :instance, scope) ||
+            !ExternalAncestorResolution.method_definition(module_name, :to_str, :instance, scope: scope).nil?
         end
 
         def unwrap_parens(node)

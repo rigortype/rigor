@@ -62,6 +62,23 @@ end
 # An `Object`, `BasicObject` or module subject narrows to its String and Symbol parts on the match edge, so a String
 # method called there reports nothing (Ruby: `Probe.new.object_length("12")` is 2, `basic_upcase("1a")` is "1A",
 # `object_or_nil_to_i("12")` is 12). Parameter types come from `sig/subjects.rbs`.
+# A module String and Symbol do not include may be included by a value that matches, so a subject typed by it is kept
+# whole (Ruby: `/\d/ === NamedImpl.new` is true, and `NamedImpl` includes `Named`); so is one typed by a module that
+# declares `to_str`. `Kernel` and `Comparable`, which String includes, read `String | Symbol` as `Object` does.
+module Named
+  def greet = "hi"
+end
+
+module NamedToStr
+  def to_str = "12"
+end
+
+class NamedImpl
+  include Named
+
+  def to_str = "12"
+end
+
 class Probe
   def object_length(s)
     assert_type("String | Symbol", s) if /\d/ === s
@@ -80,5 +97,22 @@ class Probe
 
   def kernel_subject(s)
     assert_type("String | Symbol", s) if /\d/ === s
+  end
+
+  def comparable_subject(s)
+    assert_type("String | Symbol", s) if /\d/ === s
+  end
+
+  def named_subject(s)
+    assert_type("Named", s) if /\d/ === s
+    s.greet if /\d/ === s
+  end
+
+  def named_to_str_subject(s)
+    assert_type("NamedToStr", s) if /\d/ === s
+  end
+
+  def enumerable_subject(s)
+    assert_type("Enumerable[Dynamic[top]]", s) if /\d/ === s
   end
 end

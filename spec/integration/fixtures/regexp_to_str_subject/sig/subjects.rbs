@@ -17,9 +17,26 @@ class SigMixed
   include ToStrMixin
 end
 
+module Named
+  def greet: () -> String
+end
+
+module NamedToStr
+  def to_str: () -> String
+end
+
+class NamedImpl
+  include Named
+  def to_str: () -> String
+end
+
 class Probe
   def object_length: (Object s) -> Integer?
   def basic_upcase: (BasicObject s) -> (String | Symbol)?
   def object_or_nil_to_i: (Object? s) -> Integer?
   def kernel_subject: (Kernel s) -> void
+  def comparable_subject: (Comparable s) -> void
+  def named_subject: (Named s) -> String?
+  def named_to_str_subject: (NamedToStr s) -> void
+  def enumerable_subject: (Enumerable[untyped] s) -> void
 end

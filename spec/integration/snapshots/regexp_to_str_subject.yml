@@ -9,3 +9,7 @@ assertions:
   '6': SigPlain | SigToStr
   '7': String | Symbol
   '8': String | Symbol
+  '9': String | Symbol
+  '10': Named
+  '11': NamedToStr
+  '12': Enumerable[Dynamic[top]]

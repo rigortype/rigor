@@ -722,6 +722,18 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
   # Union[Constant…] folding. Each Constant in a union represents a possible runtime value; a binary op over two unions
   # is the cartesian fold, deduplicated. Bounded by the input/output cardinality caps so an analyzer-side blowup is not
   # possible.
+  # Issue #1513 — the possible results of a fold are deduplicated by value, sign of zero included.
+  describe "signed-zero results (#1513)" do
+    it "keeps 0.0 and -0.0 as two possible results" do
+      expect([0.0 * 1.0, -0.0 * 1.0].map(&:to_s)).to eq(%w[0.0 -0.0])
+      receiver = Rigor::Type::Combinator.union(Rigor::Type::Combinator.constant_of(0.0),
+                                               Rigor::Type::Combinator.constant_of(-0.0))
+      result = described_class.try_dispatch(cc(receiver: receiver, method_name: :*,
+                                               args: [Rigor::Type::Combinator.constant_of(1.0)]))
+      expect(result.members.map { |m| m.value.to_s }).to contain_exactly("0.0", "-0.0")
+    end
+  end
+
   describe "union fold" do
     def constant_union(*values)
       Rigor::Type::Combinator.union(

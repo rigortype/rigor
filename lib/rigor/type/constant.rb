@@ -100,13 +100,51 @@ module Rigor
 
       include Rigor::Type::AcceptanceRouter
 
+      # Two carriers are equal when they pin the same value, which for a Float is stricter than Ruby's `==`
+      # (#1513): `0.0` and `-0.0` are distinct values (`1.0 / x` tells them apart), so `0.0 | -0.0` keeps both
+      # members, and a NaN equals another NaN, so `==` stays reflexive and a union never collects one NaN member
+      # per occurrence. A Complex compares its parts the same way.
       def ==(other)
-        other.is_a?(Constant) && value.class == other.value.class && value == other.value
+        other.is_a?(Constant) && value.class == other.value.class && Constant.same_value?(value, other.value)
       end
       alias eql? ==
 
       def hash
-        [Constant, value.class, value].hash
+        [Constant, value.class, Constant.value_key(value)].hash
+      end
+
+      # True when `left` and `right` (of one class) are the same value in the sense of {#==}.
+      def self.same_value?(left, right)
+        case left
+        when Float then same_float?(left, right)
+        when Complex then same_float?(left.real, right.real) && same_float?(left.imaginary, right.imaginary)
+        else left == right
+        end
+      end
+
+      def self.same_float?(left, right)
+        return left == right unless left.is_a?(Float) && right.is_a?(Float)
+        return right.nan? if left.nan?
+
+        left.eql?(right) && (!left.zero? || (1.0 / left).positive? == (1.0 / right).positive?)
+      end
+
+      # A key whose `eql?` / `hash` agree with {.same_value?}: `uniq { |v| Constant.value_key(v) }` keeps
+      # `0.0` and `-0.0` apart and folds every NaN into one. Any other value is its own key, so plain `uniq`
+      # semantics are unchanged for it.
+      def self.value_key(value)
+        case value
+        when Float then float_key(value)
+        when Complex then [Complex, float_key(value.real), float_key(value.imaginary)]
+        else value
+        end
+      end
+
+      def self.float_key(value)
+        return value unless value.is_a?(Float)
+        return :nan if value.nan?
+
+        value.zero? ? [Float, (1.0 / value)] : value
       end
 
       def inspect

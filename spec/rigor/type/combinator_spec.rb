@@ -3,6 +3,27 @@
 require "spec_helper"
 
 RSpec.describe Rigor::Type::Combinator do
+  # Issue #1513 — a union of the two signed zeros is two members; a union of NaNs is one.
+  describe "union of signed zeros and NaN (#1513)" do
+    def const(value) = Rigor::Type::Combinator.constant_of(value)
+
+    it "keeps 0.0 and -0.0 as two members" do
+      union = described_class.union(const(0.0), const(-0.0))
+      expect(union).to be_a(Rigor::Type::Union)
+      expect(union.members.map { |m| m.value.to_s }).to contain_exactly("0.0", "-0.0")
+      expect(union.describe).to eq("-0.0 | 0.0")
+    end
+
+    it "still collapses repeated zeros of one sign" do
+      expect(described_class.union(const(-0.0), const(-0.0))).to eq(const(-0.0))
+    end
+
+    it "collapses repeated NaN members into one" do
+      union = described_class.union(const(Float::NAN), const(-(0.0 / 0.0)), const(1.0))
+      expect(union.members.size).to eq(2)
+    end
+  end
+
   describe ".top" do
     it "is a flyweight" do
       expect(described_class.top).to equal(described_class.top)

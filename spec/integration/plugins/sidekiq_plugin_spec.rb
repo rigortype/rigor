@@ -574,4 +574,45 @@ RSpec.describe "plugins/rigor-sidekiq" do
       expect(rows.first.message).to include("failed to discover workers")
     end
   end
+
+  # The schedule is watched as `[".", *schedule_paths]`. A configured path holding glob metacharacters must be watched
+  # as that literal file, so the watch entry must cover it (fails without the `RootedGlob.literal` escape).
+  describe "the schedule watch with a bracketed path" do
+    # The glob entries the run computed, as `[root, pattern]` pairs, for a schedule at `schedule_path`.
+    def watched_for_schedule(dir, cache_root, schedule_path)
+      watched = []
+      allow(Rigor::Cache::Descriptor::GlobEntry).to receive(:compute).and_wrap_original do |original, **kwargs|
+        watched << kwargs
+        original.call(**kwargs)
+      end
+      schedule = { "gem" => "rigor-sidekiq", "config" => { "schedule_paths" => [schedule_path] } }
+      configuration = Rigor::Configuration.new(
+        Rigor::Configuration::DEFAULTS.merge("paths" => ["demo.rb"], "plugins" => [schedule])
+      )
+      runner = Rigor::Analysis::Runner.new(
+        configuration: configuration, cache_store: Rigor::Cache::Store.new(root: cache_root),
+        plugin_requirer: lambda { |_name|
+          Rigor::Plugin.register(Rigor::Plugin::Sidekiq)
+          true
+        }
+      )
+      Rigor::Plugin.unregister!
+      Dir.chdir(dir) { guarded_run(runner) }
+      watched.map { |kwargs| Rigor::RootedGlob.glob(kwargs[:root], kwargs[:pattern]) }
+    end
+
+    it "watches the schedule file the bracketed path names" do
+      Dir.mktmpdir do |raw_project|
+        Dir.mktmpdir do |cache_root|
+          dir = File.realpath(raw_project)
+          FileUtils.mkdir_p(File.join(dir, "config"))
+          File.write(File.join(dir, "config", "sidekiq[1].yml"), "nightly:\n  class: WelcomeEmailWorker\n")
+          File.write(File.join(dir, "demo.rb"), "x = 1\n")
+
+          covers = watched_for_schedule(dir, cache_root, "config/sidekiq[1].yml")
+          expect(covers).to include([File.join(dir, "config/sidekiq[1].yml")])
+        end
+      end
+    end
+  end
 end

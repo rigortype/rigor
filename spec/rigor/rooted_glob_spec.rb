@@ -51,6 +51,13 @@ RSpec.describe Rigor::RootedGlob do
     expect(described_class.glob(File.join(parent, "fx[1]"), "*.rb")).to eq([File.join(parent, "fx[1]", "own.rb")])
   end
 
+  it "reads a literal name as that name, whatever characters it holds" do
+    write(File.join(parent, "a[1].rb"))
+    write(File.join(parent, "a1.rb"))
+
+    expect(described_class.glob(parent, described_class.literal("a[1].rb"))).to eq([File.join(parent, "a[1].rb")])
+  end
+
   it "does not leave a root named `{..,zz}`" do
     root = File.join(parent, "proj", "{..,zz}")
     write(File.join(root, "in.rb"))

@@ -12,6 +12,9 @@ module Rigor
   # would not do that: it reads an absolute pattern, or an absolute alternative, outside `base`. A root without
   # metacharacters is joined unchanged, so the results are the joined glob's strings in its order, `root` kept as
   # given (relative, symlinked or with a trailing `/`).
+  #
+  # `literal(name)` is the same escape for a single name (a file's basename, a configured path) that is joined into
+  # a pattern as a literal: `literal("a[1].rb")` matches `a[1].rb` and not `a1.rb`.
   module RootedGlob
     METACHARACTERS = /[\[\]{}*?\\]/
 
@@ -21,7 +24,13 @@ module Rigor
     # @param pattern — a `Dir.glob` pattern relative to `root`
     # @return the matches spelled under `root`, in `Dir.glob` order; empty when `root` is not a directory
     def glob(root, pattern)
-      Dir.glob(File.join(root.to_s.gsub(METACHARACTERS, "\\\\\\0"), pattern.to_s))
+      Dir.glob(File.join(literal(root), pattern.to_s))
+    end
+
+    # @param name — a file or directory name, taken literally
+    # @return the pattern that matches exactly `name` under `Dir.glob`, with its metacharacters escaped
+    def literal(name)
+      name.to_s.gsub(METACHARACTERS, "\\\\\\0")
     end
   end
 end

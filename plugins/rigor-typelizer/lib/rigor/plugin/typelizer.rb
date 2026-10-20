@@ -62,7 +62,7 @@ module Rigor
           if io_boundary.directory?(File.expand_path(entry))
             [entry, "**/*.rb"]
           elsif entry.end_with?(".rb") && io_boundary.file?(File.expand_path(entry))
-            [File.dirname(entry), File.basename(entry)]
+            [File.dirname(entry), Rigor::RootedGlob.literal(File.basename(entry))]
           end
         end
       end

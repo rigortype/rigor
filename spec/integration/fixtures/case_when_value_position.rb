@@ -50,6 +50,13 @@ def subject_write_statement(raw)
   end
 end
 
+# An instance-variable subject write narrows the same way: `ivar_subject_write("ab")` returns ["AB"].
+def ivar_subject_write(raw)
+  [case (@case_y = raw ? String(raw) : nil)
+   when String then assert_type("String", @case_y).upcase
+   end]
+end
+
 # A block in an arm reads the arm's narrowing, a `self`-changing one included: `block_arm("s")` returns [[1]],
 # `self_block_arm("s")` ["S"].
 def block_arm(raw)

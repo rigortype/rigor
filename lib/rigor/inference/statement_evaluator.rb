@@ -1522,8 +1522,6 @@ module Rigor
           InterveningIvarReset.may_write?(condition, name, before, run_lambdas: true)
         when Prism::LocalVariableReadNode
           false
-        when Prism::GlobalVariableReadNode
-          when_test_runs_code?(condition)
         else
           body = when_lambda_body(condition)
           GuardRebinding.may_rebind?(condition, before) || (!body.nil? && GuardRebinding.may_rebind?(body, before))

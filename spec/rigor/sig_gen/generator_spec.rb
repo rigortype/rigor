@@ -688,7 +688,7 @@ RSpec.describe Rigor::SigGen::Generator do
       candidates = described_class.new(configuration: config, paths: [path], observations: observations).run
 
       expect(candidates.select { |c| c.class_name == "Point" }.filter_map(&:rbs))
-        .to include('def x: () -> ("a" | 1)', "def y: () -> 2")
+        .to include("def x: () -> (Integer | String)", "def y: () -> Integer")
     end
 
     # A one-argument `Point.new(attrs)` shim must not type member 0 as that argument's type: the arities disagree,

@@ -36,6 +36,11 @@ module Rigor
     # - A `T | nil` receiver with one `Nominal` / `Singleton` non-nil member counts as that member (#1389).
     # - Zero-argument calls give no observation; methods are matched by `(class_name, method_name)` only.
     class ObservationCollector # rubocop:disable Metrics/ClassLength
+      # The key a `Foo[...]` call is observed under. On a `Data.define` / `Struct.new` class `.[]` is `.new`
+      # (#1150, #1183), and {MetaMemberObservation} reads it as a construction; on any other class nothing reads
+      # it. Not an instance method name, so no `def` of the class can collide with it.
+      BRACKET_NEW = :"self.[]"
+
       # @param paths — observe paths (files /
       #   directories).
       # @param source_paths — source-tree paths
@@ -137,8 +142,32 @@ module Rigor
             return
           end
         end
+        register_value_class(node, prefix, accumulator)
 
         node.rigor_each_child { |child| walk_class_decls(child, prefix, accumulator) }
+      end
+
+      # `P = Data.define(...)` / `S = Struct.new(...)` declares a class with no `class` keyword, so a construction
+      # site in another file (`P.new(name: "a")` in a spec) would read `P` as an unknown constant and observe
+      # nothing (#1150, #1183). Registering it here is observation only: the analyser's own view of `P` is
+      # untouched.
+      def register_value_class(node, prefix, accumulator)
+        return unless node.is_a?(Prism::ConstantWriteNode) && value_class_call?(node.value)
+
+        full = [*prefix, node.name.to_s].join("::")
+        accumulator[full] ||= Type::Combinator.singleton_of(full)
+      end
+
+      def value_class_call?(node)
+        return false unless node.is_a?(Prism::CallNode)
+
+        expected = { define: :Data, new: :Struct }[node.name]
+        receiver = node.receiver
+        case receiver
+        when Prism::ConstantReadNode then receiver.name == expected
+        when Prism::ConstantPathNode then receiver.parent.nil? && receiver.name == expected
+        else false
+        end
       end
 
       def qualified_constant_path(constant_path)
@@ -227,6 +256,8 @@ module Rigor
       def observation_key(call_node, receiver_type)
         if receiver_type.is_a?(Type::Singleton) && call_node.name == :new
           [receiver_type.class_name, :initialize]
+        elsif receiver_type.is_a?(Type::Singleton) && call_node.name == :[]
+          [receiver_type.class_name, BRACKET_NEW]
         elsif receiver_type.is_a?(Type::Nominal)
           [receiver_type.class_name, call_node.name]
         end

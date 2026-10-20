@@ -18,6 +18,7 @@ require_relative "../inference/module_function_state"
 require_relative "../inference/rbs_type_translator"
 require_relative "alias_index"
 require_relative "meta_class_shape"
+require_relative "meta_member_observation"
 require_relative "rbs_validity"
 require_relative "classification"
 require_relative "effect_annotation"
@@ -473,7 +474,7 @@ module Rigor
         # Candidate construction freezes the per-file maps above (see {#build_candidate}), so every registration
         # pass has to be finished before the first `build_candidate` call. Meta members lead the RETURNED order —
         # a value class's members and constructors read first, ahead of the methods its block body defines.
-        meta_candidates = collect_meta_member_candidates(path, scope_index)
+        meta_candidates = collect_meta_member_candidates(path, scope_index, own_initialize_classes(defs))
         candidates_from_defs = defs.filter_map do |def_node, class_name, kind|
           # An analyzer bug typing one def's body must cost only that def's candidate, never the whole
           # `rigor sig-gen` run. The `check` path recovers each *file* this way (worker_session.rb); sig-gen
@@ -2236,13 +2237,13 @@ module Rigor
       # One candidate per member accessor and constructor {MetaClassShape} renders for each layout-carrying class.
       # These are the members no `def` or `attr_*` in the source declares, so nothing else in sig-gen can find them —
       # and once `register_meta_classes` has declared the class, an undeclared member reads as a missing one.
-      def collect_meta_member_candidates(path, scope_index)
+      def collect_meta_member_candidates(path, scope_index, own_initialize_classes)
         return [] if @meta_layouts.empty?
 
         scope = scope_index.each_value.first
         environment = scope&.environment
         @meta_layouts.flat_map do |class_name, layout|
-          types = meta_member_types(class_name, layout.member_names)
+          types = own_initialize_classes.include?(class_name) ? {} : meta_member_types(class_name, layout)
           shape = MetaClassShape.of(
             kind: layout.kind, members: layout.member_names, keyword_init: layout.keyword_init,
             member_types: types.transform_values { |type| paren_wrap_union(union_erase([type], owner: class_name)) }
@@ -2275,20 +2276,23 @@ module Rigor
         method_def.defined_in.to_s.delete_prefix("::") == class_name
       end
 
-      # `--params=observed` member types. {ObservationCollector} routes `Point.new(...)` call sites to
-      # `[class_name, :initialize]`, so a keyword call site names its member directly, while a positional one is
-      # matched by index — and only from call sites whose arity covers the whole member list, so a one-argument
-      # `Point.new(attrs)` shim cannot type member 0 as `Hash`. Empty without `--params=observed`.
-      def meta_member_types(class_name, members)
-        observations = @observations[[class_name, :initialize]] || []
-        return {} if observations.empty?
+      # `--params=observed` member types (#1150, #1183): the union of what the observed construction sites, `with`
+      # calls and Struct writer calls passed each member ({MetaMemberObservation}), with value literals widened to
+      # their class the way a proposed return is ({#widen_value_literals}) — `P.new(name: "a")` proposes `String`, not
+      # `"a"`. A member no site reaches is absent and renders `untyped`; a site passing an `untyped` argument keeps
+      # the member `untyped`, since the union erases to it. Empty without `--params=observed`.
+      def meta_member_types(class_name, layout)
+        return {} if @observations.empty?
 
-        full_arity = observations.select { |obs| obs.positional.size == members.size }
-        members.each_with_index.to_h do |member, index|
-          observed = observations.filter_map { |obs| obs.keyword[member] } +
-                     full_arity.filter_map { |obs| obs.positional[index] }
-          [member, observed.empty? ? nil : Type::Combinator.union(*observed)]
-        end.compact
+        MetaMemberObservation.types(@observations, class_name, kind: layout.kind, members: layout.member_names)
+                             .transform_values { |types| widen_value_literals(Type::Combinator.union(*types)) }
+      end
+
+      # The classes this file gives an instance `initialize` of their own. A `Data.define(:x) do def initialize(x: 0)
+      # = super end` construction's arguments are that method's, not the members', so no member is read off them.
+      def own_initialize_classes(defs)
+        defs.filter_map { |def_node, class_name, kind| class_name if kind == :instance && def_node.name == :initialize }
+            .to_set
       end
     end
   end

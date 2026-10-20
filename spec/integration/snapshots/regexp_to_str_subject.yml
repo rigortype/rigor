@@ -1,0 +1,11 @@
+---
+locals: {}
+assertions:
+  '1': SigToStr
+  '2': SigChild
+  '3': SigMixed
+  '4': bot
+  '5': SigToStr
+  '6': SigPlain | SigToStr
+  '7': String | Symbol
+  '8': String | Symbol

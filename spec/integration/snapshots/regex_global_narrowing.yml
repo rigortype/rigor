@@ -294,7 +294,7 @@ assertions:
   '286': 1 | ToStrSubject2002
   '287': ToStrSubject2002
   '288': StringSubclass2002
-  '289': Object
+  '289': String | Symbol
   '290': String?
   '291': String?
   '292': String?

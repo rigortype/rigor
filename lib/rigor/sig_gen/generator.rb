@@ -1307,7 +1307,7 @@ module Rigor
         return equivalent(path, def_node, class_name, kind, inferred, VOID_RETURN_RBS) if declares_void?(method_def)
 
         declared = build_declared_return(method_def)
-        if declared_untyped?(declared)
+        if declared_untyped?(declared, method_def)
           return declared_untyped_candidate(path, def_node, class_name, kind, inferred, method_def, rendered: rendered)
         end
 
@@ -1433,8 +1433,13 @@ module Rigor
       # skips. ADR-93's inline `# @rbs param: Type` annotation (no return clause) synthesizes exactly this
       # spelling for every method it documents, so the silent drop hit the parameter-annotated, return-bare
       # shape ADR-14 exists to help.
-      def declared_untyped?(declared)
-        declared.is_a?(Type::Dynamic)
+      #
+      # The translation alone cannot say the author wrote `untyped`: an interface return (`-> _Taker[1]`,
+      # `-> _ToS`) also translates to `Dynamic`, and reading it as an absent declaration replaced it with an
+      # unrelated nominal under `--overwrite` (#2178). So every overload's return must be `untyped` as written.
+      def declared_untyped?(declared, method_def)
+        declared.is_a?(Type::Dynamic) &&
+          method_def.method_types.all? { |mt| mt.type.return_type.is_a?(RBS::Types::Bases::Any) }
       end
 
       # Proposed without {#tighter?}: a declared `untyped` return carries no information to weigh it against, the

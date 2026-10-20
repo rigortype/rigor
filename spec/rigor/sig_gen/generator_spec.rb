@@ -1266,6 +1266,39 @@ RSpec.describe Rigor::SigGen::Generator do
       expect(method.rbs).to eq("def f: (Float num) -> [Float, String]")
     end
 
+    # An interface return also translates to `Dynamic`, but it is the author's word, not an absent one: reading
+    # it as `untyped` rewrote `-> _Taker[1]` as `-> Integer` under `--overwrite`, and an Integer is no `_Taker`
+    # (#2178). `self`, `instance`, `class`, an intersection and an alias of `untyped` translate to `Dynamic` too,
+    # and are kept for the same reason. The row stays `equivalent`, as any declaration `tighter?` cannot weigh
+    # does.
+    {
+      "a project generic interface" => ["_Taker[1]", "1"],
+      "a project interface" => %w[_Plain 1],
+      "a core interface" => ["_ToS", %("s")],
+      "a self" => %w[self self],
+      "an instance" => ["instance", "Box.new"],
+      "a class" => %w[class Box],
+      "an intersection of interfaces" => ["(_ToS & _Plain)", "1"],
+      "an alias of untyped" => %w[any 1],
+      "an overload set with one untyped return (a guard: the overloads never reached the untyped path)" =>
+        ["() -> untyped | (Integer) -> _ToS", "1"]
+    }.each do |label, (declared, body)|
+      it "leaves #{label} return alone" do
+        interfaces = "interface _Taker[T]\n  def take: () -> T\nend\n" \
+                     "interface _Plain\n  def take: () -> Integer\nend\ntype any = untyped\n"
+        member = declared.include?("->") ? "def g: #{declared}" : "def g: () -> #{declared}"
+        write_fixture("sig/box.rbs", "#{interfaces}class Box\n  #{member}\nend\n")
+        path = write_fixture("lib/box.rb", "class Box\n  def g(*) = #{body}\nend\n")
+
+        gen = generator(paths: [path], signature_paths: [File.join(tmpdir, "sig")])
+        method = gen.run.find { |c| c.method_name == :g }
+
+        expect(1.respond_to?(:take)).to be(false)
+        expect(method.classification).to eq(Rigor::SigGen::Classification::EQUIVALENT)
+        expect(method.rbs).to be_nil
+      end
+    end
+
     # The suite pins `Configuration.load`'s `rigor-rbs-inline` auto-wire off (see spec_helper.rb) and this spec
     # bypasses `Configuration.load` entirely (its `generator` helper builds a bare `Configuration.new`), so
     # neither pin applies here — the plugin still needs an explicit `plugins:` entry, and its class needs to be

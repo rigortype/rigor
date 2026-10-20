@@ -117,7 +117,10 @@ point after which undoing costs users something, so it is where post-hoc approva
 ## Consequences
 
 - A merged PR's CI has run on what master became, not on an older base. The post-merge master run
-  still runs, but a newer push can replace a pending one, so it is not a check on every merge.
+  gives every merge commit pushed to `master` its own run (per-SHA group, #2140). When the queue
+  merges several entries in one group (`max_entries_to_merge: 5`), master moves in one push, so only
+  the tip gets a push run; the intermediate merge commits' status is their merge-queue `CI required`
+  run. That is the expected behaviour, not yet verified.
 - Every queued PR runs CI twice (on the PR and in the queue); grouping amortises the second run.
 - A lane no longer stops for a precedented gate row; the maintainer reviews such rows in one
   sitting at release time, with the trade-offs written down.

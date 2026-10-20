@@ -7934,14 +7934,14 @@ module Rigor
             (@contested ||= Set.new) << [class_name, name].freeze
           else
             @contested&.delete([class_name, name])
-            @contested&.delete([class_name, ScopeIndexer.replaced_visibility_mark(name)]) unless name.is_a?(Array)
           end
         end
 
         # Issue #2013 — contests the instance slot of `name`, recorded or not, and marks the contest as a
         # replacement's ({ScopeIndexer.replaced_visibility_mark}): a `define_method(:name)` or an alias gave the name
         # a visibility the walk does not read, and another file may record the slot. A later certain write in this
-        # walk clears both ({#wrote}).
+        # walk clears the contest ({#wrote}) and leaves the mark, which then only keeps a contest another file puts on
+        # the slot: the fold declines more, never reports more, and file order is not load order there either.
         def contest_replaced(class_name, name)
           contest_slot(class_name, name)
           contest_slot(class_name, ScopeIndexer.replaced_visibility_mark(name))

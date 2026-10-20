@@ -12,7 +12,7 @@ require_relative "../source/node_children"
 require_relative "../inference/scope_indexer"
 require_relative "../rooted_glob"
 require_relative "observed_call"
-require_relative "value_class_override_scan"
+require_relative "value_class_eligibility"
 
 module Rigor
   module SigGen
@@ -46,10 +46,12 @@ module Rigor
       # The key a site that may write a member, but whose argument-to-member mapping the collector cannot read, is
       # observed under: `P.new(*args)`, `s.a += 1`, `m.a, m.b = pair`, `s[k] ||= v`. Each entry is an {ObservedCall}
       # whose keywords name the members it may write, `ALL_MEMBERS` standing for every member; the value is
-      # `untyped`. {MetaMemberObservation} keeps those members `untyped`. A class {ValueClassOverrideScan} reports
-      # gets one `ALL_MEMBERS` entry. Like {BRACKET_NEW}, no `def` can collide with it.
+      # `untyped`. {MetaMemberObservation} keeps those members `untyped`. A value class {ValueClassEligibility} finds
+      # ineligible gets one `ALL_MEMBERS` entry. A writer called on a receiver the collector cannot attribute to one
+      # class is keyed under `ANY_CLASS`, and keeps that member `untyped` on every value class. Like {BRACKET_NEW}, no `def` can collide with it.
       UNMAPPED = :"rigor.unmapped"
       ALL_MEMBERS = :*
+      ANY_CLASS = "*"
 
       # Calls that may write a member, so an argument list the collector cannot read still taints the class.
       MEMBER_WRITERS = [:initialize, BRACKET_NEW, :with, :[]=, :send, :public_send, :__send__].freeze
@@ -79,7 +81,7 @@ module Rigor
         resolved.each do |path|
           collect_from_file(path, environment, discovered_classes, observations)
         end
-        overridden_classes(resolved).each { |name| observations[[name, UNMAPPED]] << unmapped(ALL_MEMBERS) }
+        ineligible_value_classes(resolved).each { |name| observations[[name, UNMAPPED]] << unmapped(ALL_MEMBERS) }
         observations.transform_values(&:freeze).freeze
       end
 
@@ -129,7 +131,8 @@ module Rigor
       # singleton carrier even when no RBS sig describes `Foo` yet.
       def preindex_source_classes
         accumulator = {}
-        @source_roots = resolve_paths(@source_paths).filter_map { |path| parse_source(path) }
+        @source_root_list = resolve_paths(@source_paths).map { |path| parse_source(path) }
+        @source_roots = @source_root_list.compact
         @source_roots.each { |root| walk_class_decls(root, [], accumulator) }
         accumulator.freeze
       end
@@ -143,11 +146,17 @@ module Rigor
         nil
       end
 
-      # #1150 / #1183 — the classes, across the source tree and the observed files, whose construction sites do not
-      # map onto their members ({ValueClassOverrideScan}).
-      def overridden_classes(observed_paths)
-        observed_roots = (observed_paths - resolve_paths(@source_paths)).filter_map { |path| parse_source(path) }
-        ValueClassOverrideScan.overridden(@source_roots + observed_roots)
+      # #1150 / #1183 — the value classes, across the source tree and the observed files, whose construction sites are
+      # not proven to map onto their members ({ValueClassEligibility}).
+      def ineligible_value_classes(observed_paths)
+        observed_roots = observed_paths.filter_map { |path| parse_source(path) }
+        ValueClassEligibility.ineligible(source_roots: source_roots_outside(observed_paths), observed_roots: observed_roots)
+      end
+
+      def source_roots_outside(observed_paths)
+        resolve_paths(@source_paths).zip(@source_root_list).filter_map do |path, root|
+          root unless observed_paths.include?(path)
+        end
       end
 
       def unmapped(member)
@@ -262,10 +271,11 @@ module Rigor
         return if receiver.nil?
 
         scope = scope_index[call_node] || scope_index[receiver]
-        return if scope.nil?
+        return record_unattributed_write(call_node, observations) if scope.nil?
 
-        receiver_type = resolve_receiver_type(receiver, scope, bindings, blocks)
-        key = observation_key(call_node, observed_receiver(receiver_type, call_node, scope))
+        receiver_type = observed_receiver(resolve_receiver_type(receiver, scope, bindings, blocks), call_node, scope)
+        key = observation_key(call_node, receiver_type)
+        return record_unattributed_write(call_node, observations) if key.nil? && !attributed?(receiver_type)
         return if key.nil?
 
         observation = collect_args(call_node, scope)
@@ -299,9 +309,27 @@ module Rigor
         return if scope.nil?
 
         receiver_type = sole_non_nil(resolve_receiver_type(receiver, scope, bindings, blocks))
-        return unless receiver_type.is_a?(Type::Nominal)
+        member = compound_write_member(node)
+        if receiver_type.is_a?(Type::Nominal)
+          observations[[receiver_type.class_name, UNMAPPED]] << unmapped(member)
+        elsif !attributed?(receiver_type) && member != ALL_MEMBERS
+          observations[[ANY_CLASS, UNMAPPED]] << unmapped(member)
+        end
+      end
 
-        observations[[receiver_type.class_name, UNMAPPED]] << unmapped(compound_write_member(node))
+      # #1150 / #1183 — a writer `o.a = v` (or `o[:a] = v`) on a receiver the collector cannot attribute to one class
+      # may be writing member `a` of any value class, so `a` stays `untyped` on all of them. A computed index key
+      # (`o[k] = v`) is not counted: on an unattributed receiver it is far more often a Hash than a Struct.
+      def record_unattributed_write(call_node, observations)
+        member =
+          if call_node.name.match?(/\A\w+=\z/) then call_node.name.to_s.delete_suffix("=").to_sym
+          elsif call_node.name == :[]= then Source::Literals.symbol_or_string(call_node.arguments&.arguments&.first)
+          end
+        observations[[ANY_CLASS, UNMAPPED]] << unmapped(member) if member
+      end
+
+      def attributed?(type)
+        type.is_a?(Type::Nominal) || type.is_a?(Type::Singleton)
       end
 
       def compound_write_member(node)

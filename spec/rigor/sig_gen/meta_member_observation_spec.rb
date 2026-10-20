@@ -232,12 +232,8 @@ RSpec.describe Rigor::SigGen::MetaMemberObservation do
       Inc = Struct.new(:a) do
         include Init
       end
-      Plain = Struct.new(:a) do
-        include Comparable
-      end
     RUBY
-    expect_untyped({ "lib/shapes.rb" => source }, "Inc.new(1)\nPlain.new(1)\n", "Inc")
-    expect(rows(observed_print, "Plain")).to include("def a: () -> Integer")
+    expect_untyped({ "lib/shapes.rb" => source }, "Inc.new(1)\n", "Inc")
   end
 
   it "reads no member off a class that extends a project module defining new" do
@@ -356,5 +352,208 @@ RSpec.describe Rigor::SigGen::MetaMemberObservation do
 
   it "keeps the member an index operator write names untyped" do
     expect_untyped({ "lib/shapes.rb" => "Io = Struct.new(:a)\n" }, "s = Io.new(1)\ns[:a] += 2.5\n", "Io")
+  end
+
+  # The allow-list (ValueClassEligibility). Positive control: every reference form and body statement it allows, at
+  # once, still types the members.
+  it "types a value class whose every reference and body statement is plain" do
+    write("lib/shapes.rb", <<~RUBY)
+      module N
+        V = Struct.new(:a) do
+          LIMIT = 1
+          attr_reader :note
+          def label = "v"
+          private
+          def helper = 1
+          private def other = 2
+          private_constant :LIMIT
+        end
+        class V
+          def more = 2
+        end
+        class V::Inner; end
+      end
+    RUBY
+    write("test/v_test.rb", <<~RUBY)
+      N::V.new(1)
+      N::V[2]
+      N::V.members
+      def guard(v)
+        v.is_a?(N::V)
+        v.kind_of?(N::V)
+        v.instance_of?(N::V)
+        N::V === v
+        case v
+        when N::V then 1
+        end
+      rescue N::V
+        nil
+      end
+      ::N::V.new(3)
+    RUBY
+
+    expect(rows(observed_print, "N::V")).to include("def a: () -> Integer")
+  end
+
+  # Rule 1: any other reference to the constant may change how the class builds its instances.
+  it "keeps a value class untyped once its constant is aliased" do
+    expect_untyped({ "lib/shapes.rb" => "Al = Struct.new(:a)\nB = Al\n" }, "Al.new(1)\nB.new(\"y\")\n", "Al")
+  end
+
+  it "keeps a value class untyped whose singleton class is opened outside it" do
+    source = "Sc = Struct.new(:a)\nclass << Sc\n  alias_method :o, :new\n  def new(a) = o(a.to_s)\nend\n"
+    expect_untyped({ "lib/shapes.rb" => source }, "Sc.new(1)\n", "Sc")
+  end
+
+  it "keeps a value class untyped with a singleton def written on its constant" do
+    expect_untyped({ "lib/shapes.rb" => "Dn = Struct.new(:a)\ndef Dn.new(a) = super(a.to_s)\n" }, "Dn.new(1)\n", "Dn")
+  end
+
+  it "keeps a value class untyped that includes a module chain from outside" do
+    source = <<~RUBY
+      module M1
+        def initialize(*a) = super(*a.map(&:to_s))
+      end
+      module M2
+        include M1
+      end
+      Trans = Struct.new(:a)
+      Trans.include(M2)
+    RUBY
+    expect_untyped({ "lib/shapes.rb" => source }, "Trans.new(1)\n", "Trans")
+  end
+
+  it "keeps a value class untyped that includes a module define_method-ing initialize" do
+    source = "module Dm2\n  define_method(:initialize) { |*a| super(*a.map(&:to_s)) }\nend\n" \
+             "Tr2 = Struct.new(:a) do\n  include Dm2\nend\n"
+    expect_untyped({ "lib/shapes.rb" => source }, "Tr2.new(1)\n", "Tr2")
+  end
+
+  it "keeps a value class untyped that is sent define_method" do
+    source = "Sd = Struct.new(:a)\nSd.send(:define_method, :initialize) { |a| super(a.to_s) }\n"
+    expect_untyped({ "lib/shapes.rb" => source }, "Sd.new(1)\n", "Sd")
+  end
+
+  it "keeps a value class untyped whose singleton class is prepended to" do
+    source = "Sp = Struct.new(:a)\nSp.singleton_class.prepend(Module.new { def new(a) = super(a.to_s) })\n"
+    expect_untyped({ "lib/shapes.rb" => source }, "Sp.new(1)\n", "Sp")
+  end
+
+  it "keeps a value class untyped that a refinement names" do
+    source = <<~RUBY
+      Rr = Struct.new(:a)
+      Rk = Struct.new(:a)
+      module Rf
+        refine Rr.singleton_class do
+          def new(a) = super(a.to_s)
+        end
+        refine Rk do
+          def initialize(a) = super(a.to_s)
+        end
+      end
+    RUBY
+    expect_untyped({ "lib/shapes.rb" => source }, "Rr.new(1)\nRk.new(1)\n", "Rr")
+    expect(rows(observed_print, "Rk")).to include("def a: () -> untyped")
+  end
+
+  it "keeps a value class untyped that Class.new takes as a superclass" do
+    expect_untyped({ "lib/shapes.rb" => "Cb = Struct.new(:a)\nSub = Class.new(Cb)\n" }, "Cb.new(1)\n", "Cb")
+  end
+
+  it "keeps a value class untyped whose constant is class_eval-ed" do
+    source = "Ce = Struct.new(:a)\nCe.class_eval do\n  def initialize(a) = super(a.to_s)\nend\n"
+    expect_untyped({ "lib/shapes.rb" => source }, "Ce.new(1)\n", "Ce")
+  end
+
+  it "keeps a value class untyped whose override sits in an observed file" do
+    write("lib/shapes.rb", "Ob = Struct.new(:a)\n")
+    write("test/patch_test.rb", "class Ob\n  def initialize(a) = super(a.to_s)\nend\nOb.new(1)\n")
+
+    expect(rows(observed_print, "Ob")).to include("def a: () -> untyped")
+  end
+
+  it "resolves an unqualified reference lexically inside the namespace" do
+    write("lib/shapes.rb", "module Lx\n  W = Struct.new(:a)\n  ALIAS = W\nend\nW = Struct.new(:a)\n")
+    write("test/w_test.rb", "Lx::W.new(1)\nW.new(1)\n")
+
+    out = observed_print
+    expect(rows(out, "Lx::W")).to include("def a: () -> untyped")
+    expect(rows(out, "W")).to include("def a: () -> Integer")
+  end
+
+  it "keeps a value class untyped that const_get names" do
+    expect_untyped({ "lib/shapes.rb" => "Cg = Struct.new(:a)\nObject.const_get(:Cg).prepend(Module.new)\n" },
+                   "Cg.new(1)\n", "Cg")
+  end
+
+  it "keeps a value class untyped whose name is rebound" do
+    expect_untyped({ "lib/shapes.rb" => "Rb = Struct.new(:a)\nRb = Struct.new(:a, :b)\n" }, "Rb.new(1)\n", "Rb")
+  end
+
+  it "keeps a value class untyped whose constant is rebound to something else" do
+    write("lib/shapes.rb", "Ro = Struct.new(:a)\n")
+    write("lib/later.rb", "Ro = Object\n")
+    write("test/ro_test.rb", "Ro.new(1)\n")
+
+    expect(rows(observed_print, "Ro")).to include("def a: () -> untyped")
+  end
+
+  it "keeps a value class untyped whose factory takes a block argument" do
+    expect_untyped({ "lib/shapes.rb" => "BODY = proc {}\nBa = Struct.new(:a, &BODY)\n" }, "Ba.new(1)\n", "Ba")
+  end
+
+  # Rule 2: the body may hold only ordinary defs, non-member attr_*, constants and visibility calls.
+  it "keeps a value class untyped whose body includes any module" do
+    expect_untyped({ "lib/shapes.rb" => "Ic = Struct.new(:a) do\n  include Comparable\nend\n" }, "Ic.new(1)\n", "Ic")
+  end
+
+  it "keeps a value class untyped whose body redefines a member reader" do
+    expect_untyped({ "lib/shapes.rb" => "Mr = Struct.new(:a) do\n  def a = super.to_s\nend\n" }, "Mr.new(1)\n", "Mr")
+  end
+
+  it "keeps a value class untyped whose body declares an attribute over a member" do
+    expect_untyped({ "lib/shapes.rb" => "At = Struct.new(:a) do\n  attr_accessor :a\nend\n" }, "At.new(1)\n", "At")
+  end
+
+  it "keeps a value class untyped whose body calls define_singleton_method" do
+    source = "Dsm = Struct.new(:a) do\n  define_singleton_method(:new) { |a| super(a.to_s) }\nend\n"
+    expect_untyped({ "lib/shapes.rb" => source }, "Dsm.new(1)\n", "Dsm")
+  end
+
+  # Rule 3. Ruby: `s.send(:initialize, "z")` re-runs a Struct's initialize; on a Data it raises FrozenError.
+  it "keeps every Struct untyped when an observed file re-runs initialize through send" do
+    define("Ri = Struct.new(:a)\nRd = Data.define(:a)\n",
+           "s = Ri.new(1)\ns.send(:initialize, \"z\")\nd = Rd.new(a: 1)\nd.send(:initialize, a: 2)\n")
+
+    out = observed_print
+    expect(rows(out, "Ri")).to include("def a: () -> untyped")
+    expect(rows(out, "Rd")).to include("def a: () -> Integer")
+  end
+
+  it "keeps every Struct untyped when an observed file sends a computed name" do
+    expect_untyped({ "lib/shapes.rb" => "Rn = Struct.new(:a)\n" },
+                   "def poke(o, name) = o.public_send(name, \"z\")\nRn.new(1)\n", "Rn")
+  end
+
+  it "keeps a value class untyped that allocate is called on" do
+    expect_untyped({ "lib/shapes.rb" => "Ra = Struct.new(:a)\n" }, "x = Ra.allocate\nRa.new(1)\n", "Ra")
+  end
+
+  it "keeps a member untyped that a writer on an untyped receiver names" do
+    define("Wu = Struct.new(:a, :b)\n", "def touch(o) = o.a = \"param\"\nWu.new(1, 2)\n")
+
+    expect(rows(observed_print, "Wu")).to include("def a: () -> untyped", "def b: () -> Integer")
+  end
+
+  it "keeps a member untyped that an index write on an untyped receiver names" do
+    define("Wi = Struct.new(:a, :b)\n", "def touch(o) = o[:a] = \"param\"\nWi.new(1, 2)\n")
+
+    expect(rows(observed_print, "Wi")).to include("def a: () -> untyped", "def b: () -> Integer")
+  end
+
+  it "keeps a member untyped that an operator write on an untyped receiver names" do
+    define("Wo = Struct.new(:a, :b)\n", "def touch(o) = o.a += 1.5\nWo.new(1, 2)\n")
+
+    expect(rows(observed_print, "Wo")).to include("def a: () -> untyped", "def b: () -> Integer")
   end
 end

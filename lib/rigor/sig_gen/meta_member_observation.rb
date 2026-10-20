@@ -24,8 +24,9 @@ module Rigor
     # - `Data#with(**kw)` contributes each keyword it passes.
     # - A Struct writer call `s.a = v` contributes `v`. `s[key] = v` and `s.send(:a=, v)` keep the member they name
     #   `untyped` (every member, for a key or a method name that is not a literal).
-    # - {ObservationCollector::UNMAPPED} entries (a splat, an operator or multiple-assignment write, a class whose
-    #   constructor is overridden or subclassed) keep the members they name `untyped`.
+    # - {ObservationCollector::UNMAPPED} entries (a splat, an operator or multiple-assignment write, a writer on a
+    #   receiver typed as no one class, a class {ValueClassEligibility} finds ineligible) keep the members they name
+    #   `untyped`.
     #
     # The caller unions the lists; a member no site reaches is absent from the result and renders `untyped`.
     module MetaMemberObservation
@@ -36,9 +37,9 @@ module Rigor
       module_function
 
       # Each member some site reaches, with the types those sites pass it. `keywords` is how the class reads a
-      # keyword-only construction: `:members` (by name), `:hash` (possibly as a Hash in the first member, so every
-      # member is tainted) or `:rejected` (`ArgumentError`). `positionals: false` marks a class that rejects a
-      # positional construction (`keyword_init: true`).
+      # keyword-only construction: `:members` (by name) or `:hash` (possibly as a Hash in the first member, so every
+      # member is tainted). `positionals: false` marks a class that rejects a positional construction
+      # (`keyword_init: true`).
       def types(observations, class_name, kind:, members:, keywords: :members, positionals: true)
         out = Hash.new { |hash, member| hash[member] = [] }
         context = { out: out, kind: kind, members: members, keywords: keywords, positionals: positionals }
@@ -48,7 +49,8 @@ module Rigor
         else
           record_writers(context, observations, class_name)
         end
-        record_unmapped(context, observations.fetch([class_name, ObservationCollector::UNMAPPED], []))
+        record_unmapped(context, observations.fetch([class_name, ObservationCollector::UNMAPPED], []) +
+                                 observations.fetch([ObservationCollector::ANY_CLASS, ObservationCollector::UNMAPPED], []))
         finish(out)
       end
 
@@ -68,10 +70,8 @@ module Rigor
       end
 
       def record_keywords(context, keyword)
-        case context[:keywords]
-        when :hash then return taint_all(context)
-        when :rejected then return
-        end
+        return taint_all(context) if context[:keywords] == :hash
+
         members = context[:members]
         return unless (keyword.keys - members).empty?
 

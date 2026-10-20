@@ -26,13 +26,12 @@ module Rigor
     #   kept apart from `[:defines, …]`.
     # - `[:main_mixin, name]` — a module a top-level `include`, `prepend` or `extend` mixes into `Object` (or
     #   `main`), as written. A module RBS does not know may carry any method, so it reaches every class.
-    # - `[:ivar_set, name]` / {IVAR_SET_ANY} — an instance variable code outside the object writes (issue #1154): a
-    #   literal `instance_variable_set(:@x, v)` on an explicit receiver other than `self`, and an `@x` write in the
-    #   block of an `instance_eval` / `instance_exec` on such a receiver, or the same `instance_variable_set` through
-    #   a `send` that spells its name. An ivar name no literal spells, and a string `instance_eval` on such a
-    #   receiver, record {IVAR_SET_ANY}; a `send` whose method name is computed is not read. The class-ivar census
-    #   reads it to decline typing an ivar from a declared parameter ({ScopeIndexer::DeclaredParamWrites}), since
-    #   such a write never reaches the class's own census.
+    # - `[:ivar_set, name]` / {IVAR_SET_ANY} — an instance variable code outside a class's own census writes (issue
+    #   #1154): `[:ivar_set, name]` for a literal `instance_variable_set(:@x, v)` on an explicit receiver other than
+    #   `self` and for an `@x` write in the literal block of an `instance_eval` / `instance_exec` on such a receiver;
+    #   {IVAR_SET_ANY} for every writer whose target or code it cannot read ({Collector#open_world_ivar_writer?}),
+    #   a non-`self` `class << obj` included. The class-ivar census reads it to decline typing an ivar from a declared
+    #   parameter ({ScopeIndexer::DeclaredParamWrites}).
     #
     # The census is a `Set` of those frozen entries, merged by union across files, the project pre-pass and the
     # `pre_eval:` files. It is recorded inside descents that already visit every node ({Collector#visit}), never
@@ -66,10 +65,21 @@ module Rigor
       NO_ARGUMENTS = [].freeze
       # The calls that run their block, or their string, on the receiver's object (#1154).
       FOREIGN_SELF_CALLS = %i[instance_eval instance_exec].to_set.freeze
+      # The methods a `send` reaching which makes an ivar writer the census cannot read (#1154).
+      OPEN_WORLD_SENDS = %i[instance_variable_set instance_eval instance_exec extend
+                            define_singleton_method].to_set.freeze
+      # The calls on a `singleton_class` receiver that give one object methods or code the census cannot read.
+      SINGLETON_CLASS_CALLS = %i[
+        class_eval class_exec module_eval module_exec define_method include prepend extend attr attr_reader
+        attr_writer attr_accessor send public_send __send__
+      ].to_set.freeze
+      # The calls that, reaching an instance, give it methods the census cannot read.
+      INSTANCE_REACHING_CALLS = %i[extend define_singleton_method].to_set.freeze
       NAME_PATTERN = /(?<![\w@$])(?:write|to_str|to_int|method_missing|respond_to_missing\?|respond_to\?)(?![\w?!=])/
       private_constant :NAMING_CALLS, :ATTRIBUTE_CALLS, :DELEGATION_CALLS, :MISSING_DELEGATION_CALLS,
                        :SEND_CALLS, :EVAL_CALLS, :MIXIN_CALLS, :DEFINING_CALLS, :VISITED_CALLS, :NO_ARGUMENTS,
-                       :NAME_PATTERN, :FOREIGN_SELF_CALLS
+                       :NAME_PATTERN, :FOREIGN_SELF_CALLS, :OPEN_WORLD_SENDS,
+                       :SINGLETON_CLASS_CALLS, :INSTANCE_REACHING_CALLS
 
       EMPTY = Set.new.freeze
 
@@ -141,6 +151,7 @@ module Rigor
         def initialize(in_effect)
           @census = Set.new
           @refine_ranges = []
+          @def_ranges = []
           @in_effect = in_effect
         end
 
@@ -149,7 +160,11 @@ module Rigor
         def visit(node, top_level:)
           case node
           when Prism::AliasGlobalVariableNode then visit_global_alias(node)
-          when Prism::DefNode then record(node, node.name)
+          when Prism::DefNode
+            remember_def(node)
+            record(node, node.name)
+          when Prism::SingletonClassNode
+            @census << IVAR_SET_ANY unless node.expression.is_a?(Prism::SelfNode)
           when Prism::AliasMethodNode then record_argument(node, node.new_name)
           when Prism::CallNode then visit_call(node, top_level)
           end
@@ -159,23 +174,58 @@ module Rigor
 
         private
 
-        # #1154 — an instance variable written from outside the object: `o.instance_variable_set(:@x, v)`, the same
-        # through `send`, or an `@x` write in an `o.instance_eval { … }` / `instance_exec` block.
-        def visit_foreign_ivar_write(node)
+        # #1154 — an instance variable written from outside the class's own census. A literal
+        # `o.instance_variable_set(:@x, v)` and an `@x` write in an `o.instance_eval { … }` / `instance_exec` block
+        # name the ivar; every open-world writer records {IVAR_SET_ANY} ({#open_world_ivar_writer?}).
+        def visit_ivar_writer(node)
+          return @census << IVAR_SET_ANY if open_world_ivar_writer?(node)
+          return if self_receiver?(node)
+
+          arguments = node.arguments&.arguments || NO_ARGUMENTS
+          if node.name == :instance_variable_set
+            record_foreign_ivar_set(arguments)
+          elsif FOREIGN_SELF_CALLS.include?(node.name) && node.block.is_a?(Prism::BlockNode)
+            record_block_ivar_writes(node.block)
+          end
+        end
+
+        # The writers whose target or code the census cannot read, on any receiver:
+        # - `send` / `public_send` / `__send__` with a computed method name, or naming one of {OPEN_WORLD_SENDS};
+        # - `instance_eval` / `instance_exec` given a block argument (`&b`, `&PROC`, `&method(:m)`), and
+        #   `instance_eval` given a string;
+        # - `extend` or `define_singleton_method` (with a block, a block argument or a body argument) on an explicit
+        #   receiver other than `self`, or anywhere inside a method body, where `self` is an instance;
+        # - a call in {SINGLETON_CLASS_CALLS} on a `singleton_class` receiver.
+        def open_world_ivar_writer?(node)
           name = node.name
           arguments = node.arguments&.arguments || NO_ARGUMENTS
-          if SEND_CALLS.include?(name)
-            return unless arguments.first && literal_name(arguments.first) == :instance_variable_set
+          return open_world_send?(arguments) if SEND_CALLS.include?(name)
+          return true if FOREIGN_SELF_CALLS.include?(name) && open_world_eval?(node, arguments)
+          return true if singleton_class_receiver?(node) && SINGLETON_CLASS_CALLS.include?(name)
 
-            name = :instance_variable_set
-            arguments = arguments.drop(1)
-          end
-          if name == :instance_variable_set
-            record_foreign_ivar_set(arguments)
-          elsif FOREIGN_SELF_CALLS.include?(name)
-            @census << IVAR_SET_ANY unless arguments.empty? || name == :instance_exec
-            record_block_ivar_writes(node.block) if node.block.is_a?(Prism::BlockNode)
-          end
+          INSTANCE_REACHING_CALLS.include?(name) && instance_reaching?(node, arguments)
+        end
+
+        def open_world_send?(arguments)
+          return false if arguments.empty?
+
+          sent = literal_name(arguments.first)
+          sent.nil? || OPEN_WORLD_SENDS.include?(sent)
+        end
+
+        def open_world_eval?(node, arguments)
+          node.block.is_a?(Prism::BlockArgumentNode) || (node.name == :instance_eval && !arguments.empty?)
+        end
+
+        def singleton_class_receiver?(node)
+          receiver = node.receiver
+          receiver.is_a?(Prism::CallNode) && receiver.name == :singleton_class
+        end
+
+        def instance_reaching?(node, arguments)
+          return false unless !self_receiver?(node) || inside_def?(node)
+
+          node.name == :extend || !node.block.nil? || arguments.size > 1
         end
 
         def record_foreign_ivar_set(arguments)
@@ -205,7 +255,7 @@ module Rigor
 
         def visit_call(node, top_level)
           remember_refine(node)
-          visit_foreign_ivar_write(node) unless self_receiver?(node)
+          visit_ivar_writer(node)
           name = node.name
           return unless VISITED_CALLS.include?(name)
 
@@ -303,6 +353,15 @@ module Rigor
 
           location = node.block.location
           @refine_ranges << (location.start_offset...location.end_offset)
+        end
+
+        def remember_def(node)
+          @def_ranges << (node.location.start_offset...node.location.end_offset)
+        end
+
+        def inside_def?(node)
+          offset = node.location.start_offset
+          @def_ranges.any? { |range| range.cover?(offset) }
         end
 
         def inside_refine?(node)

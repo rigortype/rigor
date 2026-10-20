@@ -211,7 +211,32 @@ RSpec.describe "the ADR-58 ivar census types a write from a declared parameter (
       "another object's instance_variable_set" =>
         { "lib/o.rb" => "def poke(o) = o.instance_variable_set(:@x, 2)\n" },
       "another object's instance_eval block" =>
-        { "lib/o.rb" => "def poke(o) = o.instance_eval { @x = 2 }\n" }
+        { "lib/o.rb" => "def poke(o) = o.instance_eval { @x = 2 }\n" },
+      "an instance_variable_set in another object's instance_eval block" =>
+        { "lib/o.rb" => "def poke(o, n) = o.instance_eval { instance_variable_set(n, 2) }\n" },
+      "another object's instance_variable_set with a computed name" =>
+        { "lib/o.rb" => "def poke(o, n) = o.instance_variable_set(\"@\#{n}\", 2)\n" },
+      "another object's string instance_eval" =>
+        { "lib/o.rb" => "def poke(o) = o.instance_eval(\"@x = 2\")\n" },
+      "another object's instance_variable_set through send" =>
+        { "lib/o.rb" => "def poke(o) = o.send(:instance_variable_set, :@x, 2)\n" },
+      "a send with a computed name" =>
+        { "lib/o.rb" => "def poke(o, m) = o.send(m, 2)\n" },
+      "an instance_eval given a block argument" =>
+        { "lib/o.rb" => "class Conf\n  def configure(&b) = instance_eval(&b)\nend\n" },
+      "another object's instance_eval given a block constant" =>
+        { "lib/o.rb" => "SET_D = proc { @x = 2 }\ndef poke(o) = o.instance_eval(&SET_D)\n" },
+      "another object's extend" =>
+        { "lib/o.rb" => "module ExtSetter\n  def set(v) = @x = v\nend\ndef poke(o) = o.extend(ExtSetter)\n" },
+      "another object's define_singleton_method" =>
+        { "lib/o.rb" => "def poke(o) = o.define_singleton_method(:set_c) { |v| @c = v }\n" },
+      "another object's singleton_class class_eval" =>
+        { "lib/o.rb" => "def poke(o) = o.singleton_class.class_eval { def set_e(v) = @e = v }\n" },
+      "another object's class << obj" =>
+        { "lib/o.rb" => "def poke(o)\n  class << o\n    def set(v) = @x = v\n  end\nend\n" },
+      "an included module's instance_variable_set on self" =>
+        { "lib/setter.rb" => "module Setter\n  def set_x(v) = instance_variable_set(:@x, v)\nend\n",
+          include: "include Setter" }
     }.each do |shape, files|
       it "declines a write #{shape} may replace" do
         header = files[:superclass] ? "class K < #{files[:superclass]}" : "class K"
@@ -241,6 +266,17 @@ RSpec.describe "the ADR-58 ivar census types a write from a declared parameter (
                     "sig/k.rbs" => "class K < StandardError\n  def initialize: (String x) -> void\nend\n")
 
       expect(dumps).to eq(["dump_type: String"])
+    end
+
+    it "declines when the ancestor chain is cut" do
+      modules = (0..100).map { |i| "module M#{i}\nend\n" }.join
+      includes = (0..100).map { |i| "  include M#{i}\n" }.join
+      write_project("lib/m.rb" => modules,
+                    "lib/k.rb" => "class K\n#{includes}  def initialize(x) = @x = x\n  " \
+                                  "def r = Rigor.dump_type(@x)\nend\n",
+                    "sig/k.rbs" => "class K\n  def initialize: (String x) -> void\nend\n")
+
+      expect(dumps).to eq(["dump_type: Dynamic[top]"])
     end
 
     it "credits a write no other code may replace (control)" do

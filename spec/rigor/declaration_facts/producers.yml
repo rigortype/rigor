@@ -135,7 +135,11 @@ lib/rigor/inference/global_write_census.rb:
   producers:
     Rigor::Inference::GlobalWriteCensus: grandfathered
     Rigor::Inference::GlobalWriteCensus#walk: grandfathered
+    Rigor::Inference::GlobalWriteCensus::Collector#instance_reaching?: issue #1154, recognises the open-world ivar writers the census records ([:ivar_set_any]): extend / define_singleton_method on another receiver or inside a def, a singleton_class or class << obj body, an eval-family block argument and a send naming one; it reads call shapes and derives no declaration context
+    Rigor::Inference::GlobalWriteCensus::Collector#open_world_ivar_writer?: issue #1154, recognises the open-world ivar writers the census records ([:ivar_set_any]): extend / define_singleton_method on another receiver or inside a def, a singleton_class or class << obj body, an eval-family block argument and a send naming one; it reads call shapes and derives no declaration context
+    Rigor::Inference::GlobalWriteCensus::Collector#open_world_send?: issue #1154, recognises the open-world ivar writers the census records ([:ivar_set_any]): extend / define_singleton_method on another receiver or inside a def, a singleton_class or class << obj body, an eval-family block argument and a send naming one; it reads call shapes and derives no declaration context
     Rigor::Inference::GlobalWriteCensus::Collector#record_block_ivar_writes: issue #1154, stops its scan of an instance_eval block at a nested def, class or module, whose ivar writes are not the receiver's; it derives no declaration context
+    Rigor::Inference::GlobalWriteCensus::Collector#visit: issue #1154, records the def ranges inside_def? reads and a class << obj whose subject is not self as an open-world ivar writer; it derives no declaration context
     Rigor::Inference::GlobalWriteCensus::Collector#visit_call: grandfathered
 lib/rigor/inference/guard_rebinding.rb:
   computes: where a guard's narrowing of a global or constant stops holding

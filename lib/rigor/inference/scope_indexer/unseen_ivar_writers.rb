@@ -16,8 +16,8 @@ module Rigor
       #   includes or prepends) defines the writer `ivar=` (an `attr_writer` / `attr_accessor` or a `def`), or has an
       #   instance `def` whose body writes the ivar, in any form, or calls `instance_variable_set` on `self` (`super`
       #   from the class's `initialize`, or an inherited setter, runs it on the instance);
-      # - an ancestor the project does not declare is reached through a superclass edge and is not Ruby's own (a
-      #   gem's `initialize` may write any ivar), or the chain was cut;
+      # - an ancestor the project does not declare is reached through a superclass edge and is not a core class (a
+      #   gem's or a Ruby-written stdlib class's `initialize` may write any ivar), or the chain was cut;
       # - the project's {GlobalWriteCensus} records a write to the ivar from outside the object
       #   (`o.instance_variable_set(:@x, v)`, `o.instance_eval { @x = v }`), or one whose name it cannot read.
       #
@@ -55,6 +55,8 @@ module Rigor
           chain.entries.any? do |entry|
             next false if entry.side != :instance || entry.name == class_name
 
+            # A guard: the class body's own `include` / `<` resolution already files this edge; kept so the read
+            # states its own dependency.
             Scope::ResolutionChain.record_entry(scope, entry, :instance) if Analysis::DependencyRecorder.active?
             next foreign_superclass?(scope, entry) if entry.external?
 
@@ -62,13 +64,14 @@ module Rigor
           end
         end
 
-        # A superclass the project does not declare whose initializer Ruby does not ship: a gem's class may write
-        # any ivar of its subclass's instances. A module the project does not declare is left alone.
+        # A superclass the project does not declare that the interpreter does not implement: a gem's class, or a
+        # stdlib one written in Ruby (`Logger` sets `@level` in `initialize`), may write any ivar of its subclass's
+        # instances. A module the project does not declare is left alone.
         def foreign_superclass?(scope, entry)
           return false unless entry.superclass_edge
 
           loader = scope.environment&.rbs_loader
-          entry.candidates.empty? || entry.candidates.none? { |name| loader&.core_or_stdlib_class?(name) }
+          entry.candidates.empty? || entry.candidates.none? { |name| loader&.core_class?(name) }
         end
 
         def defs_write?(scope, owner, ivar)

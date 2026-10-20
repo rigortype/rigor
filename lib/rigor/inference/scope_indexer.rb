@@ -10311,6 +10311,8 @@ module Rigor
 
         case node
         when Prism::SingletonClassNode
+          # #1154 — a `class << obj` on another object is an ivar writer the census records.
+          tables.write_census.visit(node, top_level: qualified_prefix.empty?)
           return walk_census_singleton_class(node, qualified_prefix, tables, self_owner,
                                              meta_owner, singleton_cref)
         when Prism::ClassNode, Prism::ModuleNode

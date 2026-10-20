@@ -1764,6 +1764,9 @@ module Rigor
       # a partial sidecar as authoritative made `sig-gen --write` on redmine report 5.9x more
       # `call.undefined-method` than the same project with no `sig/` at all.
       #
+      # A class declared only by RBS synthesized from the project's own source joins the set too
+      # ({#inline_only_entry?}, issue #1934).
+      #
       # Memoised per loader: one pass over `class_decls` (~1-2k entries), and every consumer is a check
       # rule on the analysis hot path. Attribution is by buffer NAME, which survives the ADR-54 environment
       # cache since #725 — an environment blob written before that carries the `<cached>` sentinel instead,
@@ -1777,16 +1780,43 @@ module Rigor
         return Set.new.freeze if environment.nil?
 
         project_files = self.class.project_sig_files(@signature_paths)
-        return Set.new.freeze if project_files.empty?
+        virtual_names = @virtual_rbs.to_set(&:first)
+        return Set.new.freeze if project_files.empty? && virtual_names.empty?
 
         names = environment.class_decls.each_with_object(Set.new) do |(rbs_name, entry), acc|
-          acc << rbs_name.to_s.delete_prefix("::") if self.class.project_entry?(entry, project_files)
+          next unless self.class.project_entry?(entry, project_files) ||
+                      inline_only_entry?(entry, virtual_names, project_files)
+
+          acc << rbs_name.to_s.delete_prefix("::")
         end
         names.freeze
       rescue ::RBS::BaseError
         Set.new.freeze
       end
       private :build_project_declared_classes
+
+      # Issue #1934 — a class whose every declaration a source RBS synthesizer (`rigor-rbs-inline`) wrote from
+      # the project's own `.rb` files is the project's as much as a `sig/` sidecar is: the declaration is the
+      # inline comments of the source under analysis, so a method another project file adds to the class (a
+      # plain `def`, or an `alias_method` whose target the inline declaration names) is the second file of an
+      # ordinary class, not an ADR-17 monkey-patch. Reading the synthesized RBS as bundled reported
+      # `alias_method :title, :label` from another file while the `alias` keyword, which upstream translates,
+      # read clean.
+      #
+      # EVERY declaration, not only the primary one, and only virtual or `sig/` buffers: a core, stdlib or gem
+      # class an inline-annotated file reopens (`class String` with a `#:` method) keeps its bundled
+      # declaration, and a project `def` on it stays the monkey-patch ADR-17 reports. A declaration whose
+      # buffer cannot be attributed (the pre-#725 `<cached>` sentinel) fails the test, which keeps the
+      # pre-#1934 reading.
+      def inline_only_entry?(entry, virtual_names, project_files)
+        return false if virtual_names.empty?
+
+        buffers = self.class.entry_declarations(entry).map { |decl| self.class.declaration_buffer_name(decl) }
+        return false if buffers.empty? || buffers.any?(&:nil?)
+
+        buffers.all? { |name| virtual_names.include?(name) || project_files.include?(File.absolute_path(name)) }
+      end
+      private :inline_only_entry?
 
       # Issue #527 — the class / module names whose PRIMARY declaration lives in the `rbs` gem's own
       # `core/` or `stdlib/` tree, top-level prefix stripped.

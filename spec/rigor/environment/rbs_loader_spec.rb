@@ -1760,6 +1760,40 @@ RSpec.describe Rigor::Environment::RbsLoader do
     end
   end
 
+  # Issue #1934 — a declaration a source RBS synthesizer wrote from the project's own `.rb` is the project's, as a
+  # `sig/` sidecar is (#735), but only while nothing bundled declares the class too.
+  describe "#project_declared_class? over inline-synthesized declarations (issue #1934)" do
+    let(:tmpdir) { Dir.mktmpdir("rigor-rbs-loader-inline-declared-spec-") }
+    let(:shop_virtual) do
+      ["virtual:rbs-inline:/app/lib/shop.rb",
+       "class Shop\n  def label: (::Integer n) -> ::String\nend\n\nclass String\n  def yell: () -> ::String\nend\n"]
+    end
+    let(:split_virtual) { ["virtual:rbs-inline:/app/lib/split.rb", "class Split\n  def a: () -> ::Integer\nend\n"] }
+
+    after { FileUtils.rm_rf(tmpdir) }
+
+    it "counts a class only rbs-inline declares, and not a bundled class an inline file reopens" do
+      loader = described_class.new(virtual_rbs: [shop_virtual])
+
+      expect(loader.project_declared_class?("Shop")).to be(true)
+      expect(loader.project_declared_class?("::Shop")).to be(true)
+      expect(loader.project_declared_class?("String")).to be(false)
+    end
+
+    it "counts a class split between an inline declaration and the project's own sig/" do
+      File.write(File.join(tmpdir, "split.rbs"), "class Split\n  def b: () -> ::String\nend\n")
+      loader = described_class.new(signature_paths: [tmpdir], virtual_rbs: [split_virtual])
+
+      expect(loader.project_declared_class?("Split")).to be(true)
+    end
+
+    it "keeps a class with no inline or sig/ declaration outside the set" do
+      loader = described_class.new(virtual_rbs: [shop_virtual])
+
+      expect(loader.project_declared_class?("Integer")).to be(false)
+    end
+  end
+
   describe "virtual RBS collision quarantine (inline-synthesized vs sig/)" do
     # A project that ships BOTH hand-written `sig/` and rbs-inline comments on the same code declares the
     # same constants twice — the expected state mid-migration, not an authoring error (measured on herb).

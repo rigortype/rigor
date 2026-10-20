@@ -185,7 +185,11 @@ exactly which files an edit can affect. A continuous-integration
 gate, `rigor check --verify-incremental`, asserts this on every
 build: it runs the incremental analyzer and a full analysis and
 fails if they disagree on a single diagnostic, or list the same
-diagnostics in a different order.
+diagnostics in a different order. That gate re-analyses an
+unchanged tree, so it cannot see an edit that fails to re-check a
+file it affects; `--verify-incremental-edits=N` also empties `N`
+files one at a time (in memory, not on disk) and compares each
+warm recheck with a full analysis of the edited tree.
 
 Rigor is also precise about *what* an edit changed. Re-checking a
 file that many others depend on — a base class, a widely-used

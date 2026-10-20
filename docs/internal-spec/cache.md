@@ -980,6 +980,21 @@ the two lists diverge. Rows are compared in full (every field the row
 carries), so a tie on path, line, column, rule and message is not mistaken
 for a match.
 
+The partition re-analyses an unchanged tree, so every served row is still
+right and a missing invalidation edge cannot show
+([#1967](https://github.com/rigortype/rigor/issues/1967)).
+`--verify-incremental-edits=N` adds an edit replay after a passing
+partition: for each of `N` files spread over the analysed list,
+`IncrementalSession#replay_edit` rechecks the baseline, handed over as a
+Marshal copy of the snapshot a `--incremental` run would save, with the
+file emptied through an editor buffer (editor mode option B, never on
+disk), and the rows must equal, as a multiset and in order, a full run of
+the same buffered tree (`analyze_only:` every analysed file). A replay the
+recheck declines as option B does is counted, not compared. Emptying
+removes everything the file defines, so the replay exercises the removal
+direction of every edge the file is a source of; an addition is not
+replayed.
+
 Case 1 therefore fails the gate as an order mismatch or a set mismatch,
 depending on the partition: a recheck that reproduces the duplicate or the
 drop fails on order only, and one that does not fails on the set. Case 2
@@ -1073,10 +1088,11 @@ every name that appeared in or vanished from a file. The appeared-symbol
 diff the `method:` and `toplevel:` keys use cannot stand in for it: it
 sees only a `def`, and only one that appears. The seed bundles already
 carry the three tables, so no row moves and `SCHEMA` is unchanged. The
-check's other readers record the key too, and one of them is broad:
-`ErrorInfo.rescue_entry` asks it for `backtrace` at every rescue entry, so
-a `backtrace` definition appearing or vanishing anywhere re-checks every
-file with a `rescue`. That is a known cost.
+check's other readers record the key too. `ErrorInfo.rescue_entry` asks it
+for `backtrace` at a rescue entry whose clause reads `$@`, so a `backtrace`
+definition appearing or vanishing re-checks every file with such a clause.
+Before [#1967](https://github.com/rigortype/rigor/issues/1967) it asked at
+every rescue entry and re-checked every file with a `rescue`.
 
 `CheckRules::RubyDeprecations#project_defines?` records the key the same
 way, whichever way it answers

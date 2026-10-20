@@ -620,6 +620,32 @@ module Rigor
         run_runner(runner).diagnostics
       end
 
+      # Issue #1967 — the edit replay of `--verify-incremental-edits`: a warm recheck of this session's baseline with
+      # `buffer` standing in for one file, the way editor mode option B (#146) rechecks an unsaved edit. The baseline is
+      # handed over as a Marshal copy of the snapshot a `--incremental` run would save, through a fresh session that
+      # never persists, so this session's own state is untouched and each replay starts from the same baseline. Unlike
+      # {#reanalyze_subset}, whose tree is the baseline's, the edit moves what the served files' rows were computed
+      # from, so a dependent the recheck fails to re-analyse is served stale and the comparison sees it. Returns the
+      # {Recheck}, or nil when the recheck declined as option B does (the plugin fact surface moved, an unverified
+      # source-RBS gate, a re-baseline), where the answer would be a full analysis and there is nothing to compare.
+      def replay_edit(buffer)
+        adopt_plugin_fact_fingerprint if @plugin_fact_reusable.nil?
+        replay = IncrementalSession.new(
+          configuration: @configuration, paths: @paths, environment: @environment, cache_store: @cache_store,
+          plugin_requirer: @plugin_requirer, buffer: buffer, explain: @explain
+        )
+        replay.run_buffer_recheck(snapshot: ReplaySnapshot.new(blob: Marshal.dump(to_payload)), fingerprint: :replay)
+      end
+
+      # The in-memory stand-in for {Cache::IncrementalSnapshot} {#replay_edit} hands its replay session: every load is a
+      # fresh copy, as a load from disk is.
+      ReplaySnapshot = Data.define(:blob) do
+        def load(fingerprint:) # rubocop:disable Lint/UnusedMethodArgument
+          Marshal.load(blob) # rubocop:disable Security/MarshalLoad
+        end
+      end
+      private_constant :ReplaySnapshot
+
       # Cross-process incremental run (the `--incremental` flag's engine). With a disk `snapshot` whose
       # `fingerprint` matches, restore the prior per-file state and `#recheck` (re-analyze only the changed
       # closure, serve the rest from the restored cache); otherwise run a full `#baseline`. Either way,

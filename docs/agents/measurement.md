@@ -252,7 +252,9 @@ output looks right, but it acted on the wrong input or measured the wrong thing.
   `--no-cache` run. Two traps it was built around: `--incremental --no-cache` is a cold full analysis that neither
   reads nor writes the incremental snapshot or the run-result slot (#1525), so it is a valid oracle for a warm run
   but says nothing about warm latency; and `--verify-incremental`'s "N/M files re-analyzed" is a fixed half
-  of the tree, not an edit's closure (#1526). The cold tools (`bench-perf`, the A/Bs) all pass `--no-cache` and
+  of the tree, not an edit's closure (#1526). For the same reason a plain `--verify-incremental` OK proves
+  nothing about invalidation edges (#1967): it replays no edit. Only a warm-against-cold comparison after an
+  edit does — a session spec that edits between baseline and recheck, or `--verify-incremental-edits=N`. The cold tools (`bench-perf`, the A/Bs) all pass `--no-cache` and
   say nothing about a warm run.
 - **In a CPU profile, prefer vernier to stackprof.** stackprof's `:cpu` mode charges samples taken inside a long C
   call (Prism's parse) to the next interrupt check. During #1507 that made `IO.read` read as ~460 ms and

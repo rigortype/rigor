@@ -1,0 +1,1 @@
+- **[rigor sig-gen]** A path that does not exist is now reported the way `rigor check` reports it, where `rigor sig-gen` and `rigor_sig_gen` printed "No candidates" and exited 0, and a `--config` (or MCP `config`) naming no file is now an error instead of a run with the default configuration ([#2204](https://github.com/rigortype/rigor/pull/2204)).

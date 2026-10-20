@@ -1,0 +1,2 @@
+- **[engine]** `call.unresolved-toplevel` no longer reports a bare call inside a top-level block passed to a project method that may run the block under another `self`, such as `Ext.define { refine(String) { … } }` with `def self.define(&blk) = module_eval(&blk)`. ([#2183](https://github.com/rigortype/rigor/pull/2183))
+  - A block passed to a method that only `yield`s, or to a method no project file defines, still reports.

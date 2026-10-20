@@ -74,6 +74,7 @@ members:
     - lib/rigor/inference/project_seed_tables.rb
   discovered_methods:
     reads:
+    - lib/rigor/analysis/check_rules/rebinding_block_callees.rb
     - lib/rigor/analysis/check_rules/ruby_deprecations.rb
     - lib/rigor/analysis/runner.rb
     - lib/rigor/inference/block_call_timing.rb
@@ -83,6 +84,7 @@ members:
     - lib/rigor/inference/project_seed_tables.rb
   discovered_def_nodes:
     reads:
+    - lib/rigor/analysis/check_rules/rebinding_block_callees.rb
     - lib/rigor/analysis/check_rules/ruby_deprecations.rb
     - lib/rigor/analysis/incremental_session.rb
     - lib/rigor/analysis/runner.rb
@@ -99,6 +101,8 @@ members:
     justified:
       lib/rigor/inference/project_seed_tables.rb:
       - paired_copy
+      lib/rigor/analysis/check_rules/rebinding_block_callees.rb:
+      - existence
       lib/rigor/analysis/check_rules/ruby_deprecations.rb:
       - existence
       lib/rigor/analysis/incremental_session.rb:
@@ -137,6 +141,7 @@ members:
     - lib/rigor/inference/project_seed_tables.rb
   discovered_singleton_def_nodes:
     reads:
+    - lib/rigor/analysis/check_rules/rebinding_block_callees.rb
     - lib/rigor/analysis/incremental_session.rb
     - lib/rigor/analysis/runner.rb
     - lib/rigor/inference/block_call_timing.rb
@@ -150,6 +155,8 @@ members:
     justified:
       lib/rigor/inference/project_seed_tables.rb:
       - paired_copy
+      lib/rigor/analysis/check_rules/rebinding_block_callees.rb:
+      - existence
       lib/rigor/analysis/incremental_session.rb:
       - cache_key
       - same_slot
@@ -265,6 +272,7 @@ members:
   discovered_deferred_ranges:
     reads:
     - lib/rigor/analysis/check_rules.rb
+    - lib/rigor/analysis/check_rules/rebinding_block_callees.rb
     - lib/rigor/analysis/runner.rb
     - lib/rigor/inference/definer_resolution.rb
     - lib/rigor/inference/self_call_ivar_writes.rb

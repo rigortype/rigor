@@ -4,6 +4,7 @@ require "prism"
 
 require_relative "../../inference/scope_indexer"
 require_relative "../../source/node_children"
+require_relative "rebinding_block_callees"
 
 module Rigor
   module Analysis
@@ -40,6 +41,9 @@ module Rigor
         end
 
         def refinements = (@refinements ||= Inference::InEffectRefinements.new(@root))
+
+        # Issue #1817 — the file's block-passing calls, for `call.unresolved-toplevel`'s rebinding-callee decline.
+        def block_calls = (@block_calls ||= RebindingBlockCallees::Sites.new(@root))
 
         # Does a `def <local>.<name>` for this call's local receiver and method name — or a call that gives the
         # local's object methods Rigor does not enumerate (issue #1722) — sit in the scope the call is in?

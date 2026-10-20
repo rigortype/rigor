@@ -405,3 +405,14 @@ original WD3 framing left implicit.
   edge is project-wide, as Ruby's is once the file runs, so a
   file that never loads the including one is silent too; that
   false negative is the cheaper error.
+- 2026-10-20 — a call inside a top-level block is not judged as
+  top level when a project definition of the block's callee may
+  run the block under another `self` (`module_eval(&blk)`,
+  `instance_exec(&blk)`, or any other hand-off)
+  ([#1817](https://github.com/rigortype/rigor/issues/1817)). The
+  callee is read by name, so a same-named method elsewhere that
+  hands its block on silences a callee that only `yield`s, and a
+  project forwarder such as `def each(&b) = @items.each(&b)`
+  silences every block passed to an `each`; that
+  false negative is cheaper than reading one receiver's class and
+  missing the definition Ruby dispatches to.

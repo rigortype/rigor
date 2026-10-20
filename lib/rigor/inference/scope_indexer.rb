@@ -197,16 +197,21 @@ module Rigor
         # share.
         seeded_scope = seed_struct_fold_safe(seeded_scope, root).with_match_frame(root)
 
-        on_enter = ->(node, scope) { table[node] = scope }
-        evaluate = lambda do |node, scope|
-          StatementEvaluator.new(scope: scope, on_enter: on_enter,
-                                 converged_loop_recording: converged_loop_recording,
-                                 widen_clauses: widen_clauses).evaluate(node)
-        end
+        evaluate = recording_evaluator(table, converged_loop_recording, widen_clauses)
         evaluate.call(root, seeded_scope)
 
         with_unentered_evaluator(evaluate) { propagate(root, table, seeded_scope) }
         table
+      end
+
+      # The `(node, scope) ->` evaluation that records every node it visits into `table`: the file's own pass, and
+      # each construct {#evaluate_unentered_flow} evaluates in the walk after it.
+      def recording_evaluator(table, converged_loop_recording, widen_clauses)
+        on_enter = ->(node, scope) { table[node] = scope }
+        lambda do |node, scope|
+          StatementEvaluator.new(scope: scope, on_enter: on_enter, converged_loop_recording: converged_loop_recording,
+                                 widen_clauses: widen_clauses).evaluate(node)
+        end
       end
 
       # Runs the combined methods/def-nodes descent (one walk of the file), seeds the discovered-methods existence table

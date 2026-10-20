@@ -719,6 +719,169 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
     end
   end
 
+  # #2125 — every String-producing fold is capped at STRING_FOLD_BYTE_LIMIT, not only `*` and `+`. A result past it
+  # declines (the next tier answers `literal-string` or RBS `String`), and the operands that would build a huge string
+  # (a format width or precision, a pad width or repeat count, a `sub` / `gsub` replacement) are read before the
+  # call. Each row's Ruby witness shows the real result really is past the limit, or within it for the controls.
+  describe "String result cap (#2125)" do
+    let(:limit) { described_class::STRING_FOLD_BYTE_LIMIT }
+
+    def fold_types(receiver, method_name, args)
+      described_class.try_dispatch(cc(receiver: receiver, method_name: method_name, args: args))
+    end
+
+    def constant_of(value) = Rigor::Type::Combinator.constant_of(value)
+    def union_of(*values) = Rigor::Type::Combinator.union(*values.map { |v| constant_of(v) })
+    # The Ruby witness, through a variable template so the literal is not folded away.
+    def ruby_format(template, *) = format(template, *)
+
+    # Wall-clock seconds and malloc'd bytes, with GC off so a string built and dropped inside the block still counts.
+    def cost
+      GC.start
+      GC.disable
+      bytes_before = GC.stat(:malloc_increase_bytes)
+      started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      yield
+      [Process.clock_gettime(Process::CLOCK_MONOTONIC) - started, GC.stat(:malloc_increase_bytes) - bytes_before]
+    ensure
+      GC.enable
+    end
+
+    it "declines String#% past the limit by width, precision or a `*` argument" do
+      expect(ruby_format("%05000d", 1).bytesize).to be > limit
+      expect(fold("%05000d", :%, [1])).to be_nil
+      expect(ruby_format("%.5000f", 1.0).bytesize).to be > limit
+      expect(fold("%.5000f", :%, [1.0])).to be_nil
+      expect(ruby_format("%-5000s", "x").bytesize).to be > limit
+      expect(fold("%-5000s", :%, ["x"])).to be_nil
+      expect(ruby_format("%*d", 5000, 1).bytesize).to be > limit
+      star = Rigor::Type::Combinator.tuple_of(constant_of(5000), constant_of(1))
+      expect(fold_types(constant_of("%*d"), :%, [star])).to be_nil
+    end
+
+    it "keeps folding String#% within the limit, a `%%` escape included" do
+      expect(fold("%05d", :%, [42]).value).to eq("00042")
+      expect(fold("%.3f", :%, [1.0]).value).to eq("1.000")
+      star = Rigor::Type::Combinator.tuple_of(constant_of(5), constant_of(1))
+      expect(fold_types(constant_of("%*d"), :%, [star]).value).to eq("    1")
+      expect(format("%%5000d %s", "x")).to eq("%5000d x")
+      expect(fold("%%5000d %s", :%, ["x"]).value).to eq("%5000d x")
+    end
+
+    it "reads a format width before building the string, in bounded time and memory" do
+      seconds, bytes = cost { expect(fold("%0200000000d", :%, [1])).to be_nil }
+      expect(seconds).to be < 0.5
+      expect(bytes).to be < 1_000_000
+      tuple = Rigor::Type::Combinator.tuple_of(constant_of(200_000_000), constant_of(1))
+      seconds, bytes = cost { expect(fold_types(constant_of("%0*d"), :%, [tuple])).to be_nil }
+      expect(seconds).to be < 0.5
+      expect(bytes).to be < 1_000_000
+    end
+
+    it "declines a padded center / ljust / rjust past the limit, and folds one within it" do
+      expect("x".ljust(5000, "ab").bytesize).to be > limit
+      expect(fold("x", :ljust, [5000, "ab"])).to be_nil
+      expect(fold("x", :center, [5000, "ab"])).to be_nil
+      expect(fold("x", :rjust, [5000, "ab"])).to be_nil
+      expect(fold("x", :ljust, [5, "ab"]).value).to eq("xabab")
+      seconds, bytes = cost { expect(fold("x", :ljust, [200_000_000, "ab"])).to be_nil }
+      expect(seconds).to be < 0.5
+      expect(bytes).to be < 1_000_000
+    end
+
+    it "declines a sub / gsub whose replacement can grow the string past the limit" do
+      expect(("a" * 3000).gsub("a", "bb").bytesize).to be > limit
+      expect(fold("a" * 3000, :gsub, %w[a bb])).to be_nil
+      expect(("a" * 3000).gsub(/a|b/, "\\0\\0").bytesize).to be > limit
+      expect(fold("a" * 3000, :gsub, [/a|b/, "\\0\\0"])).to be_nil
+      expect(("a" * 3000).sub("a", "b" * 3000).bytesize).to be > limit
+      expect(fold("a" * 3000, :sub, ["a", "b" * 3000])).to be_nil
+      seconds, bytes = cost { expect(fold("a" * 3000, :gsub, ["a", "b" * 100_000])).to be_nil }
+      expect(seconds).to be < 0.5
+      expect(bytes).to be < 1_000_000
+      expect(fold("hello", :gsub, %w[l L]).value).to eq("heLLo")
+      expect(fold("hello", :sub, [/l/, "<\\0>"]).value).to eq("he<l>lo")
+    end
+
+    # The bound counts `gsub`'s possible match at every position and the end, and each backslash in the replacement
+    # as a back-reference that may copy the whole receiver.
+    it "bounds a substitution by its match count and its back-references" do
+      expect(("a" * 100).gsub("", "x" * 40).bytesize).to be > limit
+      expect(described_class.string_substitution_blow_up?("a" * 100, :gsub, "x" * 40)).to be(true)
+      expect(described_class.string_substitution_blow_up?("a" * 100, :sub, "x" * 40)).to be(false)
+      expect(("ab" * 50).sub(/.+/, "\\0" * 50).bytesize).to be > limit
+      expect(described_class.string_substitution_blow_up?("ab" * 50, :sub, "\\0" * 50)).to be(true)
+      expect(described_class.string_substitution_blow_up?("ab" * 50, :sub, "x0" * 50)).to be(false)
+    end
+
+    # Ruby converts a Float or Rational count or width with NUM2LONG (`"x" * 2.9` is "xx"), so it builds the string.
+    it "reads a Float or Rational count or width before building the string" do
+      expect(["x" * 2.9, "x" * 3r, "x".ljust(3.7), ruby_format("%*d", 3.5, 1)]).to eq(["xx", "xxx", "x  ", "  1"])
+      [
+        -> { fold("x", :*, [200_000_000.0]) },
+        -> { fold("x", :*, [200_000_000r]) },
+        -> { fold("x", :ljust, [200_000_000.0]) },
+        -> { fold("x", :rjust, [200_000_000r, "ab"]) },
+        -> { fold_types(constant_of("%*d"), :%, [Rigor::Type::Combinator.tuple_of(constant_of(2e8), constant_of(1))]) },
+        -> { fold("x", :*, [Complex(200_000_000, 0)]) },
+        -> { fold("x", :*, [Complex(200_000_000r, 0)]) },
+        -> { fold("x", :ljust, [Complex(200_000_000.0, 0)]) },
+        -> { fold("x", :center, [Complex(200_000_000, 0), "ab"]) },
+        -> { fold_types(constant_of("%*d"), :%, [Rigor::Type::Combinator.tuple_of(constant_of(Complex(2e8, 0)), constant_of(1))]) }
+      ].each do |call|
+        seconds, bytes = cost { expect(call.call).to be_nil }
+        expect(seconds).to be < 0.5
+        expect(bytes).to be < 1_000_000
+      end
+      expect(fold("x", :*, [3.0]).value).to eq("xxx")
+      expect(["x" * Complex(3, 0), "x" * Complex(3.5, 0)]).to eq(%w[xxx xxx])
+      expect(fold("x", :*, [Complex(3, 0)]).value).to eq("xxx")
+      expect { "x" * Complex(3, 0.0) }.to raise_error(RangeError)
+      expect(fold("x", :*, [Complex(3, 0.0)])).to be_nil
+      # An inexact-zero imaginary part raises before any string is built, so that member is skipped, not oversized.
+      expect { "x" * Complex(200_000_000, 0.0) }.to raise_error(RangeError)
+      expect(fold_types(constant_of("x"), :*, [union_of(2, Complex(200_000_000, 0.0))])).to eq(constant_of("xx"))
+      expect(fold("x", :*, [Float::INFINITY])).to be_nil
+    end
+
+    # A negative count raises, so that member is skipped as any raising one is; the rest of the union still folds.
+    it "skips a negative repeat count and folds the other members" do
+      expect { "x" * -1 }.to raise_error(ArgumentError)
+      expect(fold_types(constant_of("x"), :*, [union_of(2, -1)])).to eq(constant_of("xx"))
+    end
+
+    it "declines Integer#to_s(base) past the limit" do
+      expect((2**13_000).to_s(2).bytesize).to be > limit
+      expect(fold(2**13_000, :to_s, [2])).to be_nil
+      expect(fold_types(union_of(2**13_000, 255), :to_s, [constant_of(2)])).to be_nil
+      expect(fold(255, :to_s, [2]).value).to eq("11111111")
+      expect(fold(2**13_000, :to_s, [36]).value).to eq((2**13_000).to_s(36))
+    end
+
+    # No operand precheck covers these: the result is built (at a few times the receiver's size) and the result gate
+    # drops it.
+    it "declines a result past the limit that no operand precheck sees" do
+      expect(("a" * 3000).tr("a", "あ").bytesize).to be > limit
+      expect(fold("a" * 3000, :tr, %w[a あ])).to be_nil
+      expect(fold("a" * 1000, :tr, %w[a あ]).value).to eq("あ" * 1000)
+      expect(("\x01" * 3000).dump.bytesize).to be > limit
+      expect(fold("\x01" * 3000, :dump)).to be_nil
+      expect(described_class.foldable_constant_value?("x" * (limit + 1))).to be(false)
+      expect(described_class.foldable_constant_value?("x" * limit)).to be(true)
+    end
+
+    # Skipping only the oversized member would answer the others: `(c ? "a" : big) * 2` read `"aa"`.
+    it "declines the whole union fold when one member is past the limit" do
+      expect(fold_types(union_of("a", "b" * 3000), :*, [constant_of(2)])).to be_nil
+      expect(fold_types(union_of("hi", "ho"), :ljust, [union_of(3, 100_000)])).to be_nil
+      expect(fold_types(union_of("%05d", "%05000d"), :%, [constant_of(1)])).to be_nil
+      expect(fold_types(union_of("a" * 3000, "b"), :tr, [constant_of("ab"), constant_of("あ")])).to be_nil
+      expect(("b" * limit).upcase.bytesize).to eq(limit)
+      expect(fold_types(union_of("a", "b" * limit), :upcase, [])).to be_nil
+      expect(fold_types(union_of("a", "b"), :*, [constant_of(2)])).to eq(union_of("aa", "bb"))
+    end
+  end
+
   # Union[Constant…] folding. Each Constant in a union represents a possible runtime value; a binary op over two unions
   # is the cartesian fold, deduplicated. Bounded by the input/output cardinality caps so an analyzer-side blowup is not
   # possible.

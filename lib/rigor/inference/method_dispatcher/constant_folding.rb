@@ -219,6 +219,15 @@ module Rigor
         # declared `Numeric`, on which `(2 ** 20_000).even?` is an undefined method.
         WidenedResult = Data.define(:class_name)
 
+        # #2125 — a String result past `STRING_FOLD_BYTE_LIMIT`, or an operand that would build one. Unlike a
+        # `WidenedResult` it declines the WHOLE fold, every other member of a union receiver included: dropping
+        # only the oversized member would answer the rest (`(c ? "a" : big) * 2` read `"aa"`). The next tier then
+        # answers the call — `LiteralStringFolding`'s `literal-string`, or RBS's `String`, never less than the
+        # `Nominal[String]` the fold could have widened to.
+        OversizedString = Data.define
+        OVERSIZED_STRING = [OversizedString.new].freeze
+        private_constant :OversizedString, :OVERSIZED_STRING
+
         # Input cartesian product hard cap. Keeps fold cost bounded even when the receiver and argument are
         # both `Union[Constant…]`. 5 × 5 = 25 inputs is permitted; 6 × 6 = 36 is not. The user-facing payoff
         # (a precise small enum) drops off fast past this range and CRuby method invocation cost adds up.
@@ -331,6 +340,7 @@ module Rigor
           arg = args.first
           ruby_arg = format_argument_value(arg)
           return nil if ruby_arg.nil?
+          return nil if format_blow_up?(receiver.value, ruby_arg)
 
           result = receiver.value % ruby_arg
           return nil unless foldable_constant_value?(result)
@@ -1200,6 +1210,8 @@ module Rigor
         # "Integer-ness" was already implied by the inputs (so the widening fallback only fires for
         # arithmetic over integers).
         def build_constant_type(values, source: nil)
+          return nil if values.any?(OversizedString)
+
           widened, values = values.partition { |value| value.is_a?(WidenedResult) }
           return build_scalar_constant_type(values, source) if widened.empty?
 
@@ -1644,6 +1656,7 @@ module Rigor
         # `flat_map`.
         def invoke_binary(receiver_value, method_name, arg_value)
           return nil unless safe?(receiver_value, method_name, arg_value)
+          return OVERSIZED_STRING if string_blow_up?(receiver_value, method_name, arg_value)
           return nil if range_enumeration_blow_up?(receiver_value, method_name)
 
           widened = numeric_blow_up_class(receiver_value, method_name, arg_value)
@@ -1659,6 +1672,7 @@ module Rigor
         # `false`/`nil` folds.
         def invoke_ternary(receiver_value, method_name, av0, av1)
           return nil unless ternary_method_allowed?(receiver_value, method_name)
+          return OVERSIZED_STRING if string_ternary_blow_up?(receiver_value, method_name, av0, av1)
 
           fold_result(receiver_value.public_send(method_name, av0, av1))
         rescue StandardError
@@ -1668,7 +1682,7 @@ module Rigor
         # Returns `[value]` on success, `nil` to signal "skip". See `invoke_binary` for why we wrap.
         def invoke_unary(receiver_value, method_name)
           return nil unless unary_safe?(receiver_value, method_name)
-          return nil if string_unary_blow_up?(receiver_value, method_name)
+          return OVERSIZED_STRING if string_unary_blow_up?(receiver_value, method_name)
           return nil if range_enumeration_blow_up?(receiver_value, method_name)
 
           fold_result(receiver_value.public_send(method_name))
@@ -1676,10 +1690,11 @@ module Rigor
           nil
         end
 
-        # `[result]` for a foldable value, `[WidenedResult]` for a number past `INTEGER_FOLD_BIT_LIMIT`, nil
-        # for anything else.
+        # `[result]` for a foldable value, `[WidenedResult]` for a number past `INTEGER_FOLD_BIT_LIMIT`,
+        # `OVERSIZED_STRING` for a String past `STRING_FOLD_BYTE_LIMIT`, nil for anything else.
         def fold_result(result)
           return [WidenedResult.new(result.class.name)] if oversized_number?(result)
+          return OVERSIZED_STRING if oversized_string?(result)
 
           foldable_constant_value?(result) ? [result] : nil
         end
@@ -1823,8 +1838,18 @@ module Rigor
           return false if value.is_a?(Float) && value.nan?
           return false if value.is_a?(Complex) && complex_nan?(value)
           return false if oversized_number?(value)
+          return false if oversized_string?(value)
 
           true
+        end
+
+        # #2125 — the result gate every String-producing fold passes through, the String twin of
+        # `oversized_number?`. The operand prechecks (`string_blow_up?`, `string_ternary_blow_up?`,
+        # `format_blow_up?`) keep the costly cases from being built at all; this catches the rest after the
+        # fact (`tr` into multibyte characters, `dump`, `Integer#to_s(2)`, whose receiver
+        # `INTEGER_FOLD_BIT_LIMIT` already bounds, so its rendering is at most 13 KB).
+        def oversized_string?(value)
+          value.is_a?(String) && value.bytesize > STRING_FOLD_BYTE_LIMIT
         end
 
         # True when an Integer, or an Integer part of a Rational / Complex, is past `INTEGER_FOLD_BIT_LIMIT`.
@@ -1875,7 +1900,6 @@ module Rigor
                     catalog_allows?(receiver_value, method_name)
           return false unless allowed
           return false if integer_division_by_zero?(receiver_value, method_name, arg_value)
-          return false if string_blow_up?(receiver_value, method_name, arg_value)
 
           true
         end
@@ -1961,8 +1985,63 @@ module Rigor
           case method_name
           when :+ then string_concat_blow_up?(receiver_value, arg_value)
           when :* then string_repeat_blow_up?(receiver_value, arg_value)
+          when :% then format_blow_up?(receiver_value, arg_value)
           when :center, :ljust, :rjust then string_pad_blow_up?(arg_value)
           else false
+          end
+        end
+
+        # #2125 — the two-argument String folds that can grow past the input: the padded `center` / `ljust`
+        # / `rjust` (width, pad) and `sub` / `gsub` (pattern, replacement).
+        def string_ternary_blow_up?(receiver_value, method_name, av0, av1)
+          return false unless receiver_value.is_a?(String)
+
+          case method_name
+          when :center, :ljust, :rjust then string_pad_blow_up?(av0)
+          when :sub, :gsub then string_substitution_blow_up?(receiver_value, method_name, av1)
+          else false
+          end
+        end
+
+        # An upper bound on a `sub` / `gsub` result with a String replacement: `gsub` matches at most once per
+        # position plus once at the end, and each replacement is the replacement's bytes plus, for every
+        # backslash in it (`\0`, `\1`, `\k<name>`, `` \` ``, `\'`), at most the receiver's bytes again.
+        def string_substitution_blow_up?(receiver_value, method_name, replacement)
+          return false unless replacement.is_a?(String)
+
+          size = receiver_value.bytesize
+          matches = method_name == :gsub ? size + 1 : 1
+          per_match = replacement.bytesize + (replacement.count("\\") * size)
+          size + (matches * per_match) > STRING_FOLD_BYTE_LIMIT
+        end
+
+        # #2125 — `String#%` / `Kernel#format` pad to a field width and render to a precision the format
+        # string spells (`"%02000000000d"`, `"%.100000f"`) or an argument supplies (`"%*d" % [n, 1]`).
+        # Formatting builds the whole padded string before any result gate can look at it — two billion
+        # bytes took 13 s and 4 GB — so the numbers are read from the directives first. A `*` width counts
+        # every Integer argument as a possible width, and a `%%` escape matches as a whole, carrying no digits.
+        FORMAT_DIRECTIVE = /%%|%(?:<[^>]*>|\{[^}]*\}|[-+ 0#*$.\d])*/
+        private_constant :FORMAT_DIRECTIVE
+
+        def format_blow_up?(format_string, arguments)
+          star = false
+          format_string.scan(FORMAT_DIRECTIVE) do |directive|
+            spec = directive.gsub(/<[^>]*>|\{[^}]*\}|\d+\$/, "")
+            return true if spec.scan(/\d+/).any? { |digits| digits.to_i > STRING_FOLD_BYTE_LIMIT }
+
+            star ||= spec.include?("*")
+          end
+          star && format_argument_values(arguments).any? do |value|
+            width = integer_operand(value)
+            !width.nil? && width.abs > STRING_FOLD_BYTE_LIMIT
+          end
+        end
+
+        def format_argument_values(arguments)
+          case arguments
+          when Hash then arguments.values
+          when Array then arguments
+          else [arguments]
           end
         end
 
@@ -1970,7 +2049,27 @@ module Rigor
         # literal `width` far larger than the receiver would materialise a huge Constant; cap it at the same
         # byte limit the concat / repeat paths use.
         def string_pad_blow_up?(arg_value)
-          arg_value.is_a?(Integer) && arg_value > STRING_FOLD_BYTE_LIMIT
+          width = integer_operand(arg_value)
+          !width.nil? && width > STRING_FOLD_BYTE_LIMIT
+        end
+
+        # The Integer a width or count operand stands for. Ruby converts a Float or Rational one with `NUM2LONG`
+        # (`"x" * 2.9` is `"xx"`, `"x".ljust(2e9)` pads to two billion), and a Complex one whose imaginary part is an
+        # exact zero through its real part (`"x" * Complex(3, 0)` is `"xxx"`; `Complex(3, 0.0)` raises), so the
+        # prechecks read it the same way. Those are every Numeric class a `Constant` carries. A non-finite Float
+        # raises in Ruby, and any other operand is left to the call, so both answer nil.
+        def integer_operand(value)
+          case value
+          when Integer then value
+          when Float then value.finite? ? value.to_i : nil
+          when Rational then value.to_i
+          when Complex then exact_real_operand(value)
+          end
+        end
+
+        def exact_real_operand(value)
+          imaginary = value.imaginary
+          imaginary.is_a?(Integer) && imaginary.zero? ? integer_operand(value.real) : nil
         end
 
         def string_concat_blow_up?(receiver_value, arg_value)
@@ -1979,10 +2078,11 @@ module Rigor
         end
 
         def string_repeat_blow_up?(receiver_value, arg_value)
-          return false unless arg_value.is_a?(Integer)
-          return true if arg_value.negative?
+          # A negative count raises (`ArgumentError`), so the call itself skips that member, as any raising one is.
+          count = integer_operand(arg_value)
+          return false if count.nil? || count.negative?
 
-          receiver_value.bytesize * arg_value > STRING_FOLD_BYTE_LIMIT
+          receiver_value.bytesize * count > STRING_FOLD_BYTE_LIMIT
         end
       end
     end

@@ -191,12 +191,16 @@ module Rigor
         # Runs the real `Kernel#format` when everything is value-pinned. A malformed directive or an
         # argument-count mismatch raises at fold time; the handler declines so the literal-string
         # lift (or the RBS `String` envelope) answers instead. Results larger than the shared
-        # `ConstantFolding::STRING_FOLD_BYTE_LIMIT` decline too, keeping the carrier-size convention.
+        # `ConstantFolding::STRING_FOLD_BYTE_LIMIT` decline too, keeping the carrier-size convention,
+        # and a field width or precision past it declines before the string is built (#2125).
         def fold_format_constant(args)
           return nil unless args.all?(Type::Constant)
           return nil unless args.first.value.is_a?(String)
 
-          result = format(args.first.value, *args.drop(1).map(&:value))
+          values = args.drop(1).map(&:value)
+          return nil if ConstantFolding.format_blow_up?(args.first.value, values)
+
+          result = format(args.first.value, *values)
           return nil if result.bytesize > ConstantFolding::STRING_FOLD_BYTE_LIMIT
 
           Type::Combinator.constant_of(result)

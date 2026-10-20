@@ -296,6 +296,16 @@ RSpec.describe Rigor::Inference::MethodDispatcher::KernelDispatch do
       expect(fmt(:format, constant_of("%#{limit + 1}d"), int_const)).to eq(literal_string)
     end
 
+    # #2125 — the width is read from the template before `format` runs: two billion bytes took 13 s and 4 GB.
+    it "declines a width past STRING_FOLD_BYTE_LIMIT without building the string" do
+      allow(described_class).to receive(:format).and_call_original
+      expect(fmt(:format, constant_of("%0200000000d"), int_const)).to eq(literal_string)
+      expect(fmt(:sprintf, constant_of("%.5000f"), constant_of(1.0))).to eq(literal_string)
+      expect(fmt(:format, constant_of("%*d"), constant_of(2e8), int_const)).to eq(literal_string)
+      expect(fmt(:format, constant_of("%*d"), constant_of(Complex(200_000_000, 0)), int_const)).to eq(literal_string)
+      expect(described_class).not_to have_received(:format)
+    end
+
     it "declines when the template is not literal-bearing" do
       expect(fmt(:format, nominal_string, literal_string)).to be_nil
     end

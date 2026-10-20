@@ -11,6 +11,8 @@ require_relative "../source/literals"
 require_relative "../source/node_children"
 require_relative "../inference/scope_indexer"
 require_relative "../rooted_glob"
+require_relative "observed_call"
+require_relative "value_class_override_scan"
 
 module Rigor
   module SigGen
@@ -41,6 +43,17 @@ module Rigor
       # it. Not an instance method name, so no `def` of the class can collide with it.
       BRACKET_NEW = :"self.[]"
 
+      # The key a site that may write a member, but whose argument-to-member mapping the collector cannot read, is
+      # observed under: `P.new(*args)`, `s.a += 1`, `m.a, m.b = pair`, `s[k] ||= v`. Each entry is an {ObservedCall}
+      # whose keywords name the members it may write, `ALL_MEMBERS` standing for every member; the value is
+      # `untyped`. {MetaMemberObservation} keeps those members `untyped`. A class {ValueClassOverrideScan} reports
+      # gets one `ALL_MEMBERS` entry. Like {BRACKET_NEW}, no `def` can collide with it.
+      UNMAPPED = :"rigor.unmapped"
+      ALL_MEMBERS = :"*"
+
+      # Calls that may write a member, so an argument list the collector cannot read still taints the class.
+      MEMBER_WRITERS = [:initialize, BRACKET_NEW, :with, :[]=, :send, :public_send, :__send__].freeze
+
       # @param paths — observe paths (files /
       #   directories).
       # @param source_paths — source-tree paths
@@ -66,6 +79,7 @@ module Rigor
         resolved.each do |path|
           collect_from_file(path, environment, discovered_classes, observations)
         end
+        overridden_classes(resolved).each { |name| observations[[name, UNMAPPED]] << unmapped(ALL_MEMBERS) }
         observations.transform_values(&:freeze).freeze
       end
 
@@ -115,19 +129,29 @@ module Rigor
       # singleton carrier even when no RBS sig describes `Foo` yet.
       def preindex_source_classes
         accumulator = {}
-        resolve_paths(@source_paths).each { |path| harvest_classes_from(path, accumulator) }
+        @source_roots = resolve_paths(@source_paths).filter_map { |path| parse_source(path) }
+        @source_roots.each { |root| walk_class_decls(root, [], accumulator) }
         accumulator.freeze
       end
 
-      def harvest_classes_from(path, accumulator)
-        source = File.read(path)
-        parse_result = Prism.parse(source, filepath: path, version: @configuration.target_ruby)
-        return if parse_result.errors.any?
-
-        walk_class_decls(parse_result.value, [], accumulator)
+      # Source-side parse failures are tolerated silently — the collector still runs on whichever files parsed
+      # cleanly.
+      def parse_source(path)
+        parse_result = Prism.parse(File.read(path), filepath: path, version: @configuration.target_ruby)
+        parse_result.value if parse_result.errors.none?
       rescue StandardError
-        # Source-side harvest failures are tolerated silently — the collector still runs on whichever files
-        # parsed cleanly.
+        nil
+      end
+
+      # #1150 / #1183 — the classes, across the source tree and the observed files, whose construction sites do not
+      # map onto their members ({ValueClassOverrideScan}).
+      def overridden_classes(observed_paths)
+        observed_roots = (observed_paths - resolve_paths(@source_paths)).filter_map { |path| parse_source(path) }
+        ValueClassOverrideScan.overridden(@source_roots + observed_roots)
+      end
+
+      def unmapped(member)
+        ObservedCall.new(keyword: { member => Type::Combinator.untyped })
       end
 
       def walk_class_decls(node, prefix, accumulator)
@@ -189,6 +213,7 @@ module Rigor
         return unless node.is_a?(Prism::Node)
 
         record_call(node, scope_index, bindings, observations, blocks) if node.is_a?(Prism::CallNode)
+        record_compound_write(node, scope_index, bindings, observations, blocks) if COMPOUND_WRITES.include?(node.class)
         node.rigor_each_child do |child|
           walk_calls(child, scope_index, bindings, observations, enclosing_blocks(node, child, blocks))
         end
@@ -244,9 +269,53 @@ module Rigor
         return if key.nil?
 
         observation = collect_args(call_node, scope)
-        return if observation.nil? || observation.empty?
+        if observation.nil?
+          observations[[key.first, UNMAPPED]] << unmapped(ALL_MEMBERS) if member_writer?(key.last)
+          return
+        end
+        return if observation.empty?
 
         observations[key] << observation
+      end
+
+      def member_writer?(name)
+        MEMBER_WRITERS.include?(name) || name.match?(/\A\w+=\z/)
+      end
+
+      # Writes `walk_calls` meets as something other than a `CallNode`: an operator / `||=` / `&&=` write through a
+      # writer or `[]=`, and a multiple-assignment target. The assigned value's type is not read; the member the
+      # write names (every member, for an index write without a literal key) is observed `untyped` (#1150, #1183).
+      COMPOUND_WRITES = [
+        Prism::CallOperatorWriteNode, Prism::CallOrWriteNode, Prism::CallAndWriteNode, Prism::CallTargetNode,
+        Prism::IndexOperatorWriteNode, Prism::IndexOrWriteNode, Prism::IndexAndWriteNode, Prism::IndexTargetNode
+      ].freeze
+      private_constant :COMPOUND_WRITES
+
+      def record_compound_write(node, scope_index, bindings, observations, blocks)
+        receiver = node.receiver
+        return if receiver.nil?
+
+        scope = scope_index[node] || scope_index[receiver]
+        return if scope.nil?
+
+        receiver_type = sole_non_nil(resolve_receiver_type(receiver, scope, bindings, blocks))
+        return unless receiver_type.is_a?(Type::Nominal)
+
+        observations[[receiver_type.class_name, UNMAPPED]] << unmapped(compound_write_member(node))
+      end
+
+      def compound_write_member(node)
+        if node.respond_to?(:write_name) then node.write_name.to_s.delete_suffix("=").to_sym
+        elsif node.is_a?(Prism::CallTargetNode) then node.name.to_s.delete_suffix("=").to_sym
+        else Source::Literals.symbol_or_string(node.arguments&.arguments&.first) || ALL_MEMBERS
+        end
+      end
+
+      def sole_non_nil(type)
+        return type unless type.is_a?(Type::Union)
+
+        non_nil = type.members.reject { |member| nil_type?(member) }
+        non_nil.size == 1 ? non_nil.first : type
       end
 
       # ADR-14 follow-up (A): `.new` → `:initialize` routing. `MethodCatalog.new(path: ...)` types its receiver

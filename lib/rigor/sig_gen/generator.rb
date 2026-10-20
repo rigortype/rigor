@@ -105,6 +105,7 @@ module Rigor
         @class_shells = Set.new
         @class_superclasses = {}
         @meta_layouts = {}
+        @struct_keyword_init = {}
         # Issue #1763 — the walked file's tree, and its refine-call query, built only when a `refine` call is walked.
         @walk_root = nil
         @in_effect_refinements = nil
@@ -474,7 +475,8 @@ module Rigor
         # Candidate construction freezes the per-file maps above (see {#build_candidate}), so every registration
         # pass has to be finished before the first `build_candidate` call. Meta members lead the RETURNED order —
         # a value class's members and constructors read first, ahead of the methods its block body defines.
-        meta_candidates = collect_meta_member_candidates(path, scope_index, own_initialize_classes(defs))
+        @struct_keyword_init = @observations.empty? ? {} : struct_keyword_init_flags(parse_result.value, [], {})
+        meta_candidates = collect_meta_member_candidates(path, scope_index)
         candidates_from_defs = defs.filter_map do |def_node, class_name, kind|
           # An analyzer bug typing one def's body must cost only that def's candidate, never the whole
           # `rigor sig-gen` run. The `check` path recovers each *file* this way (worker_session.rb); sig-gen
@@ -2237,13 +2239,13 @@ module Rigor
       # One candidate per member accessor and constructor {MetaClassShape} renders for each layout-carrying class.
       # These are the members no `def` or `attr_*` in the source declares, so nothing else in sig-gen can find them —
       # and once `register_meta_classes` has declared the class, an undeclared member reads as a missing one.
-      def collect_meta_member_candidates(path, scope_index, own_initialize_classes)
+      def collect_meta_member_candidates(path, scope_index)
         return [] if @meta_layouts.empty?
 
         scope = scope_index.each_value.first
         environment = scope&.environment
         @meta_layouts.flat_map do |class_name, layout|
-          types = own_initialize_classes.include?(class_name) ? {} : meta_member_types(class_name, layout)
+          types = meta_member_types(class_name, layout)
           shape = MetaClassShape.of(
             kind: layout.kind, members: layout.member_names, keyword_init: layout.keyword_init,
             member_types: types.transform_values { |type| paren_wrap_union(union_erase([type], owner: class_name)) }
@@ -2276,23 +2278,84 @@ module Rigor
         method_def.defined_in.to_s.delete_prefix("::") == class_name
       end
 
-      # `--params=observed` member types (#1150, #1183): the union of what the observed construction sites, `with`
-      # calls and Struct writer calls passed each member ({MetaMemberObservation}), with value literals widened to
-      # their class the way a proposed return is ({#widen_value_literals}) — `P.new(name: "a")` proposes `String`, not
-      # `"a"`. A member no site reaches is absent and renders `untyped`; a site passing an `untyped` argument keeps
-      # the member `untyped`, since the union erases to it. Empty without `--params=observed`.
+      # `--params=observed` member types (#1150, #1183): the union of what the observed sites passed each member
+      # ({MetaMemberObservation}, which also says which sites keep a member `untyped`), with value literals widened
+      # to their class the way a proposed return is ({#widen_value_literals}) — `P.new(name: "a")` proposes
+      # `String`, not `"a"`. A member no site reaches is absent and renders `untyped`; a site passing an `untyped`
+      # argument keeps the member `untyped`, since the union erases to it. Empty without `--params=observed`.
       def meta_member_types(class_name, layout)
         return {} if @observations.empty?
 
-        MetaMemberObservation.types(@observations, class_name, kind: layout.kind, members: layout.member_names)
+        MetaMemberObservation.types(@observations, class_name, kind: layout.kind, members: layout.member_names,
+                                                               **constructor_forms(class_name, layout))
                              .transform_values { |types| widen_value_literals(Type::Combinator.union(*types)) }
       end
 
-      # The classes this file gives an instance `initialize` of their own. A `Data.define(:x) do def initialize(x: 0)
-      # = super end` construction's arguments are that method's, not the members', so no member is read off them.
-      def own_initialize_classes(defs)
-        defs.filter_map { |def_node, class_name, kind| class_name if kind == :instance && def_node.name == :initialize }
-            .to_set
+      # How a Struct reads a keyword-only and a positional construction, from its literal `keyword_init:`. The ADR-48
+      # layout's flag reads `false` for an absent `keyword_init:` and for a literal `false` alike, and the two differ:
+      # absent takes keywords as members on Ruby 3.2 and later, while `false` (and absent before 3.2) stores the
+      # keywords as a Hash in the first member.
+      def constructor_forms(class_name, layout)
+        return {} unless layout.kind == :struct
+
+        case @struct_keyword_init[class_name]
+        when :keyword then { keywords: :members, positionals: false }
+        when :absent then { keywords: keyword_construction_default? ? :members : :hash }
+        else { keywords: :hash }
+        end
+      end
+
+      KEYWORD_CONSTRUCTION_SINCE = Gem::Version.new("3.2")
+      private_constant :KEYWORD_CONSTRUCTION_SINCE
+
+      def keyword_construction_default?
+        Gem::Version.new(@configuration.target_ruby.to_s) >= KEYWORD_CONSTRUCTION_SINCE
+      rescue ArgumentError
+        false
+      end
+
+      # `{ qualified_name => :keyword | :positional | :absent | :dynamic }` for each `Const = Struct.new(...)` and
+      # `class Const < Struct.new(...)` in the file, read off the call's literal `keyword_init:` (`nil` reads as
+      # absent, as Ruby does).
+      def struct_keyword_init_flags(node, prefix, out)
+        return out unless node.is_a?(Prism::Node)
+
+        case node
+        when Prism::ClassNode, Prism::ModuleNode
+          child = Source::ConstantPath.declaration_prefix(prefix, node.constant_path)
+          if node.is_a?(Prism::ClassNode) && child && struct_new_call?(node.superclass)
+            out[child.join("::")] = keyword_init_flag(node.superclass)
+          end
+          struct_keyword_init_flags(node.body, child || prefix, out)
+          return out
+        when Prism::ConstantWriteNode
+          out[[*prefix, node.name.to_s].join("::")] = keyword_init_flag(node.value) if struct_new_call?(node.value)
+        end
+        node.rigor_each_child { |child| struct_keyword_init_flags(child, prefix, out) }
+        out
+      end
+
+      def struct_new_call?(node)
+        return false unless node.is_a?(Prism::CallNode) && node.name == :new
+
+        receiver = node.receiver
+        (receiver.is_a?(Prism::ConstantReadNode) || (receiver.is_a?(Prism::ConstantPathNode) && receiver.parent.nil?)) &&
+          receiver.name == :Struct
+      end
+
+      def keyword_init_flag(call)
+        options = call.arguments&.arguments&.last
+        return :absent unless options.is_a?(Prism::KeywordHashNode)
+
+        pair = options.elements.find do |element|
+          element.is_a?(Prism::AssocNode) && Source::Literals.symbol_or_string(element.key) == :keyword_init
+        end
+        case pair&.value
+        when nil, Prism::NilNode then :absent
+        when Prism::TrueNode then :keyword
+        when Prism::FalseNode then :positional
+        else :dynamic
+        end
       end
     end
   end

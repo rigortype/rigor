@@ -11439,6 +11439,8 @@ module Rigor
           propagate_if_branches(node, table, current_scope)
         when Prism::UnlessNode
           propagate_unless_branches(node, table, current_scope)
+        when Prism::AndNode, Prism::OrNode
+          propagate_and_or(node, table, current_scope)
         when Prism::BlockNode, Prism::LambdaNode
           # An entered block is recorded with its entry scope, parameters bound. An entered `->` is recorded with
           # the ENCLOSING scope ({StatementEvaluator#eval_lambda} enters only its body), so its parameter list
@@ -11684,6 +11686,21 @@ module Rigor
         propagate(node.predicate, table, current_scope) if node.predicate
         propagate(node.statements, table, falsey_scope) if node.statements
         propagate(node.else_clause, table, truthy_scope) if node.else_clause
+      end
+
+      # Issue #2196 — an `&&` / `||` / `and` / `or` the evaluator did not enter (`[c && c + 1]`, `foo(c && c + 1)`,
+      # `"#{c && c + 1}"`) evaluates its right operand under its left operand's truthy edge (`&&`) or falsey edge
+      # (`||`), as {StatementEvaluator#eval_and_or} does; the left operand and everything after the operator keep the
+      # scope the operator started in. Like the walk of an `if`, it applies no write the left operand makes, so the
+      # edge is taken from a scope where every bound local the left operand writes reads `Dynamic[top]`
+      # ({#widen_condition_writes}). A right operand the evaluator recorded keeps its own scope.
+      def propagate_and_or(node, table, current_scope)
+        propagate(node.left, table, current_scope)
+        right = node.right
+        return propagate(right, table, current_scope) if table.key?(right)
+
+        truthy_scope, falsey_scope = conditional_edges(node.left, current_scope)
+        propagate(right, table, node.is_a?(Prism::AndNode) ? truthy_scope : falsey_scope)
       end
 
       def conditional_edges(predicate, scope)

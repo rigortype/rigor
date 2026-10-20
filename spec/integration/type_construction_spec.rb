@@ -1229,6 +1229,26 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  # Issue #2196 — an unentered `&&` / `||` narrows its right operand, and only its right operand.
+  describe "fixtures/and_or_value_position.rb — a value-position `&&` / `||` narrows its right operand" do
+    let(:harness) { harness_for("and_or_value_position") }
+
+    it "types the right operand under the left operand's edge" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches.map { |d| "#{d.line}: #{d.message}" }).to be_empty
+    end
+
+    it "reports a possible nil receiver only past the right operand" do
+      nil_receivers = harness.diagnostics.select { |d| d.rule == "call.possible-nil-receiver" }
+      expect(nil_receivers.map(&:line)).to eq(marked_lines(harness, "# GENUINE-NIL"))
+    end
+
+    it "reports an undefined method on `||`'s falsey edge" do
+      undefined = harness.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(undefined.map(&:line)).to eq(marked_lines(harness, "# GENUINE-UNDEFINED"))
+    end
+  end
+
   # Issue #1484 — a subject `case` the evaluator does not enter narrows its clauses as its statement form does.
   describe "fixtures/subject_case_value_position.rb — a value-position subject `case` narrows its clauses" do
     let(:harness) { harness_for("subject_case_value_position") }

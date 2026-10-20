@@ -1,1 +1,3 @@
-- **[rigor sig-gen]** `rigor sig-gen --params=observed` now auto-detects `spec/` and `test/` in the config file's directory, so a run from a subdirectory with `--config`, and the MCP tool `rigor_sig_gen`, observe the project's tests instead of leaving every parameter `untyped` ([#2240](https://github.com/rigortype/rigor/pull/2240)).
+- **[rigor sig-gen]** `rigor sig-gen --params=observed` now observes the project's tests from a subdirectory and from the MCP tool `rigor_sig_gen`, instead of leaving every parameter `untyped` ([#2240](https://github.com/rigortype/rigor/pull/2240)).
+  - `spec/` and `test/` are auto-detected in the config file's directory, then in the working directory.
+  - A class named only on the command line (`sig-gen --observe=../spec ../lib`) is known to the observed call sites.

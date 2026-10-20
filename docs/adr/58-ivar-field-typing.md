@@ -350,11 +350,15 @@ is not a lower bound (ADR-1), so `rigor check` uses it as well as
 does not fire on its own.
 
 The census is flow-free, so the write is credited only where the
-parameter cannot have changed: a bare read of the parameter, outside
-every block, in a body that never writes that local, under a single
-typed overload with no type variable, declared on the class itself (not
-inherited, not a module), in a class declared in one file. Any other
-write records what it recorded before. The gate is the survey-corpus
+parameter cannot have changed and nothing the census does not walk can
+overwrite the ivar: a bare read of the parameter, outside every block,
+in a body that never writes that local and hands no code to `binding`
+or an eval-family call, under a single typed overload with no type
+variable, declared on the class itself (not inherited, not a module, not
+a library class), in a class declared in one file, with no project
+ancestor, non-core superclass or outside `instance_variable_set` /
+`instance_eval` that writes the ivar. Any other write records what it
+recorded before. The gate is the survey-corpus
 diagnostic diff in the PR, which reads every new diagnostic; the binding
 contract is in `inference-engine.md` § "Instance-, class-, and
 global-variable bindings".

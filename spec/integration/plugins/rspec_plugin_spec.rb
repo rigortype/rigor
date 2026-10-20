@@ -314,11 +314,14 @@ RSpec.describe "plugins/rigor-rspec" do
     end
 
     context "when matcher is match(/regex/)" do
-      it "narrows x to String for a regex literal arg" do
-        call_node = parse_call_node("expect(x).to match(/\\Afoo\\z/)")
-        fact = plugin.narrowing_facts_for(call_node: call_node, scope: nil).first
+      it "meets a regex literal arg with the local's String and Symbol members" do
+        type = equality_fact_type("expect(x).to match(/\\Afoo\\z/)", union(nominal("String"), constant(nil)))
+        expect(type).to eq(nominal("String"))
+      end
 
-        expect(fact.type).to eq(Rigor::Type::Combinator.nominal_of("String"))
+      it "is silent without a scope, since the local's members decide" do
+        call_node = parse_call_node("expect(x).to match(/\\Afoo\\z/)")
+        expect(plugin.narrowing_facts_for(call_node: call_node, scope: nil)).to be_empty
       end
 
       it "is silent for a non-regex argument" do
@@ -392,12 +395,12 @@ RSpec.describe "plugins/rigor-rspec" do
     # branch and narrows the local so a downstream `.upcase` / `.+` / etc. resolves cleanly.
     context "when running end-to-end through the engine" do
       # Runs `body` as `T#case_eq(x)` with `x` declared `x_type` in `sig/`, plus `patch` as an analysed file.
-      def run_case_eq(x_type, body, patch: nil)
+      def run_case_eq(x_type, body, patch: nil, sig: "")
         files = patch ? { "patch.rb" => patch } : {}
         source = "class T\n  def case_eq(x)\n#{body.gsub(/^/, '    ')}  end\nend\n"
         run_plugin(
           source: source,
-          files: files.merge("sig/t.rbs" => "class T\n  def case_eq: (#{x_type}) -> void\nend\n"),
+          files: files.merge("sig/t.rbs" => "class T\n  def case_eq: (#{x_type}) -> void\nend\n#{sig}"),
           paths: ["demo.rb", *files.keys],
           signature_paths: ["sig"]
         )
@@ -602,6 +605,105 @@ RSpec.describe "plugins/rigor-rspec" do
         patch = "class Integer\n  def eql?(other) = true\nend\n"
         expect(dumped_types(run_case_eq("Integer", "expect(x).to eql(9)\ndump_type(x)\n", patch: patch)))
           .to eq(["Integer"])
+      end
+
+      # Issue #2033 — RSpec's `match` passes when `expected === actual`, and `/a/ === :abc` is true, so a Symbol
+      # subject passes `expect(x).to match(/a/)` and stays a Symbol (rspec-expectations 3.13: `expect(:abc).to
+      # match(/a/)` passes). Only a member that can never pass leaves the local: `/a/ === nil` and `/a/ === 1` are
+      # false, and neither responds to `match`.
+      describe "match(/regex/) (#2033)" do
+        it "keeps a Symbol subject a Symbol" do
+          expect(/a/ === :abc).to be(true)
+          expect(dumped_types(run_case_eq("Symbol", "expect(x).to match(/a/)\ndump_type(x)\nx.to_proc\n")))
+            .to eq(["Symbol"])
+        end
+
+        it "keeps both members of a Symbol | String subject" do
+          expect(dumped_types(run_case_eq("Symbol | String", "expect(x).to match(/a/)\ndump_type(x)\n")))
+            .to eq(["String | Symbol"])
+        end
+
+        it "leaves an untyped subject untyped" do
+          expect(dumped_types(run_case_eq("untyped", "expect(x).to match(/a/)\ndump_type(x)\n")))
+            .to eq(["Dynamic[top]"])
+        end
+
+        it "keeps a String subject a String and removes nil and Integer members" do
+          nothing = nil
+          expect([/a/ === nothing, /a/ === 1, nothing.respond_to?(:match), 1.respond_to?(:match)]).to all(be(false))
+          expect(dumped_types(run_case_eq("String", "expect(x).to match(/a/)\ndump_type(x)\n"))).to eq(["String"])
+          expect(dumped_types(run_case_eq("String?", "expect(x).to match(/a/)\ndump_type(x)\n"))).to eq(["String"])
+          expect(dumped_types(run_case_eq("Symbol | Integer", "expect(x).to match(/a/)\ndump_type(x)\n")))
+            .to eq(["Symbol"])
+        end
+
+        # RSpec's `match` also passes when `actual.match(expected)` is truthy, or `actual == expected`; a member of a
+        # class Rigor cannot rule out keeps the local's type.
+        it "keeps the local's type when a member may define match, to_str or ==" do
+          expect(dumped_types(run_case_eq("Array[Integer] | String", "expect(x).to match(/a/)\ndump_type(x)\n")))
+            .to eq(dumped_types(run_case_eq("Array[Integer] | String", "dump_type(x)\n")))
+          %w[match to_str ==].each do |method_name|
+            patch = "class NilClass\n  def #{method_name}(other) = true\nend\n"
+            expect(dumped_types(run_case_eq("String?", "expect(x).to match(/a/)\ndump_type(x)\n", patch: patch)))
+              .to eq(["String?"])
+          end
+        end
+
+        it "reads a project definition on a core ancestor or through define_method" do
+          {
+            "class Numeric\n  def to_str = \"1\"\nend\n" => ["Float?", ["Float"]],
+            "module Kernel\n  def match(other) = true\nend\n" => ["String?", ["String?"]],
+            "class NilClass\n  define_method(:match) { |_other| true }\nend\n" => ["String?", ["String?"]]
+          }.each do |patch, (declared, dumped)|
+            expect(dumped_types(run_case_eq(declared, "expect(x).to match(/a/)\ndump_type(x)\n", patch: patch)))
+              .to eq(dumped)
+          end
+        end
+
+        # An Object, BasicObject or module subject reads `String | Symbol` after the matcher, as before #2033, so a
+        # String method called there reports nothing (approval-queue.d/regexp-match-open-surface-subject.md).
+        it "reads an Object, BasicObject, Kernel or Comparable subject as String | Symbol" do
+          %w[Object BasicObject Kernel Comparable Object?].each do |declared|
+            result = run_case_eq(declared, "expect(x).to match(/a/)\ndump_type(x)\nx.length\n")
+            expect(dumped_types(result)).to eq(["String | Symbol"])
+            expect(result.diagnostics.select { |d| d.severity == :error }.map(&:message)).to eq([])
+          end
+          patch = "class Object\n  def match(other) = true\nend\n"
+          expect(dumped_types(run_case_eq("Object", "expect(x).to match(/a/)\ndump_type(x)\n", patch: patch)))
+            .to eq(["Object"])
+        end
+
+        # A module String and Symbol do not include may be included by a value that passes without being a String
+        # (Ruby: with `class Greeter; include Named; def to_str = "a"; end`, `expect(Greeter.new).to match(/a/)`
+        # passes), so it emits no fact; a module that declares `to_str` or `match` keeps its type.
+        it "emits no fact for another module, and keeps one that declares to_str or match" do
+          sig = "module Named\n  def greet: () -> String\nend\nmodule Matchable\n  def match: (Regexp) -> bool\nend\n"
+          result = run_case_eq("Named", "expect(x).to match(/a/)\ndump_type(x)\nx.greet\n", sig: sig)
+          expect(dumped_types(result)).to eq(["Named"])
+          expect(result.diagnostics.select { |d| d.severity == :error }.map(&:message)).to eq([])
+          expect(dumped_types(run_case_eq("Named?", "expect(x).to match(/a/)\ndump_type(x)\n", sig: sig)))
+            .to eq(["Named?"])
+          expect(dumped_types(run_case_eq("Matchable?", "expect(x).to match(/a/)\ndump_type(x)\n", sig: sig)))
+            .to eq(["Matchable"])
+          expect(dumped_types(run_case_eq("Enumerable[untyped]?", "expect(x).to match(/a/)\ndump_type(x)\n")))
+            .to eq(dumped_types(run_case_eq("Enumerable[untyped]?", "dump_type(x)\n")))
+          reopened = "module Comparable\n  def to_str: () -> String\nend\n"
+          expect(dumped_types(run_case_eq("Comparable", "expect(x).to match(/a/)\ndump_type(x)\n", sig: reopened)))
+            .to eq(["Comparable"])
+        end
+
+        # No member of a `nil` local can pass, so the matcher fails at run time; the analyzer emits no fact rather than
+        # reading the local as `bot`.
+        it "emits no fact for a subject none of whose members can pass" do
+          expect(dumped_types(run_case_eq("nil", "expect(x).to match(/a/)\ndump_type(x)\n"))).to eq(["nil"])
+        end
+
+        # A String that does not match passes `not_to match`, so the negative form removes nothing.
+        it "leaves the local unchanged after not_to match(/regex/)" do
+          expect(/a/ === "b").to be(false)
+          expect(dumped_types(run_case_eq("String", "expect(x).not_to match(/a/)\ndump_type(x)\n")))
+            .to eq(["String"])
+        end
       end
     end
   end

@@ -328,4 +328,23 @@ RSpec.describe "call.unresolved-toplevel inside a block a project callee rebinds
 
     expect(toplevel_lines).to eq([["use.rb", 2]])
   end
+
+  # A block call chained on, or passed into, another block call: the enclosing rebinding block starts before the
+  # outer call's block, whatever order the file's walk meets the two calls in.
+  it "declines in a rebinding block nested in another block call's receiver or arguments" do
+    FileUtils.mkdir_p("lib")
+    File.write("lib/a.rb", <<~RUBY)
+      module Ext
+        def self.helper = :ok
+        def self.me(&b) = module_eval(&b)
+      end
+      Ext.me { helper }.then { |x| x }
+      [Ext.me { helper }].each { |x| x }
+      p(Ext.me { helper }) { nil }
+      y = Ext.me { helper }.to_s.tap { nil }
+      undefined_ctl
+    RUBY
+
+    expect(toplevel_lines).to eq([["a.rb", 9]])
+  end
 end

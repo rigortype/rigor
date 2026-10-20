@@ -57,7 +57,7 @@ module Rigor
             @def_rows = nil
           end
 
-          # The block-passing calls whose block contains `node`. Rows are in start order, so the scan stops at the
+          # The block-passing calls whose block contains `node`. Rows are sorted by start, so the scan stops at the
           # first block that starts after `node`.
           def enclosing(node)
             build
@@ -84,6 +84,9 @@ module Rigor
 
             @rows = []
             collect(@root) unless @root.nil?
+            # `collect` records a call before its receiver and arguments, so a block call chained on another
+            # (`m { }.then { }`) comes after the call whose block starts later.
+            @rows.sort_by!(&:first)
           end
 
           def collect(node)

@@ -170,4 +170,25 @@ RSpec.describe "incremental edges for a source-recorded method visibility (#2134
       first: [["def.override-return-widened", "lib/child.rb", 2]], second: []
     )
   end
+
+  # Issue #2161 — a module that `extend`s itself reads its private instance method's visibility for the singleton
+  # call (`Es.two(1)` is a private call), unless some file's `module_function` row for the name gives it a public
+  # singleton copy (`DefinerResolution.module_function_row?`). Swapping `private :two` for `module_function :two` in a
+  # reopening keeps the file's visibility table and declared classes, so only the row entry `visibility_entries`
+  # carries fires `visibility:Es#two`.
+  def self_extended_files
+    { "lib/es.rb" => "module Es\n  extend self\n  private def two(a, b) = a\nend\n",
+      "lib/use.rb" => "def b = Es.two(1)\n" }
+  end
+
+  def private_two = "module Es\n  private :two\nend\n"
+  def module_function_two = "module Es\n  module_function :two\nend\n"
+
+  it "re-checks a self-extended singleton call when a reopening swaps private for module_function" do
+    expect_toggle(self_extended_files, before: private_two, after: module_function_two, first: mismatch, second: arity)
+  end
+
+  it "re-checks a self-extended singleton call when a reopening swaps module_function back for private" do
+    expect_toggle(self_extended_files, before: module_function_two, after: private_two, first: arity, second: mismatch)
+  end
 end

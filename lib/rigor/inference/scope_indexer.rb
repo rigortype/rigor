@@ -9201,7 +9201,12 @@ module Rigor
 
       # Issue #2134 — one file's contributions to the visibility table and its contested sibling, as a Set of
       # `[class, slot, visibility]` entries and `[:contested, class, slot]` contests, where a slot is a method name or
-      # `[:singleton, name]`. Takes a live file index or a seed bundle, which hold the same two keys.
+      # `[:singleton, name]`. Takes a live file index or a seed bundle, which hold the same keys.
+      #
+      # Issue #2161 — and a `[:module_function, owner, name]` entry for each of the file's deferred-range rows that
+      # `DefinerResolution.module_function_row?` counts (a named def row whose kind is not `:instance`): a module
+      # function's singleton copy is public whatever its instance slot says, so the row is a visibility fact the
+      # table itself does not hold.
       def visibility_entries(file_index)
         entries = Set.new
         file_index[:method_visibilities]&.each do |class_name, table|
@@ -9209,7 +9214,16 @@ module Rigor
         end
         contested = (file_index[:siblings] || {})[:contested_discovered_method_visibilities]
         contested&.each { |(class_name, slot)| entries << [:contested, class_name, slot] }
+        add_module_function_entries(file_index[:deferred_ranges], entries)
         entries.freeze
+      end
+
+      def add_module_function_entries(deferred_ranges, entries)
+        deferred_ranges&.each_value do |rows|
+          rows.each do |(_start, _finish, name, kind, owner)|
+            entries << [:module_function, owner, name] if name && owner && kind != :instance
+          end
+        end
       end
 
       # ADR-89 WD1 — a per-file digest of every cross-file DECLARATION surface an ancestry / file-level

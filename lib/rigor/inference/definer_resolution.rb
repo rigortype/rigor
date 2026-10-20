@@ -305,6 +305,12 @@ module Rigor
 
       # Whether any file's deferred ranges carry a `module_function` row (`:both` or `:singleton`) for the name on
       # `owner` (`ModuleFunctionState`).
+      #
+      # Issue #2161 — the answer reads every file's rows, and its edge is `visibility:<owner>#<name>`, which the one
+      # caller's singleton-slot read (`side_visibility` through `Scope#discovered_method_visibility`) records for the
+      # same owner and name before it asks: `ScopeIndexer.visibility_entries` carries each file's rows of this shape,
+      # so a file that starts or stops writing one fires the key. A swap from `private :x` to `module_function :x` in
+      # a reopening leaves the file's visibility table and declared classes as they were, and fires nothing else.
       def module_function_row?(scope, owner, method_name)
         name = method_name.to_sym
         scope.discovered_deferred_ranges.each_value.any? do |rows|

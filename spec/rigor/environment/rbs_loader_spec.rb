@@ -1768,7 +1768,12 @@ RSpec.describe Rigor::Environment::RbsLoader do
       ["virtual:rbs-inline:/app/lib/shop.rb",
        "class Shop\n  def label: (::Integer n) -> ::String\nend\n\nclass String\n  def yell: () -> ::String\nend\n"]
     end
-    let(:split_virtual) { ["virtual:rbs-inline:/app/lib/split.rb", "class Split\n  def a: () -> ::Integer\nend\n"] }
+    # The superclass makes the inline declaration the PRIMARY one, so `project_entry?` (which reads only the
+    # primary) does not answer for the class and the `sig/` arm of `inline_only_entry?` has to.
+    let(:split_virtual) do
+      ["virtual:rbs-inline:/app/lib/split.rb",
+       "class SplitBase\nend\n\nclass Split < SplitBase\n  def a: () -> ::Integer\nend\n"]
+    end
 
     after { FileUtils.rm_rf(tmpdir) }
 
@@ -1785,6 +1790,15 @@ RSpec.describe Rigor::Environment::RbsLoader do
       loader = described_class.new(signature_paths: [tmpdir], virtual_rbs: [split_virtual])
 
       expect(loader.project_declared_class?("Split")).to be(true)
+    end
+
+    it "answers false, without raising, for a declaration whose buffer it cannot attribute" do
+      allow(described_class).to receive(:declaration_buffer_name).and_call_original
+      allow(described_class).to receive(:declaration_buffer_name)
+        .with(having_attributes(name: RBS::TypeName.parse("::Shop"))).and_return(nil)
+      loader = described_class.new(virtual_rbs: [shop_virtual])
+
+      expect(loader.project_declared_class?("Shop")).to be(false)
     end
 
     it "keeps a class with no inline or sig/ declaration outside the set" do

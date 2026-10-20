@@ -49,8 +49,9 @@ module Rigor
         else
           record_writers(context, observations, class_name)
         end
-        record_unmapped(context, observations.fetch([class_name, ObservationCollector::UNMAPPED], []) +
-                                 observations.fetch([ObservationCollector::ANY_CLASS, ObservationCollector::UNMAPPED], []))
+        unmapped = ObservationCollector::UNMAPPED
+        record_unmapped(context, observations.fetch([class_name, unmapped], []) +
+                                 observations.fetch([ObservationCollector::ANY_CLASS, unmapped], []))
         finish(out)
       end
 

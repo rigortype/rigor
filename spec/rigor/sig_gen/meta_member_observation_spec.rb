@@ -356,41 +356,43 @@ RSpec.describe Rigor::SigGen::MetaMemberObservation do
 
   # The allow-list (ValueClassEligibility). Positive control: every reference form and body statement it allows, at
   # once, still types the members.
+  def plain_source = <<~RUBY
+    module N
+      V = Struct.new(:a) do
+        LIMIT = 1
+        attr_reader :note
+        def label = "v"
+        private
+        def helper = 1
+        private def other = 2
+        private_constant :LIMIT
+      end
+      class V
+        def more = 2
+      end
+      class V::Inner; end
+    end
+  RUBY
+  def plain_uses = <<~RUBY
+    N::V.new(1)
+    N::V[2]
+    N::V.members
+    def guard(v)
+      v.is_a?(N::V)
+      v.kind_of?(N::V)
+      v.instance_of?(N::V)
+      N::V === v
+      case v
+      when N::V then 1
+      end
+    rescue N::V
+      nil
+    end
+    ::N::V.new(3)
+  RUBY
+
   it "types a value class whose every reference and body statement is plain" do
-    write("lib/shapes.rb", <<~RUBY)
-      module N
-        V = Struct.new(:a) do
-          LIMIT = 1
-          attr_reader :note
-          def label = "v"
-          private
-          def helper = 1
-          private def other = 2
-          private_constant :LIMIT
-        end
-        class V
-          def more = 2
-        end
-        class V::Inner; end
-      end
-    RUBY
-    write("test/v_test.rb", <<~RUBY)
-      N::V.new(1)
-      N::V[2]
-      N::V.members
-      def guard(v)
-        v.is_a?(N::V)
-        v.kind_of?(N::V)
-        v.instance_of?(N::V)
-        N::V === v
-        case v
-        when N::V then 1
-        end
-      rescue N::V
-        nil
-      end
-      ::N::V.new(3)
-    RUBY
+    define(plain_source, plain_uses)
 
     expect(rows(observed_print, "N::V")).to include("def a: () -> Integer")
   end

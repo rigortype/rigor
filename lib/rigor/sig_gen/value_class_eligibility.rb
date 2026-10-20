@@ -25,7 +25,7 @@ module Rigor
     # 3. For a Struct, no observed file calls `send` / `__send__` / `public_send` with `:initialize`,
     #    `:initialize_copy` or a name that is not a literal: that re-runs `initialize` on an existing instance with
     #    arguments no construction site shows. A `Data` instance is frozen, so the same call raises `FrozenError`.
-    class ValueClassEligibility
+    class ValueClassEligibility # rubocop:disable Metrics/ClassLength
       FACTORIES = { define: :Data, new: :Struct }.freeze
       CONSTRUCTION_CALLS = %i[new [] members].freeze
       GUARD_CALLS = %i[is_a? kind_of? instance_of?].freeze
@@ -40,7 +40,7 @@ module Rigor
       private_constant :FACTORIES, :CONSTRUCTION_CALLS, :GUARD_CALLS, :SEND_CALLS, :REINITIALIZERS, :FORBIDDEN_DEFS,
                        :ATTR_CALLS, :VISIBILITY_CALLS, :CONSTANT_REFLECTION
 
-      ValueClass = Data.define(:kind, :members)
+      ValueClass = Data.define(:kind, :member_names)
       private_constant :ValueClass
 
       # The qualified names of the value classes defined in `source_roots` + `observed_roots` that are NOT eligible.
@@ -57,13 +57,18 @@ module Rigor
       end
 
       def ineligible
+        # Two passes: a class another file defines must be known before any reference to it is resolved.
         @roots.each { |root| index(root, []) }
-        @roots.each { |root| visit(root, nil, [], nil) }
+        visit_all
         mark_structs_ineligible if @observed_roots.any? { |root| reinitializes?(root) }
         (@ineligible & @value_classes.keys.to_set).freeze
       end
 
       private
+
+      def visit_all
+        @roots.each { |root| visit(root, nil, [], nil) }
+      end
 
       # Pass 1: every class / module / constant name, and the value classes with their member lists.
       def index(node, prefix)
@@ -94,7 +99,7 @@ module Rigor
         # A class defined twice is not one layout the observations can be read against.
         @ineligible << name if @value_classes.key?(name)
         members = (call.arguments&.arguments || []).filter_map { |arg| Source::Literals.symbol(arg) }
-        @value_classes[name] = ValueClass.new(kind: kind, members: members)
+        @value_classes[name] = ValueClass.new(kind: kind, member_names: members)
       end
 
       def factory_kind(call)
@@ -208,7 +213,7 @@ module Rigor
         return if body.nil?
         return @ineligible << name unless body.is_a?(Prism::StatementsNode)
 
-        members = @value_classes.fetch(name).members
+        members = @value_classes.fetch(name).member_names
         @ineligible << name unless body.body.all? { |statement| plain_statement?(statement, members) }
       end
 

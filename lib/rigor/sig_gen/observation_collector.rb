@@ -48,7 +48,8 @@ module Rigor
       # whose keywords name the members it may write, `ALL_MEMBERS` standing for every member; the value is
       # `untyped`. {MetaMemberObservation} keeps those members `untyped`. A value class {ValueClassEligibility} finds
       # ineligible gets one `ALL_MEMBERS` entry. A writer called on a receiver the collector cannot attribute to one
-      # class is keyed under `ANY_CLASS`, and keeps that member `untyped` on every value class. Like {BRACKET_NEW}, no `def` can collide with it.
+      # class is keyed under `ANY_CLASS`, and keeps that member `untyped` on every value class. Like {BRACKET_NEW}, no
+      # `def` can collide with it.
       UNMAPPED = :"rigor.unmapped"
       ALL_MEMBERS = :*
       ANY_CLASS = "*"
@@ -150,7 +151,8 @@ module Rigor
       # not proven to map onto their members ({ValueClassEligibility}).
       def ineligible_value_classes(observed_paths)
         observed_roots = observed_paths.filter_map { |path| parse_source(path) }
-        ValueClassEligibility.ineligible(source_roots: source_roots_outside(observed_paths), observed_roots: observed_roots)
+        ValueClassEligibility.ineligible(source_roots: source_roots_outside(observed_paths),
+                                         observed_roots: observed_roots)
       end
 
       def source_roots_outside(observed_paths)

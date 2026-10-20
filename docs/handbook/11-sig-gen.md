@@ -647,26 +647,24 @@ list is the current state):
   store, so a member stays `untyped` when:
 
   - no site sets it, or some site passes it an `untyped` value;
-  - a site may set it through a mapping sig-gen does not read:
-    a construction with a splat, a double splat, a block
-    argument or `...`; a construction mixing positionals and
-    keywords; a keyword construction of a `Struct` whose
-    `keyword_init:` is `false` or not a literal; `s[key] = v`
-    (every member unless `key` is a literal); `s.send(:a=, v)`
-    or `public_send`; `s.a += v`, `||=`, `&&=`; or a multiple
-    assignment `s.a, s.b = ...`.
+  - a site may set it through a mapping sig-gen does not read,
+    such as a splat construction, a construction mixing
+    positionals and keywords, a keyword construction of a
+    `Struct` whose `keyword_init:` is not absent or `true`, an
+    index or `send` write, or an operator or multiple-assignment
+    write.
 
-  Every member stays `untyped` when the class, in any file
-  sig-gen reads (the source paths and the observed roots):
-
-  - defines `initialize`, `define_method`s it, or aliases a
-    method to it;
-  - prepends any module, or includes a project module that
-    defines `initialize`;
-  - overrides `new` or `[]` (`def self.new`, a `def` or an
-    alias in `class << self`, `define_singleton_method`), or
-    extends a project module that defines either;
-  - has a subclass.
+  Members are typed only for a class proven plain across
+  every file sig-gen reads (the source paths and the observed
+  roots). Each reference to its constant must be its
+  definition, a `class X` reopening, `X.new` / `X[...]` /
+  `X.members`, a class guard, or a `X::Y` path. Its body,
+  factory block and reopenings may hold only ordinary `def`s,
+  `attr_*` of non-member names, constants and visibility calls.
+  Any other use keeps every member `untyped`. So does an
+  observed `send` that may re-run `initialize` on a Struct.
+  A writer called on a receiver sig-gen cannot type keeps that
+  member `untyped` on every value class.
 
   Only call sites under the observed roots count. A
   construction in `lib/` outside them is not read, and code

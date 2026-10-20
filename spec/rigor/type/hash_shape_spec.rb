@@ -170,13 +170,33 @@ RSpec.describe Rigor::Type::HashShape do
       expect { RBS::Parser.parse_type(rbs) }.not_to raise_error
     end
 
-    it "erases a non-identifier Symbol key with the quoted fat-arrow form so RBS parses it" do
+    it "erases a non-identifier Symbol key with the quoted Symbol fat-arrow form so RBS parses it" do
       # A hyphenated Symbol key (e.g. Mastodon's html_attributes `:"data-contrast"`) is invalid as a
-      # bare RBS record key and also invalid quoted-with-colon; it MUST erase to `"key" => T`.
+      # bare RBS record key and also invalid quoted-with-colon. `"key" => T` parses, but as the String
+      # key (#2176); the Symbol key is `:"key" => T`.
       shape = described_class.new(lang: int_nominal, "data-contrast": str_nominal)
       rbs = shape.erase_to_rbs
-      expect(rbs).to eq("{ lang: Integer, \"data-contrast\" => String }")
+      expect(rbs).to eq("{ lang: Integer, :\"data-contrast\" => String }")
       expect { RBS::Parser.parse_type(rbs) }.not_to raise_error
+      expect(RBS::Parser.parse_type(rbs).fields.keys).to eq(%i[lang data-contrast])
+      expect({ lang: 1, "data-contrast": "s" }.keys).to eq(%i[lang data-contrast])
+    end
+
+    it "erases an optional non-identifier Symbol key with a leading `?`, read back as the same Symbol" do
+      shape = described_class.new({ "data-x": int_nominal, if: int_nominal }, optional_keys: [:"data-x"])
+      rbs = shape.erase_to_rbs
+      expect(rbs).to eq("{ ?:\"data-x\" => Integer, if: Integer }")
+      parsed = RBS::Parser.parse_type(rbs)
+      expect(parsed.optional_fields.keys).to eq([:"data-x"])
+      expect(parsed.fields.keys).to eq([:if])
+    end
+
+    # `String#inspect` escapes `#{` as `\#{`, which RBS reads back as a different Symbol, so a record
+    # holding such a key erases to `Hash[...]`, which names no key at all.
+    it "degrades a shape whose Symbol key RBS cannot spell back to Hash" do
+      key = :"\#{x}"
+      expect(described_class.new(key => int_nominal).erase_to_rbs).to eq("Hash[Symbol, Integer]")
+      expect(described_class.new("a#b": int_nominal).erase_to_rbs).to eq("{ :\"a#b\" => Integer }")
     end
   end
 

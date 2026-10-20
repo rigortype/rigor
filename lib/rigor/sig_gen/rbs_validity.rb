@@ -7,7 +7,7 @@ module Rigor
     # Parses what sig-gen is about to emit, before it is emitted.
     #
     # Two rendering bugs have shipped RBS that `rbs` itself rejects — a non-identifier record key
-    # (`{ :"data-contrast" => T }`) and a `&block` constructor parameter rendered before the parens
+    # (`{ "data-contrast": T }`) and a `&block` constructor parameter rendered before the parens
     # (`(**untyped, ?{ (?) -> void })`). Both were found downstream, as a poisoned `sig/` tree: the file is
     # quarantined, its types vanish, and (for a project adopting `reject-unparseable-signatures`) the build
     # fails. A generator that can poison its own consumer's build is worth guarding at the source.

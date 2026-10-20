@@ -1366,6 +1366,22 @@ RSpec.describe Rigor::SigGen::Generator do
       expect(method.rbs).to eq("def g: () -> Range[Integer]")
     end
 
+    # A Symbol record key that needs quoting is written `:"data-x" =>`: `"data-x" =>` is the String key in RBS,
+    # so the written return declared a key the body never has and `rigor check` then reported a false
+    # `def.return-type-mismatch` (#2176).
+    it "writes a quoted Symbol record key as a Symbol key over a declared `-> untyped`" do
+      write_fixture("sig/box.rbs", "class Box\n  def g: () -> untyped\nend\n")
+      path = write_fixture("lib/box.rb", "class Box\n  def g = { \"data-x\": 1, if: 2 }\nend\n")
+
+      gen = generator(paths: [path], signature_paths: [File.join(tmpdir, "sig")])
+      method = gen.run.find { |c| c.method_name == :g }
+
+      expect({ "data-x": 1, if: 2 }.keys).to eq(%i[data-x if])
+      expect(method.classification).to eq(Rigor::SigGen::Classification::TIGHTER_RETURN)
+      expect(method.rbs).to eq('def g: () -> { :"data-x" => Integer, if: Integer }')
+      expect(RBS::Parser.parse_type(method.rbs.delete_prefix("def g: () -> ")).fields.keys).to eq(%i[data-x if])
+    end
+
     # `Set[unchecked out A]` and `Struct[Elem]` are generic, and the bare spellings fail `rbs validate` with
     # `InvalidTypeApplicationError` (#2177), as a bare `Range` did (#1891). A set is mutable, so its element type
     # is `untyped` rather than the classes it was built with: the mutated rows return members of another class.

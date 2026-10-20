@@ -79,7 +79,9 @@ module Rigor
       # Scalar carriers without RBS Literal support (Float, Range, Rational, Complex, Regexp, Pathname)
       # keep their pre-existing widen-to-class-name behaviour because RBS rejects their literal spellings
       # as syntax errors. `Range` is generic (`Range[out E]`), and a bare `Range` fails `rbs validate`, so
-      # it carries the class of its endpoints, or `untyped` when both are nil (#1891).
+      # it carries the class of its endpoints, or `untyped` when both are nil (#1891). `Set[unchecked out A]` is
+      # generic too: it carries the classes of its elements, or `untyped` when it is empty or holds a generic
+      # carrier whose class name alone would be a bare generic again (#2177).
       def erase_to_rbs
         case value
         when true then "true"
@@ -88,6 +90,7 @@ module Rigor
         when Integer then value.to_s
         when Symbol, String then value.inspect
         when Range then "Range[#{range_element_rbs}]"
+        when ::Set then "Set[#{set_element_rbs}]"
         else value.class.name
         end
       end
@@ -110,6 +113,17 @@ module Rigor
       end
 
       private
+
+      # Element classes a `Set` constant names as its type argument. A nested `Range` or `Set` would erase to a
+      # bare generic, so a set holding one falls back to `untyped`.
+      GENERIC_SCALAR_CLASSES = [Range, ::Set].freeze
+      private_constant :GENERIC_SCALAR_CLASSES
+
+      def set_element_rbs
+        return "untyped" if value.empty? || value.any? { |e| GENERIC_SCALAR_CLASSES.any? { |k| e.is_a?(k) } }
+
+        value.map { |element| element.class.name }.uniq.sort.join(" | ")
+      end
 
       def range_element_rbs
         classes = [value.begin, value.end].compact.map { |endpoint| endpoint.class.name }.uniq.sort

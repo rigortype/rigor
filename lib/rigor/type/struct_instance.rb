@@ -63,10 +63,11 @@ module Rigor
       end
 
       # Erases to the tagging class nominal (conservative: the structural members are not RBS-expressible
-      # as a class instance). The anonymous case erases to the `Struct` supertype.
+      # as a class instance). The anonymous case erases to the `Struct` supertype with an `untyped`
+      # element: `Struct[Elem]` is generic, and a bare `Struct` fails `rbs validate` (#2177).
       def erase_to_rbs
         name = class_name
-        return "Struct" if name.nil?
+        return "Struct[untyped]" if name.nil?
 
         name
       end

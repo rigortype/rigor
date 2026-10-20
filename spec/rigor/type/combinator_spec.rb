@@ -195,6 +195,15 @@ RSpec.describe Rigor::Type::Combinator do
       expect(described_class.constant_of(nil..nil).erase_to_rbs).to eq("Range[untyped]")
     end
 
+    # `Set[unchecked out A]` is generic too, and a bare `Set` fails `rbs validate` (#2177).
+    it "widens a Set to Set of its element classes, or untyped when none can be named" do
+      expect(described_class.constant_of(Set[1, 2]).erase_to_rbs).to eq("Set[Integer]")
+      expect(described_class.constant_of(Set[:a, 1]).erase_to_rbs).to eq("Set[Integer | Symbol]")
+      expect(described_class.constant_of(Set[]).erase_to_rbs).to eq("Set[untyped]")
+      expect(described_class.constant_of(Set[1..2]).erase_to_rbs).to eq("Set[untyped]")
+      expect(described_class.constant_of(Set[Set[1]]).erase_to_rbs).to eq("Set[untyped]")
+    end
+
     it "rejects compound literals" do
       expect { described_class.constant_of([1, 2]) }.to raise_error(ArgumentError)
       expect { described_class.constant_of({}) }.to raise_error(ArgumentError)

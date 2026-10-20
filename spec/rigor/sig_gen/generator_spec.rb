@@ -15,6 +15,16 @@ RSpec.describe Rigor::SigGen::Generator do
     full
   end
 
+  # `rbs validate`'s type check over the core signatures: the error class a written `sig/` would fail with, or nil.
+  def rbs_type_error(rbs)
+    env = (@rbs_core_env ||= RBS::Environment.from_loader(RBS::EnvironmentLoader.new).resolve_type_names)
+    validator = RBS::Validator.new(env: env, resolver: RBS::Resolver::TypeNameResolver.build(env))
+    validator.validate_type(RBS::Parser.parse_type(rbs), context: nil)
+    nil
+  rescue RBS::BaseError => e
+    e.class
+  end
+
   def generator(paths:, signature_paths: nil, plugins: nil)
     configuration = Rigor::Configuration.new(
       Rigor::Configuration::DEFAULTS.merge(
@@ -1354,6 +1364,30 @@ RSpec.describe Rigor::SigGen::Generator do
 
       expect(method.classification).to eq(Rigor::SigGen::Classification::TIGHTER_RETURN)
       expect(method.rbs).to eq("def g: () -> Range[Integer]")
+    end
+
+    # `Set[unchecked out A]` and `Struct[Elem]` are generic, and the bare spellings fail `rbs validate` with
+    # `InvalidTypeApplicationError` (#2177), as a bare `Range` did (#1891). The validator is RBS's own, over the
+    # core signatures; the Ruby witness evaluates each body.
+    {
+      "a Set literal" => ["Set[1, 2]", "Set[Integer]", Set],
+      "a Set of mixed literals" => [%(Set[1, "a"]), "Set[Integer | String]", Set],
+      "an empty Set" => ["Set.new", "Set[untyped]", Set],
+      "a Set holding a Range" => ["Set[1..2]", "Set[untyped]", Set],
+      "an anonymous Struct instance" => ["Struct.new(:a).new(1)", "Struct[untyped]", Struct]
+    }.each do |label, (body, expected, runtime_class)|
+      it "proposes #{expected}, which RBS validates, for #{label} over a declared `-> untyped`" do
+        write_fixture("sig/box.rbs", "class Box\n  def g: () -> untyped\nend\n")
+        path = write_fixture("lib/box.rb", "class Box\n  def g = #{body}\nend\n")
+
+        gen = generator(paths: [path], signature_paths: [File.join(tmpdir, "sig")])
+        method = gen.run.find { |c| c.method_name == :g }
+
+        expect(eval(body)).to be_a(runtime_class) # rubocop:disable Security/Eval
+        expect(method.classification).to eq(Rigor::SigGen::Classification::TIGHTER_RETURN)
+        expect(method.rbs).to eq("def g: () -> #{expected}")
+        expect(rbs_type_error(expected)).to be_nil
+      end
     end
 
     # The boundary of #1891: an `untyped` only the inline reader synthesizes is no word of the author's, so it keeps

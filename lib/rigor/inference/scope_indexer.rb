@@ -43,6 +43,7 @@ require_relative "scope_indexer/layered_def_nestings"
 require_relative "scope_indexer/mixin_accumulator"
 require_relative "scope_indexer/certainty"
 require_relative "scope_indexer/member_layouts_collector"
+require_relative "scope_indexer/declared_param_writes"
 
 module Rigor
   module Inference
@@ -1024,8 +1025,11 @@ module Rigor
         # nodes to skip; soundness is post-domination at the top statement level, so dropping the nil never hides a real
         # runtime-nil read.
         dead_writes = dead_transient_nil_writes(def_node.body, class_name, method_assign_effects)
+        # #1154 — an `@x = x` from a declared parameter records the parameter's declared type.
+        declared = DeclaredParamWrites::EMPTY
+        declared = DeclaredParamWrites.collect(def_node, class_name, body_scope) unless singleton
         gather_ivar_writes(def_node.body, body_scope, class_name, accumulator,
-                           EMPTY_GUARDED_IVARS, mutated_ivars, dead_writes)
+                           EMPTY_GUARDED_IVARS, mutated_ivars, dead_writes, declared)
 
         # B2.3 — collect per-method evidence for the read-before- write nil contribution. The accumulator-level decision
         # ("is this ivar truly read-before-write across the class lifetime?") is finalised at
@@ -1341,14 +1345,14 @@ module Rigor
       private_constant :TAIL_VALUE_DEPTH_CAP
       private_constant :EMPTY_GUARDED_IVARS
 
-      def gather_ivar_writes(node, scope, class_name, accumulator, guarded_ivars = EMPTY_GUARDED_IVARS,
-                             mutated_ivars = nil, dead_writes = nil)
+      def gather_ivar_writes(node, scope, class_name, accumulator, guarded_ivars = EMPTY_GUARDED_IVARS, # rubocop:disable Metrics/ParameterLists
+                             mutated_ivars = nil, dead_writes = nil, declared = DeclaredParamWrites::EMPTY)
         return unless node.is_a?(Prism::Node)
 
         if node.is_a?(Prism::InstanceVariableWriteNode)
           unless dead_writes&.include?(node.object_id)
             record_ivar_write(node, scope, class_name, accumulator,
-                              guarded: guarded_ivars.include?(node.name))
+                              guarded: guarded_ivars.include?(node.name), declared: declared[node])
           end
         else
           record_compound_ivar_write(node, scope, class_name, accumulator)
@@ -1371,12 +1375,12 @@ module Rigor
 
         if node.is_a?(Prism::IfNode) || node.is_a?(Prism::UnlessNode)
           walk_conditional_ivar_writes(node, scope, class_name, accumulator, guarded_ivars,
-                                       mutated_ivars, dead_writes)
+                                       mutated_ivars, dead_writes, declared)
           return
         end
 
         node.rigor_each_child do |c|
-          gather_ivar_writes(c, scope, class_name, accumulator, guarded_ivars, mutated_ivars, dead_writes)
+          gather_ivar_writes(c, scope, class_name, accumulator, guarded_ivars, mutated_ivars, dead_writes, declared)
         end
       end
 
@@ -1452,22 +1456,22 @@ module Rigor
       # init; end` would otherwise be marked too — but that pattern (write @x in the else of `if @x`) is a separate
       # idiom whose surrounding reads of `@x` would then surface a nil-receiver FP. The ELSE branch is left ungarded so
       # those reads continue to type as they did before this fix.
-      def walk_conditional_ivar_writes(node, scope, class_name, accumulator, guarded_ivars,
-                                       mutated_ivars = nil, dead_writes = nil)
+      def walk_conditional_ivar_writes(node, scope, class_name, accumulator, guarded_ivars, # rubocop:disable Metrics/ParameterLists
+                                       mutated_ivars = nil, dead_writes = nil, declared = DeclaredParamWrites::EMPTY)
         then_guards = then_body_guarded_ivars(node)
         then_guarded = then_guards.empty? ? guarded_ivars : (guarded_ivars | then_guards)
 
         gather_ivar_writes(node.predicate, scope, class_name, accumulator, guarded_ivars,
-                           mutated_ivars, dead_writes)
+                           mutated_ivars, dead_writes, declared)
         if node.statements
           gather_ivar_writes(node.statements, scope, class_name, accumulator, then_guarded,
-                             mutated_ivars, dead_writes)
+                             mutated_ivars, dead_writes, declared)
         end
         branch = node.is_a?(Prism::IfNode) ? node.subsequent : node.else_clause
         return unless branch
 
         gather_ivar_writes(branch, scope, class_name, accumulator, guarded_ivars,
-                           mutated_ivars, dead_writes)
+                           mutated_ivars, dead_writes, declared)
       end
 
       # Returns the set of ivar names that, in the THEN body of this conditional, are statically known to be in a nil /
@@ -1944,8 +1948,8 @@ module Rigor
         assigns.include?(target)
       end
 
-      def record_ivar_write(node, scope, class_name, accumulator, guarded: false)
-        rvalue_type = scope.type_of(node.value)
+      def record_ivar_write(node, scope, class_name, accumulator, guarded: false, declared: nil)
+        rvalue_type = declared || scope.type_of(node.value)
 
         # `@x = nil unless @x` / `@y = false unless @y` — follow-up to the polarity-aware defensive-init guard fix
         # (ROADMAP § Future cycles — "Defensive ivar-init with nil / false rvalue"). When the rvalue is itself a falsey

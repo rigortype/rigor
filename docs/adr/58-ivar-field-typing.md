@@ -17,7 +17,8 @@ sibling read; `detect_read_before_write` now counts massign targets as
 writes, see WD5 status. The `||=`-seeding stretch is
 **deferred-with-reason** there). WD2 amended (2026-09-26, #541 — an
 `attr_writer` / `attr_accessor` declaration now counts as an untyped
-write, see the WD2 amendment). Archetype:
+write, see the WD2 amendment). WD2 amended again (2026-10-20, #1154 —
+a write from a declared parameter records the declared type). Archetype:
 deliberative. Stakes: high — this governs when `possible-nil-receiver`
 may fire on ivar-sourced optionality, the single largest FP class on
 idiomatic data-structure Ruby (94 % of possible-nil errors across the
@@ -333,6 +334,30 @@ diagnostic added. Every removal is a `flow.always-truthy-condition` on
 an accessor-backed ivar (rails `@automatic_reconnect`,
 `@ignore_disconnect`; liquid `@strict_variables`; textbringer
 `@prefix_arg`).
+
+**Amendment, 2026-10-20 — a write from a declared parameter carries
+the declared type (#1154).** The pre-pass typed every rvalue with no
+local bindings, so `@x = x` in a constructor recorded `Dynamic[top]`
+even where `sig/` declared `initialize: (String x) -> void`, and every
+sibling reader of the field was untyped. Such a write now records the
+parameter's declared type (`sig/`, `# @rbs`, `#:`), and joins the
+class's other writes as any write does: a `reset` storing `nil` makes it
+`String?`, and an untyped write keeps `Dynamic[top]` in the union. The
+maintainer settled the source on 2026-10-20: the declaration, not a
+default value and not observed call sites, because a declared contract
+is not a lower bound (ADR-1), so `rigor check` uses it as well as
+`rigor sig-gen`. The WD1 mark is unchanged, so a joined `nil` still
+does not fire on its own.
+
+The census is flow-free, so the write is credited only where the
+parameter cannot have changed: a bare read of the parameter, outside
+every block, in a body that never writes that local, under a single
+typed overload with no type variable, declared on the class itself (not
+inherited, not a module), in a class declared in one file. Any other
+write records what it recorded before. The gate is the survey-corpus
+diagnostic diff in the PR, which reads every new diagnostic; the binding
+contract is in `inference-engine.md` § "Instance-, class-, and
+global-variable bindings".
 
 ### WD3 — Slice 3: ctor definite assignment through same-class calls
 

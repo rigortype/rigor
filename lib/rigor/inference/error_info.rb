@@ -53,8 +53,8 @@ module Rigor
       # made a class guard on `$!` itself narrow it; #1447 narrows this decline to the guards that still do not.
       #
       # `$@` calls the exception's `backtrace`, which is an `Array[String]` for a raised exception. It is left unbound
-      # in a program that defines a method named `backtrace` anywhere, which may return anything, and in a clause
-      # whose body calls `set_backtrace`, which may set it to nil.
+      # in a program that defines a method named `backtrace` anywhere, which may return anything, in a clause whose
+      # body calls `set_backtrace`, which may set it to nil, and in a clause whose body never reads it.
       #
       # `$?` is unbound because the exception may have been raised while a subprocess waited: a backtick, `%x` or
       # `system` sets `$?` to nil before it runs the child, so a `Timeout::Error`, an `Interrupt` or a `Thread#raise`
@@ -65,6 +65,10 @@ module Rigor
         return entered if guarded?(body, reference)
 
         entered = entered.with_global(ERROR_INFO, rescued_type(exception_type, scope))
+        # Issue #1967 — a clause that never reads `$@` leaves it unbound without asking about `backtrace`: the answer
+        # could not reach a diagnostic, and asking records a `defines:backtrace` edge that re-checked every `rescue`
+        # in the program whenever such a def came or went.
+        return entered unless backtrace_read?(body)
         return entered if calls_set_backtrace?(body) || BlockCallTiming.project_defines_anywhere?(:backtrace, scope)
 
         entered.with_global(BACKTRACE, backtrace_type)
@@ -114,7 +118,16 @@ module Rigor
         node.rigor_each_child { |child| found ||= calls_set_backtrace?(child) }
         found
       end
-      private_class_method :guard?, :error_info_read?, :calls_set_backtrace?
+      # True when `node` reads `$@` anywhere in it, a block included. An empty clause (nil) reads nothing.
+      def backtrace_read?(node)
+        return false unless node.is_a?(Prism::Node)
+        return node.name == BACKTRACE if node.is_a?(Prism::GlobalVariableReadNode)
+
+        found = false
+        node.rigor_each_child { |child| found ||= backtrace_read?(child) }
+        found
+      end
+      private_class_method :guard?, :error_info_read?, :calls_set_backtrace?, :backtrace_read?
 
       # True when `node` reads `$!`, `$@` or `$?` anywhere in it: the gate on typing a rescue modifier's fallback
       # under {.modifier_entry}, which most fallbacks (`rescue nil`) never need.

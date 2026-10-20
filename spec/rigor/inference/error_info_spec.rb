@@ -27,7 +27,7 @@ RSpec.describe Rigor::Inference::ErrorInfo do
   describe ".rescue_entry" do
     it "binds `$!` to the rescued type and `$@` to an `Array[String]`, and unbinds `$?`" do
       status = Rigor::Type::Combinator.nominal_of("Process::Status")
-      entered = described_class.rescue_entry(scope.with_global(:$?, status), error_t)
+      entered = described_class.rescue_entry(scope.with_global(:$?, status), error_t, Prism.parse("$@").value)
 
       expect(entered.global(:$!)).to eq(error_t)
       expect(entered.global(:$@)).to eq(trace_t)
@@ -74,7 +74,19 @@ RSpec.describe Rigor::Inference::ErrorInfo do
 
       expect(entered.global(:$@)).to be_nil
       expect(entered.global(:$!)).to eq(error_t)
-      expect(described_class.rescue_entry(scope, error_t, Prism.parse("$!.backtrace").value).global(:$@))
+      expect(described_class.rescue_entry(scope, error_t, Prism.parse("$!.backtrace\n$@").value).global(:$@))
+        .to eq(trace_t)
+    end
+
+    # Issue #1967 — the `backtrace` question (and the `defines:backtrace` edge it records) is asked only where `$@` is
+    # read, so a clause that never reads it leaves it unbound.
+    it "leaves `$@` unbound, and still binds `$!`, for a body that never reads `$@`" do
+      [nil, "$!.message", "$!.backtrace", "[1].each { $! }"].each do |body|
+        entered = described_class.rescue_entry(scope, error_t, body && Prism.parse(body).value)
+
+        expect([entered.global(:$!), entered.global(:$@)]).to eq([error_t, nil]), body.inspect
+      end
+      expect(described_class.rescue_entry(scope, error_t, Prism.parse("[1].each { $@ }").value).global(:$@))
         .to eq(trace_t)
     end
 

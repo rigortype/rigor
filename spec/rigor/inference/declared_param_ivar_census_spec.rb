@@ -61,6 +61,12 @@ RSpec.describe "the ADR-58 ivar census types a write from a declared parameter (
       expect(k_census(body, "def initialize: (String x) -> void")).to eq("Dynamic[top] | String")
     end
 
+    it "does not count a local a nested def writes" do
+      body = "def initialize(x)\n@x = x\ndef helper = (x = 1)\nend"
+
+      expect(k_census(body, "def initialize: (String x) -> void")).to eq("String")
+    end
+
     it "gives a write in a conditional or a while loop the census's ordinary treatment" do
       body = "def initialize(x, flag)\n@x = x if flag\nwhile flag\n@y = x\nflag = false\nend\nend"
       signature = "def initialize: (String x, bool flag) -> void"
@@ -77,14 +83,17 @@ RSpec.describe "the ADR-58 ivar census types a write from a declared parameter (
                                        "def initialize: (String x) -> void"],
       "an overloaded signature" => ["def initialize(x) = @x = x",
                                     "def initialize: (String x) -> void\n| (Integer x) -> void"],
-      "an untyped parameter" => ["def initialize(x) = @x = x", "def initialize: (untyped x) -> void"],
-      "an untyped parameter list" => ["def initialize(x) = @x = x", "def initialize: (?) -> void"],
-      "a method type variable" => ["def initialize(x) = @x = x", "def initialize: [U] (U x) -> void"],
+      "an untyped parameter (a guard: the write records untyped either way)" =>
+        ["def initialize(x) = @x = x", "def initialize: (untyped x) -> void"],
+      "an untyped parameter list (a guard: the binder already leaves every slot untyped)" =>
+        ["def initialize(x) = @x = x", "def initialize: (?) -> void"],
+      "a method type variable" => ["def initialize(x) = @x = x", "def initialize: [U] (Array[U] x) -> void"],
       "a block parameter of the same name" => ["def initialize(x)\n[1].each { |x| @x = x }\nend",
                                                "def initialize: (String x) -> void"],
       "a write in a block under another self" => ["def initialize(x)\ninstance_eval { @x = x }\nend",
                                                   "def initialize: (String x) -> void"],
-      "an expression over the parameter" => ["def initialize(x) = @x = (x)", "def initialize: (String x) -> void"],
+      "an expression over the parameter (a guard: only a bare read is ever credited)" =>
+        ["def initialize(x) = @x = (x)", "def initialize: (String x) -> void"],
       "an undeclared method" => ["def initialize(x) = @x = x", "def other: () -> void"]
     }.each do |shape, (body, signature)|
       it "for #{shape}" do
@@ -93,8 +102,9 @@ RSpec.describe "the ADR-58 ivar census types a write from a declared parameter (
     end
 
     it "for a class type variable" do
-      expect(census("class K\ndef initialize(x) = @x = x\nend\n", "class K[T]\ndef initialize: (T x) -> void\nend\n",
-                    "K", :@x)).to eq("Dynamic[top]")
+      rbs = "class K[T]\ndef initialize: (Array[T] x) -> void\nend\n"
+
+      expect(census("class K\ndef initialize(x) = @x = x\nend\n", rbs, "K", :@x)).to eq("Dynamic[top]")
     end
 
     it "for a signature the class inherits" do
@@ -111,7 +121,9 @@ RSpec.describe "the ADR-58 ivar census types a write from a declared parameter (
     end
 
     it "for a singleton method" do
-      expect(k_census("def self.make(x) = @x = x", "def self.make: (String x) -> void")).to eq("Dynamic[top]")
+      signature = "def self.make: (String x) -> void\ndef make: (String x) -> void"
+
+      expect(k_census("def self.make(x) = @x = x", signature)).to eq("Dynamic[top]")
     end
   end
 

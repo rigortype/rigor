@@ -81,8 +81,7 @@ module Rigor
         end
 
         def local_read_write?(node)
-          node.is_a?(Prism::InstanceVariableWriteNode) && node.value.is_a?(Prism::LocalVariableReadNode) &&
-            node.value.depth.zero?
+          node.is_a?(Prism::InstanceVariableWriteNode) && node.value.is_a?(Prism::LocalVariableReadNode)
         end
 
         # The declared, non-`untyped` type of each parameter, or `{}` when a gate declines the method.

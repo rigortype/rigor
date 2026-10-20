@@ -68,14 +68,20 @@ silently".
   return while jobs are still running, so poll `gh run view <id> --json status` until it reads
   `completed`, then read `conclusion` and `headSha`. The same check applies to the master run after
   a merge. `gh pr view --json merged` is not a field; read `state`, `mergedAt` or `mergeCommit`.
-- **Stacked PRs.** A child merged while its base is still the parent branch reports MERGED, but its
-  commits land on that branch, never reach `master`, and its `Fixes` never fires. Deleting a parent
-  branch closes its stacked child instead of retargeting it. So land the parent (`bin/land-pr`
+- **Stacked PRs.** Delete a parent branch only after the parent reads `MERGED` and its merge commit is
+  an ancestor of `origin/master`: a queued parent is not merged yet, and deleting a queued PR's branch
+  closes it. That applies to both kinds below. Two kinds of stack. A GitHub-native stack (`gh stack`)
+  needs no retargeting: GitHub retargets the next PR to `master` when the bottom one merges (observed
+  on #2200 after #2194). Run `bin/land-pr` on the next PR only after the one below has merged and
+  GitHub has retargeted it to `master`; it refuses a PR whose base is not `master`. Never use
+  `gh stack merge`: it queues without the reviewed-SHA and `CI required` checks. Queue each stacked PR
+  with `bin/land-pr`.
+  For a hand-made base chain: a child merged while its base is still the parent branch reports MERGED,
+  but its commits land on that branch, never reach `master`, and its `Fixes` never fires. Deleting a
+  parent branch closes its stacked child instead of retargeting it. So land the parent (`bin/land-pr`
   deletes no branch), retarget each child yourself (`gh pr edit <child> --base master`), delete the
-  parent branch only after the parent reads `MERGED` and its merge commit is an ancestor of
-  `origin/master` (a queued parent is not merged yet, and deleting a queued PR's branch closes it),
-  then merge the child. Prove each landing against `origin/master` (see "Cleanup after a merge"
-  below), not by the PR state.
+  parent branch under the rule above, then merge the child. Prove each landing against `origin/master`
+  (see "Cleanup after a merge" below), not by the PR state.
 - **A head ref that vanished.** When an open PR's head branch was renamed or deleted, the PR closes
   and `gh pr reopen` fails until the ref exists again: push the old SHA back to the old name, reopen,
   and retarget a stacked child with `gh pr edit --base master`.
@@ -98,7 +104,9 @@ silently".
   refused; pass the SHA the reviewer reported on, never one read back from the PR), checks that
   head's `CI required` passed, and refuses when `master` has no merge queue (nothing would then test
   the merged result; stop and tell the user). It then polls once a minute until the PR merges (exit
-  0, merge commit printed) or leaves the queue (exit 1), and it is that PR's one watcher. A wait
+  0, merge commit printed) or leaves the queue (exit 1), and it is that PR's one watcher. For a PR in
+  a native stack it falls back to the asynchronous merge REST API, and `--no-wait` can return while
+  that request is still pending. A wait
   outlasts a foreground command (the queue batches for up to five minutes and CI takes about
   twelve), so run it in the background; run again on a queued PR, it only waits. When the merged
   tree is one a `pull_request` run into `master` passed `CI required` on (its signed `Tested tree`

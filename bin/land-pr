@@ -4,7 +4,8 @@
 #
 # `gh pr merge` enqueues through GitHub's auto-merge API, which this
 # repository keeps disabled, so it fails with "Auto merge is not allowed".
-# This calls the merge queue's own mutation instead, and folds in the traps
+# This calls the merge queue's own mutation instead (or, for a PR in a native
+# stack, the asynchronous merge REST API), and folds in the traps
 # contribution-flow.md § "GitHub and git traps" describes:
 #
 #   1. it queues only the head that was reviewed: <sha> is passed to GitHub as
@@ -23,7 +24,11 @@
 #
 # Exit status: 0 merged (the merge commit is printed); 1 refused, dropped
 # from the queue, closed, or GitHub unreadable for ten polls in a row; 2
-# usage error. --no-wait returns 0 once the PR is queued.
+# usage error. --no-wait returns 0 once the PR is queued or its merge-async request is
+# pending (a pending request can still fail in the background; the watch reports it).
+#
+# A merge-async request still pending after LAND_PR_PENDING_LIMIT seconds (default 900) is
+# refused by the watch, with its status.
 #
 # Usage: bin/land-pr <number> <reviewed-head-sha> [--no-wait]
 
@@ -31,9 +36,13 @@ set -uo pipefail
 
 interval="${LAND_PR_INTERVAL:-60}"
 [[ "$interval" =~ ^[0-9]+$ ]] || { echo "land-pr: LAND_PR_INTERVAL must be a whole number of seconds" >&2; exit 2; }
+pending_limit="${LAND_PR_PENDING_LIMIT:-900}"
+[[ "$pending_limit" =~ ^[0-9]+$ ]] || { echo "land-pr: LAND_PR_PENDING_LIMIT must be a whole number of seconds" >&2; exit 2; }
 number=""
 sha=""
 wait=1
+merge_uuid=""
+pending_since=""
 usage() {
   echo "land-pr: $* (usage: bin/land-pr <number> <reviewed-head-sha> [--no-wait])" >&2
   exit 2
@@ -64,6 +73,12 @@ die() {
   exit 1
 }
 
+# Print the last string value of the JSON key $1 read from stdin (sed's greedy prefix). The merge-async
+# bodies are flat enough for this, and jq is not in the Flake.
+json_field() {
+  tr -d '\n' | sed -n 's/.*"'"$1"'" *: *"\([^"]*\)".*/\1/p'
+}
+
 # Print the PR's fields, tab-separated, in the order given.
 pr_fields() {
   gh api graphql -F n="$number" \
@@ -82,7 +97,8 @@ IFS=$'\t' read -r id draft state queue queued base head ci checked <<<"$info"
 # The check belongs to the last commit GitHub lists; count it only when that is the head.
 [[ "$checked" == "$head" ]] || ci="MISSING"
 [[ "$state" == OPEN ]] || die "PR #$number is $state, not open"
-[[ "$base" == master ]] || die "PR #$number does not target master"
+[[ "$base" == master ]] ||
+  die "PR #$number targets $base, not master; land the bottom PR of its stack first"
 [[ "$draft" == false ]] || die "PR #$number is a draft; run gh pr ready first"
 [[ "$queue" == true ]] ||
   die "master has no merge queue, so nothing would test the merged result; stop and tell the user"
@@ -93,10 +109,43 @@ if [[ "$queued" == true ]]; then
   echo "land-pr: #$number is already queued at $head; waiting"
 else
   [[ "$ci" == SUCCESS ]] || die "\"CI required\" on $head is $ci, not SUCCESS; wait for it or fix it"
-  gh api graphql -f id="$id" -f sha="$sha" \
+  # GitHub refuses enqueuePullRequest for a PR in a native stack (gh stack submit);
+  # such a PR is queued through the asynchronous merge REST API instead, with the
+  # same reviewed head as its expected sha.
+  if reply="$(gh api graphql -f id="$id" -f sha="$sha" \
     -f query='mutation($id:ID!,$sha:GitObjectID!){enqueuePullRequest(input:{pullRequestId:$id,expectedHeadOid:$sha}){mergeQueueEntry{position}}}' \
-    --jq '"land-pr: #'"$number"' queued at '"$sha"', position \(.data.enqueuePullRequest.mergeQueueEntry.position)"' ||
-    die "GitHub refused to queue #$number at $sha"
+    --jq '"land-pr: #'"$number"' queued at '"$sha"', position \(.data.enqueuePullRequest.mergeQueueEntry.position)"' 2>&1)"; then
+    echo "$reply"
+  # The fallback keys on GitHub's English refusal wording. If GitHub rewords it, the
+  # stacked PR is refused by the die below instead of queued, so the failure is loud.
+  elif [[ "$reply" == *"must be enqueued using the asynchronous merge REST API"* ]]; then
+    echo "land-pr: #$number is in a native stack; requesting its merge through the asynchronous merge API"
+    # The raw JSON body is parsed, not a --jq result: a 409 needs its details, and gh's --jq is not
+    # reliably applied to an error body. A 2xx is 202 (pending) or 200 (already queued or merged).
+    if body="$(gh api -X PUT "repos/rigortype/rigor/pulls/$number/merge-async" \
+      -f sha="$sha" -f merge_action=merge_queue 2>&1)"; then
+      async_status="$(json_field status <<<"$body")"
+      merge_uuid="$(json_field uuid <<<"$body")"
+      case "$async_status" in
+        pending) echo "land-pr: #$number merge requested (pending) at $sha through the merge-async API, request ${merge_uuid:-unknown}" ;;
+        enqueued) echo "land-pr: #$number is already in the merge queue at $sha, request ${merge_uuid:-unknown}" ;;
+        merged) echo "land-pr: #$number is already merged, request ${merge_uuid:-unknown}" ;;
+        failed) die "GitHub failed the merge-async request for #$number at $sha: $body" ;;
+        *) die "could not read the merge-async reply (the request may still have been accepted) for #$number at $sha: $body" ;;
+      esac
+    elif [[ "$body" == *"HTTP 409"* ]]; then
+      # 409: a merge request is already pending. Wait for it only when it is for the merge queue.
+      merge_uuid="$(json_field uuid <<<"$body")"
+      merge_action="$(json_field merge_action <<<"$body")"
+      [[ "$merge_action" == merge_queue ]] ||
+        die "a pending request for #$number uses ${merge_action:-an unknown action}, not the merge queue; refusing to endorse it"
+      echo "land-pr: #$number already has a merge request pending at $sha, request ${merge_uuid:-unknown}; waiting"
+    else
+      die "GitHub refused to queue #$number at $sha through the merge-async API: $body"
+    fi
+  else
+    die "GitHub refused to queue #$number at $sha: $reply"
+  fi
 fi
 
 ((wait)) || exit 0
@@ -123,7 +172,31 @@ while :; do
       fi
       # Read once more before calling it dropped: the state may lag the merge.
       ((++suspect >= 2)) || continue
-      die "#$number left the queue unmerged (a failed merge_group run in gh run list --event merge_group, a new push, or a manual removal)"
+      if [[ -z "$merge_uuid" ]]; then
+        die "#$number left the queue unmerged (a failed merge_group run in gh run list --event merge_group, a new push, or a manual removal)"
+      fi
+      request="$(gh api "repos/rigortype/rigor/pulls/$number/merge-async/$merge_uuid" \
+        --jq '"\(.status) \(.details.message // "")"' 2>&1)" ||
+        die "#$number is not queued or merged, and merge-async request $merge_uuid cannot be read: $request"
+      request_status="${request%% *}"
+      request_text="${request#* }"
+      case "$request_status" in
+        pending | merged)
+          # Still in progress, or a merged request whose state lags: keep polling, up to the bound.
+          now="$(date +%s)"
+          [[ -n "$pending_since" ]] || pending_since="$now"
+          ((now - pending_since < pending_limit)) ||
+            die "#$number is not queued or merged, and merge-async request $merge_uuid is still $request_status after $(((now - pending_since) / 60)) minutes ($request_text)"
+          suspect=0
+          continue
+          ;;
+        enqueued)
+          die "#$number is not in the queue, but merge-async request $merge_uuid reads enqueued ($request_text)"
+          ;;
+        *)
+          die "#$number is not queued or merged, and merge-async request $merge_uuid is $request_status ($request_text)"
+          ;;
+      esac
       ;;
     *) die "#$number is $state" ;;
   esac

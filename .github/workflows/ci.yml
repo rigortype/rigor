@@ -53,12 +53,11 @@ jobs:
   changes:
     name: Detect code changes
     runs-on: ubuntu-latest
-    # pull-requests and checks: read let a merge_group run look up the queued
-    # PR's head and the trees its CI passed on (the reuse block below).
+    # attestations: read lets a merge_group run find the attestation of the
+    # tree it is about to test (the reuse block below).
     permissions:
       contents: read
-      pull-requests: read
-      checks: read
+      attestations: read
     outputs:
       code: ${{ steps.detect.outputs.code }}
       nix: ${{ steps.detect.outputs.nix }}
@@ -73,7 +72,7 @@ jobs:
 
       # The tree every job of this run checks out (GITHUB_SHA: on a
       # pull_request, the merge with the base as it stood when the event
-      # fired). The tested-tree job below names its check after it.
+      # fired). The tested-tree job below attests it.
       - name: Record the tested tree
         id: tree
         run: echo "tree=$(git rev-parse --verify -q "$GITHUB_SHA^{tree}" || true)" >> "$GITHUB_OUTPUT"
@@ -83,7 +82,6 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
-          GROUP_REF: ${{ github.event.merge_group.head_ref }}
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
         run: |
@@ -114,35 +112,52 @@ jobs:
             fi
           fi
           # Maintainer decision (2026-10-19): a queue entry whose merged tree
-          # a pull_request run of its PR already passed "CI required" on
-          # would rerun the same check on the same files. Such a run attests
-          # the tree it tested with a "Tested tree <tree>" check on the PR
-          # head (the tested-tree job below), so the queue reuses the result
-          # when that check exists for this group's tree, and skips the
-          # suite. Anything else runs in full: never skip on doubt.
+          # a pull_request run already passed "CI required" on would rerun the
+          # same check on the same files. Such a run signs an artifact
+          # attestation of the tree it tested (the tested-tree job below), so
+          # the queue reuses the result when one exists for this group's tree,
+          # and skips the suite. Anything else runs in full: never skip on doubt.
+          #
+          # A check run proves nothing here: any workflow of the repository can
+          # write one, and a pull_request run into another branch executes that
+          # branch's workflow (#2154). The attestation's certificate is issued by
+          # GitHub, and names the commit whose workflow file ran (workflow_sha).
+          # Reuse only when that commit's tree IS this group's tree: the ci.yml
+          # that signed is then the ci.yml that lands, which attests only a
+          # pull_request run into master that passed "CI required".
           if [ "${{ github.event_name }}" = "merge_group" ]; then
-            pr=$(sed -nE 's#.*/pr-([0-9]+)-[0-9a-f]+$#\1#p' <<<"$GROUP_REF")
-            pr_head=""
-            if [ -n "$pr" ]; then
-              pr_head=$(gh api "repos/$REPO/pulls/$pr" --jq .head.sha 2>/dev/null | grep -E '^[0-9a-f]{40}$' || true)
-            fi
             group_tree=$(git rev-parse --verify -q "$HEAD_SHA^{tree}" || true)
-            passed=0
-            if [ -n "$pr_head" ] && [ -n "$group_tree" ]; then
-              passed=$(gh api "repos/$REPO/commits/$pr_head/check-runs?check_name=Tested%20tree%20$group_tree&per_page=100" \
-                --jq '[.check_runs[] | select(.app.slug == "github-actions" and .conclusion == "success")] | length' \
-                2>/dev/null | grep -E '^[0-9]+$' || echo 0)
+            signers=""
+            if [ -n "$group_tree" ]; then
+              printf '%s' "$group_tree" > "$RUNNER_TEMP/tested-tree"
+              # Commits whose own ci.yml, run for a pull_request, signed an
+              # attestation of this tree.
+              signers=$(gh attestation verify "$RUNNER_TEMP/tested-tree" --repo "$REPO" \
+                  --signer-workflow "$REPO/.github/workflows/ci.yml" --deny-self-hosted-runners \
+                  --limit 100 --format json 2>/dev/null \
+                | jq -r --arg cfg "https://github.com/$REPO/.github/workflows/ci.yml@refs/pull/" '
+                    .[].verificationResult.signature.certificate
+                    | select(.buildTrigger == "pull_request"
+                        and (.buildConfigURI | startswith($cfg))
+                        and .buildSignerURI == .buildConfigURI
+                        and .buildConfigDigest == .sourceRepositoryDigest
+                        and .buildSignerDigest == .sourceRepositoryDigest)
+                    | .sourceRepositoryDigest' \
+                | grep -E '^[0-9a-f]{40}$' | sort -u) || signers=""
             fi
-            if [ "${passed:-0}" -ge 1 ] 2>/dev/null; then
-              echo "PR #$pr head $pr_head passed CI required on this very tree ($group_tree): reusing it."
-              {
-                echo "reused=true"
-                echo "code=false"
-                echo "nix=false"
-              } >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-            echo "No reusable result (PR '${pr:-?}', head '${pr_head:-?}', group tree '${group_tree:-?}'): running the suite."
+            for sha in $signers; do
+              signer_tree=$(gh api "repos/$REPO/git/commits/$sha" --jq .tree.sha 2>/dev/null || true)
+              if [ -n "$signer_tree" ] && [ "$signer_tree" = "$group_tree" ]; then
+                echo "Commit $sha passed CI required on this very tree ($group_tree) and its ci.yml attested it: reusing it."
+                {
+                  echo "reused=true"
+                  echo "code=false"
+                  echo "nix=false"
+                } >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+            done
+            echo "No attestation of group tree '${group_tree:-?}' signed by a pull_request run of that tree's own ci.yml (signers: '$(tr '\n' ' ' <<<"$signers")'): running the suite."
           fi
           if ! changed=$(git diff --name-only "$BASE_SHA...$HEAD_SHA"); then
             echo "diff failed — failing safe to the full suite."
@@ -1097,13 +1112,13 @@ jobs:
           exit $failed
 
   # ── Attestation for the merge queue (ADR-123, amended 2026-10-19) ───
-  # A pull_request run that passed "CI required" records the tree it tested
-  # as a check named "Tested tree <tree>" on the PR head. A merge_group run
-  # whose merged tree has such a check reuses that result (the changes job
-  # above). The name carries the tree because a check run attaches to the
-  # PR head, while the run tested the head merged with its base: a head can
-  # have passed on another tree (another base, a retargeted PR). Not a
-  # required check; it only exists after "CI required" succeeded.
+  # A pull_request run into master that passed "CI required" signs an
+  # artifact attestation whose subject is the tree it tested (GITHUB_SHA's
+  # tree). A merge_group run whose merged tree has such an attestation,
+  # signed by a workflow whose own commit has that tree, reuses the result
+  # (the changes job above). The job's name carries the tree for people
+  # reading the checks; the queue does not read check runs, which any
+  # workflow of the repository can write.
   tested-tree:
     name: Tested tree ${{ needs.changes.outputs.tree }}
     needs: [changes, required]
@@ -1111,13 +1126,32 @@ jobs:
     # code PR) would otherwise skip this one implicitly. Only a PR into master
     # attests: a Markdown-only run skips the code suite on the ground that its
     # base's code passed CI, which holds for master (every code change came
-    # through the queue or a full push run) but not for another branch. A run
-    # into another branch executes that branch's workflow, which this
-    # condition cannot bind; the queue-side guard for that is #2154.
-    if: always() && github.event_name == 'pull_request' && github.base_ref == 'master' && needs.required.result == 'success' && needs.changes.outputs.tree != ''
+    # through the queue or a full push run) but not for another branch. A
+    # fork's run gets no OIDC token, so only a same-repository head attests.
+    # A run into another branch executes that branch's workflow and could
+    # sign anything. The queue accepts only a signer whose own commit has the
+    # queued tree, so such a run either ran another ci.yml (another tree) or
+    # ran this one, whose base_ref condition here refuses it. The tree check
+    # relies on that condition: keep it.
+    if: always() && github.event_name == 'pull_request' && github.base_ref == 'master' && github.event.pull_request.head.repo.full_name == github.repository && needs.required.result == 'success' && needs.changes.outputs.tree != ''
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     steps:
-      - name: Attest the tested tree
+      - name: Write the tested tree
         env:
           TREE: ${{ needs.changes.outputs.tree }}
-        run: echo "CI required passed on tree $TREE"
+        run: |
+          echo "CI required passed on tree $TREE"
+          printf '%s' "$TREE" > "$RUNNER_TEMP/tested-tree"
+      # Not attesting only costs the queue a full run, so a failure here
+      # does not fail the job.
+      - name: Attest the tested tree
+        # Pinned by commit: the only job here that can mint an OIDC token.
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        continue-on-error: true
+        with:
+          subject-path: ${{ runner.temp }}/tested-tree
+          show-summary: false

@@ -42,19 +42,34 @@ before it is queued; it is re-pushed only when it is `CONFLICTING` or the queue 
 extra. *Criterion: check the result that will land, once, instead of approximating it by re-gating
 every branch in series.*
 
-*Amended 2026-10-19 (maintainer's decision).* A `pull_request` run into `master` that passes `CI
-required` attests the tree it tested, the head merged with `master` at that moment, as a `Tested tree
-<tree>` check on the PR head. A queue run whose merged tree carries such a check reuses that result and
-skips the suite, so the result that will land is still checked once. Only a run into `master` attests:
-a Markdown-only run skips the code suite because its base's code already passed CI, which holds for
-every code change on `master` and not for another branch. A run into another branch also executes
-that branch's workflow, which this condition cannot bind; a writer could use one to emit a matching
-check name, and the queue-side guard against that is #2154. A head equality would not do: a check run
-attaches to the head, while the run tested a merge, which differs when the PR's base was another
-branch or `master` was rewound. In the v0.4.5 cycle every landing queued a head that already
-contained `master`, and the queue reran an identical 11-minute CI each time. Any other tree (`master`
-moved, a batch whose tree no PR run tested) and any lookup that fails run the full CI as before. The
-approval-queue check still runs in every queue run.
+*Amended 2026-10-19 (maintainer's decision; mechanism revised 2026-10-20, #2154).* A `pull_request`
+run into `master` that passes `CI required` attests the tree it tested, the head merged with `master`
+at that moment. A queue run whose merged tree has such an attestation reuses that result and skips
+the suite, so the result that will land is still checked once. Only a run into `master` attests: a
+Markdown-only run skips the code suite because its base's code already passed CI, which holds for
+every code change on `master` and not for another branch.
+
+The attestation is a signed artifact attestation (Sigstore, `actions/attest-build-provenance`) whose
+subject is the tree, not a check run. Any workflow of the repository can write a check run of any
+name, and a run into another branch executes that branch's workflow. A writer could therefore emit a
+matching check from a PR into a branch of their own and close that PR before queueing. Neither a
+commit's PR list nor a workflow run's PR list excludes this: the API omits closed PRs from the first
+and recomputes the second from the PRs open when it is read. The attestation's certificate is issued
+by GitHub and names the commit whose workflow file ran. The queue reuses a result only when that
+commit's tree is the queued tree, the run was a `pull_request` run, and the signer was that commit's
+own `ci.yml`. The workflow that attested is then the workflow that lands, and it attests only a run
+into `master` that passed `CI required`. A run into another branch either ran another tree, whose
+attestation is ignored, or ran the queued tree's own `ci.yml`, whose condition refuses a base other
+than `master`; the tree check relies on that condition. The tree binds the files, not inputs outside
+them (actions referenced by tag, the runner image, repository variables), as with any CI result. A
+fork's run gets no signing token and does not attest.
+
+A head equality would not do either: a check run attaches to the head, while the run tested a
+merge, which differs when the PR's base was another branch or `master` was rewound. In the v0.4.5
+cycle every landing queued a head that already contained `master`, and the queue reran an identical
+11-minute CI each time. Any other tree (`master` moved, a batch whose tree no PR run tested) and any
+lookup or verification that fails run the full CI as before. The approval-queue check still runs in
+every queue run.
 
 **2. Decisions below a stated line are made by precedent and ratified afterwards.** A decision
 that is not *serious* (the list in `contribution-flow.md` § "Decisions and the approval queue") is

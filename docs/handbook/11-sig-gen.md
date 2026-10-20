@@ -626,6 +626,26 @@ list is the current state):
   are recognised as user-authored and never produce a
   duplicate `def` insertion.
 
+- **`Data.define` / `Struct.new` members** of a class built
+  as `P = Data.define(:name)` or `class P < Struct.new(:a)`:
+  a reader per member (and a writer for a `Struct`), plus
+  `self.new` / `self.[]`. Every member is `untyped` by
+  default. `--params=observed` types a member from the
+  observed sites that set it: `P.new(name: "a")`,
+  `P.new("a")`, `P["a"]`, a `Data` `p.with(name: "b")`, and
+  a `Struct` writer call `s.a = 1`. Literals widen to their
+  class, so `P.new(name: "a")` gives `def name: () -> String`,
+  and the sites' types are unioned. A positional `Data`
+  construction counts only when it passes every member. A
+  `Struct` member a construction leaves out adds `nil`. A
+  site with a splat, a double splat, a block argument or `...`
+  adds nothing. A member no site sets, or one that some site
+  passes an `untyped` value, stays `untyped`. So does every
+  member of a class that defines its own `initialize`. Only
+  call sites under the observed roots count, and the proposal
+  is only what those sites show: code outside them, or in a
+  gem, may build the class with other types.
+
 Method shapes the generator does **not** cover yet:
 
 - `define_method(:name) { ... }`.
@@ -643,7 +663,7 @@ two are wired today, one is reserved.
 | Policy | Behaviour |
 | --- | --- |
 | `untyped` (default) | Every parameter is spelled `untyped`. No inference-derived parameter contract is imposed on future callers. The user retains complete authorship over parameter typing. |
-| `observed` | Collect argument types from every call site under `--observe=PATH...` (defaults to the configured `test_paths:`, or whichever of `spec/` and `test/` exist), union per parameter position, erase to RBS, emit the union. With no test root to observe, or a declared root that does not exist or is not read, sig-gen says so on stderr, and `--format=json` carries the same fact in a top-level `observation` key (below). |
+| `observed` | Collect argument types from every call site under `--observe=PATH...` (defaults to the configured `test_paths:`, or whichever of `spec/` and `test/` exist), union per parameter position, erase to RBS, emit the union. `Data.define` / `Struct.new` members are typed from their observed construction sites too (see [above](#what-method-shapes-the-generator-covers)). With no test root to observe, or a declared root that does not exist or is not read, sig-gen says so on stderr, and `--format=json` carries the same fact in a top-level `observation` key (below). |
 | `observed-strict` | Reserved. Will additionally widen to capability roles (`_ToStr`, `_ToS`, …) once the role catalog ships. Currently rejected with a usage error. |
 
 Under `--params=observed`, the `--print` / `--diff` JSON payload gains
@@ -939,9 +959,7 @@ inference, not a separate analysis.
 - A block parameter always renders as the lenient
   `?{ (*untyped) -> untyped }`; a typed block signature
   waits on the engine tracking yield shapes end-to-end.
-- `define_method` and `Data.define`-specific emission are
-  deferred follow-ups (`Data.define`-derived readers come
-  through if a method body exists).
+- `define_method` emission is a deferred follow-up.
 - The strict-subtype check uses gradual-mode acceptance
   today; the `:strict` mode reserved on
   `Inference::Acceptance` arrives in a follow-up.

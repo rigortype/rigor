@@ -527,7 +527,7 @@ rigor sig-gen [paths]
 | `--check` | Write nothing; print what `--write` with the same options would change, and exit `1` if anything would. The CI freshness gate. |
 | `--overwrite` | Allow tighter-return updates, and inline declarations that disagree with `sig/`, to replace user-authored RBS. |
 | `--include-private` | Emit private and protected methods too. |
-| `--params=untyped\|observed\|observed-strict` | Parameter-typing policy. Default `untyped`. |
+| `--params=untyped\|observed\|observed-strict` | Parameter-typing policy. Default `untyped`. `observed` also types `Data.define` / `Struct.new` members from their observed construction sites. |
 | `--observe=PATH` | Scan `PATH` for call-site observations. Repeatable. Default: the configured `test_paths:` (unset: whichever of `spec/` and `test/` exist). |
 | `--new-files` / `--new-methods` / `--tighter-returns` | Emit only that classification. |
 | `--effect-envelopes` | Also emit `%a{rigor:v1:effect …}` for effectful methods. Needs the `effects:` opt-in. |

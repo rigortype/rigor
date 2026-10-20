@@ -2030,7 +2030,10 @@ module Rigor
 
             star ||= spec.include?("*")
           end
-          star && format_argument_values(arguments).any? { |v| v.is_a?(Integer) && v.abs > STRING_FOLD_BYTE_LIMIT }
+          star && format_argument_values(arguments).any? do |value|
+            width = integer_operand(value)
+            !width.nil? && width.abs > STRING_FOLD_BYTE_LIMIT
+          end
         end
 
         def format_argument_values(arguments)
@@ -2045,7 +2048,19 @@ module Rigor
         # literal `width` far larger than the receiver would materialise a huge Constant; cap it at the same
         # byte limit the concat / repeat paths use.
         def string_pad_blow_up?(arg_value)
-          arg_value.is_a?(Integer) && arg_value > STRING_FOLD_BYTE_LIMIT
+          width = integer_operand(arg_value)
+          !width.nil? && width > STRING_FOLD_BYTE_LIMIT
+        end
+
+        # The Integer a width or count operand stands for. Ruby converts a Float or Rational one with `NUM2LONG`
+        # (`"x" * 2.9` is `"xx"`, `"x".ljust(2e9)` pads to two billion), so the prechecks read it the same way; a
+        # non-finite Float raises in Ruby, and any other operand is left to the call, so both answer nil.
+        def integer_operand(value)
+          case value
+          when Integer then value
+          when Float then value.finite? ? value.to_i : nil
+          when Rational then value.to_i
+          end
         end
 
         def string_concat_blow_up?(receiver_value, arg_value)
@@ -2054,10 +2069,11 @@ module Rigor
         end
 
         def string_repeat_blow_up?(receiver_value, arg_value)
-          return false unless arg_value.is_a?(Integer)
-          return true if arg_value.negative?
+          count = integer_operand(arg_value)
+          return false if count.nil?
+          return true if count.negative?
 
-          receiver_value.bytesize * arg_value > STRING_FOLD_BYTE_LIMIT
+          receiver_value.bytesize * count > STRING_FOLD_BYTE_LIMIT
         end
       end
     end

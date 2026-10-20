@@ -721,8 +721,8 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
 
   # #2125 — every String-producing fold is capped at STRING_FOLD_BYTE_LIMIT, not only `*` and `+`. A result past it
   # declines (the next tier answers `literal-string` or RBS `String`), and the operands that would build a huge string
-  # (a format width or precision, a pad width, a `gsub` replacement, a `to_s` base) are read before the call. Each
-  # row's Ruby witness shows the real result really is past the limit, or within it for the controls.
+  # (a format width or precision, a pad width or repeat count, a `sub` / `gsub` replacement) are read before the
+  # call. Each row's Ruby witness shows the real result really is past the limit, or within it for the controls.
   describe "String result cap (#2125)" do
     let(:limit) { described_class::STRING_FOLD_BYTE_LIMIT }
 
@@ -801,6 +801,35 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
       expect(bytes).to be < 1_000_000
       expect(fold("hello", :gsub, %w[l L]).value).to eq("heLLo")
       expect(fold("hello", :sub, [/l/, "<\\0>"]).value).to eq("he<l>lo")
+    end
+
+    # The bound counts `gsub`'s possible match at every position and the end, and each backslash in the replacement
+    # as a back-reference that may copy the whole receiver.
+    it "bounds a substitution by its match count and its back-references" do
+      expect(("a" * 100).gsub("", "x" * 40).bytesize).to be > limit
+      expect(described_class.string_substitution_blow_up?("a" * 100, :gsub, "x" * 40)).to be(true)
+      expect(described_class.string_substitution_blow_up?("a" * 100, :sub, "x" * 40)).to be(false)
+      expect(("ab" * 50).sub(/.+/, "\\0" * 50).bytesize).to be > limit
+      expect(described_class.string_substitution_blow_up?("ab" * 50, :sub, "\\0" * 50)).to be(true)
+      expect(described_class.string_substitution_blow_up?("ab" * 50, :sub, "x0" * 50)).to be(false)
+    end
+
+    # Ruby converts a Float or Rational count or width with NUM2LONG (`"x" * 2.9` is "xx"), so it builds the string.
+    it "reads a Float or Rational count or width before building the string" do
+      expect(["x" * 2.9, "x" * 3r, "x".ljust(3.7), ruby_format("%*d", 3.5, 1)]).to eq(["xx", "xxx", "x  ", "  1"])
+      [
+        -> { fold("x", :*, [200_000_000.0]) },
+        -> { fold("x", :*, [200_000_000r]) },
+        -> { fold("x", :ljust, [200_000_000.0]) },
+        -> { fold("x", :rjust, [200_000_000r, "ab"]) },
+        -> { fold_types(constant_of("%*d"), :%, [Rigor::Type::Combinator.tuple_of(constant_of(2e8), constant_of(1))]) }
+      ].each do |call|
+        seconds, bytes = cost { expect(call.call).to be_nil }
+        expect(seconds).to be < 0.5
+        expect(bytes).to be < 1_000_000
+      end
+      expect(fold("x", :*, [3.0]).value).to eq("xxx")
+      expect(fold("x", :*, [Float::INFINITY])).to be_nil
     end
 
     it "declines Integer#to_s(base) past the limit" do

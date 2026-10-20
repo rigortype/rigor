@@ -98,6 +98,8 @@ module Rigor
 
         base_scope = Scope.empty(environment: environment)
         base_scope = base_scope.with_discovery(base_scope.discovery.with(discovered_classes: discovered_classes))
+        # Guard: sig-gen never reads a declared ivar type back (#1406). No spec pins this flag here, because
+        # it only matters for an RBS-declared class defined in an observed spec file.
         scope_index = Inference::ScopeIndexer.index(parse_result.value, default_scope: base_scope,
                                                                         declared_ivar_types: false)
         bindings = collect_rspec_bindings(parse_result.value, scope_index)

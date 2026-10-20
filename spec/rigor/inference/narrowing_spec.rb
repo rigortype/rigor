@@ -2146,7 +2146,8 @@ RSpec.describe Rigor::Inference::Narrowing do
 
   # Issue #2002 — a member with several classes (an intersection) is kept whole on the `/re/ === x` match edge when
   # any of them may convert with `to_str`: `Enumerable` is a module String does not include, so a matching value may
-  # include it, while `Comparable` alone reads `String | Symbol`.
+  # include it, while `Comparable` alone reads `String | Symbol`. A guard for the intersection row: narrowing an
+  # intersection to String's parts returns it unchanged too, so `any?` and `all?` agree there.
   describe "Regexp#=== match edge over an intersection (#2002)" do
     let(:combinator) { Rigor::Type::Combinator }
 

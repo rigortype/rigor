@@ -2798,8 +2798,7 @@ module Rigor
         end
 
         # The modules String's or Symbol's own ancestry includes, read from the running Ruby.
-        STRING_SYMBOL_MODULES = (String.ancestors + Symbol.ancestors).reject { |mod| mod.is_a?(Class) }
-                                                                      .filter_map(&:name).uniq.freeze
+        STRING_SYMBOL_MODULES = (String.ancestors + Symbol.ancestors).grep_v(Class).filter_map(&:name).uniq.freeze
         private_constant :STRING_SYMBOL_MODULES
 
         def class_converts_with_to_str?(class_name, kind, scope)

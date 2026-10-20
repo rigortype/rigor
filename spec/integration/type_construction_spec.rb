@@ -1416,6 +1416,12 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  describe "fixtures/regexp_to_str_module_reopen — a String-included module that declares to_str (#2002)" do
+    it "keeps the module's type on the match edge" do
+      expect(harness_for("regexp_to_str_module_reopen").errors.map(&:message)).to eq([])
+    end
+  end
+
   describe "fixtures/regex_global_field_separator.rb — a `split` on a `$;` the file sets to a Regexp (#1365)" do
     let(:harness) { harness_for("regex_global_field_separator") }
 

@@ -1,0 +1,7 @@
+module Comparable
+  def to_str: () -> String
+end
+
+class ReopenProbe
+  def comparable_subject: (Comparable s) -> void
+end

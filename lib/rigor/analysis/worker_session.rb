@@ -20,6 +20,7 @@ require_relative "../inference/method_dispatcher/file_folding"
 require_relative "check_rules"
 require_relative "crash_signature"
 require_relative "dependency_recorder"
+require_relative "run_disclosure_credit"
 require_relative "dependency_source_inference"
 require_relative "diagnostic"
 require_relative "erb_template_detector"
@@ -171,12 +172,17 @@ module Rigor
 
         diagnostics = nil
         reads = []
-        record = Plugin::IoBoundary.attributing(reads) do
-          DependencyRecorder.record_for(path) { diagnostics = analyze_with_effects(path) }
+        record = nil
+        # Issue #2020 — and the run-scoped rows it registered, as `Runner#analyze_file` keeps them.
+        disclosures = RunDisclosureCredit.collect(reads) do
+          record = Plugin::IoBoundary.attributing(reads) do
+            DependencyRecorder.record_for(path) { diagnostics = analyze_with_effects(path) }
+          end
         end
         @file_dependencies[path] = record
         # Issue #1553 — the plugin reads this file's analysis made, as `Runner#analyze_file` keeps them.
         (@analysis_reads ||= {})[path] = reads unless reads.empty?
+        (@analysis_disclosures ||= {})[path] = disclosures unless disclosures.empty?
         diagnostics
       end
 
@@ -318,6 +324,12 @@ module Rigor
       # unless `record_dependencies:` was set). The rows are value objects of frozen Strings, so they marshal back.
       def drain_analysis_reads
         @analysis_reads || {}
+      end
+
+      # Issue #2020 — the run-scoped rows each file's analysis registered, `{path => [record]}`; see
+      # {RunDisclosureCredit}. Marshal-clean like {#drain_run_disclosures}.
+      def drain_analysis_disclosures
+        @analysis_disclosures || {}
       end
 
       # ADR-103 WD12 — the per-file {Effects::FileCollection}s this session collected (empty unless the

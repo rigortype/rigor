@@ -139,6 +139,7 @@ module Rigor
         # the frozen `Cache::Descriptor::FileEntry` / `GlobEntry` rows, as each read observed its input. A recheck
         # re-analyses every file one of whose rows no longer validates ({#plugin_read_affected}).
         @plugin_reads = {}
+        @plugin_disclosures = {}
         reset_carried_state
         # ADR-88 WD1 — the plugin fact-surface digest computed for THIS invocation (nil until a
         # `#run_incremental` pass runs / a plugin-free project) and the reporting flags a caller (the CLI
@@ -271,6 +272,7 @@ module Rigor
         @effect_plugin_digest = effect_plugin_digest_of(runner)
         @cache = per_file(runner.per_file_diagnostics)
         @plugin_reads = plugin_reads_of(runner, @analyzed)
+        @plugin_disclosures = runner.analysis_disclosures.slice(*@analyzed)
         record_baseline_digests
         @run_level_rows = runner.run_level_rows
         diagnostics
@@ -992,6 +994,7 @@ module Rigor
         @return_summaries  = payload.return_summaries || {}
         @param_table       = payload.param_table || {} # ADR-67 WD6c lift — the seeds the cache was built under.
         @plugin_reads      = payload.plugin_reads # Issue #1553 — `{}` in a payload built without it.
+        @plugin_disclosures = payload.plugin_disclosures # Issue #2020 — likewise.
         # Issues #796 / #794 — absent (nil) in a snapshot written before schema 22 is impossible (the SCHEMA
         # gate rejects one), so nil here means the writing run genuinely had nothing to say.
         @run_level_rows    = payload.run_level_rows
@@ -1033,6 +1036,7 @@ module Rigor
           run_level_rows: @run_level_rows,
           effect_plugin_digest: @effect_plugin_digest,
           plugin_reads: @plugin_reads,
+          plugin_disclosures: @plugin_disclosures,
           discovery_digests: @discovery_digests
         )
       end
@@ -1147,10 +1151,12 @@ module Rigor
         fresh_by_file = per_file(runner.per_file_diagnostics)
         # Issue #1553 — a re-analysed file's reads are this run's: a read it no longer makes stops guarding it.
         fresh_reads = plugin_reads_of(runner, analyze_set)
+        fresh_disclosures = runner.analysis_disclosures
         analyze_set.each do |path|
           @cache[path] = fresh_by_file[path] || []
           @digests[path] = pack_digest(path)
           fresh_reads.key?(path) ? @plugin_reads[path] = fresh_reads[path] : @plugin_reads.delete(path)
+          refresh_plugin_disclosures(path, fresh_disclosures)
         end
         forget_unbound_digests
         absorb_dependency_graph(runner)
@@ -1200,6 +1206,7 @@ module Rigor
         @digests.delete(path)
         @sources.delete(path)
         @plugin_reads.delete(path)
+        @plugin_disclosures.delete(path)
         @symbol_sources.delete(path)
         @ancestry_sources.delete(path)
         @missing.delete(path)
@@ -1578,7 +1585,14 @@ module Rigor
       # and (#1898) their effect collections, so the run closes its effect graph over the whole project.
       def served_state(reused)
         { served_per_file_diagnostics: @cache.slice(*reused),
-          served_effect_collections: @effect_collections.slice(*reused) }
+          served_effect_collections: @effect_collections.slice(*reused),
+          served_run_disclosures: @plugin_disclosures.values_at(*reused).compact.flatten(1) }
+      end
+
+      # Issue #2020 — a re-analysed file's run-scoped registrations are this run's: one it no longer makes stops
+      # being replayed for it.
+      def refresh_plugin_disclosures(path, fresh)
+        fresh.key?(path) ? @plugin_disclosures[path] = fresh[path] : @plugin_disclosures.delete(path)
       end
 
       # Issue #1898 — the plugin effect-fact digest a run's collections were stamped under. A plugin writes its

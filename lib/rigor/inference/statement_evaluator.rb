@@ -834,9 +834,22 @@ module Rigor
 
       def compound_eval(node, kind:, op:) # rubocop:disable Naming/MethodParameterName
         current_type = current_type_for(kind, node.name)
-        rhs_type, post_rhs = sub_eval(node.value, scope)
+        rhs_type, post_rhs = sub_eval(node.value, compound_value_scope(kind, node.name, op))
         result_type = compound_result_type(current_type, rhs_type, op)
         [result_type, rebind_variable(post_rhs, kind, node.name, result_type)]
+      end
+
+      # Issue #2214 — the scope a compound write's value operand runs in. `x &&= v` runs `v` only when `x` is truthy,
+      # as `x && (x = v)` does, so `v` reads `x` narrowed to its truthy part: `c &&= c + 1` on an `Integer?` `c` reads
+      # `Integer`, not the `nil` that drew `call.possible-nil-receiver`. `x ||= v` and an operator write run `v` from
+      # the scope they start in; a variable the scope does not bind is left alone.
+      def compound_value_scope(kind, name, operator)
+        return scope unless operator == :and
+
+        current = scope.public_send(VAR_KIND_GETTERS.fetch(kind), name)
+        return scope if current.nil?
+
+        scope.public_send(VAR_KIND_BUILDERS.fetch(kind), name, Narrowing.narrow_truthy(current))
       end
 
       VAR_KIND_GETTERS = {

@@ -505,7 +505,7 @@ The lookup reads the plugin registry off the pre-pass scope's `Environment`; the
 Slice 7 phase 3 extends `StatementEvaluator` with **compound writes** for every variable kind. The handlers cover `Prism::{Local,InstanceVariable,ClassVariable,GlobalVariable}{Or,And,Operator}WriteNode` and apply uniform semantics:
 
 - The current type is read from the appropriate scope binding map (`local`/`ivar`/`cvar`/`global`); unbound variables read as `Dynamic[top]`.
-- The rvalue is evaluated under the entry scope through `sub_eval`.
+- The rvalue is evaluated through `sub_eval` under the entry scope, except that a `&&=` evaluates it under the entry scope with the bound variable narrowed by `Narrowing.narrow_truthy` (issue [#2214](https://github.com/rigortype/rigor/issues/2214)): `x &&= v` runs `v` only when `x` is truthy, as `x && (x = v)` does, so `c &&= c + 1` reads `c` without its `nil`. The scope index evaluates a `&&=` on a variable in a value position the evaluator does not enter (`[c &&= c + 1]`) with the recording evaluator, as it does an `&&` (`ScopeIndexer#evaluate_unentered_flow`).
 - The result type for `||=` is `union(Narrowing.narrow_truthy(current), rhs)`; for `&&=` it is `union(Narrowing.narrow_falsey(current), rhs)`; for operator forms (`+=`, `-=`, `*=`, ...) the typer dispatches `current.send(operator, rhs)` through `MethodDispatcher` and falls back to `Dynamic[top]` on a miss.
 - The variable is then rebound into the post-scope through the same `with_*` builder used by the plain write handler. The expression value is the result type, matching Ruby's semantics.
 

@@ -1292,6 +1292,26 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  # Issue #2214 — `x &&= v` reads `x` truthy in `v`, and a failed `=~` nils `$1` on the `||` edge.
+  describe "fixtures/and_assign_narrowing.rb — an and-assign narrows its value" do
+    let(:harness) { harness_for("and_assign_narrowing") }
+
+    it "types the written variable from the narrowed value" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches.map { |d| "#{d.line}: #{d.message}" }).to be_empty
+    end
+
+    it "reports a possible nil receiver only where Ruby's value may be nil" do
+      nil_receivers = harness.diagnostics.select { |d| d.rule == "call.possible-nil-receiver" }
+      expect(nil_receivers.map(&:line)).to eq(marked_lines(harness, "# GENUINE-NIL"))
+    end
+
+    it "reports an undefined method on the match globals a failed match left nil" do
+      undefined = harness.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(undefined.map(&:line)).to eq(marked_lines(harness, "# GENUINE-UNDEFINED"))
+    end
+  end
+
   # Issue #2196 — a core superclass's method is not answered from `Kernel`'s private method of the same name.
   describe "fixtures/core_subclass_kernel_shadow.rb — a core subclass does not read Kernel#select" do
     let(:harness) { harness_for("core_subclass_kernel_shadow") }

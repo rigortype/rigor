@@ -2810,6 +2810,12 @@ module Rigor
         # Whether the census holds any of `entries`, recording only what can flip the answer: the entries present
         # when it holds one (the answer stays true until every one of them vanishes, and another appearing changes
         # nothing), every entry when it holds none.
+        #
+        # This rests on an invariant: every census entry can only move a write toward being silenced, and a reported
+        # write is always re-checked through `IncrementalSession#global_write_reporters`, so recording only the
+        # present entries on a yes is sound. A future census entry that makes a write reported would break it, and
+        # its reader would have to record every entry. Recording every entry on a no is defence in depth, since the
+        # write that answer leaves reported re-checks through `global_write_reporters` anyway.
         def census_holds_any?(census, entries)
           present = entries.select { |entry| census.include?(entry) }
           record_global_census(*(present.empty? ? entries : present))

@@ -1155,7 +1155,12 @@ setter's method and each hatch, `global_census:defines_any`,
 (`GlobalWriteCensus.dependency_key`). A question over several entries
 (`CheckRules#census_holds_any?`) records only the entries present when
 one is, since the answer stays until every one of them vanishes, and
-every entry when none is. The shared `main_mixin` key is a deliberate
+every entry when none is. That rests on an invariant: every census entry
+can only move a write toward being silenced, and a reported write always
+re-checks through `IncrementalSession#global_write_reporters`. A future
+census entry that makes a write reported would break it, and its reader
+would have to record every entry; recording every entry on a no is
+defence in depth. The shared `main_mixin` key is a deliberate
 precision trade-off: the reader asks about every top-level mixin, so a
 mixin appearing or vanishing anywhere re-checks every write that reached
 that step. The census is a

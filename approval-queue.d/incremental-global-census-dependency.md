@@ -51,7 +51,8 @@ tripwire does not list it.
 
 ## To undo
 
-Revert the `record_global_census` calls in `CheckRules`, `GlobalWriteCensus.dependency_key`,
+Revert the `record_global_census` calls and `census_holds_any?` in `CheckRules` (restoring
+`GlobalWriteCensus.defines_any_of?` / `refines_write?` at its two call sites), `GlobalWriteCensus.dependency_key`,
 `Incremental.changed_global_census_keys`, `IncrementalSession#global_census_affected`, and the
 `global_write_census` member of `ScopeIndexer.scan_summary_for_paths`, together with the cache.md paragraph and
 the inference-engine.md sentence. The removal examples in `incremental_global_census_edge_spec.rb` then fail.

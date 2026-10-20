@@ -1821,7 +1821,7 @@ module Rigor
 
         @project_discovery_done = true
         # Issue #684 — the cross-file index spans the PROJECT even when the analysis targets a file list.
-        expansion = @project_discovery_expansion || once_each(expansion)
+        expansion = buffer_spelled(@project_discovery_expansion || once_each(expansion))
         if @collect_seed_bundles
           # ADR-85 WD2 — rebuild discovery from the prior run's bundles (re-walking only changed files) and
           # capture the refreshed bundle set for the session to persist.
@@ -1891,6 +1891,27 @@ module Rigor
         files = expansion.fetch(:files)
         unique = files.uniq { |path| File.absolute_path(path) }
         unique.size == files.size ? expansion : expansion.merge(files: unique)
+      end
+
+      # Issue #2165 — the discovery set with the buffer's file under the binding's own spelling, once. The binding
+      # substitutes bytes only for a path spelled exactly as its logical path, while the file can reach discovery as
+      # the argument's spelling, the configured one, or through a symlink; each of those read it from disk, and a
+      # second spelling made it a second declarer. Every member whose real path is the buffer's file is replaced by
+      # the logical path, and the duplicates that leaves are dropped (`IncrementalSession#rebind_buffer` is option
+      # B's counterpart).
+      def buffer_spelled(expansion)
+        return expansion if @buffer.nil?
+
+        target = real_path_of(@buffer.logical_path)
+        files = expansion.fetch(:files)
+        spelled = files.map { |path| real_path_of(path) == target ? @buffer.logical_path : path }.uniq
+        spelled == files ? expansion : expansion.merge(files: spelled)
+      end
+
+      def real_path_of(path)
+        File.realpath(path)
+      rescue SystemCallError
+        File.absolute_path(path)
       end
 
       # Each file once, in project order, under the spelling the analysis uses when it is analysed.

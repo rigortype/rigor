@@ -71,10 +71,45 @@ RSpec.describe "editor --tmp-file mode discovers the project (#2165)", type: :ru
     expect(buffer_rows(caller_source)).to eq(plain_rows(caller_source))
   end
 
-  # The widened discovery reads the buffer's file through the binding: on disk `Holder` inherits from a class no file
-  # declares, while the buffer makes it a `Base`.
-  it "discovers the buffer's own file from the buffer's bytes" do
-    File.write("lib/b.rb", "class Base\n  def log(message) = warn(message)\nend\n")
-    expect(buffer_rows(caller_source, on_disk: caller_source.sub("< Base", "< Missing"))).to eq([])
+  # The buffer's file reaching discovery under another spelling than the binding's must still be read from the
+  # buffer. On disk `log` writes `@io`; the buffer's `log` does not, so the narrowing holds in the buffer. Read from
+  # disk under a second spelling, the file would be a second declarer of `Holder#log` and drop it.
+  describe "with the buffer's file under another spelling" do
+    let(:own_log) do
+      caller_source.sub("class Holder < Base", "class Holder")
+                   .sub("  def dump", "  def log(message) = warn(message)\n\n  def dump")
+    end
+    let(:writing_log) { own_log.sub("def log(message) = warn(message)", "def log(_message) = (@io = STDOUT)") }
+
+    def run_with(logical, argument)
+      File.write("buffer.rb", own_log)
+      binding = Rigor::Analysis::BufferBinding.new(logical_path: logical, physical_path: File.expand_path("buffer.rb"))
+      runner = Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil, buffer: binding)
+      guarded_run(runner, [argument]).diagnostics.select { |d| d.path.end_with?("a.rb") }.map(&:rule)
+    end
+
+    before do
+      File.write("lib/b.rb", "class Other\nend\n")
+      File.write("lib/a.rb", writing_log)
+    end
+
+    it "reads it from the buffer when the argument and --instead-of are spelled differently" do
+      expect(run_with(File.expand_path("lib/a.rb"), "lib/a.rb")).to eq([])
+    end
+
+    it "reads it from the buffer when it is reached through a symlinked root" do
+      File.symlink(Dir.pwd, "link")
+      linked = File.join(Dir.pwd, "link", "lib", "a.rb")
+      expect(run_with(linked, linked)).to eq([])
+    end
+
+    # The positive control: the same runs report when the buffer's own `log` writes the variable.
+    it "still reports when the buffer's own log writes the variable" do
+      File.write("buffer.rb", writing_log)
+      binding = Rigor::Analysis::BufferBinding.new(logical_path: File.expand_path("lib/a.rb"),
+                                                   physical_path: File.expand_path("buffer.rb"))
+      runner = Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil, buffer: binding)
+      expect(guarded_run(runner, ["lib/a.rb"]).diagnostics.map(&:rule)).to include("call.undefined-method")
+    end
   end
 end

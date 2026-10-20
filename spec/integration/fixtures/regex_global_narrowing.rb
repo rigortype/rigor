@@ -2491,8 +2491,9 @@ def case_when_string_or_integer(flag, raw)
 end
 
 # Issue #2002 — `Regexp#===` converts a subject that defines `to_str`, so the match edge keeps such a member whole, and
-# so it does a String subclass, an `Object` (which may be one) and a class no signature declares. Only a member that
-# cannot respond to `to_str` narrows to its String and Symbol parts. Ruby: `/\A\d+\z/ === ToStrSubject2002.new` is
+# so it does a String subclass and a class no signature declares (the classes here have none; the signature-declared
+# rows are in `regexp_to_str_subject/`). Any other member narrows to its String and Symbol parts, an `Object` one
+# included. Ruby: `/\A\d+\z/ === ToStrSubject2002.new` is
 # true, `case_when_to_str_subject` returns :hit, `/\d/ === StringSubclass2002.new("1")` is true, `/\d/ === 1` and
 # `/\d/ === nil` are false.
 class ToStrSubject2002
@@ -2540,7 +2541,7 @@ def case_when_object_subject
   object = Object.new
   case object
   when /\d/
-    assert_type("Object", object)
+    assert_type("String | Symbol", object)
   end
 end
 

@@ -1,0 +1,25 @@
+class SigToStr
+  def to_str: () -> String
+end
+
+class SigPlain
+  def name: () -> String
+end
+
+class SigChild < SigToStr
+end
+
+module ToStrMixin
+  def to_str: () -> String
+end
+
+class SigMixed
+  include ToStrMixin
+end
+
+class Probe
+  def object_length: (Object s) -> Integer?
+  def basic_upcase: (BasicObject s) -> (String | Symbol)?
+  def object_or_nil_to_i: (Object? s) -> Integer?
+  def kernel_subject: (Kernel s) -> void
+end

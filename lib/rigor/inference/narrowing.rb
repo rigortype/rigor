@@ -2762,11 +2762,14 @@ module Rigor
 
         # Issue #1955 — the subject on the match edge of `/re/ === x` (and of `case x when /re/`). `Regexp#===`
         # matches a String, a Symbol by its name, and an object that converts with `to_str`, and answers false for
-        # anything else. A member that may respond to `to_str` is kept whole (#2002): a String and its subclasses, a
-        # class that defines `to_str`, `Object`, a class no signature declares, and `Dynamic`, which may also be a
-        # Symbol at run time. Any other member narrows to its String and Symbol parts, which are only what can match:
-        # a `String | nil` subject reads `String`, a Symbol one stays `Symbol`, an Integer one drops out. The no-match
-        # edge keeps the entry type: a String that does not match reaches it too.
+        # anything else. A member is kept whole when its class defines `to_str` (#2002) — a String and its
+        # subclasses, a class whose signature, ancestry or project source declares it — or when no signature
+        # declares the class, and a `Dynamic` member is kept, since it may also be a Symbol at run time. Any other
+        # member narrows to its String and Symbol parts, which are only what can match: a `String | nil` subject
+        # reads `String`, a Symbol one stays `Symbol`, an Integer one drops out. An `Object`, `BasicObject` or
+        # module member narrows too (to `String | Symbol`): its instances may be anything, and reading the edge as
+        # the String it most often is keeps `s.length` on it from reporting. The no-match edge keeps the entry type:
+        # a String that does not match reaches it too.
         def regexp_case_equality_type(current, scope)
           members = current.is_a?(Type::Union) ? current.members : [current]
           Type::Combinator.union(*members.map { |member| regexp_case_equality_member(member, scope) })
@@ -2774,12 +2777,29 @@ module Rigor
 
         def regexp_case_equality_member(member, scope)
           return member if member.is_a?(Type::Dynamic)
-          return member unless lacks_method?(member, :to_str, scope)
+          return member if converts_with_to_str?(member, scope)
 
           parts = %w[String Symbol].map do |class_name|
             narrow_class(member, class_name, exact: false, environment: scope.environment, scope: scope)
           end
           Type::Combinator.union(*parts)
+        end
+
+        # True when a class `member` dispatches through declares `to_str`, or is declared by no signature
+        # ({#class_lacks_method?} answers false for it). An open-surface class (`Object`, `BasicObject`) or a
+        # module is neither: its instances may be anything, so the member is not read as one that converts.
+        def converts_with_to_str?(member, scope)
+          targets = ProjectMethodOwnership.targets(member)
+          return false if targets.nil? || targets.empty?
+
+          targets.any? { |class_name, kind| class_converts_with_to_str?(class_name, kind, scope) }
+        end
+
+        def class_converts_with_to_str?(class_name, kind, scope)
+          return false if kind == :instance && OPEN_SURFACE_CLASSES.include?(class_name)
+          return false if kind == :instance && scope.environment.rbs_module?(class_name)
+
+          !class_lacks_method?(class_name, :to_str, kind, scope)
         end
 
         def unwrap_parens(node)

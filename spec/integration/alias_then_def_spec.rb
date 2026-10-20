@@ -186,6 +186,7 @@ RSpec.describe "a later definer supersedes an earlier alias for typing (#2006)",
     "a core method by alias" => "class K\n  def y = 1\n  alias x y\n  def x = 1\n  alias x inspect\nend\n",
     "a computed alias_method name" => "class K\n  def y = 1\n  alias x y\n  def x = 1\n  n = :x\n  " \
                                       "alias_method n, :to_s\nend\n",
+    "an interpolated old name" => "class K\n  def y = 1\n  alias x y\n  def x = 1\n  alias x :\"to_\#{:s}\"\nend\n",
     "a core method after a copy" => "class K\n  def y = 1\n  alias x y\n  alias x to_s\nend\n",
     "inherited, after a copy" => "class K < P\n  def y = 1\n  alias_method :x, :y\n  alias_method :x, :z\nend\n"
   }.each do |form, source|

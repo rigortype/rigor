@@ -412,6 +412,49 @@ RSpec.describe Rigor::SigGen::Generator do
       end
     end
 
+    # A lookup re-read under a predicate that tested it is nil-free only when nothing runs between the two: here
+    # something does, so the re-read can miss. Each witness calls the method with the key present, so the test
+    # passes and the re-read then returns nil.
+    {
+      "a delete" => ["", "if h[k]\n      h.delete(k)\n      h[k]\n    else\n      \"d\"\n    end", nil],
+      "a reassigned key" => ["", "if h[k]\n      k = :other\n      h[k]\n    else\n      \"d\"\n    end", nil],
+      "a callee that mutates" => ["  def clear_it(x) = x.clear\n",
+                                  "if h[k]\n      clear_it(h)\n      h[k]\n    else\n      \"d\"\n    end", nil],
+      "a block that mutates" => ["", "if h[k]\n      [1].each { h.clear }\n      h[k]\n    else\n      \"d\"\n    end",
+                                 nil],
+      "a yield" => ["", "if h[k]\n      yield h\n      h[k]\n    else\n      \"d\"\n    end", :clear],
+      "a reject!" => ["", "if h[k]\n      h.reject! { true }\n      h[k]\n    else\n      \"d\"\n    end", nil],
+      "an unless/else" => ["", "unless h[k]\n      \"d\"\n    else\n      h.delete(k)\n      h[k]\n    end", nil],
+      "an Array#shift" => ["", "if a.first\n      a.shift\n      a.first\n    else\n      \"d\"\n    end", nil],
+      "a computed key" => ["  def next_key = (@n = (@n || 0) + 1) == 1 ? :k : :z\n",
+                           "h[next_key] ? h[next_key] : \"d\"", nil]
+    }.each do |label, (extra, body, block)|
+      it "keeps the nil for a re-read after #{label}" do
+        params = "(Hash[Symbol, String] h, Symbol k, Array[String] a, bool c)"
+        write_fixture("sig/box.rbs", "class Box\n  def g: #{params} -> untyped\nend\n")
+        path = write_fixture("lib/box.rb", "class Box\n#{extra}  def g(h, k, a, c)\n    #{body}\n  end\nend\n")
+        box = Module.new.tap { it.module_eval(File.read(path)) }.const_get(:Box)
+
+        gen = generator(paths: [path], signature_paths: [File.join(tmpdir, "sig")])
+        method = gen.run.find { |c| c.method_name == :g }
+
+        expect(box.new.g({ k: "v" }, :k, ["x"], true, &block)).to be_nil
+        expect(method.rbs).to eq("def g: #{params} -> (String | nil)")
+      end
+    end
+
+    it "keeps the nil an &&= binding hands on" do
+      params = "(Hash[Symbol, String] h, Symbol k)"
+      write_fixture("sig/box.rbs", "class Box\n  def g: #{params} -> untyped\nend\n")
+      path = write_fixture("lib/box.rb", "class Box\n  def g(h, k)\n    x = h[k]\n    x &&= \"y\"\n  end\nend\n")
+      box = Module.new.tap { it.module_eval(File.read(path)) }.const_get(:Box)
+
+      method = generator(paths: [path], signature_paths: [File.join(tmpdir, "sig")]).run.find { it.method_name == :g }
+
+      expect(box.new.g({}, :k)).to be_nil
+      expect(method.rbs).to end_with("| nil)")
+    end
+
     it "keeps the nil in an attribute an instance method assigns a lookup to" do
       path = write_fixture("lib/box.rb", <<~RUBY)
         class Box

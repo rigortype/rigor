@@ -144,31 +144,37 @@ module Rigor
         value_branches(node).any? { |branch| !branch.nil? && optimistic_value?(branch, scope, context) }
       end
 
-      # Each lookup call under the truthy side of an `if` / ternary (the body of an `if`, the `else` of an
-      # `unless`) mapped to the source of every predicate guarding it, for {#guarded_lookup?}.
+      # The lookup a truthy arm (the body of an `if` or ternary, the `else` of an `unless`) reads FIRST, mapped to
+      # the source of the predicate that just tested it, for {#guarded_lookup?}. Only the first expression, or the
+      # value of a first `return`, counts: anything run between the test and the re-read (`h.delete(k)`, a
+      # reassignment, a block, `yield`, another call that mutates the receiver) can make the re-read miss.
       def truthy_guards(body)
         guards = {}.compare_by_identity
-        collect_truthy_guards(body, [], guards)
+        collect_truthy_guards(body, guards)
         guards
       end
 
-      def collect_truthy_guards(node, active, guards)
+      def collect_truthy_guards(node, guards)
         return unless node.is_a?(Prism::Node)
 
-        guards[node] = active if node.is_a?(Prism::CallNode) && !active.empty?
-        truthy, predicate, rest = truthy_split(node)
-        if truthy
-          collect_truthy_guards(truthy, active + [predicate.slice], guards)
-          rest.each { collect_truthy_guards(it, active, guards) }
-        else
-          node.rigor_each_child { collect_truthy_guards(it, active, guards) }
-        end
+        predicate, arm = truthy_arm(node)
+        first = first_value(arm)
+        guards[first] = [predicate.slice] if first
+        node.rigor_each_child { collect_truthy_guards(it, guards) }
       end
 
-      def truthy_split(node)
+      def first_value(arm)
+        return nil unless arm.is_a?(Prism::StatementsNode)
+
+        first = arm.body.first
+        args = first.is_a?(Prism::ReturnNode) ? first.arguments&.arguments : nil
+        args&.size == 1 ? args.first : first
+      end
+
+      def truthy_arm(node)
         case node
-        when Prism::IfNode then [node.statements, node.predicate, [node.predicate, node.subsequent]]
-        when Prism::UnlessNode then [node.else_clause, node.predicate, [node.predicate, node.statements]]
+        when Prism::IfNode then [node.predicate, node.statements]
+        when Prism::UnlessNode then [node.predicate, node.else_clause&.statements]
         end
       end
 

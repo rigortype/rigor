@@ -60,7 +60,7 @@ The per-buffer publish seeds the project's discovery tables through the existing
   - `rigor check --tmp-file` (buffer without `prebuilt:`) discovers only the buffer file but still finalises `ENVELOPE_PROJECT_WIDE`, so it keeps the gap ([#2165](https://github.com/rigortype/rigor/issues/2165)).
   - With `pre_eval:` configured, the prebuilt runner's own pre-eval constant publication replaces the seed's literal constant table, so constant values still differ from `check` there. One pre-existing shape of it is a false positive: a `pre_eval:` file with `X = 1` and an unlisted file with `X = "s" if …` make the editor report `X.upcase` on Integer, while `check` retracts the value (#663) and reports nothing.
   - `parameter_inference:` is still collected over the buffer alone.
-- **Staleness, closed by a follow-up:** WD2 reads other files from disk, so a dirty buffer's cross-file markers can move when another file is saved or the generation is invalidated. A save round now re-publishes every dirty open buffer from its own bytes after publishing the clean ones, and a watched-file or configuration change re-publishes every open buffer ([#2171](https://github.com/rigortype/rigor/pull/2171)).
+- **Staleness, closed by a follow-up:** WD2 reads other files from disk, so a dirty buffer's cross-file markers can move when another file is saved or the generation is invalidated. A save round now re-publishes every dirty open buffer from its own bytes after publishing the clean ones, and a watched-file or configuration change re-publishes every open buffer ([#2175](https://github.com/rigortype/rigor/pull/2175)).
 
 ## Relationship to other ADRs
 

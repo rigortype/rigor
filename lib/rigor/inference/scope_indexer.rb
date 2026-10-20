@@ -11490,6 +11490,7 @@ module Rigor
         entry = UNENTERED_FLOW_ENTRY[node.class]
         return if entry.nil?
 
+        # An entered construct is already recorded; skipping it is a performance guard, not a behaviour.
         part = node.public_send(entry)
         return if part.nil? || table.key?(part)
 

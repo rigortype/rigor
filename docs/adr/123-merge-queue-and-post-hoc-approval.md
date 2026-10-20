@@ -71,6 +71,27 @@ cycle every landing queued a head that already contained `master`, and the queue
 lookup or verification that fails run the full CI as before. The approval-queue check still runs in
 every queue run.
 
+*Amended 2026-10-20 (maintainer's decision, #2157).* The `CI required` check that the queue waits on
+is to be pinned to GitHub Actions (`integration_id: 15368`) in the `master merge queue` ruleset
+(25351003) by the maintainer; until that change is applied, any source can satisfy it. This amendment
+records the decided configuration and does not change the ruleset. Once pinned, a status posted through
+the commit status API with a personal token cannot satisfy the check.
+
+The pin leaves one gap. A check run or commit status posted from another workflow of this repository
+also runs as GitHub Actions (a `GITHUB_TOKEN` status is attributed the same way), so it could satisfy
+`CI required` too. The model therefore trusts writers: anyone with write access to the repository is
+trusted not to post such a check. The 2026-10-19 attestation amendment above still closes the
+reused-result path; writer trust covers the direct-posting path, and neither makes the other redundant.
+
+Re-evaluate this when the set of writers grows beyond the maintainer and trusted agents. The option then
+is a dedicated GitHub App that posts the required check from a `workflow_run` workflow. That workflow
+must run only from the default branch, and the App's private key must sit where only master's workflow
+can read it (for example, an environment restricted to the default branch), so a branch in a fork or a
+writer's own branch cannot reach it. The ruleset would then require only that App's check. The workflow
+first verifies the run's `event` is `merge_group` and its `conclusion` is `success`; it then checks that
+`head_sha` matches the queued entry and that `path` is `.github/workflows/ci.yml`. The option is
+deferred until that trigger fires.
+
 **2. Decisions below a stated line are made by precedent and ratified afterwards.** A decision
 that is not *serious* (the list in `contribution-flow.md` § "Decisions and the approval queue") is
 made by the coordinator, following the closest precedent, and lands with its PR. The PR carries an

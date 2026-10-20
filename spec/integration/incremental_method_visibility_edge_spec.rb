@@ -213,6 +213,24 @@ RSpec.describe "incremental edges for a source-recorded method visibility (#2134
     expect_toggle(self_extended_files, before: module_function_two, after: private_two, first: arity, second: mismatch)
   end
 
+  # Issue #2209 — the `self.` and `send` spellings write the same row, and a spelling whose names the prescan cannot
+  # read writes the owner's `*` row, which the reader files `visibility:Es#*` for. Neither rule reports under that
+  # row: the call's definer is uncertain.
+  {
+    "self.module_function :two" => ["module Es\n  self.module_function :two\nend\n", :arity],
+    "send(:module_function, n)" => ["module Es\n  n = :two\n  send(:module_function, n)\nend\n", nil]
+  }.each do |spelling, (reopening, swapped)|
+    it "re-checks a self-extended singleton call when a reopening swaps private for #{spelling}" do
+      after_rows = swapped ? arity : []
+      expect_toggle(self_extended_files, before: private_two, after: reopening, first: mismatch, second: after_rows)
+    end
+
+    it "re-checks a self-extended singleton call when a reopening swaps #{spelling} back for private" do
+      before_rows = swapped ? arity : []
+      expect_toggle(self_extended_files, before: reopening, after: private_two, first: before_rows, second: mismatch)
+    end
+  end
+
   # The `:both` row a `module_function def` writes (`ModuleFunctionState.deferred_module_function?`), against a
   # `private def` of the same body: the file's def, visibility entries and declared classes stay as they were.
   def extending_files

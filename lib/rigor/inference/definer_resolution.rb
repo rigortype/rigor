@@ -311,11 +311,15 @@ module Rigor
       # stops writing one fires the key. A swap from `private :x` to `module_function :x` in a reopening leaves the
       # file's visibility table and declared classes as they were, and fires nothing else. The caller's own
       # visibility reads record the same key today; this one keeps the reader's edge where it reads.
+      #
+      # Issue #2209 — a row named {ModuleFunctionState::ANY_ROW_NAME} (a `module_function` spelling whose names the
+      # prescan cannot read) stands for every name of its owner, so it counts too, and its key is read as well
+      # ({ModuleFunctionState.row_names}).
       def module_function_row?(scope, owner, method_name)
-        Analysis::DependencyRecorder.read_visibility(owner, method_name) if Analysis::DependencyRecorder.active?
+        names = ModuleFunctionState.row_names(method_name).each { Analysis::DependencyRecorder.read_visibility(owner, it) }
         scope.discovered_deferred_ranges.each_value.any? do |rows|
           rows.any? do |(_start, _finish, row_name, kind, row_owner)|
-            row_name == method_name.to_sym && row_owner == owner.to_s && kind != :instance
+            names.include?(row_name) && row_owner == owner.to_s && kind != :instance
           end
         end
       end

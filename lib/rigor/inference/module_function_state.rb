@@ -318,10 +318,20 @@ module Rigor
         end
       end
 
+      # Issue #2209 — the row name of a deferred-ranges row that stands for every name of its owner
+      # ({Spellings}).
+      ANY_ROW_NAME = :*
+
+      # Issue #2209 — the deferred-ranges row names that make `method_name` a module function on their owner: its
+      # own and {ANY_ROW_NAME}.
+      def row_names(method_name) = [method_name.to_sym, ANY_ROW_NAME]
+
       # The prescan's arms for a call; true when the arm took the call and its subtree.
       def prescanned_call?(node, qualified_prefix, in_singleton_class, offsets, ranges, nested)
         if call?(node)
           prescan_call(node, qualified_prefix, in_singleton_class, offsets, ranges)
+        elsif (arguments = Spellings.arguments(node))
+          Spellings.prescan(node, arguments, qualified_prefix, in_singleton_class, offsets, ranges)
         elsif visibility_reset?(node)
           offsets << [node.location.start_offset, nested ? :maybe_off : :off]
         elsif ScopeIndexer.receiver_eval_call?(node) || (node.block && ScopeIndexer.meta_new_constant_rvalue?(node))
@@ -374,3 +384,5 @@ module Rigor
     end
   end
 end
+
+require_relative "module_function_state/spellings"

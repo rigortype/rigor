@@ -113,6 +113,9 @@ module Rigor
       # nothing-to-re-anchor walk allocates none.
       EMPTY_RENAMES = {}.freeze
 
+      # No path whose contributions are all `possible` (issue #2021), the cross-file walks' default.
+      EMPTY_PATH_SET = Set.new.freeze
+
       # `declared_ivar_types:` — whether an RBS-declared ivar type replaces the census's join of the writes (#1406).
       # `rigor sig-gen` passes false: it proposes what the code says, and reading a declaration back would make a row
       # count as generated only because it is declared.
@@ -9552,14 +9555,21 @@ module Rigor
       # Error degradation is identical to the two independent loops it replaces: a read / parse failure (the
       # rescue's real target) contributes nothing to either table. The subset-scoped callers
       # ({IncrementalSession}, `coverage --protection`) keep calling the individual methods unchanged.
-      def discovered_project_index_for_paths(paths, buffer: nil)
+      #
+      # @param uncertain — issue #2021: the paths whose every method contribution is `possible`
+      #   ({Certainty.every_contribution}).
+      def discovered_project_index_for_paths(paths, buffer: nil, uncertain: EMPTY_PATH_SET)
         classes = {}
         acc = new_def_index_accumulator
         paths.each do |path|
           physical = buffer ? buffer.resolve(path) : path
           root = Prism.parse(File.read(physical), filepath: path).value
           collect_class_decls(root, [], classes)
-          accumulate_project_index(acc, path, root)
+          if uncertain.include?(path)
+            fold_file_index(acc, without_written_slots(build_file_index(path, root, uncertain: true), acc))
+          else
+            accumulate_project_index(acc, path, root)
+          end
         rescue DeclarationWalk::ContractError
           raise # a broken walk contract, not an unreadable file: skipping it would hide the failure
         rescue StandardError
@@ -9607,14 +9617,19 @@ module Rigor
       # @param paths — project file paths, in canonical order.
       # @param seed_bundles — the prior run's per-file bundles, keyed by logical path.
       # @return `{ classes:, def_index:, bundles: }`.
-      def discovered_project_index_incremental(paths, seed_bundles:, buffer: nil)
+      # @param uncertain — issue #2021: as {#discovered_project_index_for_paths}. Such a file is always re-walked and
+      #   keeps no bundle, since a bundle does not record that its contributions were all possible.
+      def discovered_project_index_incremental(paths, seed_bundles:, buffer: nil, uncertain: EMPTY_PATH_SET) # rubocop:disable Metrics/AbcSize
         classes = {}
         acc = new_def_index_accumulator
         bundles = {}
         paths.each do |path|
           physical = buffer ? buffer.resolve(path) : path
           digest = Cache::FileDigest.hexdigest(physical)
-          cached = seed_bundles[path]
+          walked = uncertain.include?(path)
+          # A walked file neither reuses nor stores a bundle. Both are guards no spec separates: no bundle is ever
+          # stored for a walked file, so the reuse guard matters only if a path changes role within one session.
+          cached = walked ? nil : seed_bundles[path]
           if cached && cached[:digest] == digest
             bundles[path] = cached
             classes.merge!(cached[:classes])
@@ -9623,13 +9638,13 @@ module Rigor
             source = File.read(physical)
             parsed = Prism.parse(source, filepath: path)
             root = parsed.value
-            file_index = build_file_index(path, root)
+            file_index = build_file_index(path, root, uncertain: walked)
             file_classes = {}
             collect_class_decls(root, [], file_classes)
-            bundles[path] = build_seed_bundle(file_index, file_classes, digest,
-                                              code_fingerprint(source, parsed.comments))
+            fingerprint = code_fingerprint(source, parsed.comments)
+            bundles[path] = build_seed_bundle(file_index, file_classes, digest, fingerprint) unless walked
             classes.merge!(file_classes)
-            fold_file_index(acc, file_index)
+            fold_file_index(acc, walked ? without_written_slots(file_index, acc) : file_index)
           end
         rescue DeclarationWalk::ContractError
           raise # a broken walk contract, not an unreadable file: skipping it would hide the failure
@@ -9643,10 +9658,41 @@ module Rigor
       # Builds ONE file's isolated def-index contribution (live `Prism::DefNode`s) by folding it into a fresh
       # accumulator — recon Q2(a)'s "constructible in isolation" property. Shared by the cold-baseline bundle
       # build and the incremental changed-file re-walk.
-      def build_file_index(path, root)
+      def build_file_index(path, root, uncertain: false)
         file_acc = new_def_index_accumulator
-        accumulate_project_index(file_acc, path, root)
+        accumulate_project_index(file_acc, path, root, uncertain: uncertain)
         file_acc
+      end
+
+      # Issue #2021 — the single-valued slot tables an `uncertain` file writes, each with its contest sibling.
+      UNCERTAIN_SLOT_TABLES = {
+        def_nodes: :contested_discovered_def_nodes,
+        singleton_def_nodes: :contested_discovered_singleton_def_nodes,
+        method_visibilities: :contested_discovered_method_visibilities,
+        parameter_envelopes: :contested_discovered_parameter_envelopes
+      }.freeze
+
+      # Issue #2021 — an `uncertain` file's isolated index without the slots `acc` already holds. The walked files fold
+      # after every other discovered file, so `acc` holds what the configured (certain) files wrote: a walked reopening
+      # of such a class adds the names it defines (existence) and leaves each written def node, visibility and
+      # envelope, and its contest, as the certain writer left it. Without this, the walked file's possible write was
+      # the slot's last and contested it, and `rigor check lib/user.rb plug/x.rb` withheld what `rigor check
+      # lib/user.rb` reports. A slot no earlier file wrote is taken, contested.
+      def without_written_slots(file_index, acc)
+        siblings = (file_index[:siblings] || {}).dup
+        tables = UNCERTAIN_SLOT_TABLES.to_h do |table, sibling|
+          written = acc[table]
+          kept = {}
+          (file_index[table] || {}).each do |class_name, entries|
+            sitting = written[class_name]
+            entries = entries.reject { |key, _| sitting.key?(key) } if sitting
+            kept[class_name] = entries unless entries.empty?
+          end
+          contests = siblings[sibling]
+          siblings[sibling] = contests.select { |class_name, key| kept[class_name]&.key?(key) }.to_set if contests
+          [table, kept]
+        end
+        file_index.merge(tables).merge(siblings: siblings)
       end
 
       # ADR-85 WD2 — folds a single file's isolated def-index contribution into the cross-file accumulator,
@@ -10215,12 +10261,12 @@ module Rigor
       # Folds one file's class-keyed indexes into the cross-file accumulator. `method_visibilities` (ADR-35) is
       # collected here so the override-visibility-reduced rule can read an ancestor's visibility declared in a sibling
       # file.
-      def accumulate_project_index(acc, path, root)
+      def accumulate_project_index(acc, path, root, uncertain: false)
         # One combined descent yields both the methods existence table and the def-node table; the latter is also
         # consumed by `record_class_sources`, so a def-dense file is walked once here instead of three times (methods +
         # def-nodes ×2). See {#build_methods_and_def_nodes}.
         file_methods, file_def_nodes, file_envelopes, file_refinements, file_singleton_def_nodes, certainty =
-          walk_def_contributions(acc, path, root)
+          walk_def_contributions(acc, path, root, uncertain: uncertain)
         merge_discovered_defs(acc[:def_nodes], acc[:def_sources], path, file_def_nodes)
         fold_parameter_envelopes(acc, file_envelopes)
         fold_refinements(acc, file_refinements)
@@ -10247,8 +10293,8 @@ module Rigor
       # file's siblings folded into the accumulator BEFORE its members join it (ADR-119 WD3: the `possible` rule
       # reads the accumulator's member as it stood). Returns `[methods, def_nodes, envelopes, refinements,
       # singleton_def_nodes, certainty]`, the classification passed on for the visibility walk.
-      def walk_def_contributions(acc, path, root)
-        certainty = Certainty.possible_nodes(root)
+      def walk_def_contributions(acc, path, root, uncertain: false)
+        certainty = uncertain ? Certainty.every_contribution(root) : Certainty.possible_nodes(root)
         file_methods, file_def_nodes, file_envelopes, file_refinements, file_siblings =
           build_methods_and_def_nodes(root, path, certainty: certainty)
         file_singleton_def_nodes, file_singleton_contested = build_singleton_def_tables(root, certainty: certainty)

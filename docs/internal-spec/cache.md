@@ -1276,6 +1276,34 @@ its cross-file discovery to the configured paths as well
 partition over `lib/b.rb` discovered `lib/b.rb` alone and answered
 differently from the full run.
 
+An analysed file outside the configured paths also discovers what it loads
+with a literal `require_relative`, through targets that are themselves
+outside them ([#2021](https://github.com/rigortype/rigor/issues/2021),
+`Analysis::RequireRelativeClosure`). Those targets are discovered-not-analysed
+files like any other: they join `discovery_digests`, the run-result
+cache's per-file entries, and every session run's discovery. A target under a
+configured path ends the walk, compared by real path, and `exclude:` drops a
+target from discovery as it drops a configured file. A target the walk names
+that is not a file is recorded as a `:kind` row in the run-result descriptor,
+the `--incremental` baseline rows and the slot's derived rows, so a file
+appearing there moves the answer; a session also re-walks on each warm run,
+so the appearing file changes `discovery_digests` and re-baselines it.
+
+A walked file is discovered as uncertain: the pre-pass classifies every one of
+its method contributions `possible` (ADR-119 WD3,
+`ScopeIndexer::Certainty.every_contribution`), and the seed-bundle pass
+re-walks it each run and keeps no bundle for it. Its classes, modules and
+constants resolve, and its methods exist, but no return type, arity or
+visibility is read from its bodies, because a file the walk does not reach may
+redefine them. The walked files fold after every other discovered file and
+skip each def-node (instance or singleton), visibility and parameter-envelope
+slot an earlier file wrote, so a walked file's slots never override a
+configured file's. Constant value types are read from walked files as from any
+other, and their ancestry and dynamic-dispatch declarations (`include`,
+`extend`, `prepend`, a `define_method` on a receiver, `method_missing` /
+`respond_to_missing?`) still apply, as in the run over the walked file's
+directory.
+
 A discovered-not-analysed file feeds the index the analysed files resolve
 against, but it has no per-file row, edge or digest of its own. The session
 records each one's ADR-87 packed stat-digest entry

@@ -7934,7 +7934,17 @@ module Rigor
             (@contested ||= Set.new) << [class_name, name].freeze
           else
             @contested&.delete([class_name, name])
+            @contested&.delete([class_name, ScopeIndexer.replaced_visibility_mark(name)]) unless name.is_a?(Array)
           end
+        end
+
+        # Issue #2013 — contests the instance slot of `name`, recorded or not, and marks the contest as a
+        # replacement's ({ScopeIndexer.replaced_visibility_mark}): a `define_method(:name)` or an alias gave the name
+        # a visibility the walk does not read, and another file may record the slot. A later certain write in this
+        # walk clears both ({#wrote}).
+        def contest_replaced(class_name, name)
+          contest_slot(class_name, name)
+          contest_slot(class_name, ScopeIndexer.replaced_visibility_mark(name))
         end
 
         # Contests the `[class_name, name]` slot, recorded or not: a visibility call changed it in a way the walk
@@ -8273,6 +8283,12 @@ module Rigor
       # them public (`K.public_class_method(*names)`, `K.singleton_class.class_eval { … }`).
       SINGLETON_WILDCARD_SLOT = %i[singleton *].freeze
 
+      # Issue #2013 — the mark a contested instance slot `name` carries in `contested_discovered_method_visibilities`
+      # when a `define_method(:name)` or an alias replaced the method: `[:replaced, name]`. No reader asks for it; it
+      # keeps the slot's contest when another file's write of the slot folds later ({#fold_visibility_contests}),
+      # since file order is not load order.
+      def self.replaced_visibility_mark(name) = [:replaced, name].freeze
+
       # Issue #1984 — a class method visibility call written on a constant (`K.public_class_method(:x)`,
       # `K.send(:public_class_method, :x)`), anywhere: each literal name is recorded public on every class the
       # constant may name, so a reopening's or another file's `private_class_method` disagrees with it and is
@@ -8543,19 +8559,21 @@ module Rigor
         Source::AliasNames.alias_method_call_names(call_node)&.first(1) || []
       end
 
-      # Issue #1989 — a `define_method` or an alias that replaces a method whose visibility slot this walk recorded
-      # gives the name a visibility the walk does not read (the running default for `define_method`, the old
-      # name's for an alias), so the slot is contested rather than left asserting the replaced `def`'s. Issue #1984
-      # — on the singleton side the slot is contested whether or not this file recorded it, since another file may
-      # have.
+      # Issue #1989 — a `define_method` or an alias that replaces a method gives the name a visibility the walk
+      # does not read (the running default for `define_method`, the old name's for an alias), so the slot is
+      # contested rather than left asserting the replaced `def`'s. Issue #1984 — the slot is contested whether or
+      # not this file recorded it, since another file may have; issue #2013 — on the instance side too, with the
+      # mark that keeps the contest when that file's write folds later ({VisibilityTable#contest_replaced}).
       def contest_replaced_visibility(names, qualified_prefix, accumulator, side: :instance)
         return if names.empty? || qualified_prefix.empty?
 
         class_name = qualified_prefix.join("::")
-        recorded = accumulator[class_name]
         names.each do |name|
-          slot = visibility_slot(name, side)
-          accumulator.contest_slot(class_name, slot) if side == :singleton || recorded&.key?(slot)
+          if side == :singleton
+            accumulator.contest_slot(class_name, visibility_slot(name, side))
+          else
+            accumulator.contest_replaced(class_name, name)
+          end
         end
       end
 
@@ -9767,9 +9785,14 @@ module Rigor
       # Issue #1984 — a singleton slot (`[:singleton, name]`) does not follow its writer: file order is not load
       # order, so two files that give it different visibilities (`private_class_method :x` here,
       # `class << self; public :x; end` in a reopening) leave it contested, and a contest on it stays whichever
-      # file folds later. The instance slots fold as before.
+      # file folds later. The instance slots fold as before, except (issue #2013) one whose contest carries a
+      # replacement's mark ({ScopeIndexer.replaced_visibility_mark}): a `define_method` or an alias in one file and a
+      # `private def` in another leave the visibility to load order, so that contest stays too.
       def fold_visibility_contests(sitting, recorded, file_slots, file_contested)
-        stale = sitting.select { |class_name, name| !name.is_a?(Array) && file_slots[class_name]&.key?(name) }
+        stale = sitting.select do |class_name, name|
+          !name.is_a?(Array) && file_slots[class_name]&.key?(name) &&
+            !sitting.include?([class_name, ScopeIndexer.replaced_visibility_mark(name)])
+        end
         disagreeing = singleton_visibility_disagreements(recorded, file_slots)
         return sitting if stale.empty? && file_contested.empty? && disagreeing.empty?
 

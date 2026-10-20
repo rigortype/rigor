@@ -97,6 +97,27 @@ RSpec.describe "incremental edges for a source-recorded method visibility (#2134
     end
   end
 
+  # Issue #2013 — a reopening's `define_method(:bar)` contests the slot another file's `private def bar` writes, with
+  # the replacement mark, so the private call declines whichever file folds later. `lib/zfoo.rb` sorts after
+  # `lib/vis.rb`, `lib/foo.rb` before it.
+  def define_bar = "class Foo\n  define_method(:bar) { 1 }\nend\n"
+  def private_bar_files(path) = { path => "class Foo\n  private def bar = 1\nend\n", "lib/use.rb" => "Foo.new.bar\n" }
+
+  %w[lib/foo.rb lib/zfoo.rb].each do |private_path|
+    it "re-checks a private call when a reopening starts a define_method (#{private_path} private)" do
+      expect_toggle(private_bar_files(private_path), before: "\n", after: define_bar, first: mismatch, second: [])
+    end
+
+    it "re-checks a private call when a reopening drops its define_method (#{private_path} private)" do
+      expect_toggle(private_bar_files(private_path), before: define_bar, after: "\n", first: [], second: mismatch)
+    end
+  end
+
+  it "re-checks an override when a reopening's define_method starts replacing the private override" do
+    expect_toggle(override_files, before: "\n", after: "class Child < Parent\n  define_method(:foo) { 3 }\nend\n",
+                                  first: reduced, second: [])
+  end
+
   # Guards, as are the wrong-arity examples below: the chain read files the class edge to the reopening.
   it "re-checks a singleton call when a reopening starts making the method private" do
     expect_toggle(singleton_files, before: "\n", after: private_new, first: [], second: singleton)

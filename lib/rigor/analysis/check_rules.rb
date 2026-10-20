@@ -4247,6 +4247,9 @@ module Rigor
 
           override_visibility = scope.discovered_method_visibility(class_name, method_name)
           return nil if override_visibility.nil?
+          # Issue #2013 — a contested slot (a later `define_method` or alias gave the name another visibility, or a
+          # write the walk cannot place) proves no reduction.
+          return nil if scope.discovery.contested?(:discovered_method_visibilities, [class_name, method_name])
 
           parent = nearest_ancestor_visibility(scope, class_name, method_name)
           return nil if parent.nil?

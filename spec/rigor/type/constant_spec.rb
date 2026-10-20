@@ -3,6 +3,49 @@
 require "date"
 
 RSpec.describe Rigor::Type::Constant do
+  # Issue #1513 — a Float carrier pins the value, sign of zero included, which Ruby's `==` does not: `0.0 == -0.0`, yet
+  # `1.0 / 0.0` and `1.0 / -0.0` differ. A NaN stays equal to itself so equality is reflexive, although `NaN != NaN`.
+  describe "equality of Float values (#1513)" do
+    def const(value) = described_class.new(value)
+
+    it "tells 0.0 and -0.0 apart" do
+      zero = 0.0
+      negative_zero = -0.0
+      expect(zero).to eq(negative_zero)
+      expect(1.0 / zero).not_to eq(1.0 / negative_zero)
+      expect(const(zero)).not_to eq(const(negative_zero))
+      expect(const(zero)).not_to eql(const(negative_zero))
+      expect(const(negative_zero)).to eq(const(-0.0))
+      expect(const(zero)).to eq(const(0.0))
+    end
+
+    it "keeps NaN equal to NaN with one hash" do
+      nan = Float::NAN
+      expect(nan).not_to eq(Float::NAN)
+      other_nan = -(0.0 / 0.0)
+      expect(other_nan.nan?).to be(true)
+      expect(const(Float::NAN)).to eq(const(other_nan))
+      expect(const(Float::NAN).hash).to eq(const(other_nan).hash)
+      expect(const(Float::NAN)).not_to eq(const(0.0))
+    end
+
+    it "compares the parts of a Complex the same way" do
+      positive = Complex(0.0, 1.0)
+      negative = Complex(-0.0, 1.0)
+      expect(positive).to eq(negative)
+      expect(const(positive)).not_to eq(const(negative))
+      expect(const(Complex(1.0, Float::NAN))).to eq(const(Complex(1.0, -(0.0 / 0.0))))
+      integral = Complex(1, 2)
+      expect(const(integral)).to eq(const(Complex(1, 2)))
+    end
+
+    it "keys 0.0 and -0.0 apart and every NaN together, other values as themselves" do
+      values = [0.0, -0.0, 0.0, Float::NAN, -(0.0 / 0.0), 1, 1.0]
+      unique = values.uniq { |v| described_class.value_key(v) }
+      expect(unique.map(&:to_s)).to eq(%w[0.0 -0.0 NaN 1 1.0])
+    end
+  end
+
   describe "construction" do
     it "wraps an Integer value" do
       c = described_class.new(42)

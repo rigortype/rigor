@@ -996,6 +996,39 @@ RSpec.describe Rigor::Analysis::Runner do
         expect(diag.message).to include("always truthy")
       end
 
+      # Issue #1513 — `0.0 | -0.0` kept one member, so `1.0 / x` folded to one infinity. In Ruby the reciprocal is
+      # `Infinity` or `-Infinity` (`1.0 / -0.0 == -Float::INFINITY`), so the `else` arm is reached when flag is false.
+      it "does not fire on the sign of a reciprocal of a possibly signed zero" do
+        expect([1.0 / 0.0, 1.0 / -0.0]).to eq([Float::INFINITY, -Float::INFINITY])
+        result = analyze(<<~RUBY)
+          def sign_of_reciprocal(flag)
+            x = flag ? 0.0 : -0.0
+            y = 1.0 / x
+            if y.positive?
+              :pos
+            else
+              :neg
+            end
+          end
+        RUBY
+        expect(truthy_diags(result)).to be_empty
+      end
+
+      it "still fires on the reciprocal of zeros of one sign (#1513 control)" do
+        result = analyze(<<~RUBY)
+          def sign_of_reciprocal(flag)
+            x = flag ? 0.0 : 0.0 * 2
+            y = 1.0 / x
+            if y.positive?
+              :pos
+            else
+              :neg
+            end
+          end
+        RUBY
+        expect(truthy_diags(result).size).to eq(1)
+      end
+
       it "does not double-fire on a syntactic literal predicate (covered by unreachable-branch)" do
         result = analyze(<<~RUBY)
           if true

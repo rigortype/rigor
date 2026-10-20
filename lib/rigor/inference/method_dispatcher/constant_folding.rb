@@ -1213,7 +1213,8 @@ module Rigor
         def build_scalar_constant_type(values, source)
           return nil if values.empty?
 
-          unique = values.uniq
+          # #1513 — keyed so the possible results `0.0` and `-0.0` stay two members, as `Constant#==` keeps them.
+          unique = values.uniq { |value| Type::Constant.value_key(value) }
           return collapse_constants(unique) if unique.size <= UNION_FOLD_OUTPUT_LIMIT
 
           widen_to_integer_range(unique, source) ||

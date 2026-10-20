@@ -1040,9 +1040,10 @@ module Rigor
         # No type carrier has a method that changes it once built (a built type is frozen; one `Marshal.load`
         # restores is not, but nothing mutates it either), so a memoised key cannot go stale. The memo is weak
         # in both key and value: it keeps neither the type nor the string alive, and an entry whose string
-        # nothing else holds is dropped at the next GC. It is keyed by identity on purpose: `Constant[0.0]` and
-        # `Constant[-0.0]` are equal and hash alike, but render differently. A non-main Ractor may not read the
-        # module's ivar, so a pool worker renders the key every time, as every run did before.
+        # nothing else holds is dropped at the next GC. It is keyed by identity on purpose: two equal members
+        # need not render alike (`Constant[1..2]` and `Constant[1..2.0]`), so equality is not a safe key. A
+        # non-main Ractor may not read the module's ivar, so a pool worker renders the key every time, as every
+        # run did before.
         def sort_key(member)
           return member.describe(:short) unless Ractor.main?
 

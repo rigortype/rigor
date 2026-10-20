@@ -42,10 +42,10 @@ module DeclarationFactSources
   end
 
   # `producers.yml` brought in line with `keys` (`"path#scope"`) by editing its text, not by re-dumping it: the file's
-  # reasons are hand-written plain scalars, and a load and dump would cut one at a ` #` (a YAML comment), reorder
-  # entries and refold a `>-` block. An entry that is still found keeps its lines as they are, a new one is added as
-  # `TODO` before the first existing entry that sorts after it, a vanished one (and a file left with none) is dropped,
-  # and the leading comment block stays. Returns the new text.
+  # reasons are hand-written scalars, quoted or folded where they hold ` #`, and a load and dump would reorder
+  # entries, refold a `>-` block and drop the quoting the author chose. An entry that is still found keeps its lines
+  # as they are, a new one is added as `TODO` before the first existing entry that sorts after it, a vanished one
+  # (and a file left with none) is dropped, and the leading comment block stays. Returns the new text.
   def regenerate_producers_text(text, keys)
     text += "\n" unless text.empty? || text.end_with?("\n")
     head, sections = split_producer_sections(text)

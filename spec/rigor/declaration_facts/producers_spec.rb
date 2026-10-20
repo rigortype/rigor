@@ -72,6 +72,55 @@ RSpec.describe "Declaration producers" do
                                 "#{DeclarationFactSources::REGENERATE_ENV}=1 adds the entries as TODO."
   end
 
+  # YAML ends a plain scalar at a `#` that follows whitespace, so `issue #1984` loads as the text before the hash, and
+  # a comment after a quoted value is text the reader drops. The check reads the Psych AST: a scalar whose source,
+  # after its end position, continues with `#` is flagged. A folded block's content is not a scalar's end, so a `: `
+  # or ` #` inside it is not flagged.
+  def comment_after_scalars(text)
+    lines = text.lines
+    flagged = []
+    visit = lambda do |node|
+      if node.is_a?(Psych::Nodes::Scalar)
+        rest = lines.fetch(node.end_line, "")[node.end_column..].to_s
+        flagged << node.value if rest.match?(/\A\s*#/)
+      end
+      node.children&.each(&visit)
+    end
+    visit.call(Psych.parse(text))
+    flagged
+  end
+
+  it "writes every reason so that YAML loads it whole" do
+    cut = comment_after_scalars(File.read(snapshot))
+
+    expect(cut).to eq([]),
+                   "These scalars in producers.yml are cut or followed by a comment at ` #`. Quote or fold them:\n" \
+                   "#{cut.join("\n")}"
+  end
+
+  # Fixtures for the four shapes the AST check decides: each cut shape must be reported, and the folded block must not.
+  describe "the comment-after-scalar check" do
+    def fixture(body)
+      "k:\n#{body}"
+    end
+
+    it "reports a value preceded by a tab before the hash" do
+      expect(comment_after_scalars(fixture("  v: reason\t#1984\n"))).to eq(["reason"])
+    end
+
+    it "reports the continuation line of a plain value that holds the hash" do
+      expect(comment_after_scalars(fixture("  v: first part\n    second #1984\n"))).to eq(["first part second"])
+    end
+
+    it "reports a quoted value followed by a comment" do
+      expect(comment_after_scalars(fixture("  v: 'reason' # note\n"))).to eq(["reason"])
+    end
+
+    it "does not report a folded block whose content holds `: ` and ` #`" do
+      expect(comment_after_scalars(fixture("  computes: >-\n    a: b #1\n    c\n"))).to eq([])
+    end
+  end
+
   it "justifies every file and entry" do
     missing = unjustified(YAML.load_file(snapshot))
 

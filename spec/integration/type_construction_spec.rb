@@ -1424,6 +1424,24 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  # Issue #2002 — the match edge of `/re/ === x` keeps a member whose class declares `to_str` in its signature, its
+  # ancestry or an included module, drops one whose signature declares none, and narrows an `Object`, `BasicObject` or
+  # `Kernel` subject to `String | Symbol`.
+  describe "fixtures/regexp_to_str_subject — a signature-declared to_str subject of Regexp#=== (#2002)" do
+    let(:harness) { harness_for("regexp_to_str_subject") }
+
+    it "keeps a to_str member, drops one without it, and reports nothing on an Object subject" do
+      expect(harness.errors.map(&:message)).to eq([])
+      expect(harness.diagnostics.reject { |d| d.rule == "call.unresolved-toplevel" }.map(&:message)).to eq([])
+    end
+  end
+
+  describe "fixtures/regexp_to_str_module_reopen — a String-included module that declares to_str (#2002)" do
+    it "keeps the module's type on the match edge" do
+      expect(harness_for("regexp_to_str_module_reopen").errors.map(&:message)).to eq([])
+    end
+  end
+
   describe "fixtures/regex_global_field_separator.rb — a `split` on a `$;` the file sets to a Regexp (#1365)" do
     let(:harness) { harness_for("regex_global_field_separator") }
 

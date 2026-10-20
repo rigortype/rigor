@@ -2762,10 +2762,14 @@ module Rigor
 
         # Issue #1955 — the subject on the match edge of `/re/ === x` (and of `case x when /re/`). `Regexp#===`
         # matches a String, a Symbol by its name, and an object that converts with `to_str`, and answers false for
-        # anything else. Each member narrows to its String and Symbol parts: a `String | nil` subject reads `String`, a
-        # Symbol one stays `Symbol`. The `to_str` conversion is not modelled, so a member that defines `to_str` and is
-        # neither drops out of the edge. A `Dynamic` member is left as it is, since it may be a Symbol at run time. The
-        # no-match edge keeps the entry type: a String that does not match reaches it too.
+        # anything else. A member is kept whole when its class defines `to_str` (#2002) — a String and its
+        # subclasses, a class whose signature, ancestry or project source declares it — or when no signature
+        # declares the class, and a `Dynamic` member is kept, since it may also be a Symbol at run time. Any other
+        # member narrows to its String and Symbol parts, which are only what can match: a `String | nil` subject
+        # reads `String`, a Symbol one stays `Symbol`, an Integer one drops out. An `Object`, `BasicObject` or
+        # module member narrows too (to `String | Symbol`): its instances may be anything, and reading the edge as
+        # the String it most often is keeps `s.length` on it from reporting. The no-match edge keeps the entry type:
+        # a String that does not match reaches it too.
         def regexp_case_equality_type(current, scope)
           members = current.is_a?(Type::Union) ? current.members : [current]
           Type::Combinator.union(*members.map { |member| regexp_case_equality_member(member, scope) })
@@ -2773,11 +2777,42 @@ module Rigor
 
         def regexp_case_equality_member(member, scope)
           return member if member.is_a?(Type::Dynamic)
+          return member if converts_with_to_str?(member, scope)
 
           parts = %w[String Symbol].map do |class_name|
             narrow_class(member, class_name, exact: false, environment: scope.environment, scope: scope)
           end
           Type::Combinator.union(*parts)
+        end
+
+        # True when a class `member` dispatches through declares `to_str`, or is declared by no signature
+        # ({#class_lacks_method?} answers false for it). `Object`, `BasicObject` and a module String or Symbol
+        # includes (`Kernel`, `Comparable`) are read as their String and Symbol parts instead: their instances may be
+        # anything, and the String they most often are keeps a String method on the arm from reporting. Any other
+        # module is kept whole, since a matching value may include it; so is one of those that declares `to_str`.
+        def converts_with_to_str?(member, scope)
+          targets = ProjectMethodOwnership.targets(member)
+          return false if targets.nil? || targets.empty?
+
+          targets.any? { |class_name, kind| class_converts_with_to_str?(class_name, kind, scope) }
+        end
+
+        # The modules String's or Symbol's own ancestry includes, read from the running Ruby.
+        STRING_SYMBOL_MODULES = (String.ancestors + Symbol.ancestors).grep_v(Class).filter_map(&:name).uniq.freeze
+        private_constant :STRING_SYMBOL_MODULES
+
+        def class_converts_with_to_str?(class_name, kind, scope)
+          return false if kind == :instance && OPEN_SURFACE_CLASSES.include?(class_name)
+          if kind == :instance && scope.environment.rbs_module?(class_name)
+            return module_declares_to_str?(class_name, scope) || !STRING_SYMBOL_MODULES.include?(class_name)
+          end
+
+          !class_lacks_method?(class_name, :to_str, kind, scope)
+        end
+
+        def module_declares_to_str?(module_name, scope)
+          ProjectMethodOwnership.defines?(module_name, :to_str, :instance, scope) ||
+            !ExternalAncestorResolution.method_definition(module_name, :to_str, :instance, scope: scope).nil?
         end
 
         def unwrap_parens(node)

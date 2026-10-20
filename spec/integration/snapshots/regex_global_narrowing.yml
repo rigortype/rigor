@@ -288,8 +288,15 @@ assertions:
   '280': String | Symbol
   '281': String
   '282': 1 | String
-  '283': String?
-  '284': String?
-  '285': String?
-  '286': String
-  '287': String
+  '283': ToStrSubject2002
+  '284': ToStrSubject2002
+  '285': ToStrSubject2002
+  '286': 1 | ToStrSubject2002
+  '287': ToStrSubject2002
+  '288': StringSubclass2002
+  '289': String | Symbol
+  '290': String?
+  '291': String?
+  '292': String?
+  '293': String
+  '294': String

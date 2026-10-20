@@ -407,4 +407,27 @@ RSpec.describe Rigor::LanguageServer::ProjectContext do
       end
     end
   end
+
+  # ADR-124 — the whole-project parameter-inference table the per-buffer publish takes.
+  describe "#param_inferred_types" do
+    it "is nil unless parameter_inference: is on" do
+      expect(context.param_inferred_types).to be_nil
+    end
+
+    it "is rebuilt after #invalidate! from the files on disk" do
+      Dir.mktmpdir("rigor-lsp-params-") do |dir|
+        lib = File.join(dir, "lib")
+        FileUtils.mkdir_p(lib)
+        File.write(File.join(lib, "a.rb"), "class Greeter\n  def greet(name) = name\nend\n")
+        configuration = Rigor::Configuration.new("paths" => [lib], "parameter_inference" => true)
+        context = described_class.new(configuration: configuration)
+        before = context.param_inferred_types
+
+        File.write(File.join(lib, "b.rb"), "Greeter.new.greet(1)\n")
+        expect(context.param_inferred_types).to equal(before)
+        context.invalidate!
+        expect(context.param_inferred_types).not_to eq(before)
+      end
+    end
+  end
 end

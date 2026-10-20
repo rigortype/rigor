@@ -257,6 +257,7 @@ module Rigor
             environment: @project_context.environment,
             prebuilt: @project_context.project_scan,
             discovery_seed_for: @project_context.method(:discovery_seed_for),
+            param_inferred_types: @project_context.param_inferred_types,
             workers: worker_count
           )
           diagnostics_per_binding = dispatcher.analyze(bindings)
@@ -296,6 +297,7 @@ module Rigor
             buffer: binding,
             prebuilt: @project_context.project_scan,
             discovery_seed: @project_context.discovery_seed_for(binding),
+            param_inferred_types: @project_context.param_inferred_types,
             environment: @project_context.environment
           )
           result = runner.run([path])

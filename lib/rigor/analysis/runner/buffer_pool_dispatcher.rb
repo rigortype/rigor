@@ -81,6 +81,8 @@ module Rigor
         #   (`ProjectContext#project_scan`) every job's Runner adopts instead of re-scanning.
         # @param discovery_seed_for — issue #2147 — a callable returning the cross-file discovery seed for one
         #   binding (`ProjectContext#discovery_seed_for`), or nil for none.
+        # @param param_inferred_types — ADR-124 — the whole-project parameter-inference table each job's Runner takes in
+        #   place of collecting one over its buffer alone (`ProjectContext#param_inferred_types`), or nil.
         # @param workers — pool size. `#analyze` degrades to sequential in-process execution — one
         #   job at a time, no `fork` — when fewer than 2 bindings are submitted, fewer than `min_batch_size`
         #   bindings are submitted, `workers` is not positive, `fork` is unavailable on this platform, or
@@ -90,13 +92,14 @@ module Rigor
         # @param min_batch_size — see {DEFAULT_MIN_BATCH_SIZE}. Exposed as a constructor param
         #   (rather than read from the env internally) purely for spec control; production callers get the
         #   resolved default.
-        def initialize(configuration:, cache_store:, environment:, prebuilt:, workers:, discovery_seed_for: nil,
-                       min_batch_size: self.class.resolve_min_batch_size)
+        def initialize(configuration:, cache_store:, environment:, prebuilt:, workers:, discovery_seed_for: nil, # rubocop:disable Metrics/ParameterLists
+                       param_inferred_types: nil, min_batch_size: self.class.resolve_min_batch_size)
           @configuration = configuration
           @cache_store = cache_store
           @environment = environment
           @prebuilt = prebuilt
           @discovery_seed_for = discovery_seed_for
+          @param_inferred_types = param_inferred_types
           @workers = workers
           @min_batch_size = min_batch_size
         end
@@ -127,7 +130,7 @@ module Rigor
           Runner.new(
             configuration: @configuration, cache_store: @cache_store, collect_stats: false,
             buffer: binding, prebuilt: @prebuilt, environment: @environment,
-            discovery_seed: @discovery_seed_for&.call(binding)
+            discovery_seed: @discovery_seed_for&.call(binding), param_inferred_types: @param_inferred_types
           ).run([binding.logical_path]).diagnostics
         end
 

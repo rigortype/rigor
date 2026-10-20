@@ -131,12 +131,26 @@ module Rigor
                                                     buffer: buffer, constant_sources: true)
       end
 
-      # Builds what {#discovery_seed_for} reads once per generation, so a fork batch's children inherit it instead
-      # of each walking the project.
+      # Builds what {#discovery_seed_for} and {#param_inferred_types} read once per generation, so a fork batch's
+      # children inherit it instead of each walking the project.
       def prepare_discovery_seed
         discovery_bundles
         discovery_real_paths
+        param_inferred_types
         nil
+      end
+
+      # ADR-124 — the ADR-67 call-site parameter-inference table over the whole project, under
+      # `parameter_inference:`, or nil when it is off. A per-buffer publish otherwise collects it over the buffer's
+      # file alone, so a parameter another file calls with an `Integer` reads `Dynamic[top]` there and the publish
+      # types it differently from `rigor check`. Built from the files on disk once per generation; a call site the
+      # buffer edits moves the table at the next invalidation, as `check` sees it only once it is saved.
+      def param_inferred_types
+        return nil unless @configuration.parameter_inference
+
+        @param_inferred_types ||= Analysis::Runner.new(
+          configuration: @configuration, cache_store: cache_store, collect_stats: false, environment: environment
+        ).collect_param_inference_table(discovery_paths)
       end
 
       # Whole-project diagnostics for one save round (#246). The first call primes an in-process
@@ -219,6 +233,7 @@ module Rigor
         @discovery_paths = nil
         @discovery_real_paths = nil
         @discovery_bundles = nil
+        @param_inferred_types = nil
         # The session's per-file cache was computed against the old environment / project scan, so it cannot
         # outlive them. The next save round primes a fresh one.
         @incremental_session = nil

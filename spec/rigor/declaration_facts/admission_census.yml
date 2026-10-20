@@ -422,13 +422,17 @@ members:
     reads:
     - lib/rigor/analysis/incremental_session.rb
     - lib/rigor/inference/statement_evaluator.rb
+    - lib/rigor/language_server/diagnostic_publisher.rb
+    - lib/rigor/language_server/project_context.rb
     - lib/rigor/protection/closure_kill_oracle.rb
     copies:
     - lib/rigor/analysis/incremental_session.rb
     - lib/rigor/analysis/runner.rb
+    - lib/rigor/analysis/runner/buffer_pool_dispatcher.rb
     - lib/rigor/cli/coverage_scan.rb
     - lib/rigor/inference/parameter_inference_collector.rb
     - lib/rigor/inference/project_seed_tables.rb
+    - lib/rigor/language_server/diagnostic_publisher.rb
     - lib/rigor/protection/closure_kill_oracle.rb
     - lib/rigor/protection/discovery_seed.rb
   run_generation:

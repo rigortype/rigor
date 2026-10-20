@@ -1283,7 +1283,7 @@ module Rigor
       def type_of_loop(node)
         return Type::Combinator.constant_of(nil) if break_free_condition_loop?(node)
 
-        scope.evaluate(node, tracer: tracer).first
+        LoopValueRecord.fetch(node, scope) || scope.evaluate(node, tracer: tracer).first
       end
 
       def break_free_condition_loop?(node)

@@ -18,14 +18,23 @@ assertions:
   '15': Array[Integer]
   '16': 1..3
   '17': Dynamic[top]
-  '18': Dynamic[top]
-  '19': Dynamic[top]
-  '20': '"four"?'
-  '21': ":b?"
-  '22': ":m?"
-  '23': Integer[6..10]?
-  '24': nil
-  '25': nil
-  '26': ":u"
-  '27': ":b?"
-  '28': "[[1], [[1]], nil]"
+  '18': Array[Integer]
+  '19': Array[Dynamic[top] | Integer] | Array[Integer]
+  '20': Array[Dynamic[top] | Integer] | Array[Integer]
+  '21': Array[Integer]
+  '22': Array[Integer]
+  '23': Array[Integer]
+  '24': Array[Integer]
+  '25': Array[Integer]
+  '26': Array[1 | 2] | Array[Integer]
+  '27': Dynamic[top]
+  '28': Dynamic[top]
+  '29': '"four"?'
+  '30': ":b?"
+  '31': ":m?"
+  '32': Integer[6..10]?
+  '33': nil
+  '34': nil
+  '35': ":u"
+  '36': ":b?"
+  '37': "[[1], [[1]], nil]"

@@ -152,6 +152,88 @@ def for_set_nominal
   assert_type("Dynamic[top]", r)
 end
 
+# Every node through which the body may change the collection drops its shape, with no call in the body:
+# `for_op_write` returns [1, 2] (an operator write, which may call a mutator), `for_index_op_write` [3, 2], `for_index_target`
+# [9, 2], `for_yield { }` and `ForSuper.new.run` [1, 2], `for_call_writes(ForBox.new)` [[1, 2], [1, 2], [1, 2]],
+# `for_ivar_collection` [1].
+def for_op_write
+  a = [1, 2]
+  b = a
+  r = for i in a
+    b += [3]
+  end
+  assert_type("Array[Integer]", r)
+end
+
+def for_index_op_write
+  a = [1, 2]
+  r = for i in a
+    a[0] += 1
+  end
+  assert_type("Array[Dynamic[top] | Integer] | Array[Integer]", r)
+end
+
+def for_index_target
+  a = [1, 2]
+  r = for i in a
+    x, a[0] = 1, 9
+  end
+  assert_type("Array[Dynamic[top] | Integer] | Array[Integer]", r)
+end
+
+def for_yield
+  a = [1, 2]
+  r = for i in a
+    yield
+  end
+  assert_type("Array[Integer]", r)
+end
+
+class ForSuperBase
+  def run = nil
+end
+
+class ForSuper < ForSuperBase
+  def run
+    a = [1, 2]
+    r = for i in a
+      super
+    end
+    assert_type("Array[Integer]", r)
+  end
+end
+
+class ForBox
+  attr_accessor :x
+
+  def initialize = @x = 1
+end
+
+def for_call_writes(o)
+  a = [1, 2]
+  r = for i in a
+    o.x += 1
+  end
+  q = for i in a
+    o.x ||= 1
+  end
+  s = for i in a
+    o.x &&= 1
+  end
+  assert_type("Array[Integer]", r)
+  assert_type("Array[Integer]", q)
+  assert_type("Array[Integer]", s)
+  [r, q, s]
+end
+
+def for_ivar_collection
+  @for_items = [1, 2]
+  r = for i in @for_items
+    @for_items.pop
+  end
+  assert_type("Array[1 | 2] | Array[Integer]", r)
+end
+
 # A collection whose `each` is not known to answer itself leaves the value gradual: `for_project` answers nil, what
 # `Bag#each` answers, and `for_dynamic(xs)` whatever `xs.each` does.
 class Bag

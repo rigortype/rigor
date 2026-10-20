@@ -45,6 +45,7 @@ require_relative "narrowing"
 require_relative "operand_effects"
 require_relative "operand_walk"
 require_relative "optimistic_origin"
+require_relative "loop_value_record"
 require_relative "return_barrier"
 require_relative "repeated_or_writes"
 require_relative "rewrite_mutation"
@@ -127,9 +128,9 @@ module Rigor
         Prism::BeginNode => :eval_begin_node,
         Prism::RescueNode => :eval_rescue,
         Prism::EnsureNode => :eval_ensure,
-        Prism::WhileNode => :eval_loop,
-        Prism::UntilNode => :eval_loop,
-        Prism::ForNode => :eval_repeating_for,
+        Prism::WhileNode => :eval_recorded_loop,
+        Prism::UntilNode => :eval_recorded_loop,
+        Prism::ForNode => :eval_recorded_for,
         Prism::AndNode => :eval_and_or,
         Prism::OrNode => :eval_and_or,
         Prism::ParenthesesNode => :eval_parentheses,
@@ -2222,6 +2223,16 @@ module Rigor
       # ({#loop_body_ivar_writes}).
       def eval_repeating_for(node) = ReflectiveIvarWrite.in_repeating_body { eval_for(node) }
 
+      # A loop's evaluation, with its value recorded for `ExpressionTyper#type_of_loop` ({LoopValueRecord}).
+      def eval_recorded_loop(node) = record_loop_value(node, eval_loop(node))
+
+      def eval_recorded_for(node) = record_loop_value(node, eval_repeating_for(node))
+
+      def record_loop_value(node, result)
+        LoopValueRecord.record(node, scope, result.first)
+        result
+      end
+
       # `while pred; body; end` / `until pred; body; end`. The body might run zero or more times, so half-bound names
       # degrade to `T | nil` in the post-loop scope. The loop expression is `nil` joined with the value of every `break`
       # that leaves this loop ({#loop_value}, issue #2031).
@@ -2804,12 +2815,15 @@ module Rigor
       private_constant :FOR_SELF_EACH_CLASSES
 
       # The nodes through which a `for` body or index may change the iterated collection's contents: a call (an
-      # in-place mutator on the collection or on an alias of it, or a method that reaches it), `yield` / `super`, and
-      # an index store.
+      # in-place mutator on the collection or on an alias of it, or a method that reaches it), `yield` / `super`, an
+      # index store, and an operator write, which calls its operator on the variable's value (`b <<= 9` appends to
+      # the array `b` holds).
       FOR_MUTATING_NODES = Set[
         Prism::CallNode, Prism::YieldNode, Prism::SuperNode, Prism::ForwardingSuperNode, Prism::IndexTargetNode,
         Prism::IndexOperatorWriteNode, Prism::IndexOrWriteNode, Prism::IndexAndWriteNode,
-        Prism::CallOperatorWriteNode, Prism::CallOrWriteNode, Prism::CallAndWriteNode
+        Prism::CallOperatorWriteNode, Prism::CallOrWriteNode, Prism::CallAndWriteNode,
+        Prism::LocalVariableOperatorWriteNode, Prism::InstanceVariableOperatorWriteNode,
+        Prism::ClassVariableOperatorWriteNode, Prism::GlobalVariableOperatorWriteNode
       ].freeze
       FOR_VARIABLE_READS = Set[Prism::LocalVariableReadNode, Prism::InstanceVariableReadNode].freeze
       private_constant :FOR_MUTATING_NODES, :FOR_VARIABLE_READS
@@ -3418,26 +3432,9 @@ module Rigor
 
         # The handler types the operand from `entry`, which is the value a later operand takes.
         type, after = operand.evaluate(node)
-        keep_operand_value(walk, slot, node, type)
+        walk.resolve(slot, type) if slot
         after
       end
-
-      # Hands the value the handler typed `node` to back to `walk`: into its slot when the walk took it, and for a
-      # loop ({LOOP_OPERANDS}) the walk did not take, as a kept value.
-      def keep_operand_value(walk, slot, node, type)
-        if slot
-          walk.resolve(slot, type)
-        elsif LOOP_OPERANDS.include?(node.class)
-          walk.keep(node, type)
-        end
-      end
-
-      # The operands whose value {#thread_operand} keeps although the walk did not take them: a loop's value runs its
-      # body fixpoint and `break` passes, and `ExpressionTyper#type_of_loop` would run them all again from the same
-      # scope to type the call, once more per level of loops nested as call operands (`id((while c; y = id((while …
-      # end)); c = false; end))`).
-      LOOP_OPERANDS = Set[Prism::WhileNode, Prism::UntilNode, Prism::ForNode].freeze
-      private_constant :LOOP_OPERANDS
 
       def thread_operand_children(node, entry, walk, typed_from)
         threaded = entry

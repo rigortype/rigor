@@ -98,6 +98,12 @@ module Rigor
         @dirty.key?(uri)
       end
 
+      # @return true when `uri` is open, its bytes are the ones on disk, and the table holds them faithfully: the
+      #   buffers a whole-project round analysed as they are.
+      def on_disk?(uri)
+        open?(uri) && !dirty?(uri) && !desynchronized?(uri)
+      end
+
       def [](uri)
         @entries[uri]
       end

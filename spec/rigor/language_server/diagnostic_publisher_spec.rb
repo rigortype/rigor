@@ -720,6 +720,24 @@ RSpec.describe Rigor::LanguageServer::DiagnosticPublisher do
   end
 
   # #246 — the save round. Analysis scope is the whole project; the PUBLISH SET is the open, clean buffers.
+  describe "#republish_open" do
+    it "publishes every open buffer from its own bytes" do
+      Dir.mktmpdir("rigor-lsp-republish-") do |dir|
+        clean = "file://#{File.join(dir, 'clean.rb')}"
+        dirty = "file://#{File.join(dir, 'dirty.rb')}"
+        File.write(File.join(dir, "clean.rb"), "def broken\n")
+        buffer_table.open(uri: clean, bytes: "def broken\n", version: 1)
+        buffer_table.open(uri: dirty, bytes: "\n", version: 1)
+        buffer_table.change(uri: dirty, bytes: "def also_broken\n", version: 2)
+
+        Dir.chdir(dir) { publisher.republish_open }
+
+        expect(writer.payloads.map { |p| p.dig(:params, :uri) }).to contain_exactly(clean, dirty)
+        expect(writer.payloads.map { |p| p.dig(:params, :diagnostics).size }).to all(be_positive)
+      end
+    end
+  end
+
   describe "#publish_project" do
     # `widget.rb` returns a String and `other.rb` calls `upcase` on it — clean. Editing widget's return to an
     # Integer makes the diagnostic appear in OTHER.rb, which is the whole point: a single-file publish for
@@ -761,20 +779,47 @@ RSpec.describe Rigor::LanguageServer::DiagnosticPublisher do
       end
     end
 
-    it "excludes a dirty buffer, whose markers only its own analysis may set" do
+    # The round analysed other.rb as it sits on DISK, which reports `upcase` on an Integer; the user is mid-edit in
+    # other.rb, so the round may not speak for it. It re-publishes the dirty buffer from its own bytes instead
+    # (ADR-124), which report nothing.
+    it "publishes a dirty buffer from its own bytes, not the round's on-disk answer" do
       Dir.mktmpdir("rigor-lsp-round-dirty-") do |dir|
         write_project(dir, "1")
         widget = "file://#{File.join(dir, 'widget.rb')}"
         other  = "file://#{File.join(dir, 'other.rb')}"
         buffer_table.open(uri: widget, bytes: File.read(File.join(dir, "widget.rb")), version: 1)
         buffer_table.open(uri: other, bytes: File.read(File.join(dir, "other.rb")), version: 1)
-        # The user is mid-edit in other.rb — this round analysed the file on DISK, so it may not speak for it.
         buffer_table.change(uri: other, bytes: "class Other\nend\n", version: 2)
 
         Dir.chdir(dir) { publisher_for(context_for(dir)).publish_project(widget) }
 
-        expect(diagnostics_for(other)).to be_nil
+        expect(diagnostics_for(other)).to eq([])
         expect(diagnostics_for(widget)).to eq([])
+      end
+    end
+
+    # ADR-124's staleness: a dirty buffer's cross-file markers read the other file on disk. Saving that file moves
+    # them, and the round re-publishes the dirty buffer against the new bytes.
+    it "re-publishes a dirty buffer whose cross-file markers the save moved" do
+      Dir.mktmpdir("rigor-lsp-round-stale-") do |dir|
+        File.write(File.join(dir, "base.rb"), "class Base\n  def log(message) = message\nend\n")
+        File.write(File.join(dir, "use.rb"), "\n")
+        base = "file://#{File.join(dir, 'base.rb')}"
+        use = "file://#{File.join(dir, 'use.rb')}"
+        context = context_for(dir)
+        publisher = publisher_for(context)
+        buffer_table.open(uri: base, bytes: File.read(File.join(dir, "base.rb")), version: 1)
+        buffer_table.open(uri: use, bytes: "\n", version: 1)
+        buffer_table.change(uri: use, bytes: "Base.new.log(1, 2)\n", version: 2)
+        Dir.chdir(dir) { publisher.publish_for(use) }
+        expect(diagnostics_for(use).map { |d| d[:code] }).to eq(["call.wrong-arity"])
+
+        File.write(File.join(dir, "base.rb"), "class Base\n  def log(message, level) = message\nend\n")
+        buffer_table.change(uri: base, bytes: File.read(File.join(dir, "base.rb")), version: 2)
+        buffer_table.save(uri: base)
+        Dir.chdir(dir) { publisher.publish_project(base) }
+
+        expect(diagnostics_for(use)).to eq([])
       end
     end
 

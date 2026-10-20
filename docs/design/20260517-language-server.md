@@ -298,7 +298,11 @@ the diagnostics (see `CONTEXT.md`, where **scope** is a trapped term).
    buffer's diagnostics would report on its stale on-disk bytes — worse
    than silence. Invariant: *each URI's markers come from the last
    analysis that saw that URI's current bytes* — a dirty buffer's own
-   `didChange` publish, a clean buffer's latest save round.
+   `didChange` publish, a clean buffer's latest save round. Since
+   ADR-124 a buffer's markers also read other files' declarations, so
+   a save round ends by re-publishing each dirty buffer from its own
+   bytes, and a watched-file or configuration change re-publishes every
+   open buffer.
 4. **The trigger is `didSave`, not `didChange`.** Phase attribution of
    one CLI option-B invocation (mastodon `app/models`, 248 files, warm,
    4-file closure) puts per-file analysis + merge at ~0.60s; boot,

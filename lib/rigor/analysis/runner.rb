@@ -2481,12 +2481,29 @@ module Rigor
       # widener erases it to the class, and listing a file under `pre_eval:` must never LOSE precision. The
       # per-file table still wins over both (`ScopeIndexer.index`'s merge) — same-file stays the most
       # specific authority.
+      #
+      # ADR-124 — a `prebuilt:` runner computes no literal table of its own; a `discovery_seed:` (the editor
+      # publish, ADR-124) brings the project's, which then plays the same part.
       def merged_seed_constants
         pre_eval = publishable_pre_eval_constants
-        return @project_constant_values if pre_eval.empty?
-        return pre_eval if @project_constant_values.empty?
+        literal = literal_seed_constants
+        return literal if pre_eval.empty?
+        return pre_eval if literal.empty?
 
-        pre_eval.merge(@project_constant_values).freeze
+        pre_eval.merge(literal).freeze
+      end
+
+      def literal_seed_constants
+        return @project_constant_values unless @project_constant_values.empty? && @discovery_seed
+
+        @discovery_seed.fetch(:in_source_constants, @project_constant_values)
+      end
+
+      # The per-name writer paths the #663 retraction reads: this run's census, or a `discovery_seed:`.s (ADR-124).
+      def constant_writer_sources
+        return @project_constant_sources unless @project_constant_sources.empty? && @discovery_seed
+
+        @discovery_seed.fetch(:constant_sources, @project_constant_sources)
       end
 
       # Issue #663 — the `pre_eval:` publication with every name an UNLISTED file also assigns retracted.
@@ -2515,8 +2532,9 @@ module Rigor
       # name of its own for the wildcard's paths to have been folded into.
       def unlisted_constant_writer?(name, listed)
         segment = name.split("::").last
-        writers = @project_constant_sources[name]
-        wildcard = @project_constant_sources["#{Inference::ScopeIndexer::DYNAMIC_TARGET_PREFIX}#{segment}"]
+        sources = constant_writer_sources
+        writers = sources[name]
+        wildcard = sources["#{Inference::ScopeIndexer::DYNAMIC_TARGET_PREFIX}#{segment}"]
         [writers, wildcard].any? do |paths|
           paths&.any? { |path| !listed.include?(File.absolute_path(path)) }
         end

@@ -63,6 +63,7 @@ members:
     - lib/rigor/sig_gen/observation_collector.rb
   in_source_constants:
     reads:
+    - lib/rigor/analysis/runner.rb
     - lib/rigor/inference/last_line/implicit_self.rb
     - lib/rigor/inference/self_call_ivar_writes.rb
     - lib/rigor/lens/run.rb
@@ -358,9 +359,12 @@ members:
   constant_sources:
     reads:
     - lib/rigor/analysis/runner.rb
+    - lib/rigor/protection/discovery_seed.rb
     copies:
     - lib/rigor/analysis/runner.rb
     - lib/rigor/inference/project_seed_tables.rb
+    - lib/rigor/language_server/project_context.rb
+    - lib/rigor/protection/discovery_seed.rb
   constant_writers:
     reads:
     - lib/rigor/analysis/runner.rb

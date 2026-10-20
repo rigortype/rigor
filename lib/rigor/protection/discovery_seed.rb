@@ -73,12 +73,17 @@ module Rigor
       # @param paths — the measured file set, in the same order {#bundles} was built from.
       # @param bundles — that bundle set.
       # @param buffer — the mutant binding (logical path → mutant bytes).
+      # @param constant_sources — ADR-124 — also carry the per-name writer paths (`constant_sources`), which a
+      #   `prebuilt:` runner needs to retract a `pre_eval:` constant another file also assigns (#663).
       # @return frozen seed tables.
-      def tables_for_buffer(paths:, bundles:, buffer:)
+      def tables_for_buffer(paths:, bundles:, buffer:, constant_sources: false)
         index = Inference::ScopeIndexer.discovered_project_index_incremental(
           paths, seed_bundles: bundles, buffer: buffer
         )
-        seed_tables(index).freeze
+        tables = seed_tables(index)
+        sources = index.fetch(:def_index).fetch(:constant_sources)
+        tables = tables.merge(constant_sources: sources) if constant_sources && !sources.empty?
+        tables.freeze
       end
 
       # The whole-project discovery tables, from the single-walk combined pass (one parse per file) that

@@ -2799,11 +2799,7 @@ module Rigor
       # expression is the collection's `each` value joined with every `break` value ({#for_value}, issue #1216).
       def eval_for(node)
         coll_type, post_coll = sub_eval(node.collection, scope)
-        element_type = for_iteration_element_type(coll_type)
-        # Issue #1359 — a body that may set `$_` runs again after it ran, as a `while` body does ({#eval_loop}).
-        body_entry = LastLine.forget_if_set(bind_for_index(node.index, element_type, post_coll), node.statements)
-        body_entry = forget_guard_for_body(node, post_coll, body_entry)
-        body_entry = loop_content_entry(node.statements, post_coll, body_entry)
+        body_entry = for_body_entry(node, for_iteration_element_type(coll_type), post_coll)
 
         if node.statements.nil?
           return [for_value(node, coll_type, post_coll, NO_BREAK_ARMS),
@@ -2929,6 +2925,14 @@ module Rigor
         when Type::Union then type.members.all? { |member| each_answers_self?(member) }
         else false
         end
+      end
+
+      # The scope a `for` body enters with: the index bound to the element. Issue #1359 — a body that may set `$_` runs
+      # again after it ran, as a `while` body does ({#eval_loop}).
+      def for_body_entry(node, element_type, post_coll)
+        body_entry = LastLine.forget_if_set(bind_for_index(node.index, element_type, post_coll), node.statements)
+        body_entry = forget_guard_for_body(node, post_coll, body_entry)
+        loop_content_entry(node.statements, post_coll, body_entry)
       end
 
       # Issue #1429 — a `for` body runs after the collection's `each`, which may be a project method, and after itself.

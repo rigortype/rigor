@@ -15,7 +15,7 @@ module Rigor
     # Only the later-run `return` pass asks this (`StatementEvaluator#collect_repeated_block_returns`); the block's
     # entry scopes and the ADR-56 write-back keep {BlockRepetition}'s rule. That pass only widens the method's
     # return type, so the rule here errs toward "repeats". The callee repeats when its body, outside a nested `def`
-    # or class body:
+    # (a `yield` in a class body is a syntax error inside a method):
     #
     # - holds two or more sites that run the block (`yield`, or `call` / `yield` / `===` / `[]` on the `&blk`
     #   parameter), or one inside a loop, a block or a lambda, which may run it many times; or
@@ -30,8 +30,7 @@ module Rigor
       BLOCK_RUN_CALLS = Set[:call, :yield, :===, :[]].freeze
       REPEATING_NODES = Set[Prism::WhileNode, Prism::UntilNode, Prism::ForNode, Prism::BlockNode,
                             Prism::LambdaNode].freeze
-      BODY_BOUNDARIES = Set[Prism::DefNode, Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode].freeze
-      private_constant :BLOCK_RUN_CALLS, :REPEATING_NODES, :BODY_BOUNDARIES
+      private_constant :BLOCK_RUN_CALLS, :REPEATING_NODES
 
       def may_run_block_repeatedly?(call_node, receiver_type, scope)
         def_node = callee_def(call_node, receiver_type, scope)
@@ -62,7 +61,7 @@ module Rigor
       end
 
       def walk(node, block_name, repeating, counter)
-        return if counter[:repeats] || BODY_BOUNDARIES.include?(node.class)
+        return if counter[:repeats] || node.is_a?(Prism::DefNode)
 
         skipped = visit(node, block_name, repeating, counter)
         inner = repeating || REPEATING_NODES.include?(node.class)

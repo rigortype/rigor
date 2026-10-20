@@ -1277,6 +1277,21 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  # Issues #2128 and #2127 — a `return` only a later loop iteration or block run reaches joins the return type.
+  describe "fixtures/return_reach_in_loops.rb — a later iteration's return" do
+    let(:harness) { harness_for("return_reach_in_loops") }
+
+    it "joins a return a later iteration or a project yielder's later run reaches" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches.map { |d| "#{d.line}: #{d.message}" }).to be_empty
+    end
+
+    it "reports no constant condition in a caller" do
+      flow = harness.diagnostics.select { |d| d.rule.start_with?("flow.") }
+      expect(flow.map { |d| "#{d.line}: #{d.rule}" }).to be_empty
+    end
+  end
+
   # Issue #2196 — a core superclass's method is not answered from `Kernel`'s private method of the same name.
   describe "fixtures/core_subclass_kernel_shadow.rb — a core subclass does not read Kernel#select" do
     let(:harness) { harness_for("core_subclass_kernel_shadow") }

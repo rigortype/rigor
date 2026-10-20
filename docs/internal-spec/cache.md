@@ -1131,6 +1131,18 @@ edit to one class's visibility from re-checking every reader of the
 method name. The seed bundles already carry both tables, so no row moves
 and `SCHEMA` is unchanged.
 
+`DefinerResolution.module_function_row?` records the key too
+([#2161](https://github.com/rigortype/rigor/issues/2161)): a self-extended
+module's singleton copy of a private method is public when any file holds a
+`module_function` row for the name on the module, and the answer reads
+every file's deferred-range rows. So `visibility_entries` also carries a
+`[:module_function, owner, name]` entry for each of the file's def rows of
+a kind other than `:instance`, and the diff fires `visibility:<owner>#<name>`
+and `visibility:*#<name>` for one that moved: a swap from `private :x` to
+`module_function :x` in a reopening leaves the file's visibility table and
+declared classes unchanged. The seed bundles already carry the
+`deferred_ranges` table, so no row moves and `SCHEMA` is unchanged.
+
 The `mark:<last segment>` key in `missing` is recorded by
 `Scope#parameter_envelopes_of` whichever way the reader answers
 ([#1833](https://github.com/rigortype/rigor/issues/1833)): a file can add a

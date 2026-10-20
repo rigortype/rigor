@@ -32,7 +32,7 @@ module Rigor
                 :void_origins, :plugin_typed_calls,
                 :optimistic_origins, :optimistic_locals, :optimistic_ivars,
                 :repeated_or_writes, :match_frame,
-                :constant_narrowings, :guard_records, :bot_guard_classes, :declared_refinements
+                :constant_narrowings, :guard_records, :bot_guard_classes, :declared_refinements, :value_memo
 
     # ADR-53 Track A — the seed-time discovery tables live on the {DiscoveryIndex} the scope carries by a single
     # reference; the per-table readers stay on Scope so engine call sites and plugins are unaffected by the

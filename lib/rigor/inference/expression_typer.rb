@@ -3988,6 +3988,7 @@ module Rigor
           discovery: scope.discovery,
           struct_fold_safe_locals: body_fold_safe_locals(def_node, receiver, self_fold_safe),
           dynamic_origins: scope.dynamic_origins,
+          value_memo: scope.value_memo,
           # Issue #1358 — the callee runs in a frame of its own ({Scope#with_match_frame}).
           match_frame: MatchRebinding::Frame.new(def_node.body, def_node.parameters)
         )

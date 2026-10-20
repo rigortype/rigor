@@ -31,6 +31,26 @@ def for_range
   assert_type("1..3", r)
 end
 
+# `for_words("a b")` returns ["a", "b"], as does `for_non_empty("a b")`; `for_union(true)` returns [1].
+def for_words(s)
+  r = for w in "#{s}".split; end
+  assert_type("Array[String]", r)
+end
+
+def for_non_empty(s)
+  xs = "#{s}".split
+  return if xs.empty?
+
+  r = for w in xs; end
+  assert_type("non-empty-array[String]", r)
+end
+
+def for_union(c)
+  xs = c ? [1] : [2, 3]
+  r = for i in xs; end
+  assert_type("[1] | [2, 3]", r)
+end
+
 # `for_break` returns :b.
 def for_break
   r = for i in [1, 2]; break :b if i == 2; end

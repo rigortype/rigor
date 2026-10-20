@@ -732,6 +732,15 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
                                                args: [Rigor::Type::Combinator.constant_of(1.0)]))
       expect(result.members.map { |m| m.value.to_s }).to contain_exactly("0.0", "-0.0")
     end
+
+    it "keeps Complex results that differ only in the sign of a zero part" do
+      expect([Complex(0.0, 1) * 1, Complex(-0.0, 1) * 1].map(&:to_s)).to eq(["0.0+1i", "-0.0+1i"])
+      receiver = Rigor::Type::Combinator.union(Rigor::Type::Combinator.constant_of(Complex(0.0, 1)),
+                                               Rigor::Type::Combinator.constant_of(Complex(-0.0, 1)))
+      result = described_class.try_dispatch(cc(receiver: receiver, method_name: :*,
+                                               args: [Rigor::Type::Combinator.constant_of(1)]))
+      expect(result.members.map { |m| m.value.to_s }).to contain_exactly("0.0+1i", "-0.0+1i")
+    end
   end
 
   describe "union fold" do

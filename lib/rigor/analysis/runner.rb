@@ -12,6 +12,7 @@ require_relative "../cache/file_digest"
 require_relative "../cache/incremental_snapshot"
 require_relative "run_cache_key"
 require_relative "path_expansion"
+require_relative "require_relative_closure"
 require_relative "../plugin"
 require_relative "../plugin/source_rbs_synthesis_reporter"
 require_relative "../rbs_extended/reporter"
@@ -1873,15 +1874,37 @@ module Rigor
       # the pre-pass then saw two writers for every constant a file declares and withheld its publication (#644),
       # and every file was a discovered-not-analysed dependency of the run's cache entry.
       #
+      # Issue #2021 — an analysed file outside the configured paths has no project there, so the widened set also
+      # holds what it loads with a literal `require_relative` ({#required_outside_paths}). A plugin file checked on
+      # its own otherwise missed its sibling's nested `Effects` and resolved the project's `Rigor::Effects`.
+      #
       # The widening decision itself compares the paths as spelled. `exclude:` patterns apply to both spellings
       # alike (#1576), so the configured absolute `lib` and the argument `lib` exclude the same files.
       def project_discovery_expansion(paths, expansion)
         return nil unless widen_discovery_to_project?(paths)
 
         analysed = expansion.fetch(:files)
-        files = discovery_files(expand_paths(@configuration.paths | paths).fetch(:files), analysed)
+        project = expand_paths(@configuration.paths | paths).fetch(:files)
+        files = discovery_files(project + required_outside_paths(analysed), analysed)
         # Overlapping arguments (`lib lib/user.rb`) name an analysed file twice; the widened set names it once.
         files.size > analysed.uniq { |path| File.absolute_path(path) }.size ? { files: files, errors: [] } : nil
+      end
+
+      # Issue #2021 — what the analysed files outside the configured `paths:` load with a literal `require_relative`,
+      # through targets that are themselves outside them ({RequireRelativeClosure}). A file under a configured path
+      # is discovered already, so the walk adds nothing for a run whose files all lie inside them. `exclude:` drops
+      # a target as it drops a configured file.
+      def required_outside_paths(analysed)
+        roots = @configuration.paths.map { |root| File.absolute_path(root) }
+        covered = lambda do |path|
+          roots.any? { |root| path == root || path.start_with?(File.join(root, "")) }
+        end
+        seeds = analysed.reject { |path| covered.call(File.absolute_path(path)) }
+        return [] if seeds.empty?
+
+        read = ->(path) { File.read(@buffer ? @buffer.resolve(path) : path) }
+        found = RequireRelativeClosure.closure(seeds, covered: covered, read: read)
+        PathExpansion.reject_excluded(found, @configuration.exclude_patterns, base: @configuration.exclude_base)
       end
 
       # The expansion with each file once, first spelling kept: overlapping arguments (`lib ./lib`) that do not
@@ -1935,7 +1958,8 @@ module Rigor
 
       private :run_project_pre_passes, :adopt_prebuilt_project_scan, :apply_pre_passes_result,
               :apply_discovery_result, :ensure_project_discovery, :force_eager_discovery?,
-              :project_discovery_expansion, :discovery_files, :once_each, :widen_discovery_to_project?
+              :project_discovery_expansion, :discovery_files, :once_each, :widen_discovery_to_project?,
+              :required_outside_paths
 
       # Ruby versions probed (ascending) to discover the lowest one this Prism build accepts for
       # `version:`. Prism exposes no version list, so the floor is found empirically — only when a

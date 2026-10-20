@@ -28,6 +28,12 @@ rigor check [paths...]
 `paths` are files or directories; when omitted, Rigor checks
 the `paths:` list from the configuration file.
 
+Only the files you name are reported on, but Rigor reads the
+declarations in the configured `paths:` too, so a file resolves a
+class or constant that another file declares. A file outside
+`paths:` also reads the files it loads with a literal
+`require_relative "..."`, and the files those load in turn.
+
 | Option | Effect |
 | --- | --- |
 | `--config=PATH` | Use a specific config file instead of auto-discovery. A path that does not exist is an error (exit 64), not a run with the defaults. |

@@ -1276,6 +1276,15 @@ its cross-file discovery to the configured paths as well
 partition over `lib/b.rb` discovered `lib/b.rb` alone and answered
 differently from the full run.
 
+An analysed file outside the configured paths also discovers what it loads
+with a literal `require_relative`, through targets that are themselves
+outside them ([#2021](https://github.com/rigortype/rigor/issues/2021),
+`Analysis::RequireRelativeClosure`). Those targets are discovered-not-analysed
+files like any other: they join `discovery_digests`, the run-result
+cache's per-file entries, and every session run's discovery. A target under a
+configured path ends the walk, and `exclude:` drops a target as it drops a
+configured file.
+
 A discovered-not-analysed file feeds the index the analysed files resolve
 against, but it has no per-file row, edge or digest of its own. The session
 records each one's ADR-87 packed stat-digest entry

@@ -192,7 +192,10 @@ module Rigor
       # {Rigor::Inference::SyntheticMethodIndex#surface_digest} at the run the cache was built under, which a recheck
       # compares to re-baseline when a class-body DSL edit moved it. A pre-44 blob carries none; the gate rejects it
       # and the next run is cold.
-      SCHEMA = 44
+      # 45: issue #1154 — each seed bundle's `global_write_census` also records the ivar writers the declared-parameter
+      # credit reads (`[:ivar_set, name]`, `[:ivar_set_class, class]`, `[:own_write, class, name, path]`), which a
+      # pre-45 bundle carries none of, so a warm run would credit an ivar write a cold run declines.
+      SCHEMA = 45
 
       # The persisted per-file state.
       # `cache` maps an analyzed file to its diagnostics.

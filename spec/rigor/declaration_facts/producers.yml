@@ -157,6 +157,15 @@ lib/rigor/inference/intervening_ivar_reset.rb:
   producers:
     Rigor::Inference::InterveningIvarReset: NON_RUNNING_NODES lists a def and a class, module or singleton class body only as code whose calls do not run on the condition's self; it derives no declaration context
     Rigor::Inference::InterveningIvarReset#collect_calls: stops the call search at a def, class, module or singleton class body (#1963); it derives no declaration context
+lib/rigor/inference/ivar_writer_census.rb:
+  computes: the instance-variable writers the declared-parameter ivar credit reads, per class and per ivar
+  producers:
+    Rigor::Inference::IvarWriterCensus: issue #1154, records the ivar writers the declared-parameter credit declines on (an open-world self writer in a class's instance body, a named foreign write, an instance-def write); it reads call shapes and the class name the host walk passes, and derives no declaration context
+    Rigor::Inference::IvarWriterCensus#open_world?: issue #1154, records the ivar writers the declared-parameter credit declines on (an open-world self writer in a class's instance body, a named foreign write, an instance-def write); it reads call shapes and the class name the host walk passes, and derives no declaration context
+    Rigor::Inference::IvarWriterCensus#open_world_send?: issue #1154, records the ivar writers the declared-parameter credit declines on (an open-world self writer in a class's instance body, a named foreign write, an instance-def write); it reads call shapes and the class name the host walk passes, and derives no declaration context
+    Rigor::Inference::IvarWriterCensus#own_singleton_class_call?: issue #1154, records the ivar writers the declared-parameter credit declines on (an open-world self writer in a class's instance body, a named foreign write, an instance-def write); it reads call shapes and the class name the host walk passes, and derives no declaration context
+    Rigor::Inference::IvarWriterCensus#record_block_ivar_writes: issue #1154, records the ivar writers the declared-parameter credit declines on (an open-world self writer in a class's instance body, a named foreign write, an instance-def write); it reads call shapes and the class name the host walk passes, and derives no declaration context
+    Rigor::Inference::IvarWriterCensus#visit: issue #1154, records the ivar writers the declared-parameter credit declines on (an open-world self writer in a class's instance body, a named foreign write, an instance-def write); it reads call shapes and the class name the host walk passes, and derives no declaration context
 lib/rigor/inference/jump_targets.rb:
   computes: the break and next nodes that target a construct
   producers:
@@ -562,6 +571,11 @@ lib/rigor/inference/scope_indexer/class_cvars_collector.rb:
   computes: the per-class class-variable writes, as a collector on the shared declaration walk
   producers:
     Rigor::Inference::ScopeIndexer::ClassCvarsCollector: grandfathered
+lib/rigor/inference/scope_indexer/declared_param_writes.rb:
+  computes: the ivar writes in one instance def whose value is a parameter with a declared type
+  producers:
+    Rigor::Inference::ScopeIndexer::DeclaredParamWrites: issue #1154, stops its scan of one def body at a nested def, class, module or class << self, whose locals and ivar writes are not the method's own; the census caller already knows the owning class, and it derives no declaration context
+    Rigor::Inference::ScopeIndexer::DeclaredParamWrites#scan: issue #1154, stops its scan of one def body at a nested def, class, module or class << self, whose locals and ivar writes are not the method's own; the census caller already knows the owning class, and it derives no declaration context
 lib/rigor/inference/scope_indexer/def_nestings_collector.rb:
   computes: the Module.nesting of each def, as a collector on the shared declaration walk
   producers:
@@ -580,6 +594,11 @@ lib/rigor/inference/scope_indexer/superclasses_collector.rb:
   computes: each class's superclass and header nesting, as a collector on the shared declaration walk
   producers:
     Rigor::Inference::ScopeIndexer::SuperclassesCollector: grandfathered
+lib/rigor/inference/scope_indexer/unseen_ivar_writers.rb:
+  computes: whether code outside a class's own census may write one of its ivars
+  producers:
+    Rigor::Inference::ScopeIndexer::UnseenIvarWriters: issue #1154, stops its scan of an ancestor's def body at a nested def, class, module or class << self, whose ivar writes are not the instance's; the ancestors come from Scope::ResolutionChain, and it derives no declaration context
+    Rigor::Inference::ScopeIndexer::UnseenIvarWriters#writes?: issue #1154, stops its scan of an ancestor's def body at a nested def, class, module or class << self, whose ivar writes are not the instance's; the ancestors come from Scope::ResolutionChain, and it derives no declaration context
 lib/rigor/inference/self_call_ivar_writes.rb:
   computes: the instance variables an implicit-self or self. call may write, for the intervening-call reset and the class-guard restore (#1596)
   producers:

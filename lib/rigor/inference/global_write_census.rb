@@ -4,6 +4,7 @@ require "prism"
 
 require_relative "../source/constant_path"
 require_relative "../source/node_children"
+require_relative "ivar_writer_census"
 
 module Rigor
   module Inference
@@ -26,6 +27,8 @@ module Rigor
     #   kept apart from `[:defines, …]`.
     # - `[:main_mixin, name]` — a module a top-level `include`, `prepend` or `extend` mixes into `Object` (or
     #   `main`), as written. A module RBS does not know may carry any method, so it reaches every class.
+    # - the instance-variable writer entries of {IvarWriterCensus} (issue #1154): `[:ivar_set, name]`,
+    #   `[:ivar_set_class, class_name]` and `[:own_write, class_name, name, path]`.
     #
     # The census is a `Set` of those frozen entries, merged by union across files, the project pre-pass and the
     # `pre_eval:` files. It is recorded inside descents that already visit every node ({Collector#visit}), never
@@ -72,6 +75,20 @@ module Rigor
       # Whether the program may define one of `names` somewhere, outside a refinement.
       def defines_any_of?(census, names)
         census.include?(DEFINES_ANY) || names.any? { |name| census.include?([:defines, name]) }
+      end
+
+      # #1154 — the {IvarWriterCensus} entries of `census`, for the incremental diff and its readers.
+      IVAR_KINDS = %i[ivar_set ivar_set_class own_write].to_set.freeze
+
+      def ivar_set_entries(census) = census.select { |entry| IVAR_KINDS.include?(entry.first) }.to_set
+
+      # The negative-dependency key an {IvarWriterCensus} entry fires, the one `UnseenIvarWriters` records.
+      def ivar_key(entry)
+        case entry.first
+        when :ivar_set then "ivar_set:#{entry[1]}"
+        when :ivar_set_class then "ivar_set_class:#{entry[1]}"
+        else "own_write:#{entry[1]}##{entry[2]}"
+        end
       end
 
       # Whether some refinement may add `write`.
@@ -121,12 +138,16 @@ module Rigor
         def initialize(in_effect)
           @census = Set.new
           @refine_ranges = []
+          @ivar_writers = IvarWriterCensus.new(@census)
           @in_effect = in_effect
         end
 
         # A node the collector cannot read must not fail the analysis of its file, nor of every file the pre-pass
         # feeds: the census then counts it as a definition of every name, which only declines a report.
-        def visit(node, top_level:)
+        # `owner` is the qualified name of the class whose body the node sits in, for {IvarWriterCensus} (nil where
+        # the host walk does not track it, or no class owns an instance there).
+        def visit(node, top_level:, owner: nil)
+          @ivar_writers.visit(node, owner)
           case node
           when Prism::AliasGlobalVariableNode then visit_global_alias(node)
           when Prism::DefNode then record(node, node.name)

@@ -396,7 +396,9 @@ RSpec.describe "special global writes", type: :runner do
         'k.alias_method(:"\\xff", :to_s)', 'k.attr_reader("\\xff")'
       ].each do |call|
         tree = Prism.parse("refine(Array) { #{call} }").value
-        expect(census.scan(tree)).to eq(Set[census::REFINES_ANY]), call
+        # #1154's ivar-writer entries are a separate question (a computed `send` is one).
+        scanned = census.scan(tree) - census.ivar_set_entries(census.scan(tree))
+        expect(scanned).to eq(Set[census::REFINES_ANY]), call
       end
     end
 

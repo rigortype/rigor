@@ -100,7 +100,8 @@ module Rigor
         publish_batch(eligible)
       end
 
-      # Runs one whole-project save round and publishes to the publish set (#246). Called from `didSave`.
+      # Runs one whole-project save round and publishes to the publish set (#246), then re-publishes each dirty buffer
+      # from its own bytes (ADR-124). Called from `didSave`.
       #
       # Analysis scope is the whole project; the PUBLISH SET is the open buffers that are not dirty, plus the
       # buffer that was just saved. A dirty buffer is excluded because only its own `didChange` analysis has
@@ -116,6 +117,12 @@ module Rigor
           run_project_round(saved_uri)
         end
       end
+
+      # Re-publishes every open buffer from its own bytes, each through {#publish_for}. Called after the project
+      # context is invalidated (a watched file or the configuration changed): every marker on screen was computed
+      # against the world that is gone, and since ADR-124 a buffer's markers read other files' declarations, so
+      # they can move without the buffer itself changing.
+      def republish_open = @buffer_table.uris.each { |uri| publish_for(uri) }
 
       # Publishes an EMPTY diagnostic array for `uri`. The LSP-spec idiom for "clear inline markers" — called
       # from `didClose` so clients drop stale highlights when the user closes a buffer.
@@ -187,16 +194,20 @@ module Rigor
 
           notify(uri, (by_path[path] || []).filter_map { |diagnostic| to_lsp_diagnostic(diagnostic, path) })
         end
+        republish_dirty
       end
+
+      # The dirty buffers the round may not speak for, re-published from their own bytes (ADR-124). The save that
+      # started the round may have moved a declaration a dirty buffer's markers read across files, and nothing
+      # else re-analyses that buffer until its next change or save. Each goes through {#publish_for}, so the
+      # debouncer and `PublishBatcher` order it against the buffer's own `didChange` publishes: a re-publish run
+      # here, beside them, could land its older bytes' markers after a newer edit's.
+      def republish_dirty = @buffer_table.uris.each { |uri| publish_for(uri) if @buffer_table.dirty?(uri) }
 
       # The URIs this round may speak for: every open buffer whose bytes are the ones on disk. The just-saved
       # URI qualifies by definition (the client wrote it), and is named explicitly so a client that sends
       # `didSave` without a preceding applied `didChange` still refreshes it.
-      def publish_set(saved_uri)
-        ([saved_uri] + @buffer_table.uris).uniq.select do |uri|
-          @buffer_table.open?(uri) && !@buffer_table.dirty?(uri) && !@buffer_table.desynchronized?(uri)
-        end
-      end
+      def publish_set(saved_uri) = ([saved_uri] + @buffer_table.uris).uniq.select { |uri| @buffer_table.on_disk?(uri) }
 
       def run_and_notify(uri, path)
         entry = @buffer_table[uri]

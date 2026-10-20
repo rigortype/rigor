@@ -282,11 +282,12 @@ module Rigor
       end
 
       # workspace/didChangeWatchedFiles NOTIFICATION. Invalidates the ProjectContext so cached pre-pass /
-      # Environment is rebuilt on the next request. Slice 7's floor: any watched file change triggers a full
-      # context rebuild. Per-file surgical invalidation (per design doc § "Project context refresh") is a
-      # follow-up; this is the LSP-correct floor.
+      # Environment is rebuilt on the next request, and re-publishes the open buffers against the new world
+      # (ADR-124). Slice 7's floor: any watched file change triggers a full context rebuild. Per-file surgical
+      # invalidation (per design doc § "Project context refresh") is a follow-up; this is the LSP-correct floor.
       def handle_did_change_watched_files(_params)
         @project_context&.invalidate!
+        @publisher&.republish_open
         nil
       end
 
@@ -295,6 +296,7 @@ module Rigor
       # (.rigor.yml / Gemfile.lock / etc).
       def handle_did_change_configuration(_params)
         @project_context&.invalidate!
+        @publisher&.republish_open
         nil
       end
 

@@ -337,6 +337,18 @@ RSpec.describe Rigor::LanguageServer::Server do
       expect(server.dispatch("workspace/didChangeWatchedFiles", { changes: [] })).to be_nil
       expect(server.dispatch("workspace/didChangeConfiguration", { settings: {} })).to be_nil
     end
+
+    # ADR-124 — the open buffers' markers were computed against the world the invalidation dropped.
+    it "re-publishes the open buffers after either one" do
+      publisher = instance_double(Rigor::LanguageServer::DiagnosticPublisher, republish_open: nil)
+      server = described_class.new(project_context: context, publisher: publisher)
+      server.dispatch("initialize", {})
+
+      server.dispatch("workspace/didChangeWatchedFiles", { changes: [] })
+      server.dispatch("workspace/didChangeConfiguration", { settings: {} })
+
+      expect(publisher).to have_received(:republish_open).twice
+    end
   end
 
   # Issue #1700 — every buffer event hands the open Ruby buffers to the project context, which rebuilds its

@@ -1,6 +1,6 @@
 # Declare `OptimisticOrigin::BoundMark`'s members in `sig/` behind `# sig-gen gap: #1150` markers
 
-- **PR:** [#2207](https://github.com/rigortype/rigor/pull/2207)
+- **PR:** [#2221](https://github.com/rigortype/rigor/pull/2221)
 - **Issue:** [#1406](https://github.com/rigortype/rigor/issues/1406)
 - **Class:** gate-row
 - **Precedent:** [#1190](https://github.com/rigortype/rigor/pull/1190)

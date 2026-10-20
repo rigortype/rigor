@@ -1,0 +1,1 @@
+- **[rigor sig-gen]** `rigor sig-gen --overwrite` no longer replaces a return declared as an interface (`-> _ToS`, a project `interface _Taker[T]`) with the body's nominal type, which the interface does not narrow to ([#2234](https://github.com/rigortype/rigor/pull/2234)).

@@ -1,6 +1,6 @@
 # ADR-124 — The editor publish seeds cross-file discovery
 
-Status: **Proposed, 2026-10-20.** Implemented in [#2164](https://github.com/rigortype/rigor/pull/2164) and waiting for the maintainer's decision; nothing has landed.
+Status: **Accepted, 2026-10-20** (the maintainer approved the recommended option). Implemented in [#2164](https://github.com/rigortype/rigor/pull/2164); the limits listed under § "Consequences" are follow-ups.
 
 Grounding: [#2147](https://github.com/rigortype/rigor/issues/2147); the measurement in § "Consequences".
 
@@ -55,7 +55,7 @@ The per-buffer publish seeds the project's discovery tables through the existing
 | faraday, alba, rgl (`lib`) | 33, 14, 28 | 0 | 0 | 0 | none | none | identical |
 
   Each added diagnostic is one the CLI already reports: the editor had been hiding it because the cross-file fact was missing. The fold costs 2–4.5 ms per publish. The analysis itself also does more, because it now resolves across files: on kramdown `lib` a full pass over its 55 files took about 11% longer (5.4 s → 6.0 s, about 11 ms per publish). Bundles are walked once per generation.
-- **Behaviour users see changes.** Editor diagnostics move toward the CLI's in both directions: false positives go, and diagnostics the CLI reports start to appear. That makes this a decision for the maintainer (contribution-flow.md § "Decisions and the approval queue").
+- **Behaviour users see changes.** Editor diagnostics move toward the CLI's in both directions: false positives go, and diagnostics the CLI reports start to appear. That made it a decision for the maintainer (contribution-flow.md § "Decisions and the approval queue"), who approved it.
 - **Not covered:**
   - `rigor check --tmp-file` (buffer without `prebuilt:`) discovers only the buffer file but still finalises `ENVELOPE_PROJECT_WIDE`, so it keeps the gap ([#2165](https://github.com/rigortype/rigor/issues/2165)).
   - With `pre_eval:` configured, the prebuilt runner's own pre-eval constant publication replaces the seed's literal constant table, so constant values still differ from `check` there. One pre-existing shape of it is a false positive: a `pre_eval:` file with `X = 1` and an unlisted file with `X = "s" if …` make the editor report `X.upcase` on Integer, while `check` retracts the value (#663) and reports nothing.

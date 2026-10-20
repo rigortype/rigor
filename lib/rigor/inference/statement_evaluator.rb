@@ -4589,23 +4589,20 @@ module Rigor
       # keeps the arms the earlier passes collected rather than taking out the method.
       #
       # Issue #2127 — a block passed to a project method whose body may run it more than once
-      # ({ProjectYielder.may_run_block_repeatedly?}) gets the same pass. No write-back fixpoint ran for such a call, so
-      # its continuation holds one run's binding, and each joined binding is widened past its value pin
-      # (`Type::Combinator.widen_value_pinned`), as the loop fixpoint widens a capped binding: `seen = 0; yielder {
-      # return :ret if (seen += 1) > 1 }` reads `seen` as `Integer` and reaches the `return`.
+      # ({ProjectYielder.may_run_block_repeatedly?}) gets the same pass. No write-back runs for such a call, so its
+      # continuation holds each rebound capture at `Dynamic[top]` ({#drop_captured_narrowing}), and the pass reads it
+      # so: `seen = 0; yielder { return :ret if (seen += 1) > 1 }` reaches the `return`.
       def collect_repeated_block_returns(call_node, post_scope)
         return if Thread.current[RETURN_SINK_KEY].nil?
 
         block = call_node.block
-        kind = repeated_block_return_kind(call_node, block)
-        return if kind.nil?
+        return unless repeated_block_return_candidate?(call_node, block)
 
         names = CapturedLocals.writes(block, scope, ivars: true, foreign_self: foreign_self_block?(call_node))
         return if names.empty?
 
         bindings = names.to_h do |name|
-          joined = Type::Combinator.union(*[scope, post_scope].filter_map { |s| CapturedLocals.bound_type(s, name) })
-          [name, kind == :project_yielder ? Type::Combinator.widen_value_pinned(joined) : joined]
+          [name, Type::Combinator.union(*[scope, post_scope].filter_map { |s| CapturedLocals.bound_type(s, name) })]
         end
         entry = with_repeated_or_write_marks(call_node, block, block_pass_entry(call_node, block, bindings))
         StatementEvaluator.with_next_sink do
@@ -4618,20 +4615,19 @@ module Rigor
       end
 
       # Whether `block` is an ordinary block (not a return barrier or a class-body block) whose body may `return` from
-      # the method and which `call_node` may run more than once: `:repeating` under {#repeating_block_class}'s rule,
-      # or for `Kernel#loop`, which that rule leaves out and which runs its block until it breaks or raises;
-      # `:project_yielder` for a project method whose body may run it more than once
-      # ({ProjectYielder.may_run_block_repeatedly?}, issue #2127); nil otherwise. The barrier, refinement and
+      # the method and which `call_node` may run more than once: {#repeating_block_class}'s rule, `Kernel#loop`, which
+      # that rule leaves out and which runs its block until it breaks or raises, or a project method whose body may
+      # run it more than once ({ProjectYielder.may_run_block_repeatedly?}, issue #2127). The barrier, refinement and
       # anonymous-class checks are defensive guards: no such call repeats under that rule today.
-      def repeated_block_return_kind(call_node, block)
-        return nil unless block.is_a?(Prism::BlockNode)
-        return nil unless ReturnBarrier.exits_method?(block.body)
-        return nil if return_barrier_block?(call_node) || refined_class_context(call_node)
-        return nil if AnonymousMetaClass.name_for(call_node, scope.source_path)
-        return :repeating if BlockCallTiming.kernel_loop?(call_node) || !repeating_block_class(call_node).nil?
+      def repeated_block_return_candidate?(call_node, block)
+        return false unless block.is_a?(Prism::BlockNode)
+        return false unless ReturnBarrier.exits_method?(block.body)
+        return false if return_barrier_block?(call_node) || refined_class_context(call_node)
+        return false if AnonymousMetaClass.name_for(call_node, scope.source_path)
+        return true if BlockCallTiming.kernel_loop?(call_node) || !repeating_block_class(call_node).nil?
 
         receiver_type = block_call_receiver_type(call_node)
-        :project_yielder if receiver_type && ProjectYielder.may_run_block_repeatedly?(call_node, receiver_type, scope)
+        !receiver_type.nil? && ProjectYielder.may_run_block_repeatedly?(call_node, receiver_type, scope)
       end
 
       # ADR-56 slice A. For a `:non_escaping` block, fold the continuation binding of every outer local the body can

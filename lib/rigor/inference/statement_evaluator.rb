@@ -2226,12 +2226,7 @@ module Rigor
       # degrade to `T | nil` in the post-loop scope. The loop expression is `nil` joined with the value of every `break`
       # that leaves this loop ({#loop_value}, issue #2031).
       def eval_loop(node)
-        # Issue #1930 — the predicate runs before every iteration but is walked once, so a literal-name
-        # `instance_variable_set` in it joins its value and `Dynamic[top]` ({ReflectiveIvarWrite.in_repeating_body}):
-        # the rebind fixpoint tracks the body's writes only.
-        entry = loop_entry_scope(node)
-        _pred_type, post_pred = ReflectiveIvarWrite.in_repeating_body { sub_eval(node.predicate, entry) }
-        post_pred = widen_predicate_pins(node, post_pred)
+        post_pred = loop_predicate_scope(node)
         return [Type::Combinator.constant_of(nil), narrow_loop_exit_edge(node, post_pred)] if node.statements.nil?
 
         # The historical single body pass joined with the pre-loop scope. This continues to carry everything the
@@ -2269,6 +2264,15 @@ module Rigor
         post_loop = join_break_scopes(post_loop, first_breaks, names) if node.begin_modifier?
         post_loop = loop_exit(node, post_pred, post_loop)
         [loop_value(node, first_values + values), post_loop]
+      end
+
+      # The scope a loop's predicate leaves, which the body and the exit edge start from. Issue #1930 — the predicate
+      # runs before every iteration but is walked once, so a literal-name `instance_variable_set` in it joins its value
+      # and `Dynamic[top]` ({ReflectiveIvarWrite.in_repeating_body}): the rebind fixpoint tracks the body's writes only.
+      def loop_predicate_scope(node)
+        entry = loop_entry_scope(node)
+        _pred_type, post_pred = ReflectiveIvarWrite.in_repeating_body { sub_eval(node.predicate, entry) }
+        widen_predicate_pins(node, post_pred)
       end
 
       # Issue #2031 — a `while` / `until` expression is `nil` when its predicate ends it and the value of the `break`

@@ -59,7 +59,7 @@ The per-buffer publish seeds the project's discovery tables through the existing
 - **Not covered:**
   - `rigor check --tmp-file T --instead-of F F` (buffer without `prebuilt:`) discovered only the buffer file; it now widens discovery to the project like a plain run ([#2188](https://github.com/rigortype/rigor/pull/2188), #2165).
   - With `pre_eval:` configured, the publish now keeps the seed's literal constant table beside the `pre_eval:` publication and retracts a listed constant an unlisted file also assigns (#663), from the seed's writer census (closed by [#2180](https://github.com/rigortype/rigor/pull/2180)).
-  - `parameter_inference:` is still collected over the buffer alone.
+  - `parameter_inference:` is collected over the buffer alone, an accepted limit: it is less precise than `check` but never reports on a lower bound `check` would not. A whole-project table goes stale on save and was rejected for that reason ([#2187](https://github.com/rigortype/rigor/pull/2187), closed); the design questions a later attempt must answer are [#2190](https://github.com/rigortype/rigor/issues/2190).
 - **Staleness, closed by a follow-up:** WD2 reads other files from disk, so a dirty buffer's cross-file markers can move when another file is saved or the generation is invalidated. A save round now re-publishes every dirty open buffer from its own bytes after publishing the clean ones, and a watched-file or configuration change re-publishes every open buffer ([#2175](https://github.com/rigortype/rigor/pull/2175)).
 
 ## Relationship to other ADRs

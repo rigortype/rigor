@@ -272,6 +272,7 @@ members:
   discovered_deferred_ranges:
     reads:
     - lib/rigor/analysis/check_rules.rb
+    - lib/rigor/analysis/check_rules/rebinding_block_callees.rb
     - lib/rigor/analysis/runner.rb
     - lib/rigor/inference/definer_resolution.rb
     - lib/rigor/inference/self_call_ivar_writes.rb

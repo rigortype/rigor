@@ -2223,8 +2223,8 @@ module Rigor
       def eval_repeating_for(node) = ReflectiveIvarWrite.in_repeating_body { eval_for(node) }
 
       # `while pred; body; end` / `until pred; body; end`. The body might run zero or more times, so half-bound names
-      # degrade to `T | nil` in the post-loop scope. The loop expression itself types as `Constant[nil]` (Slice 3 phase
-      # 1), reflecting the common case where no `break VALUE` is observed.
+      # degrade to `T | nil` in the post-loop scope. The loop expression is `nil` joined with the value of every `break`
+      # that leaves this loop ({#loop_value}, issue #2031).
       def eval_loop(node)
         # Issue #1930 — the predicate runs before every iteration but is walked once, so a literal-name
         # `instance_variable_set` in it joins its value and `Dynamic[top]` ({ReflectiveIvarWrite.in_repeating_body}):
@@ -2248,7 +2248,7 @@ module Rigor
         # The pass ends with its `next` exits as well as its fall-through ({#loop_iteration}). Its `break` arms are
         # superseded by the fixpoint's converged pass ({#loop_break_arms}) except in a `begin … end while` loop, below.
         jumps = loop_jumps(node.statements)
-        body_scope, first_breaks = single_pass(node, post_pred, jumps)
+        body_scope, first_breaks, first_values = single_pass(node, post_pred, jumps)
         base_scope = join_with_nil_injection(post_pred, body_scope)
 
         names, body_first = loop_rebound_names(node.statements, post_pred)
@@ -2258,17 +2258,41 @@ module Rigor
         # the single-pass join before returning.
         if names.empty?
           fast = loop_content_writeback(node.statements, base_scope, pre_body: post_pred)
-          return [Type::Combinator.constant_of(nil), loop_exit(node, post_pred, fast)]
+          return [loop_value(node, first_values), loop_exit(node, post_pred, fast)]
         end
 
-        post_loop = converged_loop_scope(node, post_pred, base_scope, names, body_first, jumps)
+        post_loop, values = converged_loop_scope(node, post_pred, base_scope, names, body_first, jumps)
         # A `begin … end while` / `until` body runs once before the predicate is first tested, so that iteration's
         # entry lies outside every fixpoint pass's predicate-narrowed one, and a `break` only it can take (`if state ==
         # :idle` under `end while state != :idle`) is dead in every converged pass. The single pass runs from the
         # un-narrowed post-predicate scope, so its arms stand in for that first iteration.
         post_loop = join_break_scopes(post_loop, first_breaks, names) if node.begin_modifier?
         post_loop = loop_exit(node, post_pred, post_loop)
-        [Type::Combinator.constant_of(nil), post_loop]
+        [loop_value(node, first_values + values), post_loop]
+      end
+
+      # Issue #2031 — a `while` / `until` expression is `nil` when its predicate ends it and the value of the `break`
+      # that ends it otherwise: `x = while i < k; break @r if i == 4; end` is `"four"` or `nil`. `break_values` holds
+      # what each `break` targeting this loop carried, from the single body pass (the first iteration) and the pass
+      # from the converged bindings ({#loop_break_arms}), which together cover the entry of every iteration. A literal
+      # `while true` / `until false` / `until nil` is never ended by its predicate, so only its `break`s give it a
+      # value; any other predicate is assumed to end it, since its first evaluation says nothing about later ones. A
+      # loop with no reachable `break` keeps its `nil`.
+      def loop_value(node, break_values)
+        nil_type = Type::Combinator.constant_of(nil)
+        return nil_type if break_values.empty?
+        return Type::Combinator.union(*break_values) if endless_loop_predicate?(node)
+
+        Type::Combinator.union(nil_type, *break_values)
+      end
+
+      def endless_loop_predicate?(node)
+        predicate = node.predicate
+        if node.is_a?(Prism::UntilNode)
+          predicate.is_a?(Prism::FalseNode) || predicate.is_a?(Prism::NilNode)
+        else
+          predicate.is_a?(Prism::TrueNode)
+        end
       end
 
       # Issue #1359 — the scope a loop's predicate first runs from: a body that may set `$_` runs again after it ran,
@@ -2330,7 +2354,8 @@ module Rigor
 
       # The continuation scope for a loop whose body rebinds locals: the ADR-56 slice-B rebind fixpoint overlaid on
       # `base_scope`, then the slice-C receiver-content writeback, then the `break`-path bindings the fall-through
-      # dropped (`flag = true; break` -> `flag` is `false | true`, not the stale `false`).
+      # dropped (`flag = true; break` -> `flag` is `false | true`, not the stale `false`). Returns `[scope, values]`,
+      # `values` being what the converged pass's `break`s carry ({#loop_value}).
       def converged_loop_scope(node, post_pred, base_scope, names, body_first, jumps)
         # ADR-56 slice B — loop-body fixpoint. The body runs 0..N times and may compound (`d *= 2`), so the historical
         # single body pass joined with the pre-loop scope kept stale folded constants (`d = 1; while …; d *= 2; end` →
@@ -2338,7 +2363,7 @@ module Rigor
         # fixpoint slice A uses for non-escaping block captures. Seed: a pre-existing local seeds with its
         # post-predicate binding; a local FIRST assigned inside the body seeds with `nil` so the 0-iteration path
         # degrades it to `T | nil`, matching the nil-injection treatment.
-        break_pass = jumps.breaks && { entry: nil, arms: [] }
+        break_pass = jumps.breaks && { entry: nil, arms: [], values: [] }
         result = loop_rebind_fixpoint(node, post_pred, names, body_first, jumps, break_pass)
         # Display-path re-record: the fixpoint's body re-evaluations fire `on_enter` with the cap-N INTERMEDIATE
         # assumptions, so the last-visit-wins scope index would annotate loop-body lines with stale pre-convergence
@@ -2350,8 +2375,8 @@ module Rigor
         # the continuation collection. Pre-state comes from `post_pred` for a name the loop only content-mutates and
         # from `post_loop` for one it also rebinds, so composition still works — see {#loop_content_writeback}.
         post_loop = loop_content_writeback(node.statements, post_loop, pre_body: post_pred, rebound: names)
-        arms = loop_break_arms(node, post_pred, result, body_first, jumps, break_pass)
-        join_break_scopes(post_loop, arms, names)
+        arms, values = loop_break_arms(node, post_pred, result, body_first, jumps, break_pass)
+        [join_break_scopes(post_loop, arms, names), values]
       end
 
       # A loop's continuation: a local its body and predicate only narrowed from `Dynamic[top]` re-joins to it
@@ -2444,8 +2469,9 @@ module Rigor
         [sink, result]
       end
 
-      # One evaluation of a loop body from `entry`. Returns `[exit, breaks]`: the scope the iteration ends with, and the
-      # scopes at the `break`s that target the loop ({LoopJumps}). Every reader of a loop body goes through here — the
+      # One evaluation of a loop body from `entry`. Returns `[exit, breaks, values]`: the scope the iteration ends with,
+      # the scopes at the `break`s that target the loop ({LoopJumps}), and the values those `break`s carry, read from a
+      # `break`-value sink of the loop's own ({#loop_value}). Every reader of a loop body goes through here — the
       # single pass `eval_loop` joins with the pre-loop scope, each pass of its rebind fixpoint, and `eval_for`'s only
       # pass.
       #
@@ -2463,18 +2489,21 @@ module Rigor
         recording = recorded ? {} : UNRECORDED
         evaluate = -> { sub_eval(statements, entry, next_scope_sink: next_sink, **recording).last }
         if jumps.breaks
-          break_sink, fall_through = collect_break_scopes(&evaluate)
+          break_sink, (fall_through, value_sink) = collect_break_scopes do
+            StatementEvaluator.with_break_value_sink(&evaluate)
+          end
           breaks = targeted_scopes(break_sink, jumps.breaks)
+          values = targeted_scopes(value_sink, jumps.breaks)
         else
           fall_through = evaluate.call
-          breaks = NO_BREAK_ARMS
+          breaks = values = NO_BREAK_ARMS
         end
-        return [fall_through, breaks] if next_sink.nil?
+        return [fall_through, breaks, values] if next_sink.nil?
 
         exit_scope = targeted_scopes(next_sink, jumps.nexts).reduce(fall_through) do |acc, next_scope|
           join_with_nil_injection(acc, next_scope)
         end
-        [exit_scope, breaks]
+        [exit_scope, breaks, values]
       end
 
       # The `break` scopes the continuation joins. A `break` leaves the loop, so its binding starts no further iteration
@@ -2494,12 +2523,14 @@ module Rigor
       # The unrecorded pass is otherwise an ordinary evaluation: a `return` it reaches joins the enclosing method's
       # inferred return type, as one any other pass reaches does. That only widens the return, toward values a capped
       # fixpoint's own passes never evaluated.
+      #
+      # Returns `[arms, values]`, `values` being what the same pass's `break`s carry ({#loop_value}).
       def loop_break_arms(node, post_pred, converged, body_first, jumps, break_pass)
-        return NO_BREAK_ARMS if break_pass.nil?
-        return break_pass[:arms] if break_pass[:entry] == converged.except(*body_first)
+        return [NO_BREAK_ARMS, NO_BREAK_ARMS] if break_pass.nil?
+        return break_pass.values_at(:arms, :values) if break_pass[:entry] == converged.except(*body_first)
 
         entry = loop_pass_entry(node, post_pred, converged, body_first, jumps)
-        loop_iteration(node.statements, entry, jumps, recorded: false).last
+        loop_iteration(node.statements, entry, jumps, recorded: false).drop(1)
       end
 
       # Joins each `break` arm's body-written local bindings into the loop continuation, so a `break`-path binding the
@@ -2674,10 +2705,11 @@ module Rigor
       # it.
       def loop_body_exit_bindings(node, post_pred, bindings, names, body_first, jumps, break_pass = nil)
         entry = loop_pass_entry(node, post_pred, bindings, body_first, jumps)
-        exit_scope, breaks = loop_iteration(node.statements, entry, jumps)
+        exit_scope, breaks, values = loop_iteration(node.statements, entry, jumps)
         if break_pass
           break_pass[:entry] = bindings.except(*body_first)
           break_pass[:arms] = breaks
+          break_pass[:values] = values
         end
         names.to_h { |name| [name, CapturedLocals.bound_type(exit_scope, name)] }
       end
@@ -2736,8 +2768,7 @@ module Rigor
       # index variable AND every local written in the body leak to the surrounding scope. The collection is evaluated
       # once; the body runs zero or more times, so the post-loop scope is the join of the no-iteration scope (just
       # `post_collection`) and the body scope, with half-bound names degraded to `T | nil` via nil-injection. The loop
-      # expression itself types as `Constant[nil]`, the policy `eval_loop` uses for `while` / `until` — a known gap for
-      # `for`, whose value in Ruby is the collection it iterated (issue #1216).
+      # expression is the collection's `each` value joined with every `break` value ({#for_value}, issue #1216).
       def eval_for(node)
         coll_type, post_coll = sub_eval(node.collection, scope)
         element_type = for_iteration_element_type(coll_type)
@@ -2747,18 +2778,44 @@ module Rigor
         body_entry = loop_content_entry(node.statements, post_coll, body_entry)
 
         if node.statements.nil?
-          return [Type::Combinator.constant_of(nil), join_with_nil_injection(post_coll, body_entry)]
+          return [for_value(coll_type, NO_BREAK_ARMS),
+                  join_with_nil_injection(post_coll, body_entry)]
         end
 
         # The body pass ends with its `next` exits as well as its fall-through, and its `break` arms are recovered into
         # the continuation (the `for` sibling of `eval_loop`'s break join; `for` has no fixpoint, so the single pass is
         # the only continuation and the only source of `break` arms).
         jumps = loop_jumps(node.statements)
-        body_scope, breaks = loop_iteration(node.statements, body_entry, jumps)
+        body_scope, breaks, values = loop_iteration(node.statements, body_entry, jumps)
         continuation = join_with_nil_injection(post_coll, body_scope)
         pre_existing, body_first = loop_body_local_writes(node.statements, post_coll)
         continuation = join_break_scopes(continuation, breaks, pre_existing + body_first)
-        [Type::Combinator.constant_of(nil), for_exit(node, post_coll, continuation)]
+        [for_value(coll_type, values), for_exit(node, post_coll, continuation)]
+      end
+
+      # The core collections whose `each` with a block answers its receiver.
+      FOR_SELF_EACH_CLASSES = Set["Array", "Hash", "Range", "Set"].freeze
+      private_constant :FOR_SELF_EACH_CLASSES
+
+      # Issue #1216 — `for x in coll` is `coll.each { |x| … }`, so the loop's value is what that `each` answers, or
+      # the value of the `break` that ends it. An Array, a Hash, a Range and a Set answer themselves, including when
+      # they are empty and the body never runs, so the value is the collection's own type. Any other collection
+      # (`Dynamic`, a project class, an `Enumerator`, a union with `nil`) answers `Dynamic[top]`: its `each` is not
+      # known to answer its receiver, and a guessed type would be a claim the analysis cannot back.
+      def for_value(coll_type, break_values)
+        each_value = each_answers_self?(coll_type) ? coll_type : Type::Combinator.untyped
+        break_values.empty? ? each_value : Type::Combinator.union(each_value, *break_values)
+      end
+
+      def each_answers_self?(type)
+        case type
+        when Type::Tuple, Type::HashShape then true
+        when Type::Nominal then FOR_SELF_EACH_CLASSES.include?(type.class_name)
+        when Type::Constant then type.value.is_a?(Array) || type.value.is_a?(Hash) || type.value.is_a?(Range)
+        when Type::Refined, Type::Difference then each_answers_self?(type.base)
+        when Type::Union then type.members.all? { |member| each_answers_self?(member) }
+        else false
+        end
       end
 
       # Issue #1429 — a `for` body runs after the collection's `each`, which may be a project method, and after itself.

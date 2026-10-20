@@ -211,6 +211,45 @@ def global_written(s)
   [if ($and_or_global = s ? String(s) : nil).nil? then 0 else $and_or_global.upcase end]
 end
 
+# `unless` and `until` too. `unless_right_write("s")` returns [false], `until_right_write("s")` [false].
+def unless_right_write(raw)
+  c = raw ? "s" : nil
+  [unless c.nil? then (c = c.size; c.even?) end]
+end
+
+def until_right_write(raw)
+  c = raw ? "s" : nil
+  [until c.nil?; c = c.size; break c.even?; end]
+end
+
+# A code body inside such a construct (a `def`, a `class` / `module` / `class << self` body, a `Class.new` /
+# `Struct.new` / `Data.define` / `Module.new` block) resolves its constants and `self` in the class around it, as
+# before #2196: `AND_OR_BAZ` is the nested `2`, not the top-level `nil`. With `ENV["X"]` set, `Holder::C1.new.m`
+# returns 3 and `Holder.new.inner` 4; `Holder::C5.new.m` raises NoMethodError.
+AND_OR_BAZ = nil
+
+module AndOrNesting
+  AND_OR_BAZ = 2
+
+  class Holder
+    def bar = 1
+
+    C1 = ENV["X"] ? Class.new { def m = AND_OR_BAZ.succ } : nil
+    C2 = (ENV["X"] && Struct.new(:a) { def m = AND_OR_BAZ.succ })
+    C3 = ENV["X"] || Module.new { def self.m = AND_OR_BAZ.succ }
+    C4 = [ENV["X"] && Data.define(:a) { def m = AND_OR_BAZ.succ }]
+    C6 = [ENV["X"] && (class Inner; AND_OR_BAZ.succ; end)]
+    C7 = [ENV["X"] && (module InnerM; AND_OR_BAZ.succ; end)]
+    C9 = [ENV["X"] && (class << self; AND_OR_BAZ.succ; end)]
+    C10 = [ENV["X"] && Class.new(StandardError) { def message = AND_OR_BAZ.succ.to_s }]
+    C5 = ENV["X"] ? Class.new { def m = AND_OR_BAZ.succ.zork } : nil # GENUINE-UNDEFINED
+
+    def defined_inside(c)
+      [c && (def inner = self.bar.succ + AND_OR_BAZ)]
+    end
+  end
+end
+
 # `||`'s right operand writes `x` before it tests it, so the test always holds, in either form.
 def or_write_then_test(raw)
   x = raw ? String(raw) : nil

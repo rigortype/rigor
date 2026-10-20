@@ -1031,6 +1031,7 @@ module Rigor
 
         fallback_receiver = user_class_fallback_receiver(receiver_type, environment)
         return nil if fallback_receiver.nil?
+        return nil if declared_by_external_ancestor?(receiver_type, environment, context)
 
         # Preserve the ORIGINAL receiver type as the `self` substitution so `Kernel#dup: () ->
         # self` and other `self`-returning methods route through Object's RBS while still
@@ -1053,6 +1054,25 @@ module Rigor
             call_node: nil, scope: nil
           )
         )
+      end
+
+      # Issue #2196 — a project class whose ancestry reaches a core or stdlib class before `Object` (`class FL <
+      # Array`) answers a name that class declares from that class, not from `Object` / `Kernel`: Ruby dispatches
+      # `select { … }` on an `FL` to `Array#select`, never to the private `Kernel#select` (`-> Array[String]`). The
+      # ancestor tiers decline such a name where they cannot type it (`RbsDispatch#returns_the_walked_ancestry?`),
+      # and the `Object` fallback then fabricated `Kernel#select`'s answer, so `fields.detect { |f| f.errors }` read
+      # `f` as `String`. The fallback declines the name instead, which leaves the call `Dynamic[top]`.
+      # {ExternalAncestorResolution.resolve} answers nil for a name only `Object`, `Kernel` or `BasicObject` declares,
+      # so `puts` and `raise` keep resolving.
+      def declared_by_external_ancestor?(receiver_type, environment, context)
+        return false unless receiver_type.is_a?(Type::Nominal)
+
+        scope = context.scope
+        return false if scope.nil?
+
+        !ExternalAncestorResolution.resolve(receiver_type.class_name, context.method_name, :instance,
+                                             scope: scope, environment: environment,
+                                             record_dependencies: false).nil?
       end
 
       # True when the call node carries an explicit receiver that is not the literal `self`.

@@ -1257,6 +1257,20 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  # Issue #2196 — a core superclass's method is not answered from `Kernel`'s private method of the same name.
+  describe "fixtures/core_subclass_kernel_shadow.rb — a core subclass does not read Kernel#select" do
+    let(:harness) { harness_for("core_subclass_kernel_shadow") }
+
+    it "leaves the core method untyped and keeps a Kernel-only name" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches.map { |d| "#{d.line}: #{d.message}" }).to be_empty
+    end
+
+    it "reports nothing on the elements" do
+      expect(harness.diagnostics.select { |d| d.rule.start_with?("call.") }.map(&:line)).to eq([])
+    end
+  end
+
   # Issue #1484 — a subject `case` the evaluator does not enter narrows its clauses as its statement form does.
   describe "fixtures/subject_case_value_position.rb — a value-position subject `case` narrows its clauses" do
     let(:harness) { harness_for("subject_case_value_position") }

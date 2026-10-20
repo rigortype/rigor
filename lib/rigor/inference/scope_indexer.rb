@@ -204,11 +204,15 @@ module Rigor
         table
       end
 
-      # The `(node, scope) ->` evaluation that records every node it visits into `table`: the file's own pass, and
-      # each construct {#evaluate_unentered_flow} evaluates in the walk after it.
+      # The `(node, scope, excluded = nil) ->` evaluation that records every node it visits into `table`, except the
+      # nodes in `excluded`: the file's own pass, and each construct {#evaluate_unentered_flow} evaluates in the walk
+      # after it.
       def recording_evaluator(table, converged_loop_recording, widen_clauses)
-        on_enter = ->(node, scope) { table[node] = scope }
-        lambda do |node, scope|
+        lambda do |node, scope, excluded = nil|
+          on_enter =
+            if excluded.nil? || excluded.empty? then ->(visited, at) { table[visited] = at }
+            else ->(visited, at) { table[visited] = at unless excluded.include?(visited) }
+            end
           StatementEvaluator.new(scope: scope, on_enter: on_enter, converged_loop_recording: converged_loop_recording,
                                  widen_clauses: widen_clauses).evaluate(node)
         end
@@ -11499,9 +11503,40 @@ module Rigor
         part = node.public_send(entry)
         return if part.nil? || table.key?(part)
 
-        Thread.current[UNENTERED_EVALUATOR_KEY]&.call(node, current_scope)
+        evaluate = Thread.current[UNENTERED_EVALUATOR_KEY]
+        evaluate&.call(node, current_scope, code_body_nodes(node, current_scope.source_path))
       end
 
+      # The evaluation of an unentered construct starts with no class frame and no lexical nesting, which only a code
+      # body observes: a `def`, a `class` / `module` / `class << …` body, and the block of a class-creating call
+      # (`Class.new { … }`, `Struct.new`, `Data.define`, `Module.new`) or of a `refine`, whose `def`s and constants
+      # resolve against the class the walk tracks and the evaluation does not. Every node in one is left out of the
+      # recording, so the walk reaches it unrecorded and handles it as it did before #2196 ({#unentered_block_entry},
+      # {#record_class_body_defs}).
+      def code_body_nodes(node, source_path, acc = Set.new.compare_by_identity, inside: false)
+        inside ||= CODE_BODY_NODES.include?(node.class)
+        acc << node if inside
+        if node.is_a?(Prism::CallNode) && !inside && class_body_block_call?(node, source_path)
+          code_body_nodes(node.block, source_path, acc, inside: true)
+          node.rigor_each_child { |child| code_body_nodes(child, source_path, acc) unless child.equal?(node.block) }
+          return acc
+        end
+        node.rigor_each_child { |child| code_body_nodes(child, source_path, acc, inside: inside) }
+        acc
+      end
+
+      CODE_BODY_NODES = [Prism::DefNode, Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode].freeze
+      private_constant :CODE_BODY_NODES
+
+      def class_body_block_call?(node, source_path)
+        node.block.is_a?(Prism::BlockNode) &&
+          (!AnonymousMetaClass.name_for(node, source_path).nil? || !refine_target(node).nil?)
+      end
+
+      # The evaluation {#evaluate_unentered_flow} runs for the walk of one {#index}, installed for that walk only.
+      # Index walks nest (a rule may re-index a file while another file's walk is suspended), so the outer one is
+      # restored on exit. A `propagate` called directly while an outer index walk is running would record into the
+      # OUTER index's table through it; nothing outside {#index} calls `propagate`.
       def with_unentered_evaluator(evaluate)
         outer = Thread.current[UNENTERED_EVALUATOR_KEY]
         Thread.current[UNENTERED_EVALUATOR_KEY] = evaluate

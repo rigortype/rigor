@@ -5,6 +5,10 @@ module Rigor
       # (sig.skipped.untyped-return). The answer is the recorded `true` / `false` / `nil`, or the `UNKNOWN_MISS`
       # sentinel; declaring it is what lets sig-gen type `Scope#optimistic_local_miss` / `#optimistic_ivar_miss`.
       def self?.bound_miss: (untyped mark) -> Object?
+
+      # The `Data.define(:cause, :miss)` members come from the source definition.
+      class BoundMark < ::Data
+      end
     end
   end
 end

@@ -54,7 +54,7 @@ module Rigor
 
       # The key an origin and a report spell this row as.
       def key: () -> String
-      def to_h: () -> Hash[String, untyped]
+      def to_h: () -> Hash[String, Array[String] | Hash[String, Array[String]] | String | false | nil | true]
 
       def ==: (untyped other) -> bool
       # `alias eql? ==` — the alias row has no sig-gen shape, so it stays unmarked

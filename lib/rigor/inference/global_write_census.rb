@@ -26,6 +26,13 @@ module Rigor
     #   kept apart from `[:defines, …]`.
     # - `[:main_mixin, name]` — a module a top-level `include`, `prepend` or `extend` mixes into `Object` (or
     #   `main`), as written. A module RBS does not know may carry any method, so it reaches every class.
+    # - `[:ivar_set, name]` / {IVAR_SET_ANY} — an instance variable code outside the object writes (issue #1154): a
+    #   literal `instance_variable_set(:@x, v)` on an explicit receiver other than `self`, and an `@x` write in the
+    #   block of an `instance_eval` / `instance_exec` on such a receiver, or the same `instance_variable_set` through
+    #   a `send` that spells its name. An ivar name no literal spells, and a string `instance_eval` on such a
+    #   receiver, record {IVAR_SET_ANY}; a `send` whose method name is computed is not read. The class-ivar census
+    #   reads it to decline typing an ivar from a declared parameter ({ScopeIndexer::DeclaredParamWrites}), since
+    #   such a write never reaches the class's own census.
     #
     # The census is a `Set` of those frozen entries, merged by union across files, the project pre-pass and the
     # `pre_eval:` files. It is recorded inside descents that already visit every node ({Collector#visit}), never
@@ -36,6 +43,7 @@ module Rigor
       ANSWER_NAMES = %i[write to_str to_int method_missing respond_to_missing? respond_to?].to_set.freeze
 
       DEFINES_ANY = [:defines_any].freeze
+      IVAR_SET_ANY = [:ivar_set_any].freeze
       REFINES_ANY = [:refines_any].freeze
 
       # `define_method`-family calls whose first argument names the method they define.
@@ -56,10 +64,12 @@ module Rigor
       # Every call name {Collector#visit} reads; any other call is skipped at once.
       VISITED_CALLS = (DEFINING_CALLS | SEND_CALLS | MIXIN_CALLS | %i[import_methods]).freeze
       NO_ARGUMENTS = [].freeze
+      # The calls that run their block, or their string, on the receiver's object (#1154).
+      FOREIGN_SELF_CALLS = %i[instance_eval instance_exec].to_set.freeze
       NAME_PATTERN = /(?<![\w@$])(?:write|to_str|to_int|method_missing|respond_to_missing\?|respond_to\?)(?![\w?!=])/
       private_constant :NAMING_CALLS, :ATTRIBUTE_CALLS, :DELEGATION_CALLS, :MISSING_DELEGATION_CALLS,
                        :SEND_CALLS, :EVAL_CALLS, :MIXIN_CALLS, :DEFINING_CALLS, :VISITED_CALLS, :NO_ARGUMENTS,
-                       :NAME_PATTERN
+                       :NAME_PATTERN, :FOREIGN_SELF_CALLS
 
       EMPTY = Set.new.freeze
 
@@ -72,6 +82,16 @@ module Rigor
       # Whether the program may define one of `names` somewhere, outside a refinement.
       def defines_any_of?(census, names)
         census.include?(DEFINES_ANY) || names.any? { |name| census.include?([:defines, name]) }
+      end
+
+      # Whether code outside the object may write the instance variable `name` (#1154).
+      def foreign_ivar_write?(census, name)
+        census.include?(IVAR_SET_ANY) || census.include?([:ivar_set, name])
+      end
+
+      # The `[:ivar_set, …]` entries and {IVAR_SET_ANY} of `census`, for the incremental diff.
+      def ivar_set_entries(census)
+        census.select { |entry| entry.first == :ivar_set || entry == IVAR_SET_ANY }.to_set
       end
 
       # Whether some refinement may add `write`.
@@ -139,6 +159,44 @@ module Rigor
 
         private
 
+        # #1154 — an instance variable written from outside the object: `o.instance_variable_set(:@x, v)`, the same
+        # through `send`, or an `@x` write in an `o.instance_eval { … }` / `instance_exec` block.
+        def visit_foreign_ivar_write(node)
+          name = node.name
+          arguments = node.arguments&.arguments || NO_ARGUMENTS
+          if SEND_CALLS.include?(name)
+            return unless arguments.first && literal_name(arguments.first) == :instance_variable_set
+
+            name = :instance_variable_set
+            arguments = arguments.drop(1)
+          end
+          if name == :instance_variable_set
+            record_foreign_ivar_set(arguments)
+          elsif FOREIGN_SELF_CALLS.include?(name)
+            @census << IVAR_SET_ANY unless arguments.empty? || name == :instance_exec
+            record_block_ivar_writes(node.block) if node.block.is_a?(Prism::BlockNode)
+          end
+        end
+
+        def record_foreign_ivar_set(arguments)
+          ivar = literal_name(arguments.first) if arguments.first
+          @census << (ivar.to_s.start_with?("@") ? [:ivar_set, ivar].freeze : IVAR_SET_ANY)
+        end
+
+        def record_block_ivar_writes(node)
+          return unless node.is_a?(Prism::Node)
+          return if node.is_a?(Prism::DefNode) || node.is_a?(Prism::ClassNode) || node.is_a?(Prism::ModuleNode)
+
+          case node
+          when Prism::InstanceVariableWriteNode, Prism::InstanceVariableOrWriteNode, Prism::InstanceVariableAndWriteNode,
+               Prism::InstanceVariableOperatorWriteNode, Prism::InstanceVariableTargetNode
+            @census << [:ivar_set, node.name].freeze
+          when Prism::CallNode
+            @census << IVAR_SET_ANY if node.name == :instance_variable_set && self_receiver?(node)
+          end
+          node.rigor_each_child { |child| record_block_ivar_writes(child) }
+        end
+
         def visit_global_alias(node)
           [node.new_name, node.old_name].each do |side|
             @census << GlobalWriteCensus.alias_entry(side.name) if side.is_a?(Prism::GlobalVariableReadNode)
@@ -147,6 +205,7 @@ module Rigor
 
         def visit_call(node, top_level)
           remember_refine(node)
+          visit_foreign_ivar_write(node) unless self_receiver?(node)
           name = node.name
           return unless VISITED_CALLS.include?(name)
 

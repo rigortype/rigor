@@ -135,6 +135,7 @@ lib/rigor/inference/global_write_census.rb:
   producers:
     Rigor::Inference::GlobalWriteCensus: grandfathered
     Rigor::Inference::GlobalWriteCensus#walk: grandfathered
+    Rigor::Inference::GlobalWriteCensus::Collector#record_block_ivar_writes: issue #1154, stops its scan of an instance_eval block at a nested def, class or module, whose ivar writes are not the receiver's; it derives no declaration context
     Rigor::Inference::GlobalWriteCensus::Collector#visit_call: grandfathered
 lib/rigor/inference/guard_rebinding.rb:
   computes: where a guard's narrowing of a global or constant stops holding
@@ -569,6 +570,11 @@ lib/rigor/inference/scope_indexer/superclasses_collector.rb:
   computes: each class's superclass and header nesting, as a collector on the shared declaration walk
   producers:
     Rigor::Inference::ScopeIndexer::SuperclassesCollector: grandfathered
+lib/rigor/inference/scope_indexer/unseen_ivar_writers.rb:
+  computes: whether code outside a class's own census may write one of its ivars
+  producers:
+    Rigor::Inference::ScopeIndexer::UnseenIvarWriters: issue #1154, stops its scan of an ancestor's def body at a nested def, class, module or class << self, whose ivar writes are not the instance's; the ancestors come from Scope::ResolutionChain, and it derives no declaration context
+    Rigor::Inference::ScopeIndexer::UnseenIvarWriters#writes?: issue #1154, stops its scan of an ancestor's def body at a nested def, class, module or class << self, whose ivar writes are not the instance's; the ancestors come from Scope::ResolutionChain, and it derives no declaration context
 lib/rigor/inference/self_call_ivar_writes.rb:
   computes: the instance variables an implicit-self or self. call may write, for the intervening-call reset and the class-guard restore (#1596)
   producers:

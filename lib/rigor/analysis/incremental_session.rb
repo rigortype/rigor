@@ -1298,7 +1298,7 @@ module Rigor
       def table_diff_affected(paths, summary)
         refinement_affected(paths, summary) | defined_name_affected(paths, summary) |
           visibility_name_affected(paths, summary) | mark_affected(paths, summary) |
-          global_census_affected(paths, summary)
+          global_census_affected(paths, summary) | ivar_set_affected(paths, summary)
       end
 
       # Issue #1833 — the consumers whose answer read a class mark that moved in this edit. A reader of a class's
@@ -1397,6 +1397,27 @@ module Rigor
         return Set.new if keys.empty?
 
         Incremental.negative_closure(keys, @negative_dependents)
+      end
+
+      # Issue #1154 — the consumers whose declared-parameter ivar credit asked whether code outside an object writes
+      # the ivar, for each ivar name a file in `paths` started or stopped writing that way (`ivar_set:*` for a write
+      # whose name the census cannot read). The before-state is each file's seed bundle, the after-state the scan's
+      # per-file entries. The write sits in a method body, so neither the declaration signature nor the symbol
+      # fingerprints move with it.
+      def ivar_set_affected(paths, summary)
+        after = (summary && summary[:global_write_census]) || {}
+        keys = Set.new
+        paths.each do |path|
+          census = @seed_bundles.dig(path, :global_write_census) || Inference::GlobalWriteCensus::EMPTY
+          before = Inference::GlobalWriteCensus.ivar_set_entries(census)
+          now = Inference::GlobalWriteCensus.ivar_set_entries(after[path] || Inference::GlobalWriteCensus::EMPTY)
+          (before ^ now).each do |entry|
+            keys << (entry.first == :ivar_set ? "ivar_set:#{entry[1]}" : "ivar_set:*")
+          end
+        end
+        return Set.new if keys.empty?
+
+        Incremental.negative_closure(keys.to_a, @negative_dependents)
       end
 
       # Issue #2134 — the consumers whose answer read a class's visibility slot for a method, or its contest, for each

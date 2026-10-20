@@ -4,6 +4,8 @@ require "prism"
 
 require_relative "../../reflection"
 require_relative "../method_parameter_binder"
+require_relative "../global_write_census"
+require_relative "unseen_ivar_writers"
 
 module Rigor
   module Inference
@@ -30,6 +32,13 @@ module Rigor
       #   type variable (a class `Box[T]` or a method `[T]` variable is unsolved at the write);
       # - the class is declared in one file: the census is per file, so a second `initialize` in a reopening
       #   elsewhere could not be joined, and the type is not taken from one of them;
+      # - the class's primary RBS declaration is the project's (`sig/` or rbs-inline), not core, stdlib or a gem's:
+      #   a project reopening of a library class (`Thread::SizedQueue#initialize`) would otherwise borrow the
+      #   library's parameter type for its own `def`;
+      # - the body neither calls `binding` nor passes code to `eval` / `instance_eval` / `class_eval` /
+      #   `module_eval` / `instance_exec` as an argument, any of which can rewrite the parameter unseen;
+      # - nothing outside the class's own census may write the ivar ({UnseenIvarWriters}): no project ancestor, and
+      #   no other object's code (`o.instance_variable_set(:@x, v)`);
       # - the declared type is not `untyped`, which is what the write already records.
       module DeclaredParamWrites
         EMPTY = {}.compare_by_identity.freeze
@@ -40,6 +49,10 @@ module Rigor
         BLOCK_NODES = [Prism::BlockNode, Prism::LambdaNode].freeze
         private_constant :BLOCK_NODES
 
+        OPAQUE_EVAL_CALLS = %i[eval instance_eval class_eval module_eval instance_exec class_exec
+                               module_exec].to_set.freeze
+        private_constant :OPAQUE_EVAL_CALLS
+
         module_function
 
         # `{InstanceVariableWriteNode => Rigor::Type}` for `def_node`'s creditable writes, or {EMPTY}. The caller
@@ -49,14 +62,15 @@ module Rigor
 
           written = Set.new
           writes = []
-          scan(def_node.body, written, writes, in_block: false)
+          return EMPTY if scan(def_node.body, written, writes, in_block: false) == :opaque
+
           writes.reject! { |write| written.include?(write.value.name) }
           return EMPTY if writes.empty?
 
           types = declared_types(def_node, class_name, scope)
           credited = writes.each_with_object({}.compare_by_identity) do |write, acc|
             type = types[write.value.name]
-            acc[write] = type if type
+            acc[write] = type if type && !UnseenIvarWriters.possible?(scope, class_name, write.name)
           end
           credited.empty? ? EMPTY : credited
         rescue StandardError
@@ -66,6 +80,9 @@ module Rigor
         # Collects the `@x = local` writes outside every block, and the name of every local the body writes in
         # any form at any depth. A read at depth zero outside a block names the method's own local, which is the
         # parameter when the body never writes the name.
+        #
+        # Answers `:opaque` when the body can rewrite a local through code the scan cannot read: a `binding` call, or
+        # an `eval`-family call given an argument ({OPAQUE_EVAL_CALLS}).
         def scan(node, written, writes, in_block:)
           return unless node.is_a?(Prism::Node)
           return if SCOPE_BARRIERS.any? { |klass| node.is_a?(klass) }
@@ -74,10 +91,23 @@ module Rigor
           when Prism::LocalVariableWriteNode, Prism::LocalVariableOrWriteNode, Prism::LocalVariableAndWriteNode,
                Prism::LocalVariableOperatorWriteNode, Prism::LocalVariableTargetNode
             written << node.name
+          when Prism::CallNode
+            return :opaque if opaque_call?(node)
           end
           writes << node if !in_block && local_read_write?(node)
           inner = in_block || BLOCK_NODES.any? { |klass| node.is_a?(klass) }
-          node.rigor_each_child { |child| scan(child, written, writes, in_block: inner) }
+          node.rigor_each_child do |child|
+            return :opaque if scan(child, written, writes, in_block: inner) == :opaque
+          end
+          nil
+        end
+
+        # `binding` hands the frame's locals to code that may write them (`binding.eval("x = 's'")`,
+        # `Helper.rw(binding)`); a string passed to an `eval`-family call is code the scan cannot read.
+        def opaque_call?(node)
+          return true if node.name == :binding
+
+          OPAQUE_EVAL_CALLS.include?(node.name) && !(node.arguments&.arguments || []).empty?
         end
 
         def local_read_write?(node)
@@ -89,6 +119,7 @@ module Rigor
           environment = scope&.environment
           return {} if environment.nil? || !single_declaring_file?(scope, class_name)
           return {} if environment.rbs_module?(class_name)
+          return {} unless Reflection.project_declared_class?(class_name, environment: environment)
 
           rbs_method = Reflection.instance_method_definition(class_name, def_node.name, environment: environment)
           return {} unless sole_typed_overload?(rbs_method, class_name)
@@ -107,13 +138,9 @@ module Rigor
           function.respond_to?(:required_positionals) && function.free_variables.empty?
         end
 
-        # Files the ADR-46 edges the answer reads: every file declaring the class (so removing a reopening
-        # re-checks), and the `class:` name key a class-declaration diff fires (so adding one does).
+        # The file's own class declaration already re-checks it when a reopening appears or goes away, so this read
+        # files no edge of its own (the incremental spec pins the outcome).
         def single_declaring_file?(scope, class_name)
-          if Analysis::DependencyRecorder.active?
-            Scope::ResolutionChain.record_class(scope, class_name)
-            Analysis::DependencyRecorder.read_last_segment(:class, class_name)
-          end
           (scope.discovered_class_sources[class_name]&.size || 0) <= 1
         end
       end

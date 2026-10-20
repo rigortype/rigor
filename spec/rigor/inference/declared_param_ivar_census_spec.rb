@@ -94,7 +94,23 @@ RSpec.describe "the ADR-58 ivar census types a write from a declared parameter (
                                                   "def initialize: (String x) -> void"],
       "an expression over the parameter (a guard: only a bare read is ever credited)" =>
         ["def initialize(x) = @x = (x)", "def initialize: (String x) -> void"],
-      "an undeclared method" => ["def initialize(x) = @x = x", "def other: () -> void"]
+      "an undeclared method" => ["def initialize(x) = @x = x", "def other: () -> void"],
+      "a rescue reference" => ["def initialize(x)\nbegin\nrescue => x\nend\n@x = x\nend",
+                               "def initialize: (String x) -> void"],
+      "a for index" => ["def initialize(x)\nfor x in [1]; end\n@x = x\nend", "def initialize: (String x) -> void"],
+      "a multiple-assignment target" => ["def initialize(x)\nx, = [1]\n@x = x\nend",
+                                         "def initialize: (String x) -> void"],
+      "a hash pattern key" => ["def initialize(x)\ncase {x: 1}\nin {x:} then nil\nend\n@x = x\nend",
+                               "def initialize: (String x) -> void"],
+      "a rightward pattern" => ["def initialize(x)\n1 => x\n@x = x\nend", "def initialize: (String x) -> void"],
+      "a write in a lambda" => ["def initialize(x)\n->(x) { @x = x }.call(1)\nend",
+                                "def initialize: (String x) -> void"],
+      "a binding handed to other code" => ["def initialize(x)\nHelper.rw(binding)\n@x = x\nend",
+                                           "def initialize: (String x) -> void"],
+      "an eval through the binding" => ["def initialize(x)\nbinding.eval(\"x = 's'\")\n@x = x\nend",
+                                        "def initialize: (String x) -> void"],
+      "a string instance_eval" => ["def initialize(x)\ninstance_eval(\"x = 's'\")\n@x = x\nend",
+                                   "def initialize: (String x) -> void"]
     }.each do |shape, (body, signature)|
       it "for #{shape}" do
         expect(k_census(body, signature)).to eq("Dynamic[top]")
@@ -112,6 +128,12 @@ RSpec.describe "the ADR-58 ivar census types a write from a declared parameter (
       rbs = "class P\ndef initialize: (String x) -> void\nend\nclass K < P\nend\n"
 
       expect(census(source, rbs, "K", :@x)).to eq("Dynamic[top]")
+    end
+
+    it "for a library class the project reopens" do
+      source = "class Thread::SizedQueue\ndef initialize(m)\n@m2 = m\nend\nend\n"
+
+      expect(census(source, "class K\nend\n", "Thread::SizedQueue", :@m2)).to eq("Dynamic[top]")
     end
 
     it "for a module owner" do
@@ -177,6 +199,43 @@ RSpec.describe "the ADR-58 ivar census types a write from a declared parameter (
       expect(dumps(plugins: [plugin], plugin_requirer: requirer)).to eq(["dump_type: [String, Symbol?]"])
     ensure
       Rigor::Plugin.unregister!
+    end
+
+    {
+      "an included module's writer method" =>
+        { "lib/setter.rb" => "module Setter\n  def set_x(v) = @x = v\nend\n", include: "include Setter" },
+      "an included module's attr_writer" =>
+        { "lib/setter.rb" => "module Setter\n  attr_writer :x\nend\n", include: "include Setter" },
+      "a superclass reached through super" =>
+        { "lib/p.rb" => "class P\n  def initialize(*) = @x = 1\nend\n", superclass: "P" },
+      "another object's instance_variable_set" =>
+        { "lib/o.rb" => "def poke(o) = o.instance_variable_set(:@x, 2)\n" },
+      "another object's instance_eval block" =>
+        { "lib/o.rb" => "def poke(o) = o.instance_eval { @x = 2 }\n" }
+    }.each do |shape, files|
+      it "declines a write #{shape} may replace" do
+        header = files[:superclass] ? "class K < #{files[:superclass]}" : "class K"
+        body = files[:include] ? "  #{files[:include]}\n" : ""
+        write_project(files.reject { |key, _| key.is_a?(Symbol) }.merge(
+                        "lib/k.rb" => "#{header}\n#{body}  def initialize(x)\n    @x = x\n    super() if defined?(super)\n  end\n  " \
+                                      "def r = Rigor.dump_type(@x)\nend\n",
+                        "sig/k.rbs" => "#{header}\n  def initialize: (String x) -> void\nend\n"
+                      ))
+        write_project("sig/p.rbs" => "class P\nend\n", "sig/setter.rbs" => "module Setter\nend\n")
+
+        expect(dumps).to eq(["dump_type: Dynamic[top]"])
+      end
+    end
+
+    it "credits a write no other code may replace (control)" do
+      write_project("lib/setter.rb" => "module Setter\n  def set_y(v) = @y = v\nend\n",
+                    "lib/o.rb" => "def poke(o) = o.instance_variable_set(:@y, 2)\n",
+                    "lib/k.rb" => "class K\n  include Setter\n  def initialize(x) = @x = x\n  " \
+                                  "def r = Rigor.dump_type(@x)\nend\n",
+                    "sig/k.rbs" => "class K\n  include Setter\n  def initialize: (String x) -> void\nend\n",
+                    "sig/setter.rbs" => "module Setter\nend\n")
+
+      expect(dumps).to eq(["dump_type: String"])
     end
 
     it "declines a class another file reopens" do

@@ -76,4 +76,31 @@ RSpec.describe "incremental runs over a declared-parameter ivar (#1154)", type: 
     FileUtils.rm("lib/k2.rb")
     expect_warm_equals_cold(string_row)
   end
+
+  {
+    "an included module's writer" =>
+      ["lib/setter.rb", "module Setter\n  def set_x(v) = @x = v\nend\n",
+       "module Setter\n  def set_y(v) = @y = v\nend\n"],
+    "a superclass's writer" =>
+      ["lib/p.rb", "class P\n  def initialize(*) = @x = 1\nend\n", "class P\n  def initialize(*) = @y = 1\nend\n"],
+    "another object's instance_variable_set" =>
+      ["lib/o.rb", "def poke(o) = o.instance_variable_set(:@x, 2)\n", "def poke(o) = o.instance_variable_set(:@y, 2)\n"]
+  }.each do |shape, (path, writing, silent)|
+    it "follows #{shape} appearing and going away" do
+      write("lib/k.rb", "class K < P\n  include Setter\n  def initialize(x) = @x = x\n  def use = @x.nope\nend\n")
+      write("lib/p.rb", "class P\nend\n")
+      write("lib/setter.rb", "module Setter\nend\n")
+      write("sig/k.rbs", "class P\nend\nmodule Setter\nend\nclass K < P\n  include Setter\n  " \
+                         "def initialize: (String x) -> void\nend\n")
+      row = [["lib/k.rb", 4, "undefined method `nope' for String"]]
+      write(path, silent)
+      expect_warm_equals_cold(row)
+
+      write(path, writing)
+      expect_warm_equals_cold([])
+
+      write(path, silent)
+      expect_warm_equals_cold(row)
+    end
+  end
 end

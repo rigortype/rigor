@@ -80,9 +80,9 @@ RSpec.describe "incremental runs over a declared-parameter ivar (#1154)", type: 
   {
     "an included module's writer" =>
       ["lib/setter.rb", "module Setter\n  def set_x(v) = @x = v\nend\n",
-       "module Setter\n  def set_y(v) = @y = v\nend\n"],
+       "module Setter\nend\n"],
     "a superclass's writer" =>
-      ["lib/p.rb", "class P\n  def initialize(*) = @x = 1\nend\n", "class P\n  def initialize(*) = @y = 1\nend\n"],
+      ["lib/p.rb", "class P\n  def initialize(*) = @x = 1\nend\n", "class P\nend\n"],
     "another object's instance_variable_set" =>
       ["lib/o.rb", "def poke(o) = o.instance_variable_set(:@x, 2)\n", "def poke(o) = o.instance_variable_set(:@y, 2)\n"]
   }.each do |shape, (path, writing, silent)|

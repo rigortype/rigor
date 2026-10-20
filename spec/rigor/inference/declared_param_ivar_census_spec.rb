@@ -227,6 +227,22 @@ RSpec.describe "the ADR-58 ivar census types a write from a declared parameter (
       end
     end
 
+    it "declines under a superclass the project does not declare and Ruby does not ship" do
+      write_project("lib/k.rb" => "class K < GemBase\n  def initialize(x) = @x = x\n  " \
+                                  "def r = Rigor.dump_type(@x)\nend\n",
+                    "sig/k.rbs" => "class K\n  def initialize: (String x) -> void\nend\n")
+
+      expect(dumps).to eq(["dump_type: Dynamic[top]"])
+    end
+
+    it "credits under a superclass Ruby ships (control)" do
+      write_project("lib/k.rb" => "class K < StandardError\n  def initialize(x) = @x = x\n  " \
+                                  "def r = Rigor.dump_type(@x)\nend\n",
+                    "sig/k.rbs" => "class K < StandardError\n  def initialize: (String x) -> void\nend\n")
+
+      expect(dumps).to eq(["dump_type: String"])
+    end
+
     it "credits a write no other code may replace (control)" do
       write_project("lib/setter.rb" => "module Setter\n  def set_y(v) = @y = v\nend\n",
                     "lib/o.rb" => "def poke(o) = o.instance_variable_set(:@y, 2)\n",

@@ -1,0 +1,1 @@
+- **[rigor sig-gen]** `rigor sig-gen` now writes a Symbol record key that needs quoting as `:"data-x" =>` instead of the String key `"data-x" =>`, so `rigor check` no longer reports `def.return-type-mismatch` on the method it was written for ([#2228](https://github.com/rigortype/rigor/pull/2228)).

@@ -1,0 +1,1 @@
+- **[editor]** Under `parameter_inference:`, the language server's per-buffer analysis now types a parameter from call sites in other project files, as `rigor check` does, instead of only from the buffer's own file. ([#2187](https://github.com/rigortype/rigor/pull/2187))

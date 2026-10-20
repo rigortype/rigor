@@ -535,6 +535,16 @@ module Rigor
         end
       end
 
+      # ADR-45 WD2 (#1507) / #2020 — the per-run reset of what each file's analysis is credited with: its plugin
+      # reads, its run-scoped plugin registrations, and the boundary rows around the per-file loop.
+      def reset_analysis_attribution
+        @analysis_reads = {}
+        @analysis_disclosures = {}
+        @pre_analysis_plugin_rows = nil
+        @post_analysis_plugin_rows = nil
+      end
+      private :reset_analysis_attribution
+
       def run_analysis(paths)
         Inference::MethodDispatcher::FileFolding.fold_platform_specific_paths =
           @configuration.fold_platform_specific_paths
@@ -562,10 +572,7 @@ module Rigor
         # #788 — the per-file reader is assigned only on the analysis (miss) path; reset it here so a run the
         # ADR-45 result cache serves does not answer with the previous run's rows.
         @per_file_diagnostics = [].freeze
-        @analysis_reads = {}
-        @analysis_disclosures = {}
-        @pre_analysis_plugin_rows = nil
-        @post_analysis_plugin_rows = nil
+        reset_analysis_attribution
         # ADR-84 WD2 — roll the return-memo bucket: a fresh frozen token per run makes every per-file scope
         # of THIS run share one memo bucket while entries from any earlier run in this process (stale after
         # an edit) become unreachable.

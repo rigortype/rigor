@@ -993,8 +993,7 @@ module Rigor
         restore_structural_declarations(payload)
         @return_summaries  = payload.return_summaries || {}
         @param_table       = payload.param_table || {} # ADR-67 WD6c lift — the seeds the cache was built under.
-        @plugin_reads      = payload.plugin_reads # Issue #1553 — `{}` in a payload built without it.
-        @plugin_disclosures = payload.plugin_disclosures # Issue #2020 — likewise.
+        restore_plugin_records(payload)
         # Issues #796 / #794 — absent (nil) in a snapshot written before schema 22 is impossible (the SCHEMA
         # gate rejects one), so nil here means the writing run genuinely had nothing to say.
         @run_level_rows    = payload.run_level_rows
@@ -1008,6 +1007,13 @@ module Rigor
         @symbol_dependents = Incremental.invert_symbols(@symbol_sources)
         @ancestry_dependents = Incremental.invert(@ancestry_sources)
         @negative_dependents = Incremental.invert(@missing)
+      end
+
+      # Issue #1553 — the plugin reads each file's last analysis made, and (#2020) the run-scoped plugin rows it
+      # registered; `{}` in a payload built without them. Extracted to keep {#restore} under its ABC budget.
+      def restore_plugin_records(payload)
+        @plugin_reads = payload.plugin_reads
+        @plugin_disclosures = payload.plugin_disclosures
       end
 
       # ADR-46 slice 3 / issue #644 — the structural tier's negative-edge state: the per-consumer missed

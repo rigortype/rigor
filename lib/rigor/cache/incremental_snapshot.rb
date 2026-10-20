@@ -475,7 +475,7 @@ module Rigor
           run_level_rows: data[:run_level_rows],
           effect_plugin_digest: data[:effect_plugin_digest],
           plugin_reads: data[:plugin_reads] || {},
-          plugin_disclosures: data[:plugin_disclosures] || {},
+          plugin_disclosures: data.fetch(:plugin_disclosures, {}),
           discovery_digests: data.fetch(:discovery_digests, {})
         )
       end

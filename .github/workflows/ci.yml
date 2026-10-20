@@ -33,7 +33,9 @@ on:
 # cancelled mid-run; matched via head_ref now that release/** no longer
 # triggers a push run). Other PR heads cancel the stale run.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  # Master push runs get a per-commit group (#2140) so every merge commit keeps its own
+  # completed run; every other ref, merge_group included, keeps the ref-keyed group.
+  group: ${{ github.ref == 'refs/heads/master' && format('{0}-{1}-{2}', github.workflow, github.ref, github.sha) || format('{0}-{1}', github.workflow, github.ref) }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/master' && !startsWith(github.head_ref, 'release/') }}
 
 permissions:

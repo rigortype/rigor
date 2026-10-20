@@ -243,6 +243,8 @@ module AndOrNesting
     C9 = [ENV["X"] && (class << self; AND_OR_BAZ.succ; end)]
     C10 = [ENV["X"] && Class.new(StandardError) { def message = AND_OR_BAZ.succ.to_s }]
     C5 = ENV["X"] ? Class.new { def m = AND_OR_BAZ.succ.zork } : nil # GENUINE-UNDEFINED
+    # A `def` in the class-creating block runs on an instance of the new class, not on the class.
+    C11 = [ENV["X"] && Class.new { def m = assert_type("#<Class>", self) }]
 
     def defined_inside(c)
       [c && (def inner = self.bar.succ + AND_OR_BAZ)]

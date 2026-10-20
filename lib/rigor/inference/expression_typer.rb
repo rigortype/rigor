@@ -1276,13 +1276,14 @@ module Rigor
       # statement evaluator, which owns the loop's value: `nil` or a `while` / `until` loop's `break` values
       # (issue #2031), and a `for` loop's collection or its `break` values (issue #1216).
       #
-      # The value is kept per scope ({Scope#memoized_value}): a loop that is a call's receiver or argument is typed
-      # again from the same scope by every narrowing and rule that types that operand. A `while` / `until` loop no
-      # `break` leaves is `nil` without evaluating its body, as {StatementEvaluator#loop_value} answers it.
+      # A `while` / `until` loop no `break` leaves is `nil` without evaluating its body, as
+      # {StatementEvaluator#loop_value} answers it: a loop that is a call's receiver or argument is typed again by
+      # every narrowing and rule that types that operand, and evaluating it each time re-ran the passes of every loop
+      # nested in it.
       def type_of_loop(node)
         return Type::Combinator.constant_of(nil) if break_free_condition_loop?(node)
 
-        scope.memoized_value(node) { scope.evaluate(node, tracer: tracer).first }
+        scope.evaluate(node, tracer: tracer).first
       end
 
       def break_free_condition_loop?(node)
@@ -3988,7 +3989,6 @@ module Rigor
           discovery: scope.discovery,
           struct_fold_safe_locals: body_fold_safe_locals(def_node, receiver, self_fold_safe),
           dynamic_origins: scope.dynamic_origins,
-          value_memo: scope.value_memo,
           # Issue #1358 — the callee runs in a frame of its own ({Scope#with_match_frame}).
           match_frame: MatchRebinding::Frame.new(def_node.body, def_node.parameters)
         )

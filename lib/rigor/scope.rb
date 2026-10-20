@@ -32,7 +32,7 @@ module Rigor
                 :void_origins, :plugin_typed_calls,
                 :optimistic_origins, :optimistic_locals, :optimistic_ivars,
                 :repeated_or_writes, :match_frame,
-                :constant_narrowings, :guard_records, :bot_guard_classes, :declared_refinements, :value_memo
+                :constant_narrowings, :guard_records, :bot_guard_classes, :declared_refinements
 
     # ADR-53 Track A — the seed-time discovery tables live on the {DiscoveryIndex} the scope carries by a single
     # reference; the per-table readers stay on Scope so engine call sites and plugins are unaffected by the
@@ -322,21 +322,6 @@ module Rigor
       @plugin_typed_calls.key?(node)
     end
 
-    # The value `node` takes from THIS scope, computed by the block once and kept for the next request from the same
-    # scope object (one slot per node, on a table threaded by reference through `#join` / `#rebuild` like the origin
-    # tables, excluded from `==` / `hash`). For a construct whose value costs a full evaluation of its body (a loop,
-    # `ExpressionTyper#type_of_loop`): every rule and narrowing that types a call's receiver or argument types it
-    # again from the same scope, and each such typing of a loop nested in another loop's operand re-ran the inner
-    # loop's passes, once more per level of nesting.
-    def memoized_value(node)
-      slot = @value_memo[node]
-      return slot[1] if slot && slot[0].equal?(self)
-
-      type = yield
-      @value_memo[node] = [self, type]
-      type
-    end
-
     def initialize( # rubocop:disable Metrics/AbcSize, Metrics/MethodLength -- one keyword and assignment per field
       environment:, locals:,
       fact_store: Analysis::FactStore.empty,
@@ -368,8 +353,7 @@ module Rigor
       constant_narrowings: EMPTY_CONSTANT_NARROWINGS,
       guard_records: EMPTY_GUARD_RECORDS,
       bot_guard_classes: EMPTY_BOT_GUARD_CLASSES,
-      declared_refinements: Inference::InEffectRefinements::EMPTY,
-      value_memo: {}.compare_by_identity
+      declared_refinements: Inference::InEffectRefinements::EMPTY
     )
       @environment = environment
       @locals = locals
@@ -394,7 +378,6 @@ module Rigor
       @ivar_origins = ivar_origins
       @void_origins = void_origins
       @plugin_typed_calls = plugin_typed_calls
-      @value_memo = value_memo
       @optimistic_origins = optimistic_origins
       @optimistic_locals = optimistic_locals
       @optimistic_ivars = optimistic_ivars
@@ -421,8 +404,7 @@ module Rigor
     # tables and never into the ones the file's analysis reads.
     def with_isolated_side_tables
       rebuild(dynamic_origins: @dynamic_origins.dup, void_origins: @void_origins.dup,
-              plugin_typed_calls: @plugin_typed_calls.dup, optimistic_origins: @optimistic_origins.dup,
-              value_memo: {}.compare_by_identity)
+              plugin_typed_calls: @plugin_typed_calls.dup, optimistic_origins: @optimistic_origins.dup)
     end
 
     def optimistic_local(name) = Inference::OptimisticOrigin.bound_cause(@optimistic_locals[name.to_sym])
@@ -2179,7 +2161,7 @@ module Rigor
         @bot_guard_classes == other.bot_guard_classes
     end
 
-    def rebuild( # rubocop:disable Metrics/MethodLength -- one keyword per Scope field
+    def rebuild(
       locals: @locals, fact_store: @fact_store, self_type: @self_type,
       ivars: @ivars, cvars: @cvars, globals: @globals,
       discovery: @discovery,
@@ -2206,8 +2188,7 @@ module Rigor
       constant_narrowings: @constant_narrowings,
       guard_records: @guard_records,
       bot_guard_classes: @bot_guard_classes,
-      declared_refinements: @declared_refinements,
-      value_memo: @value_memo
+      declared_refinements: @declared_refinements
     )
       self.class.new(
         environment: environment, locals: locals,
@@ -2237,8 +2218,7 @@ module Rigor
         constant_narrowings: constant_narrowings,
         guard_records: guard_records,
         bot_guard_classes: bot_guard_classes,
-        declared_refinements: declared_refinements,
-        value_memo: value_memo
+        declared_refinements: declared_refinements
       )
     end
 
@@ -2335,7 +2315,6 @@ module Rigor
         # Issue #1667 — a body property stamped at block entry like the frame above, so both arms of a merge carry
         # the same list; the union keeps either arm's modules, the declining direction.
         declared_refinements: join_declared_refinements(other),
-        value_memo: @value_memo,
         # Issue #1429 — the guard narrowings of globals and constants and their pre-guard records, and of instance
         # variables (#1446).
         **join_guard_narrowings(other, joined_globals, joined_ivars)

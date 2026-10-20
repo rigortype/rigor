@@ -6128,7 +6128,6 @@ module Rigor
           source_path: scope.source_path,
           discovery: scope.discovery,
           dynamic_origins: scope.dynamic_origins,
-          value_memo: scope.value_memo,
           declared_refinements: scope.declared_refinements
         )
       end

@@ -46,6 +46,7 @@ RSpec.describe "IncrementalSession: run-scoped plugin disclosures replay on a re
         @state ||= read_state("state.txt")
         disclose_once(:state, message: "notice: state is #{@state}", severity: :warning) if @state != "fine"
         disclose_once(:prepared, message: "notice: prepared is #{@prepared}", severity: :warning) if @prepared != "fine"
+        disclose_once(:legacy, message: "notice: legacy code present", severity: :info) if root.slice.include?("legacy")
         if @state.start_with?("view")
           emit_once(:views, [Rigor::Analysis::Diagnostic.new(path: "views/a.erb", line: 2, column: 1,
                                                              message: "notice: #{@state}", severity: :warning,
@@ -159,6 +160,7 @@ RSpec.describe "IncrementalSession: run-scoped plugin disclosures replay on a re
     end
   end
 
+  # A guard: the re-analysed file registers the disclosure afresh, so no line of the #2020 fix makes it fail.
   it "keeps the disclosure when an edit re-analyses only a file that did not read the input" do
     incremental_run
     diagnostics, affected = recheck_after { source("charlie", "2") }
@@ -181,6 +183,36 @@ RSpec.describe "IncrementalSession: run-scoped plugin disclosures replay on a re
     expect(notices(diagnostics)).to include("notice: prepared is broken")
     diagnostics, = recheck_after { write("prepared.txt", "fine\n") }
     expect(notices(diagnostics)).not_to include("notice: prepared is broken")
+  end
+
+  # The `legacy` notice is registered only while a file holding `legacy` is analysed: a row about one file's
+  # text rather than about an input every file reaches.
+  describe "a disclosure only one file registers" do
+    before do
+      write("state.txt", "fine\n")
+      source("bravo", "legacy")
+      incremental_run
+    end
+
+    it "replays it while an edit re-analyses another file" do
+      diagnostics, affected = recheck_after { source("charlie", "2") }
+      expect(affected).to eq(Set["lib/charlie.rb"])
+      expect(notices(diagnostics)).to eq(["notice: legacy code present"])
+    end
+
+    it "drops it once that file is edited not to register it" do
+      diagnostics, = recheck_after { source("bravo", "1") }
+      expect(notices(diagnostics)).to be_empty
+      diagnostics, = recheck_after { nil }
+      expect(notices(diagnostics)).to be_empty
+    end
+
+    it "drops it once that file is removed" do
+      diagnostics, = recheck_after { FileUtils.rm_f("lib/bravo.rb") }
+      expect(notices(diagnostics)).to be_empty
+      diagnostics, = recheck_after { nil }
+      expect(notices(diagnostics)).to be_empty
+    end
   end
 
   describe "a positioned batch (#emit_once)" do

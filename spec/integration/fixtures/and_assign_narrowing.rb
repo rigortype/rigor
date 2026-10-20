@@ -6,7 +6,7 @@ include Rigor::Testing
 # the `||` edge. Each comment gives what Ruby 4.0.5 answers. GENUINE-NIL and GENUINE-UNDEFINED mark a call Ruby
 # raises on.
 
-# `local_and(true)` returns 2, `local_and(false)` nil.
+# `local_and(true)` returns 2, `local_and(false)` nil; `ivar_and(true)` [1], as do the global and class variable.
 def local_and(raw)
   c = raw ? 1 : nil
   c &&= c + 1
@@ -15,21 +15,21 @@ end
 
 def ivar_and(raw)
   @x = raw ? 1 : nil
-  @x &&= @x + 1
-  assert_type("2?", @x)
+  @x &&= [@x]
+  assert_type("[1]?", @x)
 end
 
 def global_and(raw)
   $and_g = raw ? 1 : nil
-  $and_g &&= $and_g + 1
-  assert_type("2?", $and_g)
+  $and_g &&= [$and_g]
+  assert_type("[1]?", $and_g)
 end
 
 class CvarHolder
   def cvar_and(raw)
     @@and_v = raw ? 1 : nil
-    @@and_v &&= @@and_v + 1
-    assert_type("2?", @@and_v)
+    @@and_v &&= [@@and_v]
+    assert_type("[1]?", @@and_v)
   end
 end
 

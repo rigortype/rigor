@@ -6,3 +6,4 @@ assertions:
   '3': '1'
   '4': Integer
   '5': "#<Class>"
+  '6': String

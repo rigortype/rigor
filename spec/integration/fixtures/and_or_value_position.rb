@@ -252,6 +252,56 @@ module AndOrNesting
   end
 end
 
+# A class-creating block runs its body at the call, and this walk reads a captured local the body writes as
+# `Dynamic[top]`. Each runs without error: `class_body_write("s")` returns the new class in an array.
+def class_body_write(raw)
+  c = raw ? "s" : nil
+  [c && Class.new { c = c.size; c.even? }]
+end
+
+def data_body_write(raw)
+  c = raw ? "s" : nil
+  [c && Data.define(:a) { c = c.size; c.even? }]
+end
+
+def module_body_write(raw)
+  c = raw ? "s" : nil
+  take(c.nil? || Module.new { c = c.size; c.even? })
+end
+
+def if_class_body_write(raw)
+  c = raw ? "s" : nil
+  [if c then Class.new { c = c.size; c.even? } end]
+end
+
+def ternary_struct_body_write(raw)
+  c = raw ? "s" : nil
+  [c ? Struct.new(:a) { c = c.size; c.even? } : nil]
+end
+
+# Known gap: the same widening hides a `nil` the body writes, which the statement form reports. `class_body_nil("s")`
+# raises NoMethodError in both forms. Outside such a construct the block keeps the enclosing scope and still reports.
+def class_body_nil(raw)
+  c = raw ? "s" : nil
+  [c && Class.new { c = nil; c.upcase }] # KNOWN-GAP: the statement form below reports it
+end
+
+def class_body_nil_statement(raw)
+  c = raw ? "s" : nil
+  c && Class.new { c = nil; c.upcase } # GENUINE-UNDEFINED
+end
+
+def class_body_outside(raw)
+  c = raw ? "s" : nil
+  [Class.new { c = nil; c.upcase }] # GENUINE-NIL
+end
+
+# A `def` in a `refine` block runs on an instance of the refined class. With `using AndOrRefine`, `"a".shout` returns
+# "a".
+module AndOrRefine
+  R = [ENV["X"] && refine(String) { def shout = assert_type("String", self) }]
+end
+
 # `||`'s right operand writes `x` before it tests it, so the test always holds, in either form.
 def or_write_then_test(raw)
   x = raw ? String(raw) : nil

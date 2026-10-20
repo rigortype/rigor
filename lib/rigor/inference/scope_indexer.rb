@@ -11461,7 +11461,7 @@ module Rigor
           child_scope = entered ? current_scope : closure_scope(node, current_scope)
           node.rigor_each_child { |child| propagate(child, table, child_scope) }
         when Prism::CallNode
-          propagate_call(node, table, current_scope)
+          propagate_call(node, table, current_scope, recorded)
         when Prism::RescueNode, Prism::EnsureNode
           # Issue #1360 — a clause the evaluator did not enter (a `begin` in a value position) reads `$!`, `$@` and
           # `$?` unbound, not the enclosing clause's; one it entered keeps what it recorded.
@@ -11579,11 +11579,11 @@ module Rigor
       # argument one scope and threads none, so arguments that write keep the call's: an earlier one may rebind the
       # receiver a later one reads (`return y&.concat((y = nil).to_s, y.upcase)`, where the evaluator threads no
       # operand).
-      def propagate_call(node, table, current_scope)
+      def propagate_call(node, table, current_scope, recorded = false)
         block = node.block
         operands =
           OperandEffects.any?(node.arguments) ? current_scope : Narrowing.safe_navigation_scope(node, current_scope)
-        entry = unentered_block_entry(node, block, table, current_scope)
+        entry = unentered_block_entry(node, block, table, current_scope, recorded)
         if entry.equal?(current_scope) && operands.equal?(current_scope)
           node.rigor_each_child { |child| propagate(child, table, current_scope) }
           return
@@ -11607,7 +11607,7 @@ module Rigor
         node.rigor_each_child { |child| propagate(child, table, child_scope) }
       end
 
-      def unentered_block_entry(node, block, table, current_scope)
+      def unentered_block_entry(node, block, table, current_scope, call_recorded = false)
         return current_scope unless block.is_a?(Prism::BlockNode) && !table.key?(block)
 
         narrowing = unentered_block_narrowing(node, current_scope)
@@ -11620,6 +11620,12 @@ module Rigor
           else
             LastLine.block_entry(FreshFrameBlocks.closure_entry(current_scope, block, node), block, node)
           end
+        # Issue #2196 — a class-body block whose call the evaluator recorded but did not enter (one inside a construct
+        # {#evaluate_unentered_flow} evaluated, or a later operand) starts from the scope the call was evaluated in,
+        # which may narrow a captured local the body writes; this walk runs the body's statements from one scope, so
+        # such a local reads `Dynamic[top]` in it: `[c && Class.new { c = c.size; c.even? }]`. A block whose call was
+        # not recorded keeps the enclosing scope as before.
+        entry = widen_condition_writes(block, entry) if call_recorded && class_body_block_call?(node, entry.source_path)
         anonymous = AnonymousMetaClass.name_for(node, current_scope.source_path)
         return unentered_meta_class_body_entry(block, entry, anonymous, table) if anonymous
 

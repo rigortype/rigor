@@ -44,6 +44,7 @@ require_relative "scope_indexer/mixin_accumulator"
 require_relative "scope_indexer/certainty"
 require_relative "scope_indexer/member_layouts_collector"
 require_relative "scope_indexer/declared_param_writes"
+require_relative "scope_indexer/declared_ivar_types"
 
 module Rigor
   module Inference
@@ -524,6 +525,8 @@ module Rigor
         widen_mutated_ivar_entries!(accumulator, mutated_ivars)
         contribute_read_before_write_nil!(accumulator, read_before_write, init_writes)
         make_reflective_classes_gradual!(accumulator, reflective_opaque)
+        # #1406 — an RBS `@x: T` or `attr_* x: T` declaration replaces the census's join of the writes.
+        DeclaredIvarTypes.apply!(accumulator, default_scope)
         accumulator.transform_values(&:freeze).freeze
       end
 

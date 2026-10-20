@@ -18,7 +18,8 @@ writes, see WD5 status. The `||=`-seeding stretch is
 **deferred-with-reason** there). WD2 amended (2026-09-26, #541 — an
 `attr_writer` / `attr_accessor` declaration now counts as an untyped
 write, see the WD2 amendment). WD2 amended again (2026-10-20, #1154 —
-a write from a declared parameter records the declared type). Archetype:
+a write from a declared parameter records the declared type; and a
+declared ivar type wins over the writes, #1406). Archetype:
 deliberative. Stakes: high — this governs when `possible-nil-receiver`
 may fire on ivar-sourced optionality, the single largest FP class on
 idiomatic data-structure Ruby (94 % of possible-nil errors across the
@@ -362,6 +363,18 @@ recorded before. The gate is the survey-corpus
 diagnostic diff in the PR, which reads every new diagnostic; the binding
 contract is in `inference-engine.md` § "Instance-, class-, and
 global-variable bindings".
+
+**Amendment, 2026-10-20 — a declared ivar type wins (#1406).** The
+WD2 amendment's cost on RBS-declared readers is removed at its source.
+An ivar the class's RBS declares, as `@x: T` or through a typed
+`attr_*` member (in `sig/` or inline), reads that type instead of the
+census's join, so `attr_accessor cb: Proc?` beside `@cb = nil` reads
+`Proc?`, and `@x: Integer` wins over an `initialize: (String x)`
+write. The maintainer settled this with #1154: an explicit declaration
+wins, and checking the writes against it is ADR-112 WD5 (#1075). An
+`untyped` declaration (rbs-inline's placeholder for a bare attribute)
+or one with a type variable is not taken, and an undeclared attribute
+keeps #541's `Dynamic[top]`.
 
 ### WD3 — Slice 3: ctor definite assignment through same-class calls
 

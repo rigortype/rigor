@@ -246,15 +246,19 @@ RSpec.describe "discovery through require_relative outside the configured paths 
   # A walked file that reopens a configured class adds existence only: the configured file's def, visibility and
   # parameters stay certain, so a file under `paths:` answers the same whatever else is on the command line (#734).
   context "when a walked file reopens a configured class with the same defs" do
-    let(:thing) { "class Thing\n  def v = \"s\"\n  def a(x) = x\n\n  private def priv = 1\nend\n" }
+    let(:thing) do
+      "class Thing\n  def v = \"s\"\n  def a(x) = x\n  def self.s = \"s\"\n  def self.sa(x, y) = x\n\n  " \
+        "private def priv = 1\nend\n"
+    end
     let(:expected) do
       [["user.rb", 1, "call.undefined-method"], ["user.rb", 2, "call.wrong-arity"],
-       ["user.rb", 3, "def.method-visibility-mismatch"]]
+       ["user.rb", 3, "def.method-visibility-mismatch"], ["user.rb", 4, "call.undefined-method"],
+       ["user.rb", 5, "call.wrong-arity"]]
     end
 
     before do
       write("lib/thing.rb", thing)
-      write("lib/user.rb", "Thing.new.v.no_such\nThing.new.a(1, 2)\nThing.new.priv\n")
+      write("lib/user.rb", "Thing.new.v.no_such\nThing.new.a(1, 2)\nThing.new.priv\nThing.s.no_such\nThing.sa(1)\n")
       write("plug/x.rb", "require_relative \"x/patch\"\n")
       write("plug/x/patch.rb", thing)
     end
@@ -272,6 +276,21 @@ RSpec.describe "discovery through require_relative outside the configured paths 
 
     it "reports the same findings when the walking file is on the command line too" do
       expect(user_rules(%w[lib/user.rb plug/x.rb])).to eq(expected)
+    end
+
+    it "reports the same findings through the --incremental seed-bundle walk, cold and warm" do
+      File.write(".rigor.yml", "paths:\n  - lib\n")
+      runs = Array.new(2) do
+        out = StringIO.new
+        Rigor::CLI::CheckCommand.new(
+          argv: ["--no-ci-detect", "--no-stats", "--no-baseline", "--format", "json", "--incremental",
+                 "lib/user.rb", "plug/x.rb"],
+          out: out, err: StringIO.new
+        ).run
+        JSON.parse(out.string).fetch("diagnostics").select { |d| d.fetch("path").end_with?("user.rb") }
+            .map { |d| [File.basename(d.fetch("path")), d.fetch("line"), d.fetch("rule")] }.sort
+      end
+      expect(runs).to eq([expected, expected])
     end
   end
 

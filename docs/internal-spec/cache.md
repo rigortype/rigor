@@ -1296,10 +1296,13 @@ re-walks it each run and keeps no bundle for it. Its classes, modules and
 constants resolve, and its methods exist, but no return type, arity or
 visibility is read from its bodies, because a file the walk does not reach may
 redefine them. The walked files fold after every other discovered file and
-skip each def-node, visibility and parameter-envelope slot an earlier file
-wrote, so a walked reopening of a configured class adds existence only and
-leaves the configured file's answer, and its certainty, in place. Constant
-value types are read from walked files as from any other.
+skip each def-node (instance or singleton), visibility and parameter-envelope
+slot an earlier file wrote, so a walked file's slots never override a
+configured file's. Constant value types are read from walked files as from any
+other, and their ancestry and dynamic-dispatch declarations (`include`,
+`extend`, `prepend`, a `define_method` on a receiver, `method_missing` /
+`respond_to_missing?`) still apply, as in the run over the walked file's
+directory.
 
 A discovered-not-analysed file feeds the index the analysed files resolve
 against, but it has no per-file row, edge or digest of its own. The session

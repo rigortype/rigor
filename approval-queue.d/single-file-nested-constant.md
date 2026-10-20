@@ -43,9 +43,13 @@ defines; reading the walked body would then report on correct code. What the wal
 - a call on a method a walked file defines is not reported as undefined;
 - no return type, arity or visibility is read from a walked file's method, so the walk never makes a call's answer
   more precise than the run without it;
-- a walked file that reopens a class a configured file declares adds existence only: the walked files fold after
-  every configured file and skip each def-node, visibility and parameter slot already written, so a configured
-  file's findings (`rigor check lib/user.rb`) are the same whatever else is on the command line.
+- a walked file's def-node, visibility and parameter slots never override a configured file's: the walked files fold
+  after every configured file and skip each such slot (instance or singleton) already written, so a walked reopening
+  of a configured class does not move those slots' answers.
+
+Ancestry and dynamic-dispatch declarations in a walked file (`include`, `extend`, `prepend`, a `define_method` on a
+receiver, `method_missing` / `respond_to_missing?`) still apply, as they do in the run over the walked file's
+directory.
 
 Constant VALUE types are still read from walked files, as from any discovered file: `H::LIMIT = 1` in a walked
 file makes `H::LIMIT.upcase` report, which is what the run over the walked file's directory reports. A run can also

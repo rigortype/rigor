@@ -546,8 +546,9 @@ types, only the arguments of `Array`, `Hash`, `Set`, `Range`
 and `Enumerator` are widened. `nil` inside a union or a shape
 and a computed `Float` are proposed as they are. When the
 method also carries an inline `# @rbs` annotation for its
-parameters only, a return holding a literal, nested or not,
-is not proposed at all and the `untyped` stays. An `untyped` that
+parameters only, a return holding a literal that would be
+widened, nested or not, is not proposed at all and the
+`untyped` stays. An `untyped` that
 only the inline reader synthesizes for a `def` you did not
 annotate keeps the literal, as does a method no `.rbs`
 declares — the literal is still the strictest thing the body

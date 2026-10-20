@@ -1513,7 +1513,8 @@ module Rigor
       # one ({GuardRebinding.may_rebind?}).
       #
       # A subject that writes a local or instance variable (`case (@x = v)`) is read as that variable, as
-      # {Narrowing.case_when_scopes} narrows it (issue #2211).
+      # {Narrowing.case_when_scopes} narrows it (issue #2211). For such an instance variable the binding test above
+      # answers first (the test's call widens it in {#run_when_test}), so its `may_write?` arm is a guard.
       def when_test_rebinds_subject?(subject, condition, before, after)
         subject = case_subject_variable(subject)
         name = case_subject_name(subject)

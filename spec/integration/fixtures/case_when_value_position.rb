@@ -123,8 +123,22 @@ def global_after_call_element
    end]
 end
 
-# The clause bodies after the calling test read the global as the call may leave it too: `global_in_body` returns 6.
+# The calling clause's own body and the later ones read the global as the call may leave it too:
+# `global_in_body` and `global_in_later_body` return 6.
+def rebind_case_global_matching!
+  $case_when_global = 5
+  ->(_) { true }
+end
+
 def global_in_body
+  $case_when_global = nil
+  case $case_when_global
+  when String then 1
+  when rebind_case_global_matching! then $case_when_global + 1
+  end
+end
+
+def global_in_later_body
   $case_when_global = nil
   case $case_when_global
   when String then 1

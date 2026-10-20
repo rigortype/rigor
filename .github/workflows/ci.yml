@@ -331,7 +331,10 @@ jobs:
           make test-binpacker
           BINPACKER_FLAGS="--shard ${{ matrix.shard }}/3 --report tmp/binpacker-report-${{ matrix.shard }}.json"
 
+      # Not on a merge-queue ref (#2139): the queue's throwaway ref is read by no other run, and its entry counts
+      # against the 10 GB cache budget. The restore above still reads master's timings.
       - name: Save binpacker timing file
+        if: success() && github.event_name != 'merge_group'
         uses: actions/cache/save@v6
         with:
           path: tmp/binpacker.timings
@@ -545,7 +548,8 @@ jobs:
       # gem-version or source change that does not touch linting rules
       # reuses the warm cache and skips re-inspecting unchanged files.
       - name: Restore RuboCop cache
-        uses: actions/cache@v6
+        id: restore-rubocop
+        uses: actions/cache/restore@v6
         with:
           path: ~/.cache/rubocop_cache
           key: rubocop-${{ runner.os }}-${{ hashFiles('.rubocop.yml', '.rubocop_todo.yml', 'Gemfile.lock') }}
@@ -553,6 +557,15 @@ jobs:
 
       - name: Run lint
         run: make lint
+
+      # Saved after a passing lint run, as a combined cache's post-step would, and never on a merge-queue ref
+      # (#2139). An exact key hit has nothing new to save.
+      - name: Save RuboCop cache
+        if: success() && github.event_name != 'merge_group' && steps.restore-rubocop.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ~/.cache/rubocop_cache
+          key: rubocop-${{ runner.os }}-${{ hashFiles('.rubocop.yml', '.rubocop_todo.yml', 'Gemfile.lock') }}
 
   # ── 3a. Docs check for a Markdown-only PR ───────────────────────
   # The `changes` gate above skips every code job for a Markdown-only PR —
@@ -640,7 +653,7 @@ jobs:
       - name: Restore Rigor analysis cache
         id: restore-cache
         if: matrix.cache == 'warm'
-        uses: actions/cache@v6
+        uses: actions/cache/restore@v6
         with:
           path: .rigor/cache
           key: rigor-cache-${{ runner.os }}-${{ hashFiles('Gemfile.lock') }}-${{ hashFiles('lib/**/*.rb', 'sig/**/*.rbs', 'data/builtins/**/*.yml') }}
@@ -723,6 +736,15 @@ jobs:
         run: |
           echo "rigor self-check found errors — see diagnostic output above"
           exit 1
+
+      # The save a combined cache's post-step would do: only after a passing job, only when the restore was not an
+      # exact hit, and never on a merge-queue ref, whose entry no other run can read (#2139).
+      - name: Save the Rigor analysis cache
+        if: matrix.cache == 'warm' && success() && github.event_name != 'merge_group' && steps.restore-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: .rigor/cache
+          key: rigor-cache-${{ runner.os }}-${{ hashFiles('Gemfile.lock') }}-${{ hashFiles('lib/**/*.rb', 'sig/**/*.rbs', 'data/builtins/**/*.yml') }}
 
   # ── 4b. Acceptance gates over a cold analysis ───────────────────
   # Four gates that each need a full, uncached analysis and are otherwise

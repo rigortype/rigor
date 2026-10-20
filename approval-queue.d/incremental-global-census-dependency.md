@@ -39,7 +39,10 @@ The new key family. It is the only option that makes every probed form, and the 
 entries, answer warm as cold, while an edit that leaves a file's census unchanged re-checks nothing (pinned by
 the precision example in `spec/integration/incremental_global_census_edge_spec.rb`). #2136 is the closest
 precedent: a dependency key for a whole-program table whose producer diffs per-file seed-bundle data, with no
-cache format change. The coordinator approved this option before implementation.
+cache format change. The coordinator approved this option before implementation. The producer's read of the seed
+bundle's census adds `lib/rigor/analysis/incremental_session.rb` to the `discovered_global_write_census` reads in
+`spec/rigor/declaration_facts/admission_census.yml`, as the session's seed-bundle reads of `discovered_def_nodes`
+and `discovered_singleton_def_nodes` already are.
 
 ## To undo
 

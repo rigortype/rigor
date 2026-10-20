@@ -294,6 +294,7 @@ members:
   discovered_global_write_census:
     reads:
     - lib/rigor/analysis/check_rules.rb
+    - lib/rigor/analysis/incremental_session.rb
     - lib/rigor/analysis/runner.rb
     copies:
     - lib/rigor/analysis/runner.rb

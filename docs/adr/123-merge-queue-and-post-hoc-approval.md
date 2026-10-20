@@ -71,6 +71,20 @@ cycle every landing queued a head that already contained `master`, and the queue
 lookup or verification that fails run the full CI as before. The approval-queue check still runs in
 every queue run.
 
+*Amended 2026-10-20 (maintainer's decision, #2157).* The `CI required` check that the queue waits on
+is pinned to GitHub Actions (`integration_id: 15368`) in the `master merge queue` ruleset (25351003).
+A status posted through the commit status API with a personal token then cannot satisfy it. The
+maintainer applies that ruleset change; this amendment records the decided configuration and does not
+change the ruleset.
+
+The pin leaves one gap. A check run from another workflow of this repository also runs as GitHub
+Actions, so it could satisfy `CI required` too. The model therefore trusts writers: anyone with write
+access to the repository is trusted not to post such a check. Re-evaluate this when the set of writers
+grows beyond the maintainer and trusted agents. The option then is a dedicated GitHub App that posts
+the required check from a `workflow_run` workflow, which first verifies that the run's `event` is
+`merge_group`, its `head_sha` and `path` (`.github/workflows/ci.yml`) match the queued entry, and its
+`conclusion` is `success`. It is deferred until that trigger fires.
+
 **2. Decisions below a stated line are made by precedent and ratified afterwards.** A decision
 that is not *serious* (the list in `contribution-flow.md` § "Decisions and the approval queue") is
 made by the coordinator, following the closest precedent, and lands with its PR. The PR carries an

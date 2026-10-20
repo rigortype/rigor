@@ -80,6 +80,99 @@ RSpec.describe "a later definer supersedes an earlier alias for typing (#2006)",
     RUBY
   end
 
+  # Ruby: K.new.w is "y" for both forms. An alias copies what its old name held at the alias, so a later `def x`
+  # changes `x` and not the `w` copied from it.
+  it "types a chained alias from what its old name held at the alias, not from a later def" do
+    expect(undefined(<<~RUBY)).to eq([["code.rb", 13, '"y"'], ["code.rb", 14, '"y"']])
+      class K
+        def y = "y"
+        alias x y
+        alias w x
+        def x = 1
+      end
+      class L
+        def y = "y"
+        alias_method :x, :y
+        alias_method :w, :x
+        def x = 1
+      end
+      K.new.w.even?
+      L.new.w.even?
+      K.new.w.upcase
+      L.new.w.upcase
+    RUBY
+  end
+
+  # Ruby: "s" for `old_x`, 1 for `x` — the classic alias chain that wraps a method before redefining it.
+  it "types the saved name from the def it saved and the redefined name from the later def" do
+    expect(undefined(<<~RUBY)).to eq([["code.rb", 6, "1"], ["code.rb", 7, '"s"']])
+      class K
+        def x = "s"
+        alias old_x x
+        def x = 1
+      end
+      K.new.x.upcase
+      K.new.old_x.even?
+      K.new.old_x.upcase
+    RUBY
+  end
+
+  # Ruby: "s" for `old_x`; calling `x` raises NoMethodError after the `undef`, and returns 1 after `remove_method`
+  # and a new `def`.
+  it "types the saved name from the def it saved across an undef or a remove_method" do
+    expect(undefined(<<~RUBY)).to eq([["code.rb", 14, '"s"']])
+      class K
+        def x = "s"
+        alias old_x x
+        undef x
+      end
+      class L
+        def x = "s"
+        alias_method :old_x, :x
+        remove_method :x
+        def x = 1
+      end
+      K.new.old_x.upcase
+      L.new.old_x.upcase
+      L.new.old_x.even?
+    RUBY
+  end
+
+  # Ruby: "y" without X in the environment, 1 with it; the alias copies an uncertain `def`, so neither
+  # call reports.
+  it "does not type the saved name from a conditional def" do
+    expect(undefined(<<~RUBY)).to eq([])
+      class K
+        def x = "y"
+        def x = 1 if ENV["X"]
+        alias old_x x
+      end
+      K.new.old_x.even?
+      K.new.old_x.upcase
+    RUBY
+  end
+
+  # Ruby: 2 for both — the attr reader written after the alias answers.
+  it "does not type the name from the aliased def when a later attr_reader replaces it" do
+    expect(undefined(<<~RUBY)).to eq([])
+      class K
+        def y = "y"
+        alias x y
+        attr_reader :x
+        def initialize = (@x = 2)
+      end
+      class L
+        def y = "y"
+        alias x y
+        def x = "s"
+        attr_reader :x
+        def initialize = (@x = 2)
+      end
+      K.new.x.upcase
+      L.new.x.upcase
+    RUBY
+  end
+
   # Ruby: "y" — the second alias replaces the def again (control).
   it "keeps typing from the aliased def when an alias follows the def again" do
     expect(undefined(<<~RUBY)).to eq([["code.rb", 7, '"y"']])

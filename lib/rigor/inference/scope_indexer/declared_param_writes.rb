@@ -34,12 +34,6 @@ module Rigor
       module DeclaredParamWrites
         EMPTY = {}.compare_by_identity.freeze
 
-        LOCAL_WRITE_NODES = [
-          Prism::LocalVariableWriteNode, Prism::LocalVariableOrWriteNode, Prism::LocalVariableAndWriteNode,
-          Prism::LocalVariableOperatorWriteNode, Prism::LocalVariableTargetNode
-        ].freeze
-        private_constant :LOCAL_WRITE_NODES
-
         SCOPE_BARRIERS = [Prism::DefNode, Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode].freeze
         private_constant :SCOPE_BARRIERS
 
@@ -76,7 +70,11 @@ module Rigor
           return unless node.is_a?(Prism::Node)
           return if SCOPE_BARRIERS.any? { |klass| node.is_a?(klass) }
 
-          written << node.name if LOCAL_WRITE_NODES.any? { |klass| node.is_a?(klass) }
+          case node
+          when Prism::LocalVariableWriteNode, Prism::LocalVariableOrWriteNode, Prism::LocalVariableAndWriteNode,
+               Prism::LocalVariableOperatorWriteNode, Prism::LocalVariableTargetNode
+            written << node.name
+          end
           writes << node if !in_block && local_read_write?(node)
           inner = in_block || BLOCK_NODES.any? { |klass| node.is_a?(klass) }
           node.rigor_each_child { |child| scan(child, written, writes, in_block: inner) }

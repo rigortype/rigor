@@ -313,4 +313,40 @@ RSpec.describe "rigor-typelizer integration" do
       expect(added).to be_empty
     end
   end
+
+  # The serializer scan watches each file of the project's `paths:` by its own name. A single-file entry whose name holds
+  # glob metacharacters must be watched as that file (fails without the `RootedGlob.literal` escape on the basename).
+  describe "the serializer watch with a bracketed file name" do
+    it "watches the single-file path the bracketed name names" do
+      Dir.mktmpdir do |raw_project|
+        Dir.mktmpdir do |cache_root|
+          dir = File.realpath(raw_project)
+          Dir.chdir(dir) do
+            serializer = File.join(dir, "serializer[1].rb")
+            File.write(serializer, "class Thing; end\n")
+            Rigor::Plugin.unregister!
+            watched = []
+            allow(Rigor::Cache::Descriptor::GlobEntry).to receive(:compute).and_wrap_original do |original, **kwargs|
+              watched << kwargs
+              original.call(**kwargs)
+            end
+            configuration = Rigor::Configuration.new(
+              Rigor::Configuration::DEFAULTS.merge("paths" => [serializer], "plugins" => ["rigor-typelizer"])
+            )
+            runner = Rigor::Analysis::Runner.new(
+              configuration: configuration, cache_store: Rigor::Cache::Store.new(root: cache_root),
+              plugin_requirer: lambda { |_name|
+                Rigor::Plugin.register(plugin_class)
+                true
+              }
+            )
+            guarded_run(runner)
+
+            covers = watched.map { |kwargs| Rigor::RootedGlob.glob(kwargs[:root], kwargs[:pattern]) }
+            expect(covers).to include([serializer])
+          end
+        end
+      end
+    end
+  end
 end

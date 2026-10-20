@@ -574,4 +574,44 @@ RSpec.describe "plugins/rigor-sidekiq" do
       expect(rows.first.message).to include("failed to discover workers")
     end
   end
+
+  # The schedule is watched as `[".", *schedule_paths]`. A configured path holding glob metacharacters must be watched
+  # as that literal file, so the watch entry must cover it (fails without the `RootedGlob.literal` escape).
+  describe "the schedule watch with a bracketed path" do
+    it "watches the schedule file the bracketed path names" do
+      Dir.mktmpdir do |raw_project|
+        Dir.mktmpdir do |cache_root|
+          dir = File.realpath(raw_project)
+          Dir.chdir(dir) do
+            FileUtils.mkdir_p("config")
+            File.write("config/sidekiq[1].yml", "nightly:\n  class: WelcomeEmailWorker\n")
+            File.write("demo.rb", "x = 1\n")
+            Rigor::Plugin.unregister!
+            watched = []
+            allow(Rigor::Cache::Descriptor::GlobEntry).to receive(:compute).and_wrap_original do |original, **kwargs|
+              watched << kwargs
+              original.call(**kwargs)
+            end
+            configuration = Rigor::Configuration.new(
+              Rigor::Configuration::DEFAULTS.merge(
+                "paths" => ["demo.rb"],
+                "plugins" => [{ "gem" => "rigor-sidekiq", "config" => { "schedule_paths" => ["config/sidekiq[1].yml"] } }]
+              )
+            )
+            runner = Rigor::Analysis::Runner.new(
+              configuration: configuration, cache_store: Rigor::Cache::Store.new(root: cache_root),
+              plugin_requirer: lambda { |_name|
+                Rigor::Plugin.register(Rigor::Plugin::Sidekiq)
+                true
+              }
+            )
+            guarded_run(runner)
+
+            covers = watched.map { |kwargs| Rigor::RootedGlob.glob(kwargs[:root], kwargs[:pattern]) }
+            expect(covers).to include([File.join(dir, "config/sidekiq[1].yml")])
+          end
+        end
+      end
+    end
+  end
 end

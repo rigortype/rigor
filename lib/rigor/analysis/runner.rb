@@ -1821,7 +1821,7 @@ module Rigor
 
         @project_discovery_done = true
         # Issue #684 — the cross-file index spans the PROJECT even when the analysis targets a file list.
-        expansion = @project_discovery_expansion || once_each(expansion)
+        expansion = buffer_spelled(@project_discovery_expansion || once_each(expansion))
         if @collect_seed_bundles
           # ADR-85 WD2 — rebuild discovery from the prior run's bundles (re-walking only changed files) and
           # capture the refreshed bundle set for the session to persist.
@@ -1853,7 +1853,13 @@ module Rigor
       # on what else was on the command line.
       #
       # Excluded, each because its expansion is already the one it means: the LSP `prebuilt:` path (which
-      # seeds discovery from a snapshot), editor `buffer:` mode, and `run_source`'s in-memory single file.
+      # seeds discovery from a snapshot, ADR-124) and `run_source`'s in-memory single file.
+      #
+      # Issue #2165 — editor `buffer:` mode (`rigor check --tmp-file T --instead-of F F`) widens like a plain run.
+      # It was excluded on the reading that its expansion is already the one it means, but an editor passes the
+      # buffer's own path, so discovery saw that file alone: every class another file declares read as an external
+      # ancestor, and the run reported what `rigor check F` does not. The discovery pre-pass reads through the
+      # binding, so the buffer's file is walked from the buffer's bytes.
       #
       # Issue #1583 — ADR-46's `analyze_only` subset mode widens like a full run. It was excluded on the
       # reading that it "already passes the full expansion", which holds only when the incremental session
@@ -1887,6 +1893,27 @@ module Rigor
         unique.size == files.size ? expansion : expansion.merge(files: unique)
       end
 
+      # Issue #2165 — the discovery set with the buffer's file under the binding's own spelling, once. The binding
+      # substitutes bytes only for a path spelled exactly as its logical path, while the file can reach discovery as
+      # the argument's spelling, the configured one, or through a symlink; each of those read it from disk, and a
+      # second spelling made it a second declarer. Every member whose real path is the buffer's file is replaced by
+      # the logical path, and the duplicates that leaves are dropped (`IncrementalSession#rebind_buffer` is option
+      # B's counterpart).
+      def buffer_spelled(expansion)
+        return expansion if @buffer.nil?
+
+        target = real_path_of(@buffer.logical_path)
+        files = expansion.fetch(:files)
+        spelled = files.map { |path| real_path_of(path) == target ? @buffer.logical_path : path }.uniq
+        spelled == files ? expansion : expansion.merge(files: spelled)
+      end
+
+      def real_path_of(path)
+        File.realpath(path)
+      rescue SystemCallError
+        File.absolute_path(path)
+      end
+
       # Each file once, in project order, under the spelling the analysis uses when it is analysed.
       def discovery_files(project_files, analysed_files)
         spelling = analysed_files.to_h { |path| [File.absolute_path(path), path] }
@@ -1898,7 +1925,7 @@ module Rigor
       end
 
       def widen_discovery_to_project?(paths)
-        @prebuilt.nil? && @buffer.nil? && @in_memory_sources.nil? && paths != @configuration.paths
+        @prebuilt.nil? && @in_memory_sources.nil? && paths != @configuration.paths
       end
 
       # ADR-46 — the dependency-recording and subset-analysis modes read the discovery tables OUTSIDE the

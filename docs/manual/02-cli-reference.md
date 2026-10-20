@@ -60,7 +60,9 @@ that want the stricter reading.
 ### Editor mode scope
 
 `--tmp-file` / `--instead-of` on their own analyse **only** the
-buffer's file: fast, and blind to what the unsaved edit does to the
+buffer's file. It still reads the rest of the project's declarations
+(the classes and methods other files define), as `rigor check FILE`
+does, but it reports nothing about what the unsaved edit does to the
 rest of the project.
 
 Adding `--incremental` analyses the **whole project with the buffer

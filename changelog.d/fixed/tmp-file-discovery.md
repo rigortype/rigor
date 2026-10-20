@@ -1,0 +1,1 @@
+- **[editor]** `rigor check --tmp-file T --instead-of F F` now sees the classes and methods other project files declare, as `rigor check F` does, instead of reporting errors such as a `call.undefined-method` after a call to an inherited method. ([#2188](https://github.com/rigortype/rigor/pull/2188))

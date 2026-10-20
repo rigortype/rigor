@@ -2061,7 +2061,9 @@ module Rigor
         return unless LOOKUP_IVAR_WRITES.any? { |klass| node.is_a?(klass) }
 
         scope = scope_index[node.value] || scope_index[node]
-        return if scope.nil? || !Inference::DefReturnTyper.optimistic_value?(node.value, scope)
+        return if scope.nil? || !Inference::DefReturnTyper.optimistic_value?(
+          node.value, scope, Inference::DefReturnTyper::LookupContext.new(scope_index, {}.compare_by_identity)
+        )
 
         @lookup_ivars << [prefix.join("::"), node.name]
       end

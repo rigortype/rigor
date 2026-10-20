@@ -44,38 +44,132 @@ module Rigor
         last_type = safe_type_of(inner_scope, last)
         return nil if last_type.nil?
 
-        last_type = with_lookup_nil(last_type, last, inner_scope) if keep_lookup_nil
-        union_with_explicit_returns(body, last_type, scope_index, keep_lookup_nil: keep_lookup_nil)
+        lookup_context = keep_lookup_nil ? LookupContext.new(scope_index, truthy_guards(body)) : nil
+        last_type = with_lookup_nil(last_type, last, inner_scope, lookup_context) if lookup_context
+        union_with_explicit_returns(body, last_type, scope_index, lookup_context: lookup_context)
       rescue StandardError
         nil
       end
 
-      def with_lookup_nil(type, node, scope)
-        optimistic_value?(node, scope) ? Type::Combinator.union(type, Type::Combinator.constant_of(nil)) : type
+      # What {#optimistic_value?} reads beside a node's scope: the engine's per-node scopes, and for each lookup
+      # under a guard the source of the guarding predicates ({#truthy_guards}).
+      LookupContext = Data.define(:scope_index, :guards)
+
+      def with_lookup_nil(type, node, scope, context = nil)
+        return type unless optimistic_value?(node, scope, context)
+
+        Type::Combinator.union(type, Type::Combinator.constant_of(nil))
       end
 
       # Whether `node`'s value can be the `nil` an optimistic lookup's miss returns: the lookup itself (a call
       # the dispatcher marked, or `recv&.m` over one), a local or ivar bound to one, or a branch or operand that
-      # hands its value on. `a || b` hands on `b` only, since `a` is returned only when truthy, so `h[k] || 0`
-      # stays nil-free; `a && b` likewise hands on `b`. A call ON the lookup (`h[k].to_s`) is a different value.
-      def optimistic_value?(node, scope)
+      # hands its value on. `a && b` hands on either operand (a falsy `a`, a missed lookup's `nil` included, is
+      # the result); `a || b` hands on `b` only, since `a` is returned only when truthy, so `h[k] || 0` stays
+      # nil-free. `x ||= v` and `x &&= v` hand on `v` and, for `&&=`, the binding. A call ON the lookup
+      # (`h[k].to_s`) is a different value.
+      #
+      # Each child is read under the scope the engine recorded for it (`scope_index`), so a branch a guard narrows
+      # (`v ? v : "d"`, `return "z" unless v`) reads the binding the narrowing left, not the enclosing one.
+      def optimistic_value?(node, scope, context = nil)
+        scope = context&.scope_index&.[](node) || scope
         case node
-        when Prism::CallNode then optimistic_call?(node, scope)
+        when Prism::CallNode then optimistic_call?(node, scope, context)
         when Prism::LocalVariableReadNode then !scope.optimistic_local(node.name).nil?
         when Prism::InstanceVariableReadNode then !scope.optimistic_ivar(node.name).nil?
-        when Prism::LocalVariableWriteNode, Prism::InstanceVariableWriteNode then optimistic_value?(node.value, scope)
-        when Prism::AndNode, Prism::OrNode then optimistic_value?(node.right, scope)
-        else optimistic_branch?(node, scope)
+        when Prism::AndNode then [node.left, node.right].any? { optimistic_value?(it, scope, context) }
+        when Prism::OrNode then optimistic_value?(node.right, scope, context)
+        else optimistic_write?(node, scope, context) || optimistic_branch?(node, scope, context)
         end
       end
 
-      def optimistic_call?(node, scope)
-        !scope.optimistic_origins[node].nil? || (node.safe_navigation? && optimistic_value?(node.receiver, scope))
+      def optimistic_call?(node, scope, context)
+        if scope.optimistic_origins[node]
+          return false if guarded_lookup?(node, context) || non_empty_end?(node, scope)
+
+          return true
+        end
+        node.safe_navigation? && optimistic_value?(node.receiver, scope, context)
+      end
+
+      # `return h[k] if h[k]`, `h[k] ? h[k] : d`: the same lookup, read again under a predicate that just found it
+      # truthy. Only a lookup whose receiver and arguments are plain reads or literals counts, so the second read
+      # sees what the first did.
+      GUARDABLE_LOOKUPS = %i[[] first last dig].freeze
+      private_constant :GUARDABLE_LOOKUPS
+
+      def guarded_lookup?(node, context)
+        return false if context.nil? || !GUARDABLE_LOOKUPS.include?(node.name)
+        return false unless [node.receiver, *node.arguments&.arguments].all? { stable_operand?(it) }
+
+        context.guards.fetch(node, EMPTY_GUARDS).include?(node.slice)
+      end
+
+      EMPTY_GUARDS = [].freeze
+      private_constant :EMPTY_GUARDS
+
+      def stable_operand?(node)
+        case node
+        when Prism::LocalVariableReadNode, Prism::InstanceVariableReadNode, Prism::SymbolNode, Prism::StringNode,
+             Prism::IntegerNode, Prism::SelfNode, Prism::ConstantReadNode then true
+        else false
+        end
+      end
+
+      # `a.first` / `a.last` on a receiver the engine has narrowed to a non-empty array (`a.empty? ? d : a.first`)
+      # cannot miss.
+      def non_empty_end?(node, scope)
+        return false unless %i[first last].include?(node.name) && node.arguments.nil? && node.receiver
+
+        receiver = scope.type_of(node.receiver)
+        receiver.is_a?(Type::Difference) && receiver.removed == Type::Combinator.tuple_of
+      rescue StandardError
+        false
+      end
+
+      def optimistic_write?(node, scope, context)
+        case node
+        when Prism::LocalVariableWriteNode, Prism::InstanceVariableWriteNode,
+             Prism::LocalVariableOrWriteNode, Prism::InstanceVariableOrWriteNode
+          optimistic_value?(node.value, scope, context)
+        when Prism::LocalVariableAndWriteNode
+          !scope.optimistic_local(node.name).nil? || optimistic_value?(node.value, scope, context)
+        when Prism::InstanceVariableAndWriteNode
+          !scope.optimistic_ivar(node.name).nil? || optimistic_value?(node.value, scope, context)
+        else false
+        end
       end
 
       # The value-carrying children of a statement list or a conditional: any of them can be the value returned.
-      def optimistic_branch?(node, scope)
-        value_branches(node).any? { |branch| !branch.nil? && optimistic_value?(branch, scope) }
+      def optimistic_branch?(node, scope, context)
+        value_branches(node).any? { |branch| !branch.nil? && optimistic_value?(branch, scope, context) }
+      end
+
+      # Each lookup call under the truthy side of an `if` / ternary (the body of an `if`, the `else` of an
+      # `unless`) mapped to the source of every predicate guarding it, for {#guarded_lookup?}.
+      def truthy_guards(body)
+        guards = {}.compare_by_identity
+        collect_truthy_guards(body, [], guards)
+        guards
+      end
+
+      def collect_truthy_guards(node, active, guards)
+        return unless node.is_a?(Prism::Node)
+
+        guards[node] = active if node.is_a?(Prism::CallNode) && !active.empty?
+        truthy, rest = truthy_split(node)
+        if truthy
+          collect_truthy_guards(truthy, active + [node.predicate.slice], guards)
+          rest.each { collect_truthy_guards(it, active, guards) }
+        else
+          node.rigor_each_child { collect_truthy_guards(it, active, guards) }
+        end
+      end
+
+      def truthy_split(node)
+        case node
+        when Prism::IfNode then [node.statements, [node.predicate, node.subsequent]]
+        when Prism::UnlessNode then [node.else_clause, [node.predicate, node.statements]]
+        end
       end
 
       def value_branches(node)
@@ -98,27 +192,27 @@ module Rigor
         end
       end
 
-      def union_with_explicit_returns(body, last_type, scope_index, keep_lookup_nil: false)
+      def union_with_explicit_returns(body, last_type, scope_index, lookup_context: nil)
         return_types = []
-        collect_return_types(body, scope_index, return_types, keep_lookup_nil: keep_lookup_nil)
+        collect_return_types(body, scope_index, return_types, lookup_context: lookup_context)
         return last_type if return_types.empty?
 
         Type::Combinator.union(last_type, *return_types)
       end
 
-      def collect_return_types(node, scope_index, out, keep_lookup_nil: false)
+      def collect_return_types(node, scope_index, out, lookup_context: nil)
         return unless node.is_a?(Prism::Node)
         return if ReturnBarrier.node?(node)
 
-        type_return_node(node, scope_index, out, keep_lookup_nil: keep_lookup_nil) if node.is_a?(Prism::ReturnNode)
+        type_return_node(node, scope_index, out, lookup_context: lookup_context) if node.is_a?(Prism::ReturnNode)
         # A barrier call's receiver and arguments still run in the method; only its block is cut off.
         barrier_block = node.block if node.is_a?(Prism::CallNode) && ReturnBarrier.block_call?(node)
         node.rigor_each_child do |c|
-          collect_return_types(c, scope_index, out, keep_lookup_nil: keep_lookup_nil) unless c.equal?(barrier_block)
+          collect_return_types(c, scope_index, out, lookup_context: lookup_context) unless c.equal?(barrier_block)
         end
       end
 
-      def type_return_node(return_node, scope_index, out, keep_lookup_nil: false)
+      def type_return_node(return_node, scope_index, out, lookup_context: nil)
         args = return_node.arguments&.arguments || []
         if args.empty?
           out << Type::Combinator.constant_of(nil)
@@ -134,7 +228,7 @@ module Rigor
         type = safe_type_of(scope, args.first)
         return if type.nil?
 
-        out << (keep_lookup_nil ? with_lookup_nil(type, args.first, scope) : type)
+        out << (lookup_context ? with_lookup_nil(type, args.first, scope, lookup_context) : type)
       end
 
       def safe_type_of(scope, node)

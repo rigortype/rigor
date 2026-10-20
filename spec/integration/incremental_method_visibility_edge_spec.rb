@@ -231,6 +231,14 @@ RSpec.describe "incremental edges for a source-recorded method visibility (#2134
     end
   end
 
+  # Issue #2209 — a reopening that only adds the `*` row changes no visibility entry of `two`, so only the
+  # `visibility:Es#*` key the reader files re-checks the call.
+  it "re-checks a self-extended singleton call when a reopening starts a module_function spelling it cannot read" do
+    expect_toggle(self_extended_files, before: "module Es\nend\n",
+                                       after: "module Es\n  n = :two\n  send(:module_function, n)\nend\n",
+                                       first: mismatch, second: [])
+  end
+
   # The `:both` row a `module_function def` writes (`ModuleFunctionState.deferred_module_function?`), against a
   # `private def` of the same body: the file's def, visibility entries and declared classes stay as they were.
   def extending_files

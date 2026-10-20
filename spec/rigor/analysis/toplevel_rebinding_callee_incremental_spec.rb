@@ -30,41 +30,44 @@ RSpec.describe "call.unresolved-toplevel in a rebinding callee's block — incre
   let(:yields) { "module Ext\n  def self.define = yield\nend\n" }
   let(:rebinding_other) { "class Other\n  def define(&blk) = instance_exec(&blk)\nend\n" }
 
+  # Absolute paths, read once the example has moved into its temporary directory.
+  let(:lib) { File.join(Dir.pwd, "lib") }
+  let(:config) { Rigor::Configuration.new("paths" => [lib]) }
+  let(:snapshot) { Rigor::Cache::IncrementalSnapshot.new(root: File.join(Dir.pwd, ".cache")) }
+
   around do |example|
-    Dir.mktmpdir do |tmp|
-      @lib = File.join(tmp, "lib")
-      Dir.mkdir(@lib)
-      File.write(File.join(@lib, "ext.rb"), yields)
-      File.write(File.join(@lib, "use.rb"), "Ext.define { helper }\n")
-      @config = Rigor::Configuration.new("paths" => [@lib])
-      @snapshot = Rigor::Cache::IncrementalSnapshot.new(root: File.join(tmp, ".cache"))
-      example.run
-    end
+    Dir.mktmpdir { |tmp| Dir.chdir(tmp) { example.run } }
   end
 
-  def warm = process_run(@config, [@lib], @snapshot)
+  before do
+    Dir.mkdir(lib)
+    File.write(File.join(lib, "ext.rb"), yields)
+    File.write(File.join(lib, "use.rb"), "Ext.define { helper }\n")
+  end
+
+  def warm = process_run(config, [lib], snapshot)
 
   it "re-checks the caller when the callee's body starts and stops rebinding" do
-    ext = File.join(@lib, "ext.rb")
+    ext = File.join(lib, "ext.rb")
     expect(warm).to eq(fires)
 
     File.write(ext, "module Ext\n  def self.define(&blk) = module_eval(&blk)\nend\n")
-    expect(cold_run(@config)).to eq([])
+    expect(cold_run(config)).to eq([])
     expect(warm).to eq([])
 
     File.write(ext, yields)
-    expect(cold_run(@config)).to eq(fires)
+    expect(cold_run(config)).to eq(fires)
     expect(warm).to eq(fires)
   end
 
   it "re-checks the caller when another file starts or stops defining a rebinding callee of the same name" do
-    other = File.join(@lib, "other.rb")
+    other = File.join(lib, "other.rb")
     File.write(other, "class Other\nend\n")
     expect(warm).to eq(fires)
 
     # Edits of an existing file, then the file's removal.
     File.write(other, rebinding_other)
-    expect(cold_run(@config)).to eq([])
+    expect(cold_run(config)).to eq([])
     expect(warm).to eq([])
 
     File.write(other, "class Other\nend\n")
@@ -73,6 +76,22 @@ RSpec.describe "call.unresolved-toplevel in a rebinding callee's block — incre
     File.write(other, rebinding_other)
     expect(warm).to eq([])
     File.delete(other)
+    expect(warm).to eq(fires)
+  end
+
+  # Nothing else asks about `each` here (Array's RBS answers the dispatch), so only the rule's own `defines:` edge
+  # can bring this caller back.
+  it "re-checks a caller whose callee no project file defined until an edit adds a rebinding one" do
+    other = File.join(lib, "other.rb")
+    File.write(File.join(lib, "use.rb"), "[1].each { helper }\n")
+    File.write(other, "class Other\nend\n")
+    expect(warm).to eq(fires)
+
+    File.write(other, "class Other\n  def each(&blk) = instance_exec(&blk)\nend\n")
+    expect(cold_run(config)).to eq([])
+    expect(warm).to eq([])
+
+    File.write(other, "class Other\nend\n")
     expect(warm).to eq(fires)
   end
 end

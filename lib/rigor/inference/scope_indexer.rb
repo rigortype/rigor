@@ -11629,7 +11629,8 @@ module Rigor
         Prism::IfNode => :predicate, Prism::UnlessNode => :predicate,
         Prism::WhileNode => :predicate, Prism::UntilNode => :predicate,
         Prism::LocalVariableAndWriteNode => :value, Prism::InstanceVariableAndWriteNode => :value,
-        Prism::ClassVariableAndWriteNode => :value, Prism::GlobalVariableAndWriteNode => :value
+        Prism::ClassVariableAndWriteNode => :value, Prism::GlobalVariableAndWriteNode => :value,
+        Prism::CaseNode => :predicate
       }.freeze
       private_constant :UNENTERED_FLOW_ENTRY
 
@@ -11648,8 +11649,9 @@ module Rigor
         entry = UNENTERED_FLOW_ENTRY[node.class]
         return if entry.nil?
 
-        # An entered construct is already recorded; skipping it is a performance guard, not a behaviour.
-        part = node.public_send(entry)
+        # An entered construct is already recorded; skipping it is a performance guard, not a behaviour. A `case`
+        # without a subject records its first `when` test first.
+        part = node.public_send(entry) || (node.conditions.first&.conditions&.first if node.is_a?(Prism::CaseNode))
         return if part.nil? || table.key?(part)
 
         evaluate = Thread.current[UNENTERED_EVALUATOR_KEY]
@@ -11964,7 +11966,8 @@ module Rigor
       # A test that calls a method may rebind an instance-variable or global subject before the body reads it
       # (`when String then 1 when reset! then @x.upcase`, where `reset!` writes `@x`), and the walk cannot tell. From
       # the first such test on, the subject reads `Dynamic[top]` on both edges ({#forget_called_subject}). The
-      # evaluator keeps the narrowing there (a separate defect); the walk declines it rather than add a report.
+      # evaluator forgets a global subject there too (issue #2211). A `case` / `when` the evaluator did not enter is evaluated
+      # ({#evaluate_unentered_flow}); this walk handles only a clause that evaluation does not visit.
       def propagate_subject_case(node, table, current_scope)
         subject = node.predicate
         propagate(subject, table, current_scope)

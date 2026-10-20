@@ -1312,6 +1312,31 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  # Issue #2211 — a value-position `case` reads as its statement form, and a calling `when` test forgets a global.
+  describe "fixtures/case_when_value_position.rb — a value-position case and a calling when test" do
+    let(:harness) { harness_for("case_when_value_position") }
+
+    it "types each arm under the narrowing and writes its statement form reads" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches.map { |d| "#{d.line}: #{d.message}" }).to be_empty
+    end
+
+    it "reports a possible nil receiver only past the case" do
+      nil_receivers = harness.diagnostics.select { |d| d.rule == "call.possible-nil-receiver" }
+      expect(nil_receivers.map(&:line)).to eq(marked_lines(harness, "# GENUINE-NIL"))
+    end
+
+    it "reports an undefined method only where Ruby raises" do
+      undefined = harness.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(undefined.map(&:line)).to eq(marked_lines(harness, "# GENUINE-UNDEFINED"))
+    end
+
+    it "reports no unresolved constant or method in a class-creating arm" do
+      unresolved = harness.diagnostics.select { |d| d.rule.start_with?("constant.", "call.unresolved") }
+      expect(unresolved.map { |d| "#{d.line}: #{d.rule}" }).to be_empty
+    end
+  end
+
   # Issue #2196 — a core superclass's method is not answered from `Kernel`'s private method of the same name.
   describe "fixtures/core_subclass_kernel_shadow.rb — a core subclass does not read Kernel#select" do
     let(:harness) { harness_for("core_subclass_kernel_shadow") }

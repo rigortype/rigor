@@ -524,7 +524,7 @@ module Rigor
 
         # Issue #1429 — a global or constant subject (`case $stdout when StringIO`) narrows as a local does, and so
         # does an instance variable (#1446).
-        slot = receiver_slot(subject, scope, kinds: CASE_SUBJECT_KINDS)
+        slot = case_subject_slot(subject, scope)
         return [body_scope, scope] if slot.nil?
 
         truthy_type, falsey_type = case_when_types(scope, slot.current, conditions)
@@ -537,6 +537,25 @@ module Rigor
 
       CASE_SUBJECT_KINDS = %i[local ivar global constant].freeze
       private_constant :CASE_SUBJECT_KINDS
+
+      # The slot a `case` subject narrows. Issue #2211 — a subject that writes a local or instance variable
+      # (`case (x = v)`, `case x = v`) tests the value it stores, which the variable holds in every clause, so the
+      # clauses narrow the variable as they narrow a bare read of it: `case (x = s ? String(s) : nil) when String then
+      # x.upcase end` reads `x` as `String`. A single-statement `(…)` is unwrapped.
+      def case_subject_slot(subject, scope)
+        while subject.is_a?(Prism::ParenthesesNode) && subject.body.is_a?(Prism::StatementsNode) &&
+              subject.body.body.size == 1
+          subject = subject.body.body.first
+        end
+        case subject
+        when Prism::LocalVariableWriteNode
+          variable_slot(:local, subject.name, scope.local(subject.name), CASE_SUBJECT_KINDS)
+        when Prism::InstanceVariableWriteNode
+          variable_slot(:ivar, subject.name, scope.ivar(subject.name), CASE_SUBJECT_KINDS)
+        else receiver_slot(subject, scope, kinds: CASE_SUBJECT_KINDS)
+        end
+      end
+      private_class_method :case_subject_slot
 
       # Returns `[body_scope, falsey_scope]` for one clause of a `case` with a subject: a `when` clause narrows
       # through {.case_when_scopes}, and an `in` clause only for a bare class pattern ({.bare_class_pattern_node}),

@@ -1461,7 +1461,10 @@ module Rigor
           after
         end
         body_entry = reduce_scopes_with_nil_injection(test_exits)
-        return [Narrowing.apply_when_regex_globals(conditions, body_entry), after, true] if rebound
+        if rebound
+          body_entry, after = [body_entry, after].map { |s| forget_called_global_subject(subject, s) }
+          return [Narrowing.apply_when_regex_globals(conditions, body_entry), after, true]
+        end
 
         [Narrowing.case_when_scopes(subject, conditions, body_entry).first,
          Narrowing.case_when_scopes(subject, conditions, after).last, false]
@@ -1519,10 +1522,24 @@ module Rigor
           InterveningIvarReset.may_write?(condition, name, before, run_lambdas: true)
         when Prism::LocalVariableReadNode
           false
+        when Prism::GlobalVariableReadNode
+          when_test_runs_code?(condition)
         else
           body = when_lambda_body(condition)
           GuardRebinding.may_rebind?(condition, before) || (!body.nil? && GuardRebinding.may_rebind?(body, before))
         end
+      end
+
+      # Issue #2211 — a global subject from a `when` test that runs code on: any method may assign a global, and the
+      # statement walk keeps a global's binding past a call, so the clause bodies and the later clauses read it as
+      # `Dynamic[top]`, as the scope index's walk of a value-position `case` reads it
+      # (`ScopeIndexer#forget_called_subject`). `$g = nil; case $g when String then 1 when reset! then 2 else $g + 1
+      # end`, with `reset!` assigning `$g`, is `6` in Ruby. An instance variable a test's call may write is widened by
+      # {#run_when_test} instead; any other subject is left as is.
+      def forget_called_global_subject(subject, scope)
+        return scope unless subject.is_a?(Prism::GlobalVariableReadNode)
+
+        scope.with_global(subject.name, Type::Combinator.untyped)
       end
 
       def case_subject_name(subject)

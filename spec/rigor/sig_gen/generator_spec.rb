@@ -404,9 +404,12 @@ RSpec.describe Rigor::SigGen::Generator do
         "class K\n  attr_reader :x\n  def x = 1\n  def initialize = (@x = \"s\")\nend\n",
         "K", ["def x: () -> 1"], -> { it.new.x }, 1
       ],
-      "an attr_accessor then a def of the reader" => [
-        "class K\n  attr_accessor :x\n  def x = 1\n  def initialize = (@x = \"s\")\nend\n",
-        "K", ["def x: () -> 1"], -> { it.new.x }, 1
+      "a def passed to public after a def (one this reading cannot rank, so nothing is written)" => [
+        "class K\n  def x = 1\n  public def x = \"s\"\nend\n", "K", [], -> { it.new.x }, "s"
+      ],
+      "an attr_reader of two names, one redefined" => [
+        "class K\n  attr_reader :x, :y\n  def x = 1\n  def initialize = (@x = \"s\"; @y = :t)\nend\n",
+        "K", ["def x: () -> 1", "def y: () -> :t"], -> { [it.new.x, it.new.y] }, [1, :t]
       ],
       "a module function redefined public after a reset" => [
         "module M\n  module_function\n  def label = 1\n  public\n  def label = \"x\"\nend\n",
@@ -431,6 +434,51 @@ RSpec.describe Rigor::SigGen::Generator do
         expect(rbs).to match_array(expected)
         keyword = source.start_with?("module") ? "module" : "class"
         expect(rbs_definition_error("#{keyword} #{name}\n#{rbs.map { |l| "  #{l}\n" }.join}end\n", name)).to be_nil
+      end
+    end
+
+    # A definer that may not run cannot be ranked last: whether `x` is the first body or the second depends on a
+    # condition, a lambda call or a reset sig-gen cannot decide, so nothing is written for the slot. The witness
+    # runs the class with the condition true and false and gets a different answer each time.
+    {
+      "an if/else redefinition" => ["class K\n  def x = 1\n  if COND then def x = 1 else def x = \"s\" end\nend\n", :x],
+      "a modifier-if redefinition" => ["class K\n  def x = 1\n  def x = \"s\" if COND\nend\n", :x],
+      "a case-arm redefinition" => ["class K\n  def x = 1\n  case COND when true then def x = \"s\" end\nend\n", :x],
+      "a redefinition in a lambda" => ["class K\n  def x = 1\n  L = -> { def x = \"s\" }\n  L.call if COND\nend\n", :x],
+      "a guarded polyfill" => [
+        "class K\n  def x = 1\n  remove_method(:x) if COND\n  def x = \"s\" unless method_defined?(:x)\nend\n", :x
+      ]
+    }.each do |label, (template, method)|
+      it "writes nothing for a slot #{label} contests" do
+        answers = [true, false].map do |cond|
+          Module.new.tap { it.module_eval(template.gsub("COND", cond.to_s)) }.const_get(:K).new.public_send(method)
+        end
+
+        expect(answers.uniq.size).to eq(2)
+        expect(written(template.gsub("COND", "rand > 0.5"), "K")).to be_empty
+      end
+    end
+
+    it "writes nothing for a module function an uncertain reset may have redefined" do
+      template = "module M\n  module_function\n  def j = 1\n  public if COND\n  def j = \"x\"\nend\n"
+      answers = [true, false].map do |cond|
+        Module.new.tap { it.module_eval(template.gsub("COND", cond.to_s)) }.const_get(:M)
+      end
+
+      expect(answers.map(&:j)).to eq([1, "x"])
+      expect(written(template.gsub("COND", "rand > 0.5"), "M")).to be_empty
+    end
+
+    # A `Data.define` / `Struct.new` member is defined before the body that redefines it, so the `def` is kept and the
+    # member's reader is not written beside it.
+    {
+      "a Data block" => ["D = Data.define(:a) do\n  def a = 1\nend\n", "D", -> { it.new(a: 5).a }],
+      "a Struct block" => ["S = Struct.new(:a) do\n  def a = 1\nend\n", "S", -> { it.new(5).a }],
+      "a Struct subclass" => ["class P < Struct.new(:a)\n  def a = 1\nend\n", "P", -> { it.new(5).a }]
+    }.each do |label, (source, name, witness)|
+      it "writes a member a #{label} redefines once" do
+        expect(witness.call(Module.new.tap { it.module_eval(source) }.const_get(name))).to eq(1)
+        expect(written(source, name).grep(/\Adef a:/)).to eq(["def a: () -> 1"])
       end
     end
 

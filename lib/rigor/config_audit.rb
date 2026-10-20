@@ -173,20 +173,25 @@ module Rigor
     # not a qualified plugin id (a plugin's bare rule included), is inert. A reserved run-level row is the home of
     # this map, so naming one is never flagged; `all` is not a family wildcard here, so it is.
     def self.override_key_warning(key, plugin_ids)
-      reason = override_key_problem(key, plugin_ids)
+      reason = legacy_alias_problem(key) || override_key_problem(key, plugin_ids)
       return nil if reason.nil?
 
       Warning.new(kind: :severity_override, message: "severity_overrides: #{key.inspect} #{reason}",
                   fields: { "token" => key })
     end
 
+    # #2005 — `disable:` expands a legacy alias to its canonical id, but the severity resolver matches canonical ids
+    # only, so an alias key reaches no row. Name the canonical id rather than accept the key.
+    def self.legacy_alias_problem(key)
+      canonical = Analysis::CheckRules::LEGACY_RULE_ALIASES[key]
+      return nil if canonical.nil?
+
+      "is a legacy alias of `#{canonical}`; the override has no effect, so write `#{canonical}`"
+    end
+    private_class_method :legacy_alias_problem
+
     def self.override_key_problem(key, plugin_ids)
       return "is not a recognized rule id; the override has no effect" if key == "all"
-      # #2005 — `disable:` expands a legacy alias to its canonical id, but the severity resolver matches canonical ids
-      # only, so an alias key reaches no row. Name the canonical id rather than accept the key.
-      if (canonical = Analysis::CheckRules::LEGACY_RULE_ALIASES[key])
-        return "is a legacy alias of `#{canonical}`; the override has no effect, so write `#{canonical}`"
-      end
       return nil unless Array(Analysis::CheckRules.resolve_rule_token(key)).empty?
 
       if key.start_with?(Analysis::CheckRules::PLUGIN_FAMILY_PREFIX)

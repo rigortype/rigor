@@ -404,6 +404,14 @@ RSpec.describe Rigor::SigGen::Generator do
         "class K\n  attr_reader :x\n  def x = 1\n  def initialize = (@x = \"s\")\nend\n",
         "K", ["def x: () -> 1"], -> { it.new.x }, 1
       ],
+      "a def in a begin body after a def" => [
+        "class K\n  def x = 1\n  begin\n    def x = \"s\"\n  rescue StandardError\n  end\nend\n",
+        "K", ['def x: () -> "s"'], -> { it.new.x }, "s"
+      ],
+      "a def in an ensure clause after a def" => [
+        "class K\n  def x = 1\n  begin\n    nil\n  ensure\n    def x = \"s\"\n  end\nend\n",
+        "K", ['def x: () -> "s"'], -> { it.new.x }, "s"
+      ],
       "a def passed to public after a def (one this reading cannot rank, so nothing is written)" => [
         "class K\n  def x = 1\n  public def x = \"s\"\nend\n", "K", [], -> { it.new.x }, "s"
       ],
@@ -443,6 +451,9 @@ RSpec.describe Rigor::SigGen::Generator do
     {
       "an if/else redefinition" => ["class K\n  def x = 1\n  if COND then def x = 1 else def x = \"s\" end\nend\n", :x],
       "a modifier-if redefinition" => ["class K\n  def x = 1\n  def x = \"s\" if COND\nend\n", :x],
+      "a conditional attr_reader" => [
+        "class K\n  def x = 1\n  attr_reader :x if COND\n  def initialize = (@x = \"s\")\nend\n", :x
+      ],
       "a case-arm redefinition" => ["class K\n  def x = 1\n  case COND when true then def x = \"s\" end\nend\n", :x],
       "a redefinition in a lambda" => ["class K\n  def x = 1\n  L = -> { def x = \"s\" }\n  L.call if COND\nend\n", :x],
       "a guarded polyfill" => [

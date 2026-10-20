@@ -840,7 +840,11 @@ module Rigor
         certain_body = @certain_bodies.include?(stmts_node)
         Inference::ModuleFunctionState.each_sig_gen_statement(stmts_node.body,
                                                               module_function_active) do |stmt, active|
-          @certain_definers << stmt if certain_body
+          if certain_body
+            @certain_definers << stmt
+            # A `begin … end` statement's body (and `ensure`) runs whenever the statement does.
+            mark_certain_body(stmt) if stmt.is_a?(Prism::BeginNode)
+          end
           walk_defs(stmt, prefix, in_singleton_class, active, out)
         end
       end

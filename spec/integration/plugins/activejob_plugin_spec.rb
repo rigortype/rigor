@@ -341,7 +341,9 @@ RSpec.describe "plugins/rigor-activejob" do
       end
     end
 
-    it "publishes the edited schedule's roots from a warm cache, as a cold run does (regression guard: passes without the watch fix, because the schedule read records the file)" do
+    # Regression guard: this passes without the watch fix too, because the schedule read records the file in the
+    # descriptor, so the warm run's stale check still catches the edit. It pins the behaviour the fix must keep.
+    it "publishes the edited schedule's roots from a warm cache, as a cold run does (regression guard)" do
       Dir.mktmpdir do |raw_project|
         Dir.chdir(File.realpath(raw_project)) do
           DEFAULT_JOBS.each do |path, source|

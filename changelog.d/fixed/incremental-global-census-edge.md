@@ -1,0 +1,1 @@
+- **[engine]** `rigor check --incremental` now reports a `global.write-type-mismatch` write again when another file stops defining what silenced it, such as a `write` method in any spelling, an alias of the variable or a top-level mixin, instead of serving the previous silent verdict. ([#2205](https://github.com/rigortype/rigor/pull/2205))

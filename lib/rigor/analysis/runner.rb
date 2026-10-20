@@ -1853,7 +1853,13 @@ module Rigor
       # on what else was on the command line.
       #
       # Excluded, each because its expansion is already the one it means: the LSP `prebuilt:` path (which
-      # seeds discovery from a snapshot), editor `buffer:` mode, and `run_source`'s in-memory single file.
+      # seeds discovery from a snapshot, ADR-124) and `run_source`'s in-memory single file.
+      #
+      # Issue #2165 — editor `buffer:` mode (`rigor check --tmp-file T --instead-of F F`) widens like a plain run.
+      # It was excluded on the reading that its expansion is already the one it means, but an editor passes the
+      # buffer's own path, so discovery saw that file alone: every class another file declares read as an external
+      # ancestor, and the run reported what `rigor check F` does not. The discovery pre-pass reads through the
+      # binding, so the buffer's file is walked from the buffer's bytes.
       #
       # Issue #1583 — ADR-46's `analyze_only` subset mode widens like a full run. It was excluded on the
       # reading that it "already passes the full expansion", which holds only when the incremental session
@@ -1898,7 +1904,7 @@ module Rigor
       end
 
       def widen_discovery_to_project?(paths)
-        @prebuilt.nil? && @buffer.nil? && @in_memory_sources.nil? && paths != @configuration.paths
+        @prebuilt.nil? && @in_memory_sources.nil? && paths != @configuration.paths
       end
 
       # ADR-46 — the dependency-recording and subset-analysis modes read the discovery tables OUTSIDE the

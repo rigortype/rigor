@@ -2490,6 +2490,60 @@ def case_when_string_or_integer(flag, raw)
   end
 end
 
+# Issue #2002 — `Regexp#===` converts a subject that defines `to_str`, so the match edge keeps such a member whole, and
+# so it does a String subclass, an `Object` (which may be one) and a class no signature declares. Only a member that
+# cannot respond to `to_str` narrows to its String and Symbol parts. Ruby: `/\A\d+\z/ === ToStrSubject2002.new` is
+# true, `case_when_to_str_subject` returns :hit, `/\d/ === StringSubclass2002.new("1")` is true, `/\d/ === 1` and
+# `/\d/ === nil` are false.
+class ToStrSubject2002
+  def to_str = "12"
+end
+
+class StringSubclass2002 < String
+end
+
+def case_equality_to_str_subject
+  c = ToStrSubject2002.new
+  assert_type("ToStrSubject2002", c) if /\A\d+\z/ === c
+end
+
+def case_when_to_str_subject
+  c = ToStrSubject2002.new
+  case c
+  when /\A\d+\z/
+    assert_type("ToStrSubject2002", c)
+    :hit
+  end
+end
+
+def case_when_to_str_or_integer(flag)
+  c = flag ? ToStrSubject2002.new : 1
+  case c
+  when /\A\d+\z/
+    assert_type("ToStrSubject2002", c)
+  else
+    assert_type("1 | ToStrSubject2002", c)
+  end
+end
+
+def case_equality_to_str_or_nil(flag)
+  c = flag ? ToStrSubject2002.new : nil
+  assert_type("ToStrSubject2002", c) if /\A\d+\z/ === c
+end
+
+def case_equality_string_subclass_subject
+  s = StringSubclass2002.new("1")
+  assert_type("StringSubclass2002", s) if /\d/ === s
+end
+
+def case_when_object_subject
+  object = Object.new
+  case object
+  when /\d/
+    assert_type("Object", object)
+  end
+end
+
 # A String that does not match reaches the next `when`, so a `when String` after a regex arm is not dead (Ruby: 2 for
 # `when_string_after_regex("x")` and `when_string_after_regex_nilable("x")`).
 def when_string_after_regex(raw)

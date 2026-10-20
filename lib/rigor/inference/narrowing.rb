@@ -2762,10 +2762,11 @@ module Rigor
 
         # Issue #1955 — the subject on the match edge of `/re/ === x` (and of `case x when /re/`). `Regexp#===`
         # matches a String, a Symbol by its name, and an object that converts with `to_str`, and answers false for
-        # anything else. Each member narrows to its String and Symbol parts: a `String | nil` subject reads `String`, a
-        # Symbol one stays `Symbol`. The `to_str` conversion is not modelled, so a member that defines `to_str` and is
-        # neither drops out of the edge. A `Dynamic` member is left as it is, since it may be a Symbol at run time. The
-        # no-match edge keeps the entry type: a String that does not match reaches it too.
+        # anything else. A member that may respond to `to_str` is kept whole (#2002): a String and its subclasses, a
+        # class that defines `to_str`, `Object`, a class no signature declares, and `Dynamic`, which may also be a
+        # Symbol at run time. Any other member narrows to its String and Symbol parts, which are only what can match:
+        # a `String | nil` subject reads `String`, a Symbol one stays `Symbol`, an Integer one drops out. The no-match
+        # edge keeps the entry type: a String that does not match reaches it too.
         def regexp_case_equality_type(current, scope)
           members = current.is_a?(Type::Union) ? current.members : [current]
           Type::Combinator.union(*members.map { |member| regexp_case_equality_member(member, scope) })
@@ -2773,6 +2774,7 @@ module Rigor
 
         def regexp_case_equality_member(member, scope)
           return member if member.is_a?(Type::Dynamic)
+          return member unless lacks_method?(member, :to_str, scope)
 
           parts = %w[String Symbol].map do |class_name|
             narrow_class(member, class_name, exact: false, environment: scope.environment, scope: scope)

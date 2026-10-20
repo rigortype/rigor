@@ -369,6 +369,143 @@ RSpec.describe Rigor::SigGen::Generator do
     end
   end
 
+  # Ruby keeps the last definition of a name, so sig-gen writes one entry per method slot: a `def` and an
+  # `attr_reader` of the same name, or a `module_function` name redefined after a reset, gave RBS a duplicate
+  # method definition (#2008, #2023). Each example builds the written declaration with RBS's DefinitionBuilder
+  # over the core signatures, and checks the kept entry against what Ruby returns.
+  describe "#run on a name defined twice in one class (#2008, #2023)" do
+    def rbs_definition_error(source, name)
+      loader = RBS::EnvironmentLoader.new
+      env = RBS::Environment.from_loader(loader)
+      RBS::Parser.parse_signature(RBS::Buffer.new(name: "x.rbs", content: source)).then do |buffer, dirs, decls|
+        env.add_source(RBS::Source::RBS.new(buffer, dirs, decls))
+      end
+      builder = RBS::DefinitionBuilder.new(env: env.resolve_type_names)
+      type_name = RBS::TypeName.parse("::#{name}")
+      builder.build_instance(type_name)
+      builder.build_singleton(type_name)
+      nil
+    rescue RBS::BaseError => e
+      e.class
+    end
+
+    def written(source, name)
+      path = write_fixture("lib/x.rb", source)
+      candidates = generator(paths: [path]).run.select { |c| c.class_name == name && c.rbs }
+      candidates.map(&:rbs)
+    end
+
+    {
+      "a def then an attr_reader" => [
+        "class K\n  def x = 1\n  attr_reader :x\n  def initialize = (@x = \"s\")\nend\n",
+        "K", ['def x: () -> "s"'], -> { it.new.x }, "s"
+      ],
+      "an attr_reader then a def" => [
+        "class K\n  attr_reader :x\n  def x = 1\n  def initialize = (@x = \"s\")\nend\n",
+        "K", ["def x: () -> 1"], -> { it.new.x }, 1
+      ],
+      "a def in a rescue-free begin body after a def" => [
+        "class K\n  def x = 1\n  begin\n    def x = \"s\"\n  end\nend\n",
+        "K", ['def x: () -> "s"'], -> { it.new.x }, "s"
+      ],
+      "a def in an ensure clause after a def" => [
+        "class K\n  def x = 1\n  begin\n    nil\n  ensure\n    def x = \"s\"\n  end\nend\n",
+        "K", ['def x: () -> "s"'], -> { it.new.x }, "s"
+      ],
+      "a def passed to public after a def (one this reading cannot rank, so nothing is written)" => [
+        "class K\n  def x = 1\n  public def x = \"s\"\nend\n", "K", [], -> { it.new.x }, "s"
+      ],
+      "an attr_reader of two names, one redefined" => [
+        "class K\n  attr_reader :x, :y\n  def x = 1\n  def initialize = (@x = \"s\"; @y = :t)\nend\n",
+        "K", ["def x: () -> 1", "def y: () -> :t"], -> { [it.new.x, it.new.y] }, [1, :t]
+      ],
+      "a module function redefined public after a reset" => [
+        "module M\n  module_function\n  def label = 1\n  public\n  def label = \"x\"\nend\n",
+        "M", ["def self.label: () -> 1", 'def label: () -> "x"'],
+        -> { [it.label, Object.new.extend(it).label] }, [1, "x"]
+      ],
+      "a module function redefined private after a reset" => [
+        "module M\n  module_function\n  def a = 1\n  private\n  def a = \"x\"\nend\n",
+        "M", ["def self.a: () -> 1"], -> { [it.a, it.private_method_defined?(:a)] }, [1, true]
+      ],
+      "a module function redefined as a module function" => [
+        "module M\n  module_function\n  def b = 1\n  def b = \"x\"\nend\n",
+        "M", ['def self?.b: () -> "x"'], lambda(&:b), "x"
+      ]
+    }.each do |label, (source, name, expected, witness, runtime)|
+      it "writes one entry per method slot for #{label}" do
+        sandbox = Module.new
+        sandbox.module_eval(source)
+
+        expect(witness.call(sandbox.const_get(name))).to eq(runtime)
+        rbs = written(source, name)
+        expect(rbs).to match_array(expected)
+        keyword = source.start_with?("module") ? "module" : "class"
+        expect(rbs_definition_error("#{keyword} #{name}\n#{rbs.map { |l| "  #{l}\n" }.join}end\n", name)).to be_nil
+      end
+    end
+
+    # A definer that may not run cannot be ranked last: whether `x` is the first body or the second depends on a
+    # condition, a lambda call or a reset sig-gen cannot decide, so nothing is written for the slot. The witness
+    # runs the class with the condition true and false and gets a different answer each time.
+    {
+      "an if/else redefinition" => ["class K\n  def x = 1\n  if COND then def x = 1 else def x = \"s\" end\nend\n", :x],
+      "a modifier-if redefinition" => ["class K\n  def x = 1\n  def x = \"s\" if COND\nend\n", :x],
+      "a conditional attr_reader" => [
+        "class K\n  def x = 1\n  attr_reader :x if COND\n  def initialize = (@x = \"s\")\nend\n", :x
+      ],
+      "a begin with a rescue" => [
+        "class K\n  def x = 1\n  begin\n    raise LoadError if COND\n    def x = \"s\"\n  " \
+        "rescue LoadError\n  end\nend\n", :x
+      ],
+      "a class body with its own rescue" => [
+        "class K\n  def x = 1\n  raise LoadError if COND\n  def x = \"s\"\nrescue LoadError\nend\n", :x
+      ],
+      "a case-arm redefinition" => ["class K\n  def x = 1\n  case COND when true then def x = \"s\" end\nend\n", :x],
+      "a redefinition in a lambda" => ["class K\n  def x = 1\n  L = -> { def x = \"s\" }\n  L.call if COND\nend\n", :x],
+      "a guarded polyfill" => [
+        "class K\n  def x = 1\n  remove_method(:x) if COND\n  def x = \"s\" unless method_defined?(:x)\nend\n", :x
+      ]
+    }.each do |label, (template, method)|
+      it "writes nothing for a slot #{label} contests" do
+        answers = [true, false].map do |cond|
+          Module.new.tap { it.module_eval(template.gsub("COND", cond.to_s)) }.const_get(:K).new.public_send(method)
+        end
+
+        expect(answers.uniq.size).to eq(2)
+        expect(written(template.gsub("COND", "rand > 0.5"), "K")).to be_empty
+      end
+    end
+
+    it "writes nothing for a module function an uncertain reset may have redefined" do
+      template = "module M\n  module_function\n  def j = 1\n  public if COND\n  def j = \"x\"\nend\n"
+      answers = [true, false].map do |cond|
+        Module.new.tap { it.module_eval(template.gsub("COND", cond.to_s)) }.const_get(:M)
+      end
+
+      expect(answers.map(&:j)).to eq([1, "x"])
+      expect(written(template.gsub("COND", "rand > 0.5"), "M")).to be_empty
+    end
+
+    # A `Data.define` / `Struct.new` member is defined before the body that redefines it, so the `def` is kept and the
+    # member's reader is not written beside it.
+    {
+      "a Data block" => ["D = Data.define(:a) do\n  def a = 1\nend\n", "D", -> { it.new(a: 5).a }],
+      "a Struct block" => ["S = Struct.new(:a) do\n  def a = 1\nend\n", "S", -> { it.new(5).a }],
+      "a Struct subclass" => ["class P < Struct.new(:a)\n  def a = 1\nend\n", "P", -> { it.new(5).a }]
+    }.each do |label, (source, name, witness)|
+      it "writes a member a #{label} redefines once" do
+        expect(witness.call(Module.new.tap { it.module_eval(source) }.const_get(name))).to eq(1)
+        expect(written(source, name).grep(/\Adef a:/)).to eq(["def a: () -> 1"])
+      end
+    end
+
+    it "fails RBS's definition build on the duplicate entries the fix removes (the oracle's positive control)" do
+      expect(rbs_definition_error("class K\n  def x: () -> 1\n  def x: () -> String\nend\n", "K"))
+        .to eq(RBS::DuplicatedMethodDefinitionError)
+    end
+  end
+
   describe "namespace kind + module_function tracking (gap #3 a/b)" do
     it "records `:module` vs `:class` for every walked segment" do
       src = "module Outer\n  class Inner\n    def m; 1; end\n  end\nend\n"

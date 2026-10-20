@@ -99,7 +99,7 @@ module Rigor
         # candidates from one file don't leak into another; initialising empty here gives downstream consumers
         # (`build_candidate`, `method_def_prefix`) a never-nil invariant without per-call-site defensive guards.
         @namespace_kinds = {}
-        @module_function_methods = Set.new
+        @module_function_methods = Set.new.compare_by_identity
         @uncertain_module_function_defs = Set.new.compare_by_identity
         @class_shells = Set.new
         @class_superclasses = {}
@@ -472,10 +472,12 @@ module Rigor
         @meta_layouts = collect_meta_layouts(scope_index)
         register_meta_classes
         defs = collect_method_definitions(parse_result.value, scope_index)
+        definers = definer_table(parse_result.value, defs)
+        defs = live_definitions(defs, definers)
         # Candidate construction freezes the per-file maps above (see {#build_candidate}), so every registration
         # pass has to be finished before the first `build_candidate` call. Meta members lead the RETURNED order —
         # a value class's members and constructors read first, ahead of the methods its block body defines.
-        meta_candidates = collect_meta_member_candidates(path, scope_index)
+        meta_candidates = live_meta_candidates(path, scope_index, definers)
         candidates_from_defs = defs.filter_map do |def_node, class_name, kind|
           # An analyzer bug typing one def's body must cost only that def's candidate, never the whole
           # `rigor sig-gen` run. The `check` path recovers each *file* this way (worker_session.rb); sig-gen
@@ -487,13 +489,108 @@ module Rigor
         end
         obs_ivar_map = build_observed_ivar_map(parse_result.value)
         meta_candidates + candidates_from_defs +
-          collect_attr_candidates(parse_result.value, path, scope_index, obs_ivar_map)
+          collect_attr_candidates(parse_result.value, path, scope_index, obs_ivar_map, definers)
+      end
+
+      # Ruby keeps the LAST definition of a name: a `def x` followed by `attr_reader :x` (or the reverse) defines
+      # `x` once, and a second `def x` after a `module_function` reset replaces only the instance method. Writing
+      # one entry per definition gave RBS a duplicate method definition (#2008, #2023), so every definer of a
+      # `(class, kind, name)` slot is recorded with its source offset, and only the last one in a file is written.
+      # A module function defines two slots, its singleton copy and its instance method. A `Data.define` or
+      # `Struct.new` member is defined before any body that could redefine it, so it ranks first.
+      #
+      # Only a definer whose statement certainly runs can be last: a direct statement of a `class`, `module` or
+      # `class << self` body, of a `Data.define` / `Struct.new` block or of the file ({#walk_statements} records
+      # them). One under a condition, in a block or a lambda, passed to a call (`private def x`), or after an
+      # uncertain `module_function` reset may not run, as far as this reading tells. A slot such a definer could
+      # still take over from the last certain one is contested, and nothing is written for it.
+      #
+      # @return `{ [class_name, kind, method_name] => [[offset, certain], ...] }`.
+      MEMBER_OFFSET = -1
+      private_constant :MEMBER_OFFSET
+
+      def definer_table(root, defs)
+        certain = @certain_definers
+        table = Hash.new { |h, k| h[k] = [] }
+        record_def_definers(defs, certain, table)
+        meta_member_slots.each { |slot| table[slot] << [MEMBER_OFFSET, true] }
+        ctx = AttrWalkContext.new(definers: [])
+        walk_attr_calls(root, [], false, ctx)
+        ctx.definers.each do |slot, call_node|
+          table[slot] << [call_node.location.start_offset, certain.include?(call_node)]
+        end
+        table
+      end
+
+      def record_def_definers(defs, certain, table)
+        defs.each do |def_node, class_name, kind|
+          next if class_name.nil?
+
+          definer_slots(def_node, class_name, kind).each do |slot, possible_only|
+            table[slot] << [def_node.location.start_offset, !possible_only && certain.include?(def_node)]
+          end
+        end
+      end
+
+      def live_meta_candidates(path, scope_index, table)
+        collect_meta_member_candidates(path, scope_index).select do |c|
+          live_definer?(table, [c.class_name, c.kind, c.method_name], MEMBER_OFFSET)
+        end
+      end
+
+      # `[slot, possible_only]` pairs. A `def` after an uncertain `module_function` reset may or may not install a
+      # singleton copy, so it is a possible definer of that slot only.
+      def definer_slots(def_node, class_name, kind)
+        slots = [[[class_name, kind, def_node.name], false]]
+        if @module_function_methods.include?(def_node)
+          slots << [[class_name, :singleton, def_node.name], false]
+        elsif @uncertain_module_function_defs.include?(def_node)
+          slots << [[class_name, :singleton, def_node.name], true]
+        end
+        slots
+      end
+
+      def meta_member_slots
+        @meta_layouts.flat_map do |class_name, layout|
+          MetaClassShape.of(kind: layout.kind, members: layout.member_names, keyword_init: layout.keyword_init)
+                        .member_decls.map { |member| [class_name, member.kind, member.method_name] }
+        end
+      end
+
+      # Whether the definer at `offset` is the one Ruby keeps for `slot`. A slot with a single definer keeps it,
+      # certain or not, as before.
+      def live_definer?(table, slot, offset)
+        entries = table.fetch(slot, [])
+        return true if entries.size <= 1
+
+        last_certain = entries.select { |_, certain| certain }.map(&:first).max
+        return false if last_certain.nil?
+        return false if entries.any? { |entry_offset, certain| !certain && entry_offset > last_certain }
+
+        offset == last_certain
+      end
+
+      # The `defs` whose definition Ruby keeps. A module function whose instance method a later definition
+      # replaced keeps only its singleton copy (`M.label` still returns the first body), so it is written as
+      # `def self.label`. One whose singleton copy was replaced keeps only a private instance method, which
+      # sig-gen does not write, so it is dropped.
+      def live_definitions(defs, table)
+        defs.filter_map do |def_node, class_name, kind|
+          next [def_node, class_name, kind] if class_name.nil?
+
+          slots = definer_slots(def_node, class_name, kind).reject(&:last).map(&:first)
+          live = slots.select { |slot| live_definer?(table, slot, def_node.location.start_offset) }
+          next [def_node, class_name, kind] if live.size == slots.size
+          next nil unless live == [[class_name, :singleton, def_node.name]]
+
+          [def_node, class_name, :singleton]
+        end
       end
 
       # The per-file scratch state {#analyse_file} starts each file with.
       def reset_file_maps
         @namespace_kinds = {}
-        @module_function_methods = Set.new
+        @module_function_methods = Set.new.compare_by_identity
         @uncertain_module_function_defs = Set.new.compare_by_identity
         @class_shells = Set.new
         @class_superclasses = {}
@@ -511,15 +608,19 @@ module Rigor
       # - `@namespace_kinds[qualified_name]` records whether each segment came from `class Foo` (`:class`) or
       #   `module Foo` (`:module`). Used by the writer's `wrap_in_modules` step to emit the right keyword for
       #   each intermediate segment AND the leaf.
-      # - `@module_function_methods` records `(class_name, method_name)` pairs where a `module_function` (no
-      #   args) call preceded the `def` inside a module body. The renderer emits `def self?.name` for these, the
-      #   RBS spelling that matches the dual instance + singleton dispatch the runtime produces.
+      # - `@module_function_methods` records the `def` nodes a `module_function` (no args) call preceded inside
+      #   a module body. The renderer emits `def self?.name` for these, the RBS spelling that matches the dual
+      #   instance + singleton dispatch the runtime produces. It is keyed by node, not by name: a later `def` of
+      #   the same name after a reset is an ordinary method (#2023).
       def collect_method_definitions(root, scope_index)
         @declared_types = scope_index[root].declared_types
         @walk_root = root
         @in_effect_refinements = nil
         out = []
         @block_depth = 0
+        @certain_bodies = Set.new.compare_by_identity
+        @certain_definers = Set.new.compare_by_identity
+        mark_certain_body(root.statements)
         walk_defs(root, [], false, false, out)
         out
       end
@@ -532,6 +633,7 @@ module Rigor
           return if descend_into_namespace?(node, prefix, out)
         when Prism::SingletonClassNode
           if node.expression.is_a?(Prism::SelfNode) && node.body
+            mark_certain_body(node.body)
             walk_defs(node.body, prefix, true, false, out)
             return
           end
@@ -541,6 +643,7 @@ module Rigor
         when Prism::ConstantWriteNode
           body = meta_block_body(node, prefix)
           if body
+            mark_certain_body(body)
             walk_defs(body, prefix + [node.name.to_s], false, false, out)
             return
           end
@@ -719,13 +822,30 @@ module Rigor
       def walk_namespace_body(namespace_node, prefix, out)
         return if namespace_node.body.nil?
 
+        mark_certain_body(namespace_node.body)
         walk_defs(namespace_node.body, prefix, false, false, out)
+      end
+
+      # A body whose direct statements certainly run when it does ({#definer_table}): its statement list unless the
+      # body has a `rescue` clause, and its `ensure` clause. A `rescue` or `else` clause may not run.
+      def mark_certain_body(body)
+        return @certain_bodies << body unless body.is_a?(Prism::BeginNode)
+
+        # With a `rescue`, a statement before a definer can raise and skip it, so the main list is not certain.
+        @certain_bodies << body.statements if body.statements && body.rescue_clause.nil?
+        @certain_bodies << body.ensure_clause.statements if body.ensure_clause&.statements
       end
 
       # The directive's reach is {Inference::ModuleFunctionState.each_sig_gen_statement}.
       def walk_statements(stmts_node, prefix, in_singleton_class, module_function_active, out)
+        certain_body = @certain_bodies.include?(stmts_node)
         Inference::ModuleFunctionState.each_sig_gen_statement(stmts_node.body,
                                                               module_function_active) do |stmt, active|
+          if certain_body
+            @certain_definers << stmt
+            # A `begin … end` statement's body (and `ensure`) runs whenever the statement does.
+            mark_certain_body(stmt) if stmt.is_a?(Prism::BeginNode)
+          end
           walk_defs(stmt, prefix, in_singleton_class, active, out)
         end
       end
@@ -742,7 +862,7 @@ module Rigor
         kind = node.receiver.is_a?(Prism::SelfNode) || in_singleton_class ? :singleton : :instance
         class_name = prefix.join("::")
         if Inference::ModuleFunctionState.sig_gen_module_function?(module_function_active, kind)
-          @module_function_methods << [class_name, node.name]
+          @module_function_methods << node
         elsif Inference::ModuleFunctionState.sig_gen_uncertain?(module_function_active, kind)
           @uncertain_module_function_defs << node
         end
@@ -784,9 +904,9 @@ module Rigor
 
       # Returns "def self." (kind: :singleton), "def self?." (instance method declared inside a
       # `module_function` region — both instance + singleton dispatch at runtime), or "def " (plain instance).
-      def method_def_prefix(class_name, method_name, kind)
+      def method_def_prefix(def_node, kind)
         return "def self." if kind == :singleton
-        return "def self?." if @module_function_methods.include?([class_name, method_name])
+        return "def self?." if @module_function_methods.include?(def_node)
 
         "def "
       end
@@ -802,7 +922,7 @@ module Rigor
       def visibility_excludes?(def_node, class_name, kind, scope_index)
         return false if kind == :singleton
         return false if @include_private
-        return false if @module_function_methods.include?([class_name, def_node.name])
+        return false if @module_function_methods.include?(def_node)
 
         scope = scope_index[def_node] || scope_index.each_value.first
         return false if scope.nil?
@@ -1040,7 +1160,7 @@ module Rigor
 
         scope = scope_index[def_node]
         method_def = lookup_existing_method(class_name, def_node.name, kind, scope&.environment, scope)
-        head = "#{method_def_prefix(class_name, def_node.name, kind)}#{def_node.name}: "
+        head = "#{method_def_prefix(def_node, kind)}#{def_node.name}: "
         if return_defaulted
           return mixed_provenance_candidate(path, def_node, class_name, kind, scope_index, inline, method_def, head)
         end
@@ -1374,7 +1494,7 @@ module Rigor
         returned = paren_wrap_union(elaborated_rbs(inferred, owner: class_name))
         annotations = overload.annotations.map { |a| "#{a.location&.source || "%a{#{a.string}}"} " }.join
         visibility = member.respond_to?(:visibility) && member.visibility ? "#{member.visibility} " : ""
-        "#{visibility}#{method_def_prefix(class_name, def_node.name, kind)}#{def_node.name}: " \
+        "#{visibility}#{method_def_prefix(def_node, kind)}#{def_node.name}: " \
           "#{annotations}#{spell_with_return(overload.method_type, returned)}"
       end
 
@@ -1734,7 +1854,7 @@ module Rigor
       def render_rbs_line(def_node, inferred, class_name, kind)
         params = def_node.parameters
         head = "(#{render_param_list(params, class_name, def_node.name)})#{block_signature_suffix(params)}"
-        prefix = method_def_prefix(class_name, def_node.name, kind)
+        prefix = method_def_prefix(def_node, kind)
         "#{prefix}#{def_node.name}: #{head} -> #{paren_wrap_union(elaborated_rbs(inferred, owner: class_name))}"
       end
 
@@ -1838,12 +1958,15 @@ module Rigor
       # Per-file context the attr_* walker threads through its recursive descent. Keeps parameter lists in
       # check. `obs_ivar_map` carries the observation-derived fallback types built by
       # {#build_observed_ivar_map}; it is empty when sig-gen is invoked without `--params=observed`.
-      AttrWalkContext = Struct.new(:path, :scope_index, :obs_ivar_map, :out, keyword_init: true)
+      # `definer_table` is {#definer_table}'s map, which drops an attribute another definer replaces. A context
+      # with `definers` only records each attribute's slot and call node for that map, and builds nothing.
+      AttrWalkContext = Struct.new(:path, :scope_index, :obs_ivar_map, :out, :definer_table, :definers,
+                                   keyword_init: true)
       private_constant :AttrWalkContext
 
-      def collect_attr_candidates(root, path, scope_index, obs_ivar_map = {})
+      def collect_attr_candidates(root, path, scope_index, obs_ivar_map = {}, definer_table = {})
         ctx = AttrWalkContext.new(path: path, scope_index: scope_index,
-                                  obs_ivar_map: obs_ivar_map, out: [])
+                                  obs_ivar_map: obs_ivar_map, out: [], definer_table: definer_table)
         walk_attr_calls(root, [], false, ctx)
         ctx.out
       end
@@ -1888,11 +2011,25 @@ module Rigor
         class_name = prefix.join("::")
         symbol_names = extract_symbol_arguments(call_node)
         return if symbol_names.empty?
+        return record_attr_definers(call_node, class_name, symbol_names, ctx) if ctx.definers
 
         ivar_lookup = ivar_type_lookup(ctx.scope_index, class_name, ctx.obs_ivar_map)
+        offset = call_node.location.start_offset
         symbol_names.each do |attr_name|
           ivar_type = ivar_lookup.call(attr_name)
-          ctx.out.concat(build_attr_candidates(call_node.name, class_name, attr_name, ivar_type, ctx))
+          candidates = build_attr_candidates(call_node.name, class_name, attr_name, ivar_type, ctx)
+          ctx.out.concat(candidates.select do |c|
+            live_definer?(ctx.definer_table, [class_name, :instance, c.method_name], offset)
+          end)
+        end
+      end
+
+      def record_attr_definers(call_node, class_name, symbol_names, ctx)
+        symbol_names.each do |attr_name|
+          ATTR_KINDS.fetch(call_node.name).each do |variant|
+            method_name = variant == :writer ? :"#{attr_name}=" : attr_name
+            ctx.definers << [[class_name, :instance, method_name], call_node]
+          end
         end
       end
 

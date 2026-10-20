@@ -123,6 +123,37 @@ def global_after_call_element
    end]
 end
 
+# The clause bodies after the calling test read the global as the call may leave it too: `global_in_body` returns 6.
+def global_in_body
+  $case_when_global = nil
+  case $case_when_global
+  when String then 1
+  when rebind_case_global! then 2
+  when NilClass then $case_when_global + 1
+  end
+end
+
+# A subject that writes an instance variable is read through the same rebinding test: `clear!` empties `@cx`
+# before the `String` clause matches the stored "ab", so `ClearHolder.new.cleared("ab")` and `.cleared_bare("ab")`
+# return nil.
+class ClearHolder
+  def clear! = (@cx = nil; false)
+
+  def cleared(raw)
+    case (@cx = raw ? String(raw) : nil)
+    when clear! then 0
+    when String then assert_type("String?", @cx)
+    end
+  end
+
+  def cleared_bare(raw)
+    case @cx = raw ? String(raw) : nil
+    when clear! then 0
+    when String then assert_type("String?", @cx)
+    end
+  end
+end
+
 # Controls. A call-free test keeps the global's narrowing: `global_no_call` raises. A local subject is not
 # reassigned by the call: `local_after_call` raises.
 def global_no_call

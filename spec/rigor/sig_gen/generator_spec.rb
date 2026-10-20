@@ -369,6 +369,59 @@ RSpec.describe Rigor::SigGen::Generator do
     end
   end
 
+  # #2197 — the engine reads a lookup that can miss as nil-free on purpose (`if h[k]` stays silent), but a return
+  # written into `sig/` is a contract, so sig-gen keeps the `nil` a miss returns. Each row's Ruby witness calls the
+  # body on a miss (an empty Hash or Array, a false `c`); a proven nil-free form keeps the nil-free return.
+  describe "#run on a return that is an optimistic lookup (#2197)" do
+    {
+      "Hash#[]" => ["h[k]", "(String | nil)", nil],
+      "Array#first" => ["a.first", "(String | nil)", nil],
+      "Array#last" => ["a.last", "(String | nil)", nil],
+      "Array#[]" => ["a[0]", "(String | nil)", nil],
+      "a local bound to a lookup" => ["x = h[k]\n    x", "(String | nil)", nil],
+      "a ternary arm" => ["c ? h[k] : \"q\"", "(String | nil)", nil],
+      "a safe-navigation call on a lookup" => ["h[k]&.upcase", "(String | nil)", nil],
+      "an explicit return" => ["return h[k] if c\n    \"q\"", "(String | nil)", nil],
+      "Hash#fetch (proven)" => ["h.fetch(k, \"f\")", "String", "f"],
+      "a lookup with a default (proven)" => ["h[k] || \"d\"", "String", "d"],
+      "a guarded lookup (proven; a guard: the engine drops the mark)" => ["x = h[k]\n    return \"z\" unless x\n    x",
+                                                                          "String", "z"],
+      "a call on a lookup (a different value)" => ["h[k].to_s", "String", ""]
+    }.each do |label, (body, expected, on_miss)|
+      it "proposes #{expected} for #{label}" do
+        params = "(Hash[Symbol, String] h, Symbol k, Array[String] a, bool c)"
+        write_fixture("sig/box.rbs", "class Box\n  def g: #{params} -> untyped\nend\n")
+        path = write_fixture("lib/box.rb", "class Box\n  def g(h, k, a, c)\n    #{body}\n  end\nend\n")
+        box = Module.new.tap { it.module_eval(File.read(path)) }.const_get(:Box)
+
+        gen = generator(paths: [path], signature_paths: [File.join(tmpdir, "sig")])
+        method = gen.run.find { |c| c.method_name == :g }
+
+        expect(box.new.g({}, :k, [], true)).to eq(on_miss)
+        expect(method.rbs).to eq("def g: #{params} -> #{expected}")
+        expect(rbs_type_error(expected)).to be_nil
+      end
+    end
+
+    it "keeps the nil in an attribute an instance method assigns a lookup to" do
+      path = write_fixture("lib/box.rb", <<~RUBY)
+        class Box
+          attr_reader :v, :w
+          def initialize
+            @v = Dir.children(".").first
+            @w = Dir.children(".").fetch(0, "f")
+          end
+        end
+      RUBY
+
+      candidates = generator(paths: [path]).run.select { |c| %i[v w].include?(c.method_name) }
+      rbs = candidates.to_h { [it.method_name, it.rbs] }
+
+      expect(Dir.mktmpdir { |dir| Dir.children(dir).first }).to be_nil
+      expect(rbs).to eq(v: "def v: () -> (String | nil)", w: %(def w: () -> ("f" | String)))
+    end
+  end
+
   # Ruby keeps the last definition of a name, so sig-gen writes one entry per method slot: a `def` and an
   # `attr_reader` of the same name, or a `module_function` name redefined after a reset, gave RBS a duplicate
   # method definition (#2008, #2023). Each example builds the written declaration with RBS's DefinitionBuilder

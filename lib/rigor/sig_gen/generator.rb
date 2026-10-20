@@ -1380,7 +1380,7 @@ module Rigor
       # different method (issue #1382). Delegates to {Rigor::Inference::DefReturnTyper} — the same body-typing +
       # explicit-return-union the `rigor annotate` def-line annotator uses.
       def infer_return_type(def_node, scope_index)
-        Inference::DefReturnTyper.call(def_node, scope_index)
+        Inference::DefReturnTyper.call(def_node, scope_index, keep_lookup_nil: true)
       end
 
       def dynamic_top?(type)
@@ -1965,6 +1965,8 @@ module Rigor
       private_constant :AttrWalkContext
 
       def collect_attr_candidates(root, path, scope_index, obs_ivar_map = {}, definer_table = {})
+        @lookup_ivars = Set.new
+        collect_lookup_ivar_writes(root, scope_index)
         ctx = AttrWalkContext.new(path: path, scope_index: scope_index,
                                   obs_ivar_map: obs_ivar_map, out: [], definer_table: definer_table)
         walk_attr_calls(root, [], false, ctx)
@@ -2016,12 +2018,52 @@ module Rigor
         ivar_lookup = ivar_type_lookup(ctx.scope_index, class_name, ctx.obs_ivar_map)
         offset = call_node.location.start_offset
         symbol_names.each do |attr_name|
-          ivar_type = ivar_lookup.call(attr_name)
+          ivar_type = with_lookup_nil(ivar_lookup.call(attr_name), class_name, attr_name)
           candidates = build_attr_candidates(call_node.name, class_name, attr_name, ivar_type, ctx)
           ctx.out.concat(candidates.select do |c|
             live_definer?(ctx.definer_table, [class_name, :instance, c.method_name], offset)
           end)
         end
+      end
+
+      # #2197 — an attribute whose ivar an instance method assigns from an optimistic lookup (`@x = h[k]`) reads
+      # `nil` on a miss, as such a return does ({Inference::DefReturnTyper.optimistic_value?}), so the written
+      # reader keeps the `nil` the engine's nil-free reading of the lookup drops.
+      def with_lookup_nil(type, class_name, attr_name)
+        return type if type.nil? || !@lookup_ivars.include?([class_name, :"@#{attr_name}"])
+
+        Type::Combinator.union(type, Type::Combinator.constant_of(nil))
+      end
+
+      LOOKUP_IVAR_WRITES = [
+        Prism::InstanceVariableWriteNode, Prism::InstanceVariableOrWriteNode, Prism::InstanceVariableAndWriteNode
+      ].freeze
+      private_constant :LOOKUP_IVAR_WRITES
+
+      # Records `[class_name, ivar]` for each ivar an instance `def` assigns an optimistic lookup to. The class
+      # prefixes come from {#collect_other_ivar_writes}' walk, whose own result is not needed here.
+      def collect_lookup_ivar_writes(root, scope_index)
+        collect_other_ivar_writes(root, [], false, Hash.new { |h, k| h[k] = Set.new }) do |def_node, prefix|
+          next if def_node.receiver || prefix.empty?
+
+          scan_lookup_ivar_writes(def_node.body, prefix, scope_index)
+        end
+      end
+
+      def scan_lookup_ivar_writes(node, prefix, scope_index)
+        return unless node.is_a?(Prism::Node)
+
+        record_lookup_ivar_write(node, prefix, scope_index)
+        node.rigor_each_child { |child| scan_lookup_ivar_writes(child, prefix, scope_index) }
+      end
+
+      def record_lookup_ivar_write(node, prefix, scope_index)
+        return unless LOOKUP_IVAR_WRITES.any? { |klass| node.is_a?(klass) }
+
+        scope = scope_index[node.value] || scope_index[node]
+        return if scope.nil? || !Inference::DefReturnTyper.optimistic_value?(node.value, scope)
+
+        @lookup_ivars << [prefix.join("::"), node.name]
       end
 
       def record_attr_definers(call_node, class_name, symbol_names, ctx)
@@ -2094,20 +2136,25 @@ module Rigor
       # and every write inside an instance `def` or a block, an `instance_variable_set` on `self` included
       # ({#written_ivar}). `def self.x`, a `class << self` body and a bare class-body write set the class
       # object's ivars and do not count.
-      def collect_other_ivar_writes(node, prefix, in_block, other_writes)
+      #
+      # `on_def`, when given, is called with each instance `def` reached and its class prefix, so another
+      # per-class reading of instance-method ivar writes shares this walk ({#collect_lookup_ivar_writes}).
+      def collect_other_ivar_writes(node, prefix, in_block, other_writes, &on_def)
         return unless node.is_a?(Prism::Node)
 
         case node
         when Prism::ClassNode, Prism::ModuleNode
           child_prefix = Source::ConstantPath.declaration_prefix(prefix, node.constant_path)
-          return collect_other_ivar_writes(node.body, child_prefix, false, other_writes) if child_prefix
+          return collect_other_ivar_writes(node.body, child_prefix, false, other_writes, &on_def) if child_prefix
         when Prism::SingletonClassNode then return
-        when Prism::DefNode then return record_def_ivar_writes(node, prefix, other_writes)
+        when Prism::DefNode
+          on_def&.call(node, prefix)
+          return record_def_ivar_writes(node, prefix, other_writes)
         when Prism::BlockNode, Prism::LambdaNode then in_block = true
         end
         record_class_level_write(node, prefix, in_block, other_writes) unless prefix.empty?
 
-        node.rigor_each_child { |child| collect_other_ivar_writes(child, prefix, in_block, other_writes) }
+        node.rigor_each_child { |child| collect_other_ivar_writes(child, prefix, in_block, other_writes, &on_def) }
       end
 
       # The ivars an `attr_writer` / `attr_accessor` on `self` names, or the ivar a write in a block sets.

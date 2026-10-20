@@ -21,4 +21,4 @@ Copy nothing. False positives outrank worst-case static reading (AGENTS.md), and
 
 ## To undo
 
-Fall back to the final-walk `class_defs[old_name]` in `AliasMap#copy_into` when the history holds no write before the alias, and restore the original example.
+Pass the walk's final def-node table from `apply_alias_def_nodes` into `AliasMap#copy_into`, and copy `accumulator[class][old_name]` from it when the history holds no write of the old name before the alias, then restore the original example. The copy must stay contested where the old name has no write before the alias in a file that loads first, which the final table cannot tell.

@@ -8810,16 +8810,19 @@ module Rigor
       end
 
       # Writes the new name's slot from its last writer `writes.last` ({#apply_alias_def_nodes}): an alias copy or a
-      # later `def` writes its `def` with its certainty (for the `def`, what the walk wrote already); a later
-      # `define_method` / `attr_*` keeps the latest copy (unless the slot holds a `def`) and contests it.
+      # later `def` writes its `def` with its certainty (for the `def`, what the walk wrote already). A last writer
+      # with no `def` this file holds — a later `define_method` / `attr_*`, or an alias that copies nothing this file
+      # defines (an inherited or core method, an attr reader, a name it cannot read) — contests the slot, which keeps
+      # what it holds or else the latest copy, so no sibling file's `def` fills it.
       def settle_alias_slot(accumulator, tables, (class_name, new_name), writes)
         last = writes.last
+        slot = (accumulator[class_name] ||= {})
         if last[1]
-          (accumulator[class_name] ||= {})[new_name] = last[1]
+          slot[new_name] = last[1]
           follow_slot_writer(tables, :contested_def_nodes, [class_name, new_name], last[2])
-        elsif last[1].nil?
-          copy = writes.rfind { |write| write[3] == :alias }
-          (accumulator[class_name] ||= {})[new_name] ||= copy[1]
+        else
+          copy = writes.rfind { |write| write[1] }
+          slot[new_name] ||= copy[1] if copy
           follow_slot_writer(tables, :contested_def_nodes, [class_name, new_name], false)
         end
       end
@@ -8842,20 +8845,27 @@ module Rigor
           @events << [class_name, new_name, old_name, node.location.start_offset, Certainty.possible?(@certainty, node)]
         end
 
-        # Issue #2006 — adds each alias's copy to `history` (`{[class, name] => [[offset, def node or nil, certain,
-        # (:alias)], ...]}`, ascending), in source order: what the old name held at the alias, certain when that
-        # write and the alias are. An old name holding nothing there, or a definer with no `def`, copies nothing.
-        # Returns the `[class, new name]` keys it wrote.
+        # Issue #2006 — adds every alias to `history` (`{[class, name] => [[offset, def node or nil, certain,
+        # (:alias)], ...]}`, ascending), in source order. An alias whose old name held a `def` at the alias copies it,
+        # certain when that write and the alias are. Any other alias — an old name with no `def` of this file before
+        # it (inherited, core, an attr reader, a sibling file's), or one it cannot read — adds a write with no `def`,
+        # which leaves the slot contested ({ScopeIndexer#settle_alias_slot}). An alias whose new name it cannot read
+        # adds one to every name of the class written before it. Returns the `[class, name]` keys it wrote.
         def copy_into(history)
-          @events.sort_by { |event| event[3] }.filter_map do |class_name, new_name, old_name, at, possible|
-            source = history[[class_name, old_name]]&.rfind { |write| write.first < at }
-            next if source.nil? || source[1].nil?
-
-            writes = (history[[class_name, new_name]] ||= [])
-            writes << [at, source[1], source[2] && !possible, :alias].freeze
-            writes.sort_by!(&:first)
-            [class_name, new_name]
+          @events.sort_by { |event| event[3] }.flat_map do |class_name, new_name, old_name, at, possible|
+            source = old_name && history[[class_name, old_name]]&.rfind { |write| write.first < at }
+            write = if source&.[](1) then [at, source[1], source[2] && !possible, :alias].freeze
+                    else [at, nil, false, :alias].freeze
+                    end
+            keys = new_name ? [[class_name, new_name]] : names_before(history, class_name, at)
+            keys.each { |key| (history[key] ||= []).push(write).sort_by!(&:first) }
           end.uniq
+        end
+
+        private
+
+        def names_before(history, class_name, at)
+          history.filter_map { |key, writes| key if key.first == class_name && writes.first.first < at }
         end
       end
 
@@ -8917,10 +8927,17 @@ module Rigor
         # `t` alias was the corpus case). Unlike AliasMethodNode a call's children can carry further
         # class bodies (`Class.new do … end`), so the walk continues below it either way.
         names = Source::AliasNames.alias_method_call_names(node)
-        if names && !rec_prefix.empty? && !(singleton_cref && leaf_owner.nil?)
+        if (names || unread_alias_method?(node)) && !rec_prefix.empty? && !(singleton_cref && leaf_owner.nil?)
           record_alias_call_entry(accumulator, rec_prefix.join("::"), names, node)
         end
         false
+      end
+
+      # Issue #2006 — an `alias_method` call on no receiver or `self` whose names {Source::AliasNames} cannot read
+      # (`alias_method n, :to_s`, `self.alias_method :x, :y`, a splat): it still replaces a method, which
+      # {AliasMap#copy_into} contests.
+      def unread_alias_method?(node)
+        node.name == :alias_method && (node.receiver.nil? || node.receiver.is_a?(Prism::SelfNode))
       end
 
       # The rebinding-block call arm of {#collect_class_alias_map}: an anonymous meta-new call
@@ -9013,6 +9030,13 @@ module Rigor
       end
 
       def record_alias_call_entry(accumulator, class_name, names, node)
+        if names.nil?
+          # Issue #2006 — an unread `alias_method` maps nothing, but still replaces a method ({AliasMap#copy_into}).
+          new_name = Source::AliasNames.literal_name(node.arguments&.arguments&.first)
+          accumulator.wrote(class_name, new_name, nil, node) if accumulator.is_a?(AliasMap)
+          return
+        end
+
         (accumulator[class_name] ||= {})[names.first] = names.last
         accumulator.wrote(class_name, names.first, names.last, node) if accumulator.is_a?(AliasMap)
       end
@@ -9021,9 +9045,14 @@ module Rigor
         return if qualified_prefix.empty?
 
         names = Source::AliasNames.keyword_names(alias_node)
-        return if names.nil?
-
         class_name = qualified_prefix.join("::")
+        if names.nil?
+          # Issue #2006 — an `alias` whose names are not plain symbols still replaces a method ({AliasMap#copy_into}).
+          new_name = Source::AliasNames.symbol_name(alias_node.new_name)
+          accumulator.wrote(class_name, new_name, nil, alias_node) if accumulator.is_a?(AliasMap)
+          return
+        end
+
         new_name, old_name = names
         (accumulator[class_name] ||= {})[new_name] = old_name
         accumulator.wrote(class_name, new_name, old_name, alias_node) if accumulator.is_a?(AliasMap)

@@ -174,6 +174,34 @@ RSpec.describe "a later definer supersedes an earlier alias for typing (#2006)",
     RUBY
   end
 
+  # Ruby: a String for each — the last alias copies a method this file does not define (inherited from `P`, an attr
+  # reader, a `define_method`, a core method), or one whose name the pass cannot read. Each leaves `x` untyped, so
+  # `.upcase` reports for none of them, where the earlier alias and `def` would type it 1.
+  {
+    "an inherited method" => "class K < P\n  def y = \"y\"\n  alias x y\n  def x = 1\n  alias x z\nend\n",
+    "an attr reader" => "class K < P\n  attr_reader :z\n  def y = \"y\"\n  alias x y\n  def x = 1\n  alias x z\nend\n",
+    "a define_method" => "class K < P\n  define_method(:z) { \"d\" }\n  def y = \"y\"\n  alias x y\n  def x = 1\n  " \
+                         "alias x z\nend\n",
+    "a core method, alias_method" => "class K\n  def y = 1\n  alias x y\n  def x = 1\n  alias_method :x, :to_s\nend\n",
+    "a core method by alias" => "class K\n  def y = 1\n  alias x y\n  def x = 1\n  alias x inspect\nend\n",
+    "a computed alias_method name" => "class K\n  def y = 1\n  alias x y\n  def x = 1\n  n = :x\n  " \
+                                      "alias_method n, :to_s\nend\n",
+    "a core method after a copy" => "class K\n  def y = 1\n  alias x y\n  alias x to_s\nend\n",
+    "inherited, after a copy" => "class K < P\n  def y = 1\n  alias_method :x, :y\n  alias_method :x, :z\nend\n"
+  }.each do |form, source|
+    it "leaves the name untyped when the last alias copies #{form}" do
+      expect(undefined(files: { "p.rb" => "class P\n  def z = \"p\"\nend\n", "k.rb" => source,
+                                "use.rb" => "K.new.x.upcase\n" })).to eq([])
+    end
+  end
+
+  # Ruby: "p" — the last alias copies `z`, which only a sibling file defines (file order is not load order).
+  it "leaves the name untyped when the last alias copies a method a sibling file defines" do
+    files = { "k.rb" => "class K\n  def y = 1\n  alias x y\n  def x = 1\n  alias x z\nend\n",
+              "z.rb" => "class K\n  def z = \"p\"\nend\n", "use.rb" => "K.new.x.upcase\n" }
+    expect(undefined(files: files)).to eq([])
+  end
+
   # Ruby: "y" — the second alias replaces the def again (control).
   it "keeps typing from the aliased def when an alias follows the def again" do
     expect(undefined(<<~RUBY)).to eq([["code.rb", 7, '"y"']])

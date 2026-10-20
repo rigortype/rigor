@@ -66,6 +66,15 @@ module Rigor
           classifier.result
         end
 
+        # Issue #2021 — every contribution of the tree under `root`, for a file discovery reached only through a
+        # `require_relative` walk: another file the walk does not see may redefine what it defines, so none of its
+        # contributions is certain.
+        def every_contribution(root)
+          classifier = Classifier.new
+          classifier.possible(root)
+          classifier.result
+        end
+
         # Whether `node` was classified possible in `possible` (a {possible_nodes} answer).
         def possible?(possible, node)
           !possible.empty? && possible.include?(node)

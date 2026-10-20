@@ -20,39 +20,56 @@ module Rigor
     # over the configured paths discovers them. Only a string literal counts (`require_relative "a/b"`, with or
     # without the `.rb`); a computed name, `require`, `load` and `autoload` are not followed, so a gem's own
     # files and a Zeitwerk-loaded tree are not reached this way.
+    #
+    # The walk sees one entry point's load graph, and a file it does not reach may redefine what a walked file
+    # defines. The runner therefore discovers the walked files as uncertain: their declarations resolve constants
+    # and their methods exist, but no return type, arity or visibility is read from them.
     module RequireRelativeClosure
+      # The walk's answer: the existing targets it reached, and the targets it named that are not files (each an
+      # input of the answer too, since one appearing would join the discovery).
+      Result = Data.define(:found, :missing)
+
       module_function
 
       # @param seeds — the analysed files outside the configured paths, as spelled by the run.
-      # @param covered — `->(absolute_path) { Boolean }`, whether discovery already holds that file (or, for an
-      #   excluded file, deliberately leaves it out); the walk does not add it or follow it.
+      # @param covered — `->(real_path) { Boolean }`, whether a target lies under a configured path, where discovery
+      #   holds it already. The walk neither adds nor follows such a target. Paths are compared as real paths, so a
+      #   symlinked spelling of a configured file is covered too.
       # @param read — `->(path) { String }`, the source of a file (an editor buffer's bytes for its file).
-      # @return the targets reached, absolute, in walk order, each once; the seeds themselves are never listed.
+      # @return a {Result}; `found` holds absolute paths in walk order, each file once, and never a seed.
       def closure(seeds, covered:, read:)
-        seen = seeds.to_set { |path| File.absolute_path(path) }
+        seen = seeds.to_set { |path| real_path(path) }
         queue = seeds.dup
         found = []
+        missing = []
         until queue.empty?
-          path = queue.shift
-          targets_of(path, read).each do |target|
-            next if covered.call(target) || !seen.add?(target)
+          targets_of(queue.shift, read).each do |target|
+            next missing << target unless File.file?(target)
+
+            real = real_path(target)
+            next if covered.call(real) || !seen.add?(real)
 
             found << target
             queue << target
           end
         end
-        found
+        Result.new(found: found, missing: missing.uniq)
       end
 
-      # The existing `.rb` files `path` names with a literal `require_relative`, absolute.
+      def real_path(path)
+        File.realpath(path)
+      rescue SystemCallError
+        File.absolute_path(path)
+      end
+
+      # The `.rb` paths `path` names with a literal `require_relative`, absolute, whether or not they exist.
       def targets_of(path, read)
         source = read.call(path)
         return [] if source.nil?
 
         base = File.dirname(File.absolute_path(path))
-        literal_features(Prism.parse(source).value).filter_map do |feature|
-          target = File.expand_path(feature.end_with?(".rb") ? feature : "#{feature}.rb", base)
-          target if File.file?(target)
+        literal_features(Prism.parse(source).value).map do |feature|
+          File.expand_path(feature.end_with?(".rb") ? feature : "#{feature}.rb", base)
         end
       rescue StandardError
         []

@@ -32,14 +32,21 @@ issue left open whether to widen discovery or to decline the lookup.
 
 Follow literal `require_relative` targets, transitively, from analysed files outside the configured paths. A
 target under a configured path ends the walk, so a file inside `paths:` is discovered exactly as before, and the
-answer for such a file does not depend on whether it was named on the command line. `exclude:` drops a target as
-it drops a configured file. Discovery only adds declarations, so a run can now report a call on a constant it
-previously left unresolved; that is the directory run's answer. The precedent is PR #734's reasoning: a file's
+answer for such a file does not depend on whether it was named on the command line. Paths are compared as real paths.
+`exclude:` drops a target as it drops a configured file. A walked file is discovered as uncertain: its classes,
+modules and constants resolve and its methods exist, but every method contribution is `possible` (ADR-119 WD3), so
+no return type, arity or visibility is read from it. The walk sees one entry point's load graph, and a file it does
+not reach (through `require`, a computed name, Zeitwerk or another entry point) may redefine a method a walked file
+defines; reading the walked body would then report on correct code. What the walk guarantees is therefore: a
+constant a walked file declares is found before an outer one, and a call on a method a walked file defines is not
+reported as undefined. It can still report a call on a constant it previously left unresolved when the constant's
+own signature or an analysed file answers it. The precedent is PR #734's reasoning: a file's
 diagnostics should not depend on what else was on the command line, and widening discovery buys that where
 declining makes the subset run answer a different question.
 
 ## To undo
 
-Remove `Runner#required_outside_paths` and `Analysis::RequireRelativeClosure`, and the #2021 paragraphs in
+Remove `Runner#required_outside_paths`, `Runner#required_missing_entries`, `Analysis::RequireRelativeClosure`, the
+`uncertain:` parameter of the two `ScopeIndexer` project-index walks and `Certainty.every_contribution`, and the #2021 paragraphs in
 `docs/internal-spec/cache.md` and `docs/manual/02-cli-reference.md`. `make verify-changed` then reports the
 four false positives again for a change touching `activejob.rb` or `sidekiq.rb`.

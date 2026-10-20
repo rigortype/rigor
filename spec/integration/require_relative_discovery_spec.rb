@@ -170,6 +170,99 @@ RSpec.describe "discovery through require_relative outside the configured paths 
     expect(check(%w[lib/outer/user.rb])).to eq(expected)
   end
 
+  {
+    "a def" => 'def load_effects = require_relative("plug/effects")',
+    "an if" => 'if ENV.key?("X") then require_relative "plug/effects" end',
+    "a rescuing begin" => 'begin; require_relative "plug/effects"; rescue LoadError; end'
+  }.each do |construct, line|
+    it "follows a require_relative written inside #{construct}" do
+      write_plug(requires: [line])
+      write_sibling
+      expect(check(%w[plug/outer/plug.rb])).to eq([])
+    end
+  end
+
+  it "follows a require_relative spelled with the .rb extension" do
+    write_plug(requires: ['require_relative "plug/effects.rb"'])
+    write_sibling
+    expect(check(%w[plug/outer/plug.rb])).to eq([])
+  end
+
+  it "does not follow a target that is a directory, not a file" do
+    write_plug(requires: ['require_relative "plug/effects"'])
+    write_sibling(path: "plug/outer/plug/effects.rb/inner.rb")
+    expect(check(%w[plug/outer/plug.rb])).to eq(
+      [["plug.rb", 5, "undefined method `entry_points' for singleton(Outer::Effects)"]]
+    )
+  end
+
+  it "discovers no target that is not a file" do
+    # The incremental session digests this set; a missing or directory target is an existence input instead.
+    write_plug(requires: ['require_relative "plug/effects"', 'require_relative "plug/absent"'])
+    write_sibling(path: "plug/outer/plug/effects.rb/inner.rb")
+    runner = Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil)
+    expect(runner.discovery_only_file_set(%w[plug/outer/plug.rb]).grep(%r{plug/outer/plug/})).to eq([])
+  end
+
+  it "stops the walk at a target under the configured paths" do
+    # The run over the configured paths does not follow `mid.rb`'s require_relative out of them, so a walk that
+    # passed through it would discover a nearer constant only when `plug.rb` is named.
+    write_plug(requires: ['require_relative "../../lib/outer/mid"'])
+    write("lib/outer/mid.rb", "require_relative \"../../plug/outer/plug/effects\"\n")
+    write_sibling
+    expect(check(%w[plug/outer/plug.rb])).to eq(
+      [["plug.rb", 5, "undefined method `entry_points' for singleton(Outer::Effects)"]]
+    )
+  end
+
+  # The walk sees one entry point's load graph. A file it does not reach (here through a plain `require`) may
+  # redefine a method a walked file defines, so a walked file's methods exist but their bodies are not read.
+  context "when a walked file's method may be redefined elsewhere" do
+    before do
+      write_plug(call: "Helper.value.upcase", requires: ['require_relative "plug/helper"', 'require "outer/override"'])
+      write("plug/outer/plug/helper.rb", "module Outer\n  module Helper\n    def self.value = 1\n  end\nend\n")
+      write("vendor/outer/override.rb", "module Outer\n  module Helper\n    def self.value = \"s\"\n  end\nend\n")
+    end
+
+    it "does not read the walked method's return type" do
+      expect(check(%w[plug/outer/plug.rb])).to eq([])
+    end
+
+    it "does not read the walked method's return type under --incremental" do
+      session = Rigor::Analysis::IncrementalSession.new(configuration: configuration, paths: %w[plug/outer/plug.rb])
+      expect(guarded_baseline(session).select { |d| d.rule == "call.undefined-method" }).to eq([])
+    end
+
+    it "does not check a call's arity against the walked method" do
+      write_plug(call: "Helper.value(1, 2)", requires: ['require_relative "plug/helper"'])
+      expect(check(%w[plug/outer/plug.rb]).map(&:first)).to eq([])
+      expect(guarded_run(Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil),
+                         %w[plug/outer/plug.rb]).diagnostics.map(&:rule)).not_to include("call.wrong-arity")
+    end
+  end
+
+  it "answers an argument spelled through a symlinked directory as it answers the relative one" do
+    # The configured `lib` and a walked `../../lib/outer/limit.rb` name the same file. Compared by spelling, it
+    # joined discovery twice, and two writers withhold the constant (#644).
+    write("lib/outer/limit.rb", "module Outer\n  LIMIT = 3\nend\n")
+    write_plug(call: "LIMIT.upcase", requires: ['require_relative "../../lib/outer/limit"'])
+    File.symlink(Dir.pwd, "alias")
+    expected = [["plug.rb", 5, "undefined method `upcase' for 3"]]
+    expect(check(%w[plug/outer/plug.rb])).to eq(expected)
+    expect(check([File.join(Dir.pwd, "alias", "plug/outer/plug.rb")])).to eq(expected)
+  end
+
+  context "when the configured path is spelled through a symlinked directory" do
+    let(:extra_config) { { "paths" => [File.join(Dir.pwd, "alias", "lib")] } }
+
+    it "does not discover a configured file a second time through its real spelling" do
+      write("lib/outer/limit.rb", "module Outer\n  LIMIT = 3\nend\n")
+      write_plug(call: "LIMIT.upcase", requires: ['require_relative "../../lib/outer/limit"'])
+      File.symlink(Dir.pwd, "alias")
+      expect(check(%w[plug/outer/plug.rb])).to eq([["plug.rb", 5, "undefined method `upcase' for 3"]])
+    end
+  end
+
   context "when `exclude:` matches the required sibling" do
     let(:extra_config) { { "exclude" => ["plug/outer/plug/**"] } }
 
@@ -252,6 +345,22 @@ RSpec.describe "discovery through require_relative outside the configured paths 
       write_plug(requires: [])
       expect(cli("plug/outer/plug.rb")).to eq([["plug.rb", 5]])
       expect(cli("--tmp-file=buf.rb", "--instead-of=plug/outer/plug.rb", "plug/outer/plug.rb")).to eq([])
+    end
+
+    it "re-checks a cached run when a missing required file appears" do
+      FileUtils.rm_rf("plug/outer/plug")
+      expect(cli("plug/outer/plug.rb")).to eq([["plug.rb", 5]])
+      expect(cli("plug/outer/plug.rb")).to eq([["plug.rb", 5]])
+      write_sibling
+      expect(cli("plug/outer/plug.rb")).to eq([])
+    end
+
+    it "re-checks an --incremental run when a missing required file appears" do
+      FileUtils.rm_rf("plug/outer/plug")
+      expect(cli("--incremental", "plug/outer/plug.rb")).to eq([["plug.rb", 5]])
+      expect(cli("--incremental", "plug/outer/plug.rb")).to eq([["plug.rb", 5]])
+      write_sibling
+      expect(cli("--incremental", "plug/outer/plug.rb")).to eq([])
     end
   end
 end

@@ -135,7 +135,9 @@ module Rigor
         # collectors walk the tree, and the AST is dropped before the next file (peak RSS stays flat).
         def discover(expansion:)
           build_discovery(
-            Inference::ScopeIndexer.discovered_project_index_for_paths(expansion.fetch(:files), buffer: @buffer)
+            Inference::ScopeIndexer.discovered_project_index_for_paths(
+              expansion.fetch(:files), buffer: @buffer, uncertain: uncertain_paths(expansion)
+            )
           )
         end
 
@@ -145,9 +147,16 @@ module Rigor
         # (`seed_bundles` empty) this is `#discover` plus a fresh bundle set — the discovery index is identical.
         def discover_from_bundles(expansion:, seed_bundles:)
           index = Inference::ScopeIndexer.discovered_project_index_incremental(
-            expansion.fetch(:files), seed_bundles: seed_bundles, buffer: @buffer
+            expansion.fetch(:files), seed_bundles: seed_bundles, buffer: @buffer, uncertain: uncertain_paths(expansion)
           )
           [build_discovery(index), index.fetch(:bundles)]
+        end
+
+        # Issue #2021 — the files only the `require_relative` walk added ({Runner#required_outside_paths}): their
+        # declarations resolve constants and their methods exist, but every method contribution is `possible`, so no
+        # return type, arity or visibility is read from them.
+        def uncertain_paths(expansion)
+          expansion.fetch(:uncertain, Inference::ScopeIndexer::EMPTY_PATH_SET)
         end
 
         # Builds the {Discovery} bundle from a `{ classes:, def_index: }` index hash (shared by the plain and

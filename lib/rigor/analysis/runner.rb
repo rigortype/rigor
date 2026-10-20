@@ -1416,7 +1416,7 @@ module Rigor
       end
 
       def build_run_dependency_descriptor(expansion, rbs_descriptor)
-        entries = analyzed_file_entries(expansion) + discovery_file_entries(expansion) +
+        entries = analyzed_file_entries(expansion) + discovery_file_entries(expansion) + required_missing_entries +
                   pre_eval_file_entries + template_unit_file_entries + rbs_descriptor.files +
                   root_presence_entries(expansion)
         # #979 — the signature ROOTS' listings, one glob row each. `rbs_descriptor.files` covers only the
@@ -1511,7 +1511,8 @@ module Rigor
         IncrementalSlotRows.new(
           observed: plugin_boundary_rows,
           derived: Cache::Descriptor.new(
-            files: template_unit_file_entries + kind_entries(Array(roots) + @configuration.pre_eval),
+            files: template_unit_file_entries + kind_entries(Array(roots) + @configuration.pre_eval) +
+                   required_missing_entries,
             globs: template_unit_glob_entries
           ),
           by_file: @analysis_reads.transform_values do |reads|
@@ -1570,7 +1571,8 @@ module Rigor
         BaselineRows.new(
           owned: Cache::Descriptor.new(
             files: own.files + kind_entries(signature_root_candidates) +
-                   discovery_file_entries({ files: files }) + unanalysed_pre_eval_entries(files),
+                   discovery_file_entries({ files: files }) + required_missing_entries +
+                   unanalysed_pre_eval_entries(files),
             globs: (own.globs + discovery_glob_entries).uniq
           ),
           pinned: pinned
@@ -1885,26 +1887,40 @@ module Rigor
 
         analysed = expansion.fetch(:files)
         project = expand_paths(@configuration.paths | paths).fetch(:files)
-        files = discovery_files(project + required_outside_paths(analysed), analysed)
+        walked = required_outside_paths(analysed)
+        files = discovery_files(project + walked.found, analysed)
         # Overlapping arguments (`lib lib/user.rb`) name an analysed file twice; the widened set names it once.
-        files.size > analysed.uniq { |path| File.absolute_path(path) }.size ? { files: files, errors: [] } : nil
+        return nil unless files.size > analysed.uniq { |path| File.absolute_path(path) }.size || walked.missing.any?
+
+        { files: files, errors: [], uncertain: walked.found.to_set.freeze, missing: walked.missing }
       end
 
       # Issue #2021 — what the analysed files outside the configured `paths:` load with a literal `require_relative`,
       # through targets that are themselves outside them ({RequireRelativeClosure}). A file under a configured path
-      # is discovered already, so the walk adds nothing for a run whose files all lie inside them. `exclude:` drops
-      # a target as it drops a configured file.
+      # is discovered already, so the walk adds nothing for a run whose files all lie inside them. The comparison is
+      # by real path, so a symlinked spelling of a configured file does not join discovery a second time (two
+      # writers would withhold its constants, #644). `exclude:` drops a target from discovery as it drops a
+      # configured file; the walk still follows what an excluded target requires.
+      #
+      # The found files are discovered as `uncertain` ({Analysis::Runner::ProjectPrePasses#uncertain_paths}): the walk
+      # sees one entry point's load graph, and a file it does not reach may redefine what they define.
       def required_outside_paths(analysed)
-        roots = @configuration.paths.map { |root| File.absolute_path(root) }
-        covered = lambda do |path|
-          roots.any? { |root| path == root || path.start_with?(File.join(root, "")) }
-        end
-        seeds = analysed.reject { |path| covered.call(File.absolute_path(path)) }
-        return [] if seeds.empty?
+        roots = @configuration.paths.map { |root| RequireRelativeClosure.real_path(root) }
+        covered = ->(real) { roots.any? { |root| real == root || real.start_with?(File.join(root, "")) } }
+        seeds = analysed.reject { |path| covered.call(RequireRelativeClosure.real_path(path)) }
+        return RequireRelativeClosure::Result.new(found: [], missing: []) if seeds.empty?
 
         read = ->(path) { File.read(@buffer ? @buffer.resolve(path) : path) }
-        found = RequireRelativeClosure.closure(seeds, covered: covered, read: read)
-        PathExpansion.reject_excluded(found, @configuration.exclude_patterns, base: @configuration.exclude_base)
+        walked = RequireRelativeClosure.closure(seeds, covered: covered, read: read)
+        walked.with(found: PathExpansion.reject_excluded(walked.found, @configuration.exclude_patterns,
+                                                         base: @configuration.exclude_base))
+      end
+
+      # Issue #2021 — a kind row per `require_relative` target the walk named and found absent: a file appearing
+      # there joins the discovery, so it moves the answer of the run-result cache and the `--incremental` slot.
+      def required_missing_entries
+        missing = @project_discovery_expansion&.fetch(:missing, nil)
+        missing.nil? || missing.empty? ? [] : kind_entries(missing)
       end
 
       # The expansion with each file once, first spelling kept: overlapping arguments (`lib ./lib`) that do not
@@ -1959,7 +1975,7 @@ module Rigor
       private :run_project_pre_passes, :adopt_prebuilt_project_scan, :apply_pre_passes_result,
               :apply_discovery_result, :ensure_project_discovery, :force_eager_discovery?,
               :project_discovery_expansion, :discovery_files, :once_each, :widen_discovery_to_project?,
-              :required_outside_paths
+              :required_outside_paths, :required_missing_entries
 
       # Ruby versions probed (ascending) to discover the lowest one this Prism build accepts for
       # `version:`. Prism exposes no version list, so the floor is found empirically — only when a

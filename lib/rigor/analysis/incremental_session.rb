@@ -471,8 +471,8 @@ module Rigor
       # exempts such a write is a fact of the whole program — an alias, or a `write` / `to_str` / `to_int` / hatch
       # defined in any spelling on any receiver, a rewritten ancestor, a mixin — which no name-keyed edge can
       # follow, so a stale report would outlive the edit that exempts it. Such files are rare, so this costs little.
-      # A file the census silenced is not re-checked when the exemption goes away: that stale answer misses a
-      # report, it never makes one.
+      # A file the census silenced is re-checked through the `global_census:` keys its rule recorded
+      # ({#global_census_affected}, issue #2158).
       def global_write_reporters
         @cache.each_with_object(Set.new) do |(path, diagnostics), reporters|
           reporters << path if diagnostics.any? { |diagnostic| diagnostic.rule.to_s.start_with?("global.") }
@@ -1289,10 +1289,16 @@ module Rigor
         keys = appeared_methods.map { |symbol| negative_key_for(symbol) }
         keys.concat(class_move_keys(moved_classes))
         keys.concat(moved_constants.map { |name| "constant:#{name.split('::').last}" })
-        Incremental.negative_closure(keys, @negative_dependents) | refinement_affected(changed + removed, summary) |
-          defined_name_affected(changed + removed, summary) | visibility_name_affected(changed + removed, summary) |
-          mark_affected(changed + removed, summary) |
+        Incremental.negative_closure(keys, @negative_dependents) | table_diff_affected(changed + removed, summary) |
           global_write_reporters
+      end
+
+      # The consumers of the name-keyed edges whose producers diff a per-file table between each file's seed bundle
+      # and the scan.
+      def table_diff_affected(paths, summary)
+        refinement_affected(paths, summary) | defined_name_affected(paths, summary) |
+          visibility_name_affected(paths, summary) | mark_affected(paths, summary) |
+          global_census_affected(paths, summary)
       end
 
       # Issue #1833 — the consumers whose answer read a class mark that moved in this edit. A reader of a class's
@@ -1379,6 +1385,18 @@ module Rigor
         return Set.new if names.empty?
 
         Incremental.negative_closure(names.map { |name| "defines:#{name}" }, @negative_dependents)
+      end
+
+      # Issue #2158 — the consumers whose `global.*` write rule read a census entry that a file in `paths` started or
+      # stopped writing. The before-state is each file's seed bundle, the after-state the scan's per-file census. The
+      # write the census silenced reports nothing, so {#global_write_reporters} does not reach it.
+      def global_census_affected(paths, summary)
+        after = (summary && summary[:global_write_census]) || {}
+        before = paths.to_h { |path| [path, @seed_bundles.dig(path, :global_write_census)] }
+        keys = Incremental.changed_global_census_keys(paths, before, after)
+        return Set.new if keys.empty?
+
+        Incremental.negative_closure(keys, @negative_dependents)
       end
 
       # Issue #2134 — the consumers whose answer read a class's visibility slot for a method, or its contest, for each

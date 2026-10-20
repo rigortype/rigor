@@ -80,6 +80,20 @@ module Rigor
       # The module names the top-level mixins spell.
       def main_mixins(census) = census.filter_map { |entry| entry[1] if entry[0] == :main_mixin }
 
+      # Issue #2158 — the `global_census:` dependency key a census entry moves, without the kind prefix: `alias:$x`,
+      # `defines:write`, `refines:write`, `defines_any`, `refines_any`, and `main_mixin` for every top-level mixin: its
+      # reader asks about each, and one shared key is a deliberate precision trade-off (a mixin moving anywhere
+      # re-checks every write that read them). The rules that read the census record these keys
+      # (`CheckRules#record_global_census`), and `Analysis::Incremental.changed_global_census_keys` fires them for
+      # every entry that appeared in or vanished from a file's census.
+      def dependency_key(entry)
+        case entry
+        when DEFINES_ANY then "defines_any"
+        when REFINES_ANY then "refines_any"
+        else entry[0] == :main_mixin ? "main_mixin" : "#{entry[0]}:#{entry[1]}"
+        end
+      end
+
       # A standalone walk, for a file no existing descent visits (a `pre_eval:` entry).
       def scan(root)
         collector = Collector.new(InEffectRefinements.new(root))

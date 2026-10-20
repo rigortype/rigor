@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "../inference/global_write_census"
+
 module Rigor
   module Analysis
     # ADR-46 slice 2 — the pure set-algebra core of the incremental step, kept side-effect-free and
@@ -129,6 +131,20 @@ module Rigor
       def changed_defined_names(paths, before, after)
         moved = Set.new
         paths.each { |path| moved.merge((before[path] || Set.new) ^ (after[path] || Set.new)) }
+        moved.freeze
+      end
+
+      # Issue #2158 — the `global_census:` keys whose entries moved in this edit: one for every entry that appeared in
+      # or vanished from a file's `global_write_census` ({Inference::GlobalWriteCensus.dependency_key}). `paths` MUST
+      # include removed files, whose whole census vanished. `before` / `after` map a path to that file's census Set (nil
+      # when it records nothing).
+      def changed_global_census_keys(paths, before, after)
+        moved = Set.new
+        paths.each do |path|
+          ((before[path] || Set.new) ^ (after[path] || Set.new)).each do |entry|
+            moved << "global_census:#{Inference::GlobalWriteCensus.dependency_key(entry)}"
+          end
+        end
         moved.freeze
       end
 

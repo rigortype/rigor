@@ -1143,6 +1143,43 @@ and `visibility:*#<name>` for one that moved: a swap from `private :x` to
 declared classes unchanged. The seed bundles already carry the
 `deferred_ranges` table, so no row moves and `SCHEMA` is unchanged.
 
+The `global_census:<entry>` keys in `missing` are recorded by the
+`global.*` write rules (`CheckRules#global_aliased?`,
+`#program_may_answer?` and `#refined_writer_in_effect?`) for each
+`Inference::GlobalWriteCensus` entry they ask about
+([#2158](https://github.com/rigortype/rigor/issues/2158)):
+`global_census:alias:<global>`, `global_census:defines:<method>` for the
+setter's method and each hatch, `global_census:defines_any`,
+`global_census:refines:write`, `global_census:refines_any`, and one
+`global_census:main_mixin` for every top-level mixin
+(`GlobalWriteCensus.dependency_key`). A question over several entries
+(`CheckRules#census_holds_any?`) records only the entries present when
+one is, since the answer stays until every one of them vanishes, and
+every entry when none is. That rests on an invariant: every census entry
+can only move a write toward being silenced, and a reported write always
+re-checks through `IncrementalSession#global_write_reporters`. A future
+census entry that makes a write reported would break it, and its reader
+would have to record every entry; recording every entry on a no is
+defence in depth. The shared `main_mixin` key is a deliberate
+precision trade-off: the reader asks about every top-level mixin, so a
+mixin appearing or vanishing anywhere re-checks every write that reached
+that step. The census is a
+fact of the whole program: a `write` or hatch defined in any spelling on
+any receiver silences a write, and so does an alias of the variable or a
+top-level mixin of a module RBS does not rule out. Before this a file
+that stopped writing such an entry re-analysed only itself, and the
+silenced write kept its answer; the run already re-checks every file
+whose last result holds a `global.*` diagnostic, which covers the other
+direction. Its producer (`IncrementalSession#global_census_affected`)
+diffs each changed, added or removed file's census between its seed
+bundle and the recheck scan (`Incremental.changed_global_census_keys`)
+and fires the key of every entry that appeared or vanished, so an edit
+that leaves a file's census as it was re-checks nothing. The `defines:`
+key cannot stand in for it: its producer reads the method tables, which
+hold no delegation macro, string `eval`, computed name, global alias or
+mixin. The seed bundles already carry each file's census, so no row moves
+and `SCHEMA` is unchanged.
+
 The `mark:<last segment>` key in `missing` is recorded by
 `Scope#parameter_envelopes_of` whichever way the reader answers
 ([#1833](https://github.com/rigortype/rigor/issues/1833)): a file can add a

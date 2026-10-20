@@ -9154,16 +9154,14 @@ module Rigor
       # reads their parameter structure from. Issue #1120 — and each file's own refinement table, which the merged
       # def-index cannot attribute back to a file, so the session can diff it against the file's seed bundle.
       # Issue #1459 — and each file's {#defined_method_names}, diffed the same way. Issue #2134 — and each file's
-      # {#visibility_entries}.
+      # {#visibility_entries}. Issue #2158 — and each file's `global_write_census`.
       # @return `{ def_index:, code_fingerprints:, declaration_signatures:, refinements:, defined_method_names:,
-      #   visibility_entries: }`.
+      #   visibility_entries:, global_write_census: }`.
       def scan_summary_for_paths(paths, buffer: nil)
         acc = new_def_index_accumulator
         code_fingerprints = {}
         declaration_signatures = {}
-        refinements = {}
-        defined_method_names = {}
-        visibility_entries = {}
+        per_file = { refinements: {}, defined_method_names: {}, visibility_entries: {}, global_write_census: {} }
         paths.each do |path|
           physical = buffer ? buffer.resolve(path) : path
           source = File.read(physical)
@@ -9172,17 +9170,21 @@ module Rigor
           fold_file_index(acc, file_index)
           code_fingerprints[path] = code_fingerprint(source, parsed.comments)
           declaration_signatures[path] = declaration_signature(file_index)
-          refinements[path] = file_index[:refinements] if file_index[:refinements]
-          defined_method_names[path] = defined_method_names(file_index)
-          visibility_entries[path] = visibility_entries(file_index)
+          file_summary(file_index).each { |key, table| per_file[key][path] = table unless table.nil? }
         rescue DeclarationWalk::ContractError
           raise # a broken walk contract, not an unreadable file: skipping it would hide the failure
         rescue StandardError
           next
         end
         { def_index: finalize_def_index(acc), code_fingerprints: code_fingerprints,
-          declaration_signatures: declaration_signatures, refinements: refinements,
-          defined_method_names: defined_method_names, visibility_entries: visibility_entries }
+          declaration_signatures: declaration_signatures, **per_file }
+      end
+
+      # One file's tables {#scan_summary_for_paths} hands the session to diff against the file's seed bundle (nil for
+      # a table the file does not have).
+      def file_summary(file_index)
+        { refinements: file_index[:refinements], defined_method_names: defined_method_names(file_index),
+          visibility_entries: visibility_entries(file_index), global_write_census: file_index[:global_write_census] }
       end
 
       # Issue #1459 — every method name one file's index defines, on any class or module and either side: the keys of

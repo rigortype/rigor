@@ -13,7 +13,7 @@ module Rigor
 
       def initialize: (name: untyped, globs: untyped, ?why: untyped) -> void
 
-      def to_h: () -> Hash[String, Array[String] | String]
+      def to_h: () -> Hash[String, untyped]
 
       def ==: (untyped other) -> bool
       # `alias eql? ==` — the alias row has no sig-gen shape, so it stays unmarked

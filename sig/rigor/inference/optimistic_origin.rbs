@@ -6,8 +6,15 @@ module Rigor
       # sentinel; declaring it is what lets sig-gen type `Scope#optimistic_local_miss` / `#optimistic_ivar_miss`.
       def self?.bound_miss: (untyped mark) -> Object?
 
-      # The `Data.define(:cause, :miss)` members come from the source definition.
       class BoundMark < ::Data
+        # sig-gen gap: #1150 — a `Data.define` member; sig-gen proposes `untyped`. The cause a mark records.
+        def cause: () -> Symbol
+        # sig-gen gap: #1150 — a `Data.define` member; the recorded miss answer.
+        def miss: () -> bool?
+        # sig-gen gap: #1150 — the `Data.define` constructor; sig-gen types its members `untyped`.
+        def self.new: (cause: Symbol, miss: bool?) -> instance | (Symbol cause, bool? miss) -> instance
+        # sig-gen gap: #1150 — as above.
+        def self.[]: (cause: Symbol, miss: bool?) -> instance | (Symbol cause, bool? miss) -> instance
       end
     end
   end

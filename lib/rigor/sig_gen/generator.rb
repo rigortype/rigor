@@ -476,8 +476,9 @@ module Rigor
 
         base_scope = Scope.empty(environment: environment)
         writers = ivar_writer_scope(base_scope)
+        # #1406 — sig-gen keeps the census's own answer: a declared ivar type read back would echo the declaration.
         scope_index = Inference::ScopeIndexer.index(parse_result.value, default_scope: base_scope,
-                                                                        ivar_writer_scope: writers)
+                                                                        ivar_writer_scope: writers, declared_ivar_types: false)
 
         reset_file_maps
         @meta_layouts = collect_meta_layouts(scope_index)

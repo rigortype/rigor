@@ -374,7 +374,9 @@ write. The maintainer settled this with #1154: an explicit declaration
 wins, and checking the writes against it is ADR-112 WD5 (#1075). An
 `untyped` declaration (rbs-inline's placeholder for a bare attribute)
 or one with a type variable is not taken, and an undeclared attribute
-keeps #541's `Dynamic[top]`.
+keeps #541's `Dynamic[top]`. The declared type serves checking only:
+`rigor sig-gen` keeps the census's answer, so it never proposes a
+declaration back as an inference.
 
 ### WD3 — Slice 3: ctor definite assignment through same-class calls
 

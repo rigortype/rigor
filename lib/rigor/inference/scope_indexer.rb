@@ -117,8 +117,11 @@ module Rigor
       # `ivar_writer_scope:` — the scope whose project tables the #1154 declared-parameter credit reads to find the
       # ivar writers outside this file ({DeclaredParamWrites}); defaults to `default_scope`. `rigor sig-gen` indexes
       # each file under an unseeded scope, so it passes one carrying the project's tables.
+      # `declared_ivar_types:` — whether an RBS-declared ivar type replaces the census's join of the writes (#1406).
+      # `rigor sig-gen` passes false: it proposes what the code says, and reading a declaration back would make a row
+      # count as generated only because it is declared.
       def index(root, default_scope:, converged_loop_recording: false, widen_clauses: false, # rubocop:disable Metrics/AbcSize,Metrics/MethodLength
-                ivar_writer_scope: nil)
+                ivar_writer_scope: nil, declared_ivar_types: true)
         # Slice A-declarations. Build the declaration overrides first so every scope handed to the StatementEvaluator
         # already carries the table; structural sharing through `Scope#with_local` / `#with_fact` / `#with_self_type`
         # propagates it across every derived scope.
@@ -141,7 +144,7 @@ module Rigor
         # Slice 7 phase 2. Pre-pass over every class/module body to collect the per-class ivar accumulator. Seeded after
         # declared_types so the rvalue typer in the pre-pass can see declaration overrides.
         class_ivars = DeclaredParamWrites.with_writer_scope(ivar_writer_scope) do
-          build_class_ivar_index(root, seeded_scope)
+          build_class_ivar_index(root, seeded_scope, declared_ivar_types: declared_ivar_types)
         end
         seeded_scope = seeded_scope.with_discovery(seeded_scope.discovery.with(class_ivars: class_ivars))
 
@@ -506,7 +509,7 @@ module Rigor
       # (singleton vs instance). The rvalue is typed with NO local bindings — the pre-pass lacks statement-level
       # threading — so `@x = 1` records `Constant[1]` but `@x = some_local + 1` records `Dynamic[Top]` (since
       # `some_local` is unbound at pre-pass time). Multiple writes to the same ivar union via `Type::Combinator.union`.
-      def build_class_ivar_index(root, default_scope)
+      def build_class_ivar_index(root, default_scope, declared_ivar_types: true)
         accumulator = {}
         mutated_ivars = {}
         read_before_write = {}
@@ -526,7 +529,7 @@ module Rigor
         contribute_read_before_write_nil!(accumulator, read_before_write, init_writes)
         make_reflective_classes_gradual!(accumulator, reflective_opaque)
         # #1406 — an RBS `@x: T` or `attr_* x: T` declaration replaces the census's join of the writes.
-        DeclaredIvarTypes.apply!(accumulator, default_scope)
+        DeclaredIvarTypes.apply!(accumulator, default_scope) if declared_ivar_types
         accumulator.transform_values(&:freeze).freeze
       end
 

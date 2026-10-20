@@ -71,8 +71,34 @@ RSpec.describe "the ADR-58 ivar census takes an RBS-declared ivar type (#1406)" 
     expect(census(source, rbs, :@x)).to eq("String?")
   end
 
-  it "adds no entry for an ivar the file does not write (a guard)" do
-    expect(census("class K\n  def r = 1\nend\n", "class K\n  @x: String\nend\n", :@x)).to be_nil
+  it "adds no entry for an ivar the file does not write" do
+    source = "class K\n  def initialize = @y = 1\nend\n"
+
+    expect(census(source, "class K\n  @x: String\nend\n", :@x)).to be_nil
+  end
+
+  it "keeps the entry of the ivar the file writes beside it (control)" do
+    source = "class K\n  def initialize = @y = 1\nend\n"
+
+    expect(census(source, "class K\n  @x: String\n  @y: Integer\nend\n", :@y)).to eq("Integer")
+  end
+
+  it "translates a self declaration to the class" do
+    source = "class K\n  def initialize = @s = nil\nend\n"
+
+    expect(census(source, "class K\n  @s: self?\nend\n", :@s)).to eq("K?")
+  end
+
+  it "translates an instance declaration to the class" do
+    source = "class K\n  def initialize = @s = nil\nend\n"
+
+    expect(census(source, "class K\n  @s: instance?\nend\n", :@s)).to eq("K?")
+  end
+
+  it "expands a type alias declaration" do
+    source = "class K\n  def initialize = @x = nil\nend\n"
+
+    expect(census(source, "class K\n  type t = Integer\n  @x: t\nend\n", :@x)).to eq("Integer")
   end
 
   describe "through rigor check with rbs-inline" do
@@ -110,5 +136,11 @@ RSpec.describe "the ADR-58 ivar census takes an RBS-declared ivar type (#1406)" 
 
       expect(dumps(source)).to eq(["dump_type: String"])
     end
+  end
+
+  it "reads the declaration in check over a write it rules out (sig-gen keeps the write, see generator_spec)" do
+    source = "class K\n  attr_reader :x\n  def initialize = @x = \"zero\"\nend\n"
+
+    expect(census(source, "class K\n  attr_reader x: Integer\nend\n", :@x)).to eq("Integer")
   end
 end

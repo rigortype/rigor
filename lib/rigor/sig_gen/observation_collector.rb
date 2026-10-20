@@ -98,7 +98,8 @@ module Rigor
 
         base_scope = Scope.empty(environment: environment)
         base_scope = base_scope.with_discovery(base_scope.discovery.with(discovered_classes: discovered_classes))
-        scope_index = Inference::ScopeIndexer.index(parse_result.value, default_scope: base_scope)
+        scope_index = Inference::ScopeIndexer.index(parse_result.value, default_scope: base_scope,
+                                                                        declared_ivar_types: false)
         bindings = collect_rspec_bindings(parse_result.value, scope_index)
         @before_ivars = collect_before_ivars(parse_result.value, scope_index)
 

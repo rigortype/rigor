@@ -9,7 +9,7 @@ RSpec.describe "module_function spellings in a reopening (#2209)", type: :runner
   def mismatches(reopening)
     files = { "es.rb" => "module Es\n  extend self\n  private def two(a, b) = a\nend\n",
               "use.rb" => "def b = Es.two(1, 2)\n" }
-    files["es_mf.rb"] = "module Es\n  #{reopening}\nend\n" if reopening
+    files["es_mf.rb"] = "module Other\n  def two(a, b) = a\nend\nmodule Es\n  #{reopening}\nend\n" if reopening
     analyze(files: files).diagnostics.select { |d| d.rule == "def.method-visibility-mismatch" }
                          .map { |d| [File.basename(d.path), d.line] }
   end
@@ -27,9 +27,10 @@ RSpec.describe "module_function spellings in a reopening (#2209)", type: :runner
     end
   end
 
-  # Ruby: NoMethodError (private method) for the first two; `public_send` raises NoMethodError at the reopening,
-  # since `module_function` is private (controls).
-  [nil, "self.module_function :three", "public_send(:module_function, :two)"].each do |reopening|
+  # Ruby: NoMethodError (private method) for the first three, where nothing makes `Es#two` a module function;
+  # `public_send` raises NoMethodError at the reopening, since `module_function` is private (controls).
+  [nil, "self.module_function :three", "Other.send(:module_function, :two)",
+   "public_send(:module_function, :two)"].each do |reopening|
     it "still reports the singleton call with #{reopening ? "`#{reopening}`" : 'no reopening'}" do
       expect(mismatches(reopening)).to eq([["use.rb", 1]])
     end

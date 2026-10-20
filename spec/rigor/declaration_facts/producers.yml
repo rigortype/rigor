@@ -8,9 +8,9 @@
 lib/rigor/analysis/check_rules.rb:
   computes: the visibility of a method and its override, for the def.method-visibility-mismatch and override rules
   producers:
-    Rigor::Analysis::CheckRules.instance_visibility_mismatch: the instance-side half of the grandfathered visibility_mismatch_diagnostic, split out by issue #1984; its visibility comparisons are the grandfathered method's, and it adds the method_missing / respond_to_missing? decline; it reads the recorded visibility through Scope and DefinerResolution and derives no declaration context
-    Rigor::Analysis::CheckRules.private_recorded_names: issue #1984, the set of names some class records :private (either side), the table-only gate the singleton visibility rule asks before reading a chain; it derives no declaration context
-    Rigor::Analysis::CheckRules.singleton_visibility_mismatch: issue #1984, the singleton-side half of visibility_mismatch_diagnostic; it compares DefinerResolution's singleton-side :visibility answer with :private and derives no declaration context
+    Rigor::Analysis::CheckRules.instance_visibility_mismatch: 'the instance-side half of the grandfathered visibility_mismatch_diagnostic, split out by issue #1984; its visibility comparisons are the grandfathered method''s, and it adds the method_missing / respond_to_missing? decline; it reads the recorded visibility through Scope and DefinerResolution and derives no declaration context'
+    Rigor::Analysis::CheckRules.private_recorded_names: 'issue #1984, the set of names some class records :private (either side), the table-only gate the singleton visibility rule asks before reading a chain; it derives no declaration context'
+    Rigor::Analysis::CheckRules.singleton_visibility_mismatch: 'issue #1984, the singleton-side half of visibility_mismatch_diagnostic; it compares DefinerResolution''s singleton-side :visibility answer with :private and derives no declaration context'
     Rigor::Analysis::CheckRules.visibility_reduced?: grandfathered
 lib/rigor/analysis/check_rules/ivar_write_collector.rb:
   computes: the instance-variable writes in each class's instance-method bodies, keyed by qualified name
@@ -21,9 +21,9 @@ lib/rigor/analysis/check_rules/ivar_write_collector.rb:
 lib/rigor/analysis/check_rules/lexical_method_sites.rb:
   computes: where a singleton def on a local is in scope
   producers:
-    Rigor::Analysis::CheckRules::LexicalMethodSites: issue #1722, finds the calls that give one local's object singleton methods (o.extend, o.define_singleton_method, an instance_eval block that writes a def) for call.undefined-method's per-file local-scope decline; it derives no declaration context
-    Rigor::Analysis::CheckRules::LexicalMethodSites#defines_on_self?: issue #1722, finds the calls that give one local's object singleton methods (o.extend, o.define_singleton_method, an instance_eval block that writes a def) for call.undefined-method's per-file local-scope decline; it derives no declaration context
-    Rigor::Analysis::CheckRules::LexicalMethodSites#opened_method_name: issue #1722, finds the calls that give one local's object singleton methods (o.extend, o.define_singleton_method, an instance_eval block that writes a def) for call.undefined-method's per-file local-scope decline; it derives no declaration context
+    Rigor::Analysis::CheckRules::LexicalMethodSites: 'issue #1722, finds the calls that give one local''s object singleton methods (o.extend, o.define_singleton_method, an instance_eval block that writes a def) for call.undefined-method''s per-file local-scope decline; it derives no declaration context'
+    Rigor::Analysis::CheckRules::LexicalMethodSites#defines_on_self?: 'issue #1722, finds the calls that give one local''s object singleton methods (o.extend, o.define_singleton_method, an instance_eval block that writes a def) for call.undefined-method''s per-file local-scope decline; it derives no declaration context'
+    Rigor::Analysis::CheckRules::LexicalMethodSites#opened_method_name: 'issue #1722, finds the calls that give one local''s object singleton methods (o.extend, o.define_singleton_method, an instance_eval block that writes a def) for call.undefined-method''s per-file local-scope decline; it derives no declaration context'
     Rigor::Analysis::CheckRules::LexicalMethodSites#walk: grandfathered
 lib/rigor/analysis/check_rules/rule_walk.rb:
   computes: the single AST walk that hosts the check-rule collectors
@@ -43,7 +43,7 @@ lib/rigor/analysis/check_rules/source_arity.rb:
   computes: whether a source-inferred method is public at a call site
   producers:
     Rigor::Analysis::CheckRules::SourceArity#public_at?: grandfathered
-    Rigor::Analysis::CheckRules::SourceArity#singleton_private?: issue #2059, compares DefinerResolution's singleton-side :visibility answer with :private so the arity check leaves a private call to the visibility rule; it derives no declaration context
+    Rigor::Analysis::CheckRules::SourceArity#singleton_private?: 'issue #2059, compares DefinerResolution''s singleton-side :visibility answer with :private so the arity check leaves a private call to the visibility rule; it derives no declaration context'
 lib/rigor/analysis/dependency_source_inference/walker.rb:
   computes: the method catalog of an opt-in gem's source roots, per class and side, its refine bodies' refinements, and the constants its files bind
   producers:
@@ -53,8 +53,8 @@ lib/rigor/analysis/dependency_source_inference/walker.rb:
 lib/rigor/analysis/incremental.rb:
   computes: the dependency keys an --incremental recheck fires from the per-file tables the indexer already wrote
   producers:
-    Rigor::Analysis::Incremental: issue #2161, reads the `[:module_function, owner, name]` entries ScopeIndexer#add_module_function_entries puts in a file's visibility entries only to pick the `visibility:` keys an --incremental recheck fires; it records no declaration fact and derives no context
-    Rigor::Analysis::Incremental#changed_visibility_slots: issue #2161, reads the `[:module_function, owner, name]` entries ScopeIndexer#add_module_function_entries puts in a file's visibility entries only to pick the `visibility:` keys an --incremental recheck fires; it records no declaration fact and derives no context
+    Rigor::Analysis::Incremental: 'issue #2161, reads the `[:module_function, owner, name]` entries ScopeIndexer#add_module_function_entries puts in a file''s visibility entries only to pick the `visibility:` keys an --incremental recheck fires; it records no declaration fact and derives no context'
+    Rigor::Analysis::Incremental#changed_visibility_slots: 'issue #2161, reads the `[:module_function, owner, name]` entries ScopeIndexer#add_module_function_entries puts in a file''s visibility entries only to pick the `visibility:` keys an --incremental recheck fires; it records no declaration fact and derives no context'
 lib/rigor/analysis/incremental_session.rb:
   computes: which constants a changed file rewrote the singleton side of, to choose the readers an --incremental recheck re-checks (#1906)
   producers:
@@ -66,7 +66,7 @@ lib/rigor/analysis/reachability/scan.rb:
     Rigor::Analysis::Reachability::Scan::AncestrySites#mixin_arguments: reads a mixin call's module arguments into Ancestry edges that widen only rigor unused's const_get lookup (#1946); it derives no declaration context
     Rigor::Analysis::Reachability::Scan::LocalValues: SCOPE_GATES lists the nodes that open a local-variable scope, so an interpolated const_get argument is read through its own method's assignments (#1734); it derives no declaration context
     Rigor::Analysis::Reachability::Scan::LocalValues#collect_local_writes: stops a local-variable search at a nested def, class, module or singleton class (#1734); it derives no declaration context
-    Rigor::Analysis::Reachability::Scan::Walker#self_kind_in: classifies what `self` is in a def or `class << self` body only to choose where a literal const_get on `self` is looked up (#1761, #1767), falling back to reading it at the top level too where `self` is not nameable; it records no declaration and decides no def's owner
+    Rigor::Analysis::Reachability::Scan::Walker#self_kind_in: 'classifies what `self` is in a def or `class << self` body only to choose where a literal const_get on `self` is looked up (#1761, #1767), falling back to reading it at the top level too where `self` is not nameable; it records no declaration and decides no def''s owner'
     Rigor::Analysis::Reachability::Scan::Walker#mixin_names: grandfathered
     Rigor::Analysis::Reachability::Scan::Walker#walk: grandfathered
 lib/rigor/effects/definition_context.rb:
@@ -112,9 +112,9 @@ lib/rigor/inference/captured_locals.rb:
 lib/rigor/inference/clause_widening.rb:
   computes: the local and instance variable names a begin body writes that a rescue or ensure clause reads as untyped
   producers:
-    Rigor::Inference::ClauseWidening: lists the nested def, class, module and singleton class nodes its searches stop at (#1231, #1839); it derives no declaration context
-    Rigor::Inference::ClauseWidening#count_writes: stops a search for the local and instance variable names a begin body, its else clause, its rescue clauses or a rescue modifier's expression write at a nested def, class, module or singleton class (#1231, #1839); it derives no declaration context
-    Rigor::Inference::ClauseWidening#mentions: stops a search for the names a rescue or ensure clause mentions at a nested def, class, module or singleton class (#1231, #1839); it derives no declaration context
+    Rigor::Inference::ClauseWidening: 'lists the nested def, class, module and singleton class nodes its searches stop at (#1231, #1839); it derives no declaration context'
+    Rigor::Inference::ClauseWidening#count_writes: 'stops a search for the local and instance variable names a begin body, its else clause, its rescue clauses or a rescue modifier''s expression write at a nested def, class, module or singleton class (#1231, #1839); it derives no declaration context'
+    Rigor::Inference::ClauseWidening#mentions: 'stops a search for the names a rescue or ensure clause mentions at a nested def, class, module or singleton class (#1231, #1839); it derives no declaration context'
 lib/rigor/inference/declaration_walk/traversal.rb:
   computes: the shared declaration walk that hands each ScopeIndexer collector its self, cref and nesting
   producers:
@@ -192,15 +192,15 @@ lib/rigor/inference/method_dispatcher/rbs_dispatch.rb:
   producers:
     Rigor::Inference::MethodDispatcher::RbsDispatch.method_private?: grandfathered
 lib/rigor/inference/object_mixins.rb:
-  computes: how the modules the project mixes into Object answer a method name (issue #1697)
+  computes: 'how the modules the project mixes into Object answer a method name (issue #1697)'
   producers:
-    Rigor::Inference::ObjectMixins#private_definition?: reads an RBS method definition's accessibility (`:private`) to tell a bare call's reach from an explicit receiver's (issue #1697); it produces no declaration fact
+    Rigor::Inference::ObjectMixins#private_definition?: 'reads an RBS method definition''s accessibility (`:private`) to tell a bare call''s reach from an explicit receiver''s (issue #1697); it produces no declaration fact'
 lib/rigor/inference/module_function_state.rb:
   computes: what a module_function call does to the defs around it, for each of its four readers
   producers:
     Rigor::Inference::ModuleFunctionState#call?: grandfathered
     Rigor::Inference::ModuleFunctionState#each_rebound_name: stops at a nested class, module or `class <<` body, so a named module_function call's snapshot (#1550) declines only on a rebind of its own module's method; it lives in ModuleFunctionState, the home this census routes module_function readings to
-    Rigor::Inference::ModuleFunctionState#instance_visibility: names the visibility a `module_function` call gives the instance copy (private, #1569), which the method-visibility walk applies as it applies a `private` call; it lives in ModuleFunctionState, the home this census routes module_function readings to, and derives no owner or side
+    Rigor::Inference::ModuleFunctionState#instance_visibility: 'names the visibility a `module_function` call gives the instance copy (private, #1569), which the method-visibility walk applies as it applies a `private` call; it lives in ModuleFunctionState, the home this census routes module_function readings to, and derives no owner or side'
     Rigor::Inference::ModuleFunctionState#prescan_deferred: grandfathered
     Rigor::Inference::ModuleFunctionState#visibility_reset?: names the bare `public`, `private` and `protected` calls that end the module_function mode (#1968), which the singleton, deferred and sig-gen readings read through `prescan_deferred`; it lives in ModuleFunctionState, the home this census routes module_function readings to
 lib/rigor/inference/operand_effects.rb:
@@ -213,31 +213,31 @@ lib/rigor/inference/operand_effects.rb:
 lib/rigor/inference/project_patched_methods.rb:
   computes: whether a call may reach a pre_eval patch, and the order of the modules the pre_eval files mix in (#1708)
   producers:
-    Rigor::Inference::ProjectPatchedMethods#callable?: issue #1708, answers whether a call may reach a pre_eval: patch from the visibility the scanner recorded (Ruby's private / protected receiver rules), declining when another definer farther on the walk may answer; it reads the registry entry only and derives no declaration context
-    Rigor::Inference::ProjectPatchedMethods#expand_mixins: issue #1708, splices the include / prepend edges the scanner recorded into the pre_eval: registry's ancestor walk in Ruby's order; it derives no declaration context
-    Rigor::Inference::ProjectPatchedMethods#initialize: issue #1708, the Entry default visibility (:public) for a patch the scanner read no visibility call for, and the per-owner prepend / include table the registry's ancestor walk reads; it derives no declaration context
+    Rigor::Inference::ProjectPatchedMethods#callable?: 'issue #1708, answers whether a call may reach a pre_eval: patch from the visibility the scanner recorded (Ruby''s private / protected receiver rules), declining when another definer farther on the walk may answer; it reads the registry entry only and derives no declaration context'
+    Rigor::Inference::ProjectPatchedMethods#expand_mixins: 'issue #1708, splices the include / prepend edges the scanner recorded into the pre_eval: registry''s ancestor walk in Ruby''s order; it derives no declaration context'
+    Rigor::Inference::ProjectPatchedMethods#initialize: 'issue #1708, the Entry default visibility (:public) for a patch the scanner read no visibility call for, and the per-owner prepend / include table the registry''s ancestor walk reads; it derives no declaration context'
 lib/rigor/inference/project_patched_mixins.rb:
   computes: the include / prepend edges the pre_eval files write (#1708)
   producers:
-    Rigor::Inference::ProjectPatchedScanner::Mixins: issue #1708, records the include / prepend edges a pre_eval: file writes (Numeric.include(M), include M in a body, a top-level include into Object) for the pre_eval: registry's ancestor walk only; it writes no discovery table and derives no declaration context
-    Rigor::Inference::ProjectPatchedScanner::Mixins#guarded: issue #2109, recognises only the idempotence-guard shape around a pre_eval include/prepend (`X.include(M) unless X.include?(M)` / `X < M` / `X.ancestors.include?(M)`, and `if !…`) whose receiver and module match the guarded call; it derives no declaration context of its own
-    Rigor::Inference::ProjectPatchedScanner::Mixins#pending: issue #1708, records the include / prepend edges a pre_eval: file writes (Numeric.include(M), include M in a body, a top-level include into Object) for the pre_eval: registry's ancestor walk only; it writes no discovery table and derives no declaration context
+    Rigor::Inference::ProjectPatchedScanner::Mixins: 'issue #1708, records the include / prepend edges a pre_eval: file writes (Numeric.include(M), include M in a body, a top-level include into Object) for the pre_eval: registry''s ancestor walk only; it writes no discovery table and derives no declaration context'
+    Rigor::Inference::ProjectPatchedScanner::Mixins#guarded: 'issue #2109, recognises only the idempotence-guard shape around a pre_eval include/prepend (`X.include(M) unless X.include?(M)` / `X < M` / `X.ancestors.include?(M)`, and `if !…`) whose receiver and module match the guarded call; it derives no declaration context of its own'
+    Rigor::Inference::ProjectPatchedScanner::Mixins#pending: 'issue #1708, records the include / prepend edges a pre_eval: file writes (Numeric.include(M), include M in a body, a top-level include into Object) for the pre_eval: registry''s ancestor walk only; it writes no discovery table and derives no declaration context'
 lib/rigor/inference/project_patched_scanner.rb:
   computes: the def and def self methods each class declares in the pre_eval files (ADR-17), and their visibility (#1708)
   producers:
-    Rigor::Inference::ProjectPatchedScanner#alias_entry: issue #1708, gives an alias in a pre_eval: file its old name's recorded visibility (public when no patch binds that name), as Ruby's alias does; it writes no discovery table and derives no declaration context
-    Rigor::Inference::ProjectPatchedScanner#record_def_node: issue #1708, records the visibility a pre_eval: patch has (the def-argument and toggle forms, private :x, module_function's public singleton copy, an alias copying its old name's visibility) on the pre_eval: registry entry only, so a private patch does not answer an explicit-receiver call; it writes no discovery table and derives no declaration context
+    Rigor::Inference::ProjectPatchedScanner#alias_entry: 'issue #1708, gives an alias in a pre_eval: file its old name''s recorded visibility (public when no patch binds that name), as Ruby''s alias does; it writes no discovery table and derives no declaration context'
+    Rigor::Inference::ProjectPatchedScanner#record_def_node: 'issue #1708, records the visibility a pre_eval: patch has (the def-argument and toggle forms, private :x, module_function''s public singleton copy, an alias copying its old name''s visibility) on the pre_eval: registry entry only, so a private patch does not answer an explicit-receiver call; it writes no discovery table and derives no declaration context'
     Rigor::Inference::ProjectPatchedScanner#walk_node: grandfathered
 lib/rigor/inference/project_patched_visibility.rb:
   computes: the visibility a pre_eval file gives each def it writes in a class, module or class << body (#1708)
   producers:
-    Rigor::Inference::ProjectPatchedScanner::Visibility: issue #1708, reads the visibility a pre_eval: file gives each def in a class, module or class << body (a bare private / protected / public / module_function toggle, the def-argument form, private_class_method def self.x) for the pre_eval: registry only, so a private patch does not answer an explicit-receiver call; it walks no analysed file and writes no discovery table; ModuleFunctionState reads the module_function mode, not the private / protected / public default a def takes, and this asks it only whether a call is bare
-    Rigor::Inference::ProjectPatchedScanner::Visibility#applied: issue #1708, turns a pre_eval: patch's visibility into the registry entries it leaves (module_function's private instance entry and public singleton copy) for the pre_eval: registry only; it writes no discovery table and derives no declaration context
-    Rigor::Inference::ProjectPatchedScanner::Visibility#bare_call_nested?: issue #1708, reads the visibility a pre_eval: file gives each def in a class, module or class << body (a bare private / protected / public / module_function toggle, the def-argument form, private_class_method def self.x) for the pre_eval: registry only, so a private patch does not answer an explicit-receiver call; it walks no analysed file and writes no discovery table; ModuleFunctionState reads the module_function mode, not the private / protected / public default a def takes, and this asks it only whether a call is bare
-    Rigor::Inference::ProjectPatchedScanner::Visibility#call: issue #1708, reads the visibility a pre_eval: file gives each def in a class, module or class << body (a bare private / protected / public / module_function toggle, the def-argument form, private_class_method def self.x) for the pre_eval: registry only, so a private patch does not answer an explicit-receiver call; it walks no analysed file and writes no discovery table; ModuleFunctionState reads the module_function mode, not the private / protected / public default a def takes, and this asks it only whether a call is bare
-    Rigor::Inference::ProjectPatchedScanner::Visibility#mark: issue #1708, reads the visibility a pre_eval: file gives each def in a class, module or class << body (a bare private / protected / public / module_function toggle, the def-argument form, private_class_method def self.x) for the pre_eval: registry only, so a private patch does not answer an explicit-receiver call; it walks no analysed file and writes no discovery table; ModuleFunctionState reads the module_function mode, not the private / protected / public default a def takes, and this asks it only whether a call is bare
-    Rigor::Inference::ProjectPatchedScanner::Visibility#mark_nested: issue #1708, reads the visibility a pre_eval: file gives each def in a class, module or class << body (a bare private / protected / public / module_function toggle, the def-argument form, private_class_method def self.x) for the pre_eval: registry only, so a private patch does not answer an explicit-receiver call; it walks no analysed file and writes no discovery table; ModuleFunctionState reads the module_function mode, not the private / protected / public default a def takes, and this asks it only whether a call is bare
-    Rigor::Inference::ProjectPatchedScanner::Visibility#read_body: issue #1708, reads the visibility a pre_eval: file gives each def in a class, module or class << body (a bare private / protected / public / module_function toggle, the def-argument form, private_class_method def self.x) for the pre_eval: registry only, so a private patch does not answer an explicit-receiver call; it walks no analysed file and writes no discovery table; ModuleFunctionState reads the module_function mode, not the private / protected / public default a def takes, and this asks it only whether a call is bare
+    Rigor::Inference::ProjectPatchedScanner::Visibility: 'issue #1708, reads the visibility a pre_eval: file gives each def in a class, module or class << body (a bare private / protected / public / module_function toggle, the def-argument form, private_class_method def self.x) for the pre_eval: registry only, so a private patch does not answer an explicit-receiver call; it walks no analysed file and writes no discovery table; ModuleFunctionState reads the module_function mode, not the private / protected / public default a def takes, and this asks it only whether a call is bare'
+    Rigor::Inference::ProjectPatchedScanner::Visibility#applied: 'issue #1708, turns a pre_eval: patch''s visibility into the registry entries it leaves (module_function''s private instance entry and public singleton copy) for the pre_eval: registry only; it writes no discovery table and derives no declaration context'
+    Rigor::Inference::ProjectPatchedScanner::Visibility#bare_call_nested?: 'issue #1708, reads the visibility a pre_eval: file gives each def in a class, module or class << body (a bare private / protected / public / module_function toggle, the def-argument form, private_class_method def self.x) for the pre_eval: registry only, so a private patch does not answer an explicit-receiver call; it walks no analysed file and writes no discovery table; ModuleFunctionState reads the module_function mode, not the private / protected / public default a def takes, and this asks it only whether a call is bare'
+    Rigor::Inference::ProjectPatchedScanner::Visibility#call: 'issue #1708, reads the visibility a pre_eval: file gives each def in a class, module or class << body (a bare private / protected / public / module_function toggle, the def-argument form, private_class_method def self.x) for the pre_eval: registry only, so a private patch does not answer an explicit-receiver call; it walks no analysed file and writes no discovery table; ModuleFunctionState reads the module_function mode, not the private / protected / public default a def takes, and this asks it only whether a call is bare'
+    Rigor::Inference::ProjectPatchedScanner::Visibility#mark: 'issue #1708, reads the visibility a pre_eval: file gives each def in a class, module or class << body (a bare private / protected / public / module_function toggle, the def-argument form, private_class_method def self.x) for the pre_eval: registry only, so a private patch does not answer an explicit-receiver call; it walks no analysed file and writes no discovery table; ModuleFunctionState reads the module_function mode, not the private / protected / public default a def takes, and this asks it only whether a call is bare'
+    Rigor::Inference::ProjectPatchedScanner::Visibility#mark_nested: 'issue #1708, reads the visibility a pre_eval: file gives each def in a class, module or class << body (a bare private / protected / public / module_function toggle, the def-argument form, private_class_method def self.x) for the pre_eval: registry only, so a private patch does not answer an explicit-receiver call; it walks no analysed file and writes no discovery table; ModuleFunctionState reads the module_function mode, not the private / protected / public default a def takes, and this asks it only whether a call is bare'
+    Rigor::Inference::ProjectPatchedScanner::Visibility#read_body: 'issue #1708, reads the visibility a pre_eval: file gives each def in a class, module or class << body (a bare private / protected / public / module_function toggle, the def-argument form, private_class_method def self.x) for the pre_eval: registry only, so a private patch does not answer an explicit-receiver call; it walks no analysed file and writes no discovery table; ModuleFunctionState reads the module_function mode, not the private / protected / public default a def takes, and this asks it only whether a call is bare'
 lib/rigor/inference/receiver_blind_block.rb:
   computes: whether a block can see the hash an in-place transform is rewriting
   producers:
@@ -267,7 +267,7 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#add_declared_name: grandfathered
     Rigor::Inference::ScopeIndexer#add_file_possible: ADR-119 WD3, the `∪ (P_f − C)` half of the possible-methods fold; it combines two tables' kinds per name and side and decides no declaration context
     Rigor::Inference::ScopeIndexer#add_header_nesting: grandfathered
-    Rigor::Inference::ScopeIndexer#add_module_function_entries: issue #2161, copies every named deferred-range def row whose kind is not :instance (a :both row from ModuleFunctionState.deferred_module_function?, a :singleton row from a named module_function call or from a def that record_deferred_def / def_singleton? places on the singleton side, such as def self.x, class << self or instance_eval) into the file's visibility entries, the rows DefinerResolution.module_function_row? counts, so the --incremental diff sees one appear or vanish; it reads finished rows and decides no owner or side
+    Rigor::Inference::ScopeIndexer#add_module_function_entries: 'issue #2161, copies every named deferred-range def row whose kind is not :instance (a :both row from ModuleFunctionState.deferred_module_function?, a :singleton row from a named module_function call or from a def that record_deferred_def / def_singleton? places on the singleton side, such as def self.x, class << self or instance_eval) into the file''s visibility entries, the rows DefinerResolution.module_function_row? counts, so the --incremental diff sees one appear or vanish; it reads finished rows and decides no owner or side'
     Rigor::Inference::ScopeIndexer#alias_renamed_header_nestings: grandfathered
     Rigor::Inference::ScopeIndexer#append_ancestry_signature: grandfathered
     Rigor::Inference::ScopeIndexer#append_certainty_signature: ADR-119 WD3, it renders the file's filled siblings (possible names, contested slots) into the ADR-89 declaration signature so a certainty-only edit (`… end if X`) moves it; it reads the siblings the walk produced and decides no context
@@ -277,16 +277,16 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#append_envelope_signature: grandfathered
     Rigor::Inference::ScopeIndexer#append_mixin_signature: renders the mixin lists and the unpositioned table into the declaration signature; it derives no declaration context
     Rigor::Inference::ScopeIndexer#apply_alias_def_nodes: grandfathered
-    Rigor::Inference::ScopeIndexer#apply_class_method_visibility: issue #1984, applies a private_class_method / public_class_method call to the class's singleton visibility slots as the grandfathered apply_visibility_call applies private / public to the instance ones; the owner is the visibility walk's prefix and it derives no context
+    Rigor::Inference::ScopeIndexer#apply_class_method_visibility: 'issue #1984, applies a private_class_method / public_class_method call to the class''s singleton visibility slots as the grandfathered apply_visibility_call applies private / public to the instance ones; the owner is the visibility walk''s prefix and it derives no context'
     Rigor::Inference::ScopeIndexer#apply_compact_header_renames!: grandfathered
     Rigor::Inference::ScopeIndexer#apply_dynamic_target_writes: grandfathered
     Rigor::Inference::ScopeIndexer#apply_named_visibility: grandfathered
-    Rigor::Inference::ScopeIndexer#apply_visibility_argument: issues #1911 and #1633, one argument of the grandfathered apply_visibility_call split out to hold its size: a wrapped def or attr_* call takes the call's visibility, a literal name is applied, anything else is walked contested; the owner is the caller's qualified prefix and it derives no context
+    Rigor::Inference::ScopeIndexer#apply_visibility_argument: 'issues #1911 and #1633, one argument of the grandfathered apply_visibility_call split out to hold its size: a wrapped def or attr_* call takes the call''s visibility, a literal name is applied, anything else is walked contested; the owner is the caller''s qualified prefix and it derives no context'
     Rigor::Inference::ScopeIndexer#apply_visibility_call: grandfathered
     Rigor::Inference::ScopeIndexer#block_mixes_in?: scans an eval block for a mixin call; it answers a question and derives no declaration context
     Rigor::Inference::ScopeIndexer#build_method_visibility_tables: the grandfathered visibility walk's entry point, moved from build_discovered_method_visibilities (now a projection of it) so the walk also returns ADR-119 WD3's contested visibility slots; it starts the walk at the top level with the same default and adds no context of its own
     Rigor::Inference::ScopeIndexer#census_scan: ADR-121 WD7's census over a def or refine body the method walk does not descend; a nested def, class, module or singleton class only moves the module a `refine` there is charged to to the wildcard, so it derives no declaration context
-    Rigor::Inference::ScopeIndexer#class_method_visibility_parts: issue #1984, the private_class_method / public_class_method twin of visibility_call_parts; it maps the call name to its visibility in the walk's own spellings (receiverless, self., send) and derives no context
+    Rigor::Inference::ScopeIndexer#class_method_visibility_parts: 'issue #1984, the private_class_method / public_class_method twin of visibility_call_parts; it maps the call name to its visibility in the walk''s own spellings (receiverless, self., send) and derives no context'
     Rigor::Inference::ScopeIndexer#code_body_nodes: collects the nodes inside the code bodies of a construct the per-node scope walk evaluates unentered, which its recording leaves to the walk (#2196); it decides which nodes a recording skips, not what a declaration is
     Rigor::Inference::ScopeIndexer#collect_alias_map_block_call?: grandfathered
     Rigor::Inference::ScopeIndexer#collect_alias_map_declaration: grandfathered
@@ -325,9 +325,9 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#collect_singleton_method_defs: grandfathered
     Rigor::Inference::ScopeIndexer#collect_truthy_test_ivars: grandfathered
     Rigor::Inference::ScopeIndexer#constant_mutation_candidates: grandfathered
-    Rigor::Inference::ScopeIndexer#contest_foreign_singleton_visibility: issue #1984, contests the singleton visibility slot a `def Other.x` makes public on each class constant_receiver_candidates gives for the receiver; it derives no context
-    Rigor::Inference::ScopeIndexer#contest_replaced_visibility: issue #1989, contests the visibility slot a define_method or alias replaces (on the instance or, since #1984, the singleton side); the owner is the visibility walk's prefix and it derives no context
-    Rigor::Inference::ScopeIndexer#contest_singleton_rewrites: issue #1984, contests the singleton visibility slots a define_singleton_method or a call on the body's own singleton_class may make public; the owner is the visibility walk's prefix and it derives no context
+    Rigor::Inference::ScopeIndexer#contest_foreign_singleton_visibility: 'issue #1984, contests the singleton visibility slot a `def Other.x` makes public on each class constant_receiver_candidates gives for the receiver; it derives no context'
+    Rigor::Inference::ScopeIndexer#contest_replaced_visibility: 'issue #1989, contests the visibility slot a define_method or alias replaces (on the instance or, since #1984, the singleton side); the owner is the visibility walk''s prefix and it derives no context'
+    Rigor::Inference::ScopeIndexer#contest_singleton_rewrites: 'issue #1984, contests the singleton visibility slots a define_singleton_method or a call on the body''s own singleton_class may make public; the owner is the visibility walk''s prefix and it derives no context'
     Rigor::Inference::ScopeIndexer#declared_ancestor_names: grandfathered
     Rigor::Inference::ScopeIndexer#define_method_written_ivars: lists the ivar names a define_method block body writes (#1768), stopping at a nested def, class or module as gather_ivar_writes does; it records them under the class the walk passes in and derives no declaration context
     Rigor::Inference::ScopeIndexer#detect_multi_write_target_writes: grandfathered
@@ -396,7 +396,7 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#record_aliased_ivar_mutations!: grandfathered
     Rigor::Inference::ScopeIndexer#record_anonymous_body_def_as_toplevel: grandfathered
     Rigor::Inference::ScopeIndexer#record_anonymous_meta_superclass: grandfathered
-    Rigor::Inference::ScopeIndexer#record_attr_visibility: issue #1911, records the attr_reader / attr_writer / attr_accessor members in the visibility table beside the grandfathered record_def_visibility; the owner is the visibility walk's prefix and the names are each_attr_macro_name's, so it derives no context
+    Rigor::Inference::ScopeIndexer#record_attr_visibility: 'issue #1911, records the attr_reader / attr_writer / attr_accessor members in the visibility table beside the grandfathered record_def_visibility; the owner is the visibility walk''s prefix and the names are each_attr_macro_name''s, so it derives no context'
     Rigor::Inference::ScopeIndexer#record_attr_writer_ivars: grandfathered
     Rigor::Inference::ScopeIndexer#record_class_body_defs: records in the per-node scope table the self each def of a value-position class-body or refine block runs on (#1696); it records which scope a node is typed under, not what a declaration is
     Rigor::Inference::ScopeIndexer#record_class_new_constant_decl: grandfathered
@@ -405,7 +405,7 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#record_collected_method_def: grandfathered
     Rigor::Inference::ScopeIndexer#record_compact_header: grandfathered
     Rigor::Inference::ScopeIndexer#record_compound_ivar_write: grandfathered
-    Rigor::Inference::ScopeIndexer#record_constant_class_method_calls: issue #1984, records a `K.public_class_method(:x)` (or `send` of it) as K's public singleton slot and contests K's singleton slots for a call on `K.singleton_class`, on each class constant_receiver_candidates gives for K; it derives no context
+    Rigor::Inference::ScopeIndexer#record_constant_class_method_calls: 'issue #1984, records a `K.public_class_method(:x)` (or `send` of it) as K''s public singleton slot and contests K''s singleton slots for a call on `K.singleton_class`, on each class constant_receiver_candidates gives for K; it derives no context'
     Rigor::Inference::ScopeIndexer#record_constant_write: grandfathered
     Rigor::Inference::ScopeIndexer#record_cvar_write: grandfathered
     Rigor::Inference::ScopeIndexer#record_data_member_layout: grandfathered
@@ -442,7 +442,7 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#record_singleton_def_node: grandfathered
     Rigor::Inference::ScopeIndexer#record_singleton_prepend: names the module a `singleton_class.prepend` on an object, or a `prepend` in a `class << obj` body, puts ahead of an object's class (#1820), and marks it as the object-extend recorder does; it reads only whether the call sits in a singleton-class body and whether its object may be an instance, which the walk passes in, and decides no owner or side
     Rigor::Inference::ScopeIndexer#record_struct_member_layout: grandfathered
-    Rigor::Inference::ScopeIndexer#recording_evaluator: builds the per-node scope index's recording evaluation, for the file and for each construct the walk reaches unentered (#2196, #2056); it records which scope a node is typed under, not what a declaration is
+    Rigor::Inference::ScopeIndexer#recording_evaluator: 'builds the per-node scope index''s recording evaluation, for the file and for each construct the walk reaches unentered (#2196, #2056); it records which scope a node is typed under, not what a declaration is'
     Rigor::Inference::ScopeIndexer#seed_operator_only_ivars!: grandfathered
     Rigor::Inference::ScopeIndexer#singleton_class_rewrite_tainted?: taints the singleton side of the class a surface call on `singleton_class` or `Const.singleton_class` reshapes (#1752); the owner is the enclosing class the extends walk passes in, or the constant by the eval-receiver lexical rule, and the call decides no other owner or side
     Rigor::Inference::ScopeIndexer#singleton_constant_segments: collects the last segment of every constant write in a `class << …` body for loose_constant_segments; the segments are names a `refine` target is matched against, and it decides no declaration context
@@ -454,7 +454,7 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#taint_skipped_singleton_rewrites: taints the singleton side a singleton_class surface call in a block the extends walk skips may rewrite (#1906), on the enclosing owner the walk passes in or every name a constant receiver can denote; it computes no declaration context
     Rigor::Inference::ScopeIndexer#unentered_block_entry: the entry scope of a block the evaluator never entered; it passes the scope table to unentered_meta_class_body_entry, which records which scope a node is typed under, not what a declaration is
     Rigor::Inference::ScopeIndexer#unentered_meta_class_body_entry: records the class-body self of a value-position Class.new / Module.new / Struct.new / Data.define block in the per-node scope table (#1696), under the name AnonymousMetaClass.name_for gives; it records which scope a node is typed under, not what a declaration is
-    Rigor::Inference::ScopeIndexer#visibility_call_parts: ADR-119 WD3 and #1633, names the `private` / `protected` / `public` / `module_function` call the visibility walk applies (receiverless, on `self`, or sent with a literal name; a block ignored) and its arguments; it reads a call's shape and decides no owner or side
+    Rigor::Inference::ScopeIndexer#visibility_call_parts: 'ADR-119 WD3 and #1633, names the `private` / `protected` / `public` / `module_function` call the visibility walk applies (receiverless, on `self`, or sent with a literal name; a block ignored) and its arguments; it reads a call''s shape and decides no owner or side'
     Rigor::Inference::ScopeIndexer#walk_anonymous_meta_block: grandfathered
     Rigor::Inference::ScopeIndexer#walk_anonymous_meta_visibilities: PR 1981, the visibility walk's arm for a factory block no constant names (AnonymousMetaClass.block_form_receiver); it walks the body as a fresh ownerless body starting public, so it records nothing for the enclosing class and derives no owner
     Rigor::Inference::ScopeIndexer#walk_class_cvars: grandfathered
@@ -513,7 +513,7 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#walk_method_visibilities: grandfathered
     Rigor::Inference::ScopeIndexer#walk_methods_and_def_nodes: grandfathered
     Rigor::Inference::ScopeIndexer#walk_mixin_call_children: grandfathered
-    Rigor::Inference::ScopeIndexer#singleton_class_eval_walked?: issue #1984, walks a `singleton_class.class_eval` block as the grandfathered walk_method_visibilities walks a `class << self` body (the same owner prefix, a fresh :public default); it adds no context of its own
+    Rigor::Inference::ScopeIndexer#singleton_class_eval_walked?: 'issue #1984, walks a `singleton_class.class_eval` block as the grandfathered walk_method_visibilities walks a `class << self` body (the same owner prefix, a fresh :public default); it adds no context of its own'
     Rigor::Inference::ScopeIndexer#walk_published_constant_ivars: grandfathered
     Rigor::Inference::ScopeIndexer#walk_published_ivar_declaration?: grandfathered
     Rigor::Inference::ScopeIndexer#walk_published_ivar_eval_call?: grandfathered
@@ -537,7 +537,7 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#walk_visibility_singleton_class: grandfathered
     Rigor::Inference::ScopeIndexer#write_mixin_targets: grandfathered
     Rigor::Inference::ScopeIndexer#write_singleton_slot: ADR-119 WD3, the singleton walk's one slot write, routed through SingletonDefTable so the slot's contest follows its writer; the owner and side are the walk's, it adds no context of its own
-    Rigor::Inference::ScopeIndexer#toplevel_include_owner: names `Object` as the owner of a receiverless `include` written as a direct statement of the program (`main.include`, issue #1697); it reads only whether the call is a top-level statement, and the walk's own empty prefix and owner
+    Rigor::Inference::ScopeIndexer#toplevel_include_owner: 'names `Object` as the owner of a receiverless `include` written as a direct statement of the program (`main.include`, issue #1697); it reads only whether the call is a top-level statement, and the walk''s own empty prefix and owner'
     Rigor::Inference::ScopeIndexer#supersede_def_nodes: ADR-119 WD3 (#1989), a later implicit-self non-def definer (attr_*, a literal define_method, alias_method / alias) of a name contests the walk's own def-node slot, certain or possible, keeping the replaced def so no sibling file fills it (through follow_slot_writer); it takes the owner prefix and certainty the walk already computed and decides no declaration context
 lib/rigor/inference/scope_indexer/certainty.rb:
   computes: ADR-119 WD3's certainty, the identity Set of a file's possible def contributions
@@ -644,7 +644,7 @@ lib/rigor/sig_gen/generator.rb:
   computes: the defs, attribute readers and ivar observations sig-gen emits per qualified class
   producers:
     Rigor::SigGen::Generator#collect_init_ivar_obs: grandfathered
-    Rigor::SigGen::Generator#collect_other_ivar_writes: issue #1410, collects the ivars a class writes besides its initialize's `@ivar = param` (attr writers, instance-def and block writes, instance_variable_set on self) so --params=observed withdraws a constructor-observed attr type; it groups by the same declaration_prefix collect_init_ivar_obs uses and skips a class << self body as the class object's ivars, deriving no declaration context of its own
+    Rigor::SigGen::Generator#collect_other_ivar_writes: 'issue #1410, collects the ivars a class writes besides its initialize''s `@ivar = param` (attr writers, instance-def and block writes, instance_variable_set on self) so --params=observed withdraws a constructor-observed attr type; it groups by the same declaration_prefix collect_init_ivar_obs uses and skips a class << self body as the class object''s ivars, deriving no declaration context of its own'
     Rigor::SigGen::Generator#descend_into_namespace?: grandfathered
     Rigor::SigGen::Generator#record_superclass: grandfathered
     Rigor::SigGen::Generator#scan_ivar_param_assignments: grandfathered
@@ -657,7 +657,7 @@ lib/rigor/sig_gen/generator.rb:
 lib/rigor/sig_gen/observation_collector.rb:
   computes: the qualified class of each observed call site's enclosing declaration
   producers:
-    Rigor::SigGen::ObservationCollector#enclosing_blocks: issue #1389, cuts the chain of RSpec group / example / hook blocks a `before` ivar binding can reach at any other block or lambda, a class / module / singleton-class body, and a def that is not a direct statement of a group block; it decides only where an RSpec hook's ivars are visible, never a declaration's qualified name or context
+    Rigor::SigGen::ObservationCollector#enclosing_blocks: 'issue #1389, cuts the chain of RSpec group / example / hook blocks a `before` ivar binding can reach at any other block or lambda, a class / module / singleton-class body, and a def that is not a direct statement of a group block; it decides only where an RSpec hook''s ivars are visible, never a declaration''s qualified name or context'
     Rigor::SigGen::ObservationCollector#walk_class_decls: grandfathered
 plugins/rigor-actioncable/lib/rigor/plugin/actioncable/channel_discoverer.rb:
   computes: the ActionCable channel classes and their lexical paths

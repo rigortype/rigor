@@ -72,6 +72,18 @@ RSpec.describe "Declaration producers" do
                                 "#{DeclarationFactSources::REGENERATE_ENV}=1 adds the entries as TODO."
   end
 
+  # YAML ends a plain scalar at " #", so a reason written as `issue #1984` loads as the text before the hash. A plain
+  # value that holds " #" is cut; it must be quoted (single quotes, with `'` doubled) or folded (`>-`).
+  it "writes every reason so that YAML loads it whole" do
+    cut = File.readlines(snapshot).filter_map do |line|
+      value = line.chomp[/\A(?:  computes|    \S.*?): (.+)\z/, 1]
+      value if value && !value.start_with?("'", '"', ">", "|") && value.include?(" #")
+    end
+
+    expect(cut).to eq([]),
+                   "These plain reasons in producers.yml load truncated at \" #\". Quote them:\n#{cut.join("\n")}"
+  end
+
   it "justifies every file and entry" do
     missing = unjustified(YAML.load_file(snapshot))
 

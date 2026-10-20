@@ -205,6 +205,21 @@ RSpec.describe Rigor::CLI::SigGenCommand do
     )
   end
 
+  # Issue #1891. A literal nested in a tuple, a record or a hash value widens with the shape kept, and the written
+  # file still parses as RBS.
+  it "writes nested literals widened inside their tuple, record and hash under `--write --overwrite`" do
+    write("sig/c.rbs", "class C\n  def t: () -> untyped\n  def r: () -> untyped\n  def h: () -> untyped\nend\n")
+    write("lib/c.rb",
+          %(class C\n  def t = [1, true]\n  def r = { a: :k, b: [nil, "s"] }\n  def h = { "x" => 1 }\nend\n))
+
+    expect(sig_gen("--write", "--overwrite").first).to eq(0)
+    expect(sig_file).to eq(
+      "class C\n  def t: () -> [Integer, false | true]\n  def r: () -> { a: Symbol, b: [nil, String] }\n  " \
+      "def h: () -> Hash[String, Integer]\nend\n"
+    )
+    expect { RBS::Parser.parse_signature(sig_file) }.not_to raise_error
+  end
+
   # An effect annotation is added only to a declaration that carries none (ADR-103 WD9). An annotation on the
   # overload counts, or the kept `%a{pure}` would get a second one above the line.
   it "adds no effect annotation above a declaration whose overload is already annotated" do

@@ -1304,6 +1304,16 @@ RSpec.describe Rigor::SigGen::Generator do
       "true or nil" => ["(x)", "rand(2) == 0 ? true : nil", "(false | nil | true)"],
       "a bool" => ["(x)", "x > 0", "(false | true)"],
       "a Range literal" => ["(x)", "(1..10)", "Range[Integer]"],
+      "a tuple of literals" => ["(x)", %([1, "a", :k]), "[Integer, String, Symbol]"],
+      "a tuple holding true and nil" => ["(x)", "[true, nil]", "[false | true, nil]"],
+      "a record of literals" => ["(x)", %({ a: 1, b: "s" }), "{ a: Integer, b: String }"],
+      "a record nested in a tuple" => ["(x)", "[{ a: [1, false] }]", "[{ a: [Integer, false | true] }]"],
+      "a String-keyed hash of literals" => ["(x)", %({ "k" => 1 }), "Hash[String, Integer]"],
+      "a union of records" => ["(x)", %(rand(2) == 0 ? { a: 1 } : { a: 2, b: "x" }),
+                               "({ a: Integer } | { a: Integer, b: String })"],
+      "a generic argument of literals" => ["(x)", "[1, 2].cycle.first(x)", "Array[Integer]"],
+      "a nested generic argument of literals" => ["(x)", "[1, 2].each_slice(x).to_a", "Array[Array[Integer]]"],
+      "a tuple without literals (a guard)" => ["(x)", "[x, nil]", "[Integer, nil]"],
       "an Integer or nil" => ["(x)", "rand(2) == 0 ? Integer(gets) : nil", "(Integer | nil)"],
       "a computed Float" => ["(x)", "5 / 2.0", "Float"]
     }.each do |label, (params, body, expected)|
@@ -1367,6 +1377,7 @@ RSpec.describe Rigor::SigGen::Generator do
 
           def u = true
           def un = nil
+          def ut = [1, true]
         end
       RUBY
       authored = write_fixture("lib/authored.rb", "class Authored\n  def c(x) = true\n  def n(x) = nil\nend\n")
@@ -1379,6 +1390,7 @@ RSpec.describe Rigor::SigGen::Generator do
       expect(row.call("Inline", :n).rbs).to eq("def n: (Integer x) -> nil")
       expect(row.call("Inline", :u).rbs).to eq("def u: () -> true")
       expect(row.call("Inline", :un).rbs).to eq("def un: () -> nil")
+      expect(row.call("Inline", :ut).rbs).to eq("def ut: () -> [1, true]")
       expect(row.call("Authored", :c).rbs).to eq("def c: (Integer x) -> (false | true)")
       expect(row.call("Authored", :n).classification).to eq(Rigor::SigGen::Classification::EQUIVALENT)
     end
@@ -1393,6 +1405,38 @@ RSpec.describe Rigor::SigGen::Generator do
       expect(candidates.find { |c| c.method_name == :n }.rbs).to eq("def n: () -> nil")
     end
 
+    # Only a covariant core generic's arguments widen (#1891): under an `in` parameter `Sink[Integer]` is no
+    # supertype of the body's `Sink[1]`, so the declared type argument is proposed as it is.
+    it "widens the arguments of a covariant generic and leaves a contravariant one's alone" do
+      write_fixture("sig/box.rbs", <<~RBS)
+        class Sink[in T]
+        end
+        class Box
+          def mk_sink: () -> Sink[1]
+          def mk_arr: () -> Array[1]
+          def s: () -> untyped
+          def a: () -> untyped
+        end
+      RBS
+      path = write_fixture("lib/box.rb", "class Box\n  def s = mk_sink\n  def a = mk_arr\nend\n")
+
+      candidates = generator(paths: [path], signature_paths: [File.join(tmpdir, "sig")]).run
+
+      expect(candidates.find { |c| c.method_name == :s }.rbs).to eq("def s: () -> Sink[1]")
+      expect(candidates.find { |c| c.method_name == :a }.rbs).to eq("def a: () -> Array[Integer]")
+    end
+
+    # Guard: a nested literal keeps its strictest carrier where no `.rbs` declares the method, as a top-level one does.
+    it "keeps the literals inside a tuple and a record when no `.rbs` declares the method" do
+      path = write_fixture("lib/box.rb", %(class Box\n  def t = [1, true]\n  def r = { a: "s" }\nend\n))
+
+      candidates = generator(paths: [path]).run
+
+      expect(candidates.find { |c| c.method_name == :t }.rbs).to eq("def t: () -> [1, true]")
+      expect(candidates.find { |c| c.method_name == :r }.rbs).to eq(%(def r: () -> { a: "s" }))
+    end
+
+    # The tuple and record shapes stay; only the literals inside them widen (#1891).
     it "still proposes a tuple and a record shape over a declared `-> untyped`, as the new-method path does" do
       write_fixture("sig/box.rbs", "class Box\n  def t: () -> untyped\n  def r: () -> untyped\nend\n")
       path = write_fixture("lib/box.rb", <<~RUBY)
@@ -1406,7 +1450,8 @@ RSpec.describe Rigor::SigGen::Generator do
       candidates = gen.run
 
       expect(candidates.map(&:classification).uniq).to eq([Rigor::SigGen::Classification::TIGHTER_RETURN])
-      expect(candidates.find { |c| c.method_name == :t }.rbs).to eq(%(def t: () -> [1, "a"]))
+      expect(candidates.find { |c| c.method_name == :t }.rbs).to eq("def t: () -> [Integer, String]")
+      expect(candidates.find { |c| c.method_name == :r }.rbs).to eq("def r: () -> { a: Integer }")
     end
 
     it "still classifies a declared `void` equivalent — #836's carve-out is untouched by the untyped fix" do

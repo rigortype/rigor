@@ -538,8 +538,17 @@ overrides the method with the other one is not reported as
 widening the return. A body that returns only `nil` keeps
 the `untyped`: it is the shape of a template method a
 subclass fills in, and `-> nil` would make every override
-that returns a value a widening. `nil` inside a union and a
-computed `Float` are proposed as they are. An `untyped` that
+that returns a value a widening. A literal inside a tuple, a
+record or a type argument is widened the same way while the
+shape stays (`-> [1, "a"]` becomes `-> [Integer, String]`,
+`-> { a: 1 }` becomes `-> { a: Integer }`); of the generic
+types, only the arguments of `Array`, `Hash`, `Set`, `Range`
+and `Enumerator` are widened. `nil` inside a union or a shape
+and a computed `Float` are proposed as they are. When the
+method also carries an inline `# @rbs` annotation for its
+parameters only, a return holding a literal that would be
+widened, nested or not, is not proposed at all and the
+`untyped` stays. An `untyped` that
 only the inline reader synthesizes for a `def` you did not
 annotate keeps the literal, as does a method no `.rbs`
 declares — the literal is still the strictest thing the body

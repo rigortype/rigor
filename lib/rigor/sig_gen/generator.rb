@@ -1465,7 +1465,16 @@ module Rigor
       VALUE_LITERAL_CLASSES = [Integer, String, Symbol].freeze
       private_constant :VALUE_LITERAL_CLASSES
 
-      # The same object back when nothing needed widening.
+      # Core generics whose RBS parameters are all `out` or `unchecked out`, so a widened argument is a supertype of
+      # the body's type. An invariant or `in` parameter (a user `class Sink[in T]`) is not widened: `Sink[Integer]`
+      # is no supertype of `Sink[1]` there.
+      COVARIANT_CARRIERS = %w[Array Hash Set Range Enumerator].freeze
+      private_constant :COVARIANT_CARRIERS
+
+      # The same object back when nothing needed widening. A literal nested in a tuple element, a record or hash
+      # value, or a covariant generic argument (`[1, "a"]`, `{ a: 1 }`, `Hash[String, 1]`) widens the same way, while
+      # the carrier's shape and a record's keys stay: a subclass override returning `[2, "b"]` is no widening of
+      # `[Integer, String]`. A nested `nil` is an honest member there, as in a top-level union.
       def widen_value_literals(type)
         case type
         when Type::Constant
@@ -1473,11 +1482,32 @@ module Rigor
           return type unless VALUE_LITERAL_CLASSES.any? { |klass| type.value.instance_of?(klass) }
 
           Type::Combinator.nominal_of(type.value.class.name)
-        when Type::Union
-          members = type.members.map { |member| widen_value_literals(member) }
-          members.each_with_index.all? { |m, i| m.equal?(type.members[i]) } ? type : Type::Combinator.union(*members)
+        when Type::Union then widen_members(type.members, type) { |members| Type::Combinator.union(*members) }
+        when Type::Tuple then widen_members(type.elements, type) { |elements| Type::Combinator.tuple_of(*elements) }
+        when Type::HashShape then widen_hash_shape_values(type)
+        when Type::Nominal
+          return type unless COVARIANT_CARRIERS.include?(type.class_name)
+
+          widen_members(type.type_args, type) do |args|
+            Type::Combinator.nominal_of(type.class_name, type_args: args)
+          end
         else
           type
+        end
+      end
+
+      def widen_members(members, type)
+        widened = members.map { |member| widen_value_literals(member) }
+        widened.each_with_index.all? { |m, i| m.equal?(members[i]) } ? type : yield(widened)
+      end
+
+      def widen_hash_shape_values(shape)
+        widen_members(shape.pairs.values, shape) do |values|
+          Type::HashShape.new(
+            shape.pairs.keys.zip(values).to_h,
+            required_keys: shape.required_keys, optional_keys: shape.optional_keys,
+            read_only_keys: shape.read_only_keys, extra_keys: shape.extra_keys
+          )
         end
       end
 

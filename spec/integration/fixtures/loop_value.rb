@@ -128,6 +128,17 @@ def endless_until
   assert_type(":u", x)
 end
 
+# A `begin … end while` body runs once before its predicate is tested, so a `break` only that first run takes
+# counts: `begin_first_run` returns :b.
+def begin_first_run
+  state = :idle
+  x = (begin
+    break :b if state == :idle
+    state = :run
+  end while state != :idle)
+  assert_type(":b?", x)
+end
+
 # A loop in value position answers as its statement form does: `value_position` returns [[1], [[1]], nil].
 def value_position
   [[while true; break 1; end], [for i in [1]; end], [while false; end].first]

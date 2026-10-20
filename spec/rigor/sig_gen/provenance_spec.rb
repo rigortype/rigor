@@ -192,7 +192,8 @@ SIG_PROVENANCE_RESIDUE = {
   # declarations they replaced. `forced_file_effects` was typed and
   # then dropped on review: the method is `private` (runner.rb's `private :…` list) and private
   # API is not declared in this sig.
-  "sig/rigor.rbs" => 51,
+  # -16 (#1154): an ivar a declared parameter assigns now reads that type, so 16 rows over it render.
+  "sig/rigor.rbs" => 35,
   # -4 (#1181 slice): Bucket/DriftRow member rows are marked under #1183 and `buckets` under #1154;
   # `audit`/`without`/`initialize` tightened to generated/intent, leaving `filter`'s honest
   # `[Array[untyped], Integer]` divergence as the sole unmarked row.
@@ -209,7 +210,8 @@ SIG_PROVENANCE_RESIDUE = {
   # Data members sig-gen cannot infer, but the declared type is `untyped` anyway, so no gap marker
   # applies; they pin as unmarked residue. The typed members and both constructors are #1150-marked.
   "sig/rigor/analysis/project_scan.rbs" => 3,
-  "sig/rigor/ast.rbs" => 1,
+  # -1 (#1154): an ivar a declared parameter assigns now reads that type, so 1 row over it render.
+  "sig/rigor/ast.rbs" => 0,
   "sig/rigor/cache.rbs" => 2,
   "sig/rigor/cli/diff_command.rbs" => 1,
   "sig/rigor/cli/explain_command.rbs" => 1,
@@ -231,7 +233,8 @@ SIG_PROVENANCE_RESIDUE = {
   # five attr_readers #1154-marked; the sole unmarked row is `empty?` (unrenderable).
   "sig/rigor/effects/file_collection.rbs" => 1,
   "sig/rigor/effects/label.rbs" => 5,
-  "sig/rigor/effects/label_set.rbs" => 8,
+  # -1 (#1154): an ivar a declared parameter assigns now reads that type, so 1 row over it render.
+  "sig/rigor/effects/label_set.rbs" => 7,
   "sig/rigor/effects/method_key.rbs" => 3,
   "sig/rigor/effects/origin.rbs" => 0,
   # New file (#1181 collection-side slice): `Row`/`Edge` members and constructors are
@@ -257,11 +260,13 @@ SIG_PROVENANCE_RESIDUE = {
   # the bundle tables — not parameters — so they pin unmarked beside `trivial?` (unrenderable).
   "sig/rigor/effects/summary.rbs" => 3,
   "sig/rigor/effects/taint_cause.rbs" => 0,
-  "sig/rigor/environment.rbs" => 39,
+  # -3 (#1154): an ivar a declared parameter assigns now reads that type, so 3 rows over it render.
+  "sig/rigor/environment.rbs" => 36,
   # -1 (#1429): a value-position `case` now types each arm under the subject's `when` narrowing, so
   # `ExpressionTyper#type_of_virtual`'s `when AST::TypeNode then node.type` arm reads `node` as the node class
   # and its return renders.
-  "sig/rigor/inference.rbs" => 83,
+  # -4 (#1154): an ivar a declared parameter assigns now reads that type, so 4 rows over it render.
+  "sig/rigor/inference.rbs" => 79,
   "sig/rigor/inference/builtins/method_catalog.rbs" => 1,
   "sig/rigor/inference/void_origin.rbs" => 5,
   "sig/rigor/plugin.rbs" => 3,
@@ -288,7 +293,8 @@ SIG_PROVENANCE_RESIDUE = {
   # caller, so sig-gen generates what the two hand-written declarations say.
   "sig/rigor/plugin/io_boundary.rbs" => 2,
   "sig/rigor/plugin/load_error.rbs" => 3,
-  "sig/rigor/plugin/loader.rbs" => 2,
+  # -1 (#1154): an ivar a declared parameter assigns now reads that type, so 1 row over it render.
+  "sig/rigor/plugin/loader.rbs" => 1,
   # -2 (#1181 slices): `additional_initializers` and `protocol_contracts` tightened to
   # `Array[Plugin::AdditionalInitializer]` / `Array[Plugin::ProtocolContract]` and marked #1154.
   # +1 (#1181 vocabulary slice): the six `effect_*` readers are #1154-marked and `effects?` /
@@ -327,16 +333,19 @@ SIG_PROVENANCE_RESIDUE = {
   # `Scope::ResolutionChain#search`, whose value is whatever its block returns, which sig-gen does not render.
   # The three rows move from `declared_divergent` to `unrenderable` and stay residue; the declarations are
   # unchanged and still true.
-  "sig/rigor/scope.rbs" => 112,
+  # -35 (#1154): an ivar a declared parameter assigns now reads that type, so 35 rows over it render.
+  "sig/rigor/scope.rbs" => 77,
   "sig/rigor/sig_gen/skip_reason_catalog.rbs" => 8,
   "sig/rigor/source.rbs" => 4,
   "sig/rigor/testing.rbs" => 4,
-  "sig/rigor/trinary.rbs" => 5,
+  # -1 (#1154): an ivar a declared parameter assigns now reads that type, so 1 row over it render.
+  "sig/rigor/trinary.rbs" => 4,
   # -3 (#1429): a value-position `case` now types each arm under the subject's `when` narrowing, so the
   # `when Constant then type.value.is_a?(String)` arms of `Combinator#literal_string_compatible?`,
   # `#non_empty_string_compatible?` and `#non_zero_int_compatible?` read `type` as the carrier the `when` names
   # rather than `untyped`, and each `bool` return renders.
-  "sig/rigor/type.rbs" => 208
+  # -16 (#1154): an ivar a declared parameter assigns now reads that type, so 16 rows over it render.
+  "sig/rigor/type.rbs" => 192
 }.freeze
 
 module SigProvenanceSpecHelpers

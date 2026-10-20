@@ -1915,6 +1915,17 @@ RSpec.describe Rigor::SigGen::Generator do
       expect(candidate.rbs).to eq("def x: () -> (String | nil)")
     end
 
+    it "skips the reader when another file writes the ivar from outside" do
+      write_fixture("sig/box.rbs", "class Box\n  def initialize: (String x) -> void\nend\n")
+      path = write_fixture("lib/box.rb", "class Box\n  attr_reader :x\n\n  def initialize(x)\n    @x = x\n  end\nend\n")
+      poke = write_fixture("lib/poke.rb", "def poke(o) = o.instance_variable_set(:@x, 2)\n")
+
+      candidates = generator(paths: [path, poke], signature_paths: [File.join(tmpdir, "sig")]).run
+      candidate = candidates.find { |c| c.method_name == :x }
+
+      expect(candidate.skip_reason).to eq(:untyped_return)
+    end
+
     it "still skips the reader when a second write is untyped" do
       candidate = reader_rbs("class Box\n  def initialize: (String x) -> void\nend\n", "def set(v) = @x = v")
 

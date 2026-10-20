@@ -45,6 +45,8 @@ module Rigor
       # The collection a file with nothing to say contributes.
       def self.empty: (?String? path) -> FileCollection
 
+      # sig-gen gap: #1154 — `initialize` freezes the kwarg tables rather than assigning them
+      # verbatim, so sig-gen proposes the default constant's shape for each reader.
       attr_reader path: String?
       # sig-gen gap: #1154 — `{ "Class#m" => Summary }`.
       attr_reader summaries: Hash[String, Summary]

@@ -53,7 +53,27 @@ module Rigor
                                module_exec].to_set.freeze
         private_constant :OPAQUE_EVAL_CALLS
 
+        WRITER_SCOPE_KEY = :__rigor_declared_param_writer_scope__
+        private_constant :WRITER_SCOPE_KEY
+
         module_function
+
+        # Runs the block with `scope` as the one whose project tables the unseen-writer and single-file gates read, in
+        # place of the census's own scope. `rigor sig-gen` indexes each file under a scope that carries no project
+        # tables, so without it another file's writer, ancestor or reopening would go unseen.
+        def with_writer_scope(scope)
+          return yield if scope.nil?
+
+          previous = Thread.current[WRITER_SCOPE_KEY]
+          Thread.current[WRITER_SCOPE_KEY] = scope
+          begin
+            yield
+          ensure
+            Thread.current[WRITER_SCOPE_KEY] = previous
+          end
+        end
+
+        def writer_scope(scope) = Thread.current[WRITER_SCOPE_KEY] || scope
 
         # `{InstanceVariableWriteNode => Rigor::Type}` for `def_node`'s creditable writes, or {EMPTY}. The caller
         # passes only an instance `def`: a singleton body's `@x` is the class object's.
@@ -68,9 +88,10 @@ module Rigor
           return EMPTY if writes.empty?
 
           types = declared_types(def_node, class_name, scope)
+          writers = writer_scope(scope)
           credited = writes.each_with_object({}.compare_by_identity) do |write, acc|
             type = types[write.value.name]
-            acc[write] = type if type && !UnseenIvarWriters.possible?(scope, class_name, write.name)
+            acc[write] = type if type && !UnseenIvarWriters.possible?(writers, class_name, write.name)
           end
           credited.empty? ? EMPTY : credited
         rescue StandardError
@@ -117,7 +138,7 @@ module Rigor
         # The declared, non-`untyped` type of each parameter, or `{}` when a gate declines the method.
         def declared_types(def_node, class_name, scope)
           environment = scope&.environment
-          return {} if environment.nil? || !single_declaring_file?(scope, class_name)
+          return {} if environment.nil? || !single_declaring_file?(writer_scope(scope), class_name)
           return {} if environment.rbs_module?(class_name)
           return {} unless Reflection.project_declared_class?(class_name, environment: environment)
 

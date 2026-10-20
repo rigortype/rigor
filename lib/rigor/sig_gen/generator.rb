@@ -14,6 +14,7 @@ require_relative "../source/literals"
 require_relative "../source/node_children"
 require_relative "../inference/def_return_typer"
 require_relative "../inference/scope_indexer"
+require_relative "../inference/project_seed_tables"
 require_relative "../inference/module_function_state"
 require_relative "../inference/rbs_type_translator"
 require_relative "alias_index"
@@ -126,6 +127,7 @@ module Rigor
 
       def run
         resolved = resolve_paths(@paths)
+        @resolved_paths = resolved
         @environment = build_environment(resolved)
         candidates = resolved.flat_map { |path| analyse_file(path, @environment) }
         annotate_effects(
@@ -458,13 +460,24 @@ module Rigor
         end.uniq
       end
 
+      # #1154 — the project's discovery tables, read only by the declared-parameter ivar credit: it must see the ivar
+      # writers in other files (an ancestor, another object's `instance_variable_set`, a reopening) as `rigor check`
+      # does. Built once per run from the files sig-gen reads; every other part of the generator keeps its per-file
+      # scope.
+      def ivar_writer_scope(base_scope)
+        @ivar_writer_tables ||= Inference::ProjectSeedTables.for_paths(@resolved_paths || [])
+        base_scope.with_discovery(base_scope.discovery.with(**@ivar_writer_tables))
+      end
+
       def analyse_file(path, environment)
         source = File.read(path)
         parse_result = Prism.parse(source, filepath: path, version: @configuration.target_ruby)
         return [] if parse_result.errors.any?
 
         base_scope = Scope.empty(environment: environment)
-        scope_index = Inference::ScopeIndexer.index(parse_result.value, default_scope: base_scope)
+        writers = ivar_writer_scope(base_scope)
+        scope_index = Inference::ScopeIndexer.index(parse_result.value, default_scope: base_scope,
+                                                                        ivar_writer_scope: writers)
 
         reset_file_maps
         @meta_layouts = collect_meta_layouts(scope_index)

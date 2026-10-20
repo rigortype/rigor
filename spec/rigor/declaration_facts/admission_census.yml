@@ -487,3 +487,4 @@ whole_index:
 - lib/rigor/cli/coverage_mutation.rb
 - lib/rigor/cli/coverage_scan.rb
 - lib/rigor/inference/parameter_inference_collector.rb
+- lib/rigor/sig_gen/generator.rb

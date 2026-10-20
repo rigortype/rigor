@@ -113,7 +113,11 @@ module Rigor
       # nothing-to-re-anchor walk allocates none.
       EMPTY_RENAMES = {}.freeze
 
-      def index(root, default_scope:, converged_loop_recording: false, widen_clauses: false) # rubocop:disable Metrics/AbcSize
+      # `ivar_writer_scope:` — the scope whose project tables the #1154 declared-parameter credit reads to find the
+      # ivar writers outside this file ({DeclaredParamWrites}); defaults to `default_scope`. `rigor sig-gen` indexes
+      # each file under an unseeded scope, so it passes one carrying the project's tables.
+      def index(root, default_scope:, converged_loop_recording: false, widen_clauses: false, # rubocop:disable Metrics/AbcSize,Metrics/MethodLength
+                ivar_writer_scope: nil)
         # Slice A-declarations. Build the declaration overrides first so every scope handed to the StatementEvaluator
         # already carries the table; structural sharing through `Scope#with_local` / `#with_fact` / `#with_self_type`
         # propagates it across every derived scope.
@@ -135,7 +139,9 @@ module Rigor
 
         # Slice 7 phase 2. Pre-pass over every class/module body to collect the per-class ivar accumulator. Seeded after
         # declared_types so the rvalue typer in the pre-pass can see declaration overrides.
-        class_ivars = build_class_ivar_index(root, seeded_scope)
+        class_ivars = DeclaredParamWrites.with_writer_scope(ivar_writer_scope) do
+          build_class_ivar_index(root, seeded_scope)
+        end
         seeded_scope = seeded_scope.with_discovery(seeded_scope.discovery.with(class_ivars: class_ivars))
 
         # Slice 7 phase 6. Same pre-pass shape for cvars (per class) and globals (program-wide). Globals are also

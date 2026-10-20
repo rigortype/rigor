@@ -40,7 +40,7 @@ def for_break
     break :b if (n += 1) > 2
   end
 end
-assert_type(":b | [1, 2, 3]", for_break)
+assert_type(":b | Array[Integer]", for_break)
 
 # `yielder_return` returns :ret (#2127).
 def yielder

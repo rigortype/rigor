@@ -3,7 +3,7 @@ locals: {}
 assertions:
   '1': bool
   '2': ":f | :fall"
-  '3': ":b | [1, 2, 3]"
+  '3': ":b | Array[Integer]"
   '4': ":fall | :ret"
   '5': bool
   '6': bool

@@ -464,7 +464,9 @@ module Rigor
         return [] if parse_result.errors.any?
 
         base_scope = Scope.empty(environment: environment)
-        scope_index = Inference::ScopeIndexer.index(parse_result.value, default_scope: base_scope)
+        # #1406 — sig-gen keeps the census's own answer: a declared ivar type read back would echo the declaration.
+        scope_index = Inference::ScopeIndexer.index(parse_result.value, default_scope: base_scope,
+                                                                        declared_ivar_types: false)
 
         reset_file_maps
         @meta_layouts = collect_meta_layouts(scope_index)

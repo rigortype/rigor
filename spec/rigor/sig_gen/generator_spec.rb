@@ -1888,6 +1888,21 @@ RSpec.describe Rigor::SigGen::Generator do
     end
   end
 
+  # #1406 — the declared ivar type serves checking only: sig-gen does not read `attr_reader x: Integer` back as the
+  # inferred type of a reader of `@x`, which would make the row count as generated only because it is declared.
+  describe "#run over an ivar the RBS declares (#1406)" do
+    it "proposes what the writes say, not the declaration" do
+      write_fixture("sig/box.rbs", "class Box\n  attr_reader x: Integer\nend\n")
+      path = write_fixture("lib/box.rb", "class Box\n  attr_reader :x\n  def initialize = @x = \"zero\"\n  " \
+                                         "def label = @x\nend\n")
+
+      candidates = generator(paths: [path], signature_paths: [File.join(tmpdir, "sig")]).run
+      candidate = candidates.find { |c| c.method_name == :label }
+
+      expect(candidate.rbs).to eq(%(def label: () -> "zero"))
+    end
+  end
+
   describe "#run with observations (--params=observed)" do
     it "renders observed argument types when an observation matches the method's required arity" do
       path = write_fixture("lib/box.rb", "class Box\n  def greet(name)\n    \"hi\"\n  end\nend\n")

@@ -17,7 +17,8 @@ sibling read; `detect_read_before_write` now counts massign targets as
 writes, see WD5 status. The `||=`-seeding stretch is
 **deferred-with-reason** there). WD2 amended (2026-09-26, #541 — an
 `attr_writer` / `attr_accessor` declaration now counts as an untyped
-write, see the WD2 amendment). Archetype:
+write, see the WD2 amendment). WD2 amended again (2026-10-21, #1406 — a
+declared ivar type wins over the writes). Archetype:
 deliberative. Stakes: high — this governs when `possible-nil-receiver`
 may fire on ivar-sourced optionality, the single largest FP class on
 idiomatic data-structure Ruby (94 % of possible-nil errors across the
@@ -333,6 +334,23 @@ diagnostic added. Every removal is a `flow.always-truthy-condition` on
 an accessor-backed ivar (rails `@automatic_reconnect`,
 `@ignore_disconnect`; liquid `@strict_variables`; textbringer
 `@prefix_arg`).
+
+**Amendment, 2026-10-21 — a declared ivar type wins (#1406).** The
+WD2 amendment's cost on RBS-declared readers is removed at its source.
+An ivar the class's RBS declares, as `@x: T` or through a typed
+`attr_*` member (in `sig/` or inline), reads that type instead of the
+census's join of the writes, so `attr_accessor cb: Proc?` beside
+`@cb = nil` reads `Proc?` and `attr_writer x: Integer` no longer reads
+`Dynamic[top] | nil`. The maintainer settled this on 2026-10-20 (#1154's
+decision, point 3): an explicit declaration wins, and checking the
+writes against it is ADR-112 WD5 (#1075). An `untyped` declaration
+(rbs-inline's placeholder for a bare attribute) or one with a type
+variable is not taken, and an undeclared attribute keeps #541's
+`Dynamic[top]`. The declared type serves checking only: `rigor sig-gen`
+keeps the census's answer, so it never proposes a declaration back as
+an inference. A declaration looser than the code it describes now
+surfaces as diagnostics; Rigor's own `sig/` had one
+(`Scope#optimistic_locals`, declared `Symbol | Data`).
 
 ### WD3 — Slice 3: ctor definite assignment through same-class calls
 

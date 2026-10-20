@@ -1143,6 +1143,32 @@ and `visibility:*#<name>` for one that moved: a swap from `private :x` to
 declared classes unchanged. The seed bundles already carry the
 `deferred_ranges` table, so no row moves and `SCHEMA` is unchanged.
 
+The `global_census:<entry>` keys in `missing` are recorded by the
+`global.*` write rules (`CheckRules#global_aliased?`,
+`#program_may_answer?` and `#refined_writer_in_effect?`) for each
+`Inference::GlobalWriteCensus` entry they ask about, whichever way it
+answers ([#2158](https://github.com/rigortype/rigor/issues/2158)):
+`global_census:alias:<global>`, `global_census:defines:<method>` for the
+setter's method and each hatch, `global_census:defines_any`,
+`global_census:refines:write`, `global_census:refines_any`, and one
+`global_census:main_mixin` for every top-level mixin, since the reader
+reads them all (`GlobalWriteCensus.dependency_key`). The census is a
+fact of the whole program: a `write` or hatch defined in any spelling on
+any receiver silences a write, and so does an alias of the variable or a
+top-level mixin of a module RBS does not rule out. Before this a file
+that stopped writing such an entry re-analysed only itself, and the
+silenced write kept its answer; the run already re-checks every file
+whose last result holds a `global.*` diagnostic, which covers the other
+direction. Its producer (`IncrementalSession#global_census_affected`)
+diffs each changed, added or removed file's census between its seed
+bundle and the recheck scan (`Incremental.changed_global_census_keys`)
+and fires the key of every entry that appeared or vanished, so an edit
+that leaves a file's census as it was re-checks nothing. The `defines:`
+key cannot stand in for it: its producer reads the method tables, which
+hold no delegation macro, string `eval`, computed name, global alias or
+mixin. The seed bundles already carry each file's census, so no row moves
+and `SCHEMA` is unchanged.
+
 The `mark:<last segment>` key in `missing` is recorded by
 `Scope#parameter_envelopes_of` whichever way the reader answers
 ([#1833](https://github.com/rigortype/rigor/issues/1833)): a file can add a

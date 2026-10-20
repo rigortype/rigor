@@ -826,12 +826,13 @@ module Rigor
         walk_defs(namespace_node.body, prefix, false, false, out)
       end
 
-      # A body whose direct statements certainly run when it does ({#definer_table}): its statement list, and the
-      # `ensure` clause of a body with a `rescue`. A `rescue` or `else` clause may not run.
+      # A body whose direct statements certainly run when it does ({#definer_table}): its statement list unless the
+      # body has a `rescue` clause, and its `ensure` clause. A `rescue` or `else` clause may not run.
       def mark_certain_body(body)
         return @certain_bodies << body unless body.is_a?(Prism::BeginNode)
 
-        @certain_bodies << body.statements if body.statements
+        # With a `rescue`, a statement before a definer can raise and skip it, so the main list is not certain.
+        @certain_bodies << body.statements if body.statements && body.rescue_clause.nil?
         @certain_bodies << body.ensure_clause.statements if body.ensure_clause&.statements
       end
 

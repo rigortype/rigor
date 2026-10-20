@@ -26,15 +26,16 @@ assertions:
   '23': Array[Integer]
   '24': Array[Integer]
   '25': Array[Integer]
-  '26': Array[1 | 2] | Array[Integer]
-  '27': Dynamic[top]
+  '26': Array[Integer]
+  '27': Array[1 | 2] | Array[Integer]
   '28': Dynamic[top]
-  '29': '"four"?'
-  '30': ":b?"
-  '31': ":m?"
-  '32': Integer[6..10]?
-  '33': nil
+  '29': Dynamic[top]
+  '30': '"four"?'
+  '31': ":b?"
+  '32': ":m?"
+  '33': Integer[6..10]?
   '34': nil
-  '35': ":u"
-  '36': ":b?"
-  '37': "[[1], [[1]], nil]"
+  '35': nil
+  '36': ":u"
+  '37': ":b?"
+  '38': "[[1], [[1]], nil]"

@@ -154,7 +154,7 @@ end
 
 # Every node through which the body may change the collection drops its shape, with no call in the body:
 # `for_op_write` returns [1, 2] (an operator write, which may call a mutator), `for_index_op_write` [3, 2], `for_index_target`
-# [9, 2], `for_yield { }` and `ForSuper.new.run` [1, 2], `for_call_writes(ForBox.new)` [[1, 2], [1, 2], [1, 2]],
+# [9, 2], `for_yield { }`, `ForSuper.new.run` and `ForSuper.new.run_explicit` [1, 2], `for_call_writes(ForBox.new)` [[1, 2], [1, 2], [1, 2]],
 # `for_ivar_collection` [1].
 def for_op_write
   a = [1, 2]
@@ -191,6 +191,7 @@ end
 
 class ForSuperBase
   def run = nil
+  def run_explicit = nil
 end
 
 class ForSuper < ForSuperBase
@@ -198,6 +199,14 @@ class ForSuper < ForSuperBase
     a = [1, 2]
     r = for i in a
       super
+    end
+    assert_type("Array[Integer]", r)
+  end
+
+  def run_explicit
+    a = [1, 2]
+    r = for i in a
+      super()
     end
     assert_type("Array[Integer]", r)
   end

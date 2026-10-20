@@ -45,6 +45,15 @@ RSpec.describe "Loop value evaluation cost" do
     expect(evaluations(:eval_if, body)).to eq(8)
   end
 
+  it "evaluates a loop again from a scope unlike the one its record holds" do
+    node = Prism.parse("c = cond\nwhile c; break c; end").value.statements.body.last
+    first = Rigor::Scope.empty.with_local(:c, Rigor::Type::Combinator.constant_of(1))
+    second = Rigor::Scope.empty.with_local(:c, Rigor::Type::Combinator.constant_of("s"))
+    first.evaluate(node)
+    expect(second.type_of(node)).to eq(second.evaluate(node).first)
+    expect(second.type_of(node)).not_to eq(first.evaluate(node).first)
+  end
+
   it "types a while loop no break leaves as nil without evaluating it" do
     scope = Rigor::Scope.empty.with_local(:c, Rigor::Type::Combinator.untyped)
     node = Prism.parse("while c; c = false; end").value.statements.body.first

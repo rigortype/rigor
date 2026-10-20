@@ -45,6 +45,7 @@ RSpec.describe "call.unresolved-toplevel inside a block a project callee rebinds
         end
 
         def self.anon(&) = module_eval(&)
+      def self.bnd(&b) = module_eval(&binding.local_variable_get(:b))
         def self.fwd(...) = module_eval(...)
 
         def self.stored(&b)
@@ -97,6 +98,7 @@ RSpec.describe "call.unresolved-toplevel inside a block a project callee rebinds
       "Ext.me { [1].map { helper } }",
       "Ext.me { top_helper }",
       "Ext.anon { helper }",
+      "Ext.bnd { helper }",
       "Ext.fwd { helper }",
       "Ext.stored { helper }",
       "Ext.dm { helper }",
@@ -134,9 +136,9 @@ RSpec.describe "call.unresolved-toplevel inside a block a project callee rebinds
     File.write("lib/use.rb", ["require_relative \"ext\"", *rows].join("\n") << "\n")
   end
 
-  def toplevel_lines
+  def toplevel_lines(overrides = {})
     configuration = Rigor::Configuration.new(
-      Rigor::Configuration::DEFAULTS.merge("paths" => %w[lib], "workers" => 0)
+      Rigor::Configuration::DEFAULTS.merge("paths" => %w[lib], "workers" => 0, **overrides)
     )
     guarded_run(Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil), %w[lib])
       .diagnostics
@@ -218,5 +220,17 @@ RSpec.describe "call.unresolved-toplevel inside a block a project callee rebinds
     expect(runs.call("-e", 'require "./lib/a"; require "./lib/b"; Ext.define { helper }')).to be(false)
     expect(runs.call("-e", 'ENV["REBIND"] = "1"; require "./lib/c"; Cond.define { helper }')).to be(true)
     expect(toplevel_lines).to be_empty
+  end
+
+  it "declines on a callee a pre_eval: patch defines, whose body it does not read" do
+    FileUtils.mkdir_p(%w[lib patches])
+    File.write("patches/module.rb", "class Module\n  def pdefine(&b) = module_eval(&b)\nend\n")
+    File.write("lib/use.rb",
+               "module Ext\n  def self.helper = :ok\nend\nExt.pdefine { helper }\nExt.pother { helper }\n")
+
+    out, _err, status = RubyRun.capture("-r", "./patches/module.rb", "-e",
+                                        "module Ext; def self.helper = :ok; end; p Ext.pdefine { helper }")
+    expect([out, status.success?]).to eq([":ok\n", true])
+    expect(toplevel_lines("pre_eval" => ["patches/module.rb"])).to eq([["use.rb", 5]])
   end
 end

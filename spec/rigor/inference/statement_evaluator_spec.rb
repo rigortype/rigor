@@ -1086,7 +1086,7 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
     end
 
     it "joins a for loop's break value into its collection" do
-      type, = evaluate("for i in [1, 2]; break :b if i == 2; end")
+      type, = evaluate("for i in [1, 2]; break :b; end")
       collection, = evaluate("[1, 2]")
       expect(type).to eq(Rigor::Type::Combinator.union(collection, Rigor::Type::Combinator.constant_of(:b)))
     end

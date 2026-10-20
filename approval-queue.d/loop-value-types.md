@@ -8,7 +8,7 @@
 
 ## Background
 
-#1216 asks that `r = for i in [1, 2]; end` type `r` as the collection's type, since Ruby's `for` returns the collection, and that a `Dynamic` collection stay gradual. Ruby's `for` is really `coll.each { … }` and answers whatever that `each` answers: the receiver for an Array, Hash, Range or Set, but the block's value for a project class whose `each` is `def each = yield(1)`, and the underlying collection for an `Enumerator`. The issue did not say what a collection outside the core ones answers. #2031 separately asks that a `while` / `until` loop ended by `break value` answer `nil` joined with the break values, which for `while true; break 1; end` would add a `nil` the loop never answers.
+#1216 asks that `r = for i in [1, 2]; end` type `r` as the collection's type, since Ruby's `for` returns the collection, and that a `Dynamic` collection stay gradual. Ruby's `for` is really `coll.each { … }` and answers whatever that `each` answers: the receiver for an Array, Hash or Range, but the block's value for a project class whose `each` is `def each = yield(1)`, and the underlying collection for an `Enumerator`. The issue did not say what a collection outside the core ones answers. #2031 separately asks that a `while` / `until` loop ended by `break value` answer `nil` joined with the break values, which for `while true; break 1; end` would add a `nil` the loop never answers.
 
 ## Options and trade-offs
 
@@ -21,6 +21,8 @@
 
 The core-collection rule and the literal-predicate rule. Both say less where the analysis cannot prove more, the conservative reading AGENTS.md's false-positive rule asks for; #2202 set the same shape for value-position constructs: answer as the statement form does and decline to `Dynamic[top]` rather than guess.
 
+The review of #2242 added two refinements by the same reasoning: a `Set` is left to `Dynamic[top]` (its literal is a `Constant` carrier the rule did not read, and no example pinned it), and since `each` answers the collection after the body ran, a body that may change its contents (any call, `yield`, `super` or index store, which may reach it through an alias) drops the value's shapes and refinements to their nominal, joined with the variable's binding after the loop when the collection is a local or instance variable the loop does not rebind. That costs the literal shape for a body that only reads (`break :b if i == 2` gives `:b | Array[Integer]`), the price of not tracking aliases.
+
 ## To undo
 
-Widen `StatementEvaluator#each_answers_self?` (or replace `for_value` with a dispatch of `each`), or drop the `endless_loop_predicate?` early return in `loop_value`; update `spec/integration/fixtures/loop_value.rb`, its snapshot `spec/integration/snapshots/loop_value.yml`, and the "loops" examples in `spec/rigor/inference/statement_evaluator_spec.rb`.
+Widen `StatementEvaluator#each_answers_self?` or narrow `FOR_MUTATING_NODES` (or replace `for_value` with a dispatch of `each`), or drop the `endless_loop_predicate?` early return in `loop_value`; update `spec/integration/fixtures/loop_value.rb`, its snapshot `spec/integration/snapshots/loop_value.yml`, and the "loops" examples in `spec/rigor/inference/statement_evaluator_spec.rb`.

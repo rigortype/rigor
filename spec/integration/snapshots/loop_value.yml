@@ -7,15 +7,21 @@ assertions:
   '4': Array[String]
   '5': non-empty-array[String]
   '6': "[1] | [2, 3]"
-  '7': ":b | [1, 2]"
-  '8': Dynamic[top]
-  '9': Dynamic[top]
-  '10': '"four"?'
-  '11': ":b?"
-  '12': ":m?"
-  '13': Integer[6..10]?
-  '14': nil
-  '15': nil
-  '16': ":u"
+  '7': ":b | Array[Integer]"
+  '8': Array[1 | 2 | Dynamic[top]] | Array[Integer]
+  '9': Array[1 | 2 | Dynamic[top]] | Array[Integer]
+  '10': Array[1 | 2 | Dynamic[top]] | Array[Integer]
+  '11': Array[Integer]
+  '12': Hash[Dynamic[top] | Symbol, 1 | Dynamic[top]] | Hash[Symbol, Integer]
+  '13': Dynamic[top]
+  '14': Dynamic[top]
+  '15': Dynamic[top]
+  '16': '"four"?'
   '17': ":b?"
-  '18': "[[1], [[1]], nil]"
+  '18': ":m?"
+  '19': Integer[6..10]?
+  '20': nil
+  '21': nil
+  '22': ":u"
+  '23': ":b?"
+  '24': "[[1], [[1]], nil]"

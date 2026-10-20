@@ -2,7 +2,7 @@ require "rigor/testing"
 include Rigor::Testing
 
 # Issues #1216 and #2031 — a loop's value. A `for` loop is `coll.each { … }`, so it answers what that `each`
-# answers (the collection, for an Array, a Hash, a Range or a Set) unless a `break` ends it with its value. A `while`
+# answers (the collection, for an Array, a Hash or a Range) unless a `break` ends it with its value. A `while`
 # / `until` loop answers `nil` when its predicate ends it and a `break`'s value when the `break` does. Each comment
 # gives what Ruby 4.0.5 answers. GENUINE-UNDEFINED marks a call Ruby raises on.
 
@@ -54,7 +54,68 @@ end
 # `for_break` returns :b.
 def for_break
   r = for i in [1, 2]; break :b if i == 2; end
-  assert_type(":b | [1, 2]", r)
+  assert_type(":b | Array[Integer]", r)
+end
+
+# `each` answers the collection after the body ran, so a body that may change its contents leaves neither its
+# shape nor its size: `for_pop` returns :one (the loop answers [1]), `for_clear` [], `for_append` [1, 2, "s"],
+# `for_alias_pop` [1], `for_delete` {}, `for_ivar_pop` [1]. A Set's `each` is not read as answering itself:
+# `for_set` returns the Set.
+def for_pop
+  a = [1, 2]
+  r = for i in a
+    a.pop
+  end
+  assert_type("Array[1 | 2 | Dynamic[top]] | Array[Integer]", r)
+  r.size == 1 ? :one : :two
+end
+
+def for_clear
+  a = [1, 2]
+  r = for i in a
+    a.clear
+  end
+  assert_type("Array[1 | 2 | Dynamic[top]] | Array[Integer]", r)
+end
+
+def for_append
+  a = [1, 2]
+  r = for i in a
+    a << "s" if i == 1
+  end
+  assert_type("Array[1 | 2 | Dynamic[top]] | Array[Integer]", r)
+end
+
+def for_alias_pop
+  a = [1, 2]
+  b = a
+  r = for i in a
+    b.pop
+  end
+  assert_type("Array[Integer]", r)
+  r.size == 1 ? :one : :two
+end
+
+def for_delete
+  h = { a: 1 }
+  r = for k, v in h
+    h.delete(:a)
+  end
+  assert_type("Hash[Dynamic[top] | Symbol, 1 | Dynamic[top]] | Hash[Symbol, Integer]", r)
+end
+
+def for_ivar_pop
+  @items = [1, 2]
+  r = for i in @items
+    @items.pop
+  end
+  r.size == 1 ? :one : :two
+end
+
+def for_set
+  s = Set.new([1, 2])
+  r = for i in s; end
+  assert_type("Dynamic[top]", r)
 end
 
 # A collection whose `each` is not known to answer itself leaves the value gradual: `for_project` answers nil, what

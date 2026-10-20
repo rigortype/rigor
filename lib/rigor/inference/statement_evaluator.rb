@@ -2784,7 +2784,7 @@ module Rigor
         body_entry = loop_content_entry(node.statements, post_coll, body_entry)
 
         if node.statements.nil?
-          return [for_value(coll_type, NO_BREAK_ARMS),
+          return [for_value(node, coll_type, post_coll, NO_BREAK_ARMS),
                   join_with_nil_injection(post_coll, body_entry)]
         end
 
@@ -2795,22 +2795,79 @@ module Rigor
         body_scope, breaks, values = loop_iteration(node.statements, body_entry, jumps)
         continuation = join_with_nil_injection(post_coll, body_scope)
         pre_existing, body_first = loop_body_local_writes(node.statements, post_coll)
-        continuation = join_break_scopes(continuation, breaks, pre_existing + body_first)
-        [for_value(coll_type, values), for_exit(node, post_coll, continuation)]
+        continuation = for_exit(node, post_coll, join_break_scopes(continuation, breaks, pre_existing + body_first))
+        [for_value(node, coll_type, continuation, values), continuation]
       end
 
       # The core collections whose `each` with a block answers its receiver.
-      FOR_SELF_EACH_CLASSES = Set["Array", "Hash", "Range", "Set"].freeze
+      FOR_SELF_EACH_CLASSES = Set["Array", "Hash", "Range"].freeze
       private_constant :FOR_SELF_EACH_CLASSES
 
+      # The nodes through which a `for` body or index may change the iterated collection's contents: a call (an
+      # in-place mutator on the collection or on an alias of it, or a method that reaches it), `yield` / `super`, and
+      # an index store.
+      FOR_MUTATING_NODES = Set[
+        Prism::CallNode, Prism::YieldNode, Prism::SuperNode, Prism::ForwardingSuperNode, Prism::IndexTargetNode,
+        Prism::IndexOperatorWriteNode, Prism::IndexOrWriteNode, Prism::IndexAndWriteNode,
+        Prism::CallOperatorWriteNode, Prism::CallOrWriteNode, Prism::CallAndWriteNode
+      ].freeze
+      FOR_VARIABLE_READS = Set[Prism::LocalVariableReadNode, Prism::InstanceVariableReadNode].freeze
+      private_constant :FOR_MUTATING_NODES, :FOR_VARIABLE_READS
+
       # Issue #1216 — `for x in coll` is `coll.each { |x| … }`, so the loop's value is what that `each` answers, or
-      # the value of the `break` that ends it. An Array, a Hash, a Range and a Set answer themselves, including when
-      # they are empty and the body never runs, so the value is the collection's own type. Any other collection
-      # (`Dynamic`, a project class, an `Enumerator`, a union with `nil`) answers `Dynamic[top]`: its `each` is not
-      # known to answer its receiver, and a guessed type would be a claim the analysis cannot back.
-      def for_value(coll_type, break_values)
-        each_value = each_answers_self?(coll_type) ? coll_type : Type::Combinator.untyped
+      # the value of the `break` that ends it. An Array, a Hash and a Range answer themselves, including when
+      # they are empty and the body never runs, so the value is the collection ({#for_collection_after}). Any other
+      # collection (`Dynamic`, a project class, an `Enumerator`, a union with `nil`) answers `Dynamic[top]`: its
+      # `each` is not known to answer its receiver, and a guessed type would be a claim the analysis cannot back.
+      def for_value(node, coll_type, continuation, break_values)
+        each_value = each_answers_self?(coll_type) ? for_collection_after(node, coll_type, continuation) : Type::Combinator.untyped
         break_values.empty? ? each_value : Type::Combinator.union(each_value, *break_values)
+      end
+
+      # The collection as the loop leaves it. `each` answers the object it iterated, after the body ran, so a body that
+      # may change its contents ({FOR_MUTATING_NODES}: `a.pop`, `h.delete(k)`, `b << 3` on an alias `b`) leaves
+      # neither its shape nor its size: `a = [1, 2]; for i in a; a.pop; end` is `[1]`. The value is then the
+      # collection's type with every shape and refinement dropped to its nominal ({#shape_erased_collection}), joined,
+      # when the collection is a local or instance variable the loop does not rebind, with that variable's binding
+      # after the loop, which holds the contents the body's own mutator calls add. A body that runs no such code
+      # leaves the collection as it was.
+      def for_collection_after(node, coll_type, continuation)
+        return coll_type unless [node.index, node.statements].any? { |part| for_may_mutate?(part) }
+
+        types = [coll_type]
+        name = for_collection_variable(node)
+        types << CapturedLocals.bound_type(continuation, name) if name
+        Type::Combinator.union(*types.compact.map { |type| shape_erased_collection(type) })
+      end
+
+      def for_may_mutate?(part)
+        return false if part.nil?
+
+        found = false
+        Source::NodeWalker.each(part) { |descendant| found ||= FOR_MUTATING_NODES.include?(descendant.class) }
+        found || FOR_MUTATING_NODES.include?(part.class)
+      end
+
+      # The local or instance variable `for` iterates, when neither its index nor its body rebinds it.
+      def for_collection_variable(node)
+        collection = node.collection
+        return nil unless FOR_VARIABLE_READS.include?(collection.class)
+
+        written = OperandEffects.written_variables(node.index) + OperandEffects.written_variables(node.statements)
+        written.include?(collection.name) ? nil : collection.name
+      end
+
+      # `type` with each `Tuple` / `HashShape` / literal Array or Hash dropped to its nominal, each refinement to its
+      # base. A Range is immutable and keeps its value.
+      def shape_erased_collection(type)
+        case type
+        when Type::Tuple then MutationWidening.widen_tuple(type)
+        when Type::HashShape then MutationWidening.widen_hash_shape(type)
+        when Type::Constant then type.value.is_a?(Range) ? type : Type::Combinator.widen_value_pinned(type)
+        when Type::Refined, Type::Difference then shape_erased_collection(type.base)
+        when Type::Union then Type::Combinator.union(*type.members.map { |member| shape_erased_collection(member) })
+        else type
+        end
       end
 
       def each_answers_self?(type)
@@ -3361,9 +3418,26 @@ module Rigor
 
         # The handler types the operand from `entry`, which is the value a later operand takes.
         type, after = operand.evaluate(node)
-        walk.resolve(slot, type) if slot
+        keep_operand_value(walk, slot, node, type)
         after
       end
+
+      # Hands the value the handler typed `node` to back to `walk`: into its slot when the walk took it, and for a
+      # loop ({LOOP_OPERANDS}) the walk did not take, as a kept value.
+      def keep_operand_value(walk, slot, node, type)
+        if slot
+          walk.resolve(slot, type)
+        elsif LOOP_OPERANDS.include?(node.class)
+          walk.keep(node, type)
+        end
+      end
+
+      # The operands whose value {#thread_operand} keeps although the walk did not take them: a loop's value runs its
+      # body fixpoint and `break` passes, and `ExpressionTyper#type_of_loop` would run them all again from the same
+      # scope to type the call, once more per level of loops nested as call operands (`id((while c; y = id((while …
+      # end)); c = false; end))`).
+      LOOP_OPERANDS = Set[Prism::WhileNode, Prism::UntilNode, Prism::ForNode].freeze
+      private_constant :LOOP_OPERANDS
 
       def thread_operand_children(node, entry, walk, typed_from)
         threaded = entry

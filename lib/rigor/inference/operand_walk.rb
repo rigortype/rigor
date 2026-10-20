@@ -58,6 +58,12 @@ module Rigor
         @entries[slot][2] = type
       end
 
+      # Keeps `type`, the value a handler typed an operand the walk did not take to (one entered from the scope the
+      # call types its operands from), so the call's typing reads it instead of typing the operand again.
+      def keep(node, type)
+        (@entries ||= []) << [node, nil, type]
+      end
+
       # The identity-comparing table of every taken operand's value, for `ExpressionTyper`'s `operand_types:`, or
       # nil when the walk took none at or after `since` (a {#mark}). An operand the evaluator did not type is typed
       # from its entry here, after every operand below it. A threaded call below the root asks for the operands

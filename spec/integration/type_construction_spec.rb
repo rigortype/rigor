@@ -1270,6 +1270,11 @@ RSpec.describe "Rigor type construction (integration)" do
       undefined = harness.diagnostics.select { |d| d.rule.start_with?("call.") }
       expect(undefined.map(&:line)).to eq(marked_lines(harness, "# GENUINE-UNDEFINED"))
     end
+
+    it "reports no constant condition on the size of a collection the loop body mutated" do
+      flow = harness.diagnostics.select { |d| d.rule.start_with?("flow.") }
+      expect(flow.map { |d| "#{d.line}: #{d.rule}" }).to be_empty
+    end
   end
 
   # Issue #2196 — a core superclass's method is not answered from `Kernel`'s private method of the same name.

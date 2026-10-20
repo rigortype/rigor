@@ -1275,8 +1275,18 @@ module Rigor
       # A `while` / `until` / `for` loop in value position. Like {#type_of_conditional}, it delegates to the
       # statement evaluator, which owns the loop's value: `nil` or a `while` / `until` loop's `break` values
       # (issue #2031), and a `for` loop's collection or its `break` values (issue #1216).
+      #
+      # The value is kept per scope ({Scope#memoized_value}): a loop that is a call's receiver or argument is typed
+      # again from the same scope by every narrowing and rule that types that operand. A `while` / `until` loop no
+      # `break` leaves is `nil` without evaluating its body, as {StatementEvaluator#loop_value} answers it.
       def type_of_loop(node)
-        scope.evaluate(node, tracer: tracer).first
+        return Type::Combinator.constant_of(nil) if break_free_condition_loop?(node)
+
+        scope.memoized_value(node) { scope.evaluate(node, tracer: tracer).first }
+      end
+
+      def break_free_condition_loop?(node)
+        !node.is_a?(Prism::ForNode) && !block_level_jump?(node.statements, Prism::BreakNode)
       end
 
       def type_of_lambda(_node)

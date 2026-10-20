@@ -1,0 +1,2 @@
+- **[engine]** A `def` written after `alias x y` or `alias_method :x, :y` of the same name now types `x`, instead of `call.undefined-method` reading it from the alias target. ([#2225](https://github.com/rigortype/rigor/pull/2225))
+  - A later `define_method(:x)` or `attr_*` reader after the alias leaves the call untyped instead.

@@ -565,7 +565,7 @@ jobs:
         uses: actions/cache/save@v6
         with:
           path: ~/.cache/rubocop_cache
-          key: rubocop-${{ runner.os }}-${{ hashFiles('.rubocop.yml', '.rubocop_todo.yml', 'Gemfile.lock') }}
+          key: ${{ steps.restore-rubocop.outputs.cache-primary-key }}
 
   # ── 3a. Docs check for a Markdown-only PR ───────────────────────
   # The `changes` gate above skips every code job for a Markdown-only PR —
@@ -744,7 +744,7 @@ jobs:
         uses: actions/cache/save@v6
         with:
           path: .rigor/cache
-          key: rigor-cache-${{ runner.os }}-${{ hashFiles('Gemfile.lock') }}-${{ hashFiles('lib/**/*.rb', 'sig/**/*.rbs', 'data/builtins/**/*.yml') }}
+          key: ${{ steps.restore-cache.outputs.cache-primary-key }}
 
   # ── 4b. Acceptance gates over a cold analysis ───────────────────
   # Four gates that each need a full, uncached analysis and are otherwise

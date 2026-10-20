@@ -90,10 +90,28 @@ RSpec.describe "the ADR-58 ivar census counts define_method block writes" do
     end
   end
 
-  describe "writes that do not reach an instance" do
+  # Ruby does run a literal lambda or proc argument on the instance, so these two rows are false positives the census
+  # misses (#2169). Flip them when #2169 is fixed.
+  describe "callable arguments the census does not read" do
     {
       "a define_method with a lambda argument" => %(define_method(:set, -> { @x = "a" })),
-      "a define_method with a block-pass lambda" => %(define_method(:set, &-> { @x = "a" })),
+      "a define_method with a block-pass lambda" => %(define_method(:set, &-> { @x = "a" }))
+    }.each do |shape, body|
+      it "leaves the census alone for #{shape}" do
+        expect(census(box(body))).to eq("nil")
+      end
+    end
+
+    # Ruby does install this block as Box's instance method, so this is a false positive (#2167). The census counts
+    # exactly the blocks whose `self` `DefineMethodBlockSelf` narrows, and that match is a literal `define_method`
+    # (#963). Flip this when #2167 is fixed.
+    it "does not count a send(:define_method) block" do
+      expect(census(box(%(send(:define_method, :set) { @x = "a" })))).to eq("nil")
+    end
+  end
+
+  describe "writes that do not reach an instance" do
+    {
       "a define_method reusing an UnboundMethod" => %(define_method(:other, instance_method(:initialize))),
       "a class_eval block in the class body" => %(class_eval { @x = "a" }),
       "a singleton_class.define_method block" => %(singleton_class.define_method(:set) { @x = "a" }),
@@ -109,13 +127,6 @@ RSpec.describe "the ADR-58 ivar census counts define_method block writes" do
       it "leaves the census alone for #{shape}" do
         expect(census(box(body))).to eq("nil")
       end
-    end
-
-    # Ruby does install this block as Box's instance method, so this is a false positive (#2167). The census counts
-    # exactly the blocks whose `self` `DefineMethodBlockSelf` narrows, and that match is a literal `define_method`
-    # (#963). Flip this when #2167 is fixed.
-    it "does not count a send(:define_method) block" do
-      expect(census(box(%(send(:define_method, :set) { @x = "a" })))).to eq("nil")
     end
 
     # Ruby writes these on another object, so `@x` stays nil on Box's instance; the census still counts them, which

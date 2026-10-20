@@ -18,8 +18,8 @@
 
 ## Decision
 
-No Grape census. The census counts a block exactly when the engine narrows its `self` to the class's instance, which is the rule #2099 applied, and a Grape route body is not such a block. If a Grape project reports a false positive that a census would fix, that is a new issue with its own fixture.
+#2099 named this question as the maintainer's call, so this entry is the place to ratify or reverse it. No Grape census. The census counts a block exactly when the engine narrows its `self` to the class's instance, which is the rule #2099 applied, and a Grape route body is not such a block. If a Grape project reports a false positive that a census would fix, that is a new issue with its own fixture.
 
 ## To undo
 
-Add the Grape plugin's route entries to the census through the same `MacroBlockSelfType.runs_as_receiver_instance_method?` match `ScopeIndexer#method_body_block_call?` uses, keyed on the class the entry binds. Nothing else depends on the omission.
+Count the Grape plugin's route entries in the census. `MacroBlockSelfType.runs_as_receiver_instance_method?` does not match them: they bind a named `self_type` (`Grape::Endpoint`), not the receiver's instance. So the census needs a second predicate that credits such a block to its named class. Nothing else depends on the omission.

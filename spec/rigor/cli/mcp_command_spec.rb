@@ -2,6 +2,7 @@
 
 require "spec_helper"
 require "stringio"
+require "tmpdir"
 
 require "rigor/cli"
 require "rigor/cli/mcp_command"
@@ -21,9 +22,22 @@ RSpec.describe Rigor::CLI::McpCommand do
       expect(command([]).send(:parse_options)).to eq(transport: "stdio", config: nil)
     end
 
+    # #1992 — the --config value must name a file that exists, so the example makes one.
     it "reads --transport and --config" do
-      options = command(["--transport=stdio", "--config=rigor.yml"]).send(:parse_options)
-      expect(options).to eq(transport: "stdio", config: "rigor.yml")
+      Dir.mktmpdir do |dir|
+        Dir.chdir(dir) do
+          File.write("rigor.yml", "")
+          options = command(["--transport=stdio", "--config=rigor.yml"]).send(:parse_options)
+          expect(options).to eq(transport: "stdio", config: "rigor.yml")
+        end
+      end
+    end
+
+    # #1992 — a session default naming no file is refused before the server would start. The option parser
+    # raises, which Rigor::CLI#run turns into the usage exit.
+    it "refuses a --config naming no file, before any server starts" do
+      expect { command(["--config=missing.yml"]).send(:parse_options) }
+        .to raise_error(Rigor::ConfigurationError, /config file not found: missing\.yml/)
     end
 
     it "returns :usage_error and prints the banner on an unknown flag" do

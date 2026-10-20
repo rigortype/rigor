@@ -283,6 +283,81 @@ RSpec.describe Rigor::MCP::Server do
 
       expect(JSON.parse(text_of(resp))).not_to have_key("observation")
     end
+
+    # #1991 — sig-gen read a missing path as empty and returned `{"candidates": []}` with nothing to say why.
+    # The entry must match the one rigor_check gives the same path.
+    it "reports a missing path the way rigor_check does" do
+      sig_gen = JSON.parse(text_of(tool_call("rigor_sig_gen", { "paths" => ["missing.rb"] })))
+      check = JSON.parse(text_of(tool_call("rigor_check", { "paths" => ["missing.rb"] })))
+      entry = { "path" => "missing.rb", "line" => 1, "column" => 1, "severity" => "error",
+                "message" => "no such file or directory" }
+
+      expect(sig_gen.fetch("diagnostics")).to include(include(entry))
+      expect(check.fetch("diagnostics")).to include(include(entry))
+    end
+
+    # Positive control: an existing path has no diagnostics key at all.
+    it "omits diagnostics for an existing path" do
+      Dir.mktmpdir do |dir|
+        file = File.join(dir, "calc.rb")
+        File.write(file, "class Calc\n  def m(x) = 1\nend\n")
+
+        resp = tool_call("rigor_sig_gen", { "paths" => [file] })
+
+        expect(resp.dig("result", "isError")).to be(false)
+        expect(JSON.parse(text_of(resp))).not_to have_key("diagnostics")
+      end
+    end
+  end
+
+  # #1992 — a `config` naming no file ran with the default configuration and said nothing. Every tool that takes a
+  # `config` argument is a row here; a tool added to TOOLS with a `config` belongs in this table too.
+  describe "config argument naming no file" do
+    def text_of(resp)
+      resp.dig("result", "content", 0, "text")
+    end
+
+    # Each tool's minimal arguments for one existing Ruby file, so the only thing that can fail is the config.
+    config_tool_args = {
+      "rigor_check" => ->(file) { { "paths" => [file] } },
+      "rigor_type_of" => ->(file) { { "file" => file, "line" => 1, "col" => 1 } },
+      "rigor_triage" => ->(file) { { "paths" => [file] } },
+      "rigor_lens" => ->(file) { { "files" => [file] } },
+      "rigor_annotate" => ->(file) { { "file" => file } },
+      "rigor_sig_gen" => ->(file) { { "paths" => [file] } },
+      "rigor_coverage" => ->(file) { { "paths" => [file] } }
+    }
+
+    config_tool_args.each do |tool, args_for|
+      it "reports a missing config as an error for #{tool}" do
+        Dir.mktmpdir do |dir|
+          file = File.join(dir, "calc.rb")
+          File.write(file, "class Calc\n  def m(x) = 1\nend\n")
+
+          ["missing.yml", "--help"].each do |config|
+            resp = tool_call(tool, args_for.call(file).merge("config" => config))
+
+            expect(resp.dig("result", "isError")).to be(true), "config #{config.inspect}: #{resp.inspect}"
+            expect(text_of(resp)).to include("config file not found: #{config}")
+          end
+        end
+      end
+
+      # Positive control: an existing config file is read and the tool runs.
+      it "still runs #{tool} with an existing config file" do
+        Dir.mktmpdir do |dir|
+          file = File.join(dir, "calc.rb")
+          config = File.join(dir, "rigor.yml")
+          File.write(file, "class Calc\n  def m(x) = 1\nend\n")
+          File.write(config, "paths:\n  - #{dir}\n")
+
+          resp = tool_call(tool, args_for.call(file).merge("config" => config))
+
+          expect(text_of(resp)).not_to include("config file not found")
+          expect(resp.dig("result", "isError")).to be(false)
+        end
+      end
+    end
   end
 
   describe "config_path session default" do

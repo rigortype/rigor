@@ -29,9 +29,11 @@ module Rigor
       #   array means "all emittable classifications".
       # @param observation — `{ paths:, missing: }` under `--params=observed`, else `nil`; JSON carries it
       #   as the top-level `observation` key (#1398).
-      def render(candidates:, mode:, format:, selection:, observation: nil)
+      # @param diagnostics — the path errors `rigor check` would report for the arguments (#1991); JSON carries
+      #   them as the top-level `diagnostics` key, and only when there are some.
+      def render(candidates:, mode:, format:, selection:, observation: nil, diagnostics: [])
         case format
-        when "json" then render_json(filter(candidates, selection, with_skipped: true), observation)
+        when "json" then render_json(filter(candidates, selection, with_skipped: true), observation, diagnostics)
         when "text"
           filtered = filter(candidates, selection)
           mode == :diff ? render_diff(filtered) : render_print(filtered)
@@ -124,9 +126,10 @@ module Rigor
         end
       end
 
-      def render_json(candidates, observation = nil)
+      def render_json(candidates, observation = nil, diagnostics = [])
         payload = { candidates: candidates.map(&:to_h) }
         payload[:observation] = observation if observation
+        payload[:diagnostics] = diagnostics.map(&:to_h) if diagnostics.any?
         @out.puts(JSON.pretty_generate(payload))
       end
 

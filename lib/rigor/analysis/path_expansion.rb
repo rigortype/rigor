@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../rooted_glob"
+require_relative "diagnostic"
 
 module Rigor
   module Analysis
@@ -10,8 +11,13 @@ module Rigor
     # is taken verbatim; anything else contributes no files here (the Runner layers its own path-error
     # diagnostics and buffer / in-memory handling on top — none of which add or remove files for an ordinary
     # on-disk check, so the two file sets agree).
+    #
+    # #1991 — also the one place a path that names neither a directory nor a `.rb` file is worded and
+    # severity-graded, so `rigor check` and `rigor sig-gen` report the same path error the same way.
     module PathExpansion
       RUBY_GLOB = "**/*.rb"
+      NO_SUCH_PATH = "no such file or directory"
+      NOT_A_RUBY_FILE = "not a Ruby file (expected `.rb` or a directory)"
 
       module_function
 
@@ -25,6 +31,30 @@ module Rigor
           else
             []
           end
+        end
+      end
+
+      # The `[path, message]` pairs for each of `paths` that names neither a directory nor a `.rb` file,
+      # worded as `rigor check` words them.
+      def unusable(paths)
+        Array(paths).each_with_object([]) do |path, bad|
+          next if File.directory?(path) || (File.file?(path) && path.end_with?(".rb"))
+
+          bad << [path, unusable_message(path)]
+        end
+      end
+
+      def unusable_message(path)
+        File.exist?(path) ? NOT_A_RUBY_FILE : NO_SUCH_PATH
+      end
+
+      # The error diagnostics for `bad` (from {unusable}). A bad path among valid ones is a warning that it was
+      # skipped; a bad path that leaves nothing to analyse is an error, so a lone typo is not masked.
+      def diagnostics(bad, any_files:)
+        severity = any_files ? :warning : :error
+        suffix = any_files ? " (skipped)" : ""
+        bad.map do |path, message|
+          Diagnostic.new(path: path, line: 1, column: 1, message: "#{message}#{suffix}", severity: severity)
         end
       end
 

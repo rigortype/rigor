@@ -8,12 +8,29 @@ require "rigor/cli/options"
 
 RSpec.describe Rigor::CLI::Options do
   describe ".add_config" do
+    # #1992 — the file the flag names must exist; the example makes one.
     it "parses --config=PATH into options[:config]" do
+      Dir.mktmpdir do |dir|
+        Dir.chdir(dir) do
+          File.write("custom.yml", "")
+          options = {}
+          parser = OptionParser.new { |opts| described_class.add_config(opts, options) }
+          parser.parse!(["--config=custom.yml"])
+
+          expect(options[:config]).to eq("custom.yml")
+        end
+      end
+    end
+
+    # #1992 — a path that names no file is refused where the flag is read, not handed on to a run that would use
+    # the defaults.
+    it "refuses a --config=PATH that names no file" do
       options = {}
       parser = OptionParser.new { |opts| described_class.add_config(opts, options) }
-      parser.parse!(["--config=custom.yml"])
 
-      expect(options[:config]).to eq("custom.yml")
+      expect { parser.parse!(["--config=missing.yml"]) }
+        .to raise_error(Rigor::ConfigurationError, "config file not found: missing.yml")
+      expect(options).not_to have_key(:config)
     end
   end
 

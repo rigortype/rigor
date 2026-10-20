@@ -66,7 +66,9 @@ rigor mcp [--transport=stdio] [--config=PATH]
   transport is queued for v2.
 - `--config=PATH` — session-level default config path. Individual tool
   calls may supply their own `config` argument, which takes precedence.
-  Without either, `Configuration.discover` walks `.rigor.yml` /
+  A path that names no file is an error, not a silent switch to the
+  defaults, for the session default and for a per-call `config` alike:
+  the call returns `isError: true`. Without either, `Configuration.discover` walks `.rigor.yml` /
   `.rigor.dist.yml` from the working directory.
 
 Exit codes: 0 (clean shutdown — stdin EOF), 64 (unknown
@@ -416,6 +418,12 @@ The key is absent under the default `untyped` policy.
 
 Classifications: `new-file`, `new-method`, `tighter-return`,
 `equivalent`, `skipped`.
+
+A `paths` entry that is neither a directory nor a `.rb` file is reported
+under a top-level `diagnostics` array, in the shape `rigor_check` uses
+(`"message": "no such file or directory"`). It is a warning beside
+paths that were read, and an error when none was. An empty `candidates`
+list with no `diagnostics` means nothing was found to generate.
 
 **Typical agent use:** call `rigor_sig_gen` to see which methods have
 precise enough returns to be worth writing into `sig/`, then generate

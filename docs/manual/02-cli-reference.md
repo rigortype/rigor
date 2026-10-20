@@ -30,7 +30,7 @@ the `paths:` list from the configuration file.
 
 | Option | Effect |
 | --- | --- |
-| `--config=PATH` | Use a specific config file instead of auto-discovery. |
+| `--config=PATH` | Use a specific config file instead of auto-discovery. A path that does not exist is an error (exit 64), not a run with the defaults. |
 | `--format=FORMAT` | Output format. Default `text`. Also `json` (structured stream), plus the CI-native renderings `sarif`, `github`, `gitlab`, `checkstyle`, `junit`, and `teamcity` — see [Running Rigor in CI](11-ci.md). |
 | `--no-ci-detect` | Disable CI auto-detection — by default `text` output also emits the running CI's native annotations / hint (`RIGOR_CI_DETECT=0` does the same). See [Running Rigor in CI § auto-detection](11-ci.md). |
 | `--explain` | Surface fail-soft fallback events as `info` diagnostics. |

@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "command"
+require_relative "options"
 
 require "json"
 require "optionparser"
@@ -63,7 +64,7 @@ module Rigor
             options[:current_path] = path
           end
           opt.on("--config=PATH", "Path to .rigor.yml. Forwarded to the implicit `rigor check` run.") do |path|
-            options[:config] = path
+            options[:config] = Options.config_path(path)
           end
         end.parse!(@argv)
         options

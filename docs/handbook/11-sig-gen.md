@@ -637,14 +637,42 @@ list is the current state):
   class, so `P.new(name: "a")` gives `def name: () -> String`,
   and the sites' types are unioned. A positional `Data`
   construction counts only when it passes every member. A
-  `Struct` member a construction leaves out adds `nil`. A
-  site with a splat, a double splat, a block argument or `...`
-  adds nothing. A member no site sets, or one that some site
-  passes an `untyped` value, stays `untyped`. So does every
-  member of a class that defines its own `initialize`. Only
-  call sites under the observed roots count, and the proposal
-  is only what those sites show: code outside them, or in a
-  gem, may build the class with other types.
+  `Struct` member a construction leaves out adds `nil`, but a
+  member only ever left out stays `untyped`. A keyword
+  construction counts on a `Data`, on a `Struct` with
+  `keyword_init: true`, and on a `Struct` with no
+  `keyword_init:` when `target_ruby` is 3.2 or later.
+
+  The proposal is never narrower than a value a seen site may
+  store, so a member stays `untyped` when:
+
+  - no site sets it, or some site passes it an `untyped` value;
+  - a site may set it through a mapping sig-gen does not read:
+    a construction with a splat, a double splat, a block
+    argument or `...`; a construction mixing positionals and
+    keywords; a keyword construction of a `Struct` whose
+    `keyword_init:` is `false` or not a literal; `s[key] = v`
+    (every member unless `key` is a literal); `s.send(:a=, v)`
+    or `public_send`; `s.a += v`, `||=`, `&&=`; or a multiple
+    assignment `s.a, s.b = ...`.
+
+  Every member stays `untyped` when the class, in any file
+  sig-gen reads (the source paths and the observed roots):
+
+  - defines `initialize`, `define_method`s it, or aliases a
+    method to it;
+  - prepends any module, or includes a project module that
+    defines `initialize`;
+  - overrides `new` or `[]` (`def self.new`, a `def` or an
+    alias in `class << self`, `define_singleton_method`), or
+    extends a project module that defines either;
+  - has a subclass.
+
+  Only call sites under the observed roots count. A
+  construction in `lib/` outside them is not read, and code
+  in a gem is not seen at all. The proposal shows only what the
+  observed sites do, and other code may build the class with
+  other types.
 
 Method shapes the generator does **not** cover yet:
 

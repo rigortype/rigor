@@ -1,3 +1,4 @@
 - **[sig-gen]** `rigor sig-gen --params=observed` now types `Data.define` and `Struct.new` members from the construction sites it observes, so `P.new(name: "a")` gives `def name: () -> String`. ([#2195](https://github.com/rigortype/rigor/pull/2195))
   - `.new` and `.[]` count, with keywords or positionals, as do `Data#with` and Struct writer calls. Literals widen to their class.
-  - A member no site sets, a member some site passes an `untyped` value, and every member of a class that defines its own `initialize` stay `untyped`.
+  - A member stays `untyped` when no observed site sets it, or when a seen site may set it through a mapping sig-gen does not read: an `untyped` argument, a splat, an index or `send` write, an operator or multiple-assignment write, or a keyword construction of a Struct whose `keyword_init:` is `false` or not a literal.
+  - Every member stays `untyped` when the class, in any file sig-gen reads, defines or aliases `initialize`, prepends a module, includes or extends a project module that overrides construction, overrides `new` or `[]`, or has a subclass.

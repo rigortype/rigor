@@ -132,6 +132,31 @@ RSpec.describe Rigor::CLI::SigGenCommand do
 
       expect(out).to include("def m: (42) -> 1")
     end
+
+    # No config file is discovered from `sub/`, so the default `paths:` name `sub/lib`; the class to observe is
+    # the one the command line names.
+    it "pre-indexes the paths the command line names when no config file is used" do
+      write("spec/calc_spec.rb", "Calc.new.m(42)\n")
+      FileUtils.mkdir_p(File.join(root, "sub"))
+      out = StringIO.new
+      Dir.chdir(File.join(root, "sub")) do
+        described_class.new(argv: ["--print", "--params=observed", "--observe=../spec", "../lib"], out: out,
+                            err: StringIO.new).run
+      end
+
+      expect(out.string).to include("def m: (42) -> 1")
+    end
+
+    # A config file kept below the project root still finds the project's test roots from the root.
+    it "falls back to the working directory when the config file's directory holds no test root" do
+      write("spec/calc_spec.rb", "Calc.new.m(42)\n")
+      write("config/rigor.yml", "paths:\n  - ../lib\n")
+      out = StringIO.new
+      described_class.new(argv: ["--print", "--params=observed", "--config=#{File.join(root, 'config/rigor.yml')}"],
+                          out: out, err: StringIO.new).run
+
+      expect(out.string).to include("def m: (42) -> 1")
+    end
   end
 
   # #1398 — the stderr notes are invisible to `--format=json` consumers (and to the MCP tool), so the same fact

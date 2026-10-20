@@ -321,15 +321,22 @@ module Rigor
 
     # The test roots a run uses: the declared `test_paths:` as written (already resolved against the
     # config file's directory by {.load}), or — when the key is unset — whichever of
-    # {CONVENTIONAL_TEST_PATHS} is a directory under `root`, as absolute paths. `root` defaults to the
-    # project root: the directory of the config file in use, the one `paths:` and a declared `test_paths:`
-    # resolve against, or the working directory when no config file is used. Auto-detecting against the
-    # working directory found nothing for a run from a subdirectory, or for the MCP server started
-    # elsewhere, though both name the config file (#2078).
-    def resolved_test_paths(root: exclude_base)
+    # {CONVENTIONAL_TEST_PATHS} is a directory under a root, as absolute paths. The roots, unless `root` names
+    # one, are the directory of the config file in use, the one `paths:` and a declared `test_paths:` resolve
+    # against, and then the working directory, read only when the first holds neither. Auto-detecting against
+    # the working directory alone found nothing for a run from a subdirectory, or for the MCP server started
+    # elsewhere, though both name the config file (#2078); a config file kept in a subdirectory
+    # (`--config=config/rigor.yml`) still finds the project's `spec/` from the project root.
+    def resolved_test_paths(root: nil)
       return test_paths unless test_paths.nil?
 
-      CONVENTIONAL_TEST_PATHS.map { |dir| File.absolute_path(dir, root) }.select { |dir| File.directory?(dir) }
+      roots = root ? [root] : [exclude_base, Dir.pwd].uniq
+      roots.each do |dir|
+        found = CONVENTIONAL_TEST_PATHS.map { |test_dir| File.absolute_path(test_dir, dir) }
+                                       .select { File.directory?(it) }
+        return found unless found.empty?
+      end
+      []
     end
 
     # Loads a configuration file.

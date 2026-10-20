@@ -278,6 +278,27 @@ RSpec.describe Rigor::MCP::Server do
       end
     end
 
+    # #2078 — the server runs wherever its client started it; the test roots are found under the config file's
+    # directory, not the server's working directory.
+    it "auto-detects the test roots under the config file's directory, not the server's working directory" do
+      Dir.mktmpdir do |dir|
+        File.write(File.join(dir, ".rigor.yml"), "paths:\n  - lib\n")
+        FileUtils.mkdir_p([File.join(dir, "lib"), File.join(dir, "spec")])
+        File.write(File.join(dir, "lib", "calc.rb"), "class Calc\n  def m(x) = 1\nend\n")
+        File.write(File.join(dir, "spec", "calc_spec.rb"), "Calc.new.m(42)\n")
+
+        resp = Dir.mktmpdir do |elsewhere|
+          Dir.chdir(elsewhere) do
+            tool_call("rigor_sig_gen", { "params" => "observed", "config" => File.join(dir, ".rigor.yml") })
+          end
+        end
+
+        payload = JSON.parse(text_of(resp))
+        expect(payload.fetch("observation")).to eq("paths" => [File.join(dir, "spec")], "missing" => [])
+        expect(payload.fetch("candidates").map { it["rbs"] }).to include("def m: (42) -> 1")
+      end
+    end
+
     it "omits the observation report under the default params policy" do
       resp = tool_call("rigor_sig_gen", { "paths" => ["lib"] })
 

@@ -1908,10 +1908,16 @@ module Rigor
         spelled == files ? expansion : expansion.merge(files: spelled)
       end
 
+      # The file's real path. A file absent from disk (a new buffer's file) resolves through its directory, so a
+      # symlinked root spells it the same way it spells an existing file.
       def real_path_of(path)
         File.realpath(path)
       rescue SystemCallError
-        File.absolute_path(path)
+        absolute = File.absolute_path(path)
+        parent = File.dirname(absolute)
+        return absolute if parent == absolute
+
+        File.join(real_path_of(parent), File.basename(absolute))
       end
 
       # Each file once, in project order, under the spelling the analysis uses when it is analysed.
@@ -2292,9 +2298,11 @@ module Rigor
         PathExpansion.diagnostics(bad, any_files: any_files)
       end
 
+      # #2191 — the buffer's logical path is accepted under any spelling that names the same file (relative, absolute,
+      # or through a symlinked root), since the discovery set respells it to the logical path (`buffer_spelled`).
       def accept_as_ruby_file?(path)
         (File.file?(path) && path.end_with?(".rb")) ||
-          (@buffer && path == @buffer.logical_path) ||
+          (@buffer && (path == @buffer.logical_path || real_path_of(path) == real_path_of(@buffer.logical_path))) ||
           @in_memory_sources&.key?(path)
       end
 

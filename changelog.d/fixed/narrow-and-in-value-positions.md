@@ -1,0 +1,1 @@
+- **[engine]** An `&&` or `||` written as an array element, hash value, call argument or interpolation now narrows its right operand as the statement form does, so `[column && (column + 1)]` no longer reports `call.possible-nil-receiver`. ([#2202](https://github.com/rigortype/rigor/pull/2202))
